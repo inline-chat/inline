@@ -31,16 +31,33 @@ public class ProcessEntities {
     /// If enabled, mentions convert to in-app URLs
     var convertMentionsToLink: Bool
 
+    /// Color for inline code background
+    var codeBackgroundColor: PlatformColor
+
+    /// Color for inline code text
+    var codeTextColor: PlatformColor
+
     public init(
       font: PlatformFont,
       textColor: PlatformColor,
       linkColor: PlatformColor,
-      convertMentionsToLink: Bool = true
+      convertMentionsToLink: Bool = true,
+      codeBackgroundColor: PlatformColor? = nil,
+      codeTextColor: PlatformColor? = nil
     ) {
       self.font = font
       self.textColor = textColor
       self.linkColor = linkColor
       self.convertMentionsToLink = convertMentionsToLink
+      
+      // Set platform-specific defaults for inline code colors
+      #if os(macOS)
+      self.codeBackgroundColor = codeBackgroundColor ?? NSColor.secondarySystemFill
+      self.codeTextColor = codeTextColor ?? NSColor.labelColor
+      #else
+      self.codeBackgroundColor = codeBackgroundColor ?? UIColor.secondarySystemFill
+      self.codeTextColor = codeTextColor ?? UIColor.label
+      #endif
     }
   }
 
@@ -101,6 +118,12 @@ public class ProcessEntities {
           let boldFont = createBoldFont(from: existingAttributes[.font] as? PlatformFont ?? configuration.font)
           attributedString.addAttribute(.font, value: boldFont, range: range)
 
+        case .code:
+          // Apply inline code formatting - just monospace font, no background
+          let existingAttributes = attributedString.attributes(at: range.location, effectiveRange: nil)
+          let codeFont = createMonospaceFont(from: existingAttributes[.font] as? PlatformFont ?? configuration.font)
+          attributedString.addAttribute(.font, value: codeFont, range: range)
+
         default:
           break
       }
@@ -158,6 +181,34 @@ public class ProcessEntities {
         #endif
       }
 
+    // Extract inline code entities by looking for monospace fonts
+    attributedString.enumerateAttribute(
+      .font,
+      in: NSRange(location: 0, length: text.count),
+      options: []
+    ) { value, range, _ in
+      if let font = value as? PlatformFont, isMonospaceFont(font) {
+        // Check if this is actually inline code (not bold)
+        #if os(macOS)
+        if !font.fontDescriptor.symbolicTraits.contains(.bold) {
+          var entity = MessageEntity()
+          entity.type = .code
+          entity.offset = Int64(range.location)
+          entity.length = Int64(range.length)
+          entities.append(entity)
+        }
+        #elseif os(iOS)
+        if !font.fontDescriptor.symbolicTraits.contains(.traitBold) {
+          var entity = MessageEntity()
+          entity.type = .code
+          entity.offset = Int64(range.location)
+          entity.length = Int64(range.length)
+          entities.append(entity)
+        }
+        #endif
+      }
+    }
+
     // Sort entities by offset
     entities.sort { $0.offset < $1.offset }
 
@@ -180,11 +231,15 @@ public class ProcessEntities {
   }
 
   private static func createBoldFont(from font: PlatformFont) -> PlatformFont {
-    #if os(macOS)
-    return NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
-    #elseif os(iOS)
-    return UIFont.boldSystemFont(ofSize: font.pointSize)
-    #endif
+    return RichTextPatterns.createBoldFont(from: font)
+  }
+
+  private static func createMonospaceFont(from font: PlatformFont) -> PlatformFont {
+    return RichTextPatterns.createMonospaceFont(from: font)
+  }
+
+  private static func isMonospaceFont(_ font: PlatformFont) -> Bool {
+    return RichTextPatterns.isMonospaceFont(font)
   }
 }
 

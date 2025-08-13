@@ -503,15 +503,22 @@ class ComposeTextView: UITextView {
     set {
       Log.shared.debug("🎯 TYPING ATTRS SET: \(newValue)")
 
-      // Check if we're trying to set bold attributes when we shouldn't
+      // Check if we're trying to set bold or monospace attributes when we shouldn't
       if let font = newValue[.font] as? UIFont,
-         font.fontDescriptor.symbolicTraits.contains(.traitBold)
+         font.fontDescriptor.symbolicTraits.contains(.traitBold) || 
+         font.fontDescriptor.symbolicTraits.contains(.traitMonoSpace)
       {
-        Log.shared.debug("🎯 BOLD FONT DETECTED in typing attributes")
+        if font.fontDescriptor.symbolicTraits.contains(.traitBold) {
+          Log.shared.debug("🎯 BOLD FONT DETECTED in typing attributes")
+        }
+        if font.fontDescriptor.symbolicTraits.contains(.traitMonoSpace) {
+          Log.shared.debug("🎯 MONOSPACE FONT DETECTED in typing attributes")
+        }
 
-        // Only allow bold if we're actually in the MIDDLE of a bold region, not at the end
+        // Only allow special fonts if we're actually in the MIDDLE of a styled region, not at the end
         let selectedRange = selectedRange
         var shouldAllowBold = false
+        var shouldAllowMonospace = false
 
         if selectedRange.length == 0, selectedRange.location > 0 {
           let checkPosition = selectedRange.location - 1
@@ -519,26 +526,39 @@ class ComposeTextView: UITextView {
             let attributes = attributedText.attributes(at: checkPosition, effectiveRange: nil)
             let isPreviousCharBold = (attributes[.font] as? UIFont)?.fontDescriptor.symbolicTraits
               .contains(.traitBold) == true
-            Log.shared.debug("🎯 Previous char is bold: \(isPreviousCharBold)")
+            let isPreviousCharMonospace = (attributes[.font] as? UIFont)?.fontDescriptor.symbolicTraits
+              .contains(.traitMonoSpace) == true
+            
+            Log.shared.debug("🎯 Previous char is bold: \(isPreviousCharBold), monospace: \(isPreviousCharMonospace)")
 
-            // CRITICAL FIX: Only allow bold if we're WITHIN a bold region
-            // Check if the NEXT character is also bold (meaning we're in the middle)
-            // If cursor is at the end of bold text, we should NOT inherit bold
-            if isPreviousCharBold, selectedRange.location < attributedText.length {
+            // CRITICAL FIX: Only allow special fonts if we're WITHIN a styled region
+            // Check if the NEXT character is also styled (meaning we're in the middle)
+            // If cursor is at the end of styled text, we should NOT inherit the style
+            if (isPreviousCharBold || isPreviousCharMonospace) && selectedRange.location < attributedText.length {
               let nextAttributes = attributedText.attributes(at: selectedRange.location, effectiveRange: nil)
               let isNextCharBold = (nextAttributes[.font] as? UIFont)?.fontDescriptor.symbolicTraits
                 .contains(.traitBold) == true
-              shouldAllowBold = isNextCharBold
-              Log.shared.debug("🎯 Next char is bold: \(isNextCharBold), shouldAllowBold: \(shouldAllowBold)")
+              let isNextCharMonospace = (nextAttributes[.font] as? UIFont)?.fontDescriptor.symbolicTraits
+                .contains(.traitMonoSpace) == true
+              
+              shouldAllowBold = isPreviousCharBold && isNextCharBold
+              shouldAllowMonospace = isPreviousCharMonospace && isNextCharMonospace
+              
+              Log.shared.debug("🎯 Next char is bold: \(isNextCharBold), monospace: \(isNextCharMonospace)")
+              Log.shared.debug("🎯 shouldAllowBold: \(shouldAllowBold), shouldAllowMonospace: \(shouldAllowMonospace)")
             } else {
               shouldAllowBold = false
-              Log.shared.debug("🎯 Previous char not bold or at end, shouldAllowBold: false")
+              shouldAllowMonospace = false
+              Log.shared.debug("🎯 Previous char not styled or at end, blocking style inheritance")
             }
           }
         }
 
-        if !shouldAllowBold {
-          Log.shared.debug("🛡️ BLOCKING bold typing attributes! Setting default instead.")
+        let hasBoldFont = font.fontDescriptor.symbolicTraits.contains(.traitBold)
+        let hasMonospaceFont = font.fontDescriptor.symbolicTraits.contains(.traitMonoSpace)
+        
+        if (hasBoldFont && !shouldAllowBold) || (hasMonospaceFont && !shouldAllowMonospace) {
+          Log.shared.debug("🛡️ BLOCKING styled typing attributes! Setting default instead.")
           let defaultAttributes: [NSAttributedString.Key: Any] = [
             .font: UIFont.systemFont(ofSize: 17),
             .foregroundColor: UIColor.label,
@@ -546,7 +566,7 @@ class ComposeTextView: UITextView {
           super.typingAttributes = defaultAttributes
           return
         } else {
-          Log.shared.debug("🛡️ ALLOWING bold typing attributes (in middle of bold region)")
+          Log.shared.debug("🛡️ ALLOWING styled typing attributes (in middle of styled region)")
         }
       }
 
@@ -787,6 +807,15 @@ extension UITextView {
     return false
   }
 
+  /// Check if current typing attributes have monospace styling
+  var hasTypingAttributesMonospaceStyling: Bool {
+    let currentTypingAttributes = typingAttributes
+    if let font = currentTypingAttributes[.font] as? UIFont {
+      return font.fontDescriptor.symbolicTraits.contains(.traitMonoSpace)
+    }
+    return false
+  }
+
   /// Reset typing attributes to default to prevent style leakage
   func resetTypingAttributesToDefault() {
     let defaultAttributes: [NSAttributedString.Key: Any] = [
@@ -809,10 +838,10 @@ extension UITextView {
   func updateTypingAttributesIfNeeded() {
     let selectedRange = selectedRange
 
-    // If cursor is after a mention/bold text or typing attributes have special styling, reset to default
+    // If cursor is after a mention/bold/code text or typing attributes have special styling, reset to default
     if selectedRange.length == 0,
        isCursorAfterMention || isCursorAfterBoldText || hasTypingAttributesMentionStyling ||
-       hasTypingAttributesBoldStyling
+       hasTypingAttributesBoldStyling || hasTypingAttributesMonospaceStyling
     {
       resetTypingAttributesToDefault()
     }

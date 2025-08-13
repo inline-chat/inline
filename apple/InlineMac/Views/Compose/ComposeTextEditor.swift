@@ -370,6 +370,32 @@ extension NSTextView {
     return attributes[.mentionUserId] != nil
   }
 
+  /// Check if cursor is positioned after bold text
+  var isCursorAfterBoldText: Bool {
+    let selectedRange = selectedRange()
+    guard selectedRange.length == 0, selectedRange.location > 0 else { return false }
+
+    let checkPosition = selectedRange.location - 1
+    let attributes = attributedString().attributes(at: checkPosition, effectiveRange: nil)
+    if let font = attributes[.font] as? NSFont {
+      return font.fontDescriptor.symbolicTraits.contains(.bold)
+    }
+    return false
+  }
+
+  /// Check if cursor is positioned after monospace text
+  var isCursorAfterMonospaceText: Bool {
+    let selectedRange = selectedRange()
+    guard selectedRange.length == 0, selectedRange.location > 0 else { return false }
+
+    let checkPosition = selectedRange.location - 1
+    let attributes = attributedString().attributes(at: checkPosition, effectiveRange: nil)
+    if let font = attributes[.font] as? NSFont {
+      return font.fontDescriptor.symbolicTraits.contains(.monoSpace)
+    }
+    return false
+  }
+
   /// Check if current typing attributes have mention styling
   var hasTypingAttributesMentionStyling: Bool {
     let currentTypingAttributes = typingAttributes
@@ -377,7 +403,25 @@ extension NSTextView {
       (currentTypingAttributes[.foregroundColor] as? NSColor) == NSColor.systemBlue
   }
 
-  /// Reset typing attributes to default to prevent mention style leakage
+  /// Check if current typing attributes have bold styling
+  var hasTypingAttributesBoldStyling: Bool {
+    let currentTypingAttributes = typingAttributes
+    if let font = currentTypingAttributes[.font] as? NSFont {
+      return font.fontDescriptor.symbolicTraits.contains(.bold)
+    }
+    return false
+  }
+
+  /// Check if current typing attributes have monospace styling
+  var hasTypingAttributesMonospaceStyling: Bool {
+    let currentTypingAttributes = typingAttributes
+    if let font = currentTypingAttributes[.font] as? NSFont {
+      return font.fontDescriptor.symbolicTraits.contains(.monoSpace)
+    }
+    return false
+  }
+
+  /// Reset typing attributes to default to prevent style leakage
   func resetTypingAttributesToDefault() {
     typingAttributes = defaultTypingAttributes
   }
@@ -386,8 +430,11 @@ extension NSTextView {
   func updateTypingAttributesIfNeeded() {
     let selectedRange = selectedRange()
 
-    // If cursor is after a mention or typing attributes have mention styling, reset to default
-    if selectedRange.length == 0, isCursorAfterMention || hasTypingAttributesMentionStyling {
+    // If cursor is after a mention/bold/code text or typing attributes have special styling, reset to default
+    if selectedRange.length == 0,
+       isCursorAfterMention || isCursorAfterBoldText || isCursorAfterMonospaceText ||
+       hasTypingAttributesMentionStyling || hasTypingAttributesBoldStyling || hasTypingAttributesMonospaceStyling
+    {
       resetTypingAttributesToDefault()
     }
   }

@@ -11,8 +11,7 @@ extension ComposeView: UITextViewDelegate {
     // Prevent mention style leakage to new text
     textView.updateTypingAttributesIfNeeded()
 
-    // Process bold text patterns (**text**)
-    processBoldTextIfNeeded(in: textView)
+    // Rich text processing is now only applied in message display, not in compose
 
     // Height Management
     UIView.animate(withDuration: 0.1) { self.updateHeight() }
@@ -74,64 +73,4 @@ extension ComposeView: UITextViewDelegate {
     mentionManager?.handleTextChange(in: textView)
   }
 
-  // MARK: - Bold Text Processing
-
-  private func processBoldTextIfNeeded(in textView: UITextView) {
-    guard let attributedText = textView.attributedText else { return }
-
-    let originalText = attributedText.string
-    let originalCursorPosition = textView.selectedRange.location
-
-    // Process **bold** patterns - for now keep existing logic until we have bold pattern processing in ProcessEntities
-    let processedAttributedText = AttributedStringHelpers.processBoldText(in: attributedText)
-
-    // Only update if processing changed the text
-    if !processedAttributedText.isEqual(to: attributedText) {
-      let selectedRange = textView.selectedRange
-
-      // Calculate new cursor position after processing
-      let newCursorPosition = calculateNewCursorPosition(
-        originalText: originalText,
-        processedText: processedAttributedText.string,
-        originalCursor: selectedRange.location
-      )
-
-      // Update the text view
-      textView.attributedText = processedAttributedText
-      textView.selectedRange = NSRange(location: newCursorPosition, length: 0)
-
-      // Reset text view state after bold pattern processing
-      resetTextViewState()
-    }
-  }
-
-  private func calculateNewCursorPosition(originalText: String, processedText: String, originalCursor: Int) -> Int {
-    // For **text** -> text transformation, cursor position needs adjustment
-    // Count how many complete ** pairs were processed before the cursor position
-
-    let textBeforeCursor = String(originalText.prefix(originalCursor))
-
-    // Find all ** patterns that were completed before the cursor
-    let pattern = #"\*\*([^*]+?)\*\*"#
-    guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-      return originalCursor
-    }
-
-    let matches = regex.matches(
-      in: textBeforeCursor,
-      options: [],
-      range: NSRange(location: 0, length: textBeforeCursor.count)
-    )
-
-    // Each complete ** pattern removes 4 characters (** at start and end)
-    let removedCharacters = matches.count * 4
-
-    let newPosition = max(0, originalCursor - removedCharacters)
-
-    Self.log.trace(
-      "Cursor calculation: original=\(originalCursor), matches=\(matches.count), removed=\(removedCharacters), new=\(newPosition)"
-    )
-
-    return newPosition
-  }
 }

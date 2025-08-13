@@ -126,6 +126,14 @@ class MessageViewAppKit: NSView {
     }
   }
 
+  private var inlineCodeBackgroundColor: NSColor {
+    return RichTextColors.inlineCodeBackgroundColor(outgoing: outgoing)
+  }
+
+  private var inlineCodeTextColor: NSColor {
+    return RichTextColors.inlineCodeTextColor(outgoing: outgoing)
+  }
+
   private var senderFont: NSFont {
     .systemFont(
       ofSize: 12,
@@ -1156,6 +1164,8 @@ class MessageViewAppKit: NSView {
         font: MessageTextConfiguration.font,
         textColor: textColor,
         linkColor: mentionColor,
+        codeBackgroundColor: inlineCodeBackgroundColor,
+        codeTextColor: inlineCodeTextColor
       )
     )
 

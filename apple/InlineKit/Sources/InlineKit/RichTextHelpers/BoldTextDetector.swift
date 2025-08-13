@@ -50,9 +50,8 @@ public class BoldTextDetector {
     var ranges: [BoldRange] = []
     let nsString = text as NSString
 
-    // Regex pattern to match **text** (non-greedy)
-    let pattern = #"\*\*([^*]+?)\*\*"#
-    guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+    // Use shared pattern from RichTextPatterns
+    guard let regex = try? NSRegularExpression(pattern: RichTextPatterns.boldPattern, options: []) else {
       log.error("Failed to create bold text regex")
       return ranges
     }
@@ -87,15 +86,13 @@ public class BoldTextDetector {
 
     #if os(macOS)
     if let existingFont = existingAttributes[.font] as? NSFont {
-      let boldFont = NSFontManager.shared.convert(existingFont, toHaveTrait: .boldFontMask)
-      attributes[.font] = boldFont
+      attributes[.font] = RichTextPatterns.createBoldFont(from: existingFont)
     } else {
       attributes[.font] = NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)
     }
     #elseif os(iOS)
     if let existingFont = existingAttributes[.font] as? UIFont {
-      let boldFont = UIFont.boldSystemFont(ofSize: existingFont.pointSize)
-      attributes[.font] = boldFont
+      attributes[.font] = RichTextPatterns.createBoldFont(from: existingFont)
     } else {
       attributes[.font] = UIFont.boldSystemFont(ofSize: 17)
     }

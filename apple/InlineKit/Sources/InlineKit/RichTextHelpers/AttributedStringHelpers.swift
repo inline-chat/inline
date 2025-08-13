@@ -87,6 +87,14 @@ public class AttributedStringHelpers {
     return boldDetector.processBoldText(in: attributedString)
   }
 
+  // MARK: - Inline Code Processing
+
+  /// Process `code` text patterns in attributed string
+  public static func processInlineCode(in attributedString: NSAttributedString, outgoing: Bool = false) -> NSAttributedString {
+    let codeDetector = InlineCodeDetector()
+    return codeDetector.processInlineCode(in: attributedString, outgoing: outgoing)
+  }
+
   // MARK: - Combined Entity Processing
 
   // Note: For extracting/applying all entities (mentions, bold, etc.), use:
@@ -94,10 +102,10 @@ public class AttributedStringHelpers {
   // - ProcessEntities.toAttributedString() to apply entities to text
   // These methods are in the TextProcessing module and provide centralized entity handling.
 
-  /// Process all rich text patterns (bold, etc.) in attributed string
-  public static func processRichText(in attributedString: NSAttributedString) -> NSAttributedString {
-    // Process bold text patterns first
-    processBoldText(in: attributedString)
+  /// Process all rich text patterns (bold, inline code, etc.) in attributed string
+  public static func processRichText(in attributedString: NSAttributedString, outgoing: Bool = false) -> NSAttributedString {
+    // Use the unified rich text processor for consistent handling
+    return RichTextProcessor.processAllPatterns(in: attributedString, outgoing: outgoing)
   }
 }
 

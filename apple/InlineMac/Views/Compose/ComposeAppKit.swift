@@ -989,6 +989,8 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     // Prevent mention style leakage to new text
     textView.updateTypingAttributesIfNeeded()
 
+    // Rich text processing is now only applied in message display, not in compose
+
     if !ignoreNextHeightChange {
       updateHeightIfNeeded(for: textView)
     } else {
@@ -1163,6 +1165,7 @@ extension ComposeAppKit: MentionCompletionMenuDelegate {
     hideMentionCompletion()
   }
 }
+
 
 // MARK: - Rich text loading
 

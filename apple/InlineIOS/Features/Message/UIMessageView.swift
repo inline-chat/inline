@@ -744,6 +744,8 @@ class UIMessageView: UIView {
         font: font,
         textColor: textColor,
         linkColor: MessageRichTextRenderer.linkColor(for: outgoing),
+        codeBackgroundColor: MessageRichTextRenderer.inlineCodeBackgroundColor(for: outgoing),
+        codeTextColor: MessageRichTextRenderer.inlineCodeTextColor(for: outgoing)
       )
     )
 
