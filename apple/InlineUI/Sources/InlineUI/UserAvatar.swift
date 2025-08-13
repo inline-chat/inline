@@ -91,11 +91,16 @@ public struct UserAvatar: View, Equatable {
   public var initials: some View {
     InitialsCircle(
       name: nameForInitials,
-      size: size
+      size: size,
+      symbol: shouldShowPersonSymbol ? "person.fill" : nil
     )
     .equatable()
     .frame(width: size, height: size)
     .fixedSize()
+  }
+  
+  private var shouldShowPersonSymbol: Bool {
+    firstName == nil && lastName == nil && email == nil && username == nil
   }
 
   @Environment(\.colorScheme) private var colorScheme
