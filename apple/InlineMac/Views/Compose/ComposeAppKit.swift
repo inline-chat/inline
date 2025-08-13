@@ -302,11 +302,28 @@ class ComposeAppKit: NSView {
         updateMessageView(to: editingMsgId, kind: .editing, animate: true)
         focus()
       }.store(in: &cancellables)
+
+    // Listen to AppSettings changes
+    AppSettings.shared.$automaticSpellCorrection
+      .sink { [weak self] enabled in
+        self?.textEditor.textView.isAutomaticTextReplacementEnabled = enabled
+        self?.textEditor.textView.isAutomaticSpellingCorrectionEnabled = enabled
+      }.store(in: &cancellables)
+
+    AppSettings.shared.$checkSpellingWhileTyping
+      .sink { [weak self] enabled in
+        self?.textEditor.textView.isContinuousSpellCheckingEnabled = enabled
+      }.store(in: &cancellables)
   }
 
   private func setupTextEditor() {
     // Set the delegate if needed
     textEditor.delegate = self
+    
+    // Configure text input settings
+    textEditor.textView.isAutomaticTextReplacementEnabled = AppSettings.shared.automaticSpellCorrection
+    textEditor.textView.isAutomaticSpellingCorrectionEnabled = AppSettings.shared.automaticSpellCorrection
+    textEditor.textView.isContinuousSpellCheckingEnabled = AppSettings.shared.checkSpellingWhileTyping
   }
 
   // MARK: - Mention Completion
