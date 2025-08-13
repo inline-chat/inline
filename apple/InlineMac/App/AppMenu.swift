@@ -51,33 +51,16 @@ final class AppMenu: NSObject {
     appMenu.addItem(servicesMenuItem)
     NSApp.servicesMenu = servicesMenu
 
-//    appMenu.addItem(NSMenuItem.separator())
-//
-//    appMenu.addItem(withTitle: "Preferences…",
-//                    action: #selector(showPreferences),
-//                    keyEquivalent: ",")
-
     appMenu.addItem(NSMenuItem.separator())
 
-    appMenu.addItem(
-      withTitle: "Hide \(appName)",
-      action: #selector(NSApplication.hide(_:)),
-      keyEquivalent: "h"
+    let settingsMenuItem = NSMenuItem(
+      title: "Settings…",
+      action: #selector(showPreferences),
+      keyEquivalent: ","
     )
-
-    let hideOthersItem = NSMenuItem(
-      title: "Hide Others",
-      action: #selector(NSApplication.hideOtherApplications(_:)),
-      keyEquivalent: "h"
-    )
-    hideOthersItem.keyEquivalentModifierMask = [.command, .option]
-    appMenu.addItem(hideOthersItem)
-
-    appMenu.addItem(
-      withTitle: "Show All",
-      action: #selector(NSApplication.unhideAllApplications(_:)),
-      keyEquivalent: ""
-    )
+    settingsMenuItem.target = self
+    settingsMenuItem.image = NSImage(systemSymbolName: "gear", accessibilityDescription: nil)
+    appMenu.addItem(settingsMenuItem)
 
     appMenu.addItem(NSMenuItem.separator())
 
@@ -114,6 +97,28 @@ final class AppMenu: NSObject {
     )
     resetDismissedPopoversMenuItem.target = self
     appMenu.addItem(resetDismissedPopoversMenuItem)
+
+    appMenu.addItem(NSMenuItem.separator())
+
+    appMenu.addItem(
+      withTitle: "Hide \(appName)",
+      action: #selector(NSApplication.hide(_:)),
+      keyEquivalent: "h"
+    )
+
+    let hideOthersItem = NSMenuItem(
+      title: "Hide Others",
+      action: #selector(NSApplication.hideOtherApplications(_:)),
+      keyEquivalent: "h"
+    )
+    hideOthersItem.keyEquivalentModifierMask = [.command, .option]
+    appMenu.addItem(hideOthersItem)
+
+    appMenu.addItem(
+      withTitle: "Show All",
+      action: #selector(NSApplication.unhideAllApplications(_:)),
+      keyEquivalent: ""
+    )
 
     appMenu.addItem(NSMenuItem.separator())
 
@@ -427,8 +432,13 @@ final class AppMenu: NSObject {
     NSApp.windowsMenu = windowMenu
   }
 
+  private var settingsWindowController: SettingsWindowController?
+  
   @objc private func showPreferences(_ sender: Any?) {
-    // Implement your preferences window display logic here
+    if settingsWindowController == nil {
+      settingsWindowController = SettingsWindowController()
+    }
+    settingsWindowController?.showWindow(sender)
   }
 
   @objc private func logOut(_ sender: Any?) {
