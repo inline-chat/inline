@@ -302,6 +302,16 @@ class ComposeAppKit: NSView {
         updateMessageView(to: editingMsgId, kind: .editing, animate: true)
         focus()
       }.store(in: &cancellables)
+  }
+
+  private func setupTextEditor() {
+    // Set the delegate if needed
+    textEditor.delegate = self
+
+    // Configure text input settings
+    textEditor.textView.isAutomaticTextReplacementEnabled = AppSettings.shared.automaticSpellCorrection
+    textEditor.textView.isAutomaticSpellingCorrectionEnabled = AppSettings.shared.automaticSpellCorrection
+    textEditor.textView.isContinuousSpellCheckingEnabled = AppSettings.shared.checkSpellingWhileTyping
 
     // Listen to AppSettings changes
     AppSettings.shared.$automaticSpellCorrection
@@ -314,16 +324,6 @@ class ComposeAppKit: NSView {
       .sink { [weak self] enabled in
         self?.textEditor.textView.isContinuousSpellCheckingEnabled = enabled
       }.store(in: &cancellables)
-  }
-
-  private func setupTextEditor() {
-    // Set the delegate if needed
-    textEditor.delegate = self
-    
-    // Configure text input settings
-    textEditor.textView.isAutomaticTextReplacementEnabled = AppSettings.shared.automaticSpellCorrection
-    textEditor.textView.isAutomaticSpellingCorrectionEnabled = AppSettings.shared.automaticSpellCorrection
-    textEditor.textView.isContinuousSpellCheckingEnabled = AppSettings.shared.checkSpellingWhileTyping
   }
 
   // MARK: - Mention Completion
@@ -941,7 +941,7 @@ extension ComposeAppKit {
 extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   // Implement delegate methods as needed
   func textViewDidPressCommandReturn(_ textView: NSTextView) -> Bool {
-    // Send
+    // Always send with command enter
     send()
     return true // handled
   }
@@ -982,9 +982,13 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
       }
     }
 
-    // Send
-    send()
-    return true
+    if !AppSettings.shared.sendsWithCmdEnter {
+      // Send
+      send()
+      return true
+    }
+
+    return false // not handled
   }
 
   func textView(_ textView: NSTextView, didReceiveImage image: NSImage, url: URL? = nil) {
