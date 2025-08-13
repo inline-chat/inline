@@ -41,7 +41,7 @@ struct SettingsSidebarView: View {
       categories.append(.account)
     }
 
-    categories.append(contentsOf: [.general, .appearance])
+    categories.append(contentsOf: [.general])
 
     return categories
   }
@@ -53,6 +53,7 @@ struct SettingsCategoryRow: View {
   var body: some View {
     Label {
       Text(category.title)
+        .foregroundStyle(.primary)
     } icon: {
       Image(systemName: category.iconName)
     }
