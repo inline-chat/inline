@@ -118,6 +118,9 @@ message UserProfilePhoto {
 
   // Photo
   optional string cdn_url = 3;
+
+  // Unique identifier of the file for cache invalidation
+  optional string file_unique_id = 4;
 }
 
 message Dialog {
