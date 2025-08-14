@@ -1,6 +1,7 @@
 import Foundation
 import InlineKit
 import InlineProtocol
+import Logger
 
 #if canImport(AppKit)
 import AppKit
@@ -52,6 +53,10 @@ public class ProcessEntities {
     entities: MessageEntities?,
     configuration: Configuration
   ) -> NSMutableAttributedString {
+    Log.shared.debug("🎯🎯🎯 Text: \(text)")
+    Log.shared.debug("🎯🎯🎯 Entities: \(entities)")
+    Log.shared.debug("🎯🎯🎯 Configuration: \(configuration)")
+
     let attributedString = NSMutableAttributedString(
       string: text,
       attributes: [
@@ -98,8 +103,11 @@ public class ProcessEntities {
         case .bold:
           // Apply bold formatting
           let existingAttributes = attributedString.attributes(at: range.location, effectiveRange: nil)
+          Log.shared.debug("🎯🎯🎯 Existing attributes: \(existingAttributes)")
           let boldFont = createBoldFont(from: existingAttributes[.font] as? PlatformFont ?? configuration.font)
+          Log.shared.debug("🎯🎯🎯 Bold font: \(boldFont)")
           attributedString.addAttribute(.font, value: boldFont, range: range)
+          Log.shared.debug("🎯🎯🎯 Attributed string: \(attributedString)")
 
         default:
           break
@@ -136,27 +144,9 @@ public class ProcessEntities {
       }
     }
 
-    // Extract bold entities
-    attributedString
-      .enumerateAttribute(.font, in: NSRange(location: 0, length: text.count), options: []) { value, range, _ in
-        #if os(macOS)
-        if let font = value as? NSFont, font.fontDescriptor.symbolicTraits.contains(.bold) {
-          var entity = MessageEntity()
-          entity.type = .bold
-          entity.offset = Int64(range.location)
-          entity.length = Int64(range.length)
-          entities.append(entity)
-        }
-        #elseif os(iOS)
-        if let font = value as? UIFont, font.fontDescriptor.symbolicTraits.contains(.traitBold) {
-          var entity = MessageEntity()
-          entity.type = .bold
-          entity.offset = Int64(range.location)
-          entity.length = Int64(range.length)
-          entities.append(entity)
-        }
-        #endif
-      }
+    // Extract bold entities from **text** markdown syntax
+    let boldEntitiesFromMarkdown = extractBoldFromMarkdown(text: text)
+    entities.append(contentsOf: boldEntitiesFromMarkdown)
 
     // Sort entities by offset
     entities.sort { $0.offset < $1.offset }
@@ -185,6 +175,41 @@ public class ProcessEntities {
     #elseif os(iOS)
     return UIFont.boldSystemFont(ofSize: font.pointSize)
     #endif
+  }
+
+  /// Extract bold entities from **text** markdown syntax
+  private static func extractBoldFromMarkdown(text: String) -> [MessageEntity] {
+    Log.shared.debug("🎯🎯🎯 Extracting bold entities from text: \(text)")
+    var entities: [MessageEntity] = []
+    let pattern = "\\*\\*(.*?)\\*\\*"
+
+    do {
+      let regex = try NSRegularExpression(pattern: pattern, options: [])
+      let nsText = text as NSString
+      let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsText.length))
+      Log.shared.debug("🎯🎯🎯 Found \(matches.count) \(matches) bold entities")
+      for match in matches {
+        // Get the range of the content inside ** ** (excluding the asterisks)
+        Log.shared.debug("🎯🎯🎯 Match: \(match)")
+        if match.numberOfRanges > 1 {
+          let contentRange = match.range(at: 1)
+          if contentRange.location != NSNotFound {
+            Log.shared.debug("🎯🎯🎯 Content range: \(contentRange)")
+            var entity = MessageEntity()
+            entity.type = .bold
+            entity.offset = Int64(contentRange.location)
+            entity.length = Int64(contentRange.length)
+            Log.shared.debug("🎯🎯🎯 Entity: \(entity)")
+            entities.append(entity)
+          }
+        }
+      }
+    } catch {
+      // Handle regex error silently
+      Log.shared.error("🎯🎯🎯 Error extracting bold entities: \(error)")
+    }
+
+    return entities
   }
 }
 
