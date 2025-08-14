@@ -35,13 +35,14 @@ struct SettingsSidebarView: View {
 
   private
   var availableCategories: [SettingsCategory] {
-    var categories: [SettingsCategory] = []
+    var categories: [SettingsCategory] = [.general]
 
     if auth.isLoggedIn {
       categories.append(.account)
     }
 
-    categories.append(contentsOf: [.general])
+    // more items
+    categories.append(contentsOf: [])
 
     return categories
   }
@@ -53,10 +54,10 @@ struct SettingsCategoryRow: View {
   var body: some View {
     Label {
       Text(category.title)
-        .foregroundStyle(.primary)
     } icon: {
       Image(systemName: category.iconName)
     }
+    .foregroundStyle(.primary)
   }
 }
 

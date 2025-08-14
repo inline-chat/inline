@@ -48,6 +48,7 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var profileFileId: String?
   public var profileCdnUrl: String?
   public var profileLocalPath: String?
+  public var profileFileUniqueId: String?
 
   public enum Columns {
     static let id = Column(CodingKeys.id)
@@ -64,6 +65,7 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     static let profileFileId = Column(CodingKeys.profileFileId)
     static let profileCdnUrl = Column(CodingKeys.profileCdnUrl)
     static let profileLocalPath = Column(CodingKeys.profileLocalPath)
+    static let profileFileUniqueId = Column(CodingKeys.profileFileUniqueId)
   }
 
   // Add hasMany for all files (including historical profile photos)
@@ -226,6 +228,10 @@ public extension ApiUser {
     }
 
     if let existing {
+      // Check if we need to clear local cache due to profile photo change
+      let newFileUniqueId = file?.fileUniqueId
+      let shouldClearCache = existing.shouldInvalidateLocalCache(newFileUniqueId: newFileUniqueId)
+
       // keep exitsing values
       user.profileFileId = file?.id ?? existing.profileFileId
       user.phoneNumber = user.phoneNumber ?? existing.phoneNumber
@@ -233,7 +239,13 @@ public extension ApiUser {
       user.pendingSetup = user.pendingSetup ?? existing.pendingSetup
       user.timeZone = user.timeZone ?? existing.timeZone
       user.profileCdnUrl = profileCdnUrl ?? existing.profileCdnUrl
-      user.profileLocalPath = existing.profileLocalPath
+      user.profileLocalPath = shouldClearCache ? nil : existing.profileLocalPath
+      user.profileFileUniqueId = newFileUniqueId ?? existing.profileFileUniqueId
+
+      // Remove old cached file from disk if cache is being invalidated
+      if shouldClearCache, let localURL = existing.getLocalURL() {
+        try? FileManager.default.removeItem(at: localURL)
+      }
 
       try user.save(db)
       // ... anything else?
@@ -242,6 +254,7 @@ public extension ApiUser {
       // attach main photo
       user.profileFileId = file?.id
       user.profileCdnUrl = profileCdnUrl
+      user.profileFileUniqueId = file?.fileUniqueId
 
       // TODO: handle multiple files
       try user.save(db)
@@ -279,6 +292,10 @@ public extension User {
 
     if user.hasProfilePhoto {
       profileCdnUrl = user.profilePhoto.hasCdnURL ? user.profilePhoto.cdnURL : nil
+      // Extract file unique ID from protocol if available
+      if user.profilePhoto.hasFileUniqueID {
+        profileFileUniqueId = user.profilePhoto.fileUniqueID
+      }
     }
   }
 
@@ -291,6 +308,9 @@ public extension User {
     var user = User(from: protocolUser)
 
     if let existing {
+      // Check if we need to clear local cache due to profile photo change
+      let shouldClearCache = existing.shouldInvalidateLocalCache(newFileUniqueId: user.profileFileUniqueId)
+
       // keep existing values
       user.profileFileId = existing.profileFileId
       user.date = existing.date
@@ -298,7 +318,13 @@ public extension User {
       user.email = user.email ?? existing.email
       user.timeZone = user.timeZone ?? existing.timeZone
       user.profileCdnUrl = user.profileCdnUrl ?? existing.profileCdnUrl
-      user.profileLocalPath = existing.profileLocalPath
+      user.profileLocalPath = shouldClearCache ? nil : existing.profileLocalPath
+      user.profileFileUniqueId = user.profileFileUniqueId ?? existing.profileFileUniqueId
+
+      // Remove old cached file from disk if cache is being invalidated
+      if shouldClearCache, let localURL = existing.getLocalURL() {
+        try? FileManager.default.removeItem(at: localURL)
+      }
 
       // don't preserve pendingSetup
       try user.save(db)
@@ -348,6 +374,38 @@ public extension User {
         try User.filter(id: userId).updateAll(db, [
           Column("profileLocalPath").set(to: localPath),
         ])
+      }
+    }
+  }
+
+  /// Check if the local cache should be invalidated based on profileFileUniqueId changes
+  /// Used internally by save methods to automatically handle cache invalidation
+  func shouldInvalidateLocalCache(newFileUniqueId: String?) -> Bool {
+    // If we have a new unique ID and it's different from our current one, invalidate cache
+    if let newId = newFileUniqueId, newId != profileFileUniqueId {
+      return true
+    }
+
+    // If we previously had a unique ID but now don't, invalidate cache
+    if profileFileUniqueId != nil, newFileUniqueId == nil {
+      return true
+    }
+
+    return false
+  }
+
+  /// Clear the local cache if the profile file unique ID has changed
+  mutating func clearLocalCacheIfNeeded(newFileUniqueId: String?) {
+    if shouldInvalidateLocalCache(newFileUniqueId: newFileUniqueId) {
+      // Clear local path to force re-download
+      profileLocalPath = nil
+      profileFileUniqueId = newFileUniqueId
+
+      // Optionally remove the cached file from disk
+      if let localURL = getLocalURL() {
+        Task.detached {
+          try? FileManager.default.removeItem(at: localURL)
+        }
       }
     }
   }
