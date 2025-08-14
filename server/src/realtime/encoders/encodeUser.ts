@@ -43,6 +43,7 @@ export const encodeUser = ({
     profilePhoto: cdnUrl
       ? {
           cdnUrl: cdnUrl,
+          fileUniqueId: photoFile?.fileUniqueId,
         }
       : undefined,
   }

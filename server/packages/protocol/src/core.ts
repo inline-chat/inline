@@ -356,6 +356,12 @@ export interface UserProfilePhoto {
      * @generated from protobuf field: optional string cdn_url = 3;
      */
     cdnUrl?: string;
+    /**
+     * Unique identifier of the file for cache invalidation
+     *
+     * @generated from protobuf field: optional string file_unique_id = 4;
+     */
+    fileUniqueId?: string;
 }
 /**
  * @generated from protobuf message Dialog
@@ -1718,7 +1724,7 @@ export interface GetUpdatesStateResult {
     /**
      * Current date of the state
      *
-     * @generated from protobuf field: int64 date = 2;
+     * @generated from protobuf field: int64 date = 1;
      */
     date: bigint;
 }
@@ -4234,7 +4240,8 @@ class UserProfilePhoto$Type extends MessageType<UserProfilePhoto> {
         super("UserProfilePhoto", [
             { no: 1, name: "photo_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "stripped_thumb", kind: "scalar", opt: true, T: 12 /*ScalarType.BYTES*/ },
-            { no: 3, name: "cdn_url", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 3, name: "cdn_url", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "file_unique_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<UserProfilePhoto>): UserProfilePhoto {
@@ -4257,6 +4264,9 @@ class UserProfilePhoto$Type extends MessageType<UserProfilePhoto> {
                 case /* optional string cdn_url */ 3:
                     message.cdnUrl = reader.string();
                     break;
+                case /* optional string file_unique_id */ 4:
+                    message.fileUniqueId = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4278,6 +4288,9 @@ class UserProfilePhoto$Type extends MessageType<UserProfilePhoto> {
         /* optional string cdn_url = 3; */
         if (message.cdnUrl !== undefined)
             writer.tag(3, WireType.LengthDelimited).string(message.cdnUrl);
+        /* optional string file_unique_id = 4; */
+        if (message.fileUniqueId !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.fileUniqueId);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -7034,7 +7047,7 @@ export const GetUpdatesStateInput = new GetUpdatesStateInput$Type();
 class GetUpdatesStateResult$Type extends MessageType<GetUpdatesStateResult> {
     constructor() {
         super("GetUpdatesStateResult", [
-            { no: 2, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 1, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<GetUpdatesStateResult>): GetUpdatesStateResult {
@@ -7049,7 +7062,7 @@ class GetUpdatesStateResult$Type extends MessageType<GetUpdatesStateResult> {
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
             switch (fieldNo) {
-                case /* int64 date */ 2:
+                case /* int64 date */ 1:
                     message.date = reader.int64().toBigInt();
                     break;
                 default:
@@ -7064,9 +7077,9 @@ class GetUpdatesStateResult$Type extends MessageType<GetUpdatesStateResult> {
         return message;
     }
     internalBinaryWrite(message: GetUpdatesStateResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
-        /* int64 date = 2; */
+        /* int64 date = 1; */
         if (message.date !== 0n)
-            writer.tag(2, WireType.Varint).int64(message.date);
+            writer.tag(1, WireType.Varint).int64(message.date);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
