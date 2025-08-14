@@ -17,6 +17,7 @@ struct CreateThread: View {
   @Environment(\.dismiss) var dismiss
   @EnvironmentObject var dataManager: DataManager
 
+
   var spaceId: Int64
 
   var body: some View {
