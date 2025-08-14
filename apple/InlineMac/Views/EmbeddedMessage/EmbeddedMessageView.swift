@@ -156,6 +156,7 @@ class EmbeddedMessageView: NSView {
 
   @objc func handleTap(_ gesture: NSClickGestureRecognizer) {
     guard let message else { return }
+    guard message.status == .sent else { return }
 
     let messageId = message.messageId
     let chatState = ChatsManager.shared.get(for: message.peerId, chatId: message.chatId)
