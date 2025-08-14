@@ -1,3 +1,4 @@
+
 import Auth
 import Combine
 import GRDB
@@ -31,7 +32,6 @@ class UIMessageView: UIView {
   var linkTapHandler: ((URL) -> Void)?
   var interaction: UIContextMenuInteraction?
 
-
   static let attributedCache: NSCache<NSString, NSAttributedString> = {
     let cache = NSCache<NSString, NSAttributedString>()
     cache.countLimit = 1_000
@@ -44,16 +44,16 @@ class UIMessageView: UIView {
 
   var bubbleColor: UIColor {
     if isEmojiOnlyMessage || isSticker || shouldShowFloatingMetadata {
-      return UIColor.clear
+      UIColor.clear
     } else if outgoing {
       // Show red bubble for failed messages using theme-aware color
       if message.status == .failed {
-        return ThemeManager.shared.selected.failedBubbleBackground
+        ThemeManager.shared.selected.failedBubbleBackground
       } else {
-        return ThemeManager.shared.selected.bubbleBackground
+        ThemeManager.shared.selected.bubbleBackground
       }
     } else {
-      return ThemeManager.shared.selected.incomingBubbleBackground
+      ThemeManager.shared.selected.incomingBubbleBackground
     }
   }
 
@@ -264,7 +264,7 @@ class UIMessageView: UIView {
     shineEffectView?.removeFromSuperview()
     shineEffectView = nil
   }
-  
+
   public func refreshAppearance() {
     setupAppearance()
   }
@@ -280,7 +280,7 @@ class UIMessageView: UIView {
     // Reset appearance-related properties
     bubbleView.backgroundColor = bubbleColor
     messageLabel.textColor = textColor
-    
+
     // Re-setup translation state observation
     setupTranslationObserver()
   }
@@ -512,7 +512,7 @@ class UIMessageView: UIView {
 
   func addGestureRecognizer() {
     messageLabel.isUserInteractionEnabled = true
-    
+
     // Add tap gesture for mentions and links
     let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTextViewTap))
     messageLabel.addGestureRecognizer(tapGesture)
@@ -532,19 +532,18 @@ class UIMessageView: UIView {
     bubbleView.addGestureRecognizer(doubleTapGesture)
   }
 
-
   @objc func handleTextViewTap(_ gesture: UITapGestureRecognizer) {
     let tapLocation = gesture.location(in: messageLabel)
     let textContainer = messageLabel.textContainer
     let layoutManager = messageLabel.layoutManager
-    
+
     // Get character index at tap location
     let characterIndex = layoutManager.characterIndex(
       for: tapLocation,
       in: textContainer,
       fractionOfDistanceBetweenInsertionPoints: nil
     )
-    
+
     // Check if tap is on a mention first
     if let attributedText = messageLabel.attributedText {
       var foundMention = false
@@ -565,7 +564,7 @@ class UIMessageView: UIView {
           return
         }
       }
-      
+
       // If not a mention, check for links
       if !foundMention {
         attributedText.enumerateAttribute(.link, in: NSRange(
@@ -720,7 +719,7 @@ class UIMessageView: UIView {
   }
 
   func setupAppearance() {
-    let cacheKey = "\(message.stableId)-\(fullMessage.displayText ?? "")-\(outgoing)"
+    let cacheKey = "\(fullMessage.message.entities)\(message.stableId)-\(fullMessage.displayText ?? "")-\(outgoing)"
     bubbleView.backgroundColor = bubbleColor
 
     guard let text = fullMessage.displayText else { return }
@@ -955,4 +954,3 @@ class UIMessageView: UIView {
     return nil
   }
 }
-
