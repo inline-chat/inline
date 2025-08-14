@@ -123,9 +123,22 @@ struct CreateSpaceChat: View {
       .onAppear {
         isTitleFocused = true
       }
-      .onChange(of: selectedSpaceId) { _, _ in
+      .onChange(of: selectedSpaceId) { _, spaceId in
         // Clear selected people when space changes
         selectedPeople.removeAll()
+
+        Task {
+          guard let spaceId else { return }
+          // fetch space members
+          do {
+            try await realtime
+              .invokeWithHandler(.getSpaceMembers, input: .getSpaceMembers(.with {
+                $0.spaceID = spaceId
+              }))
+          } catch {
+            Log.shared.error("failed to fetch space members in create chat", error: error)
+          }
+        }
       }
     }
     .themedSheet()
