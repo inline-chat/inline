@@ -104,6 +104,11 @@ public class ProcessEntities {
 
           attributedString.addAttribute(.font, value: boldFont, range: range)
 
+        case .code:
+          // monospace font
+          let monospaceFont = createMonospaceFont(from: configuration.font)
+          attributedString.addAttribute(.font, value: monospaceFont, range: range)
+
         default:
           break
       }
@@ -142,6 +147,9 @@ public class ProcessEntities {
     // Extract bold entities from **text** markdown syntax and update all entity offsets
     entities = extractBoldFromMarkdown(text: &text, existingEntities: entities)
 
+    // Extract inline code entities from `text` markdown syntax and update all entity offsets
+    entities = extractInlineCodeFromMarkdown(text: &text, existingEntities: entities)
+
     // Sort entities by offset
     entities.sort { $0.offset < $1.offset }
 
@@ -168,6 +176,14 @@ public class ProcessEntities {
     return NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
     #elseif os(iOS)
     return UIFont.boldSystemFont(ofSize: font.pointSize)
+    #endif
+  }
+
+  private static func createMonospaceFont(from font: PlatformFont) -> PlatformFont {
+    #if os(macOS)
+    return NSFontManager.shared.convert(font, toHaveTrait: .monoSpaceFontMask)
+    #elseif os(iOS)
+    return UIFont.monospacedSystemFont(ofSize: font.pointSize, weight: .regular)
     #endif
   }
 
@@ -239,6 +255,81 @@ public class ProcessEntities {
 
       // Add bold entities to the list
       allEntities.append(contentsOf: boldEntities)
+
+    } catch {
+      // Handle regex error silently
+    }
+
+    return allEntities
+  }
+
+  private static func extractInlineCodeFromMarkdown(
+    text: inout String,
+    existingEntities: [MessageEntity]
+  ) -> [MessageEntity] {
+    var allEntities = existingEntities
+    var inlineCodeEntities: [MessageEntity] = []
+    let pattern = "`(.*?)`"
+
+    do {
+      let regex = try NSRegularExpression(pattern: pattern, options: [])
+      let nsText = text as NSString
+      let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsText.length))
+
+      // Process matches in reverse order to avoid offset issues when removing ` markers
+      var offsetAdjustments: [Int: Int] = [:] // position -> characters removed
+
+      for match in matches.reversed() {
+        // Get the full match range (including `)
+        let fullRange = match.range(at: 0)
+
+        // Get the content range (excluding `)
+        if match.numberOfRanges > 1 {
+          let contentRange = match.range(at: 1)
+
+          if fullRange.location != NSNotFound, contentRange.location != NSNotFound {
+            // Remove the ` markers from the text first
+            let startIndex = text.index(text.startIndex, offsetBy: fullRange.location)
+
+            let endIndex = text.index(text.startIndex, offsetBy: fullRange.location + fullRange.length)
+
+            let contentText = String(text[text.index(text.startIndex, offsetBy: contentRange.location) ..< text.index(
+              text.startIndex,
+              offsetBy: contentRange.location + contentRange.length
+            )])
+
+            text.replaceSubrange(startIndex ..< endIndex, with: contentText)
+
+            // Track that 2 characters were removed at this position (1 ` at start + 1 ` at end)
+            offsetAdjustments[fullRange.location] = 2
+
+            // Now create inline code entity with the correct position (after ` removal)
+            var inlineCodeEntity = MessageEntity()
+            inlineCodeEntity.type = .code
+            inlineCodeEntity.offset = Int64(fullRange.location) // Position where content now starts (after ` removed)
+            inlineCodeEntity.length = Int64(contentRange.length)
+            inlineCodeEntities.append(inlineCodeEntity)
+          }
+        }
+      }
+
+      // Update offsets of all existing entities that come after removed ` markers
+      for i in 0 ..< allEntities.count {
+        let entityOffset = Int(allEntities[i].offset)
+        var adjustment = 0
+
+        // Calculate total adjustment for this entity's position
+        for (removalPosition, charsRemoved) in offsetAdjustments {
+          if entityOffset > removalPosition {
+            adjustment += charsRemoved
+          }
+        }
+
+        allEntities[i].offset = Int64(entityOffset - adjustment)
+      }
+
+      // Add inline code entities to the list
+      allEntities.append(contentsOf: inlineCodeEntities)
 
     } catch {
       // Handle regex error silently
