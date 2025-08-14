@@ -11,7 +11,6 @@ extension ComposeView: UITextViewDelegate {
     // Prevent mention style leakage to new text
     textView.updateTypingAttributesIfNeeded()
 
-    // Process bold text patterns (**text**) - DISABLED to prevent auto-transform
     // processBoldTextIfNeeded(in: textView)
 
     // Height Management
