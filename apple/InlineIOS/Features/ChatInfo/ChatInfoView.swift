@@ -47,9 +47,9 @@ struct ChatInfoView: View {
   var currentMemberRole: MemberRole? {
     spaceMembersViewModel.members
       .first(
-        where: { $0.member.userId == Auth.shared.getCurrentUserId()
+        where: { $0.userId == Auth.shared.getCurrentUserId()
         }
-      )?.member.role
+      )?.role
   }
 
   var isOwnerOrAdmin: Bool {

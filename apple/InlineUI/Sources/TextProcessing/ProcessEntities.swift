@@ -181,7 +181,7 @@ public class ProcessEntities {
 
   private static func createMonospaceFont(from font: PlatformFont) -> PlatformFont {
     #if os(macOS)
-    return NSFontManager.shared.convert(font, toHaveTrait: .monoSpaceFontMask)
+    return NSFont.monospacedSystemFont(ofSize: font.pointSize, weight: .regular)
     #elseif os(iOS)
     return UIFont.monospacedSystemFont(ofSize: font.pointSize, weight: .regular)
     #endif
