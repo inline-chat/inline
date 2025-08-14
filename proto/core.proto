@@ -225,6 +225,7 @@ message MessageEntity {
     TYPE_ITALIC = 6;
     TYPE_USERNAME_MENTION = 7;
     TYPE_CODE = 8;
+    TYPE_PRE = 9;
   }
 
   Type type = 1;
@@ -233,10 +234,12 @@ message MessageEntity {
 
   message MessageEntityMention { int64 user_id = 1; }
   message MessageEntityTextUrl { string url = 1; }
+  message MessageEntityPre { string language = 1; }
 
   oneof entity {
     MessageEntityMention mention = 4;
     MessageEntityTextUrl text_url = 5;
+    MessageEntityPre pre = 6;
   }
 }
 
