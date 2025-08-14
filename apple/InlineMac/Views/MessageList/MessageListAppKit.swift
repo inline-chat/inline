@@ -40,7 +40,7 @@ class MessageListAppKit: NSViewController {
 
   private var eventMonitorTask: Task<Void, Never>?
   private var cancellables: Set<AnyCancellable> = []
-  
+
   // Translation system
   private let translationViewModel: TranslationViewModel
   private var hasAnalyzedInitialMessages = false
@@ -79,6 +79,7 @@ class MessageListAppKit: NSViewController {
 
     eventMonitorTask = Task { @MainActor [weak self] in
       guard let self_ = self else { return }
+
       for await event in self_.state.events {
         switch event {
           case let .scrollToMsg(msgId):
@@ -1234,41 +1235,41 @@ class MessageListAppKit: NSViewController {
   }
 
   // MARK: - Translation
-  
+
   private func handleTranslationForUpdate(_ update: MessagesProgressiveViewModel.MessagesChangeSet) {
     Task {
       switch update {
-      case .reload:
-        // Trigger translation on all current messages
-        await translationViewModel.messagesDisplayed(messages: viewModel.messages)
-        
-        // Analyze for translation detection on initial load
-        if !hasAnalyzedInitialMessages && !viewModel.messages.isEmpty {
-          await TranslationDetector.shared.analyzeMessages(peer: peerId, messages: viewModel.messages)
-          hasAnalyzedInitialMessages = true
-        }
-        
-      case let .added(addedMessages, _):
-        // Trigger translation on added messages
-        if !addedMessages.isEmpty {
-          await translationViewModel.messagesDisplayed(messages: addedMessages)
-          
-          // Analyze new messages for detection if initial analysis not done
-          if !hasAnalyzedInitialMessages {
-            await TranslationDetector.shared.analyzeMessages(peer: peerId, messages: addedMessages)
+        case .reload:
+          // Trigger translation on all current messages
+          await translationViewModel.messagesDisplayed(messages: viewModel.messages)
+
+          // Analyze for translation detection on initial load
+          if !hasAnalyzedInitialMessages, !viewModel.messages.isEmpty {
+            await TranslationDetector.shared.analyzeMessages(peer: peerId, messages: viewModel.messages)
             hasAnalyzedInitialMessages = true
           }
-        }
-        
-      case let .updated(updatedMessages, _, _):
-        // Handle updated messages
-        if !updatedMessages.isEmpty {
-          await translationViewModel.messagesDisplayed(messages: updatedMessages)
-        }
-        
-      case .deleted:
-        // No action needed for deletes
-        break
+
+        case let .added(addedMessages, _):
+          // Trigger translation on added messages
+          if !addedMessages.isEmpty {
+            await translationViewModel.messagesDisplayed(messages: addedMessages)
+
+            // Analyze new messages for detection if initial analysis not done
+            if !hasAnalyzedInitialMessages {
+              await TranslationDetector.shared.analyzeMessages(peer: peerId, messages: addedMessages)
+              hasAnalyzedInitialMessages = true
+            }
+          }
+
+        case let .updated(updatedMessages, _, _):
+          // Handle updated messages
+          if !updatedMessages.isEmpty {
+            await translationViewModel.messagesDisplayed(messages: updatedMessages)
+          }
+
+        case .deleted:
+          // No action needed for deletes
+          break
       }
     }
   }
@@ -1437,6 +1438,9 @@ extension MessageListAppKit {
   // MARK: - Scroll to message
 
   func scrollToMsgAndHighlight(_ msgId: Int64) {
+    // Don't allow negative msgIds (likely local messages)
+    guard msgId > 0 else { return }
+
     if messages.isEmpty {
       log.error("No messages to scroll to")
       return
