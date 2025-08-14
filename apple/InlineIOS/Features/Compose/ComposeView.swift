@@ -481,6 +481,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     textView.text = ""
 
     resetTextViewState()
+    
+    // Ensure font is reset after clearing text
+    textView.font = .systemFont(ofSize: 17)
+    textView.typingAttributes[.font] = UIFont.systemFont(ofSize: 17)
 
     resetHeight()
     textView.showPlaceholder(true)
