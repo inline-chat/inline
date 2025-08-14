@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import InlineKit
 import Logger
+import TextProcessing
 import Translation
 
 // Known issues:
@@ -278,7 +279,8 @@ class MessageSizeCalculator {
   // Use a more efficient cache key
   private func cacheKey(for message: FullMessage, width: CGFloat, props: MessageViewInputProps) -> NSString {
     // Hash-based approach is faster than string concatenation
-    let hashValue = "\(message.id)_\(message.displayText?.hashValue ?? 0)_\(Int(width))_\(props.toString())"
+    let hashValue =
+      "\(message.id)_\(message.displayText?.hashValue ?? 0)_\(Int(width))_\(props.toString())_\(message.message.entities?.entities.count ?? 0)"
     return NSString(string: "\(hashValue)")
   }
 
@@ -304,6 +306,25 @@ class MessageSizeCalculator {
     var isSingleLine = false
     var textSize: CGSize?
     var photoSize: CGSize?
+
+    // Attributed String
+    let attributedString: NSAttributedString
+    if let cached = CacheAttrs.shared.get(message: message) {
+      attributedString = cached
+    } else {
+      let processed = ProcessEntities.toAttributedString(
+        text: text,
+        entities: message.message.entities,
+        configuration: .init(
+          font: MessageTextConfiguration.font,
+          textColor: MessageViewAppKit.textColor(outgoing: isOutgoing),
+          linkColor: MessageViewAppKit.linkColor(outgoing: isOutgoing)
+        )
+      )
+      // cache processed string
+      CacheAttrs.shared.set(message: message, value: processed)
+      attributedString = processed
+    }
 
     // If text is empty, height is always 1 line
     // Ref: https://inessential.com/2015/02/05/a_performance_enhancement_for_variable-h.html
@@ -419,7 +440,7 @@ class MessageSizeCalculator {
     }
 
     if hasText, textSize == nil {
-      let textSize_ = calculateSizeForText(text, width: availableWidth, message: message)
+      let textSize_ = calculateSizeForAttributedString(attributedString, width: availableWidth, message: message)
       textSize = textSize_
 
       // Cache as single line if height is equal to single line height
@@ -866,7 +887,7 @@ class MessageSizeCalculator {
 
 //  private func calculateSizeForText(_ text: String, width: CGFloat, message: FullMessage? = nil) -> NSSize {
 //    textContainer.size = NSSize(width: width, height: .greatestFiniteMagnitude)
-//
+
 //    // See if this actually helps performance or not
 //    let attributedString = if let message, let attrs = CacheAttrs.shared.get(message: message) {
 //      attrs
@@ -876,12 +897,12 @@ class MessageSizeCalculator {
 //        attributes: [.font: MessageTextConfiguration.font]
 //      )
 //    }
-//
+
 //  //    let attributedString = NSAttributedString(
 //  //      string: text, // whitespacesAndNewline
 //  //      attributes: [.font: MessageTextConfiguration.font]
 //  //    )
-//
+
 //    // Use separate text storages https://github.com/lordvisionz/cocoa-string-size-performance
 //    let textStorage = NSTextStorage()
 //    textStorage.setAttributedString(attributedString)
@@ -893,29 +914,23 @@ class MessageSizeCalculator {
 //    // Get the glyphRange to ensure we're measuring all content
 //  //    let glyphRange = layoutManager.glyphRange(for: textContainer)
 //  //    let textRect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
-//
+
 //    // Alternative
 //    let textRect = layoutManager.usedRect(for: textContainer)
-//
+
 //    let textHeight = ceil(textRect.height)
 //    let textWidth = ceil(textRect.width) + Self.extraSafeWidth
-//
+
 //    log.trace("calculateSizeForText \(text) width \(width) resulting in rect \(textRect)")
-//
+
 //    return CGSize(width: textWidth, height: textHeight)
 //  }
 
-  private func calculateSizeForText(_ text: String, width: CGFloat, message: FullMessage? = nil) -> NSSize {
-    // Create attributed string
-    let attributedString = if let message, let attrs = CacheAttrs.shared.get(message: message) {
-      attrs
-    } else {
-      NSAttributedString(
-        string: text,
-        attributes: typographicSettings
-      )
-    }
-
+  private func calculateSizeForAttributedString(
+    _ attributedString: NSAttributedString,
+    width: CGFloat,
+    message: FullMessage? = nil
+  ) -> NSSize {
     // Create a frame setter with our attributed string
     let frameSetter = CTFramesetterCreateWithAttributedString(attributedString)
 
@@ -934,10 +949,24 @@ class MessageSizeCalculator {
     let textHeight = ceil(frameSize.height) + additionalTextHeight
 
     #if DEBUG
-    log.trace("calculateSizeForText \(text) width \(width) resulting in size \(frameSize)")
+    log.trace("calculateSizeForText \(attributedString.string) width \(width) resulting in size \(frameSize)")
     #endif
 
     return CGSize(width: textWidth, height: textHeight)
+  }
+
+  private func calculateSizeForText(_ text: String, width: CGFloat, message: FullMessage? = nil) -> NSSize {
+    // Create attributed string
+    let attributedString = if let message, let attrs = CacheAttrs.shared.get(message: message) {
+      attrs
+    } else {
+      NSAttributedString(
+        string: text,
+        attributes: typographicSettings
+      )
+    }
+
+    return calculateSizeForAttributedString(attributedString, width: width, message: message)
   }
 
   /// Fixes a bug with the text view height calculation for Chinese text that don't show last line.
