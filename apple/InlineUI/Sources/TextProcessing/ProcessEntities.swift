@@ -53,10 +53,6 @@ public class ProcessEntities {
     entities: MessageEntities?,
     configuration: Configuration
   ) -> NSMutableAttributedString {
-    Log.shared.debug("🎯🎯🎯 Text: \(text)")
-    Log.shared.debug("🎯🎯🎯 Entities: \(entities)")
-    Log.shared.debug("🎯🎯🎯 Configuration: \(configuration)")
-
     let attributedString = NSMutableAttributedString(
       string: text,
       attributes: [
@@ -103,11 +99,10 @@ public class ProcessEntities {
         case .bold:
           // Apply bold formatting
           let existingAttributes = attributedString.attributes(at: range.location, effectiveRange: nil)
-          Log.shared.debug("🎯🎯🎯 Existing attributes: \(existingAttributes)")
+
           let boldFont = createBoldFont(from: existingAttributes[.font] as? PlatformFont ?? configuration.font)
-          Log.shared.debug("🎯🎯🎯 Bold font: \(boldFont)")
+
           attributedString.addAttribute(.font, value: boldFont, range: range)
-          Log.shared.debug("🎯🎯🎯 Attributed string: \(attributedString)")
 
         default:
           break
@@ -123,10 +118,10 @@ public class ProcessEntities {
   public static func fromAttributedString(
     _ attributedString: NSAttributedString
   ) -> (text: String, entities: MessageEntities) {
+    var text = attributedString.string
     var entities: [MessageEntity] = []
-    let text = attributedString.string
 
-    // Extract mention entities
+    // Extract mention entities first (before text modification)
     attributedString.enumerateAttribute(
       .mentionUserId,
       in: NSRange(location: 0, length: text.count),
@@ -144,9 +139,8 @@ public class ProcessEntities {
       }
     }
 
-    // Extract bold entities from **text** markdown syntax
-    let boldEntitiesFromMarkdown = extractBoldFromMarkdown(text: text)
-    entities.append(contentsOf: boldEntitiesFromMarkdown)
+    // Extract bold entities from **text** markdown syntax and update all entity offsets
+    entities = extractBoldFromMarkdown(text: &text, existingEntities: entities)
 
     // Sort entities by offset
     entities.sort { $0.offset < $1.offset }
@@ -178,38 +172,79 @@ public class ProcessEntities {
   }
 
   /// Extract bold entities from **text** markdown syntax
-  private static func extractBoldFromMarkdown(text: String) -> [MessageEntity] {
-    Log.shared.debug("🎯🎯🎯 Extracting bold entities from text: \(text)")
-    var entities: [MessageEntity] = []
+  private static func extractBoldFromMarkdown(
+    text: inout String,
+    existingEntities: [MessageEntity]
+  ) -> [MessageEntity] {
+    var allEntities = existingEntities
+    var boldEntities: [MessageEntity] = []
     let pattern = "\\*\\*(.*?)\\*\\*"
 
     do {
       let regex = try NSRegularExpression(pattern: pattern, options: [])
       let nsText = text as NSString
       let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsText.length))
-      Log.shared.debug("🎯🎯🎯 Found \(matches.count) \(matches) bold entities")
-      for match in matches {
-        // Get the range of the content inside ** ** (excluding the asterisks)
-        Log.shared.debug("🎯🎯🎯 Match: \(match)")
+
+      // Process matches in reverse order to avoid offset issues when removing ** markers
+      var offsetAdjustments: [Int: Int] = [:] // position -> characters removed
+
+      for match in matches.reversed() {
+        // Get the full match range (including **)
+        let fullRange = match.range(at: 0)
+
+        // Get the content range (excluding **)
         if match.numberOfRanges > 1 {
           let contentRange = match.range(at: 1)
-          if contentRange.location != NSNotFound {
-            Log.shared.debug("🎯🎯🎯 Content range: \(contentRange)")
-            var entity = MessageEntity()
-            entity.type = .bold
-            entity.offset = Int64(contentRange.location)
-            entity.length = Int64(contentRange.length)
-            Log.shared.debug("🎯🎯🎯 Entity: \(entity)")
-            entities.append(entity)
+
+          if fullRange.location != NSNotFound, contentRange.location != NSNotFound {
+            // Remove the ** markers from the text first
+            let startIndex = text.index(text.startIndex, offsetBy: fullRange.location)
+
+            let endIndex = text.index(text.startIndex, offsetBy: fullRange.location + fullRange.length)
+
+            let contentText = String(text[text.index(text.startIndex, offsetBy: contentRange.location) ..< text.index(
+              text.startIndex,
+              offsetBy: contentRange.location + contentRange.length
+            )])
+
+            text.replaceSubrange(startIndex ..< endIndex, with: contentText)
+
+            // Track that 4 characters were removed at this position (2 ** at start + 2 ** at end)
+            offsetAdjustments[fullRange.location] = 4
+
+            // Now create bold entity with the correct position (after ** removal)
+            var boldEntity = MessageEntity()
+            boldEntity.type = .bold
+            boldEntity.offset = Int64(fullRange.location) // Position where content now starts (after ** removed)
+            boldEntity.length = Int64(contentRange.length)
+            boldEntities.append(boldEntity)
           }
         }
       }
+
+      // Update offsets of all existing entities that come after removed ** markers
+      for i in 0 ..< allEntities.count {
+        let entityOffset = Int(allEntities[i].offset)
+        var adjustment = 0
+
+        // Calculate total adjustment for this entity's position
+        for (removalPosition, charsRemoved) in offsetAdjustments {
+          if entityOffset > removalPosition {
+            adjustment += charsRemoved
+          }
+        }
+
+        allEntities[i].offset = Int64(entityOffset - adjustment)
+      }
+
+      // Add bold entities to the list
+      allEntities.append(contentsOf: boldEntities)
+
     } catch {
       // Handle regex error silently
-      Log.shared.error("🎯🎯🎯 Error extracting bold entities: \(error)")
     }
 
-    return entities
+    return allEntities
   }
 }
 
