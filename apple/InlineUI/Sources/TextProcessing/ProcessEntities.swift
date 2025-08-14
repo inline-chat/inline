@@ -144,6 +144,39 @@ public class ProcessEntities {
       }
     }
 
+    // Extract bold entities from font attributes
+    attributedString.enumerateAttribute(
+      .font,
+      in: NSRange(location: 0, length: text.count),
+      options: []
+    ) { value, range, _ in
+      if let font = value as? PlatformFont {
+        #if os(macOS)
+        let isBold = NSFontManager.shared.traits(of: font).contains(.boldFontMask)
+        let isMonospace = font.fontName.contains("Menlo") || font.fontName.contains("Monaco") || font.fontName.contains("Consolas") || font.fontName.contains("monospace")
+        #elseif os(iOS)
+        let isBold = font.fontDescriptor.symbolicTraits.contains(.traitBold)
+        let isMonospace = font.fontDescriptor.symbolicTraits.contains(.traitMonoSpace)
+        #endif
+        
+        if isBold {
+          var entity = MessageEntity()
+          entity.type = .bold
+          entity.offset = Int64(range.location)
+          entity.length = Int64(range.length)
+          entities.append(entity)
+        }
+        
+        if isMonospace {
+          var entity = MessageEntity()
+          entity.type = .code
+          entity.offset = Int64(range.location)
+          entity.length = Int64(range.length)
+          entities.append(entity)
+        }
+      }
+    }
+
     // Extract bold entities from **text** markdown syntax and update all entity offsets
     entities = extractBoldFromMarkdown(text: &text, existingEntities: entities)
 
