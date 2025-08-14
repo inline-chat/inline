@@ -4,7 +4,8 @@
       "mcp__ide__getDiagnostics",
       "Bash(git log:*)",
       "Bash(grep:*)",
-      "Bash(xcodebuild:*)"
+      "Bash(xcodebuild:*)",
+      "Bash(rm:*)"
     ],
     "deny": []
   }
