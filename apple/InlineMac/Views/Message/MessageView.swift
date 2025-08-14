@@ -93,10 +93,22 @@ class MessageViewAppKit: NSView {
   }
 
   private var textColor: NSColor {
+    Self.textColor(outgoing: outgoing)
+  }
+
+  static func textColor(outgoing: Bool) -> NSColor {
     if outgoing {
       NSColor.white
     } else {
       NSColor.labelColor
+    }
+  }
+
+  static func linkColor(outgoing: Bool) -> NSColor {
+    if outgoing {
+      NSColor.white
+    } else {
+      NSColor.linkColor
     }
   }
 
@@ -111,19 +123,11 @@ class MessageViewAppKit: NSView {
   }
 
   private var linkColor: NSColor {
-    if outgoing {
-      NSColor.white
-    } else {
-      NSColor.linkColor
-    }
+    Self.linkColor(outgoing: outgoing)
   }
 
   private var mentionColor: NSColor {
-    if outgoing {
-      NSColor.white
-    } else {
-      NSColor.systemBlue
-    }
+    Self.linkColor(outgoing: outgoing)
   }
 
   private var senderFont: NSFont {
