@@ -86,8 +86,8 @@ class MessageTableCell: NSView {
     // different text
     // currentContent.message.message.text != message.message.text
     {
-      log.trace("updating message text and size")
       #if DEBUG
+      log.trace("updating message text and size")
       log.trace("transforming cell from \(currentContent.message.message.id) to \(message.message.id)")
       #endif
       self.currentContent = (message, props)
