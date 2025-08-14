@@ -25,12 +25,12 @@ public struct CreateChatView: View {
   let emojis = ["👥", "💬", "🎯", "🛍️", "🛒", "💵", "🎧", "📚", "🍕", "📈", "⚙️", "🚧", "🏪", "🏡", "🎪", "🌴", "📁", "🤝", "🛖"]
 
   // Space view model
-  @StateObject private var spaceViewModel: FullSpaceViewModel
+  @StateObject private var spaceViewModel: SpaceFullMembersViewModel
 
   public init(spaceId: Int64, onChatCreated: @escaping (Int64) -> Void) {
     self.spaceId = spaceId
     self.onChatCreated = onChatCreated
-    _spaceViewModel = StateObject(wrappedValue: FullSpaceViewModel(db: AppDatabase.shared, spaceId: spaceId))
+    _spaceViewModel = StateObject(wrappedValue: SpaceFullMembersViewModel(db: AppDatabase.shared, spaceId: spaceId))
   }
 
   public var body: some View {
@@ -39,15 +39,8 @@ public struct CreateChatView: View {
       .scrollContentBackground(.hidden)
       .navigationTitle("Create Chat")
       .task {
-        // fetch space members
-        do {
-          try await realtime
-            .invokeWithHandler(.getSpaceMembers, input: .getSpaceMembers(.with {
-              $0.spaceID = spaceId
-            }))
-        } catch {
-          Log.shared.error("failed to fetch space members in create chat", error: error)
-        }
+        // Refresh members from server
+        await spaceViewModel.refetchMembers()
       }
   }
 
@@ -140,25 +133,25 @@ public struct CreateChatView: View {
   private var invitePeopleSection: some View {
     Section(header: Text("Invite People")) {
       List {
-        ForEach(spaceViewModel.memberChats, id: \.id) { member in
+        ForEach(spaceViewModel.filteredMembers, id: \.id) { member in
           memberRow(member)
         }
       }
     }
   }
 
-  private func memberRow(_ member: SpaceChatItem) -> some View {
+  private func memberRow(_ member: FullMemberItem) -> some View {
     HStack {
-      Text(member.user?.fullName ?? "Unknown User")
+      Text(member.userInfo.user.displayName)
       Spacer()
-      if let userId = member.user?.id, selectedPeople.contains(userId) {
+      if selectedPeople.contains(member.userInfo.user.id) {
         Image(systemName: "checkmark")
           .foregroundColor(.blue)
       }
     }
     .contentShape(Rectangle())
     .onTapGesture {
-      guard let userId = member.user?.id else { return }
+      let userId = member.userInfo.user.id
       if selectedPeople.contains(userId) {
         selectedPeople.remove(userId)
       } else {
@@ -196,28 +189,21 @@ public struct CreateChatView: View {
         let spaceId = spaceId
         let participants = isPublic ? [] : selectedPeople.map(\.self)
 
-        Task.detached {
-          let result = try await realtime.invokeWithHandler(
-            .createChat,
-            input: .createChat(.with {
-              $0.title = title
-              $0.spaceID = spaceId
-              if let emoji { $0.emoji = emoji }
-              $0.isPublic = isPublic
-              $0.participants = participants
-                .map {
-                  userId in InputChatParticipant.with { $0.userID = Int64(userId) }
-                }
-            })
-          )
+        let result = try await realtime.invokeWithHandler(
+          .createChat,
+          input: .createChat(.with {
+            $0.title = title
+            $0.spaceID = spaceId
+            if let emoji { $0.emoji = emoji }
+            $0.isPublic = isPublic
+            $0.participants = participants.map { userId in InputChatParticipant.with { $0.userID = userId } }
+          })
+        )
 
-          if case let .createChat(createChatResult) = result {
-            DispatchQueue.main.async {
-              formState.succeeded()
-              onChatCreated(createChatResult.chat.id)
-              dismiss()
-            }
-          }
+        if case let .createChat(createChatResult) = result {
+          formState.succeeded()
+          onChatCreated(createChatResult.chat.id)
+          dismiss()
         }
       } catch {
         formState.failed(error: error.localizedDescription)

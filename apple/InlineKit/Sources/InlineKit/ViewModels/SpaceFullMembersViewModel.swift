@@ -2,10 +2,20 @@ import Combine
 import GRDB
 import Logger
 
-public final class SpaceMembersViewModel: ObservableObject {
-  /// The members of the space
-  @Published public private(set) var members: [Member] = []
+public final class SpaceFullMembersViewModel: ObservableObject {
+  /// The space information.
+  @Published public private(set) var space: Space?
+  /// The full members for this space.
+  @Published public private(set) var members: [FullMemberItem] = []
   
+  public var filteredMembers: [FullMemberItem] {
+    members.filter { member in
+      // Filter out users who are pending setup
+      member.userInfo.user.pendingSetup != true
+    }
+  }
+  
+  private var spaceCancellable: AnyCancellable?
   private var membersCancellable: AnyCancellable?
   private var db: AppDatabase
   private var spaceId: Int64
@@ -13,7 +23,26 @@ public final class SpaceMembersViewModel: ObservableObject {
   public init(db: AppDatabase, spaceId: Int64) {
     self.db = db
     self.spaceId = spaceId
+    fetchSpace()
     fetchMembers()
+  }
+  
+  private func fetchSpace() {
+    let spaceId = spaceId
+    spaceCancellable =
+    ValueObservation
+      .tracking { db in
+        try Space.fetchOne(db, id: spaceId)
+      }
+      .publisher(in: db.dbWriter, scheduling: .immediate)
+      .sink(
+        receiveCompletion: { error in
+          Log.shared.error("failed to fetch space in space members view model. error: \(error)")
+        },
+        receiveValue: { [weak self] space in
+          self?.space = space
+        }
+      )
   }
   
   public func fetchMembers() {
@@ -21,6 +50,7 @@ public final class SpaceMembersViewModel: ObservableObject {
     membersCancellable = ValueObservation
       .tracking { db in
         try Member
+          .fullMemberQuery()
           .filter(Column("spaceId") == spaceId)
           .fetchAll(db)
       }

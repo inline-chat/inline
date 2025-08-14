@@ -13,7 +13,7 @@ public struct CreateChatIOSView: View {
   @FocusState private var isTitleFocused: Bool
   @FormState var formState
 
-  @StateObject private var spaceViewModel: FullSpaceViewModel
+  @StateObject private var spaceViewModel: SpaceFullMembersViewModel
 
   @Environment(\.appDatabase) var db
   @Environment(\.realtime) var realtime
@@ -25,7 +25,7 @@ public struct CreateChatIOSView: View {
 
   public init(spaceId: Int64) {
     self.spaceId = spaceId
-    _spaceViewModel = StateObject(wrappedValue: FullSpaceViewModel(db: AppDatabase.shared, spaceId: spaceId))
+    _spaceViewModel = StateObject(wrappedValue: SpaceFullMembersViewModel(db: AppDatabase.shared, spaceId: spaceId))
   }
 
   public var body: some View {
@@ -83,7 +83,7 @@ public struct CreateChatIOSView: View {
         }
         if !isPublic {
           Section(header: Text("Invite People")) {
-            ForEach(spaceViewModel.memberChats, id: \.id) { member in
+            ForEach(spaceViewModel.filteredMembers, id: \.id) { member in
               memberRow(member)
             }
           }
@@ -105,23 +105,27 @@ public struct CreateChatIOSView: View {
       .onAppear {
         isTitleFocused = true
       }
+      .task {
+        // Refresh members from server
+        await spaceViewModel.refetchMembers()
+      }
     }
     .themedSheet()
   }
 
-  private func memberRow(_ member: SpaceChatItem) -> some View {
+  private func memberRow(_ member: FullMemberItem) -> some View {
     HStack {
-      Text(member.user?.fullName ?? "Unknown User")
+      Text(member.userInfo.user.displayName)
         .themedPrimaryText()
       Spacer()
-      if let userId = member.user?.id, selectedPeople.contains(userId) {
+      if selectedPeople.contains(member.userInfo.user.id) {
         Image(systemName: "checkmark")
           .foregroundColor(.blue)
       }
     }
     .contentShape(Rectangle())
     .onTapGesture {
-      guard let userId = member.user?.id else { return }
+      let userId = member.userInfo.user.id
       if selectedPeople.contains(userId) {
         selectedPeople.remove(userId)
       } else {
@@ -148,7 +152,7 @@ public struct CreateChatIOSView: View {
             $0.spaceID = spaceId
             if let emoji { $0.emoji = emoji }
             $0.isPublic = isPublic
-            $0.participants = participants.map { userId in InputChatParticipant.with { $0.userID = Int64(userId) } }
+            $0.participants = participants.map { userId in InputChatParticipant.with { $0.userID = userId } }
           })
         )
 
