@@ -72,6 +72,7 @@ extension InlineProtocol.MessageEntity.OneOf_Entity: Codable {
   private enum CodingKeys: String, CodingKey {
     case mention
     case textURL
+    case pre
   }
 
   public init(from decoder: Decoder) throws {
@@ -81,6 +82,8 @@ extension InlineProtocol.MessageEntity.OneOf_Entity: Codable {
       self = .mention(mention)
     } else if let textURL = try container.decodeIfPresent(MessageEntity.MessageEntityTextUrl.self, forKey: .textURL) {
       self = .textURL(textURL)
+    } else if let pre = try container.decodeIfPresent(MessageEntity.MessageEntityPre.self, forKey: .pre) {
+      self = .pre(pre)
     } else {
       throw DecodingError.dataCorrupted(
         DecodingError.Context(
@@ -99,6 +102,8 @@ extension InlineProtocol.MessageEntity.OneOf_Entity: Codable {
         try container.encode(mention, forKey: .mention)
       case let .textURL(textURL):
         try container.encode(textURL, forKey: .textURL)
+      case let .pre(pre):
+        try container.encode(pre, forKey: .pre)
     }
   }
 }
@@ -138,6 +143,25 @@ extension InlineProtocol.MessageEntity.MessageEntityTextUrl: Codable {
   public func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: CodingKeys.self)
     try container.encode(url, forKey: .url)
+  }
+}
+
+extension InlineProtocol.MessageEntity.MessageEntityPre: Codable {
+  private enum CodingKeys: String, CodingKey {
+    case language
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    let language = try container.decode(String.self, forKey: .language)
+
+    self.init()
+    self.language = language
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(language, forKey: .language)
   }
 }
 

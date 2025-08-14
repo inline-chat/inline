@@ -599,6 +599,12 @@ export interface MessageEntity {
          */
         textUrl: MessageEntity_MessageEntityTextUrl;
     } | {
+        oneofKind: "pre";
+        /**
+         * @generated from protobuf field: MessageEntity.MessageEntityPre pre = 6;
+         */
+        pre: MessageEntity_MessageEntityPre;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -619,6 +625,15 @@ export interface MessageEntity_MessageEntityTextUrl {
      * @generated from protobuf field: string url = 1;
      */
     url: string;
+}
+/**
+ * @generated from protobuf message MessageEntity.MessageEntityPre
+ */
+export interface MessageEntity_MessageEntityPre {
+    /**
+     * @generated from protobuf field: string language = 1;
+     */
+    language: string;
 }
 /**
  * @generated from protobuf enum MessageEntity.Type
@@ -659,7 +674,11 @@ export enum MessageEntity_Type {
     /**
      * @generated from protobuf enum value: TYPE_CODE = 8;
      */
-    CODE = 8
+    CODE = 8,
+    /**
+     * @generated from protobuf enum value: TYPE_PRE = 9;
+     */
+    PRE = 9
 }
 /**
  * @generated from protobuf message MessageReactions
@@ -4711,7 +4730,8 @@ class MessageEntity$Type extends MessageType<MessageEntity> {
             { no: 2, name: "offset", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 3, name: "length", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 4, name: "mention", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityMention },
-            { no: 5, name: "text_url", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityTextUrl }
+            { no: 5, name: "text_url", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityTextUrl },
+            { no: 6, name: "pre", kind: "message", oneof: "entity", T: () => MessageEntity_MessageEntityPre }
         ]);
     }
     create(value?: PartialMessage<MessageEntity>): MessageEntity {
@@ -4750,6 +4770,12 @@ class MessageEntity$Type extends MessageType<MessageEntity> {
                         textUrl: MessageEntity_MessageEntityTextUrl.internalBinaryRead(reader, reader.uint32(), options, (message.entity as any).textUrl)
                     };
                     break;
+                case /* MessageEntity.MessageEntityPre pre */ 6:
+                    message.entity = {
+                        oneofKind: "pre",
+                        pre: MessageEntity_MessageEntityPre.internalBinaryRead(reader, reader.uint32(), options, (message.entity as any).pre)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4777,6 +4803,9 @@ class MessageEntity$Type extends MessageType<MessageEntity> {
         /* MessageEntity.MessageEntityTextUrl text_url = 5; */
         if (message.entity.oneofKind === "textUrl")
             MessageEntity_MessageEntityTextUrl.internalBinaryWrite(message.entity.textUrl, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        /* MessageEntity.MessageEntityPre pre = 6; */
+        if (message.entity.oneofKind === "pre")
+            MessageEntity_MessageEntityPre.internalBinaryWrite(message.entity.pre, writer.tag(6, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -4881,6 +4910,53 @@ class MessageEntity_MessageEntityTextUrl$Type extends MessageType<MessageEntity_
  * @generated MessageType for protobuf message MessageEntity.MessageEntityTextUrl
  */
 export const MessageEntity_MessageEntityTextUrl = new MessageEntity_MessageEntityTextUrl$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageEntity_MessageEntityPre$Type extends MessageType<MessageEntity_MessageEntityPre> {
+    constructor() {
+        super("MessageEntity.MessageEntityPre", [
+            { no: 1, name: "language", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MessageEntity_MessageEntityPre>): MessageEntity_MessageEntityPre {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.language = "";
+        if (value !== undefined)
+            reflectionMergePartial<MessageEntity_MessageEntityPre>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageEntity_MessageEntityPre): MessageEntity_MessageEntityPre {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string language */ 1:
+                    message.language = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageEntity_MessageEntityPre, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string language = 1; */
+        if (message.language !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.language);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageEntity.MessageEntityPre
+ */
+export const MessageEntity_MessageEntityPre = new MessageEntity_MessageEntityPre$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class MessageReactions$Type extends MessageType<MessageReactions> {
     constructor() {
