@@ -1,5 +1,6 @@
 import InlineKit
 import InlineProtocol
+import Logger
 import SwiftUI
 
 public struct CreateChatView: View {
@@ -35,9 +36,19 @@ public struct CreateChatView: View {
   public var body: some View {
     mainForm
       .formStyle(.grouped)
-      //.padding()
       .scrollContentBackground(.hidden)
       .navigationTitle("Create Chat")
+      .task {
+        // fetch space members
+        do {
+          try await realtime
+            .invokeWithHandler(.getSpaceMembers, input: .getSpaceMembers(.with {
+              $0.spaceID = spaceId
+            }))
+        } catch {
+          Log.shared.error("failed to fetch space members in create chat", error: error)
+        }
+      }
   }
 
   private var mainForm: some View {
