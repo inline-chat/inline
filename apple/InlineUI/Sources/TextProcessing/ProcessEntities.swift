@@ -254,17 +254,17 @@ public class ProcessEntities {
           let contentRange = match.range(at: 1)
 
           if fullRange.location != NSNotFound, contentRange.location != NSNotFound {
-            // Remove the ** markers from the text first
-            let startIndex = text.index(text.startIndex, offsetBy: fullRange.location)
+            // Convert NSRange to Range<String.Index> safely
+            guard let swiftFullRange = Range(fullRange, in: text),
+                  let swiftContentRange = Range(contentRange, in: text) else {
+              continue // Skip this match if range conversion fails
+            }
 
-            let endIndex = text.index(text.startIndex, offsetBy: fullRange.location + fullRange.length)
+            // Extract content text
+            let contentText = String(text[swiftContentRange])
 
-            let contentText = String(text[text.index(text.startIndex, offsetBy: contentRange.location) ..< text.index(
-              text.startIndex,
-              offsetBy: contentRange.location + contentRange.length
-            )])
-
-            text.replaceSubrange(startIndex ..< endIndex, with: contentText)
+            // Replace the full match with just the content
+            text.replaceSubrange(swiftFullRange, with: contentText)
 
             // Track that 4 characters were removed at this position (2 ** at start + 2 ** at end)
             offsetAdjustments[fullRange.location] = 4
@@ -329,17 +329,17 @@ public class ProcessEntities {
           let contentRange = match.range(at: 1)
 
           if fullRange.location != NSNotFound, contentRange.location != NSNotFound {
-            // Remove the ` markers from the text first
-            let startIndex = text.index(text.startIndex, offsetBy: fullRange.location)
+            // Convert NSRange to Range<String.Index> safely
+            guard let swiftFullRange = Range(fullRange, in: text),
+                  let swiftContentRange = Range(contentRange, in: text) else {
+              continue // Skip this match if range conversion fails
+            }
 
-            let endIndex = text.index(text.startIndex, offsetBy: fullRange.location + fullRange.length)
+            // Extract content text
+            let contentText = String(text[swiftContentRange])
 
-            let contentText = String(text[text.index(text.startIndex, offsetBy: contentRange.location) ..< text.index(
-              text.startIndex,
-              offsetBy: contentRange.location + contentRange.length
-            )])
-
-            text.replaceSubrange(startIndex ..< endIndex, with: contentText)
+            // Replace the full match with just the content
+            text.replaceSubrange(swiftFullRange, with: contentText)
 
             // Track that 2 characters were removed at this position (1 ` at start + 1 ` at end)
             offsetAdjustments[fullRange.location] = 2
