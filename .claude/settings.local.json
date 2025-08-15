@@ -8,7 +8,8 @@
       "Bash(swift test)",
       "Bash(swift test:*)",
       "Bash(swift:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(mv:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"
