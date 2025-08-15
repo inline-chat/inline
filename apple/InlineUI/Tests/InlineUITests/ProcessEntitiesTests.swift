@@ -155,15 +155,9 @@ struct ProcessEntitiesTests {
     #expect(result.string == text)
     
     let attributes = result.attributes(at: 11, effectiveRange: nil)
-    let font = attributes[.font] as? PlatformFont
+    let hasInlineCodeAttribute = attributes[.inlineCode] != nil
     
-    #if os(macOS)
-    let isMonospace = font?.fontName.contains("Menlo") ?? false || font?.fontName.contains("Monaco") ?? false
-    #else
-    let isMonospace = font?.fontName.contains("Courier") ?? false || font?.fontName.contains("Menlo") ?? false
-    #endif
-    
-    #expect(isMonospace == true)
+    #expect(hasInlineCodeAttribute == true)
   }
   
   @Test("Mention with bold")
@@ -241,18 +235,11 @@ struct ProcessEntitiesTests {
     
     #expect(result.string == text)
     
-    // Check code portion (which should have both bold and monospace)
+    // Check code portion (which should have inline code attribute)
     let codeAttributes = result.attributes(at: 13, effectiveRange: nil)
-    let font = codeAttributes[.font] as? PlatformFont
+    let hasInlineCodeAttribute = codeAttributes[.inlineCode] != nil
     
-    // Code should have monospace font
-    #if os(macOS)
-    let isMonospace = font?.fontName.contains("Menlo") ?? false || font?.fontName.contains("Monaco") ?? false
-    #else
-    let isMonospace = font?.fontName.contains("Courier") ?? false || font?.fontName.contains("Menlo") ?? false
-    #endif
-    
-    #expect(isMonospace == true)
+    #expect(hasInlineCodeAttribute == true)
   }
   
   @Test("Complex combination: mention, bold, and inline code")
@@ -308,17 +295,11 @@ struct ProcessEntitiesTests {
     
     #expect(isBold == true)
     
-    // Check code portion (should have monospace)
+    // Check code portion (should have inline code attribute)
     let codeAttributes = result.attributes(at: 19, effectiveRange: nil)
-    let codeFont = codeAttributes[.font] as? PlatformFont
+    let hasInlineCodeAttribute = codeAttributes[.inlineCode] != nil
     
-    #if os(macOS)
-    let isMonospace = codeFont?.fontName.contains("Menlo") ?? false || codeFont?.fontName.contains("Monaco") ?? false
-    #else
-    let isMonospace = codeFont?.fontName.contains("Courier") ?? false || codeFont?.fontName.contains("Menlo") ?? false
-    #endif
-    
-    #expect(isMonospace == true)
+    #expect(hasInlineCodeAttribute == true)
   }
   
   // MARK: - fromAttributedString Tests
@@ -372,8 +353,8 @@ struct ProcessEntitiesTests {
     
     let result = ProcessEntities.fromAttributedString(attributedString)
     
-    // The result should convert bold to markdown
-    #expect(result.text == "This is **bold** text")
+    // The result should preserve original text and extract bold as entity
+    #expect(result.text == "This is bold text")
     #expect(result.entities.entities.count == 1)
     
     let entity = result.entities.entities[0]
@@ -390,7 +371,7 @@ struct ProcessEntitiesTests {
       attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
     )
     
-    // Add monospace font
+    // Add monospace font and custom attribute
     let codeRange = NSRange(location: 11, length: 4)
     
     #if os(macOS)
@@ -399,12 +380,15 @@ struct ProcessEntitiesTests {
     let monospaceFont = UIFont.monospacedSystemFont(ofSize: testConfiguration.font.pointSize, weight: .regular)
     #endif
     
-    attributedString.addAttribute(.font, value: monospaceFont, range: codeRange)
+    attributedString.addAttributes([
+      .font: monospaceFont,
+      .inlineCode: true
+    ], range: codeRange)
     
     let result = ProcessEntities.fromAttributedString(attributedString)
     
-    // The result should convert code to markdown
-    #expect(result.text == "Check this `code` block")
+    // The result should preserve original text and extract code as entity
+    #expect(result.text == "Check this code block")
     #expect(result.entities.entities.count == 1)
     
     let entity = result.entities.entities[0]
@@ -442,8 +426,8 @@ struct ProcessEntitiesTests {
     
     let result = ProcessEntities.fromAttributedString(attributedString)
     
-    // The result should convert bold to markdown while preserving mention
-    #expect(result.text == "Hey @alice this is **bold**")
+    // The result should preserve original text and extract both mention and bold as entities
+    #expect(result.text == "Hey @alice this is bold")
     #expect(result.entities.entities.count == 2)
     
     // Find mention entity
@@ -456,7 +440,7 @@ struct ProcessEntitiesTests {
     // Find bold entity
     let boldEntity = result.entities.entities.first { $0.type == .bold }
     #expect(boldEntity != nil)
-    #expect(boldEntity!.offset == 19) // Adjusted for ** insertion
+    #expect(boldEntity!.offset == 16) // Original position without markdown
     #expect(boldEntity!.length == 4)
   }
   
@@ -492,12 +476,15 @@ struct ProcessEntitiesTests {
     #else
     let monospaceFont = UIFont.monospacedSystemFont(ofSize: testConfiguration.font.pointSize, weight: .regular)
     #endif
-    attributedString.addAttribute(.font, value: monospaceFont, range: codeRange)
+    attributedString.addAttributes([
+      .font: monospaceFont,
+      .inlineCode: true
+    ], range: codeRange)
     
     let result = ProcessEntities.fromAttributedString(attributedString)
     
-    // Expected: "Start @user middle **bold** `code` end"
-    #expect(result.text == "Start @user middle **bold** `code` end")
+    // Expected: "Start @user middle bold code end" (original text preserved)
+    #expect(result.text == "Start @user middle bold code end")
     #expect(result.entities.entities.count == 3)
     
     // Verify all entities are present and positioned correctly
@@ -508,14 +495,14 @@ struct ProcessEntitiesTests {
     #expect(sortedEntities[0].offset == 6)
     #expect(sortedEntities[0].length == 5)
     
-    // Bold should be second (offset adjusted for ** insertion)
+    // Bold should be second (original position)
     #expect(sortedEntities[1].type == .bold)
-    #expect(sortedEntities[1].offset == 21) // 19 + 2 for ** insertion
+    #expect(sortedEntities[1].offset == 19) // Original position
     #expect(sortedEntities[1].length == 4)
     
-    // Code should be third (offset adjusted for both ** and ` insertions)
+    // Code should be third (original position)
     #expect(sortedEntities[2].type == .code)
-    #expect(sortedEntities[2].offset == 28) // 24 + 4 for ** and ` insertions
+    #expect(sortedEntities[2].offset == 24) // Original position
     #expect(sortedEntities[2].length == 4)
   }
 }
