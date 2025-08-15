@@ -1,6 +1,7 @@
 import AppKit
 import InlineKit
 import Logger
+import TextProcessing
 
 class ComposeTextEditor: NSView {
   // MARK: - Internals
@@ -376,6 +377,20 @@ extension NSTextView {
     return currentTypingAttributes[.mentionUserId] != nil ||
       (currentTypingAttributes[.foregroundColor] as? NSColor) == NSColor.systemBlue
   }
+  
+  /// Check if cursor is positioned within a code block (inline or pre)
+  var isCursorInCodeBlock: Bool {
+    let selectedRange = selectedRange()
+    guard selectedRange.length == 0, 
+          selectedRange.location > 0,
+          selectedRange.location <= attributedString().length else { return false }
+
+    let checkPosition = selectedRange.location - 1
+    guard checkPosition >= 0 && checkPosition < attributedString().length else { return false }
+    
+    let attributes = attributedString().attributes(at: checkPosition, effectiveRange: nil)
+    return ProcessEntities.isCursorInCodeBlock(attributes: attributes)
+  }
 
   /// Reset typing attributes to default to prevent mention style leakage
   func resetTypingAttributesToDefault() {
@@ -390,6 +405,41 @@ extension NSTextView {
     if selectedRange.length == 0, isCursorAfterMention || hasTypingAttributesMentionStyling {
       resetTypingAttributesToDefault()
     }
+    
+    // Check if cursor is within a code block and maintain monospace font
+    if selectedRange.length == 0 && 
+       selectedRange.location > 0 && 
+       selectedRange.location <= attributedString().length {
+      
+      let checkPosition = selectedRange.location - 1
+      guard checkPosition >= 0 && checkPosition < attributedString().length else { return }
+      
+      let attributes = attributedString().attributes(at: checkPosition, effectiveRange: nil)
+      
+      // Use shared utility to determine if we're in a code block
+      if ProcessEntities.isCursorInCodeBlock(attributes: attributes) {
+        updateTypingAttributesForCodeBlock(attributes: attributes)
+      }
+    }
+  }
+  
+  /// Updates typing attributes to maintain monospace font for code blocks
+  private func updateTypingAttributesForCodeBlock(attributes: [NSAttributedString.Key: Any]) {
+    let defaultFontSize = NSFont.systemFontSize
+    let currentFont = attributes[.font] as? NSFont ?? NSFont.systemFont(ofSize: defaultFontSize)
+    let monospaceFont = NSFont.monospacedSystemFont(ofSize: currentFont.pointSize, weight: .regular)
+    
+    var newTypingAttributes = defaultTypingAttributes
+    newTypingAttributes[.font] = monospaceFont
+    
+    // Preserve preCode or inlineCode attribute for continued typing
+    if attributes[.preCode] != nil {
+      newTypingAttributes[.preCode] = true
+    } else if attributes[.inlineCode] != nil {
+      newTypingAttributes[.inlineCode] = true
+    }
+    
+    typingAttributes = newTypingAttributes
   }
 
   /// Set attributed text while preserving selection

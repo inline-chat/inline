@@ -1,6 +1,7 @@
 import InlineKit
 import Logger
 import ObjectiveC
+import TextProcessing
 import UIKit
 import UniformTypeIdentifiers
 
@@ -786,6 +787,20 @@ extension UITextView {
     }
     return false
   }
+  
+  /// Check if cursor is positioned within a code block (inline or pre)
+  var isCursorInCodeBlock: Bool {
+    let selectedRange = selectedRange
+    guard selectedRange.length == 0, 
+          selectedRange.location > 0,
+          selectedRange.location <= attributedText.length else { return false }
+
+    let checkPosition = selectedRange.location - 1
+    guard checkPosition >= 0 && checkPosition < attributedText.length else { return false }
+    
+    let attributes = attributedText.attributes(at: checkPosition, effectiveRange: nil)
+    return ProcessEntities.isCursorInCodeBlock(attributes: attributes)
+  }
 
   /// Reset typing attributes to default to prevent style leakage
   func resetTypingAttributesToDefault() {
@@ -816,5 +831,40 @@ extension UITextView {
     {
       resetTypingAttributesToDefault()
     }
+    
+    // Check if cursor is within a code block and maintain monospace font
+    if selectedRange.length == 0 && 
+       selectedRange.location > 0 && 
+       selectedRange.location <= attributedText.length {
+      
+      let checkPosition = selectedRange.location - 1
+      guard checkPosition >= 0 && checkPosition < attributedText.length else { return }
+      
+      let attributes = attributedText.attributes(at: checkPosition, effectiveRange: nil)
+      
+      // Use shared utility to determine if we're in a code block
+      if ProcessEntities.isCursorInCodeBlock(attributes: attributes) {
+        updateTypingAttributesForCodeBlock(attributes: attributes)
+      }
+    }
+  }
+  
+  /// Updates typing attributes to maintain monospace font for code blocks
+  private func updateTypingAttributesForCodeBlock(attributes: [NSAttributedString.Key: Any]) {
+    let defaultFontSize = ProcessEntities.defaultFontSize
+    let currentFont = attributes[.font] as? UIFont ?? UIFont.systemFont(ofSize: defaultFontSize)
+    let monospaceFont = UIFont.monospacedSystemFont(ofSize: currentFont.pointSize, weight: .regular)
+    
+    var newTypingAttributes = defaultTypingAttributes
+    newTypingAttributes[.font] = monospaceFont
+    
+    // Preserve preCode or inlineCode attribute for continued typing
+    if attributes[NSAttributedString.Key("preCode")] != nil {
+      newTypingAttributes[NSAttributedString.Key("preCode")] = true
+    } else if attributes[NSAttributedString.Key("inlineCode")] != nil {
+      newTypingAttributes[NSAttributedString.Key("inlineCode")] = true
+    }
+    
+    typingAttributes = newTypingAttributes
   }
 }
