@@ -1,3 +1,5 @@
 // Edit Local.xcconfig to customize
 #include "Local.default.xcconfig"
 #include? "Local.xcconfig"
+
+DISPLAY_NAME = Inline Dev
