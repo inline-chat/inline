@@ -179,7 +179,7 @@ public class ProcessEntities {
 
     // Extract pre code entities from custom attribute
     attributedString.enumerateAttribute(
-      NSAttributedString.Key("preCode"),
+      .preCode,
       in: NSRange(location: 0, length: text.count),
       options: []
     ) { value, range, _ in
@@ -200,14 +200,19 @@ public class ProcessEntities {
     ) { value, range, _ in
       if let font = value as? PlatformFont, isMonospaceFont(font) {
         // Check if this range doesn't already have a preCode or inlineCode attribute
-        let hasPreCodeAttribute = attributedString.attributes(at: range.location, effectiveRange: nil)[NSAttributedString.Key("preCode")] != nil
-        let hasInlineCodeAttribute = attributedString.attributes(at: range.location, effectiveRange: nil)[NSAttributedString.Key("inlineCode")] != nil
-        
-        if !hasPreCodeAttribute && !hasInlineCodeAttribute {
+        let hasPreCodeAttribute = attributedString.attributes(at: range.location, effectiveRange: nil)[.preCode] !=
+          nil
+        let hasInlineCodeAttribute = attributedString.attributes(
+          at: range.location,
+          effectiveRange:
+          nil
+        )[.inlineCode] != nil
+
+        if !hasPreCodeAttribute, !hasInlineCodeAttribute {
           // Determine if this should be pre or inline code based on content
           let contentText = (attributedString.string as NSString).substring(with: range)
           let containsNewlines = contentText.contains("\n")
-          
+
           var entity = MessageEntity()
           entity.type = containsNewlines ? .pre : .code
           entity.offset = Int64(range.location)
@@ -303,42 +308,42 @@ public class ProcessEntities {
   // MARK: - Helper Methods
 
   // MARK: - Constants
-  
+
   /// Common monospace font family names for detection
   private static let monospacePatterns = ["Monaco", "Menlo", "Courier", "SF Mono", "Consolas"]
-  
+
   /// Thread-safe cache for monospace font detection results
   private static let monospaceFontCacheLock = NSLock()
-  private static nonisolated(unsafe) var _monospaceFontCache: [String: Bool] = [:]
-  
+  private nonisolated(unsafe) static var _monospaceFontCache: [String: Bool] = [:]
+
   /// Default font size used as fallback
   public static let defaultFontSize: CGFloat = 17
-  
+
   // MARK: - Regex Patterns
-  
+
   /// Regex pattern for pre code blocks with optional language specification
   /// Matches: ```[language]\n[content]``` or ```[content]```
   /// Examples: "```swift\nlet x = 1```", "```hello world```"
   private static let preBlockPattern = "```(?:([a-zA-Z0-9+#-]+)\\n([\\s\\S]*?)|([\\s\\S]*?))```"
-  
+
   /// Regex pattern for inline code blocks
   /// Matches: `[content]`
   private static let inlineCodePattern = "`(.*?)`"
-  
+
   /// Regex pattern for bold text
   /// Matches: **[content]**
   private static let boldTextPattern = "\\*\\*(.*?)\\*\\*"
-  
-  /// Regex pattern for italic text  
+
+  /// Regex pattern for italic text
   /// Matches: _[content]_
   private static let italicTextPattern = "_(.*?)_"
-  
+
   private static func getCachedMonospaceResult(for fontName: String) -> Bool? {
     monospaceFontCacheLock.lock()
     defer { monospaceFontCacheLock.unlock() }
     return _monospaceFontCache[fontName]
   }
-  
+
   private static func setCachedMonospaceResult(for fontName: String, result: Bool) {
     monospaceFontCacheLock.lock()
     defer { monospaceFontCacheLock.unlock() }
@@ -346,47 +351,47 @@ public class ProcessEntities {
   }
 
   // MARK: - Monospace Detection Utilities
-  
+
   /// Checks if a font is monospace using platform-specific detection and font name patterns
   public static func isMonospaceFont(_ font: PlatformFont) -> Bool {
     let fontName = font.fontName
-    
+
     // Check cache first for performance
     if let cached = getCachedMonospaceResult(for: fontName) {
       return cached
     }
-    
+
     var isMonospace = false
-    
+
     #if os(macOS)
     isMonospace = font.isFixedPitch || monospacePatterns.contains { fontName.contains($0) }
     #else
-    isMonospace = font.fontDescriptor.symbolicTraits.contains(.traitMonoSpace) || 
-                  monospacePatterns.contains { fontName.contains($0) }
+    isMonospace = font.fontDescriptor.symbolicTraits.contains(.traitMonoSpace) ||
+      monospacePatterns.contains { fontName.contains($0) }
     #endif
-    
+
     // Cache the result for performance
     setCachedMonospaceResult(for: fontName, result: isMonospace)
     return isMonospace
   }
-  
+
   /// Determines if cursor is within a code block based on attributes and font
   public static func isCursorInCodeBlock(
     attributes: [NSAttributedString.Key: Any]
   ) -> Bool {
     // Check for explicit preCode or inlineCode attributes
-    let hasPreCode = attributes[NSAttributedString.Key("preCode")] != nil
-    let hasInlineCode = attributes[NSAttributedString.Key("inlineCode")] != nil
-    
+    let hasPreCode = attributes[.preCode] != nil
+    let hasInlineCode = attributes[.inlineCode] != nil
+
     if hasPreCode || hasInlineCode {
       return true
     }
-    
+
     // Check for monospace font
     if let font = attributes[.font] as? PlatformFont {
       return isMonospaceFont(font)
     }
-    
+
     return false
   }
 
@@ -598,10 +603,10 @@ public class ProcessEntities {
 
         // Get the content range based on which groups matched
         let contentRange: NSRange
-        if match.numberOfRanges >= 4 && match.range(at: 3).location != NSNotFound {
+        if match.numberOfRanges >= 4, match.range(at: 3).location != NSNotFound {
           // No language format: ```content``` (group 3)
           contentRange = match.range(at: 3)
-        } else if match.numberOfRanges >= 3 && match.range(at: 2).location != NSNotFound {
+        } else if match.numberOfRanges >= 3, match.range(at: 2).location != NSNotFound {
           // Language + newline + content format: ```lang\ncontent``` (group 2)
           contentRange = match.range(at: 2)
         } else {
