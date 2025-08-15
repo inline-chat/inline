@@ -573,8 +573,9 @@
 /* Begin XCBuildConfiguration section */
 		B7020C4E2DCE1534007099D9 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = CD5326842CE113CD00EC348D /* Debug.xcconfig */;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = share/shareDebug.entitlements;
+				CODE_SIGN_ENTITLEMENTS = share/share.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = dwarf;
@@ -602,8 +603,9 @@
 		};
 		B7020C4F2DCE1534007099D9 /* Debug #2 */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = CD5326842CE113CD00EC348D /* Debug.xcconfig */;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = "share/shareDebug #2.entitlements";
+				CODE_SIGN_ENTITLEMENTS = share/share.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = dwarf;
@@ -631,8 +633,9 @@
 		};
 		B7020C502DCE1534007099D9 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = CD5326862CE1149700EC348D /* Release.xcconfig */;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = share/shareRelease.entitlements;
+				CODE_SIGN_ENTITLEMENTS = share/share.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 2487AN8AL4;
