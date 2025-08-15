@@ -171,7 +171,29 @@ public class ProcessEntities {
     }
 
     // Extract italic entities from font attributes
+    attributedString.enumerateAttribute(
+      .font,
+      in: NSRange(location: 0, length: text.count),
+      options: []
+    ) { value, range, _ in
+      if let font = value as? PlatformFont {
+        #if os(macOS)
+        let isItalic = NSFontManager.shared.traits(of: font).contains(.italicFontMask)
+        #else
+        let isItalic = font.fontDescriptor.symbolicTraits.contains(.traitItalic)
+        #endif
 
+        if isItalic {
+          var entity = MessageEntity()
+          entity.type = .italic
+          entity.offset = Int64(range.location)
+          entity.length = Int64(range.length)
+          entities.append(entity)
+        }
+      }
+    }
+
+    // Also check for custom italic attribute (fallback)
     attributedString.enumerateAttribute(
       .italic,
       in: NSRange(location: 0, length: text.count),
