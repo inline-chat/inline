@@ -105,4 +105,5 @@ public class AttributedStringHelpers {
 
 public extension NSAttributedString.Key {
   static let mentionUserId = NSAttributedString.Key("mentionUserId")
+  static let inlineCode = NSAttributedString.Key("inlineCode")
 }
