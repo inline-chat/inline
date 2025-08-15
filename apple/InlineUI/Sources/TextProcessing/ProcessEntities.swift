@@ -105,9 +105,12 @@ public class ProcessEntities {
           attributedString.addAttribute(.font, value: boldFont, range: range)
 
         case .code:
-          // monospace font
+          // monospace font with custom marker
           let monospaceFont = createMonospaceFont(from: configuration.font)
-          attributedString.addAttribute(.font, value: monospaceFont, range: range)
+          attributedString.addAttributes([
+            .font: monospaceFont,
+            .inlineCode: true
+          ], range: range)
 
         default:
           break
@@ -144,6 +147,21 @@ public class ProcessEntities {
       }
     }
 
+    // Extract inline code entities from custom attribute
+    attributedString.enumerateAttribute(
+      .inlineCode,
+      in: NSRange(location: 0, length: text.count),
+      options: []
+    ) { value, range, _ in
+      if value != nil {
+        var entity = MessageEntity()
+        entity.type = .code
+        entity.offset = Int64(range.location)
+        entity.length = Int64(range.length)
+        entities.append(entity)
+      }
+    }
+
     // Extract bold entities from font attributes
     attributedString.enumerateAttribute(
       .font,
@@ -153,23 +171,13 @@ public class ProcessEntities {
       if let font = value as? PlatformFont {
         #if os(macOS)
         let isBold = NSFontManager.shared.traits(of: font).contains(.boldFontMask)
-        let isMonospace = font.fontName.contains("Menlo") || font.fontName.contains("Monaco") || font.fontName.contains("Consolas") || font.fontName.contains("monospace")
-        #elseif os(iOS)
+        #else
         let isBold = font.fontDescriptor.symbolicTraits.contains(.traitBold)
-        let isMonospace = font.fontDescriptor.symbolicTraits.contains(.traitMonoSpace)
         #endif
-        
+
         if isBold {
           var entity = MessageEntity()
           entity.type = .bold
-          entity.offset = Int64(range.location)
-          entity.length = Int64(range.length)
-          entities.append(entity)
-        }
-        
-        if isMonospace {
-          var entity = MessageEntity()
-          entity.type = .code
           entity.offset = Int64(range.location)
           entity.length = Int64(range.length)
           entities.append(entity)
@@ -207,7 +215,7 @@ public class ProcessEntities {
   private static func createBoldFont(from font: PlatformFont) -> PlatformFont {
     #if os(macOS)
     return NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
-    #elseif os(iOS)
+    #else
     return UIFont.boldSystemFont(ofSize: font.pointSize)
     #endif
   }
@@ -215,7 +223,7 @@ public class ProcessEntities {
   private static func createMonospaceFont(from font: PlatformFont) -> PlatformFont {
     #if os(macOS)
     return NSFont.monospacedSystemFont(ofSize: font.pointSize, weight: .regular)
-    #elseif os(iOS)
+    #else
     return UIFont.monospacedSystemFont(ofSize: font.pointSize, weight: .regular)
     #endif
   }
