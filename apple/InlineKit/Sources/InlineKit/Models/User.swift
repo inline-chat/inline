@@ -203,13 +203,14 @@ public extension ApiUser {
     var user = User(from: self)
 
     var profileCdnUrl: String? = nil
-    var profileLocalPath: String? = nil
+    var profileFileUniqueId: String? = nil
 
     // TODO: support clearing photo
     var file: File? = nil
 
     if let photo = photo?.first {
       profileCdnUrl = photo.temporaryUrl
+      profileFileUniqueId = photo.fileUniqueId
       // save file
       file = try? File.save(db, apiPhoto: photo, forUserId: user.id)
     }
@@ -229,10 +230,9 @@ public extension ApiUser {
 
     if let existing {
       // Check if we need to clear local cache due to profile photo change
-      let newFileUniqueId = file?.fileUniqueId
-      let shouldClearCache = existing.shouldInvalidateLocalCache(newFileUniqueId: newFileUniqueId)
+      let shouldClearCache = existing.shouldInvalidateLocalCache(newFileUniqueId: profileFileUniqueId)
 
-      // keep exitsing values
+      // keep existing values
       user.profileFileId = file?.id ?? existing.profileFileId
       user.phoneNumber = user.phoneNumber ?? existing.phoneNumber
       user.email = user.email ?? existing.email
@@ -240,7 +240,7 @@ public extension ApiUser {
       user.timeZone = user.timeZone ?? existing.timeZone
       user.profileCdnUrl = profileCdnUrl ?? existing.profileCdnUrl
       user.profileLocalPath = shouldClearCache ? nil : existing.profileLocalPath
-      user.profileFileUniqueId = newFileUniqueId ?? existing.profileFileUniqueId
+      user.profileFileUniqueId = profileFileUniqueId ?? existing.profileFileUniqueId
 
       // Remove old cached file from disk if cache is being invalidated
       if shouldClearCache, let localURL = existing.getLocalURL() {
@@ -296,6 +296,7 @@ public extension User {
       if user.profilePhoto.hasFileUniqueID {
         profileFileUniqueId = user.profilePhoto.fileUniqueID
       }
+      // Note: Don't clear profileFileUniqueId if not provided - preserve existing value
     }
   }
 
@@ -381,13 +382,8 @@ public extension User {
   /// Check if the local cache should be invalidated based on profileFileUniqueId changes
   /// Used internally by save methods to automatically handle cache invalidation
   func shouldInvalidateLocalCache(newFileUniqueId: String?) -> Bool {
-    // If we have a new unique ID and it's different from our current one, invalidate cache
+    // Only invalidate cache if we have a new unique ID and it's different from our current one
     if let newId = newFileUniqueId, newId != profileFileUniqueId {
-      return true
-    }
-
-    // If we previously had a unique ID but now don't, invalidate cache
-    if profileFileUniqueId != nil, newFileUniqueId == nil {
       return true
     }
 
