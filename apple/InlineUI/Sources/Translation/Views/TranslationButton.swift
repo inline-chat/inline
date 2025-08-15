@@ -31,7 +31,7 @@ public struct TranslationButton: View {
   /// Button shown in nav bar/toolbar
   @ViewBuilder
   public var button: some View {
-    let base = Button {
+    Button {
       pressed()
     } label: {
       // TODO: change the icon from this Apple-copyrighted icon
@@ -40,19 +40,10 @@ public struct TranslationButton: View {
     #if os(macOS)
     .font(.system(size: 16))
     .buttonStyle(.automatic)
+    .foregroundStyle(isTranslationEnabled ? Color.macOSAccent : .secondary)
+    #else
+    .foregroundStyle(isTranslationEnabled ? Color.accentColor : .secondary)
     #endif
-
-    if isTranslationEnabled {
-      base
-      #if os(macOS)
-      .foregroundStyle(Color.macOSAccent)
-      #else
-      .foregroundStyle(Color.accentColor)
-      #endif
-    } else {
-      base
-        .foregroundStyle(.secondary)
-    }
   }
 
   /// Popover when button is pressed
