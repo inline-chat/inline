@@ -5,7 +5,8 @@
       "Bash(git log:*)",
       "Bash(grep:*)",
       "Bash(xcodebuild:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(mv:*)"
     ],
     "deny": []
   }
