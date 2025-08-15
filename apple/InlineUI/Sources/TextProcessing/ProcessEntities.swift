@@ -104,12 +104,20 @@ public class ProcessEntities {
 
           attributedString.addAttribute(.font, value: boldFont, range: range)
 
+        case .italic:
+          let existingAttributes = attributedString.attributes(at: range.location, effectiveRange: nil)
+          let italicFont = createItalicFont(from: existingAttributes[.font] as? PlatformFont ?? configuration.font)
+          attributedString.addAttributes([
+            .font: italicFont,
+            .italic: true,
+          ], range: range)
+
         case .code:
           // monospace font with custom marker
           let monospaceFont = createMonospaceFont(from: configuration.font)
           attributedString.addAttributes([
             .font: monospaceFont,
-            .inlineCode: true
+            .inlineCode: true,
           ], range: range)
 
         default:
@@ -162,6 +170,22 @@ public class ProcessEntities {
       }
     }
 
+    // Extract italic entities from font attributes
+
+    attributedString.enumerateAttribute(
+      .italic,
+      in: NSRange(location: 0, length: text.count),
+      options: []
+    ) { value, range, _ in
+      if value != nil {
+        var entity = MessageEntity()
+        entity.type = .italic
+        entity.offset = Int64(range.location)
+        entity.length = Int64(range.length)
+        entities.append(entity)
+      }
+    }
+
     // Extract bold entities from font attributes
     attributedString.enumerateAttribute(
       .font,
@@ -190,6 +214,9 @@ public class ProcessEntities {
 
     // Extract inline code entities from `text` markdown syntax and update all entity offsets
     entities = extractInlineCodeFromMarkdown(text: &text, existingEntities: entities)
+
+    // Extract italic entities from _text_ markdown syntax and update all entity offsets
+    entities = extractItalicFromMarkdown(text: &text, existingEntities: entities)
 
     // Sort entities by offset
     entities.sort { $0.offset < $1.offset }
@@ -228,6 +255,14 @@ public class ProcessEntities {
     #endif
   }
 
+  private static func createItalicFont(from font: PlatformFont) -> PlatformFont {
+    #if os(macOS)
+    return NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
+    #else
+    return UIFont.italicSystemFont(ofSize: font.pointSize)
+    #endif
+  }
+
   /// Extract bold entities from **text** markdown syntax
   private static func extractBoldFromMarkdown(
     text: inout String,
@@ -256,7 +291,8 @@ public class ProcessEntities {
           if fullRange.location != NSNotFound, contentRange.location != NSNotFound {
             // Convert NSRange to Range<String.Index> safely
             guard let swiftFullRange = Range(fullRange, in: text),
-                  let swiftContentRange = Range(contentRange, in: text) else {
+                  let swiftContentRange = Range(contentRange, in: text)
+            else {
               continue // Skip this match if range conversion fails
             }
 
@@ -331,7 +367,8 @@ public class ProcessEntities {
           if fullRange.location != NSNotFound, contentRange.location != NSNotFound {
             // Convert NSRange to Range<String.Index> safely
             guard let swiftFullRange = Range(fullRange, in: text),
-                  let swiftContentRange = Range(contentRange, in: text) else {
+                  let swiftContentRange = Range(contentRange, in: text)
+            else {
               continue // Skip this match if range conversion fails
             }
 
@@ -374,6 +411,84 @@ public class ProcessEntities {
 
     } catch {
       // Handle regex error silently
+    }
+
+    return allEntities
+  }
+
+  private static func extractItalicFromMarkdown(
+    text: inout String,
+    existingEntities: [MessageEntity]
+  ) -> [MessageEntity] {
+    var allEntities = existingEntities
+    var italicEntities: [MessageEntity] = []
+    let pattern = "_(.*?)_"
+    do {
+      let regex = try NSRegularExpression(
+        pattern: pattern,
+        options:
+        []
+      )
+      let nsText = text as NSString
+      let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsText.length))
+
+      // Process matches in reverse order to avoid offset issues when removing _ markers
+      var offsetAdjustments: [Int: Int] = [:] // position -> characters removed
+
+      for match in matches.reversed() {
+        // Get the full match range (including _)
+        let fullRange = match.range(at: 0)
+
+        // Get the content range (excluding _)
+        if match.numberOfRanges > 1 {
+          let contentRange = match.range(at: 1)
+
+          if fullRange.location != NSNotFound, contentRange.location != NSNotFound {
+            // Convert NSRange to Range<String.Index> safely
+            guard let swiftFullRange = Range(fullRange, in: text),
+                  let swiftContentRange = Range(contentRange, in: text)
+            else {
+              continue // Skip this match if range conversion fails
+            }
+
+            // Extract content text
+            let contentText = String(text[swiftContentRange])
+
+            // Replace the full match with just the content
+            text.replaceSubrange(swiftFullRange, with: contentText)
+
+            // Track that 2 characters were removed at this position (1 _ at start + 1 _ at end)
+            offsetAdjustments[fullRange.location] = 2
+
+            // Now create italic entity with the correct position (after _ removal)
+            var italicEntity = MessageEntity()
+            italicEntity.type = .italic
+            italicEntity.offset = Int64(fullRange.location) // Position where content now starts (after _ removed)
+            italicEntity.length = Int64(contentRange.length)
+            italicEntities.append(italicEntity)
+          }
+        }
+      }
+
+      // Update offsets of all existing entities that come after removed _ markers
+      for i in 0 ..< allEntities.count {
+        let entityOffset = Int(allEntities[i].offset)
+        var adjustment = 0
+
+        // Calculate total adjustment for this entity's position
+        for (removalPosition, charsRemoved) in offsetAdjustments {
+          if entityOffset > removalPosition {
+            adjustment += charsRemoved
+          }
+        }
+
+        allEntities[i].offset = Int64(entityOffset - adjustment)
+      }
+
+      // Add italic entities to the list
+      allEntities.append(contentsOf: italicEntities)
+
+    } catch {
     }
 
     return allEntities
