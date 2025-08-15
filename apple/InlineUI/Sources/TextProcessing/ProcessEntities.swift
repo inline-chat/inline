@@ -120,6 +120,13 @@ public class ProcessEntities {
             .inlineCode: true,
           ], range: range)
 
+        case .pre:
+          let monospaceFont = createMonospaceFont(from: configuration.font)
+          attributedString.addAttributes([
+            .font: monospaceFont,
+            .preCode: true,
+          ], range: range)
+
         default:
           break
       }
@@ -167,6 +174,46 @@ public class ProcessEntities {
         entity.offset = Int64(range.location)
         entity.length = Int64(range.length)
         entities.append(entity)
+      }
+    }
+
+    // Extract pre code entities from custom attribute
+    attributedString.enumerateAttribute(
+      NSAttributedString.Key("preCode"),
+      in: NSRange(location: 0, length: text.count),
+      options: []
+    ) { value, range, _ in
+      if value != nil {
+        var entity = MessageEntity()
+        entity.type = .pre
+        entity.offset = Int64(range.location)
+        entity.length = Int64(range.length)
+        entities.append(entity)
+      }
+    }
+
+    // Extract pre code entities from font attributes (monospace fonts)
+    attributedString.enumerateAttribute(
+      .font,
+      in: NSRange(location: 0, length: text.count),
+      options: []
+    ) { value, range, _ in
+      if let font = value as? PlatformFont, isMonospaceFont(font) {
+        // Check if this range doesn't already have a preCode or inlineCode attribute
+        let hasPreCodeAttribute = attributedString.attributes(at: range.location, effectiveRange: nil)[NSAttributedString.Key("preCode")] != nil
+        let hasInlineCodeAttribute = attributedString.attributes(at: range.location, effectiveRange: nil)[NSAttributedString.Key("inlineCode")] != nil
+        
+        if !hasPreCodeAttribute && !hasInlineCodeAttribute {
+          // Determine if this should be pre or inline code based on content
+          let contentText = (attributedString.string as NSString).substring(with: range)
+          let containsNewlines = contentText.contains("\n")
+          
+          var entity = MessageEntity()
+          entity.type = containsNewlines ? .pre : .code
+          entity.offset = Int64(range.location)
+          entity.length = Int64(range.length)
+          entities.append(entity)
+        }
       }
     }
 
@@ -234,6 +281,10 @@ public class ProcessEntities {
     // Extract bold entities from **text** markdown syntax and update all entity offsets
     entities = extractBoldFromMarkdown(text: &text, existingEntities: entities)
 
+    // Extract pre code entities from ```text``` markdown syntax and update all entity offsets
+    // NOTE: This must come BEFORE inline code extraction to avoid interference
+    entities = extractPreFromMarkdown(text: &text, existingEntities: entities)
+
     // Extract inline code entities from `text` markdown syntax and update all entity offsets
     entities = extractInlineCodeFromMarkdown(text: &text, existingEntities: entities)
 
@@ -251,6 +302,94 @@ public class ProcessEntities {
 
   // MARK: - Helper Methods
 
+  // MARK: - Constants
+  
+  /// Common monospace font family names for detection
+  private static let monospacePatterns = ["Monaco", "Menlo", "Courier", "SF Mono", "Consolas"]
+  
+  /// Thread-safe cache for monospace font detection results
+  private static let monospaceFontCacheLock = NSLock()
+  private static nonisolated(unsafe) var _monospaceFontCache: [String: Bool] = [:]
+  
+  /// Default font size used as fallback
+  public static let defaultFontSize: CGFloat = 17
+  
+  // MARK: - Regex Patterns
+  
+  /// Regex pattern for pre code blocks with optional language specification
+  /// Matches: ```[language]\n[content]``` or ```[content]```
+  /// Examples: "```swift\nlet x = 1```", "```hello world```"
+  private static let preBlockPattern = "```(?:([a-zA-Z0-9+#-]+)\\n([\\s\\S]*?)|([\\s\\S]*?))```"
+  
+  /// Regex pattern for inline code blocks
+  /// Matches: `[content]`
+  private static let inlineCodePattern = "`(.*?)`"
+  
+  /// Regex pattern for bold text
+  /// Matches: **[content]**
+  private static let boldTextPattern = "\\*\\*(.*?)\\*\\*"
+  
+  /// Regex pattern for italic text  
+  /// Matches: _[content]_
+  private static let italicTextPattern = "_(.*?)_"
+  
+  private static func getCachedMonospaceResult(for fontName: String) -> Bool? {
+    monospaceFontCacheLock.lock()
+    defer { monospaceFontCacheLock.unlock() }
+    return _monospaceFontCache[fontName]
+  }
+  
+  private static func setCachedMonospaceResult(for fontName: String, result: Bool) {
+    monospaceFontCacheLock.lock()
+    defer { monospaceFontCacheLock.unlock() }
+    _monospaceFontCache[fontName] = result
+  }
+
+  // MARK: - Monospace Detection Utilities
+  
+  /// Checks if a font is monospace using platform-specific detection and font name patterns
+  public static func isMonospaceFont(_ font: PlatformFont) -> Bool {
+    let fontName = font.fontName
+    
+    // Check cache first for performance
+    if let cached = getCachedMonospaceResult(for: fontName) {
+      return cached
+    }
+    
+    var isMonospace = false
+    
+    #if os(macOS)
+    isMonospace = font.isFixedPitch || monospacePatterns.contains { fontName.contains($0) }
+    #else
+    isMonospace = font.fontDescriptor.symbolicTraits.contains(.traitMonoSpace) || 
+                  monospacePatterns.contains { fontName.contains($0) }
+    #endif
+    
+    // Cache the result for performance
+    setCachedMonospaceResult(for: fontName, result: isMonospace)
+    return isMonospace
+  }
+  
+  /// Determines if cursor is within a code block based on attributes and font
+  public static func isCursorInCodeBlock(
+    attributes: [NSAttributedString.Key: Any]
+  ) -> Bool {
+    // Check for explicit preCode or inlineCode attributes
+    let hasPreCode = attributes[NSAttributedString.Key("preCode")] != nil
+    let hasInlineCode = attributes[NSAttributedString.Key("inlineCode")] != nil
+    
+    if hasPreCode || hasInlineCode {
+      return true
+    }
+    
+    // Check for monospace font
+    if let font = attributes[.font] as? PlatformFont {
+      return isMonospaceFont(font)
+    }
+    
+    return false
+  }
+
   /// Sorts message entities by their offset position
   public static func sortEntities(_ entities: [MessageEntity]) -> [MessageEntity] {
     entities.sorted { $0.offset < $1.offset }
@@ -263,7 +402,8 @@ public class ProcessEntities {
 
   private static func createBoldFont(from font: PlatformFont) -> PlatformFont {
     #if os(macOS)
-    return NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
+    let boldFont = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
+    return boldFont
     #else
     return UIFont.boldSystemFont(ofSize: font.pointSize)
     #endif
@@ -279,7 +419,8 @@ public class ProcessEntities {
 
   private static func createItalicFont(from font: PlatformFont) -> PlatformFont {
     #if os(macOS)
-    return NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
+    let italicFont = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
+    return italicFont
     #else
     return UIFont.italicSystemFont(ofSize: font.pointSize)
     #endif
@@ -292,10 +433,9 @@ public class ProcessEntities {
   ) -> [MessageEntity] {
     var allEntities = existingEntities
     var boldEntities: [MessageEntity] = []
-    let pattern = "\\*\\*(.*?)\\*\\*"
 
     do {
-      let regex = try NSRegularExpression(pattern: pattern, options: [])
+      let regex = try NSRegularExpression(pattern: boldTextPattern, options: [])
       let nsText = text as NSString
       let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsText.length))
 
@@ -368,10 +508,9 @@ public class ProcessEntities {
   ) -> [MessageEntity] {
     var allEntities = existingEntities
     var inlineCodeEntities: [MessageEntity] = []
-    let pattern = "`(.*?)`"
 
     do {
-      let regex = try NSRegularExpression(pattern: pattern, options: [])
+      let regex = try NSRegularExpression(pattern: inlineCodePattern, options: [])
       let nsText = text as NSString
       let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsText.length))
 
@@ -438,18 +577,102 @@ public class ProcessEntities {
     return allEntities
   }
 
+  private static func extractPreFromMarkdown(
+    text: inout String,
+    existingEntities: [MessageEntity]
+  ) -> [MessageEntity] {
+    var allEntities = existingEntities
+    var preEntities: [MessageEntity] = []
+
+    do {
+      let regex = try NSRegularExpression(pattern: preBlockPattern, options: [.dotMatchesLineSeparators])
+      let nsText = text as NSString
+      let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsText.length))
+
+      // Process matches in reverse order to avoid offset issues when removing ``` markers
+      var offsetAdjustments: [Int: Int] = [:] // position -> characters removed
+
+      for match in matches.reversed() {
+        // Get the full match range (including ``` and language)
+        let fullRange = match.range(at: 0)
+
+        // Get the content range based on which groups matched
+        let contentRange: NSRange
+        if match.numberOfRanges >= 4 && match.range(at: 3).location != NSNotFound {
+          // No language format: ```content``` (group 3)
+          contentRange = match.range(at: 3)
+        } else if match.numberOfRanges >= 3 && match.range(at: 2).location != NSNotFound {
+          // Language + newline + content format: ```lang\ncontent``` (group 2)
+          contentRange = match.range(at: 2)
+        } else {
+          continue // Skip if no valid content group found
+        }
+
+        if fullRange.location != NSNotFound, contentRange.location != NSNotFound {
+          // Convert NSRange to Range<String.Index> safely
+          guard let swiftFullRange = Range(fullRange, in: text),
+                let swiftContentRange = Range(contentRange, in: text)
+          else {
+            continue // Skip this match if range conversion fails
+          }
+
+          // Extract content text and clean up whitespace
+          var contentText = String(text[swiftContentRange])
+
+          // Remove leading and trailing whitespace/newlines
+          contentText = contentText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+          // Replace the full match with just the cleaned content
+          text.replaceSubrange(swiftFullRange, with: contentText)
+
+          // Calculate characters removed (original full match length - cleaned content length)
+          let charsRemoved = fullRange.length - contentText.count
+          offsetAdjustments[fullRange.location] = charsRemoved
+
+          // Now create pre entity with the correct position (after ``` removal)
+          var preEntity = MessageEntity()
+          preEntity.type = .pre
+          preEntity.offset = Int64(fullRange.location) // Position where content now starts
+          preEntity.length = Int64(contentText.count)
+          preEntities.append(preEntity)
+        }
+      }
+
+      // Update offsets of all existing entities that come after removed ``` markers
+      for i in 0 ..< allEntities.count {
+        let entityOffset = Int(allEntities[i].offset)
+        var adjustment = 0
+
+        // Calculate total adjustment for this entity's position
+        for (removalPosition, charsRemoved) in offsetAdjustments {
+          if entityOffset > removalPosition {
+            adjustment += charsRemoved
+          }
+        }
+
+        allEntities[i].offset = Int64(entityOffset - adjustment)
+      }
+
+      // Add pre entities to the list
+      allEntities.append(contentsOf: preEntities)
+
+    } catch {
+      // Handle regex error silently
+    }
+
+    return allEntities
+  }
+
   private static func extractItalicFromMarkdown(
     text: inout String,
     existingEntities: [MessageEntity]
   ) -> [MessageEntity] {
     var allEntities = existingEntities
     var italicEntities: [MessageEntity] = []
-    let pattern = "_(.*?)_"
     do {
       let regex = try NSRegularExpression(
-        pattern: pattern,
-        options:
-        []
+        pattern: italicTextPattern,
+        options: []
       )
       let nsText = text as NSString
       let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsText.length))
@@ -510,8 +733,7 @@ public class ProcessEntities {
       // Add italic entities to the list
       allEntities.append(contentsOf: italicEntities)
 
-    } catch {
-    }
+    } catch {}
 
     return allEntities
   }

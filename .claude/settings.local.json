@@ -6,7 +6,8 @@
       "Bash(grep:*)",
       "Bash(xcodebuild:*)",
       "Bash(swift test)",
-      "Bash(swift test:*)"
+      "Bash(swift test:*)",
+      "Bash(swift:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"
