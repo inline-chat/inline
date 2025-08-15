@@ -56,7 +56,7 @@ public struct UserAvatar: View, Equatable {
     userId = user.id
     file = userInfo.profilePhoto?.first
     fileId = userInfo.profilePhoto?.first?.id
-    remoteUrl = user.getRemoteURL()// ?? userInfo.profilePhoto?.first?.getRemoteURL()
+    remoteUrl = user.getRemoteURL() // ?? userInfo.profilePhoto?.first?.getRemoteURL()
     localUrl = user.getLocalURL() // ?? userInfo.profilePhoto?.first?.getLocalURL()
     firstName = user.firstName
     lastName = user.lastName
@@ -98,7 +98,7 @@ public struct UserAvatar: View, Equatable {
     .frame(width: size, height: size)
     .fixedSize()
   }
-  
+
   private var shouldShowPersonSymbol: Bool {
     firstName == nil && lastName == nil && email == nil && username == nil
   }
@@ -135,7 +135,9 @@ public struct UserAvatar: View, Equatable {
           } else {
             state.image?
               .resizable()
-              .aspectRatio(contentMode: .fit)
+              // .aspectRatio(contentMode: .fit)
+              // for not square profile photo
+              .aspectRatio(contentMode: .fill)
               .frame(width: size, height: size)
               .background(backgroundGradient)
               .clipShape(Circle())
