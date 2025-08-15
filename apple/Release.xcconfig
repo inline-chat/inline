@@ -1,2 +1,3 @@
 DEV_HOST = api.inline.chat
 USE_PRODUCTION_API = YES
+DISPLAY_NAME = Inline
