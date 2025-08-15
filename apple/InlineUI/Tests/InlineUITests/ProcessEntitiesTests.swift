@@ -505,4 +505,79 @@ struct ProcessEntitiesTests {
     #expect(sortedEntities[2].offset == 24) // Original position
     #expect(sortedEntities[2].length == 4)
   }
+  
+  @Test("Emoji followed by bold markdown causes crash in fromAttributedString")
+  func testEmojiFollowedByBoldMarkdown() {
+    let text = "👍 **bold text**"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+    
+    // Add bold font to the "bold text" part (without the markdown markers)
+    let boldRange = NSRange(location: 5, length: 9) // "bold text"
+    #if os(macOS)
+    let boldFont = NSFontManager.shared.convert(testConfiguration.font, toHaveTrait: .boldFontMask)
+    #else
+    let boldFont = UIFont.boldSystemFont(ofSize: testConfiguration.font.pointSize)
+    #endif
+    attributedString.addAttribute(.font, value: boldFont, range: boldRange)
+    
+    let result = ProcessEntities.fromAttributedString(attributedString)
+    
+    // The function should handle emoji properly and not crash
+    #expect(result.text == "👍 bold text")
+    
+    // The function extracts both markdown and the bold entity
+    #expect(result.entities.entities.count == 2)
+    
+    // Find the bold entity
+    let boldEntity = result.entities.entities.first { $0.type == .bold }
+    #expect(boldEntity != nil)
+    #expect(boldEntity!.offset == 1) // After emoji (which takes UTF-16 position 0-1) and space at position 1
+    #expect(boldEntity!.length == 9) // "bold text"
+  }
+  
+  @Test("Code, bold, and mention entities convert to attributed string correctly")
+  func testCodeBoldMentionToAttributedString() {
+    let text = "Check code bold @john here"
+    
+    // Create entities
+    let codeEntity = createCodeEntity(offset: 6, length: 4) // "code"
+    let boldEntity = createBoldEntity(offset: 11, length: 4) // "bold"
+    let mentionEntity = createMentionEntity(offset: 16, length: 5, userId: 123) // "@john"
+    
+    let entities = createMessageEntities([codeEntity, boldEntity, mentionEntity])
+    
+    let result = ProcessEntities.toAttributedString(
+      text: text,
+      entities: entities,
+      configuration: testConfiguration
+    )
+    
+    #expect(result.string == text)
+    
+    // Check code attributes at position 6
+    let codeAttributes = result.attributes(at: 6, effectiveRange: nil)
+    let hasInlineCodeAttribute = codeAttributes[.inlineCode] != nil
+    #expect(hasInlineCodeAttribute == true)
+    
+    // Check bold attributes at position 11
+    let boldAttributes = result.attributes(at: 11, effectiveRange: nil)
+    let boldFont = boldAttributes[.font] as? PlatformFont
+    
+    #if os(macOS)
+    let isBold = NSFontManager.shared.traits(of: boldFont!).contains(.boldFontMask)
+    #else
+    let isBold = boldFont?.fontDescriptor.symbolicTraits.contains(.traitBold) ?? false
+    #endif
+    
+    #expect(isBold == true)
+    
+    // Check mention attributes at position 16
+    let mentionAttributes = result.attributes(at: 16, effectiveRange: nil)
+    #expect(mentionAttributes[.mentionUserId] as? Int64 == 123)
+    #expect(mentionAttributes[.foregroundColor] as? PlatformColor == testConfiguration.linkColor)
+    #expect(mentionAttributes[.link] as? String == "inline://user/123")
+  }
 }
