@@ -16,6 +16,8 @@
 		</dict>
 		<dict/>
 	</array>
+	<key>CFBundleDisplayName</key>
+	<string>$(DISPLAY_NAME)</string>
 	<key>DEV_HOST</key>
 	<string>$(DEV_HOST)</string>
 	<key>UIAppFonts</key>
