@@ -153,9 +153,6 @@
         }
       }
     },
-    "Appearance" : {
-
-    },
     "Are you sure you want to logout? This will clear your local data and return you to the welcome screen." : {
 
     },
@@ -185,9 +182,6 @@
 
     },
     "Cannot preview document" : {
-
-    },
-    "Change Profile Photo" : {
 
     },
     "Chat" : {
@@ -229,6 +223,9 @@
       }
     },
     "Clear Cache" : {
+
+    },
+    "Clear Shared Data" : {
 
     },
     "Code sent to %@" : {
@@ -410,6 +407,9 @@
     "Database" : {
 
     },
+    "Debug" : {
+
+    },
     "Delete Space" : {
       "localizations" : {
         "fa" : {
@@ -563,6 +563,9 @@
           }
         }
       }
+    },
+    "Error Clearing Data" : {
+
     },
     "Find" : {
       "localizations" : {
@@ -811,9 +814,6 @@
     "Remove Participant" : {
 
     },
-    "Reset Translation Alerts" : {
-
-    },
     "Search by username" : {
 
     },
@@ -889,6 +889,9 @@
     "Share Invite" : {
 
     },
+    "Shared Data" : {
+
+    },
     "Sign in with email" : {
       "comment" : "Email sign in title"
     },
@@ -930,6 +933,9 @@
 
     },
     "This will clear all locally cached images. Downloaded content will need to be re-downloaded." : {
+
+    },
+    "This will clear all shared data used by the share extension. The data will be regenerated when needed." : {
 
     },
     "Type" : {
