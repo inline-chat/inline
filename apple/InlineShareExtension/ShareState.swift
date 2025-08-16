@@ -64,8 +64,16 @@ class ShareState: ObservableObject {
         return MIMEType(text: "image/png")
       case "gif":
         return MIMEType(text: "image/gif")
-      case "mp4":
+      case "mp4", "m4v":
         return MIMEType(text: "video/mp4")
+      case "mov":
+        return MIMEType(text: "video/quicktime")
+      case "avi":
+        return MIMEType(text: "video/x-msvideo")
+      case "mkv":
+        return MIMEType(text: "video/x-matroska")
+      case "webm":
+        return MIMEType(text: "video/webm")
       case "mp3":
         return MIMEType(text: "audio/mpeg")
       case "zip":
@@ -167,6 +175,20 @@ class ShareState: ObservableObject {
             if let text = data as? String {
               Task { @MainActor in
                 self?.sharedContent = .text(text)
+              }
+            }
+          }
+        }
+        // Check for videos (movies)
+        else if attachment.hasItemConformingToTypeIdentifier(UTType.movie.identifier) {
+          group.enter()
+          attachment.loadItem(forTypeIdentifier: UTType.movie.identifier, options: nil) { [weak self] data, _ in
+            defer { group.leave() }
+
+            if let videoURL = data as? URL {
+              let fileName = videoURL.lastPathComponent
+              Task { @MainActor in
+                self?.sharedContent = .file(videoURL, fileName)
               }
             }
           }
@@ -368,7 +390,6 @@ class ShareState: ObservableObject {
         }
 
         await MainActor.run {
-          self.uploadProgress = Self.progressCompletionValue
           self.isSending = false
           self.isSent = true
 
