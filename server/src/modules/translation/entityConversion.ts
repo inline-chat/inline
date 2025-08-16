@@ -48,7 +48,7 @@ export async function convertEntityOffsets(input: {
   const messageCount = input.messages.length
   log.info(`Converting entity offsets for ${messageCount} message${messageCount === 1 ? "" : "s"}`)
 
-  const systemPrompt = `You are an expert at converting text entity offsets between different languages.
+  const systemPrompt = `You are an expert at converting rich text entity offsets in texts when translated.
 
 # Task
 Convert entity offsets from original texts to translated texts for ${
@@ -59,6 +59,7 @@ Convert entity offsets from original texts to translated texts for ${
 • Count ALL UTF-16 characters: letters, numbers, spaces, punctuation, emojis, newlines
 • Use the indexed translated text to see exactly where each character is positioned
 • The offset is the position number where the entity content begins
+• If entity starts at index 0, it means the entity is at the beginning of the text and keep it the same. no need to move it to 1.
 
 # Input
 - ${
@@ -68,7 +69,7 @@ Convert entity offsets from original texts to translated texts for ${
 
 # Output Format
 Return conversions array with messageId and updated entities JSON for each message.
-If there's no  entities for a message, set entities to null.`
+If there's no entities for a message, set entities to null.`
 
   const userPrompt = `# Message${messageCount === 1 ? "" : "s"} to Convert
 ${input.messages
@@ -89,7 +90,7 @@ ${input.messages
 
   const response = await openaiClient.chat.completions.create({
     model: "gpt-5-mini" as ChatModel,
-    verbosity: "medium",
+    verbosity: "low",
     reasoning_effort: "minimal",
     messages: [
       { role: "system", content: systemPrompt },

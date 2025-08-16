@@ -280,12 +280,14 @@ public struct TransactionSendMessage: Transaction {
 
   public func didFail(error: Error?) async {
     Log.shared.error("Failed to send message", error: error)
-
+    guard let currentUserId = Auth.getCurrentUserId() else {
+      return
+    }
     // Mark as failed
     do {
       let message = try await AppDatabase.shared.dbWriter.write { db in
         try Message
-          .filter(Column("randomId") == randomId && Column("fromId") == Auth.getCurrentUserId()!)
+          .filter(Column("randomId") == randomId && Column("fromId") == currentUserId)
           .updateAll(
             db,
             Column("status").set(to: MessageSendingStatus.failed.rawValue)
