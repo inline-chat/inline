@@ -15,14 +15,25 @@ enum SharedContentType {
   case file(URL, String)
 }
 
+// Helper functions for SharedContentType pattern matching
+private func isFileContent(_ content: SharedContentType) -> Bool {
+  if case .file = content { return true }
+  return false
+}
+
+private func isImagesContent(_ content: SharedContentType) -> Bool {
+  if case .images = content { return true }
+  return false
+}
+
 /// Manages the state and operations for the share extension
 /// Handles loading shared content, uploading files, and sending messages
 @MainActor
 class ShareState: ObservableObject {
   private nonisolated static let maxImages = 5
   private static let imageCompressionQuality: CGFloat = 0.7
-  private static let uploadProgressWeight = 0.8
-  private static let sendProgressWeight = 0.9
+  private static let progressCompletionValue = 1.0
+  private static let maxFileSizeBytes: Int64 = 100 * 1024 * 1024 // 100MB
 
   @Published var sharedContent: SharedContentType? = nil
   @Published var sharedData: SharedData?
@@ -32,6 +43,37 @@ class ShareState: ObservableObject {
   @Published var errorState: ErrorState?
 
   private let log = Log.scoped("ShareState")
+  
+  private func detectMIMEType(for fileName: String) -> MIMEType {
+    let fileExtension = (fileName as NSString).pathExtension.lowercased()
+    
+    switch fileExtension {
+      case "pdf":
+        return MIMEType(text: "application/pdf")
+      case "doc", "docx":
+        return MIMEType(text: "application/msword")
+      case "xls", "xlsx":
+        return MIMEType(text: "application/vnd.ms-excel")
+      case "ppt", "pptx":
+        return MIMEType(text: "application/vnd.ms-powerpoint")
+      case "txt":
+        return MIMEType(text: "text/plain")
+      case "jpg", "jpeg":
+        return MIMEType(text: "image/jpeg")
+      case "png":
+        return MIMEType(text: "image/png")
+      case "gif":
+        return MIMEType(text: "image/gif")
+      case "mp4":
+        return MIMEType(text: "video/mp4")
+      case "mp3":
+        return MIMEType(text: "audio/mpeg")
+      case "zip":
+        return MIMEType(text: "application/zip")
+      default:
+        return MIMEType(text: "application/octet-stream")
+    }
+  }
 
   private func sendMessageToChat(
     _ selectedChat: SharedChat,
@@ -61,9 +103,9 @@ class ShareState: ObservableObject {
     if sharedData == nil {
       log.warning("No shared data available")
       errorState = ErrorState(
-        title: "No Data Available",
-        message: "No chats available to share with.",
-        suggestion: "Open the main app first to load your chats."
+        title: "No Chats Available",
+        message: "Unable to load your chats for sharing.",
+        suggestion: "Please open the main Inline app first, then try sharing again."
       )
     } else {
       log.info("Shared data loaded successfully")
@@ -191,21 +233,15 @@ class ShareState: ObservableObject {
         let messageText = caption
 
         // Handle different content types
-        var totalImages = 0
-        var totalItems = 0
-
-        // Count total items for progress tracking
+        var processedItems = 0
+        var totalItems = 1 // Default to 1 for simple progress
+        
         switch sharedContent {
           case let .images(images):
-            totalImages += images.count
-            totalItems += images.count
-          case .text, .url:
-            totalItems += 1
-          case .file:
-            totalItems += 1
+            totalItems = images.count
+          case .text, .url, .file:
+            totalItems = 1
         }
-
-        var processedItems = 0
 
         switch sharedContent {
           case let .images(images):
@@ -231,6 +267,17 @@ class ShareState: ObservableObject {
                   userInfo: [NSLocalizedDescriptionKey: "Failed to prepare image \(index + 1)"]
                 )
               }
+              
+              // Validate image size
+              guard imageData.count <= Self.maxFileSizeBytes else {
+                throw NSError(
+                  domain: "ShareError",
+                  code: 4,
+                  userInfo: [
+                    NSLocalizedDescriptionKey: "Image \(index + 1) is too large. Maximum size is 100MB."
+                  ]
+                )
+              }
 
               let fileName = "shared_image_\(Date().timeIntervalSince1970)_\(index + 1).jpg"
               let uploadResult = try await apiClient.uploadFile(
@@ -240,7 +287,7 @@ class ShareState: ObservableObject {
                 progress: { progress in
                   Task { @MainActor in
                     let itemProgress = (Double(processedItems) + progress) / Double(totalItems)
-                    self.uploadProgress = itemProgress * Self.uploadProgressWeight
+                    self.uploadProgress = itemProgress * 0.9 // Reserve 10% for sending
                   }
                 }
               )
@@ -255,7 +302,7 @@ class ShareState: ObservableObject {
               )
 
               processedItems += 1
-              self.uploadProgress = Double(processedItems) / Double(totalItems) * Self.uploadProgressWeight
+              self.uploadProgress = Double(processedItems) / Double(totalItems) * 0.9
             }
 
           case let .text(text):
@@ -263,8 +310,7 @@ class ShareState: ObservableObject {
             let combinedText = messageText.isEmpty ? text : messageText + "\n\n" + text
             try await sendMessageToChat(selectedChat, text: combinedText, photoId: nil, documentId: nil)
 
-            processedItems += 1
-            self.uploadProgress = Double(processedItems) / Double(totalItems) * Self.sendProgressWeight
+            self.uploadProgress = 0.9
 
           case let .url(url):
             // Send URL as separate message
@@ -272,21 +318,31 @@ class ShareState: ObservableObject {
             let combinedText = messageText.isEmpty ? urlText : messageText + "\n\n" + urlText
             try await sendMessageToChat(selectedChat, text: combinedText, photoId: nil, documentId: nil)
 
-            processedItems += 1
-            self.uploadProgress = Double(processedItems) / Double(totalItems) * Self.sendProgressWeight
+            self.uploadProgress = 0.9
 
           case let .file(fileURL, fileName):
             // Upload and send file
             let fileData = try Data(contentsOf: fileURL)
+            
+            // Validate file size
+            guard fileData.count <= Self.maxFileSizeBytes else {
+              throw NSError(
+                domain: "ShareError",
+                code: 3,
+                userInfo: [
+                  NSLocalizedDescriptionKey: "File is too large. Maximum size is 100MB."
+                ]
+              )
+            }
+            let mimeType = self.detectMIMEType(for: fileName)
             let uploadResult = try await apiClient.uploadFile(
               type: .document,
               data: fileData,
               filename: fileName,
-              mimeType: MIMEType(text: "application/octet-stream"),
+              mimeType: mimeType,
               progress: { progress in
                 Task { @MainActor in
-                  let itemProgress = (Double(processedItems) + progress) / Double(totalItems)
-                  self.uploadProgress = itemProgress * Self.uploadProgressWeight
+                  self.uploadProgress = progress * 0.9 // Reserve 10% for sending
                 }
               }
             )
@@ -298,38 +354,64 @@ class ShareState: ObservableObject {
               documentId: uploadResult.documentId
             )
 
-            processedItems += 1
-            self.uploadProgress = Double(processedItems) / Double(totalItems) * Self.sendProgressWeight
+            self.uploadProgress = 0.9
         }
 
-        // If we only have images and they've been sent, or if we have no other content to send
-        if totalImages > 0, processedItems == totalItems {
-          // All images sent, we're done
-        } else if totalImages == 0, !messageText.isEmpty {
-          // Send caption-only message if no media was shared
+        // Send caption-only message if no media was shared and we have text
+        if case .text = sharedContent, messageText.isEmpty {
+          // Text content was already sent above
+        } else if case .url = sharedContent, messageText.isEmpty {
+          // URL content was already sent above  
+        } else if !messageText.isEmpty && !isFileContent(sharedContent) && !isImagesContent(sharedContent) {
+          // Send standalone caption if no media was shared
           try await sendMessageToChat(selectedChat, text: messageText, photoId: nil, documentId: nil)
         }
 
-        self.uploadProgress = 1.0
-        self.isSending = false
-        self.isSent = true
+        await MainActor.run {
+          self.uploadProgress = Self.progressCompletionValue
+          self.isSending = false
+          self.isSent = true
 
-        // Play haptic feedback
-        let impactFeedback = UIImpactFeedbackGenerator(style: .light)
-        impactFeedback.impactOccurred()
+          // Play haptic feedback
+          let impactFeedback = UIImpactFeedbackGenerator(style: .light)
+          impactFeedback.impactOccurred()
 
-        // Close after delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-          completion()
+          // Close after delay
+          DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            completion()
+          }
         }
       } catch {
         log.error("Failed to share content", error: error)
-        self.errorState = ErrorState(
-          title: "Failed to Share",
-          message: "Could not share the content.",
-          suggestion: "Please check your internet connection and try again."
-        )
-        self.isSending = false
+        
+        await MainActor.run {
+          // Provide more specific error messages
+          let errorMessage: (title: String, message: String, suggestion: String?) = {
+            if let apiError = error as? APIError {
+              switch apiError {
+                case .networkError:
+                  return ("Connection Error", "Unable to connect to the server.", "Check your internet connection and try again.")
+                case .rateLimited:
+                  return ("Rate Limited", "Too many requests. Please wait a moment.", "Try again in a few seconds.")
+                case let .httpError(statusCode):
+                  return ("Server Error", "Server returned error code \(statusCode).", "Please try again later.")
+                case let .error(error, _, description):
+                  return ("Share Failed", description ?? error, "Please try again.")
+                default:
+                  return ("Share Failed", "Could not share the content.", "Please check your connection and try again.")
+              }
+            } else {
+              return ("Share Failed", "An unexpected error occurred.", "Please try again.")
+            }
+          }()
+          
+          self.errorState = ErrorState(
+            title: errorMessage.title,
+            message: errorMessage.message,
+            suggestion: errorMessage.suggestion
+          )
+          self.isSending = false
+        }
       }
     }
   }

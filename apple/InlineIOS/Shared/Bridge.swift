@@ -2,16 +2,15 @@ import Foundation
 import Logger
 
 struct SharedData: Codable {
-  var shareExtensionData: [ShareExtensionData]
+  var shareExtensionData: ShareExtensionData
   var lastUpdate: Date
 
-  init(shareExtensionData: [ShareExtensionData], lastUpdate: Date) {
+  init(shareExtensionData: ShareExtensionData, lastUpdate: Date) {
     self.shareExtensionData = shareExtensionData
     self.lastUpdate = lastUpdate
   }
 }
 
-// TODO: Refactor and simplify
 
 struct ShareExtensionData: Codable {
   var chats: [SharedChat]
@@ -93,7 +92,7 @@ class BridgeManager {
     Task(priority: .background) {
       let shareExtensionData = ShareExtensionData(chats: chats, users: users)
 
-      let sharedData = SharedData(shareExtensionData: [shareExtensionData], lastUpdate: Date())
+      let sharedData = SharedData(shareExtensionData: shareExtensionData, lastUpdate: Date())
 
       do {
         let encoder = JSONEncoder()
