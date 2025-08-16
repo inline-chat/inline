@@ -28,90 +28,63 @@ struct SettingsView: View {
         Button {
           fileUploadViewModel.showImagePicker = true
         } label: {
-          HStack {
-            Image(systemName: "camera.fill")
-              .font(.callout)
-              .foregroundColor(.white)
-              .frame(width: 25, height: 25)
-              .background(Color.orange)
-              .clipShape(RoundedRectangle(cornerRadius: 6))
-            Text("Change Profile Photo")
-              .foregroundColor(.primary)
-              .padding(.leading, 4)
-            Spacer()
-          }
-          .padding(.vertical, 2)
+          SettingsItem(
+            icon: "camera.fill",
+            iconColor: .orange,
+            title: "Change Profile Photo"
+          )
         }
       }
 
       NavigationLink(destination: IntegrationsView()) {
-        HStack {
-          Image(systemName: "app.connected.to.app.below.fill")
-            .foregroundColor(.white)
-            .frame(width: 25, height: 25)
-            .background(Color.purple)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-          Text("Integrations")
-            .foregroundColor(.primary)
-            .padding(.leading, 4)
-          Spacer()
-        }
-        .padding(.vertical, 2)
+        SettingsItem(
+          icon: "app.connected.to.app.below.fill",
+          iconColor: .purple,
+          title: "Integrations"
+        )
       }
 
       NavigationLink(destination: ThemeSelectionView()) {
-        HStack {
-          Image(systemName: "paintbrush.fill")
-            .foregroundColor(.white)
-            .frame(width: 25, height: 25)
-            .background(Color.blue)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-          Text("Appearance")
-            .foregroundColor(.primary)
-            .padding(.leading, 4)
-          Spacer()
-        }
-        .padding(.vertical, 2)
+        SettingsItem(
+          icon: "paintbrush.fill",
+          iconColor: .blue,
+          title: "Appearance"
+        )
+      }
+
+      NavigationLink(destination: DebugView()) {
+        SettingsItem(
+          icon: "ladybug.fill",
+          iconColor: .green,
+          title: "Debug"
+        )
       }
 
       Section {
         Button {
           showClearCacheAlert = true
         } label: {
-          HStack {
-            Image(systemName: "eraser.fill")
-              .foregroundColor(.white)
-              .frame(width: 25, height: 25)
-              .background(Color.red)
-              .clipShape(RoundedRectangle(cornerRadius: 6))
-            Text("Clear Cache")
-              .foregroundColor(.primary)
-              .padding(.leading, 4)
-            Spacer()
+          SettingsItem(
+            icon: "eraser.fill",
+            iconColor: .red,
+            title: "Clear Cache"
+          ) {
             if isClearing {
               ProgressView()
                 .padding(.trailing, 8)
             }
           }
-          .padding(.vertical, 2)
         }
         .disabled(isClearing)
 
         Button {
           TranslationAlertDismiss.shared.resetAllDismissStates()
         } label: {
-          HStack {
-            Image(systemName: "bell.badge.slash.fill")
-              .foregroundColor(.white)
-              .frame(width: 25, height: 25)
-              .background(Color.orange)
-              .clipShape(RoundedRectangle(cornerRadius: 6))
-            Text("Reset Translation Alerts")
-              .foregroundColor(.primary)
-              .padding(.leading, 4)
-            Spacer()
-          }
-          .padding(.vertical, 2)
+          SettingsItem(
+            icon: "bell.badge.slash.fill",
+            iconColor: .orange,
+            title: "Reset Translation Alerts"
+          )
         }
       }
 
