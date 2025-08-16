@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		B7020C4C2DCE1534007099D9 /* share.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B7020C422DCE1534007099D9 /* share.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		B7020C4C2DCE1534007099D9 /* InlineShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B7020C422DCE1534007099D9 /* InlineShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		B7020C542DCE157F007099D9 /* InlineConfig in Frameworks */ = {isa = PBXBuildFile; productRef = B7020C532DCE157F007099D9 /* InlineConfig */; };
 		B7020C562DCE157F007099D9 /* InlineKit in Frameworks */ = {isa = PBXBuildFile; productRef = B7020C552DCE157F007099D9 /* InlineKit */; };
 		B7020C582DCE157F007099D9 /* InlineProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = B7020C572DCE157F007099D9 /* InlineProtocol */; };
@@ -58,7 +58,7 @@
 			containerPortal = CD2660FC2CA01CAE00EB186F /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = B7020C412DCE1534007099D9;
-			remoteInfo = share;
+			remoteInfo = InlineShareExtension;
 		};
 		B7C0676D2DB7F44900EAADA4 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -76,7 +76,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
-				B7020C4C2DCE1534007099D9 /* share.appex in Embed Foundation Extensions */,
+				B7020C4C2DCE1534007099D9 /* InlineShareExtension.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -95,7 +95,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		B7020C422DCE1534007099D9 /* share.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = share.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		B7020C422DCE1534007099D9 /* InlineShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = InlineShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		B7C0674E2DB7F2BA00EAADA4 /* iMessageUI.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = iMessageUI.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = InlineIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C3AA8E4E2CB942BF00800A03 /* InlineKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineKit; sourceTree = "<group>"; };
@@ -106,20 +106,20 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		B7020C512DCE1534007099D9 /* Exceptions for "share" folder in "share" target */ = {
+		B7020C652DCE1534007099D9 /* Exceptions for "InlineShareExtension" folder in "InlineShareExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
-			target = B7020C412DCE1534007099D9 /* share */;
+			target = B7020C412DCE1534007099D9 /* InlineShareExtension */;
 		};
-		B752F53D2DCE56DA00269D84 /* Exceptions for "InlineIOS" folder in "share" target */ = {
+		B752F53D2DCE56DA00269D84 /* Exceptions for "InlineIOS" folder in "InlineShareExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Shared/Bridge.swift,
 				Shared/SharedApiClient.swift,
 			);
-			target = B7020C412DCE1534007099D9 /* share */;
+			target = B7020C412DCE1534007099D9 /* InlineShareExtension */;
 		};
 		B7C067702DB7F5BC00EAADA4 /* Exceptions for "iMessageUI" folder in "iMessageUI" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
@@ -147,12 +147,12 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		B7020C432DCE1534007099D9 /* share */ = {
+		B7020C432DCE1534007099D9 /* InlineShareExtension */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				B7020C512DCE1534007099D9 /* Exceptions for "share" folder in "share" target */,
+				B7020C652DCE1534007099D9 /* Exceptions for "InlineShareExtension" folder in "InlineShareExtension" target */,
 			);
-			path = share;
+			path = InlineShareExtension;
 			sourceTree = "<group>";
 		};
 		B7C0674F2DB7F2BA00EAADA4 /* iMessageUI */ = {
@@ -167,7 +167,7 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				C33CC3A22CA5C771002882B3 /* Exceptions for "InlineIOS" folder in "InlineIOS" target */,
-				B752F53D2DCE56DA00269D84 /* Exceptions for "InlineIOS" folder in "share" target */,
+				B752F53D2DCE56DA00269D84 /* Exceptions for "InlineIOS" folder in "InlineShareExtension" target */,
 			);
 			path = InlineIOS;
 			sourceTree = "<group>";
@@ -269,7 +269,7 @@
 				C3AA8E4E2CB942BF00800A03 /* InlineKit */,
 				CD2661662CA01E3E00EB186F /* InlineMac */,
 				B7C0674F2DB7F2BA00EAADA4 /* iMessageUI */,
-				B7020C432DCE1534007099D9 /* share */,
+				B7020C432DCE1534007099D9 /* InlineShareExtension */,
 				C38A28382CA5AB8F00D3DFB8 /* InlineIOS */,
 				C31675032CAC167D009A1FD8 /* Frameworks */,
 				CD2661052CA01CAE00EB186F /* Products */,
@@ -284,7 +284,7 @@
 				CD2661652CA01E3E00EB186F /* Inline.app */,
 				C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */,
 				B7C0674E2DB7F2BA00EAADA4 /* iMessageUI.framework */,
-				B7020C422DCE1534007099D9 /* share.appex */,
+				B7020C422DCE1534007099D9 /* InlineShareExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -302,9 +302,9 @@
 /* End PBXHeadersBuildPhase section */
 
 /* Begin PBXNativeTarget section */
-		B7020C412DCE1534007099D9 /* share */ = {
+		B7020C412DCE1534007099D9 /* InlineShareExtension */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = B7020C4D2DCE1534007099D9 /* Build configuration list for PBXNativeTarget "share" */;
+			buildConfigurationList = B7020C4D2DCE1534007099D9 /* Build configuration list for PBXNativeTarget "InlineShareExtension" */;
 			buildPhases = (
 				B7020C3E2DCE1534007099D9 /* Sources */,
 				B7020C3F2DCE1534007099D9 /* Frameworks */,
@@ -315,9 +315,9 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				B7020C432DCE1534007099D9 /* share */,
+				B7020C432DCE1534007099D9 /* InlineShareExtension */,
 			);
-			name = share;
+			name = InlineShareExtension;
 			packageProductDependencies = (
 				B7020C532DCE157F007099D9 /* InlineConfig */,
 				B7020C552DCE157F007099D9 /* InlineKit */,
@@ -329,8 +329,8 @@
 				B7020C612DCE1593007099D9 /* NukeUI */,
 				B7020C632DCE1593007099D9 /* NukeVideo */,
 			);
-			productName = share;
-			productReference = B7020C422DCE1534007099D9 /* share.appex */;
+			productName = InlineShareExtension;
+			productReference = B7020C422DCE1534007099D9 /* InlineShareExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
 		B7C0674D2DB7F2BA00EAADA4 /* iMessageUI */ = {
@@ -490,7 +490,7 @@
 				CD2661642CA01E3E00EB186F /* InlineMac */,
 				C38A28362CA5AB8F00D3DFB8 /* InlineIOS */,
 				B7C0674D2DB7F2BA00EAADA4 /* iMessageUI */,
-				B7020C412DCE1534007099D9 /* share */,
+				B7020C412DCE1534007099D9 /* InlineShareExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -560,7 +560,7 @@
 /* Begin PBXTargetDependency section */
 		B7020C4B2DCE1534007099D9 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = B7020C412DCE1534007099D9 /* share */;
+			target = B7020C412DCE1534007099D9 /* InlineShareExtension */;
 			targetProxy = B7020C4A2DCE1534007099D9 /* PBXContainerItemProxy */;
 		};
 		B7C0676E2DB7F44900EAADA4 /* PBXTargetDependency */ = {
@@ -575,14 +575,14 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = CD5326842CE113CD00EC348D /* Debug.xcconfig */;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = share/share.entitlements;
+				CODE_SIGN_ENTITLEMENTS = InlineShareExtension/InlineShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 2487AN8AL4;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = share/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = share;
+				INFOPLIST_FILE = InlineShareExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = InlineShareExtension;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -591,7 +591,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineIOS.debug.share;
+				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineIOS.debug.InlineShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -605,14 +605,14 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = CD5326842CE113CD00EC348D /* Debug.xcconfig */;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = share/share.entitlements;
+				CODE_SIGN_ENTITLEMENTS = InlineShareExtension/InlineShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 2487AN8AL4;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = share/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = share;
+				INFOPLIST_FILE = InlineShareExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = InlineShareExtension;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -621,7 +621,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineIOS.debug.share;
+				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineIOS.debug.InlineShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -635,13 +635,13 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = CD5326862CE1149700EC348D /* Release.xcconfig */;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = share/share.entitlements;
+				CODE_SIGN_ENTITLEMENTS = InlineShareExtension/InlineShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 2487AN8AL4;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = share/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = share;
+				INFOPLIST_FILE = InlineShareExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = InlineShareExtension;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -650,7 +650,7 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 0.1;
-				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineIOS.share;
+				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineIOS.InlineShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
@@ -1180,7 +1180,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		B7020C4D2DCE1534007099D9 /* Build configuration list for PBXNativeTarget "share" */ = {
+		B7020C4D2DCE1534007099D9 /* Build configuration list for PBXNativeTarget "InlineShareExtension" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				B7020C4E2DCE1534007099D9 /* Debug */,
