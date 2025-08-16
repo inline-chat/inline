@@ -22,9 +22,7 @@ public enum Path: String {
 
 public final class SharedApiClient: ObservableObject, @unchecked Sendable {
   public static let shared = SharedApiClient()
-  public init() {
-    print("SharedApiClient initialized")
-  }
+  public init() {}
 
   private let log = Log.scoped("ApiClient")
 
@@ -53,66 +51,50 @@ public final class SharedApiClient: ObservableObject, @unchecked Sendable {
     queryItems: [URLQueryItem] = [],
     includeToken: Bool = false
   ) async throws -> T {
-    print("Making request to path: \(path.rawValue)")
     guard var urlComponents = URLComponents(string: "\(baseURL)/\(path.rawValue)") else {
-      print("Failed to create URL components")
       throw APIError.invalidURL
     }
 
     urlComponents.queryItems = queryItems.isEmpty ? nil : queryItems
 
     guard let url = urlComponents.url else {
-      print("Failed to create URL from components")
       throw APIError.invalidURL
     }
 
-    print("Request URL: \(url)")
     var request = URLRequest(url: url)
     request.httpMethod = "GET"
 
     if let token = Auth.shared.getToken(), includeToken {
-      print("Adding authorization token")
       request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
 
     do {
-      print("Sending request...")
       let (data, response) = try await URLSession.shared.data(for: request)
 
       guard let httpResponse = response as? HTTPURLResponse else {
-        print("Invalid response type")
         throw APIError.invalidResponse
       }
 
-      print("Received response with status code: \(httpResponse.statusCode)")
       switch httpResponse.statusCode {
         case 200 ... 299:
-          print("Request successful, decoding response")
           let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
           switch apiResponse {
             case let .success(data):
-              print("Successfully decoded response")
               return data
             case let .error(error, errorCode, description):
-              print("API returned error: \(error) (\(errorCode ?? 0)): \(description ?? "")")
-              log.error("Error \(error): \(description ?? "")")
+              log.error("API error \(error): \(description ?? "")")
               throw APIError.error(error: error, errorCode: errorCode, description: description)
           }
         case 429:
-          print("Rate limited")
           throw APIError.rateLimited
         default:
-          print("HTTP error: \(httpResponse.statusCode)")
           throw APIError.httpError(statusCode: httpResponse.statusCode)
       }
     } catch let decodingError as DecodingError {
-      print("Decoding error: \(decodingError)")
       throw APIError.decodingError(decodingError)
     } catch let apiError as APIError {
-      print("API error: \(apiError)")
       throw apiError
     } catch {
-      print("Network error: \(error)")
       throw APIError.networkError
     }
   }
@@ -122,9 +104,7 @@ public final class SharedApiClient: ObservableObject, @unchecked Sendable {
     body: [String: Any],
     includeToken: Bool = true
   ) async throws -> T {
-    print("Making POST request to path: \(path.rawValue)")
     guard let url = URL(string: "\(baseURL)/\(path.rawValue)") else {
-      print("Failed to create URL")
       throw APIError.invalidURL
     }
 
@@ -133,52 +113,38 @@ public final class SharedApiClient: ObservableObject, @unchecked Sendable {
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
     if let token = Auth.shared.getToken(), includeToken {
-      print("Adding authorization token")
       request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
 
     do {
-      print("Encoding request body")
       request.httpBody = try JSONSerialization.data(withJSONObject: body)
-      print("Request body: \(String(data: request.httpBody!, encoding: .utf8) ?? "")")
 
-      print("Sending POST request...")
       let (data, response) = try await URLSession.shared.data(for: request)
 
       guard let httpResponse = response as? HTTPURLResponse else {
-        print("Invalid response type")
         throw APIError.invalidResponse
       }
 
-      print("Received response with status code: \(httpResponse.statusCode)")
       switch httpResponse.statusCode {
         case 200 ... 299:
-          print("Request successful, decoding response")
           let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
           switch apiResponse {
             case let .success(data):
-              print("Successfully decoded response")
               return data
             case let .error(error, errorCode, description):
-              print("API returned error: \(error) (\(errorCode ?? 0)): \(description ?? "")")
-              log.error("Error \(error): \(description ?? "")")
+              log.error("API error \(error): \(description ?? "")")
               throw APIError.error(error: error, errorCode: errorCode, description: description)
           }
         case 429:
-          print("Rate limited")
           throw APIError.rateLimited
         default:
-          print("HTTP error: \(httpResponse.statusCode)")
           throw APIError.httpError(statusCode: httpResponse.statusCode)
       }
     } catch let decodingError as DecodingError {
-      print("Decoding error: \(decodingError)")
       throw APIError.decodingError(decodingError)
     } catch let apiError as APIError {
-      print("API error: \(apiError)")
       throw apiError
     } catch {
-      print("Network error: \(error)")
       throw APIError.networkError
     }
   }
@@ -187,12 +153,14 @@ public final class SharedApiClient: ObservableObject, @unchecked Sendable {
     peerUserId: Int64?,
     peerThreadId: Int64?,
     text: String?,
-    photoId: Int64?,
+    photoId: Int64? = nil,
+    documentId: Int64? = nil
   ) async throws -> EmptyPayload {
-    print("Preparing to send message")
-    var body: [String: Any] = [
-      "text": text as Any,
-    ]
+    var body: [String: Any] = [:]
+    
+    if let text {
+      body["text"] = text
+    }
 
     if let peerUserId {
       body["peerUserId"] = peerUserId
@@ -205,8 +173,10 @@ public final class SharedApiClient: ObservableObject, @unchecked Sendable {
     if let photoId {
       body["photoId"] = photoId
     }
-
-    print("Message body prepared: \(body)")
+    
+    if let documentId {
+      body["documentId"] = documentId
+    }
 
     return try await postRequest(
       .sendMessage20250509,
@@ -217,6 +187,7 @@ public final class SharedApiClient: ObservableObject, @unchecked Sendable {
 
   public enum FileType: String, Codable, Sendable {
     case photo
+    case document
   }
 
   public func uploadFile(
@@ -226,13 +197,9 @@ public final class SharedApiClient: ObservableObject, @unchecked Sendable {
     mimeType: MIMEType,
     progress: @escaping (Double) -> Void
   ) async throws -> UploadFileResult {
-    print("Preparing to upload file: \(filename) of type \(type.rawValue)")
     guard let url = URL(string: "\(baseURL)/uploadFile") else {
-      print("Failed to create upload URL")
       throw APIError.invalidURL
     }
-
-    print("Creating multipart form data")
     let multipartFormData = try MultipartFormData.Builder.build(
       with: [
         (
@@ -257,59 +224,36 @@ public final class SharedApiClient: ObservableObject, @unchecked Sendable {
     request.httpBody = multipartFormData.body
 
     if let token = Auth.shared.getToken() {
-      print("Adding authorization token")
       request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-    } else {
-      print("Warning: No authorization token available")
     }
 
     do {
-      print("Sending file upload request...")
       let (data, response) = try await URLSession.shared.data(for: request)
 
       guard let httpResponse = response as? HTTPURLResponse else {
-        print("Invalid response type")
         throw APIError.invalidResponse
-      }
-
-      print("Received response with status code: \(httpResponse.statusCode)")
-
-      // Print response body for debugging
-      if let responseString = String(data: data, encoding: .utf8) {
-        print("Response body: \(responseString)")
       }
 
       switch httpResponse.statusCode {
         case 200 ... 299:
-          print("Upload successful, decoding response")
           let apiResponse = try decoder.decode(APIResponse<UploadFileResult>.self, from: data)
           switch apiResponse {
             case let .success(data):
-              print("Successfully decoded upload response")
               return data
             case let .error(error, errorCode, description):
-              print("API returned error: \(error) (\(errorCode ?? 0)): \(description ?? "")")
-              log.error("Error \(error): \(description ?? "")")
+              log.error("Upload error \(error): \(description ?? "")")
               throw APIError.error(error: error, errorCode: errorCode, description: description)
           }
         case 429:
-          print("Rate limited")
           throw APIError.rateLimited
         default:
-          print("HTTP error: \(httpResponse.statusCode)")
-          if let responseString = String(data: data, encoding: .utf8) {
-            print("Error response body: \(responseString)")
-          }
           throw APIError.httpError(statusCode: httpResponse.statusCode)
       }
     } catch let decodingError as DecodingError {
-      print("Decoding error: \(decodingError)")
       throw APIError.decodingError(decodingError)
     } catch let apiError as APIError {
-      print("API error: \(apiError)")
       throw apiError
     } catch {
-      print("Network error: \(error)")
       throw APIError.networkError
     }
   }
