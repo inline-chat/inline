@@ -45,7 +45,11 @@ struct ChatInfoView: View {
   var theme = ThemeManager.shared.selected
 
   var currentMemberRole: MemberRole? {
-    spaceMembersViewModel.members.first(where: { $0.userId == Auth.shared.getCurrentUserId() })?.role
+    spaceMembersViewModel.members
+      .first(
+        where: { $0.userId == Auth.shared.getCurrentUserId()
+        }
+      )?.role
   }
 
   var isOwnerOrAdmin: Bool {

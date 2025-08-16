@@ -5,9 +5,12 @@
       "Bash(git log:*)",
       "Bash(grep:*)",
       "Bash(xcodebuild:*)",
-      "Bash(rm:*)",
-      "Bash(mv:*)"
+      "Bash(mv:*)",
+      "Bash(swift test)",
+      "Bash(swift test:*)",
+      "Bash(swift:*)"
     ],
-    "deny": []
+    "deny": [],
+    "defaultMode": "acceptEdits"
   }
 }

@@ -284,7 +284,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
     // Extract all entities using TextProcessing module
     let attributedText = textView.attributedText ?? NSAttributedString()
-    let (_, extractedEntities) = ProcessEntities.fromAttributedString(attributedText)
+    let (textFromAttributedString, extractedEntities) = ProcessEntities.fromAttributedString(attributedText)
 
     let entities = if extractedEntities.entities.isEmpty {
       nil as MessageEntities?
@@ -302,7 +302,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     if isEditing {
       Transactions.shared.mutate(transaction: .editMessage(.init(
         messageId: state.editingMessageId ?? 0,
-        text: text ?? "",
+        text: textFromAttributedString ?? text ?? "",
         chatId: chatId,
         peerId: peerId,
         entities: entities
@@ -314,7 +314,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
       if attachmentItems.isEmpty {
         Transactions.shared.mutate(transaction: .sendMessage(.init(
-          text: text,
+          text: textFromAttributedString ?? text ?? "",
           peerId: peerId,
           chatId: chatId,
           mediaItems: [],
@@ -334,7 +334,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
           }
 
           Transactions.shared.mutate(transaction: .sendMessage(.init(
-            text: isFirst ? text : nil,
+            text: isFirst ? textFromAttributedString ?? text ?? "" : nil,
             peerId: peerId,
             chatId: chatId,
             mediaItems: [attachment],
@@ -481,6 +481,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     textView.text = ""
 
     resetTextViewState()
+    
+    // Ensure font is reset after clearing text
+    textView.font = .systemFont(ofSize: 17)
+    textView.typingAttributes[.font] = UIFont.systemFont(ofSize: 17)
 
     resetHeight()
     textView.showPlaceholder(true)

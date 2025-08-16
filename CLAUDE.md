@@ -299,3 +299,5 @@ This guide provides the foundation for understanding and contributing to the Inl
 
 ## Development Memories
 - Don't run xcodebuild command, use IDE diagnostics, Swift typecheck, and when needed to build, run xcodebuild in silent mode to disable all the logging which fills the context window.
+- sometimes diagnostics fails to view changes in other packages/targets. ask user to restart their IDE or build in xcode to resolve the issue.
+- use `swift test` in a package root folder for running package tests
