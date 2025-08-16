@@ -387,6 +387,12 @@ public class ProcessEntities {
     {
       return converted
     }
+    // Fallback: try to create bold using font descriptor
+    let descriptor = font.fontDescriptor.withSymbolicTraits(.bold)
+    if let boldFont = NSFont(descriptor: descriptor, size: font.pointSize) {
+      return boldFont
+    }
+    // Last resort: return bold system font if all attempts fail
     return NSFont.boldSystemFont(ofSize: font.pointSize)
     #else
     return UIFont.boldSystemFont(ofSize: font.pointSize)
@@ -416,7 +422,12 @@ public class ProcessEntities {
     {
       return converted
     }
-    // Fallback to a system font - since we can't create italic, return regular
+    // Fallback: try to create italic using font descriptor
+    let descriptor = font.fontDescriptor.withSymbolicTraits(.italic)
+    if let italicFont = NSFont(descriptor: descriptor, size: font.pointSize) {
+      return italicFont
+    }
+    // Last resort: return regular font if all attempts fail
     return NSFont.systemFont(ofSize: font.pointSize)
     #else
     return UIFont.italicSystemFont(ofSize: font.pointSize)
