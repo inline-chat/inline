@@ -11,9 +11,9 @@ struct ShareView: View {
   private let log = Log.scoped("ShareView")
 
   private var filteredChats: [SharedChat] {
-    guard let chats = state.sharedData?.shareExtensionData.first?.chats else { return [] }
+    guard let chats = state.sharedData?.shareExtensionData.chats else { return [] }
 
-    let users = state.sharedData?.shareExtensionData.first?.users ?? []
+    let users = state.sharedData?.shareExtensionData.users ?? []
     let sortedChats = sortChats(chats)
 
     if searchText.isEmpty {
@@ -47,7 +47,15 @@ struct ShareView: View {
     if let peerUserId = chat.peerUserId,
        let user = users.first(where: { $0.id == peerUserId })
     {
-      return user.firstName
+      let displayName = user.displayName ?? ""
+      if !displayName.isEmpty {
+        return displayName
+      } else {
+        let firstName = user.firstName
+        let lastName = user.lastName
+        let fullName = [firstName, lastName].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
+        return fullName.isEmpty ? "Unknown User" : fullName
+      }
     }
 
     log.warning("Failed to find a name for chat \(chat)")
@@ -71,82 +79,17 @@ struct ShareView: View {
 
   var body: some View {
     NavigationView {
-      Group {
-        if state.isSent {
-          VStack(spacing: 16) {
-            Image(systemName: "checkmark.circle.fill")
-              .font(.system(size: 48))
-              .foregroundStyle(.green)
-              .symbolEffect(.bounce, value: state.isSent)
-              .symbolRenderingMode(.hierarchical)
-            Text("Sent")
-              .font(.headline)
-              .foregroundStyle(.primary)
-          }
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
-          .transition(.asymmetric(
-            insertion: .scale.combined(with: .opacity),
-            removal: .opacity
-          ))
-        } else if state.isSending {
-          VStack(spacing: 16) {
-            ProgressView()
-              .scaleEffect(1.2)
-            Text("Sending...")
-              .font(.headline)
-              .foregroundStyle(.primary)
-            if state.uploadProgress > 0 {
-              ProgressView(value: state.uploadProgress)
-                .frame(maxWidth: 200)
-                .transition(.opacity.combined(with: .scale))
-            }
-          }
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
-          .transition(.asymmetric(
-            insertion: .scale.combined(with: .opacity),
-            removal: .opacity
-          ))
-        } else {
-          VStack(spacing: 0) {
-            // Search bar
-            HStack {
-              Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-              TextField("Search chats", text: $searchText)
-            }
-            .padding()
-            .background(Color(.systemGray6))
-
-            // Chat list
-            List(filteredChats, id: \.id) { chat in
-              ChatRowView(
-                chat: chat,
-                users: state.sharedData?.shareExtensionData.first?.users ?? [],
-                onTap: {
-                  // Send immediately on selection
-                  state.sendMessage(caption: "", selectedChat: chat) {
-                    extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
-                  }
-                }
-              )
-            }
-            .listStyle(.plain)
-          }
-          .transition(.asymmetric(
-            insertion: .move(edge: .bottom).combined(with: .opacity),
-            removal: .opacity
-          ))
-        }
+      VStack(spacing: 0) {
+        // Clear heading for the sheet
+        headerView
+        
+        contentView
       }
-      .animation(.easeInOut(duration: 0.3), value: state.isSent)
-      .animation(.easeInOut(duration: 0.3), value: state.isSending)
-    }
-    .navigationTitle(navigationTitle)
-    .navigationBarTitleDisplayMode(.inline)
-    .toolbar {
-      ToolbarItem(placement: .navigationBarLeading) {
-        Button("Close") {
-          extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
+      .toolbar {
+        ToolbarItem(placement: .navigationBarLeading) {
+          Button("Close") {
+            extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
+          }
         }
       }
     }
@@ -160,15 +103,170 @@ struct ShareView: View {
         set: { if !$0 { state.errorState = nil } }
       )
     ) {
-      Button("OK", role: .cancel) {
+      Button("Close", role: .cancel) {
         state.errorState = nil
         extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
       }
     } message: {
-      if let message = state.errorState?.message {
-        Text(message)
+      VStack(alignment: .leading, spacing: 4) {
+        if let message = state.errorState?.message {
+          Text(message)
+        }
+        if let suggestion = state.errorState?.suggestion {
+          Text(suggestion)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
       }
     }
+  }
+  
+  @ViewBuilder
+  private var headerView: some View {
+    VStack(spacing: 8) {
+      Text(navigationTitle)
+        .font(.title2)
+        .fontWeight(.semibold)
+        .foregroundStyle(.primary)
+      
+      if case let .images(images) = state.sharedContent, images.count > 1 {
+        Text("\(images.count) items selected")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+    }
+    .padding(.vertical, 16)
+    .padding(.horizontal, 20)
+    .background(Color(.systemBackground))
+  }
+  
+  @ViewBuilder
+  private var contentView: some View {
+    Group {
+      if state.isSent {
+        successView
+      } else if state.isSending {
+        sendingView
+      } else {
+        chatSelectionView
+      }
+    }
+    .animation(.easeInOut(duration: 0.3), value: state.isSent)
+    .animation(.easeInOut(duration: 0.3), value: state.isSending)
+  }
+  
+  @ViewBuilder
+  private var successView: some View {
+    VStack(spacing: 16) {
+      Image(systemName: "checkmark.circle.fill")
+        .font(.system(size: 48))
+        .foregroundStyle(.green)
+        .symbolEffect(.bounce, value: state.isSent)
+        .symbolRenderingMode(.hierarchical)
+      Text("Sent")
+        .font(.headline)
+        .foregroundStyle(.primary)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .transition(.asymmetric(
+      insertion: .scale.combined(with: .opacity),
+      removal: .opacity
+    ))
+  }
+  
+  @ViewBuilder
+  private var sendingView: some View {
+    VStack(spacing: 16) {
+      ProgressView()
+        .scaleEffect(1.2)
+      Text("Sending...")
+        .font(.headline)
+        .foregroundStyle(.primary)
+      if state.uploadProgress > 0 {
+        ProgressView(value: state.uploadProgress)
+          .frame(maxWidth: 200)
+          .transition(.opacity.combined(with: .scale))
+      }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .transition(.asymmetric(
+      insertion: .scale.combined(with: .opacity),
+      removal: .opacity
+    ))
+  }
+  
+  @ViewBuilder
+  private var chatSelectionView: some View {
+    VStack(spacing: 0) {
+      // Search bar with idiomatic styling
+      searchBar
+      
+      // Chat list
+      if filteredChats.isEmpty {
+        emptyStateView
+      } else {
+        chatListView
+      }
+    }
+    .transition(.asymmetric(
+      insertion: .move(edge: .bottom).combined(with: .opacity),
+      removal: .opacity
+    ))
+  }
+  
+  @ViewBuilder
+  private var searchBar: some View {
+    HStack {
+      Image(systemName: "magnifyingglass")
+        .foregroundStyle(.secondary)
+        .font(.system(size: 16))
+      
+      TextField("Search chats", text: $searchText)
+        .textFieldStyle(.plain)
+        .font(.body)
+        .accessibilityLabel("Search chats")
+        .accessibilityHint("Enter text to filter your chat list")
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 10)
+    .background(
+      RoundedRectangle(cornerRadius: 10)
+        .fill(Color(.systemGray6))
+    )
+    .padding(.horizontal, 16)
+    .padding(.vertical, 8)
+  }
+  
+  @ViewBuilder
+  private var emptyStateView: some View {
+    VStack(spacing: 16) {
+      Image(systemName: "magnifyingglass")
+        .font(.system(size: 40))
+        .foregroundStyle(.secondary)
+      Text("No chats found")
+        .font(.headline)
+        .foregroundStyle(.secondary)
+      Text("Try a different search term")
+        .font(.caption)
+        .foregroundStyle(.tertiary)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+  }
+  
+  @ViewBuilder
+  private var chatListView: some View {
+    List(filteredChats, id: \.id) { chat in
+      ChatRowView(
+        chat: chat,
+        users: state.sharedData?.shareExtensionData.users ?? [],
+        onTap: {
+          state.sendMessage(caption: "", selectedChat: chat) {
+            extensionContext?.completeRequest(returningItems: [], completionHandler: nil)
+          }
+        }
+      )
+    }
+    .listStyle(.plain)
   }
 }
 
@@ -184,7 +282,15 @@ struct ChatRowView: View {
     if let peerUserId = chat.peerUserId,
        let user = users.first(where: { $0.id == peerUserId })
     {
-      return user.firstName
+      let displayName = user.displayName ?? ""
+      if !displayName.isEmpty {
+        return displayName
+      } else {
+        let firstName = user.firstName
+        let lastName = user.lastName
+        let fullName = [firstName, lastName].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
+        return fullName.isEmpty ? "Unknown User" : fullName
+      }
     }
     return "Unknown"
   }
@@ -208,6 +314,7 @@ struct ChatRowView: View {
               Image(systemName: "pin.fill")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .accessibilityLabel("Pinned chat")
             }
           }
 
@@ -222,8 +329,10 @@ struct ChatRowView: View {
       }
       .contentShape(Rectangle())
     }
-    .buttonStyle(.borderless)
+    .buttonStyle(.plain)
     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+    .accessibilityLabel("Share with \(getChatName())")
+    .accessibilityHint("Tap to send content to this chat")
   }
 }
 
