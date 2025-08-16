@@ -28,11 +28,29 @@ struct SharedChat: Codable {
   var title: String
   var peerUserId: Int64?
   var peerThreadId: Int64?
-  init(id: Int64, title: String, peerUserId: Int64?, peerThreadId: Int64?) {
+  var lastMessageDate: Date?
+  var pinned: Bool?
+  var spaceName: String?
+  var emoji: String?
+
+  init(
+    id: Int64,
+    title: String,
+    peerUserId: Int64?,
+    peerThreadId: Int64?,
+    lastMessageDate: Date?,
+    pinned: Bool?,
+    spaceName: String?,
+    emoji: String?
+  ) {
     self.id = id
     self.title = title
     self.peerUserId = peerUserId
     self.peerThreadId = peerThreadId
+    self.lastMessageDate = lastMessageDate
+    self.pinned = pinned
+    self.spaceName = spaceName
+    self.emoji = emoji
   }
 }
 
@@ -40,11 +58,13 @@ struct SharedUser: Codable {
   var id: Int64
   var firstName: String
   var lastName: String
+  var displayName: String?
 
-  init(id: Int64, firstName: String, lastName: String) {
+  init(id: Int64, firstName: String, lastName: String, displayName: String?) {
     self.id = id
     self.firstName = firstName
     self.lastName = lastName
+    self.displayName = displayName
   }
 }
 
@@ -94,6 +114,14 @@ class BridgeManager {
       return try decoder.decode(SharedData.self, from: data)
     } catch {
       return nil
+    }
+  }
+
+  // Clear shared data file
+  func clearSharedData() throws {
+    if FileManager.default.fileExists(atPath: sharedDataURL.path) {
+      try FileManager.default.removeItem(at: sharedDataURL)
+      Log.shared.info("Cleared shared data file")
     }
   }
 }
