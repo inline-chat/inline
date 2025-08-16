@@ -40,7 +40,20 @@ class AppDataUpdater {
         // Process chats
         for item in homeChatItems {
           let chatId = item.dialog.id
-          let title = item.user?.user.firstName ?? item.user?.user.fullName
+
+          var title = ""
+          if let user = item.user?.user {
+            let displayName = user.displayName
+            if !displayName.isEmpty {
+              title = displayName
+            } else {
+              title = "Unknown User"
+            }
+          } else if let chatTitle = item.chat?.title, !chatTitle.isEmpty {
+            title = chatTitle
+          } else {
+            title = "Untitled Chat"
+          }
 
           var peerUserId: Int64?
           var peerThreadId: Int64?
@@ -51,24 +64,43 @@ class AppDataUpdater {
             peerThreadId = threadId
           }
 
+          // Get last message date
+          let lastMessageDate = item.lastMessage?.message.date ?? item.chat?.date
+
+          // Get pinned status
+          let pinned = item.dialog.pinned ?? false
+
+          // Get space name
+          let spaceName = item.space?.name
+
+          // Get emoji from chat
+          let emoji = item.chat?.emoji
+
           let bridgeChat = SharedChat(
             id: chatId,
-            title: title ?? "",
+            title: title,
             peerUserId: peerUserId,
-            peerThreadId: peerThreadId
+            peerThreadId: peerThreadId,
+            lastMessageDate: lastMessageDate,
+            pinned: pinned,
+            spaceName: spaceName,
+            emoji: emoji
           )
 
           bridgeChats.append(bridgeChat)
 
-          // Add user info
-          let bridgeUser = SharedUser(
-            id: item.user?.user.id ?? 0,
-            firstName: item.user?.user.firstName ?? "",
-            lastName: item.user?.user.lastName ?? ""
-          )
+          // Add user info if we have a user
+          if let userInfo = item.user {
+            let bridgeUser = SharedUser(
+              id: userInfo.user.id,
+              firstName: userInfo.user.firstName ?? "",
+              lastName: userInfo.user.lastName ?? "",
+              displayName: userInfo.user.displayName
+            )
 
-          if !bridgeUsers.contains(where: { $0.id == bridgeUser.id }) {
-            bridgeUsers.append(bridgeUser)
+            if !bridgeUsers.contains(where: { $0.id == bridgeUser.id }) {
+              bridgeUsers.append(bridgeUser)
+            }
           }
         }
 
