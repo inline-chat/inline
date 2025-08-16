@@ -192,55 +192,32 @@ public class ProcessEntities {
       }
     }
 
-    // Extract pre code entities from font attributes (monospace fonts)
-    attributedString.enumerateAttribute(
-      .font,
-      in: NSRange(location: 0, length: text.count),
-      options: []
-    ) { value, range, _ in
-      if let font = value as? PlatformFont, isMonospaceFont(font) {
-        // Check if this range doesn't already have a preCode or inlineCode attribute
-        let hasPreCodeAttribute = attributedString.attributes(at: range.location, effectiveRange: nil)[.preCode] !=
-          nil
-        let hasInlineCodeAttribute = attributedString.attributes(
-          at: range.location,
-          effectiveRange:
-          nil
-        )[.inlineCode] != nil
+    // Note: Only rely on explicit .preCode and .inlineCode attributes for deterministic entity creation
 
-        if !hasPreCodeAttribute, !hasInlineCodeAttribute {
-          // Determine if this should be pre or inline code based on content
-          let contentText = (attributedString.string as NSString).substring(with: range)
-          let containsNewlines = contentText.contains("\n")
-
-          var entity = MessageEntity()
-          entity.type = containsNewlines ? .pre : .code
-          entity.offset = Int64(range.location)
-          entity.length = Int64(range.length)
-          entities.append(entity)
-        }
-      }
-    }
-
-    // Extract italic entities from font attributes
+    // Extract italic entities from font attributes (only if no custom italic attribute exists)
     attributedString.enumerateAttribute(
       .font,
       in: NSRange(location: 0, length: text.count),
       options: []
     ) { value, range, _ in
       if let font = value as? PlatformFont {
-        #if os(macOS)
-        let isItalic = NSFontManager.shared.traits(of: font).contains(.italicFontMask)
-        #else
-        let isItalic = font.fontDescriptor.symbolicTraits.contains(.traitItalic)
-        #endif
+        // Check if this range already has a custom italic attribute
+        let hasItalicAttribute = attributedString.attributes(at: range.location, effectiveRange: nil)[.italic] != nil
 
-        if isItalic {
-          var entity = MessageEntity()
-          entity.type = .italic
-          entity.offset = Int64(range.location)
-          entity.length = Int64(range.length)
-          entities.append(entity)
+        if !hasItalicAttribute {
+          #if os(macOS)
+          let isItalic = NSFontManager.shared.traits(of: font).contains(.italicFontMask)
+          #else
+          let isItalic = font.fontDescriptor.symbolicTraits.contains(.traitItalic)
+          #endif
+
+          if isItalic {
+            var entity = MessageEntity()
+            entity.type = .italic
+            entity.offset = Int64(range.location)
+            entity.length = Int64(range.length)
+            entities.append(entity)
+          }
         }
       }
     }
@@ -260,7 +237,7 @@ public class ProcessEntities {
       }
     }
 
-    // Extract bold entities from font attributes
+    // Extract bold entities from font attributes (only if no existing bold entity)
     attributedString.enumerateAttribute(
       .font,
       in: NSRange(location: 0, length: text.count),
@@ -316,15 +293,12 @@ public class ProcessEntities {
   private static let monospaceFontCacheLock = NSLock()
   private nonisolated(unsafe) static var _monospaceFontCache: [String: Bool] = [:]
 
-  /// Default font size used as fallback
-  public static let defaultFontSize: CGFloat = 17
-
   // MARK: - Regex Patterns
 
   /// Regex pattern for pre code blocks with optional language specification
   /// Matches: ```[language]\n[content]``` or ```[content]```
   /// Examples: "```swift\nlet x = 1```", "```hello world```"
-  private static let preBlockPattern = "```(?:([a-zA-Z0-9+#-]+)\\n([\\s\\S]*?)|([\\s\\S]*?))```"
+  private static let preBlockPattern = "```(?:([a-zA-Z0-9+#-]+)\\n)?([\\s\\S]*?)```"
 
   /// Regex pattern for inline code blocks
   /// Matches: `[content]`
@@ -407,8 +381,13 @@ public class ProcessEntities {
 
   private static func createBoldFont(from font: PlatformFont) -> PlatformFont {
     #if os(macOS)
-    let boldFont = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
-    return boldFont
+    // NSFontManager.convert may return nil depending on the source font/traits. Provide safe fallbacks.
+    if let converted = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask) as PlatformFont?,
+       NSFontManager.shared.traits(of: converted).contains(.boldFontMask)
+    {
+      return converted
+    }
+    return NSFont.boldSystemFont(ofSize: font.pointSize)
     #else
     return UIFont.boldSystemFont(ofSize: font.pointSize)
     #endif
@@ -416,7 +395,14 @@ public class ProcessEntities {
 
   private static func createMonospaceFont(from font: PlatformFont) -> PlatformFont {
     #if os(macOS)
-    return NSFont.monospacedSystemFont(ofSize: font.pointSize, weight: .regular)
+    // Provide robust fallback chain to guarantee a non-nil font
+    if let mono = NSFont.monospacedSystemFont(ofSize: font.pointSize, weight: .regular) as PlatformFont? {
+      return mono
+    }
+    if let userFixed = NSFont.userFixedPitchFont(ofSize: font.pointSize) as PlatformFont? {
+      return userFixed
+    }
+    return NSFont.systemFont(ofSize: font.pointSize)
     #else
     return UIFont.monospacedSystemFont(ofSize: font.pointSize, weight: .regular)
     #endif
@@ -424,8 +410,14 @@ public class ProcessEntities {
 
   private static func createItalicFont(from font: PlatformFont) -> PlatformFont {
     #if os(macOS)
-    let italicFont = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
-    return italicFont
+    // NSFontManager.convert may return nil depending on the source font/traits. Provide safe fallbacks.
+    if let converted = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask) as PlatformFont?,
+       NSFontManager.shared.traits(of: converted).contains(.italicFontMask)
+    {
+      return converted
+    }
+    // Fallback to a system font - since we can't create italic, return regular
+    return NSFont.systemFont(ofSize: font.pointSize)
     #else
     return UIFont.italicSystemFont(ofSize: font.pointSize)
     #endif
@@ -601,13 +593,9 @@ public class ProcessEntities {
         // Get the full match range (including ``` and language)
         let fullRange = match.range(at: 0)
 
-        // Get the content range based on which groups matched
+        // Get the content range - always in group 2 with new regex
         let contentRange: NSRange
-        if match.numberOfRanges >= 4, match.range(at: 3).location != NSNotFound {
-          // No language format: ```content``` (group 3)
-          contentRange = match.range(at: 3)
-        } else if match.numberOfRanges >= 3, match.range(at: 2).location != NSNotFound {
-          // Language + newline + content format: ```lang\ncontent``` (group 2)
+        if match.numberOfRanges >= 3, match.range(at: 2).location != NSNotFound {
           contentRange = match.range(at: 2)
         } else {
           continue // Skip if no valid content group found
@@ -621,16 +609,13 @@ public class ProcessEntities {
             continue // Skip this match if range conversion fails
           }
 
-          // Extract content text and clean up whitespace
-          var contentText = String(text[swiftContentRange])
+          // Extract content text without trimming to preserve positioning
+          let contentText = String(text[swiftContentRange])
 
-          // Remove leading and trailing whitespace/newlines
-          contentText = contentText.trimmingCharacters(in: .whitespacesAndNewlines)
-
-          // Replace the full match with just the cleaned content
+          // Replace the full match with just the content
           text.replaceSubrange(swiftFullRange, with: contentText)
 
-          // Calculate characters removed (original full match length - cleaned content length)
+          // Calculate characters removed (original full match length - content length)
           let charsRemoved = fullRange.length - contentText.count
           offsetAdjustments[fullRange.location] = charsRemoved
 
