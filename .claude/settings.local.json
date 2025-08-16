@@ -9,7 +9,9 @@
       "Bash(swift test:*)",
       "Bash(swift:*)",
       "Bash(rm:*)",
-      "Bash(mv:*)"
+      "Bash(mv:*)",
+      "Bash(swift test)",
+      "Bash(swift test:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"
