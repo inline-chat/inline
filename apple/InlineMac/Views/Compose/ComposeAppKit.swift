@@ -309,14 +309,12 @@ class ComposeAppKit: NSView {
     textEditor.delegate = self
 
     // Configure text input settings
-    textEditor.textView.isAutomaticTextReplacementEnabled = AppSettings.shared.automaticSpellCorrection
     textEditor.textView.isAutomaticSpellingCorrectionEnabled = AppSettings.shared.automaticSpellCorrection
     textEditor.textView.isContinuousSpellCheckingEnabled = AppSettings.shared.checkSpellingWhileTyping
 
     // Listen to AppSettings changes
     AppSettings.shared.$automaticSpellCorrection
       .sink { [weak self] enabled in
-        self?.textEditor.textView.isAutomaticTextReplacementEnabled = enabled
         self?.textEditor.textView.isAutomaticSpellingCorrectionEnabled = enabled
       }.store(in: &cancellables)
 
