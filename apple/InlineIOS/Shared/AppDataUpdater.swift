@@ -47,7 +47,14 @@ class AppDataUpdater {
             if !displayName.isEmpty {
               title = displayName
             } else {
-              title = "Unknown User"
+              // Fallback to firstName + lastName when displayName is empty
+              let firstName = user.firstName ?? ""
+              let lastName = user.lastName ?? ""
+              if !firstName.isEmpty || !lastName.isEmpty {
+                title = [firstName, lastName].filter { !$0.isEmpty }.joined(separator: " ")
+              } else {
+                title = "Unknown User"
+              }
             }
           } else if let chatTitle = item.chat?.title, !chatTitle.isEmpty {
             title = chatTitle
@@ -106,7 +113,6 @@ class AppDataUpdater {
 
         // Return the data on the main thread
         DispatchQueue.main.async {
-          print("👽 completion called")
           completion(bridgeChats, bridgeUsers)
         }
       } catch {

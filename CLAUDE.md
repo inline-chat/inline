@@ -10,6 +10,7 @@ inline/
 │   ├── InlineIOS/      # iOS SwiftUI/UIKit app
 │   ├── InlineMac/      # macOS AppKit/SwiftUI app
 │   ├── InlineKit/      # Shared Swift logic, database, auth, protocol
+│   ├── InlineShareExtension # Share extension for iOS
 │   └── InlineUI/       # Shared SwiftUI views between platforms
 ├── server/             # TypeScript backend API server
 ├── web/                # React Router web client
