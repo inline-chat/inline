@@ -1,71 +1,108 @@
 # Inline Chat App - Development Guide
 
-Inline is a native chat application with Swift clients for iOS and macOS, and a TypeScript backend API server. This guide provides comprehensive information about the codebase architecture, development workflow, and key modules.
+## Overview
+
+Inline is a native chat application with Swift clients for iOS and macOS, and a TypeScript backend API server. This guide provides comprehensive information about the codebase architecture, development workflow, and key modules for both new developers and AI assistants.
+
+### Architecture
+
+- **Backend**: TypeScript server built with Bun, featuring REST and WebSocket APIs
+- **Apple Platforms**: Swift clients for iOS (SwiftUI/UIKit) and macOS (AppKit/SwiftUI)
+- **Web Client**: React Router v7 application
+- **Protocol**: Protocol Buffers for cross-platform communication
+- **Database**: PostgreSQL (server) and GRDB/SQLite (Apple platforms)
+
+## Getting Started
+
+### Prerequisites
+
+- **Backend**: Bun runtime (not Node.js)
+- **Apple Development**: Xcode with latest Swift version
+- **Web Development**: Bun for package management
+
+### Quick Setup
+
+1. **Clone and install dependencies**:
+   ```bash
+   git clone <repository>
+   cd inline
+   bun install
+   ```
+
+2. **Start development servers**:
+   ```bash
+   # Backend server
+   bun run dev:server
+   
+   # Web client (in separate terminal)
+   cd web && bun run dev
+   ```
+
+3. **Apple platforms**: Open `apple/Inline.xcodeproj` in Xcode
 
 ## Project Structure
 
 ```
 inline/
 ├── apple/              # Apple platform clients (iOS/macOS)
-│   ├── InlineIOS/      # iOS SwiftUI/UIKit app
-│   ├── InlineMac/      # macOS AppKit/SwiftUI app
-│   ├── InlineKit/      # Shared Swift logic, database, auth, protocol
-│   ├── InlineShareExtension # Share extension for iOS
-│   └── InlineUI/       # Shared SwiftUI views between platforms
+│   ├── InlineIOS/      # iOS SwiftUI/UIKit application
+│   ├── InlineMac/      # macOS AppKit/SwiftUI application
+│   ├── InlineKit/      # Shared Swift logic, database, auth, networking
+│   ├── InlineShareExtension # iOS share extension
+│   └── InlineUI/       # Shared SwiftUI components
 ├── server/             # TypeScript backend API server
 ├── web/                # React Router web client
-├── proto/              # Protocol buffer definitions
-└── scripts/            # Build and utility scripts
+├── proto/              # Protocol buffer definitions (.proto files)
+└── scripts/            # Build scripts and protocol buffer generation
 ```
 
-## Backend Architecture (server/)
+### Key Directories
 
-The backend is a TypeScript server built with **Bun**, featuring two API layers:
+- **`apple/InlineKit/`**: Core shared functionality between iOS and macOS
+  - `Sources/InlineKit/Models/` - Database models and GRDB schemas
+  - `Sources/InlineKit/Transactions/` - Optimistic update transactions
+- **`server/src/`**: Backend source code with functions, handlers, and database models
+  - `functions/` - Business logic functions
+  - `realtime/handlers/` - WebSocket RPC handlers
+  - `db/schema/` - Database schema definitions
+- **`proto/`**: Protocol buffer definitions for cross-platform communication
+- **`web/app/`**: React Router application structure
 
-### Core Technologies
+## Backend (server/)
+
+### Technologies
+
 - **Runtime**: Bun (not Node.js)
 - **Database**: PostgreSQL with Drizzle ORM
-- **Framework**: Elysia for REST API
+- **API Framework**: Elysia (REST) + Custom WebSocket RPC
 - **Protocol**: Protocol Buffers for real-time communication
-- **WebSocket**: Custom RPC format for real-time API
 
-### Key Modules
+### Architecture
 
 #### API Layers
-1. **REST API** (Legacy): Using Elysia framework in `methods/` directory
-2. **Realtime API** (Primary): WebSocket-based RPC using Protocol Buffers
+- **REST API** (Legacy): Elysia framework in `src/methods/`
+- **Realtime API** (Primary): WebSocket RPC using Protocol Buffers
 
-#### Database Layer
-- **Schema**: `/server/src/db/schema/` - Drizzle schema definitions
-- **Models**: `/server/src/db/models/` - Database interaction layer with encryption support
-- **Migrations**: `/server/drizzle/` - Database migration files
+#### Core Components
+- **Functions** (`src/functions/`): Business logic abstracted from API
+- **Handlers** (`src/realtime/handlers/`): RPC handlers connecting functions to protocols
+- **Models** (`src/db/models/`): Database interaction layer with encryption support
+- **Schema** (`src/db/schema/`): Drizzle schema definitions
+- **Encoders** (`src/realtime/encoders/`): Convert database types to protocol buffers
+- **Utils** (`src/utils/`): Authorization, logging, validation utilities
 
-#### Protocol Buffer Integration
-- **Proto Definition**: `/proto/core.proto` - Core protocol specification
-- **Generated Code**: `/server/packages/protocol/src/core.ts`
-- **Encoders**: `/server/src/realtime/encoders/` - Convert database types to protocol buffers
+### Development Commands
 
-#### Real-time API Components
-- **Functions**: `/server/src/functions/` - Business logic abstracted from API
-- **Handlers**: `/server/src/realtime/handlers/` - RPC handlers connecting functions to type system
-- **Transport**: WebSocket transport with custom RPC format
-
-#### External Services
-- **Integrations**: `src/libs/` - External service clients (Anthropic, OpenAI, Linear, Notion, etc.)
-- **Notifications**: Push notifications via APN
-- **File Storage**: R2 (Cloudflare) for file uploads
-
-### Development Workflow
-
-#### Available Commands (Backend)
 ```bash
 # Development
-bun run dev:server          # Start development server
-bun run typecheck           # Type checking
+bun run dev                 # Start development server
+bun run typecheck          # Type checking
 
 # Database
 bun run db:migrate         # Run migrations
 bun run db:generate <slug> # Generate new migration
+bun run db:studio          # Open Drizzle Studio (port 8010)
+bun run db:push            # Push schema changes without migration
 
 # Testing & Quality
 bun test                   # Run tests
@@ -77,71 +114,132 @@ bun run build              # Production build
 bun run start              # Start production server
 ```
 
-#### Creating New Realtime API Endpoints
-1. Define RPC types in `proto/core.proto`
-2. Create business logic function in `/server/src/functions/`
-3. Create handler in `/server/src/realtime/handlers/`
-4. Register handler in `/server/src/realtime/handlers/_rpc.ts`
-5. Add encoders/decoders as needed
+### External Integrations
 
-## Apple Platform Architecture (apple/)
+- **Notifications**: Push notifications via APN (`src/libs/apn.ts`)
+- **File Storage**: Cloudflare R2 for uploads (`src/libs/r2.ts`)
+- **AI Services**: Anthropic, OpenAI integrations in `src/libs/`
+- **Third-party**: Linear (`src/libs/linear/`), Notion (`src/libs/notion.ts`), Loom integrations
 
-The Apple ecosystem consists of shared Swift packages and platform-specific apps using modern Swift patterns.
+## Apple Platforms (apple/)
 
-### Core Technologies
-- **iOS App**: SwiftUI + UIKit hybrid
-- **macOS App**: AppKit + SwiftUI hybrid
-- **Database**: GRDB (SQLite)
+### Technologies
+
+- **iOS**: SwiftUI + UIKit hybrid architecture
+- **macOS**: AppKit + SwiftUI hybrid architecture
+- **Database**: GRDB (SQLite) with migrations
 - **Networking**: Custom WebSocket RPC with Protocol Buffers
 - **Concurrency**: Swift Concurrency (async/await, actors)
 
 ### Shared Packages
 
 #### InlineKit
-Core shared functionality between iOS and macOS:
-- **Database**: GRDB schema and migrations (`Sources/InlineKit/Models/`)
-- **Networking**: `RealtimeAPI` WebSocket client
-- **Authentication**: Auth flow management
+Core functionality shared between platforms:
+- **Database**: GRDB schema and migrations in `Sources/InlineKit/Models/`
+- **Networking**: `RealtimeAPI` WebSocket client in `Sources/RealtimeV2/`
+- **Authentication**: Auth flow management in `Sources/Auth/`
 - **File Management**: Upload/download, caching, image processing
-- **Transactions**: Optimistic updates with retry logic (`Sources/InlineKit/Transactions/`)
+- **Transactions**: (Legacy) optimistic updates with retry in `Sources/InlineKit/Transactions/`
 
 #### InlineUI
 Shared SwiftUI components:
-- User avatars and space avatars
-- Chat creation views
+- User and space avatars
 - Text processing and link detection
 
 #### InlineProtocol
-Generated Protocol Buffer Swift code from `/proto/core.proto` using swift-protobuf.
+Generated Protocol Buffer Swift code from `proto/core.proto`
 
 #### Logger
-Centralized logging system accessible via `Log.scoped` or `Log.shared`.
+Centralized logging accessible via `Log.scoped("ModuleName")` or `Log.shared`
 
 ### Platform-Specific Apps
 
 #### iOS App (InlineIOS/)
-- **Architecture**: SwiftUI + UIKit hybrid
-- **Chat View**: UIKit-based with upside-down collection view for chat behavior
-- **Message List**: Custom collection view with cell reuse
+- **Chat View**: UIKit-based with upside-down collection view
+- **Navigation**: SwiftUI navigation with hybrid UIKit chat views
 - **Image Loading**: Nuke/NukeUI for remote images
-- **Navigation**: SwiftUI navigation with UIKit chat screens
 
 #### macOS App (InlineMac/)
-- **Architecture**: AppKit + SwiftUI hybrid
 - **Chat View**: AppKit-based for performance
 - **Compose**: AppKit text handling with SwiftUI UI
-- **Window Management**: Custom window controllers
+- **MessageView**: AppKit message bubble
+- **MessageTableRow**: NSTableView row handling cell-reuse
+- **Architecture**: AppKit + SwiftUI hybrid
 
-### Key Implementation Details
+### Build Commands
 
-#### Database Management
-- All database logic must be shared between platforms
-- Schema changes require migrations in `InlineKit/Sources/InlineKit/Database.swift`
-- Use GRDB for thread-safe database operations
+```bash
+# List available schemes
+xcodebuild -project apple/Inline.xcodeproj -list
 
-#### Protocol Buffer Usage
+# Build specific targets
+xcodebuild -project apple/Inline.xcodeproj -scheme "Inline (iOS)" -configuration Debug build
+xcodebuild -project apple/Inline.xcodeproj -scheme "Inline (macOS)" -configuration Debug build
+xcodebuild -project apple/Inline.xcodeproj -scheme "InlineKit" -configuration Debug build
+
+# Run package tests (from package directory)
+cd apple/InlineKit && swift test
+cd apple/InlineUI && swift test
+```
+
+### Available Xcode Schemes
+
+- **"Inline (iOS)"** - Main iOS application
+- **"Inline (macOS)"** - Main macOS application
+- **"2nd Inline (macOS)"** - Alternative macOS build configuration
+- **InlineKit** - Shared Swift package
+- **InlineUI** - Shared SwiftUI components
+- **InlineProtocol** - Protocol buffer Swift code
+- **Logger** - Logging framework
+- **RealtimeV2** - WebSocket and sync client library
+- **TextProcessing** - Text processing utilities
+
+## Web Client (web/)
+
+### Technologies
+
+- **Framework**: React Router v7
+- **Styling**: Tailwind CSS + StyleX
+- **Animation**: Framer Motion
+- **Build Tool**: Vite
+
+### Development Commands
+
+```bash
+# Development
+bun run dev              # Start development server
+bun run typecheck        # Type checking and route generation
+
+# Build & Deploy
+bun run build            # Production build
+bun run start            # Start production server
+```
+
+## Protocol Buffers
+
+Protocol Buffers enable type-safe communication between all platforms.
+
+### Core Files
+
+- **Definition**: `proto/core.proto` - Core protocol specification
+- **TypeScript**: `server/packages/protocol/src/core.ts` (generated)
+- **Swift**: `apple/InlineKit/Sources/InlineProtocol/core.pb.swift` (generated)
+
+### Generation Commands
+
+```bash
+# Generate all protocol files
+bun run generate:proto
+
+# Individual generation (from scripts/)
+bun run proto:generate-ts     # TypeScript generation
+bun run proto:generate-swift  # Swift generation
+```
+
+### Usage Examples
+
+#### Swift
 ```swift
-// Creating protocol buffer objects
 var message = Message.with {
     $0.id = 1234
     $0.text = "Hello, world!"
@@ -149,155 +247,138 @@ var message = Message.with {
 }
 ```
 
-#### Mutations and Transactions
-For data mutations like `sendMessage`, create transactions under `InlineKit/Sources/InlineKit/Transactions/Methods/` and call via the transactions singleton for automatic retry and optimistic updates.
-
-#### Translation System
-- **Language Support**: English (en), Spanish (es), French (fr), Japanese (ja), Chinese Simplified (zh-Hans), Chinese Traditional (zh-Hant), Tagalog (tl), Persian (fa)
-- **Language Preference**: `UserLocale.setPreferredTranslationLanguage()` to set custom language, stored in UserDefaults
-- **Translation State**: `TranslationState.shared` manages per-peer translation enable/disable state
-- **Language Picker**: `LanguagePickerView` provides UI for selecting translation target language
-- **Integration**: Translation button in `apple/InlineMac/Toolbar/TranslateButtion/TranslationButton.swift`
-
-## Web Client (web/)
-
-React Router application for web access to the chat platform.
-
-### Technologies
-- **Framework**: React Router v7
-- **Styling**: Tailwind CSS + StyleX
-- **Animation**: Framer Motion
-- **Build Tool**: Vite
-
-### Available Commands
-```bash
-bun run dev              # Development server
-bun run build            # Production build
-bun run typecheck        # Type checking
-bun run start            # Start production server
+#### TypeScript
+```typescript
+const message: Message = {
+  id: 1234,
+  text: "Hello, world!",
+  author: "User"
+}
 ```
 
-## Apple Platform Build Commands
+#### Naming Conventions
+- **Proto**: snake_case → **TypeScript**: camelCase → **Swift**: camelCase (except Id → ID)
 
-### Available Schemes
-From `apple/Inline.xcodeproj`:
-- **"Inline (macOS)"** - Main macOS application
-- **"Inline (iOS)"** - Main iOS application  
-- **"2nd Inline (macOS)"** - Alternative macOS build configuration
-- **InlineKit** - Shared Swift package
-- **InlineUI** - Shared SwiftUI components
-- **InlineProtocol** - Protocol buffer Swift code
-- **Logger** - Logging framework
-- **RealtimeAPI** - WebSocket client
-- **TextProcessing** - Text processing utilities
+## Development Workflows
 
-### Build Commands
-```bash
-# Build macOS app
-xcodebuild -project apple/Inline.xcodeproj -scheme "Inline (macOS)" -configuration Debug build
+### Adding New Realtime API Endpoints
 
-# Build iOS app  
-xcodebuild -project apple/Inline.xcodeproj -scheme "Inline (iOS)" -configuration Debug build
+1. **Define Protocol**: Add RPC types in `proto/core.proto`
+2. **Generate Code**: Run `bun run generate:proto`
+3. **Business Logic**: Create function in `server/src/functions/`
+4. **Handler**: Create handler in `server/src/realtime/handlers/`
+5. **Register**: Add to `server/src/realtime/handlers/_rpc.ts`
+6. **Encoders**: Add encoders/decoders in `server/src/realtime/encoders/`
+7. **Client Code**: Rebuild Xcode `InlineProtocol` target for Swift changes
+8. **Testing**: Add tests in `server/src/__tests__/functions/`
 
-# Build specific package (e.g. InlineKit)
-xcodebuild -project apple/Inline.xcodeproj -scheme "InlineKit" -configuration Debug build
+### Adding Database Tables
 
-# List all available schemes
-xcodebuild -project apple/Inline.xcodeproj -list
-```
+#### Server
+1. **Schema**: Create schema file in `server/src/db/schema/`
+2. **Export**: Add export to `server/src/db/schema/index.ts`
+3. **Generate**: Run `cd server && bun run db:generate <migration-name>`
+4. **Migrate**: Run `cd server && bun run db:migrate`
+5. **Model**: Create model file in `server/src/db/models/`
+6. **Testing**: Add model tests in `server/src/__tests__/models/`
+
+#### Apple Platforms
+1. **Model**: Create model file in `apple/InlineKit/Sources/InlineKit/Models/`
+2. **Migration**: Add migration in `apple/InlineKit/Sources/InlineKit/Database.swift`
+3. **Testing**: Add tests using Swift Testing framework
+
+### Data Mutations and Transactions
+
+Create transactions in `apple/InlineKit/Sources/InlineKit/Transactions/Methods/` for operations like `sendMessage`. Use the transactions singleton for automatic retry and optimistic updates.
+
+## Testing & Quality
+
+### Testing Frameworks
+
+- **Backend**: Bun test with utilities in `src/__tests__/setup.ts`
+- **Apple Platforms**: Swift Testing framework with `@Test` and `@Suite` macros
+- **Debug Logging**: Set `process.env["DEBUG"] = "1"` for backend debug output
+
+### Code Quality
+
+- **Linting**: `bun run lint` (root level), `bun run lint` (server)
+- **Type Checking**: `bun run typecheck` (verifies TypeScript across projects)
+- **Testing**: `bun test` (backend), `swift test` (Swift packages)
+- **Database**: `bun run db:studio` for visual database inspection
+
+### Performance Guidelines
+
+- **Apple Platforms**: Avoid heavy computations on main thread
+- **Database**: Use appropriate query patterns for complexity
+- **Real-time**: Encode updates separately for each user
+- **UI**: Use minimal, subtle animations and interactions
 
 ## Development Guidelines
 
 ### Code Style & Conventions
+
 - **Backend**: Use Bun instead of Node.js/npm
-- **Testing**: `bun test` for backend, Swift Testing for Apple platforms
-- **Database**: Drizzle ORM with both `db.select()` and `db.query` patterns
-- **Protocol**: Snake case in `.proto` → camelCase in TypeScript, camelCase in Swift (except Id → ID)
+- **Database**: Drizzle ORM with `db.select()` and `db.query` patterns
+- **Swift**: Target Swift 6, use modern APIs and concurrency patterns
+- **UI Design**: Follow Apple Human Interface Guidelines, use SF Symbols
 
 ### Security & Best Practices
-- **Encryption**: Use `server/src/modules/encryption` for sensitive data
+
+- **Encryption**: Use `server/src/modules/encryption/encryption2.ts` for sensitive data
 - **Authorization**: Use `server/src/utils/authorize.ts` helpers
-- **Logging**: Use `server/src/utils/log.ts` for error capture to Sentry
+- **Logging**: 
+  - **Backend**: `server/src/utils/log.ts` for Sentry integration
+  - **Apple**: `Log.scoped("ModuleName")` for structured logging
 - **Environment**: Type-checked environment variables in `server/src/env.ts`
+- **Error Handling**: Use `server/src/utils/log.ts` for error capture and Sentry integration
 
-### Performance Considerations
-- **Apple Platforms**: Don't perform heavy computations on main thread
-- **Database**: Use appropriate query patterns for complexity
-- **Real-time**: Encode updates separately for each user
-- **UI**: Use minimal, subtle animations and interaction styles
+### Swift Development Principles
 
-### Testing
-- **Backend**: Bun test with utilities in `src/__tests__/setup.ts`
-- **Apple**: Swift Testing framework with `@Test` and `@Suite` macros
-- **Debug**: Set `process.env["DEBUG"] = "1"` for debug logging
-
-## Getting Started
-
-1. **Clone and Install**:
-   ```bash
-   bun install
-   ```
-
-2. **Start Development**:
-   ```bash
-   bun run dev:server    # Backend
-   bun run dev           # Web client (separate terminal)
-   ```
-
-3. **Open Apple Projects**:
-   Open `apple/Inline.xcodeproj` in Xcode
-
-4. **Database Setup**:
-   ```bash
-   cd server
-   bun run db:migrate
-   ```
-
-
-## Swift
-* Design UI in a way that is idiomatic for the macOS platform and follows Apple Human Interface Guidelines.
-* Use SF Symbols for iconography.
-* Use the most modern macOS APIs. Since there is no backward compatibility constraint, this app can target the latest macOS version with the newest APIs.
-* Use the most modern Swift language features and conventions. Target Swift 6 and use Swift concurrency (async/await, actors) and Swift macros where applicable.
 - Build UI with small, focused views
 - Extract reusable components naturally
-- Use view modifiers to encapsulate common styling
+- Use view modifiers for common styling
 - Prefer composition over inheritance
-- Use extensions to organize large files
-- Follow Swift naming conventions consistently
-- Unit test business logic and data transformations
-- Use SwiftUI Previews for visual testing
-- Test @Observable classes independently
-- Keep tests simple and focused
-- Don't sacrifice code clarity for testability
+- Follow Swift naming conventions
 - Use Swift Concurrency (async/await, actors)
-- Leverage Swift 6 data race safety when available
-- Utilize property wrappers effectively
-- Embrace value types where appropriate
-- Use protocols for abstraction, not just for testing
+- Leverage Swift 6 data race safety
+- Use protocols for abstraction
 
-## Common Development Tasks
+## Deployment & Production
 
-### Adding New Protocol Buffer Types
-1. Edit `/proto/core.proto`
-2. Regenerate: `bun run generate:proto`
-3. Update encoders in `server/src/realtime/encoders/`
-4. Rebuild Xcode project for Swift changes
+### Build Commands
 
-### Adding Database Tables
-1. Create schema in `server/src/db/schema/`
-2. Export from `server/src/db/schema/index.ts`
-3. Generate migration: `bun run db:generate`
-4. Update Apple schema in `apple/InlineKit/Sources/InlineKit/Database.swift`
+```bash
+# Backend production build
+cd server && bun run build && bun run start
 
-### Debugging
-- **Backend**: Use `server/src/utils/log.ts` for structured logging
-- **Apple**: Use `Logger` package with `Log.scoped("ModuleName")`
-- **Database**: Use `bun run db:studio` for visual inspection
+# Web client production build
+cd web && bun run build && bun run start
 
-This guide provides the foundation for understanding and contributing to the Inline chat application codebase. For specific implementation details, refer to the existing code patterns and the `.cursor/rules/*.mdc` files for additional context.
+# Apple platforms
+# For development: Build in Xcode (Cmd+B)
+# For distribution: Product > Archive in Xcode
+```
 
-## Development Memories
-- Don't run xcodebuild command, use IDE diagnostics, Swift typecheck, and when needed to build, run xcodebuild in silent mode to disable all the logging which fills the context window.
-- sometimes diagnostics fails to view changes in other packages/targets. ask user to restart their IDE or build in xcode to resolve the issue.
-- use `swift test` in a package root folder for running package tests
+### Environment Configuration
+
+- **Server**: Environment variables in `server/src/env.ts`
+- **Database**: PostgreSQL with Drizzle migrations
+- **File Storage**: Cloudflare R2 configuration
+- **Push Notifications**: APN setup for iOS/macOS
+
+## Development Tips
+
+- **Apple Development**: Use IDE diagnostics and `swift test` instead of verbose xcodebuild commands
+- **IDE Issues**: Restart IDE when package changes aren't reflected in diagnostics
+- **Build Output**: Use silent mode for xcodebuild to avoid context window overflow
+- **Package Testing**: Run Swift package tests from package root: `cd apple/InlineKit && swift test`
+- **Protocol Changes**: Always run `bun run generate:proto` after modifying `.proto` files
+
+## Development Instructions
+
+### For AI Assistants
+- Do what has been asked; nothing more, nothing less
+- NEVER proactively create documentation files unless explicitly requested
+- Follow existing code patterns and conventions in the codebase
+- Reference this guide for accurate commands and file structure
+- Write tests for isolated, simple to test, non-UI code in Swift packages. Avoid attempting to write tests automatically when it requires significant investment, mocking, re-architecture or complex testing workflows
