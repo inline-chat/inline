@@ -35,6 +35,9 @@ public final class NavigationModel<Tab: TabType, Destination: DestinationType, S
     }
   }
 
+  // Store the initial tab for proper reset behavior
+  private let initialTab: Tab
+
   // Persistence keys
   private let pathsKey: String
   private let selectedTabKey: String
@@ -44,6 +47,7 @@ public final class NavigationModel<Tab: TabType, Destination: DestinationType, S
   /// - Parameters:
   ///   - initialTab: The default tab to select if no persisted state exists
   public init(initialTab: Tab) {
+    self.initialTab = initialTab
     selectedTab = initialTab
     pathsKey = "AppRouter_paths"
     selectedTabKey = "AppRouter_selectedTab"
@@ -172,7 +176,7 @@ public final class NavigationModel<Tab: TabType, Destination: DestinationType, S
   /// Reset all navigation state and clear persistence
   public func reset() {
     paths = [:]
-    selectedTab = Tab.allCases.first ?? selectedTab
+    selectedTab = initialTab
     presentedSheet = nil
 
     // Clear persisted data
