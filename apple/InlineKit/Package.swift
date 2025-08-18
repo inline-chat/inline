@@ -51,7 +51,10 @@ let package = Package(
       .upToNextMajor(from: "1.2.0")
     ),
     .package(url: "https://github.com/apple/swift-async-algorithms", from: "1.0.0"),
-    // .package(url: "https://github.com/pointfreeco/swift-dependencies", from: "1.0.0"),
+    .package(
+      url: "https://github.com/apple/swift-collections.git",
+      .upToNextMajor(from: "1.2.0")
+    ),
   ],
   targets: [
     // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -120,6 +123,7 @@ let package = Package(
       name: "RealtimeV2",
       dependencies: [
         .product(name: "AsyncAlgorithms", package: "swift-async-algorithms"),
+        .product(name: "Collections", package: "swift-collections"),
         "Logger",
         "InlineProtocol",
         "InlineConfig",

@@ -17,9 +17,13 @@ public actor RealtimeV2 {
   // private var transport: Transport
   private var auth: Auth
   private var client: ProtocolClient
+  private var sync: Sync
+  private var transactions: Transactions
+  private var queries: Queries
 
   // TODO:
   // transactions
+  // queries
   // sync
 
   // MARK: - Private Properties
@@ -42,6 +46,9 @@ public actor RealtimeV2 {
     // self.transport = transport
     self.auth = auth
     client = ProtocolClient(transport: transport, auth: auth)
+    sync = Sync()
+    transactions = Transactions()
+    queries = Queries()
 
     Task {
       // Initialize everything and start
@@ -131,6 +138,7 @@ public actor RealtimeV2 {
   }
 
   // MARK: - Public API
+
 
   /// Send an RPC call through the protocol client
   ///
