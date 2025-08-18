@@ -16,5 +16,10 @@
   "cSpell.enabledFileTypes": {
     "swift": true
   },
-  "cSpell.words": ["Deinitialization", "GRDB"]
+  "cSpell.words": ["Deinitialization", "GRDB"],
+
+  "protoc": {
+    "compile_on_save": false,
+    "options": ["--proto_path=${workspaceRoot}/proto"]
+  }
 }
