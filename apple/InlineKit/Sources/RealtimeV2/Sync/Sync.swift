@@ -1,0 +1,5 @@
+
+
+class Sync {
+  init() {}
+}
