@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+import "core.proto";
+
+package client;
+
+message Transaction {
+  string id = 1;
+  int64 date = 2;
+  RpcCall call = 3;
+}
