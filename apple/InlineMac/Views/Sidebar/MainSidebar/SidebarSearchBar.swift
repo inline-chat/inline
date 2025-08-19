@@ -2,11 +2,18 @@ import SwiftUI
 
 struct SidebarSearchBar: View {
   var text: Binding<String>
+  var isFocused: Bool
 
   var body: some View {
-    OutlineField("Search (⌘K)", text: text, prompt: Text("Search").foregroundColor(.secondary), size: .regular)
-      .submitLabel(.search)
-      .autocorrectionDisabled()
+    OutlineField(
+      "Search (⌘K)",
+      text: text,
+      prompt: Text("Search").foregroundColor(.secondary),
+      size: .regular,
+      isFocused: isFocused
+    )
+    .submitLabel(.search)
+    .autocorrectionDisabled()
   }
 }
 
@@ -19,24 +26,27 @@ struct OutlineField: View {
   var value: Binding<String>
   var prompt: Text?
   var size: Size = .regular
+  var isFocused: Bool
 
-  init(_ titleKey: LocalizedStringKey, text value: Binding<String>) {
+  init(_ titleKey: LocalizedStringKey, text value: Binding<String>, isFocused: Bool) {
     self.titleKey = titleKey
     self.value = value
     prompt = nil
+    self.isFocused = isFocused
   }
 
   init(
     _ titleKey: LocalizedStringKey, text value: Binding<String>, prompt: Text? = nil,
-    size: Size = .regular
+    size: Size = .regular, isFocused: Bool
   ) {
     self.titleKey = titleKey
     self.value = value
     self.prompt = prompt
     self.size = size
+    self.isFocused = isFocused
   }
 
-  @FocusState private var isFocused: Bool
+  // @FocusState private var isFocused: Bool
 
   var font: Font {
     switch size {
@@ -65,11 +75,11 @@ struct OutlineField: View {
       .textFieldStyle(.plain)
       .font(font)
       .frame(height: height)
-//      .focused($isFocused)
+      // .focused($isFocused)
       .cornerRadius(cornerRadius)
       .background(
         RoundedRectangle(cornerRadius: cornerRadius)
-          .fill(.primary.opacity(0.05))
+          .fill(isFocused ? Color.primary.opacity(0.05) : Color.primary.opacity(0.02))
           .animation(.easeOut.speed(3), value: isFocused)
       )
 //      .overlay(
