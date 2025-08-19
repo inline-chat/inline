@@ -109,17 +109,20 @@ actor ProtocolClient {
         log.info("Protocol client: Connection established")
 
       case let .rpcResult(result):
+        Task { await events.send(.rpcResult(msgId: result.reqMsgID, rpcResult: result.result)) }
         handleRpcResult(result)
 
       case let .rpcError(error):
+        Task { await events.send(.rpcError(msgId: error.reqMsgID, rpcError: error)) }
         handleRpcError(error)
 
       case let .ack(ack):
-        // TODO:
-        log.debug("Received ack: \(ack)")
+        log.debug("Received ack: \(ack.msgID)")
+        Task { await events.send(.ack(msgId: ack.msgID)) }
 
       case let .message(serverMessage):
         log.debug("Received server message: \(serverMessage)")
+
       // TODO: Handle server messages (updates, notifications, etc.)
       default:
         log.debug("Protocol client: Unhandled message type: \(String(describing: message.body))")
@@ -209,33 +212,45 @@ actor ProtocolClient {
 
   // MARK: - RPC Calls
 
-  /// Send an RPC call and wait for the response
-  func sendRpc(
-    method: InlineProtocol.Method,
-    input: RpcCall.OneOf_Input?
-  ) async throws -> RpcResult.OneOf_Result? {
-    log.debug("sending RPC call for method: \(method)")
-
+  public func sendRpc(method: InlineProtocol.Method, input: RpcCall.OneOf_Input?) async throws -> UInt64 {
     let message = wrapMessage(body: .rpcCall(.with {
       $0.method = method
       $0.input = input
     }))
 
-    return try await withCheckedThrowingContinuation { continuation in
-      rpcCalls[message.id] = continuation
+    // FIXME: Should we move it to a task?
+    try await transport.send(message)
 
-      // Send the message synchronously in the continuation context
-      Task.detached { [transport] in
-        do {
-          try await transport.send(message)
-          // Log success, but don't access self here
-        } catch {
-          // Remove the continuation and resume with error if sending fails
-          continuation.resume(throwing: error)
-        }
-      }
-    }
+    return message.id
   }
+
+  /// Send an RPC call and wait for the response
+  // func sendRpc(
+  //   method: InlineProtocol.Method,
+  //   input: RpcCall.OneOf_Input?
+  // ) async throws -> RpcResult.OneOf_Result? {
+  //   log.debug("sending RPC call for method: \(method)")
+
+  //   let message = wrapMessage(body: .rpcCall(.with {
+  //     $0.method = method
+  //     $0.input = input
+  //   }))
+
+  //   return try await withCheckedThrowingContinuation { continuation in
+  //     rpcCalls[message.id] = continuation
+
+  //     // Send the message synchronously in the continuation context
+  //     Task.detached { [transport] in
+  //       do {
+  //         try await transport.send(message)
+  //         // Log success, but don't access self here
+  //       } catch {
+  //         // Remove the continuation and resume with error if sending fails
+  //         continuation.resume(throwing: error)
+  //       }
+  //     }
+  //   }
+  // }
 
   // MARK: - Response Handling
 
