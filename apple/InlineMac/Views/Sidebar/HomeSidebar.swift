@@ -1,8 +1,8 @@
 import InlineKit
 import InlineUI
 import Logger
-import SwiftUI
 import RealtimeV2
+import SwiftUI
 
 struct HomeSidebar: View {
   // MARK: - State
@@ -158,7 +158,7 @@ struct HomeSidebar: View {
 
   @ViewBuilder
   var searchBar: some View {
-    SidebarSearchBar(text: $searchQuery)
+    SidebarSearchBar(text: $searchQuery, isFocused: isSearching)
       .focused($isSearching)
       .overlay(alignment: .trailing) {
         if isSearching {

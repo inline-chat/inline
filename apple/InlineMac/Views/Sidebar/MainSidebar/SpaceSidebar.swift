@@ -144,7 +144,7 @@ struct SpaceSidebar: View {
         content: {
           VStack(alignment: .leading, spacing: 0) {
             topArea
-            SidebarSearchBar(text: $searchQuery)
+            SidebarSearchBar(text: $searchQuery, isFocused: false)
           }
           .frame(maxWidth: .infinity, alignment: .leading)
           .padding(
