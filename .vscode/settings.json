@@ -18,8 +18,12 @@
   },
   "cSpell.words": ["Deinitialization", "GRDB"],
 
+  // Protocol Buffers
   "protoc": {
     "compile_on_save": false,
     "options": ["--proto_path=${workspaceRoot}/proto"]
-  }
+  },
+
+  // Swift Path
+  "sweetpad.build.xcodeWorkspacePath": "apple/Inline.xcodeproj/project.xcworkspace"
 }
