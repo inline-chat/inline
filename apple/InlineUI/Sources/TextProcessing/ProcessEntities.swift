@@ -260,17 +260,20 @@ public class ProcessEntities {
       }
     }
 
-    // Extract bold entities from **text** markdown syntax and update all entity offsets
-    entities = extractBoldFromMarkdown(text: &text, existingEntities: entities)
-
     // Extract pre code entities from ```text``` markdown syntax and update all entity offsets
-    // NOTE: This must come BEFORE inline code extraction to avoid interference
+    // NOTE: This must come FIRST to establish all code blocks before other markdown parsing
     entities = extractPreFromMarkdown(text: &text, existingEntities: entities)
 
     // Extract inline code entities from `text` markdown syntax and update all entity offsets
+    // NOTE: This must come SECOND to avoid interference with pre code blocks
     entities = extractInlineCodeFromMarkdown(text: &text, existingEntities: entities)
 
+    // Extract bold entities from **text** markdown syntax and update all entity offsets
+    // NOTE: Only extract if not within code blocks
+    entities = extractBoldFromMarkdown(text: &text, existingEntities: entities)
+
     // Extract italic entities from _text_ markdown syntax and update all entity offsets
+    // NOTE: Only extract if not within code blocks
     entities = extractItalicFromMarkdown(text: &text, existingEntities: entities)
 
     // Sort entities by offset
@@ -309,8 +312,8 @@ public class ProcessEntities {
   private static let boldTextPattern = "\\*\\*(.*?)\\*\\*"
 
   /// Regex pattern for italic text
-  /// Matches: _[content]_
-  private static let italicTextPattern = "_(.*?)_"
+  /// Matches: _[content]_ only when surrounded by whitespace or string boundaries
+  private static let italicTextPattern = "(^|\\s)_(.+?)_(\\s|$)"
 
   private static func getCachedMonospaceResult(for fontName: String) -> Bool? {
     monospaceFontCacheLock.lock()
@@ -379,6 +382,20 @@ public class ProcessEntities {
     entities.sort { $0.offset < $1.offset }
   }
 
+  /// Check if a given position is within any code block or pre entity
+  private static func isPositionWithinCodeBlock(position: Int, entities: [MessageEntity]) -> Bool {
+    for entity in entities {
+      if entity.type == .code || entity.type == .pre {
+        let start = Int(entity.offset)
+        let end = start + Int(entity.length)
+        if position >= start, position < end {
+          return true
+        }
+      }
+    }
+    return false
+  }
+
   private static func createBoldFont(from font: PlatformFont) -> PlatformFont {
     #if os(macOS)
     // NSFontManager.convert may return nil depending on the source font/traits. Provide safe fallbacks.
@@ -392,25 +409,29 @@ public class ProcessEntities {
     if let boldFont = NSFont(descriptor: descriptor, size: font.pointSize) {
       return boldFont
     }
-    // Last resort: return bold system font if all attempts fail
-    return NSFont.boldSystemFont(ofSize: font.pointSize)
+    // Safe fallbacks with valid point size
+    let safeSize = max(font.pointSize, 12.0)
+    return NSFont.boldSystemFont(ofSize: safeSize)
     #else
-    return UIFont.boldSystemFont(ofSize: font.pointSize)
+    let safeSize = max(font.pointSize, 12.0)
+    return UIFont.boldSystemFont(ofSize: safeSize)
     #endif
   }
 
   private static func createMonospaceFont(from font: PlatformFont) -> PlatformFont {
     #if os(macOS)
     // Provide robust fallback chain to guarantee a non-nil font
-    if let mono = NSFont.monospacedSystemFont(ofSize: font.pointSize, weight: .regular) as PlatformFont? {
+    let safeSize = max(font.pointSize, 12.0)
+    if let mono = NSFont.monospacedSystemFont(ofSize: safeSize, weight: .regular) as PlatformFont? {
       return mono
     }
-    if let userFixed = NSFont.userFixedPitchFont(ofSize: font.pointSize) as PlatformFont? {
+    if let userFixed = NSFont.userFixedPitchFont(ofSize: safeSize) as PlatformFont? {
       return userFixed
     }
-    return NSFont.systemFont(ofSize: font.pointSize)
+    return NSFont.systemFont(ofSize: safeSize)
     #else
-    return UIFont.monospacedSystemFont(ofSize: font.pointSize, weight: .regular)
+    let safeSize = max(font.pointSize, 12.0)
+    return UIFont.monospacedSystemFont(ofSize: safeSize, weight: .regular)
     #endif
   }
 
@@ -427,10 +448,12 @@ public class ProcessEntities {
     if let italicFont = NSFont(descriptor: descriptor, size: font.pointSize) {
       return italicFont
     }
-    // Last resort: return regular font if all attempts fail
-    return NSFont.systemFont(ofSize: font.pointSize)
+    // Safe fallbacks with valid point size
+    let safeSize = max(font.pointSize, 12.0)
+    return NSFont.systemFont(ofSize: safeSize)
     #else
-    return UIFont.italicSystemFont(ofSize: font.pointSize)
+    let safeSize = max(font.pointSize, 12.0)
+    return UIFont.italicSystemFont(ofSize: safeSize)
     #endif
   }
 
@@ -453,6 +476,11 @@ public class ProcessEntities {
       for match in matches.reversed() {
         // Get the full match range (including **)
         let fullRange = match.range(at: 0)
+
+        // Skip if this match is within a code block
+        if isPositionWithinCodeBlock(position: fullRange.location, entities: allEntities) {
+          continue
+        }
 
         // Get the content range (excluding **)
         if match.numberOfRanges > 1 {
@@ -529,6 +557,11 @@ public class ProcessEntities {
         // Get the full match range (including `)
         let fullRange = match.range(at: 0)
 
+        // Skip if this match is within a code block (prevents nested code blocks)
+        if isPositionWithinCodeBlock(position: fullRange.location, entities: allEntities) {
+          continue
+        }
+
         // Get the content range (excluding `)
         if match.numberOfRanges > 1 {
           let contentRange = match.range(at: 1)
@@ -603,6 +636,11 @@ public class ProcessEntities {
       for match in matches.reversed() {
         // Get the full match range (including ``` and language)
         let fullRange = match.range(at: 0)
+
+        // Skip if this match is within a code block (prevents nested code blocks)
+        if isPositionWithinCodeBlock(position: fullRange.location, entities: allEntities) {
+          continue
+        }
 
         // Get the content range - always in group 2 with new regex
         let contentRange: NSRange
@@ -682,12 +720,19 @@ public class ProcessEntities {
       var offsetAdjustments: [Int: Int] = [:] // position -> characters removed
 
       for match in matches.reversed() {
-        // Get the full match range (including _)
+        // Get the full match range (including surrounding whitespace/boundaries and _)
         let fullRange = match.range(at: 0)
 
-        // Get the content range (excluding _)
-        if match.numberOfRanges > 1 {
-          let contentRange = match.range(at: 1)
+        // Skip if this match is within a code block
+        if isPositionWithinCodeBlock(position: fullRange.location, entities: allEntities) {
+          continue
+        }
+
+        // Get the content range (excluding _ and whitespace) - now in group 2
+        if match.numberOfRanges > 2 {
+          let contentRange = match.range(at: 2)
+          let leadingWhitespace = match.range(at: 1) // First capture group (^|\\s)
+          let trailingWhitespace = match.range(at: 3) // Third capture group (\\s|$)
 
           if fullRange.location != NSNotFound, contentRange.location != NSNotFound {
             // Convert NSRange to Range<String.Index> safely
@@ -700,16 +745,28 @@ public class ProcessEntities {
             // Extract content text
             let contentText = String(text[swiftContentRange])
 
-            // Replace the full match with just the content
-            text.replaceSubrange(swiftFullRange, with: contentText)
+            // Calculate the leading whitespace length
+            let leadingLength = leadingWhitespace.location != NSNotFound ? leadingWhitespace.length : 0
+
+            // Calculate the trailing whitespace length
+            let trailingLength = trailingWhitespace.location != NSNotFound ? trailingWhitespace.length : 0
+
+            // Create replacement text: leading whitespace + content + trailing whitespace
+            let leadingText = leadingLength > 0 ? String(text[Range(leadingWhitespace, in: text)!]) : ""
+            let trailingText = trailingLength > 0 ? String(text[Range(trailingWhitespace, in: text)!]) : ""
+            let replacementText = leadingText + contentText + trailingText
+
+            // Replace the full match with the replacement text
+            text.replaceSubrange(swiftFullRange, with: replacementText)
 
             // Track that 2 characters were removed at this position (1 _ at start + 1 _ at end)
             offsetAdjustments[fullRange.location] = 2
 
-            // Now create italic entity with the correct position (after _ removal)
+            // Now create italic entity with the correct position (after _ removal, accounting for leading whitespace)
             var italicEntity = MessageEntity()
             italicEntity.type = .italic
-            italicEntity.offset = Int64(fullRange.location) // Position where content now starts (after _ removed)
+            italicEntity
+              .offset = Int64(fullRange.location + leadingLength) // Position where content now starts (after _ removed)
             italicEntity.length = Int64(contentRange.length)
             italicEntities.append(italicEntity)
           }
