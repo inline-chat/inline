@@ -65,7 +65,7 @@ struct OutlineField: View {
       .textFieldStyle(.plain)
       .font(font)
       .frame(height: height)
-      .focused($isFocused)
+//      .focused($isFocused)
       .cornerRadius(cornerRadius)
       .background(
         RoundedRectangle(cornerRadius: cornerRadius)
