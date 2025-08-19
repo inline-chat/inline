@@ -28,7 +28,11 @@ public struct TranslationPopover: View {
     VStack {
       HStack {
         Text(
-          "Translate this chat to \(Locale.current.localizedString(forLanguageCode: UserLocale.getCurrentLanguage()) ?? "your language")?"
+          translationEnabled
+            ?
+            "Translated to \(Locale.current.localizedString(forLanguageCode: UserLocale.getCurrentLanguage()) ?? "your language")"
+            :
+            "Translate this chat to \(Locale.current.localizedString(forLanguageCode: UserLocale.getCurrentLanguage()) ?? "your language")?"
         )
         .foregroundStyle(.primary)
       }
