@@ -36,6 +36,12 @@ public actor RealtimeV2 {
   private let connectionStateChannel = AsyncChannel<RealtimeConnectionState>()
   private var currentConnectionState: RealtimeConnectionState = .connecting
 
+  // Transaction execution
+  private var transactionContinuations: [TransactionId: CheckedContinuation<
+    InlineProtocol.RpcResult.OneOf_Result?,
+    TransactionError
+  >] = [:]
+
   // MARK: - Options
 
   private let retryDelay: TimeInterval = 2.0
@@ -109,7 +115,7 @@ public actor RealtimeV2 {
       }
     }.store(in: &tasks)
 
-    // Transport events
+    // Client/Transport events
     Task.detached {
       self.log.debug("Starting transport events listener")
       for await event in await self.client.events {
@@ -118,11 +124,42 @@ public actor RealtimeV2 {
         switch event {
           case .open:
             self.log.debug("Transport connected")
-            await self.updateConnectionState(.connected)
+            Task {
+              await self.updateConnectionState(.connected)
+              await self.restartTransactions()
+            }
 
           case .connecting:
             self.log.debug("Transport connecting")
-            await self.updateConnectionState(.connecting)
+            Task { await self.updateConnectionState(.connecting) }
+
+          case let .ack(msgId):
+            self.log.debug("Received ACK for message \(msgId)")
+            Task { await self.ackTransaction(msgId: msgId) }
+
+          case let .rpcResult(msgId, rpcResult):
+            self.log.debug("Received RPC result for message \(msgId)")
+            Task { await self.completeTransaction(msgId: msgId, rpcResult: rpcResult) }
+
+          case let .rpcError(msgId, rpcError):
+            self.log.debug("Received RPC error for message \(msgId)")
+            Task { await self.completeTransaction(msgId: msgId, error: TransactionError.rpcError(rpcError)) }
+        }
+      }
+    }.store(in: &tasks)
+
+    // Transactions
+    Task.detached {
+      self.log.debug("Starting transactions listener")
+      for await _ in await self.transactions.queueStream {
+        guard await self.currentConnectionState == .connected else {
+          self.log.debug("Skipping transaction queue stream as connection is not connected")
+          continue
+        }
+
+        while let transaction = await self.transactions.dequeue() {
+          self.log.debug("Dequeued transaction \(transaction.id)")
+          await self.runTransaction(transaction)
         }
       }
     }.store(in: &tasks)
@@ -137,17 +174,76 @@ public actor RealtimeV2 {
     await client.stopTransport()
   }
 
+  private func runTransaction(_ transactionWrapper: TransactionWrapper) async {
+    let transaction = transactionWrapper.transaction
+    // send as RPC
+    // mark as running
+    Task {
+      // send as RPC message
+      let msgId = try await client.sendRpc(method: transaction.method, input: transaction.input)
+      // mark as running
+      await transactions.running(transactionId: transactionWrapper.id, rpcMsgId: msgId)
+      // the rest of the work (ack, etc) is handled later
+    }
+  }
+
+  private func ackTransaction(msgId: UInt64) async {
+    await transactions.ack(rpcMsgId: msgId)
+  }
+
+  private func completeTransaction(msgId: UInt64, rpcResult: InlineProtocol.RpcResult.OneOf_Result?) async {
+    guard let transactionWrapper = await transactions.complete(rpcMsgId: msgId) else {
+      return
+    }
+
+    let transaction = transactionWrapper.transaction
+    let transactionId = transactionWrapper.id
+
+    do {
+      try transaction.apply(rpcResult)
+      transactionContinuations[transactionId]?.resume(returning: rpcResult)
+      transactionContinuations.removeValue(forKey: transactionId)
+    } catch {
+      transactionContinuations[transactionId]?.resume(throwing: TransactionError.executionError(error))
+      transactionContinuations.removeValue(forKey: transactionId)
+    }
+  }
+
+  private func completeTransaction(msgId: UInt64, error: TransactionError) async {
+    guard let transactionWrapper = await transactions.complete(rpcMsgId: msgId) else {
+      return
+    }
+
+    let transaction = transactionWrapper.transaction
+    let transactionId = transactionWrapper.id
+
+    transaction.failed(error: error)
+    transactionContinuations[transactionId]?.resume(throwing: error)
+    transactionContinuations.removeValue(forKey: transactionId)
+  }
+
+  private func restartTransactions() async {
+    // FIXME: probably wait a little before requeuing the inflight list as ack may come soon after a quick intermittent connection loss
+    await transactions.requeueAll()
+  }
+
   // MARK: - Public API
 
+  public func send(_ transaction: some Transaction) async throws -> InlineProtocol.RpcResult.OneOf_Result? {
+    // run optimistic immediately
+    transaction.optimistic()
 
-  /// Send an RPC call through the protocol client
-  ///
-  /// Note(@Mo): Unsure if we should keep this
-  public func sendRpc(
-    method: InlineProtocol.Method,
-    input: RpcCall.OneOf_Input?
-  ) async throws -> RpcResult.OneOf_Result? {
-    try await client.sendRpc(method: method, input: input)
+    // add to execution queue
+    let transactionId = await transactions.queue(transaction: transaction)
+    log.debug("Queued transaction \(transaction.debugDescription)")
+
+    // optionally if they want to wait for the result
+    return try await withCheckedThrowingContinuation { continuation in
+      transactionContinuations[transactionId] = continuation as? CheckedContinuation<
+        RpcResult.OneOf_Result?,
+        TransactionError
+      >
+    }
   }
 
   /// Returns a stream of connection state changes that can be consumed from any task.
