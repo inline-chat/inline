@@ -71,7 +71,7 @@ struct SpaceListView: View {
   }
 
   private var searchBar: some View {
-    SidebarSearchBar(text: $searchQuery)
+    SidebarSearchBar(text: $searchQuery, isFocused: false)
       .padding(.horizontal, Theme.sidebarItemOuterSpacing)
       .padding(.bottom, 8)
   }
