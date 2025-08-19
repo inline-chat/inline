@@ -434,7 +434,8 @@ struct ProcessEntitiesTests {
     let boldFont = NSFontManager.shared.convert(testConfiguration.font, toHaveTrait: .boldFontMask) ?? testConfiguration
       .font
     #else
-    let boldFont = UIFont.boldSystemFont(ofSize: testConfiguration.font.pointSize)
+    let safeSize = max(testConfiguration.font.pointSize, 12.0)
+    let boldFont = UIFont.boldSystemFont(ofSize: safeSize)
     #endif
 
     attributedString.addAttribute(.font, value: boldFont, range: boldRange)
@@ -463,9 +464,11 @@ struct ProcessEntitiesTests {
     let codeRange = NSRange(location: 11, length: 4)
 
     #if os(macOS)
-    let monospaceFont = NSFont.monospacedSystemFont(ofSize: testConfiguration.font.pointSize, weight: .regular)
+    let safeSize = max(testConfiguration.font.pointSize, 12.0)
+    let monospaceFont = NSFont.monospacedSystemFont(ofSize: safeSize, weight: .regular)
     #else
-    let monospaceFont = UIFont.monospacedSystemFont(ofSize: testConfiguration.font.pointSize, weight: .regular)
+    let safeSize = max(testConfiguration.font.pointSize, 12.0)
+    let monospaceFont = UIFont.monospacedSystemFont(ofSize: safeSize, weight: .regular)
     #endif
 
     attributedString.addAttributes([
@@ -508,7 +511,8 @@ struct ProcessEntitiesTests {
     let boldFont = NSFontManager.shared.convert(testConfiguration.font, toHaveTrait: .boldFontMask) ?? testConfiguration
       .font
     #else
-    let boldFont = UIFont.boldSystemFont(ofSize: testConfiguration.font.pointSize)
+    let safeSize = max(testConfiguration.font.pointSize, 12.0)
+    let boldFont = UIFont.boldSystemFont(ofSize: safeSize)
     #endif
 
     attributedString.addAttribute(.font, value: boldFont, range: boldRange)
@@ -565,7 +569,8 @@ struct ProcessEntitiesTests {
     let boldFont = NSFontManager.shared.convert(testConfiguration.font, toHaveTrait: .boldFontMask) ?? testConfiguration
       .font
     #else
-    let boldFont = UIFont.boldSystemFont(ofSize: testConfiguration.font.pointSize)
+    let safeSize = max(testConfiguration.font.pointSize, 12.0)
+    let boldFont = UIFont.boldSystemFont(ofSize: safeSize)
     #endif
     attributedString.addAttribute(.font, value: boldFont, range: boldRange)
 
@@ -576,9 +581,11 @@ struct ProcessEntitiesTests {
     // Add code
     let codeRange = NSRange(location: 31, length: 4)
     #if os(macOS)
-    let monospaceFont = NSFont.monospacedSystemFont(ofSize: testConfiguration.font.pointSize, weight: .regular)
+    let safeSize = max(testConfiguration.font.pointSize, 12.0)
+    let monospaceFont = NSFont.monospacedSystemFont(ofSize: safeSize, weight: .regular)
     #else
-    let monospaceFont = UIFont.monospacedSystemFont(ofSize: testConfiguration.font.pointSize, weight: .regular)
+    let safeSize = max(testConfiguration.font.pointSize, 12.0)
+    let monospaceFont = UIFont.monospacedSystemFont(ofSize: safeSize, weight: .regular)
     #endif
     attributedString.addAttributes([
       .font: monospaceFont,
@@ -629,7 +636,8 @@ struct ProcessEntitiesTests {
     let boldFont = NSFontManager.shared.convert(testConfiguration.font, toHaveTrait: .boldFontMask) ?? testConfiguration
       .font
     #else
-    let boldFont = UIFont.boldSystemFont(ofSize: testConfiguration.font.pointSize)
+    let safeSize = max(testConfiguration.font.pointSize, 12.0)
+    let boldFont = UIFont.boldSystemFont(ofSize: safeSize)
     #endif
     attributedString.addAttribute(.font, value: boldFont, range: boldRange)
 
@@ -743,5 +751,94 @@ struct ProcessEntitiesTests {
     #expect(italicEntity != nil)
     #expect(italicEntity!.offset == 7) // Position after markdown is stripped
     #expect(italicEntity!.length == 6) // "italic"
+  }
+
+  @Test("Should not extract italic from attributed string with markdown if no space before or after")
+  func testShouldNotExtractItalicWithMarkdown() {
+    let text = "This_is_italic_text"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+
+    #expect(result.text == "This_is_italic_text")
+    #expect(result.entities.entities.count == 0)
+  }
+
+  @Test("Should extract italic from string boundaries")
+  func testShouldExtractItalicFromStringBoundaries() {
+    let text = "_italic_"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+
+    #expect(result.text == "italic")
+    #expect(result.entities.entities.count == 1)
+
+    let italicEntity = result.entities.entities.first { $0.type == .italic }
+    #expect(italicEntity != nil)
+    #expect(italicEntity!.offset == 0)
+    #expect(italicEntity!.length == 6) // "italic"
+  }
+
+  @Test("Should not extract the markdowns within code block except for code block")
+  func testShouldNotExtractMarkdownWithinCodeBlock() {
+    let text = "this is a code `let str = \"i'm writing a code _hey_ do not parse **bold**\"`"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+
+    #expect(result.text == "this is a code let str = \"i'm writing a code _hey_ do not parse **bold**\"")
+    #expect(result.entities.entities.count == 1)
+  }
+
+  @Test("Should not allow nested code blocks")
+  func testShouldNotAllowNestedCodeBlocks() {
+    // Test inline code within pre code block
+    let text1 = "```\nlet code = `inline code here`\nmore code\n```"
+    let attributedString1 = NSMutableAttributedString(
+      string: text1,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let result1 = ProcessEntities.fromAttributedString(attributedString1)
+
+    // Should only have one pre code entity, no nested inline code
+    #expect(result1.entities.entities.count == 1)
+    #expect(result1.entities.entities[0].type == .pre)
+
+    // Test multiple inline code blocks within pre code block
+    let text2 = "```\nlet x = `value1`\nlet y = `value2`\n```"
+    let attributedString2 = NSMutableAttributedString(
+      string: text2,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let result2 = ProcessEntities.fromAttributedString(attributedString2)
+
+    // Should only have one pre code entity
+    #expect(result2.entities.entities.count == 1)
+    #expect(result2.entities.entities[0].type == .pre)
+
+    // Test bold and italic within pre code block
+    let text3 = "```\nlet text = \"**bold** and _italic_\"\n```"
+    let attributedString3 = NSMutableAttributedString(
+      string: text3,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let result3 = ProcessEntities.fromAttributedString(attributedString3)
+
+    // Should only have one pre code entity, no bold or italic
+    #expect(result3.entities.entities.count == 1)
+    #expect(result3.entities.entities[0].type == .pre)
   }
 }
