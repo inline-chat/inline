@@ -382,3 +382,4 @@ cd web && bun run build && bun run start
 - Follow existing code patterns and conventions in the codebase
 - Reference this guide for accurate commands and file structure
 - Write tests for isolated, simple to test, non-UI code in Swift packages. Avoid attempting to write tests automatically when it requires significant investment, mocking, re-architecture or complex testing workflows
+- run tests with a timeout of 15s
