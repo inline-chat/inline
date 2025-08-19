@@ -70,11 +70,13 @@ class NewTransactionsTests {
     #expect(mappedId == id)
   }
 
-  @Test("deletes transaction completely")
-  func testDelete() async throws {
+  @Test("completes transaction and removes it completely")
+  func testComplete() async throws {
     let transactions = Transactions()
     let id = await transactions.queue(transaction: MockTransaction())
-    await transactions.delete(transactionId: id)
+    _ = await transactions.dequeue()
+    await transactions.running(transactionId: id, rpcMsgId: 42)
+    _ = await transactions.complete(rpcMsgId: 42)
     
     let inQueue = await transactions.isInQueue(transactionId: id)
     let inFlight = await transactions.isInFlight(transactionId: id)
@@ -96,22 +98,19 @@ class NewTransactionsTests {
 // MARK: - Helpers
 
 private struct MockTransaction: Transaction {
+  typealias Result = Void
+  
   var method: InlineProtocol.Method = .UNRECOGNIZED(0)
   var input: InlineProtocol.RpcCall.OneOf_Input? = nil
 
   init() {}
 
-  func execute() async throws(TransactionExecutionError) -> [String] {
-    []
-  }
-
   /// Apply the result of the query to database
   /// Error propagated to the caller of the query
-  func apply(result: [String]) throws {
+  func apply(_ rpcResult: InlineProtocol.RpcResult.OneOf_Result?) throws(TransactionExecutionError) {
     // Mock implementation that does nothing
   }
 
   func optimistic() {}
-  func cancelled() {}
-  func failed() {}
+  func failed(error: TransactionError) {}
 }
