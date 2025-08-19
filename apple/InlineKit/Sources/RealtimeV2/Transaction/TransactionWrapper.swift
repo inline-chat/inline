@@ -9,9 +9,9 @@ struct TransactionWrapper: Sendable, Identifiable {
   var date: Date
 
   /// Transaction to execute
-  var transaction: Transaction
+  var transaction: any Transaction
 
-  init(transaction: Transaction) {
+  init(transaction: some Transaction) {
     id = .generate()
     date = Date()
     self.transaction = transaction

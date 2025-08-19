@@ -1,39 +1,58 @@
+import AsyncAlgorithms
 import Collections
 import Foundation
 
 actor Transactions {
   /// Transactions that are queued to be run
-  var queue: OrderedDictionary<TransactionId, TransactionWrapper> = [:]
+  var _queue: OrderedDictionary<TransactionId, TransactionWrapper> = [:]
 
   /// Transactions that have an RPC call in progress
-  var inFlight: OrderedDictionary<TransactionId, TransactionWrapper> = [:]
+  var inFlight: [TransactionId: TransactionWrapper] = [:]
+
+  /// Transactions that have been sent but not yet completed
+  var sent: [TransactionId: TransactionWrapper] = [:]
 
   /// Make of transport RPC msgId to transactionId
-  var transactionRpcMap: [Int64: TransactionId] = [:]
+  var transactionRpcMap: [UInt64: TransactionId] = [:]
 
-  init() {}
+  /// Async stream to signal run loop to check the transaction queue
+  var queueStream: AsyncChannel<Void> = AsyncChannel()
 
-  public func queue(transaction: any Transaction) -> TransactionId {
+  init() {
+    Task {
+      // load all transactions from disk into queue
+      await loadAllFromDisk()
+      // signal the run loop
+      await queueStream.send(())
+    }
+  }
+
+  public func queue(transaction: some Transaction) -> TransactionId {
     let wrapper = TransactionWrapper(transaction: transaction)
     let transactionId = wrapper.id
 
     // add to queue
-    queue[transactionId] = wrapper
+    _queue[transactionId] = wrapper
 
     // persist
     saveToDisk(transaction: wrapper)
+
+    Task {
+      // send to stream
+      await queueStream.send(())
+    }
 
     return transactionId
   }
 
   /// Dequeue next transaction from the queue and mark it as in-flight.
   public func dequeue() -> TransactionWrapper? {
-    guard let first = queue.keys.first else { return nil }
+    guard let first = _queue.keys.first else { return nil }
     let transactionId = first
-    let wrapper = queue[first]
+    let wrapper = _queue[first]
 
     // remove from queue
-    queue.removeValue(forKey: transactionId)
+    _queue.removeValue(forKey: transactionId)
 
     // add to in-flight
     inFlight[transactionId] = wrapper
@@ -42,8 +61,8 @@ actor Transactions {
   }
 
   /// Mark a transaction as running, which means it has an RPC call in progress.
-  public func running(transactionId: TransactionId, rpcMsgId: Int64) {
-    guard let wrapper = inFlight[transactionId] else {
+  public func running(transactionId: TransactionId, rpcMsgId: UInt64) {
+    guard let _ = inFlight[transactionId] else {
       // if not found, it means it was already completed or discarded
       return
     }
@@ -52,8 +71,8 @@ actor Transactions {
     transactionRpcMap[rpcMsgId] = transactionId
   }
 
-  /// Acknowledge a transaction by the rpc message ID
-  public func ack(rpcMsgId: Int64) {
+  /// Acknowledge a transaction by the rpc message ID. It deletes the transaction from the system.
+  public func ack(rpcMsgId: UInt64) {
     guard let transactionId = transactionRpcMap[rpcMsgId] else {
       // if not found, it means it was already completed or discarded
       return
@@ -62,9 +81,40 @@ actor Transactions {
     ack(transactionId: transactionId)
   }
 
-  /// Acknowledge a transaction that has been completed and deletes it from the system
+  /// Acknowledge a transaction that has been completed, it moves it to sent queue waiting for the result.
   func ack(transactionId: TransactionId) {
-    delete(transactionId: transactionId)
+    // delete(transactionId: transactionId)
+    // move to sent
+    sent[transactionId] = inFlight[transactionId]
+
+    // remove from in-flight
+    inFlight.removeValue(forKey: transactionId)
+
+    // delete from disk because we no longer need to retry it
+    deleteFromDisk(transactionId: transactionId)
+  }
+
+  /// Complete a transaction by the rpc message ID. Called when a response or error is received.
+  /// It deletes the transaction from the system.
+  func complete(rpcMsgId: UInt64) -> TransactionWrapper? {
+    guard let transactionId = transactionRpcMap[rpcMsgId] else {
+      // if not found, it means it was already completed or discarded
+      return nil
+    }
+
+    // delete from all queues
+    let transactionFromInFlight = inFlight.removeValue(forKey: transactionId)
+    let transactionFromSent = sent.removeValue(forKey: transactionId)
+    _ = _queue.removeValue(forKey: transactionId)
+
+    // remove from rpc map
+    transactionRpcMap.removeValue(forKey: rpcMsgId)
+
+    // delete from disk because we no longer need to retry it
+    deleteFromDisk(transactionId: transactionId)
+
+    // In case we have missed the ACK, we return the transaction from in-flight
+    return transactionFromSent ?? transactionFromInFlight
   }
 
   /// Requeue a transaction that needs to be retried
@@ -78,10 +128,14 @@ actor Transactions {
     inFlight.removeValue(forKey: transactionId)
 
     // re-add to queue
-    queue[transactionId] = wrapper
+    _queue[transactionId] = wrapper
+  }
 
-    // persist
-    saveToDisk(transaction: wrapper)
+  public func requeueAll() {
+    for (transactionId, wrapper) in inFlight {
+      _queue[transactionId] = wrapper
+    }
+    inFlight.removeAll()
   }
 
   // MARK: - Helpers
@@ -91,21 +145,14 @@ actor Transactions {
   }
 
   public func isInQueue(transactionId: TransactionId) -> Bool {
-    queue[transactionId] != nil
+    _queue[transactionId] != nil
   }
 
-  public func transactionIdFrom(msgId: Int64) -> TransactionId? {
+  public func transactionIdFrom(msgId: UInt64) -> TransactionId? {
     transactionRpcMap[msgId]
   }
 
   // MARK: - Private APIs
-
-  public func delete(transactionId: TransactionId) {
-    queue.removeValue(forKey: transactionId)
-    inFlight.removeValue(forKey: transactionId)
-    transactionRpcMap = transactionRpcMap.filter { $0.value != transactionId }
-    deleteFromDisk(transactionId: transactionId)
-  }
 
   private func saveToDisk(transaction: TransactionWrapper) {
     // todo
@@ -113,5 +160,12 @@ actor Transactions {
 
   private func deleteFromDisk(transactionId: TransactionId) {
     // todo
+  }
+
+  private func loadAllFromDisk() {
+    // todo
+    // for transaction in transactions {
+    //   queue[transaction.id] = transaction
+    // }
   }
 }
