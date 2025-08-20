@@ -6,7 +6,7 @@ import Logger
 
 /// Communicate with the transport and handle auth, generating messages, sequencing, track ACKs, etc.
 actor ProtocolClient {
-  private let log = Log.scoped("ProtocolClient")
+  private let log = Log.scoped("RealtimeV2/ProtocolClient")
   private let transport: Transport
   private let auth: Auth
 
@@ -28,9 +28,14 @@ actor ProtocolClient {
   /// Tasks for managing listeners
   private var tasks: Set<Task<Void, Never>> = []
 
+  /// Ping pong
+  private let pingPong: PingPongService
+
   init(transport: Transport, auth: Auth) {
     self.transport = transport
     self.auth = auth
+    pingPong = PingPongService()
+    Task { await pingPong.configure(client: self) }
 
     Task {
       await self.startListeners()
@@ -51,6 +56,7 @@ actor ProtocolClient {
     lastTimestamp = 0
     sequence = 0
     rpcCalls.removeAll()
+    Task { await pingPong.stop() }
   }
 
   // MARK: - State
@@ -58,11 +64,13 @@ actor ProtocolClient {
   private func connectionOpen() async {
     state = .open
     Task { await events.send(.open) }
+    await pingPong.start()
   }
 
   private func connecting() async {
     state = .connecting
     Task { await events.send(.connecting) }
+    await pingPong.stop()
   }
 
   // MARK: - Listeners
@@ -123,10 +131,29 @@ actor ProtocolClient {
       case let .message(serverMessage):
         log.debug("Received server message: \(serverMessage)")
 
+      case let .pong(pong):
+        log.debug("Received pong: \(pong.nonce)")
+        Task { await pingPong.pong(nonce: pong.nonce) }
+
       // TODO: Handle server messages (updates, notifications, etc.)
       default:
         log.debug("Protocol client: Unhandled message type: \(String(describing: message.body))")
     }
+  }
+
+  func sendPing(nonce: UInt64) async {
+    let msg = wrapMessage(body: .ping(.with {
+      $0.nonce = nonce
+    }))
+    do {
+      try await transport.send(msg)
+    } catch {
+      log.error("Failed to send ping: \(error)")
+    }
+  }
+
+  func reconnect() async {
+    await transport.restart()
   }
 
   // MARK: - ID Generation
