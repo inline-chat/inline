@@ -9,12 +9,6 @@ import Network
 import UIKit
 #endif
 
-// MARK: - WebSocketTransport -------------------------------------------------
-
-/// Lightweight, Swift-Concurrency-first WebSocket implementation that conforms
-/// to the new `Transport` protocol.  It purposefully leaves out the advanced
-/// ping/reconnect logic of the old `RealtimeAPI.WebSocketTransport` in order to
-/// keep the example focused on the *shape* of the API.
 actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
   // MARK: Public `Transport` API --------------------------------------------
 
@@ -29,11 +23,11 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
     }
     log.debug("starting connection to \(url)")
 
-    // Transition to connecting state before opening connection
     state = .connecting
     await openConnection()
   }
 
+  /// Should be called on logout
   func stop() async {
     guard state == .connected || state == .connecting else { return }
     log.debug("stopping connection")
@@ -69,10 +63,7 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
   private var state: ConnectionState = .idle
 
   private var task: URLSessionWebSocketTask?
-  /// Handle to the detached task that continuously receives frames from the
-  /// current WebSocket connection.  We keep a reference so it can be cancelled
-  /// when tearing down the connection to avoid leaking multiple concurrent
-  /// receive loops.
+
   private var receiveLoopTask: Task<Void, Never>?
 
   /// Connection attempt ID to ensure delegate callbacks and cleanup operations
@@ -80,12 +71,8 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
   /// previous connection attempts from interfering.
   private var connectionAttemptId: UInt64 = 0
 
-  /// Task that handles the current reconnection attempt. Only one reconnection
-  /// can be in progress at a time to prevent resource leaks.
   private var reconnectionTask: Task<Void, Never>?
 
-  /// `URLSession` configured with this actor as its delegate so that we can
-  /// reliably act on `didOpen`, `didClose` and error callbacks.
   private lazy var session: URLSession = { [unowned self] in
     let configuration = URLSessionConfiguration.default
     configuration.timeoutIntervalForRequest = 30

@@ -37,6 +37,18 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
     })
   }
 
+  const sendPong = (message: ClientMessage, nonce: bigint) => {
+    sendRaw({
+      id: message.id,
+      body: {
+        oneofKind: "pong",
+        pong: {
+          nonce,
+        },
+      },
+    })
+  }
+
   const sendRpcReply = (result: RpcResult["result"]) => {
     handlerContext.sendRaw({
       id: genId(),
@@ -72,6 +84,10 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
       case "rpcCall":
         let result = await handleRpcCall(message.body.rpcCall, handlerContext)
         sendRpcReply(result)
+        break
+
+      case "ping":
+        sendPong(message, message.body.ping.nonce)
         break
 
       default:
