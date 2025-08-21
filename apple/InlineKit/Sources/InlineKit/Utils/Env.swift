@@ -8,6 +8,7 @@ public extension EnvironmentValues {
   @Entry var auth = Auth.shared
   @Entry var transactions = Transactions.shared
   @Entry var realtime = Realtime.shared
+  @Entry var realtimeV2 = RealtimeV2.shared
 }
 
 public extension View {
