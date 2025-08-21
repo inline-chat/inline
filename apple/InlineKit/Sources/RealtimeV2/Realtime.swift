@@ -39,7 +39,8 @@ public actor RealtimeV2 {
   // Transaction execution
   private var transactionContinuations: [TransactionId: CheckedContinuation<
     InlineProtocol.RpcResult.OneOf_Result?,
-    TransactionError
+    // TransactionError
+    any Error
   >] = [:]
 
   // MARK: - Options
@@ -175,6 +176,7 @@ public actor RealtimeV2 {
   }
 
   private func runTransaction(_ transactionWrapper: TransactionWrapper) async {
+    log.debug("Running transaction \(transactionWrapper.id) with method \(transactionWrapper.transaction.method)")
     let transaction = transactionWrapper.transaction
     // send as RPC
     // mark as running
@@ -188,6 +190,7 @@ public actor RealtimeV2 {
   }
 
   private func ackTransaction(msgId: UInt64) async {
+    log.debug("Acknowledging transaction with message ID \(msgId)")
     await transactions.ack(rpcMsgId: msgId)
   }
 
@@ -199,13 +202,24 @@ public actor RealtimeV2 {
     let transaction = transactionWrapper.transaction
     let transactionId = transactionWrapper.id
 
-    do {
-      try transaction.apply(rpcResult)
-      transactionContinuations[transactionId]?.resume(returning: rpcResult)
-      transactionContinuations.removeValue(forKey: transactionId)
-    } catch {
-      transactionContinuations[transactionId]?.resume(throwing: TransactionError.executionError(error))
-      transactionContinuations.removeValue(forKey: transactionId)
+    log.debug("Transaction \(transactionId) completed with result \(rpcResult)")
+
+    // FIXME: Task, Task.detached, or...?
+    Task.detached {
+      do {
+        try await transaction.apply(rpcResult)
+        Task {
+          await self.getAndRemoveContinuation(for: transactionId)?.resume(returning: rpcResult)
+        }
+      } catch {
+        // This for some reason did not work
+        // let error = TransactionError.executionError(error)
+        await transaction.failed(error: TransactionError.invalid)
+        Task {
+          await self.getAndRemoveContinuation(for: transactionId)?
+            .resume(throwing: TransactionError.invalid)
+        }
+      }
     }
   }
 
@@ -217,9 +231,22 @@ public actor RealtimeV2 {
     let transaction = transactionWrapper.transaction
     let transactionId = transactionWrapper.id
 
-    transaction.failed(error: error)
+    log.error("Transaction \(transactionId) failed with error", error: error)
+
+    Task.detached {
+      await transaction.failed(error: error)
+    }
     transactionContinuations[transactionId]?.resume(throwing: error)
     transactionContinuations.removeValue(forKey: transactionId)
+  }
+
+  private func getAndRemoveContinuation(for transactionId: TransactionId) -> CheckedContinuation<
+    RpcResult.OneOf_Result?,
+    any Error
+  >? {
+    let continuation = transactionContinuations[transactionId]
+    transactionContinuations.removeValue(forKey: transactionId)
+    return continuation
   }
 
   private func restartTransactions() async {
@@ -231,7 +258,9 @@ public actor RealtimeV2 {
 
   public func send(_ transaction: some Transaction) async throws -> InlineProtocol.RpcResult.OneOf_Result? {
     // run optimistic immediately
-    transaction.optimistic()
+    Task(priority: .userInitiated) { @MainActor in
+      await transaction.optimistic()
+    }
 
     // add to execution queue
     let transactionId = await transactions.queue(transaction: transaction)
@@ -239,10 +268,11 @@ public actor RealtimeV2 {
 
     // optionally if they want to wait for the result
     return try await withCheckedThrowingContinuation { continuation in
-      transactionContinuations[transactionId] = continuation as? CheckedContinuation<
-        RpcResult.OneOf_Result?,
-        TransactionError
-      >
+      transactionContinuations[transactionId] = continuation
+//      as? CheckedContinuation<
+//        RpcResult.OneOf_Result?,
+//        TransactionError
+//      >
     }
   }
 
