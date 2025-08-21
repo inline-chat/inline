@@ -1,5 +1,6 @@
 import Auth
 import InlineKit
+import RealtimeV2
 import SwiftUI
 
 struct ReactionOverlayView: View {
@@ -50,12 +51,14 @@ struct ReactionOverlayView: View {
       )))
     } else {
       // Add reaction
-      Transactions.shared.mutate(transaction: .addReaction(.init(
-        message: fullMessage.message,
-        emoji: emoji,
-        userId: currentUserId,
-        peerId: fullMessage.message.peerId
-      )))
+      Task { @MainActor in
+        let _ = try await RealtimeV2.shared.send(AddReactionTransaction(
+          messageId: fullMessage.message.messageId,
+          emoji: emoji,
+          peerId: fullMessage.message.peerId,
+          chatId: fullMessage.message.chatId
+        ))
+      }
     }
 
     // Dismiss the overlay

@@ -1,13 +1,12 @@
 import InlineProtocol
 
 public enum TransactionExecutionError: Error {
-  case rpcError // todo
   case invalid
 }
 
-public protocol Transaction: Sendable {
-  associatedtype Result
+public typealias Transaction2 = Transaction
 
+public protocol Transaction: Sendable {
   var method: InlineProtocol.Method { get set }
   var input: InlineProtocol.RpcCall.OneOf_Input? { get set }
 
@@ -15,13 +14,13 @@ public protocol Transaction: Sendable {
 
   /// Apply the result of the query to database
   /// Error propagated to the caller of the query
-  func apply(_ rpcResult: InlineProtocol.RpcResult.OneOf_Result?) throws(TransactionExecutionError)
+  func apply(_ rpcResult: InlineProtocol.RpcResult.OneOf_Result?) async throws(TransactionExecutionError)
 
   /// Optimistically update the database
-  func optimistic()
+  func optimistic() async
 
   /// Called when the transaction fails to execute
-  func failed(error: TransactionError)
+  func failed(error: TransactionError) async
 }
 
 public extension Transaction {
