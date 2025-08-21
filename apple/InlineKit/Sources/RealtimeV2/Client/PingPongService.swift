@@ -120,6 +120,8 @@ actor PingPongService {
   }
 
   private func avgLatencyMs() -> UInt32 {
+    // otherwise we'll divide by 0 and get a crash
+    guard recentLatenciesMs.count > 0 else { return 0 }
     let sum = recentLatenciesMs.reduce(0, +)
     return sum / UInt32(recentLatenciesMs.count)
   }
