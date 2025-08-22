@@ -335,7 +335,9 @@ extension RealtimeAPI {
       case let .message(serverMessage):
         switch serverMessage.payload {
           case let .update(update):
-            handleUpdate(update)
+            break
+          // Disabled and moved to v2
+            // handleUpdate(update)
 
           default:
             break
