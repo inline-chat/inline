@@ -33,7 +33,7 @@ extension View {
       .environmentObject(deps.nav)
       .environmentObject(deps.data)
       .environmentObject(deps.userSettings.notification)
-      .environmentObject(RealtimeState.shared)
+      .environmentObject(Api.realtime.stateObject)
       .environment(\.transactions, deps.transactions)
       .environment(\.realtime, deps.realtime)
       .appDatabase(deps.database)
