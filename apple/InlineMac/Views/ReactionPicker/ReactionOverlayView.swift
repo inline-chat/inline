@@ -52,11 +52,9 @@ struct ReactionOverlayView: View {
     } else {
       // Add reaction
       Task { @MainActor in
-        let _ = try await RealtimeV2.shared.send(AddReactionTransaction(
-          messageId: fullMessage.message.messageId,
+        try await Api.realtime.send(AddReactionTransaction(
           emoji: emoji,
-          peerId: fullMessage.message.peerId,
-          chatId: fullMessage.message.chatId
+          message: fullMessage.message
         ))
       }
     }

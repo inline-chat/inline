@@ -22,6 +22,9 @@ public enum ClientEvent: Sendable {
   /// When a RPC error is received for a message
   case rpcError(msgId: UInt64, rpcError: InlineProtocol.RpcError)
 
+  /// When a batch of updates is received from the server
+  case updates(updates: InlineProtocol.UpdatesPayload)
+
   /// When a message is received from the server
   // Probably need to add granularity here and abstract the protocol
   // case message(ServerProtocolMessage)

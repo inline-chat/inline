@@ -130,6 +130,12 @@ actor ProtocolClient {
 
       case let .message(serverMessage):
         log.debug("Received server message: \(serverMessage)")
+        switch serverMessage.payload {
+          case let .update(updatesPayload):
+            Task { await events.send(.updates(updates: updatesPayload)) }
+          default:
+            log.debug("Protocol client: Unhandled message type: \(String(describing: serverMessage.payload))")
+        }
 
       case let .pong(pong):
         log.debug("Received pong: \(pong.nonce)")

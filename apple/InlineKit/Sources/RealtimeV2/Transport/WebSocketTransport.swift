@@ -9,14 +9,14 @@ import Network
 import UIKit
 #endif
 
-actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
+public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
   // MARK: Public `Transport` API --------------------------------------------
 
   private let log = Log.scoped("RealtimeV2.WebSocketTransport", enableTracing: true)
 
-  nonisolated var events: AsyncChannel<TransportEvent> { _eventChannel }
+  public nonisolated var events: AsyncChannel<TransportEvent> { _eventChannel }
 
-  func start() async {
+  public func start() async {
     guard state == .idle else {
       log.trace("Not starting connection because state is not idle (current: \(state))")
       return
@@ -28,7 +28,7 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
   }
 
   /// Should be called on logout
-  func stop() async {
+  public func stop() async {
     guard state == .connected || state == .connecting else { return }
     log.debug("stopping connection")
 
@@ -48,7 +48,7 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
     state = .idle
   }
 
-  func send(_ message: InlineProtocol.ClientMessage) async throws {
+  public func send(_ message: InlineProtocol.ClientMessage) async throws {
     guard state == .connected, let task else {
       throw TransportError.notConnected
     }
@@ -108,7 +108,7 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
 
   // MARK: Initialization -----------------------------------------------------
 
-  init(url: URL? = nil) {
+  public init(url: URL? = nil) {
     log.trace("initializing")
 
     // 1. Build the unified AsyncChannel first
@@ -256,7 +256,7 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
 
   // MARK: - URLSessionWebSocketDelegate ------------------------------------
 
-  nonisolated func urlSession(
+  public nonisolated func urlSession(
     _ session: URLSession,
     webSocketTask: URLSessionWebSocketTask,
     didOpenWithProtocol protocol: String?
@@ -264,7 +264,7 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
     Task { await self.connectionDidOpen(for: webSocketTask) }
   }
 
-  nonisolated func urlSession(
+  public nonisolated func urlSession(
     _ session: URLSession,
     webSocketTask: URLSessionWebSocketTask,
     didCloseWith closeCode: URLSessionWebSocketTask.CloseCode,
@@ -273,7 +273,7 @@ actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
     Task { await self.handleClose(for: webSocketTask, code: closeCode, reason: reason) }
   }
 
-  nonisolated func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+  public nonisolated func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
     guard let error else { return }
     Task { await self.handleError(error, for: task) }
   }
