@@ -9,17 +9,16 @@ import Logger
 ///
 /// This actor manages the real-time communication with the Inline Protocol server.
 public actor RealtimeV2 {
-  /// The shared instance of the Realtime actor used across the application.
-  public static let shared = RealtimeV2(transport: WebSocketTransport(), auth: Auth.shared)
-
   // MARK: - Core Components
 
-  // private var transport: Transport
   private var auth: Auth
   private var client: ProtocolClient
   private var sync: Sync
   private var transactions: Transactions
   private var queries: Queries
+
+  // Public
+  public var stateObject: RealtimeState
 
   // TODO:
   // transactions
@@ -49,13 +48,14 @@ public actor RealtimeV2 {
 
   // MARK: - Initialization
 
-  init(transport: Transport, auth: Auth) {
+  public init(transport: Transport, auth: Auth, applyUpdates: ApplyUpdates) {
     // self.transport = transport
     self.auth = auth
     client = ProtocolClient(transport: transport, auth: auth)
-    sync = Sync()
+    sync = Sync(applyUpdates: applyUpdates)
     transactions = Transactions()
     queries = Queries()
+    stateObject = RealtimeState()
 
     Task {
       // Initialize everything and start
@@ -82,6 +82,7 @@ public actor RealtimeV2 {
 
   /// Start core components, register listeners and start run loops.
   private func start() async {
+    stateObject.start(realtime: self)
     await startListeners()
 
     if auth.isLoggedIn {
@@ -145,6 +146,10 @@ public actor RealtimeV2 {
           case let .rpcError(msgId, rpcError):
             self.log.debug("Received RPC error for message \(msgId)")
             Task { await self.completeTransaction(msgId: msgId, error: TransactionError.rpcError(rpcError)) }
+
+          case let .updates(updates):
+            self.log.debug("Received updates \(updates)")
+            Task { await self.sync.process(updates: updates.updates) }
         }
       }
     }.store(in: &tasks)
@@ -256,7 +261,8 @@ public actor RealtimeV2 {
 
   // MARK: - Public API
 
-  public func send(_ transaction: some Transaction) async throws -> InlineProtocol.RpcResult.OneOf_Result? {
+  @discardableResult
+  public func send(_ transaction: any Transaction2) async throws -> InlineProtocol.RpcResult.OneOf_Result? {
     // run optimistic immediately
     Task(priority: .userInitiated) { @MainActor in
       await transaction.optimistic()

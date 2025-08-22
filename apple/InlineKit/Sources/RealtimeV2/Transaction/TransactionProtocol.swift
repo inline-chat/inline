@@ -4,8 +4,6 @@ public enum TransactionExecutionError: Error {
   case invalid
 }
 
-public typealias Transaction2 = Transaction
-
 public protocol Transaction: Sendable {
   var method: InlineProtocol.Method { get set }
   var input: InlineProtocol.RpcCall.OneOf_Input? { get set }

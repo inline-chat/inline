@@ -6,10 +6,8 @@ import Logger
 
 /// An ObservableObject class that represents the state of the Realtime connection for usage in SwiftUI views
 public class RealtimeState: ObservableObject, @unchecked Sendable {
-  public static let shared = RealtimeState()
-
   // Private properties
-  private let realtime: RealtimeV2
+  private weak var realtime: RealtimeV2?
   private var task: Task<Void, Never>?
 
   // Published properties
@@ -18,7 +16,9 @@ public class RealtimeState: ObservableObject, @unchecked Sendable {
   // Publishers
   public var connectionStatePublisher: PassthroughSubject<RealtimeConnectionState, Never> = .init()
 
-  public init(realtime: RealtimeV2 = RealtimeV2.shared) {
+  public init() {}
+
+  public func start(realtime: RealtimeV2) {
     self.realtime = realtime
 
     // Subscribe to the realtime connection state

@@ -18,7 +18,11 @@ public struct AddReactionTransaction: Transaction2 {
   private var peerId: Peer
   private var userId: Int64
 
-  public init(messageId: Int64, emoji: String, peerId: Peer, chatId: Int64) {
+  public init(emoji: String, message: Message) {
+    self.init(emoji: emoji, messageId: message.messageId, peerId: message.peerId, chatId: message.chatId)
+  }
+
+  public init(emoji: String, messageId: Int64, peerId: Peer, chatId: Int64) {
     input = .addReaction(.with {
       $0.peerID = peerId.toInputPeer()
       $0.messageID = messageId
@@ -81,4 +85,12 @@ public struct AddReactionTransaction: Transaction2 {
   }
 
   public func failed(error: TransactionError2) async {}
+}
+
+// Helper
+
+public extension Transaction2 {
+  static func addReaction(emoji: String, message: InlineKit.Message) -> AddReactionTransaction {
+    AddReactionTransaction(emoji: emoji, message: message)
+  }
 }
