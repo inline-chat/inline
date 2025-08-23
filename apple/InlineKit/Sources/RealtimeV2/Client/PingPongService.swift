@@ -105,10 +105,8 @@ actor PingPongService {
     let pingsInFlight = pings.filter { $0.value.timeIntervalSinceNow > -30 }
     guard pingsInFlight.count > 0 else { return }
 
-    Task {
-      // Trigger a reconnect
-      await client.reconnect()
-    }
+    // Trigger a reconnect
+    await client.reconnect()
   }
 
   private func recordLatency(pingDate: Date) {

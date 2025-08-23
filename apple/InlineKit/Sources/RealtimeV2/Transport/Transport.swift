@@ -35,20 +35,25 @@ public protocol Transport: Sendable {
   /// Send an encoded `ClientMessage` to the server.  Throws if the transport
   /// is not currently in the `.connected` state.
   func send(_ message: ClientMessage) async throws
+
+  func stopConnection() async
+  func restart(retryDelay: TimeInterval?) async
 }
 
 // MARK: - Implementation Helpers
 
-extension Transport {
+public extension Transport {
   /// Restart the start connect after a delay
   ///
   /// Must be called if a fatal error occurs during connection flow.
-  func restart(retryDelay: TimeInterval = 2.0) async {
+  func restart(retryDelay: TimeInterval? = 2.0) async {
     // Stop current transport
-    await stop()
+    await stopConnection()
 
-    // Wait for the specified delay
-    try? await Task.sleep(for: .seconds(retryDelay))
+    if let retryDelay {
+      // Wait for the specified delay
+      try? await Task.sleep(for: .seconds(retryDelay))
+    }
 
     // Check if task was cancelled during sleep
     guard !Task.isCancelled else {

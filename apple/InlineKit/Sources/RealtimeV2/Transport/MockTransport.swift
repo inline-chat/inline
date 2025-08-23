@@ -44,4 +44,14 @@ actor MockTransport: Transport {
   init() {
     channel = AsyncChannel<TransportEvent>()
   }
+
+  func stopConnection() async {
+    started = false
+  }
+
+  func restart(retryDelay: TimeInterval? = 2.0) async {
+    started = true
+    await channel.send(.connecting)
+    await channel.send(.connected)
+  }
 }
