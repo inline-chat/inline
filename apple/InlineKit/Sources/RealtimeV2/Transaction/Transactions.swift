@@ -1,6 +1,7 @@
 import AsyncAlgorithms
 import Collections
 import Foundation
+import Logger
 
 actor Transactions {
   /// Transactions that are queued to be run
@@ -17,6 +18,9 @@ actor Transactions {
 
   /// Async stream to signal run loop to check the transaction queue
   var queueStream: AsyncChannel<Void> = AsyncChannel()
+
+  // Private
+  private let log = Log.scoped("RealtimeV2/Transactions")
 
   init() {
     Task {
@@ -160,6 +164,19 @@ actor Transactions {
 
   public func transactionIdFrom(msgId: UInt64) -> TransactionId? {
     transactionRpcMap[msgId]
+  }
+
+  /// Cancel all transactions that match the predicate from the queue.
+  public func cancel(where predicate: (TransactionWrapper) -> Bool) {
+    for (transactionId, wrapper) in _queue {
+      if predicate(wrapper) {
+        log.debug("Cancelling transaction \(transactionId) \(wrapper.transaction.debugDescription)")
+        Task {
+          await wrapper.transaction.cancelled()
+        }
+        _queue.removeValue(forKey: transactionId)
+      }
+    }
   }
 
   // MARK: - Private APIs
