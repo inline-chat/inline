@@ -72,10 +72,10 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
 
   private var receiveLoopTask: Task<Void, Never>?
 
-  /// Connection attempt ID to ensure delegate callbacks and cleanup operations
+  /// Connection attempt number to ensure delegate callbacks and cleanup operations
   /// only affect the current connection attempt. Prevents stale callbacks from
   /// previous connection attempts from interfering.
-  private var connectionAttemptId: UInt64 = 0
+  private var connectionAttemptNo: UInt64 = 0
 
   private var reconnectionTask: Task<Void, Never>?
 
@@ -95,9 +95,9 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
   private func cleanUpPreviousConnection() {
     log.trace("cleaning up previous connection task and loop")
 
-    // Increment connection attempt ID to invalidate any pending delegate callbacks
+    // Increment connection attempt number to invalidate any pending delegate callbacks
     // from the previous connection attempt
-    connectionAttemptId = connectionAttemptId &+ 1
+    connectionAttemptNo = connectionAttemptNo &+ 1
 
     // Cancel any active reconnection task to prevent concurrent reconnection attempts
     reconnectionTask?.cancel()
@@ -152,7 +152,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
 
     if state != .connecting {
       state = .connecting
-      log.debug("Transport connecting (attempt #\(connectionAttemptId))")
+      log.debug("Transport connecting (attempt #\(connectionAttemptNo))")
       Task { await _eventChannel.send(.connecting) }
     }
 
@@ -228,14 +228,25 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     }
 
     // Start a reconnection task to handle this error
+    let attemptNo = connectionAttemptNo
     reconnectionTask = Task { [weak self] in
       guard let self else { return }
 
       await connecting()
 
-      // Small delay with jitter to avoid busy-loop in pathological scenarios.
-      // TODO: Improve reconnection logic especially timeout amount
-      let delay = Double.random(in: 0.5 ... 3.0)
+      // Progressive backoff: 0.5s → 1s → random(1-3s)
+      let delay = switch attemptNo {
+        case 1:
+          0.3 // First reconnection attempt
+        case 2:
+          0.8 // Second reconnection attempt
+        case 3:
+          1.5 // Third reconnection attempt
+        default:
+          Double.random(in: 1.0 ... 4.0) // Subsequent attempts
+      }
+
+      log.debug("Reconnection attempt #\(attemptNo) with \(delay)s delay")
       try? await Task.sleep(for: .seconds(delay))
 
       // Check if we're still the active reconnection task and haven't been cancelled
@@ -248,7 +259,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
   private func connecting() async {
     guard state != .connecting else { return }
     state = .connecting
-    log.debug("Transport connecting (attempt #\(connectionAttemptId))")
+    log.debug("Transport connecting (attempt #\(connectionAttemptNo))")
     Task { await _eventChannel.send(.connecting) }
   }
 
@@ -295,7 +306,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     receiveLoop()
 
     state = .connected
-    log.debug("Transport connected (attempt #\(connectionAttemptId))")
+    log.debug("Transport connected (attempt #\(connectionAttemptNo))")
     Task { await _eventChannel.send(.connected) }
   }
 
