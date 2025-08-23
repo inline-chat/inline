@@ -1658,6 +1658,16 @@ class MessageViewAppKit: NSView {
     Log.shared.debug("Canceling message")
     if let transactionId = message.transactionId, !transactionId.isEmpty {
       Transactions.shared.cancel(transactionId: transactionId)
+    } else {
+      // try v2
+      let randomId = message.randomId
+      Task {
+        Api.realtime.cancelTransaction(where: {
+          guard $0.transaction.method == .sendMessage else { return false }
+          guard case let .sendMessage(input) = $0.transaction.input else { return false }
+          return input.randomID == randomId
+        })
+      }
     }
   }
 }
