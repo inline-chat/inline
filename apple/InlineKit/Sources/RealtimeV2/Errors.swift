@@ -5,7 +5,6 @@ public enum TransactionError: Error {
   case rpcError(InlineProtocol.RpcError)
   case timeout
   case invalid
-  case cancelled
 }
 
 extension TransactionError {

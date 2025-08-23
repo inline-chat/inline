@@ -19,6 +19,9 @@ public protocol Transaction: Sendable {
 
   /// Called when the transaction fails to execute
   func failed(error: TransactionError) async
+
+  /// Called when the transaction is cancelled
+  func cancelled() async
 }
 
 public extension Transaction {
@@ -29,4 +32,8 @@ public extension Transaction {
     input: \(String(describing: input)))
     """
   }
+}
+
+public extension Transaction {
+  func cancelled() async {}
 }
