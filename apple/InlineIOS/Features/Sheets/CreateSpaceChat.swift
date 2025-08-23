@@ -189,6 +189,15 @@ struct CreateSpaceChat: View {
 
         Transactions.shared.mutate(transaction: .createChat(transaction))
 
+        // TODO: Move to new transaction system
+        // Task(priority: .userInitiated) { @MainActor in
+        //   try await Api.realtime.send(CreateChatTransaction(
+        //     messageIds: [message.messageId],
+        //     peerId: message.peerId,
+        //     chatId: message.chatId
+        //   ))
+        // }
+
         // For now, we'll wait a bit and then dismiss - in a real app you'd want to handle the success callback
         formState.succeeded()
 

@@ -228,15 +228,15 @@ struct ReactionItem: View {
 
     if weReacted {
       // Remove reaction
-      Transactions.shared.mutate(transaction: .deleteReaction(.init(
-        message: fullMessage.message,
-        emoji: emoji,
-        peerId: fullMessage.message.peerId,
-        chatId: fullMessage.message.chatId
-      )))
+      Task(priority: .userInitiated) { @MainActor in
+        try await Api.realtime.send(DeleteReactionTransaction(
+          emoji: emoji,
+          message: fullMessage.message
+        ))
+      }
     } else {
       // Add reaction
-      Task { @MainActor in
+      Task(priority: .userInitiated) { @MainActor in
         try await Api.realtime.send(AddReactionTransaction(
           emoji: emoji,
           message: fullMessage.message
