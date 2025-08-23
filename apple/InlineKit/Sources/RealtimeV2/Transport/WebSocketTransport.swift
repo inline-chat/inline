@@ -32,6 +32,23 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     guard state == .connected || state == .connecting else { return }
     log.debug("stopping connection")
 
+    await stopConnection()
+
+    state = .idle
+  }
+
+  public func send(_ message: InlineProtocol.ClientMessage) async throws {
+    guard state == .connected, let task else {
+      throw TransportError.notConnected
+    }
+    log.trace("sending message \(message)")
+    let data = try message.serializedData()
+    try await task.send(.data(data))
+  }
+
+  public func stopConnection() async {
+    log.debug("stopping connection")
+
     // Cancel any active reconnection task
     reconnectionTask?.cancel()
     reconnectionTask = nil
@@ -44,17 +61,6 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     receiveLoopTask = nil
 
     task = nil
-
-    state = .idle
-  }
-
-  public func send(_ message: InlineProtocol.ClientMessage) async throws {
-    guard state == .connected, let task else {
-      throw TransportError.notConnected
-    }
-    log.trace("sending message \(message)")
-    let data = try message.serializedData()
-    try await task.send(.data(data))
   }
 
   // MARK: Internal state -----------------------------------------------------
@@ -75,8 +81,8 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
 
   private lazy var session: URLSession = { [unowned self] in
     let configuration = URLSessionConfiguration.default
-    configuration.timeoutIntervalForRequest = 30
-    configuration.timeoutIntervalForResource = 300
+    // configuration.timeoutIntervalForRequest = 30
+    // configuration.timeoutIntervalForResource = 300
     return URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
   }()
 
@@ -131,7 +137,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
   private func openConnection() async {
     // Guard against starting a connection when we shouldn't
     guard state != .idle else {
-      log.trace("Not opening connection because state is idle")
+      log.warning("Not opening connection because state is idle")
       return
     }
 
@@ -140,7 +146,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
 
     // Double-check state after cleanup - another task might have changed it
     guard state != .idle else {
-      log.trace("Not opening connection because state became idle during cleanup")
+      log.warning("Not opening connection because state became idle during cleanup")
       return
     }
 
@@ -286,11 +292,11 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
       return
     }
 
+    receiveLoop()
+
     state = .connected
     log.debug("Transport connected (attempt #\(connectionAttemptId))")
-    await _eventChannel.send(.connected)
-
-    receiveLoop()
+    Task { await _eventChannel.send(.connected) }
   }
 
   private func handleClose(

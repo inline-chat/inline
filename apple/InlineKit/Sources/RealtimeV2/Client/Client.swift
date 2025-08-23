@@ -159,7 +159,8 @@ actor ProtocolClient {
   }
 
   func reconnect() async {
-    await transport.restart()
+    log.debug("Reconnecting transport")
+    await transport.restart(retryDelay: nil)
   }
 
   // MARK: - ID Generation
