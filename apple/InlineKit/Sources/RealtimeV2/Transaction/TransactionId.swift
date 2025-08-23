@@ -1,6 +1,6 @@
 import Foundation
 
-struct TransactionId: Hashable {
+public struct TransactionId: Sendable, Hashable {
   let id: UUID
 
   func toString() -> String {
