@@ -12,7 +12,7 @@
     "typecheck": "cd server && bun run typecheck",
     "dev": "cd server && bun run dev",
     "test": "cd server && bun test",
-    "lint": "oxlint"
+    "lint": "bunx oxlint@latest"
   },
   "devDependencies": {
     "oxlint": "^0.16.0"

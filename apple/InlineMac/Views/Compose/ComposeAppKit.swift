@@ -755,13 +755,15 @@ class ComposeAppKit: NSView {
       // Edit message
       if let editingMessageId {
         // Edit message
-        Transactions.shared.mutate(transaction: .editMessage(.init(
-          messageId: editingMessageId,
-          text: text ?? "",
-          chatId: self.chatId ?? 0,
-          peerId: self.peerId,
-          entities: entities
-        )))
+        Task(priority: .userInitiated) { @MainActor in
+          try await Api.realtime.send(EditMessageTransaction(
+            messageId: editingMessageId,
+            text: text ?? "",
+            chatId: self.chatId ?? 0,
+            peerId: self.peerId,
+            entities: entities
+          ))
+        }
       }
 
       // Send message

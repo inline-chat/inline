@@ -628,20 +628,20 @@ class MessageViewAppKit: NSView {
     // Set reaction
     if weReacted {
       // Remove reaction
-      Transactions.shared.mutate(transaction: .deleteReaction(.init(
-        message: fullMessage.message,
-        emoji: emoji,
-        peerId: fullMessage.message.peerId,
-        chatId: fullMessage.message.chatId
-      )))
+      Task(priority: .userInitiated) {
+        try await Api.realtime.send(DeleteReactionTransaction(
+          emoji: emoji,
+          message: fullMessage.message,
+        ))
+      }
     } else {
       // Add reaction
-      Transactions.shared.mutate(transaction: .addReaction(.init(
-        message: fullMessage.message,
-        emoji: emoji,
-        userId: currentUserId,
-        peerId: fullMessage.message.peerId
-      )))
+      Task(priority: .userInitiated) {
+        try await Api.realtime.send(AddReactionTransaction(
+          emoji: emoji,
+          message: fullMessage.message,
+        ))
+      }
     }
   }
 
@@ -1287,15 +1287,14 @@ class MessageViewAppKit: NSView {
   }
 
   @objc private func deleteMessage() {
-    let _ = Transactions.shared.mutate(
-      transaction: .deleteMessage(
-        .init(
-          messageIds: [message.messageId],
-          peerId: message.peerId,
-          chatId: message.chatId
-        )
-      )
-    )
+    // Delete message
+    Task(priority: .userInitiated) { @MainActor in
+      try await Api.realtime.send(DeleteMessageTransaction(
+        messageIds: [message.messageId],
+        peerId: message.peerId,
+        chatId: message.chatId
+      ))
+    }
   }
 
   @objc private func reply() {

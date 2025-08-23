@@ -298,6 +298,10 @@ public actor RealtimeV2 {
     }
   }
 
+  public func applyUpdates(_ updates: [InlineProtocol.Update]) {
+    Task { await sync.process(updates: updates) }
+  }
+
   // MARK: - Helpers
 
   private func updateConnectionState(_ newState: RealtimeConnectionState) async {
