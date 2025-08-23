@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import InlineKit
+import RealtimeV2
 
 class ChatTitleToolbar: NSToolbarItem {
   private var peer: Peer
@@ -118,7 +119,16 @@ final class ChatStatusView: NSView {
   private var dependencies: AppDependencies
 
   // Connection state tracking
-  private var connectionState: RealtimeAPIState = .connected
+  private var connectionState: RealtimeConnectionState = .connected {
+    didSet {
+      if oldValue != connectionState {
+        DispatchQueue.main.async {
+          self.updateLabel()
+        }
+      }
+    }
+  }
+
   private var connectionStateSubscription: AnyCancellable?
 
   private lazy var label: NSTextField = {
@@ -167,13 +177,16 @@ final class ChatStatusView: NSView {
     }
 
     // connection state updates
-    connectionStateSubscription = dependencies.realtime.apiStatePublisher
-      .sink { [weak self] state in
-        self?.connectionState = state
-        DispatchQueue.main.async {
-          self?.updateLabel()
-        }
+    Task {
+      let stateObject = await Api.realtime.stateObject
+      await MainActor.run {
+        self.connectionState = stateObject.connectionState
+        self.connectionStateSubscription = stateObject.connectionStatePublisher
+          .sink { [weak self] state in
+            self?.connectionState = state
+          }
       }
+    }
   }
 
   private var cancellables: Set<AnyCancellable> = []
@@ -260,7 +273,7 @@ final class ChatStatusView: NSView {
   private var statusState: StatusState {
     // Check connection state first
     if connectionState != .connected {
-      return .connecting(connectionState.toHumanReadable())
+      return .connecting(connectionState.title.lowercased())
     }
 
     // Check for typing text first (synchronously)
