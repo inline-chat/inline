@@ -769,20 +769,33 @@ class ComposeAppKit: NSView {
       // Send message
       else if attachmentItems.isEmpty {
         // Text-only
-        let _ = Transactions.shared.mutate(
-          transaction:
-          .sendMessage(
-            TransactionSendMessage(
+        // Send via V2
+        Task(priority: .userInitiated) { @MainActor in
+          try await Api.realtime.send(
+            SendMessageTransaction(
               text: text,
               peerId: self.peerId,
               chatId: self.chatId ?? 0, // FIXME: chatId fallback
-              mediaItems: [],
               replyToMsgId: replyToMsgId,
               isSticker: nil,
               entities: entities
             )
           )
-        )
+        }
+        // let _ = Transactions.shared.mutate(
+        //   transaction:
+        //   .sendMessage(
+        //     TransactionSendMessage(
+        //       text: text,
+        //       peerId: self.peerId,
+        //       chatId: self.chatId ?? 0, // FIXME: chatId fallback
+        //       mediaItems: [],
+        //       replyToMsgId: replyToMsgId,
+        //       isSticker: nil,
+        //       entities: entities
+        //     )
+        //   )
+        // )
       }
 
       // With image/file/video
