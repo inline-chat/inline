@@ -129,6 +129,11 @@ actor Transactions {
 
     // re-add to queue
     _queue[transactionId] = wrapper
+
+    // signal the run loop
+    Task {
+      await queueStream.send(())
+    }
   }
 
   public func requeueAll() {
@@ -136,6 +141,11 @@ actor Transactions {
       _queue[transactionId] = wrapper
     }
     inFlight.removeAll()
+
+    // signal the run loop
+    Task {
+      await queueStream.send(())
+    }
   }
 
   // MARK: - Helpers
