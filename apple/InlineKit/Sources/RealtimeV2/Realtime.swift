@@ -302,6 +302,10 @@ public actor RealtimeV2 {
     Task { await sync.process(updates: updates) }
   }
 
+  public func cancelTransaction(where predicate: @escaping (TransactionWrapper) -> Bool) {
+    Task { await transactions.cancel(where: predicate) }
+  }
+
   // MARK: - Helpers
 
   private func updateConnectionState(_ newState: RealtimeConnectionState) async {
