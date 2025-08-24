@@ -87,6 +87,46 @@ public struct EditMessageTransaction: Transaction2 {
   public func failed(error: TransactionError2) async {}
 }
 
+// MARK: - Codable
+
+extension EditMessageTransaction: Codable {
+  enum CodingKeys: String, CodingKey {
+    case messageId, text, chatId, peerId, entities
+  }
+  
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(messageId, forKey: .messageId)
+    try container.encode(text, forKey: .text)
+    try container.encode(chatId, forKey: .chatId)
+    try container.encode(peerId, forKey: .peerId)
+    try container.encodeIfPresent(entities, forKey: .entities)
+  }
+  
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    
+    messageId = try container.decode(Int64.self, forKey: .messageId)
+    text = try container.decode(String.self, forKey: .text)
+    chatId = try container.decode(Int64.self, forKey: .chatId)
+    peerId = try container.decode(Peer.self, forKey: .peerId)
+    entities = try container.decodeIfPresent(MessageEntities.self, forKey: .entities)
+    
+    // Set method
+    method = .editMessage
+    
+    // Reconstruct Protocol Buffer input
+    input = .editMessage(.with {
+      $0.peerID = peerId.toInputPeer()
+      $0.messageID = messageId
+      $0.text = text
+      if let entities {
+        $0.entities = entities
+      }
+    })
+  }
+}
+
 // Helper
 
 public extension Transaction2 {

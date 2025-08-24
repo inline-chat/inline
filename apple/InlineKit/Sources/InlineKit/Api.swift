@@ -7,6 +7,7 @@ public enum Api {
   public static let realtime = RealtimeV2(
     transport: WebSocketTransport2(),
     auth: Auth.shared,
-    applyUpdates: InlineApplyUpdates()
+    applyUpdates: InlineApplyUpdates(),
+    persistenceHandler: DefaultTransactionPersistenceHandler()
   )
 }

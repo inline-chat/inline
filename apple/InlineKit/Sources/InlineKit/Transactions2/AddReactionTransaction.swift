@@ -87,6 +87,43 @@ public struct AddReactionTransaction: Transaction2 {
   public func failed(error: TransactionError2) async {}
 }
 
+// MARK: - Codable
+
+extension AddReactionTransaction: Codable {
+  enum CodingKeys: String, CodingKey {
+    case emoji, messageId, chatId, peerId, userId
+  }
+  
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(emoji, forKey: .emoji)
+    try container.encode(messageId, forKey: .messageId)
+    try container.encode(chatId, forKey: .chatId)
+    try container.encode(peerId, forKey: .peerId)
+    try container.encode(userId, forKey: .userId)
+  }
+  
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    
+    emoji = try container.decode(String.self, forKey: .emoji)
+    messageId = try container.decode(Int64.self, forKey: .messageId)
+    chatId = try container.decode(Int64.self, forKey: .chatId)
+    peerId = try container.decode(Peer.self, forKey: .peerId)
+    userId = try container.decode(Int64.self, forKey: .userId)
+    
+    // Set method
+    method = .addReaction
+    
+    // Reconstruct Protocol Buffer input
+    input = .addReaction(.with {
+      $0.peerID = peerId.toInputPeer()
+      $0.messageID = messageId
+      $0.emoji = emoji
+    })
+  }
+}
+
 // Helper
 
 public extension Transaction2 {

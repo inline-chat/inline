@@ -1,9 +1,9 @@
 import Foundation
 
-public struct TransactionId: Sendable, Hashable {
+public struct TransactionId: Sendable, Hashable, Codable {
   let id: UUID
 
-  func toString() -> String {
+  public func toString() -> String {
     id.uuidString
   }
 
