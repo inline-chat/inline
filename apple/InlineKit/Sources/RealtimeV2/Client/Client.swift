@@ -118,11 +118,11 @@ actor ProtocolClient {
 
       case let .rpcResult(result):
         Task { await events.send(.rpcResult(msgId: result.reqMsgID, rpcResult: result.result)) }
-        handleRpcResult(result)
+        //handleRpcResult(result)
 
       case let .rpcError(error):
         Task { await events.send(.rpcError(msgId: error.reqMsgID, rpcError: error)) }
-        handleRpcError(error)
+        //handleRpcError(error)
 
       case let .ack(ack):
         log.debug("Received ack: \(ack.msgID)")

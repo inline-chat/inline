@@ -74,6 +74,41 @@ public struct DeleteReactionTransaction: Transaction2 {
   }
 }
 
+// MARK: - Codable
+
+extension DeleteReactionTransaction: Codable {
+  enum CodingKeys: String, CodingKey {
+    case emoji, messageId, chatId, peerId
+  }
+  
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(emoji, forKey: .emoji)
+    try container.encode(messageId, forKey: .messageId)
+    try container.encode(chatId, forKey: .chatId)
+    try container.encode(peerId, forKey: .peerId)
+  }
+  
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    
+    emoji = try container.decode(String.self, forKey: .emoji)
+    messageId = try container.decode(Int64.self, forKey: .messageId)
+    chatId = try container.decode(Int64.self, forKey: .chatId)
+    peerId = try container.decode(Peer.self, forKey: .peerId)
+    
+    // Set method
+    method = .deleteReaction
+    
+    // Reconstruct Protocol Buffer input
+    input = .deleteReaction(.with {
+      $0.peerID = peerId.toInputPeer()
+      $0.messageID = messageId
+      $0.emoji = emoji
+    })
+  }
+}
+
 // Helper
 
 public extension Transaction2 {
