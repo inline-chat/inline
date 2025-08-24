@@ -12,7 +12,8 @@
       "Bash(mv:*)",
       "Bash(swift test)",
       "Bash(swift test:*)",
-      "Bash(timeout 10 swift test:*)"
+      "Bash(timeout 10 swift test:*)",
+      "Bash(timeout 15 swift build)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"

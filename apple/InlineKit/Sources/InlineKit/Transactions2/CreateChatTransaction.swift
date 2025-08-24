@@ -74,6 +74,47 @@ public struct CreateChatTransaction: Transaction2 {
   }
 }
 
+// MARK: - Codable
+
+extension CreateChatTransaction: Codable {
+  enum CodingKeys: String, CodingKey {
+    case title, emoji, isPublic, spaceId, participants
+  }
+  
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(title, forKey: .title)
+    try container.encodeIfPresent(emoji, forKey: .emoji)
+    try container.encode(isPublic, forKey: .isPublic)
+    try container.encode(spaceId, forKey: .spaceId)
+    try container.encode(participants, forKey: .participants)
+  }
+  
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    
+    title = try container.decode(String.self, forKey: .title)
+    emoji = try container.decodeIfPresent(String.self, forKey: .emoji)
+    isPublic = try container.decode(Bool.self, forKey: .isPublic)
+    spaceId = try container.decode(Int64.self, forKey: .spaceId)
+    participants = try container.decode([Int64].self, forKey: .participants)
+    
+    // Set method
+    method = .createChat
+    
+    // Reconstruct Protocol Buffer input
+    input = .createChat(.with {
+      $0.title = title
+      $0.spaceID = spaceId
+      if let emoji { $0.emoji = emoji }
+      $0.isPublic = isPublic
+      $0.participants = participants.map { userId in
+        InputChatParticipant.with { $0.userID = Int64(userId) }
+      }
+    })
+  }
+}
+
 // Helper
 
 public extension Transaction2 {

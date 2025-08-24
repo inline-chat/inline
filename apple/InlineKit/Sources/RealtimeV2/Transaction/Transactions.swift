@@ -21,8 +21,10 @@ actor Transactions {
 
   // Private
   private let log = Log.scoped("RealtimeV2/Transactions")
+  private var persistenceHandler: TransactionPersistenceHandler?
 
-  init() {
+  init(persistenceHandler: TransactionPersistenceHandler? = nil) {
+    self.persistenceHandler = persistenceHandler
     Task {
       // load all transactions from disk into queue
       await loadAllFromDisk()
@@ -35,6 +37,8 @@ actor Transactions {
     let wrapper = TransactionWrapper(transaction: transaction)
     let transactionId = wrapper.id
 
+    log.debug("Queuing transaction \(transactionId): \(transaction.debugDescription)")
+    
     // add to queue
     _queue[transactionId] = wrapper
 
@@ -87,7 +91,8 @@ actor Transactions {
 
   /// Acknowledge a transaction that has been completed, it moves it to sent queue waiting for the result.
   func ack(transactionId: TransactionId) {
-    // delete(transactionId: transactionId)
+    log.debug("Acknowledging transaction \(transactionId) - moving to sent queue and deleting from disk")
+    
     // move to sent
     sent[transactionId] = inFlight[transactionId]
 
@@ -102,9 +107,11 @@ actor Transactions {
   /// It deletes the transaction from the system.
   func complete(rpcMsgId: UInt64) -> TransactionWrapper? {
     guard let transactionId = transactionRpcMap[rpcMsgId] else {
-      // if not found, it means it was already completed or discarded
+      log.debug("Complete called for unknown rpcMsgId \(rpcMsgId) - transaction already completed or discarded")
       return nil
     }
+
+    log.debug("Completing transaction \(transactionId) (rpcMsgId: \(rpcMsgId)) - removing from all queues and deleting from disk")
 
     // delete from all queues
     let transactionFromInFlight = inFlight.removeValue(forKey: transactionId)
@@ -182,17 +189,98 @@ actor Transactions {
   // MARK: - Private APIs
 
   private func saveToDisk(transaction: TransactionWrapper) {
-    // todo
+    Task.detached { [transaction, log, persistenceHandler] in
+      do {
+        if let persistenceHandler {
+          log.debug("Saving transaction \(transaction.id) to disk: \(transaction.transaction.debugDescription)")
+          try await persistenceHandler.saveTransaction(transaction)
+          log.debug("Successfully saved transaction \(transaction.id) to disk")
+        } else {
+          log.debug("No persistence handler available, skipping save for transaction \(transaction.id)")
+        }
+      } catch {
+        log.error("Failed to save transaction \(transaction.id) to disk", error: error)
+      }
+    }
   }
 
   private func deleteFromDisk(transactionId: TransactionId) {
-    // todo
+    Task.detached { [transactionId, persistenceHandler, log] in
+      do {
+        if let persistenceHandler {
+          log.debug("Deleting transaction \(transactionId) from disk")
+          try await persistenceHandler.deleteTransaction(transactionId)
+          log.debug("Successfully deleted transaction \(transactionId) from disk")
+        } else {
+          log.debug("No persistence handler available, skipping delete for transaction \(transactionId)")
+        }
+      } catch {
+        log.debug("Failed to delete transaction \(transactionId) from disk (file may not exist): \(error)")
+      }
+    }
   }
 
   private func loadAllFromDisk() {
-    // todo
-    // for transaction in transactions {
-    //   queue[transaction.id] = transaction
-    // }
+    Task { [weak self, log, persistenceHandler] in
+      guard let self else { return }
+      
+      do {
+        if let persistenceHandler {
+          log.debug("Starting to load transactions from disk")
+          let allTransactions = try await persistenceHandler.loadTransactions()
+          log.debug("Loaded \(allTransactions.count) raw transactions from disk")
+          
+          // Separate valid and expired transactions
+          let expirationDate = Date().addingTimeInterval(-10 * 60) // 10 minutes
+          var validTransactions: [TransactionWrapper] = []
+          var expiredTransactions: [TransactionWrapper] = []
+          
+          for transaction in allTransactions {
+            if transaction.date < expirationDate {
+              log.debug("Transaction \(transaction.id) expired (created: \(transaction.date))")
+              expiredTransactions.append(transaction)
+            } else {
+              validTransactions.append(transaction)
+            }
+          }
+          
+          // Trigger failed() for expired transactions
+          for expiredTransaction in expiredTransactions {
+            log.info("Transaction \(expiredTransaction.id) expired, calling failed()")
+            await expiredTransaction.transaction.failed(error: .timeout)
+            
+            // Delete expired transaction from disk
+            try? await persistenceHandler.deleteTransaction(expiredTransaction.id)
+          }
+          
+          // Sort valid transactions by creation date
+          validTransactions.sort { $0.date < $1.date }
+          log.debug("Sorted \(validTransactions.count) valid transactions by creation date")
+          
+          // Add loaded transactions to queue
+          await self.addLoadedTransactions(validTransactions)
+          
+          log.info("Loaded \(validTransactions.count) transactions from disk, expired \(expiredTransactions.count)")
+        } else {
+          log.debug("No persistence handler available, skipping load from disk")
+        }
+      } catch {
+        log.error("Failed to load transactions from disk", error: error)
+      }
+    }
   }
+  
+  private func addLoadedTransactions(_ transactions: [TransactionWrapper]) {
+    for transaction in transactions {
+      _queue[transaction.id] = transaction
+    }
+  }
+}
+
+// MARK: - Transaction Persistence Protocol
+
+public protocol TransactionPersistenceHandler: Sendable {
+  func saveTransaction(_ transaction: TransactionWrapper) async throws
+  func deleteTransaction(_ transactionId: TransactionId) async throws
+  func loadTransactions() async throws -> [TransactionWrapper]
 }
