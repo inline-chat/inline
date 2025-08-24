@@ -48,12 +48,12 @@ public actor RealtimeV2 {
 
   // MARK: - Initialization
 
-  public init(transport: Transport, auth: Auth, applyUpdates: ApplyUpdates) {
+  public init(transport: Transport, auth: Auth, applyUpdates: ApplyUpdates, persistenceHandler: TransactionPersistenceHandler? = nil) {
     // self.transport = transport
     self.auth = auth
     client = ProtocolClient(transport: transport, auth: auth)
     sync = Sync(applyUpdates: applyUpdates)
-    transactions = Transactions()
+    transactions = Transactions(persistenceHandler: persistenceHandler)
     queries = Queries()
     stateObject = RealtimeState()
 

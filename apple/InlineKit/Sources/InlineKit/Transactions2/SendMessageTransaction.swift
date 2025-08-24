@@ -186,6 +186,78 @@ public struct SendMessageTransaction: Transaction2 {
   }
 }
 
+// MARK: - Codable
+
+extension SendMessageTransaction: Codable {
+  enum CodingKeys: String, CodingKey {
+    // Core transaction data
+    case text, peerId, chatId, replyToMsgId, isSticker, entities
+
+    // State that needs to persist
+    case randomId, temporaryMessageId, date
+
+    // Note: We don't encode 'input' since it's reconstructible
+    // Note: We don't encode computed peerUserId/peerThreadId since they're derived
+  }
+
+  // MARK: - Encoding
+
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+
+    // Encode core data
+    try container.encodeIfPresent(text, forKey: .text)
+    try container.encode(peerId, forKey: .peerId)
+    try container.encode(chatId, forKey: .chatId)
+    try container.encodeIfPresent(replyToMsgId, forKey: .replyToMsgId)
+    try container.encodeIfPresent(isSticker, forKey: .isSticker)
+    try container.encodeIfPresent(entities, forKey: .entities)
+
+    // Encode state
+    try container.encode(randomId, forKey: .randomId)
+    try container.encode(temporaryMessageId, forKey: .temporaryMessageId)
+    try container.encode(date, forKey: .date)
+  }
+
+  // MARK: - Decoding
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+
+    // Decode core data
+    text = try container.decodeIfPresent(String.self, forKey: .text)
+    peerId = try container.decode(Peer.self, forKey: .peerId)
+    chatId = try container.decode(Int64.self, forKey: .chatId)
+    replyToMsgId = try container.decodeIfPresent(Int64.self, forKey: .replyToMsgId)
+    isSticker = try container.decodeIfPresent(Bool.self, forKey: .isSticker)
+    entities = try container.decodeIfPresent(MessageEntities.self, forKey: .entities)
+
+    // Decode state
+    randomId = try container.decode(Int64.self, forKey: .randomId)
+    temporaryMessageId = try container.decode(Int64.self, forKey: .temporaryMessageId)
+    date = try container.decode(Date.self, forKey: .date)
+
+    // Reconstruct computed properties
+    peerUserId = if case let .user(id) = peerId { id } else { nil }
+    peerThreadId = if case let .thread(id) = peerId { id } else { nil }
+
+    // Set method (this should be consistent across all instances)
+    method = .sendMessage
+
+    // Reconstruct the Protocol Buffer input
+    input = .sendMessage(.with {
+      $0.peerID = peerId.toInputPeer()
+      $0.randomID = randomId
+      $0.temporarySendDate = Int64(date.timeIntervalSince1970.rounded())
+      $0.isSticker = isSticker ?? false
+
+      if let text { $0.message = text }
+      if let replyToMsgId { $0.replyToMsgID = replyToMsgId }
+      if let entities { $0.entities = entities }
+    })
+  }
+}
+
 // Helper
 
 public extension Transaction2 {

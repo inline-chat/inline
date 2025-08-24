@@ -16,4 +16,11 @@ public struct TransactionWrapper: Sendable, Identifiable {
     date = Date()
     self.transaction = transaction
   }
+  
+  // Public initializer for deserialization
+  public init(id: TransactionId, date: Date, transaction: any Transaction) {
+    self.id = id
+    self.date = date
+    self.transaction = transaction
+  }
 }

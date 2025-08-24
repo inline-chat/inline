@@ -4,7 +4,7 @@ public enum TransactionExecutionError: Error {
   case invalid
 }
 
-public protocol Transaction: Sendable {
+public protocol Transaction: Sendable, Codable {
   var method: InlineProtocol.Method { get set }
   var input: InlineProtocol.RpcCall.OneOf_Input? { get set }
 
