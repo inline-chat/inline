@@ -55,7 +55,7 @@ class MainSplitViewController: NSSplitViewController {
   @objc private func refetchChats() {
     Task.detached {
       do {
-        try await dependencies.realtimeV2.send(.getChats())
+        try await self.dependencies.realtimeV2.send(.getChats())
       } catch {
         Log.shared.error("Error refetching getChats", error: error)
       }
