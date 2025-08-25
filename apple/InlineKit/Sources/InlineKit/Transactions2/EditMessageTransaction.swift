@@ -93,7 +93,7 @@ extension EditMessageTransaction: Codable {
   enum CodingKeys: String, CodingKey {
     case messageId, text, chatId, peerId, entities
   }
-  
+
   public func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: CodingKeys.self)
     try container.encode(messageId, forKey: .messageId)
@@ -102,19 +102,19 @@ extension EditMessageTransaction: Codable {
     try container.encode(peerId, forKey: .peerId)
     try container.encodeIfPresent(entities, forKey: .entities)
   }
-  
+
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
-    
+
     messageId = try container.decode(Int64.self, forKey: .messageId)
     text = try container.decode(String.self, forKey: .text)
     chatId = try container.decode(Int64.self, forKey: .chatId)
     peerId = try container.decode(Peer.self, forKey: .peerId)
     entities = try container.decodeIfPresent(MessageEntities.self, forKey: .entities)
-    
+
     // Set method
     method = .editMessage
-    
+
     // Reconstruct Protocol Buffer input
     input = .editMessage(.with {
       $0.peerID = peerId.toInputPeer()
@@ -129,7 +129,7 @@ extension EditMessageTransaction: Codable {
 
 // Helper
 
-public extension Transaction2 {
+public extension Transaction2 where Self == EditMessageTransaction {
   static func editMessage(
     messageId: Int64,
     text: String,

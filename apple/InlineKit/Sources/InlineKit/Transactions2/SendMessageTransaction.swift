@@ -260,7 +260,7 @@ extension SendMessageTransaction: Codable {
 
 // Helper
 
-public extension Transaction2 {
+public extension Transaction2 where Self == SendMessageTransaction {
   static func sendMessage(
     text: String?,
     peerId: Peer,
