@@ -21,6 +21,7 @@ public enum TransactionTypeRegistry {
       case is AddChatParticipantTransaction: "add_chat_participant"
       case is RemoveChatParticipantTransaction: "remove_chat_participant"
       case is TranslateMessagesTransaction: "translate_messages"
+      case is UpdateUserSettingsTransaction: "update_user_settings"
       default: "unknown"
     }
   }
@@ -43,6 +44,7 @@ public enum TransactionTypeRegistry {
       case "add_chat_participant": return try decoder.decode(AddChatParticipantTransaction.self, from: data)
       case "remove_chat_participant": return try decoder.decode(RemoveChatParticipantTransaction.self, from: data)
       case "translate_messages": return try decoder.decode(TranslateMessagesTransaction.self, from: data)
+      case "update_user_settings": return try decoder.decode(UpdateUserSettingsTransaction.self, from: data)
       default: throw TransactionTypeError.unknownTransactionType(type)
     }
   }

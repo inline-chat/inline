@@ -2,7 +2,8 @@ import Combine
 import Foundation
 import InlineProtocol
 
-public class NotificationSettingsManager: ObservableObject, Codable {
+// FIXME: need @unchecked Sendable for usage in transaction
+public class NotificationSettingsManager: ObservableObject, Codable, @unchecked Sendable {
   @Published public var mode: NotificationMode
   @Published public var silent: Bool
   @Published public var requiresMention: Bool
