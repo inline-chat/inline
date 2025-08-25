@@ -178,25 +178,13 @@ struct CreateSpaceChat: View {
         let spaceId = selectedSpaceId
         let participants = isPublic ? [] : selectedPeople.map(\.self)
 
-        // Use the transaction system instead of direct realtime call
-        let transaction = TransactionCreateChat(
+        try await Api.realtime.send(.createChat(
           title: title,
           emoji: emoji,
           isPublic: isPublic,
           spaceId: spaceId,
           participants: Array(participants)
-        )
-
-        Transactions.shared.mutate(transaction: .createChat(transaction))
-
-        // TODO: Move to new transaction system
-        // Task(priority: .userInitiated) { @MainActor in
-        //   try await Api.realtime.send(CreateChatTransaction(
-        //     messageIds: [message.messageId],
-        //     peerId: message.peerId,
-        //     chatId: message.chatId
-        //   ))
-        // }
+        ))
 
         // For now, we'll wait a bit and then dismiss - in a real app you'd want to handle the success callback
         formState.succeeded()

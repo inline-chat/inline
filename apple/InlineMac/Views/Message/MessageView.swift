@@ -629,7 +629,7 @@ class MessageViewAppKit: NSView {
     if weReacted {
       // Remove reaction
       Task(priority: .userInitiated) {
-        try await Api.realtime.send(DeleteReactionTransaction(
+        try await Api.realtime.send(.deleteReaction(
           emoji: emoji,
           message: fullMessage.message,
         ))
@@ -637,7 +637,7 @@ class MessageViewAppKit: NSView {
     } else {
       // Add reaction
       Task(priority: .userInitiated) {
-        try await Api.realtime.send(AddReactionTransaction(
+        try await Api.realtime.send(.addReaction(
           emoji: emoji,
           message: fullMessage.message,
         ))
@@ -1289,7 +1289,7 @@ class MessageViewAppKit: NSView {
   @objc private func deleteMessage() {
     // Delete message
     Task(priority: .userInitiated) { @MainActor in
-      try await Api.realtime.send(DeleteMessageTransaction(
+      try await Api.realtime.send(.deleteMessages(
         messageIds: [message.messageId],
         peerId: message.peerId,
         chatId: message.chatId

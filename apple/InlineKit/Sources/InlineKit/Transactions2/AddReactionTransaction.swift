@@ -93,7 +93,7 @@ extension AddReactionTransaction: Codable {
   enum CodingKeys: String, CodingKey {
     case emoji, messageId, chatId, peerId, userId
   }
-  
+
   public func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: CodingKeys.self)
     try container.encode(emoji, forKey: .emoji)
@@ -102,19 +102,19 @@ extension AddReactionTransaction: Codable {
     try container.encode(peerId, forKey: .peerId)
     try container.encode(userId, forKey: .userId)
   }
-  
+
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
-    
+
     emoji = try container.decode(String.self, forKey: .emoji)
     messageId = try container.decode(Int64.self, forKey: .messageId)
     chatId = try container.decode(Int64.self, forKey: .chatId)
     peerId = try container.decode(Peer.self, forKey: .peerId)
     userId = try container.decode(Int64.self, forKey: .userId)
-    
+
     // Set method
     method = .addReaction
-    
+
     // Reconstruct Protocol Buffer input
     input = .addReaction(.with {
       $0.peerID = peerId.toInputPeer()
@@ -126,7 +126,7 @@ extension AddReactionTransaction: Codable {
 
 // Helper
 
-public extension Transaction2 {
+public extension Transaction2 where Self == AddReactionTransaction {
   static func addReaction(emoji: String, message: InlineKit.Message) -> AddReactionTransaction {
     AddReactionTransaction(emoji: emoji, message: message)
   }

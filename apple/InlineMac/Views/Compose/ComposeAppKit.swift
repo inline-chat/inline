@@ -756,7 +756,7 @@ class ComposeAppKit: NSView {
       if let editingMessageId {
         // Edit message
         Task(priority: .userInitiated) { @MainActor in
-          try await Api.realtime.send(EditMessageTransaction(
+          try await Api.realtime.send(.editMessage(
             messageId: editingMessageId,
             text: text ?? "",
             chatId: self.chatId ?? 0,
@@ -772,7 +772,7 @@ class ComposeAppKit: NSView {
         // Send via V2
         Task(priority: .userInitiated) { @MainActor in
           try await Api.realtime.send(
-            SendMessageTransaction(
+            .sendMessage(
               text: text,
               peerId: self.peerId,
               chatId: self.chatId ?? 0, // FIXME: chatId fallback

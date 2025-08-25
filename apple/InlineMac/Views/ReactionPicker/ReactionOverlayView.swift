@@ -44,7 +44,7 @@ struct ReactionOverlayView: View {
     if hasReaction {
       // Remove reaction
       Task { @MainActor in
-        try await Api.realtime.send(DeleteReactionTransaction(
+        try await Api.realtime.send(.deleteReaction(
           emoji: emoji,
           message: fullMessage.message
         ))
@@ -52,7 +52,7 @@ struct ReactionOverlayView: View {
     } else {
       // Add reaction
       Task { @MainActor in
-        try await Api.realtime.send(AddReactionTransaction(
+        try await Api.realtime.send(.addReaction(
           emoji: emoji,
           message: fullMessage.message
         ))

@@ -80,7 +80,7 @@ extension CreateChatTransaction: Codable {
   enum CodingKeys: String, CodingKey {
     case title, emoji, isPublic, spaceId, participants
   }
-  
+
   public func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: CodingKeys.self)
     try container.encode(title, forKey: .title)
@@ -89,19 +89,19 @@ extension CreateChatTransaction: Codable {
     try container.encode(spaceId, forKey: .spaceId)
     try container.encode(participants, forKey: .participants)
   }
-  
+
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
-    
+
     title = try container.decode(String.self, forKey: .title)
     emoji = try container.decodeIfPresent(String.self, forKey: .emoji)
     isPublic = try container.decode(Bool.self, forKey: .isPublic)
     spaceId = try container.decode(Int64.self, forKey: .spaceId)
     participants = try container.decode([Int64].self, forKey: .participants)
-    
+
     // Set method
     method = .createChat
-    
+
     // Reconstruct Protocol Buffer input
     input = .createChat(.with {
       $0.title = title
@@ -117,7 +117,7 @@ extension CreateChatTransaction: Codable {
 
 // Helper
 
-public extension Transaction2 {
+public extension Transaction2 where Self == CreateChatTransaction {
   static func createChat(
     title: String,
     emoji: String?,
