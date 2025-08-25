@@ -8,7 +8,7 @@ struct SpaceMembersView: View {
   @EnvironmentObject var data: DataManager
   @EnvironmentStateObject var fullSpace: FullSpaceViewModel
   @Environment(\.keyMonitor) var keyMonitor
-  @Environment(\.realtime) var realtime
+  @Environment(\.realtimeV2) var realtimeV2
 
   @State var searchQuery: String = ""
   @State private var selectedTab: Int = 0
@@ -45,10 +45,7 @@ struct SpaceMembersView: View {
     .task {
       do {
         try await data.getSpace(spaceId: spaceId)
-        try await realtime
-          .invokeWithHandler(.getSpaceMembers, input: .getSpaceMembers(.with {
-            $0.spaceID = spaceId
-          }))
+        try await realtimeV2.send(.getSpaceMembers(spaceId: spaceId))
       } catch {
         Log.shared.error("failed to get space data", error: error)
       }

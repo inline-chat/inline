@@ -38,12 +38,7 @@ public final class SpaceMembersViewModel: ObservableObject {
   /// Refetch members from the server
   public func refetchMembers() async {
     do {
-      try await Realtime.shared.invokeWithHandler(
-        .getSpaceMembers,
-        input: .getSpaceMembers(.with { input in
-          input.spaceID = spaceId
-        })
-      )
+      try await Api.realtime.send(.getSpaceMembers(spaceId: spaceId))
     } catch {
       Log.shared.error("Failed to refetch space members: \(error)")
     }
