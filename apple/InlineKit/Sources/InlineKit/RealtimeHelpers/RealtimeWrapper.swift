@@ -522,8 +522,6 @@ public extension Realtime {
           var newDialog = Dialog(from: dialog)
 
           if let existing {
-            print("🌴 Dialog draft \(newDialog.draftMessage)")
-            print("🌴 Existing draftMessage \(existing.draftMessage)")
             newDialog.draftMessage = existing.draftMessage
             try newDialog.save(db)
           } else {
@@ -551,7 +549,7 @@ public extension Realtime {
     _ result: InlineProtocol.MarkAsUnreadResult
   ) async throws {
     log.trace("markAsUnread result: \(result)")
-    
+
     applyUpdates(result.updates)
   }
 }

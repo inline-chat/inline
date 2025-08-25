@@ -55,8 +55,7 @@ class MainSplitViewController: NSSplitViewController {
   @objc private func refetchChats() {
     Task.detached {
       do {
-        try await self.dependencies.realtime
-          .invokeWithHandler(.getChats, input: .getChats(.init()))
+        try await dependencies.realtimeV2.send(.getChats())
       } catch {
         Log.shared.error("Error refetching getChats", error: error)
       }
@@ -98,8 +97,7 @@ extension MainSplitViewController {
 
       Task.detached {
         do {
-          try await self.dependencies.realtime
-            .invokeWithHandler(.getChats, input: .getChats(.init()))
+          try await self.dependencies.realtimeV2.send(.getChats())
         } catch {
           Log.shared.error("Error fetching getChats", error: error)
         }
