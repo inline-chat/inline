@@ -321,6 +321,11 @@ Create transactions in `apple/InlineKit/Sources/InlineKit/Transactions/Methods/`
 - **Database**: Drizzle ORM with `db.select()` and `db.query` patterns
 - **Swift**: Target Swift 6, use modern APIs and concurrency patterns
 - **UI Design**: Follow Apple Human Interface Guidelines, use SF Symbols
+- Only add comments that explain exactly why a certain complex code is needed and only when the code is not self explanatory. Keep them concise and do not add comments that do not provide anything important. We use comments sparingly. 
+- Do not fill stubs with comments.
+- Do not keep print statements, only use them while debugging and delete them afterwards. 
+- Prefer using the log package for error and warnings.
+- Most IDs use `Int64`. Use all caps `ID` in protocol buffers types and `Id` in app Swift code
 
 ### Security & Best Practices
 
