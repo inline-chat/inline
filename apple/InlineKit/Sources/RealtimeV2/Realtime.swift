@@ -18,12 +18,7 @@ public actor RealtimeV2 {
   private var queries: Queries
 
   // Public
-  public var stateObject: RealtimeState
-
-  // TODO:
-  // transactions
-  // queries
-  // sync
+  public nonisolated let stateObject: RealtimeState
 
   // MARK: - Private Properties
 
@@ -42,14 +37,14 @@ public actor RealtimeV2 {
     any Error
   >] = [:]
 
-  // MARK: - Options
-
-  private let retryDelay: TimeInterval = 2.0
-
   // MARK: - Initialization
 
-  public init(transport: Transport, auth: Auth, applyUpdates: ApplyUpdates, persistenceHandler: TransactionPersistenceHandler? = nil) {
-    // self.transport = transport
+  public init(
+    transport: Transport,
+    auth: Auth,
+    applyUpdates: ApplyUpdates,
+    persistenceHandler: TransactionPersistenceHandler? = nil
+  ) {
     self.auth = auth
     client = ProtocolClient(transport: transport, auth: auth)
     sync = Sync(applyUpdates: applyUpdates)

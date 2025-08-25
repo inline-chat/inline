@@ -85,8 +85,7 @@ extension MainSplitViewController {
   private func fetchData() {
     Task.detached {
       do {
-        try await self.dependencies.realtime
-          .invokeWithHandler(.getMe, input: .getMe(.init()))
+        try await self.dependencies.realtimeV2.send(.getMe())
 
         // wait for our own user to finish fetching
         // TODO: dedup from home sidebar
