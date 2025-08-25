@@ -17,6 +17,7 @@ struct SidebarThreadItem: View {
   @EnvironmentObject var dataManager: DataManager
   @EnvironmentObject var nav: Nav
   @Environment(\.realtime) var realtime
+  @Environment(\.realtimeV2) var realtimeV2
 
   @State private var alertPresented: Bool = false
   @State private var pendingAction: Action?
@@ -95,10 +96,7 @@ struct SidebarThreadItem: View {
         case .delete:
           if pendingAction == action {
             do {
-              try await realtime
-                .invokeWithHandler(.deleteChat, input: .deleteChat(.with {
-                  $0.peerID = chat.inputPeerId
-                }))
+              try await realtimeV2.send(.deleteChat(peerId: peerId))
 
               // Delete in local db
               if let dialog {
