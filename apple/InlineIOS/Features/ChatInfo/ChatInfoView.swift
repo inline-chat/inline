@@ -150,13 +150,10 @@ struct ChatInfoView: View {
                     removeParticipant: { userInfo in
                       Task {
                         do {
-                          try await Realtime.shared.invokeWithHandler(
-                            .removeChatParticipant,
-                            input: .removeChatParticipant(.with { input in
-                              input.chatID = chatItem.chat?.id ?? 0
-                              input.userID = userInfo.user.id
-                            })
-                          )
+                          try await Api.realtime.send(.removeChatParticipant(
+                            chatID: chatItem.chat?.id ?? 0,
+                            userID: userInfo.user.id
+                          ))
                         } catch {
                           Log.shared.error("Failed to remove participant", error: error)
                         }
