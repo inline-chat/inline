@@ -29,6 +29,8 @@ struct SidebarThreadItem: View {
     nav.currentRoute == .chat(peer: .thread(id: chat.id))
   }
 
+  var peerId: Peer { .thread(id: chat.id) }
+
   // MARK: - Views
 
   var body: some View {

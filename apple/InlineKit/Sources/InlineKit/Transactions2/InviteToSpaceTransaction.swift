@@ -84,7 +84,7 @@ public struct InviteToSpaceTransaction: Transaction2 {
   // MARK: - Transaction Methods
 
   public func optimistic() async {
-    log.debug("Optimistic invite to space")
+    // log.debug("Optimistic invite to space")
     // For invite operations, we could show a pending invitation UI state
     // This is left minimal as the actual invitation UI feedback 
     // should be handled by the UI layer showing loading states
@@ -145,23 +145,13 @@ public struct InviteToSpaceTransaction: Transaction2 {
       throw TransactionExecutionError.invalid
     }
   }
-
-  public func failed(error: TransactionError2) async {
-    log.error("Failed to invite to space", error: error)
-    // Could show error UI feedback here if needed
-  }
-
-  public func cancelled() async {
-    log.debug("Cancelled invite to space")
-    // Clean up any optimistic UI state if needed
-  }
 }
 
 // MARK: - Helper
 
 public extension Transaction2 where Self == InviteToSpaceTransaction {
-  static func inviteToSpace(spaceId: Int64, role: InlineProtocol.Member.Role, userID: Int64) -> InviteToSpaceTransaction {
-    InviteToSpaceTransaction(spaceId: spaceId, role: role, userID: userID)
+  static func inviteToSpace(spaceId: Int64, role: InlineProtocol.Member.Role, userId: Int64) -> InviteToSpaceTransaction {
+    InviteToSpaceTransaction(spaceId: spaceId, role: role, userID: userId)
   }
   
   static func inviteToSpace(spaceId: Int64, role: InlineProtocol.Member.Role, email: String) -> InviteToSpaceTransaction {

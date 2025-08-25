@@ -40,10 +40,7 @@ public final class ChatParticipantsViewModel: ObservableObject, @unchecked Senda
 
   public func refetchParticipants() async {
     do {
-      try await Realtime.shared.invokeWithHandler(
-        .getChatParticipants,
-        input: .getChatParticipants(.with { $0.chatID = chatId })
-      )
+      try await Api.realtime.send(.getChatParticipants(chatID: chatId))
     } catch {
       Log.shared.error("Failed to refetch chat participants", error: error)
     }

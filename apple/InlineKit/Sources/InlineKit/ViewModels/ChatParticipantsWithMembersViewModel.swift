@@ -74,10 +74,7 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
 
     do {
       // First try to get chat participants
-      try await Realtime.shared.invokeWithHandler(
-        .getChatParticipants,
-        input: .getChatParticipants(.with { $0.chatID = chatId })
-      )
+      try await Api.realtime.send(.getChatParticipants(chatID: chatId))
 
       // Also try to get space members if this is a public thread
       let chat = try? await db.reader.read { db in

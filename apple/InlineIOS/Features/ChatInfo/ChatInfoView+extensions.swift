@@ -53,13 +53,10 @@ extension ChatInfoView {
   func addParticipant(_ userInfo: UserInfo) {
     Task {
       do {
-        try await Realtime.shared.invokeWithHandler(
-          .addChatParticipant,
-          input: .addChatParticipant(.with { input in
-            input.chatID = chatItem.chat?.id ?? 0
-            input.userID = userInfo.user.id
-          })
-        )
+        try await Api.realtime.send(.addChatParticipant(
+          chatID: chatItem.chat?.id ?? 0,
+          userID: userInfo.user.id
+        ))
         isSearching = false
         searchText = ""
       } catch {
@@ -197,13 +194,10 @@ extension ChatInfoView {
               Button(role: .destructive, action: {
                 Task {
                   do {
-                    try await Realtime.shared.invokeWithHandler(
-                      .removeChatParticipant,
-                      input: .removeChatParticipant(.with { input in
-                        input.chatID = chatItem.chat?.id ?? 0
-                        input.userID = userInfo.user.id
-                      })
-                    )
+                    try await Api.realtime.send(.removeChatParticipant(
+                      chatID: chatItem.chat?.id ?? 0,
+                      userID: userInfo.user.id
+                    ))
                   } catch {
                     Log.shared.error("Failed to remove participant", error: error)
                   }
