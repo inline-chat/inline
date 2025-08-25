@@ -235,6 +235,8 @@ public extension Dialog {
   }
 }
 
+// MARK: - Save
+
 public extension ApiDialog {
   @discardableResult
   func saveFull(
@@ -254,6 +256,27 @@ public extension ApiDialog {
     }
 
     return dialog
+  }
+}
+
+public extension InlineProtocol.Dialog {
+  @discardableResult
+  func saveFull(
+    _ db: Database
+  )
+    throws -> Dialog
+  {
+    let existing = try? Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peer.toPeer()))
+    if let existing {
+      var newDialog = Dialog(from: self)
+      newDialog.draftMessage = existing.draftMessage
+      try newDialog.save(db, onConflict: .replace)
+      return newDialog
+    } else {
+      let newDialog = Dialog(from: self)
+      try newDialog.save(db, onConflict: .replace)
+      return newDialog
+    }
   }
 }
 

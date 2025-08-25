@@ -113,15 +113,8 @@ public class INUserSettings {
 
   private func saveToRealtime() async {
     log.debug("Saving notification settings to Realtime")
-    let notificationProtocol = notification.toProtocol()
     do {
-      _ = try await Realtime.shared
-        .invoke(
-          .updateUserSettings,
-          input: .updateUserSettings((.with { $0.userSettings = .with {
-            $0.notificationSettings = notificationProtocol
-          } }))
-        )
+      try await Api.realtime.send(.updateUserSettings(notificationSettings: notification))
     } catch {
       log.error("Failed to save notification settings to server", error: error)
     }
