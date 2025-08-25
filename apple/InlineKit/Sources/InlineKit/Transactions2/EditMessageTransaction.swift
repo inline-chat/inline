@@ -8,15 +8,22 @@ import RealtimeV2
 public struct EditMessageTransaction: Transaction2 {
   // Properties
   public var method: InlineProtocol.Method = .editMessage
-  public var input: InlineProtocol.RpcCall.OneOf_Input?
+  public var context: Context
+
+  public struct Context: Sendable, Codable {
+    public var messageId: Int64
+    public var text: String
+    public var chatId: Int64
+    public var peerId: Peer
+    public var entities: MessageEntities?
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case context
+  }
 
   // Private
   private var log = Log.scoped("Transactions/EditMessage")
-  private var messageId: Int64
-  private var text: String
-  private var chatId: Int64
-  private var peerId: Peer
-  private var entities: MessageEntities?
 
   public init(message: InlineKit.Message, text: String, entities: MessageEntities? = nil) {
     self.init(
@@ -29,20 +36,27 @@ public struct EditMessageTransaction: Transaction2 {
   }
 
   public init(messageId: Int64, text: String, chatId: Int64, peerId: Peer, entities: MessageEntities? = nil) {
-    input = .editMessage(.with {
-      $0.peerID = peerId.toInputPeer()
-      $0.messageID = messageId
-      $0.text = text
-      if let entities {
+    context = Context(messageId: messageId, text: text, chatId: chatId, peerId: peerId, entities: entities)
+  }
+
+  public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
+    .editMessage(.with {
+      $0.peerID = context.peerId.toInputPeer()
+      $0.messageID = context.messageId
+      $0.text = context.text
+      if let entities = context.entities {
         $0.entities = entities
       }
     })
-    self.messageId = messageId
-    self.text = text
-    self.chatId = chatId
-    self.peerId = peerId
-    self.entities = entities
   }
+  
+  // Computed
+  
+  var messageId: Int64 { context.messageId }
+  var text: String { context.text }
+  var chatId: Int64 { context.chatId }
+  var peerId: Peer { context.peerId }
+  var entities: MessageEntities? { context.entities }
 
   // Methods
   public func optimistic() async {
@@ -87,49 +101,17 @@ public struct EditMessageTransaction: Transaction2 {
   public func failed(error: TransactionError2) async {}
 }
 
-// MARK: - Codable
-
-extension EditMessageTransaction: Codable {
-  enum CodingKeys: String, CodingKey {
-    case messageId, text, chatId, peerId, entities
-  }
-
-  public func encode(to encoder: Encoder) throws {
-    var container = encoder.container(keyedBy: CodingKeys.self)
-    try container.encode(messageId, forKey: .messageId)
-    try container.encode(text, forKey: .text)
-    try container.encode(chatId, forKey: .chatId)
-    try container.encode(peerId, forKey: .peerId)
-    try container.encodeIfPresent(entities, forKey: .entities)
-  }
-
-  public init(from decoder: Decoder) throws {
-    let container = try decoder.container(keyedBy: CodingKeys.self)
-
-    messageId = try container.decode(Int64.self, forKey: .messageId)
-    text = try container.decode(String.self, forKey: .text)
-    chatId = try container.decode(Int64.self, forKey: .chatId)
-    peerId = try container.decode(Peer.self, forKey: .peerId)
-    entities = try container.decodeIfPresent(MessageEntities.self, forKey: .entities)
-
-    // Set method
-    method = .editMessage
-
-    // Reconstruct Protocol Buffer input
-    input = .editMessage(.with {
-      $0.peerID = peerId.toInputPeer()
-      $0.messageID = messageId
-      $0.text = text
-      if let entities {
-        $0.entities = entities
-      }
-    })
-  }
-}
-
 // Helper
 
 public extension Transaction2 where Self == EditMessageTransaction {
+  static func editMessage(
+    message: InlineKit.Message,
+    text: String,
+    entities: MessageEntities? = nil
+  ) -> EditMessageTransaction {
+    EditMessageTransaction(message: message, text: text, entities: entities)
+  }
+
   static func editMessage(
     messageId: Int64,
     text: String,

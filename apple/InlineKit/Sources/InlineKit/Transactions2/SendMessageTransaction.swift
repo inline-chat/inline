@@ -10,25 +10,23 @@ import UIKit
 #endif
 
 public struct SendMessageTransaction: Transaction2 {
-  // Properties
-  public var method: InlineProtocol.Method = .sendMessage
-  public var input: InlineProtocol.RpcCall.OneOf_Input?
-
   // Private
   private var log = Log.scoped("Transactions/SendMessage")
-  private var text: String?
-  private var peerId: Peer
-  private var chatId: Int64
-  private var replyToMsgId: Int64?
-  private var isSticker: Bool?
-  private var entities: MessageEntities?
 
-  // State
-  private var randomId: Int64
-  private var peerUserId: Int64?
-  private var peerThreadId: Int64?
-  private var temporaryMessageId: Int64
-  private var date = Date()
+  // Properties
+  public var method: InlineProtocol.Method = .sendMessage
+  public var context: Context
+
+  public struct Context: Sendable, Codable {
+    public var text: String?
+    public var peerId: Peer
+    public var chatId: Int64
+    public var replyToMsgId: Int64?
+    public var isSticker: Bool?
+    public var entities: MessageEntities?
+    public var randomId: Int64
+    public var temporaryMessageId: Int64
+  }
 
   public init(
     text: String?,
@@ -38,29 +36,46 @@ public struct SendMessageTransaction: Transaction2 {
     isSticker: Bool? = nil,
     entities: MessageEntities? = nil
   ) {
-    self.text = text
-    self.peerId = peerId
-    self.chatId = chatId
-    self.replyToMsgId = replyToMsgId
-    self.isSticker = isSticker
-    self.entities = entities
+    let randomId = Int64.random(in: 0 ... Int64.max)
+    context = Context(
+      text: text,
+      peerId: peerId,
+      chatId: chatId,
+      replyToMsgId: replyToMsgId,
+      isSticker: isSticker,
+      entities: entities,
+      randomId: randomId,
+      temporaryMessageId: -1 * randomId
+    )
+  }
 
-    randomId = Int64.random(in: 0 ... Int64.max)
-    peerUserId = if case let .user(id) = peerId { id } else { nil }
-    peerThreadId = if case let .thread(id) = peerId { id } else { nil }
-    temporaryMessageId = -1 * randomId
+  public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
+    .sendMessage(.with {
+      $0.peerID = context.peerId.toInputPeer()
+      $0.randomID = context.randomId
+      $0.temporarySendDate = Int64(Date().timeIntervalSince1970.rounded())
+      $0.isSticker = context.isSticker ?? false
 
-    // Create input for send message
-    input = .sendMessage(.with {
-      $0.peerID = peerId.toInputPeer()
-      $0.randomID = randomId
-      $0.temporarySendDate = Int64(date.timeIntervalSince1970.rounded())
-      $0.isSticker = isSticker ?? false
-
-      if let text { $0.message = text }
-      if let replyToMsgId { $0.replyToMsgID = replyToMsgId }
-      if let entities { $0.entities = entities }
+      if let text = context.text { $0.message = text }
+      if let replyToMsgId = context.replyToMsgId { $0.replyToMsgID = replyToMsgId }
+      if let entities = context.entities { $0.entities = entities }
     })
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case context
+  }
+
+  var peerUserId: Int64? {
+    if case let .user(id) = context.peerId { id } else { nil }
+  }
+
+  var peerThreadId: Int64? {
+    if case let .thread(id) = context.peerId { id } else { nil }
+  }
+
+  var peerId: Peer {
+    context.peerId
   }
 
   // Methods
@@ -68,24 +83,24 @@ public struct SendMessageTransaction: Transaction2 {
     log.debug("Optimistic send message")
 
     let message = Message(
-      messageId: temporaryMessageId,
-      randomId: randomId,
+      messageId: context.temporaryMessageId,
+      randomId: context.randomId,
       fromId: Auth.getCurrentUserId()!,
-      date: date,
-      text: text,
+      date: Date(), // Date here?
+      text: context.text,
       peerUserId: peerUserId,
       peerThreadId: peerThreadId,
-      chatId: chatId,
+      chatId: context.chatId,
       out: true,
       status: .sending,
-      repliedToMessageId: replyToMsgId,
+      repliedToMessageId: context.replyToMsgId,
       fileId: nil,
       photoId: nil,
       videoId: nil,
       documentId: nil,
       transactionId: nil, // No longer using transaction ID in new system
-      isSticker: isSticker,
-      entities: entities
+      isSticker: context.isSticker,
+      entities: context.entities
     )
 
     // Clear typing status
@@ -120,7 +135,7 @@ public struct SendMessageTransaction: Transaction2 {
 
       Task(priority: .userInitiated) { @MainActor in
         if let newMessage {
-          MessagesPublisher.shared.messageAddedSync(fullMessage: newMessage, peer: peerId)
+          MessagesPublisher.shared.messageAddedSync(fullMessage: newMessage, peer: context.peerId)
         } else {
           log.error("Failed to save message and push update")
         }
@@ -147,19 +162,19 @@ public struct SendMessageTransaction: Transaction2 {
     do {
       let message = try await AppDatabase.shared.dbWriter.write { db in
         try Message
-          .filter(Column("randomId") == randomId && Column("fromId") == currentUserId)
+          .filter(Column("randomId") == context.randomId && Column("fromId") == currentUserId)
           .updateAll(
             db,
             Column("status").set(to: MessageSendingStatus.failed.rawValue)
           )
-        return try Message.fetchOne(db, key: ["messageId": temporaryMessageId, "chatId": chatId])
+        return try Message.fetchOne(db, key: ["messageId": context.temporaryMessageId, "chatId": context.chatId])
       }
 
       // Update UI
       if let message {
         Task { @MainActor in
           try await Task.sleep(for: .milliseconds(100))
-          MessagesPublisher.shared.messageUpdatedSync(message: message, peer: peerId, animated: true)
+          MessagesPublisher.shared.messageUpdatedSync(message: message, peer: context.peerId, animated: true)
         }
       }
     } catch {
@@ -173,88 +188,16 @@ public struct SendMessageTransaction: Transaction2 {
     do {
       // Remove from database and update chat state
       try await AppDatabase.shared.dbWriter.write { db in
-        try Message.deleteMessages(db, messageIds: [temporaryMessageId], chatId: chatId)
+        try Message.deleteMessages(db, messageIds: [context.temporaryMessageId], chatId: context.chatId)
       }
 
       // Remove from UI cache
       Task { @MainActor in
-        MessagesPublisher.shared.messagesDeleted(messageIds: [temporaryMessageId], peer: peerId)
+        MessagesPublisher.shared.messagesDeleted(messageIds: [context.temporaryMessageId], peer: context.peerId)
       }
     } catch {
       log.error("Failed to cancel send message", error: error)
     }
-  }
-}
-
-// MARK: - Codable
-
-extension SendMessageTransaction: Codable {
-  enum CodingKeys: String, CodingKey {
-    // Core transaction data
-    case text, peerId, chatId, replyToMsgId, isSticker, entities
-
-    // State that needs to persist
-    case randomId, temporaryMessageId, date
-
-    // Note: We don't encode 'input' since it's reconstructible
-    // Note: We don't encode computed peerUserId/peerThreadId since they're derived
-  }
-
-  // MARK: - Encoding
-
-  public func encode(to encoder: Encoder) throws {
-    var container = encoder.container(keyedBy: CodingKeys.self)
-
-    // Encode core data
-    try container.encodeIfPresent(text, forKey: .text)
-    try container.encode(peerId, forKey: .peerId)
-    try container.encode(chatId, forKey: .chatId)
-    try container.encodeIfPresent(replyToMsgId, forKey: .replyToMsgId)
-    try container.encodeIfPresent(isSticker, forKey: .isSticker)
-    try container.encodeIfPresent(entities, forKey: .entities)
-
-    // Encode state
-    try container.encode(randomId, forKey: .randomId)
-    try container.encode(temporaryMessageId, forKey: .temporaryMessageId)
-    try container.encode(date, forKey: .date)
-  }
-
-  // MARK: - Decoding
-
-  public init(from decoder: Decoder) throws {
-    let container = try decoder.container(keyedBy: CodingKeys.self)
-
-    // Decode core data
-    text = try container.decodeIfPresent(String.self, forKey: .text)
-    peerId = try container.decode(Peer.self, forKey: .peerId)
-    chatId = try container.decode(Int64.self, forKey: .chatId)
-    replyToMsgId = try container.decodeIfPresent(Int64.self, forKey: .replyToMsgId)
-    isSticker = try container.decodeIfPresent(Bool.self, forKey: .isSticker)
-    entities = try container.decodeIfPresent(MessageEntities.self, forKey: .entities)
-
-    // Decode state
-    randomId = try container.decode(Int64.self, forKey: .randomId)
-    temporaryMessageId = try container.decode(Int64.self, forKey: .temporaryMessageId)
-    date = try container.decode(Date.self, forKey: .date)
-
-    // Reconstruct computed properties
-    peerUserId = if case let .user(id) = peerId { id } else { nil }
-    peerThreadId = if case let .thread(id) = peerId { id } else { nil }
-
-    // Set method (this should be consistent across all instances)
-    method = .sendMessage
-
-    // Reconstruct the Protocol Buffer input
-    input = .sendMessage(.with {
-      $0.peerID = peerId.toInputPeer()
-      $0.randomID = randomId
-      $0.temporarySendDate = Int64(date.timeIntervalSince1970.rounded())
-      $0.isSticker = isSticker ?? false
-
-      if let text { $0.message = text }
-      if let replyToMsgId { $0.replyToMsgID = replyToMsgId }
-      if let entities { $0.entities = entities }
-    })
   }
 }
 
