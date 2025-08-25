@@ -64,24 +64,24 @@ extension DeleteMessageTransaction: Codable {
   enum CodingKeys: String, CodingKey {
     case messageIds, peerId, chatId
   }
-  
+
   public func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: CodingKeys.self)
     try container.encode(messageIds, forKey: .messageIds)
     try container.encode(peerId, forKey: .peerId)
     try container.encode(chatId, forKey: .chatId)
   }
-  
+
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
-    
+
     messageIds = try container.decode([Int64].self, forKey: .messageIds)
     peerId = try container.decode(Peer.self, forKey: .peerId)
     chatId = try container.decode(Int64.self, forKey: .chatId)
-    
+
     // Set method
     method = .deleteMessages
-    
+
     // Reconstruct Protocol Buffer input
     input = .deleteMessages(.with {
       $0.peerID = peerId.toInputPeer()
@@ -92,7 +92,7 @@ extension DeleteMessageTransaction: Codable {
 
 // Helper
 
-public extension Transaction2 {
+public extension Transaction2 where Self == DeleteMessageTransaction {
   static func deleteMessages(messageIds: [Int64], peerId: Peer, chatId: Int64) -> DeleteMessageTransaction {
     DeleteMessageTransaction(messageIds: messageIds, peerId: peerId, chatId: chatId)
   }

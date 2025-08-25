@@ -220,8 +220,7 @@ struct ReactionItem: View {
   }
 
   private func toggleReaction() {
-    guard let fullMessage,
-          let currentUserId
+    guard let fullMessage
     else {
       return
     }
@@ -229,7 +228,7 @@ struct ReactionItem: View {
     if weReacted {
       // Remove reaction
       Task(priority: .userInitiated) { @MainActor in
-        try await Api.realtime.send(DeleteReactionTransaction(
+        try await Api.realtime.send(.deleteReaction(
           emoji: emoji,
           message: fullMessage.message
         ))
@@ -237,7 +236,7 @@ struct ReactionItem: View {
     } else {
       // Add reaction
       Task(priority: .userInitiated) { @MainActor in
-        try await Api.realtime.send(AddReactionTransaction(
+        try await Api.realtime.send(.addReaction(
           emoji: emoji,
           message: fullMessage.message
         ))
