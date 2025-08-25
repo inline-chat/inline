@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 public struct InviteToSpaceView: View {
   @Environment(\.appDatabase) var db
   @Environment(\.realtime) var realtime
+  @Environment(\.realtimeV2) var realtimeV2
   @Environment(\.dismiss) private var dismiss
 
   @FormState var formState
@@ -260,14 +261,12 @@ public struct InviteToSpaceView: View {
     Task {
       do {
         formState.startLoading()
-        try await realtime.invokeWithHandler(
-          .inviteToSpace,
-          input: .inviteToSpace(.with { input in
-            input.via = .email(emailInput)
-            input.spaceID = spaceId
-            input.role = .member
-          })
-        )
+        try await realtimeV2.send(.inviteToSpace(
+          spaceId: spaceId,
+          role: .member,
+          email: emailInput
+        ))
+
         formState.succeeded()
         successMessage = "Invite sent to \(emailInput)"
         showSuccess = true
@@ -289,14 +288,13 @@ public struct InviteToSpaceView: View {
     Task {
       do {
         formState.startLoading()
-        try await realtime.invokeWithHandler(
-          .inviteToSpace,
-          input: .inviteToSpace(.with { input in
-            input.via = .userID(user.id)
-            input.spaceID = spaceId
-            input.role = .member
-          })
-        )
+
+        try await realtimeV2.send(.inviteToSpace(
+          spaceId: spaceId,
+          role: .member,
+          userId: user.id
+        ))
+
         formState.succeeded()
         successMessage = "Invite sent to \(user.anyName)"
         showSuccess = true
@@ -317,14 +315,13 @@ public struct InviteToSpaceView: View {
     Task {
       do {
         formState.startLoading()
-        try await realtime.invokeWithHandler(
-          .inviteToSpace,
-          input: .inviteToSpace(.with { input in
-            input.via = .phoneNumber(phoneInput)
-            input.spaceID = spaceId
-            input.role = .member
-          })
-        )
+
+        try await realtimeV2.send(.inviteToSpace(
+          spaceId: spaceId,
+          role: .member,
+          phoneNumber: phoneInput
+        ))
+
         formState.succeeded()
         showPhoneShare = true
       } catch let error as RealtimeAPIError {

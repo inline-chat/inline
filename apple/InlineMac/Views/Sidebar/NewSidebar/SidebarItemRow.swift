@@ -496,7 +496,10 @@ class SidebarItemRow: NSTableCellView {
       keyEquivalent: "a"
     )
     archiveItem.target = self
-    archiveItem.image = NSImage(systemSymbolName: isArchived ? "archivebox" : "archivebox", accessibilityDescription: nil)
+    archiveItem.image = NSImage(
+      systemSymbolName: isArchived ? "archivebox" : "archivebox",
+      accessibilityDescription: nil
+    )
     menu.addItem(archiveItem)
 
     if isThread {
@@ -537,7 +540,7 @@ class SidebarItemRow: NSTableCellView {
 
   @objc private func handleReadUnreadAction() {
     guard let item else { return }
-    
+
     Task(priority: .userInitiated) {
       do {
         if hasUnread {
@@ -587,10 +590,7 @@ class SidebarItemRow: NSTableCellView {
       Task(priority: .userInitiated) {
         guard let peerId else { return }
         do {
-          try await dependencies.realtime
-            .invokeWithHandler(.deleteChat, input: .deleteChat(.with {
-              $0.peerID = peerId.toInputPeer()
-            }))
+          try await dependencies.realtimeV2.send(.deleteChat(peerId: peerId))
 
           navigateOut()
 
