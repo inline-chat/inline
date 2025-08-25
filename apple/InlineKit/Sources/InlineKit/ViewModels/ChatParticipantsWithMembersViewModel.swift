@@ -89,10 +89,7 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
          let spaceId = chat.spaceId
       {
         log.debug("🔍 Also fetching space members for public thread, spaceId: \(spaceId)")
-        try await Realtime.shared.invokeWithHandler(
-          .getSpaceMembers,
-          input: .getSpaceMembers(.with { $0.spaceID = spaceId })
-        )
+        try await Api.realtime.send(.getSpaceMembers(spaceId: spaceId))
       }
 
     } catch {

@@ -11,7 +11,7 @@ struct SpaceView: View {
   let spaceId: Int64
 
   @Environment(\.appDatabase) private var database
-  @Environment(\.realtime) private var realtime
+  @Environment(\.realtimeV2) private var realtimeV2
   @EnvironmentObject private var data: DataManager
   @Environment(Router.self) private var router
   @EnvironmentStateObject private var viewModel: FullSpaceViewModel
@@ -125,10 +125,7 @@ struct SpaceView: View {
     do {
       try await data.getSpace(spaceId: spaceId)
       try await data.getDialogs(spaceId: spaceId)
-      try await realtime.invokeWithHandler(
-        .getSpaceMembers,
-        input: .getSpaceMembers(.with { $0.spaceID = spaceId })
-      )
+      try await realtimeV2.send(.getSpaceMembers(spaceId: spaceId))
     } catch {
       Log.shared.error("Failed to load space data", error: error)
     }
