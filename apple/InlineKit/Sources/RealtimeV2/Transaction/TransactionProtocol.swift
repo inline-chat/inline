@@ -1,4 +1,5 @@
 import InlineProtocol
+import Logger
 
 public enum TransactionExecutionError: Error {
   case invalid
@@ -6,9 +7,12 @@ public enum TransactionExecutionError: Error {
 
 public protocol Transaction: Sendable, Codable {
   var method: InlineProtocol.Method { get set }
-  var input: InlineProtocol.RpcCall.OneOf_Input? { get set }
 
-  // func execute() async throws(TransactionExecutionError) -> Result
+  associatedtype Context: Sendable, Codable
+
+  var context: Context { get set }
+
+  func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input?
 
   /// Apply the result of the query to database
   /// Error propagated to the caller of the query
@@ -36,4 +40,12 @@ public extension Transaction {
 
 public extension Transaction {
   func cancelled() async {}
+  func optimistic() async {}
+  func failed(error: TransactionError) async {
+    Log.shared.error("Transaction failed \(debugDescription)", error: error)
+  }
+
+  var input: InlineProtocol.RpcCall.OneOf_Input? {
+    input(from: context)
+  }
 }
