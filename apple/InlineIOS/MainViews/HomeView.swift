@@ -277,8 +277,7 @@ struct HomeView: View {
       }
 
       do {
-        try await Realtime.shared
-          .invokeWithHandler(.getChats, input: .getChats(.init()))
+        try await realtimeV2.send(.getChats())
       } catch {
         Log.shared.error("Error fetching getChats", error: error)
       }
