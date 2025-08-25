@@ -9,6 +9,7 @@ actor TranslationManager {
   private let log = Log.scoped("TranslationManager")
   private let db = AppDatabase.shared
   private let realtime = Realtime.shared
+  private let realtimeV2 = Api.realtime
 
   // Cache for pending translation requests to avoid duplicates
   private var pendingTranslations: Set<Int64> = []
@@ -25,14 +26,12 @@ actor TranslationManager {
     let targetLanguage = UserLocale.getCurrentLanguage()
     log.debug("Requesting translations for \(messages.count) messages in \(targetLanguage)")
 
-    // Create translation request
-    var input = TranslateMessagesInput()
-    input.peerID = peerId.toInputPeer()
-    input.messageIds = messages.map(\.messageId)
-    input.language = targetLanguage
-
     // Call translation API
-    try await realtime.invokeWithHandler(.translateMessages, input: .translateMessages(input))
+    try await realtimeV2.send(.translateMessages(
+      peerId: peerId,
+      messageIds: messages.map(\.messageId),
+      language: targetLanguage
+    ))
     log.debug("Successfully sent translation request to API")
   }
 

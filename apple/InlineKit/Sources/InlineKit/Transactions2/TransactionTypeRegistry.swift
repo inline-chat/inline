@@ -4,24 +4,27 @@ import RealtimeV2
 /// Registry for mapping between transaction types and their string representations
 /// Used for serialization/deserialization in persistence layer
 public enum TransactionTypeRegistry {
-  
   /// Convert a transaction instance to its string type identifier
   public static func typeString(for transaction: any Transaction2) -> String {
     switch transaction {
-      case is SendMessageTransaction: return "send_message"
-      case is AddReactionTransaction: return "add_reaction"
-      case is DeleteReactionTransaction: return "delete_reaction"
-      case is EditMessageTransaction: return "edit_message"
-      case is DeleteMessageTransaction: return "delete_message"
-      case is CreateChatTransaction: return "create_chat"
-      case is GetMeTransaction: return "get_me"
-      case is GetSpaceMembersTransaction: return "get_space_members"
-      case is InviteToSpaceTransaction: return "invite_to_space"
-      case is DeleteChatTransaction: return "delete_chat"
-      default: return "unknown"
+      case is SendMessageTransaction: "send_message"
+      case is AddReactionTransaction: "add_reaction"
+      case is DeleteReactionTransaction: "delete_reaction"
+      case is EditMessageTransaction: "edit_message"
+      case is DeleteMessageTransaction: "delete_message"
+      case is CreateChatTransaction: "create_chat"
+      case is GetMeTransaction: "get_me"
+      case is GetSpaceMembersTransaction: "get_space_members"
+      case is InviteToSpaceTransaction: "invite_to_space"
+      case is DeleteChatTransaction: "delete_chat"
+      case is GetChatParticipantsTransaction: "get_chat_participants"
+      case is AddChatParticipantTransaction: "add_chat_participant"
+      case is RemoveChatParticipantTransaction: "remove_chat_participant"
+      case is TranslateMessagesTransaction: "translate_messages"
+      default: "unknown"
     }
   }
-  
+
   /// Decode a transaction from its type string and JSON data
   public static func decodeTransaction(type: String, data: Data) throws -> any Transaction2 {
     let decoder = JSONDecoder()
@@ -36,6 +39,10 @@ public enum TransactionTypeRegistry {
       case "get_space_members": return try decoder.decode(GetSpaceMembersTransaction.self, from: data)
       case "invite_to_space": return try decoder.decode(InviteToSpaceTransaction.self, from: data)
       case "delete_chat": return try decoder.decode(DeleteChatTransaction.self, from: data)
+      case "get_chat_participants": return try decoder.decode(GetChatParticipantsTransaction.self, from: data)
+      case "add_chat_participant": return try decoder.decode(AddChatParticipantTransaction.self, from: data)
+      case "remove_chat_participant": return try decoder.decode(RemoveChatParticipantTransaction.self, from: data)
+      case "translate_messages": return try decoder.decode(TranslateMessagesTransaction.self, from: data)
       default: throw TransactionTypeError.unknownTransactionType(type)
     }
   }
