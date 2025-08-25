@@ -15,6 +15,7 @@ public enum TransactionTypeRegistry {
       case is DeleteMessageTransaction: return "delete_message"
       case is CreateChatTransaction: return "create_chat"
       case is GetMeTransaction: return "get_me"
+      case is GetSpaceMembersTransaction: return "get_space_members"
       default: return "unknown"
     }
   }
@@ -30,6 +31,7 @@ public enum TransactionTypeRegistry {
       case "delete_message": return try decoder.decode(DeleteMessageTransaction.self, from: data)
       case "create_chat": return try decoder.decode(CreateChatTransaction.self, from: data)
       case "get_me": return try decoder.decode(GetMeTransaction.self, from: data)
+      case "get_space_members": return try decoder.decode(GetSpaceMembersTransaction.self, from: data)
       default: throw TransactionTypeError.unknownTransactionType(type)
     }
   }

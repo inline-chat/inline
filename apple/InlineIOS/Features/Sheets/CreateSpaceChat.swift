@@ -16,7 +16,7 @@ struct CreateSpaceChat: View {
   @FormState var formState
 
   @Environment(\.appDatabase) var db
-  @Environment(\.realtime) var realtime
+  @Environment(\.realtimeV2) var realtimeV2
   @Environment(\.dismiss) private var dismiss
 
   @EnvironmentObject var nav: Navigation
@@ -131,10 +131,7 @@ struct CreateSpaceChat: View {
           guard let spaceId else { return }
           // fetch space members
           do {
-            try await realtime
-              .invokeWithHandler(.getSpaceMembers, input: .getSpaceMembers(.with {
-                $0.spaceID = spaceId
-              }))
+            try await realtimeV2.send(.getSpaceMembers(spaceId: spaceId))
           } catch {
             Log.shared.error("failed to fetch space members in create chat", error: error)
           }
