@@ -11,6 +11,7 @@ public struct AppDependencies {
   let navigation = NavigationModel.shared
   let transactions = Transactions.shared
   let realtime = Realtime.shared
+  let realtimeV2 = Api.realtime
   let database = AppDatabase.shared
   let data = DataManager(database: AppDatabase.shared)
   let userSettings = INUserSettings.current
@@ -36,6 +37,7 @@ extension View {
       .environmentObject(Api.realtime.stateObject)
       .environment(\.transactions, deps.transactions)
       .environment(\.realtime, deps.realtime)
+      .environment(\.realtimeV2, deps.realtimeV2)
       .appDatabase(deps.database)
       .environment(\.logOut, deps.logOut)
       .environment(\.keyMonitor, deps.keyMonitor)

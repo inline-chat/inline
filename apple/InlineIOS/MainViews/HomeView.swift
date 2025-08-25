@@ -36,6 +36,7 @@ struct HomeView: View {
   @EnvironmentObject private var tabsManager: TabsManager
 
   @Environment(\.realtime) var realtime
+  @Environment(\.realtimeV2) var realtimeV2
   @Environment(\.appDatabase) private var database
   @Environment(\.auth) private var auth
   @Environment(\.scenePhase) var scenePhase
@@ -270,8 +271,7 @@ struct HomeView: View {
 
     Task.detached {
       do {
-        try await Realtime.shared
-          .invokeWithHandler(.getMe, input: .getMe(.init()))
+        try await realtimeV2.send(.getMe())
       } catch {
         Log.shared.error("Error fetching getMe info", error: error)
       }
