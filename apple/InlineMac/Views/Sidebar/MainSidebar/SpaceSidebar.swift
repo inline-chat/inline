@@ -9,7 +9,7 @@ struct SpaceSidebar: View {
   @EnvironmentStateObject var fullSpace: FullSpaceViewModel
   @Environment(\.keyMonitor) var keyMonitor
   @Environment(\.openWindow) var openWindow
-  @Environment(\.realtime) var realtime
+  @Environment(\.realtimeV2) var realtimeV2
 
   @State var searchQuery: String = ""
 
@@ -165,10 +165,7 @@ struct SpaceSidebar: View {
           }
 
           Task.detached {
-            try await realtime
-              .invokeWithHandler(.getSpaceMembers, input: .getSpaceMembers(.with {
-                $0.spaceID = spaceId
-              }))
+            try await realtimeV2.send(.getSpaceMembers(spaceId: spaceId))
           }
           Task.detached {
             do {
