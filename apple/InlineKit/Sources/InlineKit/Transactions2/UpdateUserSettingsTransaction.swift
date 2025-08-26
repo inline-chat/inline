@@ -8,6 +8,7 @@ public struct UpdateUserSettingsTransaction: Transaction2 {
   // Properties
   public var method: InlineProtocol.Method = .updateUserSettings
   public var context: Context
+  public var type: TransactionKindType = .mutation()
 
   public struct Context: Sendable, Codable {
     public var notificationSettings: NotificationSettingsManager

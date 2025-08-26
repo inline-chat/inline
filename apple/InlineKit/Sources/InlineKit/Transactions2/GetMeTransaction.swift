@@ -11,6 +11,7 @@ public struct GetMeTransaction: Transaction2 {
   // Properties
   public var method: InlineProtocol.Method = .getMe
   public var context: Context = .init()
+  public var type: TransactionKindType = .query()
 
   public struct Context: Sendable, Codable {}
 

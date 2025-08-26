@@ -11,13 +11,14 @@ public struct GetChatParticipantsTransaction: Transaction2 {
   // Properties
   public var method: InlineProtocol.Method = .getChatParticipants
   public var context: Context
+  public var type: TransactionKindType = .query()
 
   public struct Context: Sendable, Codable {
     let chatID: Int64
   }
 
   public init(chatID: Int64) {
-    self.context = Context(chatID: chatID)
+    context = Context(chatID: chatID)
   }
 
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
@@ -44,16 +45,16 @@ public struct GetChatParticipantsTransaction: Transaction2 {
           do {
             _ = try User.save(db, user: user)
           } catch {
-            self.log.error("Failed to save user", error: error)
+            log.error("Failed to save user", error: error)
           }
         }
 
         // Save participants
         for participant in response.participants {
           do {
-            ChatParticipant.save(db, from: participant, chatId: self.context.chatID)
+            ChatParticipant.save(db, from: participant, chatId: context.chatID)
           } catch {
-            self.log.error("Failed to save chat participant", error: error)
+            log.error("Failed to save chat participant", error: error)
           }
         }
       }

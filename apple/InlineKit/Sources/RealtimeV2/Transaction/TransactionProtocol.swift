@@ -1,3 +1,4 @@
+import Foundation
 import InlineProtocol
 import Logger
 
@@ -5,8 +6,29 @@ public enum TransactionExecutionError: Error {
   case invalid
 }
 
+public struct QueryConfig: Sendable {
+  public init() {}
+}
+
+public struct MutationConfig: Sendable {
+  public var transient: Bool = false
+
+  public init(transient: Bool = false) {
+    self.transient = transient
+  }
+}
+
+public enum TransactionKindType: Sendable {
+  /// Query is a transaction that will not be persisted to disk
+  case query(QueryConfig = QueryConfig())
+
+  /// Mutations will be persisted to disk for the duration of the timeout
+  case mutation(MutationConfig = MutationConfig())
+}
+
 public protocol Transaction: Sendable, Codable {
   var method: InlineProtocol.Method { get set }
+  var type: TransactionKindType { get set }
 
   associatedtype Context: Sendable, Codable
 
