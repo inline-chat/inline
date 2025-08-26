@@ -148,10 +148,14 @@ struct ChatInfoView: View {
                     spaceMembersViewModel: spaceMembersViewModel,
                     space: space,
                     removeParticipant: { userInfo in
+                      guard let chatId = chatItem.chat?.id else {
+                        Log.shared.error("No chat ID found when trying to remove participant")
+                        return
+                      }
                       Task {
                         do {
                           try await Api.realtime.send(.removeChatParticipant(
-                            chatID: chatItem.chat?.id ?? 0,
+                            chatID: chatId,
                             userID: userInfo.user.id
                           ))
                         } catch {
