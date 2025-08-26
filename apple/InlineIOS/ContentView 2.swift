@@ -143,6 +143,7 @@ struct SimpleChatListView: View {
   @EnvironmentObject private var dataManager: DataManager
   @Environment(Router.self) private var router
   @Environment(\.realtime) private var realtime
+  @Environment(\.realtimeV2) private var realtimeV2
 
   var chatItems: [HomeChatItem] {
     home.chats.filter {
@@ -205,9 +206,7 @@ struct SimpleChatListView: View {
       onUnread: { item in
         Task {
           do {
-            try await realtime.invokeWithHandler(.markAsUnread, input: .markAsUnread(.with {
-              $0.peerID = item.dialog.peerId.toInputPeer()
-            }))
+            try await realtimeV2.send(.markAsUnread(peerId: item.dialog.peerId))
           } catch {
             Log.shared.error("Failed to mark as unread", error: error)
           }
