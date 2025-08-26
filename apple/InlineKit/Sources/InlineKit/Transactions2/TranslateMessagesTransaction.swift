@@ -20,7 +20,7 @@ public struct TranslateMessagesTransaction: Transaction2 {
   }
 
   // Private
-  private var log = Log.scoped("Transactions/Empty")
+  private var log = Log.scoped("Transactions/TranslateMessages")
 
   public init(peerId: Peer, messageIds: [Int64], language: String) {
     context = Context(peerId: peerId, messageIds: messageIds, language: language)

@@ -13,6 +13,7 @@ struct ArchivedChatsView: View {
   @Environment(Router.self) private var router
   @EnvironmentObject var data: DataManager
   @Environment(\.realtime) var realtime
+  @Environment(\.realtimeV2) var realtimeV2
   @Environment(\.appDatabase) private var database
   @EnvironmentObject private var fullSpaceViewModel: FullSpaceViewModel
 
@@ -129,9 +130,7 @@ struct ArchivedChatsView: View {
       onUnread: { item in
         Task {
           do {
-            try await realtime.invokeWithHandler(.markAsUnread, input: .markAsUnread(.with {
-              $0.peerID = item.dialog.peerId.toInputPeer()
-            }))
+            try await realtimeV2.send(.markAsUnread(peerId: item.dialog.peerId))
           } catch {
             Log.shared.error("Failed to mark as unread", error: error)
           }
@@ -233,9 +232,7 @@ struct ArchivedChatsView: View {
           onUnread: {
             Task {
               do {
-                try await realtime.invokeWithHandler(.markAsUnread, input: .markAsUnread(.with {
-                  $0.peerID = memberChat.dialog.peerId.toInputPeer()
-                }))
+                try await realtimeV2.send(.markAsUnread(peerId: memberChat.dialog.peerId))
               } catch {
                 Log.shared.error("Failed to mark as unread", error: error)
               }
@@ -283,9 +280,7 @@ struct ArchivedChatsView: View {
           onUnread: {
             Task {
               do {
-                try await realtime.invokeWithHandler(.markAsUnread, input: .markAsUnread(.with {
-                  $0.peerID = chat.dialog.peerId.toInputPeer()
-                }))
+                try await realtimeV2.send(.markAsUnread(peerId: chat.dialog.peerId))
               } catch {
                 Log.shared.error("Failed to mark as unread", error: error)
               }
