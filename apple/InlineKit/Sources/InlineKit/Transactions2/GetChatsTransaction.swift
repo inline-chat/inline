@@ -8,6 +8,7 @@ public struct GetChatsTransaction: Transaction2 {
   // Properties
   public var method: InlineProtocol.Method = .getChats
   public var context: Context
+  public var type: TransactionKindType = .query()
 
   public struct Context: Sendable, Codable {}
 

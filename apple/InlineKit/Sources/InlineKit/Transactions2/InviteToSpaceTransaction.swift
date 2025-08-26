@@ -11,6 +11,7 @@ public struct InviteToSpaceTransaction: Transaction2 {
   // Properties
   public var method: InlineProtocol.Method = .inviteToSpace
   public var context: Context
+  public var type: TransactionKindType = .mutation()
 
   public struct Context: Sendable, Codable {
     public var spaceId: Int64
@@ -18,11 +19,11 @@ public struct InviteToSpaceTransaction: Transaction2 {
     public var userID: Int64?
     public var email: String?
     public var phoneNumber: String?
-    
+
     public var role: InlineProtocol.Member.Role {
       InlineProtocol.Member.Role(rawValue: roleRawValue) ?? .member
     }
-    
+
     public init(
       spaceId: Int64,
       role: InlineProtocol.Member.Role,
@@ -31,7 +32,7 @@ public struct InviteToSpaceTransaction: Transaction2 {
       phoneNumber: String? = nil
     ) {
       self.spaceId = spaceId
-      self.roleRawValue = role.rawValue
+      roleRawValue = role.rawValue
       self.userID = userID
       self.email = email
       self.phoneNumber = phoneNumber
@@ -45,7 +46,7 @@ public struct InviteToSpaceTransaction: Transaction2 {
   ) {
     context = Context(spaceId: spaceId, role: role, userID: userID)
   }
-  
+
   public init(
     spaceId: Int64,
     role: InlineProtocol.Member.Role,
@@ -53,7 +54,7 @@ public struct InviteToSpaceTransaction: Transaction2 {
   ) {
     context = Context(spaceId: spaceId, role: role, email: email)
   }
-  
+
   public init(
     spaceId: Int64,
     role: InlineProtocol.Member.Role,
@@ -66,7 +67,7 @@ public struct InviteToSpaceTransaction: Transaction2 {
     .inviteToSpace(.with {
       $0.spaceID = context.spaceId
       $0.role = context.role
-      
+
       if let userID = context.userID {
         $0.userID = userID
       } else if let email = context.email {
@@ -86,7 +87,7 @@ public struct InviteToSpaceTransaction: Transaction2 {
   public func optimistic() async {
     // log.debug("Optimistic invite to space")
     // For invite operations, we could show a pending invitation UI state
-    // This is left minimal as the actual invitation UI feedback 
+    // This is left minimal as the actual invitation UI feedback
     // should be handled by the UI layer showing loading states
   }
 
@@ -96,7 +97,7 @@ public struct InviteToSpaceTransaction: Transaction2 {
     }
 
     log.trace("inviteToSpace result: \(response)")
-    
+
     do {
       try await AppDatabase.shared.dbWriter.write { db in
         // Save user
@@ -108,7 +109,7 @@ public struct InviteToSpaceTransaction: Transaction2 {
             log.error("Failed to save user", error: error)
           }
         }
-        
+
         // Save member
         if response.hasMember {
           do {
@@ -150,15 +151,27 @@ public struct InviteToSpaceTransaction: Transaction2 {
 // MARK: - Helper
 
 public extension Transaction2 where Self == InviteToSpaceTransaction {
-  static func inviteToSpace(spaceId: Int64, role: InlineProtocol.Member.Role, userId: Int64) -> InviteToSpaceTransaction {
+  static func inviteToSpace(
+    spaceId: Int64,
+    role: InlineProtocol.Member.Role,
+    userId: Int64
+  ) -> InviteToSpaceTransaction {
     InviteToSpaceTransaction(spaceId: spaceId, role: role, userID: userId)
   }
-  
-  static func inviteToSpace(spaceId: Int64, role: InlineProtocol.Member.Role, email: String) -> InviteToSpaceTransaction {
+
+  static func inviteToSpace(
+    spaceId: Int64,
+    role: InlineProtocol.Member.Role,
+    email: String
+  ) -> InviteToSpaceTransaction {
     InviteToSpaceTransaction(spaceId: spaceId, role: role, email: email)
   }
-  
-  static func inviteToSpace(spaceId: Int64, role: InlineProtocol.Member.Role, phoneNumber: String) -> InviteToSpaceTransaction {
+
+  static func inviteToSpace(
+    spaceId: Int64,
+    role: InlineProtocol.Member.Role,
+    phoneNumber: String
+  ) -> InviteToSpaceTransaction {
     InviteToSpaceTransaction(spaceId: spaceId, role: role, phoneNumber: phoneNumber)
   }
 }

@@ -8,6 +8,7 @@ import RealtimeV2
 public struct DeleteMessageTransaction: Transaction2 {
   public var method: InlineProtocol.Method = .deleteMessages
   public var context: Context
+  public var type: TransactionKindType = .mutation()
 
   public struct Context: Sendable, Codable {
     public var messageIds: [Int64]

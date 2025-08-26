@@ -8,6 +8,7 @@ public struct EmptyTransaction: Transaction2 {
   // Properties
   public var method: InlineProtocol.Method = .getMe
   public var context: Context
+  public var type: TransactionKindType = .query()
 
   public struct Context: Sendable, Codable {}
 
