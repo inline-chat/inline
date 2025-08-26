@@ -1,5 +1,5 @@
 {
-  "originHash" : "06f0c23867ed6ebf5be47a56e392d80520daebef6d120523594265abc3e57408",
+  "originHash" : "0736d8f2d425e3d2454e2f8d27fc2efa7371e0c7229a67e2e3647b051e3e1b97",
   "pins" : [
     {
       "identity" : "get",
@@ -58,7 +58,7 @@
     {
       "identity" : "multipartformdatakit",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Kuniwak/MultipartFormDataKit.git",
+      "location" : "https://github.com/Kuniwak/MultipartFormDataKit",
       "state" : {
         "revision" : "27bf281a9adfd742fa2fb3318c176dcc7a111599",
         "version" : "1.0.1"
@@ -96,8 +96,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/getsentry/sentry-cocoa",
       "state" : {
-        "revision" : "56bfb7e723c76614be4c0861ee820ccbaed14c6d",
-        "version" : "8.41.0"
+        "revision" : "3c2eee7773df58bdfb9e10e72d9a4be44253e0d9",
+        "version" : "8.55.0"
       }
     },
     {
@@ -105,8 +105,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-async-algorithms",
       "state" : {
-        "revision" : "4c3ea81f81f0a25d0470188459c6d4bf20cf2f97",
-        "version" : "1.0.3"
+        "revision" : "042e1c4d9d19748c9c228f8d4ebc97bb1e339b0b",
+        "version" : "1.0.4"
       }
     },
     {
@@ -114,8 +114,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-atomics.git",
       "state" : {
-        "revision" : "cd142fd2f64be2100422d658e7411e39489da985",
-        "version" : "1.2.0"
+        "revision" : "b601256eab081c0f92f059e12818ac1d4f178ff7",
+        "version" : "1.3.0"
       }
     },
     {
@@ -132,8 +132,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-protobuf.git",
       "state" : {
-        "revision" : "ebc7251dd5b37f627c93698e4374084d98409633",
-        "version" : "1.28.2"
+        "revision" : "e3f69fd321d0c9fcdc16fb576a0cdd956675face",
+        "version" : "1.31.0"
       }
     },
     {
