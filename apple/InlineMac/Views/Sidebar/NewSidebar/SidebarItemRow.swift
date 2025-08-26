@@ -548,10 +548,7 @@ class SidebarItemRow: NSTableCellView {
           UnreadManager.shared.readAll(item.peerId, chatId: item.chat?.id ?? 0)
         } else {
           // Mark as unread using realtime API
-          try await dependencies.realtime
-            .invokeWithHandler(.markAsUnread, input: .markAsUnread(.with {
-              $0.peerID = item.peerId.toInputPeer()
-            }))
+          try await dependencies.realtimeV2.send(.markAsUnread(peerId: item.peerId))
         }
       } catch {
         Log.shared.error("Failed to update read/unread status", error: error)
