@@ -35,9 +35,9 @@
 		C3CC991B2CCE9AFF007F7F77 /* InlineUI in Frameworks */ = {isa = PBXBuildFile; productRef = C3CC991A2CCE9AFF007F7F77 /* InlineUI */; };
 		C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C3E6D5CA2CAE82B00048D2D8 /* GRDB */; };
 		CD0A3CDA2CD536DF0081AD69 /* GRDBQuery in Frameworks */ = {isa = PBXBuildFile; productRef = CD0A3CD92CD536DF0081AD69 /* GRDBQuery */; };
-		CD26CEAC2CB94E7900665A89 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = CD26CEAB2CB94E7900665A89 /* Sentry */; };
 		CD27856F2CFB053C008A0EEF /* InlineConfig in Frameworks */ = {isa = PBXBuildFile; productRef = CD27856E2CFB053C008A0EEF /* InlineConfig */; };
 		CD2785712CFB0916008A0EEF /* InlineConfig in Frameworks */ = {isa = PBXBuildFile; productRef = CD2785702CFB0916008A0EEF /* InlineConfig */; };
+		CD4CAEF02E5E14AA00698C43 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = CD4CAEEF2E5E14AA00698C43 /* Sentry */; };
 		CD4D56CD2D2D4393006072AE /* Throttler in Frameworks */ = {isa = PBXBuildFile; productRef = CD4D56CC2D2D4393006072AE /* Throttler */; };
 		CD4E8E2A2E088F6100CE6BC0 /* TextProcessing in Frameworks */ = {isa = PBXBuildFile; productRef = CD4E8E292E088F6100CE6BC0 /* TextProcessing */; };
 		CD4E8E2C2E088F6B00CE6BC0 /* TextProcessing in Frameworks */ = {isa = PBXBuildFile; productRef = CD4E8E2B2E088F6B00CE6BC0 /* TextProcessing */; };
@@ -239,7 +239,7 @@
 				CD4D56CD2D2D4393006072AE /* Throttler in Frameworks */,
 				CD735FF22E493C9400F7BFFE /* Translation in Frameworks */,
 				CD70BF1E2DE72D5100E9830A /* FileAttachments in Frameworks */,
-				CD26CEAC2CB94E7900665A89 /* Sentry in Frameworks */,
+				CD4CAEF02E5E14AA00698C43 /* Sentry in Frameworks */,
 				CDC72E3D2D999C6D001E8A0C /* GRDB in Frameworks */,
 				C38C90602CB9432200B78B8A /* InlineKit in Frameworks */,
 				CD7C6F132E5847CD00C89032 /* RealtimeV2 in Frameworks */,
@@ -418,7 +418,6 @@
 				C38C905F2CB9432200B78B8A /* InlineKit */,
 				CDE960152CB94C4F004C541C /* SwiftUIIntrospect */,
 				CDE9601B2CB94D1C004C541C /* KeychainSwift */,
-				CD26CEAB2CB94E7900665A89 /* Sentry */,
 				C3CC991A2CCE9AFF007F7F77 /* InlineUI */,
 				CD0A3CD92CD536DF0081AD69 /* GRDBQuery */,
 				CD2785702CFB0916008A0EEF /* InlineConfig */,
@@ -430,6 +429,7 @@
 				CD4E8E292E088F6100CE6BC0 /* TextProcessing */,
 				CD735FF12E493C9400F7BFFE /* Translation */,
 				CD7C6F122E5847CD00C89032 /* RealtimeV2 */,
+				CD4CAEEF2E5E14AA00698C43 /* Sentry */,
 			);
 			productName = InlineMac;
 			productReference = CD2661652CA01E3E00EB186F /* Inline.app */;
@@ -1431,10 +1431,6 @@
 			package = CD0A3CD82CD536DF0081AD69 /* XCRemoteSwiftPackageReference "GRDBQuery" */;
 			productName = GRDBQuery;
 		};
-		CD26CEAB2CB94E7900665A89 /* Sentry */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = Sentry;
-		};
 		CD27856E2CFB053C008A0EEF /* InlineConfig */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineConfig;
@@ -1442,6 +1438,11 @@
 		CD2785702CFB0916008A0EEF /* InlineConfig */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineConfig;
+		};
+		CD4CAEEF2E5E14AA00698C43 /* Sentry */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C35092C82CAEA7DA00AE3E23 /* XCRemoteSwiftPackageReference "sentry-cocoa" */;
+			productName = Sentry;
 		};
 		CD4D56CC2D2D4393006072AE /* Throttler */ = {
 			isa = XCSwiftPackageProductDependency;
