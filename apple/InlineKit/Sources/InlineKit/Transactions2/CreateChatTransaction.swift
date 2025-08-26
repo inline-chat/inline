@@ -9,6 +9,7 @@ public struct CreateChatTransaction: Transaction2 {
   // Properties
   public var method: InlineProtocol.Method = .createChat
   public var context: Context
+  public var type: TransactionKindType = .mutation()
 
   public struct Context: Sendable, Codable {
     public var title: String

@@ -8,6 +8,7 @@ public struct TranslateMessagesTransaction: Transaction2 {
   // Properties
   public var method: InlineProtocol.Method = .translateMessages
   public var context: Context
+  public var type: TransactionKindType = .query()
 
   public struct Context: Sendable, Codable {
     let peerId: Peer
