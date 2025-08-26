@@ -16,6 +16,7 @@ public struct SendMessageTransaction: Transaction2 {
   // Properties
   public var method: InlineProtocol.Method = .sendMessage
   public var context: Context
+  public var type: TransactionKindType = .mutation()
 
   public struct Context: Sendable, Codable {
     public var text: String?

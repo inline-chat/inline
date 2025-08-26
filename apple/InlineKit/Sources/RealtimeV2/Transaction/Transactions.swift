@@ -97,7 +97,7 @@ actor Transactions {
     sent[transactionId] = inFlight[transactionId]
 
     // remove from in-flight
-    inFlight.removeValue(forKey: transactionId)
+    _ = inFlight.removeValue(forKey: transactionId)
 
     // delete from disk because we no longer need to retry it
     deleteFromDisk(transactionId: transactionId)
@@ -191,7 +191,18 @@ actor Transactions {
 
   // MARK: - Private APIs
 
+  private func shouldSaveToDisk(transaction: TransactionWrapper) -> Bool {
+    switch transaction.transaction.type {
+      case .query:
+        false
+      case let .mutation(config):
+        config.transient ? false : true
+    }
+  }
+
   private func saveToDisk(transaction: TransactionWrapper) {
+    guard shouldSaveToDisk(transaction: transaction) else { return }
+
     Task.detached { [transaction, log, persistenceHandler] in
       do {
         if let persistenceHandler {
@@ -215,9 +226,11 @@ actor Transactions {
           try await persistenceHandler.deleteTransaction(transactionId)
           log.debug("Successfully deleted transaction \(transactionId) from disk")
         } else {
-          log.debug("No persistence handler available, skipping delete for transaction \(transactionId)")
+          log.trace("No persistence handler available, skipping delete for transaction \(transactionId)")
         }
       } catch {
+        // It's safe to ignore this error, the file may not exist, but better to be safe from infinite retries than
+        // sorry
         log.debug("Failed to delete transaction \(transactionId) from disk (file may not exist): \(error)")
       }
     }

@@ -9,6 +9,7 @@ public struct EditMessageTransaction: Transaction2 {
   // Properties
   public var method: InlineProtocol.Method = .editMessage
   public var context: Context
+  public var type: TransactionKindType = .mutation()
 
   public struct Context: Sendable, Codable {
     public var messageId: Int64
@@ -49,9 +50,9 @@ public struct EditMessageTransaction: Transaction2 {
       }
     })
   }
-  
+
   // Computed
-  
+
   var messageId: Int64 { context.messageId }
   var text: String { context.text }
   var chatId: Int64 { context.chatId }

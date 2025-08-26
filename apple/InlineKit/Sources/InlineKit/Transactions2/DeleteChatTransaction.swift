@@ -11,6 +11,7 @@ public struct DeleteChatTransaction: Transaction2 {
   // Properties
   public var method: InlineProtocol.Method = .deleteChat
   public var context: Context
+  public var type: TransactionKindType = .mutation()
 
   public struct Context: Sendable, Codable {
     public var peerId: Peer

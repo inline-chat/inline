@@ -11,6 +11,7 @@ public struct GetChatHistoryTransaction: Transaction2 {
   // Properties
   public var method: InlineProtocol.Method = .getChatHistory
   public var context: Context
+  public var type: TransactionKindType = .query()
 
   public struct Context: Sendable, Codable {
     public var peer: Peer

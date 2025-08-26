@@ -11,6 +11,7 @@ public struct AddChatParticipantTransaction: Transaction2 {
   // Properties
   public var method: InlineProtocol.Method = .addChatParticipant
   public var context: Context
+  public var type: TransactionKindType = .mutation()
 
   public struct Context: Sendable, Codable {
     let chatID: Int64

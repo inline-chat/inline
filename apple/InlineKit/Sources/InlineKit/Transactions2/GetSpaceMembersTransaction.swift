@@ -11,13 +11,14 @@ public struct GetSpaceMembersTransaction: Transaction2 {
   // Properties
   public var method: InlineProtocol.Method = .getSpaceMembers
   public var context: Context
+  public var type: TransactionKindType = .query()
 
   public struct Context: Sendable, Codable {
     let spaceId: Int64
   }
 
   public init(spaceId: Int64) {
-    self.context = Context(spaceId: spaceId)
+    context = Context(spaceId: spaceId)
   }
 
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
