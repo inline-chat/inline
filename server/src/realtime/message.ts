@@ -73,11 +73,19 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
   try {
     switch (message.body.oneofKind) {
       case "connectionInit":
-        if (!conn?.userId) {
-          let _ = await handleConnectionInit(message.body.connectionInit, handlerContext)
-          sendConnectionOpen()
-        } else {
-          log.error("connectionInit received after already authenticated")
+        try {
+          if (!conn?.userId) {
+            let _ = await handleConnectionInit(message.body.connectionInit, handlerContext)
+            sendConnectionOpen()
+          } else {
+            log.error("connectionInit received after already authenticated")
+          }
+        } catch (e) {
+          log.error("error handling message in connectionInit", e)
+          sendRaw({
+            id: message.id,
+            body: { oneofKind: "connectionError", connectionError: {} },
+          })
         }
         break
 
