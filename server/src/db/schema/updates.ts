@@ -2,7 +2,7 @@ import { chats } from "@in/server/db/schema/chats"
 import { creationDate } from "@in/server/db/schema/common"
 import { spaces } from "@in/server/db/schema/spaces"
 import { users } from "@in/server/db/schema/users"
-import { pgTable, integer, bytea, varchar, index, unique, bigint } from "drizzle-orm/pg-core"
+import { pgTable, integer, varchar, index, unique, bigint, bytea } from "drizzle-orm/pg-core"
 
 // enum for bucket
 export enum UpdateBucket {
