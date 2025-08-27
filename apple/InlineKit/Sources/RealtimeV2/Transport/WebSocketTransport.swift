@@ -10,98 +10,43 @@ import UIKit
 #endif
 
 public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
-  // MARK: Public `Transport` API --------------------------------------------
-
   private let log = Log.scoped("RealtimeV2.WebSocketTransport", enableTracing: true)
 
+  private let _eventChannel: AsyncChannel<TransportEvent>
   public nonisolated var events: AsyncChannel<TransportEvent> { _eventChannel }
-
-  public func start() async {
-    guard state == .idle else {
-      log.trace("Not starting connection because state is not idle (current: \(state))")
-      return
-    }
-    log.debug("starting connection to \(url)")
-
-    state = .connecting
-    await openConnection()
-  }
-
-  /// Should be called on logout
-  public func stop() async {
-    guard state == .connected || state == .connecting else { return }
-    log.debug("stopping connection")
-
-    await stopConnection()
-
-    state = .idle
-  }
-
-  public func send(_ message: InlineProtocol.ClientMessage) async throws {
-    guard state == .connected, let task else {
-      throw TransportError.notConnected
-    }
-    log.trace("sending message \(message)")
-    let data = try message.serializedData()
-    try await task.send(.data(data))
-  }
-
-  public func stopConnection() async {
-    log.debug("stopping connection")
-
-    // Cancel any active reconnection task
-    reconnectionTask?.cancel()
-    reconnectionTask = nil
-
-    // Cancel the WebSocket task; listeners stay subscribed to the stream.
-    task?.cancel(with: .goingAway, reason: nil)
-
-    // Also cancel the detached receive loop so it does not linger.
-    receiveLoopTask?.cancel()
-    receiveLoopTask = nil
-
-    task = nil
-  }
 
   // MARK: Internal state -----------------------------------------------------
 
   private enum ConnectionState { case idle, connecting, connected }
   private var state: ConnectionState = .idle
 
-  private var task: URLSessionWebSocketTask?
-
-  private var receiveLoopTask: Task<Void, Never>?
-
-  /// Connection attempt number to ensure delegate callbacks and cleanup operations
-  /// only affect the current connection attempt. Prevents stale callbacks from
-  /// previous connection attempts from interfering.
   private var connectionAttemptNo: UInt64 = 0
 
+  private var task: URLSessionWebSocketTask?
+  private var receiveLoopTask: Task<Void, Never>?
   private var reconnectionTask: Task<Void, Never>?
+  private var connectionTimeoutTask: Task<Void, Never>?
 
   private lazy var session: URLSession = { [unowned self] in
     let configuration = URLSessionConfiguration.default
-    // configuration.timeoutIntervalForRequest = 30
-    // configuration.timeoutIntervalForResource = 300
     return URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
   }()
 
-  // AsyncChannel plumbing
-  private let _eventChannel: AsyncChannel<TransportEvent>
+  private static var defaultURL: URL {
+    URL(string: InlineConfig.realtimeServerURL)!
+  }
 
-  /// Cancels any leftover tasks or sockets from a previous connection attempt.
-  /// This prevents multiple receive loops from running in parallel and ensures
-  /// that no stale sockets are left dangling when we reconnect.
+  private let url: URL
+
   private func cleanUpPreviousConnection() {
     log.trace("cleaning up previous connection task and loop")
-
-    // Increment connection attempt number to invalidate any pending delegate callbacks
-    // from the previous connection attempt
-    connectionAttemptNo = connectionAttemptNo &+ 1
 
     // Cancel any active reconnection task to prevent concurrent reconnection attempts
     reconnectionTask?.cancel()
     reconnectionTask = nil
+
+    // Cancel any active connection timeout task
+    stopConnectionTimeout()
 
     // Cancel the detached receive task first so it stops using the socket.
     receiveLoopTask?.cancel()
@@ -117,22 +62,126 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
   public init(url: URL? = nil) {
     log.trace("initializing")
 
-    // 1. Build the unified AsyncChannel first
     _eventChannel = AsyncChannel<TransportEvent>()
-
-    // 2. Endpoint (the session is configured lazily)
     self.url = url ?? Self.defaultURL
 
     super.init()
   }
 
-  private static var defaultURL: URL {
-    URL(string: InlineConfig.realtimeServerURL)!
+  // MARK: Reconnection -------------------------------------------------------
+
+  /// Reconnect after a delay
+  private func reconnect(skipDelay: Bool = false) async {
+    // Increment connection attempt number. It also invalidates connection timeout task.
+    connectionAttemptNo = connectionAttemptNo &+ 1
+
+    reconnectionTask?.cancel()
+    reconnectionTask = Task {
+      let delay = getReconnectionDelay()
+
+      if !skipDelay {
+        // Wait for timeout or a signal to reconnect
+        try? await Task.sleep(for: .seconds(delay))
+      }
+
+      // Check if we're still trying to reconnect
+      guard !Task.isCancelled else { return }
+      guard state != .idle, state != .connected else { return }
+
+      // Open a new connection
+      log.debug("Reconnection attempt #\(connectionAttemptNo) with \(delay)s delay")
+      await openConnection()
+    }
   }
 
-  private let url: URL
+  private func getReconnectionDelay() -> TimeInterval {
+    let attemptNo = connectionAttemptNo
+
+    if attemptNo >= 8 {
+      return 8.0 + Double.random(in: 0.0 ... 5.0)
+    }
+
+    // Custom formula: 0.2 + (attempt^1.5 * 0.4)
+    // Produces: 0.6, 1.33, 2.28, 3.4, 4.69, 6.12, 7.68s
+    return min(8.0, 0.2 + pow(Double(attemptNo), 1.5) * 0.4)
+  }
+
+  // MARK: Connection timeout helpers -----------------------------------------
+
+  private func startConnectionTimeout(for wsTask: URLSessionWebSocketTask) {
+    let currentAttemptNo = connectionAttemptNo
+    connectionTimeoutTask = Task { [weak self] in
+      try? await Task.sleep(for: .seconds(10))
+
+      guard let self else { return }
+
+      // Only trigger timeout for the current connection attempt
+      guard await connectionAttemptNo == currentAttemptNo else {
+        return
+      }
+
+      // Only trigger timeout if still connecting (not connected or idle)
+      guard await state == .connecting else {
+        return
+      }
+
+      log.debug("Connection attempt timed out after 10 seconds")
+
+      // Cancel the WebSocket task and trigger error handling
+      wsTask.cancel(with: .abnormalClosure, reason: "Connection timeout".data(using: .utf8))
+
+      let timeoutError = NSError(
+        domain: "WebSocketConnectionTimeout",
+        code: -1_001,
+        userInfo: [NSLocalizedDescriptionKey: "Connection attempt timed out after 10 seconds"]
+      )
+      await handleError(timeoutError)
+    }
+  }
+
+  private func stopConnectionTimeout() {
+    connectionTimeoutTask?.cancel()
+    connectionTimeoutTask = nil
+  }
 
   // MARK: Connection helpers -------------------------------------------------
+
+  /// Only called once (ie. on login)
+  public func start() async {
+    guard state == .idle else {
+      log.trace("Not starting transport because state is not idle (current: \(state))")
+      return
+    }
+    log.debug("starting transport and opening connection to \(url)")
+
+    await connecting()
+    await openConnection()
+  }
+
+  /// Should be called on logout. Destructive. Do not call for a simple connection restart. Use `stopConnection`
+  /// instead.
+  public func stop() async {
+    guard state == .connected || state == .connecting else { return }
+    log.debug("stopping connection")
+
+    await idle()
+    await stopConnection()
+  }
+
+  public func send(_ message: InlineProtocol.ClientMessage) async throws {
+    guard state == .connected, let task else {
+      throw TransportError.notConnected
+    }
+    log.trace("sending message \(message)")
+    let data = try message.serializedData()
+    try await task.send(.data(data))
+  }
+
+  public func stopConnection() async {
+    log.debug("stopping connection")
+
+    cleanUpPreviousConnection()
+  }
 
   private func openConnection() async {
     // Guard against starting a connection when we shouldn't
@@ -144,34 +193,18 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     // Ensure we start from a clean slate.
     cleanUpPreviousConnection()
 
-    // Double-check state after cleanup - another task might have changed it
-    guard state != .idle else {
-      log.warning("Not opening connection because state became idle during cleanup")
-      return
-    }
-
-    if state != .connecting {
-      state = .connecting
-      log.debug("Transport connecting (attempt #\(connectionAttemptNo))")
-      Task { await _eventChannel.send(.connecting) }
-    }
+    await connecting()
 
     let wsTask = session.webSocketTask(with: url)
     task = wsTask
+
+    // Start 10-second connection timeout
+    startConnectionTimeout(for: wsTask)
+
     wsTask.resume()
 
     // Actual transition to `.connected` happens in the
     // `urlSession(_:webSocketTask:didOpenWithProtocol:)` delegate callback.
-  }
-
-  // Note: `stop()` performs lightweight disconnect; we no longer need a
-  // separate `closeConnection` that finishes the stream.
-  // Keeping this helper in case future enhancements want to finish the stream
-  // upon deallocation.
-  private func closeAndFinish() {
-    task?.cancel()
-    task = nil
-    _eventChannel.finish()
   }
 
   // MARK: Receive loop -------------------------------------------------------
@@ -215,45 +248,22 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
   private func handleError(_ error: Error) async {
     log.debug("WebSocket error: \(error)")
 
-    // Attempt to reconnect transparently: transition back to `.connecting` and
-    // try to re-open the socket.  The client will never see a `.disconnected`
-    // event; instead it observes `.connecting → .connected` again.
-
-    guard state != .idle else { return }
-
-    // If a reconnection is already in progress, don't start another one
-    guard reconnectionTask == nil else {
-      log.trace("Reconnection already in progress, ignoring error")
+    guard state != .idle else {
+      log.trace("Ignoring error because state is idle")
       return
     }
 
-    // Start a reconnection task to handle this error
-    let attemptNo = connectionAttemptNo
-    reconnectionTask = Task { [weak self] in
-      guard let self else { return }
+    await connecting()
+    await reconnect()
+  }
 
-      await connecting()
+  // MARK: State transitions --------------------------------------------------
 
-      // Progressive backoff: 0.5s → 1s → random(1-3s)
-      let delay = switch attemptNo {
-        case 1:
-          0.3 // First reconnection attempt
-        case 2:
-          0.8 // Second reconnection attempt
-        case 3:
-          1.5 // Third reconnection attempt
-        default:
-          Double.random(in: 1.0 ... 4.0) // Subsequent attempts
-      }
-
-      log.debug("Reconnection attempt #\(attemptNo) with \(delay)s delay")
-      try? await Task.sleep(for: .seconds(delay))
-
-      // Check if we're still the active reconnection task and haven't been cancelled
-      guard !Task.isCancelled else { return }
-
-      await attemptReconnection()
-    }
+  private func connected() async {
+    guard state != .connected else { return }
+    state = .connected
+    log.debug("Transport connected")
+    Task { await _eventChannel.send(.connected) }
   }
 
   private func connecting() async {
@@ -263,12 +273,11 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     Task { await _eventChannel.send(.connecting) }
   }
 
-  /// Internal method to handle the actual reconnection logic
-  private func attemptReconnection() async {
-    await openConnection()
-
-    // Clear the reconnection task since we're done
-    reconnectionTask = nil
+  private func idle() async {
+    guard state != .idle else { return }
+    state = .idle
+    log.debug("Transport stopping")
+    Task { await _eventChannel.send(.stopping) }
   }
 
   // MARK: - URLSessionWebSocketDelegate ------------------------------------
@@ -303,11 +312,15 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
       return
     }
 
+    // Reset connection attempt number to 0 since we've successfully connected
+    connectionAttemptNo = 0
+
+    // Cancel the connection timeout task since we've successfully connected
+    stopConnectionTimeout()
+
     receiveLoop()
 
-    state = .connected
-    log.debug("Transport connected (attempt #\(connectionAttemptNo))")
-    Task { await _eventChannel.send(.connected) }
+    await connected()
   }
 
   private func handleClose(
