@@ -42,6 +42,11 @@ export class Log {
     this.logLevel = level ?? globalLogLevel[scope] ?? Log.logLevel
   }
 
+  /**
+   * @param messageOrError - The message to log or an error object
+   * @param errorOrMetadata - The error object or metadata to attach to the error
+   * @param metadata - Additional metadata to attach to the error
+   */
   error(
     messageOrError: string | unknown,
     errorOrMetadata?: unknown | Error | Record<string, unknown>,
@@ -53,11 +58,21 @@ export class Log {
     const scopeColored = styleText("red", this.scope)
     if (typeof messageOrError === "string") {
       console.error(scopeColored, messageOrError, errorOrMetadata, metadata)
-      Sentry.captureException(new Error(messageOrError), { extra: errorOrMetadata as Record<string, unknown> })
+
+      // Check if second argument is an Error - support both log.error("desc", error) and log.error(error, "desc")
+      if (this.isError(errorOrMetadata)) {
+        Sentry.captureException(errorOrMetadata, { extra: { message: messageOrError, metadata } })
+      } else {
+        Sentry.captureException(new Error(messageOrError), { extra: errorOrMetadata as Record<string, unknown> })
+      }
     } else {
       console.error(scopeColored, messageOrError, errorOrMetadata, metadata)
       Sentry.captureException(messageOrError)
     }
+  }
+
+  private isError(obj: unknown): obj is Error {
+    return obj instanceof Error || (typeof obj === "object" && obj !== null && "message" in obj && "stack" in obj)
   }
 
   warn(messageOrError: string | unknown, error?: unknown | Error): void {
