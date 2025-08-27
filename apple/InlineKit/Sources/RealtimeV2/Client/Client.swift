@@ -22,9 +22,6 @@ actor ProtocolClient {
   private var lastTimestamp: UInt32 = 0
   private var sequence: UInt32 = 0
 
-  /// Message IDs to continuation handlers for pending RPC calls
-  private var rpcCalls: [UInt64: CheckedContinuation<RpcResult.OneOf_Result?, any Error>] = [:]
-
   /// Tasks for managing listeners
   private var tasks: Set<Task<Void, Never>> = []
 
@@ -51,11 +48,9 @@ actor ProtocolClient {
   }
 
   public func reset() {
-    cancelPendingRpcCalls(reason: .stopped)
     seq = 0
     lastTimestamp = 0
     sequence = 0
-    rpcCalls.removeAll()
     Task { await pingPong.stop() }
   }
 
@@ -118,11 +113,9 @@ actor ProtocolClient {
 
       case let .rpcResult(result):
         Task { await events.send(.rpcResult(msgId: result.reqMsgID, rpcResult: result.result)) }
-        //handleRpcResult(result)
 
       case let .rpcError(error):
         Task { await events.send(.rpcError(msgId: error.reqMsgID, rpcError: error)) }
-        //handleRpcError(error)
 
       case let .ack(ack):
         log.debug("Received ack: \(ack.msgID)")
@@ -141,7 +134,6 @@ actor ProtocolClient {
         log.debug("Received pong: \(pong.nonce)")
         Task { await pingPong.pong(nonce: pong.nonce) }
 
-      // TODO: Handle server messages (updates, notifications, etc.)
       default:
         log.debug("Protocol client: Unhandled message type: \(String(describing: message.body))")
     }
@@ -252,78 +244,9 @@ actor ProtocolClient {
       $0.input = input
     }))
 
-    // FIXME: Should we move it to a task?
     try await transport.send(message)
 
     return message.id
-  }
-
-  /// Send an RPC call and wait for the response
-  // func sendRpc(
-  //   method: InlineProtocol.Method,
-  //   input: RpcCall.OneOf_Input?
-  // ) async throws -> RpcResult.OneOf_Result? {
-  //   log.debug("sending RPC call for method: \(method)")
-
-  //   let message = wrapMessage(body: .rpcCall(.with {
-  //     $0.method = method
-  //     $0.input = input
-  //   }))
-
-  //   return try await withCheckedThrowingContinuation { continuation in
-  //     rpcCalls[message.id] = continuation
-
-  //     // Send the message synchronously in the continuation context
-  //     Task.detached { [transport] in
-  //       do {
-  //         try await transport.send(message)
-  //         // Log success, but don't access self here
-  //       } catch {
-  //         // Remove the continuation and resume with error if sending fails
-  //         continuation.resume(throwing: error)
-  //       }
-  //     }
-  //   }
-  // }
-
-  // MARK: - Response Handling
-
-  /// Handle incoming RPC result
-  func handleRpcResult(_ result: RpcResult) {
-    log.debug("received RPC result for message ID: \(result.reqMsgID)")
-
-    guard let continuation = rpcCalls.removeValue(forKey: result.reqMsgID) else {
-      log.warning("No pending RPC call found for message ID: \(result.reqMsgID)")
-      return
-    }
-
-    continuation.resume(returning: result.result)
-  }
-
-  /// Handle incoming RPC error
-  func handleRpcError(_ error: RpcError) {
-    log.debug("received RPC error for message ID: \(error.reqMsgID) - \(error.message)")
-
-    guard let continuation = rpcCalls.removeValue(forKey: error.reqMsgID) else {
-      log.warning("No pending RPC call found for error message ID: \(error.reqMsgID)")
-      return
-    }
-
-    continuation.resume(throwing: ProtocolClientError.rpcError(
-      errorCode: String(describing: error.errorCode),
-      message: error.message,
-      code: Int(error.code)
-    ))
-  }
-
-  /// Cancel all pending RPC calls with a specific error
-  func cancelPendingRpcCalls(reason: ProtocolClientError) {
-    log.debug("cancelling \(rpcCalls.count) pending RPC calls")
-
-    for (_, continuation) in rpcCalls {
-      continuation.resume(throwing: reason)
-    }
-    rpcCalls.removeAll()
   }
 }
 
