@@ -1,4 +1,4 @@
-// trigger ci
+// trigger ci 1
 import * as Sentry from "@sentry/bun"
 import { SENTRY_DSN } from "@in/server/env"
 import { gitCommitHash, version } from "@in/server/buildEnv"
