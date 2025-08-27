@@ -118,6 +118,12 @@ export interface ServerProtocolMessage {
          */
         pong: Pong;
     } | {
+        oneofKind: "connectionError";
+        /**
+         * @generated from protobuf field: ConnectionError connection_error = 10;
+         */
+        connectionError: ConnectionError;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -160,6 +166,11 @@ export interface Ack {
  * @generated from protobuf message ConnectionOpen
  */
 export interface ConnectionOpen {
+}
+/**
+ * @generated from protobuf message ConnectionError
+ */
+export interface ConnectionError {
 }
 /**
  * @generated from protobuf message Ping
@@ -3425,7 +3436,8 @@ class ServerProtocolMessage$Type extends MessageType<ServerProtocolMessage> {
             { no: 6, name: "rpc_error", kind: "message", oneof: "body", T: () => RpcError },
             { no: 7, name: "message", kind: "message", oneof: "body", T: () => ServerMessage },
             { no: 8, name: "ack", kind: "message", oneof: "body", T: () => Ack },
-            { no: 9, name: "pong", kind: "message", oneof: "body", T: () => Pong }
+            { no: 9, name: "pong", kind: "message", oneof: "body", T: () => Pong },
+            { no: 10, name: "connection_error", kind: "message", oneof: "body", T: () => ConnectionError }
         ]);
     }
     create(value?: PartialMessage<ServerProtocolMessage>): ServerProtocolMessage {
@@ -3480,6 +3492,12 @@ class ServerProtocolMessage$Type extends MessageType<ServerProtocolMessage> {
                         pong: Pong.internalBinaryRead(reader, reader.uint32(), options, (message.body as any).pong)
                     };
                     break;
+                case /* ConnectionError connection_error */ 10:
+                    message.body = {
+                        oneofKind: "connectionError",
+                        connectionError: ConnectionError.internalBinaryRead(reader, reader.uint32(), options, (message.body as any).connectionError)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -3513,6 +3531,9 @@ class ServerProtocolMessage$Type extends MessageType<ServerProtocolMessage> {
         /* Pong pong = 9; */
         if (message.body.oneofKind === "pong")
             Pong.internalBinaryWrite(message.body.pong, writer.tag(9, WireType.LengthDelimited).fork(), options).join();
+        /* ConnectionError connection_error = 10; */
+        if (message.body.oneofKind === "connectionError")
+            ConnectionError.internalBinaryWrite(message.body.connectionError, writer.tag(10, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -3692,6 +3713,31 @@ class ConnectionOpen$Type extends MessageType<ConnectionOpen> {
  * @generated MessageType for protobuf message ConnectionOpen
  */
 export const ConnectionOpen = new ConnectionOpen$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ConnectionError$Type extends MessageType<ConnectionError> {
+    constructor() {
+        super("ConnectionError", []);
+    }
+    create(value?: PartialMessage<ConnectionError>): ConnectionError {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<ConnectionError>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ConnectionError): ConnectionError {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: ConnectionError, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ConnectionError
+ */
+export const ConnectionError = new ConnectionError$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class Ping$Type extends MessageType<Ping> {
     constructor() {
