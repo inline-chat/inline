@@ -71,13 +71,16 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
   // MARK: Reconnection -------------------------------------------------------
 
   /// Reconnect after a delay
-  private func reconnect(skipDelay: Bool = false) async {
+  public func reconnect(skipDelay: Bool = false) async {
+    await connecting()
+    await stopConnection()
     // Increment connection attempt number. It also invalidates connection timeout task.
     connectionAttemptNo = connectionAttemptNo &+ 1
 
     reconnectionTask?.cancel()
     reconnectionTask = Task {
       let delay = getReconnectionDelay()
+      log.debug("Reconnection attempt #\(connectionAttemptNo) with \(delay)s delay")
 
       if !skipDelay {
         // Wait for timeout or a signal to reconnect
@@ -86,10 +89,12 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
 
       // Check if we're still trying to reconnect
       guard !Task.isCancelled else { return }
-      guard state != .idle, state != .connected else { return }
+      guard state != .idle, state != .connected else {
+        log.debug("Not reconnecting because state is idle or connected")
+        return
+      }
 
       // Open a new connection
-      log.debug("Reconnection attempt #\(connectionAttemptNo) with \(delay)s delay")
       await openConnection()
     }
   }
@@ -149,7 +154,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
   /// Only called once (ie. on login)
   public func start() async {
     guard state == .idle else {
-      log.trace("Not starting transport because state is not idle (current: \(state))")
+      log.error("Not starting transport because state is not idle (current: \(state))")
       return
     }
     log.debug("starting transport and opening connection to \(url)")
@@ -184,6 +189,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
   }
 
   private func openConnection() async {
+    log.debug("Opening connection")
     // Guard against starting a connection when we shouldn't
     guard state != .idle else {
       log.warning("Not opening connection because state is idle")
@@ -238,6 +244,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
               break
           }
         } catch {
+          log.debug("Error in receive loop")
           await handleError(error)
           break
         }
@@ -269,7 +276,6 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
   private func connecting() async {
     guard state != .connecting else { return }
     state = .connecting
-    log.debug("Transport connecting (attempt #\(connectionAttemptNo))")
     Task { await _eventChannel.send(.connecting) }
   }
 
