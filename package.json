@@ -1,9 +1,11 @@
 {
   "name": "inline",
-  "devDependencies": {
-    "oxlint": "^0.16.0"
-  },
   "private": true,
+  "workspaces": [
+    "server",
+    "web",
+    "scripts"
+  ],
   "scripts": {
     "generate:proto": "cd scripts && bun run generate",
     "dev:server": "cd server && bun run dev",
@@ -12,9 +14,7 @@
     "test": "cd server && bun test",
     "lint": "bunx oxlint@latest"
   },
-  "workspaces": [
-    "server",
-    "web",
-    "scripts"
-  ]
+  "devDependencies": {
+    "oxlint": "^0.16.0"
+  }
 }
