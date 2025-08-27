@@ -22,10 +22,21 @@ actor ProtocolClient {
   private var lastTimestamp: UInt32 = 0
   private var sequence: UInt32 = 0
 
+  // Connection
+
+  /// Connection attempt number for handling reconnection delay
+  private var connectionAttemptNo: UInt32 = 0
+
+  /// Reconnection task for handling client failure with a local delay
+  private var reconnectionTask: Task<Void, Never>?
+
+  /// Authentication timeout task for handling authentication failure after 10s
+  private var authenticationTimeoutTask: Task<Void, Never>?
+
   /// Tasks for managing listeners
   private var tasks: Set<Task<Void, Never>> = []
 
-  /// Ping pong
+  /// Ping pong service to keep connection alive
   private let pingPong: PingPongService
 
   init(transport: Transport, auth: Auth) {
@@ -45,12 +56,19 @@ actor ProtocolClient {
       task.cancel()
     }
     tasks.removeAll()
+    Task { [self] in
+      await reset()
+    }
   }
 
   public func reset() {
     seq = 0
     lastTimestamp = 0
+    connectionAttemptNo = 0
     sequence = 0
+    stopAuthenticationTimeout()
+    reconnectionTask?.cancel()
+    reconnectionTask = nil
     Task { await pingPong.stop() }
   }
 
@@ -59,12 +77,17 @@ actor ProtocolClient {
   private func connectionOpen() async {
     state = .open
     Task { await events.send(.open) }
+    stopAuthenticationTimeout()
+    reconnectionTask?.cancel()
+    reconnectionTask = nil
+    connectionAttemptNo = 0
     await pingPong.start()
   }
 
   private func connecting() async {
     state = .connecting
     Task { await events.send(.connecting) }
+    stopAuthenticationTimeout()
     await pingPong.stop()
   }
 
@@ -147,12 +170,13 @@ actor ProtocolClient {
       try await transport.send(msg)
     } catch {
       log.error("Failed to send ping: \(error)")
+      // Reconnect with delay??
     }
   }
 
-  func reconnect() async {
+  func reconnect(skipDelay: Bool = false) async {
     log.debug("Reconnecting transport")
-    await transport.restart(retryDelay: nil)
+    await transport.reconnect(skipDelay: skipDelay)
   }
 
   // MARK: - ID Generation
@@ -219,11 +243,66 @@ actor ProtocolClient {
   private func authenticate() async {
     do {
       try await sendConnectionInit()
-      log.debug("Authentication successful")
+
+      log.debug("Sent authentication message")
+
+      startAuthenticationTimeout()
     } catch {
       log.error("Failed to authenticate, attempting restart", error: error)
-      Task { await transport.restart() }
+      handleClientFailure()
     }
+  }
+
+  private func startAuthenticationTimeout() {
+    authenticationTimeoutTask = Task.detached(name: "authentication timeout") { [weak self] in
+      try? await Task.sleep(for: .seconds(10))
+
+      guard let self else { return }
+
+      guard !Task.isCancelled else { return }
+
+      if await state == .connecting {
+        log.error("Authentication timeout. Reconnecting")
+        // Skip delay because we already have a delay here
+        Task { await self.reconnect(skipDelay: true) }
+      }
+    }
+  }
+
+  private func stopAuthenticationTimeout() {
+    authenticationTimeoutTask?.cancel()
+    authenticationTimeoutTask = nil
+  }
+
+  /// This is when transport works fine but server is not responding to our messages or we have a failure inside the
+  /// Client. We need to clear client's state, with a timeout, reconnect and start over.
+  private func handleClientFailure() {
+    log.error("Client failure. Reconnecting")
+    connectionAttemptNo = connectionAttemptNo &+ 1
+    stopAuthenticationTimeout()
+
+    reconnectionTask?.cancel()
+    reconnectionTask = Task {
+      try? await Task.sleep(for: .seconds(getReconnectionDelay()))
+
+      guard !Task.isCancelled else { return }
+      guard state != .open else { return }
+
+      // Skip delay because we already have a delay here
+      await self.reconnect(skipDelay: true)
+    }
+  }
+
+  private func getReconnectionDelay() -> TimeInterval {
+    let attemptNo = connectionAttemptNo
+
+    if attemptNo >= 8 {
+      return 8.0 + Double.random(in: 0.0 ... 5.0)
+    }
+
+    // Custom formula: 0.2 + (attempt^1.5 * 0.4)
+    // Produces: 0.6, 1.33, 2.28, 3.4, 4.69, 6.12, 7.68s
+    return min(8.0, 0.2 + pow(Double(attemptNo), 1.5) * 0.4)
   }
 
   // MARK: - Public API
