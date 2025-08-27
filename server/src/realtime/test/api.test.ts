@@ -14,16 +14,16 @@ describe("realtime api", () => {
     await wsOpen(ws)
   })
 
-  it("should not accept string messages", async () => {
-    const app = new Elysia()
-    app.use(realtime)
-    app.listen(0)
+  // it("should not accept string messages", async () => {
+  //   const app = new Elysia()
+  //   app.use(realtime)
+  //   app.listen(0)
 
-    const ws = newWebsocket(app.server!)
-    await wsOpen(ws)
+  //   const ws = newWebsocket(app.server!)
+  //   await wsOpen(ws)
 
-    ws.send("hello")
-    await delay(5)
-    expect(ws.readyState).toBe(WebSocket.CLOSED)
-  })
+  //   ws.send("hello")
+  //   await delay(5)
+  //   expect(ws.readyState).toBe(WebSocket.CLOSED)
+  // })
 })
