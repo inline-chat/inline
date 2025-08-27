@@ -35,6 +35,7 @@ message ServerProtocolMessage {
     ServerMessage message = 7;
     Ack ack = 8;
     Pong pong = 9;
+    ConnectionError connection_error = 10;
   }
 }
 
@@ -49,6 +50,8 @@ message UpdatesPayload { repeated Update updates = 1; }
 message Ack { uint64 msg_id = 1; }
 
 message ConnectionOpen {}
+
+message ConnectionError {}
 
 message Ping { uint64 nonce = 1; }
 

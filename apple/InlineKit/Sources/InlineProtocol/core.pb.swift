@@ -284,6 +284,14 @@ public struct ServerProtocolMessage: Sendable {
     set {body = .pong(newValue)}
   }
 
+  public var connectionError: ConnectionError {
+    get {
+      if case .connectionError(let v)? = body {return v}
+      return ConnectionError()
+    }
+    set {body = .connectionError(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Body: Equatable, Sendable {
@@ -293,6 +301,7 @@ public struct ServerProtocolMessage: Sendable {
     case message(ServerMessage)
     case ack(Ack)
     case pong(Pong)
+    case connectionError(ConnectionError)
 
   }
 
@@ -349,6 +358,16 @@ public struct Ack: Sendable {
 }
 
 public struct ConnectionOpen: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct ConnectionError: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -4968,6 +4987,7 @@ extension ServerProtocolMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
     7: .same(proto: "message"),
     8: .same(proto: "ack"),
     9: .same(proto: "pong"),
+    10: .standard(proto: "connection_error"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -5055,6 +5075,19 @@ extension ServerProtocolMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
           self.body = .pong(v)
         }
       }()
+      case 10: try {
+        var v: ConnectionError?
+        var hadOneofValue = false
+        if let current = self.body {
+          hadOneofValue = true
+          if case .connectionError(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.body = .connectionError(v)
+        }
+      }()
       default: break
       }
     }
@@ -5092,6 +5125,10 @@ extension ServerProtocolMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
     case .pong?: try {
       guard case .pong(let v)? = self.body else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
+    }()
+    case .connectionError?: try {
+      guard case .connectionError(let v)? = self.body else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 10)
     }()
     case nil: break
     }
@@ -5232,6 +5269,25 @@ extension ConnectionOpen: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
   }
 
   public static func ==(lhs: ConnectionOpen, rhs: ConnectionOpen) -> Bool {
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension ConnectionError: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ConnectionError"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: ConnectionError, rhs: ConnectionError) -> Bool {
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
