@@ -5,9 +5,9 @@ import Foundation
 import InlineProtocol
 import Logger
 
-/// Internal – later we will rename the main module to Realtime
+/// This root actor manages the connection, sync, transactions, queries, etc.
 ///
-/// This actor manages the real-time communication with the Inline Protocol server.
+/// later we will rename the main module to `Realtime`
 public actor RealtimeV2 {
   // MARK: - Core Components
 
@@ -181,11 +181,17 @@ public actor RealtimeV2 {
     // send as RPC
     // mark as running
     Task {
-      // send as RPC message
-      let msgId = try await client.sendRpc(method: transaction.method, input: transaction.input)
-      // mark as running
-      await transactions.running(transactionId: transactionWrapper.id, rpcMsgId: msgId)
-      // the rest of the work (ack, etc) is handled later
+      do {
+        // send as RPC message
+        let msgId = try await client.sendRpc(method: transaction.method, input: transaction.input)
+        // mark as running
+        await transactions.running(transactionId: transactionWrapper.id, rpcMsgId: msgId)
+        // the rest of the work (ack, etc) is handled later
+      } catch {
+        log.error("Failed to send transaction \(transactionWrapper.id) with method \(transaction.method)", error: error)
+        await transactions.requeue(transactionId: transactionWrapper.id)
+        // FIXME: What to do with the error? Restart the connection?
+      }
     }
   }
 
