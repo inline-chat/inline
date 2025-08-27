@@ -49,7 +49,7 @@ actor MockTransport: Transport {
     started = false
   }
 
-  func restart(retryDelay: TimeInterval? = 2.0) async {
+  func reconnect(skipDelay: Bool) async {
     started = true
     await channel.send(.connecting)
     await channel.send(.connected)
