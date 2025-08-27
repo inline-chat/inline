@@ -41,6 +41,7 @@ export const MessageModel = {
   insertMessage: insertMessage,
   getMessages: getMessages,
   getMessage: getMessage, // 1 msg
+  getMessageByRandomId: getMessageByRandomId,
   getMessagesByIds: getMessagesByIds,
   getMessagesAroundTarget: getMessagesAroundTarget,
   getNonFullMessagesRange: getNonFullMessagesRange,
@@ -476,6 +477,20 @@ async function editMessage(input: EditMessageInput): Promise<{
   }
 
   return { message, update }
+}
+
+async function getMessageByRandomId(randomId: bigint, fromId: number): Promise<DbMessage> {
+  let result = await db.query.messages.findMany({
+    where: { randomId, fromId },
+  })
+
+  // Only one message should be found
+  if (result.length !== 1) {
+    log.trace("this should never happen: message not found by random id", { randomId, fromId })
+    throw ModelError.MessageInvalid
+  }
+
+  return result[0]!
 }
 
 async function getMessage(messageId: number, chatId: number): Promise<DbFullMessage> {
