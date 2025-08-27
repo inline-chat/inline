@@ -3,7 +3,7 @@ import { ChatModel } from "@in/server/db/models/chats"
 import { FileModel, type DbFullPhoto, type DbFullVideo } from "@in/server/db/models/files"
 import type { DbFullDocument } from "@in/server/db/models/files"
 import { MessageModel } from "@in/server/db/models/messages"
-import { type DbChat } from "@in/server/db/schema"
+import { type DbChat, type DbMessage } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { getCachedUserName, UserNamesCache } from "@in/server/modules/cache/userNames"
 import { decryptMessage, encryptMessage } from "@in/server/modules/encryption/encryptMessage"
@@ -22,6 +22,8 @@ import { processMessageText } from "@in/server/modules/message/processText"
 import { isUserMentioned } from "@in/server/modules/message/helpers"
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { debugDelay } from "@in/server/utils/helpers/time"
 
 type Input = {
   peerId: InputPeer
@@ -91,25 +93,39 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   const binaryEntities = entities ? MessageEntities.toBinary(entities) : undefined
   const encryptedEntities = binaryEntities && binaryEntities.length > 0 ? encryptBinary(binaryEntities) : undefined
 
-  // insert new msg with new ID
-  const { message: newMessage, update } = await MessageModel.insertMessage({
-    chatId: chatId,
-    fromId: fromId,
-    textEncrypted: encryptedMessage?.encrypted ?? null,
-    textIv: encryptedMessage?.iv ?? null,
-    textTag: encryptedMessage?.authTag ?? null,
-    replyToMsgId: replyToMsgIdNumber,
-    randomId: input.randomId,
-    date: date,
-    mediaType: mediaType,
-    photoId: dbFullPhoto?.id ?? null,
-    videoId: dbFullVideo?.id ?? null,
-    documentId: dbFullDocument?.id ?? null,
-    isSticker: input.isSticker ?? false,
-    entitiesEncrypted: encryptedEntities?.encrypted ?? null,
-    entitiesIv: encryptedEntities?.iv ?? null,
-    entitiesTag: encryptedEntities?.authTag ?? null,
-  })
+  let newMessage: DbMessage
+  let update: UpdateSeqAndDate
+  try {
+    // insert new msg with new ID
+    ;({ message: newMessage, update } = await MessageModel.insertMessage({
+      chatId: chatId,
+      fromId: fromId,
+      textEncrypted: encryptedMessage?.encrypted ?? null,
+      textIv: encryptedMessage?.iv ?? null,
+      textTag: encryptedMessage?.authTag ?? null,
+      replyToMsgId: replyToMsgIdNumber,
+      randomId: input.randomId,
+      date: date,
+      mediaType: mediaType,
+      photoId: dbFullPhoto?.id ?? null,
+      videoId: dbFullVideo?.id ?? null,
+      documentId: dbFullDocument?.id ?? null,
+      isSticker: input.isSticker ?? false,
+      entitiesEncrypted: encryptedEntities?.encrypted ?? null,
+      entitiesIv: encryptedEntities?.iv ?? null,
+      entitiesTag: encryptedEntities?.authTag ?? null,
+    }))
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("random_id_per_sender_unique") && input.randomId) {
+      log.error(error, "duplicate random id, fetching message from database to recover")
+
+      // Just fetch the message from the database
+      return { updates: await selfUpdatesFromExistingMessage(input.randomId, currentUserId) }
+    } else {
+      log.error("error inserting message", error)
+      throw RealtimeRpcError.InternalError
+    }
+  }
 
   // Process Loom links in the message if any
   if (text) {
@@ -124,6 +140,8 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     video: dbFullVideo,
     document: dbFullDocument,
   }
+
+  //await debugDelay(5000)
 
   // send new updates
   // TODO: need to create the update, use the sequence number
@@ -300,6 +318,25 @@ const pushUpdates = async ({
   }
 
   return { selfUpdates, updateGroup }
+}
+
+async function selfUpdatesFromExistingMessage(randomId: bigint, currentUserId: number): Promise<Update[]> {
+  const message = await MessageModel.getMessageByRandomId(randomId, currentUserId)
+  return [
+    {
+      update: {
+        oneofKind: "updateMessageId",
+        updateMessageId: { messageId: BigInt(message.messageId), randomId: randomId },
+      },
+    },
+
+    // Note(@mo): No need for this, this will be fetched by the sync engine once it detects missing PTS
+    // Moreover we don't have access to the exact update caused by this message
+    // so we can't send it to the user.
+    // {
+    //   update: {
+    //     oneofKind: "newMessage",
+  ]
 }
 
 // ------------------------------------------------------------

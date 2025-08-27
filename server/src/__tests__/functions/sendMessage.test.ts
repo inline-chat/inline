@@ -44,6 +44,28 @@ describe("sendMessage", () => {
     expect(message?.message).toBe("test")
   })
 
+  test("should return one update if message has duplicate random id", async () => {
+    let _ = await sendMessage(
+      {
+        peerId: privateChatPeerId,
+        message: "test",
+        randomId: 1n,
+      },
+      context,
+    )
+    let result = await sendMessage(
+      {
+        peerId: privateChatPeerId,
+        message: "test",
+        randomId: 1n,
+      },
+      context,
+    )
+
+    expect(result.updates).toHaveLength(1)
+    expect(result.updates[0]?.update.oneofKind).toBe("updateMessageId")
+  })
+
   test("should create a text message with empty entities", async () => {
     let result = await sendMessage(
       {
