@@ -18,9 +18,35 @@ public actor FileCache: Sendable {
 
   private init() {}
 
+  deinit {
+    // Cancel all ongoing downloads
+    for (photoId, task) in downloadingPhotos {
+      task.cancel()
+      log.debug("Cancelled download for photo \(photoId) during deinit")
+    }
+  }
+
   private func removeFromDownloadingPhotos(_ id: Int64) {
     downloadingPhotos[id] = nil
     log.debug("Removed photo \(id) from downloadingPhotos")
+  }
+
+  /// Cancel download for a specific photo
+  public func cancelDownload(photoId: Int64) {
+    if let task = downloadingPhotos[photoId] {
+      task.cancel()
+      downloadingPhotos[photoId] = nil
+      log.debug("Cancelled download for photo \(photoId)")
+    }
+  }
+
+  /// Cancel all ongoing downloads
+  public func cancelAllDownloads() {
+    for (photoId, task) in downloadingPhotos {
+      task.cancel()
+      log.debug("Cancelled download for photo \(photoId)")
+    }
+    downloadingPhotos.removeAll()
   }
 
   // MARK: -  Fetches
@@ -38,7 +64,6 @@ public actor FileCache: Sendable {
       return
     }
 
-    // TODO: Implement via Nuke for now?
     log.debug("downloading photo \(photo.id) for message \(message.id)")
 
     // For now we get thumbnail for size "f"
@@ -47,60 +72,131 @@ public actor FileCache: Sendable {
       return
     }
 
-    let request = ImageRequest(url: URL(string: remoteUrl))
     downloadingPhotos[photo.id] = Task {
-      _ = await MainActor.run {
-        ImagePipeline.shared.loadData(
-          with: request,
-          progress: { completed, total in
-            Task {
-              self.log.debug("progress \(completed) / \(total)")
+      // TODO: make it smarter about max retries
+      await downloadWithRetries(photo: photo, message: message, remoteUrl: remoteUrl, maxRetries: 20)
+    }
+  }
+
+  private func downloadWithRetries(photo: PhotoInfo, message: Message, remoteUrl: String, maxRetries: Int) async {
+    var attempt = 0
+
+    while attempt < maxRetries {
+      attempt += 1
+
+      // Check for cancellation before each attempt
+      guard !Task.isCancelled else {
+        log.debug("Downloading photo \(photo.id) was cancelled before attempt \(attempt)")
+        break
+      }
+
+      do {
+        log.debug("Downloading photo \(photo.id), attempt \(attempt)")
+
+        guard let url = URL(string: remoteUrl) else {
+          log.error("Invalid URL for photo \(photo.id): \(remoteUrl)")
+          break
+        }
+
+        let (data, response) = try await URLSession.shared.data(from: url)
+
+        // Validate response
+        if let httpResponse = response as? HTTPURLResponse {
+          guard 200 ... 299 ~= httpResponse.statusCode else {
+            if httpResponse.statusCode == 404 {
+              log.error("Photo \(photo.id) not found (404) - will not retry")
+              break
             }
-          },
-          completion: { result in
-            Task.detached { [weak self] in
-              guard let self else { return }
-
-              await removeFromDownloadingPhotos(photo.id)
-
-              switch result {
-                case let .success(response):
-                  log.debug("success \(response)")
-
-                  // Generate a new file name
-                  let localPath = "IMG" + (photo.bestPhotoSize()?.type ?? "") + String(photo.id) +
-                    photo.photo.format
-                    .toExt()
-                  let localUrl = FileCache.getUrl(for: .photos, localPath: localPath)
-                  do {
-                    try response.data.write(to: localUrl, options: .atomic)
-
-                    Task { [weak self] in
-                      guard let self else { return }
-                      // Update database
-                      try? await database.dbWriter.write { db in
-                        guard var matchingSize = photo.bestPhotoSize() else { return }
-                        matchingSize.localPath = localPath
-                        try matchingSize.save(db)
-                        self.log.debug("saved photo size \(matchingSize)")
-                      }
-
-                      await triggerMessageReload(message: message)
-                    }
-                  } catch {
-                    if Task.isCancelled {
-                      log.debug("Downloading photo \(photo.id) was cancelled")
-                    }
-                    log.error("error saving image locally \(error)")
-                  }
-                case let .failure(error):
-                  log.error("error \(error)")
-              }
-            }
+            throw URLError(.badServerResponse)
           }
-        )
+        }
+
+        // Validate data
+        guard !data.isEmpty else {
+          log.error("Empty data received for photo \(photo.id)")
+          if attempt < maxRetries {
+            try? await Task.sleep(for: .seconds(Double(attempt)))
+            continue
+          }
+          break
+        }
+
+        // Success - same logic as original
+        log.debug("Successfully downloaded photo \(photo.id) (\(data.count) bytes)")
+
+        // Generate a new file name (same as original)
+        let localPath = "IMG" + (photo.bestPhotoSize()?.type ?? "") + String(photo.id) + photo.photo.format.toExt()
+        let localUrl = FileCache.getUrl(for: .photos, localPath: localPath)
+
+        // Ensure directory exists
+        let directory = localUrl.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        do {
+          try data.write(to: localUrl, options: .atomic)
+        } catch {
+          if Task.isCancelled {
+            log.debug("Downloading photo \(photo.id) was cancelled")
+          }
+          log.error("error saving image locally \(error)")
+          throw error
+        }
+
+        // Update database (same as original)
+        Task { [weak self] in
+          guard let self else { return }
+          // Update database
+          try? await database.dbWriter.write { db in
+            guard var matchingSize = photo.bestPhotoSize() else { return }
+            matchingSize.localPath = localPath
+            try matchingSize.save(db)
+            self.log.debug("saved photo size \(matchingSize)")
+          }
+
+          await triggerMessageReload(message: message)
+        }
+
+        await removeFromDownloadingPhotos(photo.id)
+        return
+
+      } catch {
+        if Task.isCancelled {
+          log.debug("Downloading photo \(photo.id) was cancelled during attempt \(attempt)")
+          break
+        }
+
+        log.error("Failed to download photo \(photo.id), attempt \(attempt): \(error)")
+
+        // Check if we should retry based on error type
+        if attempt < maxRetries, shouldRetryError(error) {
+          let delay = Double(attempt) // 1s, 2s, 3s
+          log.debug("Retrying photo \(photo.id) in \(delay) seconds")
+          try? await Task.sleep(for: .seconds(delay))
+        } else if attempt >= maxRetries {
+          log.error("Failed to download photo \(photo.id) after \(maxRetries) attempts")
+          break
+        } else {
+          log.error("Photo \(photo.id) download failed with non-recoverable error: \(error)")
+          break
+        }
       }
     }
+
+    await removeFromDownloadingPhotos(photo.id)
+  }
+
+  private func shouldRetryError(_ error: Error) -> Bool {
+    if let urlError = error as? URLError {
+      switch urlError.code {
+        case .timedOut, .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet:
+          return true
+        case .badServerResponse, .cannotFindHost, .dnsLookupFailed:
+          return true
+        default:
+          return false
+      }
+    }
+    return false
   }
 
   private func triggerMessageReload(message: Message) {
