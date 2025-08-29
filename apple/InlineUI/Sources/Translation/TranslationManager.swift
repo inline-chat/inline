@@ -51,10 +51,16 @@ actor TranslationManager {
       guard let text = message.text, !text.isEmpty else { continue }
 
       // Check if translation already exists using FullMessage's translations
-      if fullMessage.translation(for: targetLanguage) != nil {
-        // Translation already exists, skip this message
-        log.debug("Translation already exists for message \(message.messageId)")
-        continue
+      if let translation = fullMessage.translation(for: targetLanguage) {
+        // Check if it's stale
+        if let editDate = message.editDate, editDate > translation.date {
+          // Translation is older than message, so we should translate and update it
+          log.trace("Translation is older than message edit, translating message \(message.messageId)")
+        } else {
+          // Translation exists and is up-to-date
+          log.trace("Translation already exists for message \(message.messageId), skipping")
+          continue
+        }
       }
 
       // Detect message language outside of DB transaction
