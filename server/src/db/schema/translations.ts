@@ -34,6 +34,8 @@ export const translations = pgTable(
       columns: [t.chatId, t.messageId],
       foreignColumns: [messages.chatId, messages.messageId],
     }),
+
+    uniqueMessageChatLanguage: unique("unique_message_chat_language").on(t.messageId, t.chatId, t.language),
   }),
 )
 
