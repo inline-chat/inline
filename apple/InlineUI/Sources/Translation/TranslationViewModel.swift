@@ -12,7 +12,7 @@ public actor TranslationViewModel {
   private let peerId: Peer
 
   // Combined state management
-  private var processedMessages: [Int64: String] = [:] // messageId -> targetLanguage
+  private var processedMessages: [MessageKey: String] = [:] // messageKey -> targetLanguage
   private var inProgressRequests: [InProgressRequest: RequestState] = [:]
 
   // Timeout configuration
@@ -100,7 +100,7 @@ public actor TranslationViewModel {
           if message.message.status == .sending || message.message.status == .failed {
             continue
           }
-          let isProcessed = await isProcessed(messageId: message.id, targetLanguage: targetLanguage)
+          let isProcessed = await isProcessed(message: message, targetLanguage: targetLanguage)
           if !isProcessed {
             newMessages.append(message)
           }
@@ -128,7 +128,7 @@ public actor TranslationViewModel {
             )
             // Then clean up our internal state
             await self.removeRequest(messageIds: cleanupMessageIds, targetLanguage: targetLanguage)
-            await self.markAsProcessed(messageIds: cleanupNewMessages.map(\.id), targetLanguage: targetLanguage)
+            await self.markAsProcessed(messages: cleanupNewMessages, targetLanguage: targetLanguage)
           }
         }
 
@@ -297,16 +297,27 @@ public actor TranslationViewModel {
 
   // MARK: - State Management Methods
 
-  private func isProcessed(messageId: Int64, targetLanguage: String) -> Bool {
-    if let processedLanguage = processedMessages[messageId] {
+  struct MessageKey: Hashable {
+    var id: Int64
+    var editDate: Date?
+
+    static func from(_ message: FullMessage) -> MessageKey {
+      MessageKey(id: message.id, editDate: message.message.editDate)
+    }
+  }
+
+  private func isProcessed(message: FullMessage, targetLanguage: String) -> Bool {
+    let messageKey = MessageKey.from(message)
+    if let processedLanguage = processedMessages[messageKey] {
       return processedLanguage == targetLanguage
     }
     return false
   }
 
-  private func markAsProcessed(messageIds: [Int64], targetLanguage: String) {
-    for messageId in messageIds {
-      processedMessages[messageId] = targetLanguage
+  private func markAsProcessed(messages: [FullMessage], targetLanguage: String) {
+    for message in messages {
+      let messageKey = MessageKey.from(message)
+      processedMessages[messageKey] = targetLanguage
     }
   }
 
