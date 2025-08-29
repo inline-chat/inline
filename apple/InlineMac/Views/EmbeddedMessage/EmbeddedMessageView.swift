@@ -1,14 +1,14 @@
 import AppKit
 import InlineKit
 import InlineUI
+import SwiftUI
 import Translation
 
 class EmbeddedMessageView: NSView {
   // MARK: - Constants
 
   private enum Constants {
-    static let cornerRadius: CGFloat = 4
-    static let rectangleWidth: CGFloat = 2
+    static let rectangleWidth: CGFloat = 3
     static let contentSpacing: CGFloat = 6
     static let verticalPadding: CGFloat = 4
     static let horizontalPadding: CGFloat = 6
@@ -27,6 +27,16 @@ class EmbeddedMessageView: NSView {
   private var style: EmbeddedMessageStyle
 
   private var message: Message?
+  private var senderNameForColor: String?
+
+  private var cornerRadius: CGFloat {
+    switch kind {
+      case .replyInMessage:
+        8
+      default:
+        0
+    }
+  }
 
   private var senderFont: NSFont {
     .systemFont(ofSize: 12, weight: .semibold)
@@ -44,6 +54,44 @@ class EmbeddedMessageView: NSView {
     }
   }
 
+  private var senderColor: NSColor {
+    guard let senderNameForColor else {
+      return NSColor.controlAccentColor
+    }
+    let swiftUIColor = AvatarColorUtility.colorFor(name: senderNameForColor)
+    return NSColor(swiftUIColor)
+  }
+
+  private var shouldUseSenderColor: Bool {
+    style == .colored && kind == .replyInMessage
+  }
+
+  private var rectangleColor: NSColor {
+    if style == .colored {
+      shouldUseSenderColor ? senderColor : NSColor.controlAccentColor
+    } else {
+      NSColor.white
+    }
+  }
+
+  private var nameLabelColor: NSColor {
+    if style == .colored {
+      shouldUseSenderColor ? senderColor : NSColor.controlAccentColor
+    } else {
+      NSColor.white
+    }
+  }
+
+  private var backgroundColor: NSColor? {
+    guard kind == .replyInMessage else { return nil }
+
+    if style == .colored {
+      return senderColor.withAlphaComponent(0.08)
+    } else {
+      return NSColor.white.withAlphaComponent(0.09)
+    }
+  }
+
   // MARK: - Views
 
   override var wantsUpdateLayer: Bool {
@@ -55,11 +103,7 @@ class EmbeddedMessageView: NSView {
     view.translatesAutoresizingMaskIntoConstraints = false
     view.wantsLayer = true
     view.layer?.masksToBounds = true
-    view.layer?.backgroundColor = if style == .colored {
-      NSColor.controlAccentColor.cgColor // use sender color
-    } else {
-      NSColor.white.cgColor
-    }
+    view.layer?.backgroundColor = rectangleColor.cgColor
     return view
   }()
 
@@ -106,7 +150,7 @@ class EmbeddedMessageView: NSView {
 
   private func setupView() {
     wantsLayer = true
-    layer?.cornerRadius = Constants.cornerRadius
+    layer?.cornerRadius = cornerRadius
     layer?.masksToBounds = true
 
     translatesAutoresizingMaskIntoConstraints = false
@@ -122,8 +166,8 @@ class EmbeddedMessageView: NSView {
       // Rectangle view
       rectangleView.leadingAnchor.constraint(equalTo: leadingAnchor),
       rectangleView.widthAnchor.constraint(equalToConstant: Constants.rectangleWidth),
-      rectangleView.topAnchor.constraint(equalTo: topAnchor, constant: Constants.verticalPadding),
-      rectangleView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Constants.verticalPadding),
+      rectangleView.topAnchor.constraint(equalTo: topAnchor, constant: 0),
+      rectangleView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: 0),
 
       // Name label
       nameLabel.leadingAnchor.constraint(
@@ -174,6 +218,14 @@ class EmbeddedMessageView: NSView {
     }
 
     let senderName = from.fullName
+
+    // Set sender name for color calculation
+    senderNameForColor = AvatarColorUtility.formatNameForHashing(
+      firstName: from.firstName,
+      lastName: from.lastName,
+      email: from.email
+    )
+
     nameLabel.stringValue = switch self.kind {
       case .replyInMessage:
         "\(senderName)"
@@ -185,11 +237,10 @@ class EmbeddedMessageView: NSView {
         "Edit Message"
     }
 
-    nameLabel.textColor = if style == .colored {
-      NSColor.controlAccentColor // rect color
-    } else {
-      NSColor.white
-    }
+    // Update colors after setting senderNameForColor
+    rectangleView.layer?.backgroundColor = rectangleColor.cgColor
+    nameLabel.textColor = nameLabelColor
+    layer?.backgroundColor = backgroundColor?.cgColor
 
     let message = embeddedMessage.message
 
@@ -219,6 +270,14 @@ class EmbeddedMessageView: NSView {
     }
 
     let senderName = from.fullName
+
+    // Set sender name for color calculation
+    senderNameForColor = AvatarColorUtility.formatNameForHashing(
+      firstName: from.firstName,
+      lastName: from.lastName,
+      email: from.email
+    )
+
     nameLabel.stringValue = switch self.kind {
       case .replyInMessage:
         "\(senderName)"
@@ -230,11 +289,10 @@ class EmbeddedMessageView: NSView {
         "Edit Message"
     }
 
-    nameLabel.textColor = if style == .colored {
-      NSColor.controlAccentColor // rect color
-    } else {
-      NSColor.white
-    }
+    // Update colors after setting senderNameForColor
+    rectangleView.layer?.backgroundColor = rectangleColor.cgColor
+    nameLabel.textColor = nameLabelColor
+    layer?.backgroundColor = backgroundColor?.cgColor
 
     // Use display text which handles translations
     if let displayText = fullMessage.displayText, !displayText.isEmpty {
