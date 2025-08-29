@@ -77,7 +77,7 @@ public extension Translation {
     publishChanges: Bool = false
   ) throws -> Translation {
     let translation = Translation(from: protocolTranslation, chatId: chatId)
-    try translation.save(db)
+    try translation.save(db, onConflict: .replace)
     return translation
   }
 
