@@ -73,7 +73,7 @@ export async function translateMessages(
     })
 
     // Get existing translations
-    const existingTranslations = await db._query.translations.findMany({
+    let existingTranslations = await db._query.translations.findMany({
       where: and(
         eq(translations.chatId, chat.id),
         eq(translations.language, input.language),
@@ -86,7 +86,24 @@ export async function translateMessages(
     })
 
     // Filter out messages that already have translations
-    const messagesToTranslate = msgs.filter((msg) => !existingTranslations.some((t) => t.messageId === msg.messageId))
+    const messagesToTranslate = msgs.filter((msg) => {
+      const existingTranslation = existingTranslations.find((t) => t.messageId === msg.messageId)
+
+      if (existingTranslation) {
+        if (msg.editDate && msg.editDate > existingTranslation.date) {
+          // Edit date is newer than existing translation, so we should translate it
+          // Important: drop it from the list of existing translations so we don't try to translate it again
+          existingTranslations = existingTranslations.filter((t) => t.messageId !== msg.messageId)
+          return true
+        } else {
+          // Translation is valid, so we should not translate it again
+          return false
+        }
+      }
+
+      // No existing translation, so we should translate it
+      return true
+    })
 
     // Nothing to translate
     if (!messagesToTranslate.length) {
