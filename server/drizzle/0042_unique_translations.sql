@@ -1,0 +1,1 @@
+ALTER TABLE "message_translations" ADD CONSTRAINT "unique_message_chat_language" UNIQUE("message_id","chat_id","language");
