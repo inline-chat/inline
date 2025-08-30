@@ -11,6 +11,7 @@ on:
     paths:
       - "apple/InlineKit/**"
       - "apple/InlineUI/**"
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
