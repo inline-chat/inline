@@ -26,7 +26,7 @@ jobs:
 
       - uses: swift-actions/setup-swift@v2
         with:
-          swift-version: "6.2"
+          swift-version: "6"
 
       - name: Build
         run: |
