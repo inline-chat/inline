@@ -27,30 +27,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Swift 6.2
-        run: |
-          # Install Swiftly using official method
-          curl -O https://download.swift.org/swiftly/darwin/swiftly.pkg
-          sudo installer -pkg swiftly.pkg -target /
-          
-          # Initialize and install Swift 6.2
-          ~/.swiftly/bin/swiftly init --quiet-shell-followup
-          . "${SWIFTLY_HOME_DIR:-$HOME/.swiftly}/env.sh"
-          hash -r
-          swiftly install 6.2-snapshot --assume-yes
-          swiftly use 6.2-snapshot
-          
-          # Verify installation
-          swift --version
+      - name: Set Xcode version
+        run: sudo xcode-select -s /Applications/Xcode_26.0.app
+
+      - name: Swift Version
+        run: swift --version
+
+      - name: Xcode Version
+        run: xcodebuild -version
 
       - name: Test InlineKit
         working-directory: apple/InlineKit
-        run: |
-          . "${SWIFTLY_HOME_DIR:-$HOME/.swiftly}/env.sh"
-          swift test
+        run: swift test
 
       - name: Test InlineUI
         working-directory: apple/InlineUI
-        run: |
-          . "${SWIFTLY_HOME_DIR:-$HOME/.swiftly}/env.sh"
-          swift test
+        run: swift test
