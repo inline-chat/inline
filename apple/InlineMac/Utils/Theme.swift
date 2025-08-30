@@ -69,6 +69,10 @@ enum Theme {
   static let messageHorizontalStackSpacing: CGFloat = 8.0
   static let messageNameLabelHeight: CGFloat = 16
   static let messageTextFont: NSFont = .systemFont(ofSize: NSFont.systemFontSize)
+  static let messageTextFontSize: Double = NSFont.systemFontSize
+  static let messageTextFontSizeSingleEmoji = 64.0
+  static let messageTextFontSizeThreeEmojis = 42.0
+  static let messageTextFontSizeManyEmojis = 18.0
   static let messageTextLineFragmentPadding: CGFloat = 0
   static let messageTextContainerInset: NSSize = .zero
   static let messageTextViewPadding: CGFloat = 0
