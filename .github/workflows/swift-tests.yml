@@ -30,7 +30,7 @@ jobs:
       - name: Setup Swift 6.2
         uses: vapor/swiftly-action@main
         with:
-          toolchain: '6.2'
+          toolchain: "6.2-snapshot"
 
       - name: Test InlineKit
         working-directory: apple/InlineKit
