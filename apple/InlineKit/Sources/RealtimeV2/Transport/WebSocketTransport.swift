@@ -21,15 +21,21 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
   private var state: ConnectionState = .idle
 
   private var connectionAttemptNo: UInt64 = 0
+  private var connectingStartTime: Date?
 
   private var task: URLSessionWebSocketTask?
   private var receiveLoopTask: Task<Void, Never>?
   private var reconnectionTask: Task<Void, Never>?
   private var connectionTimeoutTask: Task<Void, Never>?
+  private var watchdogTask: Task<Void, Never>?
 
   private lazy var session: URLSession = { [unowned self] in
     let configuration = URLSessionConfiguration.default
-    return URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+    // Use a serial queue to ensure delegate callbacks are serialized and predictable
+    let delegateQueue = OperationQueue()
+    delegateQueue.maxConcurrentOperationCount = 1
+    delegateQueue.name = "WebSocketTransport.delegate"
+    return URLSession(configuration: configuration, delegate: self, delegateQueue: delegateQueue)
   }()
 
   private static var defaultURL: URL {
@@ -111,6 +117,55 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     return min(8.0, 0.2 + pow(Double(attemptNo), 1.5) * 0.4)
   }
 
+  // MARK: Watchdog helpers ---------------------------------------------------
+
+  private func startWatchdog() {
+    stopWatchdog()
+    watchdogTask = Task.detached { [weak self] in
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .seconds(10))
+        
+        guard let self = self else { return }
+        guard !Task.isCancelled else { return }
+        
+        if await isStuckConnecting() {
+          log.info("Watchdog: detected stuck connection, triggering recovery")
+          await handleStuckConnection()
+        }
+      }
+    }
+  }
+  
+  private func stopWatchdog() {
+    watchdogTask?.cancel()
+    watchdogTask = nil
+  }
+  
+  private func isStuckConnecting() async -> Bool {
+    guard state == .connecting else { return false }
+    
+    // Check if we have no active recovery tasks (indicating truly stuck state)
+    let hasNoActiveTasks = reconnectionTask == nil && connectionTimeoutTask == nil
+    
+    // Check if we've been connecting for too long (covers client-layer issues too)
+    let hasBeenConnectingTooLong = connectingStartTime?.timeIntervalSinceNow.magnitude ?? 0 > 60
+    
+    // Consider stuck if either condition is true:
+    // 1. No active tasks (immediate stuck detection)
+    // 2. Been connecting for over 60 seconds (covers auth/protocol issues)
+    return hasNoActiveTasks || hasBeenConnectingTooLong
+  }
+  
+  private func handleStuckConnection() async {
+    log.warning("Watchdog: handling stuck connection")
+    // Use the same logic as error handling to trigger reconnection
+    await handleError(NSError(
+      domain: "WatchdogRecovery",
+      code: -2001,
+      userInfo: [NSLocalizedDescriptionKey: "Watchdog detected stuck connection"]
+    ))
+  }
+
   // MARK: Connection timeout helpers -----------------------------------------
 
   private func startConnectionTimeout(for wsTask: URLSessionWebSocketTask) {
@@ -119,6 +174,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
       try? await Task.sleep(for: .seconds(10))
 
       guard let self else { return }
+      guard !Task.isCancelled else { return }
 
       // Only trigger timeout for the current connection attempt
       guard await connectionAttemptNo == currentAttemptNo else {
@@ -127,6 +183,11 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
 
       // Only trigger timeout if still connecting (not connected or idle)
       guard await state == .connecting else {
+        return
+      }
+
+      // Final check: ensure this is still the active task before cancelling
+      guard await self.task === wsTask else {
         return
       }
 
@@ -160,6 +221,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     log.debug("starting transport and opening connection to \(url)")
 
     await connecting()
+    startWatchdog()
     await openConnection()
   }
 
@@ -169,6 +231,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     guard state == .connected || state == .connecting else { return }
     log.debug("stopping connection")
 
+    stopWatchdog()
     await idle()
     await stopConnection()
   }
@@ -269,19 +332,26 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
   private func connected() async {
     guard state != .connected else { return }
     state = .connected
+    connectingStartTime = nil
     log.debug("Transport connected")
+    // Stop watchdog when successfully connected - no longer need recovery checks
+    stopWatchdog()
     Task { await _eventChannel.send(.connected) }
   }
 
   private func connecting() async {
     guard state != .connecting else { return }
     state = .connecting
+    connectingStartTime = Date()
+    // Restart watchdog when entering connecting state to detect if we get stuck
+    startWatchdog()
     Task { await _eventChannel.send(.connecting) }
   }
 
   private func idle() async {
     guard state != .idle else { return }
     state = .idle
+    connectingStartTime = nil
     log.debug("Transport stopping")
     Task { await _eventChannel.send(.stopping) }
   }
@@ -318,6 +388,12 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
       return
     }
 
+    // Double-check task is still valid after await points
+    guard self.task === task else {
+      log.trace("Ignoring didOpen - task became stale during execution")
+      return
+    }
+
     // Reset connection attempt number to 0 since we've successfully connected
     connectionAttemptNo = 0
 
@@ -337,6 +413,12 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     // Only handle close events for the current task to prevent stale callbacks
     guard self.task === task else {
       log.trace("Ignoring didClose for stale WebSocket task")
+      return
+    }
+
+    // Double-check task is still valid after await points
+    guard self.task === task else {
+      log.trace("Ignoring didClose - task became stale during execution")
       return
     }
 
