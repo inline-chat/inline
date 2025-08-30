@@ -2,11 +2,17 @@ import Foundation
 import InlineProtocol
 import UserNotifications
 
-actor MacNotifications: Sendable {
-  static let shared = MacNotifications()
+public actor MacNotifications: Sendable {
+  public static let shared = MacNotifications()
+  
+  private var soundEnabled = true
 
   func requestPermission() async throws -> Bool {
     try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+  }
+  
+  public func setSoundEnabled(_ enabled: Bool) {
+    soundEnabled = enabled
   }
 
   nonisolated func showMessageNotification(
@@ -23,7 +29,7 @@ actor MacNotifications: Sendable {
       content.subtitle = subtitle
     }
     content.userInfo = userInfo
-    content.sound = .default
+    content.sound = await soundEnabled ? .default : nil
 
     if let imageURL {
       do {

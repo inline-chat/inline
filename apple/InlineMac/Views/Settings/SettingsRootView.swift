@@ -42,7 +42,7 @@ struct SettingsSidebarView: View {
     }
 
     // more items
-    categories.append(contentsOf: [])
+    categories.append(contentsOf: [.appearance, .notifications])
 
     return categories
   }
@@ -73,6 +73,8 @@ struct SettingsDetailView: View {
           AppearanceSettingsDetailView()
         case .account:
           AccountSettingsDetailView()
+        case .notifications:
+          NotificationsSettingsDetailView()
       }
     }
     .navigationTitle(category.title)

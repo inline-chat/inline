@@ -25,10 +25,19 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  // MARK: - Notification Settings
+
+  @Published var disableNotificationSound: Bool {
+    didSet {
+      UserDefaults.standard.set(disableNotificationSound, forKey: "disableNotificationSound")
+    }
+  }
+
   private init() {
     sendsWithCmdEnter = UserDefaults.standard.bool(forKey: "sendsWithCmdEnter")
     automaticSpellCorrection = UserDefaults.standard.object(forKey: "automaticSpellCorrection") as? Bool ?? true
     checkSpellingWhileTyping = UserDefaults.standard.object(forKey: "checkSpellingWhileTyping") as? Bool ?? true
+    disableNotificationSound = UserDefaults.standard.bool(forKey: "disableNotificationSound")
   }
 }
 

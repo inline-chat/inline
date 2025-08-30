@@ -4,6 +4,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
   case account
   case general
   case appearance
+  case notifications
   
   var id: String { rawValue }
   
@@ -15,6 +16,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
       return "Appearance"
     case .account:
       return "Account"
+    case .notifications:
+      return "Notifications"
     }
   }
   
@@ -26,6 +29,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
       return "paintbrush"
     case .account:
       return "person.circle"
+    case .notifications:
+      return "bell"
     }
   }
 }
