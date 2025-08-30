@@ -1017,6 +1017,33 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     handleFileDrop([url])
   }
 
+  /// Note(@mo): User reported Chinese users still see the placeholder when they start typing in Chinese characters.
+  /// So apparently there is a feature in macOS for these languages called Chinese IME (Input Method Editor) which lays
+  /// out text temporarily without committing it. This method can detect this and hide the placeholder. And show it back
+  /// when that text is removed.
+  func textView(
+    _ textView: NSTextView,
+    shouldChangeTextIn affectedCharRange: NSRange,
+    replacementString: String?
+  ) -> Bool {
+    // Hide placeholder during IME composition and handle undo to empty text
+    let currentText = textView.string
+    let replacementText = replacementString ?? ""
+
+    // Calculate resulting text safely
+    let nsString = currentText as NSString
+    guard affectedCharRange.location <= nsString.length,
+          NSMaxRange(affectedCharRange) <= nsString.length
+    else {
+      return true
+    }
+
+    let resultingText = nsString.replacingCharacters(in: affectedCharRange, with: replacementText)
+    textEditor.showPlaceholder(resultingText.isEmpty)
+
+    return true
+  }
+
   func textDidChange(_ notification: Notification) {
     guard let textView = notification.object as? NSTextView else { return }
 
