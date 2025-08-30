@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 @testable import InlineKit
 
 @Suite("String Extensions Tests")
@@ -22,6 +23,11 @@ struct StringExtensionsTests {
     #expect("🚀".isAllEmojis == true)
     #expect("❤️".isAllEmojis == true)
     #expect("👍".isAllEmojis == true)
+  }
+  
+  @Test("Skin colors are detected")
+  func testSkinColorsAreDetected() {
+    #expect("🦶🏿".isAllEmojis == true)
   }
   
   @Test("Multiple emojis return true for isAllEmojis")
@@ -85,5 +91,32 @@ struct StringExtensionsTests {
     let result = "1️⃣2️⃣3️⃣".emojiInfo
     #expect(result.count == 3)
     #expect(result.isAllEmojis == true)
+  }
+  
+  @Test("Benchmark isAllEmojis performance")
+  func benchmarkIsAllEmojisPerformance() {
+    let testStrings = [
+      "😀🚀❤️👍🎉✨💪🌟🔥💯", // 10 emojis
+      "😀🚀❤️👍🎉✨💪🌟🔥💯" + "1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣8️⃣9️⃣🔟", // 20 emojis
+      String(repeating: "😀🚀❤️👍🎉", count: 10), // 50 emojis
+      String(repeating: "😀🚀❤️👍🎉", count: 20), // 100 emojis
+      "hello world this is a plain text string with no emojis at all",
+      "hello 😀 world 🚀 with some 👍 mixed 🎉 content ✨ here and there 💪",
+      String(repeating: "a", count: 100) // 100 plain characters
+    ]
+    
+    for testString in testStrings {
+      let startTime = CFAbsoluteTimeGetCurrent()
+      
+      // Run the test multiple times to get a better average
+      for _ in 0..<1000 {
+        _ = testString.isAllEmojis
+      }
+      
+      let endTime = CFAbsoluteTimeGetCurrent()
+      let timeElapsed = (endTime - startTime) * 1000 // Convert to milliseconds
+      
+      print("String length: \(testString.count), Time: \(String(format: "%.3f", timeElapsed))ms (1000 iterations)")
+    }
   }
 }
