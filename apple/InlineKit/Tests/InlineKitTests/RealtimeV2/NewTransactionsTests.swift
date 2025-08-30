@@ -97,11 +97,15 @@ class NewTransactionsTests {
 
 // MARK: - Helpers
 
-private struct MockTransaction: Transaction {
+private struct MockTransaction: Transaction, Codable {
   typealias Result = Void
   
   struct Context: Sendable, Codable {
     init() {}
+  }
+  
+  public enum CodingKeys: String, CodingKey {
+    case context
   }
   
   var method: InlineProtocol.Method = .UNRECOGNIZED(0)
