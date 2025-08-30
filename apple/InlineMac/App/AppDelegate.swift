@@ -1,9 +1,9 @@
 import AppKit
 import Auth
+import Combine
 import InlineConfig
 import InlineKit
 import Logger
-
 import Sentry
 import SwiftUI
 import UserNotifications
@@ -23,6 +23,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   let navigation: NavigationModel = .shared
   let log = Log.scoped("AppDelegate")
 
+  private var cancellables = Set<AnyCancellable>()
+
   func applicationWillFinishLaunching(_ notification: Notification) {
     // Disable native tabbing
     NSWindow.allowsAutomaticWindowTabbing = false
@@ -41,6 +43,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     initializeServices()
     setupMainWindow()
     setupMainMenu()
+    setupNotificationsSoundSetting()
     // Register Vim-style shortcuts (Ctrl-K / Ctrl-J) for chat navigation
     Task { @MainActor in
       self.globalHotkeys = GlobalHotkeys(dependencies: self.dependencies)
@@ -169,6 +172,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Register for notifications
     notifications.setup()
+  }
+
+  @MainActor private func setupNotificationsSoundSetting() {
+    // Set initial sound setting
+    let initialSoundEnabled = !AppSettings.shared.disableNotificationSound
+    Task {
+      await MacNotifications.shared.setSoundEnabled(initialSoundEnabled)
+    }
+
+    // Observe setting changes
+    AppSettings.shared.$disableNotificationSound
+      .sink { [weak self] disableSound in
+        Task {
+          await MacNotifications.shared.setSoundEnabled(!disableSound)
+        }
+      }
+      .store(in: &cancellables)
   }
 }
 
