@@ -109,7 +109,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     let attemptNo = connectionAttemptNo
 
     if attemptNo >= 8 {
-      return 8.0 + Double.random(in: 0.0 ... 5.0)
+      return 7.0 + Double.random(in: 0.0 ... 4.0)
     }
 
     // Custom formula: 0.2 + (attempt^1.5 * 0.4)
@@ -124,10 +124,10 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     watchdogTask = Task.detached { [weak self] in
       while !Task.isCancelled {
         try? await Task.sleep(for: .seconds(10))
-        
-        guard let self = self else { return }
+
+        guard let self else { return }
         guard !Task.isCancelled else { return }
-        
+
         if await isStuckConnecting() {
           log.info("Watchdog: detected stuck connection, triggering recovery")
           await handleStuckConnection()
@@ -135,33 +135,33 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
       }
     }
   }
-  
+
   private func stopWatchdog() {
     watchdogTask?.cancel()
     watchdogTask = nil
   }
-  
+
   private func isStuckConnecting() async -> Bool {
     guard state == .connecting else { return false }
-    
+
     // Check if we have no active recovery tasks (indicating truly stuck state)
     let hasNoActiveTasks = reconnectionTask == nil && connectionTimeoutTask == nil
-    
+
     // Check if we've been connecting for too long (covers client-layer issues too)
     let hasBeenConnectingTooLong = connectingStartTime?.timeIntervalSinceNow.magnitude ?? 0 > 60
-    
+
     // Consider stuck if either condition is true:
     // 1. No active tasks (immediate stuck detection)
     // 2. Been connecting for over 60 seconds (covers auth/protocol issues)
     return hasNoActiveTasks || hasBeenConnectingTooLong
   }
-  
+
   private func handleStuckConnection() async {
     log.warning("Watchdog: handling stuck connection")
     // Use the same logic as error handling to trigger reconnection
     await handleError(NSError(
       domain: "WatchdogRecovery",
-      code: -2001,
+      code: -2_001,
       userInfo: [NSLocalizedDescriptionKey: "Watchdog detected stuck connection"]
     ))
   }
@@ -187,7 +187,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
       }
 
       // Final check: ensure this is still the active task before cancelling
-      guard await self.task === wsTask else {
+      guard await task === wsTask else {
         return
       }
 
