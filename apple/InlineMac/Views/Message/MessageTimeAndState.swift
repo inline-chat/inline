@@ -10,18 +10,7 @@ class MessageTimeAndState: NSView {
   private var tooltipText: String = ""
   private var trackingArea: NSTrackingArea?
 
-  private var isOverlay: Bool {
-    let isEmpty = fullMessage.message.text == nil || fullMessage.message.text?.isEmpty == true
-    let hasDocument = fullMessage.message.documentId != nil
-
-    // If we have a document and the message is empty, we don't want to show the time overlay
-    if hasDocument, isEmpty {
-      return false
-    }
-
-    // for photos, we want to show the time overlay if the message is empty
-    return isEmpty
-  }
+  private var isOverlay: Bool
 
   private var textColor: NSColor {
     if isOverlay {
@@ -177,8 +166,9 @@ class MessageTimeAndState: NSView {
 
   // MARK: - Initialization
 
-  init(fullMessage: FullMessage) {
+  init(fullMessage: FullMessage, overlay: Bool) {
     self.fullMessage = fullMessage
+    isOverlay = overlay
     super.init(frame: .zero)
     configureLayerSetup()
     updateContent()
@@ -288,13 +278,14 @@ class MessageTimeAndState: NSView {
 
   // MARK: - Content Updates
 
-  public func updateMessage(_ fullMessage: FullMessage) {
+  public func updateMessage(_ fullMessage: FullMessage, overlay: Bool) {
     let oldStatus = self.fullMessage.message.status
     let oldDate = self.fullMessage.message.date
     let oldOut = self.fullMessage.message.out
     let oldIsOverlay = isOverlay
 
     self.fullMessage = fullMessage
+    isOverlay = overlay
 
     if fullMessage.message.date != oldDate || fullMessage.message.out != oldOut {
       updateTimeContent()

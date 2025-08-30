@@ -100,17 +100,26 @@ class NewTransactionsTests {
 private struct MockTransaction: Transaction {
   typealias Result = Void
   
+  struct Context: Sendable, Codable {
+    init() {}
+  }
+  
   var method: InlineProtocol.Method = .UNRECOGNIZED(0)
-  var input: InlineProtocol.RpcCall.OneOf_Input? = nil
+  var type: TransactionKindType = .query()
+  var context: Context = Context()
 
   init() {}
 
+  func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
+    return nil
+  }
+
   /// Apply the result of the query to database
   /// Error propagated to the caller of the query
-  func apply(_ rpcResult: InlineProtocol.RpcResult.OneOf_Result?) throws(TransactionExecutionError) {
+  func apply(_ rpcResult: InlineProtocol.RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {
     // Mock implementation that does nothing
   }
 
-  func optimistic() {}
-  func failed(error: TransactionError) {}
+  func optimistic() async {}
+  func failed(error: TransactionError) async {}
 }
