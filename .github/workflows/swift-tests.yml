@@ -27,22 +27,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Swift 6.2 with Swiftly
-        run: |
-          curl -L https://swift-server.github.io/swiftly/swiftly-install.sh | bash
-          export PATH="$HOME/.local/bin:$PATH"
-          swiftly install 6.2 --assume-yes
-          swiftly use 6.2 
-          swift --version
+      - name: Setup Swift 6.2
+        uses: vapor/swiftly-action@main
+        with:
+          toolchain: '6.2'
 
       - name: Test InlineKit
         working-directory: apple/InlineKit
-        run: |
-          export PATH="$HOME/.local/bin:$PATH"
-          swift test
+        run: swift test
 
       - name: Test InlineUI
         working-directory: apple/InlineUI
-        run: |
-          export PATH="$HOME/.local/bin:$PATH"
-          swift test
+        run: swift test
