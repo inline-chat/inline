@@ -635,7 +635,7 @@ public extension PhotoSize {
       .fetchOne(db)
     {
       // Create updated photo size with preserved local path
-      var updatedSize = PhotoSize(
+      let updatedSize = PhotoSize(
         id: existingSize.id,
         photoId: photoId,
         type: protoSize.type,

@@ -112,8 +112,12 @@ class MessageViewAppKit: NSView {
     }
   }
 
+  private var emojiMessage: Bool {
+    props.layout.emojiMessage
+  }
+
   private var bubbleBackgroundColor: NSColor {
-    if fullMessage.message.isSticker == true {
+    if !props.layout.hasBubbleColor {
       NSColor.clear
     } else if outgoing {
       Theme.messageBubblePrimaryBgColor
@@ -135,6 +139,18 @@ class MessageViewAppKit: NSView {
       ofSize: 12,
       weight: .semibold
     )
+  }
+
+  private var isTimeOverlay: Bool {
+    // If we have a document and the message is empty, we don't want to show the time overlay
+    if props.layout.hasDocument, !props.layout.hasText {
+      false
+    } else if emojiMessage {
+      true
+    } else {
+      // for photos, we want to show the time overlay if the message is empty
+      !props.layout.hasText
+    }
   }
 
   // State
@@ -179,7 +195,7 @@ class MessageViewAppKit: NSView {
   }()
 
   private lazy var timeAndStateView: MessageTimeAndState = {
-    let view = MessageTimeAndState(fullMessage: fullMessage)
+    let view = MessageTimeAndState(fullMessage: fullMessage, overlay: isTimeOverlay)
     view.translatesAutoresizingMaskIntoConstraints = false
     view.wantsLayer = true
     return view
@@ -239,7 +255,8 @@ class MessageViewAppKit: NSView {
       // Clips to bounds = false fucks up performance so badly. what!?
       // textView.clipsToBounds = true
       textView.textContainerInset = MessageTextConfiguration.containerInset
-      textView.font = MessageTextConfiguration.font
+      // FIXME: Extract font to a variable
+      textView.font = .systemFont(ofSize: props.layout.fontSize)
       textView.textColor = textColor
       textView.wantsLayer = true
       textView.layerContentsRedrawPolicy = .onSetNeedsDisplay
@@ -779,16 +796,17 @@ class MessageViewAppKit: NSView {
         equalTo: contentView.topAnchor,
         constant: layout.textContentViewTop
       )
+      textViewLeadingConstraint = textView.leadingAnchor.constraint(
+        equalTo: contentView.leadingAnchor,
+        constant: text.spacing.left
+      )
 
       constraints.append(
         contentsOf: [
           textViewHeightConstraint!,
           textViewWidthConstraint!,
           textViewTopConstraint!,
-          textView.leadingAnchor.constraint(
-            equalTo: contentView.leadingAnchor,
-            constant: text.spacing.left
-          ),
+          textViewLeadingConstraint!,
         ]
       )
 
@@ -919,6 +937,7 @@ class MessageViewAppKit: NSView {
   private var textViewWidthConstraint: NSLayoutConstraint?
   private var textViewHeightConstraint: NSLayoutConstraint?
   private var textViewTopConstraint: NSLayoutConstraint?
+  private var textViewLeadingConstraint: NSLayoutConstraint?
 
   private var photoViewHeightConstraint: NSLayoutConstraint?
   private var photoViewWidthConstraint: NSLayoutConstraint?
@@ -986,7 +1005,8 @@ class MessageViewAppKit: NSView {
     if let text = props.layout.text,
        let textViewWidthConstraint,
        let textViewHeightConstraint,
-       let textViewTopConstraint
+       let textViewTopConstraint,
+       let textViewLeadingConstraint
     {
       log.trace("Updating text view constraints for message \(text.size)")
       if textViewWidthConstraint.constant != text.size.width {
@@ -999,6 +1019,10 @@ class MessageViewAppKit: NSView {
 
       if textViewTopConstraint.constant != props.layout.textContentViewTop {
         textViewTopConstraint.constant = props.layout.textContentViewTop
+      }
+
+      if textViewLeadingConstraint.constant != text.spacing.left {
+        textViewLeadingConstraint.constant = text.spacing.left
       }
     }
 
@@ -1157,7 +1181,8 @@ class MessageViewAppKit: NSView {
       text: text,
       entities: entities,
       configuration: .init(
-        font: MessageTextConfiguration.font,
+        // FIXME: Extract to a variable
+        font: .systemFont(ofSize: props.layout.fontSize),
         textColor: textColor,
         linkColor: mentionColor,
       )
@@ -1422,6 +1447,9 @@ class MessageViewAppKit: NSView {
     // Text
     setupMessageText()
 
+    // Update bubble background
+    bubbleView.backgroundColor = bubbleBackgroundColor
+
     // Photo
     if hasPhoto {
       photoView.update(with: fullMessage)
@@ -1448,7 +1476,7 @@ class MessageViewAppKit: NSView {
     }
 
     // Update time and state
-    timeAndStateView.updateMessage(fullMessage)
+    timeAndStateView.updateMessage(fullMessage, overlay: isTimeOverlay)
 
     DispatchQueue.main.async(qos: .utility) { [weak self] in
       // As the message changes here, we need to update everything related to that. Otherwise we get wrong context menu.
