@@ -1,0 +1,44 @@
+name: Swift Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apple/InlineKit/**"
+      - "apple/InlineUI/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "apple/InlineKit/**"
+      - "apple/InlineUI/**"
+
+jobs:
+  test:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.2"
+
+      - name: Build
+        run: |
+          cd apple/InlineKit
+          swift build
+
+      - name: Test InlineKit
+        run: |
+          cd apple/InlineKit
+          swift test
+
+      - name: Build InlineUI
+        run: |
+          cd apple/InlineUI
+          swift build
+
+      - name: Test InlineUI
+        run: |
+          cd apple/InlineUI
+          swift test
