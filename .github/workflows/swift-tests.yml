@@ -17,9 +17,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  SWIFT_PATH: "/Library/Developer/Toolchains/swift-6.2-RELEASE.xctoolchain/usr/bin"
-
 jobs:
   test:
     name: Swift Tests
@@ -30,18 +27,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Swift 6.2
+      - name: Install Swift 6.2 with Swiftly
         run: |
-          curl -sSL https://download.swift.org/swift-6.2-release/xcode/swift-6.2-RELEASE/swift-6.2-RELEASE-osx.pkg -o swift.pkg
-          sudo installer -pkg swift.pkg -target /
-          rm swift.pkg
-          echo "$SWIFT_PATH" >> $GITHUB_PATH
+          curl -L https://swift-server.github.io/swiftly/swiftly-install.sh | bash
+          export PATH="$HOME/.local/bin:$PATH"
+          swiftly install 6.2 --assume-yes
+          swiftly use 6.2 
           swift --version
 
       - name: Test InlineKit
         working-directory: apple/InlineKit
-        run: swift test
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          swift test
 
       - name: Test InlineUI
         working-directory: apple/InlineUI
-        run: swift test
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          swift test
