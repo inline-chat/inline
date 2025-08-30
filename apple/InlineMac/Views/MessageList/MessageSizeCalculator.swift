@@ -147,6 +147,9 @@ class MessageSizeCalculator {
 
     /// used for determining if the message is single line for time view positioning
     var singleLine: Bool
+    var emojiMessage: Bool
+    var fontSize: CGFloat
+    var hasBubbleColor: Bool
 
     // computed
     var totalHeight: CGFloat {
@@ -304,8 +307,29 @@ class MessageSizeCalculator {
     let hasAttachments = message.attachments.count > 0
     let isOutgoing = message.message.out == true
     var isSingleLine = false
+    var isSticker = message.message.isSticker == true
     var textSize: CGSize?
     var photoSize: CGSize?
+    let isTextOnly: Bool = hasText && !hasMedia && !hasDocument && !hasAttachments
+    let emojiInfo: (count: Int, isAllEmojis: Bool) = isTextOnly ? text.emojiInfo : (0, false)
+    // TODO: remove has reply once we confirm reply embed style looks good with emojis
+    let emojiMessage = !hasReply && isTextOnly && emojiInfo.isAllEmojis && emojiInfo.count > 0
+    let hasBubbleColor = !emojiMessage && !isSticker
+
+    // Font size
+    var fontSize: Double = switch emojiInfo {
+      case let (count, true) where count == 1:
+        Theme.messageTextFontSizeSingleEmoji
+      case let (count, true) where count <= 3:
+        Theme.messageTextFontSizeThreeEmojis
+      case let (count, true):
+        Theme.messageTextFontSizeManyEmojis
+      default:
+        Theme.messageTextFontSize
+    }
+
+    // Font - use this for measuring text
+    var font: NSFont = MessageTextConfiguration.font.withSize(fontSize)
 
     // Attributed String
     let attributedString: NSAttributedString
@@ -316,7 +340,7 @@ class MessageSizeCalculator {
         text: text,
         entities: message.message.entities,
         configuration: .init(
-          font: MessageTextConfiguration.font,
+          font: font,
           textColor: MessageViewAppKit.textColor(outgoing: isOutgoing),
           linkColor: MessageViewAppKit.linkColor(outgoing: isOutgoing)
         )
@@ -427,6 +451,7 @@ class MessageSizeCalculator {
     // Shared logic
     if hasText,
        textSize == nil,
+       !emojiMessage,
        let minTextWidth = getTextWidthIfSingleLine(message, availableWidth: availableWidth)
     {
       #if DEBUG
@@ -436,6 +461,7 @@ class MessageSizeCalculator {
       textSize = CGSize(width: minTextWidth, height: heightForSingleLineText())
     } else {
       // remove from single line cache. possibly logic can be improved
+      // FIXME: Optimize this line, it's hit too often with the whole text
       minTextWidthForSingleLine.removeObject(forKey: text as NSString)
     }
 
@@ -539,7 +565,7 @@ class MessageSizeCalculator {
       let textHeight = max(textHeight, heightForSingleLineText())
       var textTopSpacing: CGFloat = 0
       var textBottomSpacing: CGFloat = 0
-      let textSidePadding = Theme.messageBubbleContentHorizontalInset
+      let textSidePadding = hasBubbleColor ? Theme.messageBubbleContentHorizontalInset : 0
 
       // If just text
       if !hasMedia, !hasReply {
@@ -724,7 +750,8 @@ class MessageSizeCalculator {
     if isSingleLine {
       timePlan!.spacing = .init(top: 0, left: 0, bottom: 5.0, right: 9.0)
     } else {
-      timePlan!.spacing = .init(top: 1.0, left: 9.0, bottom: 5.0, right: 9.0)
+      //timePlan!.spacing = .init(top: 1.0, left: 9.0, bottom: 5.0, right: 9.0)
+      timePlan!.spacing = .init(top: 1.0, left: 0.0, bottom: 5.0, right: 6.0)
     }
 
     // modify isSignleLine to be false if we have photo or document and text won't fit in a single line with time
@@ -839,7 +866,10 @@ class MessageSizeCalculator {
       reactions: reactionsPlan,
       reactionItems: reactionItemsPlan,
       time: timePlan,
-      singleLine: isSingleLine
+      singleLine: isSingleLine,
+      emojiMessage: emojiMessage,
+      fontSize: fontSize,
+      hasBubbleColor: hasBubbleColor
     )
 
     // final pass
@@ -955,18 +985,15 @@ class MessageSizeCalculator {
     return CGSize(width: textWidth, height: textHeight)
   }
 
-  private func calculateSizeForText(_ text: String, width: CGFloat, message: FullMessage? = nil) -> NSSize {
+  /// This is purely used for single height text measurements so it's safe to not use the actual font here.
+  private func calculateSizeForText(_ text: String, width: CGFloat) -> NSSize {
     // Create attributed string
-    let attributedString = if let message, let attrs = CacheAttrs.shared.get(message: message) {
-      attrs
-    } else {
-      NSAttributedString(
-        string: text,
-        attributes: typographicSettings
-      )
-    }
+    let attributedString = NSAttributedString(
+      string: text,
+      attributes: typographicSettings
+    )
 
-    return calculateSizeForAttributedString(attributedString, width: width, message: message)
+    return calculateSizeForAttributedString(attributedString, width: width, message: nil)
   }
 
   /// Fixes a bug with the text view height calculation for Chinese text that don't show last line.
