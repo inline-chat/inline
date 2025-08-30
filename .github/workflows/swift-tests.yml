@@ -16,6 +16,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  SWIFT_PATH: "/Library/Developer/Toolchains/swift-6.2-RELEASE.xctoolchain/usr/bin"
+
 jobs:
   test:
     name: Swift Tests
@@ -23,28 +26,21 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: swift-actions/setup-swift@v2
-        with:
-          swift-version: "6"
-
-      - name: Build
+      - name: Install Swift 6.2
         run: |
-          cd apple/InlineKit
-          swift build
+          curl -sSL https://download.swift.org/swift-6.2-release/xcode/swift-6.2-RELEASE/swift-6.2-RELEASE-osx.pkg -o swift.pkg
+          sudo installer -pkg swift.pkg -target /
+          rm swift.pkg
+          echo "$SWIFT_PATH" >> $GITHUB_PATH
+          swift --version
 
       - name: Test InlineKit
-        run: |
-          cd apple/InlineKit
-          swift test
-
-      - name: Build InlineUI
-        run: |
-          cd apple/InlineUI
-          swift build
+        working-directory: apple/InlineKit
+        run: swift test
 
       - name: Test InlineUI
-        run: |
-          cd apple/InlineUI
-          swift test
+        working-directory: apple/InlineUI
+        run: swift test
