@@ -18,6 +18,7 @@ concurrency:
 
 jobs:
   test:
+    name: Swift Tests
     runs-on: macos-latest
     timeout-minutes: 10
 
