@@ -301,6 +301,7 @@ class MessageTimeAndState: NSView {
     }
 
     if oldIsOverlay != isOverlay {
+      CATransaction.setDisableActions(true)
       backgroundLayer.isHidden = !isOverlay
     }
 
