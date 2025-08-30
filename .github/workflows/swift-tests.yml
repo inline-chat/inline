@@ -28,14 +28,29 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Swift 6.2
-        uses: vapor/swiftly-action@main
-        with:
-          toolchain: "6.2-snapshot"
+        run: |
+          # Install Swiftly using official method
+          curl -O https://download.swift.org/swiftly/darwin/swiftly.pkg
+          sudo installer -pkg swiftly.pkg -target /
+          
+          # Initialize and install Swift 6.2
+          ~/.swiftly/bin/swiftly init --quiet-shell-followup
+          . "${SWIFTLY_HOME_DIR:-$HOME/.swiftly}/env.sh"
+          hash -r
+          swiftly install 6.2-snapshot --assume-yes
+          swiftly use 6.2-snapshot
+          
+          # Verify installation
+          swift --version
 
       - name: Test InlineKit
         working-directory: apple/InlineKit
-        run: swift test
+        run: |
+          . "${SWIFTLY_HOME_DIR:-$HOME/.swiftly}/env.sh"
+          swift test
 
       - name: Test InlineUI
         working-directory: apple/InlineUI
-        run: swift test
+        run: |
+          . "${SWIFTLY_HOME_DIR:-$HOME/.swiftly}/env.sh"
+          swift test
