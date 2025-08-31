@@ -9,7 +9,15 @@ import UIKit
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
   let notificationHandler = NotificationHandler()
    let nav = Navigation()
-  let router = NavigationModel<AppTab, Destination, Sheet>(initialTab: .chats)
+  let router: NavigationModel<AppTab, Destination, Sheet> = {
+    let router = NavigationModel<AppTab, Destination, Sheet>(initialTab: .chats)
+    // Clear old navigation system's persisted data to prevent type conflicts
+    UserDefaults.standard.removeObject(forKey: "persistedNavigationPath")
+    UserDefaults.standard.removeObject(forKey: "persistedActiveSheet")
+    // Reset the new router to clear any problematic persisted state
+    router.reset()
+    return router
+  }()
 //
   func application(
     _ application: UIApplication,
