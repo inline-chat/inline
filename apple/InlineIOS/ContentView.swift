@@ -118,6 +118,10 @@ struct ContentView2: View {
         SpaceIntegrationsView(spaceId: spaceId)
       case let .integrationOptions(spaceId, provider):
         IntegrationOptionsView(spaceId: spaceId, provider: provider)
+      case let .createThread(spaceId):
+        CreateChatView(spaceId: spaceId)
+      case .createSpaceChat:
+        CreateChatView(spaceId: nil)
     }
   }
 
@@ -126,93 +130,13 @@ struct ContentView2: View {
     switch sheet {
       case .createSpace:
         CreateSpace()
-      case let .createThread(spaceId):
-        CreateChatIOSView(spaceId: spaceId)
+
       case .alphaSheet:
         AlphaSheet()
-      case .createSpaceChat:
-        CreateSpaceChat()
+
       case let .addMember(spaceId):
         // AddMember(showSheet: showSheet, spaceId: spaceId)
         InviteToSpaceView(spaceId: spaceId)
     }
-  }
-}
-
-struct SimpleChatListView: View {
-  @EnvironmentObject private var home: HomeViewModel
-  @EnvironmentObject private var dataManager: DataManager
-  @Environment(Router.self) private var router
-  @Environment(\.realtime) private var realtime
-  @Environment(\.realtimeV2) private var realtimeV2
-
-  var chatItems: [HomeChatItem] {
-    home.chats.filter {
-      $0.dialog.archived != true
-    }.sorted { (item1: HomeChatItem, item2: HomeChatItem) in
-      let pinned1 = item1.dialog.pinned ?? false
-      let pinned2 = item2.dialog.pinned ?? false
-      if pinned1 != pinned2 { return pinned1 }
-      return item1.lastMessage?.message.date ?? item1.chat?.date ?? Date.now > item2.lastMessage?.message.date ?? item2
-        .chat?.date ?? Date.now
-    }
-  }
-
-  var body: some View {
-    ChatListView(
-      items: chatItems,
-      isArchived: false,
-      onItemTap: { item in
-        if let user = item.user {
-          router.push(.chat(peer: .user(id: user.user.id)))
-        } else if let chat = item.chat {
-          router.push(.chat(peer: .thread(id: chat.id)))
-        }
-      },
-      onArchive: { item in
-        Task {
-          if let user = item.user {
-            try await dataManager.updateDialog(
-              peerId: .user(id: user.user.id),
-              archived: true
-            )
-          } else if let chat = item.chat {
-            try await dataManager.updateDialog(
-              peerId: .thread(id: chat.id),
-              archived: true
-            )
-          }
-        }
-      },
-      onPin: { item in
-        Task {
-          if let user = item.user {
-            try await dataManager.updateDialog(
-              peerId: .user(id: user.user.id),
-              pinned: !(item.dialog.pinned ?? false)
-            )
-          } else if let chat = item.chat {
-            try await dataManager.updateDialog(
-              peerId: .thread(id: chat.id),
-              pinned: !(item.dialog.pinned ?? false)
-            )
-          }
-        }
-      },
-      onRead: { item in
-        Task {
-          UnreadManager.shared.readAll(item.dialog.peerId, chatId: item.chat?.id ?? 0)
-        }
-      },
-      onUnread: { item in
-        Task {
-          do {
-            try await realtimeV2.send(.markAsUnread(peerId: item.dialog.peerId))
-          } catch {
-            Log.shared.error("Failed to mark as unread", error: error)
-          }
-        }
-      }
-    )
   }
 }
