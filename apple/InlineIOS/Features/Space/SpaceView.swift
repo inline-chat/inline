@@ -99,7 +99,7 @@ struct SpaceView: View {
 
     ToolbarItem(placement: .topBarTrailing) {
       Menu {
-        Button(action: { router.presentSheet(.createThread(spaceId: spaceId)) }) {
+        Button(action: { router.push(.createThread(spaceId: spaceId)) }) {
           Label("New Group Chat", systemImage: "plus.message")
         }
         Button(action: {

@@ -94,7 +94,7 @@ struct HomeToolbarContent: ToolbarContent {
       }
 
       Button {
-        router.presentSheet(.createSpaceChat)
+        router.push(.createSpaceChat)
       } label: {
         Label("New Group Chat", systemImage: "plus.message")
       }
