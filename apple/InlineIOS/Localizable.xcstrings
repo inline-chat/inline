@@ -187,6 +187,9 @@
     "Chat" : {
 
     },
+    "Chat title" : {
+
+    },
     "Chat Title" : {
       "localizations" : {
         "fa" : {
@@ -567,6 +570,9 @@
     "Error Clearing Data" : {
 
     },
+    "Everyone in %@" : {
+
+    },
     "Find" : {
       "localizations" : {
         "fa" : {
@@ -711,6 +717,9 @@
         }
       }
     },
+    "Next" : {
+
+    },
     "No Archived Chats Yet" : {
 
     },
@@ -742,6 +751,9 @@
 
     },
     "Older files may not appear, will be fixed in an update." : {
+
+    },
+    "Only selected members" : {
 
     },
     "Only space admins and owners can connect and manage integrations." : {
@@ -839,6 +851,9 @@
         }
       }
     },
+    "Search in users by username, first name, last name" : {
+
+    },
     "Searching..." : {
 
     },
@@ -846,6 +861,9 @@
 
     },
     "Select a database to help AI understand your data" : {
+
+    },
+    "Select a space" : {
 
     },
     "Select Country" : {
