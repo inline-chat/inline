@@ -27,24 +27,24 @@ enum Destination: DestinationType, Codable {
   case spaceSettings(spaceId: Int64)
   case spaceIntegrations(spaceId: Int64)
   case integrationOptions(spaceId: Int64, provider: String)
+  case createSpaceChat
+  case createThread(spaceId: Int64)
 }
 
 enum Sheet: SheetType, Codable {
   case createSpace
-  case createThread(spaceId: Int64)
+
   case alphaSheet
-  case createSpaceChat
+
   case addMember(spaceId: Int64)
   var id: String {
     switch self {
       case .createSpace:
         "createSpace"
-      case let .createThread(spaceId):
-        "createThread_\(spaceId)"
+
       case .alphaSheet:
         "alphaSheet"
-      case .createSpaceChat:
-        "createSpaceChat"
+
       case let .addMember(spaceId):
         "addMember_\(spaceId)"
     }
