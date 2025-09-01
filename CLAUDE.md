@@ -388,3 +388,4 @@ cd web && bun run build && bun run start
 - Reference this guide for accurate commands and file structure
 - Write tests for isolated, simple to test, non-UI code in Swift packages. Avoid attempting to write tests automatically when it requires significant investment, mocking, re-architecture or complex testing workflows
 - run tests with a timeout of 15s
+- When you want to build the full macOS/iOS using xcodebuild, ask me to do it, do not build the full apps. Only run tests for InlineUI or InlineKit.
