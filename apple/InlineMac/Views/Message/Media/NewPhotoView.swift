@@ -178,7 +178,7 @@ final class NewPhotoView: NSView {
       if let photoInfo = fullMessage.photoInfo {
         Task.detached { [weak self] in
           guard let self else { return }
-          await FileCache.shared.download(photo: photoInfo, for: fullMessage.message)
+          await FileCache.shared.download(photo: photoInfo, reloadMessageOnFinish: fullMessage.message)
         }
       }
 
