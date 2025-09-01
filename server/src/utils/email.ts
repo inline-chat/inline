@@ -56,7 +56,7 @@ ${styleText("cyan", "[Preview email. Force sending via SEND_EMAIL=1]")}
       to: input.to,
       subject: template.subject,
       text: template.text,
-      replyTo: "team@inline.chat",
+      replyTo: "founders@inline.chat",
     })
 
     if (result.error) {
