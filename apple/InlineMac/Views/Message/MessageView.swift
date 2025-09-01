@@ -234,6 +234,7 @@ class MessageViewAppKit: NSView {
   private lazy var replyView: EmbeddedMessageView = {
     let view = EmbeddedMessageView(style: outgoing ? .white : .colored)
     view.translatesAutoresizingMaskIntoConstraints = false
+    view.setRelatedMessage(fullMessage.message)
     if let embeddedMessage = fullMessage.repliedToMessage {
       view.update(with: embeddedMessage, kind: .replyInMessage)
     }
@@ -1436,6 +1437,14 @@ class MessageViewAppKit: NSView {
 
     // update internal props
     self.fullMessage = fullMessage
+
+    // Update related message for reply view
+    if hasReply {
+      replyView.setRelatedMessage(fullMessage.message)
+      if let embeddedMessage = fullMessage.repliedToMessage {
+        replyView.update(with: embeddedMessage, kind: .replyInMessage)
+      }
+    }
 
     // Update props and reflect changes
     updatePropsAndUpdateLayout(props: props, disableTextRelayout: true, animate: animate)

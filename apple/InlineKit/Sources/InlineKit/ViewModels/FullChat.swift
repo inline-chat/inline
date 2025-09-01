@@ -191,6 +191,10 @@ public extension FullMessage {
               .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
           )
           .including(all: Message.translations.forKey(EmbeddedMessage.CodingKeys.translations))
+          .including(
+            optional: Message.photo.forKey(EmbeddedMessage.CodingKeys.photoInfo)
+              .including(all: Photo.sizes.forKey(PhotoInfo.CodingKeys.sizes))
+          )
       )
       .including(
         all: Message.attachments

@@ -121,7 +121,7 @@ actor ImagePrefetcher {
                 guard let self = self else { return }
                 
                 do {
-                    try await FileCache.shared.download(photo: photoInfo, for: message.message)
+                    try await FileCache.shared.download(photo: photoInfo, reloadMessageOnFinish: message.message)
                     
                     if Task.isCancelled { return }
                     

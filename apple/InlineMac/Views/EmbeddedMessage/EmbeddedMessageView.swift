@@ -13,6 +13,8 @@ class EmbeddedMessageView: NSView {
     static let verticalPadding: CGFloat = 4
     static let horizontalPadding: CGFloat = 6
     static let height: CGFloat = Theme.embeddedMessageHeight
+    static let photoWidth: CGFloat = 32
+    static let photoHeight: CGFloat = 32
   }
 
   // MARK: - Properties
@@ -27,7 +29,11 @@ class EmbeddedMessageView: NSView {
   private var style: EmbeddedMessageStyle
 
   private var message: Message?
+  private var relatedMessage: Message?
   private var senderNameForColor: String?
+  private var simplePhotoView: SimplePhotoView?
+  private var textLeadingConstraint: NSLayoutConstraint?
+  private var photoConstraints: [NSLayoutConstraint] = []
 
   private var cornerRadius: CGFloat {
     switch kind {
@@ -159,6 +165,10 @@ class EmbeddedMessageView: NSView {
     addSubview(nameLabel)
     addSubview(messageLabel)
 
+    textLeadingConstraint = nameLabel.leadingAnchor.constraint(
+      equalTo: rectangleView.trailingAnchor, constant: Constants.contentSpacing
+    )
+
     NSLayoutConstraint.activate([
       // Height
       heightAnchor.constraint(equalToConstant: Constants.height),
@@ -170,18 +180,14 @@ class EmbeddedMessageView: NSView {
       rectangleView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: 0),
 
       // Name label
-      nameLabel.leadingAnchor.constraint(
-        equalTo: rectangleView.trailingAnchor, constant: Constants.contentSpacing
-      ),
+      textLeadingConstraint!,
       nameLabel.trailingAnchor.constraint(
         equalTo: trailingAnchor, constant: -Constants.horizontalPadding
       ),
       nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: Constants.verticalPadding),
 
       // Message label
-      messageLabel.leadingAnchor.constraint(
-        equalTo: rectangleView.trailingAnchor, constant: Constants.contentSpacing
-      ),
+      messageLabel.leadingAnchor.constraint(equalTo: nameLabel.leadingAnchor),
       messageLabel.trailingAnchor.constraint(
         equalTo: trailingAnchor, constant: -Constants.horizontalPadding
       ),
@@ -198,6 +204,10 @@ class EmbeddedMessageView: NSView {
     addGestureRecognizer(clickGesture)
   }
 
+  func setRelatedMessage(_ message: Message) {
+    relatedMessage = message
+  }
+
   @objc func handleTap(_ gesture: NSClickGestureRecognizer) {
     guard let message else { return }
     guard message.status != .sending, message.status != .failed else { return }
@@ -209,66 +219,57 @@ class EmbeddedMessageView: NSView {
   }
 
   func update(with embeddedMessage: EmbeddedMessage, kind: Kind) {
-    self.kind = kind
-    self.message = embeddedMessage.message
-
     guard let from = embeddedMessage.from else {
       messageLabel.stringValue = "Unknown sender"
       return
     }
 
-    let senderName = from.fullName
-
-    // Set sender name for color calculation
-    senderNameForColor = AvatarColorUtility.formatNameForHashing(
-      firstName: from.firstName,
-      lastName: from.lastName,
-      email: from.email
-    )
-
-    nameLabel.stringValue = switch self.kind {
-      case .replyInMessage:
-        "\(senderName)"
-
-      case .replyingInCompose:
-        "Reply to \(senderName)"
-
-      case .editingInCompose:
-        "Edit Message"
-    }
-
-    // Update colors after setting senderNameForColor
-    rectangleView.layer?.backgroundColor = rectangleColor.cgColor
-    nameLabel.textColor = nameLabelColor
-    layer?.backgroundColor = backgroundColor?.cgColor
-
-    let message = embeddedMessage.message
-
-    // Use display text which handles translations
-    if let displayText = embeddedMessage.displayText, !displayText.isEmpty {
-      messageLabel.stringValue = displayText
-    } else if message.isSticker == true {
-      messageLabel.stringValue = "🖼️ Sticker"
-    } else if let _ = message.photoId {
-      messageLabel.stringValue = "🖼️ Photo"
-    } else if let _ = message.videoId {
-      messageLabel.stringValue = "🎥 Video"
-    } else if let _ = message.documentId {
-      messageLabel.stringValue = "📄 Document"
+    let messageContent: String = if let displayText = embeddedMessage.displayText, !displayText.isEmpty {
+      displayText
     } else {
-      messageLabel.stringValue = "Message"
+      getMessageContentText(from: embeddedMessage.message)
     }
+
+    updateView(
+      message: embeddedMessage.message,
+      from: from,
+      kind: kind,
+      photoInfo: embeddedMessage.photoInfo,
+      messageContent: messageContent
+    )
   }
 
   func update(with fullMessage: FullMessage, kind: Kind) {
-    self.kind = kind
-    message = fullMessage.message
-
     guard let from = fullMessage.from else {
       messageLabel.stringValue = "Unknown sender"
       return
     }
 
+    let messageContent: String = if let displayText = fullMessage.displayText, !displayText.isEmpty {
+      displayText
+    } else {
+      getMessageContentText(from: fullMessage.message)
+    }
+
+    updateView(
+      message: fullMessage.message,
+      from: from,
+      kind: kind,
+      photoInfo: fullMessage.photoInfo,
+      messageContent: messageContent
+    )
+  }
+
+  private func updateView(
+    message: Message,
+    from: User,
+    kind: Kind,
+    photoInfo: PhotoInfo?,
+    messageContent: String
+  ) {
+    self.kind = kind
+    self.message = message
+
     let senderName = from.fullName
 
     // Set sender name for color calculation
@@ -278,7 +279,7 @@ class EmbeddedMessageView: NSView {
       email: from.email
     )
 
-    nameLabel.stringValue = switch self.kind {
+    nameLabel.stringValue = switch kind {
       case .replyInMessage:
         "\(senderName)"
 
@@ -294,19 +295,70 @@ class EmbeddedMessageView: NSView {
     nameLabel.textColor = nameLabelColor
     layer?.backgroundColor = backgroundColor?.cgColor
 
-    // Use display text which handles translations
-    if let displayText = fullMessage.displayText, !displayText.isEmpty {
-      messageLabel.stringValue = displayText
-    } else if fullMessage.message.isSticker == true {
-      messageLabel.stringValue = "🖼️ Sticker"
-    } else if let _ = fullMessage.message.photoId {
-      messageLabel.stringValue = "🖼️ Photo"
-    } else if let _ = fullMessage.message.videoId {
-      messageLabel.stringValue = "🎥 Video"
-    } else if let _ = fullMessage.message.documentId {
-      messageLabel.stringValue = "📄 Document"
+    // Handle photo if available
+    updatePhotoView(photoInfo: photoInfo)
+
+    messageLabel.stringValue = messageContent
+  }
+
+  private func getMessageContentText(from message: Message) -> String {
+    if message.isSticker == true {
+      "Sticker"
+    } else if let _ = message.photoId {
+      "Photo"
+    } else if let _ = message.videoId {
+      "🎥 Video"
+    } else if let _ = message.documentId {
+      "📄 Document"
     } else {
-      messageLabel.stringValue = "Message"
+      "Message"
+    }
+  }
+
+  private func updatePhotoView(photoInfo: PhotoInfo?) {
+    if let photoInfo {
+      if let existingPhotoView = simplePhotoView {
+        existingPhotoView.update(with: photoInfo)
+      } else {
+        let photoView = SimplePhotoView(
+          photoInfo: photoInfo,
+          width: Constants.photoWidth,
+          height: Constants.photoHeight,
+          relatedMessage: relatedMessage
+        )
+        simplePhotoView = photoView
+        addSubview(photoView)
+
+        photoConstraints = [
+          photoView.leadingAnchor.constraint(
+            equalTo: rectangleView.trailingAnchor, constant: Constants.contentSpacing
+          ),
+          photoView.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ]
+        NSLayoutConstraint.activate(photoConstraints)
+
+        // Update text leading constraint to be after photo
+        textLeadingConstraint?.isActive = false
+        textLeadingConstraint = nameLabel.leadingAnchor.constraint(
+          equalTo: photoView.trailingAnchor, constant: Constants.contentSpacing
+        )
+        textLeadingConstraint?.isActive = true
+      }
+    } else {
+      if let photoView = simplePhotoView {
+        photoView.removeFromSuperview()
+        simplePhotoView = nil
+
+        NSLayoutConstraint.deactivate(photoConstraints)
+        photoConstraints = []
+
+        // Restore original text leading constraint
+        textLeadingConstraint?.isActive = false
+        textLeadingConstraint = nameLabel.leadingAnchor.constraint(
+          equalTo: rectangleView.trailingAnchor, constant: Constants.contentSpacing
+        )
+        textLeadingConstraint?.isActive = true
+      }
     }
   }
 }
