@@ -45,6 +45,8 @@ public struct EmbeddedMessage: Codable, FetchableRecord, PersistableRecord, Hash
   public var message: Message
   public var senderInfo: UserInfo?
   public var translations: [Translation]
+  // FIXME: can fetch only one thumbnail in the future
+  public var photoInfo: PhotoInfo?
 
   public var id: Int64 { message.id }
 
@@ -61,12 +63,14 @@ public struct EmbeddedMessage: Codable, FetchableRecord, PersistableRecord, Hash
     case message
     case senderInfo
     case translations
+    case photoInfo
   }
 
-  public init(message: Message, senderInfo: UserInfo? = nil, translations: [Translation] = []) {
+  public init(message: Message, senderInfo: UserInfo? = nil, translations: [Translation] = [], photoInfo: PhotoInfo? = nil) {
     self.message = message
     self.senderInfo = senderInfo
     self.translations = translations
+    self.photoInfo = photoInfo
   }
 }
 
@@ -124,6 +128,10 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
                   .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
               )
               .including(all: Message.translations.forKey(EmbeddedMessage.CodingKeys.translations))
+              .including(
+                optional: Message.photo.forKey(EmbeddedMessage.CodingKeys.photoInfo)
+                  .including(all: Photo.sizes.forKey(PhotoInfo.CodingKeys.sizes))
+              )
           )
       )
 

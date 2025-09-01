@@ -130,6 +130,7 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
     message = embeddedMessage.message
     senderInfo = embeddedMessage.senderInfo
     translations = embeddedMessage.translations
+    photoInfo = embeddedMessage.photoInfo
     reactions = []
     repliedToMessage = nil
     attachments = []
