@@ -303,7 +303,7 @@ final class NewPhotoView: UIView {
         Task.detached(priority: .userInitiated) { [weak self] in
           guard let self else { return }
 
-          await FileCache.shared.download(photo: photoInfo, for: fullMessage.message)
+          await FileCache.shared.download(photo: photoInfo, reloadMessageOnFinish: fullMessage.message)
 
           Task { @MainActor in
             if let newUrl = self.imageLocalUrl() {
