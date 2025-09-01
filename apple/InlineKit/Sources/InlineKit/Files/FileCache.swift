@@ -15,6 +15,8 @@ public actor FileCache: Sendable {
   private let log = Log.scoped("FileCache")
 
   var downloadingPhotos: [Int64: Task<Void, Never>] = [:]
+  // TODO: Create a message asset downloader middleware over the file cache which tracks messages and downloads, but for now we do it in this file directly
+  var messagesToReload: [Int64: Set<Message>] = [:]
 
   private init() {}
 
@@ -28,6 +30,7 @@ public actor FileCache: Sendable {
 
   private func removeFromDownloadingPhotos(_ id: Int64) {
     downloadingPhotos[id] = nil
+    // Note(@mo): do not clear messagesToReload here, it is used to reload messages when the photo is downloaded
     log.debug("Removed photo \(id) from downloadingPhotos")
   }
 
@@ -44,9 +47,15 @@ public actor FileCache: Sendable {
   public func cancelAllDownloads() {
     for (photoId, task) in downloadingPhotos {
       task.cancel()
+      messagesToReload[photoId] = nil
       log.debug("Cancelled download for photo \(photoId)")
     }
     downloadingPhotos.removeAll()
+  }
+
+  /// Wait for a specific photo download to finish
+  public func waitForDownload(photoId: Int64) async {
+    await downloadingPhotos[photoId]?.value
   }
 
   // MARK: -  Fetches
@@ -58,13 +67,22 @@ public actor FileCache: Sendable {
 
   // MARK: -  Remote downloads
 
-  public func download(photo: PhotoInfo, for message: Message) async {
+  public func download(photo: PhotoInfo, reloadMessageOnFinish: Message? = nil) async {
+    // Register the message for reloading if provided
+    if let message = reloadMessageOnFinish {
+      if messagesToReload[photo.id] == nil {
+        messagesToReload[photo.id] = Set<Message>()
+      }
+      messagesToReload[photo.id]?.insert(message)
+      log.debug("Registered message \(message.id) for reload when photo \(photo.id) downloads")
+    }
+
     guard downloadingPhotos[photo.id] == nil else {
       log.debug("Photo \(photo.id) is already being downloaded")
       return
     }
 
-    log.debug("downloading photo \(photo.id) for message \(message.id)")
+    log.debug("downloading photo \(photo.id) for message \(reloadMessageOnFinish?.id ?? 0)")
 
     // For now we get thumbnail for size "f"
     guard let remoteUrl = photo.bestPhotoSize()?.cdnUrl else {
@@ -74,11 +92,19 @@ public actor FileCache: Sendable {
 
     downloadingPhotos[photo.id] = Task {
       // TODO: make it smarter about max retries
-      await downloadWithRetries(photo: photo, message: message, remoteUrl: remoteUrl, maxRetries: 20)
+      await downloadWithRetries(
+        photo: photo,
+        remoteUrl: remoteUrl,
+        maxRetries: 20
+      )
     }
   }
 
-  private func downloadWithRetries(photo: PhotoInfo, message: Message, remoteUrl: String, maxRetries: Int) async {
+  private func downloadWithRetries(
+    photo: PhotoInfo,
+    remoteUrl: String,
+    maxRetries: Int
+  ) async {
     var attempt = 0
 
     while attempt < maxRetries {
@@ -153,10 +179,11 @@ public actor FileCache: Sendable {
             self.log.debug("saved photo size \(matchingSize)")
           }
 
-          await triggerMessageReload(message: message)
+          // Reload all messages associated with this photo
+          await reloadAllMessagesForPhoto(photo.id)
         }
 
-        await removeFromDownloadingPhotos(photo.id)
+        removeFromDownloadingPhotos(photo.id)
         return
 
       } catch {
@@ -182,7 +209,7 @@ public actor FileCache: Sendable {
       }
     }
 
-    await removeFromDownloadingPhotos(photo.id)
+    removeFromDownloadingPhotos(photo.id)
   }
 
   private func shouldRetryError(_ error: Error) -> Bool {
@@ -204,6 +231,22 @@ public actor FileCache: Sendable {
       await MessagesPublisher.shared
         .messageUpdated(message: message, peer: message.peerId, animated: true)
     }
+  }
+
+  private func reloadAllMessagesForPhoto(_ photoId: Int64) {
+    guard let messages = messagesToReload[photoId] else { return }
+
+    log.debug("Triggering message reload for photo \(photoId) for \(messages.count) messages")
+
+    for message in messages {
+      Task { @MainActor in
+        await MessagesPublisher.shared
+          .messageUpdated(message: message, peer: message.peerId, animated: true)
+      }
+    }
+
+    // clear
+    messagesToReload[photoId] = nil
   }
 
   // MARK: - Download Helpers
