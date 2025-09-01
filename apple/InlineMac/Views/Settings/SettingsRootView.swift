@@ -3,7 +3,15 @@ import InlineUI
 import SwiftUI
 
 struct SettingsRootView: View {
+  @EnvironmentStateObject private var root: RootData
   @State private var selectedCategory: SettingsCategory = .general
+
+  init() {
+    _root = EnvironmentStateObject { env in
+      RootData(db: env.appDatabase, auth: env.auth)
+    }
+  }
+
   @Environment(\.auth) var auth
 
   var body: some View {
@@ -15,49 +23,7 @@ struct SettingsRootView: View {
     }
     .navigationTitle("Settings")
     .navigationSplitViewStyle(.balanced)
-  }
-}
-
-struct SettingsSidebarView: View {
-  @Binding var selectedCategory: SettingsCategory
-  @Environment(\.auth) var auth
-
-  var body: some View {
-    List(selection: $selectedCategory) {
-      ForEach(availableCategories) { category in
-        SettingsCategoryRow(category: category)
-          .tag(category)
-      }
-    }
-    .listStyle(.sidebar)
-    .navigationTitle("Settings")
-  }
-
-  private
-  var availableCategories: [SettingsCategory] {
-    var categories: [SettingsCategory] = [.general]
-
-    if auth.isLoggedIn {
-      categories.append(.account)
-    }
-
-    // more items
-    categories.append(contentsOf: [.appearance, .notifications])
-
-    return categories
-  }
-}
-
-struct SettingsCategoryRow: View {
-  let category: SettingsCategory
-
-  var body: some View {
-    Label {
-      Text(category.title)
-    } icon: {
-      Image(systemName: category.iconName)
-    }
-    .foregroundStyle(.primary)
+    .environmentObject(root)
   }
 }
 

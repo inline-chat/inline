@@ -147,17 +147,13 @@ final class AccountSettingsPhotoViewModel: ObservableObject {
 // MARK: - Account Settings Detail View
 
 struct AccountSettingsDetailView: View {
-  @EnvironmentStateObject private var root: RootData
+  @EnvironmentObject private var root: RootData
   @Environment(\.logOut) private var logOut
   @StateObject private var photoViewModel = AccountSettingsPhotoViewModel()
   @State private var showImagePicker = false
   @State private var showLogoutConfirmation = false
 
-  init() {
-    _root = EnvironmentStateObject { env in
-      RootData(db: env.appDatabase, auth: env.auth)
-    }
-  }
+  init() {}
 
   var body: some View {
     Form {
@@ -203,7 +199,6 @@ struct AccountSettingsDetailView: View {
     }
     .formStyle(.grouped)
     .scrollContentBackground(.hidden)
-    .padding()
     .environmentObject(root)
     .fileImporter(
       isPresented: $showImagePicker,
