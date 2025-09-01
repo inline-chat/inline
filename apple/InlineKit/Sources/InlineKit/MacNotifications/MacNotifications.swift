@@ -4,13 +4,13 @@ import UserNotifications
 
 public actor MacNotifications: Sendable {
   public static let shared = MacNotifications()
-  
+
   private var soundEnabled = true
 
   func requestPermission() async throws -> Bool {
     try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
   }
-  
+
   public func setSoundEnabled(_ enabled: Bool) {
     soundEnabled = enabled
   }
