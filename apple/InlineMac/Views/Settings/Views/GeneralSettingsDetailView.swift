@@ -12,12 +12,18 @@ struct GeneralSettingsDetailView: View {
       Section("Compose") {
         Toggle("Automatic Spell Correction", isOn: $appSettings.automaticSpellCorrection)
         Toggle("Check Spelling While Typing", isOn: $appSettings.checkSpellingWhileTyping)
-        Toggle("Send with Cmd+Enter", isOn: $appSettings.sendsWithCmdEnter)
+      }
+      
+      Section("Keyboard") {
+        Picker("Send messages with:", selection: $appSettings.sendsWithCmdEnter) {
+          Text("Return").tag(false)
+          Text("⌘ + Return").tag(true)
+        }
+        .pickerStyle(.menu)
       }
     }
     .formStyle(.grouped)
     .scrollContentBackground(.hidden)
-    .padding()
   }
 }
 

@@ -11,7 +11,6 @@ struct NotificationsSettingsDetailView: View {
     }
     .formStyle(.grouped)
     .scrollContentBackground(.hidden)
-    .padding()
   }
 }
 
