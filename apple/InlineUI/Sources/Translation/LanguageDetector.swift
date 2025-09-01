@@ -9,7 +9,7 @@ actor LanguageDetector {
     .spanish,
     .french,
     .japanese,
-    .persian
+    .persian,
   ]
 
   // Define major script groups
@@ -154,10 +154,18 @@ actor LanguageDetector {
   private static func detectLanguageForSegment(_ recognizer: NLLanguageRecognizer, _ text: String) -> NLLanguage? {
     recognizer.reset()
     // recognizer.languageConstraints = Self.supportedLanguages
+
+    // FIXME: improve language detection
     recognizer.languageHints = [
       .english: 0.9,
       .traditionalChinese: 0.9,
+      // others
       .persian: 0.5,
+      .simplifiedChinese: 0.5,
+      .spanish: 0.5,
+      .french: 0.5,
+      .japanese: 0.5,
+      .arabic: 0.5,
     ]
     recognizer.processString(text)
 
