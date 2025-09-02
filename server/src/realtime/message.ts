@@ -16,7 +16,7 @@ import { handleRpcCall } from "@in/server/realtime/handlers/_rpc"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { InlineError } from "@in/server/types/errors"
 
-const log = new Log("realtime")
+const log = new Log("realtime", LogLevel.TRACE)
 
 export const handleMessage = async (message: ClientMessage, rootContext: RootContext) => {
   const { ws, connectionId } = rootContext
@@ -170,6 +170,8 @@ export const sendMessageToRealtimeUser = async (
       log.debug(`skipping session ${options.skipSessionId} for user ${userId}`)
       continue
     }
+
+    log.trace(`sending message to user ${userId} with session ${conn.sessionId} with payload ${payload}`)
 
     // re-using id in different sockets should be fine, even beneficial as it avoid duplicate ones
     let id = genId()

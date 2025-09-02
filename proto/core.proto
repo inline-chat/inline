@@ -21,6 +21,9 @@ message ConnectionInit {
 
   // Build number of the client app
   optional int32 build_number = 2;
+
+  // API layer, for specific API differentiation
+  optional uint32 layer = 3;
 }
 
 message ServerProtocolMessage {
