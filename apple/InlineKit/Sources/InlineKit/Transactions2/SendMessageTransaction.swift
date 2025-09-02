@@ -82,11 +82,11 @@ public struct SendMessageTransaction: Transaction2 {
   // Methods
   public func optimistic() async {
     log.debug("Optimistic send message")
-
+    
     let message = Message(
       messageId: context.temporaryMessageId,
       randomId: context.randomId,
-      fromId: Auth.getCurrentUserId()!,
+      fromId: Auth.shared.currentUserId!,
       date: Date(), // Date here?
       text: context.text,
       peerUserId: peerUserId,
@@ -103,45 +103,44 @@ public struct SendMessageTransaction: Transaction2 {
       isSticker: context.isSticker,
       entities: context.entities
     )
-
+    
     // Clear typing status
     Task {
       await ComposeActions.shared.stoppedTyping(for: peerId)
     }
-
-    Task(priority: .userInitiated) {
-      let newMessage = try? await AppDatabase.shared.dbWriter.write { db in
-        do {
-          // Save message
-          try message.save(db)
-
-          // Update last message id
-          try Chat.updateLastMsgId(
-            db,
-            chatId: message.chatId,
-            lastMsgId: message.messageId,
-            date: message.date
-          )
-
-          // Fetch full message for update
-          return try FullMessage.queryRequest()
-            .filter(Column("messageId") == message.messageId)
-            .filter(Column("chatId") == message.chatId)
-            .fetchOne(db)
-        } catch {
-          log.error("Failed to save and fetch message", error: error)
-          return nil
-        }
+    
+    let newMessage = try? await AppDatabase.shared.dbWriter.write { db in
+      do {
+        // Save message
+        try message.save(db)
+        
+        // Update last message id
+        try Chat.updateLastMsgId(
+          db,
+          chatId: message.chatId,
+          lastMsgId: message.messageId,
+          date: message.date
+        )
+        
+        // Fetch full message for update
+        return try FullMessage.queryRequest()
+          .filter(Column("messageId") == message.messageId)
+          .filter(Column("chatId") == message.chatId)
+          .fetchOne(db)
+      } catch {
+        log.error("Failed to save and fetch message", error: error)
+        return nil
       }
-
-      Task(priority: .userInitiated) { @MainActor in
-        if let newMessage {
-          MessagesPublisher.shared.messageAddedSync(fullMessage: newMessage, peer: context.peerId)
-        } else {
-          log.error("Failed to save message and push update")
-        }
-      }
+      
     }
+  
+    
+    if let newMessage {
+        await MessagesPublisher.shared.messageAddedSync(fullMessage: newMessage, peer: context.peerId)
+      } else {
+        log.error("Failed to save message and push update")
+      }
+    
   }
 
   public func apply(_ result: RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {
