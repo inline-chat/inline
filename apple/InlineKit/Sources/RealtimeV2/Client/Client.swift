@@ -233,9 +233,9 @@ actor ProtocolClient {
     let msg = wrapMessage(body: .connectionInit(.with {
       $0.token = token
       $0.buildNumber = getBuildNumber()
-      #if os(macOS)
+      /// Layer 2 Changes:
+      /// - Contains a fix that doesn't send updates on send message back into the same session.
       $0.layer = 2
-      #endif
     }))
 
     try await transport.send(msg)
