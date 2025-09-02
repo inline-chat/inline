@@ -1,5 +1,6 @@
 import Auth
 import InlineKit
+import RealtimeV2
 
 import SwiftUI
 
@@ -22,7 +23,7 @@ extension ChatView {
   }
 
   enum ChatSubtitle {
-    case apiState(RealtimeAPIState)
+    case connectionState(RealtimeConnectionState)
     case typing(String)
     case composeAction(ApiComposeAction)
     case timezone(String)
@@ -30,8 +31,8 @@ extension ChatView {
 
     var text: String {
       switch self {
-        case let .apiState(state):
-          getStatusTextForChatHeader(state)
+        case let .connectionState(state):
+          state.title.lowercased()
         case let .typing(text):
           text
         case let .composeAction(action):
@@ -75,8 +76,8 @@ extension ChatView {
   }
 
   func getCurrentSubtitle() -> ChatSubtitle {
-    if apiState != .connected {
-      return .apiState(apiState)
+    if realtimeState.connectionState != .connected {
+      return .connectionState(realtimeState.connectionState)
     } else if isPrivateChat {
       if let composeAction = currentComposeAction() {
         if composeAction == .typing {
@@ -175,10 +176,10 @@ struct ChatSubtitlePreview: View {
 
 #Preview {
   VStack(spacing: 20) {
-    // API States
-    ChatSubtitlePreview(subtitle: .apiState(.connecting))
-    ChatSubtitlePreview(subtitle: .apiState(.updating))
-    ChatSubtitlePreview(subtitle: .apiState(.waitingForNetwork))
+    // Connection States
+    ChatSubtitlePreview(subtitle: .connectionState(.connecting))
+    ChatSubtitlePreview(subtitle: .connectionState(.updating))
+    ChatSubtitlePreview(subtitle: .connectionState(.connected))
 
     // Typing
     ChatSubtitlePreview(subtitle: .typing("John is typing..."))

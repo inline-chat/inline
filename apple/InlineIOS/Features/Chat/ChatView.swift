@@ -4,6 +4,7 @@ import InlineUI
 import Logger
 import SwiftUI
 import Translation
+import RealtimeV2
 
 struct ChatView: View {
   var peerId: Peer
@@ -11,8 +12,6 @@ struct ChatView: View {
 
   @State private var navBarHeight: CGFloat = 0
   @State private var isChatHeaderPressed = false
-  @State var apiState: RealtimeAPIState = .connecting
-
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
   @EnvironmentObject var data: DataManager
   @Environment(Router.self) private var router
@@ -20,6 +19,7 @@ struct ChatView: View {
   @Environment(\.appDatabase) var database
   @Environment(\.scenePhase) var scenePhase
   @Environment(\.realtime) var realtime
+  @EnvironmentObject var realtimeState: RealtimeState
 
   @ObservedObject var composeActions: ComposeActions = .shared
 
@@ -90,7 +90,6 @@ struct ChatView: View {
       }
     }
     .onAppear {
-      getApiState()
       fetch()
     }
     .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NavigationBarHeight"))) { notification in
@@ -98,7 +97,6 @@ struct ChatView: View {
         navBarHeight = height
       }
     }
-    .onReceive(realtime.apiStatePublisher) { apiState = $0 }
     .onReceive(
       NotificationCenter.default
         .publisher(for: Notification.Name("chatDeletedNotification"))
@@ -203,22 +201,12 @@ struct ChatView: View {
       subtitleView
     }
     .fixedSize(horizontal: false, vertical: true)
-    .onAppear {
-      apiState = realtime.apiState
-    }
-    .onReceive(realtime.apiStatePublisher, perform: { nextApiState in
-      apiState = nextApiState
-    })
   }
 
   @ViewBuilder
   var translateButton: some View {
     TranslationButton(peer: peerId)
       .tint(ThemeManager.shared.accentColor)
-  }
-
-  func getApiState() {
-    apiState = realtime.apiState
   }
 
   func fetch() {
