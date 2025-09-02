@@ -41,6 +41,7 @@ struct ContentView2: View {
     }
     .environment(router)
     .environmentObject(onboardingNav)
+    .environmentObject(Api.realtime.stateObject)
     .environmentObject(api)
     .environmentObject(userData)
     .environmentObject(data)
