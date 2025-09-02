@@ -16,12 +16,16 @@ import { handleRpcCall } from "@in/server/realtime/handlers/_rpc"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { InlineError } from "@in/server/types/errors"
 
-const log = new Log("realtime", LogLevel.TRACE)
+const log = new Log("realtime")
 
 export const handleMessage = async (message: ClientMessage, rootContext: RootContext) => {
   const { ws, connectionId } = rootContext
 
   const conn = connectionManager.getConnection(connectionId)
+
+  log.trace(
+    `handling message ${message.body.oneofKind} for connection ${connectionId} userId: ${conn?.userId} sessionId: ${conn?.sessionId} layer: ${conn?.layer}`,
+  )
 
   const sendRaw = (message: ServerProtocolMessage) => {
     ws.raw.sendBinary(ServerProtocolMessage.toBinary(message), true)
