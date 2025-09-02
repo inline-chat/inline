@@ -24,6 +24,7 @@ import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { debugDelay } from "@in/server/utils/helpers/time"
+import { connectionManager } from "@in/server/ws/connections"
 
 type Input = {
   peerId: InputPeer
@@ -56,6 +57,8 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   const chat = await ChatModel.getChatFromInputPeer(input.peerId, context)
   const chatId = chat.id
   const replyToMsgIdNumber = input.replyToMessageId ? Number(input.replyToMessageId) : null
+  // FIXME: create a helper function to get the layer
+  const currentUserLayer = connectionManager.getConnectionBySession(currentUserId, context.currentSessionId)?.layer ?? 0
 
   let text = input.message
   let entities = input.entities
@@ -150,7 +153,14 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   // we can also separate the sequence caching. this will speed up and
   // remove the need to lock the chat row. then we should deliver the update
   // with sequence number so we can ensure gap-free delivery.
-  let { selfUpdates, updateGroup } = await pushUpdates({ inputPeer, messageInfo, currentUserId, update })
+  let { selfUpdates, updateGroup } = await pushUpdates({
+    inputPeer,
+    messageInfo,
+    currentUserId,
+    update,
+    currentSessionId: context.currentSessionId,
+    currentUserLayer,
+  })
 
   // send notification
   sendNotifications({
@@ -218,13 +228,21 @@ const pushUpdates = async ({
   messageInfo,
   currentUserId,
   update,
+  currentUserLayer,
+  currentSessionId,
 }: {
   inputPeer: InputPeer
   messageInfo: MessageInfo
   currentUserId: number
   update: UpdateSeqAndDate
+  currentSessionId: number
+  currentUserLayer: number
 }): Promise<{ selfUpdates: Update[]; updateGroup: UpdateGroup }> => {
   const updateGroup = await getUpdateGroupFromInputPeer(inputPeer, { currentUserId })
+  const publishToSelfSession = currentUserLayer < 2
+  const skipSessionId = publishToSelfSession ? undefined : currentSessionId
+
+  console.log("currentUserLayer", currentUserLayer)
 
   let messageIdUpdate: Update = {
     update: {
@@ -263,11 +281,16 @@ const pushUpdates = async ({
 
       if (userId === currentUserId) {
         // current user gets the message id update and new message update
-        RealtimeUpdates.pushToUser(userId, [
-          // order matters here
-          messageIdUpdate,
-          newMessageUpdate,
-        ])
+        RealtimeUpdates.pushToUser(
+          userId,
+          [
+            // order matters here
+            messageIdUpdate,
+            newMessageUpdate,
+          ],
+          { skipSessionId },
+        )
+
         selfUpdates = [
           // order matters here
           messageIdUpdate,
@@ -300,11 +323,16 @@ const pushUpdates = async ({
 
       if (userId === currentUserId) {
         // current user gets the message id update and new message update
-        RealtimeUpdates.pushToUser(userId, [
-          // order matters here
-          messageIdUpdate,
-          newMessageUpdate,
-        ])
+        RealtimeUpdates.pushToUser(
+          userId,
+          [
+            // order matters here
+            messageIdUpdate,
+            newMessageUpdate,
+          ],
+          { skipSessionId },
+        )
+
         selfUpdates = [
           // order matters here
           messageIdUpdate,
