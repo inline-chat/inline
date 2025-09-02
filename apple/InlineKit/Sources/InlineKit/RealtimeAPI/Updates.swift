@@ -10,7 +10,7 @@ public actor UpdatesEngine: Sendable {
   private let database: AppDatabase = .shared
   private let log = Log.scoped("RealtimeUpdates")
 
-  public func apply(update: InlineProtocol.Update, db: Database) {
+  public nonisolated func apply(update: InlineProtocol.Update, db: Database) {
     log.trace("apply realtime update")
     // log.debug("Received update type: \(update.update)")
 
@@ -83,10 +83,10 @@ public actor UpdatesEngine: Sendable {
     }
   }
 
-  public func applyBatch(updates: [InlineProtocol.Update]) {
-    log.debug("applying \(updates.count) updates")
+  public func applyBatch(updates: [InlineProtocol.Update]) async {
+    log.debug("applying \(updates.count) updates \(updates.map(\.update))")
     do {
-      try database.dbWriter.write { db in
+      try await database.dbWriter.write { db in
         for update in updates {
           self.apply(update: update, db: db)
         }
@@ -381,7 +381,7 @@ extension InlineProtocol.UpdateNewChat {
       Log.shared.debug("saving user \(user)")
       do {
         // Save user if it's a private chat
-        let _ = try User.save(db, user: user)
+        _ = try User.save(db, user: user)
       } catch {
         Log.shared.error("Failed to save user", error: error)
       }
@@ -407,7 +407,7 @@ extension InlineProtocol.UpdateNewChat {
 
 extension InlineProtocol.UpdateSpaceMemberAdd {
   func apply(_ db: Database) throws {
-    let _ = try User.save(db, user: user)
+    _ = try User.save(db, user: user)
     let member = Member(from: member)
     try member.save(db)
   }
@@ -555,7 +555,7 @@ extension InlineProtocol.UpdateChatHasNewUpdates {
 extension InlineProtocol.UpdateMarkAsUnread {
   func apply(_ db: Database) throws {
     Log.shared.debug("update mark as unread for peer \(peerID.toPeer()) mark: \(unreadMark)")
-    
+
     // Find the dialog for this peer and update the unread mark
     if var dialog = try Dialog.get(peerId: peerID.toPeer()).fetchOne(db) {
       dialog.unreadMark = unreadMark
