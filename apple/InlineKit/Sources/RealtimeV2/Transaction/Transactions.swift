@@ -33,7 +33,7 @@ actor Transactions {
     }
   }
 
-  public func queue(transaction: some Transaction) -> TransactionId {
+  func queue(transaction: some Transaction) -> TransactionId {
     let wrapper = TransactionWrapper(transaction: transaction)
     let transactionId = wrapper.id
 
@@ -41,25 +41,23 @@ actor Transactions {
 
     // add to queue
     _queue[transactionId] = wrapper
-    
+
     // FIXME: there might be a race condition where delete is called before save to disk
     Task(priority: .utility) {
       // persist
       saveToDisk(transaction: wrapper)
     }
-    
+
     Task(priority: .userInitiated) {
       // send to stream
       await queueStream.send(())
     }
 
-
-
     return transactionId
   }
 
   /// Dequeue next transaction from the queue and mark it as in-flight.
-  public func dequeue() -> TransactionWrapper? {
+  func dequeue() -> TransactionWrapper? {
     guard let first = _queue.keys.first else { return nil }
     let transactionId = first
     let wrapper = _queue[first]
@@ -74,7 +72,7 @@ actor Transactions {
   }
 
   /// Mark a transaction as running, which means it has an RPC call in progress.
-  public func running(transactionId: TransactionId, rpcMsgId: UInt64) {
+  func running(transactionId: TransactionId, rpcMsgId: UInt64) {
     guard let _ = inFlight[transactionId] else {
       // if not found, it means it was already completed or discarded
       return
@@ -85,7 +83,7 @@ actor Transactions {
   }
 
   /// Acknowledge a transaction by the rpc message ID. It deletes the transaction from the system.
-  public func ack(rpcMsgId: UInt64) {
+  func ack(rpcMsgId: UInt64) {
     guard let transactionId = transactionRpcMap[rpcMsgId] else {
       // if not found, it means it was already completed or discarded
       return
@@ -155,7 +153,7 @@ actor Transactions {
     }
   }
 
-  public func requeueAll() {
+  func requeueAll() {
     for (transactionId, wrapper) in inFlight {
       _queue[transactionId] = wrapper
     }
@@ -169,20 +167,20 @@ actor Transactions {
 
   // MARK: - Helpers
 
-  public func isInFlight(transactionId: TransactionId) -> Bool {
+  func isInFlight(transactionId: TransactionId) -> Bool {
     inFlight[transactionId] != nil
   }
 
-  public func isInQueue(transactionId: TransactionId) -> Bool {
+  func isInQueue(transactionId: TransactionId) -> Bool {
     _queue[transactionId] != nil
   }
 
-  public func transactionIdFrom(msgId: UInt64) -> TransactionId? {
+  func transactionIdFrom(msgId: UInt64) -> TransactionId? {
     transactionRpcMap[msgId]
   }
 
   /// Cancel all transactions that match the predicate from the queue.
-  public func cancel(where predicate: (TransactionWrapper) -> Bool) {
+  func cancel(where predicate: (TransactionWrapper) -> Bool) {
     for (transactionId, wrapper) in _queue {
       if predicate(wrapper) {
         log.debug("Cancelling transaction \(transactionId) \(wrapper.transaction.debugDescription)")
