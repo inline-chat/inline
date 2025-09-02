@@ -275,9 +275,8 @@ public actor RealtimeV2 {
   @discardableResult
   public nonisolated func send(_ transaction: any Transaction2) async throws -> InlineProtocol.RpcResult.OneOf_Result? {
     // run optimistic immediately
-    Task(priority: .userInitiated) { @MainActor in
-      await transaction.optimistic()
-    }
+    // Note(@mo): Do not put this in a task or it may run after the execution of the transaction
+    await transaction.optimistic()
 
     // add to execution queue
     let transactionId = await transactions.queue(transaction: transaction)
