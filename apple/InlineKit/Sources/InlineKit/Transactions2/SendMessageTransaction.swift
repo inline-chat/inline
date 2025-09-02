@@ -149,7 +149,7 @@ public struct SendMessageTransaction: Transaction2 {
       throw TransactionExecutionError.invalid
     }
 
-    await Realtime.shared.applyUpdates(response.updates)
+    await Api.realtime.applyUpdates(response.updates)
   }
 
   public func failed(error: TransactionError2) async {
