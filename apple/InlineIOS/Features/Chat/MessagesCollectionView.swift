@@ -119,7 +119,7 @@ final class MessagesCollectionView: UICollectionView {
   private var composeHeight: CGFloat = ComposeView.minHeight
   private var composeEmbedViewHeight: CGFloat = ComposeEmbedView.height
 
-  public func updateComposeInset(composeHeight: CGFloat) {
+  func updateComposeInset(composeHeight: CGFloat) {
     self.composeHeight = composeHeight
     UIView.animate(withDuration: 0.2) {
       self.updateContentInsets()
@@ -489,8 +489,6 @@ private extension MessagesCollectionView {
     private weak var collectionContextMenu: UIContextMenuInteraction?
     private var cancellables = Set<AnyCancellable>()
     private var updateWorkItem: DispatchWorkItem?
-    private var isApplyingSnapshot = false
-    private var needsAnotherUpdate = false
 
     // MARK: - Date Separator Visibility Handling
 
@@ -553,8 +551,12 @@ private extension MessagesCollectionView {
           guard let self, peer == self.peerId else { return }
           var snapshot = dataSource.snapshot()
           let ids = messages.map(\.id)
-          snapshot.reconfigureItems(ids)
-          dataSource.apply(snapshot, animatingDifferences: true)
+          // Safety check: only reconfigure items that actually exist in the snapshot
+          let existingIds = ids.filter { snapshot.itemIdentifiers.contains($0) }
+          if !existingIds.isEmpty {
+            snapshot.reconfigureItems(existingIds)
+            safeApplySnapshot(snapshot, animatingDifferences: true)
+          }
         }
         .store(in: &cancellables)
 
@@ -677,11 +679,44 @@ private extension MessagesCollectionView {
         snapshot.appendItems(messageIds, toSection: section.date)
       }
 
-      dataSource.apply(snapshot, animatingDifferences: animated ?? false)
+      safeApplySnapshot(snapshot, animatingDifferences: animated ?? false) { [weak self] in
+        // Kick-off the auto-hide timer on first load as well (after layout pass)
+        DispatchQueue.main.async {
+          self?.scheduleHideDateSeparators()
+        }
+      }
+    }
 
-      // Kick-off the auto-hide timer on first load as well (after layout pass)
-      DispatchQueue.main.async { [weak self] in
-        self?.scheduleHideDateSeparators()
+    private func safeApplySnapshot(
+      _ snapshot: NSDiffableDataSourceSnapshot<Date, FullMessage.ID>,
+      animatingDifferences: Bool,
+      withCustomTiming: Bool = false,
+      completion: (() -> Void)? = nil
+    ) {
+      guard Thread.isMainThread else {
+        DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
+          self?.safeApplySnapshot(
+            snapshot,
+            animatingDifferences: animatingDifferences,
+            withCustomTiming: withCustomTiming,
+            completion: completion
+          )
+        }
+        return
+      }
+
+      if withCustomTiming, animatingDifferences {
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.33)
+        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(controlPoints: 0.2, 0.8, 0.2, 1.0))
+      }
+
+      dataSource.apply(snapshot, animatingDifferences: animatingDifferences) {
+        completion?()
+      }
+
+      if withCustomTiming, animatingDifferences {
+        CATransaction.commit()
       }
     }
 
@@ -723,12 +758,7 @@ private extension MessagesCollectionView {
             updateUnreadIfNeeded()
           }
 
-          // Use CATransaction to customize the diffable data source animation timing
-          CATransaction.begin()
-          CATransaction.setAnimationDuration(0.33)
-          CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(controlPoints: 0.2, 0.8, 0.2, 1.0))
-
-          dataSource.apply(snapshot, animatingDifferences: true) { [weak self] in
+          safeApplySnapshot(snapshot, animatingDifferences: true, withCustomTiming: true) { [weak self] in
             if shouldScroll {
               if let collectionView = self?.currentCollectionView as? MessagesCollectionView {
                 collectionView.safeScrollToTop(animated: true)
@@ -736,17 +766,19 @@ private extension MessagesCollectionView {
             }
           }
 
-          CATransaction.commit()
-
         case let .messagesDeleted(_, messageIds):
           var snapshot = dataSource.snapshot()
           snapshot.deleteItems(messageIds)
-          dataSource.apply(snapshot, animatingDifferences: true)
+          safeApplySnapshot(snapshot, animatingDifferences: true)
 
         case let .messagesUpdated(_, messageIds, animated):
           var snapshot = dataSource.snapshot()
-          snapshot.reconfigureItems(messageIds)
-          dataSource.apply(snapshot, animatingDifferences: animated ?? false)
+          // Safety check: only reconfigure items that actually exist in the snapshot
+          let existingIds = messageIds.filter { snapshot.itemIdentifiers.contains($0) }
+          if !existingIds.isEmpty {
+            snapshot.reconfigureItems(existingIds)
+            safeApplySnapshot(snapshot, animatingDifferences: animated ?? false)
+          }
 
         case .multiSectionUpdate:
           // Multiple sections affected - do a full data reload for simplicity
@@ -764,7 +796,6 @@ private extension MessagesCollectionView {
     func setupContextMenuAccessories() {
       guard let collectionView = currentCollectionView as? MessagesCollectionView else { return }
       collectionView.accessoryProvider = { [weak self] indexPath in
-
         guard let self, let message = viewModel.message(at: indexPath) else { return [] }
         let alignment: UIContextMenuAccessoryAlignment = if message.message.out == true {
           .trailing
@@ -1336,11 +1367,6 @@ private extension MessagesCollectionView {
     }
 
     private func updateItemsSafely() {
-      guard !isApplyingSnapshot else {
-        needsAnotherUpdate = true
-        return
-      }
-      isApplyingSnapshot = true
       let currentSnapshot = dataSource.snapshot()
       let currentIds = Set(currentSnapshot.itemIdentifiers)
       let availableIds = Set(messages.map(\.id))
@@ -1348,21 +1374,6 @@ private extension MessagesCollectionView {
 
       if !missingIds.isEmpty {
         setInitialData(animated: false)
-        isApplyingSnapshot = false
-        if needsAnotherUpdate {
-          needsAnotherUpdate = false
-          DispatchQueue.main.async { [weak self] in
-            self?.scheduleUpdateItems()
-          }
-        }
-      } else {
-        isApplyingSnapshot = false
-        if needsAnotherUpdate {
-          needsAnotherUpdate = false
-          DispatchQueue.main.async { [weak self] in
-            self?.scheduleUpdateItems()
-          }
-        }
       }
     }
 
