@@ -76,7 +76,19 @@ public class MessagesSectionedViewModel {
   }
 
   public func loadBatch(at direction: MessagesProgressiveViewModel.MessagesLoadDirection) {
+    let previousSectionsSet = Set(sections.map(\.date))
     progressiveViewModel.loadBatch(at: direction)
+    // rebuild sections
+    rebuildSections()
+    // check if sections changed
+    let newSectionsSet = Set(sections.map(\.date))
+    if previousSectionsSet != newSectionsSet {
+      let changedSections = sections.filter { !previousSectionsSet.contains($0.date) }
+      // sections changed
+      callback?(.sectionsChanged(sections: changedSections))
+    } else {
+      callback?(.sectionsChanged(sections: [sections[sections.count - 1]]))
+    }
   }
 
   public func setAtBottom(_ atBottom: Bool) {

@@ -122,7 +122,6 @@ public class MessagesProgressiveViewModel {
 
           updateRange()
 
-
           // Return changeset
           return MessagesChangeSet.added(newMessages, indexSet: [messages.count - 1])
         }
@@ -214,7 +213,6 @@ public class MessagesProgressiveViewModel {
 
     minDate = lowestDate
     maxDate = highestDate
-
   }
 
   private func refetchCurrentRange() {
@@ -280,13 +278,9 @@ public class MessagesProgressiveViewModel {
       var messagesBatch: [FullMessage] = try db.dbWriter.read { db in
         var query = baseQuery()
 
-        if prepend {
-          query = query.order(Column("date").desc)
-          query = query.filter(Column("date") <= cursor)
-        } else {
-          query = query.order(Column("date").desc)
-          query = query.filter(Column("date") <= cursor)
-        }
+        // FIXME: we'll need to adjust it based on newest or oldest
+        query = query.order(Column("date").desc)
+        query = query.filter(Column("date") <= cursor)
 
         query = query.limit(limit)
 
@@ -312,13 +306,6 @@ public class MessagesProgressiveViewModel {
         }
 
         updateRange()
-
-        if publish {
-          // Notify observers about the new messages
-          let indices = prepend ? Array(0 ..< messagesBatch.count) :
-            Array((messages.count - messagesBatch.count) ..< messages.count)
-          callback?(.added(messagesBatch, indexSet: indices))
-        }
       }
     } catch {
       Log.shared.error("Failed to get messages \(error)")
