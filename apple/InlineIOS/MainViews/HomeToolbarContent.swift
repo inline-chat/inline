@@ -1,14 +1,15 @@
 import InlineKit
 import InlineUI
+import RealtimeV2
 
 import SwiftUI
 
 struct HomeToolbarContent: ToolbarContent {
   @Environment(Router.self) private var router
   @Environment(\.realtime) var realtime
+  @EnvironmentObject var realtimeState: RealtimeState
 
   @State var shouldShow = false
-  @State var apiState: RealtimeAPIState = .connecting
 
   var body: some ToolbarContent {
     ToolbarItem(placement: .topBarLeading) {
@@ -33,47 +34,44 @@ struct HomeToolbarContent: ToolbarContent {
 
   @ViewBuilder
   private var title: some View {
-    Text(shouldShow ? getStatusText(apiState) : "Chats")
+    Text(shouldShow ? realtimeState.connectionState.title : "Chats")
       .font(.title3)
       .fontWeight(.semibold)
       .themedPrimaryText()
       .contentTransition(.numericText())
-      .animation(.spring(duration: 0.5), value: getStatusText(apiState))
+      .animation(.spring(duration: 0.5), value: realtimeState.connectionState.title)
       .animation(.spring(duration: 0.5), value: shouldShow)
   }
 
   @ViewBuilder
   private var header: some View {
     HStack(spacing: 8) {
-      if apiState != .connected {
+      if realtimeState.connectionState != .connected {
         Spinner(size: 16)
           .padding(.trailing, 4)
       }
 
       VStack(alignment: .leading, spacing: 0) {
-        Text(shouldShow ? getStatusText(apiState) : "Chats")
+        Text(shouldShow ? realtimeState.connectionState.title : "Chats")
           .font(.title3)
           .fontWeight(.semibold)
           .themedPrimaryText()
           .contentTransition(.numericText())
-          .animation(.spring(duration: 0.5), value: getStatusText(apiState))
+          .animation(.spring(duration: 0.5), value: realtimeState.connectionState.title)
           .animation(.spring(duration: 0.5), value: shouldShow)
       }
     }
 
     .onAppear {
-      apiState = realtime.apiState
-
-      if apiState != .connected {
+      if realtimeState.connectionState != .connected {
         shouldShow = true
       }
     }
-    .onReceive(realtime.apiStatePublisher, perform: { nextApiState in
-      apiState = nextApiState
-      if nextApiState == .connected {
+    .onReceive(realtimeState.connectionStatePublisher, perform: { nextConnectionState in
+      if nextConnectionState == .connected {
         Task { @MainActor in
           try await Task.sleep(for: .seconds(1))
-          if nextApiState == .connected {
+          if nextConnectionState == .connected {
             // second check
             shouldShow = false
           }
