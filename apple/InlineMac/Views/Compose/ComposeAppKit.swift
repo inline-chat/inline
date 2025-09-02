@@ -213,7 +213,7 @@ class ComposeAppKit: NSView {
 
   /// This method is called from ChatViewAppKit's viewDidLayout
   /// Load draft, set initial height, etc here.
-  public func didLayout() {
+  func didLayout() {
     guard !initializedDraft else { return }
     let loaded = loadDraft()
     if !loaded {
@@ -541,7 +541,7 @@ class ComposeAppKit: NSView {
     }
   }
 
-  private var keyMonitorEscUnsubscribe: (() -> Void)? = nil
+  private var keyMonitorEscUnsubscribe: (() -> Void)?
   private func addReplyEscHandler() {
     keyMonitorEscUnsubscribe = dependencies.keyMonitor?.addHandler(
       for: .escape,
@@ -802,7 +802,7 @@ class ComposeAppKit: NSView {
       else {
         for (index, (_, attachment)) in attachmentItems.enumerated() {
           let isFirst = index == 0
-          let _ = Transactions.shared.mutate(
+          _ = Transactions.shared.mutate(
             transaction:
             .sendMessage(
               TransactionSendMessage(
