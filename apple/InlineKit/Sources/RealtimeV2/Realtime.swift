@@ -260,10 +260,20 @@ public actor RealtimeV2 {
     await transactions.requeueAll()
   }
 
+  /// Store the continuation for a transaction from actor context
+  private func storeContinuation(for transactionId: TransactionId, continuation: CheckedContinuation<
+    RpcResult.OneOf_Result?,
+    any Error
+  >) {
+    transactionContinuations[transactionId] = continuation
+  }
+
   // MARK: - Public API
 
+  /// Send a transaction and wait for the result
+  /// Uses nonisolated func to allow use from MainActor for faster optimistic updates
   @discardableResult
-  public func send(_ transaction: any Transaction2) async throws -> InlineProtocol.RpcResult.OneOf_Result? {
+  public nonisolated func send(_ transaction: any Transaction2) async throws -> InlineProtocol.RpcResult.OneOf_Result? {
     // run optimistic immediately
     Task(priority: .userInitiated) { @MainActor in
       await transaction.optimistic()
@@ -275,11 +285,9 @@ public actor RealtimeV2 {
 
     // optionally if they want to wait for the result
     return try await withCheckedThrowingContinuation { continuation in
-      transactionContinuations[transactionId] = continuation
-//      as? CheckedContinuation<
-//        RpcResult.OneOf_Result?,
-//        TransactionError
-//      >
+      Task {
+        await storeContinuation(for: transactionId, continuation: continuation)
+      }
     }
   }
 
