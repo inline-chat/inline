@@ -14,14 +14,14 @@ public actor UpdatesEngine: Sendable {
     log.trace("apply realtime update")
     // log.debug("Received update type: \(update.update)")
 
-    // TODO: Save update state
-
     do {
       switch update.update {
         case let .newMessage(newMessageUpdate):
+          log.trace("apply new message update")
           try newMessageUpdate.apply(db)
 
         case let .updateMessageID(updateMessageId):
+          log.trace("apply update message id")
           try updateMessageId.apply(db)
 
         case let .updateUserStatus(updateUserStatus):
@@ -155,9 +155,14 @@ extension InlineProtocol.UpdateNewMessageNotification {
 extension InlineProtocol.UpdateMessageId {
   func apply(_ db: Database) throws {
     Log.shared.debug("update message id \(randomID) \(messageID)")
-    let message = try Message.filter(Column("randomId") == randomID).fetchOne(
-      db
-    )
+    let currentUserId = Auth.shared.currentUserId
+    // FIXME: optimize this to update in one go OR to make a faster fetch
+    let message = try Message
+      .filter(Column("randomId") == randomID)
+      .filter(Column("fromId") == currentUserId)
+      .fetchOne(
+        db
+      )
     if var message {
       message.status = .sent
       message.messageId = messageID
@@ -166,14 +171,14 @@ extension InlineProtocol.UpdateMessageId {
       try message
         .saveMessage(
           db,
-          onConflict: .ignore,
+          onConflict: .replace,
           publishChanges: true
         )
 
-      // TODO: optimize this to update in one go
-      var chat = try Chat.fetchOne(db, id: message.chatId)
-      chat?.lastMsgId = message.messageId
-      try chat?.save(db)
+      try Chat.filter(id: message.chatId).updateAll(
+        db,
+        [Column("lastMsgId").set(to: message.messageId)]
+      )
     }
   }
 }
