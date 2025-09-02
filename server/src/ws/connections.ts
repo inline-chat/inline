@@ -32,6 +32,9 @@ interface Connection {
   // For authenticated connections
   userId?: number
   sessionId?: number
+
+  /** Realtime API layer */
+  layer?: number
 }
 
 class ConnectionManager {
@@ -73,12 +76,13 @@ class ConnectionManager {
     return id
   }
 
-  authenticateConnection(id: string, userId: number, sessionId: number) {
+  authenticateConnection(id: string, userId: number, sessionId: number, layer: number = 1) {
     log.debug(`Authenticating connection ${id} for user ${userId}`)
     const connection = this.connections.get(id)
     if (connection) {
       connection.userId = userId
       connection.sessionId = sessionId
+      connection.layer = layer
 
       presenceManager.handleConnectionOpen({ userId, sessionId })
 
@@ -145,6 +149,12 @@ class ConnectionManager {
   getUserConnections(userId: number): Connection[] {
     const userConnections = this.authenticatedUsers.get(userId) ?? new Set<string>()
     return [...userConnections].map((conId) => this.connections.get(conId)).filter(filterFalsy)
+  }
+
+  getConnectionBySession(userId: number, sessionId: number): Connection | undefined {
+    const userConnections = this.authenticatedUsers.get(userId) ?? new Set<string>()
+    let connectionId = [...userConnections].find((conId) => this.connections.get(conId)?.sessionId === sessionId)
+    return connectionId ? this.connections.get(connectionId) : undefined
   }
 
   getSpaceUserIds(spaceId: number): number[] {

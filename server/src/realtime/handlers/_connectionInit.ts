@@ -15,7 +15,7 @@ export const handleConnectionInit = async (
 ): Promise<ConnectionOpen> => {
   // user still unauthenticated here.
 
-  let { token, buildNumber } = init
+  let { token, buildNumber, layer } = init
   let userIdFromToken = await getUserIdFromToken(token)
 
   log.debug(
@@ -40,6 +40,7 @@ export const handleConnectionInit = async (
     handlerContext.connectionId,
     userIdFromToken.userId,
     userIdFromToken.sessionId,
+    layer,
   )
 
   // respond back with ack
