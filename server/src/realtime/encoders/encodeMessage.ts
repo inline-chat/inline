@@ -112,10 +112,10 @@ export const encodeMessage = ({
     message: text,
     out: encodingForUserId === message.fromId,
     date: encodeDateStrict(message.date),
-    mentioned: false,
+    mentioned: undefined,
     replyToMsgId: message.replyToMsgId ? BigInt(message.replyToMsgId) : undefined,
     media: media,
-    isSticker: message.isSticker ?? false,
+    isSticker: message.isSticker || undefined,
     entities: entities,
   }
 
