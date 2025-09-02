@@ -153,8 +153,15 @@ class ConnectionManager {
 
   getConnectionBySession(userId: number, sessionId: number): Connection | undefined {
     const userConnections = this.authenticatedUsers.get(userId) ?? new Set<string>()
-    let connectionId = [...userConnections].find((conId) => this.connections.get(conId)?.sessionId === sessionId)
-    return connectionId ? this.connections.get(connectionId) : undefined
+
+    for (const connectionId of userConnections) {
+      const connection = this.connections.get(connectionId)
+      if (connection?.sessionId === sessionId) {
+        return connection
+      }
+    }
+
+    return undefined
   }
 
   getSpaceUserIds(spaceId: number): number[] {
