@@ -41,14 +41,19 @@ actor Transactions {
 
     // add to queue
     _queue[transactionId] = wrapper
-
-    // persist
-    saveToDisk(transaction: wrapper)
-
-    Task {
+    
+    // FIXME: there might be a race condition where delete is called before save to disk
+    Task(priority: .utility) {
+      // persist
+      saveToDisk(transaction: wrapper)
+    }
+    
+    Task(priority: .userInitiated) {
       // send to stream
       await queueStream.send(())
     }
+
+
 
     return transactionId
   }
