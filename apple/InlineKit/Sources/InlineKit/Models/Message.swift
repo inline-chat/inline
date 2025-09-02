@@ -358,15 +358,7 @@ public extension Message {
 
     // Check if message exists
     if globalId == nil {
-      // experimental, probably not needed
-      let existing = if let randomId {
-        // fetch via random id if available
-        try? Message.fetchOne(db, key: ["fromId": fromId, "randomId": randomId])
-      } else {
-        try? Message.fetchOne(db, key: ["messageId": messageId, "chatId": chatId])
-      }
-
-      if let existing {
+      if let existing = try? Message.fetchOne(db, key: ["messageId": messageId, "chatId": chatId]) {
         globalId = existing.globalId
 
         fileId = fileId ?? existing.fileId
