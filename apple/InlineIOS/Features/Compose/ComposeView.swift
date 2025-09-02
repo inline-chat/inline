@@ -157,13 +157,13 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     }
   }
 
-  public func sendSticker(_ image: UIImage) {
+  func sendSticker(_ image: UIImage) {
     guard let peerId else {
       log.debug("No peerId available")
       return
     }
 
-    Task.detached(priority: .userInitiated) {
+    Task.detached(priority: .userInitiated) { @MainActor in
       let photoInfo = try FileCache.savePhoto(image: image, optimize: true)
       let mediaItem = FileMediaItem.photo(photoInfo)
 
@@ -300,28 +300,33 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     }
 
     if isEditing {
-      Transactions.shared.mutate(transaction: .editMessage(.init(
-        messageId: state.editingMessageId ?? 0,
-        text: textFromAttributedString ?? text ?? "",
-        chatId: chatId,
-        peerId: peerId,
-        entities: entities
-      )))
+      Task(priority: .userInitiated) { @MainActor in
+        try await Api.realtime.send(.editMessage(
+          messageId: state.editingMessageId ?? 0,
+          text: textFromAttributedString ?? text ?? "",
+          chatId: chatId,
+          peerId: peerId,
+          entities: entities
+        ))
+      }
 
       ChatState.shared.clearEditingMessageId(peer: peerId)
     } else {
       let replyToMessageId = state.replyingMessageId
 
       if attachmentItems.isEmpty {
-        Transactions.shared.mutate(transaction: .sendMessage(.init(
-          text: textFromAttributedString ?? text ?? "",
-          peerId: peerId,
-          chatId: chatId,
-          mediaItems: [],
-          replyToMsgId: replyToMessageId,
-          isSticker: nil,
-          entities: entities
-        )))
+        Task(priority: .userInitiated) { @MainActor in
+          try await Api.realtime.send(
+            .sendMessage(
+              text: textFromAttributedString ?? text ?? "",
+              peerId: peerId,
+              chatId: chatId,
+              replyToMsgId: replyToMessageId,
+              isSticker: nil,
+              entities: entities
+            )
+          )
+        }
       } else {
         for (index, (_, attachment)) in attachmentItems.enumerated() {
           log.debug("Sending attachment: \(attachment)")
@@ -481,7 +486,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     textView.text = ""
 
     resetTextViewState()
-    
+
     // Ensure font is reset after clearing text
     textView.font = .systemFont(ofSize: 17)
     textView.typingAttributes[.font] = UIFont.systemFont(ofSize: 17)
