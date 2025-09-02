@@ -11,10 +11,10 @@ actor ProtocolClient {
   private let auth: Auth
 
   // Events
-  public let events = AsyncChannel<ClientEvent>()
+  let events = AsyncChannel<ClientEvent>()
 
   // State
-  public var state: ClientState = .connecting
+  var state: ClientState = .connecting
 
   // Message sequencing and ID generation
   private var seq: UInt32 = 0
@@ -61,7 +61,7 @@ actor ProtocolClient {
     }
   }
 
-  public func reset() {
+  func reset() {
     seq = 0
     lastTimestamp = 0
     connectionAttemptNo = 0
@@ -233,6 +233,9 @@ actor ProtocolClient {
     let msg = wrapMessage(body: .connectionInit(.with {
       $0.token = token
       $0.buildNumber = getBuildNumber()
+      #if os(macOS)
+      $0.layer = 2
+      #endif
     }))
 
     try await transport.send(msg)
@@ -307,17 +310,17 @@ actor ProtocolClient {
 
   // MARK: - Public API
 
-  public func startTransport() async {
+  func startTransport() async {
     await transport.start()
   }
 
-  public func stopTransport() async {
+  func stopTransport() async {
     await transport.stop()
   }
 
   // MARK: - RPC Calls
 
-  public func sendRpc(method: InlineProtocol.Method, input: RpcCall.OneOf_Input?) async throws -> UInt64 {
+  func sendRpc(method: InlineProtocol.Method, input: RpcCall.OneOf_Input?) async throws -> UInt64 {
     let message = wrapMessage(body: .rpcCall(.with {
       $0.method = method
       $0.input = input

@@ -220,11 +220,22 @@ public struct ConnectionInit: Sendable {
   /// Clears the value of `buildNumber`. Subsequent reads from it will return its default value.
   public mutating func clearBuildNumber() {self._buildNumber = nil}
 
+  /// API layer, for specific API differentiation
+  public var layer: UInt32 {
+    get {return _layer ?? 0}
+    set {_layer = newValue}
+  }
+  /// Returns true if `layer` has been explicitly set.
+  public var hasLayer: Bool {return self._layer != nil}
+  /// Clears the value of `layer`. Subsequent reads from it will return its default value.
+  public mutating func clearLayer() {self._layer = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _buildNumber: Int32? = nil
+  fileprivate var _layer: UInt32? = nil
 }
 
 public struct ServerProtocolMessage: Sendable {
@@ -4940,6 +4951,7 @@ extension ConnectionInit: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .same(proto: "token"),
     2: .standard(proto: "build_number"),
+    3: .same(proto: "layer"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -4950,6 +4962,7 @@ extension ConnectionInit: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.token) }()
       case 2: try { try decoder.decodeSingularInt32Field(value: &self._buildNumber) }()
+      case 3: try { try decoder.decodeSingularUInt32Field(value: &self._layer) }()
       default: break
       }
     }
@@ -4966,12 +4979,16 @@ extension ConnectionInit: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
     try { if let v = self._buildNumber {
       try visitor.visitSingularInt32Field(value: v, fieldNumber: 2)
     } }()
+    try { if let v = self._layer {
+      try visitor.visitSingularUInt32Field(value: v, fieldNumber: 3)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: ConnectionInit, rhs: ConnectionInit) -> Bool {
     if lhs.token != rhs.token {return false}
     if lhs._buildNumber != rhs._buildNumber {return false}
+    if lhs._layer != rhs._layer {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
