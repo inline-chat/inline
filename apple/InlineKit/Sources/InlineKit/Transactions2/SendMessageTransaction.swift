@@ -82,7 +82,7 @@ public struct SendMessageTransaction: Transaction2 {
   // Methods
   public func optimistic() async {
     log.debug("Optimistic send message")
-    
+
     let message = Message(
       messageId: context.temporaryMessageId,
       randomId: context.randomId,
@@ -103,17 +103,17 @@ public struct SendMessageTransaction: Transaction2 {
       isSticker: context.isSticker,
       entities: context.entities
     )
-    
+
     // Clear typing status
     Task(priority: .utility) {
       await ComposeActions.shared.stoppedTyping(for: peerId)
     }
-    
+
     let newMessage = try? await AppDatabase.shared.dbWriter.write { db in
       do {
         // Save message
         try message.save(db)
-        
+
         // Update last message id
         try Chat.updateLastMsgId(
           db,
@@ -121,7 +121,7 @@ public struct SendMessageTransaction: Transaction2 {
           lastMsgId: message.messageId,
           date: message.date
         )
-        
+
         // Fetch full message for update
         return try FullMessage.queryRequest()
           .filter(Column("messageId") == message.messageId)
@@ -131,10 +131,9 @@ public struct SendMessageTransaction: Transaction2 {
         log.error("Failed to save and fetch message", error: error)
         return nil
       }
-      
     }
-  
-    
+
+    #if os(iOS)
     Task(priority: .userInitiated) { @MainActor in
       if let newMessage {
         await MessagesPublisher.shared.messageAddedSync(fullMessage: newMessage, peer: context.peerId)
@@ -142,6 +141,13 @@ public struct SendMessageTransaction: Transaction2 {
         log.error("Failed to save message and push update")
       }
     }
+    #else
+    if let newMessage {
+      await MessagesPublisher.shared.messageAddedSync(fullMessage: newMessage, peer: context.peerId)
+    } else {
+      log.error("Failed to save message and push update")
+    }
+    #endif
   }
 
   public func apply(_ result: RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {
