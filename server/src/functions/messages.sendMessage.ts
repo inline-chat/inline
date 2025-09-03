@@ -146,6 +146,9 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
 
   //await debugDelay(5000)
 
+  const hasAttachments =
+    messageInfo.photo !== undefined || messageInfo.video !== undefined || messageInfo.document !== undefined
+
   // send new updates
   // TODO: need to create the update, use the sequence number
   // we probably need to create the update and message in one transaction
@@ -159,7 +162,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     currentUserId,
     update,
     currentSessionId: context.currentSessionId,
-    currentUserLayer,
+    publishToSelfSession: currentUserLayer < 2 || hasAttachments,
   })
 
   // send notification
@@ -228,7 +231,7 @@ const pushUpdates = async ({
   messageInfo,
   currentUserId,
   update,
-  currentUserLayer,
+  publishToSelfSession,
   currentSessionId,
 }: {
   inputPeer: InputPeer
@@ -236,13 +239,10 @@ const pushUpdates = async ({
   currentUserId: number
   update: UpdateSeqAndDate
   currentSessionId: number
-  currentUserLayer: number
+  publishToSelfSession: boolean
 }): Promise<{ selfUpdates: Update[]; updateGroup: UpdateGroup }> => {
   const updateGroup = await getUpdateGroupFromInputPeer(inputPeer, { currentUserId })
-  const publishToSelfSession = currentUserLayer < 2
   const skipSessionId = publishToSelfSession ? undefined : currentSessionId
-
-  console.log("currentUserLayer", currentUserLayer)
 
   let messageIdUpdate: Update = {
     update: {
