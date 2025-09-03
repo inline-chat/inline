@@ -158,11 +158,8 @@ extension InlineProtocol.UpdateMessageId {
     let currentUserId = Auth.shared.currentUserId
     // FIXME: optimize this to update in one go OR to make a faster fetch
     let message = try Message
-      .filter(Column("randomId") == randomID)
-      .filter(Column("fromId") == currentUserId)
-      .fetchOne(
-        db
-      )
+      .fetchOne(db, key: ["fromId": currentUserId, "randomId": randomID])
+
     if var message {
       message.status = .sent
       message.messageId = messageID
