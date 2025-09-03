@@ -269,7 +269,7 @@ public struct TransactionSendMessage: Transaction {
   }
 
   public func didSucceed(result: [InlineProtocol.Update]) async {
-    // await Realtime.shared.updates.applyBatch(updates: result)
+    await Api.realtime.applyUpdates(result)
 
     #if os(iOS)
     Task(priority: .userInitiated) { @MainActor in
