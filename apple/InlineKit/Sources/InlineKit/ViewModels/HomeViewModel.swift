@@ -58,7 +58,6 @@ public struct EmbeddedMessage: Codable, FetchableRecord, PersistableRecord, Hash
     translations.first { $0.language == language }
   }
 
-
   public enum CodingKeys: String, CodingKey {
     case message
     case senderInfo
@@ -66,7 +65,12 @@ public struct EmbeddedMessage: Codable, FetchableRecord, PersistableRecord, Hash
     case photoInfo
   }
 
-  public init(message: Message, senderInfo: UserInfo? = nil, translations: [Translation] = [], photoInfo: PhotoInfo? = nil) {
+  public init(
+    message: Message,
+    senderInfo: UserInfo? = nil,
+    translations: [Translation] = [],
+    photoInfo: PhotoInfo? = nil
+  ) {
     self.message = message
     self.senderInfo = senderInfo
     self.translations = translations
@@ -156,6 +160,7 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
   }
 }
 
+@MainActor
 public final class HomeViewModel: ObservableObject {
   @Published public private(set) var chats: [HomeChatItem] = []
   @Published public private(set) var spaces: [HomeSpaceItem] = []
@@ -192,12 +197,32 @@ public final class HomeViewModel: ObservableObject {
         },
         receiveValue: { [weak self] chats in
           guard let self else { return }
+
+          let isInitial = self.chats.isEmpty
+
           self.chats = chats
 
-          let sortedChats = sortChats(filterEmptyChats(chats))
-          withAnimation(.smooth) {
-            archivedChats = filterArchived(sortedChats, archived: true)
-            myChats = filterArchived(sortedChats, archived: false)
+          if isInitial {
+            let sortedChats = Self.sortChats(Self.filterEmptyChats(chats))
+            let filteredArchived = Self.filterArchived(sortedChats, archived: true)
+            let filteredMyChats = Self.filterArchived(sortedChats, archived: false)
+
+            archivedChats = filteredArchived
+            myChats = filteredMyChats
+          } else {
+            Task.detached {
+              // FIXME: Optimize this madness
+              let sortedChats = Self.sortChats(Self.filterEmptyChats(chats))
+              let filteredArchived = Self.filterArchived(sortedChats, archived: true)
+              let filteredMyChats = Self.filterArchived(sortedChats, archived: false)
+
+              Task { @MainActor in
+                withAnimation(.smooth) {
+                  self.archivedChats = filteredArchived
+                  self.myChats = filteredMyChats
+                }
+              }
+            }
           }
         }
       )
@@ -233,7 +258,7 @@ public extension AppDatabase {
 }
 
 extension HomeViewModel {
-  private func sortChats(_ chats: [HomeChatItem]) -> [HomeChatItem] {
+  nonisolated static func sortChats(_ chats: [HomeChatItem]) -> [HomeChatItem] {
     chats.sorted { item1, item2 in
       // First sort by pinned status
       let pinned1 = item1.dialog.pinned ?? false
@@ -247,11 +272,11 @@ extension HomeViewModel {
     }
   }
 
-  private func filterArchived(_ chats: [HomeChatItem], archived: Bool) -> [HomeChatItem] {
+  nonisolated static func filterArchived(_ chats: [HomeChatItem], archived: Bool) -> [HomeChatItem] {
     chats.filter { $0.dialog.archived == archived }
   }
 
-  private func filterEmptyChats(_ chats: [HomeChatItem]) -> [HomeChatItem] {
+  nonisolated static func filterEmptyChats(_ chats: [HomeChatItem]) -> [HomeChatItem] {
     chats.filter { $0.chat != nil }
   }
 }
