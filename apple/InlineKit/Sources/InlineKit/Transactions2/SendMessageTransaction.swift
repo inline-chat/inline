@@ -105,7 +105,7 @@ public struct SendMessageTransaction: Transaction2 {
     )
     
     // Clear typing status
-    Task {
+    Task(priority: .utility) {
       await ComposeActions.shared.stoppedTyping(for: peerId)
     }
     
@@ -135,12 +135,13 @@ public struct SendMessageTransaction: Transaction2 {
     }
   
     
-    if let newMessage {
+    Task(priority: .userInitiated) { @MainActor in
+      if let newMessage {
         await MessagesPublisher.shared.messageAddedSync(fullMessage: newMessage, peer: context.peerId)
       } else {
         log.error("Failed to save message and push update")
       }
-    
+    }
   }
 
   public func apply(_ result: RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {
