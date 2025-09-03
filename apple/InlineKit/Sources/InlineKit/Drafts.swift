@@ -24,7 +24,8 @@ public final class Drafts: Sendable {
 
     print("🌴 Draft message in update", draft)
 
-    Task {
+    // See if it introduces any race conditions
+    Task.detached(priority: .utility) {
       do {
         try await AppDatabase.shared.dbWriter.write { db in
           if var dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId)) {
@@ -40,13 +41,14 @@ public final class Drafts: Sendable {
           }
         }
       } catch {
-        log.error("Failed to update draft", error: error)
+        Log.shared.error("Failed to update draft", error: error)
       }
     }
   }
-  
+
   public func clear(peerId: Peer) {
-    Task {
+    // Priority
+    Task.detached(priority: .utility) {
       do {
         try await AppDatabase.shared.dbWriter.write { db in
           if var dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId)) {
@@ -55,7 +57,7 @@ public final class Drafts: Sendable {
           }
         }
       } catch {
-        log.error("Failed to clear draft", error: error)
+        Log.shared.error("Failed to clear draft", error: error)
       }
     }
   }
