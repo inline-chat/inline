@@ -755,7 +755,7 @@ class ComposeAppKit: NSView {
     // Edit message
     if let editingMessageId {
       // Edit message
-      Task(priority: .userInitiated) { @MainActor in
+      Task.detached(priority: .userInitiated) { // @MainActor in
         try await Api.realtime.send(.editMessage(
           messageId: editingMessageId,
           text: text ?? "",
@@ -770,7 +770,7 @@ class ComposeAppKit: NSView {
     else if attachmentItems.isEmpty {
       // Text-only
       // Send via V2
-      Task(priority: .userInitiated) { @MainActor in
+      Task.detached(priority: .userInitiated) { // @MainActor in
         try await Api.realtime.send(
           .sendMessage(
             text: text,
