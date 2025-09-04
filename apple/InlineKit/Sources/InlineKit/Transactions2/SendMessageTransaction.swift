@@ -109,45 +109,47 @@ public struct SendMessageTransaction: Transaction2 {
       await ComposeActions.shared.stoppedTyping(for: peerId)
     }
 
-    let newMessage = try? await AppDatabase.shared.dbWriter.write { db in
-      do {
-        // Save message
-        try message.save(db)
+    Task.detached(priority: .userInitiated) {
+      let newMessage = try? await AppDatabase.shared.dbWriter.write { db in
+        do {
+          // Save message
+          try message.save(db)
 
-        // Update last message id
-        try Chat.updateLastMsgId(
-          db,
-          chatId: message.chatId,
-          lastMsgId: message.messageId,
-          date: message.date
-        )
+          // Update last message id
+          try Chat.updateLastMsgId(
+            db,
+            chatId: message.chatId,
+            lastMsgId: message.messageId,
+            date: message.date
+          )
 
-        // Fetch full message for update
-        return try FullMessage.queryRequest()
-          .filter(Column("messageId") == message.messageId)
-          .filter(Column("chatId") == message.chatId)
-          .fetchOne(db)
-      } catch {
-        log.error("Failed to save and fetch message", error: error)
-        return nil
+          // Fetch full message for update
+          return try FullMessage.queryRequest()
+            .filter(Column("messageId") == message.messageId)
+            .filter(Column("chatId") == message.chatId)
+            .fetchOne(db)
+        } catch {
+          log.error("Failed to save and fetch message", error: error)
+          return nil
+        }
       }
-    }
 
-    #if os(iOS)
-    Task(priority: .userInitiated) { @MainActor in
+      #if os(iOS)
+      //Task(priority: .userInitiated) { @MainActor in
+        if let newMessage {
+          await MessagesPublisher.shared.messageAddedSync(fullMessage: newMessage, peer: context.peerId)
+        } else {
+          log.error("Failed to save message and push update")
+        }
+      //}
+      #else
       if let newMessage {
         await MessagesPublisher.shared.messageAddedSync(fullMessage: newMessage, peer: context.peerId)
       } else {
         log.error("Failed to save message and push update")
       }
+      #endif
     }
-    #else
-    if let newMessage {
-      await MessagesPublisher.shared.messageAddedSync(fullMessage: newMessage, peer: context.peerId)
-    } else {
-      log.error("Failed to save message and push update")
-    }
-    #endif
   }
 
   public func apply(_ result: RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {
