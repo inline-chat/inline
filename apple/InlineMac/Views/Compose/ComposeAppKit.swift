@@ -731,109 +731,109 @@ class ComposeAppKit: NSView {
 
   // Send the message
   func send() {
-    DispatchQueue.main.async(qos: .userInteractive) {
-      self.ignoreNextHeightChange = true
-      let attributedString = self.textEditor.attributedString
-      let replyToMsgId = self.state.replyingToMsgId
-      let attachmentItems = self.attachmentItems
-      // keep a copy of editingMessageId before we clear it
-      let editingMessageId = self.state.editingMsgId
+    // DispatchQueue.main.async(qos: .userInteractive) {
+    ignoreNextHeightChange = true
+    let attributedString = textEditor.attributedString
+    let replyToMsgId = state.replyingToMsgId
+    let attachmentItems = attachmentItems
+    // keep a copy of editingMessageId before we clear it
+    let editingMessageId = state.editingMsgId
 
-      // Extract mention entities from attributed text
-      // TODO: replace with `fromAttributedString`
-      let (rawText, entities) = ProcessEntities.fromAttributedString(attributedString)
+    // Extract mention entities from attributed text
+    // TODO: replace with `fromAttributedString`
+    let (rawText, entities) = ProcessEntities.fromAttributedString(attributedString)
 
-      // make it nil if empty
-      let text = if rawText.isEmpty, !attachmentItems.isEmpty {
-        nil as String?
-      } else {
-        rawText
-      }
-
-      if !self.canSend { return }
-
-      // Edit message
-      if let editingMessageId {
-        // Edit message
-        Task(priority: .userInitiated) { @MainActor in
-          try await Api.realtime.send(.editMessage(
-            messageId: editingMessageId,
-            text: text ?? "",
-            chatId: self.chatId ?? 0,
-            peerId: self.peerId,
-            entities: entities
-          ))
-        }
-      }
-
-      // Send message
-      else if attachmentItems.isEmpty {
-        // Text-only
-        // Send via V2
-        Task(priority: .userInitiated) { @MainActor in
-          try await Api.realtime.send(
-            .sendMessage(
-              text: text,
-              peerId: self.peerId,
-              chatId: self.chatId ?? 0, // FIXME: chatId fallback
-              replyToMsgId: replyToMsgId,
-              isSticker: nil,
-              entities: entities
-            )
-          )
-        }
-        // let _ = Transactions.shared.mutate(
-        //   transaction:
-        //   .sendMessage(
-        //     TransactionSendMessage(
-        //       text: text,
-        //       peerId: self.peerId,
-        //       chatId: self.chatId ?? 0, // FIXME: chatId fallback
-        //       mediaItems: [],
-        //       replyToMsgId: replyToMsgId,
-        //       isSticker: nil,
-        //       entities: entities
-        //     )
-        //   )
-        // )
-      }
-
-      // With image/file/video
-      else {
-        for (index, (_, attachment)) in attachmentItems.enumerated() {
-          let isFirst = index == 0
-          _ = Transactions.shared.mutate(
-            transaction:
-            .sendMessage(
-              TransactionSendMessage(
-                text: isFirst ? text : nil,
-                peerId: self.peerId,
-                chatId: self.chatId ?? 0, // FIXME: chatId fallback
-                mediaItems: [attachment],
-                replyToMsgId: isFirst ? replyToMsgId : nil,
-                isSticker: nil,
-                entities: isFirst ? entities : nil
-              )
-            )
-          )
-        }
-      }
-
-      // Clear immediately
-      self.clear()
-
-      // Cancel typing
-      Task {
-        await ComposeActions.shared.stoppedTyping(for: self.peerId)
-      }
-
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-        // Scroll to new message
-        self.state.scrollToBottom()
-      }
-
-      self.ignoreNextHeightChange = false
+    // make it nil if empty
+    let text = if rawText.isEmpty, !attachmentItems.isEmpty {
+      nil as String?
+    } else {
+      rawText
     }
+
+    if !canSend { return }
+
+    // Edit message
+    if let editingMessageId {
+      // Edit message
+      Task(priority: .userInitiated) { @MainActor in
+        try await Api.realtime.send(.editMessage(
+          messageId: editingMessageId,
+          text: text ?? "",
+          chatId: self.chatId ?? 0,
+          peerId: self.peerId,
+          entities: entities
+        ))
+      }
+    }
+
+    // Send message
+    else if attachmentItems.isEmpty {
+      // Text-only
+      // Send via V2
+      Task(priority: .userInitiated) { @MainActor in
+        try await Api.realtime.send(
+          .sendMessage(
+            text: text,
+            peerId: self.peerId,
+            chatId: self.chatId ?? 0, // FIXME: chatId fallback
+            replyToMsgId: replyToMsgId,
+            isSticker: nil,
+            entities: entities
+          )
+        )
+      }
+      // let _ = Transactions.shared.mutate(
+      //   transaction:
+      //   .sendMessage(
+      //     TransactionSendMessage(
+      //       text: text,
+      //       peerId: self.peerId,
+      //       chatId: self.chatId ?? 0, // FIXME: chatId fallback
+      //       mediaItems: [],
+      //       replyToMsgId: replyToMsgId,
+      //       isSticker: nil,
+      //       entities: entities
+      //     )
+      //   )
+      // )
+    }
+
+    // With image/file/video
+    else {
+      for (index, (_, attachment)) in attachmentItems.enumerated() {
+        let isFirst = index == 0
+        _ = Transactions.shared.mutate(
+          transaction:
+          .sendMessage(
+            TransactionSendMessage(
+              text: isFirst ? text : nil,
+              peerId: peerId,
+              chatId: chatId ?? 0, // FIXME: chatId fallback
+              mediaItems: [attachment],
+              replyToMsgId: isFirst ? replyToMsgId : nil,
+              isSticker: nil,
+              entities: isFirst ? entities : nil
+            )
+          )
+        )
+      }
+    }
+
+    // Clear immediately
+    clear()
+
+    // Cancel typing
+    Task {
+      await ComposeActions.shared.stoppedTyping(for: self.peerId)
+    }
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+      // Scroll to new message
+      self.state.scrollToBottom()
+    }
+
+    ignoreNextHeightChange = false
+    // }
   }
 
   func focus() {
