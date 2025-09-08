@@ -15,7 +15,6 @@ public actor RealtimeV2 {
   private var client: ProtocolClient
   private var sync: Sync
   private var transactions: Transactions
-  private var queries: Queries
 
   // Public
   public nonisolated let stateObject: RealtimeState
@@ -49,7 +48,6 @@ public actor RealtimeV2 {
     client = ProtocolClient(transport: transport, auth: auth)
     sync = Sync(applyUpdates: applyUpdates)
     transactions = Transactions(persistenceHandler: persistenceHandler)
-    queries = Queries()
     stateObject = RealtimeState()
 
     Task {
