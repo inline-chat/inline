@@ -63,6 +63,10 @@ public final class Log: @unchecked Sendable {
     Log(scope: scope, level: enableTracing ? .trace : .debug)
   }
 
+  public static func scoped(_ scope: String, level: LogLevel = .debug) -> Log {
+    Log(scope: scope, level: level)
+  }
+
   public static func scoped(_ scope: String) -> Log {
     Log(scope: scope)
   }

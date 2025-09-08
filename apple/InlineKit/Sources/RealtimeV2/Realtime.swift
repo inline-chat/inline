@@ -22,7 +22,7 @@ public actor RealtimeV2 {
 
   // MARK: - Private Properties
 
-  private let log = Log.scoped("RealtimeV2")
+  private let log = Log.scoped("RealtimeV2", level: .debug)
   private var cancellables = Set<AnyCancellable>()
   private var tasks: Set<Task<Void, Never>> = []
 
@@ -96,7 +96,7 @@ public actor RealtimeV2 {
   private func startListeners() async {
     // Auth events
     Task.detached {
-      self.log.debug("Starting auth events listener")
+      self.log.trace("Starting auth events listener")
       for await event in await self.auth.events {
         guard !Task.isCancelled else { return }
 
@@ -114,36 +114,36 @@ public actor RealtimeV2 {
 
     // Client/Transport events
     Task.detached {
-      self.log.debug("Starting transport events listener")
+      self.log.trace("Starting transport events listener")
       for await event in await self.client.events {
         guard !Task.isCancelled else { return }
 
         switch event {
           case .open:
-            self.log.debug("Transport connected")
+            self.log.trace("Transport connected")
             Task {
               await self.updateConnectionState(.connected)
               await self.restartTransactions()
             }
 
           case .connecting:
-            self.log.debug("Transport connecting")
+            self.log.trace("Transport connecting")
             Task { await self.updateConnectionState(.connecting) }
 
           case let .ack(msgId):
-            self.log.debug("Received ACK for message \(msgId)")
+            self.log.trace("Received ACK for message \(msgId)")
             Task { await self.ackTransaction(msgId: msgId) }
 
           case let .rpcResult(msgId, rpcResult):
-            self.log.debug("Received RPC result for message \(msgId)")
+            self.log.trace("Received RPC result for message \(msgId)")
             Task { await self.completeTransaction(msgId: msgId, rpcResult: rpcResult) }
 
           case let .rpcError(msgId, rpcError):
-            self.log.debug("Received RPC error for message \(msgId)")
+            self.log.trace("Received RPC error for message \(msgId)")
             Task { await self.completeTransaction(msgId: msgId, error: TransactionError.rpcError(rpcError)) }
 
           case let .updates(updates):
-            self.log.debug("Received updates \(updates)")
+            self.log.trace("Received updates \(updates)")
             Task { await self.sync.process(updates: updates.updates) }
         }
       }
@@ -151,15 +151,15 @@ public actor RealtimeV2 {
 
     // Transactions
     Task.detached {
-      self.log.debug("Starting transactions listener")
+      self.log.trace("Starting transactions listener")
       for await _ in await self.transactions.queueStream {
         guard await self.currentConnectionState == .connected else {
-          self.log.debug("Skipping transaction queue stream as connection is not connected")
+          self.log.trace("Skipping transaction queue stream as connection is not connected")
           continue
         }
 
         while let transaction = await self.transactions.dequeue() {
-          self.log.debug("Dequeued transaction \(transaction.id)")
+          self.log.trace("Dequeued transaction \(transaction.id)")
           await self.runTransaction(transaction)
         }
       }
@@ -176,7 +176,7 @@ public actor RealtimeV2 {
   }
 
   private func runTransaction(_ transactionWrapper: TransactionWrapper) async {
-    log.debug("Running transaction \(transactionWrapper.id) with method \(transactionWrapper.transaction.method)")
+    log.trace("Running transaction \(transactionWrapper.id) with method \(transactionWrapper.transaction.method)")
     let transaction = transactionWrapper.transaction
     // send as RPC
     // mark as running
@@ -208,7 +208,7 @@ public actor RealtimeV2 {
     let transaction = transactionWrapper.transaction
     let transactionId = transactionWrapper.id
 
-    log.debug("Transaction \(transactionId) completed with result \(rpcResult)")
+    log.trace("Transaction \(transactionId) completed with result")
 
     // FIXME: Task, Task.detached, or...?
     Task.detached {
@@ -280,7 +280,7 @@ public actor RealtimeV2 {
 
     // add to execution queue
     let transactionId = await transactions.queue(transaction: transaction)
-    log.debug("Queued transaction \(transaction.debugDescription)")
+    log.trace("Queued transaction \(transaction.debugDescription)")
 
     // optionally if they want to wait for the result
     return try await withCheckedThrowingContinuation { continuation in

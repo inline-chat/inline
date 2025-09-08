@@ -10,7 +10,7 @@ import UIKit
 #endif
 
 public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegate {
-  private let log = Log.scoped("RealtimeV2.WebSocketTransport", enableTracing: true)
+  private let log = Log.scoped("RealtimeV2.WebSocketTransport", level: .debug)
 
   private let _eventChannel: AsyncChannel<TransportEvent>
   public nonisolated var events: AsyncChannel<TransportEvent> { _eventChannel }
@@ -86,7 +86,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     reconnectionTask?.cancel()
     reconnectionTask = Task {
       let delay = getReconnectionDelay()
-      log.debug("Reconnection attempt #\(connectionAttemptNo) with \(delay)s delay")
+      log.trace("Reconnection attempt #\(connectionAttemptNo) with \(delay)s delay")
 
       if !skipDelay {
         // Wait for timeout or a signal to reconnect
@@ -129,7 +129,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
         guard !Task.isCancelled else { return }
 
         if await isStuckConnecting() {
-          log.info("Watchdog: detected stuck connection, triggering recovery")
+          log.debug("Watchdog: detected stuck connection, triggering recovery")
           await handleStuckConnection()
         }
       }
@@ -246,16 +246,16 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
   }
 
   public func stopConnection() async {
-    log.debug("stopping connection")
+    log.trace("stopping connection")
 
     cleanUpPreviousConnection()
   }
 
   private func openConnection() async {
-    log.debug("Opening connection")
+    log.trace("Opening connection")
     // Guard against starting a connection when we shouldn't
     guard state != .idle else {
-      log.warning("Not opening connection because state is idle")
+      log.debug("Not opening connection because state is idle")
       return
     }
 
@@ -307,7 +307,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
               break
           }
         } catch {
-          log.debug("Error in receive loop")
+          log.trace("Error in receive loop")
           await handleError(error)
           break
         }
@@ -333,7 +333,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     guard state != .connected else { return }
     state = .connected
     connectingStartTime = nil
-    log.debug("Transport connected")
+    log.trace("Transport connected")
     // Stop watchdog when successfully connected - no longer need recovery checks
     stopWatchdog()
     Task { await _eventChannel.send(.connected) }
@@ -352,7 +352,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     guard state != .idle else { return }
     state = .idle
     connectingStartTime = nil
-    log.debug("Transport stopping")
+    log.trace("Transport stopping")
     Task { await _eventChannel.send(.stopping) }
   }
 
