@@ -6,7 +6,14 @@ import { integrations } from "@in/server/db/schema/integrations"
 
 export let notionOauth: arctic.Notion | undefined
 
-if (process.env.NOTION_CLIENT_ID && process.env.NOTION_CLIENT_SECRET) {
+let isDev = process.env.NODE_ENV === "development"
+if (isDev && process.env.NOTION_CLIENT_ID_DEV && process.env.NOTION_CLIENT_SECRET_DEV) {
+  notionOauth = new arctic.Notion(
+    process.env.NOTION_CLIENT_ID_DEV,
+    process.env.NOTION_CLIENT_SECRET_DEV,
+    "https://api.inline.chat/integrations/notion/callback",
+  )
+} else if (!isDev && process.env.NOTION_CLIENT_ID && process.env.NOTION_CLIENT_SECRET) {
   notionOauth = new arctic.Notion(
     process.env.NOTION_CLIENT_ID,
     process.env.NOTION_CLIENT_SECRET,
