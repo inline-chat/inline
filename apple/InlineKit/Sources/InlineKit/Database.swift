@@ -672,19 +672,6 @@ public extension AppDatabase {
       path.replace(" ", with: "\\ ")
       log.debug("Database path: \(path)")
 
-      let iOSLink = "https://testflight.apple.com/join/FkC3f7fz"
-      let macOSLink = "https://testflight.apple.com/join/Z8zUcWZH"
-
-      print(
-        """
-        |TestFlight links|
-
-        iOS: \(iOSLink)
-        macOS: \(macOSLink)
-        🍎🍎🍎
-        """
-      )
-
       // Create the AppDatabase
       let appDatabase = try AppDatabase(dbPool)
 
