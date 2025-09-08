@@ -71,12 +71,21 @@ struct HomeSidebar: View {
 
         // Main content
         if showSearchBar {
-          List {
-            searchView
-          }
-          .listStyle(.sidebar)
-          .listRowBackground(Color.clear)
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          SearchView(
+            isSearching: isSearching,
+            localResults: localSearch.results,
+            globalResults: search.results,
+            selectedResultIndex: selectedResultIndex,
+            isLoading: search.isLoading,
+            error: search.error,
+            searchQuery: searchQuery,
+            onSelectLocal: { result in
+              handleLocalResult(result)
+            },
+            onSelectRemote: { user in
+              handleRemoteUser(user)
+            }
+          )
         } else {
           NewSidebarWrapper(dependencies: dependencies!, tab: tab)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -344,73 +353,6 @@ struct HomeSidebar: View {
     }
     .menuStyle(.button)
     .buttonStyle(.plain)
-  }
-
-  var hasAnyResults: Bool {
-    search.hasResults || localSearch.results.count > 0
-  }
-
-  var searchLoadingResults: Bool {
-    search.isLoading
-  }
-
-  // The view when user focuses the search input shows up
-  @ViewBuilder
-  var searchView: some View {
-    if isSearching {
-      if hasAnyResults {
-        if localSearch.results.count > 0 {
-          Section {
-            ForEach(Array(localSearch.results.enumerated()), id: \.element.id) { index, result in
-              LocalSearchItem(item: result, highlighted: selectedResultIndex == index) {
-                handleLocalResult(result)
-              }
-              .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
-            }
-          }
-        }
-
-        if search.hasResults {
-          Section("Global Search") {
-            ForEach(Array(search.results.enumerated()), id: \.element.id) { index, result in
-              let globalIndex = index + localSearch.results.count
-              switch result {
-                case let .users(user):
-                  RemoteUserItem(user: user, highlighted: selectedResultIndex == globalIndex, action: {
-                    handleRemoteUser(user)
-                  })
-                  .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
-              }
-            }
-          }
-        }
-      } else {
-        HStack {
-          if searchLoadingResults {
-            ProgressView()
-              .progressViewStyle(.circular)
-              .tint(.secondary)
-          } else if let error = search.error {
-            Text("Failed to load: \(error.localizedDescription)")
-              .font(.body)
-              .foregroundStyle(.secondary)
-          } else if !searchQuery.isEmpty, !hasAnyResults {
-            // User searched, loading is done, but we didn't find a result
-            Image(systemName: "x.circle")
-              .font(.system(size: 32, weight: .medium))
-              .foregroundStyle(.tertiary)
-          } else {
-            Image(systemName: "magnifyingglass")
-              .font(.system(size: 32, weight: .medium))
-              .foregroundStyle(.tertiary)
-          }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .lineLimit(2)
-        .multilineTextAlignment(.center)
-        .padding()
-      }
-    }
   }
 
   // MARK: - Key Monitor
