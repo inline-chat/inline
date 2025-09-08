@@ -36,6 +36,9 @@ export const WANVER_TRANSLATION_CONTEXT = process.env["WANVER_TRANSLATION_CONTEX
 export const NOTION_CLIENT_ID = process.env["NOTION_CLIENT_ID"]
 export const NOTION_CLIENT_SECRET = process.env["NOTION_CLIENT_SECRET"]
 
+export const NOTION_CLIENT_ID_DEV = process.env["NOTION_CLIENT_ID_DEV"]
+export const NOTION_CLIENT_SECRET_DEV = process.env["NOTION_CLIENT_SECRET_DEV"]
+
 // Check required variables
 const requiredProductionVariables = [
   "DATABASE_URL",
