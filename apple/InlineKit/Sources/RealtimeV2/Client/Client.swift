@@ -6,7 +6,7 @@ import Logger
 
 /// Communicate with the transport and handle auth, generating messages, sequencing, track ACKs, etc.
 actor ProtocolClient {
-  private let log = Log.scoped("RealtimeV2/ProtocolClient")
+  private let log = Log.scoped("RealtimeV2.ProtocolClient")
   private let transport: Transport
   private let auth: Auth
 
@@ -97,19 +97,19 @@ actor ProtocolClient {
   private func startListeners() async {
     // Transport events
     Task.detached {
-      self.log.debug("Starting protocol client transport events listener")
+      self.log.trace("Starting protocol client transport events listener")
       for await event in self.transport.events {
         guard !Task.isCancelled else { return }
 
         switch event {
           case .connected:
-            self.log.debug("Protocol client: Transport connected")
+            self.log.trace("Protocol client: Transport connected")
             Task {
               await self.authenticate()
             }
 
           case let .message(message):
-            self.log.debug("Protocol client received transport message: \(message)")
+            self.log.trace("Protocol client received transport message: \(message)")
             Task {
               await self.handleTransportMessage(message)
             }
@@ -118,7 +118,7 @@ actor ProtocolClient {
             await self.connecting()
 
           case .stopping:
-            self.log.debug("Protocol client: Transport stopping. Resetting state and clearing RPC calls")
+            self.log.trace("Protocol client: Transport stopping. Resetting state and clearing RPC calls")
             Task {
               await self.reset()
             }
@@ -141,24 +141,24 @@ actor ProtocolClient {
         Task { await events.send(.rpcError(msgId: error.reqMsgID, rpcError: error)) }
 
       case let .ack(ack):
-        log.debug("Received ack: \(ack.msgID)")
+        log.trace("Received ack: \(ack.msgID)")
         Task { await events.send(.ack(msgId: ack.msgID)) }
 
       case let .message(serverMessage):
-        log.debug("Received server message: \(serverMessage)")
+        log.trace("Received server message: \(serverMessage)")
         switch serverMessage.payload {
           case let .update(updatesPayload):
             Task { await events.send(.updates(updates: updatesPayload)) }
           default:
-            log.debug("Protocol client: Unhandled message type: \(String(describing: serverMessage.payload))")
+            log.trace("Protocol client: Unhandled message type: \(String(describing: serverMessage.payload))")
         }
 
       case let .pong(pong):
-        log.debug("Received pong: \(pong.nonce)")
+        log.trace("Received pong: \(pong.nonce)")
         Task { await pingPong.pong(nonce: pong.nonce) }
 
       default:
-        log.debug("Protocol client: Unhandled message type: \(String(describing: message.body))")
+        log.trace("Protocol client: Unhandled message type: \(String(describing: message.body))")
     }
   }
 
@@ -175,7 +175,7 @@ actor ProtocolClient {
   }
 
   func reconnect(skipDelay: Bool = false) async {
-    log.debug("Reconnecting transport")
+    log.trace("Reconnecting transport")
     await transport.reconnect(skipDelay: skipDelay)
   }
 
@@ -223,7 +223,7 @@ actor ProtocolClient {
 
   /// Send connection initialization message with authentication token
   func sendConnectionInit() async throws {
-    log.debug("sending connection init")
+    log.trace("sending connection init")
 
     guard let token = auth.getToken() else {
       log.error("No token available for connection init")
@@ -239,7 +239,7 @@ actor ProtocolClient {
     }))
 
     try await transport.send(msg)
-    log.debug("connection init sent successfully")
+    log.trace("connection init sent successfully")
   }
 
   /// Send connection init
@@ -247,7 +247,7 @@ actor ProtocolClient {
     do {
       try await sendConnectionInit()
 
-      log.debug("Sent authentication message")
+      log.trace("Sent authentication message")
 
       startAuthenticationTimeout()
     } catch {
@@ -280,7 +280,7 @@ actor ProtocolClient {
   /// This is when transport works fine but server is not responding to our messages or we have a failure inside the
   /// Client. We need to clear client's state, with a timeout, reconnect and start over.
   private func handleClientFailure() {
-    log.error("Client failure. Reconnecting")
+    log.debug("Client failure. Reconnecting")
     connectionAttemptNo = connectionAttemptNo &+ 1
     stopAuthenticationTimeout()
 
