@@ -15,6 +15,7 @@ public class KeyMonitor: Sendable {
   private var pasteHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
   private var arrowKeyHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
   private var returnKeyHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
+  private var vimNavHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
 
   private var localEventMonitor: Any?
   private var window: NSWindow
@@ -32,6 +33,7 @@ public class KeyMonitor: Sendable {
     case paste
     case arrowKeys
     case returnKey
+    case vimNavigation
   }
 
   /// Add a handler for a specific event type
@@ -49,6 +51,8 @@ public class KeyMonitor: Sendable {
         arrowKeyHandlers[key] = handler
       case .returnKey:
         returnKeyHandlers[key] = handler
+      case .vimNavigation:
+        vimNavHandlers[key] = handler
     }
 
     return { [weak self] in
@@ -64,6 +68,8 @@ public class KeyMonitor: Sendable {
           self?.arrowKeyHandlers.removeValue(forKey: key)
         case .returnKey:
           self?.returnKeyHandlers.removeValue(forKey: key)
+        case .vimNavigation:
+          self?.vimNavHandlers.removeValue(forKey: key)
       }
     }
   }
@@ -81,6 +87,8 @@ public class KeyMonitor: Sendable {
         arrowKeyHandlers.removeValue(forKey: key)
       case .returnKey:
         returnKeyHandlers.removeValue(forKey: key)
+      case .vimNavigation:
+        vimNavHandlers.removeValue(forKey: key)
     }
   }
 
@@ -110,6 +118,15 @@ public class KeyMonitor: Sendable {
       // Check for return key
       if event.keyCode == 36 {
         let handled = callHandler(for: .returnKey, event: event)
+        if handled { return nil }
+      }
+
+      // Check for Vim-style navigation (ctrl+j/k/n/p)
+      if event.modifierFlags.contains(.control),
+         let char = event.charactersIgnoringModifiers?.lowercased(),
+         ["j", "k", "n", "p"].contains(char)
+      {
+        let handled = callHandler(for: .vimNavigation, event: event)
         if handled { return nil }
       }
 
@@ -205,6 +222,13 @@ public class KeyMonitor: Sendable {
       case .returnKey:
         // only call the last one as otherwise multiple handlers will fight
         if let last = returnKeyHandlers.values.last {
+          last(event)
+          return true
+        } else {
+          return false
+        }
+      case .vimNavigation:
+        if let last = vimNavHandlers.values.last {
           last(event)
           return true
         } else {
