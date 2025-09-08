@@ -20,7 +20,7 @@ final class GlobalHotkeys {
           NotificationCenter.default.post(name: .prevChat, object: nil)
         case .nextChat:
           NotificationCenter.default.post(name: .nextChat, object: nil)
-        case .custom(let handler):
+        case let .custom(handler):
           handler()
       }
     }
@@ -28,12 +28,13 @@ final class GlobalHotkeys {
 
   /// Describes a key-combination and the action it triggers.
   struct Hotkey {
-    let key: String                      // unmodified character (lower-case)
+    let key: String // unmodified character (lower-case)
     let modifierFlags: NSEvent.ModifierFlags
     let action: Action
   }
 
   // MARK: Lifecycle
+
   private var eventMonitor: Any?
   private var hotkeys: [Hotkey] = []
   private let dependencies: AppDependencies
@@ -62,26 +63,27 @@ final class GlobalHotkeys {
   }
 
   // MARK: Event monitoring
+
   private func setupMonitor() {
     eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
       guard let self else { return event }
 
       // Respect text inputs – don’t interfere while typing.
-      // if self.isTextInputFocused { return event }
+      if isTextInputFocused { return event }
 
       // Match event to a hotkey
-      guard let matched = self.match(event: event) else { return event }
+      guard let matched = match(event: event) else { return event }
 
       // For navigation keys, ensure we’re in Inbox/Archive; for others it may
       // not matter. Extend this logic per-action as needed.
       switch matched.action {
         case .previousChat, .nextChat:
-          guard self.isChatNavigationRelevant else { return event }
+          guard isChatNavigationRelevant else { return event }
         default:
           break
       }
 
-      matched.action.perform(using: self.dependencies)
+      matched.action.perform(using: dependencies)
       return nil // swallow the event
     }
   }
@@ -94,6 +96,7 @@ final class GlobalHotkeys {
   }
 
   // MARK: Helper state checks
+
   private var isChatNavigationRelevant: Bool {
     let nav = dependencies.nav
     return nav.selectedTab == .inbox || nav.selectedTab == .archive
@@ -106,4 +109,4 @@ final class GlobalHotkeys {
       responder is NSSecureTextField ||
       (responder is NSText && (responder as? NSText)?.delegate is NSTextField)
   }
-} 
+}

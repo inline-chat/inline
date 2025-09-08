@@ -21,6 +21,7 @@ struct HomeSidebar: View {
   @State private var selectedResultIndex: Int = 0
   @State private var searchQuery = ""
   @State private var keyMonitorSearchUnsubscriber: (() -> Void)?
+  @State private var keyMonitorVimUnsubscriber: (() -> Void)?
 
   // MARK: - Initializer
 
@@ -247,9 +248,30 @@ struct HomeSidebar: View {
                 break
             }
           }
+
+          // Subscribe to vim-style navigation (ctrl+j/k/n/p)
+          keyMonitorVimUnsubscriber = keyMonitor?.addHandler(for: .vimNavigation, key: "home_search_vim") { event in
+            let totalResults = localSearch.results.count + search.results.count
+            guard totalResults > 0 else { return }
+            guard let char = event.charactersIgnoringModifiers?.lowercased() else { return }
+
+            switch char {
+              case "k", "p": // up
+                if selectedResultIndex > 0 {
+                  selectedResultIndex -= 1
+                }
+              case "j", "n": // down
+                if selectedResultIndex < totalResults - 1 {
+                  selectedResultIndex += 1
+                }
+              default:
+                break
+            }
+          }
         } else {
           unsubcribeKeyMonitor()
           unsubcribeSearchKeyMonitor()
+          unsubcribeVimKeyMonitor()
         }
       }
   }
@@ -385,6 +407,11 @@ struct HomeSidebar: View {
   private func unsubcribeSearchKeyMonitor() {
     keyMonitorSearchUnsubscriber?()
     keyMonitorSearchUnsubscriber = nil
+  }
+
+  private func unsubcribeVimKeyMonitor() {
+    keyMonitorVimUnsubscriber?()
+    keyMonitorVimUnsubscriber = nil
   }
 
   // MARK: - Actions
