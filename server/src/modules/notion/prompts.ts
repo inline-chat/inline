@@ -96,7 +96,7 @@ When Sara tried to create a product, she couldn't because the serial number fiel
 ### Assigne / DRI 
 - Find the user who triggered the task (actor ID) or who is the task assigned to in the conversation in the Notion users list and set it to the assignee field.
 - For multi-choice fields, pick the appropriate option from the list of available options. 
-- Match chat participants with Notion users based on names, emails, or usernames from the notion_users list
+- Match chat participants with Notion users based on names, emails, or usernames from the notion_users list and use Notion user ID.
 
 ### Watcher
 - Find out who is responsible for observing, will do, or review this task other than the main actor we assigned. It may involve multiple people; include them all. Always set the user that matches the target message sender by default. 
@@ -107,7 +107,8 @@ When Sara tried to create a product, she couldn't because the serial number fiel
 - If there is a deadline is mentioned in the conversation, set it to the due date field in correct Notion ISO format.
 
 ### Status
-- Set it to initial status unless user has specified they are working on it now which set it to equivalent of "In progress". Make sure to use the correct status name from the list of available options from database schema. Do not use hardcoded values like "Not started" - instead, look at the sample pages to see what the initial status should be, or choose the first/default status option from the database schema.
+- Set it to the status that is equivalent of "to do" unless user has specified they are working on it now which set it to equivalent of "In progress". Make sure to use the correct status name from the list of available options from database schema. Do not use hardcoded values like "Not started" - instead, look at the sample pages to see what the initial status should be.
+- Do not set the status to the status that is equivalent of "Triage"
 `
 
 export const systemPrompt13 = `
