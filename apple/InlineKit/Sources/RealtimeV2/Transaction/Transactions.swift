@@ -20,7 +20,7 @@ actor Transactions {
   var queueStream: AsyncChannel<Void> = AsyncChannel()
 
   // Private
-  private let log = Log.scoped("RealtimeV2/Transactions")
+  private let log = Log.scoped("RealtimeV2.Transactions", level: .debug)
   private var persistenceHandler: TransactionPersistenceHandler?
 
   init(persistenceHandler: TransactionPersistenceHandler? = nil) {
@@ -37,7 +37,7 @@ actor Transactions {
     let wrapper = TransactionWrapper(transaction: transaction)
     let transactionId = wrapper.id
 
-    log.debug("Queuing transaction \(transactionId): \(transaction.debugDescription)")
+    log.trace("Queuing transaction \(transactionId): \(transaction.debugDescription)")
 
     // add to queue
     _queue[transactionId] = wrapper
@@ -94,7 +94,7 @@ actor Transactions {
 
   /// Acknowledge a transaction that has been completed, it moves it to sent queue waiting for the result.
   func ack(transactionId: TransactionId) {
-    log.debug("Acknowledging transaction \(transactionId) - moving to sent queue and deleting from disk")
+    log.trace("Acknowledging transaction \(transactionId) - moving to sent queue and deleting from disk")
 
     // move to sent
     sent[transactionId] = inFlight[transactionId]
@@ -110,12 +110,12 @@ actor Transactions {
   /// It deletes the transaction from the system.
   func complete(rpcMsgId: UInt64) -> TransactionWrapper? {
     guard let transactionId = transactionRpcMap[rpcMsgId] else {
-      log.debug("Complete called for unknown rpcMsgId \(rpcMsgId) - transaction already completed or discarded")
+      log.trace("Complete called for unknown rpcMsgId \(rpcMsgId) - transaction already completed or discarded")
       return nil
     }
 
     log
-      .debug(
+      .trace(
         "Completing transaction \(transactionId) (rpcMsgId: \(rpcMsgId)) - removing from all queues and deleting from disk"
       )
 
@@ -183,7 +183,7 @@ actor Transactions {
   func cancel(where predicate: (TransactionWrapper) -> Bool) {
     for (transactionId, wrapper) in _queue {
       if predicate(wrapper) {
-        log.debug("Cancelling transaction \(transactionId) \(wrapper.transaction.debugDescription)")
+        log.trace("Cancelling transaction \(transactionId) \(wrapper.transaction.debugDescription)")
         Task {
           await wrapper.transaction.cancelled()
         }
@@ -209,11 +209,11 @@ actor Transactions {
     Task.detached { [transaction, log, persistenceHandler] in
       do {
         if let persistenceHandler {
-          log.debug("Saving transaction \(transaction.id) to disk: \(transaction.transaction.debugDescription)")
+          log.trace("Saving transaction \(transaction.id) to disk: \(transaction.transaction.debugDescription)")
           try await persistenceHandler.saveTransaction(transaction)
-          log.debug("Successfully saved transaction \(transaction.id) to disk")
+          log.trace("Successfully saved transaction \(transaction.id) to disk")
         } else {
-          log.debug("No persistence handler available, skipping save for transaction \(transaction.id)")
+          log.trace("No persistence handler available, skipping save for transaction \(transaction.id)")
         }
       } catch {
         log.error("Failed to save transaction \(transaction.id) to disk", error: error)
@@ -225,16 +225,17 @@ actor Transactions {
     Task.detached { [transactionId, persistenceHandler, log] in
       do {
         if let persistenceHandler {
-          log.debug("Deleting transaction \(transactionId) from disk")
+          log.trace("Deleting transaction \(transactionId) from disk")
           try await persistenceHandler.deleteTransaction(transactionId)
-          log.debug("Successfully deleted transaction \(transactionId) from disk")
+          log.trace("Successfully deleted transaction \(transactionId) from disk")
         } else {
           log.trace("No persistence handler available, skipping delete for transaction \(transactionId)")
         }
       } catch {
+        // FIXME: distinguish between queries and mutations to avoid showing errors for queries that are not persisted
         // It's safe to ignore this error, the file may not exist, but better to be safe from infinite retries than
         // sorry
-        log.debug("Failed to delete transaction \(transactionId) from disk (file may not exist): \(error)")
+        log.trace("Failed to delete transaction \(transactionId) from disk (file may not exist): \(error)")
       }
     }
   }
@@ -245,9 +246,9 @@ actor Transactions {
 
       do {
         if let persistenceHandler {
-          log.debug("Starting to load transactions from disk")
+          log.trace("Starting to load transactions from disk")
           let allTransactions = try await persistenceHandler.loadTransactions()
-          log.debug("Loaded \(allTransactions.count) raw transactions from disk")
+          log.trace("Loaded \(allTransactions.count) raw transactions from disk")
 
           // Separate valid and expired transactions
           let expirationDate = Date().addingTimeInterval(-10 * 60) // 10 minutes
@@ -256,7 +257,7 @@ actor Transactions {
 
           for transaction in allTransactions {
             if transaction.date < expirationDate {
-              log.debug("Transaction \(transaction.id) expired (created: \(transaction.date))")
+              log.trace("Transaction \(transaction.id) expired (created: \(transaction.date))")
               expiredTransactions.append(transaction)
             } else {
               validTransactions.append(transaction)
@@ -265,7 +266,7 @@ actor Transactions {
 
           // Trigger failed() for expired transactions
           for expiredTransaction in expiredTransactions {
-            log.info("Transaction \(expiredTransaction.id) expired, calling failed()")
+            log.debug("Transaction \(expiredTransaction.id) expired, calling failed()")
             await expiredTransaction.transaction.failed(error: .timeout)
 
             // Delete expired transaction from disk
@@ -274,7 +275,7 @@ actor Transactions {
 
           // Sort valid transactions by creation date
           validTransactions.sort { $0.date < $1.date }
-          log.debug("Sorted \(validTransactions.count) valid transactions by creation date")
+          log.trace("Sorted \(validTransactions.count) valid transactions by creation date")
 
           // Add loaded transactions to queue
           await addLoadedTransactions(validTransactions)

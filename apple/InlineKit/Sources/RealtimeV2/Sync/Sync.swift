@@ -2,7 +2,7 @@ import InlineProtocol
 import Logger
 
 actor Sync {
-  private var log = Log.scoped("RealtimeV2.Sync")
+  private var log = Log.scoped("RealtimeV2.Sync", level: .debug)
   private var applyUpdates: ApplyUpdates
 
   init(applyUpdates: ApplyUpdates) {
@@ -10,7 +10,7 @@ actor Sync {
   }
 
   func process(updates: [InlineProtocol.Update]) async {
-    log.debug("applying \(updates.count) updates")
+    log.trace("applying \(updates.count) updates")
     await applyUpdates.apply(updates: updates)
   }
 }
