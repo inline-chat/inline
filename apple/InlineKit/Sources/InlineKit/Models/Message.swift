@@ -662,7 +662,8 @@ public extension Message {
   static func deleteMessages(
     _ db: Database,
     messageIds: [Int64],
-    chatId: Int64
+    chatId: Int64,
+    deleteMedia: Bool = false
   ) throws {
     // Fetch the chat once so we can update its `lastMsgId` if needed.
     let chat = try Chat.fetchOne(db, id: chatId)
