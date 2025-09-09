@@ -1089,6 +1089,7 @@ private extension MessagesCollectionView {
         guard let self else { return UIMenu(children: []) }
 
         let isMessageSending = message.status == .sending
+        let isMessageFailed = message.status == .failed
 
         var actions: [UIAction] = []
 
@@ -1123,10 +1124,7 @@ private extension MessagesCollectionView {
               Transactions.shared.cancel(transactionId: transactionId)
               Task {
                 let _ = try? await AppDatabase.shared.dbWriter.write { db in
-                  try Message
-                    .filter(Column("chatId") == message.chatId)
-                    .filter(Column("messageId") == message.messageId)
-                    .deleteAll(db)
+                  try Message.deleteMessages(db, messageIds: [message.messageId], chatId: message.chatId)
                 }
 
                 MessagesPublisher.shared
@@ -1135,6 +1133,40 @@ private extension MessagesCollectionView {
             }
           }
           actions.append(cancelAction)
+
+          return UIMenu(children: actions)
+        }
+
+        if isMessageFailed {
+          if fullMessage.photoInfo != nil {
+            let copyPhotoAction = UIAction(title: "Copy Photo", image: UIImage(systemName: "doc.on.clipboard")) {
+              [weak self] _ in
+              guard let self else { return }
+              if let image = cell.messageView?.newPhotoView.getCurrentImage() {
+                UIPasteboard.general.image = image
+                ToastManager.shared.showToast(
+                  "Photo copied to clipboard",
+                  type: .success,
+                  systemImage: "doc.on.clipboard"
+                )
+              }
+            }
+            actions.append(copyPhotoAction)
+          }
+
+          let resendAction = UIAction(title: "Resend", image: UIImage(systemName: "arrow.clockwise")) { [weak self] _ in
+            self?.resendMessage(fullMessage)
+          }
+          actions.append(resendAction)
+
+          let deleteAction = UIAction(title: "Delete", attributes: .destructive) { [weak self] _ in
+            self?.showDeleteConfirmationForFailed(
+              messageId: message.messageId,
+              peerId: message.peerId,
+              chatId: message.chatId
+            )
+          }
+          actions.append(deleteAction)
 
           return UIMenu(children: actions)
         }
@@ -1268,6 +1300,113 @@ private extension MessagesCollectionView {
       })
 
       viewController.present(alert, animated: true)
+    }
+
+    func showDeleteConfirmationForFailed(messageId: Int64, peerId: Peer, chatId: Int64) {
+      func findViewController(from view: UIView?) -> UIViewController? {
+        guard let view else { return nil }
+
+        var responder: UIResponder? = view
+        while let nextResponder = responder?.next {
+          if let viewController = nextResponder as? UIViewController {
+            return viewController
+          }
+          responder = nextResponder
+        }
+        return nil
+      }
+
+      guard let viewController = findViewController(from: currentCollectionView) else { return }
+
+      let alert = UIAlertController(
+        title: "Delete Failed Message",
+        message: "Are you sure you want to delete this failed message?",
+        preferredStyle: .alert
+      )
+
+      alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+      alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
+        guard let self else { return }
+        Task {
+          // Delete locally without server call since it failed to send
+          let _ = try? await AppDatabase.shared.dbWriter.write { db in
+            try Message.deleteMessages(db, messageIds: [messageId], chatId: chatId)
+          }
+
+          await MainActor.run {
+            MessagesPublisher.shared
+              .messagesDeleted(messageIds: [messageId], peer: peerId)
+          }
+        }
+      })
+
+      viewController.present(alert, animated: true)
+    }
+
+    func resendMessage(_ fullMessage: FullMessage) {
+      let message = fullMessage.message
+
+      Task {
+        // Reconstruct media items from the failed message
+        var mediaItems: [FileMediaItem] = []
+
+        // Handle photo
+        if let photoInfo = fullMessage.photoInfo {
+          let mediaItem = FileMediaItem.photo(photoInfo)
+          mediaItems.append(mediaItem)
+        }
+
+        // Handle video
+        if let videoInfo = fullMessage.videoInfo {
+          let mediaItem = FileMediaItem.video(videoInfo)
+          mediaItems.append(mediaItem)
+        }
+
+        // Handle document
+        if let documentInfo = fullMessage.documentInfo {
+          let mediaItem = FileMediaItem.document(documentInfo)
+          mediaItems.append(mediaItem)
+        }
+
+        // Delete the failed message first
+        _ = try? await AppDatabase.shared.dbWriter.write { db in
+          try Message.deleteMessages(db, messageIds: [message.messageId], chatId: message.chatId)
+        }
+
+        await MainActor.run {
+          MessagesPublisher.shared
+            .messagesDeleted(messageIds: [message.messageId], peer: message.peerId)
+        }
+
+        // Send new message with reconstructed data
+        if mediaItems.isEmpty {
+          // Text-only message
+          try await Api.realtime.send(
+            .sendMessage(
+              text: message.text ?? "",
+              peerId: message.peerId,
+              chatId: message.chatId,
+              replyToMsgId: message.repliedToMessageId, // Preserve original reply
+              isSticker: message.isSticker,
+              entities: message.entities
+            )
+          )
+        } else {
+          // Message with media
+          await Transactions.shared.mutate(
+            transaction: .sendMessage(.init(
+              text: message.text,
+              peerId: message.peerId,
+              chatId: message.chatId,
+              mediaItems: mediaItems,
+              replyToMsgId: message.repliedToMessageId, // Preserve original reply
+              isSticker: message.isSticker,
+              entities: message.entities
+            ))
+          )
+        }
+      }
     }
 
     // MARK: - UICollectionView
