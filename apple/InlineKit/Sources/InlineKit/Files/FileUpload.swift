@@ -216,7 +216,8 @@ public actor FileUploader {
 
     if finishedUploads[uploadId] != nil {
       Log.shared.warning("[FileUploader] Upload already completed for \(uploadId)")
-      throw FileUploadError.uploadAlreadyCompleted
+      //throw FileUploadError.uploadAlreadyCompleted
+      return 
     }
 
     let task = Task<UploadResult, any Error>(priority: priority) { [weak self] in
