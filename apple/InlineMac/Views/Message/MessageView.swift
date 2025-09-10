@@ -1426,7 +1426,7 @@ class MessageViewAppKit: NSView {
     }
   }
 
-  public func updateTextAndSize(fullMessage: FullMessage, props: MessageViewProps, animate: Bool = false) {
+  func updateTextAndSize(fullMessage: FullMessage, props: MessageViewProps, animate: Bool = false) {
     log.trace(
       "Updating message view content. from: \(self.fullMessage.message.messageId) to: \(fullMessage.message.messageId)"
     )
@@ -1487,13 +1487,22 @@ class MessageViewAppKit: NSView {
     // Update time and state
     timeAndStateView.updateMessage(fullMessage, overlay: isTimeOverlay)
 
+    // Ensure swipe UI is reset if message cannot be replied to
+    if !self.fullMessage.canReply {
+      layer?.transform = CATransform3DIdentity
+      swipeAnimationView?.alphaValue = 0
+      isSwipeInProgress = false
+      hasTriggerHapticFeedback = false
+      didReachThreshold = false
+    }
+
     DispatchQueue.main.async(qos: .utility) { [weak self] in
       // As the message changes here, we need to update everything related to that. Otherwise we get wrong context menu.
       self?.setupContextMenu()
     }
   }
 
-  public func updateSize(props: MessageViewProps) {
+  func updateSize(props: MessageViewProps) {
     // update props and reflect changes
     updatePropsAndUpdateLayout(
       props: props,
@@ -1554,6 +1563,17 @@ class MessageViewAppKit: NSView {
   private var didReachThreshold = false
 
   override func scrollWheel(with event: NSEvent) {
+    // Do not allow swipe-to-reply if message cannot be replied to
+    if !fullMessage.canReply {
+      // Ensure UI is reset and pass through
+      layer?.transform = CATransform3DIdentity
+      swipeAnimationView?.alphaValue = 0
+      isSwipeInProgress = false
+      hasTriggerHapticFeedback = false
+      didReachThreshold = false
+      super.scrollWheel(with: event)
+      return
+    }
     // Only handle horizontal scrolling with two fingers
     if event.phase == .began, abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) {
       // Start of a horizontal scroll
@@ -1628,6 +1648,20 @@ class MessageViewAppKit: NSView {
 
         // Check if swipe was far enough to trigger reply
         if abs(swipeOffset) > swipeThreshold, direction == "left" {
+          // Guard again in case state changed mid-gesture
+          guard fullMessage.canReply else {
+            // Reset and exit
+            NSAnimationContext.runAnimationGroup { context in
+              context.duration = 0.2
+              context.allowsImplicitAnimation = true
+              context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+              self.layer?.transform = CATransform3DIdentity
+              swipeAnimationView?.animator().alphaValue = 0
+            }
+            hasTriggerHapticFeedback = false
+            didReachThreshold = false
+            return
+          }
           Task(priority: .userInitiated) { @MainActor in self.reply() }
 
           // Animate back with spring effect
@@ -1712,7 +1746,7 @@ class MessageViewAppKit: NSView {
 // MARK: - Tracking Area & Hover
 
 extension MessageViewAppKit {
-  public func setScrollState(_ state: MessageListScrollState) {
+  func setScrollState(_ state: MessageListScrollState) {
     handleScrollStateChange(state)
   }
 
