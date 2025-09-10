@@ -82,7 +82,6 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
     translations.first { $0.language == language }
   }
 
-
   public var groupedReactions: [GroupedReaction] {
     let groupedDictionary = Dictionary(grouping: reactions, by: { $0.reaction.emoji })
     return groupedDictionary.enumerated().map { _, item in
@@ -137,6 +136,17 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
   }
 }
 
+public extension FullMessage {
+  var canReply: Bool {
+    guard let status = message.status else { return true }
+    switch status {
+      case .sent:
+        return true
+      case .sending, .failed:
+        return false
+    }
+  }
+}
 
 public extension FullMessage {
   var debugDescription: String {
