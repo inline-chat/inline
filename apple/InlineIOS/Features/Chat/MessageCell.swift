@@ -20,7 +20,8 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   private var panGesture: UIPanGestureRecognizer!
   private var swipeActive = false
   private var initialTranslation: CGFloat = 0
-  private var prevText: String? = nil
+  private var prevText: String?
+  private var canReply: Bool = true
 
   // MARK: - Props
 
@@ -89,6 +90,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     self.spaceId = spaceId
     isThread = message.peerId.isThread
     outgoing = newOutgoing
+    canReply = message.canReply
 
     resetCell()
 
@@ -98,6 +100,9 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     setupBaseMessageConstraints()
 
     contentView.transform = CGAffineTransform(scaleX: 1, y: -1)
+
+    // Enable/disable swipe based on message state
+    updateSwipeAvailability()
   }
 
   override func prepareForReuse() {
@@ -105,6 +110,8 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
     // Reset swipe state
     resetSwipeState()
+    panGesture?.isEnabled = true
+    canReply = true
 
     // Clear cached values to force reconfiguration
     prevText = nil
@@ -139,12 +146,12 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     return attributes
   }
 
-  @objc public func handleAvatarTap() {
+  @objc func handleAvatarTap() {
     guard let from = message.from else { return }
     onUserTap?(from.id)
   }
 
-  public func highlightBubble() {
+  func highlightBubble() {
     guard let bubble = messageView?.bubbleView else { return }
     let originalColor = bubble.backgroundColor ?? .systemGray6
     let isEmojiOrSticker = messageView?.isEmojiOnlyMessage == true || messageView?.isSticker == true
@@ -162,7 +169,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     }
   }
 
-  public func clearHighlight() {
+  func clearHighlight() {
     guard let bubble = messageView?.bubbleView else { return }
     bubble.layer.removeAllAnimations()
     bubble.backgroundColor = messageView?.bubbleColor
@@ -172,6 +179,9 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 extension MessageCollectionViewCell {
   override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
     guard gestureRecognizer == panGesture else { return true }
+
+    // Do not begin swipe-to-reply if replying is not allowed
+    if !canReply { return false }
 
     let velocity = panGesture.velocity(in: contentView)
 
@@ -186,6 +196,11 @@ extension MessageCollectionViewCell {
   }
 
   @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+    // Ignore pan if cannot reply
+    guard canReply else {
+      resetSwipeState()
+      return
+    }
     let translation = gesture.translation(in: contentView)
     let velocity = gesture.velocity(in: contentView)
 
@@ -304,6 +319,14 @@ extension MessageCollectionViewCell {
     panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
     panGesture.delegate = self
     contentView.addGestureRecognizer(panGesture)
+  }
+
+  private func updateSwipeAvailability() {
+    panGesture?.isEnabled = canReply
+    if !canReply {
+      // Ensure UI is reset when swipe is disabled
+      resetSwipeState()
+    }
   }
 
   func setupContentSize() {
