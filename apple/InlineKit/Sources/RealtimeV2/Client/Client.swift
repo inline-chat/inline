@@ -16,6 +16,9 @@ actor ProtocolClient {
   // State
   var state: ClientState = .connecting
 
+  // RPC continuations keyed by message id for low-level, special-case RPC calls
+  private var rpcContinuations: [UInt64: CheckedContinuation<InlineProtocol.RpcResult.OneOf_Result?, any Error>] = [:]
+
   // Message sequencing and ID generation
   private var seq: UInt32 = 0
   private let epoch = Date(timeIntervalSince1970: 1_735_689_600) // 2025-01-01 00:00:00 UTC
@@ -70,6 +73,7 @@ actor ProtocolClient {
     reconnectionTask?.cancel()
     reconnectionTask = nil
     Task { await pingPong.stop() }
+    cancelAllRpcContinuations(with: ProtocolClientError.stopped)
   }
 
   // MARK: - State
@@ -89,6 +93,7 @@ actor ProtocolClient {
     Task { await events.send(.connecting) }
     stopAuthenticationTimeout()
     await pingPong.stop()
+    cancelAllRpcContinuations(with: ProtocolClientError.notConnected)
   }
 
   // MARK: - Listeners
@@ -135,9 +140,11 @@ actor ProtocolClient {
         log.info("Protocol client: Connection established")
 
       case let .rpcResult(result):
+        completeRpcResult(msgId: result.reqMsgID, rpcResult: result.result)
         Task { await events.send(.rpcResult(msgId: result.reqMsgID, rpcResult: result.result)) }
 
       case let .rpcError(error):
+        completeRpcError(msgId: error.reqMsgID, rpcError: error)
         Task { await events.send(.rpcError(msgId: error.reqMsgID, rpcError: error)) }
 
       case let .ack(ack):
@@ -318,8 +325,25 @@ actor ProtocolClient {
     await transport.stop()
   }
 
+  // MARK: - RPC Calls are defined in the `ProtocolClient` extension below
+}
+
+// MARK: - Errors
+
+enum ProtocolClientError: Error {
+  case notAuthorized
+  case notConnected
+  case rpcError(errorCode: String, message: String, code: Int)
+  case stopped
+  case timeout
+}
+
+// MARK: - RPC Extension
+
+extension ProtocolClient {
   // MARK: - RPC Calls
 
+  @discardableResult
   func sendRpc(method: InlineProtocol.Method, input: RpcCall.OneOf_Input?) async throws -> UInt64 {
     let message = wrapMessage(body: .rpcCall(.with {
       $0.method = method
@@ -330,13 +354,89 @@ actor ProtocolClient {
 
     return message.id
   }
-}
 
-// MARK: - Errors
+  /// Low-level RPC that waits for the server response or error using continuations.
+  /// This is independent of the higher-level transactions system in `RealtimeV2`.
+  @discardableResult
+  func callRpc(
+    method: InlineProtocol.Method,
+    input: RpcCall.OneOf_Input?,
+    timeout: Duration? = .seconds(15)
+  ) async throws -> InlineProtocol.RpcResult
+    .OneOf_Result?
+  {
+    let message = wrapMessage(body: .rpcCall(.with {
+      $0.method = method
+      $0.input = input
+    }))
 
-enum ProtocolClientError: Error {
-  case notAuthorized
-  case notConnected
-  case rpcError(errorCode: String, message: String, code: Int)
-  case stopped
+    return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<
+      InlineProtocol.RpcResult.OneOf_Result?,
+      any Error
+    >) in
+      // Store continuation first to avoid race if result arrives very fast
+      storeRpcContinuation(for: message.id, continuation: continuation)
+
+      Task {
+        do {
+          try await self.transport.send(message)
+        } catch {
+          await self.failRpcContinuation(for: message.id, error: error)
+        }
+      }
+
+      if let timeout {
+        Task.detached { [weak self] in
+          try? await Task.sleep(for: timeout)
+          guard let self else { return }
+          guard !Task.isCancelled else { return }
+          if await hasPendingRpcContinuation(for: message.id) {
+            await failRpcContinuation(for: message.id, error: ProtocolClientError.timeout)
+          }
+        }
+      }
+    }
+  }
+
+  // MARK: - Continuations (RPC)
+
+  private func storeRpcContinuation(
+    for msgId: UInt64,
+    continuation: CheckedContinuation<InlineProtocol.RpcResult.OneOf_Result?, any Error>
+  ) {
+    rpcContinuations[msgId] = continuation
+  }
+
+  private func getAndRemoveRpcContinuation(for msgId: UInt64)
+    -> CheckedContinuation<InlineProtocol.RpcResult.OneOf_Result?, any Error>?
+  {
+    let continuation = rpcContinuations[msgId]
+    rpcContinuations.removeValue(forKey: msgId)
+    return continuation
+  }
+
+  private func completeRpcResult(msgId: UInt64, rpcResult: InlineProtocol.RpcResult.OneOf_Result?) {
+    getAndRemoveRpcContinuation(for: msgId)?.resume(returning: rpcResult)
+  }
+
+  private func completeRpcError(msgId: UInt64, rpcError: InlineProtocol.RpcError) {
+    let codeString = String(describing: rpcError.errorCode)
+    let error = ProtocolClientError.rpcError(errorCode: codeString, message: rpcError.message, code: Int(rpcError.code))
+    getAndRemoveRpcContinuation(for: msgId)?.resume(throwing: error)
+  }
+
+  private func failRpcContinuation(for msgId: UInt64, error: any Error) async {
+    getAndRemoveRpcContinuation(for: msgId)?.resume(throwing: error)
+  }
+
+  private func hasPendingRpcContinuation(for msgId: UInt64) -> Bool {
+    rpcContinuations[msgId] != nil
+  }
+
+  private func cancelAllRpcContinuations(with error: any Error = ProtocolClientError.stopped) {
+    for (_, continuation) in rpcContinuations {
+      continuation.resume(throwing: error)
+    }
+    rpcContinuations.removeAll()
+  }
 }
