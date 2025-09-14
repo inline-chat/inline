@@ -2,9 +2,9 @@ import Combine
 import InlineKit
 import InlineUI
 import Logger
+import RealtimeV2
 import SwiftUI
 import Translation
-import RealtimeV2
 
 struct ChatView: View {
   var peerId: Peer
@@ -66,8 +66,9 @@ struct ChatView: View {
         spaceId: fullChatViewModel.chat?.spaceId ?? 0
       )
       .edgesIgnoringSafeArea(.all)
-
-      ChatViewHeader(navBarHeight: $navBarHeight)
+      if #unavailable(iOS 26.0) {
+        ChatViewHeader(navBarHeight: $navBarHeight)
+      }
     }
     .toolbarBackground(.hidden, for: .navigationBar)
     .toolbarTitleDisplayMode(.inline)
@@ -212,7 +213,6 @@ struct ChatView: View {
   func fetch() {
     fullChatViewModel.refetchChatView()
   }
-  
 }
 
 struct ChatViewHeader: View {
@@ -225,8 +225,8 @@ struct ChatViewHeader: View {
   var body: some View {
     VStack {
       VariableBlurView()
-        /// +25 to enhance the variant blur effect; it needs more space to cover the full navigation bar background
-        .frame(height: navBarHeight + 25) // was 38
+        /// +28 to enhance the variant blur effect; it needs more space to cover the full navigation bar background
+        .frame(height: navBarHeight + 28) // was 38
         .contentShape(Rectangle())
         .background(
           LinearGradient(
