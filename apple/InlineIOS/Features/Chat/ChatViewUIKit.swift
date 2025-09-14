@@ -41,12 +41,22 @@ public class ChatContainerView: UIView {
     return view
   }()
 
-  private let blurView: UIVisualEffectView = {
-    let effect = UIBlurEffect(style: .regular)
-    let view = UIVisualEffectView(effect: effect)
-    view.backgroundColor = ThemeManager.shared.selected.backgroundColor.withAlphaComponent(0.6)
+  private let composeContainerView: UIView = {
+    let view = UIView()
+    view.backgroundColor = .clear
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
+  }()
+
+  private lazy var composeBlurBackgroundView: VariableBlurUIView = {
+    let blurView = VariableBlurUIView(
+      gradientMask: VariableBlurViewConstants.defaultGradientMask,
+      maxBlurRadius: 4,
+      filterType: "variableBlur",
+      rotateForBottomBar: true
+    )
+    blurView.translatesAutoresizingMaskIntoConstraints = false
+    return blurView
   }()
 
   private lazy var borderView: UIView = {
@@ -59,7 +69,7 @@ public class ChatContainerView: UIView {
 
   let scrollButton = BlurCircleButton()
 
-  private var blurViewBottomConstraint: NSLayoutConstraint?
+  private var composeContainerViewBottomConstraint: NSLayoutConstraint?
 
   deinit {
     print("ChatView  deinit")
@@ -88,14 +98,15 @@ public class ChatContainerView: UIView {
     backgroundColor = ThemeManager.shared.selected.backgroundColor
 
     addSubview(messagesCollectionView)
-    addSubview(blurView)
-    blurView.contentView.addSubview(borderView)
+    addSubview(composeBlurBackgroundView)
+    addSubview(composeContainerView)
+    composeContainerView.addSubview(borderView)
     addSubview(composeEmbedViewWrapper)
     addSubview(mentionCompletionViewWrapper)
     addSubview(composeView)
     addSubview(scrollButton)
     scrollButton.isHidden = true
-    blurViewBottomConstraint = blurView.bottomAnchor.constraint(equalTo: bottomAnchor)
+    composeContainerViewBottomConstraint = composeContainerView.bottomAnchor.constraint(equalTo: bottomAnchor)
 
     keyboardLayoutGuide.followsUndockedKeyboard = true
 
@@ -111,58 +122,67 @@ public class ChatContainerView: UIView {
       addReplyView()
     }
 
-    NSLayoutConstraint.activate([
-      messagesCollectionView.topAnchor.constraint(equalTo: topAnchor),
-      messagesCollectionView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
-      messagesCollectionView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
-      messagesCollectionView.bottomAnchor.constraint(equalTo: bottomAnchor),
+    NSLayoutConstraint.activate(
+      [
+        messagesCollectionView.topAnchor.constraint(equalTo: topAnchor),
+        messagesCollectionView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
+        messagesCollectionView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
+        messagesCollectionView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-      blurView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      blurView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      blurView.topAnchor.constraint(
-        equalTo: composeEmbedViewWrapper.topAnchor,
-        constant: -ComposeView.textViewVerticalMargin
-      ),
-      blurViewBottomConstraint!,
+        composeBlurBackgroundView.leadingAnchor.constraint(equalTo: composeContainerView.leadingAnchor),
+        composeBlurBackgroundView.trailingAnchor.constraint(equalTo: composeContainerView.trailingAnchor),
+        composeBlurBackgroundView.topAnchor.constraint(
+          equalTo: composeContainerView.topAnchor,
+          constant: -20
+        ),
+        composeBlurBackgroundView.bottomAnchor.constraint(equalTo: composeContainerView.bottomAnchor),
 
-      composeEmbedViewWrapper.bottomAnchor.constraint(equalTo: composeView.topAnchor),
-      composeEmbedViewWrapper.leadingAnchor.constraint(
-        equalTo: leadingAnchor,
-        constant: ComposeView.textViewHorizantalMargin
-      ),
-      composeEmbedViewWrapper.trailingAnchor.constraint(
-        equalTo: trailingAnchor,
-        constant: -ComposeView.textViewHorizantalMargin
-      ),
-      composeEmbedHeightConstraint,
-      composeEmbedViewWrapper.heightAnchor.constraint(
-        greaterThanOrEqualToConstant: ComposeEmbedView.height
-      ),
-      mentionCompletionViewWrapper.bottomAnchor.constraint(equalTo: composeEmbedViewWrapper.topAnchor),
-      mentionCompletionViewWrapper.leadingAnchor.constraint(
-        equalTo: leadingAnchor,
-        constant: ComposeView.textViewHorizantalMargin
-      ),
-      mentionCompletionViewWrapper.trailingAnchor.constraint(
-        equalTo: trailingAnchor,
-        constant: -ComposeView.textViewHorizantalMargin
-      ),
-      mentionCompletionHeightConstraint,
+        composeContainerView.leadingAnchor.constraint(equalTo: leadingAnchor),
+        composeContainerView.trailingAnchor.constraint(equalTo: trailingAnchor),
+        composeContainerView.topAnchor.constraint(
+          equalTo: composeEmbedViewWrapper.topAnchor,
+          constant: -ComposeView.textViewVerticalMargin
+        ),
+        composeContainerViewBottomConstraint!,
 
-      composeView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: ComposeView.textViewHorizantalMargin),
-      composeView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -ComposeView.textViewHorizantalMargin),
-      composeView.bottomAnchor.constraint(
-        equalTo: keyboardLayoutGuide.topAnchor, constant: -ComposeView.textViewVerticalMargin
-      ),
-      borderView.leadingAnchor.constraint(equalTo: blurView.leadingAnchor),
-      borderView.trailingAnchor.constraint(equalTo: blurView.trailingAnchor),
-      borderView.topAnchor.constraint(equalTo: blurView.topAnchor),
-      borderView.heightAnchor.constraint(equalToConstant: 0.5),
+        composeEmbedViewWrapper.bottomAnchor.constraint(equalTo: composeView.topAnchor),
+        composeEmbedViewWrapper.leadingAnchor.constraint(
+          equalTo: leadingAnchor,
+          constant: ComposeView.textViewHorizantalMargin
+        ),
+        composeEmbedViewWrapper.trailingAnchor.constraint(
+          equalTo: trailingAnchor,
+          constant: -ComposeView.textViewHorizantalMargin
+        ),
+        composeEmbedHeightConstraint,
+        composeEmbedViewWrapper.heightAnchor.constraint(
+          greaterThanOrEqualToConstant: ComposeEmbedView.height
+        ),
+        mentionCompletionViewWrapper.bottomAnchor.constraint(equalTo: composeEmbedViewWrapper.topAnchor),
+        mentionCompletionViewWrapper.leadingAnchor.constraint(
+          equalTo: leadingAnchor,
+          constant: ComposeView.textViewHorizantalMargin
+        ),
+        mentionCompletionViewWrapper.trailingAnchor.constraint(
+          equalTo: trailingAnchor,
+          constant: -ComposeView.textViewHorizantalMargin
+        ),
+        mentionCompletionHeightConstraint,
 
-      scrollButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-      scrollButton.bottomAnchor.constraint(equalTo: blurView.topAnchor, constant: -10),
+        composeView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: ComposeView.textViewHorizantalMargin),
+        composeView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -ComposeView.textViewHorizantalMargin),
+        composeView.bottomAnchor.constraint(
+          equalTo: keyboardLayoutGuide.topAnchor, constant: -ComposeView.textViewVerticalMargin
+        ),
+        borderView.leadingAnchor.constraint(equalTo: composeContainerView.leadingAnchor),
+        borderView.trailingAnchor.constraint(equalTo: composeContainerView.trailingAnchor),
+        borderView.topAnchor.constraint(equalTo: composeContainerView.topAnchor),
+        borderView.heightAnchor.constraint(equalToConstant: 0.5),
 
-    ])
+        scrollButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+        scrollButton.bottomAnchor.constraint(equalTo: composeContainerView.topAnchor, constant: -10),
+      ]
+    )
   }
 
   private func setupObservers() {
@@ -249,9 +269,10 @@ public class ChatContainerView: UIView {
       delay: 0,
       options: .curveEaseOut
     ) {
-      self.blurViewBottomConstraint?.isActive = false
-      self.blurViewBottomConstraint = self.blurView.bottomAnchor.constraint(equalTo: self.keyboardLayoutGuide.topAnchor)
-      self.blurViewBottomConstraint?.isActive = true
+      self.composeContainerViewBottomConstraint?.isActive = false
+      self.composeContainerViewBottomConstraint = self.composeContainerView.bottomAnchor
+        .constraint(equalTo: self.keyboardLayoutGuide.topAnchor)
+      self.composeContainerViewBottomConstraint?.isActive = true
       self.layoutIfNeeded()
     }
   }
@@ -267,9 +288,10 @@ public class ChatContainerView: UIView {
       delay: 0,
       options: .curveEaseIn
     ) {
-      self.blurViewBottomConstraint?.isActive = false
-      self.blurViewBottomConstraint = self.blurView.bottomAnchor.constraint(equalTo: self.bottomAnchor)
-      self.blurViewBottomConstraint?.isActive = true
+      self.composeContainerViewBottomConstraint?.isActive = false
+      self.composeContainerViewBottomConstraint = self.composeContainerView.bottomAnchor
+        .constraint(equalTo: self.bottomAnchor)
+      self.composeContainerViewBottomConstraint?.isActive = true
       self.layoutIfNeeded()
     }
   }
@@ -448,7 +470,7 @@ struct ChatViewUIKit: UIViewRepresentable {
     }
 
     // Mark messages as read when view appears
-     UnreadManager.shared.readAll(peerId, chatId: chatId ?? 0)
+    UnreadManager.shared.readAll(peerId, chatId: chatId ?? 0)
 
     return view
   }
