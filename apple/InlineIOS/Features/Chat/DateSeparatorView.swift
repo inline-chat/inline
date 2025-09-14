@@ -2,7 +2,7 @@ import UIKit
 
 final class DateSeparatorView: UICollectionReusableView {
   static let reuseIdentifier = "DateSeparatorView"
-  static let height: CGFloat = 32
+  static let height: CGFloat = 44
 
   // Performance optimization: Cache the current date string to avoid unnecessary updates
   private var currentDateString: String = ""
