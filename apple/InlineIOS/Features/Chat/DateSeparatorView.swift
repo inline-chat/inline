@@ -2,7 +2,7 @@ import UIKit
 
 final class DateSeparatorView: UICollectionReusableView {
   static let reuseIdentifier = "DateSeparatorView"
-  static let height: CGFloat = 44
+  static let height: CGFloat = 32
 
   // Performance optimization: Cache the current date string to avoid unnecessary updates
   private var currentDateString: String = ""
@@ -42,7 +42,8 @@ final class DateSeparatorView: UICollectionReusableView {
 
     NSLayoutConstraint.activate([
       blurEffectView.centerXAnchor.constraint(equalTo: centerXAnchor),
-      blurEffectView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
+      blurEffectView.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -2),
+      // blurEffectView.bottomAnchor.constraint(equalTo: bottomAnchor),
       blurEffectView.heightAnchor.constraint(equalToConstant: 20),
       blurEffectView.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 16),
       blurEffectView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -16),
