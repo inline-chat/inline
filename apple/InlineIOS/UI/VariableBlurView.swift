@@ -2,8 +2,8 @@ import SwiftUI
 
 extension UIImage {
   func rotated180() -> UIImage? {
-    guard let cgImage = self.cgImage else { return nil }
-    
+    guard let cgImage else { return nil }
+
     let renderer = UIGraphicsImageRenderer(size: size)
     return renderer.image { context in
       context.cgContext.translateBy(x: size.width / 2, y: size.height / 2)
