@@ -22,7 +22,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   let buttonSize: CGSize = .init(width: 32, height: 32)
   let linkColor: UIColor = ThemeManager.shared.selected.accent
 
-  static let minHeight: CGFloat = 38.0
+  static let minHeight: CGFloat = 46.0
   static let textViewVerticalPadding: CGFloat = 0.0
   static let textViewHorizantalPadding: CGFloat = 12.0
   static let textViewHorizantalMargin: CGFloat = 7.0
@@ -72,6 +72,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   lazy var textView = makeTextView()
   lazy var sendButton = makeSendButton()
   lazy var plusButton = makePlusButton()
+  lazy var composeAndButtonContainer = makeComposeAndButtonContainer()
 
   // MARK: - Initialization
 
@@ -190,9 +191,12 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   func setupViews() {
     clearBackground()
 
-    addSubview(textView)
-    addSubview(sendButton)
     addSubview(plusButton)
+    addSubview(composeAndButtonContainer)
+
+    // Add textView and sendButton to the container
+    composeAndButtonContainer.addSubview(textView)
+    composeAndButtonContainer.addSubview(sendButton)
 
     setupInitialHeight()
     setupConstraints()
@@ -217,18 +221,34 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       composeHeightConstraint,
 
       plusButton.leadingAnchor.constraint(equalTo: leadingAnchor),
-      plusButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: buttonBottomPadding),
-      plusButton.widthAnchor.constraint(equalToConstant: buttonSize.width),
-      plusButton.heightAnchor.constraint(equalToConstant: buttonSize.height),
+      plusButton.bottomAnchor.constraint(
+        equalTo: bottomAnchor,
+        constant: buttonBottomPadding
+      ),
+      plusButton.widthAnchor.constraint(equalToConstant: buttonSize.width + 10),
+      plusButton.heightAnchor.constraint(equalToConstant: buttonSize.height + 10),
 
-      textView.leadingAnchor.constraint(equalTo: plusButton.trailingAnchor, constant: 8),
-      textView.topAnchor.constraint(equalTo: topAnchor),
-      textView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      // Container constraints
+      composeAndButtonContainer.leadingAnchor.constraint(equalTo: plusButton.trailingAnchor, constant: 8),
+      composeAndButtonContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
+      composeAndButtonContainer.topAnchor.constraint(equalTo: topAnchor),
+      composeAndButtonContainer.bottomAnchor.constraint(
+        equalTo: bottomAnchor,
+        constant: buttonBottomPadding
+      ),
 
+      // TextView constraints within container
+      textView.leadingAnchor.constraint(equalTo: composeAndButtonContainer.leadingAnchor, constant: 8),
+      textView.topAnchor.constraint(equalTo: composeAndButtonContainer.topAnchor, constant: 3),
+      textView.bottomAnchor.constraint(equalTo: composeAndButtonContainer.bottomAnchor),
       textView.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor, constant: -12),
 
-      sendButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: 0),
-      sendButton.bottomAnchor.constraint(equalTo: textView.bottomAnchor, constant: buttonBottomPadding),
+      // SendButton constraints within container
+      sendButton.trailingAnchor.constraint(equalTo: composeAndButtonContainer.trailingAnchor, constant: -5),
+      sendButton.bottomAnchor.constraint(
+        equalTo: composeAndButtonContainer.bottomAnchor,
+        constant: -5
+      ),
       sendButton.widthAnchor.constraint(equalToConstant: buttonSize.width),
       sendButton.heightAnchor.constraint(equalToConstant: buttonSize.height),
     ])
