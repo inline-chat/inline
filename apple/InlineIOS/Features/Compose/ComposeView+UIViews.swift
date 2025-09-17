@@ -64,12 +64,18 @@ extension ComposeView {
     let button = UIButton()
     button.translatesAutoresizingMaskIntoConstraints = false
 
-    var config = UIButton.Configuration.plain()
+    var config: UIButton.Configuration
+    if #available(iOS 26.0, *) {
+      config = UIButton.Configuration.glass()
+    } else {
+      config = UIButton.Configuration.plain()
+      config.background.backgroundColor = .secondarySystemBackground
+    }
+
     config.image = UIImage(systemName: "plus")?.withConfiguration(
-      UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+      UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)
     )
     config.baseForegroundColor = .secondaryLabel
-    config.background.backgroundColor = .secondarySystemBackground
     button.configuration = config
     button.layer.cornerRadius = 16
     button.clipsToBounds = true
@@ -101,5 +107,40 @@ extension ComposeView {
     button.showsMenuAsPrimaryAction = true
 
     return button
+  }
+
+  func makeComposeAndButtonContainer() -> UIView {
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.isUserInteractionEnabled = true
+    view.backgroundColor = .clear
+
+    if #available(iOS 26.0, *) {
+      let glassEffect = UIGlassEffect(style: .regular)
+      let glassView = UIVisualEffectView(effect: glassEffect)
+      glassView.translatesAutoresizingMaskIntoConstraints = false
+      view.addSubview(glassView)
+
+      NSLayoutConstraint.activate([
+        glassView.topAnchor.constraint(equalTo: view.topAnchor),
+        glassView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+        glassView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+        glassView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+      ])
+      
+      glassView.layer.cornerRadius = 20
+      glassView.layer.cornerCurve = .continuous
+      glassView.layer.masksToBounds = true
+
+    } else {
+      view.layer.backgroundColor = UIColor.systemBackground
+        .withAlphaComponent(0.5).cgColor
+      view.layer.cornerRadius = 22
+      view.layer.cornerCurve = .continuous
+      view.clipsToBounds = true
+    }
+    
+
+    return view
   }
 }
