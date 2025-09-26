@@ -2,14 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key></key>
-	<string></string>
-	<key>DEV_HOST</key>
-	<string>$(DEV_HOST)</string>
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
-	<key>USE_PRODUCTION_API</key>
-	<string>$(USE_PRODUCTION_API)</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -21,5 +13,9 @@
 			</array>
 		</dict>
 	</array>
+	<key>DEV_HOST</key>
+	<string>$(DEV_HOST)</string>
+	<key>USE_PRODUCTION_API</key>
+	<string>$(USE_PRODUCTION_API)</string>
 </dict>
 </plist>
