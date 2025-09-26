@@ -1,8 +1,8 @@
 {
   "fill" : {
     "linear-gradient" : [
-      "display-p3:0.38824,0.75294,1.00000,1.00000",
-      "display-p3:0.01961,0.50196,0.92549,1.00000"
+      "srgb:0.21414,0.21414,0.21414,1.00000",
+      "srgb:0.10344,0.10344,0.10344,1.00000"
     ]
   },
   "groups" : [
@@ -37,7 +37,7 @@
       "opacity-specializations" : [
         {
           "appearance" : "dark",
-          "value" : 0.92
+          "value" : 1
         }
       ],
       "position" : {
@@ -75,7 +75,7 @@
         {
           "value" : {
             "enabled" : true,
-            "value" : 0.61
+            "value" : 0.5
           }
         },
         {
