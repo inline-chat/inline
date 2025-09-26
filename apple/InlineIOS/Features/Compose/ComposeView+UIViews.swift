@@ -77,7 +77,7 @@ extension ComposeView {
     )
     config.baseForegroundColor = .secondaryLabel
     button.configuration = config
-    button.layer.cornerRadius = 16
+    button.layer.cornerRadius = 20
     button.clipsToBounds = true
 
     let libraryAction = UIAction(
@@ -127,19 +127,18 @@ extension ComposeView {
         glassView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         glassView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
       ])
-      
+
       glassView.layer.cornerRadius = 20
       glassView.layer.cornerCurve = .continuous
       glassView.layer.masksToBounds = true
 
     } else {
-      view.layer.backgroundColor = UIColor.systemBackground
-        .withAlphaComponent(0.5).cgColor
-      view.layer.cornerRadius = 22
+      // view.layer.backgroundColor = UIColor.systemBackground.cgColor
+      view.backgroundColor = .secondarySystemBackground.withAlphaComponent(0.8)
+      view.layer.cornerRadius = 20
       view.layer.cornerCurve = .continuous
       view.clipsToBounds = true
     }
-    
 
     return view
   }
