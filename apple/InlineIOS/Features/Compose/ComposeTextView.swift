@@ -41,7 +41,7 @@ class ComposeTextView: UITextView {
 
   private func setupPlaceholder() {
     let label = UILabel()
-    label.text = "Write a message"
+    label.text = "Message"
     label.font = .systemFont(ofSize: 17)
     label.textColor = .secondaryLabel
     label.translatesAutoresizingMaskIntoConstraints = false
