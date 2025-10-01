@@ -1,4 +1,5 @@
 import InlineKit
+import InlineUI
 import Translation
 import UIKit
 
@@ -180,12 +181,16 @@ private extension EmbedMessageView {
   }
 
   func updateColors() {
+    let senderColor =
+      AvatarColorUtility
+        .uiColorFor(name: headerLabel.text ?? "")
+
     let textColor: UIColor = outgoing && !isOnlyEmoji ? .white : .label
-    let headerColor: UIColor = outgoing && !isOnlyEmoji ? .white : theme.accent
-    let rectangleColor = outgoing && !isOnlyEmoji ? UIColor.white : theme.accent
+    let headerColor: UIColor = outgoing && !isOnlyEmoji ? .white : senderColor
+    let rectangleColor = outgoing && !isOnlyEmoji ? UIColor.white : senderColor
     let bgAlpha: CGFloat = outgoing && !isOnlyEmoji ? 0.13 : 0.08
-    backgroundColor = outgoing && !isOnlyEmoji ? .white.withAlphaComponent(bgAlpha) : theme.accent
-      .withAlphaComponent(bgAlpha)
+    backgroundColor = outgoing && !isOnlyEmoji ? .white.withAlphaComponent(bgAlpha) :
+      headerColor.withAlphaComponent(bgAlpha)
 
     headerLabel.textColor = headerColor
     messageLabel.textColor = textColor
