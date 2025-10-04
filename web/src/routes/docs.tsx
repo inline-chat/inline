@@ -1,4 +1,3 @@
-import type { Route } from "./+types/home"
 import * as stylex from "@stylexjs/stylex"
 
 import { PageMenu } from "../landing/components/PageMenu"
@@ -8,16 +7,15 @@ import { PageMarkdown } from "~/landing/components/PageMarkdown"
 
 import "../landing/styles/style.css"
 import "../landing/styles/page-content.css"
+import { createFileRoute } from "@tanstack/react-router"
 
-export const meta = ({}: Route.MetaArgs) => {
-  return [{ title: "Docs - Inline" }]
-}
+// return [{ title: "Docs - Inline" }]
 
-export const links: Route.LinksFunction = () => {
-  return []
-}
+export const Route = createFileRoute("/docs")({
+  component: Docs,
+})
 
-export default function Privacy() {
+function Docs() {
   return (
     <>
       <PageMenu />

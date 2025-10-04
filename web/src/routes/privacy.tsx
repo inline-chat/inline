@@ -1,5 +1,4 @@
-import type { Route } from "./+types/home"
-import * as stylex from "@stylexjs/stylex"
+import { createFileRoute } from "@tanstack/react-router"
 
 import { PageMenu } from "../landing/components/PageMenu"
 import { PageContainer, PageLongFormContent, PageHeader } from "../landing/components/Page"
@@ -9,21 +8,21 @@ import { PageMarkdown } from "~/landing/components/PageMarkdown"
 import "../landing/styles/style.css"
 import "../landing/styles/page-content.css"
 
-export const meta = ({}: Route.MetaArgs) => {
-  return [
-    { title: "Privacy Policy - Inline" },
-    {
-      name: "description",
-      content: "We're commited to protect Inline users' privacy and data while providing a great user experience.",
-    },
-  ]
-}
+export const Route = createFileRoute("/privacy")({
+  component: Privacy,
 
-export const links: Route.LinksFunction = () => {
-  return []
-}
+  head: () => ({
+    meta: [
+      { title: "Privacy Policy - Inline" },
+      {
+        name: "description",
+        content: "We're committed to protect Inline users' privacy and data while providing a great user experience.",
+      },
+    ],
+  }),
+})
 
-export default function Privacy() {
+function Privacy() {
   return (
     <>
       <PageMenu />
@@ -39,8 +38,6 @@ export default function Privacy() {
     </>
   )
 }
-
-const styles = stylex.create({})
 
 const PRIVACY_POLICY = `
 ## Key Points
