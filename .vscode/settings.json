@@ -16,7 +16,7 @@
   "cSpell.enabledFileTypes": {
     "swift": true
   },
-  "cSpell.words": ["Deinitialization", "GRDB"],
+  "cSpell.words": ["Deinitialization", "GRDB", "stylex"],
 
   // Protocol Buffers
   "protoc": {
