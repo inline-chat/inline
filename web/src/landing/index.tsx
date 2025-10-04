@@ -3,7 +3,7 @@
 
 import * as stylex from "@stylexjs/stylex"
 import { useEffect, useRef, useState } from "react"
-import { AnimatePresence, motion } from "framer-motion"
+import { AnimatePresence, motion } from "motion/react"
 
 import "./styles/style.css"
 
@@ -97,6 +97,8 @@ export function Landing() {
 
   const parallaxOffset = calculateParallax()
 
+  const applyDynamicEffects = isntInitialRender
+
   return (
     <motion.div {...stylex.props(styles.root)}>
       <motion.div {...stylex.props(styles.centerBox, styles.center)} id="center">
@@ -125,19 +127,28 @@ export function Landing() {
               left: 0,
               right: 0,
               bottom: 0,
-              background: `linear-gradient(${55 + parallaxOffset.x * 1.5}deg,
-              rgba(255,255,255,0) 30%,
-              rgba(255,255,255,0.1) 45%,
-              rgba(255,255,255,0.4) 50%,
-              rgba(255,255,255,0.1) 55%,
-              rgba(255,255,255,0) 70%)`,
+
               // opacity: 0.18,
               opacity: 0,
-              transform: `scale(1.5) ${
-                hasInteracted ? `translateX(${parallaxOffset.x * -2}px) translateY(${parallaxOffset.y * -1}px)` : ""
-              }`,
+
               pointerEvents: "none",
               boxShadow: "inset 0px 10px 80px 120px rgba(255, 255, 255, 1)",
+
+              ...(applyDynamicEffects
+                ? {
+                    backgroundImage: `linear-gradient(${55 + parallaxOffset.x * 1.5}deg,
+                rgba(255,255,255,0) 30%,
+                rgba(255,255,255,0.1) 45%,
+                rgba(255,255,255,0.4) 50%,
+                rgba(255,255,255,0.1) 55%,
+                rgba(255,255,255,0) 70%)`,
+                    transform: `scale(1.5) ${
+                      hasInteracted
+                        ? `translateX(${parallaxOffset.x * -2}px) translateY(${parallaxOffset.y * -1}px)`
+                        : ""
+                    }`,
+                  }
+                : {}),
             }}
           />
         </motion.div>
@@ -359,17 +370,17 @@ export function Landing() {
                   <span
                     style={{
                       display: "block",
-                      transform: `translate(${parallaxOffset.x * 0.08 * -1}px, 0px)`,
+                      transform: applyDynamicEffects ? `translate(${parallaxOffset.x * 0.08 * -1}px, 0px)` : undefined,
                       whiteSpace: "nowrap",
                     }}
                   >
                     {failed
                       ? "Failed to submit"
                       : submitting
-                      ? "Submitting..."
-                      : subscribed
-                      ? "You're on the waitlist 🎉"
-                      : "Get on the Waitlist"}
+                        ? "Submitting..."
+                        : subscribed
+                          ? "You're on the waitlist 🎉"
+                          : "Get on the Waitlist"}
                   </span>
                 </motion.div>
               )}
@@ -742,7 +753,7 @@ const styles = stylex.create({
 
   emailInput: {
     height: buttonHeight - 8,
-    background: "none",
+    backgroundColor: "none",
     width: "100%",
     minWidth: 0,
     flexShrink: 1,
@@ -754,7 +765,7 @@ const styles = stylex.create({
       color: "rgba(255,255,255,0.9)",
       fontWeight: 400,
     },
-    border: "none",
+    borderColor: "none",
     outline: "none",
   },
 
@@ -766,7 +777,7 @@ const styles = stylex.create({
     alignItems: "center",
     justifyContent: "center",
     fontSize: 18,
-    background: {
+    backgroundColor: {
       default: "rgba(255,255,255,0.2)",
       ":hover": "rgba(255,255,255,0.3)",
     },
