@@ -1,5 +1,6 @@
 import InlineKit
 import InlineUI
+import Invite
 import Logger
 import SwiftUI
 
@@ -58,85 +59,85 @@ struct ContentView2: View {
     @Bindable var bindableRouter = router
 
     switch mainViewRouter.route {
-      case .main:
-        TabView(selection: $bindableRouter.selectedTab) {
-          ForEach(AppTab.allCases) { tab in
-            NavigationStack(path: $bindableRouter[tab]) {
-              tabContentView(for: tab)
-                .navigationDestination(for: Destination.self) { destination in
-                  destinationView(for: destination)
-                }
-            }
-            .tabItem {
-              Label(tab.rawValue.capitalized, systemImage: tab.icon)
-            }
-            .tag(tab)
+    case .main:
+      TabView(selection: $bindableRouter.selectedTab) {
+        ForEach(AppTab.allCases) { tab in
+          NavigationStack(path: $bindableRouter[tab]) {
+            tabContentView(for: tab)
+              .navigationDestination(for: Destination.self) { destination in
+                destinationView(for: destination)
+              }
           }
+          .tabItem {
+            Label(tab.rawValue.capitalized, systemImage: tab.icon)
+          }
+          .tag(tab)
         }
-        .background(ThemeManager.shared.backgroundColorSwiftUI)
-        .themedAccent()
-        .sheet(item: $bindableRouter.presentedSheet) { sheet in
-          sheetView(for: sheet)
-        }
-      case .onboarding:
-        OnboardingView()
+      }
+      .background(ThemeManager.shared.backgroundColorSwiftUI)
+      .themedAccent()
+      .sheet(item: $bindableRouter.presentedSheet) { sheet in
+        sheetView(for: sheet)
+      }
+    case .onboarding:
+      OnboardingView()
     }
   }
 
   @ViewBuilder
   private func tabContentView(for tab: AppTab) -> some View {
     switch tab {
-      case .chats:
-        HomeView()
-      case .archived:
-        ArchivedChatsView()
-      case .spaces:
-        SpacesView()
+    case .chats:
+      HomeView()
+    case .archived:
+      ArchivedChatsView()
+    case .spaces:
+      SpacesView()
     }
   }
 
   @ViewBuilder
   private func destinationView(for destination: Destination) -> some View {
     switch destination {
-      case .chats:
-        HomeView()
-      case .archived:
-        ArchivedChatsView()
-      case .spaces:
-        SpacesView()
-      case let .space(id):
-        SpaceView(spaceId: id)
-      case let .chat(peer):
-        ChatView(peer: peer)
-      case let .chatInfo(chatItem):
-        ChatInfoView(chatItem: chatItem)
-      case .settings:
-        SettingsView()
-      case let .spaceSettings(spaceId):
-        SpaceSettingsView(spaceId: spaceId)
-      case let .spaceIntegrations(spaceId):
-        SpaceIntegrationsView(spaceId: spaceId)
-      case let .integrationOptions(spaceId, provider):
-        IntegrationOptionsView(spaceId: spaceId, provider: provider)
-      case let .createThread(spaceId):
-        CreateChatView(spaceId: spaceId)
-      case .createSpaceChat:
-        CreateChatView(spaceId: nil)
+    case .chats:
+      HomeView()
+    case .archived:
+      ArchivedChatsView()
+    case .spaces:
+      SpacesView()
+    case let .space(id):
+      SpaceView(spaceId: id)
+    case let .chat(peer):
+      ChatView(peer: peer)
+    case let .chatInfo(chatItem):
+      ChatInfoView(chatItem: chatItem)
+    case .settings:
+      SettingsView()
+    case let .spaceSettings(spaceId):
+      SpaceSettingsView(spaceId: spaceId)
+    case let .spaceIntegrations(spaceId):
+      SpaceIntegrationsView(spaceId: spaceId)
+    case let .integrationOptions(spaceId, provider):
+      IntegrationOptionsView(spaceId: spaceId, provider: provider)
+    case let .createThread(spaceId):
+      CreateChatView(spaceId: spaceId)
+    case .createSpaceChat:
+      CreateChatView(spaceId: nil)
     }
   }
 
   @ViewBuilder
   private func sheetView(for sheet: Sheet) -> some View {
     switch sheet {
-      case .createSpace:
-        CreateSpace()
+    case .createSpace:
+      CreateSpace()
 
-      case .alphaSheet:
-        AlphaSheet()
+    case .alphaSheet:
+      AlphaSheet()
 
-      case let .addMember(spaceId):
-        // AddMember(showSheet: showSheet, spaceId: spaceId)
-        InviteToSpaceView(spaceId: spaceId)
+    case let .addMember(spaceId):
+      // AddMember(showSheet: showSheet, spaceId: spaceId)
+      InviteToSpaceView(spaceId: spaceId)
     }
   }
 }

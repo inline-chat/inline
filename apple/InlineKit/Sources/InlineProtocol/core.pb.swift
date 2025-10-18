@@ -4584,6 +4584,62 @@ public struct DeleteChatResult: Sendable {
   public init() {}
 }
 
+public struct SpaceMemberOptions: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var canAccessPublicChats: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct SpaceAdminOptions: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct SpaceMemberRole: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var role: SpaceMemberRole.OneOf_Role? = nil
+
+  public var member: SpaceMemberOptions {
+    get {
+      if case .member(let v)? = role {return v}
+      return SpaceMemberOptions()
+    }
+    set {role = .member(newValue)}
+  }
+
+  public var admin: SpaceAdminOptions {
+    get {
+      if case .admin(let v)? = role {return v}
+      return SpaceAdminOptions()
+    }
+    set {role = .admin(newValue)}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public enum OneOf_Role: Equatable, Sendable {
+    case member(SpaceMemberOptions)
+    case admin(SpaceAdminOptions)
+
+  }
+
+  public init() {}
+}
+
 public struct InviteToSpaceInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -4592,8 +4648,14 @@ public struct InviteToSpaceInput: Sendable {
   /// ID of the space to invite to
   public var spaceID: Int64 = 0
 
-  /// Role of the user to invite
-  public var role: Member.Role = .owner
+  public var role: SpaceMemberRole {
+    get {return _role ?? SpaceMemberRole()}
+    set {_role = newValue}
+  }
+  /// Returns true if `role` has been explicitly set.
+  public var hasRole: Bool {return self._role != nil}
+  /// Clears the value of `role`. Subsequent reads from it will return its default value.
+  public mutating func clearRole() {self._role = nil}
 
   public var via: InviteToSpaceInput.OneOf_Via? = nil
 
@@ -4637,6 +4699,8 @@ public struct InviteToSpaceInput: Sendable {
   }
 
   public init() {}
+
+  fileprivate var _role: SpaceMemberRole? = nil
 }
 
 public struct InviteToSpaceResult: @unchecked Sendable {
@@ -12090,11 +12154,132 @@ extension DeleteChatResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   }
 }
 
+extension SpaceMemberOptions: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "SpaceMemberOptions"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "can_access_public_chats"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularBoolField(value: &self.canAccessPublicChats) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.canAccessPublicChats != false {
+      try visitor.visitSingularBoolField(value: self.canAccessPublicChats, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: SpaceMemberOptions, rhs: SpaceMemberOptions) -> Bool {
+    if lhs.canAccessPublicChats != rhs.canAccessPublicChats {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension SpaceAdminOptions: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "SpaceAdminOptions"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: SpaceAdminOptions, rhs: SpaceAdminOptions) -> Bool {
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension SpaceMemberRole: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "SpaceMemberRole"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "member"),
+    2: .same(proto: "admin"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try {
+        var v: SpaceMemberOptions?
+        var hadOneofValue = false
+        if let current = self.role {
+          hadOneofValue = true
+          if case .member(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.role = .member(v)
+        }
+      }()
+      case 2: try {
+        var v: SpaceAdminOptions?
+        var hadOneofValue = false
+        if let current = self.role {
+          hadOneofValue = true
+          if case .admin(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.role = .admin(v)
+        }
+      }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    switch self.role {
+    case .member?: try {
+      guard case .member(let v)? = self.role else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    }()
+    case .admin?: try {
+      guard case .admin(let v)? = self.role else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    }()
+    case nil: break
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: SpaceMemberRole, rhs: SpaceMemberRole) -> Bool {
+    if lhs.role != rhs.role {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
 extension InviteToSpaceInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "InviteToSpaceInput"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .standard(proto: "space_id"),
-    2: .same(proto: "role"),
+    6: .same(proto: "role"),
     3: .standard(proto: "user_id"),
     4: .same(proto: "email"),
     5: .standard(proto: "phone_number"),
@@ -12107,7 +12292,6 @@ extension InviteToSpaceInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularInt64Field(value: &self.spaceID) }()
-      case 2: try { try decoder.decodeSingularEnumField(value: &self.role) }()
       case 3: try {
         var v: Int64?
         try decoder.decodeSingularInt64Field(value: &v)
@@ -12132,6 +12316,7 @@ extension InviteToSpaceInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
           self.via = .phoneNumber(v)
         }
       }()
+      case 6: try { try decoder.decodeSingularMessageField(value: &self._role) }()
       default: break
       }
     }
@@ -12144,9 +12329,6 @@ extension InviteToSpaceInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
     // https://github.com/apple/swift-protobuf/issues/1182
     if self.spaceID != 0 {
       try visitor.visitSingularInt64Field(value: self.spaceID, fieldNumber: 1)
-    }
-    if self.role != .owner {
-      try visitor.visitSingularEnumField(value: self.role, fieldNumber: 2)
     }
     switch self.via {
     case .userID?: try {
@@ -12163,12 +12345,15 @@ extension InviteToSpaceInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
     }()
     case nil: break
     }
+    try { if let v = self._role {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: InviteToSpaceInput, rhs: InviteToSpaceInput) -> Bool {
     if lhs.spaceID != rhs.spaceID {return false}
-    if lhs.role != rhs.role {return false}
+    if lhs._role != rhs._role {return false}
     if lhs.via != rhs.via {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true

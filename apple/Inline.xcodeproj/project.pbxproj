@@ -34,6 +34,8 @@
 		C3CC99192CCE9AF7007F7F77 /* InlineUI in Frameworks */ = {isa = PBXBuildFile; productRef = C3CC99182CCE9AF7007F7F77 /* InlineUI */; };
 		C3CC991B2CCE9AFF007F7F77 /* InlineUI in Frameworks */ = {isa = PBXBuildFile; productRef = C3CC991A2CCE9AFF007F7F77 /* InlineUI */; };
 		C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C3E6D5CA2CAE82B00048D2D8 /* GRDB */; };
+		CD0240C42EA439D400976FDE /* Invite in Frameworks */ = {isa = PBXBuildFile; productRef = CD0240C32EA439D400976FDE /* Invite */; };
+		CD0240C62EA439DA00976FDE /* Invite in Frameworks */ = {isa = PBXBuildFile; productRef = CD0240C52EA439DA00976FDE /* Invite */; };
 		CD0A3CDA2CD536DF0081AD69 /* GRDBQuery in Frameworks */ = {isa = PBXBuildFile; productRef = CD0A3CD92CD536DF0081AD69 /* GRDBQuery */; };
 		CD27856F2CFB053C008A0EEF /* InlineConfig in Frameworks */ = {isa = PBXBuildFile; productRef = CD27856E2CFB053C008A0EEF /* InlineConfig */; };
 		CD2785712CFB0916008A0EEF /* InlineConfig in Frameworks */ = {isa = PBXBuildFile; productRef = CD2785702CFB0916008A0EEF /* InlineConfig */; };
@@ -228,6 +230,7 @@
 				C37F34402D5A4D4800D7D7CC /* MCEmojiPicker in Frameworks */,
 				B7C0676B2DB7F44900EAADA4 /* iMessageUI.framework in Frameworks */,
 				C3CC99192CCE9AF7007F7F77 /* InlineUI in Frameworks */,
+				CD0240C42EA439D400976FDE /* Invite in Frameworks */,
 				C38C905E2CB9431900B78B8A /* InlineKit in Frameworks */,
 				C35092CA2CAEA7DB00AE3E23 /* Sentry in Frameworks */,
 			);
@@ -242,6 +245,7 @@
 				CD4D56CD2D2D4393006072AE /* Throttler in Frameworks */,
 				CD735FF22E493C9400F7BFFE /* Translation in Frameworks */,
 				CD70BF1E2DE72D5100E9830A /* FileAttachments in Frameworks */,
+				CD0240C62EA439DA00976FDE /* Invite in Frameworks */,
 				CD4CAEF02E5E14AA00698C43 /* Sentry in Frameworks */,
 				CDC72E3D2D999C6D001E8A0C /* GRDB in Frameworks */,
 				C38C90602CB9432200B78B8A /* InlineKit in Frameworks */,
@@ -397,6 +401,7 @@
 				B7F71EB82DDB3BA70091C872 /* RenderMeThis */,
 				CD4E8E2B2E088F6B00CE6BC0 /* TextProcessing */,
 				CD735FEF2E493C8E00F7BFFE /* Translation */,
+				CD0240C32EA439D400976FDE /* Invite */,
 			);
 			productName = InlineIOS;
 			productReference = C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */;
@@ -434,6 +439,7 @@
 				CD735FF12E493C9400F7BFFE /* Translation */,
 				CD7C6F122E5847CD00C89032 /* RealtimeV2 */,
 				CD4CAEEF2E5E14AA00698C43 /* Sentry */,
+				CD0240C52EA439DA00976FDE /* Invite */,
 			);
 			productName = InlineMac;
 			productReference = CD2661652CA01E3E00EB186F /* Inline.app */;
@@ -1434,6 +1440,14 @@
 			isa = XCSwiftPackageProductDependency;
 			package = C3E6D5C92CAE82B00048D2D8 /* XCRemoteSwiftPackageReference "GRDB" */;
 			productName = GRDB;
+		};
+		CD0240C32EA439D400976FDE /* Invite */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Invite;
+		};
+		CD0240C52EA439DA00976FDE /* Invite */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = Invite;
 		};
 		CD0A3CD92CD536DF0081AD69 /* GRDBQuery */ = {
 			isa = XCSwiftPackageProductDependency;

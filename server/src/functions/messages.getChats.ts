@@ -92,6 +92,8 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
               user: {
                 id: currentUserId,
               },
+              // only include public chats if user has access to them
+              canAccessPublicChats: true,
             },
           },
         },
