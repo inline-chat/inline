@@ -1139,12 +1139,25 @@ message DeleteChatInput { InputPeer peer_id = 1; }
 
 message DeleteChatResult {}
 
+message SpaceMemberOptions { bool can_access_public_chats = 1; }
+message SpaceAdminOptions {}
+message SpaceMemberRole {
+  oneof role {
+    SpaceMemberOptions member = 1;
+    SpaceAdminOptions admin = 2;
+  }
+}
+
 message InviteToSpaceInput {
   // ID of the space to invite to
   int64 space_id = 1;
 
   // Role of the user to invite
-  Member.Role role = 2;
+  // @deprecated
+  // Member.Role role = 2;
+  reserved 2;
+
+  SpaceMemberRole role = 6;
 
   oneof via {
     // ID of the user to invite

@@ -99,6 +99,14 @@ export const handler = async (
   }
   const currentUserId = context.currentUserId
 
+  // Check if user has permission to access public chats in this space
+  let memberPermission: schema.DbMember | undefined
+  if (spaceId) {
+    memberPermission = await db._query.members.findFirst({
+      where: and(eq(schema.members.userId, currentUserId), eq(schema.members.spaceId, spaceId)),
+    })
+  }
+
   // Buckets for results
   let dialogs: schema.DbDialog[] = []
   let users: schema.DbUserWithPhoto[] = []
@@ -123,6 +131,11 @@ export const handler = async (
       return
     }
 
+    // Skip public threads if user doesn't have permission
+    if (d.chat?.type === "thread" && d.chat?.publicThread === true && !memberPermission?.canAccessPublicChats) {
+      return
+    }
+
     dialogs.push(d)
     if (d.chat) chats.push(d.chat)
     pushMessageAndUser(messages, users, d.chat?.lastMsg, currentUserId, peerIdFromChat(d.chat, { currentUserId }))
@@ -130,18 +143,21 @@ export const handler = async (
 
   // --- 2. Public Chats and Private Dialogs in Space ---
   if (spaceId) {
-    // 2a. Public Chats
-    const publicChats = await db._query.chats.findMany({
-      where: and(
-        eq(schema.chats.spaceId, spaceId),
-        eq(schema.chats.type, "thread"),
-        eq(schema.chats.publicThread, true),
-      ),
-      with: {
-        dialogs: { where: eq(schema.dialogs.userId, currentUserId) },
-        lastMsg: { with: { from: true, file: true } },
-      },
-    })
+    // 2a. Public Chats (only if user has permission)
+    let publicChats: any[] = []
+    if (memberPermission?.canAccessPublicChats) {
+      publicChats = await db._query.chats.findMany({
+        where: and(
+          eq(schema.chats.spaceId, spaceId),
+          eq(schema.chats.type, "thread"),
+          eq(schema.chats.publicThread, true),
+        ),
+        with: {
+          dialogs: { where: eq(schema.dialogs.userId, currentUserId) },
+          lastMsg: { with: { from: true, file: true } },
+        },
+      })
+    }
 
     // 2a. Private Threads (where user is a participant) - single SQL call
     const privateThreadChats = await db
@@ -189,14 +205,16 @@ export const handler = async (
         : undefined,
     }))
 
-    // Create missing dialogs for public chats
-    const newDialogs = await createMissingDialogsForPublicChats(publicChats, currentUserId, spaceId)
-    newDialogs.forEach((d) => dialogs.push(d))
-    publicChats.forEach((c) => {
-      if (c.dialogs[0]) dialogs.push(c.dialogs[0])
-      pushMessageAndUser(messages, users, c.lastMsg, currentUserId, peerIdFromChat(c, { currentUserId }))
-      chats.push(c)
-    })
+    // Create missing dialogs for public chats (only if user has permission)
+    if (memberPermission?.canAccessPublicChats) {
+      const newDialogs = await createMissingDialogsForPublicChats(publicChats, currentUserId, spaceId)
+      newDialogs.forEach((d) => dialogs.push(d))
+      publicChats.forEach((c) => {
+        if (c.dialogs[0]) dialogs.push(c.dialogs[0])
+        pushMessageAndUser(messages, users, c.lastMsg, currentUserId, peerIdFromChat(c, { currentUserId }))
+        chats.push(c)
+      })
+    }
 
     // Add privateThreadChatsTransformed to results
     privateThreadChatsTransformed.forEach((c) => {
@@ -328,6 +346,11 @@ export const handler = async (
       for (const chat of missingDialogsChats) {
         // Only create if not already present (extra safety)
         if (!chatIdsWithDialog.has(chat.id)) {
+          // Skip public threads if user doesn't have permission
+          if (chat.type === "thread" && chat.publicThread === true && !memberPermission?.canAccessPublicChats) {
+            continue
+          }
+
           const values: any = {
             chatId: chat.id,
             userId: currentUserId,

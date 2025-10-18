@@ -15,24 +15,25 @@ public struct InviteToSpaceTransaction: Transaction2 {
 
   public struct Context: Sendable, Codable {
     public var spaceId: Int64
-    public var roleRawValue: Int
+    public var access: AccessRole
     public var userID: Int64?
     public var email: String?
     public var phoneNumber: String?
 
-    public var role: InlineProtocol.Member.Role {
-      InlineProtocol.Member.Role(rawValue: roleRawValue) ?? .member
+    public enum AccessRole: Sendable, Codable {
+      case member(canAccessPublicChats: Bool)
+      case admin
     }
 
     public init(
       spaceId: Int64,
-      role: InlineProtocol.Member.Role,
+      access: AccessRole,
       userID: Int64? = nil,
       email: String? = nil,
       phoneNumber: String? = nil
     ) {
       self.spaceId = spaceId
-      roleRawValue = role.rawValue
+      self.access = access
       self.userID = userID
       self.email = email
       self.phoneNumber = phoneNumber
@@ -41,32 +42,43 @@ public struct InviteToSpaceTransaction: Transaction2 {
 
   public init(
     spaceId: Int64,
-    role: InlineProtocol.Member.Role,
+    access: Context.AccessRole,
     userID: Int64
   ) {
-    context = Context(spaceId: spaceId, role: role, userID: userID)
+    context = Context(spaceId: spaceId, access: access, userID: userID)
   }
 
   public init(
     spaceId: Int64,
-    role: InlineProtocol.Member.Role,
+    access: Context.AccessRole,
     email: String
   ) {
-    context = Context(spaceId: spaceId, role: role, email: email)
+    context = Context(spaceId: spaceId, access: access, email: email)
   }
 
   public init(
     spaceId: Int64,
-    role: InlineProtocol.Member.Role,
+    access: Context.AccessRole,
     phoneNumber: String
   ) {
-    context = Context(spaceId: spaceId, role: role, phoneNumber: phoneNumber)
+    context = Context(spaceId: spaceId, access: access, phoneNumber: phoneNumber)
   }
 
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
     .inviteToSpace(.with {
       $0.spaceID = context.spaceId
-      $0.role = context.role
+
+      $0.role = .with {
+        $0.role = switch context.access {
+        case let .member(canAccessPublicChats):
+          .member(.with {
+            $0.canAccessPublicChats = canAccessPublicChats
+          })
+
+        case .admin:
+          .admin(.init())
+        }
+      }
 
       if let userID = context.userID {
         $0.userID = userID
@@ -153,25 +165,25 @@ public struct InviteToSpaceTransaction: Transaction2 {
 public extension Transaction2 where Self == InviteToSpaceTransaction {
   static func inviteToSpace(
     spaceId: Int64,
-    role: InlineProtocol.Member.Role,
+    access: InviteToSpaceTransaction.Context.AccessRole,
     userId: Int64
   ) -> InviteToSpaceTransaction {
-    InviteToSpaceTransaction(spaceId: spaceId, role: role, userID: userId)
+    InviteToSpaceTransaction(spaceId: spaceId, access: access, userID: userId)
   }
 
   static func inviteToSpace(
     spaceId: Int64,
-    role: InlineProtocol.Member.Role,
+    access: InviteToSpaceTransaction.Context.AccessRole,
     email: String
   ) -> InviteToSpaceTransaction {
-    InviteToSpaceTransaction(spaceId: spaceId, role: role, email: email)
+    InviteToSpaceTransaction(spaceId: spaceId, access: access, email: email)
   }
 
   static func inviteToSpace(
     spaceId: Int64,
-    role: InlineProtocol.Member.Role,
+    access: InviteToSpaceTransaction.Context.AccessRole,
     phoneNumber: String
   ) -> InviteToSpaceTransaction {
-    InviteToSpaceTransaction(spaceId: spaceId, role: role, phoneNumber: phoneNumber)
+    InviteToSpaceTransaction(spaceId: spaceId, access: access, phoneNumber: phoneNumber)
   }
 }

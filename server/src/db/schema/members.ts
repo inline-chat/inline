@@ -24,6 +24,8 @@ export const members = pgTable(
       }),
     role: rolesEnum().default("member"),
 
+    canAccessPublicChats: boolean("can_access_public_chats").default(true),
+
     // per member state
     // pinned: boolean("pinned").default(false),
     // archivedAt: timestamp("archived_at"),
