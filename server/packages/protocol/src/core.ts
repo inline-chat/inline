@@ -3033,6 +3033,43 @@ export interface DeleteChatInput {
 export interface DeleteChatResult {
 }
 /**
+ * @generated from protobuf message SpaceMemberOptions
+ */
+export interface SpaceMemberOptions {
+    /**
+     * @generated from protobuf field: bool can_access_public_chats = 1;
+     */
+    canAccessPublicChats: boolean;
+}
+/**
+ * @generated from protobuf message SpaceAdminOptions
+ */
+export interface SpaceAdminOptions {
+}
+/**
+ * @generated from protobuf message SpaceMemberRole
+ */
+export interface SpaceMemberRole {
+    /**
+     * @generated from protobuf oneof: role
+     */
+    role: {
+        oneofKind: "member";
+        /**
+         * @generated from protobuf field: SpaceMemberOptions member = 1;
+         */
+        member: SpaceMemberOptions;
+    } | {
+        oneofKind: "admin";
+        /**
+         * @generated from protobuf field: SpaceAdminOptions admin = 2;
+         */
+        admin: SpaceAdminOptions;
+    } | {
+        oneofKind: undefined;
+    };
+}
+/**
  * @generated from protobuf message InviteToSpaceInput
  */
 export interface InviteToSpaceInput {
@@ -3043,11 +3080,9 @@ export interface InviteToSpaceInput {
      */
     spaceId: bigint;
     /**
-     * Role of the user to invite
-     *
-     * @generated from protobuf field: Member.Role role = 2;
+     * @generated from protobuf field: SpaceMemberRole role = 6;
      */
-    role: Member_Role;
+    role?: SpaceMemberRole;
     /**
      * @generated from protobuf oneof: via
      */
@@ -11001,11 +11036,143 @@ class DeleteChatResult$Type extends MessageType<DeleteChatResult> {
  */
 export const DeleteChatResult = new DeleteChatResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class SpaceMemberOptions$Type extends MessageType<SpaceMemberOptions> {
+    constructor() {
+        super("SpaceMemberOptions", [
+            { no: 1, name: "can_access_public_chats", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<SpaceMemberOptions>): SpaceMemberOptions {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.canAccessPublicChats = false;
+        if (value !== undefined)
+            reflectionMergePartial<SpaceMemberOptions>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SpaceMemberOptions): SpaceMemberOptions {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bool can_access_public_chats */ 1:
+                    message.canAccessPublicChats = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SpaceMemberOptions, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool can_access_public_chats = 1; */
+        if (message.canAccessPublicChats !== false)
+            writer.tag(1, WireType.Varint).bool(message.canAccessPublicChats);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SpaceMemberOptions
+ */
+export const SpaceMemberOptions = new SpaceMemberOptions$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SpaceAdminOptions$Type extends MessageType<SpaceAdminOptions> {
+    constructor() {
+        super("SpaceAdminOptions", []);
+    }
+    create(value?: PartialMessage<SpaceAdminOptions>): SpaceAdminOptions {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<SpaceAdminOptions>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SpaceAdminOptions): SpaceAdminOptions {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: SpaceAdminOptions, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SpaceAdminOptions
+ */
+export const SpaceAdminOptions = new SpaceAdminOptions$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SpaceMemberRole$Type extends MessageType<SpaceMemberRole> {
+    constructor() {
+        super("SpaceMemberRole", [
+            { no: 1, name: "member", kind: "message", oneof: "role", T: () => SpaceMemberOptions },
+            { no: 2, name: "admin", kind: "message", oneof: "role", T: () => SpaceAdminOptions }
+        ]);
+    }
+    create(value?: PartialMessage<SpaceMemberRole>): SpaceMemberRole {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.role = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<SpaceMemberRole>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SpaceMemberRole): SpaceMemberRole {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* SpaceMemberOptions member */ 1:
+                    message.role = {
+                        oneofKind: "member",
+                        member: SpaceMemberOptions.internalBinaryRead(reader, reader.uint32(), options, (message.role as any).member)
+                    };
+                    break;
+                case /* SpaceAdminOptions admin */ 2:
+                    message.role = {
+                        oneofKind: "admin",
+                        admin: SpaceAdminOptions.internalBinaryRead(reader, reader.uint32(), options, (message.role as any).admin)
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SpaceMemberRole, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* SpaceMemberOptions member = 1; */
+        if (message.role.oneofKind === "member")
+            SpaceMemberOptions.internalBinaryWrite(message.role.member, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* SpaceAdminOptions admin = 2; */
+        if (message.role.oneofKind === "admin")
+            SpaceAdminOptions.internalBinaryWrite(message.role.admin, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SpaceMemberRole
+ */
+export const SpaceMemberRole = new SpaceMemberRole$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class InviteToSpaceInput$Type extends MessageType<InviteToSpaceInput> {
     constructor() {
         super("InviteToSpaceInput", [
             { no: 1, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 2, name: "role", kind: "enum", T: () => ["Member.Role", Member_Role] },
+            { no: 6, name: "role", kind: "message", T: () => SpaceMemberRole },
             { no: 3, name: "user_id", kind: "scalar", oneof: "via", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 4, name: "email", kind: "scalar", oneof: "via", T: 9 /*ScalarType.STRING*/ },
             { no: 5, name: "phone_number", kind: "scalar", oneof: "via", T: 9 /*ScalarType.STRING*/ }
@@ -11014,7 +11181,6 @@ class InviteToSpaceInput$Type extends MessageType<InviteToSpaceInput> {
     create(value?: PartialMessage<InviteToSpaceInput>): InviteToSpaceInput {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.spaceId = 0n;
-        message.role = 0;
         message.via = { oneofKind: undefined };
         if (value !== undefined)
             reflectionMergePartial<InviteToSpaceInput>(this, message, value);
@@ -11028,8 +11194,8 @@ class InviteToSpaceInput$Type extends MessageType<InviteToSpaceInput> {
                 case /* int64 space_id */ 1:
                     message.spaceId = reader.int64().toBigInt();
                     break;
-                case /* Member.Role role */ 2:
-                    message.role = reader.int32();
+                case /* SpaceMemberRole role */ 6:
+                    message.role = SpaceMemberRole.internalBinaryRead(reader, reader.uint32(), options, message.role);
                     break;
                 case /* int64 user_id */ 3:
                     message.via = {
@@ -11064,9 +11230,9 @@ class InviteToSpaceInput$Type extends MessageType<InviteToSpaceInput> {
         /* int64 space_id = 1; */
         if (message.spaceId !== 0n)
             writer.tag(1, WireType.Varint).int64(message.spaceId);
-        /* Member.Role role = 2; */
-        if (message.role !== 0)
-            writer.tag(2, WireType.Varint).int32(message.role);
+        /* SpaceMemberRole role = 6; */
+        if (message.role)
+            SpaceMemberRole.internalBinaryWrite(message.role, writer.tag(6, WireType.LengthDelimited).fork(), options).join();
         /* int64 user_id = 3; */
         if (message.via.oneofKind === "userId")
             writer.tag(3, WireType.Varint).int64(message.via.userId);

@@ -19,6 +19,7 @@ let package = Package(
     .library(name: "InlineUI", targets: ["InlineUI"]),
     .library(name: "TextProcessing", targets: ["TextProcessing"]),
     .library(name: "Translation", targets: ["Translation"]),
+    .library(name: "Invite", targets: ["Invite"]),
   ],
 
   dependencies: [
@@ -43,6 +44,11 @@ let package = Package(
     .target(
       name: "Translation",
       dependencies: baseDependencies,
+    ),
+
+    .target(
+      name: "Invite",
+      dependencies: baseDependencies + ["InlineUI"],
     ),
 
     .testTarget(
