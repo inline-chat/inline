@@ -302,6 +302,13 @@
       "when": 1756484420884,
       "tag": "0042_unique_translations",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1760820886901,
+      "tag": "0043_can_access_public_threads",
+      "breakpoints": true
     }
   ]
 }

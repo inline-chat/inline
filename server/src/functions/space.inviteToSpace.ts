@@ -1,6 +1,14 @@
 import { db } from "@in/server/db"
 import { and, eq } from "drizzle-orm"
-import { members, type DbChat, type DbDialog, type DbMember, type DbSpace, type DbUser } from "@in/server/db/schema"
+import {
+  members,
+  type DbChat,
+  type DbDialog,
+  type DbMember,
+  type DbMemberRole,
+  type DbSpace,
+  type DbUser,
+} from "@in/server/db/schema"
 import { UsersModel } from "@in/server/db/models/users"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import type { FunctionContext } from "@in/server/functions/_types"
@@ -49,12 +57,11 @@ export const inviteToSpace = async (
   // Validate our permission in this space and maximum role we can assign
   const { member: ourMembership } = await Authorize.spaceMember(spaceId, context.currentUserId)
 
-  if (ourMembership.role === "member" && input.role != Member_Role.MEMBER) {
-    throw RealtimeRpcError.SpaceAdminRequired
-  }
+  const isMember = input.role?.role.oneofKind === "member"
+  const isAdmin = input.role?.role.oneofKind === "admin"
 
-  if (ourMembership.role !== "owner" && input.role == Member_Role.OWNER) {
-    throw RealtimeRpcError.SpaceOwnerRequired
+  if (ourMembership.role === "member" && isMember) {
+    throw RealtimeRpcError.SpaceAdminRequired
   }
 
   let inviteInfo: InviteInfo
@@ -178,15 +185,21 @@ async function createMember(
     throw RealtimeRpcError.UserAlreadyMember
   }
 
-  // Create member
-  const newMember = await MembersModel.createMember(
-    spaceId,
-    userId,
-    ProtocolConvertors.protocolMemberRoleToDb(input.role),
-    { invitedBy: context.currentUserId },
-  )
+  // Db member role
 
-  // Return result
+  let dbMemberRole: DbMemberRole = "member"
+  if (input.role?.role.oneofKind === "member") {
+    dbMemberRole = "member"
+  } else if (input.role?.role.oneofKind === "admin") {
+    dbMemberRole = "admin"
+  }
+
+  // Create member
+  const newMember = await MembersModel.createMember(spaceId, userId, dbMemberRole, {
+    invitedBy: context.currentUserId,
+    canAccessPublicChats: input.role?.role.oneofKind === "member" ? input.role?.role.member.canAccessPublicChats : true,
+  })
+
   return newMember
 }
 

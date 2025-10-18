@@ -1,8 +1,11 @@
 import InlineKit
 import InlineProtocol
-
 import SwiftUI
 import UniformTypeIdentifiers
+
+#if canImport(AppKit)
+import AppKit
+#endif
 
 public struct InviteToSpaceView: View {
   @Environment(\.appDatabase) var db
@@ -16,6 +19,8 @@ public struct InviteToSpaceView: View {
   @State private var emailInput = ""
   @State private var phoneInput = ""
   @State private var selectedInviteType: InviteType = .username
+  @State private var selectedAccessLevel: AccessLevel = .member
+  @State private var canAccessPublicThreads: Bool = true
   @State private var showInviteConfirmation = false
   @State private var selectedUser: ApiUser?
   @State private var showError = false
@@ -31,6 +36,11 @@ public struct InviteToSpaceView: View {
     case username
     case email
     case phone
+  }
+
+  enum AccessLevel {
+    case admin
+    case member
   }
 
   public init(spaceId: Int64) {
@@ -74,6 +84,7 @@ public struct InviteToSpaceView: View {
     Form {
       titleSection
       inviteTypeSection
+      inviteRoleSection
       inputSection
       if selectedInviteType == .username {
         searchResultsSection
@@ -123,9 +134,10 @@ public struct InviteToSpaceView: View {
         Button(action: {
           let text =
             "I invited you to \"\(spaceViewModel.space?.name ?? "")\" on Inline to chat with me.\nIf you don't have the app, get it from TestFlight for iOS and be sure to sign up with this phone number: \(phoneInput).\nhttps://testflight.apple.com/join/FkC3f7fz"
-
-          UIPasteboard.general.items = []
-          UIPasteboard.general.string = text
+          #if canImport(AppKit)
+          NSPasteboard.general.clearContents()
+          NSPasteboard.general.setString(text, forType: .string)
+          #endif
         }) {
           Label("Copy", systemImage: "doc.on.doc")
         }
@@ -154,8 +166,32 @@ public struct InviteToSpaceView: View {
       }
       .pickerStyle(SegmentedPickerStyle())
     }
-    .listRowBackground(Color.clear)
-    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+  }
+
+  @ViewBuilder
+  private var inviteRoleSection: some View {
+    Section {
+      Picker("Access Level", selection: $selectedAccessLevel) {
+        Text("Member").tag(AccessLevel.member)
+        Text("Admin").tag(AccessLevel.admin)
+      }
+      .pickerStyle(.menu)
+
+      if selectedAccessLevel == AccessLevel.member {
+        Toggle(isOn: $canAccessPublicThreads) {
+          Text("Has access to all public chats")
+        }
+      }
+    }
+  }
+
+  private var access: InviteToSpaceTransaction.Context.AccessRole {
+    switch selectedAccessLevel {
+    case .admin:
+      .admin
+    case .member:
+      .member(canAccessPublicChats: canAccessPublicThreads)
+    }
   }
 
   @ViewBuilder var inputSectionField: some View {
@@ -242,10 +278,10 @@ public struct InviteToSpaceView: View {
         .padding(.vertical, 4)
       } else if !search.results.isEmpty {
         ForEach(search.results, id: \.id) { user in
-          RemoteUserItem(user: user) {
+          RemoteUserItem(user: user, action: {
             selectedUser = user
             showInviteConfirmation = true
-          }
+          })
           .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
         }
       } else if !searchQuery.isEmpty {
@@ -253,20 +289,19 @@ public struct InviteToSpaceView: View {
           .foregroundStyle(.secondary)
       }
     }
-    .listRowBackground(Color.clear)
-    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
   }
 
   private func sendEmailInvite() {
     Task {
       do {
         formState.startLoading()
-        try await realtimeV2.send(.inviteToSpace(
-          spaceId: spaceId,
-          role: .member,
-          email: emailInput
-        ))
-
+        try await realtimeV2.send(
+          .inviteToSpace(
+            spaceId: spaceId,
+            access: access,
+            email: emailInput,
+          )
+        )
         formState.succeeded()
         successMessage = "Invite sent to \(emailInput)"
         showSuccess = true
@@ -288,13 +323,13 @@ public struct InviteToSpaceView: View {
     Task {
       do {
         formState.startLoading()
-
-        try await realtimeV2.send(.inviteToSpace(
-          spaceId: spaceId,
-          role: .member,
-          userId: user.id
-        ))
-
+        try await realtimeV2.send(
+          .inviteToSpace(
+            spaceId: spaceId,
+            access: access,
+            userId: user.id,
+          )
+        )
         formState.succeeded()
         successMessage = "Invite sent to \(user.anyName)"
         showSuccess = true
@@ -315,13 +350,13 @@ public struct InviteToSpaceView: View {
     Task {
       do {
         formState.startLoading()
-
-        try await realtimeV2.send(.inviteToSpace(
-          spaceId: spaceId,
-          role: .member,
-          phoneNumber: phoneInput
-        ))
-
+        try await realtimeV2.send(
+          .inviteToSpace(
+            spaceId: spaceId,
+            access: access,
+            phoneNumber: phoneInput,
+          )
+        )
         formState.succeeded()
         showPhoneShare = true
       } catch let error as RealtimeAPIError {
@@ -336,25 +371,25 @@ public struct InviteToSpaceView: View {
 
   private func handleInviteError(_ error: RealtimeAPIError) {
     switch error {
-      case let .rpcError(errorCode, message, _):
-        switch errorCode {
-          case .userIDInvalid:
-            showError(message: "Invalid user selected")
-          case .userAlreadyMember:
-            showError(message: "User is already a member of this space")
-          case .emailInvalid:
-            showError(message: "Invalid email address")
-          default:
-            showError(message: message ?? "Failed to send invite")
-        }
-      case .notAuthorized:
-        showError(message: "You are not authorized to invite members")
-      case .notConnected:
-        showError(message: "Not connected to server")
-      case .stopped:
-        showError(message: "Connection stopped")
-      case let .unknown(error):
-        showError(message: error.localizedDescription)
+    case let .rpcError(errorCode, message, _):
+      switch errorCode {
+      case .userIDInvalid:
+        showError(message: "Invalid user selected")
+      case .userAlreadyMember:
+        showError(message: "User is already a member of this space")
+      case .emailInvalid:
+        showError(message: "Invalid email address")
+      default:
+        showError(message: message ?? "Failed to send invite")
+      }
+    case .notAuthorized:
+      showError(message: "You are not authorized to invite members")
+    case .notConnected:
+      showError(message: "Not connected to server")
+    case .stopped:
+      showError(message: "Connection stopped")
+    case let .unknown(error):
+      showError(message: error.localizedDescription)
     }
   }
 

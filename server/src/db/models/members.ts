@@ -56,7 +56,7 @@ async function createMember(
   spaceId: number,
   userId: number,
   role: DbMemberRole,
-  moreInput: { invitedBy?: number } = {},
+  moreInput: { invitedBy?: number; canAccessPublicChats?: boolean } = { canAccessPublicChats: true },
 ): Promise<DbMember> {
   const newMember = await db
     .insert(members)
@@ -65,6 +65,7 @@ async function createMember(
       userId,
       role,
       invitedBy: moreInput.invitedBy,
+      canAccessPublicChats: moreInput.canAccessPublicChats ?? true,
     })
     .returning()
 

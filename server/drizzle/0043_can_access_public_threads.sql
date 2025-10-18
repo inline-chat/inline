@@ -1,0 +1,1 @@
+ALTER TABLE "members" ADD COLUMN "can_access_public_chats" boolean DEFAULT true;

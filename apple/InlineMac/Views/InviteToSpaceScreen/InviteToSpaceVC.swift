@@ -2,6 +2,7 @@ import AppKit
 import InlineKit
 import InlineUI
 import SwiftUI
+import Invite
 
 class InviteToSpaceViewController: NSViewController {
   var spaceId: Int64
