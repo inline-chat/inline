@@ -5,13 +5,14 @@ import tsconfigPaths from "vite-tsconfig-paths"
 import tailwindcss from "@tailwindcss/vite"
 import stylex from "vite-plugin-stylex"
 
+// @ts-expect-error process is a nodejs global
+const host = process.env.TAURI_DEV_HOST
+
 export default defineConfig({
-  server: {
-    port: 3000,
-  },
   css: {
     postcss: "./postcss.config.cjs", // Vite will automatically pick this up
   },
+
   plugins: [
     tailwindcss(),
     // Enables Vite to resolve imports using path aliases.
@@ -46,4 +47,19 @@ export default defineConfig({
       // },
     }),
   ],
+
+  envPrefix: ["VITE_", "TAURI_"],
+
+  server: {
+    port: 8001,
+    strictPort: true,
+    host: host || false,
+    hmr: host
+      ? {
+          protocol: "ws",
+          host,
+          port: 1421,
+        }
+      : undefined,
+  },
 })

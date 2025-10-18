@@ -1,0 +1,13 @@
+{
+  "name": "@inline-chat/desktop",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "bun scripts/dev.ts"
+  },
+  "dependencies": {
+    "electron": "^38.2.2"
+  },
+  "devDependencies": {}
+}
