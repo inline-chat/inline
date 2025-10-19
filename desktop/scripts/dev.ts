@@ -5,25 +5,36 @@ const build = async () => {
   console.log("Building...");
   await Bun.build({
     entrypoints: ["./src/index.ts"],
-    outdir: "./dist",
+    outdir: "./build",
     external: ["electron"],
     target: "node",
   });
 };
 
-const run = async () => {
+const run = () => {
   console.log("Running...");
-  await $`bun electron dist/index.js`;
+
+  const proc = Bun.spawn(["bun", "electron", "build/index.js"]);
+
+  return () => {
+    console.log("Killing...");
+    proc.kill("SIGINT");
+  };
 };
 
-const buildAndRun = async () => {
-  await build();
-  await run();
-};
+let killPrev: () => void;
 
-buildAndRun();
+await build();
+killPrev = run();
 
 // Build
 watch("./src/", async () => {
-  buildAndRun();
+  killPrev?.();
+  try {
+    await build();
+    killPrev = run();
+  } catch (error) {
+    console.error("Failed to build");
+    console.error(error);
+  }
 });

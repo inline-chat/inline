@@ -4,16 +4,17 @@ app.whenReady().then(() => {
   const mainWindow = new BrowserWindow({
     width: 800,
     height: 600,
-    //transparent: true,
+    transparent: true,
     trafficLightPosition: {
-      x: 30,
-      y: 30,
+      x: 18,
+      y: 18,
     },
+
     frame: true,
 
     visualEffectState: "followWindow",
     titleBarOverlay: true,
-    titleBarStyle: "hiddenInset",
+    titleBarStyle: "hidden",
     vibrancy: "popover",
   });
   mainWindow.loadURL("http://localhost:8001");
