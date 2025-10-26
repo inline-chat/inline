@@ -60,13 +60,30 @@ struct SpacesView: View {
       ToolbarItem(placement: .principal) {
         header
       }
+
       ToolbarItem(placement: .topBarTrailing) {
-        Button {
-          router.presentSheet(.createSpace)
-        } label: {
-          Image(systemName: "plus")
-        }
+        dotsButton
       }
+    }
+  }
+
+  @ViewBuilder
+  private var dotsButton: some View {
+    Menu {
+      Button {
+        router.presentSheet(.createSpace)
+      } label: {
+        Label("Create Space", systemImage: "building")
+      }
+
+      Button {
+        router.push(.settings)
+      } label: {
+        Label("Settings", systemImage: "gearshape")
+      }
+    } label: {
+      Image(systemName: "ellipsis")
+        .contentShape(Rectangle())
     }
   }
 
