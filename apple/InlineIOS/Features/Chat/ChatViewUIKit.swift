@@ -50,10 +50,7 @@ public class ChatContainerView: UIView {
 
   private lazy var composeBlurBackgroundView: VariableBlurUIView = {
     let blurView = VariableBlurUIView(
-      gradientMask: VariableBlurViewConstants.defaultGradientMask,
-      maxBlurRadius: 4,
-      filterType: "variableBlur",
-      rotateForBottomBar: true
+      maxBlurRadius: 4, direction: .blurredBottomClearTop, startOffset: 0
     )
     blurView.translatesAutoresizingMaskIntoConstraints = false
     return blurView

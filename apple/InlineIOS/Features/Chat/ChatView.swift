@@ -66,9 +66,8 @@ struct ChatView: View {
         spaceId: fullChatViewModel.chat?.spaceId ?? 0
       )
       .edgesIgnoringSafeArea(.all)
-      if #unavailable(iOS 26.0) {
-        ChatViewHeader(navBarHeight: $navBarHeight)
-      }
+
+      ChatViewHeader(navBarHeight: $navBarHeight)
     }
     .toolbarBackground(.hidden, for: .navigationBar)
     .toolbarTitleDisplayMode(.inline)
@@ -224,7 +223,7 @@ struct ChatViewHeader: View {
 
   var body: some View {
     VStack {
-      VariableBlurView()
+      VariableBlurView(maxBlurRadius: 4)
         /// +28 to enhance the variant blur effect; it needs more space to cover the full navigation bar background
         .frame(height: navBarHeight + 28) // was 38
         .contentShape(Rectangle())
