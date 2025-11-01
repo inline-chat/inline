@@ -48,6 +48,8 @@ COPY --from=install /temp/prod/node_modules node_modules
 COPY --from=prerelease /usr/src/app/server/dist ./server/dist
 COPY --from=prerelease /usr/src/app/server/package.json ./server/package.json
 COPY --from=prerelease /usr/src/app/package.json .
+COPY --from=prerelease /usr/src/app/bun.lock .
+RUN bun install --frozen-lockfile --production
 
 # Install curl for Coolify healthcheck
 RUN apt-get update && apt-get install -y curl
