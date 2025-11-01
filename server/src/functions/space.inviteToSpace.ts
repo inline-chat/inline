@@ -64,6 +64,10 @@ export const inviteToSpace = async (
     throw RealtimeRpcError.SpaceAdminRequired
   }
 
+  if (ourMembership.role === "member" && isAdmin) {
+    throw RealtimeRpcError.SpaceAdminRequired
+  }
+
   let inviteInfo: InviteInfo
 
   // Determine method
