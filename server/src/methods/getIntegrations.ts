@@ -29,10 +29,7 @@ type Input = Static<typeof Input>
 type Response = Static<typeof Response>
 
 export const handler = async (input: Input, context: HandlerContext): Promise<Response> => {
-  let userId = Number(input.userId)
-  if (isNaN(userId)) {
-    throw new Error("Invalid userId")
-  }
+  let userId = context.currentUserId
 
   let hasLinearConnected = false
   let hasNotionConnected = false

@@ -222,8 +222,10 @@ class MessageListAppKit: NSViewController {
 
     log.trace("viewDidLoad for chat \(chatId)")
 
-    // Read messages
-    // readAll()
+    Task { [weak self] in
+      guard let self, let chat = self.chat else { return }
+      await NotionTaskService.shared.checkIntegrationAccess(peerId: self.peerId, spaceId: chat.spaceId)
+    }
   }
 
   // MARK: - Insets

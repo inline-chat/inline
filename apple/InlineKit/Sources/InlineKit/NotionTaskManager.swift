@@ -8,7 +8,10 @@ import Logger
 public enum NotionTaskError: Error, LocalizedError {
   case spaceSelectionRequired
   case integrationNotFound
-  case apiError(String)
+  case noIntegrationAccess
+  case noNotionSpaces
+  case apiError(Error)
+  case invalidSpaceId
 
   public var errorDescription: String? {
     switch self {
@@ -16,8 +19,14 @@ public enum NotionTaskError: Error, LocalizedError {
         "Space selection is required"
       case .integrationNotFound:
         "No Notion integration found"
-      case let .apiError(message):
-        message
+      case .noIntegrationAccess:
+        "You don't have access to Notion integration"
+      case .noNotionSpaces:
+        "No Notion spaces found"
+      case .apiError(let error):
+        error.localizedDescription
+      case .invalidSpaceId:
+        "Invalid space ID"
     }
   }
 }
@@ -45,7 +54,7 @@ public class NotionTaskManager: @unchecked Sendable {
   // MARK: - Public Interface
 
   /// Checks if user has integration access for the given peer and space
-  public func checkIntegrationAccess(peerId: Peer, spaceId: Int64) async {
+  public func checkIntegrationAccess(peerId: Peer, spaceId: Int64?) async {
     do {
       let integrations = try await ApiClient.shared.getIntegrations(
         userId: Auth.shared.getCurrentUserId() ?? 0,
