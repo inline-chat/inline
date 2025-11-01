@@ -2,7 +2,9 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "rootDir": ".",
-    "declarationDir": "dist"
+    "declarationDir": "dist",
+    "module": "Preserve",
+    "moduleResolution": "bundler"
   },
 
   "references": [
