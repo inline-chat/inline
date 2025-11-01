@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test"
 import { inviteToSpace } from "@in/server/functions/space.inviteToSpace"
 import { testUtils, setupTestLifecycle } from "../setup"
-import { Member_Role } from "@in/protocol/core"
+import { InviteToSpaceInput, Member_Role } from "@in/protocol/core"
 
 function makeFunctionContext(userId: number) {
   return {
@@ -16,9 +16,9 @@ describe("inviteToSpace", () => {
   test("successfully invites a user by email", async () => {
     const { space, users } = await testUtils.createSpaceWithMembers("Invite Space", ["owner@ex.com"])
     const owner = users[0]
-    const input = {
+    const input: InviteToSpaceInput = {
       spaceId: BigInt(space.id),
-      role: Member_Role.MEMBER,
+      role: { role: { oneofKind: "member", member: { canAccessPublicChats: true } } },
       via: { oneofKind: "email" as const, email: "invitee@ex.com" },
     }
     const context = makeFunctionContext(owner.id)
@@ -35,9 +35,9 @@ describe("inviteToSpace", () => {
   })
 
   test("throws error for invalid spaceId", async () => {
-    const input = {
+    const input: InviteToSpaceInput = {
       spaceId: BigInt(-1),
-      role: Member_Role.MEMBER,
+      role: { role: { oneofKind: "member", member: { canAccessPublicChats: true } } },
       via: { oneofKind: "email" as const, email: "invitee@ex.com" },
     }
     const context = makeFunctionContext(1)
@@ -51,7 +51,7 @@ describe("inviteToSpace", () => {
     // Manually set role to 'member' if needed (depends on implementation)
     const input = {
       spaceId: BigInt(space.id),
-      role: Member_Role.ADMIN,
+      role: { role: { oneofKind: "admin" as const, admin: {} } },
       via: { oneofKind: "email" as const, email: "invitee2@ex.com" },
     }
     const context = makeFunctionContext(member.id)
