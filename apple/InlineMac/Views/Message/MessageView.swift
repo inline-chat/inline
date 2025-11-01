@@ -21,6 +21,7 @@ class MessageViewAppKit: NSView {
   private(set) var fullMessage: FullMessage
   private var props: MessageViewProps
   private var translationStateCancellable: AnyCancellable?
+  private var notionAccessCancellable: AnyCancellable?
   private var from: User {
     fullMessage.from ?? User.deletedInstance
   }
@@ -373,6 +374,7 @@ class MessageViewAppKit: NSView {
     scrollState = isScrolling ? .scrolling : .idle
     super.init(frame: .zero)
     setupView()
+    setupNotionAccessObserver()
 
     DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
       self?.setupScrollStateObserver()
@@ -380,7 +382,7 @@ class MessageViewAppKit: NSView {
   }
 
   @available(*, unavailable)
-  required init?(coder: NSCoder) {
+  required init?(coder _: NSCoder) {
     fatalError("init(coder:) has not been implemented")
   }
 
@@ -564,7 +566,7 @@ class MessageViewAppKit: NSView {
     reactionsViewModel?.height = props.layout.reactions?.size.height ?? 0
   }
 
-  private func updateReactions(prev: FullMessage, next: FullMessage, props: MessageViewProps) {
+  private func updateReactions(prev _: FullMessage, next: FullMessage, props: MessageViewProps) {
     if reactionsView == nil, next.reactions.count > 0 {
       log.trace("Adding reactions view \(props.layout.reactions)")
       // Added
@@ -663,7 +665,7 @@ class MessageViewAppKit: NSView {
     }
   }
 
-  @objc private func handleAvatarClick(_ gesture: NSClickGestureRecognizer) {
+  @objc private func handleAvatarClick(_: NSClickGestureRecognizer) {
     guard !isDM else { return }
     guard let user = fullMessage.senderInfo?.user else { return }
 
@@ -973,7 +975,6 @@ class MessageViewAppKit: NSView {
 
     // Setup/update attachments view constraints
     if let attachments = props.layout.attachments {
-      log.trace("Updating attachments view constraints for message \(attachments.size)")
       if let attachmentsViewTopConstraint {
         if attachmentsViewTopConstraint.constant != props.layout.attachmentsContentViewTop {
           attachmentsViewTopConstraint.constant = props.layout.attachmentsContentViewTop
@@ -1211,7 +1212,7 @@ class MessageViewAppKit: NSView {
     }
   }
 
-  func reflectBoundsChange(fraction uncappedFraction: CGFloat) {}
+  func reflectBoundsChange(fraction _: CGFloat) {}
 
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
@@ -1296,6 +1297,14 @@ class MessageViewAppKit: NSView {
     menu = createMenu(context: .message)
   }
 
+  private func setupNotionAccessObserver() {
+    notionAccessCancellable = NotionTaskService.shared.$hasAccess
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] _ in
+        self?.setupContextMenu()
+      }
+  }
+
   @objc private func addReaction() {
     // Show reaction overlay
     showReactionOverlay()
@@ -1343,6 +1352,24 @@ class MessageViewAppKit: NSView {
     state.setEditingMsgId(fullMessage.message.messageId)
   }
 
+  @objc private func handleWillDo() {
+    guard let window else { return }
+
+    Task { @MainActor in
+      let spaceId: Int64? = if message.peerId.isThread {
+        try? Chat.getByPeerId(peerId: message.peerId)?.spaceId
+      } else {
+        nil
+      }
+
+      await NotionTaskCoordinator.shared.handleWillDo(
+        message: message,
+        spaceId: spaceId,
+        window: window
+      )
+    }
+  }
+
   @objc private func saveDocument() {
     guard let documentInfo = fullMessage.documentInfo else { return }
 
@@ -1376,13 +1403,13 @@ class MessageViewAppKit: NSView {
     }
   }
 
-  override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+  override func willOpenMenu(_: NSMenu, with _: NSEvent) {
     // Apply selection style when menu is about to open
     layer?.backgroundColor = NSColor.darkGray
       .withAlphaComponent(0.05).cgColor
   }
 
-  override func didCloseMenu(_ menu: NSMenu, with event: NSEvent?) {
+  override func didCloseMenu(_: NSMenu, with _: NSEvent?) {
     // Remove selection style when menu closes
     layer?.backgroundColor = nil
   }
@@ -1391,7 +1418,7 @@ class MessageViewAppKit: NSView {
 
   private func updatePropsAndUpdateLayout(
     props: MessageViewProps,
-    disableTextRelayout: Bool = false,
+    disableTextRelayout _: Bool = false,
     animate: Bool = false
   ) {
     // update internal props (must update so contentView is recalced)
@@ -1496,6 +1523,10 @@ class MessageViewAppKit: NSView {
       didReachThreshold = false
     }
 
+    // Experimental: I wanted to add this for external task attachments when created, but I'm just adding it here.
+    // Force update constraints
+    needsUpdateConstraints = true
+
     DispatchQueue.main.async(qos: .utility) { [weak self] in
       // As the message changes here, we need to update everything related to that. Otherwise we get wrong context menu.
       self?.setupContextMenu()
@@ -1515,7 +1546,7 @@ class MessageViewAppKit: NSView {
     // }
   }
 
-  private func setTimeAndStateVisibility(visible: Bool) {
+  private func setTimeAndStateVisibility(visible _: Bool) {
 //    NSAnimationContext.runAnimationGroup { context in
 //      context.duration = visible ? 0.05 : 0.05
 //      context.timingFunction = CAMediaTimingFunction(name: .easeOut)
@@ -1808,7 +1839,7 @@ extension MessageViewAppKit {
 // MARK: - NSTextViewDelegate
 
 extension MessageViewAppKit: NSTextViewDelegate {
-  func textView(_ textView: NSTextView, menu: NSMenu, for event: NSEvent, at charIndex: Int) -> NSMenu? {
+  func textView(_: NSTextView, menu: NSMenu, for _: NSEvent, at _: Int) -> NSMenu? {
     createMenu(context: .textView, nativeMenu: menu)
   }
 
@@ -1849,6 +1880,12 @@ extension MessageViewAppKit: NSMenuDelegate {
       let addReactionItem = NSMenuItem(title: "Add Reaction...", action: #selector(addReaction), keyEquivalent: "e")
       addReactionItem.image = NSImage(systemSymbolName: "face.smiling", accessibilityDescription: "Add Reaction")
       menu.addItem(addReactionItem)
+    }
+
+    if regularMessage, NotionTaskService.shared.hasAccess {
+      let willDoItem = NSMenuItem(title: "Will Do", action: #selector(handleWillDo), keyEquivalent: "")
+      willDoItem.image = NSImage(systemSymbolName: "circle.badge.plus", accessibilityDescription: "Create Notion Task")
+      menu.addItem(willDoItem)
     }
 
     if menu.items.count > 0 {
@@ -1999,7 +2036,7 @@ extension MessageViewAppKit: NSTextViewportLayoutControllerDelegate {
     prevDelegate?.textViewportLayoutControllerDidLayout?(textViewportLayoutController)
   }
 
-  func viewportBounds(for textViewportLayoutController: NSTextViewportLayoutController) -> CGRect {
+  func viewportBounds(for _: NSTextViewportLayoutController) -> CGRect {
     // During resize, we need to be more aggressive with the viewport size
     let visibleRect = enclosingScrollView?.documentVisibleRect ?? textView.visibleRect
 
