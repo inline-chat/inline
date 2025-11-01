@@ -1,6 +1,8 @@
 import { build, $ } from "bun"
 import { resolve } from "path"
 import { version } from "../package.json"
+import { migrateDb } from "./helpers/migrate-db"
+
 
 // https://coolify.io/docs/knowledge-base/environment-variables/
 const commitHash =
@@ -9,11 +11,14 @@ const commitHash =
 // Migrate if run in production
 if (process.env.NODE_ENV === "production") {
   console.info(`🚧 Migrating...`)
+  
 
   try {
-    await $`bun scripts/migrate.ts`.quiet()
+    await migrateDb()
+    console.info("🚧 Migrations applied successfully")
+    process.exit(0)
   } catch (error) {
-    console.error("🚨 Error migrating:", error)
+    console.error("🔥 Error applying migrations", error)
     process.exit(1)
   }
 }
