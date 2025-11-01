@@ -366,6 +366,26 @@ struct HomeSidebar: View {
           .foregroundStyle(Color.accent)
       }
 
+      Menu {
+        if home.spaces.isEmpty {
+          Button("Create a Space First") {}.disabled(true)
+        } else {
+          ForEach(home.spaces, id: \.space.id) { spaceItem in
+            Button {
+              nav.open(.inviteToSpace(spaceId: spaceItem.space.id))
+            } label: {
+              Label(spaceItem.space.name, systemImage: "person.badge.plus")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Color.accent)
+            }
+          }
+        }
+      } label: {
+        Label("Invite", systemImage: "person.badge.plus")
+          .font(.system(size: 14, weight: .medium))
+          .foregroundStyle(Color.accent)
+      }
+
     } label: {
       Image(systemName: "plus")
         .font(.system(size: 15, weight: .medium))
