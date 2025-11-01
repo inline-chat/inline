@@ -18,6 +18,7 @@ public struct CreateChatView: View {
   @State private var isPublic = true
   @State private var showEmojiPicker = false
   @State private var selectedPeople: Set<Int64> = []
+  @State private var showParticipantPicker = false
 
   @FocusState private var isTitleFocused: Bool
 
@@ -38,6 +39,14 @@ public struct CreateChatView: View {
       .formStyle(.grouped)
       .scrollContentBackground(.hidden)
       .navigationTitle("Create Chat")
+      .sheet(isPresented: $showParticipantPicker) {
+        SelectParticipantsSheet(
+          spaceId: spaceId,
+          selectedUserIds: $selectedPeople,
+          db: db,
+          isPresented: $showParticipantPicker
+        )
+      }
       .task {
         // Refresh members from server
         await spaceViewModel.refetchMembers()
@@ -132,30 +141,18 @@ public struct CreateChatView: View {
 
   private var invitePeopleSection: some View {
     Section(header: Text("Invite People")) {
-      List {
-        ForEach(spaceViewModel.filteredMembers, id: \.id) { member in
-          memberRow(member)
-        }
+      HStack {
+        Text(selectedPeople.isEmpty ? "Select participants" : "\(selectedPeople.count) participant\(selectedPeople.count == 1 ? "" : "s") selected")
+          .foregroundColor(selectedPeople.isEmpty ? .secondary : .primary)
+        Spacer()
+        Image(systemName: "chevron.right")
+          .foregroundColor(.secondary)
+          .font(.system(size: 12))
       }
-    }
-  }
-
-  private func memberRow(_ member: FullMemberItem) -> some View {
-    HStack {
-      Text(member.userInfo.user.displayName)
-      Spacer()
-      if selectedPeople.contains(member.userInfo.user.id) {
-        Image(systemName: "checkmark")
-          .foregroundColor(.blue)
-      }
-    }
-    .contentShape(Rectangle())
-    .onTapGesture {
-      let userId = member.userInfo.user.id
-      if selectedPeople.contains(userId) {
-        selectedPeople.remove(userId)
-      } else {
-        selectedPeople.insert(userId)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .contentShape(Rectangle())
+      .onTapGesture {
+        showParticipantPicker = true
       }
     }
   }

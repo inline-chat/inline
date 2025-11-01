@@ -7,7 +7,11 @@ public final class SpaceFullMembersViewModel: ObservableObject {
   @Published public private(set) var space: Space?
   /// The full members for this space.
   @Published public private(set) var members: [FullMemberItem] = []
-  
+  /// Loading state for refetching members from server
+  @Published public private(set) var isLoading = false
+  /// Error message if fetching fails
+  @Published public private(set) var errorMessage: String?
+
   public var filteredMembers: [FullMemberItem] {
     members.filter { member in
       // Filter out users who are pending setup
@@ -67,9 +71,14 @@ public final class SpaceFullMembersViewModel: ObservableObject {
   
   /// Refetch members from the server
   public func refetchMembers() async {
+    isLoading = true
+    errorMessage = nil
     do {
       try await Api.realtime.send(.getSpaceMembers(spaceId: spaceId))
+      isLoading = false
     } catch {
+      isLoading = false
+      errorMessage = error.localizedDescription
       Log.shared.error("Failed to refetch space members: \(error)")
     }
   }
