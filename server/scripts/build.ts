@@ -9,6 +9,7 @@ const commitHash =
 // Migrate if run in production
 if (process.env.NODE_ENV === "production") {
   console.info(`🚧 Migrating...`)
+  await $`cd ${resolve(__dirname, "../node_modules/drizzle-orm/postgres-js/migrator")}`.quiet()
   try {
     await $`bun scripts/migrate.ts`.quiet()
   } catch (error) {
