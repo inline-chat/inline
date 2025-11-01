@@ -2,6 +2,9 @@ import { describe, test, expect } from "bun:test"
 import { inviteToSpace } from "@in/server/functions/space.inviteToSpace"
 import { testUtils, setupTestLifecycle } from "../setup"
 import { InviteToSpaceInput, Member_Role } from "@in/protocol/core"
+import { schema } from "@in/server/db/relations"
+import { db } from "@in/server/db"
+import { and, eq } from "drizzle-orm"
 
 function makeFunctionContext(userId: number) {
   return {
@@ -16,6 +19,9 @@ describe("inviteToSpace", () => {
   test("successfully invites a user by email", async () => {
     const { space, users } = await testUtils.createSpaceWithMembers("Invite Space", ["owner@ex.com"])
     const owner = users[0]
+    // Update permission to admin
+    await db.update(schema.members).set({ role: "admin" }).where(and(eq(schema.members.userId, owner.id), eq(schema.members.spaceId, space.id))).execute()
+    
     const input: InviteToSpaceInput = {
       spaceId: BigInt(space.id),
       role: { role: { oneofKind: "member", member: { canAccessPublicChats: true } } },
