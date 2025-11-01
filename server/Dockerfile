@@ -9,6 +9,7 @@ FROM base AS install
 RUN mkdir -p /temp/dev
 COPY package.json bun.lock /temp/dev/
 COPY web/package.json /temp/dev/web/
+COPY desktop/package.json /temp/dev/desktop/
 COPY scripts/package.json /temp/dev/scripts/
 COPY server/package.json /temp/dev/server/
 RUN cd /temp/dev && bun install --frozen-lockfile
@@ -17,6 +18,7 @@ RUN cd /temp/dev && bun install --frozen-lockfile
 RUN mkdir -p /temp/prod
 COPY package.json bun.lock /temp/prod/
 COPY web/package.json /temp/prod/web/
+COPY desktop/package.json /temp/prod/desktop/
 COPY scripts/package.json /temp/prod/scripts/
 COPY server/package.json /temp/prod/server/
 RUN cd /temp/prod && bun install --frozen-lockfile --production

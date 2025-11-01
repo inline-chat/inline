@@ -9,26 +9,7 @@ const commitHash =
 // Migrate if run in production
 if (process.env.NODE_ENV === "production") {
   console.info(`🚧 Migrating...`)
-  try {
-    await $`ls ${resolve(__dirname, "./node_modules/drizzle-orm/")}`.quiet()
-  } catch (error) {
-    console.error("🚨 Error listing drizzle-orm:", error)
-  }
-  try {
-    await $`ls ${resolve(__dirname, "../node_modules/drizzle-orm/")}`.quiet()
-  } catch (error) {
-    console.error("🚨 Error listing drizzle-orm:", error)
-  }
-  try {
-    await $`ls ${resolve(__dirname, "../../node_modules/drizzle-orm/")}`.quiet()
-  } catch (error) {
-    console.error("🚨 Error listing drizzle-orm:", error)
-  }
-  try {
-    await $`ls ${resolve(__dirname, "../../node_modules/drizzle-orm/postgres-js")}`.quiet()
-  } catch (error) {
-    console.error("🚨 Error listing drizzle-orm/postgres-js:", error)
-  }
+
   try {
     await $`bun scripts/migrate.ts`.quiet()
   } catch (error) {
