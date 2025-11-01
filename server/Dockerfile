@@ -39,6 +39,7 @@ ENV DATABASE_URL=${DATABASE_URL}
 # [optional] tests & build
 ENV NODE_ENV=production
 # RUN bun typecheck 
+RUN bun install --frozen-lockfile 
 RUN cd server && bun run build
 
 # copy production dependencies and source code into final image
