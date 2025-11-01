@@ -50,6 +50,7 @@ class ExternalTaskAttachmentView: NSView, AttachmentView {
     label.isSelectable = false
     label.isBezeled = false
     label.isBordered = false
+    label.drawsBackground = false
     label.font = .systemFont(ofSize: 13)
     label.textColor = .labelColor
     label.lineBreakMode = .byTruncatingTail
@@ -71,6 +72,7 @@ class ExternalTaskAttachmentView: NSView, AttachmentView {
     label.isSelectable = false
     label.isBezeled = false
     label.isBordered = false
+    label.drawsBackground = false
     label.lineBreakMode = .byTruncatingTail
     label.maximumNumberOfLines = 1
     return label
