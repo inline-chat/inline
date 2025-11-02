@@ -10,20 +10,24 @@ struct ChatView: View {
   var peerId: Peer
   var preview: Bool
 
-  @State private var navBarHeight: CGFloat = 0
-  @State private var isChatHeaderPressed = false
-  @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
-  @EnvironmentObject var data: DataManager
-  @Environment(Router.self) private var router
+  @State var navBarHeight: CGFloat = 0
+  @State var isChatHeaderPressed = false
 
+  @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
+
+  @EnvironmentObject var data: DataManager
+  @EnvironmentObject var realtimeState: RealtimeState
+
+  @Environment(Router.self) var router
   @Environment(\.appDatabase) var database
   @Environment(\.scenePhase) var scenePhase
   @Environment(\.realtime) var realtime
-  @EnvironmentObject var realtimeState: RealtimeState
+  @Environment(\.colorScheme) var colorScheme
 
   @ObservedObject var composeActions: ComposeActions = .shared
 
   static let formatter = RelativeDateTimeFormatter()
+
   var toolbarAvatarSize: CGFloat {
     if #available(iOS 26.0, *) {
       44
@@ -56,10 +60,8 @@ struct ChatView: View {
     }
   }
 
-  // MARK: - Body
-
   var body: some View {
-    ZStack {
+    ZStack(alignment: .top) {
       ChatViewUIKit(
         peerId: peerId,
         chatId: fullChatViewModel.chat?.id ?? 0,
@@ -69,13 +71,15 @@ struct ChatView: View {
 
       ChatViewHeader(navBarHeight: $navBarHeight)
     }
+    .toolbarColorScheme(colorScheme == .dark ? .dark : .light, for: .navigationBar)
     .toolbarBackground(.hidden, for: .navigationBar)
     .toolbarTitleDisplayMode(.inline)
     .toolbar(.hidden, for: .tabBar)
     .toolbarRole(.editor)
     .toolbar {
       ToolbarItem(placement: .topBarTrailing) {
-        translateButton
+        TranslationButton(peer: peerId)
+          .tint(ThemeManager.shared.accentColor)
       }
 
       if #available(iOS 26.0, *) {
@@ -135,112 +139,7 @@ struct ChatView: View {
     .environment(router)
   }
 
-  @ViewBuilder
-  var toolbarLeadingView: some View {
-    HStack(spacing: 8) {
-      if isThreadChat {
-        Circle()
-          .fill(
-            LinearGradient(
-              colors: chatProfileColors,
-              startPoint: .top,
-              endPoint: .bottom
-            )
-          )
-          .frame(width: toolbarAvatarSize, height: toolbarAvatarSize)
-          .overlay {
-            Text(
-              String(describing: fullChatViewModel.chat?.emoji ?? "💬")
-                .replacingOccurrences(of: "Optional(\"", with: "")
-                .replacingOccurrences(of: "\")", with: "")
-            )
-            .font(.title2)
-          }
-      } else {
-        if let user = fullChatViewModel.peerUserInfo {
-          UserAvatar(userInfo: user, size: toolbarAvatarSize)
-        } else {
-          Circle()
-            .fill(
-              LinearGradient(
-                colors: chatProfileColors,
-                startPoint: .top,
-                endPoint: .bottom
-              )
-            ).frame(width: toolbarAvatarSize, height: toolbarAvatarSize)
-        }
-      }
-
-      VStack(alignment: .leading, spacing: 0) {
-        Text(title)
-          .font(.body)
-        subtitleView
-      }
-    }
-    .scaledToFill()
-    .fixedSize()
-    .opacity(isChatHeaderPressed ? 0.7 : 1.0)
-    .onTapGesture {
-      if let chatItem = fullChatViewModel.chatItem {
-        router.push(.chatInfo(chatItem: chatItem))
-      }
-    }
-    .onLongPressGesture(minimumDuration: 0, maximumDistance: .infinity, pressing: { pressing in
-      withAnimation(.easeInOut(duration: 0.1)) {
-        isChatHeaderPressed = pressing
-      }
-    }, perform: {})
-  }
-
-  @ViewBuilder
-  var header: some View {
-    VStack(alignment: .leading, spacing: 0) {
-      Text(title)
-        .font(.body)
-
-      subtitleView
-    }
-    .fixedSize(horizontal: false, vertical: true)
-  }
-
-  @ViewBuilder
-  var translateButton: some View {
-    TranslationButton(peer: peerId)
-      .tint(ThemeManager.shared.accentColor)
-  }
-
   func fetch() {
     fullChatViewModel.refetchChatView()
-  }
-}
-
-struct ChatViewHeader: View {
-  @Binding private var navBarHeight: CGFloat
-
-  init(navBarHeight: Binding<CGFloat>) {
-    _navBarHeight = navBarHeight
-  }
-
-  var body: some View {
-    VStack {
-      VariableBlurView(maxBlurRadius: 4)
-        /// +28 to enhance the variant blur effect; it needs more space to cover the full navigation bar background
-        .frame(height: navBarHeight + 28) // was 38
-        .contentShape(Rectangle())
-        .background(
-          LinearGradient(
-            gradient: Gradient(colors: [
-              ThemeManager.shared.backgroundColorSwiftUI.opacity(1),
-              ThemeManager.shared.backgroundColorSwiftUI.opacity(0.0),
-            ]),
-            startPoint: .top,
-            endPoint: .bottom
-          )
-        )
-
-      Spacer()
-    }
-    .ignoresSafeArea(.all)
-    .allowsHitTesting(false)
   }
 }
