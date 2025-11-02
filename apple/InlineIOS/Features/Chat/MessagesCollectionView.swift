@@ -1437,7 +1437,8 @@ private extension MessagesCollectionView {
             let messageView = cell.messageView?.bubbleView else { return nil }
 
       let parameters = UIPreviewParameters()
-
+      parameters.backgroundColor = messageView.backgroundColor
+      
       let targetedPreview = UITargetedPreview(view: messageView, parameters: parameters)
       return targetedPreview
     }
