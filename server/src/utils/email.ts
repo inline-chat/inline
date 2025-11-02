@@ -143,8 +143,10 @@ ${
     : `
 To start chatting, get the app from TestFlight from one of the links below. Then, sign up via your email: "${email}".
 
-iOS: https://testflight.apple.com/join/FkC3f7fz
-macOS: https://testflight.apple.com/join/Z8zUcWZH
+For iPhone/iPad: https://testflight.apple.com/join/FkC3f7fz
+(Here's a video showing how to install: https://www.loom.com/share/73f951f0963843f588c921751ac82603)
+
+For Mac: https://testflight.apple.com/join/Z8zUcWZH
     `
 }
 
