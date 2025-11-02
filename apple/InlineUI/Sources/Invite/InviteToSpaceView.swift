@@ -123,7 +123,7 @@ public struct InviteToSpaceView: View {
       Text(
         "I invited you to \"\(spaceViewModel.space?.name ?? "")\" on Inline to chat with me.\nIf you don't have the app, get it from TestFlight for iOS and be sure to sign up with this phone number: \(phoneInput).\nhttps://testflight.apple.com/join/FkC3f7fz (Video installation guide: https://www.loom.com/share/73f951f0963843f588c921751ac82603)"
       )
-      .font(.body) s
+      .font(.body) 
       .multilineTextAlignment(.leading)
       .padding()
       .frame(maxWidth: .infinity, alignment: .leading)
