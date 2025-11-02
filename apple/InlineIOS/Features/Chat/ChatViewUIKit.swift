@@ -48,12 +48,32 @@ public class ChatContainerView: UIView {
     return view
   }()
 
-  private lazy var composeBlurBackgroundView: VariableBlurUIView = {
-    let blurView = VariableBlurUIView(
-      maxBlurRadius: 4, direction: .blurredBottomClearTop, startOffset: 0
-    )
-    blurView.translatesAutoresizingMaskIntoConstraints = false
-    return blurView
+  private lazy var composeBlurBackgroundView: UIView = {
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+
+    let gradientLayer = CAGradientLayer()
+    let dynamicColor = UIColor { traitCollection in
+      traitCollection.userInterfaceStyle == .dark
+//        ? UIColor.red
+//        : UIColor.red
+        ? UIColor.systemBackground
+        : UIColor.systemBackground
+    }
+    gradientLayer.colors = [
+      dynamicColor.cgColor,
+      dynamicColor.withAlphaComponent(0.5).cgColor,
+      dynamicColor.withAlphaComponent(0.0).cgColor,
+    ]
+
+    gradientLayer.locations = [0, 0.8, 1]
+    gradientLayer.startPoint = CGPoint(x: 0.5, y: 1.0)
+    gradientLayer.endPoint = CGPoint(x: 0.5, y: 0.0)
+    view.layer.insertSublayer(gradientLayer, at: 0)
+
+    view.layer.name = "gradientLayer"
+
+    return view
   }()
 
   private lazy var borderView: UIView = {
@@ -130,9 +150,9 @@ public class ChatContainerView: UIView {
         composeBlurBackgroundView.trailingAnchor.constraint(equalTo: composeContainerView.trailingAnchor),
         composeBlurBackgroundView.topAnchor.constraint(
           equalTo: composeContainerView.topAnchor,
-          constant: -20
+          constant: -10
         ),
-        composeBlurBackgroundView.bottomAnchor.constraint(equalTo: composeContainerView.bottomAnchor),
+        composeBlurBackgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
         composeContainerView.leadingAnchor.constraint(equalTo: leadingAnchor),
         composeContainerView.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -449,6 +469,34 @@ public class ChatContainerView: UIView {
 
   override public func layoutSubviews() {
     super.layoutSubviews()
+
+    if let gradientLayer = composeBlurBackgroundView.layer.sublayers?
+      .first(where: { $0 is CAGradientLayer }) as? CAGradientLayer
+    {
+      gradientLayer.frame = composeBlurBackgroundView.bounds
+    }
+  }
+
+  override public func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+    super.traitCollectionDidChange(previousTraitCollection)
+
+    if traitCollection
+      .hasDifferentColorAppearance(comparedTo: previousTraitCollection)
+    {
+      updateGradientColors()
+    }
+  }
+
+  private func updateGradientColors() {
+    if let gradientLayer = composeBlurBackgroundView.layer.sublayers?
+      .first(where: { $0 is CAGradientLayer }) as? CAGradientLayer
+    {
+      let backgroundColor = UIColor.systemBackground
+      gradientLayer.colors = [
+        backgroundColor.resolvedColor(with: traitCollection).cgColor,
+        backgroundColor.withAlphaComponent(0.0).resolvedColor(with: traitCollection).cgColor,
+      ]
+    }
   }
 }
 
