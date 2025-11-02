@@ -1,7 +1,7 @@
 import Auth
 import InlineKit
+import InlineUI
 import RealtimeV2
-
 import SwiftUI
 
 extension ChatView {
@@ -127,6 +127,64 @@ extension ChatView {
       .padding(.top, -2)
       .fixedSize()
     }
+  }
+
+  @ViewBuilder
+  var toolbarLeadingView: some View {
+    HStack(spacing: 8) {
+      if isThreadChat {
+        Circle()
+          .fill(
+            LinearGradient(
+              colors: chatProfileColors,
+              startPoint: .top,
+              endPoint: .bottom
+            )
+          )
+          .frame(width: toolbarAvatarSize, height: toolbarAvatarSize)
+          .overlay {
+            Text(
+              String(describing: fullChatViewModel.chat?.emoji ?? "💬")
+                .replacingOccurrences(of: "Optional(\"", with: "")
+                .replacingOccurrences(of: "\")", with: "")
+            )
+            .font(.title2)
+          }
+      } else {
+        if let user = fullChatViewModel.peerUserInfo {
+          UserAvatar(userInfo: user, size: toolbarAvatarSize)
+        } else {
+          Circle()
+            .fill(
+              LinearGradient(
+                colors: chatProfileColors,
+                startPoint: .top,
+                endPoint: .bottom
+              )
+            ).frame(width: toolbarAvatarSize, height: toolbarAvatarSize)
+        }
+      }
+
+      VStack(alignment: .leading, spacing: 0) {
+        Text(title)
+          .font(.body)
+          .fontWeight(.medium)
+        subtitleView
+      }
+    }
+    .scaledToFill()
+    .fixedSize()
+    .opacity(isChatHeaderPressed ? 0.7 : 1.0)
+    .onTapGesture {
+      if let chatItem = fullChatViewModel.chatItem {
+        router.push(.chatInfo(chatItem: chatItem))
+      }
+    }
+    .onLongPressGesture(minimumDuration: 0, maximumDistance: .infinity, pressing: { pressing in
+      withAnimation(.easeInOut(duration: 0.1)) {
+        isChatHeaderPressed = pressing
+      }
+    }, perform: {})
   }
 }
 
