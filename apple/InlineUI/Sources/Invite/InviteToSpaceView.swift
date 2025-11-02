@@ -121,9 +121,9 @@ public struct InviteToSpaceView: View {
         .padding(.top)
 
       Text(
-        "I invited you to \"\(spaceViewModel.space?.name ?? "")\" on Inline to chat with me.\nIf you don't have the app, get it from TestFlight for iOS and be sure to sign up with this phone number: \(phoneInput).\nhttps://testflight.apple.com/join/FkC3f7fz"
+        "I invited you to \"\(spaceViewModel.space?.name ?? "")\" on Inline to chat with me.\nIf you don't have the app, get it from TestFlight for iOS and be sure to sign up with this phone number: \(phoneInput).\nhttps://testflight.apple.com/join/FkC3f7fz (Video installation guide: https://www.loom.com/share/73f951f0963843f588c921751ac82603)"
       )
-      .font(.body)
+      .font(.body) s
       .multilineTextAlignment(.leading)
       .padding()
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -133,7 +133,7 @@ public struct InviteToSpaceView: View {
       HStack(spacing: 12) {
         Button(action: {
           let text =
-            "I invited you to \"\(spaceViewModel.space?.name ?? "")\" on Inline to chat with me.\nIf you don't have the app, get it from TestFlight for iOS and be sure to sign up with this phone number: \(phoneInput).\nhttps://testflight.apple.com/join/FkC3f7fz"
+            "I invited you to \"\(spaceViewModel.space?.name ?? "")\" on Inline to chat with me.\nIf you don't have the app, get it from TestFlight for iOS and be sure to sign up with this phone number: \(phoneInput).\nhttps://testflight.apple.com/join/FkC3f7fz (Video installation guide: https://www.loom.com/share/73f951f0963843f588c921751ac82603)"
           #if canImport(AppKit)
           NSPasteboard.general.clearContents()
           NSPasteboard.general.setString(text, forType: .string)
@@ -187,10 +187,10 @@ public struct InviteToSpaceView: View {
 
   private var access: InviteToSpaceTransaction.Context.AccessRole {
     switch selectedAccessLevel {
-    case .admin:
-      .admin
-    case .member:
-      .member(canAccessPublicChats: canAccessPublicThreads)
+      case .admin:
+        .admin
+      case .member:
+        .member(canAccessPublicChats: canAccessPublicThreads)
     }
   }
 
@@ -371,25 +371,25 @@ public struct InviteToSpaceView: View {
 
   private func handleInviteError(_ error: RealtimeAPIError) {
     switch error {
-    case let .rpcError(errorCode, message, _):
-      switch errorCode {
-      case .userIDInvalid:
-        showError(message: "Invalid user selected")
-      case .userAlreadyMember:
-        showError(message: "User is already a member of this space")
-      case .emailInvalid:
-        showError(message: "Invalid email address")
-      default:
-        showError(message: message ?? "Failed to send invite")
-      }
-    case .notAuthorized:
-      showError(message: "You are not authorized to invite members")
-    case .notConnected:
-      showError(message: "Not connected to server")
-    case .stopped:
-      showError(message: "Connection stopped")
-    case let .unknown(error):
-      showError(message: error.localizedDescription)
+      case let .rpcError(errorCode, message, _):
+        switch errorCode {
+          case .userIDInvalid:
+            showError(message: "Invalid user selected")
+          case .userAlreadyMember:
+            showError(message: "User is already a member of this space")
+          case .emailInvalid:
+            showError(message: "Invalid email address")
+          default:
+            showError(message: message ?? "Failed to send invite")
+        }
+      case .notAuthorized:
+        showError(message: "You are not authorized to invite members")
+      case .notConnected:
+        showError(message: "Not connected to server")
+      case .stopped:
+        showError(message: "Connection stopped")
+      case let .unknown(error):
+        showError(message: error.localizedDescription)
     }
   }
 
