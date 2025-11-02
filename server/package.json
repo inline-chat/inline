@@ -18,7 +18,7 @@
     "db:studio": "drizzle-kit studio --port 8010 --schema src/db/schema/index.ts --out drizzle --dialect postgresql",
     "drizzle:up": "drizzle-kit up --dialect=postgresql",
     "proto:generate-ts": "npx protoc --ts_out ./protocol/ --proto_path protos protos/messages.proto",
-    "lint": "eslint . --cache",
+    "lint": "bunx oxlint@latest",
     "lint:fix": "eslint . --fix"
   },
   "overrides": {
