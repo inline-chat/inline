@@ -53,7 +53,7 @@ final class MessagesCollectionView: UICollectionView {
 
     let style = _UIContextMenuStyle.perform(NSSelectorFromString("defaultStyle")).takeUnretainedValue() as! NSObject
 
-    let preferredEdgeInsets = UIEdgeInsets(top: 150.0, left: 30.0, bottom: 150.0, right: 30.0)
+    let preferredEdgeInsets = UIEdgeInsets(top: 0.0, left: 30.0, bottom: 0.0, right: 30.0)
     style.setValue(preferredEdgeInsets, forKey: "preferredEdgeInsets")
 
     return style
@@ -67,6 +67,7 @@ final class MessagesCollectionView: UICollectionView {
 
     if #available(iOS 26.0, *) {
       topEdgeEffect.isHidden = true
+      bottomEdgeEffect.isHidden = true
     } else {}
 
     register(
@@ -138,7 +139,8 @@ final class MessagesCollectionView: UICollectionView {
       return
     }
 
-    let topContentPadding: CGFloat = 10
+    // let topContentPadding: CGFloat = 10
+    let topContentPadding: CGFloat = -10
     let navBarHeight = (findViewController()?.navigationController?.navigationBar.frame.height ?? 0)
 
     let isLandscape = UIDevice.current.orientation.isLandscape
@@ -1492,9 +1494,12 @@ private extension MessagesCollectionView {
         // which is actually at the maximum content offset position
         let maxOffset = scrollView.contentSize.height - scrollView.bounds.size.height
         let threshold: CGFloat = 100 // Load when within 100 points of the top
+
+        // Ensure we're within valid content bounds (not overscrolling)
+        let isWithinBounds = scrollView.contentOffset.y <= maxOffset
         let isNearTop = scrollView.contentOffset.y >= (maxOffset - threshold)
 
-        if isNearTop, maxOffset > 0 {
+        if isNearTop, isWithinBounds, maxOffset > 0 {
           viewModel.loadBatch(at: .older)
           scheduleUpdateItems()
         }
@@ -1512,6 +1517,7 @@ private extension MessagesCollectionView {
       let missingIds = availableIds.subtracting(currentIds)
 
       if !missingIds.isEmpty {
+        print("missingIds = \(missingIds)")
         setInitialData(animated: false)
       }
     }
