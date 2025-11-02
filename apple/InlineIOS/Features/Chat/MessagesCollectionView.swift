@@ -130,7 +130,7 @@ final class MessagesCollectionView: UICollectionView {
     }
   }
 
-  static let messagesBottomPadding = 6.0
+  static let messagesBottomPadding = 12.0
   func updateContentInsets() {
     guard !MessagesCollectionView.contextMenuOpen else {
       return
