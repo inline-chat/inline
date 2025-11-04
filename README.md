@@ -5,24 +5,66 @@
   <br>Inline
 </h1>
   <p align="center">
-    A thoughtfully crafted, native work chat app that just works.
+    A work chat app for high-performance teams.
   </p>
 </p>
 
 ## About
 
-Inline is the team chat app we wished existed, so we're building it ourselves. We tried Slack, Discord, iMessage, Telegram, etc but none of them felt quite right. Those are good apps so if they work well for you, we're not saying Inline will be better for you. Here's what Inline is:
+Inline is a successor to traditional chat apps like Slack. It's fast, lightweight, scalable and powerful.
 
-- **Fast**: 120-fps, instant app startup, no spinners.
-- **Lightweight**: Sub-1% CPU usage, low RAM footprint.
-- **Simple**: Clutter-free. Familiar concepts. Easy to use.
-- **Developer-friendly**: Our API is public and designed to be very easy to use.
-- **Powerful**: Feature-rich yet refreshingly well designed.
-- **Organized**: Less cognitive load. Never lose a message deep in a thread.
-- **Tranquil**: Stay in the flow longer by only seeing content that you need to.
-- **Better notifications**: Inline can avoid distracting you when something does not require your attention.
+## What's Inline
 
-We're currently two cofounders developing Inline full-time.
+We're designing Inline with these goals in mind.
+
+### A place where new ideas take shape
+
+An idea doesn't form in the issue tracker, the company wiki, or Google Docs. The earliest sparks of ideas often aren't shared. They're jotted down in private notes or mentioned in the office and then get lost. The work chat app should encourage collecting all these unpolished ideas in threads, allowing them to develop slowly with others.
+
+### Maximum sharing
+
+It should accommodate maximum sharing of ideas and information. Sharing less information directly impacts team alignment, collaboration, and the development of new ideas. Friction kills collective thinking. Sharing more shouldn't cause more notifications or chaos in large chats. Eventually, these small threads link and form a graph of the team's ideas, thoughts, and information.
+
+### Highest signal-to-noise ratio
+
+Minimum distraction—allowing you to stay in the zone for as long as possible without having to quit the app. It should be tranquil and in your control. Everything you see on the screen should matter to you; otherwise, you can close it.
+
+### Simplicity = Flexibility = Power
+
+A simple concept can have infinite applications— a shareable thread containing messages or more threads. You can use it to collect feedback, track bugs, review work together, write specs, brainstorm, take meeting notes, put together a team library, share assets, etc.
+
+## How we're designing it
+
+### Threads
+
+Threads are the building blocks of organized and focused chats with your teammates. Seamlessly go from rapid back-and-forth to async discussions spanning days without losing track. Each thread gets a number and optionally a title for easy reference. Threads are shareable via links or by inviting users by username.
+
+### Sidebar
+
+The sidebar is a list of chats (threads and direct messages) you want to see at the moment. Additionally, chats that require your attention get added at the bottom (e.g., when you're explicitly mentioned in a thread). You can close any chats you don't care about at the moment. You can reopen them whenever you want. Think of "opening" as how you only open application windows on your desktop that you need at any time.
+
+### Spaces
+
+If you've joined 20 communities, a few friend groups, and you have your company chat, you shouldn't have to see all of those screaming in your face. Inline Spaces can be opened as tabs and closed when you don't need them anymore. Only what you care about right now.
+
+### Home
+
+You can use the app without being part of any team. In your Home, you can start direct messages, get invited to threads, or create them.
+
+### Communities
+
+We think of friend groups and communities as first-class citizens. At this point, we're primarily focused on team chat because that helps us build a sustainable business faster. The first community in the app is our own: the Town Hall.
+
+### ... (more soon)
+
+## Technical Details
+
+- iOS and macOS apps are written in Swift using AppKit, UIKit, and SwiftUI.
+- We aim for 120 fps, instant app startup, and low CPU and RAM usage.
+- We'll have a web-based desktop app experience for Windows and Linux.
+- Our Android app will start as a React Native app because of our development bandwidth.
+- Our server is written in TypeScript running on Bun.
+- We'll release our API docs and an SDK soon.
 
 ### Platform Support
 
@@ -35,14 +77,11 @@ We're currently two cofounders developing Inline full-time.
 | Windows  | Not started               |
 | Linux    | Not started               |
 
-> [!IMPORTANT]
-> Inline is in the alpha stage, and only suitable for use by enthusiastic testers willing to endure an incomplete app with bugs. However, it's our own daily driver and we're actively developing it.
-
 ## Download
 
 - [Join the waitlist](https://inline.chat)
 - Inline is not ready for production use yet.
-- We give access to early testers who can help us test the app as we're building it.
+- We'll soon give access to early testers who can help us test the app as we're building it. Reach out if you want to be an alpha tester.
 
 ## How to run this yourself
 
@@ -64,9 +103,27 @@ bun run dev
 ### Contributing
 
 - We <3 contributions.
-- Bear in mind that the project is under heavy development and we don't have a proccess for accepting contributions yet.
+- Bear in mind that the project is under heavy development and we don't have a process for accepting contributions yet.
 - Submit a [feature request](https://github.com/inline-chat/inline/discussions/new?category=ideas) or [bug report](https://github.com/inline-chat/inline/issues/new?labels=bug)
+
+## FAQ
+
+### What stage are you at?
+
+We currently have a closed alpha with a few teams. Our native macOS and iOS apps are in production and our web app is in development. Once those reach a stable point, we plan to ship desktop clients for Windows and Linux, and an Android app.
+
+### Is it paid?
+
+The app will eventually be free for individuals, communities, etc., with a paid plan for teams. However, at this time we're focused on paid teams to build a sustainable business and to work closely with early users to build what they need.
+
+### How can you possibly build this? Many people have failed!
+
+We have six years of experience building team communication and collaboration apps. Previously, this team co-founded [Noor](https://noor.to), a virtual office and work chat app, and we're applying those learnings to what we're building today. Time will tell, and you can be the judge when the app is released. I believe we're all better served if we get a great alternative to the current status quo, which has remained unchanged for over a decade.
 
 ## License
 
 Inline's macOS and iOS clients are licensed under the [GNU Affero General Public License v3.0](LICENSE).
+
+## Thanks
+
+Thank you for following Inline and helping us build this. We'll be sharing updates on our X (Twitter) accounts. Please don't hesitate to reach out; if you have a question, we'll be happy to chat.
