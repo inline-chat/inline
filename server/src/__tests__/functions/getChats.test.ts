@@ -103,15 +103,15 @@ describe("getChats", () => {
 
     const [user4, user5] = users
 
-    const existingChat = await testUtils.createPrivateChat(user4, user5)
+    const existingChat = (await testUtils.createPrivateChat(user4!, user5!))!
     await db
       .insert(schema.dialogs)
       .values([
-        { chatId: existingChat.id, userId: user4.id, peerUserId: user5.id },
-        { chatId: existingChat.id, userId: user5.id, peerUserId: user4.id },
+        { chatId: existingChat.id, userId: user4!.id, peerUserId: user5!.id },
+        { chatId: existingChat.id, userId: user5!.id, peerUserId: user4!.id },
       ])
 
-    await getChats({}, makeHandlerContext(user4.id))
+    await getChats({}, makeHandlerContext(user4!.id))
 
     const chatsAfter = await db
       .select()
@@ -119,8 +119,8 @@ describe("getChats", () => {
       .where(
         and(
           eq(schema.chats.type, "private"),
-          eq(schema.chats.minUserId, Math.min(user4.id, user5.id)),
-          eq(schema.chats.maxUserId, Math.max(user4.id, user5.id)),
+          eq(schema.chats.minUserId, Math.min(user4!.id, user5!.id)),
+          eq(schema.chats.maxUserId, Math.max(user4!.id, user5!.id)),
         ),
       )
     expect(chatsAfter.length).toBe(1)
@@ -135,32 +135,32 @@ describe("getChats", () => {
 
     const [user6, user7] = users
 
-    const existingChat = await testUtils.createPrivateChat(user6, user7)
+    const existingChat = (await testUtils.createPrivateChat(user6!, user7!))!
 
     const dialogsBefore = await db.select().from(schema.dialogs).where(eq(schema.dialogs.chatId, existingChat.id))
     expect(dialogsBefore.length).toBe(0)
 
-    await getChats({}, makeHandlerContext(user6.id))
+    await getChats({}, makeHandlerContext(user6!.id))
 
     const dialogsAfter = await db.select().from(schema.dialogs).where(eq(schema.dialogs.chatId, existingChat.id))
     expect(dialogsAfter.length).toBe(2)
 
-    const dialogForUser6 = dialogsAfter.find((d) => d.userId === user6.id)
-    const dialogForUser7 = dialogsAfter.find((d) => d.userId === user7.id)
+    const dialogForUser6 = dialogsAfter.find((d) => d.userId === user6!.id)
+    const dialogForUser7 = dialogsAfter.find((d) => d.userId === user7!.id)
 
     expect(dialogForUser6).toBeDefined()
-    expect(dialogForUser6?.peerUserId).toBe(user7.id)
+    expect(dialogForUser6?.peerUserId).toBe(user7!.id)
     expect(dialogForUser7).toBeDefined()
-    expect(dialogForUser7?.peerUserId).toBe(user6.id)
+    expect(dialogForUser7?.peerUserId).toBe(user6!.id)
   })
 
   test("handles multiple spaces correctly", async () => {
-    const user8 = await testUtils.createUser("user8@example.com")
-    const user9 = await testUtils.createUser("user9@example.com")
-    const user10 = await testUtils.createUser("user10@example.com")
+    const user8 = (await testUtils.createUser("user8@example.com"))!
+    const user9 = (await testUtils.createUser("user9@example.com"))!
+    const user10 = (await testUtils.createUser("user10@example.com"))!
 
-    const space1 = await testUtils.createSpace("Space 1")
-    const space2 = await testUtils.createSpace("Space 2")
+    const space1 = (await testUtils.createSpace("Space 1"))!
+    const space2 = (await testUtils.createSpace("Space 2"))!
 
     await db.insert(schema.members).values([
       { userId: user8.id, spaceId: space1.id, role: "member" },
@@ -192,12 +192,12 @@ describe("getChats", () => {
   })
 
   test("does not create chats for users not in the same space", async () => {
-    const userA = await testUtils.createUser("userA@example.com")
-    const userB = await testUtils.createUser("userB@example.com")
-    const userC = await testUtils.createUser("userC@example.com")
+    const userA = (await testUtils.createUser("userA@example.com"))!
+    const userB = (await testUtils.createUser("userB@example.com"))!
+    const userC = (await testUtils.createUser("userC@example.com"))!
 
-    const space1 = await testUtils.createSpace("Space A")
-    const space2 = await testUtils.createSpace("Space B")
+    const space1 = (await testUtils.createSpace("Space A"))!
+    const space2 = (await testUtils.createSpace("Space B"))!
 
     await db.insert(schema.members).values([
       { userId: userA.id, spaceId: space1.id, role: "member" },
@@ -346,13 +346,13 @@ describe("getChats", () => {
   })
 
   test("only creates chats with members in shared spaces, not all members", async () => {
-    const userA = await testUtils.createUser("shared1@example.com")
-    const userB = await testUtils.createUser("shared2@example.com")
-    const userC = await testUtils.createUser("shared3@example.com")
-    const userD = await testUtils.createUser("shared4@example.com")
+    const userA = (await testUtils.createUser("shared1@example.com"))!
+    const userB = (await testUtils.createUser("shared2@example.com"))!
+    const userC = (await testUtils.createUser("shared3@example.com"))!
+    const userD = (await testUtils.createUser("shared4@example.com"))!
 
-    const space1 = await testUtils.createSpace("Shared Space 1")
-    const space2 = await testUtils.createSpace("Shared Space 2")
+    const space1 = (await testUtils.createSpace("Shared Space 1"))!
+    const space2 = (await testUtils.createSpace("Shared Space 2"))!
 
     await db.insert(schema.members).values([
       { userId: userA.id, spaceId: space1.id, role: "member" },

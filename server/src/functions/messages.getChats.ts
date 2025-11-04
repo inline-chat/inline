@@ -108,6 +108,10 @@ async function ensurePrivateChatsForSpaceMembers(currentUserId: number): Promise
     const dialogsToCreate: { chatId: number; userId: number; peerUserId: number }[] = []
 
     for (const chat of allChatsToProcess) {
+      if (chat.minUserId === null || chat.maxUserId === null) {
+        continue
+      }
+
       if (!existingDialogSet.has(`${chat.id}-${currentUserId}`)) {
         dialogsToCreate.push({
           chatId: chat.id,
