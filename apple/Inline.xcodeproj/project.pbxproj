@@ -18,6 +18,7 @@
 		B7020C622DCE1593007099D9 /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = B7020C612DCE1593007099D9 /* NukeUI */; };
 		B7020C642DCE1593007099D9 /* NukeVideo in Frameworks */ = {isa = PBXBuildFile; productRef = B7020C632DCE1593007099D9 /* NukeVideo */; };
 		B77EE8082DC91CFD00C42B9E /* iPhoneNumberField in Frameworks */ = {isa = PBXBuildFile; productRef = B77EE8072DC91CFD00C42B9E /* iPhoneNumberField */; };
+		B7E8E0E42EBA637100EA23B8 /* ContextMenuAccessoryStructs in Frameworks */ = {isa = PBXBuildFile; productRef = B7E8E0E32EBA637100EA23B8 /* ContextMenuAccessoryStructs */; };
 		B7F71EB92DDB3BA70091C872 /* RenderMeThis in Frameworks */ = {isa = PBXBuildFile; productRef = B7F71EB82DDB3BA70091C872 /* RenderMeThis */; };
 		C35092CA2CAEA7DB00AE3E23 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = C35092C92CAEA7DB00AE3E23 /* Sentry */; };
 		C35092D52CAEE8EA00AE3E23 /* KeychainSwift in Frameworks */ = {isa = PBXBuildFile; productRef = C35092D42CAEE8EA00AE3E23 /* KeychainSwift */; };
@@ -182,6 +183,7 @@
 				B7F71EB92DDB3BA70091C872 /* RenderMeThis in Frameworks */,
 				C35EC9F42CC4176D0067979B /* SwiftUIIntrospect in Frameworks */,
 				C3AEE6AA2D4FCDC9005D1179 /* Nuke in Frameworks */,
+				B7E8E0E42EBA637100EA23B8 /* ContextMenuAccessoryStructs in Frameworks */,
 				CD27856F2CFB053C008A0EEF /* InlineConfig in Frameworks */,
 				C35EC8222CC2A24A0067979B /* InlineKit in Frameworks */,
 				C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */,
@@ -354,6 +356,7 @@
 				CD4E8E2B2E088F6B00CE6BC0 /* TextProcessing */,
 				CD735FEF2E493C8E00F7BFFE /* Translation */,
 				CD0240C32EA439D400976FDE /* Invite */,
+				B7E8E0E32EBA637100EA23B8 /* ContextMenuAccessoryStructs */,
 			);
 			productName = InlineIOS;
 			productReference = C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */;
@@ -1321,6 +1324,10 @@
 			isa = XCSwiftPackageProductDependency;
 			package = B77EE8062DC91CFD00C42B9E /* XCRemoteSwiftPackageReference "iPhoneNumberField" */;
 			productName = iPhoneNumberField;
+		};
+		B7E8E0E32EBA637100EA23B8 /* ContextMenuAccessoryStructs */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ContextMenuAccessoryStructs;
 		};
 		B7F71EB82DDB3BA70091C872 /* RenderMeThis */ = {
 			isa = XCSwiftPackageProductDependency;
