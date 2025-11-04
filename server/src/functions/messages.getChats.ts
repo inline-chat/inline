@@ -23,6 +23,7 @@ import {
 } from "@in/server/db/schema"
 import { DialogsModel } from "@in/server/db/models/dialogs"
 import { encodePeerFromChat } from "@in/server/realtime/encoders/encodePeer"
+import { ChatModel } from "@in/server/db/models/chats"
 
 type Input = {}
 
@@ -36,8 +37,107 @@ type Output = {
 
 const log = new Log("functions.getChats")
 
+async function ensurePrivateChatsForSpaceMembers(currentUserId: number): Promise<void> {
+  try {
+    const allMembers = await db
+      .selectDistinct({ userId: members.userId })
+      .from(members)
+      .innerJoin(spaces, eq(members.spaceId, spaces.id))
+      .where(
+        and(
+          inArray(
+            members.spaceId,
+            db
+              .select({ spaceId: members.spaceId })
+              .from(members)
+              .where(eq(members.userId, currentUserId)),
+          ),
+          isNull(spaces.deleted),
+        ),
+      )
+
+    const otherUserIds = allMembers.map((m) => m.userId).filter((id) => id !== currentUserId)
+
+    if (otherUserIds.length === 0) return
+
+    const chatPairs = otherUserIds.map((userId) => ({
+      minUserId: Math.min(currentUserId, userId),
+      maxUserId: Math.max(currentUserId, userId),
+    }))
+
+    const existingChats = await db
+      .select({ id: chats.id, minUserId: chats.minUserId, maxUserId: chats.maxUserId })
+      .from(chats)
+      .where(
+        and(
+          eq(chats.type, "private"),
+          or(eq(chats.minUserId, currentUserId), eq(chats.maxUserId, currentUserId)),
+        ),
+      )
+
+    const existingChatSet = new Set(existingChats.map((c) => `${c.minUserId}-${c.maxUserId}`))
+
+    const missingChatPairs = chatPairs.filter((pair) => !existingChatSet.has(`${pair.minUserId}-${pair.maxUserId}`))
+
+    let newChats: typeof existingChats = []
+    if (missingChatPairs.length > 0) {
+      newChats = await db
+        .insert(chats)
+        .values(
+          missingChatPairs.map((pair) => ({
+            type: "private" as const,
+            minUserId: pair.minUserId,
+            maxUserId: pair.maxUserId,
+          })),
+        )
+        .onConflictDoNothing()
+        .returning()
+    }
+
+    const allChatsToProcess = [...existingChats, ...newChats]
+
+    if (allChatsToProcess.length === 0) return
+
+    const existingDialogs = await db
+      .select({ chatId: dialogs.chatId, userId: dialogs.userId })
+      .from(dialogs)
+      .where(inArray(dialogs.chatId, allChatsToProcess.map((c) => c.id)))
+
+    const existingDialogSet = new Set(existingDialogs.map((d) => `${d.chatId}-${d.userId}`))
+
+    const dialogsToCreate: { chatId: number; userId: number; peerUserId: number }[] = []
+
+    for (const chat of allChatsToProcess) {
+      if (!existingDialogSet.has(`${chat.id}-${currentUserId}`)) {
+        dialogsToCreate.push({
+          chatId: chat.id,
+          userId: currentUserId,
+          peerUserId: chat.minUserId === currentUserId ? chat.maxUserId : chat.minUserId,
+        })
+      }
+
+      const otherUserId = chat.minUserId === currentUserId ? chat.maxUserId : chat.minUserId
+      if (!existingDialogSet.has(`${chat.id}-${otherUserId}`)) {
+        dialogsToCreate.push({
+          chatId: chat.id,
+          userId: otherUserId,
+          peerUserId: currentUserId,
+        })
+      }
+    }
+
+    if (dialogsToCreate.length > 0) {
+      await db.insert(dialogs).values(dialogsToCreate).onConflictDoNothing()
+    }
+  } catch (error) {
+    log.error("Failed to ensure private chats for space members", { currentUserId, error })
+  }
+}
+
 export const getChats = async (input: Input, context: FunctionContext): Promise<Output> => {
   const currentUserId = context.currentUserId
+
+  await ensurePrivateChatsForSpaceMembers(currentUserId)
 
   // Buckets for results
   let dialogsList: DbDialog[] = []
