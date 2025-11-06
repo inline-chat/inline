@@ -34,32 +34,9 @@ final class MessagesCollectionView: UICollectionView {
     fatalError("init(coder:) has not been implemented")
   }
 
-//  override func contextMenuAccessories(
-//    for interaction: UIContextMenuInteraction,
-//    configuration: UIContextMenuConfiguration
-//  ) -> [Any]? {
-//    guard let indexPath = configuration.identifier as? IndexPath else {
-//      return nil
-//    }
-//    return accessoryProvider?(indexPath)
-//  }
-//
-//  override func contextMenuStyle(
-//    for interaction: UIContextMenuInteraction,
-//    configuration: UIContextMenuConfiguration
-//  ) -> Any? {
-//    let _UIContextMenuStyle = NSClassFromString("_UIContextMenuStyle") as! NSObject.Type
-//
-//    let style = _UIContextMenuStyle.perform(NSSelectorFromString("defaultStyle")).takeUnretainedValue() as! NSObject
-//
-//    let preferredEdgeInsets = UIEdgeInsets(top: 0.0, left: 30.0, bottom: 0.0, right: 30.0)
-//    style.setValue(preferredEdgeInsets, forKey: "preferredEdgeInsets")
-//
-//    return style
-//  }
-
   private func setupCollectionView() {
     backgroundColor = .clear
+    UIContextMenuInteraction.swizzle_delegate_getAccessoryViewsForConfigurationIfNeeded()
     delegate = coordinator
     autoresizingMask = [.flexibleHeight]
     alwaysBounceVertical = true
@@ -519,6 +496,10 @@ private extension MessagesCollectionView {
       animator: UIContextMenuInteractionAnimating?
     ) {
       MessagesCollectionView.contextMenuOpen = false
+
+      if let identifierView = configuration.identifier as? ContextMenuIdentifierUIView {
+        identifierView.removeFromSuperview()
+      }
     }
 
     private func dismissContextMenuIfNeeded() {
@@ -574,8 +555,6 @@ private extension MessagesCollectionView {
 
     func setupDataSource(_ collectionView: UICollectionView) {
       currentCollectionView = collectionView
-
-//      setupContextMenuAccessories()
 
       let cellRegistration = UICollectionView.CellRegistration<
         MessageCollectionViewCell,
@@ -793,41 +772,6 @@ private extension MessagesCollectionView {
 
     private var sizeCache: [FullMessage.ID: CGSize] = [:]
     private let maxCacheSize = 1_000
-
-//    func setupContextMenuAccessories() {
-//      guard let collectionView = currentCollectionView as? MessagesCollectionView else { return }
-//      collectionView.accessoryProvider = { [weak self] indexPath in
-//        guard let self, let message = viewModel.message(at: indexPath) else { return [] }
-//        let alignment: UIContextMenuAccessoryAlignment = if message.message.out == true {
-//          .trailing
-//        } else {
-//          .leading
-//        }
-//
-//        let verticalSpacing: CGFloat = 6
-//        let offset = CGPoint(x: 0, y: -verticalSpacing)
-//
-//        let accessoryView = _UIContextMenuAccessoryViewBuilder.build(with: alignment, offset: offset)
-//        accessoryView?.frame = CGRect(x: 0, y: 0, width: UIScreen.main.bounds.width - 80, height: 70)
-//        accessoryView?.backgroundColor = .clear
-//
-//        if let accessoryView {
-//          let reactionPickerView = createReactionPickerView(for: message.message, at: indexPath)
-//          accessoryView.addSubview(reactionPickerView)
-//
-//          reactionPickerView.translatesAutoresizingMaskIntoConstraints = false
-//          NSLayoutConstraint.activate([
-//            reactionPickerView.centerXAnchor.constraint(equalTo: accessoryView.centerXAnchor),
-//            reactionPickerView.centerYAnchor.constraint(equalTo: accessoryView.centerYAnchor),
-//            reactionPickerView.leadingAnchor.constraint(equalTo: accessoryView.leadingAnchor),
-//            reactionPickerView.trailingAnchor.constraint(equalTo: accessoryView.trailingAnchor),
-//          ])
-//        }
-//
-//        guard let accessoryView else { return [] }
-//        return [accessoryView]
-//      }
-//    }
 
     func createReactionPickerView(for message: Message, at indexPath: IndexPath) -> UIView {
       let reactions = ["🥹", "❤️", "🫡", "👍", "👎", "💯", "😂"] // ✔️
@@ -1086,7 +1030,30 @@ private extension MessagesCollectionView {
 
       print("🔄 Using collection view context menu")
 
-      return UIContextMenuConfiguration(identifier: indexPath as NSIndexPath, previewProvider: nil) { [weak self] _ in
+      let reactionPickerView = createReactionPickerView(for: message, at: indexPath)
+
+      let isOutgoing = message.out == true
+      let location: ContextMenuAccessoryLocation = isOutgoing ? .trailing : .leading
+      let attachment: ContextMenuAccessoryAttachment = isOutgoing ? .trailing : .leading
+
+      let configuration = ContextMenuAccessoryConfiguration(
+        location: location,
+        trackingAxis: .vertical,
+        attachment: attachment,
+        alignment: .leading,
+        attachmentOffset: -6,
+        alignmentOffset: 0,
+        gravity: 0
+      )
+
+      let identifierView = ContextMenuIdentifierUIView(
+        accessoryView: reactionPickerView,
+        configuration: configuration
+      )
+
+      collectionView.addSubview(identifierView)
+
+      return UIContextMenuConfiguration(identifier: identifierView, previewProvider: nil) { [weak self] _ in
         guard let self else { return UIMenu(children: []) }
 
         let isMessageSending = message.status == .sending
