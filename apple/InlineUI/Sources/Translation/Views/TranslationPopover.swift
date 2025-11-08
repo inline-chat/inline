@@ -97,7 +97,14 @@ public struct TranslationPopover: View {
   }
 
   private func showOptions() {
+    #if os(iOS)
+    dismiss()
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+      isOptionsSheetPresented = true
+    }
+    #else
     isOptionsSheetPresented = true
+    #endif
   }
 }
 
