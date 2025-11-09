@@ -20,6 +20,7 @@ let package = Package(
     .library(name: "TextProcessing", targets: ["TextProcessing"]),
     .library(name: "Translation", targets: ["Translation"]),
     .library(name: "Invite", targets: ["Invite"]),
+    .library(name: "ContextMenuAccessoryStructs", targets: ["ContextMenuAccessoryStructs"]),
   ],
 
   dependencies: [
@@ -34,6 +35,12 @@ let package = Package(
         .product(name: "Nuke", package: "Nuke"),
         .product(name: "NukeUI", package: "Nuke"),
       ],
+    ),
+
+    .target(
+      name: "ContextMenuAccessoryStructs",
+      dependencies: [],
+      publicHeadersPath: "include"
     ),
 
     .target(

@@ -18,8 +18,7 @@
 		B7020C622DCE1593007099D9 /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = B7020C612DCE1593007099D9 /* NukeUI */; };
 		B7020C642DCE1593007099D9 /* NukeVideo in Frameworks */ = {isa = PBXBuildFile; productRef = B7020C632DCE1593007099D9 /* NukeVideo */; };
 		B77EE8082DC91CFD00C42B9E /* iPhoneNumberField in Frameworks */ = {isa = PBXBuildFile; productRef = B77EE8072DC91CFD00C42B9E /* iPhoneNumberField */; };
-		B7C0676B2DB7F44900EAADA4 /* iMessageUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B7C0674E2DB7F2BA00EAADA4 /* iMessageUI.framework */; };
-		B7C0676C2DB7F44900EAADA4 /* iMessageUI.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = B7C0674E2DB7F2BA00EAADA4 /* iMessageUI.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		B7E8E0E42EBA637100EA23B8 /* ContextMenuAccessoryStructs in Frameworks */ = {isa = PBXBuildFile; productRef = B7E8E0E32EBA637100EA23B8 /* ContextMenuAccessoryStructs */; };
 		B7F71EB92DDB3BA70091C872 /* RenderMeThis in Frameworks */ = {isa = PBXBuildFile; productRef = B7F71EB82DDB3BA70091C872 /* RenderMeThis */; };
 		C35092CA2CAEA7DB00AE3E23 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = C35092C92CAEA7DB00AE3E23 /* Sentry */; };
 		C35092D52CAEE8EA00AE3E23 /* KeychainSwift in Frameworks */ = {isa = PBXBuildFile; productRef = C35092D42CAEE8EA00AE3E23 /* KeychainSwift */; };
@@ -62,13 +61,6 @@
 			remoteGlobalIDString = B7020C412DCE1534007099D9;
 			remoteInfo = InlineShareExtension;
 		};
-		B7C0676D2DB7F44900EAADA4 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = CD2660FC2CA01CAE00EB186F /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = B7C0674D2DB7F2BA00EAADA4;
-			remoteInfo = iMessageUI;
-		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -81,17 +73,6 @@
 				B7020C4C2DCE1534007099D9 /* InlineShareExtension.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		B7C0676F2DB7F44900EAADA4 /* Embed Frameworks */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 10;
-			files = (
-				B7C0676C2DB7F44900EAADA4 /* iMessageUI.framework in Embed Frameworks */,
-			);
-			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
@@ -123,15 +104,6 @@
 			);
 			target = B7020C412DCE1534007099D9 /* InlineShareExtension */;
 		};
-		B7C067702DB7F5BC00EAADA4 /* Exceptions for "iMessageUI" folder in "iMessageUI" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			publicHeaders = (
-				_UIContextMenuAccessoryViewBuilder.h,
-				iMessageUI.h,
-				"UICollectionView+Private.h",
-			);
-			target = B7C0674D2DB7F2BA00EAADA4 /* iMessageUI */;
-		};
 		C33CC3A22CA5C771002882B3 /* Exceptions for "InlineIOS" folder in "InlineIOS" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -155,14 +127,6 @@
 				B7020C652DCE1534007099D9 /* Exceptions for "InlineShareExtension" folder in "InlineShareExtension" target */,
 			);
 			path = InlineShareExtension;
-			sourceTree = "<group>";
-		};
-		B7C0674F2DB7F2BA00EAADA4 /* iMessageUI */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				B7C067702DB7F5BC00EAADA4 /* Exceptions for "iMessageUI" folder in "iMessageUI" target */,
-			);
-			path = iMessageUI;
 			sourceTree = "<group>";
 		};
 		C38A28382CA5AB8F00D3DFB8 /* InlineIOS */ = {
@@ -219,13 +183,13 @@
 				B7F71EB92DDB3BA70091C872 /* RenderMeThis in Frameworks */,
 				C35EC9F42CC4176D0067979B /* SwiftUIIntrospect in Frameworks */,
 				C3AEE6AA2D4FCDC9005D1179 /* Nuke in Frameworks */,
+				B7E8E0E42EBA637100EA23B8 /* ContextMenuAccessoryStructs in Frameworks */,
 				CD27856F2CFB053C008A0EEF /* InlineConfig in Frameworks */,
 				C35EC8222CC2A24A0067979B /* InlineKit in Frameworks */,
 				C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */,
 				C35092D52CAEE8EA00AE3E23 /* KeychainSwift in Frameworks */,
 				C35E950E2CAC497700D569AF /* GRDB in Frameworks */,
 				C37F34402D5A4D4800D7D7CC /* MCEmojiPicker in Frameworks */,
-				B7C0676B2DB7F44900EAADA4 /* iMessageUI.framework in Frameworks */,
 				C3CC99192CCE9AF7007F7F77 /* InlineUI in Frameworks */,
 				CD0240C42EA439D400976FDE /* Invite in Frameworks */,
 				C38C905E2CB9431900B78B8A /* InlineKit in Frameworks */,
@@ -272,7 +236,6 @@
 				C3CC99172CCE9A7E007F7F77 /* InlineUI */,
 				C3AA8E4E2CB942BF00800A03 /* InlineKit */,
 				CD2661662CA01E3E00EB186F /* InlineMac */,
-				B7C0674F2DB7F2BA00EAADA4 /* iMessageUI */,
 				B7020C432DCE1534007099D9 /* InlineShareExtension */,
 				C38A28382CA5AB8F00D3DFB8 /* InlineIOS */,
 				C31675032CAC167D009A1FD8 /* Frameworks */,
@@ -350,9 +313,6 @@
 			);
 			dependencies = (
 			);
-			fileSystemSynchronizedGroups = (
-				B7C0674F2DB7F2BA00EAADA4 /* iMessageUI */,
-			);
 			name = iMessageUI;
 			packageProductDependencies = (
 			);
@@ -367,13 +327,11 @@
 				C38A28332CA5AB8F00D3DFB8 /* Sources */,
 				C38A28342CA5AB8F00D3DFB8 /* Frameworks */,
 				C38A28352CA5AB8F00D3DFB8 /* Resources */,
-				B7C0676F2DB7F44900EAADA4 /* Embed Frameworks */,
 				B7020C522DCE1534007099D9 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				B7C0676E2DB7F44900EAADA4 /* PBXTargetDependency */,
 				B7020C4B2DCE1534007099D9 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
@@ -398,6 +356,7 @@
 				CD4E8E2B2E088F6B00CE6BC0 /* TextProcessing */,
 				CD735FEF2E493C8E00F7BFFE /* Translation */,
 				CD0240C32EA439D400976FDE /* Invite */,
+				B7E8E0E32EBA637100EA23B8 /* ContextMenuAccessoryStructs */,
 			);
 			productName = InlineIOS;
 			productReference = C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */;
@@ -568,11 +527,6 @@
 			isa = PBXTargetDependency;
 			target = B7020C412DCE1534007099D9 /* InlineShareExtension */;
 			targetProxy = B7020C4A2DCE1534007099D9 /* PBXContainerItemProxy */;
-		};
-		B7C0676E2DB7F44900EAADA4 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = B7C0674D2DB7F2BA00EAADA4 /* iMessageUI */;
-			targetProxy = B7C0676D2DB7F44900EAADA4 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -1370,6 +1324,10 @@
 			isa = XCSwiftPackageProductDependency;
 			package = B77EE8062DC91CFD00C42B9E /* XCRemoteSwiftPackageReference "iPhoneNumberField" */;
 			productName = iPhoneNumberField;
+		};
+		B7E8E0E32EBA637100EA23B8 /* ContextMenuAccessoryStructs */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ContextMenuAccessoryStructs;
 		};
 		B7F71EB82DDB3BA70091C872 /* RenderMeThis */ = {
 			isa = XCSwiftPackageProductDependency;
