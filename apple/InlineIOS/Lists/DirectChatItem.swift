@@ -198,66 +198,10 @@ struct DirectChatItem: View {
           .foregroundStyle(.secondary)
       }
 
-    } else if lastMsg?.message.isSticker == true {
-      HStack(alignment: .top, spacing: 4) {
-        Image(systemName: "cup.and.saucer.fill")
-          .font(.caption)
-          .foregroundColor(.secondary)
-          .padding(.top, 5)
-
-        Text("Sticker")
-          .font(.callout)
-          .foregroundColor(.secondary)
-          .lineLimit(2)
-          .truncationMode(.tail)
-      }
-
-    } else if lastMsg?.message.documentId != nil {
-      HStack(alignment: .top, spacing: 4) {
-        Image(systemName: "document.fill")
-          .font(.caption)
-          .foregroundColor(.secondary)
-          .padding(.top, 5)
-
-        Text(
-          (lastMsg?.message.hasText == true ? lastMsg?.displayText ?? "" : "Document")
-            .replacingOccurrences(of: "\n", with: " ")
-        )
-        .font(.callout)
-        .foregroundColor(.secondary)
-        .lineLimit(2)
-        .truncationMode(.tail)
-      }
-
-    } else if lastMsg?.message.photoId != nil || lastMsg?.message.fileId != nil {
-      HStack(alignment: .top, spacing: 4) {
-        Image(systemName: "photo.fill")
-          .font(.caption)
-          .foregroundColor(.secondary)
-          .padding(.top, 5)
-        Text(
-          (lastMsg?.message.hasText == true ? lastMsg?.displayText ?? "" : "Photo")
-            .replacingOccurrences(of: "\n", with: " ")
-        )
-        .font(.callout)
-        .foregroundColor(.secondary)
-        .lineLimit(2)
-        .truncationMode(.tail)
-      }
-
-    } else if lastMsg?.message.hasUnsupportedTypes == true {
-      Text("Unsupported message")
-        .italic()
-        .font(.callout)
-        .foregroundColor(.secondary)
-        .lineLimit(2)
-        .truncationMode(.tail)
     } else {
-      Text((lastMsg?.displayText ?? "").replacingOccurrences(of: "\n", with: " "))
+      Text(lastMsg?.displayTextForLastMessage ?? lastMsg?.message.stringRepresentationWithEmoji ?? "")
         .font(.callout)
-        .foregroundColor(.secondary)
-        .lineLimit(2)
-        .truncationMode(.tail)
+        .foregroundStyle(.secondary)
     }
   }
 
