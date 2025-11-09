@@ -5,13 +5,11 @@
   <br>Inline
 </h1>
   <p align="center">
-    A work chat app for high-performance teams.
+    Work chat for high-performance teams.
   </p>
 </p>
 
-## About
-
-Inline is a successor to traditional chat apps like Slack. It's fast, lightweight, scalable and powerful.
+Inline is a fast, lightweight, scalable, and powerful work chat app which enables unprecedented collaboration bandwidth.
 
 ## What's Inline
 
@@ -41,7 +39,7 @@ Threads are the building blocks of organized and focused chats with your teammat
 
 ### Sidebar
 
-The sidebar is a list of chats (threads and direct messages) you want to see at the moment. Additionally, chats that require your attention get added at the bottom (e.g., when you're explicitly mentioned in a thread). You can close any chats you don't care about at the moment. You can reopen them whenever you want. Think of "opening" as how you only open application windows on your desktop that you need at any time.
+The sidebar is a list of chats (threads and direct messages) you want to see at the moment. Additionally, chats that require your attention get added at the bottom (e.g., when you're explicitly mentioned in a thread). You can close any chats you don't care about at the moment. You can reopen them whenever you want. Think of it like your desktop—you only keep open the windows you need right now.
 
 ### Spaces
 
@@ -120,10 +118,20 @@ The app will eventually be free for individuals, communities, etc., with a paid 
 
 We have six years of experience building team communication and collaboration apps. Previously, this team co-founded [Noor](https://noor.to), a virtual office and work chat app, and we're applying those learnings to what we're building today. Time will tell, and you can be the judge when the app is released. I believe we're all better served if we get a great alternative to the current status quo, which has remained unchanged for over a decade.
 
+### Will it have end-to-end encryption?
+
+Short answer is not at launch. Let's go over our requirements. We want to offer the best work chat experience for teams and communities of all sizes. It has to be scalable for very large chats, stay fast and be secure at every layer.
+
+Maximum security is end-to-end encryption which comes at a cost. For example, it makes it very difficult or impossible to sync history across devices and installs fast, securely especially across many large chats. Similarly, it impacts features like searching across all chats and file contents, AI agents, publicly sharing chat threads, real-time translation, etc. Even if it's possible to develop novel technical solutions to each of the limitations, it hasn't been done before practically in this context and it's beyond our resources as a very small startup right now.
+
+For such reasons, we decided to instead focus on security at every layer (even encrypting the locally stored database on your iPhone or Mac similar to Signal). As we go, we'll keep exploring the options for even more security. For example, ephemeral messages or letting users selectively enable E2EE in certain chats/DMs while explicitly opting out of features like history sync or cloud search as a trade-off.
+
+If you have suggestions, have questions or have a concern please reach out to `founders [at] inline [dot] chat`. We'll write more about how we approach security and privacy soon.
+
 ## License
 
 Inline's macOS and iOS clients are licensed under the [GNU Affero General Public License v3.0](LICENSE).
 
 ## Thanks
 
-Thank you for following Inline and helping us build this. We'll be sharing updates on our X (Twitter) accounts. Please don't hesitate to reach out; if you have a question, we'll be happy to chat.
+Thank you for following Inline and supporting us. We'll share more on our X (Twitter) accounts and here. Please don't hesitate to reach out; if you have a question, we'll be happy to chat.
