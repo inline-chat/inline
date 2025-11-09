@@ -380,7 +380,8 @@ class SidebarItemRow: NSTableCellView {
     messageLabel.textContainer?.lineBreakMode = .byTruncatingTail
 
     if let lastMessage = item.lastMessage {
-      messageLabel.string = lastMessage.displayText ?? lastMessage.message.stringRepresentationWithEmoji ?? ""
+      messageLabel.string = lastMessage.displayTextForLastMessage
+        ?? lastMessage.message.stringRepresentationWithEmoji ?? ""
     } else {
       messageLabel.string = ""
     }

@@ -6,7 +6,7 @@ public extension FullMessage {
   var currentTranslation: Translation? {
     translation(for: UserLocale.getCurrentLanguage())
   }
-  
+
   /// Translation text for the message, without falling back to the original text
   var translationText: String? {
     if TranslationState.shared.isTranslationEnabled(for: peerId) {
@@ -67,5 +67,9 @@ public extension EmbeddedMessage {
     } else {
       message.text
     }
+  }
+
+  var displayTextForLastMessage: String? {
+    displayText?.replacingOccurrences(of: "\n", with: " ")
   }
 }
