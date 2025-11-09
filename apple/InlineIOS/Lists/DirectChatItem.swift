@@ -200,6 +200,8 @@ struct DirectChatItem: View {
 
     } else {
       Text(lastMsg?.displayTextForLastMessage ?? lastMsg?.message.stringRepresentationWithEmoji ?? "")
+        .lineLimit(2)
+        .truncationMode(.tail)
         .font(.callout)
         .foregroundStyle(.secondary)
     }
