@@ -21,9 +21,9 @@ enum ContextMenuAccessoryAttachment: UInt64 {
 }
 
 enum ContextMenuAccessoryAlignment: UInt64 {
-  case leading = 0
   case center = 1
-  case trailing = 2
+  case leading = 2
+  case trailing = 8
 }
 
 struct ContextMenuAccessoryConfiguration {

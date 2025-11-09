@@ -1,5 +1,6 @@
 import Auth
 import Combine
+import ContextMenuAccessoryStructs
 import GRDB
 import InlineKit
 import Logger
@@ -449,6 +450,29 @@ extension MessagesCollectionView: UICollectionViewDataSourcePrefetching {
         await ImagePrefetcher.shared.cancelPrefetching(for: messagesToCancel)
       }
     }
+  }
+
+  @objc func _contextMenuInteraction(
+    _ interaction: UIContextMenuInteraction,
+    styleForMenuWithConfiguration configuration: UIContextMenuConfiguration
+  ) -> Any? {
+    guard let window = window else { return nil }
+
+    let navBarHeight = (findViewController()?.navigationController?.navigationBar.frame.height ?? 0)
+    let topSafeArea = window.safeAreaInsets.top
+    let totalTopInset = topSafeArea + navBarHeight
+
+    let styleClass = NSClassFromString("_UIContextMenuStyle") as? NSObject.Type
+    guard let style = styleClass?.perform(NSSelectorFromString("defaultStyle"))?.takeUnretainedValue() as? NSObject else {
+      return nil
+    }
+
+    style.setValue(
+      UIEdgeInsets(top: totalTopInset, left: 30, bottom: 0, right: 30),
+      forKey: "preferredEdgeInsets"
+    )
+
+    return style
   }
 }
 
@@ -1037,7 +1061,7 @@ private extension MessagesCollectionView {
         trackingAxis: .vertical,
         attachment: .center,
         alignment: alignment,
-        attachmentOffset: -6,
+        attachmentOffset: -16,
         alignmentOffset: 0,
         gravity: 0
       )

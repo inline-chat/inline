@@ -45,7 +45,16 @@ extension UIContextMenuInteraction {
       accessoryView?.backgroundColor = .clear
 
       contentView.frame = CGRect(x: 0, y: 0, width: width, height: height)
+
+      contentView.translatesAutoresizingMaskIntoConstraints = false
       accessoryView?.addSubview(contentView)
+
+      NSLayoutConstraint.activate([
+        contentView.centerXAnchor.constraint(equalTo: accessoryView!.centerXAnchor),
+        contentView.centerYAnchor.constraint(equalTo: accessoryView!.centerYAnchor),
+        contentView.leadingAnchor.constraint(equalTo: accessoryView!.leadingAnchor),
+        contentView.trailingAnchor.constraint(equalTo: accessoryView!.trailingAnchor),
+      ])
 
       return [accessoryView].compact()
     } else {
