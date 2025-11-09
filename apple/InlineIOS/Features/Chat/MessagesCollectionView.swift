@@ -14,7 +14,6 @@ final class MessagesCollectionView: UICollectionView {
   private var chatId: Int64
   private var spaceId: Int64
   private var coordinator: Coordinator
-  var accessoryProvider: ((IndexPath) -> [Any])?
   static var contextMenuOpen: Bool = false
 
   init(peerId: Peer, chatId: Int64, spaceId: Int64) {
@@ -777,7 +776,7 @@ private extension MessagesCollectionView {
       let reactions = ["🥹", "❤️", "🫡", "👍", "👎", "💯", "😂"] // ✔️
 
       let containerView = UIView()
-      containerView.translatesAutoresizingMaskIntoConstraints = false
+      containerView.translatesAutoresizingMaskIntoConstraints = true
 
       let blurEffect = UIBlurEffect(style: .systemMaterial)
       let blurView = UIVisualEffectView(effect: blurEffect)
@@ -1028,19 +1027,16 @@ private extension MessagesCollectionView {
         }
       }
 
-      print("🔄 Using collection view context menu")
-
       let reactionPickerView = createReactionPickerView(for: message, at: indexPath)
 
       let isOutgoing = message.out == true
-      let location: ContextMenuAccessoryLocation = isOutgoing ? .trailing : .leading
-      let attachment: ContextMenuAccessoryAttachment = isOutgoing ? .trailing : .leading
+      let alignment: ContextMenuAccessoryAlignment = isOutgoing ? .trailing : .leading
 
       let configuration = ContextMenuAccessoryConfiguration(
-        location: location,
+        location: .below,
         trackingAxis: .vertical,
-        attachment: attachment,
-        alignment: .leading,
+        attachment: .center,
+        alignment: alignment,
         attachmentOffset: -6,
         alignmentOffset: 0,
         gravity: 0

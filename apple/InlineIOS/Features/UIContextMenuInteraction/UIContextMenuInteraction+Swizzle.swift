@@ -35,10 +35,16 @@ extension UIContextMenuInteraction {
        let contentView = identifierView.accessoryView as UIView?
     {
       identifierView.interaction = view?.interactions.compactMap { $0 as? UIContextMenuInteraction }.first
-      contentView.frame.size = contentView.intrinsicContentSize
 
       let accessoryView = UIContextMenuInteraction.accessoryView(configuration: identifierView.configuration)
-      accessoryView?.frame.size = contentView.intrinsicContentSize
+
+      let width = UIScreen.main.bounds.width - 80
+      let height: CGFloat = 70
+
+      accessoryView?.frame = CGRect(x: 0, y: 0, width: width, height: height)
+      accessoryView?.backgroundColor = .clear
+
+      contentView.frame = CGRect(x: 0, y: 0, width: width, height: height)
       accessoryView?.addSubview(contentView)
 
       return [accessoryView].compact()
