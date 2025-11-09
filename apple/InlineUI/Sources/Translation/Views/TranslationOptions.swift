@@ -5,7 +5,7 @@ import SwiftUI
 public struct TranslationOptions: View {
   @State private var selectedLanguage: Language = .getCurrentLanguage()
   @Environment(\.dismiss) private var dismiss
-  
+
   /// Optional peer to enable translation for when language is changed
   private let peer: Peer?
 
@@ -64,24 +64,26 @@ public struct TranslationOptions: View {
       .frame(minHeight: 280)
       #endif
       .navigationTitle("Translation")
-      .navigationBarTitleDisplayMode(.inline)
-      .toolbar {
-        ToolbarItem(placement: .cancellationAction) {
-          Button {
-            dismiss()
-          } label: {
-            #if os(iOS)
-            if #available(iOS 26.0, *) {
-              Image(systemName: "xmark")
-            } else {
+      #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+      #endif
+        .toolbar {
+          ToolbarItem(placement: .cancellationAction) {
+            Button {
+              dismiss()
+            } label: {
+              #if os(iOS)
+              if #available(iOS 26.0, *) {
+                Image(systemName: "xmark")
+              } else {
+                Text("Done")
+              }
+              #else
               Text("Done")
+              #endif
             }
-            #else
-            Text("Done")
-            #endif
           }
         }
-      }
     }
   }
 }
