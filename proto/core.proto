@@ -569,6 +569,7 @@ enum Method {
   DELETE_MEMBER = 22;
   MARK_AS_UNREAD = 23;
   GET_UPDATES_STATE = 24;
+  GET_CHAT = 25;
 }
 
 message RpcCall {
@@ -598,6 +599,7 @@ message RpcCall {
     DeleteMemberInput deleteMember = 23;
     MarkAsUnreadInput markAsUnread = 24;
     GetUpdatesStateInput getUpdatesState = 25;
+    GetChatInput getChat = 26;
   }
 }
 
@@ -629,6 +631,7 @@ message RpcResult {
     DeleteMemberResult deleteMember = 23;
     MarkAsUnreadResult markAsUnread = 24;
     GetUpdatesStateResult getUpdatesState = 25;
+    GetChatResult getChat = 26;
   }
 }
 
@@ -654,6 +657,16 @@ message GetUpdatesStateInput {
 message GetUpdatesStateResult {
   // Current date of the state
   int64 date = 1;
+}
+
+message GetChatInput {
+  // Peer ID to get chat for
+  InputPeer peer_id = 1;
+}
+
+message GetChatResult {
+  Chat chat = 1;
+  Dialog dialog = 2;
 }
 
 // Mark dialog as unread
