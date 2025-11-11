@@ -48,6 +48,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case deleteMember // = 22
   case markAsUnread // = 23
   case getUpdatesState // = 24
+  case getChat // = 25
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -81,6 +82,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 22: self = .deleteMember
     case 23: self = .markAsUnread
     case 24: self = .getUpdatesState
+    case 25: self = .getChat
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -112,6 +114,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .deleteMember: return 22
     case .markAsUnread: return 23
     case .getUpdatesState: return 24
+    case .getChat: return 25
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -143,6 +146,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .deleteMember,
     .markAsUnread,
     .getUpdatesState,
+    .getChat,
   ]
 
 }
@@ -2276,6 +2280,14 @@ public struct RpcCall: Sendable {
     set {input = .getUpdatesState(newValue)}
   }
 
+  public var getChat: GetChatInput {
+    get {
+      if case .getChat(let v)? = input {return v}
+      return GetChatInput()
+    }
+    set {input = .getChat(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Input: Equatable, Sendable {
@@ -2303,6 +2315,7 @@ public struct RpcCall: Sendable {
     case deleteMember(DeleteMemberInput)
     case markAsUnread(MarkAsUnreadInput)
     case getUpdatesState(GetUpdatesStateInput)
+    case getChat(GetChatInput)
 
   }
 
@@ -2516,6 +2529,14 @@ public struct RpcResult: @unchecked Sendable {
     set {_uniqueStorage()._result = .getUpdatesState(newValue)}
   }
 
+  public var getChat: GetChatResult {
+    get {
+      if case .getChat(let v)? = _storage._result {return v}
+      return GetChatResult()
+    }
+    set {_uniqueStorage()._result = .getChat(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Result: Equatable, Sendable {
@@ -2543,6 +2564,7 @@ public struct RpcResult: @unchecked Sendable {
     case deleteMember(DeleteMemberResult)
     case markAsUnread(MarkAsUnreadResult)
     case getUpdatesState(GetUpdatesStateResult)
+    case getChat(GetChatResult)
 
   }
 
@@ -2605,6 +2627,58 @@ public struct GetUpdatesStateResult: Sendable {
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+}
+
+public struct GetChatInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Peer ID to get chat for
+  public var peerID: InputPeer {
+    get {return _peerID ?? InputPeer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {return self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: InputPeer? = nil
+}
+
+public struct GetChatResult: @unchecked Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var chat: Chat {
+    get {return _storage._chat ?? Chat()}
+    set {_uniqueStorage()._chat = newValue}
+  }
+  /// Returns true if `chat` has been explicitly set.
+  public var hasChat: Bool {return _storage._chat != nil}
+  /// Clears the value of `chat`. Subsequent reads from it will return its default value.
+  public mutating func clearChat() {_uniqueStorage()._chat = nil}
+
+  public var dialog: Dialog {
+    get {return _storage._dialog ?? Dialog()}
+    set {_uniqueStorage()._dialog = newValue}
+  }
+  /// Returns true if `dialog` has been explicitly set.
+  public var hasDialog: Bool {return _storage._dialog != nil}
+  /// Clears the value of `dialog`. Subsequent reads from it will return its default value.
+  public mutating func clearDialog() {_uniqueStorage()._dialog = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _storage = _StorageClass.defaultInstance
 }
 
 /// Mark dialog as unread
@@ -4889,6 +4963,7 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     22: .same(proto: "DELETE_MEMBER"),
     23: .same(proto: "MARK_AS_UNREAD"),
     24: .same(proto: "GET_UPDATES_STATE"),
+    25: .same(proto: "GET_CHAT"),
   ]
 }
 
@@ -7715,6 +7790,7 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     23: .same(proto: "deleteMember"),
     24: .same(proto: "markAsUnread"),
     25: .same(proto: "getUpdatesState"),
+    26: .same(proto: "getChat"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -8036,6 +8112,19 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
           self.input = .getUpdatesState(v)
         }
       }()
+      case 26: try {
+        var v: GetChatInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .getChat(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .getChat(v)
+        }
+      }()
       default: break
       }
     }
@@ -8146,6 +8235,10 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       guard case .getUpdatesState(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 25)
     }()
+    case .getChat?: try {
+      guard case .getChat(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 26)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -8187,6 +8280,7 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     23: .same(proto: "deleteMember"),
     24: .same(proto: "markAsUnread"),
     25: .same(proto: "getUpdatesState"),
+    26: .same(proto: "getChat"),
   ]
 
   fileprivate class _StorageClass {
@@ -8539,6 +8633,19 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
             _storage._result = .getUpdatesState(v)
           }
         }()
+        case 26: try {
+          var v: GetChatResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getChat(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getChat(v)
+          }
+        }()
         default: break
         }
       }
@@ -8650,6 +8757,10 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
       case .getUpdatesState?: try {
         guard case .getUpdatesState(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 25)
+      }()
+      case .getChat?: try {
+        guard case .getChat(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 26)
       }()
       case nil: break
       }
@@ -8802,6 +8913,126 @@ extension GetUpdatesStateResult: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
 
   public static func ==(lhs: GetUpdatesStateResult, rhs: GetUpdatesStateResult) -> Bool {
     if lhs.date != rhs.date {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension GetChatInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetChatInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "peer_id"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetChatInput, rhs: GetChatInput) -> Bool {
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension GetChatResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetChatResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "chat"),
+    2: .same(proto: "dialog"),
+  ]
+
+  fileprivate class _StorageClass {
+    var _chat: Chat? = nil
+    var _dialog: Dialog? = nil
+
+    #if swift(>=5.10)
+      // This property is used as the initial default value for new instances of the type.
+      // The type itself is protecting the reference to its storage via CoW semantics.
+      // This will force a copy to be made of this reference when the first mutation occurs;
+      // hence, it is safe to mark this as `nonisolated(unsafe)`.
+      static nonisolated(unsafe) let defaultInstance = _StorageClass()
+    #else
+      static let defaultInstance = _StorageClass()
+    #endif
+
+    private init() {}
+
+    init(copying source: _StorageClass) {
+      _chat = source._chat
+      _dialog = source._dialog
+    }
+  }
+
+  fileprivate mutating func _uniqueStorage() -> _StorageClass {
+    if !isKnownUniquelyReferenced(&_storage) {
+      _storage = _StorageClass(copying: _storage)
+    }
+    return _storage
+  }
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    _ = _uniqueStorage()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      while let fieldNumber = try decoder.nextFieldNumber() {
+        // The use of inline closures is to circumvent an issue where the compiler
+        // allocates stack space for every case branch when no optimizations are
+        // enabled. https://github.com/apple/swift-protobuf/issues/1034
+        switch fieldNumber {
+        case 1: try { try decoder.decodeSingularMessageField(value: &_storage._chat) }()
+        case 2: try { try decoder.decodeSingularMessageField(value: &_storage._dialog) }()
+        default: break
+        }
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every if/case branch local when no optimizations
+      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+      // https://github.com/apple/swift-protobuf/issues/1182
+      try { if let v = _storage._chat {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+      } }()
+      try { if let v = _storage._dialog {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+      } }()
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetChatResult, rhs: GetChatResult) -> Bool {
+    if lhs._storage !== rhs._storage {
+      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
+        let _storage = _args.0
+        let rhs_storage = _args.1
+        if _storage._chat != rhs_storage._chat {return false}
+        if _storage._dialog != rhs_storage._dialog {return false}
+        return true
+      }
+      if !storagesAreEqual {return false}
+    }
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
