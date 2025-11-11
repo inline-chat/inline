@@ -1550,6 +1550,12 @@ export interface RpcCall {
          */
         getUpdatesState: GetUpdatesStateInput;
     } | {
+        oneofKind: "getChat";
+        /**
+         * @generated from protobuf field: GetChatInput getChat = 26;
+         */
+        getChat: GetChatInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1709,6 +1715,12 @@ export interface RpcResult {
          */
         getUpdatesState: GetUpdatesStateResult;
     } | {
+        oneofKind: "getChat";
+        /**
+         * @generated from protobuf field: GetChatResult getChat = 26;
+         */
+        getChat: GetChatResult;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1763,6 +1775,30 @@ export interface GetUpdatesStateResult {
      * @generated from protobuf field: int64 date = 1;
      */
     date: bigint;
+}
+/**
+ * @generated from protobuf message GetChatInput
+ */
+export interface GetChatInput {
+    /**
+     * Peer ID to get chat for
+     *
+     * @generated from protobuf field: InputPeer peer_id = 1;
+     */
+    peerId?: InputPeer;
+}
+/**
+ * @generated from protobuf message GetChatResult
+ */
+export interface GetChatResult {
+    /**
+     * @generated from protobuf field: Chat chat = 1;
+     */
+    chat?: Chat;
+    /**
+     * @generated from protobuf field: Dialog dialog = 2;
+     */
+    dialog?: Dialog;
 }
 /**
  * Mark dialog as unread
@@ -3315,7 +3351,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: GET_UPDATES_STATE = 24;
      */
-    GET_UPDATES_STATE = 24
+    GET_UPDATES_STATE = 24,
+    /**
+     * @generated from protobuf enum value: GET_CHAT = 25;
+     */
+    GET_CHAT = 25
 }
 // @generated message type with reflection information, may provide speed optimized methods
 class ClientMessage$Type extends MessageType<ClientMessage> {
@@ -6516,7 +6556,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 22, name: "createBot", kind: "message", oneof: "input", T: () => CreateBotInput },
             { no: 23, name: "deleteMember", kind: "message", oneof: "input", T: () => DeleteMemberInput },
             { no: 24, name: "markAsUnread", kind: "message", oneof: "input", T: () => MarkAsUnreadInput },
-            { no: 25, name: "getUpdatesState", kind: "message", oneof: "input", T: () => GetUpdatesStateInput }
+            { no: 25, name: "getUpdatesState", kind: "message", oneof: "input", T: () => GetUpdatesStateInput },
+            { no: 26, name: "getChat", kind: "message", oneof: "input", T: () => GetChatInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -6679,6 +6720,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         getUpdatesState: GetUpdatesStateInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getUpdatesState)
                     };
                     break;
+                case /* GetChatInput getChat */ 26:
+                    message.input = {
+                        oneofKind: "getChat",
+                        getChat: GetChatInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getChat)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -6766,6 +6813,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* GetUpdatesStateInput getUpdatesState = 25; */
         if (message.input.oneofKind === "getUpdatesState")
             GetUpdatesStateInput.internalBinaryWrite(message.input.getUpdatesState, writer.tag(25, WireType.LengthDelimited).fork(), options).join();
+        /* GetChatInput getChat = 26; */
+        if (message.input.oneofKind === "getChat")
+            GetChatInput.internalBinaryWrite(message.input.getChat, writer.tag(26, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -6804,7 +6854,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 22, name: "createBot", kind: "message", oneof: "result", T: () => CreateBotResult },
             { no: 23, name: "deleteMember", kind: "message", oneof: "result", T: () => DeleteMemberResult },
             { no: 24, name: "markAsUnread", kind: "message", oneof: "result", T: () => MarkAsUnreadResult },
-            { no: 25, name: "getUpdatesState", kind: "message", oneof: "result", T: () => GetUpdatesStateResult }
+            { no: 25, name: "getUpdatesState", kind: "message", oneof: "result", T: () => GetUpdatesStateResult },
+            { no: 26, name: "getChat", kind: "message", oneof: "result", T: () => GetChatResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -6967,6 +7018,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         getUpdatesState: GetUpdatesStateResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getUpdatesState)
                     };
                     break;
+                case /* GetChatResult getChat */ 26:
+                    message.result = {
+                        oneofKind: "getChat",
+                        getChat: GetChatResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getChat)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -7054,6 +7111,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* GetUpdatesStateResult getUpdatesState = 25; */
         if (message.result.oneofKind === "getUpdatesState")
             GetUpdatesStateResult.internalBinaryWrite(message.result.getUpdatesState, writer.tag(25, WireType.LengthDelimited).fork(), options).join();
+        /* GetChatResult getChat = 26; */
+        if (message.result.oneofKind === "getChat")
+            GetChatResult.internalBinaryWrite(message.result.getChat, writer.tag(26, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -7260,6 +7320,105 @@ class GetUpdatesStateResult$Type extends MessageType<GetUpdatesStateResult> {
  * @generated MessageType for protobuf message GetUpdatesStateResult
  */
 export const GetUpdatesStateResult = new GetUpdatesStateResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetChatInput$Type extends MessageType<GetChatInput> {
+    constructor() {
+        super("GetChatInput", [
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer }
+        ]);
+    }
+    create(value?: PartialMessage<GetChatInput>): GetChatInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<GetChatInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetChatInput): GetChatInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetChatInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetChatInput
+ */
+export const GetChatInput = new GetChatInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class GetChatResult$Type extends MessageType<GetChatResult> {
+    constructor() {
+        super("GetChatResult", [
+            { no: 1, name: "chat", kind: "message", T: () => Chat },
+            { no: 2, name: "dialog", kind: "message", T: () => Dialog }
+        ]);
+    }
+    create(value?: PartialMessage<GetChatResult>): GetChatResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<GetChatResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: GetChatResult): GetChatResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Chat chat */ 1:
+                    message.chat = Chat.internalBinaryRead(reader, reader.uint32(), options, message.chat);
+                    break;
+                case /* Dialog dialog */ 2:
+                    message.dialog = Dialog.internalBinaryRead(reader, reader.uint32(), options, message.dialog);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: GetChatResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Chat chat = 1; */
+        if (message.chat)
+            Chat.internalBinaryWrite(message.chat, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* Dialog dialog = 2; */
+        if (message.dialog)
+            Dialog.internalBinaryWrite(message.dialog, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message GetChatResult
+ */
+export const GetChatResult = new GetChatResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class MarkAsUnreadInput$Type extends MessageType<MarkAsUnreadInput> {
     constructor() {

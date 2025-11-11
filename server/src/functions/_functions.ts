@@ -1,6 +1,7 @@
 import { deleteMessage } from "@in/server/functions/messages.deleteMessage"
 import { sendMessage } from "@in/server/functions/messages.sendMessage"
 import { getChatHistory } from "@in/server/functions/messages.getChatHistory"
+import { getChat } from "@in/server/functions/messages.getChat"
 import { addReaction } from "./messages.addReaction"
 import { deleteReaction } from "./messages.deleteReaction"
 import { editMessage } from "./messages.editMessage"
@@ -23,6 +24,7 @@ export const Functions = {
     deleteMessage: deleteMessage,
     sendMessage: sendMessage,
     getChatHistory: getChatHistory,
+    getChat: getChat,
     addReaction: addReaction,
     deleteReaction: deleteReaction,
     editMessage: editMessage,
