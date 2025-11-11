@@ -408,7 +408,9 @@ class UIMessageView: UIView {
       innerContainer.isLayoutMarginsRelativeArrangement = true
       innerContainer.insetsLayoutMarginsFromSafeArea = false
 
-      innerContainer.addArrangedSubview(messageLabel)
+      if message.hasText {
+        innerContainer.addArrangedSubview(messageLabel)
+      }
 
       // Insert URLPreviewView(s) for attachments with urlPreview
       for attachment in fullMessage.attachments {
