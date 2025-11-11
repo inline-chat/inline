@@ -690,19 +690,15 @@ class UIMessageView: UIView {
       ).withPriority(.defaultHigh),
     ]
 
-    // Dena: Really hacky, needs refactor.
-    if message.hasPhoto, message.hasText, fullMessage.reactions.count > 0 {
-      NSLayoutConstraint.activate(baseConstraints + withFileConstraints)
-    }
     let constraints: [NSLayoutConstraint] = switch (
       message.hasPhoto,
-      message.hasText
+      message.hasText || fullMessage.reactions.count > 0
     ) {
       case (true, false):
-        // File only
+        // Photo only (no text, no reactions)
         withFileConstraints
       case (true, true):
-        // File with text
+        // Photo with text or reactions
         withFileAndTextConstraints
       default:
         // Text only
