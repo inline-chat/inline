@@ -1,6 +1,5 @@
 import AppKit
 import Cocoa
-import Combine
 import InlineKit
 import InlineUI
 import Logger
@@ -190,7 +189,7 @@ class ChatViewAppKit: NSViewController {
   private func fetchChat() {
     Task {
       do {
-        if let chat = try? await viewModel.ensureChat() {
+        if let chat = try await viewModel.ensureChat() {
           await MainActor.run {
             state = .loaded(chat)
           }
