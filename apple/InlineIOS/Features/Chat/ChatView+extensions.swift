@@ -172,8 +172,8 @@ extension ChatView {
         subtitleView
       }
     }
-    .scaledToFill()
-    .fixedSize()
+//    .scaledToFill()
+//    .fixedSize()
     .opacity(isChatHeaderPressed ? 0.7 : 1.0)
     .onTapGesture {
       if let chatItem = fullChatViewModel.chatItem {
