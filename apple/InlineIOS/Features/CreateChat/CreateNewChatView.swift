@@ -82,6 +82,33 @@ struct CreateNewChatView: View {
             }
         }
       }
+      .toolbar {
+        ToolbarItem(placement: .topBarTrailing) {
+          if !text.isEmpty && (spaceId != nil || selectedSpaceId != nil) {
+            if #available(iOS 26.0, *) {
+              Button(action: {
+                isFocused = false
+                showEmojiPicker = false
+                selectedRoute = .visibility
+              }) {
+                Image(systemName: "arrow.right")
+              }
+              .buttonStyle(.glassProminent)
+
+            } else {
+              Button(action: {
+                isFocused = false
+                showEmojiPicker = false
+
+                selectedRoute = .visibility
+              }) {
+                Text("Next")
+              }
+              .tint(Color(theme.accent))
+            }
+          }
+        }
+      }
       Section {
         if spaceId == nil {
           Picker("Select a space", selection: $selectedSpaceId) {
@@ -97,33 +124,6 @@ struct CreateNewChatView: View {
             }
           }
           .pickerStyle(.menu)
-        }
-      }
-      .toolbar {
-        ToolbarItem(placement: .topBarTrailing) {
-          if #available(iOS 26.0, *) {
-            Button(action: {
-              isFocused = false
-              showEmojiPicker = false
-              selectedRoute = .visibility
-            }) {
-              Image(systemName: "arrow.right")
-            }
-            .disabled(spaceId == nil && selectedSpaceId == nil || text.isEmpty)
-            .buttonStyle(.glassProminent)
-
-          } else {
-            Button(action: {
-              isFocused = false
-              showEmojiPicker = false
-
-              selectedRoute = .visibility
-            }) {
-              Text("Next")
-            }
-            .disabled(spaceId == nil && selectedSpaceId == nil || text.isEmpty)
-            .tint(Color(theme.accent))
-          }
         }
       }
     }
