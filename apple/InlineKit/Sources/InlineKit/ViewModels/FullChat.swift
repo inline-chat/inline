@@ -324,34 +324,45 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
 
   public func refetchChatViewAsync() async {
     let peer_ = peer
-    await withTaskGroup(of: Void.self) { group in
-      group.addTask {
-        // Fetch user before hand
-        if self.peerUser == nil {
-          do {
-            if let userId = peer_.asUserId() {
-              try await DataManager.shared.getUser(id: userId)
-            }
-          } catch {
-            Log.shared.error("Failed to refetch user info \(error)")
-          }
+
+    let chatExists = await (try? queryChatFromDatabase()) != nil
+
+    if chatExists {
+      await withTaskGroup(of: Void.self) { group in
+        group.addTask {
+          _ = try? await Api.realtime.send(.getChat(peer: peer_))
         }
 
-        _ = try? await Realtime.shared
-          .invokeWithHandler(.getChatHistory, input: .getChatHistory(.with { input in
-            input.peerID = peer_.toInputPeer()
-          }))
-      }
+        group.addTask {
+          _ = try? await Api.realtime.send(.getChatHistory(peer: peer_))
+        }
 
-      group.addTask {
+        group.addTask {
+          if self.peerUser == nil {
+            do {
+              if let userId = peer_.asUserId() {
+                try await DataManager.shared.getUser(id: userId)
+              }
+            } catch {
+              Log.shared.error("Failed to refetch user info \(error)")
+            }
+          }
+        }
+      }
+    } else {
+      if self.peerUser == nil {
         do {
           if let userId = peer_.asUserId() {
-            return try await DataManager.shared.getUser(id: userId)
+            try await DataManager.shared.getUser(id: userId)
           }
         } catch {
           Log.shared.error("Failed to refetch user info \(error)")
         }
       }
+
+      _ = try? await Api.realtime.send(.getChat(peer: peer_))
+
+      _ = try? await Api.realtime.send(.getChatHistory(peer: peer_))
     }
   }
 
@@ -362,16 +373,51 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
     }
   }
 
+  /// Query chat from database directly
+  private func queryChatFromDatabase() async throws -> Chat? {
+    let peer_ = peer
+    let chatItem = try await db.reader.read { db in
+      switch peer_ {
+        case .user:
+          try Dialog
+            .spaceChatItemQueryForUser()
+            .filter(id: Dialog.getDialogId(peerId: peer_))
+            .fetchOne(db)
+        case .thread:
+          try Dialog
+            .spaceChatItemQueryForChat()
+            .filter(id: Dialog.getDialogId(peerId: peer_))
+            .fetchOne(db)
+      }
+    }
+    return chatItem?.chat
+  }
+
   /// Ensure chat is loaded, if not fetch it
-  public func ensureChat() async -> Chat? {
+  public func ensureChat() async throws -> Chat? {
     if let chatItem, let chat = chatItem.chat {
       return chat
-    } else {
-      await refetchChatViewAsync()
+    }
+
+    let peer_ = peer
+    do {
+      // Wait for getChat transaction to complete and save to database
+      _ = try await Api.realtime.send(.getChat(peer: peer_))
+
+      // Also fetch user info if it's a DM
+      if let userId = peer_.asUserId() {
+        try? await DataManager.shared.getUser(id: userId)
+      }
+
+      // Update UI by fetching from database observation
       await MainActor.run {
         fetchChat()
       }
+
       return chatItem?.chat
+    } catch {
+      Log.shared.error("Failed to ensure chat", error: error)
+      throw error
     }
   }
 }
