@@ -125,6 +125,7 @@ extension ChatView {
           .foregroundStyle(.secondary)
       }
       .padding(.top, -2)
+      .scaledToFill()
       .fixedSize()
     }
   }
