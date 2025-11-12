@@ -47,10 +47,7 @@ async function ensurePrivateChatsForSpaceMembers(currentUserId: number): Promise
         and(
           inArray(
             members.spaceId,
-            db
-              .select({ spaceId: members.spaceId })
-              .from(members)
-              .where(eq(members.userId, currentUserId)),
+            db.select({ spaceId: members.spaceId }).from(members).where(eq(members.userId, currentUserId)),
           ),
           isNull(spaces.deleted),
         ),
@@ -68,12 +65,7 @@ async function ensurePrivateChatsForSpaceMembers(currentUserId: number): Promise
     const existingChats = await db
       .select({ id: chats.id, minUserId: chats.minUserId, maxUserId: chats.maxUserId })
       .from(chats)
-      .where(
-        and(
-          eq(chats.type, "private"),
-          or(eq(chats.minUserId, currentUserId), eq(chats.maxUserId, currentUserId)),
-        ),
-      )
+      .where(and(eq(chats.type, "private"), or(eq(chats.minUserId, currentUserId), eq(chats.maxUserId, currentUserId))))
 
     const existingChatSet = new Set(existingChats.map((c) => `${c.minUserId}-${c.maxUserId}`))
 
@@ -101,7 +93,12 @@ async function ensurePrivateChatsForSpaceMembers(currentUserId: number): Promise
     const existingDialogs = await db
       .select({ chatId: dialogs.chatId, userId: dialogs.userId })
       .from(dialogs)
-      .where(inArray(dialogs.chatId, allChatsToProcess.map((c) => c.id)))
+      .where(
+        inArray(
+          dialogs.chatId,
+          allChatsToProcess.map((c) => c.id),
+        ),
+      )
 
     const existingDialogSet = new Set(existingDialogs.map((d) => `${d.chatId}-${d.userId}`))
 
@@ -141,7 +138,8 @@ async function ensurePrivateChatsForSpaceMembers(currentUserId: number): Promise
 export const getChats = async (input: Input, context: FunctionContext): Promise<Output> => {
   const currentUserId = context.currentUserId
 
-  await ensurePrivateChatsForSpaceMembers(currentUserId)
+  // TEMPORARY UNTIL getChats is integrated into the clients
+  // await ensurePrivateChatsForSpaceMembers(currentUserId)
 
   // Buckets for results
   let dialogsList: DbDialog[] = []
