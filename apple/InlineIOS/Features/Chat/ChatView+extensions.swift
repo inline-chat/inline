@@ -172,6 +172,7 @@ extension ChatView {
           .fontWeight(.medium)
         subtitleView
       }
+      .fixedSize(horizontal: false, vertical: true)
     }
 //    .scaledToFill()
 //    .fixedSize()
