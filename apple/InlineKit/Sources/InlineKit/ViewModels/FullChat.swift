@@ -373,6 +373,33 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
     }
   }
 
+  public func refetchHistoryOnly() {
+    Log.shared.debug("Refetching history only for peer \(peer)")
+    Task {
+      await refetchHistoryOnlyAsync()
+    }
+  }
+
+  private func refetchHistoryOnlyAsync() async {
+    let peer_ = peer
+
+    await withTaskGroup(of: Void.self) { group in
+      group.addTask {
+        _ = try? await Api.realtime.send(.getChatHistory(peer: peer_))
+      }
+
+      group.addTask {
+        if self.peerUser == nil, let userId = peer_.asUserId() {
+          do {
+            try await DataManager.shared.getUser(id: userId)
+          } catch {
+            Log.shared.error("Failed to refetch user info \(error)")
+          }
+        }
+      }
+    }
+  }
+
   /// Query chat from database directly
   private func queryChatFromDatabase() async throws -> Chat? {
     let peer_ = peer
