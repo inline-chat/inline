@@ -12,6 +12,7 @@ struct ChatView: View {
 
   @State var navBarHeight: CGFloat = 0
   @State var isChatHeaderPressed = false
+  @State private var pageState: PageState = .initial
 
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
 
@@ -27,6 +28,13 @@ struct ChatView: View {
   @ObservedObject var composeActions: ComposeActions = .shared
 
   static let formatter = RelativeDateTimeFormatter()
+
+  enum PageState {
+    case initial
+    case loading
+    case loaded
+    case error(Error)
+  }
 
   var toolbarAvatarSize: CGFloat {
     if #available(iOS 26.0, *) {
@@ -62,14 +70,24 @@ struct ChatView: View {
 
   var body: some View {
     ZStack(alignment: .top) {
-      ChatViewUIKit(
-        peerId: peerId,
-        chatId: fullChatViewModel.chat?.id ?? 0,
-        spaceId: fullChatViewModel.chat?.spaceId ?? 0
-      )
-      .edgesIgnoringSafeArea(.all)
+      if let chat = fullChatViewModel.chat {
+        ChatViewUIKit(
+          peerId: peerId,
+          chatId: chat.id,
+          spaceId: chat.spaceId ?? 0
+        )
+        .edgesIgnoringSafeArea(.all)
+      }
 
       ChatViewHeader(navBarHeight: $navBarHeight)
+
+      if case .loading = pageState {
+        loadingOverlay
+      }
+
+      if case .error(let error) = pageState {
+        errorOverlay(error: error)
+      }
     }
     .toolbarColorScheme(colorScheme == .dark ? .dark : .light, for: .navigationBar)
     .toolbarBackground(.hidden, for: .navigationBar)
@@ -93,8 +111,13 @@ struct ChatView: View {
         }
       }
     }
-    .onAppear {
-      fetch()
+    .task {
+      await fetchChatIfNeeded()
+    }
+    .onChange(of: scenePhase) { _, newPhase in
+      if newPhase == .active, fullChatViewModel.chat != nil {
+        fullChatViewModel.refetchHistoryOnly()
+      }
     }
     .onReceive(NotificationCenter.default.publisher(for: Notification.Name("NavigationBarHeight"))) { notification in
       if let height = notification.userInfo?["navBarHeight"] as? CGFloat {
@@ -139,7 +162,64 @@ struct ChatView: View {
     .environment(router)
   }
 
-  func fetch() {
-    fullChatViewModel.refetchChatView()
+  private func fetchChatIfNeeded() async {
+    if fullChatViewModel.chat != nil {
+      pageState = .loaded
+      fullChatViewModel.refetchHistoryOnly()
+    } else {
+      pageState = .loading
+      do {
+        _ = try await fullChatViewModel.ensureChat()
+        pageState = .loaded
+      } catch {
+        pageState = .error(error)
+      }
+    }
+  }
+
+  private var loadingOverlay: some View {
+    ZStack {
+      Color.black.opacity(0.1)
+        .ignoresSafeArea()
+
+      ProgressView()
+        .scaleEffect(1.2)
+    }
+  }
+
+  private func errorOverlay(error: Error) -> some View {
+    ZStack {
+      Color.black.opacity(0.1)
+        .ignoresSafeArea()
+
+      VStack(spacing: 16) {
+        Image(systemName: "exclamationmark.triangle")
+          .font(.system(size: 48))
+          .foregroundColor(.secondary)
+
+        Text("Failed to load chat")
+          .font(.headline)
+
+        Text(error.localizedDescription)
+          .font(.subheadline)
+          .foregroundColor(.secondary)
+          .multilineTextAlignment(.center)
+          .padding(.horizontal)
+
+        Button("Retry") {
+          Task {
+            pageState = .loading
+            do {
+              _ = try await fullChatViewModel.ensureChat()
+              pageState = .loaded
+            } catch {
+              pageState = .error(error)
+            }
+          }
+        }
+        .buttonStyle(.borderedProminent)
+      }
+      .padding()
+    }
   }
 }
