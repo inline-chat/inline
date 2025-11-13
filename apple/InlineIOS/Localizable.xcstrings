@@ -552,6 +552,9 @@
     "Everyone in %@" : {
 
     },
+    "Failed to load chat" : {
+
+    },
     "Find" : {
       "localizations" : {
         "fa" : {
@@ -759,6 +762,9 @@
 
     },
     "Remove Participant" : {
+
+    },
+    "Retry" : {
 
     },
     "Search countries..." : {
