@@ -17,8 +17,6 @@ class EmbedMessageView: UIView {
   private var outgoing: Bool = false
   private var isOnlyEmoji: Bool = false
 
-  let theme = ThemeManager.shared.selected
-
   private lazy var headerLabel: UILabel = {
     let label = UILabel()
     label.translatesAutoresizingMaskIntoConstraints = false

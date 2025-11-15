@@ -40,7 +40,7 @@ class StandaloneComposeTextView: UITextView {
     typingAttributes[.font] = font
     textContainerInset = UIEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
     translatesAutoresizingMaskIntoConstraints = false
-    tintColor = ThemeManager.shared.selected.accent
+    tintColor = UIColor(hex: "#52A5FF")!
   }
 
   private func setupPlaceholder() {

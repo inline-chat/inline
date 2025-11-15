@@ -21,10 +21,10 @@ struct LogoutSection: View {
             .font(.callout)
             .foregroundColor(.white)
             .frame(width: 25, height: 25)
-            .background(ThemeManager.shared.logoutRedColor)
+            .background(Color.red)
             .clipShape(RoundedRectangle(cornerRadius: 6))
           Text("Logout")
-            .foregroundColor(ThemeManager.shared.logoutRedColor)
+            .foregroundColor(Color.red)
             .padding(.leading, 4)
           Spacer()
         }
