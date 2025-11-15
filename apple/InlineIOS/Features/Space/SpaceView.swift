@@ -175,10 +175,13 @@ private struct MemberListView: View {
           }()
         )
         .listRowInsets(.init(top: 4, leading: 12, bottom: 4, trailing: 0))
-        .themedListRow()
+        .listRowBackground(Color(.systemBackground))
+        .foregroundColor(.primary)
       }
     }
-    .themedListStyle()
+    .listStyle(.plain)
+    .scrollContentBackground(.hidden)
+    .background(Color(.systemBackground))
   }
 }
 
@@ -191,10 +194,13 @@ private struct ChatListContent: View {
       ForEach(items, id: \.id) { item in
         ChatItemRow(item: item)
           .listRowInsets(.init(top: 9, leading: 16, bottom: 2, trailing: 0))
-          .themedListRow()
+          .listRowBackground(Color(.systemBackground))
+          .foregroundColor(.primary)
       }
     }
-    .themedListStyle()
+    .listStyle(.plain)
+    .scrollContentBackground(.hidden)
+    .background(Color(.systemBackground))
   }
 }
 

@@ -30,7 +30,7 @@ struct ArchivedChatsView: View {
           spaceArchivedView
       }
     }
-    .background(ThemeManager.shared.backgroundColorSwiftUI)
+    .background(Color(.systemBackground))
     .navigationBarTitleDisplayMode(.inline)
     .navigationTitle("")
     .toolbar {
@@ -52,7 +52,7 @@ struct ArchivedChatsView: View {
         Text(shouldShow ? realtimeState.connectionState.title : "Chats")
           .font(.title3)
           .fontWeight(.semibold)
-          .themedPrimaryText()
+          .foregroundColor(.primary)
           .contentTransition(.numericText())
           .animation(.spring(duration: 0.5), value: realtimeState.connectionState.title)
           .animation(.spring(duration: 0.5), value: shouldShow)
@@ -178,10 +178,13 @@ struct ArchivedChatsView: View {
                 bottom: 2,
                 trailing: 0
               ))
-              .themedListRow()
+              .listRowBackground(Color(.systemBackground))
+              .foregroundColor(.primary)
           }
         }
-        .themedListStyle()
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Color(.systemBackground))
         .animation(.default, value: fullSpaceViewModel.chats)
         .animation(.default, value: fullSpaceViewModel.memberChats)
       }
