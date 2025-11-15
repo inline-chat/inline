@@ -48,11 +48,11 @@ struct SpaceSettingsView: View {
             Text(viewModel.space?.nameWithoutEmoji ?? "Space")
               .font(.body)
               .fontWeight(.medium)
-              .themedPrimaryText()
+              .foregroundColor(.primary)
 
             Text("\(viewModel.members.count) \(viewModel.members.count == 1 ? "member" : "members")")
               .font(.callout)
-              .themedSecondaryText()
+              .foregroundColor(.secondary)
           }
         }
       }
@@ -66,7 +66,7 @@ struct SpaceSettingsView: View {
               .background(Color.purple)
               .clipShape(RoundedRectangle(cornerRadius: 6))
             Text("Integrations")
-              .themedPrimaryText()
+              .foregroundColor(.primary)
               .padding(.leading, 4)
             Spacer()
           }

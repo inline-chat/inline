@@ -114,7 +114,7 @@ class LiquidGlassComposeView: UIView {
     let config = UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold)
     button.setImage(UIImage(systemName: "arrow.up", withConfiguration: config), for: .normal)
     button.tintColor = .white
-    button.backgroundColor = ThemeManager.shared.selected.accent
+    button.backgroundColor = UIColor(hex: "#52A5FF")!
     button.layer.cornerRadius = buttonSize.width / 2
     button.layer.cornerCurve = .continuous
 
@@ -141,7 +141,7 @@ class LiquidGlassComposeView: UIView {
     // Configure button appearance
     let config = UIImage.SymbolConfiguration(pointSize: 16, weight: .medium)
     button.setImage(UIImage(systemName: "plus", withConfiguration: config), for: .normal)
-    button.tintColor = ThemeManager.shared.selected.accent
+    button.tintColor = UIColor(hex: "#52A5FF")!
     button.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.1)
     button.layer.cornerRadius = buttonSize.width / 2
     button.layer.cornerCurve = .continuous

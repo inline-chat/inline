@@ -47,15 +47,15 @@ struct ProfileRow: View {
         Text(fullName)
           .font(.body)
           .fontWeight(.medium)
-          .themedPrimaryText()
+          .foregroundColor(.primary)
         if !isChatInfo {
           Text(user.email ?? "")
             .font(.callout)
-            .themedSecondaryText()
+            .foregroundColor(.secondary)
         } else {
           Text("@\(user.username ?? "")")
             .font(.callout)
-            .themedSecondaryText()
+            .foregroundColor(.secondary)
         }
       }
     }

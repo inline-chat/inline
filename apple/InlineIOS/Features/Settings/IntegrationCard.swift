@@ -34,9 +34,9 @@ struct IntegrationCard: View {
         VStack(alignment: .leading, spacing: 2) {
           Text(title)
             .fontWeight(.medium)
-            .themedPrimaryText()
+            .foregroundColor(.primary)
           Text(description)
-            .themedSecondaryText()
+            .foregroundColor(.secondary)
             .font(.caption)
         }
 
@@ -64,7 +64,7 @@ struct IntegrationCard: View {
       }) {
         HStack {
           Text(isConnecting ? "Connecting..." : isConnected ? "Connected" : "Connect")
-            .themedPrimaryText()
+            .foregroundColor(.primary)
           Spacer()
           if isConnected {
             Image(systemName: "checkmark.circle.fill")
@@ -81,7 +81,6 @@ struct IntegrationCard: View {
         Button("Options") {
           navigateToOptions()
         }
-        .themedPrimaryText()
         .disabled(permissionCheck?() == false)
       }
     }

@@ -111,12 +111,10 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
   private func configureContainerAppearance() {
     containerView.backgroundColor = byCurrentUser ?
       (
-        outgoing ? ThemeManager.shared.selected.reactionOutgoingPrimary : ThemeManager.shared.selected
-          .reactionIncomingPrimary
+        outgoing ? UIColor.white : UIColor(hex: "#52A5FF")!
       ) :
       (
-        outgoing ? ThemeManager.shared.selected.reactionOutgoingSecoundry : ThemeManager.shared.selected
-          .reactionIncomingSecoundry
+        outgoing ? UIColor.white.withAlphaComponent(0.08) : UIColor(dynamicProvider: { $0.userInterfaceStyle == .dark ? UIColor(hex: "#3c3b43")! : UIColor(hex: "#e2e5e5")! })
       )
   }
 
@@ -486,10 +484,8 @@ extension UIColor {
   static let reactionBackgroundOutgoingSelf = UIColor(.white).withAlphaComponent(0.4)
 
   /// Background color for reactions on incoming messages by the current user
-  static let reactionBackgroundIncomingSelf = ThemeManager.shared.selected.secondaryTextColor?
-    .withAlphaComponent(0.4) ?? .systemGray6.withAlphaComponent(0.5)
+  static let reactionBackgroundIncomingSelf = UIColor.systemGray6.withAlphaComponent(0.5)
 
   /// Background color for reactions on incoming messages by others
-  static let reactionBackgroundIncoming = ThemeManager.shared.selected.secondaryTextColor?
-    .withAlphaComponent(0.2) ?? .systemGray6.withAlphaComponent(0.2)
+  static let reactionBackgroundIncoming = UIColor.systemGray6.withAlphaComponent(0.2)
 }

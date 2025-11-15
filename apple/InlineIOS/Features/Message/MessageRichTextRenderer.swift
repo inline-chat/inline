@@ -10,7 +10,7 @@ class MessageRichTextRenderer {
     if outgoing {
       UIColor.white
     } else {
-      ThemeManager.shared.selected.accent
+      UIColor(hex: "#52A5FF")!
     }
   }
 
@@ -21,7 +21,7 @@ class MessageRichTextRenderer {
     if outgoing {
       UIColor.white
     } else {
-      ThemeManager.shared.selected.accent
+      UIColor(hex: "#52A5FF")!
     }
   }
 }

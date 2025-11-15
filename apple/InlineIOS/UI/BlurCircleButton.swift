@@ -14,7 +14,7 @@ class BlurCircleButton: UIButton {
     } else {
       let effect = UIBlurEffect(style: .regular)
       let view = UIVisualEffectView(effect: effect)
-      view.backgroundColor = ThemeManager.shared.selected.backgroundColor.withAlphaComponent(0.6)
+      view.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.6)
       view.translatesAutoresizingMaskIntoConstraints = false
 
       view.layer.shadowColor = UIColor.black.cgColor
@@ -52,7 +52,7 @@ class BlurCircleButton: UIButton {
     backgroundView.isUserInteractionEnabled = false
     blurView.isUserInteractionEnabled = false
     iconImageView.isUserInteractionEnabled = false
-    iconImageView.tintColor = ThemeManager.shared.selected.accent
+    iconImageView.tintColor = UIColor(hex: "#52A5FF")!
     isUserInteractionEnabled = true
     addSubview(backgroundView)
 

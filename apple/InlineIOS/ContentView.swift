@@ -74,8 +74,8 @@ struct ContentView2: View {
           .tag(tab)
         }
       }
-      .background(ThemeManager.shared.backgroundColorSwiftUI)
-      .themedAccent()
+      .background(Color(.systemBackground))
+      .accentColor(Color(uiColor: UIColor(hex: "#52A5FF")!))
       .sheet(item: $bindableRouter.presentedSheet) { sheet in
         sheetView(for: sheet)
       }

@@ -176,7 +176,7 @@ struct SwiftUIPhotoPreviewView: View {
     GeometryReader { geometry in
       ZStack {
         // Background
-        ThemeManager.shared.backgroundColorSwiftUI
+        Color(.systemBackground)
           .ignoresSafeArea()
 
         // Main image with zoom and pan
@@ -268,22 +268,22 @@ struct SwiftUIPhotoPreviewView: View {
     }) {
       if #available(iOS 26.0, *) {
         Circle()
-          .fill(ThemeManager.shared.cardBackgroundColor)
+          .fill(Color(.secondarySystemBackground))
           .frame(width: closeButtonSize, height: closeButtonSize)
           .overlay {
             Image(systemName: "xmark")
               .font(.callout)
-              .foregroundColor(ThemeManager.shared.textPrimaryColor)
+              .foregroundColor(Color.primary)
           }
           .glassEffect(.regular, in: Circle())
       } else {
         Circle()
-          .fill(ThemeManager.shared.surfaceBackgroundColor)
+          .fill(Color(.secondarySystemBackground))
           .frame(width: closeButtonSize, height: closeButtonSize)
           .overlay {
             Image(systemName: "xmark")
               .font(.callout)
-              .foregroundColor(ThemeManager.shared.textPrimaryColor)
+              .foregroundColor(Color.primary)
           }
       }
     }
@@ -294,10 +294,10 @@ struct SwiftUIPhotoPreviewView: View {
     HStack(spacing: 2) {
       Text("\(viewModel.currentIndex + 1)")
         .font(.body)
-        .foregroundColor(ThemeManager.shared.textPrimaryColor)
+        .foregroundColor(Color.primary)
       Text("of \(viewModel.photoItems.count)")
         .font(.body)
-        .foregroundColor(ThemeManager.shared.textSecondaryColor)
+        .foregroundColor(Color.secondary)
     }
     .padding(.horizontal, 12)
     .frame(height: closeButtonSize)
@@ -305,11 +305,11 @@ struct SwiftUIPhotoPreviewView: View {
     .background {
       if #available(iOS 26.0, *) {
         Capsule()
-          .fill(ThemeManager.shared.cardBackgroundColor)
+          .fill(Color(.secondarySystemBackground))
           .glassEffect(.regular, in: Capsule())
       } else {
         Capsule()
-          .fill(ThemeManager.shared.surfaceBackgroundColor)
+          .fill(Color(.secondarySystemBackground))
       }
     }
   }
@@ -321,17 +321,17 @@ struct SwiftUIPhotoPreviewView: View {
       if viewModel.photoItems.count > 1 {
         Text("\(viewModel.currentIndex + 1)")
           .font(.callout.bold())
-          .foregroundColor(ThemeManager.shared.textPrimaryColor)
+          .foregroundColor(Color.primary)
           .frame(width: closeButtonSize, height: closeButtonSize)
           .background(
             Group {
               if #available(iOS 26.0, *) {
                 Circle()
-                  .fill(ThemeManager.shared.cardBackgroundColor)
+                  .fill(Color(.secondarySystemBackground))
                   .glassEffect(.regular, in: Circle())
               } else {
                 Circle()
-                  .fill(ThemeManager.shared.surfaceBackgroundColor)
+                  .fill(Color(.secondarySystemBackground))
               }
             }
           )
@@ -361,7 +361,7 @@ struct SwiftUIPhotoPreviewView: View {
                     RoundedRectangle(cornerRadius: 8)
                       .fill(Color.black.opacity(0.2))
                       .stroke(
-                        index == viewModel.currentIndex ? ThemeManager.shared.accentColor : Color.clear,
+                        index == viewModel.currentIndex ? Color(uiColor: UIColor(hex: "#52A5FF")!) : Color.clear,
                         lineWidth: 2
                       )
                     if viewModel.currentIndex == index {
@@ -398,13 +398,13 @@ struct SwiftUIPhotoPreviewView: View {
     TextField("Add a caption...", text: $viewModel.caption, axis: .vertical)
       .focused($isCaptionFocused)
       .font(.system(size: 16))
-      .foregroundColor(ThemeManager.shared.textPrimaryColor)
+      .foregroundColor(Color.primary)
       .padding(.horizontal, textFieldHorizontalPadding)
       .padding(.vertical, textFieldVerticalPadding)
       .background {
         RoundedRectangle(cornerRadius: 20)
-          .fill(ThemeManager.shared.backgroundColorSwiftUI)
-          .stroke(ThemeManager.shared.borderColor, lineWidth: 1)
+          .fill(Color(.systemBackground))
+          .stroke(Color(.separator), lineWidth: 1)
       }
       .lineLimit(isCaptionFocused ? (1 ... 4) : (1 ... 1))
       .onChange(of: viewModel.caption) { _, newValue in
@@ -425,22 +425,22 @@ struct SwiftUIPhotoPreviewView: View {
     Button(action: action) {
       if #available(iOS 26.0, *) {
         Circle()
-          .fill(ThemeManager.shared.cardBackgroundColor)
+          .fill(Color(.secondarySystemBackground))
           .frame(width: actionButtonSize, height: actionButtonSize)
           .overlay {
             Image(systemName: systemImage)
               .font(.system(size: 18, weight: .medium))
-              .foregroundColor(ThemeManager.shared.textPrimaryColor)
+              .foregroundColor(Color.primary)
           }
           .glassEffect(.regular, in: Circle())
       } else {
         Circle()
-          .fill(ThemeManager.shared.surfaceBackgroundColor)
+          .fill(Color(.secondarySystemBackground))
           .frame(width: actionButtonSize, height: actionButtonSize)
           .overlay {
             Image(systemName: systemImage)
               .font(.system(size: 18, weight: .medium))
-              .foregroundColor(ThemeManager.shared.textPrimaryColor)
+              .foregroundColor(Color.primary)
           }
       }
     }
@@ -461,7 +461,7 @@ struct SwiftUIPhotoPreviewView: View {
         .frame(width: sendButtonSize, height: sendButtonSize)
         .background(
           Circle()
-            .fill(ThemeManager.shared.accentColor)
+            .fill(Color(uiColor: UIColor(hex: "#52A5FF")!))
         )
     }
     .buttonStyle(ScaleButtonStyle2())
