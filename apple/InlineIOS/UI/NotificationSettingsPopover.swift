@@ -22,7 +22,7 @@ struct NotificationSettingsButton: View {
               }
             }
         }
-        .themedSheet()
+        .tint(Color(uiColor: UIColor(hex: "#52A5FF")!))
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
       }
@@ -60,7 +60,7 @@ struct NotificationSettingsButton: View {
       VStack(alignment: .leading, spacing: 4) {
         Text("Control how you receive notifications")
           .font(.subheadline)
-          .themedSecondaryText()
+          .foregroundColor(.secondary)
       }
       .padding(.horizontal, 16)
 
@@ -118,7 +118,7 @@ struct NotificationSettingsButton: View {
       Spacer()
     }
     .padding(.vertical, 20)
-    .background(ThemeManager.shared.backgroundColorSwiftUI)
+    .background(Color(.systemBackground))
   }
 
   private func close() {
@@ -136,7 +136,6 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
   var selected: Bool
   var value: Value
   var onChange: (Value) -> Void
-  let theme = ThemeManager.shared.selected
 
   var body: some View {
     Button {
@@ -144,7 +143,7 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
     } label: {
       HStack(spacing: 12) {
         Circle()
-          .fill(selected ? Color(theme.accent) : Color(.systemGray5))
+          .fill(selected ? Color(uiColor: UIColor(hex: "#52A5FF")!) : Color(.systemGray5))
           .frame(width: 36, height: 36)
           .overlay {
             Image(systemName: systemImage)
@@ -156,10 +155,10 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
           Text(title)
             .font(.body)
             .fontWeight(.medium)
-            .themedPrimaryText()
+            .foregroundColor(.primary)
           Text(description)
             .font(.caption)
-            .themedSecondaryText()
+            .foregroundColor(.secondary)
         }
 
         Spacer()
@@ -167,14 +166,14 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
         if selected {
           Image(systemName: "checkmark")
             .font(.system(size: 16, weight: .semibold))
-            .foregroundStyle(Color(theme.accent))
+            .foregroundStyle(Color(uiColor: UIColor(hex: "#52A5FF")!))
         }
       }
       .padding(.vertical, 8)
       .padding(.horizontal, 12)
       .background(
         RoundedRectangle(cornerRadius: 12)
-          .fill(selected ? Color(theme.accent).opacity(0.1) : ThemeManager.shared.cardBackgroundColor)
+          .fill(selected ? Color(uiColor: UIColor(hex: "#52A5FF")!).opacity(0.1) : Color(.secondarySystemBackground))
       )
     }
     .buttonStyle(.plain)

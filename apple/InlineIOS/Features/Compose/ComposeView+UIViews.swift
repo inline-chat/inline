@@ -18,7 +18,7 @@ extension ComposeView {
       UIImage.SymbolConfiguration(pointSize: 14, weight: .bold)
     )
     config.baseForegroundColor = .white
-    config.background.backgroundColor = ThemeManager.shared.selected.accent
+    config.background.backgroundColor = UIColor(hex: "#52A5FF")!
     config.cornerStyle = .capsule
 
     button.addTarget(self, action: #selector(sendTapped), for: .touchUpInside)

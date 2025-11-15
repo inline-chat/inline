@@ -55,7 +55,7 @@ struct ChatItemRow: View {
         }
         Text(item.chat?.title ?? "Chat")
           .font(.body)
-          .themedPrimaryText()
+          .foregroundColor(.primary)
           .padding(.leading, 8)
       }
     }

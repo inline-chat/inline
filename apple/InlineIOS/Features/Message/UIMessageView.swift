@@ -48,12 +48,12 @@ class UIMessageView: UIView {
     } else if outgoing {
       // Show red bubble for failed messages using theme-aware color
       if message.status == .failed {
-        ThemeManager.shared.selected.failedBubbleBackground
+        UIColor.systemRed
       } else {
-        ThemeManager.shared.selected.bubbleBackground
+        UIColor(hex: "#52A5FF")!
       }
     } else {
-      ThemeManager.shared.selected.incomingBubbleBackground
+      UIColor(dynamicProvider: { $0.userInterfaceStyle == .dark ? UIColor(hex: "#27262B")! : UIColor(hex: "#F2F2F2")! })
     }
   }
 
@@ -61,7 +61,7 @@ class UIMessageView: UIView {
     if outgoing {
       .white
     } else {
-      ThemeManager.shared.selected.primaryTextColor ?? .label
+      .label
     }
   }
 

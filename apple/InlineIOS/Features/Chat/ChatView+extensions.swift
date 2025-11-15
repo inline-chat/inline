@@ -118,10 +118,8 @@ extension ChatView {
       HStack(alignment: .center, spacing: 4) {
         subtitle.animatedIndicator.padding(.top, 2)
 
-        // Text(subtitle.text.lowercased())
         Text(subtitle.shouldKeepOriginalCase ? subtitle.text : subtitle.text.lowercased())
           .font(.caption)
-//          .foregroundStyle(subtitle.isComposeAction ? Color(ThemeManager.shared.selected.accent) : .secondary)
           .foregroundStyle(.secondary)
       }
       .padding(.top, -2)

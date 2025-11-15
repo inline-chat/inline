@@ -12,7 +12,7 @@ struct DocumentsTabView: View {
       if documentsViewModel.documentMessages.isEmpty {
         VStack(spacing: 8) {
           Text("No files found in this chat.")
-            .themedPrimaryText()
+            .foregroundColor(.primary)
           Text("Older files may not appear, will be fixed in an update.")
             .font(.caption2)
             .foregroundStyle(.tertiary)

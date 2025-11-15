@@ -69,13 +69,11 @@ class URLPreviewView: UIView {
     let contentSpacing: CGFloat = 8
     let cornerRadius: CGFloat = 8
 
-    let theme = ThemeManager.shared.selected
-    let bgColor = outgoing ? .white.withAlphaComponent(0.1) : theme.secondaryTextColor?
-      .withAlphaComponent(0.2) ?? .systemGray5.withAlphaComponent(0.2)
-    let primaryTextColor = outgoing ? UIColor.white : (theme.primaryTextColor ?? .label)
+    let bgColor = outgoing ? .white.withAlphaComponent(0.1) : UIColor.systemGray5.withAlphaComponent(0.2)
+    let primaryTextColor = outgoing ? UIColor.white : UIColor.label
     let secondaryTextColor = outgoing ? UIColor.white
-      .withAlphaComponent(0.7) : (theme.primaryTextColor?.withAlphaComponent(0.7) ?? .secondaryLabel)
-    let rectangleColor = outgoing ? UIColor.white : (theme.accent ?? .systemBlue)
+      .withAlphaComponent(0.7) : UIColor.secondaryLabel
+    let rectangleColor = outgoing ? UIColor.white : UIColor(hex: "#52A5FF")!
 
     siteNameLabel.text = preview.siteName
     siteNameLabel.font = UIFont.systemFont(ofSize: 12, weight: .medium)

@@ -11,13 +11,13 @@ struct EmptySearchView: View {
       VStack(spacing: 4) {
         Text("🔍")
           .font(.largeTitle)
-          .themedPrimaryText()
+          .foregroundColor(.primary)
           .padding(.bottom, 14)
         Text("Search for people")
           .font(.headline)
-          .themedPrimaryText()
+          .foregroundColor(.primary)
         Text("Type a username to find someone to add. eg. dena, mo")
-          .themedSecondaryText()
+          .foregroundColor(.secondary)
           .multilineTextAlignment(.center)
       }
       .padding(.horizontal, 45)

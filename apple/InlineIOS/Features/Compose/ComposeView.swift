@@ -20,7 +20,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
   let maxHeight: CGFloat = 350
   let buttonSize: CGSize = .init(width: 32, height: 32)
-  let linkColor: UIColor = ThemeManager.shared.selected.accent
+  let linkColor: UIColor = UIColor(hex: "#52A5FF")!
 
   static let minHeight: CGFloat = 46.0
   static let textViewVerticalPadding: CGFloat = 0.0
