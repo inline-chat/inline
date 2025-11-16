@@ -26,16 +26,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    SentrySDK.start { options in
-      options.dsn = InlineConfig.SentryDSN
-      options.debug = false
-      options.tracesSampleRate = 0.1
-      options.attachViewHierarchy = true
-      options.enableMetricKit = true
-      options.enableTimeToFullDisplayTracing = true
-      options.swiftAsyncStacktraces = true
-      options.enableAppLaunchProfiling = true
-    }
+    Analytics.start()
 
     NotificationCenter.default.addObserver(
       self,
@@ -84,7 +75,6 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
   func getNotificationSettings() {
     UNUserNotificationCenter.current().getNotificationSettings { settings in
-
       guard settings.authorizationStatus == .authorized else { return }
       DispatchQueue.main.async {
         UIApplication.shared.registerForRemoteNotifications()
@@ -99,7 +89,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     let deviceToken = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
 
     Task.detached {
-      let _ = try await ApiClient.shared.savePushNotification(
+      _ = try await ApiClient.shared.savePushNotification(
         pushToken: deviceToken
       )
     }
