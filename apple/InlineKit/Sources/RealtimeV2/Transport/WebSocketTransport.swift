@@ -316,7 +316,8 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
   }
 
   private func handleError(_ error: Error) async {
-    log.debug("WebSocket error: \(error)")
+    // Capture error in Sentry
+    log.error("WebSocket connection error", error: error)
 
     guard state != .idle else {
       log.trace("Ignoring error because state is idle")
