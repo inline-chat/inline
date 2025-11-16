@@ -1,6 +1,7 @@
 import Auth
 import InlineKit
 import Logger
+import Sentry
 import SwiftUI
 
 struct OnboardingEnterCode: View {
@@ -109,6 +110,14 @@ struct OnboardingEnterCode: View {
 
         // Save creds
         await Auth.shared.saveCredentials(token: result.token, userId: result.userId)
+
+        // Register Sentry
+        Analytics.identify(
+          userId: result.userId,
+          email: result.user.email,
+          name: result.user.anyName,
+          username: result.user.username
+        )
 
         // Change passphrase of database
         try await AppDatabase.authenticated()
