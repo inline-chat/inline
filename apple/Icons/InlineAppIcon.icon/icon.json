@@ -11,11 +11,16 @@
       "blur-material" : 0.5,
       "layers" : [
         {
-          "hidden" : false,
+          "image-name" : "Frame 220 3.png",
+          "name" : "Frame 220 3"
+        },
+        {
+          "hidden" : true,
           "image-name" : "Frame 218.png",
           "name" : "Frame 218"
         }
       ],
+      "name" : "Group",
       "position" : {
         "scale" : 0.97,
         "translation-in-points" : [
@@ -27,7 +32,14 @@
         {
           "value" : {
             "kind" : "neutral",
-            "opacity" : 0.8
+            "opacity" : 0.9
+          }
+        },
+        {
+          "appearance" : "dark",
+          "value" : {
+            "kind" : "neutral",
+            "opacity" : 0.7
           }
         },
         {
@@ -43,7 +55,7 @@
         {
           "value" : {
             "enabled" : true,
-            "value" : 0.4
+            "value" : 0.62
           }
         },
         {
