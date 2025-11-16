@@ -164,14 +164,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   private func initializeServices() {
     // Setup Sentry
-    SentrySDK.start { options in
-      options.dsn = InlineConfig.SentryDSN
-      options.debug = false
-      options.tracesSampleRate = 0.1
-    }
+    Analytics.start()
 
     // Register for notifications
-    notifications.setup()
+    // notifications.setup()
   }
 
   @MainActor private func setupNotificationsSoundSetting() {
@@ -261,6 +257,8 @@ extension AppDelegate {
 
     Task {
       _ = try? await ApiClient.shared.logout()
+
+      Analytics.logout()
 
       // Clear database
       try? AppDatabase.loggedOut()

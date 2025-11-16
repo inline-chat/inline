@@ -105,6 +105,14 @@ extension Code {
           try result.user.saveFull(db)
         }
 
+        // Register Sentry
+        Analytics.identify(
+          userId: result.userId,
+          email: result.user.email,
+          name: result.user.anyName,
+          username: result.user.username
+        )
+
         formState.reset()
         if result.user.firstName == nil || result.user.firstName?.isEmpty == true || result.user.pendingSetup == true {
           nav.push(.profile)
