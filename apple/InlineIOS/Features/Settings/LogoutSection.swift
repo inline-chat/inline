@@ -1,6 +1,7 @@
 import Auth
 import InlineKit
 import Logger
+import Sentry
 import SwiftUI
 
 struct LogoutSection: View {
@@ -61,7 +62,7 @@ struct LogoutSection: View {
         try await withThrowingTaskGroup(of: Void.self) { group in
           // Tell server about logout
           group.addTask {
-            let _ = try await ApiClient.shared.logout()
+            _ = try await ApiClient.shared.logout()
           }
 
           // Timeout
@@ -79,6 +80,8 @@ struct LogoutSection: View {
         // Handle logout error
         Log.shared.error("Logout API call failed: \(error.localizedDescription)")
       }
+
+      Analytics.logout()
 
       // 4. Clear local authentication state
       await Auth.shared.logOut()
