@@ -11,12 +11,13 @@
       "blur-material" : 0.5,
       "layers" : [
         {
-          "image-name" : "Frame 217 3.png",
-          "name" : "Frame 217 3"
+          "hidden" : false,
+          "image-name" : "Frame 218.png",
+          "name" : "Frame 218"
         }
       ],
       "position" : {
-        "scale" : 0.95,
+        "scale" : 0.97,
         "translation-in-points" : [
           0,
           0
