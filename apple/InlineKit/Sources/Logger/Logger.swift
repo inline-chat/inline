@@ -101,6 +101,10 @@ public final class Log: @unchecked Sendable {
 
     let level_ = level
 
+    if level == .info {
+      SentrySDK.logger.info(logMessage)
+    }
+
     // Handle Sentry reporting with proper isolation
     if level == .error || level == .warning {
       Task {
