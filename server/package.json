@@ -38,7 +38,7 @@
     "@prelude.so/sdk": "^0.3.0",
     "@protobuf-ts/plugin": "^2.9.4",
     "@protobuf-ts/runtime": "^2.11.1",
-    "@sentry/bun": "^8.32.0",
+    "@sentry/bun": "10",
     "@sinclair/typebox": "=0.32.34",
     "apn": "^2.2.0",
     "arctic": "^3.3.0",
