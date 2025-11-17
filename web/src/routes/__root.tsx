@@ -22,6 +22,17 @@ export const Route = createRootRoute({
         href: "https://fonts.gstatic.com",
         crossOrigin: "anonymous",
       },
+      // favicon
+      {
+        rel: "icon",
+        href: "https://inline.chat/favicon-white.png",
+        media: "(prefers-color-scheme: dark)",
+      },
+      {
+        rel: "icon",
+        href: "https://inline.chat/favicon-black.png",
+        media: "(prefers-color-scheme: light)",
+      },
       {
         rel: "stylesheet",
         href: "https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=Red+Hat+Display:wght@700&family=Reddit+Mono:wght@400&display=swap",
