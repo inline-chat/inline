@@ -7,6 +7,7 @@ Sentry.init({
   dsn: SENTRY_DSN,
   tracesSampleRate: 1.0,
   enabled: process.env.NODE_ENV !== "development",
+  enableLogs: true,
 })
 
 // Main app
