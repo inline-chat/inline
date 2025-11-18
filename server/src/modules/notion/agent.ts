@@ -106,7 +106,9 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
 
   // throw new Error("test")
   const completion = await openaiClient.chat.completions.create({
-    model: "gpt-4.1",
+    model: "gpt-5.1",
+    verbosity: "high",
+    reasoning_effort: "medium",
 
     messages: [
       {
