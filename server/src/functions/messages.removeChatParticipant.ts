@@ -9,6 +9,10 @@ import type { UpdateGroup } from "../modules/updates"
 import { getUpdateGroup } from "../modules/updates"
 import { RealtimeUpdates } from "../realtime/message"
 import type { Update } from "@in/protocol/core"
+import { UpdateBucket } from "@in/server/db/schema"
+import { UpdatesModel } from "@in/server/db/models/updates"
+import type { ServerUpdate } from "@in/protocol/server"
+import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 
 export async function removeChatParticipant(
   input: {
@@ -18,40 +22,71 @@ export async function removeChatParticipant(
   context: FunctionContext,
 ): Promise<void> {
   try {
-    // Check if chat exists
-    const chat = await db.select().from(chats).where(eq(chats.id, input.chatId)).limit(1)
+    await db.transaction(async (tx) => {
+      const [chat] = await tx.select().from(chats).where(eq(chats.id, input.chatId)).for("update").limit(1)
 
-    if (!chat || chat.length === 0) {
-      throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, `Chat with ID ${input.chatId} not found`, 404)
-    }
+      if (!chat) {
+        throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, `Chat with ID ${input.chatId} not found`, 404)
+      }
 
-    // Check if user exists
-    const user = await db.select().from(users).where(eq(users.id, input.userId)).limit(1)
-    if (!user || user.length === 0) {
-      throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, `User with ID ${input.userId} not found`, 404)
-    }
+      const user = await tx.select().from(users).where(eq(users.id, input.userId)).limit(1)
+      if (!user || user.length === 0) {
+        throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, `User with ID ${input.userId} not found`, 404)
+      }
 
-    // Check if user is a participant
-    const [participant] = await db
-      .select()
-      .from(chatParticipants)
-      .where(and(eq(chatParticipants.chatId, input.chatId), eq(chatParticipants.userId, input.userId)))
+      const [participant] = await tx
+        .select()
+        .from(chatParticipants)
+        .where(and(eq(chatParticipants.chatId, input.chatId), eq(chatParticipants.userId, input.userId)))
 
-    if (!participant) {
-      throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "User is not a participant of this chat", 404)
-    }
+      if (!participant) {
+        throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "User is not a participant of this chat", 404)
+      }
 
-    // Remove the participant
-    const deletedParticipant = await db
-      .delete(chatParticipants)
-      .where(and(eq(chatParticipants.chatId, input.chatId), eq(chatParticipants.userId, input.userId)))
-      .returning()
+      await tx
+        .delete(chatParticipants)
+        .where(and(eq(chatParticipants.chatId, input.chatId), eq(chatParticipants.userId, input.userId)))
 
-    if (!deletedParticipant) {
-      throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to remove chat participant", 500)
-    }
+      const chatServerUpdatePayload: ServerUpdate["update"] = {
+        oneofKind: "participantDelete",
+        participantDelete: {
+          chatId: BigInt(input.chatId),
+          userId: BigInt(input.userId),
+        },
+      }
 
-    pushUpdates({
+      const userServerUpdatePayload: ServerUpdate["update"] = {
+        oneofKind: "userChatParticipantDelete",
+        userChatParticipantDelete: {
+          chatId: BigInt(input.chatId),
+          userId: BigInt(input.userId),
+        },
+      }
+
+      const update = await UpdatesModel.insertUpdate(tx, {
+        update: chatServerUpdatePayload,
+        bucket: UpdateBucket.Chat,
+        entity: chat,
+      })
+
+      await tx
+        .update(chats)
+        .set({
+          updateSeq: update.seq,
+          lastUpdateDate: update.date,
+        })
+        .where(eq(chats.id, chat.id))
+
+      await UserBucketUpdates.enqueue(
+        {
+          userId: input.userId,
+          update: userServerUpdatePayload,
+        },
+        { tx },
+      )
+    })
+
+    await pushUpdates({
       chatId: input.chatId,
       userId: input.userId,
       currentUserId: context.currentUserId,

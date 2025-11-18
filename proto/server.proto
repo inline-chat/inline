@@ -14,9 +14,14 @@ message ServerUpdate {
     ServerChatUpdateEditMessage edit_message = 5;
     ServerChatUpdateDeleteMessages delete_messages = 6;
     ServerChatUpdateDeleteChat delete_chat = 7;
+    ServerChatUpdateParticipantDelete participant_delete = 8;
 
     // Space updates
-    ServerSpaceUpdateRemoveMember space_remove_member = 8;
+    ServerSpaceUpdateRemoveMember space_remove_member = 9;
+
+    // User bucket updates
+    ServerUserUpdateSpaceMemberDelete user_space_member_delete = 10;
+    ServerUserUpdateChatParticipantDelete user_chat_participant_delete = 11;
   }
 }
 
@@ -45,6 +50,12 @@ message ServerChatUpdateDeleteMessages {
 // Update for a chat when it is deleted
 message ServerChatUpdateDeleteChat { int64 chat_id = 1; }
 
+// Update for a chat when a participant is removed
+message ServerChatUpdateParticipantDelete {
+  int64 chat_id = 1;
+  int64 user_id = 2;
+}
+
 // ------------------------------------------------------------
 // Space updates
 // ------------------------------------------------------------
@@ -54,3 +65,13 @@ message ServerSpaceUpdateRemoveMember {
   int64 space_id = 1;
   int64 user_id = 2;
 }
+
+// ------------------------------------------------------------
+// User bucket updates
+// ------------------------------------------------------------
+
+// Update for a user when they were removed from a space
+message ServerUserUpdateSpaceMemberDelete { int64 space_id = 1; }
+
+// Update for a user when they were removed from a chat
+message ServerUserUpdateChatParticipantDelete { int64 chat_id = 1; }

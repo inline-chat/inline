@@ -2,39 +2,46 @@ import type { CreateBotInput, CreateBotResult, DeleteMemberInput, DeleteMemberRe
 import type { HandlerContext } from "@in/server/realtime/types"
 import { createBot } from "@in/server/functions/createBot"
 import { Functions } from "@in/server/functions"
-import { Effect } from "effect"
+import { Cause, Effect } from "effect"
 import { SpaceIdInvalidError, SpaceNotExistsError } from "@in/server/functions/_errors"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { MemberNotExistsError } from "@in/server/modules/effect/commonErrors"
+import { Log } from "@in/server/utils/log"
+
+const log = new Log("realtime.deleteMemberHandler")
 
 export const deleteMemberHandler = async (
   input: DeleteMemberInput,
   handlerContext: HandlerContext,
 ): Promise<DeleteMemberResult> => {
-  try {
-    const result = await Effect.runPromise(
-      Functions.spaces.deleteMember(input, {
-        currentSessionId: handlerContext.sessionId,
-        currentUserId: handlerContext.userId,
-      }),
-    )
+  const exit = await Effect.runPromiseExit(
+    Functions.spaces.deleteMember(input, {
+      currentSessionId: handlerContext.sessionId,
+      currentUserId: handlerContext.userId,
+    }),
+  )
 
-    return {
-      updates: result.result.updates,
-    }
-  } catch (error) {
-    if (error instanceof SpaceIdInvalidError) {
+  if (exit._tag === "Failure") {
+    const causeError = Cause.squash(exit.cause)
+
+    log.error("deleteMemberHandler failed", causeError)
+
+    if (causeError instanceof SpaceIdInvalidError || causeError instanceof SpaceNotExistsError) {
       throw RealtimeRpcError.SpaceIdInvalid
     }
 
-    if (error instanceof SpaceNotExistsError) {
-      throw RealtimeRpcError.SpaceIdInvalid
-    }
-
-    if (error instanceof MemberNotExistsError) {
+    if (causeError instanceof MemberNotExistsError) {
       throw RealtimeRpcError.UserIdInvalid
     }
 
+    if (causeError instanceof RealtimeRpcError) {
+      throw causeError
+    }
+
     throw RealtimeRpcError.InternalError
+  }
+
+  return {
+    updates: exit.value.result.updates,
   }
 }
