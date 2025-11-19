@@ -4,13 +4,13 @@ WORKDIR /usr/src/app
 # Install dependencies into temp directory with devDependencies
 FROM base AS development-dependencies
 RUN mkdir -p /temp/dev
-COPY package.json bun.lockb /temp/dev/
+COPY package.json bun.lock /temp/dev/
 RUN cd /temp/dev && bun install --frozen-lockfile
 
 # Install production dependencies only
 FROM base AS production-dependencies
 RUN mkdir -p /temp/prod
-COPY package.json bun.lockb /temp/prod/
+COPY package.json bun.lock /temp/prod/
 RUN cd /temp/prod && bun install --frozen-lockfile --production
 
 # Build stage
