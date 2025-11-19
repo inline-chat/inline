@@ -21,21 +21,23 @@ export const Route = createFileRoute("/")({
 
     meta: [
       {
-        title: "Inline - A fast, feature-rich, lightweight messaging app for teams",
+        title: "Inline - A fast, lightweight and powerful work chat app",
+        //title: "Inline Chat - A new way to chat at work built for collective thinking",
       },
       {
         name: "description",
-        content: "We're building a native, fast, powerful chat app for teams.",
+        content: "A fast, lightweight and powerful chat app for teams that makes sharing ideas an absolute joy.",
       },
       { name: "twitter:card", content: "summary_large_image" },
       {
         name: "twitter:title",
-        content: "Inline - A fast, feature-rich, lightweight messaging app for teams",
+        content: "Inline - Work chat 2.0",
       },
       {
         name: "twitter:description",
         content:
-          "We're building a native, fast, powerful chat app for teams. Currently alpha stage. We've developing the apps open-source.",
+          "Inline is a fast, lightweight, scalable, and powerful work chat app designed to spark new ideas, enable maximum sharing, while allowing longest possible focus time.",
+        //A fast, lightweight and powerful chat app for teams that makes sharing ideas an absolute joy.
       },
       {
         name: "twitter:image",
