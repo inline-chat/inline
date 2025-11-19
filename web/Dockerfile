@@ -33,7 +33,7 @@ COPY --from=build /usr/src/app/web/package.json ./web/package.json
 COPY package.json .
 
 # Install curl for Coolify healthcheck
-RUN apt-get update && apt-get install -y curlƒ
+RUN apt-get update && apt-get install -y curl
 
 USER bun
 
