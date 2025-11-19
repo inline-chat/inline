@@ -4,6 +4,7 @@ import viteReact from "@vitejs/plugin-react"
 import tsconfigPaths from "vite-tsconfig-paths"
 import tailwindcss from "@tailwindcss/vite"
 import stylex from "vite-plugin-stylex"
+import { nitro } from "nitro/vite"
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST
@@ -27,6 +28,7 @@ export default defineConfig({
         routesDirectory: "routes", // Defaults to "routes", relative to srcDirectory
       },
     }),
+    nitro(),
     viteReact({
       // babel: {
       //   plugins: [
@@ -61,5 +63,9 @@ export default defineConfig({
           port: 1421,
         }
       : undefined,
+  },
+
+  nitro: {
+    preset: "bun",
   },
 })
