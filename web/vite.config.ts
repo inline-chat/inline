@@ -53,8 +53,11 @@ export default defineConfig({
   envPrefix: ["VITE_", "TAURI_"],
 
   build: {
+    // Fixes missing styles in production build
+    // Ref: https://github.com/vitejs/vite/issues/10630#issuecomment-1290273972
     cssCodeSplit: false,
   },
+
   server: {
     port: 8001,
     strictPort: true,
