@@ -13,7 +13,7 @@ export const Route = createRootRoute({
         name: "viewport",
         content: "width=device-width, initial-scale=1",
       },
-      { title: "Inline" },
+      { title: "Inline Chat" },
     ],
     links: [
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
@@ -25,12 +25,13 @@ export const Route = createRootRoute({
       // favicon
       {
         rel: "icon",
-        href: "https://inline.chat/favicon-white.png",
+        href: "/favicon-white.png?v=2",
         media: "(prefers-color-scheme: dark)",
       },
       {
         rel: "icon",
-        href: "https://inline.chat/favicon-black.png",
+        href: "/favicon-colored.png?v=2",
+        //href: "/favicon-colored-outline.png?v=2",
         media: "(prefers-color-scheme: light)",
       },
       {
