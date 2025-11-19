@@ -31,6 +31,11 @@ COPY --from=production-dependencies /temp/prod/node_modules node_modules
 COPY --from=build /usr/src/app/web/.output ./web/.output
 COPY --from=build /usr/src/app/web/package.json ./web/package.json
 COPY package.json .
+
+# Install curl for Coolify healthcheck
+RUN apt-get update && apt-get install -y curlƒ
+
 USER bun
+
 WORKDIR /usr/src/app/web
 CMD ["bun", "run", "start"]
