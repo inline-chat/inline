@@ -109,3 +109,6 @@ dist/
 
 # Ignore local.json for CLAUDE
 **/*.local.json
+
+# WEb
+.output
