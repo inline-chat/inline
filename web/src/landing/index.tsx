@@ -17,7 +17,69 @@ const addTransitionEffect = () => {
   }, 200)
 }
 
-const messagesLength = 4
+// Marketing Copy
+const COPY = {
+  headlines: [
+    { text: "Work chat 2.0" },
+    {
+      before: "Work chat that ",
+      highlight: "isn't from the 2010s",
+      after: "",
+      hasSound: true,
+    },
+    { text: "Work chat built for collective thinking" },
+    // { text: "Where work happens" },
+    // { text: "iMessage, but for teams" },
+    // { text: "Messaging for focused work" },
+  ],
+  description: "A fast, lightweight and powerful chat app for teams that makes sharing ideas an absolute joy.",
+  cta: {
+    default: "Join the Waitlist",
+    submitting: "Submitting...",
+    success: "You're on the waitlist 🎉",
+    failed: "Failed to submit",
+    inputPlaceholder: "What's your work email?",
+  },
+  features: [
+    {
+      title: "Fast",
+      desc: "Native performance. Instant app startup. Sub-50ms interactions.",
+    },
+    {
+      title: "Productivity-focused",
+      desc: "We believe work chat is a tool for thought not a social media feed.",
+    },
+    {
+      title: "Simple",
+      desc: "Built upon few powerful concepts that are easy to understand and use.",
+    },
+    {
+      title: "Your team's knowledge graph",
+      desc: "Threads form a graph through links to and from other threads.",
+    },
+    {
+      title: "Share everything",
+      desc: "Your thread won't show up for others unless you @ them or link to it.",
+    },
+    {
+      title: "Scalable",
+      desc: "Zoomed into what's relevant for you at any give time by default.",
+    },
+  ],
+  footer: {
+    availability: "Coming soon in early access for macOS, iOS, and the web. Open-source.",
+    links: {
+      twitter: "Follow updates on X (Twitter)",
+      github: "GitHub",
+      status: "Status",
+      privacy: "Privacy",
+      email: "hey@inline.chat",
+    },
+    copyright: "© 2025 Inline Chat",
+  },
+}
+
+const messagesLength = COPY.headlines.length
 const apiEndpoint = process.env.NODE_ENV == "production" ? "https://api.inline.chat" : "http://localhost:8000"
 const centerWidth = 983
 const centerHeight = 735
@@ -179,8 +241,8 @@ export function Landing() {
                 }}
                 src="/logotype-white.svg"
                 alt="Inline"
-                height="18px"
-                width="75px"
+                //height="18px"
+                width="110px"
               />
             </motion.div>
           </h1>
@@ -195,27 +257,33 @@ export function Landing() {
               setMessage((m) => (m < messagesLength - 1 ? m + 1 : 0))
             }}
           >
-            {message === 0 && (
+            {COPY.headlines[message] && (
               <>
-                Chat that isn&apos;t from{" "}
-                <span
-                  {...stylex.props(styles.dated)}
-                  onPointerEnter={() => {
-                    // limit it to once per 2s
-                    if (Date.now() - lastPlayedAtRef.current < 1500) return
-                    const audio = new Audio("/sounds/slack-notification.mp3")
-                    audio.volume = 0.2
-                    audio.play()
-                    lastPlayedAtRef.current = Date.now()
-                  }}
-                >
-                  2010s
-                </span>
+                {"text" in COPY.headlines[message] ? (
+                  COPY.headlines[message].text
+                ) : (
+                  <>
+                    {COPY.headlines[message].before}
+                    <span
+                      {...stylex.props(styles.dated)}
+                      onPointerEnter={() => {
+                        if (COPY.headlines[message].hasSound) {
+                          // limit it to once per 2s
+                          if (Date.now() - lastPlayedAtRef.current < 1500) return
+                          const audio = new Audio("/sounds/slack-notification.mp3")
+                          audio.volume = 0.2
+                          audio.play()
+                          lastPlayedAtRef.current = Date.now()
+                        }
+                      }}
+                    >
+                      {COPY.headlines[message].highlight}
+                    </span>
+                    {COPY.headlines[message].after}
+                  </>
+                )}
               </>
             )}
-            {message === 1 && <>Where chat happens</>}
-            {message === 2 && <>iMessage, but for teams</>}
-            {message === 3 && <>Messaging for focused work</>}
           </motion.h2>
           <motion.p
             {...stylex.props(styles.description)}
@@ -223,7 +291,7 @@ export function Landing() {
             transition={{ delay: 0.1, duration: 0.2 }}
             animate={fontAvailable ? { opacity: 1, y: 0, scale: 1 } : undefined}
           >
-            We're building a native, high-quality messaging app for teams who crave the best.
+            {COPY.description}
           </motion.p>
 
           <motion.div
@@ -304,7 +372,7 @@ export function Landing() {
                     key="input"
                     type="email"
                     ref={inputRef}
-                    placeholder="What's your work email?"
+                    placeholder={COPY.cta.inputPlaceholder}
                     {...stylex.props(styles.emailInput)}
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
@@ -375,12 +443,12 @@ export function Landing() {
                     }}
                   >
                     {failed
-                      ? "Failed to submit"
+                      ? COPY.cta.failed
                       : submitting
-                        ? "Submitting..."
-                        : subscribed
-                          ? "You're on the waitlist 🎉"
-                          : "Get on the Waitlist"}
+                      ? COPY.cta.submitting
+                      : subscribed
+                      ? COPY.cta.success
+                      : COPY.cta.default}
                   </span>
                 </motion.div>
               )}
@@ -389,32 +457,7 @@ export function Landing() {
         </div>
 
         <div {...stylex.props(styles.features)}>
-          {[
-            {
-              title: "Lightweight",
-              desc: "Sub-1% CPU usage, ultra-low RAM, and under-designed UI.",
-            },
-            {
-              title: "Designed for speed",
-              desc: "120-fps, instant app startup, no spinners. Works fast on any network.",
-            },
-            {
-              title: "Simple",
-              desc: "Powerful, yet easy to use. Minimum clicks and modals. Clutter-free.",
-            },
-            {
-              title: "Intelligent",
-              desc: "Agents can handle workflows across apps via custom reaction triggers.",
-            },
-            {
-              title: "Tranquil",
-              desc: "Only what's relevant to you shows in the sidebar. Dig deeper at your will.",
-            },
-            {
-              title: "Context-aware notifications",
-              desc: "Inline differentiates urgent messages vs casual pings.",
-            },
-          ].map(({ title, desc }, index) => (
+          {COPY.features.map(({ title, desc }, index) => (
             <motion.div
               {...stylex.props(styles.card)}
               key={title}
@@ -436,7 +479,7 @@ export function Landing() {
       {/* == */}
       <footer {...stylex.props(styles.footer)}>
         <div>
-          <div>Coming soon in early access for macOS and iOS, written in Swift, and for the web</div>
+          <div>{COPY.footer.availability}</div>
         </div>
 
         <div {...stylex.props(styles.footerSecondRow)}>
@@ -447,7 +490,7 @@ export function Landing() {
               rel="noopener noreferrer"
               {...stylex.props(styles.footerLink)}
             >
-              Follow updates on X (Twitter)
+              {COPY.footer.links.twitter}
             </a>
           </div>
           <div>
@@ -457,7 +500,7 @@ export function Landing() {
               rel="noopener noreferrer"
               {...stylex.props(styles.footerLink)}
             >
-              GitHub
+              {COPY.footer.links.github}
             </a>
           </div>
           <div>
@@ -467,12 +510,12 @@ export function Landing() {
               rel="noopener noreferrer"
               {...stylex.props(styles.footerLink)}
             >
-              Status
+              {COPY.footer.links.status}
             </a>
           </div>
           <div>
             <a href="/privacy" {...stylex.props(styles.footerLink)}>
-              Privacy
+              {COPY.footer.links.privacy}
             </a>
           </div>
           <a
@@ -481,12 +524,12 @@ export function Landing() {
             rel="noopener noreferrer"
             {...stylex.props(styles.footerLink)}
           >
-            hey@inline.chat
+            {COPY.footer.links.email}
           </a>
         </div>
 
         <div {...stylex.props(styles.footerSecondRow)}>
-          <div {...stylex.props(styles.copyRight)}>© 2025 Inline Chat</div>
+          <div {...stylex.props(styles.copyRight)}>{COPY.footer.copyright}</div>
         </div>
       </footer>
     </motion.div>
@@ -650,7 +693,7 @@ const styles = stylex.create({
 
   subheading: {
     marginBottom: 18,
-    fontSize: { default: 48, "@media (max-width: 500px)": 28 },
+    fontSize: { default: 44, "@media (max-width: 500px)": 28 },
     lineHeight: 1.2,
     fontWeight: "700",
     cursor: "default",
@@ -670,7 +713,7 @@ const styles = stylex.create({
 
   description: {
     fontSize: { default: 21, "@media (max-width: 500px)": 18 },
-    maxWidth: 480,
+    maxWidth: 450,
     marginBottom: 28,
     cursor: "default",
     color: "rgba(255,255,255,0.88)",
