@@ -12,7 +12,7 @@ class MessageListAppKit: NSViewController {
   private var peerId: Peer
   private var chat: Chat?
   private var chatId: Int64 { chat?.id ?? 0 }
-  public var viewModel: MessagesProgressiveViewModel
+  var viewModel: MessagesProgressiveViewModel
   private var messages: [FullMessage] { viewModel.messages }
   private var state: ChatState
 
@@ -223,15 +223,15 @@ class MessageListAppKit: NSViewController {
     log.trace("viewDidLoad for chat \(chatId)")
 
     Task { [weak self] in
-      guard let self, let chat = self.chat else { return }
-      await NotionTaskService.shared.checkIntegrationAccess(peerId: self.peerId, spaceId: chat.spaceId)
+      guard let self, let chat else { return }
+      await NotionTaskService.shared.checkIntegrationAccess(peerId: peerId, spaceId: chat.spaceId)
     }
   }
 
   // MARK: - Insets
 
   private var insetForCompose: CGFloat = Theme.composeMinHeight
-  public func updateInsetForCompose(_ inset: CGFloat, animate: Bool = true) {
+  func updateInsetForCompose(_ inset: CGFloat, animate: Bool = true) {
     insetForCompose = inset
 
     scrollView.contentInsets.bottom = Theme.messageListBottomInset + insetForCompose
@@ -1467,6 +1467,12 @@ extension MessageListAppKit {
       return
     }
 
+    // Verify index is valid for tableView before calling rect(ofRow:)
+    guard index >= 0, index < tableView.numberOfRows else {
+      log.error("Index \(index) is out of bounds for tableView with \(tableView.numberOfRows) rows")
+      return
+    }
+
     // Get current scroll position and target position
     let currentY = scrollView.contentView.bounds.origin.y
     let targetRect = tableView.rect(ofRow: index)
@@ -1522,6 +1528,12 @@ extension MessageListAppKit {
   }
 
   private func highlightMessage(at row: Int) {
+    // Verify row is still valid (tableView state may have changed during animation)
+    guard row >= 0, row < tableView.numberOfRows else {
+      log.debug("Cannot highlight message at row \(row) - tableView has \(tableView.numberOfRows) rows")
+      return
+    }
+
     guard let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? MessageTableCell else {
       return
     }
