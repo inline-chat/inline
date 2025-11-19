@@ -239,7 +239,7 @@ export function Landing() {
                   right: 10,
                   bottom: 10,
                 }}
-                src="/logotype-white.svg"
+                src="/logotype-white.svg?v=2"
                 alt="Inline"
                 //height="18px"
                 width="110px"
