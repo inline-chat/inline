@@ -213,7 +213,7 @@ function inflateUserUpdates(dbUpdates: DbUpdate[]): Update[] {
   return dbUpdates
     .map((dbUpdate) => {
       const decrypted = UpdatesModel.decrypt(dbUpdate)
-      return convertUserUpdate(decrypted)
+      return convertUserUpdate(decrypted, dbUpdate.entityId)
     })
     .filter((update): update is Update => Boolean(update))
 }
@@ -241,7 +241,7 @@ function convertSpaceUpdate(update: DecryptedUpdate): Update | null {
   return null
 }
 
-function convertUserUpdate(decrypted: DecryptedUpdate): Update | null {
+function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update | null {
   const seq = decrypted.seq
   const date = encodeDateStrict(decrypted.date)
   const payload = decrypted.payload.update
@@ -255,7 +255,7 @@ function convertUserUpdate(decrypted: DecryptedUpdate): Update | null {
           oneofKind: "spaceMemberDelete",
           spaceMemberDelete: {
             spaceId: payload.userSpaceMemberDelete.spaceId,
-            userId: payload.userSpaceMemberDelete.userId,
+            userId: BigInt(userId),
           },
         },
       }
@@ -268,7 +268,7 @@ function convertUserUpdate(decrypted: DecryptedUpdate): Update | null {
           oneofKind: "participantDelete",
           participantDelete: {
             chatId: payload.userChatParticipantDelete.chatId,
-            userId: payload.userChatParticipantDelete.userId,
+            userId: BigInt(userId),
           },
         },
       }

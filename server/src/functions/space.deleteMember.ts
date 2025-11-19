@@ -115,7 +115,6 @@ const persistSpaceMemberDeleteUpdate = async ({ spaceId, userId }: { spaceId: nu
     oneofKind: "userSpaceMemberDelete",
     userSpaceMemberDelete: {
       spaceId: BigInt(spaceId),
-      userId: BigInt(userId),
     },
   }
 

@@ -59,7 +59,6 @@ export async function removeChatParticipant(
         oneofKind: "userChatParticipantDelete",
         userChatParticipantDelete: {
           chatId: BigInt(input.chatId),
-          userId: BigInt(input.userId),
         },
       }
 

@@ -1,3 +1,5 @@
+import Logger
+
 public extension Peer {
   func toInputPeer() -> InputPeer {
     switch type {
@@ -12,7 +14,7 @@ public extension Peer {
       }
 
     default:
-      print("ERROR: Unknown peer type")
+      Log.shared.error("Unknown peer type")
       return .with {
         $0.user.userID = 0
       }
