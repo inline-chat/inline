@@ -29,6 +29,7 @@ RUN cd web && bun run build
 FROM base AS release
 COPY --from=production-dependencies /temp/prod/node_modules node_modules
 COPY --from=build /usr/src/app/web/.output ./web/.output
+COPY --from=build /usr/src/app/web/dist ./web/dist
 COPY --from=build /usr/src/app/web/package.json ./web/package.json
 COPY package.json .
 
