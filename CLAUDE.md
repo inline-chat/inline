@@ -4,6 +4,10 @@
 
 Inline is a native chat application with Swift clients for iOS and macOS, and a TypeScript backend API server. This guide provides comprehensive information about the codebase architecture, development workflow, and key modules for both new developers and AI assistants.
 
+### Repository
+
+This repository is on GitHub at https://github.com/inline-chat/inline
+
 ### Architecture
 
 - **Backend**: TypeScript server built with Bun, featuring REST and WebSocket APIs
