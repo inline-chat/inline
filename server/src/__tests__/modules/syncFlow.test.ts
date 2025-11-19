@@ -99,7 +99,6 @@ describe("Sync core flow", () => {
         oneofKind: "userChatParticipantDelete",
         userChatParticipantDelete: {
           chatId: 42n,
-          userId: BigInt(user.id),
         },
       },
     })
@@ -169,7 +168,6 @@ describe("Sync core flow", () => {
         oneofKind: "userChatParticipantDelete",
         userChatParticipantDelete: {
           chatId: 1n,
-          userId: BigInt(user.id),
         },
       },
     })
@@ -181,7 +179,6 @@ describe("Sync core flow", () => {
         oneofKind: "userChatParticipantDelete",
         userChatParticipantDelete: {
           chatId: 2n,
-          userId: BigInt(user.id),
         },
       },
     })
@@ -212,7 +209,6 @@ describe("Sync core flow", () => {
         oneofKind: "userChatParticipantDelete",
         userChatParticipantDelete: {
           chatId: 99n,
-          userId: BigInt(user.id),
         },
       },
     })
@@ -247,7 +243,6 @@ describe("Sync core flow", () => {
         oneofKind: "userChatParticipantDelete",
         userChatParticipantDelete: {
           chatId: 100n,
-          userId: BigInt(user.id),
         },
       },
     })
