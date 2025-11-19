@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
-    "start": "node .output/server/index.mjs",
+    "start": "bun run .output/server/index.mjs",
     "typecheck": "tsc"
   },
   "dependencies": {
@@ -20,6 +20,7 @@
     "framer-motion": "^11.18.1",
     "isbot": "^5.1.17",
     "motion": "^12.23.22",
+    "nitro": "^3.0.1-alpha.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-markdown": "^9.0.3",
