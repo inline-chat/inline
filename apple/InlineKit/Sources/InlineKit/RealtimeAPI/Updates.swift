@@ -48,6 +48,9 @@ public actor UpdatesEngine: Sendable {
         case let .newChat(newChat):
           try newChat.apply(db)
 
+        case let .deleteChat(deleteChat):
+          try deleteChat.apply(db)
+
         case let .spaceMemberAdd(spaceMemberAdd):
           try spaceMemberAdd.apply(db)
 
@@ -99,6 +102,42 @@ public actor UpdatesEngine: Sendable {
 }
 
 // MARK: Extensions
+
+extension InlineProtocol.UpdateDeleteChat {
+  func apply(_ db: Database) throws {
+    Log.shared.debug("update delete chat \(peerID.toPeer())")
+
+    let peer = peerID.toPeer()
+    guard case let .thread(chatId) = peer else { return }
+
+    do {
+      try Message.filter(Column("chatId") == chatId).deleteAll(db)
+    } catch {
+      Log.shared.error("Failed to delete chat", error: error)
+    }
+
+    do {
+      try Dialog.filter(Column("peerThreadId") == chatId).deleteAll(db)
+    } catch {
+      Log.shared.error("Failed to delete dialog", error: error)
+    }
+
+    do {
+      try Chat.filter(Column("id") == chatId).deleteAll(db)
+    } catch {
+      Log.shared.error("Failed to delete chat", error: error)
+    }
+
+    // Post notification to pop chat route
+    Task.detached {
+      NotificationCenter.default.post(
+        name: Notification.Name("chatDeletedNotification"),
+        object: nil,
+        userInfo: ["chatId": chatId]
+      )
+    }
+  }
+}
 
 extension InlineProtocol.UpdateNewMessage {
   func apply(_ db: Database) throws {

@@ -18,6 +18,7 @@ import { createBot } from "./createBot"
 import { deleteMember } from "@in/server/functions/space.deleteMember"
 import { markAsUnread } from "./messages.markAsUnread"
 import { getUpdatesState } from "./updates.getUpdatesState"
+import { getUpdates } from "./updates.getUpdates"
 
 export const Functions = {
   messages: {
@@ -50,5 +51,6 @@ export const Functions = {
   },
   updates: {
     getUpdatesState: getUpdatesState,
+    getUpdates: getUpdates,
   },
 }

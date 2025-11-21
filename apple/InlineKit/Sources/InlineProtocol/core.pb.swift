@@ -49,6 +49,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case markAsUnread // = 23
   case getUpdatesState // = 24
   case getChat // = 25
+  case getUpdates // = 26
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -83,6 +84,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 23: self = .markAsUnread
     case 24: self = .getUpdatesState
     case 25: self = .getChat
+    case 26: self = .getUpdates
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -115,6 +117,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .markAsUnread: return 23
     case .getUpdatesState: return 24
     case .getChat: return 25
+    case .getUpdates: return 26
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -147,6 +150,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .markAsUnread,
     .getUpdatesState,
     .getChat,
+    .getUpdates,
   ]
 
 }
@@ -2288,6 +2292,14 @@ public struct RpcCall: Sendable {
     set {input = .getChat(newValue)}
   }
 
+  public var getUpdates: GetUpdatesInput {
+    get {
+      if case .getUpdates(let v)? = input {return v}
+      return GetUpdatesInput()
+    }
+    set {input = .getUpdates(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Input: Equatable, Sendable {
@@ -2316,6 +2328,7 @@ public struct RpcCall: Sendable {
     case markAsUnread(MarkAsUnreadInput)
     case getUpdatesState(GetUpdatesStateInput)
     case getChat(GetChatInput)
+    case getUpdates(GetUpdatesInput)
 
   }
 
@@ -2537,6 +2550,14 @@ public struct RpcResult: @unchecked Sendable {
     set {_uniqueStorage()._result = .getChat(newValue)}
   }
 
+  public var getUpdates: GetUpdatesResult {
+    get {
+      if case .getUpdates(let v)? = _storage._result {return v}
+      return GetUpdatesResult()
+    }
+    set {_uniqueStorage()._result = .getUpdates(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Result: Equatable, Sendable {
@@ -2565,12 +2586,201 @@ public struct RpcResult: @unchecked Sendable {
     case markAsUnread(MarkAsUnreadResult)
     case getUpdatesState(GetUpdatesStateResult)
     case getChat(GetChatResult)
+    case getUpdates(GetUpdatesResult)
 
   }
 
   public init() {}
 
   fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+public struct UpdateBucket: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var type: UpdateBucket.OneOf_Type? = nil
+
+  public var user: UpdateBucketUser {
+    get {
+      if case .user(let v)? = type {return v}
+      return UpdateBucketUser()
+    }
+    set {type = .user(newValue)}
+  }
+
+  public var space: UpdateBucketSpace {
+    get {
+      if case .space(let v)? = type {return v}
+      return UpdateBucketSpace()
+    }
+    set {type = .space(newValue)}
+  }
+
+  public var chat: UpdateBucketChat {
+    get {
+      if case .chat(let v)? = type {return v}
+      return UpdateBucketChat()
+    }
+    set {type = .chat(newValue)}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public enum OneOf_Type: Equatable, Sendable {
+    case user(UpdateBucketUser)
+    case space(UpdateBucketSpace)
+    case chat(UpdateBucketChat)
+
+  }
+
+  public init() {}
+}
+
+public struct UpdateBucketUser: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct UpdateBucketSpace: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var spaceID: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct UpdateBucketChat: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var peerID: InputPeer {
+    get {return _peerID ?? InputPeer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {return self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: InputPeer? = nil
+}
+
+public struct GetUpdatesInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var bucket: UpdateBucket {
+    get {return _bucket ?? UpdateBucket()}
+    set {_bucket = newValue}
+  }
+  /// Returns true if `bucket` has been explicitly set.
+  public var hasBucket: Bool {return self._bucket != nil}
+  /// Clears the value of `bucket`. Subsequent reads from it will return its default value.
+  public mutating func clearBucket() {self._bucket = nil}
+
+  public var startSeq: Int64 = 0
+
+  /// if the difference with the start_seq is greater than this, the result will
+  /// contain "too long" result type
+  public var totalLimit: Int32 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _bucket: UpdateBucket? = nil
+}
+
+public struct GetUpdatesResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var updates: [Update] = []
+
+  /// Final sequence of the updates slice
+  public var seq: Int64 = 0
+
+  /// Final date of the updates slice
+  public var date: Int64 = 0
+
+  /// Whether this is the final slice of updates
+  public var final: Bool {
+    get {return _final ?? false}
+    set {_final = newValue}
+  }
+  /// Returns true if `final` has been explicitly set.
+  public var hasFinal: Bool {return self._final != nil}
+  /// Clears the value of `final`. Subsequent reads from it will return its default value.
+  public mutating func clearFinal() {self._final = nil}
+
+  /// Type of the result
+  public var resultType: GetUpdatesResult.ResultType = .unspecified
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public enum ResultType: SwiftProtobuf.Enum, Swift.CaseIterable {
+    public typealias RawValue = Int
+    case unspecified // = 0
+    case empty // = 1
+    case slice // = 2
+    case tooLong // = 3
+    case UNRECOGNIZED(Int)
+
+    public init() {
+      self = .unspecified
+    }
+
+    public init?(rawValue: Int) {
+      switch rawValue {
+      case 0: self = .unspecified
+      case 1: self = .empty
+      case 2: self = .slice
+      case 3: self = .tooLong
+      default: self = .UNRECOGNIZED(rawValue)
+      }
+    }
+
+    public var rawValue: Int {
+      switch self {
+      case .unspecified: return 0
+      case .empty: return 1
+      case .slice: return 2
+      case .tooLong: return 3
+      case .UNRECOGNIZED(let i): return i
+      }
+    }
+
+    // The compiler won't synthesize support with the UNRECOGNIZED case.
+    public static let allCases: [GetUpdatesResult.ResultType] = [
+      .unspecified,
+      .empty,
+      .slice,
+      .tooLong,
+    ]
+
+  }
+
+  public init() {}
+
+  fileprivate var _final: Bool? = nil
 }
 
 /// Remove member from space
@@ -3940,12 +4150,24 @@ public struct UpdateChatHasNewUpdates: Sendable {
   /// Chat ID
   public var chatID: Int64 = 0
 
+  /// Peer ID of the chat
+  public var peerID: Peer {
+    get {return _peerID ?? Peer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {return self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
   /// Current PTS of the chat
   public var updateSeq: Int32 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _peerID: Peer? = nil
 }
 
 public struct UpdateChatSkipPts: Sendable {
@@ -4964,6 +5186,7 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     23: .same(proto: "MARK_AS_UNREAD"),
     24: .same(proto: "GET_UPDATES_STATE"),
     25: .same(proto: "GET_CHAT"),
+    26: .same(proto: "GET_UPDATES"),
   ]
 }
 
@@ -7791,6 +8014,7 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     24: .same(proto: "markAsUnread"),
     25: .same(proto: "getUpdatesState"),
     26: .same(proto: "getChat"),
+    27: .same(proto: "getUpdates"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -8125,6 +8349,19 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
           self.input = .getChat(v)
         }
       }()
+      case 27: try {
+        var v: GetUpdatesInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .getUpdates(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .getUpdates(v)
+        }
+      }()
       default: break
       }
     }
@@ -8239,6 +8476,10 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       guard case .getChat(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 26)
     }()
+    case .getUpdates?: try {
+      guard case .getUpdates(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 27)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -8281,6 +8522,7 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     24: .same(proto: "markAsUnread"),
     25: .same(proto: "getUpdatesState"),
     26: .same(proto: "getChat"),
+    27: .same(proto: "getUpdates"),
   ]
 
   fileprivate class _StorageClass {
@@ -8646,6 +8888,19 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
             _storage._result = .getChat(v)
           }
         }()
+        case 27: try {
+          var v: GetUpdatesResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getUpdates(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getUpdates(v)
+          }
+        }()
         default: break
         }
       }
@@ -8762,6 +9017,10 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
         guard case .getChat(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 26)
       }()
+      case .getUpdates?: try {
+        guard case .getUpdates(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 27)
+      }()
       case nil: break
       }
     }
@@ -8782,6 +9041,298 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
+}
+
+extension UpdateBucket: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateBucket"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "user"),
+    2: .same(proto: "space"),
+    3: .same(proto: "chat"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try {
+        var v: UpdateBucketUser?
+        var hadOneofValue = false
+        if let current = self.type {
+          hadOneofValue = true
+          if case .user(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.type = .user(v)
+        }
+      }()
+      case 2: try {
+        var v: UpdateBucketSpace?
+        var hadOneofValue = false
+        if let current = self.type {
+          hadOneofValue = true
+          if case .space(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.type = .space(v)
+        }
+      }()
+      case 3: try {
+        var v: UpdateBucketChat?
+        var hadOneofValue = false
+        if let current = self.type {
+          hadOneofValue = true
+          if case .chat(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.type = .chat(v)
+        }
+      }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    switch self.type {
+    case .user?: try {
+      guard case .user(let v)? = self.type else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    }()
+    case .space?: try {
+      guard case .space(let v)? = self.type else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    }()
+    case .chat?: try {
+      guard case .chat(let v)? = self.type else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    }()
+    case nil: break
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateBucket, rhs: UpdateBucket) -> Bool {
+    if lhs.type != rhs.type {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateBucketUser: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateBucketUser"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateBucketUser, rhs: UpdateBucketUser) -> Bool {
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateBucketSpace: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateBucketSpace"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "space_id"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.spaceID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.spaceID != 0 {
+      try visitor.visitSingularInt64Field(value: self.spaceID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateBucketSpace, rhs: UpdateBucketSpace) -> Bool {
+    if lhs.spaceID != rhs.spaceID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateBucketChat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateBucketChat"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "peer_id"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateBucketChat, rhs: UpdateBucketChat) -> Bool {
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension GetUpdatesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetUpdatesInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "bucket"),
+    2: .standard(proto: "start_seq"),
+    3: .standard(proto: "total_limit"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._bucket) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.startSeq) }()
+      case 3: try { try decoder.decodeSingularInt32Field(value: &self.totalLimit) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._bucket {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if self.startSeq != 0 {
+      try visitor.visitSingularInt64Field(value: self.startSeq, fieldNumber: 2)
+    }
+    if self.totalLimit != 0 {
+      try visitor.visitSingularInt32Field(value: self.totalLimit, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetUpdatesInput, rhs: GetUpdatesInput) -> Bool {
+    if lhs._bucket != rhs._bucket {return false}
+    if lhs.startSeq != rhs.startSeq {return false}
+    if lhs.totalLimit != rhs.totalLimit {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension GetUpdatesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetUpdatesResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "updates"),
+    2: .same(proto: "seq"),
+    3: .same(proto: "date"),
+    4: .same(proto: "final"),
+    5: .standard(proto: "result_type"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.updates) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.seq) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self._final) }()
+      case 5: try { try decoder.decodeSingularEnumField(value: &self.resultType) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.updates.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.updates, fieldNumber: 1)
+    }
+    if self.seq != 0 {
+      try visitor.visitSingularInt64Field(value: self.seq, fieldNumber: 2)
+    }
+    if self.date != 0 {
+      try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 3)
+    }
+    try { if let v = self._final {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 4)
+    } }()
+    if self.resultType != .unspecified {
+      try visitor.visitSingularEnumField(value: self.resultType, fieldNumber: 5)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetUpdatesResult, rhs: GetUpdatesResult) -> Bool {
+    if lhs.updates != rhs.updates {return false}
+    if lhs.seq != rhs.seq {return false}
+    if lhs.date != rhs.date {return false}
+    if lhs._final != rhs._final {return false}
+    if lhs.resultType != rhs.resultType {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension GetUpdatesResult.ResultType: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    0: .same(proto: "RESULT_TYPE_UNSPECIFIED"),
+    1: .same(proto: "RESULT_TYPE_EMPTY"),
+    2: .same(proto: "RESULT_TYPE_SLICE"),
+    3: .same(proto: "RESULT_TYPE_TOO_LONG"),
+  ]
 }
 
 extension DeleteMemberInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
@@ -11208,6 +11759,7 @@ extension UpdateChatHasNewUpdates: SwiftProtobuf.Message, SwiftProtobuf._Message
   public static let protoMessageName: String = "UpdateChatHasNewUpdates"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .standard(proto: "chat_id"),
+    3: .standard(proto: "peer_id"),
     2: .standard(proto: "update_seq"),
   ]
 
@@ -11219,23 +11771,32 @@ extension UpdateChatHasNewUpdates: SwiftProtobuf.Message, SwiftProtobuf._Message
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularInt64Field(value: &self.chatID) }()
       case 2: try { try decoder.decodeSingularInt32Field(value: &self.updateSeq) }()
+      case 3: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if self.chatID != 0 {
       try visitor.visitSingularInt64Field(value: self.chatID, fieldNumber: 1)
     }
     if self.updateSeq != 0 {
       try visitor.visitSingularInt32Field(value: self.updateSeq, fieldNumber: 2)
     }
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: UpdateChatHasNewUpdates, rhs: UpdateChatHasNewUpdates) -> Bool {
     if lhs.chatID != rhs.chatID {return false}
+    if lhs._peerID != rhs._peerID {return false}
     if lhs.updateSeq != rhs.updateSeq {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true

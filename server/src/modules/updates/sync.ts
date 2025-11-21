@@ -1,7 +1,7 @@
 import type { Message, Peer, Update } from "@in/protocol/core"
 import { db } from "@in/server/db"
 import { MessageModel } from "@in/server/db/models/messages"
-import { UpdatesModel, type UpdateBoxInput } from "@in/server/db/models/updates"
+import { UpdatesModel, type UpdateBoxInput, type DecryptedUpdate } from "@in/server/db/models/updates"
 import { UpdateBucket, type DbUpdate } from "@in/server/db/schema"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
@@ -12,6 +12,8 @@ const log = new Log("Sync", LogLevel.TRACE)
 export const Sync = {
   getUpdates: getUpdates,
   processChatUpdates: processChatUpdates,
+  inflateSpaceUpdates: inflateSpaceUpdates,
+  inflateUserUpdates: inflateUserUpdates,
 }
 
 type GetUpdatesInput = {
@@ -27,23 +29,19 @@ type GetUpdatesInput = {
 
 type GetUpdatesOutput = {
   updates: DbUpdate[]
+  latestSeq: number
+  latestDate: Date | null
 }
 
 // Get a list of updates from the database
 async function getUpdates(input: GetUpdatesInput): Promise<GetUpdatesOutput> {
   const { bucket, seqStart } = input
+  const entityId = getEntityId(bucket)
 
   const list = await db.query.updates.findMany({
     where: {
       bucket: bucket.type,
-      entityId:
-        bucket.type === UpdateBucket.Chat
-          ? bucket.chatId
-          : bucket.type === UpdateBucket.User
-          ? bucket.userId
-          : bucket.type === UpdateBucket.Space
-          ? bucket.spaceId
-          : -1, // should never rich
+      entityId,
       seq: {
         gt: seqStart,
       },
@@ -54,7 +52,34 @@ async function getUpdates(input: GetUpdatesInput): Promise<GetUpdatesOutput> {
     limit: input.limit,
   })
 
-  return { updates: list }
+  const latest = await db.query.updates.findFirst({
+    where: {
+      bucket: bucket.type,
+      entityId,
+    },
+    orderBy: {
+      seq: "desc",
+    },
+  })
+
+  return {
+    updates: list,
+    latestSeq: latest?.seq ?? seqStart,
+    latestDate: latest?.date ?? null,
+  }
+}
+
+const getEntityId = (bucket: UpdateBoxInput): number => {
+  switch (bucket.type) {
+    case UpdateBucket.Chat:
+      return bucket.chatId
+    case UpdateBucket.Space:
+      return bucket.spaceId
+    case UpdateBucket.User:
+      return bucket.userId
+    default:
+      return -1
+  }
 }
 
 type ProcessChatUpdatesInput = {
@@ -154,10 +179,102 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
           },
         }
 
+      case "participantDelete":
+        return {
+          seq: update.seq,
+          date: encodeDateStrict(update.date),
+          update: {
+            oneofKind: "participantDelete",
+            participantDelete: {
+              chatId: serverUpdate.update.participantDelete.chatId,
+              userId: serverUpdate.update.participantDelete.userId,
+            },
+          },
+        }
+
       default:
         throw new Error(`Unknown update type: ${serverUpdate.update.oneofKind}`)
     }
   })
 
   return { updates: inflatedUpdates }
+}
+
+function inflateSpaceUpdates(dbUpdates: DbUpdate[]): Update[] {
+  return dbUpdates
+    .map((dbUpdate) => {
+      const decrypted = UpdatesModel.decrypt(dbUpdate)
+      return convertSpaceUpdate(decrypted)
+    })
+    .filter((update): update is Update => Boolean(update))
+}
+
+function inflateUserUpdates(dbUpdates: DbUpdate[]): Update[] {
+  return dbUpdates
+    .map((dbUpdate) => {
+      const decrypted = UpdatesModel.decrypt(dbUpdate)
+      return convertUserUpdate(decrypted, dbUpdate.entityId)
+    })
+    .filter((update): update is Update => Boolean(update))
+}
+
+function convertSpaceUpdate(update: DecryptedUpdate): Update | null {
+  const seq = update.seq
+  const date = encodeDateStrict(update.date)
+  const payload = update.payload.update
+
+  if (payload.oneofKind === "spaceRemoveMember") {
+    return {
+      seq,
+      date,
+      update: {
+        oneofKind: "spaceMemberDelete",
+        spaceMemberDelete: {
+          spaceId: payload.spaceRemoveMember.spaceId,
+          userId: payload.spaceRemoveMember.userId,
+        },
+      },
+    }
+  }
+
+  log.warn("Unhandled space update", { type: payload.oneofKind })
+  return null
+}
+
+function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update | null {
+  const seq = decrypted.seq
+  const date = encodeDateStrict(decrypted.date)
+  const payload = decrypted.payload.update
+
+  switch (payload.oneofKind) {
+    case "userSpaceMemberDelete":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "spaceMemberDelete",
+          spaceMemberDelete: {
+            spaceId: payload.userSpaceMemberDelete.spaceId,
+            userId: BigInt(userId),
+          },
+        },
+      }
+
+    case "userChatParticipantDelete":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "participantDelete",
+          participantDelete: {
+            chatId: payload.userChatParticipantDelete.chatId,
+            userId: BigInt(userId),
+          },
+        },
+      }
+
+    default:
+      log.warn("Unhandled user update", { type: payload.oneofKind })
+      return null
+  }
 }
