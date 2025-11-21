@@ -498,6 +498,25 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("sync_v1") { db in
+      // Table to store the state of each sync bucket (chat, space, user)
+      try db.create(table: "sync_bucket_state") { t in
+        // Composite primary key: bucketType + entityId
+        t.column("bucketType", .integer).notNull() // 1=chat, 2=user, 3=space
+        t.column("entityId", .integer).notNull() // Chat ID, Space ID, or 0 for user
+        t.column("seq", .integer).notNull() // Last synced sequence number
+        t.column("date", .integer).notNull() // Last synced date
+
+        t.primaryKey(["bucketType", "entityId"])
+      }
+
+      // Table to store global sync state (e.g., last overall sync date)
+      try db.create(table: "sync_global_state") { t in
+        t.primaryKey("id", .integer).notNull().unique() // Always 1
+        t.column("lastSyncDate", .integer).notNull()
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

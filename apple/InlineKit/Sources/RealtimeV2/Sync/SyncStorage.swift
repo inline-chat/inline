@@ -2,12 +2,21 @@ import Foundation
 import InlineProtocol
 
 public struct SyncState: Sendable {
-  let lastSyncDate: Int64
+  public let lastSyncDate: Int64
+
+  public init(lastSyncDate: Int64) {
+    self.lastSyncDate = lastSyncDate
+  }
 }
 
 public struct BucketState: Sendable {
-  let date: Int64
-  let seq: Int64
+  public let date: Int64
+  public let seq: Int64
+
+  public init(date: Int64, seq: Int64) {
+    self.date = date
+    self.seq = seq
+  }
 }
 
 public enum BucketKey: Sendable, Hashable {
@@ -15,7 +24,7 @@ public enum BucketKey: Sendable, Hashable {
   case chat(peer: InlineProtocol.Peer)
   case user
 
-  func getEntityId() -> Int64 {
+  public func getEntityId() -> Int64 {
     switch self {
       case let .space(id):
         id
@@ -37,7 +46,7 @@ public enum BucketKey: Sendable, Hashable {
   }
 
   /// In sync with backend
-  func getBucket() -> Int {
+  public func getBucket() -> Int {
     switch self {
       case .chat:
         1
@@ -48,7 +57,7 @@ public enum BucketKey: Sendable, Hashable {
     }
   }
 
-  func toProtocolBucket() -> InlineProtocol.UpdateBucket {
+  public func toProtocolBucket() -> InlineProtocol.UpdateBucket {
     switch self {
       case let .chat(peer):
         InlineProtocol.UpdateBucket.with { $0.chat = .with { $0.peerID = peer.toInputPeer() } }
