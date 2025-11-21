@@ -1,5 +1,5 @@
 {
-  "originHash" : "0736d8f2d425e3d2454e2f8d27fc2efa7371e0c7229a67e2e3647b051e3e1b97",
+  "originHash" : "5d4502128ee410b6536aa1ef947223cc106b2c44b9c964f44e1cc35ad0f8d1d1",
   "pins" : [
     {
       "identity" : "get",
@@ -58,7 +58,7 @@
     {
       "identity" : "multipartformdatakit",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Kuniwak/MultipartFormDataKit",
+      "location" : "https://github.com/Kuniwak/MultipartFormDataKit.git",
       "state" : {
         "revision" : "27bf281a9adfd742fa2fb3318c176dcc7a111599",
         "version" : "1.0.1"
@@ -96,8 +96,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/getsentry/sentry-cocoa",
       "state" : {
-        "revision" : "3c2eee7773df58bdfb9e10e72d9a4be44253e0d9",
-        "version" : "8.55.0"
+        "revision" : "8627bbc0e663238d516b541d8fc7edd62a627fde",
+        "version" : "8.57.3"
       }
     },
     {

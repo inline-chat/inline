@@ -28,6 +28,7 @@ import { createBotHandler } from "./createBot"
 import { deleteMemberHandler } from "@in/server/realtime/handlers/space.deleteMember"
 import { markAsUnread } from "./messages.markAsUnread"
 import { getUpdatesState } from "@in/server/realtime/handlers/updates.getUpdatesState"
+import { getUpdates } from "@in/server/realtime/handlers/updates.getUpdates"
 
 const log = new Log("rpc")
 
@@ -229,6 +230,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await getUpdatesState(call.input.getUpdatesState, handlerContext)
       return { oneofKind: "getUpdatesState", getUpdatesState: result }
+    }
+
+    case Method.GET_UPDATES: {
+      if (call.input.oneofKind !== "getUpdates") {
+        throw RealtimeRpcError.BadRequest
+      }
+      let result = await getUpdates(call.input.getUpdates, handlerContext)
+      return { oneofKind: "getUpdates", getUpdates: result }
     }
 
     default:
