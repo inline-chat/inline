@@ -112,3 +112,7 @@ dist/
 
 # WEb
 .output
+
+
+# Swift
+.swift-module-cache
