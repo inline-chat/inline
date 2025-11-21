@@ -51,10 +51,14 @@ public final class Auth: ObservableObject, @unchecked Sendable {
         }
 
         if isLoggedIn {
-          await events.send(.login(
-            userId: newCUID!,
-            token: newToken!
-          ))
+          if let userId = newCUID, let token = newToken {
+            await events.send(.login(
+              userId: userId,
+              token: token
+            ))
+          } else {
+            log.warning("Auth published logged in without credentials; skipping login event")
+          }
         } else {
           await events.send(.logout)
         }
@@ -122,7 +126,7 @@ public final class Auth: ObservableObject, @unchecked Sendable {
       self.lock.withLock {
         self.currentUserId = newCUID
         self.token = newToken
-        self.isLoggedIn = newToken != nil && newCUID != nil
+        self.isLoggedIn = newCUID != nil
       }
     }
     await task.value
@@ -139,7 +143,7 @@ public final class Auth: ObservableObject, @unchecked Sendable {
 }
 
 actor AuthManager: Sendable {
-  public static let shared = AuthManager()
+  static let shared = AuthManager()
 
   private let log = Log.scoped("AuthManager")
 
@@ -150,6 +154,7 @@ actor AuthManager: Sendable {
   // cache
   private var cachedUserId: Int64?
   private var cachedToken: String?
+  private var userDefaultsKey: String
 
   // config
   private var accessGroup: String
@@ -160,7 +165,7 @@ actor AuthManager: Sendable {
   private let keychain: KeychainSwift
 
   // public
-  public var isLoggedIn = AsyncChannel<Bool>()
+  var isLoggedIn = AsyncChannel<Bool>()
 
   static func getUserDefaultsPrefix(mocked: Bool) -> String {
     if mocked { "mock" }
@@ -199,22 +204,25 @@ actor AuthManager: Sendable {
     keychain = KeychainSwift(keyPrefix: keyChainPrefix)
     keychain.accessGroup = accessGroup
 
+    userDefaultsKey = "\(userDefaultsPrefix)userId"
     // load
     cachedToken = keychain.get("token")
-    cachedUserId = UserDefaults.standard.value(forKey: "\(userDefaultsPrefix)userId") as? Int64
+    cachedUserId = Self.readUserId(key: userDefaultsKey)
 
     // set initial values
     initialToken = cachedToken
     initialUserId = cachedUserId
-    initialIsLoggedIn = initialToken != nil && initialUserId != nil
+    // During early launch keychain reads can fail; consider a stored userId as logged in for routing.
+    initialIsLoggedIn = initialUserId != nil
 
     Task {
       await self.updateLoginStatus()
+      await self.refreshKeychainAfterLaunch()
     }
   }
 
   nonisolated static func getCurrentUserId() -> Int64? {
-    UserDefaults.standard.value(forKey: "\(getUserDefaultsPrefix(mocked: false))userId") as? Int64
+    readUserId(key: "\(getUserDefaultsPrefix(mocked: false))userId")
   }
 
   // Mock for testing/previews
@@ -222,6 +230,7 @@ actor AuthManager: Sendable {
     keychain = KeychainSwift(keyPrefix: "mock")
     accessGroup = "2487AN8AL4.keychainGroup"
     userDefaultsPrefix = Self.getUserDefaultsPrefix(mocked: true)
+    userDefaultsKey = "\(userDefaultsPrefix)userId"
     mocked = true
     if mockAuthenticated {
       cachedToken = "1:mockToken"
@@ -245,7 +254,7 @@ actor AuthManager: Sendable {
   func saveCredentials(token: String, userId: Int64) async {
     // persist
     keychain.set(token, forKey: "token")
-    UserDefaults.standard.set(userId, forKey: "\(userDefaultsPrefix)userId")
+    Self.writeUserId(userId, key: userDefaultsKey)
 
     // cache
     cachedToken = token
@@ -266,7 +275,7 @@ actor AuthManager: Sendable {
   func logOut() async {
     // persist
     keychain.delete("token")
-    UserDefaults.standard.removeObject(forKey: "\(userDefaultsPrefix)userId")
+    UserDefaults.standard.removeObject(forKey: userDefaultsKey)
 
     // cache
     cachedToken = nil
@@ -277,12 +286,49 @@ actor AuthManager: Sendable {
   }
 
   private func updateLoginStatus() async {
-    let loggedIn = cachedToken != nil && cachedUserId != nil
-    
+    let loggedIn = cachedUserId != nil
+
     // Use Task to make this non-blocking
     Task {
       await isLoggedIn.send(loggedIn)
     }
+  }
+
+  /// Keychain can be unavailable right at startup; re-read after a brief delay so token is picked up.
+  private func refreshKeychainAfterLaunch() async {
+    // Small delay to allow the shared keychain container to become available.
+    try? await Task.sleep(nanoseconds: 100_000_000)
+
+    let refreshedToken = keychain.get("token")
+    let refreshedUserId = Self.readUserId(key: userDefaultsKey)
+
+    var changed = false
+
+    if refreshedToken != cachedToken {
+      cachedToken = refreshedToken
+      changed = true
+    }
+
+    if refreshedUserId != cachedUserId {
+      cachedUserId = refreshedUserId
+      changed = true
+    }
+
+    if changed {
+      await updateLoginStatus()
+    }
+  }
+
+  private static func readUserId(key: String) -> Int64? {
+    // UserDefaults bridges numeric values as NSNumber on iOS; cast safely.
+    guard let number = UserDefaults.standard.object(forKey: key) as? NSNumber else {
+      return nil
+    }
+    return number.int64Value
+  }
+
+  private static func writeUserId(_ userId: Int64, key: String) {
+    UserDefaults.standard.set(NSNumber(value: userId), forKey: key)
   }
 }
 
