@@ -4,6 +4,10 @@
 
 Inline is a native chat application with Swift clients for iOS and macOS, and a TypeScript backend API server. This guide provides comprehensive information about the codebase architecture, development workflow, and key modules for both new developers and AI assistants.
 
+### Repository
+
+This repository is on GitHub at https://github.com/inline-chat/inline
+
 ### Architecture
 
 - **Backend**: TypeScript server built with Bun, featuring REST and WebSocket APIs
@@ -23,6 +27,7 @@ Inline is a native chat application with Swift clients for iOS and macOS, and a 
 ### Quick Setup
 
 1. **Clone and install dependencies**:
+
    ```bash
    git clone <repository>
    cd inline
@@ -30,10 +35,11 @@ Inline is a native chat application with Swift clients for iOS and macOS, and a 
    ```
 
 2. **Start development servers**:
+
    ```bash
    # Backend server
    bun run dev:server
-   
+
    # Web client (in separate terminal)
    cd web && bun run dev
    ```
@@ -80,10 +86,12 @@ inline/
 ### Architecture
 
 #### API Layers
+
 - **REST API** (Legacy): Elysia framework in `src/methods/`
 - **Realtime API** (Primary): WebSocket RPC using Protocol Buffers
 
 #### Core Components
+
 - **Functions** (`src/functions/`): Business logic abstracted from API
 - **Handlers** (`src/realtime/handlers/`): RPC handlers connecting functions to protocols
 - **Models** (`src/db/models/`): Database interaction layer with encryption support
@@ -114,6 +122,15 @@ bun run build              # Production build
 bun run start              # Start production server
 ```
 
+### Running tests for a single file
+
+Run tests from the `server/` subdirectory, like this:
+
+```
+cd ./server
+bun test src/__tests__/modules/accessGuards.test.ts
+```
+
 ### External Integrations
 
 - **Notifications**: Push notifications via APN (`src/libs/apn.ts`)
@@ -134,7 +151,9 @@ bun run start              # Start production server
 ### Shared Packages
 
 #### InlineKit
+
 Core functionality shared between platforms:
+
 - **Database**: GRDB schema and migrations in `Sources/InlineKit/Models/`
 - **Networking**: `RealtimeAPI` WebSocket client in `Sources/RealtimeV2/`
 - **Authentication**: Auth flow management in `Sources/Auth/`
@@ -142,24 +161,30 @@ Core functionality shared between platforms:
 - **Transactions**: (Legacy) optimistic updates with retry in `Sources/InlineKit/Transactions/`
 
 #### InlineUI
+
 Shared SwiftUI components:
+
 - User and space avatars
 - Text processing and link detection
 
 #### InlineProtocol
+
 Generated Protocol Buffer Swift code from `proto/core.proto`
 
 #### Logger
+
 Centralized logging accessible via `Log.scoped("ModuleName")` or `Log.shared`
 
 ### Platform-Specific Apps
 
 #### iOS App (InlineIOS/)
+
 - **Chat View**: UIKit-based with upside-down collection view
 - **Navigation**: SwiftUI navigation with hybrid UIKit chat views
 - **Image Loading**: Nuke/NukeUI for remote images
 
 #### macOS App (InlineMac/)
+
 - **Chat View**: AppKit-based for performance
 - **Compose**: AppKit text handling with SwiftUI UI
 - **MessageView**: AppKit message bubble
@@ -239,6 +264,7 @@ bun run proto:generate-swift  # Swift generation
 ### Usage Examples
 
 #### Swift
+
 ```swift
 var message = Message.with {
     $0.id = 1234
@@ -248,15 +274,17 @@ var message = Message.with {
 ```
 
 #### TypeScript
+
 ```typescript
 const message: Message = {
   id: 1234,
   text: "Hello, world!",
-  author: "User"
-}
+  author: "User",
+};
 ```
 
 #### Naming Conventions
+
 - **Proto**: snake_case → **TypeScript**: camelCase → **Swift**: camelCase (except Id → ID)
 
 ## Development Workflows
@@ -275,6 +303,7 @@ const message: Message = {
 ### Adding Database Tables
 
 #### Server
+
 1. **Schema**: Create schema file in `server/src/db/schema/`
 2. **Export**: Add export to `server/src/db/schema/index.ts`
 3. **Generate**: Run `cd server && bun run db:generate <migration-name>`
@@ -283,6 +312,7 @@ const message: Message = {
 6. **Testing**: Add model tests in `server/src/__tests__/models/`
 
 #### Apple Platforms
+
 1. **Model**: Create model file in `apple/InlineKit/Sources/InlineKit/Models/`
 2. **Migration**: Add migration in `apple/InlineKit/Sources/InlineKit/Database.swift`
 3. **Testing**: Add tests using Swift Testing framework
@@ -321,9 +351,9 @@ Create transactions in `apple/InlineKit/Sources/InlineKit/Transactions/Methods/`
 - **Database**: Drizzle ORM with `db.select()` and `db.query` patterns
 - **Swift**: Target Swift 6, use modern APIs and concurrency patterns
 - **UI Design**: Follow Apple Human Interface Guidelines, use SF Symbols
-- Only add comments that explain exactly why a certain complex code is needed and only when the code is not self explanatory. Keep them concise and do not add comments that do not provide anything important. We use comments sparingly. 
+- Only add comments that explain exactly why a certain complex code is needed and only when the code is not self explanatory. Keep them concise and do not add comments that do not provide anything important. We use comments sparingly.
 - Do not fill stubs with comments.
-- Do not keep print statements, only use them while debugging and delete them afterwards. 
+- Do not keep print statements, only use them while debugging and delete them afterwards.
 - Prefer using the log package for error and warnings.
 - Most IDs use `Int64`. Use all caps `ID` in protocol buffers types and `Id` in app Swift code
 
@@ -331,7 +361,7 @@ Create transactions in `apple/InlineKit/Sources/InlineKit/Transactions/Methods/`
 
 - **Encryption**: Use `server/src/modules/encryption/encryption2.ts` for sensitive data
 - **Authorization**: Use `server/src/utils/authorize.ts` helpers
-- **Logging**: 
+- **Logging**:
   - **Backend**: `server/src/utils/log.ts` for Sentry integration
   - **Apple**: `Log.scoped("ModuleName")` for structured logging
 - **Environment**: Type-checked environment variables in `server/src/env.ts`
@@ -382,6 +412,7 @@ cd web && bun run build && bun run start
 ## Development Instructions
 
 ### For AI Assistants
+
 - Do what has been asked; nothing more, nothing less
 - NEVER proactively create documentation files unless explicitly requested
 - Follow existing code patterns and conventions in the codebase
@@ -389,4 +420,5 @@ cd web && bun run build && bun run start
 - Write tests for isolated, simple to test, non-UI code in Swift packages. Avoid attempting to write tests automatically when it requires significant investment, mocking, re-architecture or complex testing workflows
 - run tests with a timeout of 15s
 - When you want to build the full macOS/iOS using xcodebuild, ask me to do it, do not build the full apps. Only run tests for InlineUI or InlineKit.
-- Do not remove comments that are prefixed with Note:, TODO:, or FIXME: or documentation. 
+- Do not remove comments that are prefixed with Note:, TODO:, or FIXME: or documentation.
+- Our date/time values are in SECONDS in transport by default. We only transform to milliseconds for calculations if the host language's native date object expects something else. Use seconds by default unless specifically asked for.

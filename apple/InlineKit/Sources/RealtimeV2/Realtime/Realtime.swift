@@ -42,11 +42,12 @@ public actor RealtimeV2 {
     transport: Transport,
     auth: Auth,
     applyUpdates: ApplyUpdates,
-    persistenceHandler: TransactionPersistenceHandler? = nil
+    syncStorage: SyncStorage,
+    persistenceHandler: TransactionPersistenceHandler? = nil,
   ) {
     self.auth = auth
     client = ProtocolClient(transport: transport, auth: auth)
-    sync = Sync(applyUpdates: applyUpdates)
+    sync = Sync(applyUpdates: applyUpdates, syncStorage: syncStorage, client: client)
     transactions = Transactions(persistenceHandler: persistenceHandler)
     stateObject = RealtimeState()
 
@@ -118,7 +119,7 @@ public actor RealtimeV2 {
 
         switch event {
           case .open:
-            self.log.trace("Transport connected")
+            self.log.trace("Client connected (transport open and auth successful)")
             Task {
               await self.updateConnectionState(.connected)
               await self.restartTransactions()
@@ -318,5 +319,6 @@ public actor RealtimeV2 {
     guard newState != currentConnectionState else { return }
     currentConnectionState = newState
     Task { await connectionStateChannel.send(newState) }
+    Task { await sync.connectionStateChanged(state: newState) }
   }
 }
