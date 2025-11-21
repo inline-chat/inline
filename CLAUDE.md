@@ -421,3 +421,4 @@ cd web && bun run build && bun run start
 - run tests with a timeout of 15s
 - When you want to build the full macOS/iOS using xcodebuild, ask me to do it, do not build the full apps. Only run tests for InlineUI or InlineKit.
 - Do not remove comments that are prefixed with Note:, TODO:, or FIXME: or documentation.
+- Our date/time values are in SECONDS in transport by default. We only transform to milliseconds for calculations if the host language's native date object expects something else. Use seconds by default unless specifically asked for.

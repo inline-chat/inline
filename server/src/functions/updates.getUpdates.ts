@@ -70,7 +70,7 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
   if (seqDifference > totalLimit) {
     return {
       updates: [],
-      seq: BigInt(seqStart),
+      seq: BigInt(latestSeq),
       date: encodeOptionalDate(latestDate),
       final: false,
       resultType: GetUpdatesResult_ResultType.TOO_LONG,

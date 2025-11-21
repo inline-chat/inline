@@ -34,6 +34,26 @@ export const encodePeerFromChat = (chat: DbChat, { currentUserId }: { currentUse
   throw new Error("Unsupported chat type")
 }
 
+export const encodeOutputPeerFromChat = (chat: DbChat, { currentUserId }: { currentUserId: number }): Peer => {
+  if (chat.type == "thread") {
+    return {
+      type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } },
+    }
+  }
+
+  if (chat.type == "private") {
+    let peerUserId = chat.minUserId === currentUserId ? chat.maxUserId : chat.minUserId
+    if (!peerUserId) {
+      throw new Error("Peer user ID is null")
+    }
+    return {
+      type: { oneofKind: "user", user: { userId: BigInt(peerUserId) } },
+    }
+  }
+
+  throw new Error("Unsupported chat type")
+}
+
 export const encodePeerFromInputPeer = ({
   inputPeer,
   currentUserId,
