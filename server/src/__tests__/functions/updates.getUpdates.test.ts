@@ -17,7 +17,7 @@ describe("getUpdates", () => {
 
     // 2. Insert updates (seq 1 to 10)
     // We just need dummy payload
-    const dummyPayload = new Uint8Array([1, 2, 3])
+    const dummyPayload = Buffer.from([1, 2, 3])
     
     for (let i = 1; i <= 10; i++) {
       await db.insert(updates).values({
