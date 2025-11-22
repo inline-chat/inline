@@ -1,6 +1,5 @@
-import type { CreateBotInput, CreateBotResult, DeleteMemberInput, DeleteMemberResult } from "@in/protocol/core"
+import type { DeleteMemberInput, DeleteMemberResult } from "@in/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
-import { createBot } from "@in/server/functions/createBot"
 import { Functions } from "@in/server/functions"
 import { Cause, Effect } from "effect"
 import { SpaceIdInvalidError, SpaceNotExistsError } from "@in/server/functions/_errors"
@@ -14,6 +13,10 @@ export const deleteMemberHandler = async (
   input: DeleteMemberInput,
   handlerContext: HandlerContext,
 ): Promise<DeleteMemberResult> => {
+  if (!input.userId) {
+    throw RealtimeRpcError.UserIdInvalid
+  }
+
   const exit = await Effect.runPromiseExit(
     Functions.spaces.deleteMember(input, {
       currentSessionId: handlerContext.sessionId,
