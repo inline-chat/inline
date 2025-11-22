@@ -3,7 +3,7 @@ import Logger
 import Network
 
 actor PingPongService {
-  private let log = Log.scoped("RealtimeV2.PingPongService", enableTracing: true)
+  private let log = Log.scoped("RealtimeV2.PingPongService", level: .info)
 
   init() {}
 
@@ -66,7 +66,7 @@ actor PingPongService {
   }
 
   /// Called when a pong is received in Client.swift
-  public func pong(nonce: UInt64) {
+  func pong(nonce: UInt64) {
     log.debug("pong received for nonce: \(nonce)")
 
     guard let pingDate = pings[nonce] else {
