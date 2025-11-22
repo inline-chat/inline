@@ -18,11 +18,13 @@ struct HomeSidebar: View {
   @EnvironmentStateObject var home: HomeViewModel
   @EnvironmentStateObject var localSearch: HomeSearchViewModel
   @StateObject var search = GlobalSearch()
+  @AppStorage("home_lastSelectedSpaceId") private var persistedSpaceId: Int = 0
   @FocusState private var isSearching: Bool
   @State private var selectedResultIndex: Int = 0
   @State private var searchQuery = ""
   @State private var keyMonitorSearchUnsubscriber: (() -> Void)?
   @State private var keyMonitorVimUnsubscriber: (() -> Void)?
+  @State private var hasRestoredSpaceSelection = false
 
   // MARK: - Initializer
 
@@ -61,6 +63,9 @@ struct HomeSidebar: View {
       if nav.selectedTab == .spaces {
         SpacesTab()
           .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .onAppear {
+            restoreLastSpaceIfNeeded()
+          }
       } else {
         // Top area
         VStack(alignment: .leading, spacing: 0) {
@@ -529,6 +534,15 @@ struct HomeSidebar: View {
       case .member:
         return false
     }
+  }
+
+  private func restoreLastSpaceIfNeeded() {
+    guard hasRestoredSpaceSelection == false else { return }
+    guard nav.selectedSpaceId == nil else { return }
+    guard persistedSpaceId != 0 else { return }
+
+    nav.selectedSpaceId = Int64(persistedSpaceId)
+    hasRestoredSpaceSelection = true
   }
 }
 
