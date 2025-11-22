@@ -2,9 +2,8 @@ import AppKit
 import InlineKit
 import InlineUI
 import SwiftUI
-import Invite
 
-class InviteToSpaceViewController: NSViewController {
+class MemberManagementViewController: NSViewController {
   var spaceId: Int64
   var dependencies: AppDependencies
 
@@ -20,12 +19,7 @@ class InviteToSpaceViewController: NSViewController {
   }
 
   private lazy var swiftUIView: some View =
-    InviteToSpaceView(
-      spaceId: self.spaceId,
-      onManageMembers: { [dependencies, spaceId] in
-        dependencies.nav.open(.members(spaceId: spaceId))
-      }
-    )
+    MemberManagementView(spaceId: self.spaceId)
       .environment(dependencies: dependencies)
 
   override func loadView() {
