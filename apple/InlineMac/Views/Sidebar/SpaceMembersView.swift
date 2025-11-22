@@ -7,6 +7,7 @@ struct SpaceMembersView: View {
   @EnvironmentObject var nav: Nav
   @EnvironmentObject var data: DataManager
   @EnvironmentStateObject var fullSpace: FullSpaceViewModel
+  @EnvironmentStateObject var membershipStatus: SpaceMembershipStatusViewModel
   @Environment(\.keyMonitor) var keyMonitor
   @Environment(\.realtimeV2) var realtimeV2
 
@@ -18,6 +19,9 @@ struct SpaceMembersView: View {
     self.spaceId = spaceId
     _fullSpace = EnvironmentStateObject { env in
       FullSpaceViewModel(db: env.appDatabase, spaceId: spaceId)
+    }
+    _membershipStatus = EnvironmentStateObject { env in
+      SpaceMembershipStatusViewModel(db: env.appDatabase, spaceId: spaceId)
     }
   }
 
@@ -46,6 +50,7 @@ struct SpaceMembersView: View {
       do {
         try await data.getSpace(spaceId: spaceId)
         try await realtimeV2.send(.getSpaceMembers(spaceId: spaceId))
+        await membershipStatus.refreshIfNeeded()
       } catch {
         Log.shared.error("failed to get space data", error: error)
       }
@@ -154,6 +159,16 @@ struct SpaceMembersView: View {
 
       Button("Invite to Space", systemImage: "person.badge.plus") {
         nav.open(.inviteToSpace(spaceId: spaceId))
+      }
+
+      if membershipStatus.canManageMembers {
+        Button("Manage Members", systemImage: "person.3") {
+          nav.open(.members(spaceId: spaceId))
+        }
+      } else {
+        Button("Manage Members", systemImage: "person.3") {}
+          .disabled(true)
+          .opacity(0.5)
       }
     } label: {
       Image(systemName: "plus")

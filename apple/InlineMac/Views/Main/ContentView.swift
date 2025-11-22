@@ -87,13 +87,17 @@ class ContentViewController: NSViewController {
         let inviteToSpaceVC = InviteToSpaceViewController(spaceId: spaceId, dependencies: dependencies)
         addRouteSubview(inviteToSpaceVC.view, inviteToSpaceVC)
 
+      case let .members(spaceId):
+        let membersVC = MemberManagementViewController(spaceId: spaceId, dependencies: dependencies)
+        addRouteSubview(membersVC.view, membersVC)
+
       default:
         break
     }
   }
 
-  var currentRouteSubview: NSView? = nil
-  var currentRouteViewController: NSViewController? = nil
+  var currentRouteSubview: NSView?
+  var currentRouteViewController: NSViewController?
 
   private func addRouteSubview(_ subview: NSView, _ viewController: NSViewController? = nil) {
     // Add the view controller as a child first
