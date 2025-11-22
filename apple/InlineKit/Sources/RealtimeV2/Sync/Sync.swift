@@ -133,8 +133,13 @@ actor Sync {
       let maxSyncAge: Int64 = 14 * 24 * 60 * 60
 
       if state.lastSyncDate == 0 {
-        log.info("Sync state uninitialized (date=0). Setting to now: \(now)")
-        state = SyncState(lastSyncDate: now)
+        // Temporary rollout safety: when sync state is missing, ask the server for the past 3 days so
+        // we re-trigger buckets that may have changed while clients upgrade. Once all clients run the
+        // new sync engine we can narrow or remove this lookback window.
+        let threeDays: Int64 = 3 * 24 * 60 * 60
+        let seedDate = max(0, now - threeDays)
+        log.info("Sync state uninitialized (date=0). Seeding lookback to \(seedDate) (3 days ago)")
+        state = SyncState(lastSyncDate: seedDate)
         await syncStorage.setState(state)
       } else if now - state.lastSyncDate > maxSyncAge {
         log.warning("Sync state too old (> 14 days). Resetting to now: \(now)")
@@ -312,35 +317,17 @@ actor BucketActor {
     var totalFetched = 0
     var isFinal = false
 
+    // On a cold start (no seq/date), attempt a small catch-up instead of immediately fast-forwarding.
+    // We cap totalLimit to 50 to avoid pulling large history; if the server still reports TOO_LONG we
+    // fall back to fast-forward behavior.
+    let isColdStart = seq == 0 || date == 0
+    let coldStartTotalLimit: Int32 = 50
+
     defer {
       isFetching = false
     }
 
     do {
-      // Special case: if seq is 0, we don't have any local state yet.
-      // We fast-forward to the current server state without fetching history.
-      if seq == 0 {
-        log.debug("seq is 0 for bucket \(key), fast-forwarding to current server state")
-
-        let result = try await client.callRpc(method: .getUpdates, input: .getUpdates(.with {
-          $0.bucket = key.toProtocolBucket()
-          $0.startSeq = 0
-          $0.totalLimit = 1
-        }))
-
-        guard case let .getUpdates(payload) = result else {
-          log.error("failed to parse getUpdates result for fast-forward")
-          return
-        }
-
-        // Update state without applying any updates
-        seq = payload.seq
-        date = payload.date
-        await sync.saveBucketState(for: key, seq: payload.seq, date: payload.date)
-        log.debug("fast-forwarded bucket \(key) to seq=\(payload.seq), date=\(payload.date)")
-        return
-      }
-
       log.debug("starting fetch for bucket \(key) from seq \(seq)")
 
       // Fetch loop: accumulate all updates until final=true
@@ -348,6 +335,9 @@ actor BucketActor {
         let result = try await client.callRpc(method: .getUpdates, input: .getUpdates(.with {
           $0.bucket = key.toProtocolBucket()
           $0.startSeq = currentSeq
+          if isColdStart {
+            $0.totalLimit = coldStartTotalLimit
+          }
         }))
 
         guard case let .getUpdates(payload) = result else {
