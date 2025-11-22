@@ -32,7 +32,7 @@ struct SpaceMembersView: View {
 
       Picker("", selection: $selectedTab) {
         Text("Chats").tag(0)
-        Text("Members").tag(1)
+        Text("Direct Chats").tag(1)
       }
       .pickerStyle(.segmented)
       .labelsHidden()
@@ -73,6 +73,7 @@ struct SpaceMembersView: View {
 
       Spacer()
 
+      manageMembersButton
       plusButton
     }
     .padding(.top, -6)
@@ -151,6 +152,23 @@ struct SpaceMembersView: View {
   }
 
   @ViewBuilder
+  var manageMembersButton: some View {
+    Button {
+      nav.open(.members(spaceId: spaceId))
+    } label: {
+      Image(systemName: "person.2")
+        .font(.system(size: 15, weight: .medium))
+        .foregroundStyle(.tertiary)
+        .contentShape(.circle)
+        .frame(width: 24, height: 24, alignment: .center)
+    }
+    .buttonStyle(.plain)
+    .opacity(membershipStatus.canManageMembers ? 1 : 0.5)
+    .disabled(!membershipStatus.canManageMembers)
+    .padding(.trailing, 8)
+  }
+
+  @ViewBuilder
   var plusButton: some View {
     Menu {
       Button("New Chat", systemImage: "bubble.left") {
@@ -159,16 +177,6 @@ struct SpaceMembersView: View {
 
       Button("Invite to Space", systemImage: "person.badge.plus") {
         nav.open(.inviteToSpace(spaceId: spaceId))
-      }
-
-      if membershipStatus.canManageMembers {
-        Button("Manage Members", systemImage: "person.3") {
-          nav.open(.members(spaceId: spaceId))
-        }
-      } else {
-        Button("Manage Members", systemImage: "person.3") {}
-          .disabled(true)
-          .opacity(0.5)
       }
     } label: {
       Image(systemName: "plus")
