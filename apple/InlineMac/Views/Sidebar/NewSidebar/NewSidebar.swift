@@ -94,7 +94,6 @@ class NewSidebar: NSViewController {
     scrollView.translatesAutoresizingMaskIntoConstraints = false
     scrollView.contentView.wantsLayer = true
     scrollView.postsBoundsChangedNotifications = true
-
     scrollView.hasVerticalScroller = true
     scrollView.scrollerStyle = .overlay
     scrollView.verticalScroller?.controlSize = .mini
