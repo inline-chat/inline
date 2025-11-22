@@ -11,6 +11,7 @@ struct SpaceMembersView: View {
   @EnvironmentStateObject var membershipStatus: SpaceMembershipStatusViewModel
   @Environment(\.keyMonitor) var keyMonitor
   @Environment(\.realtimeV2) var realtimeV2
+  @AppStorage("home_lastSelectedSpaceId") private var persistedSpaceId: Int = 0
 
   @State var searchQuery: String = ""
   @State private var selectedTab: Int = 0
@@ -77,6 +78,9 @@ struct SpaceMembersView: View {
       if let deleteErrorMessage {
         Text(deleteErrorMessage)
       }
+    }
+    .onAppear {
+      persistedSpaceId = Int(spaceId)
     }
   }
 
