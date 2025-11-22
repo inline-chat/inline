@@ -17,6 +17,7 @@ import { UpdateBucket } from "@in/server/db/schema/updates"
 import type { ServerUpdate } from "@in/protocol/server"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { db } from "@in/server/db"
+import { MemberNotExistsError } from "@in/server/modules/effect/commonErrors"
 import { eq } from "drizzle-orm"
 
 const log = new Log("space.removeMember")
@@ -34,11 +35,16 @@ export const deleteMember = (input: DeleteMemberInput, context: FunctionContext)
       return yield* Effect.fail(new SpaceIdInvalidError())
     }
 
+    const userId = Number(input.userId)
+    if (!Number.isSafeInteger(userId) || userId <= 0) {
+      return yield* Effect.fail(new MemberNotExistsError())
+    }
+
     // Get space
-  const space = yield* Effect.tryPromise({
-    try: () => SpaceModel.getSpaceById(spaceId),
-    catch: () => new SpaceNotExistsError(),
-  })
+    const space = yield* Effect.tryPromise({
+      try: () => SpaceModel.getSpaceById(spaceId),
+      catch: () => new SpaceNotExistsError(),
+    })
 
     if (!space) {
       return yield* Effect.fail(new SpaceNotExistsError())
@@ -47,21 +53,23 @@ export const deleteMember = (input: DeleteMemberInput, context: FunctionContext)
     // Validate our permission in this space and maximum role we can assign
     yield* AuthorizeEffect.spaceAdmin(spaceId, context.currentUserId)
 
+    log.debug("Deleting member", { spaceId, userId, currentUserId: context.currentUserId })
+
     // Delete member
-    yield* MembersModel.deleteMemberEffect(spaceId, Number(input.userId))
+    yield* MembersModel.deleteMemberEffect(spaceId, userId)
 
     yield* Effect.tryPromise({
       try: () =>
         persistSpaceMemberDeleteUpdate({
           spaceId,
-          userId: Number(input.userId),
+          userId,
         }),
       catch: (error) => (error instanceof Error ? error : new Error("persistSpaceMemberDeleteUpdate failed")),
     })
 
     // Push updates
     const { updates } = yield* Effect.promise(() =>
-      pushUpdatesForSpace({ spaceId, userId: Number(input.userId), currentUserId: context.currentUserId }),
+      pushUpdatesForSpace({ spaceId, userId, currentUserId: context.currentUserId }),
     )
 
     // Return result
