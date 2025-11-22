@@ -129,11 +129,11 @@ class NavigationModel: ObservableObject {
   }
 
   private func setUpForRoute(_ route: NavigationRoute) {
-    guard let windowManager else {
-      log.error("Window manager not set up")
-      return
-    }
-    windowManager.setUpForInnerRoute(route)
+//    guard let windowManager else {
+//      log.error("Window manager not set up")
+//      return
+//    }
+//    windowManager.setUpForInnerRoute(route)
   }
 
   // Used from sidebars
