@@ -30,7 +30,9 @@ public struct InviteToSpaceView: View {
   @State private var showPhoneShare = false
 
   private let spaceId: Int64
+  private let onManageMembers: (() -> Void)?
   @StateObject private var spaceViewModel: FullSpaceViewModel
+  @StateObject private var membershipStatusViewModel: SpaceMembershipStatusViewModel
 
   enum InviteType {
     case username
@@ -43,9 +45,13 @@ public struct InviteToSpaceView: View {
     case member
   }
 
-  public init(spaceId: Int64) {
+  public init(spaceId: Int64, onManageMembers: (() -> Void)? = nil) {
     self.spaceId = spaceId
+    self.onManageMembers = onManageMembers
     _spaceViewModel = StateObject(wrappedValue: FullSpaceViewModel(db: AppDatabase.shared, spaceId: spaceId))
+    _membershipStatusViewModel = StateObject(
+      wrappedValue: SpaceMembershipStatusViewModel(db: AppDatabase.shared, spaceId: spaceId)
+    )
   }
 
   public var body: some View {
@@ -75,6 +81,9 @@ public struct InviteToSpaceView: View {
       } message: {
         Text(successMessage)
       }
+      .task {
+        await membershipStatusViewModel.refreshIfNeeded()
+      }
       .sheet(isPresented: $showPhoneShare) {
         phoneShareView
       }
@@ -83,6 +92,7 @@ public struct InviteToSpaceView: View {
   private var mainForm: some View {
     Form {
       titleSection
+      manageMembersSection
       inviteTypeSection
       inviteRoleSection
       inputSection
@@ -154,6 +164,21 @@ public struct InviteToSpaceView: View {
     }
     .padding()
     .frame(width: 400)
+  }
+
+  @ViewBuilder
+  private var manageMembersSection: some View {
+    if let onManageMembers, membershipStatusViewModel.canManageMembers {
+      Section {
+        Button {
+          onManageMembers()
+        } label: {
+          Label("Manage Members", systemImage: "person.3")
+            .labelStyle(.titleAndIcon)
+        }
+        .buttonStyle(.link)
+      }
+    }
   }
 
   @ViewBuilder

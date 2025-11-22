@@ -280,6 +280,7 @@ public extension User {
     if !min {
       email = user.hasEmail ? user.email : nil
       phoneNumber = user.hasPhoneNumber ? user.phoneNumber : nil
+      pendingSetup = user.hasPendingSetup ? user.pendingSetup : nil
 
       if user.hasStatus {
         online = user.status.online == .online
