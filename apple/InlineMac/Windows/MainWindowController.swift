@@ -14,16 +14,18 @@ class MainWindowController: NSWindowController {
     dependencies.viewModel.topLevelRoute
   }
 
-  private var currentTopLevelRoute: TopLevelRoute? = nil
+  private var currentTopLevelRoute: TopLevelRoute?
 
   private var navBackButton: NSButton?
   private var navForwardButton: NSButton?
+
+  private var defaultWindowSize: CGSize = .init(width: 860, height: 640)
 
   init(dependencies: AppDependencies) {
     self.dependencies = dependencies
 
     let window = NSWindow(
-      contentRect: NSRect(origin: .zero, size: CGSize(width: 900, height: 600)),
+      contentRect: NSRect(origin: .zero, size: defaultWindowSize),
       styleMask: [
         .titled,
         .closable,
@@ -146,7 +148,7 @@ class MainWindowController: NSWindowController {
     }
 
     // TODO: fix sizing
-    window?.setContentSize(NSSize(width: 740, height: 600))
+    window?.setContentSize(defaultWindowSize)
     window?.setFrameUsingName("MainWindow")
     window?.minSize = NSSize(width: 330, height: 220)
   }
@@ -380,7 +382,7 @@ class MainWindowViewModel: ObservableObject {
     topLevelRoute = route
   }
 
-  public func setUpForInnerRoute(_ route: NavigationRoute) {
+  func setUpForInnerRoute(_ route: NavigationRoute) {
 //    Log.shared.debug("Setting up window for inner route: \(route)")
 //    switch route {
 //      case .spaceRoot:
@@ -398,7 +400,7 @@ class MainWindowViewModel: ObservableObject {
 //    }
   }
 
-  public func setToolbarVisibility(_ isVisible: Bool) {
+  func setToolbarVisibility(_ isVisible: Bool) {
 //    guard let window else { return }
 //
 //    if isVisible {
@@ -446,21 +448,21 @@ extension MainWindowController {
 
     // Route dependant items
     switch nav.currentRoute {
-      case .chat(let peer):
+      case let .chat(peer):
         items.append(.chatTitle)
         items.append(.flexibleSpace)
-        
+
         // Only show participants for private thread chats (not DMs, not public threads)
-        if case .thread(let chatId) = peer {
+        if case let .thread(chatId) = peer {
           // Check if thread is private (not public)
           if let chat = ObjectCache.shared.getChat(id: chatId), chat.isPublic != true {
             items.append(.participants)
           }
         }
-        
+
         // Add space between participants and translate
         items.append(.space)
-        
+
         // FIXME: check if we should show this
         items.append(.translate)
 
