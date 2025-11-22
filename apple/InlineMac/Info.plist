@@ -16,6 +16,8 @@
 	</array>
 	<key>DEV_HOST</key>
 	<string>$(DEV_HOST)</string>
+	<key>NSObservationTrackingEnabled</key>
+	<true/>
 	<key>USE_PRODUCTION_API</key>
 	<string>$(USE_PRODUCTION_API)</string>
 </dict>
