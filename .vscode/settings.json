@@ -16,7 +16,17 @@
   "cSpell.enabledFileTypes": {
     "swift": true
   },
-  "cSpell.words": ["Deinitialization", "GRDB", "stylex"],
+  "cSpell.words": [
+    "Autoresizing",
+    "Bezeled",
+    "Deinitialization",
+    "GRDB",
+    "stylex",
+    "Sublayer",
+    "sublayers",
+    "Subview",
+    "Superlayer"
+  ],
 
   // Protocol Buffers
   "protoc": {
