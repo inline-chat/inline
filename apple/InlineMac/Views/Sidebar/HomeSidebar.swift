@@ -1,3 +1,4 @@
+import Auth
 import InlineKit
 import InlineUI
 import Logger
@@ -386,6 +387,30 @@ struct HomeSidebar: View {
           .foregroundStyle(Color.accent)
       }
 
+      Menu {
+        if home.spaces.isEmpty {
+          Button("Create a Space First") {}.disabled(true)
+        } else {
+          ForEach(home.spaces, id: \.space.id) { spaceItem in
+            let canManage = canManageMembers(spaceItem)
+
+            Button {
+              nav.open(.members(spaceId: spaceItem.space.id))
+            } label: {
+              Label(spaceItem.space.name, systemImage: "person.3")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Color.accent)
+            }
+            .disabled(!canManage)
+            .opacity(canManage ? 1 : 0.5)
+          }
+        }
+      } label: {
+        Label("Manage Members", systemImage: "person.3")
+          .font(.system(size: 14, weight: .medium))
+          .foregroundStyle(Color.accent)
+      }
+
     } label: {
       Image(systemName: "plus")
         .font(.system(size: 15, weight: .medium))
@@ -489,6 +514,20 @@ struct HomeSidebar: View {
         Log.shared.error("Failed to open a private chat with \(user.anyName)", error: error)
         overlay.showError(message: "Failed to open a private chat with \(user.anyName)")
       }
+    }
+  }
+
+  private func canManageMembers(_ spaceItem: HomeSpaceItem) -> Bool {
+    guard let currentUserId = Auth.getCurrentUserId() else { return false }
+    guard let membership = spaceItem.members.first(where: { $0.userId == currentUserId }) else {
+      return false
+    }
+
+    switch membership.role {
+      case .owner, .admin:
+        return true
+      case .member:
+        return false
     }
   }
 }

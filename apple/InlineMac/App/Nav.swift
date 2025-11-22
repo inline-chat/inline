@@ -15,6 +15,7 @@ struct NavEntry: Hashable, Codable, Equatable {
     case profile(userInfo: UserInfo)
     case newChat(spaceId: Int64)
     case inviteToSpace(spaceId: Int64)
+    case members(spaceId: Int64)
 
     static func == (lhs: Route, rhs: Route) -> Bool {
       switch (lhs, rhs) {
@@ -32,6 +33,8 @@ struct NavEntry: Hashable, Codable, Equatable {
           lhsSpaceId == rhsSpaceId
         case let (.inviteToSpace(lhsSpaceId), .inviteToSpace(rhsSpaceId)):
           lhsSpaceId == rhsSpaceId
+        case let (.members(lhsSpaceId), .members(rhsSpaceId)):
+          lhsSpaceId == rhsSpaceId
         default:
           false
       }
@@ -46,7 +49,7 @@ class Nav: ObservableObject {
 
   private let log = Log.scoped("Nav", enableTracing: false)
   private let maxHistoryLength = 200
-  private var saveStateTask: Task<Void, Never>? = nil
+  private var saveStateTask: Task<Void, Never>?
 
   // TODO: support multi-window
   // to support that, we need to store state per window, and disable persist outside of main window
@@ -56,9 +59,9 @@ class Nav: ObservableObject {
   // Nav State
 
   /// History of navigation entries, current entry is last item in the history array
-  public var history: [NavEntry] = []
+  var history: [NavEntry] = []
 
-  public var forwardHistory: [NavEntry] = []
+  var forwardHistory: [NavEntry] = []
 
   // UI State Publishers For AppKit
   var canGoBackPublisher: CurrentValueSubject<Bool, Never> = CurrentValueSubject(false)
@@ -118,7 +121,7 @@ class Nav: ObservableObject {
 // MARK: - Navigation APIs
 
 extension Nav {
-  @MainActor public func openSpace(_ spaceId: Int64) {
+  @MainActor func openSpace(_ spaceId: Int64) {
     // TODO: Implement a caching for last viewed route in that space and restore that instead of opening .empty
     let entry = NavEntry(route: .empty, spaceId: spaceId)
     history.append(entry)
@@ -126,7 +129,7 @@ extension Nav {
     reflectHistoryChange()
   }
 
-  @MainActor public func openHome(replace: Bool? = false) {
+  @MainActor func openHome(replace: Bool? = false) {
     // TODO: Implement a caching for last viewed route in home
     let entry = NavEntry(route: .empty, spaceId: nil)
     if replace == true {
@@ -142,7 +145,7 @@ extension Nav {
 //    reflectHistoryChange()
 //  }
 
-  public func open(_ route: NavEntry.Route) {
+  func open(_ route: NavEntry.Route) {
     // optimistic
     upcomingRoute = route
 
@@ -168,7 +171,7 @@ extension Nav {
     }
   }
 
-  @MainActor public func goBack() {
+  @MainActor func goBack() {
     print("goBack")
     print("history: \(history)")
     guard history.count > 0 else { return }
@@ -179,7 +182,7 @@ extension Nav {
     reflectHistoryChange()
   }
 
-  @MainActor public func goForward() {
+  @MainActor func goForward() {
     guard forwardHistory.count >= 1 else { return }
 
     let current = forwardHistory.removeLast()
@@ -188,7 +191,7 @@ extension Nav {
     reflectHistoryChange()
   }
 
-  @MainActor public func handleEsc() {
+  @MainActor func handleEsc() {
     if history.count == 1 {
       history = []
       forwardHistory = []
