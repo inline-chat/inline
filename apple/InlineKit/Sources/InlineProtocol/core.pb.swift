@@ -1295,6 +1295,9 @@ public struct Member: Sendable {
   /// Date of joining
   public var date: Int64 = 0
 
+  /// Whether member can access public chats in the space
+  public var canAccessPublicChats: Bool = false
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum Role: SwiftProtobuf.Enum, Swift.CaseIterable {
@@ -6900,6 +6903,7 @@ extension Member: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     3: .standard(proto: "user_id"),
     4: .same(proto: "role"),
     5: .same(proto: "date"),
+    6: .standard(proto: "can_access_public_chats"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -6913,6 +6917,7 @@ extension Member: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
       case 3: try { try decoder.decodeSingularInt64Field(value: &self.userID) }()
       case 4: try { try decoder.decodeSingularEnumField(value: &self._role) }()
       case 5: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
+      case 6: try { try decoder.decodeSingularBoolField(value: &self.canAccessPublicChats) }()
       default: break
       }
     }
@@ -6938,6 +6943,9 @@ extension Member: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     if self.date != 0 {
       try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 5)
     }
+    if self.canAccessPublicChats != false {
+      try visitor.visitSingularBoolField(value: self.canAccessPublicChats, fieldNumber: 6)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -6947,6 +6955,7 @@ extension Member: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     if lhs.userID != rhs.userID {return false}
     if lhs._role != rhs._role {return false}
     if lhs.date != rhs.date {return false}
+    if lhs.canAccessPublicChats != rhs.canAccessPublicChats {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

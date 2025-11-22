@@ -517,6 +517,12 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("member public access") { db in
+      try db.alter(table: "member") { t in
+        t.add(column: "canAccessPublicChats", .boolean).notNull().defaults(to: true)
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

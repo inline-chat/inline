@@ -285,6 +285,9 @@ message Member {
 
   // Date of joining
   int64 date = 5;
+
+  // Whether member can access public chats in the space
+  bool can_access_public_chats = 6;
 }
 
 message Space {
