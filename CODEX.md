@@ -10,9 +10,10 @@
 
 - Do requested work only; mirror existing patterns; add comments only when clarifying non-obvious logic; never touch `.env` or delete others’ work.
 - Avoid destructive git commands; keep commits atomic and scoped; do not amend existing commits; quote paths with special chars; check status before committing.
+- Commit style: platform-prefixed, lowercase, scoped messages (e.g., `apple: fix sync`); add a brief description or bullets when extra context is needed.
 - Prefer `rg` for search; keep edits ASCII; strip debug prints; use logging utilities (`Log` in Swift, `server/src/utils/log.ts`).
 - Regenerate protobufs after proto changes with `bun run generate:proto` (or per-language commands in `scripts/`); rebuild Swift `InlineProtocol` target if needed.
-- Default test timeout 15s; run focused tests from relevant package roots; avoid heavy/unapproved tooling (e.g., do not run `xcodebuild` full apps).
+- Default test timeout 25s; run focused tests from relevant package roots; avoid heavy/unapproved tooling (e.g., do not run `xcodebuild` full apps).
 
 ## Common Commands
 
