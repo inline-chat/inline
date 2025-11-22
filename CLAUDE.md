@@ -1,52 +1,16 @@
-# Inline Chat App - Development Guide
-
-## Overview
-
-Inline is a native chat application with Swift clients for iOS and macOS, and a TypeScript backend API server. This guide provides comprehensive information about the codebase architecture, development workflow, and key modules for both new developers and AI assistants.
+Inline is a work chat application.
 
 ### Repository
 
 This repository is on GitHub at https://github.com/inline-chat/inline
 
-### Architecture
+### Project Structure
 
 - **Backend**: TypeScript server built with Bun, featuring REST and WebSocket APIs
 - **Apple Platforms**: Swift clients for iOS (SwiftUI/UIKit) and macOS (AppKit/SwiftUI)
-- **Web Client**: React Router v7 application
+- **Web Client**: React + Tanstack Router web application
 - **Protocol**: Protocol Buffers for cross-platform communication
 - **Database**: PostgreSQL (server) and GRDB/SQLite (Apple platforms)
-
-## Getting Started
-
-### Prerequisites
-
-- **Backend**: Bun runtime (not Node.js)
-- **Apple Development**: Xcode with latest Swift version
-- **Web Development**: Bun for package management
-
-### Quick Setup
-
-1. **Clone and install dependencies**:
-
-   ```bash
-   git clone <repository>
-   cd inline
-   bun install
-   ```
-
-2. **Start development servers**:
-
-   ```bash
-   # Backend server
-   bun run dev:server
-
-   # Web client (in separate terminal)
-   cd web && bun run dev
-   ```
-
-3. **Apple platforms**: Open `apple/Inline.xcodeproj` in Xcode
-
-## Project Structure
 
 ```
 inline/
@@ -76,7 +40,7 @@ inline/
 
 ## Backend (server/)
 
-### Technologies
+#### Backend API Layers
 
 - **Runtime**: Bun (not Node.js)
 - **Database**: PostgreSQL with Drizzle ORM
@@ -90,7 +54,7 @@ inline/
 - **REST API** (Legacy): Elysia framework in `src/methods/`
 - **Realtime API** (Primary): WebSocket RPC using Protocol Buffers
 
-#### Core Components
+#### Backend Core Components
 
 - **Functions** (`src/functions/`): Business logic abstracted from API
 - **Handlers** (`src/realtime/handlers/`): RPC handlers connecting functions to protocols
@@ -99,7 +63,7 @@ inline/
 - **Encoders** (`src/realtime/encoders/`): Convert database types to protocol buffers
 - **Utils** (`src/utils/`): Authorization, logging, validation utilities
 
-### Development Commands
+### Backend Development Commands
 
 ```bash
 # Development
@@ -107,19 +71,12 @@ bun run dev                 # Start development server
 bun run typecheck          # Type checking
 
 # Database
-bun run db:migrate         # Run migrations
 bun run db:generate <slug> # Generate new migration
-bun run db:studio          # Open Drizzle Studio (port 8010)
-bun run db:push            # Push schema changes without migration
+bun run db:migrate         # Run migrations
 
 # Testing & Quality
 bun test                   # Run tests
 bun run lint               # Run linting
-bun run lint:fix           # Auto-fix linting issues
-
-# Build & Deploy
-bun run build              # Production build
-bun run start              # Start production server
 ```
 
 ### Running tests for a single file
@@ -131,14 +88,36 @@ cd ./server
 bun test src/__tests__/modules/accessGuards.test.ts
 ```
 
-### External Integrations
+### Backend External Integrations
 
 - **Notifications**: Push notifications via APN (`src/libs/apn.ts`)
 - **File Storage**: Cloudflare R2 for uploads (`src/libs/r2.ts`)
 - **AI Services**: Anthropic, OpenAI integrations in `src/libs/`
 - **Third-party**: Linear (`src/libs/linear/`), Notion (`src/libs/notion.ts`), Loom integrations
 
-## Apple Platforms (apple/)
+### Adding New Realtime API Endpoints
+
+1. **Define Protocol**: Add RPC types in `proto/core.proto`
+2. **Generate Code**: Run `bun run generate:proto`
+3. **Business Logic**: Create function in `server/src/functions/`
+4. **Handler**: Create handler in `server/src/realtime/handlers/`
+5. **Register**: Add to `server/src/realtime/handlers/_rpc.ts`
+6. **Encoders**: Add encoders/decoders in `server/src/realtime/encoders/`
+7. **Client Code**: Rebuild Xcode `InlineProtocol` target for Swift changes
+8. **Testing**: Add tests in `server/src/__tests__/functions/`
+
+### Adding Database Tables
+
+#### Server
+
+1. **Schema**: Create schema file in `server/src/db/schema/`
+2. **Export**: Add export to `server/src/db/schema/index.ts`
+3. **Generate**: Run `cd server && bun run db:generate <migration-name>`
+4. **Migrate**: Run `cd server && bun run db:migrate`
+5. **Model**: Create model file in `server/src/db/models/`
+6. **Testing**: Add model tests in `server/src/__tests__/models/`
+
+## Apple Platforms (apple/) (iOS, macOS)
 
 ### Technologies
 
@@ -148,7 +127,7 @@ bun test src/__tests__/modules/accessGuards.test.ts
 - **Networking**: Custom WebSocket RPC with Protocol Buffers
 - **Concurrency**: Swift Concurrency (async/await, actors)
 
-### Shared Packages
+### Shared Packages for Apple
 
 #### InlineKit
 
@@ -193,15 +172,9 @@ Centralized logging accessible via `Log.scoped("ModuleName")` or `Log.shared`
 
 ### Build Commands
 
+Do not use `xcodebuild`.
+
 ```bash
-# List available schemes
-xcodebuild -project apple/Inline.xcodeproj -list
-
-# Build specific targets
-xcodebuild -project apple/Inline.xcodeproj -scheme "Inline (iOS)" -configuration Debug build
-xcodebuild -project apple/Inline.xcodeproj -scheme "Inline (macOS)" -configuration Debug build
-xcodebuild -project apple/Inline.xcodeproj -scheme "InlineKit" -configuration Debug build
-
 # Run package tests (from package directory)
 cd apple/InlineKit && swift test
 cd apple/InlineUI && swift test
@@ -209,15 +182,14 @@ cd apple/InlineUI && swift test
 
 ### Available Xcode Schemes
 
-- **"Inline (iOS)"** - Main iOS application
-- **"Inline (macOS)"** - Main macOS application
-- **"2nd Inline (macOS)"** - Alternative macOS build configuration
-- **InlineKit** - Shared Swift package
-- **InlineUI** - Shared SwiftUI components
-- **InlineProtocol** - Protocol buffer Swift code
-- **Logger** - Logging framework
-- **RealtimeV2** - WebSocket and sync client library
-- **TextProcessing** - Text processing utilities
+- **"Inline (iOS)"**
+- **"Inline (macOS)"**
+- **InlineKit**
+- **InlineUI**
+- **InlineProtocol**
+- **Logger**
+- **RealtimeV2**
+- **TextProcessing**
 
 ## Web Client (web/)
 
@@ -227,18 +199,6 @@ cd apple/InlineUI && swift test
 - **Styling**: Tailwind CSS + StyleX
 - **Animation**: Framer Motion
 - **Build Tool**: Vite
-
-### Development Commands
-
-```bash
-# Development
-bun run dev              # Start development server
-bun run typecheck        # Type checking and route generation
-
-# Build & Deploy
-bun run build            # Production build
-bun run start            # Start production server
-```
 
 ## Protocol Buffers
 
@@ -300,9 +260,7 @@ const message: Message = {
 7. **Client Code**: Rebuild Xcode `InlineProtocol` target for Swift changes
 8. **Testing**: Add tests in `server/src/__tests__/functions/`
 
-### Adding Database Tables
-
-#### Server
+### Adding Database Tables in Backend
 
 1. **Schema**: Create schema file in `server/src/db/schema/`
 2. **Export**: Add export to `server/src/db/schema/index.ts`
@@ -311,7 +269,7 @@ const message: Message = {
 5. **Model**: Create model file in `server/src/db/models/`
 6. **Testing**: Add model tests in `server/src/__tests__/models/`
 
-#### Apple Platforms
+#### Adding Client Database Tables In Apple Platforms
 
 1. **Model**: Create model file in `apple/InlineKit/Sources/InlineKit/Models/`
 2. **Migration**: Add migration in `apple/InlineKit/Sources/InlineKit/Database.swift`
@@ -378,22 +336,6 @@ Create transactions in `apple/InlineKit/Sources/InlineKit/Transactions/Methods/`
 - Leverage Swift 6 data race safety
 - Use protocols for abstraction
 
-## Deployment & Production
-
-### Build Commands
-
-```bash
-# Backend production build
-cd server && bun run build && bun run start
-
-# Web client production build
-cd web && bun run build && bun run start
-
-# Apple platforms
-# For development: Build in Xcode (Cmd+B)
-# For distribution: Product > Archive in Xcode
-```
-
 ### Environment Configuration
 
 - **Server**: Environment variables in `server/src/env.ts`
@@ -409,9 +351,7 @@ cd web && bun run build && bun run start
 - **Package Testing**: Run Swift package tests from package root: `cd apple/InlineKit && swift test`
 - **Protocol Changes**: Always run `bun run generate:proto` after modifying `.proto` files
 
-## Development Instructions
-
-### For AI Assistants
+## General Instructions
 
 - Do what has been asked; nothing more, nothing less
 - NEVER proactively create documentation files unless explicitly requested
@@ -422,3 +362,25 @@ cd web && bun run build && bun run start
 - When you want to build the full macOS/iOS using xcodebuild, ask me to do it, do not build the full apps. Only run tests for InlineUI or InlineKit.
 - Do not remove comments that are prefixed with Note:, TODO:, or FIXME: or documentation.
 - Our date/time values are in SECONDS in transport by default. We only transform to milliseconds for calculations if the host language's native date object expects something else. Use seconds by default unless specifically asked for.
+- Instead of using xcodebuild to build the whole macOS/iOS application, ask the user to do it and report back. If your work was in InlineKit or InlineUI
+
+## Git Instructions
+
+- **Before attempting to delete a file to resolve a local type/lint failure, stop and ask the user.** Other agents are often editing adjacent files; deleting their work to silence an error is never acceptable without explicit approval.
+- NEVER edit `.env` or any environment variable files—only the user may change them.
+- Coordinate with other agents before removing their in-progress edits—don't revert or delete work you didn't author unless everyone agrees.
+- Moving/renaming and restoring files is allowed.
+- ABSOLUTELY NEVER run destructive git operations (e.g., `git reset --hard`, `rm`, `git checkout`/`git restore` to an older commit) unless the user gives an explicit, written instruction in this conversation. Treat these commands as catastrophic; if you are even slightly unsure, stop and ask before touching them. _(When working within Cursor or Codex Web, these git limitations do not apply; use the tooling's capabilities as needed.)_
+- Never use `git restore` (or similar commands) to revert files you didn't author—coordinate with other agents instead so their in-progress work stays intact.
+- Always double-check git status before any commit
+- Keep commits atomic: commit only the files you touched and list each path explicitly. For tracked files run `git commit -m "<scoped message>" -- path/to/file1 path/to/file2`. For brand-new files, use the one-liner `git restore --staged :/ && git add "path/to/file1" "path/to/file2" && git commit -m "<scoped message>" -- path/to/file1 path/to/file2`.
+- Quote any git paths containing brackets or parentheses (e.g., `src/app/[candidate]/**`) when staging or committing so the shell does not treat them as globs or subshells.
+- When running `git rebase`, avoid opening editors—export `GIT_EDITOR=:` and `GIT_SEQUENCE_EDITOR=:` (or pass `--no-edit`) so the default messages are used automatically.
+- Never amend commits unless you have explicit written approval in the task thread.
+
+## Commit style guide
+
+- We commit changes atomically so usually one unit of commit is one feature, bug, refactor or one unit of working piece of code toward a bigger task.
+- Write the affected platform like this: "macos: fix the navbar", "ios:", "apple:", "api:", etc.
+- Use lowercase
+- If change is larger and requires more context on the cause or future consideration write a description with a concise explanation or a bullet list.
