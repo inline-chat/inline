@@ -9,6 +9,7 @@ struct SpaceListView: View {
   @EnvironmentObject var data: DataManager
   @EnvironmentObject var overlay: OverlayManager
   @EnvironmentStateObject var home: HomeViewModel
+  @AppStorage("home_lastSelectedSpaceId") private var persistedSpaceId: Int = 0
 
   @State private var searchQuery: String = ""
 
@@ -80,6 +81,7 @@ struct SpaceListView: View {
     List(home.spaces, id: \.id) { spaceItem in
       SpaceItem(space: spaceItem.space) { spaceId in
         nav.selectedSpaceId = spaceId
+        persistedSpaceId = Int(spaceId)
       }
       .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
     }
