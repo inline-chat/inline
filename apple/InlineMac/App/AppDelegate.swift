@@ -25,7 +25,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   private var cancellables = Set<AnyCancellable>()
 
-  func applicationWillFinishLaunching(_ notification: Notification) {
+  func applicationWillFinishLaunching(_: Notification) {
     // Disable native tabbing
     NSWindow.allowsAutomaticWindowTabbing = false
 
@@ -39,7 +39,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     dependencies.logOut = logOut
   }
 
-  func applicationDidFinishLaunching(_ aNotification: Notification) {
+  func applicationDidFinishLaunching(_: Notification) {
     initializeServices()
     setupMainWindow()
     setupMainMenu()
@@ -69,11 +69,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
   }
 
-  func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
+  func applicationSupportsSecureRestorableState(_: NSApplication) -> Bool {
     true
   }
 
-  func applicationDidResignActive(_ notification: Notification) {
+  func applicationDidResignActive(_: Notification) {
 //    Task {
 //      if Auth.shared.isLoggedIn {
 //        // Mark offline
@@ -82,7 +82,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 //    }
   }
 
-  func applicationDidBecomeActive(_ notification: Notification) {
+  func applicationDidBecomeActive(_: Notification) {
 //    Task {
 //      if Auth.shared.isLoggedIn {
 //        // Mark online
@@ -105,14 +105,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     mainWindowController = controller
   }
 
-  func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+  func applicationShouldHandleReopen(_: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
     if !flag {
       setupMainWindow()
     }
     return true
   }
 
-  func application(_ application: NSApplication, open urls: [URL]) {
+  func application(_: NSApplication, open urls: [URL]) {
     // Handle URLs when app is already running
     for url in urls {
       log.debug("Received URL via application:open: \(url)")
@@ -137,10 +137,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
       // Handle different URL patterns
       switch url.host {
-        case "user":
-          handleUserURL(pathComponents: pathComponents)
-        default:
-          log.warning("Unhandled URL host: \(url.host ?? "nil")")
+      case "user":
+        handleUserURL(pathComponents: pathComponents)
+      default:
+        log.warning("Unhandled URL host: \(url.host ?? "nil")")
       }
     }
   }
@@ -200,7 +200,7 @@ extension AppDelegate {
   }
 
   func application(
-    _ application: NSApplication,
+    _: NSApplication,
     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
   ) {
     log.debug("Registered for remote notifications: \(deviceToken)")
@@ -209,7 +209,7 @@ extension AppDelegate {
   }
 
   func application(
-    _ application: NSApplication,
+    _: NSApplication,
     didFailToRegisterForRemoteNotificationsWithError error: Error
   ) {
     log.error("Failed to register for remote notifications \(error)")
@@ -276,7 +276,7 @@ extension AppDelegate {
 // MARK: - URL Scheme Handling
 
 extension AppDelegate {
-  @objc func handleURLEvent(_ event: NSAppleEventDescriptor, withReplyEvent replyEvent: NSAppleEventDescriptor) {
+  @objc func handleURLEvent(_ event: NSAppleEventDescriptor, withReplyEvent _: NSAppleEventDescriptor) {
     guard let urlString = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
           let url = URL(string: urlString)
     else {
