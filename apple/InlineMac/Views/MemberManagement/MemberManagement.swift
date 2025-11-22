@@ -107,20 +107,18 @@ public struct MemberManagementView: View {
 
   private var header: some View {
     HStack(spacing: 12) {
-      if let space = membersViewModel.space {
-        SpaceAvatar(space: space, size: 28)
-      }
-
       VStack(alignment: .leading, spacing: 2) {
-        Text(membersViewModel.space?.displayName ?? "Space")
-          .font(.headline)
+        Text("Members")
+          .font(.title2)
+          .fontWeight(.semibold)
 
+        let spaceName = membersViewModel.space?.displayName ?? "Space"
         let total = memberCountExcludingStaff
         let inlineCount = inlineStaffCount
         let base = "\(total) member\(total == 1 ? "" : "s")"
         let detail = inlineCount > 0 ? " (and \(inlineCount) Inline staff)" : ""
 
-        Text(base + detail)
+        Text("\(spaceName) • \(base)\(detail)")
           .foregroundStyle(.secondary)
           .font(.subheadline)
       }
@@ -160,11 +158,13 @@ public struct MemberManagementView: View {
         TableColumn("Member") { member in
           memberIdentity(member)
         }
+        .width(min: 100, ideal: 170)
 
         TableColumn("Joined") { member in
           Text(joinedDate(member))
             .foregroundStyle(.secondary)
         }
+        .width(min: 80, ideal: 90, max: 120)
 
         TableColumn("Role") { member in
           HStack(spacing: 6) {
@@ -177,6 +177,7 @@ public struct MemberManagementView: View {
             }
           }
         }
+        .width(min: 80, ideal: 80, max: 100)
 
         if membershipStatusViewModel.canManageMembers {
           TableColumn("Actions") { member in
@@ -187,6 +188,7 @@ public struct MemberManagementView: View {
               }
             }
           }
+          .width(min: 30, ideal: 40, max: 50)
         }
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
