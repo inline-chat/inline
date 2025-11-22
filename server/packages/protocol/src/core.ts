@@ -769,6 +769,12 @@ export interface Member {
      * @generated from protobuf field: int64 date = 5;
      */
     date: bigint;
+    /**
+     * Whether member can access public chats in the space
+     *
+     * @generated from protobuf field: bool can_access_public_chats = 6;
+     */
+    canAccessPublicChats: boolean;
 }
 /**
  * @generated from protobuf enum Member.Role
@@ -5376,7 +5382,8 @@ class Member$Type extends MessageType<Member> {
             { no: 2, name: "space_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 3, name: "user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 4, name: "role", kind: "enum", opt: true, T: () => ["Member.Role", Member_Role] },
-            { no: 5, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 5, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 6, name: "can_access_public_chats", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<Member>): Member {
@@ -5385,6 +5392,7 @@ class Member$Type extends MessageType<Member> {
         message.spaceId = 0n;
         message.userId = 0n;
         message.date = 0n;
+        message.canAccessPublicChats = false;
         if (value !== undefined)
             reflectionMergePartial<Member>(this, message, value);
         return message;
@@ -5408,6 +5416,9 @@ class Member$Type extends MessageType<Member> {
                     break;
                 case /* int64 date */ 5:
                     message.date = reader.int64().toBigInt();
+                    break;
+                case /* bool can_access_public_chats */ 6:
+                    message.canAccessPublicChats = reader.bool();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -5436,6 +5447,9 @@ class Member$Type extends MessageType<Member> {
         /* int64 date = 5; */
         if (message.date !== 0n)
             writer.tag(5, WireType.Varint).int64(message.date);
+        /* bool can_access_public_chats = 6; */
+        if (message.canAccessPublicChats !== false)
+            writer.tag(6, WireType.Varint).bool(message.canAccessPublicChats);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

@@ -22,5 +22,6 @@ export function encodeMember(member: DbMember): Member {
     userId: BigInt(member.userId),
     role: protocolRole,
     date: encodeDate(member.date) ?? 0n,
+    canAccessPublicChats: member.canAccessPublicChats ?? true,
   }
 }
