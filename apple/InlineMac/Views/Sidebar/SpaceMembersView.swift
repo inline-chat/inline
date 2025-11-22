@@ -2,6 +2,7 @@ import InlineKit
 import InlineUI
 import Logger
 import SwiftUI
+import AppKit
 
 struct SpaceMembersView: View {
   @EnvironmentObject var nav: Nav
@@ -13,6 +14,8 @@ struct SpaceMembersView: View {
 
   @State var searchQuery: String = ""
   @State private var selectedTab: Int = 0
+  @StateObject private var memberActionsViewModel: SpaceMemberActionsViewModel
+  @State private var deleteErrorMessage: String?
   var spaceId: Int64
 
   init(spaceId: Int64) {
@@ -23,6 +26,7 @@ struct SpaceMembersView: View {
     _membershipStatus = EnvironmentStateObject { env in
       SpaceMembershipStatusViewModel(db: env.appDatabase, spaceId: spaceId)
     }
+    _memberActionsViewModel = StateObject(wrappedValue: SpaceMemberActionsViewModel(spaceId: spaceId))
   }
 
   var body: some View {
@@ -53,6 +57,25 @@ struct SpaceMembersView: View {
         await membershipStatus.refreshIfNeeded()
       } catch {
         Log.shared.error("failed to get space data", error: error)
+      }
+    }
+    .alert(
+      "Error",
+      isPresented: Binding(
+        get: { deleteErrorMessage != nil },
+        set: { presented in
+          if presented == false {
+            deleteErrorMessage = nil
+          }
+        }
+      )
+    ) {
+      Button("OK", role: .cancel) {
+        deleteErrorMessage = nil
+      }
+    } message: {
+      if let deleteErrorMessage {
+        Text(deleteErrorMessage)
       }
     }
   }
@@ -140,6 +163,8 @@ struct SpaceMembersView: View {
   @ViewBuilder
   func memberItem(_ item: FullMemberItem) -> some View {
     let peerId: Peer = .user(id: item.userInfo.user.id)
+    let userId = item.userInfo.user.id
+    let isDeleting = memberActionsViewModel.isDeleting(userId: userId)
 
     MemberItem(
       member: item,
@@ -149,6 +174,16 @@ struct SpaceMembersView: View {
       }
     )
     .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
+    .contextMenu {
+      if membershipStatus.canManageMembers {
+        Button("Remove from Space", systemImage: "trash", role: .destructive) {
+          Task {
+            await confirmAndDelete(member: item)
+          }
+        }
+        .disabled(!canDelete(member: item) || isDeleting)
+      }
+    }
   }
 
   @ViewBuilder
@@ -187,6 +222,40 @@ struct SpaceMembersView: View {
     }
     .menuStyle(.button)
     .buttonStyle(.plain)
+  }
+}
+
+extension SpaceMembersView {
+  private func canDelete(member: FullMemberItem) -> Bool {
+    guard membershipStatus.canManageMembers else { return false }
+    if member.member.role == .owner { return false }
+    if member.userInfo.user.isCurrentUser() { return false }
+    return true
+  }
+
+  private func confirmAndDelete(member: FullMemberItem) async {
+    guard canDelete(member: member) else { return }
+
+    let confirmed = await MainActor.run { () -> Bool in
+      let alert = NSAlert()
+      alert.messageText = "Remove \(member.userInfo.user.displayName)?"
+      alert.informativeText = "They will lose access to this space and its chats."
+      alert.alertStyle = .warning
+      let cancelButton = alert.addButton(withTitle: "Cancel")
+      cancelButton.keyEquivalent = "\r"
+      let deleteButton = alert.addButton(withTitle: "Delete")
+      deleteButton.hasDestructiveAction = true
+      deleteButton.keyEquivalent = ""
+      return alert.runModal() == .alertSecondButtonReturn
+    }
+
+    guard confirmed else { return }
+
+    do {
+      try await memberActionsViewModel.deleteMember(userId: member.userInfo.user.id)
+    } catch {
+      deleteErrorMessage = error.localizedDescription
+    }
   }
 }
 
