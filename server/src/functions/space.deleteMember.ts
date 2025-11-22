@@ -107,6 +107,11 @@ const pushUpdatesForSpace = async ({
     RealtimeUpdates.pushToUser(userId, [update])
   })
 
+  // Also push directly to the removed user. They are no longer part of the space topic,
+  // but connected clients still need the realtime event even though they will only get
+  // the persisted user-bucket update on the next sync.
+  RealtimeUpdates.pushToUser(userId, [update])
+
   return { updates: [update] }
 }
 
