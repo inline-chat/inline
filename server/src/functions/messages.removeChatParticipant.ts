@@ -131,7 +131,8 @@ const pushUpdates = async ({
   })
 
   // Send to deleted user.
-  // Becuase it's already deleted and it's not part of update group.
+  // Because they're no longer in the chat topic we still need to deliver the realtime
+  // event directly (the user-bucket update handles offline sync).
   RealtimeUpdates.pushToUser(userId, [chatParticipantDelete])
 
   return { selfUpdates, updateGroup }
