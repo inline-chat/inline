@@ -7,6 +7,7 @@ struct SpaceSidebar: View {
   @EnvironmentObject var nav: Nav
   @EnvironmentObject var data: DataManager
   @EnvironmentStateObject var fullSpace: FullSpaceViewModel
+  @EnvironmentStateObject var membershipStatus: SpaceMembershipStatusViewModel
   @Environment(\.keyMonitor) var keyMonitor
   @Environment(\.openWindow) var openWindow
   @Environment(\.realtimeV2) var realtimeV2
@@ -27,6 +28,9 @@ struct SpaceSidebar: View {
     self.spaceId = spaceId
     _fullSpace = EnvironmentStateObject { env in
       FullSpaceViewModel(db: env.appDatabase, spaceId: spaceId)
+    }
+    _membershipStatus = EnvironmentStateObject { env in
+      SpaceMembershipStatusViewModel(db: env.appDatabase, spaceId: spaceId)
     }
   }
 
@@ -174,6 +178,9 @@ struct SpaceSidebar: View {
               Log.shared.error("failed to get dialogs for space", error: error)
             }
           }
+          Task.detached {
+            await membershipStatus.refreshIfNeeded()
+          }
         }
       }
       .onAppear {
@@ -250,6 +257,18 @@ struct SpaceSidebar: View {
       Button("Invite to Space", systemImage: "person.badge.plus") {
         nav.open(.inviteToSpace(spaceId: spaceId))
       }
+
+      if membershipStatus.canManageMembers {
+        Button("Manage Members", systemImage: "person.3") {
+          nav.open(.members(spaceId: spaceId))
+        }
+      } else {
+        Button("Manage Members", systemImage: "person.3") {
+          // nav.open(.members(spaceId: spaceId))
+        }
+        .disabled(true)
+        .opacity(0.5)
+      }
     } label: {
       Image(systemName: "plus")
         .font(.system(size: 15, weight: .medium))
@@ -268,7 +287,7 @@ struct SpaceSidebar: View {
   // MARK: - Private Methods
 
   private func subscribeKeyMonitor() {
-    let _ = keyMonitor?.addHandler(for: .escape, key: "space_esc") { _ in
+    _ = keyMonitor?.addHandler(for: .escape, key: "space_esc") { _ in
       if nav.currentRoute != .empty {
         nav.handleEsc()
       } else {
