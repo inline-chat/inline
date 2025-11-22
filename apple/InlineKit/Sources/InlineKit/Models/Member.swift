@@ -12,6 +12,7 @@ public struct ApiMember: Codable, Hashable, Sendable {
   public var userId: Int64
   public var spaceId: Int64
   public var role: String
+  public var canAccessPublicChats: Bool?
 }
 
 public struct Member: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord,
@@ -22,6 +23,7 @@ public struct Member: FetchableRecord, Identifiable, Codable, Hashable, Persista
   public var userId: Int64
   public var spaceId: Int64
   public var role: MemberRole
+  public var canAccessPublicChats: Bool
 
   public enum Columns {
     static let id = Column(CodingKeys.id)
@@ -29,6 +31,7 @@ public struct Member: FetchableRecord, Identifiable, Codable, Hashable, Persista
     static let userId = Column(CodingKeys.userId)
     static let spaceId = Column(CodingKeys.spaceId)
     static let role = Column(CodingKeys.role)
+    static let canAccessPublicChats = Column(CodingKeys.canAccessPublicChats)
   }
 
   // Member -> Space
@@ -57,13 +60,14 @@ public struct Member: FetchableRecord, Identifiable, Codable, Hashable, Persista
 
   public init(
     id: Int64 = Int64.random(in: 1 ... 5_000), date: Date, userId: Int64, spaceId: Int64,
-    role: MemberRole = .owner
+    role: MemberRole = .owner, canAccessPublicChats: Bool = true
   ) {
     self.id = id
     self.date = date
     self.userId = userId
     self.spaceId = spaceId
     self.role = role
+    self.canAccessPublicChats = canAccessPublicChats
   }
 }
 
@@ -74,6 +78,7 @@ public extension Member {
     userId = from.userId
     spaceId = from.spaceId
     role = MemberRole(rawValue: from.role) ?? .member
+    canAccessPublicChats = from.canAccessPublicChats ?? true
   }
 
   static func fromTimestamp(from: Int) -> Date {
@@ -97,6 +102,7 @@ public extension Member {
       case .UNRECOGNIZED:
         .member
     }
+    canAccessPublicChats = from.canAccessPublicChats
   }
 }
 
