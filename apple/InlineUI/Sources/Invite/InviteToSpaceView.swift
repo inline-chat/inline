@@ -168,6 +168,7 @@ public struct InviteToSpaceView: View {
 
   @ViewBuilder
   private var manageMembersSection: some View {
+    #if os(macOS)
     if let onManageMembers, membershipStatusViewModel.canManageMembers {
       Section {
         Button {
@@ -179,6 +180,7 @@ public struct InviteToSpaceView: View {
         .buttonStyle(.link)
       }
     }
+    #endif
   }
 
   @ViewBuilder
