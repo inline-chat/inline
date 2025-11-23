@@ -19,6 +19,7 @@ struct ContentView2: View {
   @StateObject var mainViewRouter = MainViewRouter()
   @StateObject private var fileUploadViewModel = FileUploadViewModel()
   @StateObject private var tabsManager = TabsManager()
+  @StateObject private var spaceSelection = SpaceSelectionViewModel()
 
   @Environment(Router.self) private var router
 
@@ -51,6 +52,7 @@ struct ContentView2: View {
     .environmentObject(fileUploadViewModel)
     .environmentObject(tabsManager)
     .environmentObject(compactSpaceList)
+    .environmentObject(spaceSelection)
     .toastView()
   }
 

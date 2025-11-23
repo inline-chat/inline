@@ -4,6 +4,7 @@ import SwiftUI
 
 struct SpacePickerView: View {
   @EnvironmentObject var homeViewModel: HomeViewModel
+  @EnvironmentObject private var spaceSelection: SpaceSelectionViewModel
 
   var sortedSpaces: [HomeSpaceItem] {
     homeViewModel.spaces.sorted { s1, s2 in
@@ -18,7 +19,7 @@ struct SpacePickerView: View {
   }
 
   var selectedSpace: Space? {
-    homeViewModel.selectedSpace
+    spaceSelection.selectedSpace(in: sortedSpaces)
   }
 
   private var labelUIFont: UIFont {
@@ -29,7 +30,7 @@ struct SpacePickerView: View {
   var body: some View {
     Menu {
       Button {
-        homeViewModel.selectSpace(nil)
+        spaceSelection.selectSpace(nil, availableSpaces: sortedSpaces)
       } label: {
         Label {
           Text("Home")
@@ -42,7 +43,7 @@ struct SpacePickerView: View {
 
       ForEach(sortedSpaces) { spaceItem in
         Button {
-          homeViewModel.selectSpace(spaceItem.space.id)
+          spaceSelection.selectSpace(spaceItem.space.id, availableSpaces: sortedSpaces)
         } label: {
           Label {
             Text(spaceItem.space.name)
@@ -82,6 +83,9 @@ struct SpacePickerView: View {
           .fontWeight(.semibold)
       }
       .font(.system(size: labelUIFont.pointSize, weight: .semibold))
+    }
+    .onChange(of: sortedSpaces) { spaces in
+      spaceSelection.pruneSelectionIfNeeded(spaces: spaces)
     }
   }
 }
