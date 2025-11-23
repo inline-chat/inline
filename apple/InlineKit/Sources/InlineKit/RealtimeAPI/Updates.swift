@@ -468,38 +468,62 @@ extension InlineProtocol.UpdateSpaceMemberDelete {
       // If the removed user is the current user, clean up local data
       if userID == Auth.shared.getCurrentUserId() {
         // Remove all dialogs and chats for this space
-        // Note: This is a simplified cleanup - you may need more comprehensive cleanup
         Log.shared.info("Current user was removed from space, cleaning up local data")
 
-        do {
-          // 1. Collect all chats that belong to the removed space
-          let chatsInSpace = try Chat.filter(Column("spaceId") == spaceID).fetchAll(db)
-          let chatIds = chatsInSpace.map(\.id)
-
-          if !chatIds.isEmpty {
-            // 2. Delete all messages, reactions, translations, participants, etc. that belong to those chats
-            try Message.filter(chatIds.contains(Column("chatId"))).deleteAll(db)
-            try Reaction.filter(chatIds.contains(Column("chatId"))).deleteAll(db)
-            try ChatParticipant.filter(chatIds.contains(Column("chatId"))).deleteAll(db)
-
-            // 3. Delete dialogs that reference these chats
-            try Dialog.filter(chatIds.contains(Column("chatId"))).deleteAll(db)
+        // Run each cleanup step independently so one failure doesn't block the rest.
+        func cleanupStep(_ label: String, _ block: () throws -> Void) {
+          do {
+            try block()
+          } catch {
+            Log.shared.error("Space cleanup failed: \(label)", error: error)
           }
+        }
 
-          // 4. Delete any dialogs that are directly associated with the space (safety)
+        // 1. Collect all chats that belong to the removed space
+        let chatsInSpace: [Chat] = (try? Chat.filter(Column("spaceId") == spaceID).fetchAll(db)) ?? []
+        let chatIds = chatsInSpace.map(\.id)
+
+        // 2. Drop dialogs tied to those chats (both chatId and peerThreadId columns)
+        cleanupStep("delete dialogs for chatIds") {
+          guard !chatIds.isEmpty else { return }
+          try Dialog.filter(chatIds.contains(Column("chatId"))).deleteAll(db)
+          try Dialog.filter(chatIds.contains(Column("peerThreadId"))).deleteAll(db)
+        }
+
+        // 3. Remove sync bucket state for chats in this space (bucketType = 1)
+        cleanupStep("delete sync buckets for chats") {
+          guard !chatIds.isEmpty else { return }
+          let chatBucketIds = chatIds.map { -$0 } // matches BucketKey.chat entityId encoding
+          try DbBucketState
+            .filter(DbBucketState.Columns.bucketType == 1 && chatBucketIds.contains(DbBucketState.Columns.entityId))
+            .deleteAll(db)
+        }
+
+        // 4. Delete any dialogs associated directly with the space (safety)
+        cleanupStep("delete dialogs for space") {
           try Dialog.filter(Column("spaceId") == spaceID).deleteAll(db)
+        }
 
-          // 5. Remove the chats themselves
+        // 5. Remove the chats themselves (cascades will drop messages, reactions, translations, etc.)
+        cleanupStep("delete chats in space") {
           try Chat.filter(Column("spaceId") == spaceID).deleteAll(db)
+        }
 
-          // 6. Remove all remaining members for this space (if any)
+        // 6. Remove all remaining members for this space (if any)
+        cleanupStep("delete members in space") {
           try Member.filter(Column("spaceId") == spaceID).deleteAll(db)
+        }
 
-          // 7. Finally delete the space record
+        // 7. Remove sync bucket state for the space (bucketType = 3)
+        cleanupStep("delete sync bucket for space") {
+          try DbBucketState
+            .filter(DbBucketState.Columns.bucketType == 3 && DbBucketState.Columns.entityId == spaceID)
+            .deleteAll(db)
+        }
+
+        // 8. Finally delete the space record
+        cleanupStep("delete space record") {
           try Space.filter(Column("id") == spaceID).deleteAll(db)
-
-        } catch {
-          Log.shared.error("Failed to clean up space data", error: error)
         }
 
         // Notify UI so that any views related to this space can be dismissed
