@@ -66,7 +66,6 @@ struct CreateSpace: View {
         dismiss()
 
         if let id {
-          router.selectedTab = .spaces
           router.push(.space(id: id))
         }
 

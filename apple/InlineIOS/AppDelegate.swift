@@ -9,7 +9,7 @@ import UIKit
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
   let notificationHandler = NotificationHandler()
   let nav = Navigation()
-  let router = NavigationModel<AppTab, Destination, Sheet>(initialTab: .chats)
+  let router = Router()
 
   func application(
     _ application: UIApplication,

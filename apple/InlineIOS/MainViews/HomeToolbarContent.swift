@@ -85,6 +85,20 @@ struct HomeToolbarContent: ToolbarContent {
   private var dotsButton: some View {
     Menu {
       Button {
+        router.push(.spacesRoot)
+      } label: {
+        Label("Spaces", systemImage: "building.2.fill")
+      }
+
+      Button {
+        router.push(.archivedChats)
+      } label: {
+        Label("Archived", systemImage: "archivebox.fill")
+      }
+
+      Divider()
+
+      Button {
         router.presentSheet(.createSpace)
       } label: {
         Label("Create Space", systemImage: "building")
@@ -95,6 +109,8 @@ struct HomeToolbarContent: ToolbarContent {
       } label: {
         Label("New Group Chat", systemImage: "plus.message")
       }
+
+      Divider()
 
       Button {
         router.push(.settings)

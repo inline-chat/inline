@@ -45,7 +45,7 @@ struct ChatListView: View {
   }
 
   func processForTranslation(items: [HomeChatItem]) {
-    let currentPath = router.selectedTabPath
+    let currentPath = router.path
 
     let itemsToProcess = items.filter { newItem in
       if let oldItem = previousItems.first(where: { $0.id == newItem.id }) {

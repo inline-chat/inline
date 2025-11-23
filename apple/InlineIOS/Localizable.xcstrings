@@ -153,6 +153,9 @@
         }
       }
     },
+    "Archived" : {
+
+    },
     "Are you sure you want to logout? This will clear your local data and return you to the welcome screen." : {
 
     },
@@ -574,6 +577,9 @@
     "Global Search" : {
 
     },
+    "Home" : {
+
+    },
     "Integration Options" : {
 
     },
@@ -843,6 +849,9 @@
       "comment" : "Phone sign in title"
     },
     "Space" : {
+
+    },
+    "Spaces" : {
 
     },
     "Start a chat" : {
