@@ -102,7 +102,8 @@ struct ContentView2: View {
       case .archivedChats:
         ArchivedChatsView()
       case .spacesRoot:
-        SpacesView()
+//        SpacesView()
+      EmptyView()
     }
   }
 

@@ -586,9 +586,6 @@
     "Integrations" : {
 
     },
-    "Invite Member" : {
-
-    },
     "Invite People" : {
 
     },
@@ -677,9 +674,6 @@
 
     },
     "No files found in this chat." : {
-
-    },
-    "No Spaces Yet" : {
 
     },
     "Notifications" : {
@@ -920,9 +914,6 @@
         }
       }
     },
-    "View" : {
-
-    },
     "Welcome to Inline" : {
       "comment" : "Welcome to Inline",
       "localizations" : {
@@ -962,9 +953,6 @@
     },
     "Your Email" : {
       "comment" : "Email input placeholder"
-    },
-    "Your spaces will appear here" : {
-
     }
   },
   "version" : "1.0"
