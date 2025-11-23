@@ -133,12 +133,12 @@ actor Sync {
       let maxSyncAge: Int64 = 14 * 24 * 60 * 60
 
       if state.lastSyncDate == 0 {
-        // Temporary rollout safety: when sync state is missing, ask the server for the past 3 days so
+        // Temporary rollout safety: when sync state is missing, ask the server for the past 5 days so
         // we re-trigger buckets that may have changed while clients upgrade. Once all clients run the
         // new sync engine we can narrow or remove this lookback window.
-        let threeDays: Int64 = 3 * 24 * 60 * 60
-        let seedDate = max(0, now - threeDays)
-        log.info("Sync state uninitialized (date=0). Seeding lookback to \(seedDate) (3 days ago)")
+        let fiveDays: Int64 = 5 * 24 * 60 * 60
+        let seedDate = max(0, now - fiveDays)
+        log.info("Sync state uninitialized (date=0). Seeding lookback to \(seedDate) (5 days ago)")
         state = SyncState(lastSyncDate: seedDate)
         await syncStorage.setState(state)
       } else if now - state.lastSyncDate > maxSyncAge {
