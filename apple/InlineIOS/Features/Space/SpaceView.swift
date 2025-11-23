@@ -8,6 +8,34 @@ import UIKit
 // MARK: - SpaceView
 
 struct SpaceView: View {
+  private enum SpaceTab: Hashable {
+    case openChats
+    case allChats
+    case members
+
+    var title: String {
+      switch self {
+        case .openChats:
+          "Open Chats"
+        case .allChats:
+          "All Chats"
+        case .members:
+          "Members"
+      }
+    }
+
+    var systemImage: String {
+      switch self {
+        case .openChats:
+          "bubble.left.and.bubble.right.fill"
+        case .allChats:
+          "text.bubble.fill"
+        case .members:
+          "person.2.fill"
+      }
+    }
+  }
+
   let spaceId: Int64
 
   @Environment(\.appDatabase) private var database
@@ -18,22 +46,10 @@ struct SpaceView: View {
   @EnvironmentObject private var tabsManager: TabsManager
 
   @State private var showAddMemberSheet = false
-  @State private var selectedSegment = 0
+  @State private var selectedTab: SpaceTab = .openChats
 
   var space: Space? {
     viewModel.space
-  }
-
-  enum Segment: Int, CaseIterable {
-    case chats
-    case members
-
-    var title: String {
-      switch self {
-        case .chats: "Chats"
-        case .members: "Members"
-      }
-    }
   }
 
   init(spaceId: Int64) {
@@ -56,70 +72,21 @@ struct SpaceView: View {
   // MARK: - Body
 
   var body: some View {
-    VStack(spacing: 0) {
-      Picker("View", selection: $selectedSegment) {
-        ForEach(Segment.allCases, id: \.rawValue) { segment in
-          Text(segment.title).tag(segment.rawValue)
-        }
-      }
-      .pickerStyle(.segmented)
-      .padding()
+    TabView(selection: $selectedTab) {
+      chatList(for: viewModel.filteredChats, emptyMessage: "No chats in this space yet")
+        .tag(SpaceTab.allChats)
+        .tabItem { tabLabel(for: .allChats) }
 
-      contentView
+      chatList(for: viewModel.filteredMemberChats, emptyMessage: "No open chats yet")
+        .tag(SpaceTab.openChats)
+        .tabItem { tabLabel(for: .openChats) }
+
+      membersList
+        .tag(SpaceTab.members)
+        .tabItem { tabLabel(for: .members) }
     }
-    .navigationBarTitleDisplayMode(.inline)
-    .navigationTitle("")
-    .toolbar { toolbarContent }
     .task { await loadData() }
   }
-
-  // MARK: - Subviews
-
-  private var contentView: some View {
-    Group {
-      switch Segment(rawValue: selectedSegment) {
-        case .chats:
-          ChatListContent(items: viewModel.filteredChats)
-            .environmentObject(viewModel)
-        case .members:
-          MemberListView(members: viewModel.members)
-            .environmentObject(viewModel)
-        case .none:
-          EmptyView()
-      }
-    }
-    .id(selectedSegment)
-  }
-
-  @ToolbarContentBuilder
-  private var toolbarContent: some ToolbarContent {
-    ToolbarItem(placement: .principal) {
-      SpaceHeaderView(space: space)
-    }
-
-    ToolbarItem(placement: .topBarTrailing) {
-      Menu {
-        Button(action: { router.push(.createThread(spaceId: spaceId)) }) {
-          Label("New Group Chat", systemImage: "plus.message")
-        }
-        Button(action: {
-          router.presentSheet(.addMember(spaceId: spaceId))
-        }) {
-          Label("Invite Member", systemImage: "person.badge.plus")
-        }
-
-        Button {
-          router.push(.spaceSettings(spaceId: spaceId))
-        } label: {
-          Label("Settings", systemImage: "gearshape")
-        }
-      } label: {
-        Image(systemName: "ellipsis")
-      }
-    }
-  }
-
-  // MARK: - Actions
 
   private func loadData() async {
     do {
@@ -130,82 +97,49 @@ struct SpaceView: View {
       Log.shared.error("Failed to load space data", error: error)
     }
   }
-}
 
-// MARK: - Supporting Views
-
-private struct SpaceHeaderView: View {
-  let space: Space?
-
-  var body: some View {
-    HStack {
-      if let space {
-        SpaceAvatar(space: space, size: 28)
-          .padding(.trailing, 4)
-      } else {
-        Image(systemName: "person.2.fill")
-          .foregroundColor(.secondary)
-          .font(.callout)
-          .padding(.trailing, 4)
-      }
-
-      Text(space?.nameWithoutEmoji ?? space?.name ?? "Space")
-        .font(.title3)
-        .fontWeight(.semibold)
-    }
-  }
-}
-
-private struct MemberListView: View {
-  let members: [FullMemberItem]
-  @EnvironmentObject private var viewModel: FullSpaceViewModel
-
-  var body: some View {
-    List {
-      ForEach(members, id: \.userInfo.user.id) { member in
-        MemberItemRow(
-          member: member,
-          hasUnread: {
-            if let dialog = viewModel.filteredMemberChats.first(where: { $0.user?.id == member.userInfo.user.id })?
-              .dialog
-            {
-              return (dialog.unreadCount ?? 0) > 0 || (dialog.unreadMark == true)
-            }
-            return false
-          }()
-        )
-        .listRowInsets(.init(top: 4, leading: 12, bottom: 4, trailing: 0))
-        .listRowBackground(Color(.systemBackground))
-        .foregroundColor(.primary)
-      }
-    }
-    .listStyle(.plain)
-    .scrollContentBackground(.hidden)
-    .background(Color(.systemBackground))
-  }
-}
-
-private struct ChatListContent: View {
-  let items: [SpaceChatItem]
-  @EnvironmentObject private var viewModel: FullSpaceViewModel
-
-  var body: some View {
-    List {
-      ForEach(items, id: \.id) { item in
+  @ViewBuilder
+  private func chatList(for items: [SpaceChatItem], emptyMessage: String) -> some View {
+    if items.isEmpty {
+      emptyState(message: emptyMessage, systemImage: "bubble.left.and.exclamationmark")
+    } else {
+      List(items, id: \.id) { item in
         ChatItemRow(item: item)
-          .listRowInsets(.init(top: 9, leading: 16, bottom: 2, trailing: 0))
-          .listRowBackground(Color(.systemBackground))
-          .foregroundColor(.primary)
       }
+      .listStyle(.plain)
+      .scrollContentBackground(.hidden)
+      .background(Color(.systemBackground))
     }
-    .listStyle(.plain)
-    .scrollContentBackground(.hidden)
+  }
+
+  @ViewBuilder
+  private var membersList: some View {
+    if viewModel.members.isEmpty {
+      emptyState(message: "No members yet", systemImage: "person.fill.questionmark")
+    } else {
+      List(viewModel.members, id: \.id) { member in
+        MemberItemRow(member: member, hasUnread: false)
+      }
+      .listStyle(.plain)
+      .scrollContentBackground(.hidden)
+      .background(Color(.systemBackground))
+    }
+  }
+
+  private func tabLabel(for tab: SpaceTab) -> some View {
+    Label(tab.title, systemImage: tab.systemImage)
+  }
+
+  private func emptyState(message: String, systemImage: String) -> some View {
+    VStack(spacing: 12) {
+      Image(systemName: systemImage)
+        .font(.largeTitle)
+        .foregroundColor(.secondary)
+      Text(message)
+        .font(.body)
+        .foregroundColor(.secondary)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(Color(.systemBackground))
   }
-}
-
-// MARK: - Preview
-
-#Preview {
-  SpaceView(spaceId: Int64.random(in: 1 ... 500))
 }
