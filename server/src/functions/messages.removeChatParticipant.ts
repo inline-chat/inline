@@ -13,6 +13,7 @@ import { UpdateBucket } from "@in/server/db/schema"
 import { UpdatesModel } from "@in/server/db/models/updates"
 import type { ServerUpdate } from "@in/protocol/server"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
+import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 
 export async function removeChatParticipant(
   input: {
@@ -46,6 +47,8 @@ export async function removeChatParticipant(
       await tx
         .delete(chatParticipants)
         .where(and(eq(chatParticipants.chatId, input.chatId), eq(chatParticipants.userId, input.userId)))
+
+      AccessGuardsCache.resetChatParticipant(input.chatId, input.userId)
 
       const chatServerUpdatePayload: ServerUpdate["update"] = {
         oneofKind: "participantDelete",

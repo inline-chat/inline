@@ -8,6 +8,8 @@ import { getUpdateGroupFromInputPeer } from "../modules/updates"
 import { RealtimeUpdates } from "../realtime/message"
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
+import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
+import { Log } from "@in/server/utils/log"
 
 type Input = {
   messageIds: bigint[]
@@ -18,9 +20,23 @@ type Output = {
   updates: Update[]
 }
 
+const log = new Log("functions.deleteMessage")
+
 export const deleteMessage = async (input: Input, context: FunctionContext): Promise<Output> => {
-  const chatId = await ChatModel.getChatIdFromInputPeer(input.peer, context)
-  let { update } = await MessageModel.deleteMessages(input.messageIds, chatId)
+  const chat = await ChatModel.getChatFromInputPeer(input.peer, context)
+  try {
+    await AccessGuards.ensureChatAccess(chat, context.currentUserId)
+  } catch (error) {
+    log.error("deleteMessage blocked: chat access denied", {
+      chatId: chat.id,
+      currentUserId: context.currentUserId,
+      peer: input.peer,
+      error,
+    })
+    throw error
+  }
+
+  let { update } = await MessageModel.deleteMessages(input.messageIds, chat.id)
 
   const { selfUpdates } = await pushUpdates({
     inputPeer: input.peer,

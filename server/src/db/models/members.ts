@@ -7,6 +7,7 @@ import { Log } from "@in/server/utils/log"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { SpaceModel } from "./spaces"
 import { deleteMemberEffect } from "@in/server/db/models/members/deleteMember"
+import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 
 const log = new Log("MembersModel")
 
@@ -116,6 +117,9 @@ async function addMemberToSpace(
     const newMember = await createMember(spaceId, userId, role, {
       invitedBy: options.invitedBy,
     })
+
+    AccessGuardsCache.resetSpaceMember(spaceId, userId)
+    AccessGuardsCache.setSpaceMember(spaceId, userId)
 
     log.info("Successfully added member to space", {
       spaceId,

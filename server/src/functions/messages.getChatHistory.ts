@@ -7,6 +7,8 @@ import type { FunctionContext } from "@in/server/functions/_types"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { Log } from "@in/server/utils/log"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
+import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
+import type { DbChat } from "@in/server/db/schema"
 
 type Input = {
   peerId: InputPeer
@@ -23,9 +25,11 @@ const log = new Log("functions.getChatHistory")
 async function getMessagesWithChatCreation(
   inputPeer: InputPeer,
   options: { currentUserId: number; offsetId?: bigint; limit?: number },
-): Promise<DbFullMessage[]> {
+): Promise<{ chat: DbChat; messages: DbFullMessage[] }> {
+  let chat: DbChat
+
   try {
-    return await MessageModel.getMessages(inputPeer, options)
+    chat = await ChatModel.getChatFromInputPeer(inputPeer, { currentUserId: options.currentUserId })
   } catch (error) {
     if (error instanceof ModelError && error.code === ModelError.Codes.CHAT_INVALID) {
       if (inputPeer.type.oneofKind === "user") {
@@ -55,12 +59,29 @@ async function getMessagesWithChatCreation(
           currentUserId: peerUserId,
         })
 
-        return []
+        chat = await ChatModel.getChatFromInputPeer(inputPeer, { currentUserId: options.currentUserId })
+      } else {
+        throw error
       }
+    } else {
+      throw error
     }
+  }
 
+  try {
+    await AccessGuards.ensureChatAccess(chat, options.currentUserId)
+  } catch (error) {
+    log.error("getChatHistory blocked: chat access denied", {
+      chatId: chat.id,
+      currentUserId: options.currentUserId,
+      inputPeer,
+      error,
+    })
     throw error
   }
+
+  const messages = await MessageModel.getMessages(inputPeer, options)
+  return { chat, messages }
 }
 
 export const getChatHistory = async (input: Input, context: FunctionContext): Promise<Output> => {
@@ -68,7 +89,7 @@ export const getChatHistory = async (input: Input, context: FunctionContext): Pr
   const inputPeer = input.peerId
 
   // get messages
-  const messages = await getMessagesWithChatCreation(inputPeer, {
+  const { messages } = await getMessagesWithChatCreation(inputPeer, {
     offsetId: input.offsetId,
     limit: input.limit,
     currentUserId: context.currentUserId,
