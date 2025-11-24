@@ -21,6 +21,7 @@ import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { db } from "@in/server/db"
 import { MemberNotExistsError } from "@in/server/modules/effect/commonErrors"
 import { and, eq, inArray } from "drizzle-orm"
+import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 
 const log = new Log("space.removeMember")
 
@@ -59,6 +60,7 @@ export const deleteMember = (input: DeleteMemberInput, context: FunctionContext)
 
     // Delete member
     yield* MembersModel.deleteMemberEffect(spaceId, userId)
+    AccessGuardsCache.resetSpaceMember(spaceId, userId)
 
     const privateThreadIds = yield* Effect.tryPromise({
       try: () => getPrivateThreadIdsForUser({ spaceId, userId }),
@@ -73,6 +75,8 @@ export const deleteMember = (input: DeleteMemberInput, context: FunctionContext)
         }),
       catch: (error) => (error instanceof Error ? error : new Error("removeUserFromPrivateThreads failed")),
     })
+    privateThreadIds.forEach((chatId) => AccessGuardsCache.resetChatParticipant(chatId, userId))
+    AccessGuardsCache.resetForUser(userId)
 
     yield* Effect.tryPromise({
       try: () => deleteDialogsForSpace({ spaceId, userId }),
