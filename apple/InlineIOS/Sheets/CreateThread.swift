@@ -65,15 +65,13 @@ struct CreateThread: View {
           }
         }
       }
-      .listStyle(.plain)
-      .scrollContentBackground(.hidden)
-      .background(Color(.systemBackground))
+      .themedListStyle()
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .topBarLeading) {
           Text("Create Chat")
             .fontWeight(.bold)
-            .foregroundColor(.primary)
+            .themedPrimaryText()
         }
         ToolbarItem(placement: .topBarTrailing) {
           Button(formState.isLoading ? "Creating..." : "Create") {
@@ -88,7 +86,7 @@ struct CreateThread: View {
         isFocused = true
       }
     }
-    .tint(Color(uiColor: UIColor(hex: "#52A5FF")!))
+    .themedSheet()
   }
 
   func submit() {

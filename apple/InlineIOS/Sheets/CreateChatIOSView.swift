@@ -89,9 +89,7 @@ public struct CreateChatIOSView: View {
           }
         }
       }
-      .listStyle(.plain)
-      .scrollContentBackground(.hidden)
-      .background(Color(.systemBackground))
+      .themedListStyle()
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .topBarTrailing) {
@@ -112,13 +110,13 @@ public struct CreateChatIOSView: View {
         await spaceViewModel.refetchMembers()
       }
     }
-    .tint(Color(uiColor: UIColor(hex: "#52A5FF")!))
+    .themedSheet()
   }
 
   private func memberRow(_ member: FullMemberItem) -> some View {
     HStack {
       Text(member.userInfo.user.displayName)
-        .foregroundColor(.primary)
+        .themedPrimaryText()
       Spacer()
       if selectedPeople.contains(member.userInfo.user.id) {
         Image(systemName: "checkmark")

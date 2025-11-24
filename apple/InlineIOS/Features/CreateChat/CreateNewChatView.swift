@@ -4,6 +4,7 @@ import SwiftUI
 struct CreateNewChatView: View {
   @EnvironmentObject var compactSpaceList: CompactSpaceList
 
+  let theme = ThemeManager.shared.selected
   var spaceId: Int64?
 
   @FocusState private var isFocused: Bool
@@ -37,7 +38,7 @@ struct CreateNewChatView: View {
     Group {
       Section {
         HStack(spacing: 12) {
-          Circle().fill(Color(uiColor: UIColor(hex: "#52A5FF")!).opacity(0.1))
+          Circle().fill(Color(theme.accent).opacity(0.1))
             .frame(width: 52, height: 52)
             .overlay {
               ZStack {
@@ -62,7 +63,7 @@ struct CreateNewChatView: View {
 
                 Image(systemName: "face.smiling")
                   .font(.title)
-                  .foregroundStyle(Color(uiColor: UIColor(hex: "#52A5FF")!))
+                  .foregroundStyle(Color(theme.accent))
                   .opacity(showEmojiPicker || !emoji.isEmpty ? 0 : 1)
               }
             }
@@ -103,7 +104,7 @@ struct CreateNewChatView: View {
               }) {
                 Text("Next")
               }
-              .tint(Color(uiColor: UIColor(hex: "#52A5FF")!))
+              .tint(Color(theme.accent))
             }
           }
         }

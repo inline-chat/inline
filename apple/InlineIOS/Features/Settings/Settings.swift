@@ -44,6 +44,14 @@ struct SettingsView: View {
         )
       }
 
+      NavigationLink(destination: ThemeSelectionView()) {
+        SettingsItem(
+          icon: "paintbrush.fill",
+          iconColor: .blue,
+          title: "Appearance"
+        )
+      }
+
       NavigationLink(destination: DebugView()) {
         SettingsItem(
           icon: "ladybug.fill",

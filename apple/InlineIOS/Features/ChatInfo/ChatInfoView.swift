@@ -42,6 +42,8 @@ struct ChatInfoView: View {
     chatItem.peerId.isPrivate
   }
 
+  var theme = ThemeManager.shared.selected
+
   var currentMemberRole: MemberRole? {
     spaceMembersViewModel.members
       .first(
@@ -229,7 +231,7 @@ struct InfoTabView: View {
 
           Spacer()
           Image(systemName: chatInfoView.isPrivate ? "lock.fill" : "person.2.fill")
-            .foregroundStyle(Color(uiColor: UIColor(hex: "#52A5FF")!))
+            .foregroundStyle(Color(ThemeManager.shared.selected.accent))
 
           Text(chatInfoView.isPrivate ? "Private" : "Public")
             .foregroundStyle(.secondary)

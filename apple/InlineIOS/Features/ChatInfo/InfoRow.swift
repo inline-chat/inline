@@ -21,11 +21,11 @@ struct InfoRow: View {
         Text(title)
           .font(.body)
           .fontWeight(.medium)
-          .foregroundColor(.primary)
+          .themedPrimaryText()
       }
       Spacer()
       Text(value)
-        .foregroundColor(.secondary)
+        .themedSecondaryText()
     }
   }
 }
