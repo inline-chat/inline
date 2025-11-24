@@ -25,6 +25,7 @@ import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { debugDelay } from "@in/server/utils/helpers/time"
 import { connectionManager } from "@in/server/ws/connections"
+import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 
 type Input = {
   peerId: InputPeer
@@ -55,6 +56,12 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   const inputPeer = input.peerId
   const currentUserId = context.currentUserId
   const chat = await ChatModel.getChatFromInputPeer(input.peerId, context)
+  try {
+    await AccessGuards.ensureChatAccess(chat, currentUserId)
+  } catch (error) {
+    log.error("sendMessage blocked: chat access denied", { chatId: chat.id, currentUserId, inputPeer, error })
+    throw error
+  }
   const chatId = chat.id
   const replyToMsgIdNumber = input.replyToMessageId ? Number(input.replyToMessageId) : null
   // FIXME: create a helper function to get the layer

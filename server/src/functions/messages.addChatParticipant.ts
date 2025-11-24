@@ -10,6 +10,7 @@ import { users } from "@in/server/db/schema/users"
 import type { UpdateGroup } from "../modules/updates"
 import { getUpdateGroup } from "../modules/updates"
 import { RealtimeUpdates } from "../realtime/message"
+import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 
 export async function addChatParticipant(
   input: {
@@ -39,6 +40,8 @@ export async function addChatParticipant(
       .where(and(eq(chatParticipants.chatId, input.chatId), eq(chatParticipants.userId, input.userId)))
 
     if (participant != null) {
+      AccessGuardsCache.setChatParticipant(input.chatId, input.userId)
+
       const participantForUpdate: ChatParticipant = {
         userId: BigInt(participant.userId),
         date: encodeDateStrict(participant.date),
@@ -66,6 +69,8 @@ export async function addChatParticipant(
       if (!newParticipant[0]) {
         throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to create chat participant", 500)
       }
+
+      AccessGuardsCache.setChatParticipant(input.chatId, input.userId)
 
       const participantForUpdate: ChatParticipant = {
         userId: BigInt(newParticipant[0].userId),
