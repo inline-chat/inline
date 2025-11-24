@@ -23,7 +23,7 @@ class ComposeEmbedViewContent: UIView {
   private lazy var nameLabel: UILabel = {
     let label = UILabel()
     label.font = .systemFont(ofSize: 17, weight: .medium)
-    label.textColor = UIColor(hex: "#52A5FF")!
+    label.textColor = ThemeManager.shared.selected.accent
     label.numberOfLines = 1
 
     return label

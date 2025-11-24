@@ -21,7 +21,7 @@ struct MemberItemRow: View {
         }
         Text(member.userInfo.user.displayName)
           .font(.body)
-          .foregroundColor(.primary)
+          .themedPrimaryText()
           .padding(.leading, 8)
       }
     }

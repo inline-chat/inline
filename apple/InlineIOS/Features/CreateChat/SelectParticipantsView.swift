@@ -16,6 +16,8 @@ struct SelectParticipantsView: View {
   @EnvironmentStateObject private var participantSearchViewModel: ParticipantSearchViewModel
   @EnvironmentStateObject private var spaceViewModel: FullSpaceViewModel
 
+  let theme = ThemeManager.shared.selected
+
   init(
     selectedParticipants: Binding<Set<Int64>>,
     spaceId: Int64,
@@ -56,7 +58,7 @@ struct SelectParticipantsView: View {
       }) {
         Text(formState.isLoading ? "Creating..." : "Create")
       }
-      .tint(Color(uiColor: UIColor(hex: "#52A5FF")!))
+      .tint(Color(theme.accent))
       .disabled(selectedParticipants.count == 0 || formState.isLoading)
     }
   }
@@ -86,7 +88,7 @@ struct SelectParticipantsView: View {
               }) {
                 Image(systemName: "chevron.left")
               }
-              .tint(Color(uiColor: UIColor(hex: "#52A5FF")!))
+              .tint(Color(theme.accent))
             }
             ToolbarItem(placement: .topBarTrailing) {
               trailingButton
@@ -125,11 +127,13 @@ struct UserRow: View {
   let userInfo: UserInfo
   @Binding var selectedParticipants: Set<Int64>
 
+  let theme = ThemeManager.shared.selected
+
   var body: some View {
     HStack(spacing: 10) {
       Circle()
-        .fill(selectedParticipants.contains(userInfo.user.id) ? Color(uiColor: UIColor(hex: "#52A5FF")!) : Color.clear)
-        .stroke(selectedParticipants.contains(userInfo.user.id) ? Color(uiColor: UIColor(hex: "#52A5FF")!) : Color.gray, lineWidth: 1)
+        .fill(selectedParticipants.contains(userInfo.user.id) ? Color(theme.accent) : Color.clear)
+        .stroke(selectedParticipants.contains(userInfo.user.id) ? Color(theme.accent) : Color.gray, lineWidth: 1)
         .frame(width: 18, height: 18)
         .scaleEffect(selectedParticipants.contains(userInfo.user.id) ? 1.0 : 0.8)
         .animation(

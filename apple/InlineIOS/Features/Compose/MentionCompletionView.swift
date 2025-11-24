@@ -55,7 +55,7 @@ public class MentionCompletionView: UIView {
 
     // Add subtle tint over blur
     let tintView = UIView()
-    tintView.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.1)
+    tintView.backgroundColor = ThemeManager.shared.selected.backgroundColor.withAlphaComponent(0.1)
     tintView.translatesAutoresizingMaskIntoConstraints = false
     view.addSubview(tintView)
 

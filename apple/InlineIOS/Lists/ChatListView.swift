@@ -29,13 +29,10 @@ struct ChatListView: View {
             onUnread: { onUnread(item) },
             isArchived: isArchived
           )
-          .listRowBackground(Color(.systemBackground))
-          .foregroundColor(.primary)
+          .themedListRow()
         }
       }
-      .listStyle(.plain)
-      .scrollContentBackground(.hidden)
-      .background(Color(.systemBackground))
+      .themedListStyle()
       .animation(.default, value: items)
       .onChange(of: items) { _, newItems in
         processForTranslation(items: newItems)
