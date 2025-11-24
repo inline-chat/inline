@@ -44,21 +44,21 @@ class DocumentView: UIView {
   }
 
   var textColor: UIColor {
-    outgoing ? .white : .label
+    outgoing ? .white : ThemeManager.shared.selected.primaryTextColor ?? .label
   }
 
   var labelColor: UIColor {
-    outgoing ? .white.withAlphaComponent(0.4) : .label
+    outgoing ? .white.withAlphaComponent(0.4) : ThemeManager.shared.selected.secondaryTextColor ?? .label
       .withAlphaComponent(0.4)
   }
 
   var fileIconWrapperColor: UIColor {
-    outgoing ? .white.withAlphaComponent(0.2) : UIColor(dynamicProvider: { $0.userInterfaceStyle == .dark ? UIColor(hex: "#3c3b43")! : UIColor(hex: "#e2e5e5")! })
+    outgoing ? .white.withAlphaComponent(0.2) : ThemeManager.shared.selected.documentIconBackground ?? .systemGray5
       .withAlphaComponent(0.2)
   }
 
   var progressBarColor: UIColor {
-    outgoing ? .white : UIColor(hex: "#52A5FF")!
+    outgoing ? .white : ThemeManager.shared.selected.accent
   }
 
   // MARK: - Initializers
@@ -306,15 +306,15 @@ class DocumentView: UIView {
     switch documentState {
       case .needsDownload:
         iconView.image = UIImage(systemName: "arrow.down")
-        iconView.tintColor = outgoing ? .white : UIColor(hex: "#52A5FF")!
+        iconView.tintColor = outgoing ? .white : ThemeManager.shared.selected.accent
 
       case .downloading:
         iconView.image = UIImage(systemName: "xmark")
-        iconView.tintColor = outgoing ? .white : UIColor(hex: "#52A5FF")!
+        iconView.tintColor = outgoing ? .white : ThemeManager.shared.selected.accent
 
       case .uploading:
         iconView.image = UIImage(systemName: "xmark")
-        iconView.tintColor = outgoing ? .white : UIColor(hex: "#52A5FF")!
+        iconView.tintColor = outgoing ? .white : ThemeManager.shared.selected.accent
 
       case .locallyAvailable:
         // Show file type icon

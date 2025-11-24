@@ -15,7 +15,7 @@ extension DocumentRow {
   }
 
   var progressBarColor: Color {
-    Color(uiColor: UIColor(hex: "#52A5FF")!)
+    Color(ThemeManager.shared.selected.accent)
   }
 
   var fileCircleSize: CGFloat {
@@ -218,7 +218,7 @@ extension DocumentRow {
   var fileIconColor: Color {
     switch documentState {
       case .needsDownload, .downloading:
-        Color(uiColor: UIColor(hex: "#52A5FF")!)
+        Color(ThemeManager.shared.selected.accent)
       case .locallyAvailable:
         .gray
     }

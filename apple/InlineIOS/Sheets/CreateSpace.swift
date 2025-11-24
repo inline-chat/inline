@@ -32,14 +32,12 @@ struct CreateSpace: View {
           }
         }
       }
-      .listStyle(.insetGrouped)
-      .scrollContentBackground(.hidden)
-      .background(Color(.systemBackground))
+      .themedInsetGroupedListStyle()
       .navigationBarTitleDisplayMode(.inline)
       .toolbar(content: {
         ToolbarItem(placement: .principal) {
           Text("Create a new space (team)")
-            .foregroundColor(.primary)
+            .themedPrimaryText()
         }
         ToolbarItem(placement: .topBarTrailing) {
           Button(formState.isLoading ? "Creating..." : "Create") {
@@ -53,7 +51,7 @@ struct CreateSpace: View {
         isFocused = true
       }
     }
-    .tint(Color(uiColor: UIColor(hex: "#52A5FF")!))
+    .themedSheet()
   }
 
   func submit() {

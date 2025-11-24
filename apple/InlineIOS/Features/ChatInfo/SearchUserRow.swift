@@ -12,7 +12,7 @@ struct SearchUserRow: View {
         UserAvatar(userInfo: userInfo, size: 32)
         Text((userInfo.user.firstName ?? "") + " " + (userInfo.user.lastName ?? ""))
           .fontWeight(.medium)
-          .foregroundColor(.primary)
+          .themedPrimaryText()
       }
     }
   }

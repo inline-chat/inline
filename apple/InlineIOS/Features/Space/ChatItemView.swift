@@ -166,7 +166,7 @@ struct ChatItemView: View {
   var title: some View {
     Text(chat?.title ?? "")
       .font(.body)
-      .foregroundColor(.primary)
+      .themedPrimaryText()
   }
 
   @ViewBuilder

@@ -100,9 +100,7 @@ struct CreateSpaceChat: View {
           }
         }
       }
-      .listStyle(.plain)
-      .scrollContentBackground(.hidden)
-      .background(Color(.systemBackground))
+      .themedListStyle()
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .topBarLeading) {
@@ -140,13 +138,13 @@ struct CreateSpaceChat: View {
         }
       }
     }
-    .tint(Color(uiColor: UIColor(hex: "#52A5FF")!))
+    .themedSheet()
   }
 
   private func memberRow(_ member: SpaceChatItem) -> some View {
     HStack {
       Text(member.user?.fullName ?? "Unknown User")
-        .foregroundColor(.primary)
+        .themedPrimaryText()
       Spacer()
       if let userId = member.user?.id, selectedPeople.contains(userId) {
         Image(systemName: "checkmark")

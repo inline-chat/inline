@@ -97,7 +97,7 @@ struct ChatView: View {
     .toolbar {
       ToolbarItem(placement: .topBarTrailing) {
         TranslationButton(peer: peerId)
-          .tint(Color(uiColor: UIColor(hex: "#52A5FF")!))
+          .tint(ThemeManager.shared.accentColor)
       }
 
       if #available(iOS 26.0, *) {

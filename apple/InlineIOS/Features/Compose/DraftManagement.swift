@@ -96,7 +96,7 @@ extension ComposeView {
           configuration: .init(
             font: textView.font ?? UIFont.systemFont(ofSize: 17),
             textColor: UIColor.label,
-            linkColor: UIColor(hex: "#52A5FF")!,
+            linkColor: ThemeManager.shared.selected.accent,
             convertMentionsToLink: false
           )
         )
