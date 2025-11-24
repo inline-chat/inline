@@ -1,4 +1,6 @@
 import { spaces } from "@in/server/db/schema"
+import { chatParticipants, chats } from "@in/server/db/schema/chats"
+import { dialogs } from "@in/server/db/schema/dialogs"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import type { FunctionContext } from "@in/server/functions/_types"
 
@@ -18,7 +20,7 @@ import type { ServerUpdate } from "@in/protocol/server"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { db } from "@in/server/db"
 import { MemberNotExistsError } from "@in/server/modules/effect/commonErrors"
-import { eq } from "drizzle-orm"
+import { and, eq, inArray } from "drizzle-orm"
 
 const log = new Log("space.removeMember")
 
@@ -57,6 +59,25 @@ export const deleteMember = (input: DeleteMemberInput, context: FunctionContext)
 
     // Delete member
     yield* MembersModel.deleteMemberEffect(spaceId, userId)
+
+    const privateThreadIds = yield* Effect.tryPromise({
+      try: () => getPrivateThreadIdsForUser({ spaceId, userId }),
+      catch: (error) => (error instanceof Error ? error : new Error("getPrivateThreadIdsForUser failed")),
+    })
+
+    yield* Effect.tryPromise({
+      try: () =>
+        removeUserFromPrivateThreads({
+          chatIds: privateThreadIds,
+          userId,
+        }),
+      catch: (error) => (error instanceof Error ? error : new Error("removeUserFromPrivateThreads failed")),
+    })
+
+    yield* Effect.tryPromise({
+      try: () => deleteDialogsForSpace({ spaceId, userId }),
+      catch: (error) => (error instanceof Error ? error : new Error("deleteDialogsForSpace failed")),
+    })
 
     yield* Effect.tryPromise({
       try: () =>
@@ -160,4 +181,42 @@ const persistSpaceMemberDeleteUpdate = async ({ spaceId, userId }: { spaceId: nu
       { tx },
     )
   })
+}
+
+// ------------------------------------------------------------
+// Cleanup helpers (no realtime updates)
+
+const getPrivateThreadIdsForUser = async ({
+  spaceId,
+  userId,
+}: {
+  spaceId: number
+  userId: number
+}): Promise<number[]> => {
+  const threads = await db
+    .select({ chatId: chats.id })
+    .from(chats)
+    .innerJoin(chatParticipants, eq(chatParticipants.chatId, chats.id))
+    .where(
+      and(
+        eq(chats.spaceId, spaceId),
+        eq(chats.type, "thread"),
+        eq(chats.publicThread, false),
+        eq(chatParticipants.userId, userId),
+      ),
+    )
+
+  return threads.map((t) => t.chatId)
+}
+
+const removeUserFromPrivateThreads = async ({ chatIds, userId }: { chatIds: number[]; userId: number }) => {
+  if (chatIds.length === 0) return
+
+  await db
+    .delete(chatParticipants)
+    .where(and(eq(chatParticipants.userId, userId), inArray(chatParticipants.chatId, chatIds)))
+}
+
+const deleteDialogsForSpace = async ({ spaceId, userId }: { spaceId: number; userId: number }) => {
+  await db.delete(dialogs).where(and(eq(dialogs.spaceId, spaceId), eq(dialogs.userId, userId)))
 }

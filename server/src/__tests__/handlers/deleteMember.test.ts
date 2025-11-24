@@ -14,6 +14,7 @@ describe("deleteMemberHandler", () => {
   let memberUser: DbUser
   let space: DbSpace
   let handlerContext: HandlerContext
+  let privateThreadId: number
 
   beforeEach(async () => {
     // Create users
@@ -40,6 +41,35 @@ describe("deleteMemberHandler", () => {
         spaceId: space.id,
         role: "member" as const,
       })
+      .execute()
+
+    // Create a private thread in the space with both users as participants + dialogs
+    const [thread] = await db
+      .insert(schema.chats)
+      .values({
+        type: "thread" as const,
+        title: "Private Thread",
+        spaceId: space.id,
+        publicThread: false,
+      })
+      .returning()
+
+    privateThreadId = thread!.id
+
+    await db
+      .insert(schema.chatParticipants)
+      .values([
+        { chatId: privateThreadId, userId: adminUser.id },
+        { chatId: privateThreadId, userId: memberUser.id },
+      ])
+      .execute()
+
+    await db
+      .insert(schema.dialogs)
+      .values([
+        { chatId: privateThreadId, userId: adminUser.id, spaceId: space.id },
+        { chatId: privateThreadId, userId: memberUser.id, spaceId: space.id },
+      ])
       .execute()
 
     // Prepare handler context for admin user
@@ -75,5 +105,34 @@ describe("deleteMemberHandler", () => {
       .from(schema.members)
       .where(and(eq(schema.members.userId, memberUser.id), eq(schema.members.spaceId, space.id)))
     expect(membersMatching.length).toBe(0)
+  })
+
+  test("removes user from private threads and dialogs in the space", async () => {
+    const input: DeleteMemberInput = {
+      spaceId: BigInt(space.id),
+      userId: BigInt(memberUser.id),
+    }
+
+    await deleteMemberHandler(input, handlerContext)
+
+    const participants = await db
+      .select()
+      .from(schema.chatParticipants)
+      .where(
+        and(eq(schema.chatParticipants.chatId, privateThreadId), eq(schema.chatParticipants.userId, memberUser.id)),
+      )
+    expect(participants.length).toBe(0)
+
+    const memberDialogs = await db
+      .select()
+      .from(schema.dialogs)
+      .where(and(eq(schema.dialogs.chatId, privateThreadId), eq(schema.dialogs.userId, memberUser.id)))
+    expect(memberDialogs.length).toBe(0)
+
+    const adminDialogs = await db
+      .select()
+      .from(schema.dialogs)
+      .where(and(eq(schema.dialogs.chatId, privateThreadId), eq(schema.dialogs.userId, adminUser.id)))
+    expect(adminDialogs.length).toBe(1)
   })
 })
