@@ -15,6 +15,7 @@ import { Encoders } from "@in/server/realtime/encoders/encoders"
 import type { UpdateGroup } from "@in/server/modules/updates"
 import type { DbChat, DbDialog } from "@in/server/db/schema"
 import { encodeDialog } from "@in/server/realtime/encoders/encodeDialog"
+import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 
 export async function createChat(
   input: {
@@ -86,13 +87,14 @@ export async function createChat(
 
   // If it's a private space thread, add participants
   if (input.isPublic === false && input.participants) {
-    await db.insert(chatParticipants).values(
-      input.participants.map((p) => ({
-        chatId: chat[0]!.id,
-        userId: Number(p.userId),
-        date: new Date(),
-      })),
-    )
+    const participants = input.participants.map((p) => ({
+      chatId: chat[0]!.id,
+      userId: Number(p.userId),
+      date: new Date(),
+    }))
+
+    await db.insert(chatParticipants).values(participants)
+    participants.forEach((p) => AccessGuardsCache.setChatParticipant(p.chatId, p.userId))
   }
 
   let dialog: DbDialog | undefined
