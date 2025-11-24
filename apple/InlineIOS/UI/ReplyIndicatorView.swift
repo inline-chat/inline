@@ -15,17 +15,17 @@ class ReplyIndicatorView: UIView {
   }
 
   private func setupView() {
-
+    
     backgroundCircleView.translatesAutoresizingMaskIntoConstraints = false
-    backgroundCircleView.backgroundColor = UIColor(hex: "#52A5FF")!.withAlphaComponent(0.2)
+    backgroundCircleView.backgroundColor = ThemeManager.shared.selected.accent.withAlphaComponent(0.2)
     backgroundCircleView.layer.cornerRadius = 14
     backgroundCircleView.alpha = 0
-
+    
     addSubview(backgroundCircleView)
-
-
+    
+    
     iconView.image = UIImage(systemName: "arrowshape.turn.up.left.fill")
-    iconView.tintColor = UIColor(hex: "#52A5FF")!
+    iconView.tintColor =  ThemeManager.shared.selected.accent
     iconView.translatesAutoresizingMaskIntoConstraints = false
     iconView.alpha = 0
     

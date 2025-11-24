@@ -2,6 +2,8 @@ import InlineKit
 import SwiftUI
 
 struct VisibilityView: View {
+  var theme = ThemeManager.shared.selected
+
   @Binding private var selectedChatType: ChatType
   @Binding private var selectedRoute: Route
   @Binding private var selectedSpaceName: String?
@@ -39,7 +41,7 @@ struct VisibilityView: View {
         }) {
           Text("Next")
         }
-        .tint(Color(uiColor: UIColor(hex: "#52A5FF")!))
+        .tint(Color(theme.accent))
       }
     } else {
       if #available(iOS 26.0, *) {
@@ -61,7 +63,7 @@ struct VisibilityView: View {
         }) {
           Text(formState.isLoading ? "Creating..." : "Create")
         }
-        .tint(Color(uiColor: UIColor(hex: "#52A5FF")!))
+        .tint(Color(theme.accent))
         .disabled(formState.isLoading)
       }
     }
@@ -75,7 +77,7 @@ struct VisibilityView: View {
         }) {
           HStack(spacing: 12) {
             Image(systemName: selectedChatType == .public ? "largecircle.fill.circle" : "circle")
-              .foregroundColor(selectedChatType == .public ? Color(uiColor: UIColor(hex: "#52A5FF")!) : .secondary)
+              .foregroundColor(selectedChatType == .public ? Color(theme.accent) : .secondary)
               .animation(.easeInOut(duration: 0.08), value: selectedChatType)
 
             VStack(alignment: .leading, spacing: 0) {
@@ -100,7 +102,7 @@ struct VisibilityView: View {
         }) {
           HStack(spacing: 12) {
             Image(systemName: selectedChatType == .private ? "largecircle.fill.circle" : "circle")
-              .foregroundColor(selectedChatType == .private ? Color(uiColor: UIColor(hex: "#52A5FF")!) : .secondary)
+              .foregroundColor(selectedChatType == .private ? Color(theme.accent) : .secondary)
               .animation(.easeInOut(duration: 0.08), value: selectedChatType)
 
             VStack(alignment: .leading, spacing: 0) {
@@ -127,7 +129,7 @@ struct VisibilityView: View {
         }) {
           Image(systemName: "chevron.left")
         }
-        .tint(Color(uiColor: UIColor(hex: "#52A5FF")!))
+        .tint(Color(theme.accent))
       }
       ToolbarItem(placement: .topBarTrailing) {
         trailingButton

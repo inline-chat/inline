@@ -21,7 +21,7 @@ struct DefaultSendButtonStyle: ComposeButtonStyle {
   let cornerRadius: CGFloat?
 
   init(
-    accentColor: UIColor = UIColor(hex: "#52A5FF")!,
+    accentColor: UIColor = ThemeManager.shared.selected.accent,
     iconSize: CGFloat = 14,
     cornerRadius: CGFloat? = nil
   ) {
@@ -102,7 +102,7 @@ struct RoundedSendButtonStyle: ComposeButtonStyle {
   let borderColor: UIColor
 
   init(
-    accentColor: UIColor = UIColor(hex: "#52A5FF")!,
+    accentColor: UIColor = ThemeManager.shared.selected.accent,
     borderWidth: CGFloat = 2.0,
     borderColor: UIColor = .systemGray4
   ) {

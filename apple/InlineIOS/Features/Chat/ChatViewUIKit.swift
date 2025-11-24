@@ -112,7 +112,7 @@ public class ChatContainerView: UIView {
   private var mentionCompletionHeightConstraint: NSLayoutConstraint!
 
   private func setupViews() {
-    backgroundColor = .systemBackground
+    backgroundColor = ThemeManager.shared.selected.backgroundColor
 
     addSubview(messagesCollectionView)
     addSubview(composeBlurBackgroundView)
