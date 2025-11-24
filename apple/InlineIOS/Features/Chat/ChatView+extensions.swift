@@ -123,7 +123,6 @@ extension ChatView {
           .foregroundStyle(.secondary)
       }
       .padding(.top, -2)
-      .scaledToFill()
       .fixedSize()
     }
   }
@@ -170,10 +169,9 @@ extension ChatView {
           .fontWeight(.medium)
         subtitleView
       }
-      .fixedSize(horizontal: false, vertical: true)
     }
-//    .scaledToFill()
-//    .fixedSize()
+    .scaledToFill()
+    .fixedSize()
     .opacity(isChatHeaderPressed ? 0.7 : 1.0)
     .onTapGesture {
       if let chatItem = fullChatViewModel.chatItem {
