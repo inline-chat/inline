@@ -30,7 +30,8 @@ export const Route = createRootRoute({
       },
       {
         rel: "icon",
-        href: "/favicon-colored.png?v=2",
+        href: "/favicon-black.png?v=2",
+        // href: "/favicon-colored.png?v=2",
         //href: "/favicon-colored-outline.png?v=2",
         media: "(prefers-color-scheme: light)",
       },
