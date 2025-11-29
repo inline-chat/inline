@@ -14,6 +14,8 @@ class MentionManager: NSObject {
   // Feature flag: enable auto-picking an exact single mention match on whitespace/punctuation.
   // Toggle to false to disable the behavior without removing the code path.
   static let autoPickExactMatchEnabled = true
+  // Feature flag: when editing (backspace) inside a mention, strip the mention styling first.
+  static let removeMentionOnEditEnabled = true
 
   weak var delegate: MentionManagerDelegate?
 
@@ -162,6 +164,42 @@ class MentionManager: NSObject {
     textView.selectedRange = NSRange(location: result.newCursorPosition, length: 0)
     hideMentionCompletion()
     delegate?.mentionManager(self, didSelectMention: mentionText, userId: user.user.id, for: mentionRange.range)
+    return true
+  }
+
+  /// When deleting inside a mention, first strip mention styling so the text becomes plain, then apply the delete.
+  func handleMentionRemovalOnDelete(
+    in textView: UITextView,
+    changeRange: NSRange,
+    replacementText text: String
+  ) -> Bool {
+    guard Self.removeMentionOnEditEnabled else { return false }
+    // Only care about deletions (backspace or selection delete)
+    guard text.isEmpty, changeRange.length > 0 else { return false }
+
+    let attributed = textView.attributedText ?? NSAttributedString()
+    guard changeRange.location < attributed.length else { return false }
+
+    var effectiveRange = NSRange(location: 0, length: 0)
+    let attributes = attributed.attributes(at: changeRange.location, effectiveRange: &effectiveRange)
+
+    guard attributes[.mentionUserId] != nil else { return false }
+
+    let mutable = attributed.mutableCopy() as! NSMutableAttributedString
+    let mentionString = mutable.attributedSubstring(from: effectiveRange).string
+
+    // Replace the whole mention run with plain styling before applying the deletion.
+    let plain = NSAttributedString(
+      string: mentionString,
+      attributes: textView.defaultTypingAttributes
+    )
+    mutable.replaceCharacters(in: effectiveRange, with: plain)
+
+    // Apply the user's deletion on the now-plain text.
+    mutable.replaceCharacters(in: changeRange, with: "")
+
+    textView.attributedText = mutable.copy() as? NSAttributedString
+    textView.selectedRange = NSRange(location: changeRange.location, length: 0)
     return true
   }
 
