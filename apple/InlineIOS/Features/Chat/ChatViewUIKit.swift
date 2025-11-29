@@ -91,7 +91,7 @@ public class ChatContainerView: UIView {
   private var composeContainerViewBottomConstraint: NSLayoutConstraint?
 
   deinit {
-    print("ChatView  deinit")
+    edgePanGestureRecognizer?.removeTarget(self, action: #selector(handleEdgePan(_:)))
   }
 
   init(peerId: Peer, chatId: Int64?, spaceId: Int64) {
