@@ -25,7 +25,7 @@ struct TabModel: Hashable {
 
 class MainTabBar: NSViewController {
   private let tabHeight: CGFloat = Theme.tabBarItemHeight
-  private let tabWidth: CGFloat = 110
+  private let tabWidth: CGFloat = 120
   private let homeTabWidth: CGFloat = 50
   private let iconSize: CGFloat = 22
 
@@ -198,7 +198,7 @@ class MainTabBar: NSViewController {
   private func spaceAvatar(for space: Space, size: CGFloat) -> NSImage? {
     let initials = space.displayName
       .split(separator: " ")
-      .compactMap { $0.first }
+      .compactMap(\.first)
       .prefix(2)
       .map(String.init)
       .joined()
@@ -298,7 +298,7 @@ class MainTabBar: NSViewController {
 
     let initials = text
       .split(separator: " ")
-      .compactMap { $0.first }
+      .compactMap(\.first)
       .prefix(2)
       .map(String.init)
       .joined()
