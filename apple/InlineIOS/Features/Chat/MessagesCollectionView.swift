@@ -456,14 +456,15 @@ extension MessagesCollectionView: UICollectionViewDataSourcePrefetching {
     _ interaction: UIContextMenuInteraction,
     styleForMenuWithConfiguration configuration: UIContextMenuConfiguration
   ) -> Any? {
-    guard let window = window else { return nil }
+    guard let window else { return nil }
 
     let navBarHeight = (findViewController()?.navigationController?.navigationBar.frame.height ?? 0)
     let topSafeArea = window.safeAreaInsets.top
     let totalTopInset = topSafeArea + navBarHeight
 
     let styleClass = NSClassFromString("_UIContextMenuStyle") as? NSObject.Type
-    guard let style = styleClass?.perform(NSSelectorFromString("defaultStyle"))?.takeUnretainedValue() as? NSObject else {
+    guard let style = styleClass?.perform(NSSelectorFromString("defaultStyle"))?.takeUnretainedValue() as? NSObject
+    else {
       return nil
     }
 
@@ -680,6 +681,15 @@ private extension MessagesCollectionView {
         snapshot.appendSections([section.date])
         let messageIds = section.messages.map(\.id)
         snapshot.appendItems(messageIds, toSection: section.date)
+      }
+
+      // Reconfigure only items that already exist in both snapshots so reused cells
+      // rebuild their content when underlying data changes (e.g., replies load later).
+      let currentIds = Set(dataSource.snapshot().itemIdentifiers)
+      let nextIds = Set(snapshot.itemIdentifiers)
+      let idsToReconfigure = Array(currentIds.intersection(nextIds))
+      if !idsToReconfigure.isEmpty {
+        snapshot.reconfigureItems(idsToReconfigure)
       }
 
       safeApplySnapshot(snapshot, animatingDifferences: animated ?? false) { [weak self] in
@@ -1504,7 +1514,6 @@ private extension MessagesCollectionView {
       let missingIds = availableIds.subtracting(currentIds)
 
       if !missingIds.isEmpty {
-        print("missingIds = \(missingIds)")
         setInitialData(animated: false)
       }
     }
