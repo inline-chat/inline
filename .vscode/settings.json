@@ -25,7 +25,8 @@
     "Sublayer",
     "sublayers",
     "Subview",
-    "Superlayer"
+    "Superlayer",
+    "superview"
   ],
 
   // Protocol Buffers
