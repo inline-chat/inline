@@ -31,16 +31,20 @@ public enum Theme {
 
   public static let windowMinimumSize: CGSize = .init(width: 320, height: 300)
 
+  // MARK: - Main View & Split View
+
+  static let collapseSidebarAtWindowSize: CGFloat = 500
+
   // MARK: - Tab Bar
 
-  static let tabBarHeight: CGFloat = 38
-  static let tabBarItemHeight: CGFloat = 32
+  static let tabBarHeight: CGFloat = 44
+  static let tabBarItemHeight: CGFloat = 38
   static let tabBarItemInset: CGFloat = 4
 
   // MARK: - Main Split View
 
-  static let mainSplitViewInnerPadding: CGFloat = 8
-  static let mainSplitViewContentRadius: CGFloat = 14
+  static let mainSplitViewInnerPadding: CGFloat = 6 // or 8
+  static let mainSplitViewContentRadius: CGFloat = 20 // and 18
 
   // MARK: - Sidebar
 
