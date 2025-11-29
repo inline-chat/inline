@@ -153,6 +153,7 @@ extension ChatView {
       } else {
         if let user = fullChatViewModel.peerUserInfo {
           UserAvatar(userInfo: user, size: toolbarAvatarSize)
+            .frame(width: toolbarAvatarSize, height: toolbarAvatarSize)
         } else {
           Circle()
             .fill(
