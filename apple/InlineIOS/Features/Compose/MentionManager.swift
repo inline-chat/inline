@@ -16,6 +16,8 @@ class MentionManager: NSObject {
   static let autoPickExactMatchEnabled = true
   // Feature flag: when editing (backspace) inside a mention, strip the mention styling first.
   static let removeMentionOnEditEnabled = true
+  // Feature flag: suppress immediate re-detection after a mention is converted to plain text by a delete.
+  static let suppressAfterDeleteEnabled = true
 
   weak var delegate: MentionManagerDelegate?
 
@@ -27,6 +29,7 @@ class MentionManager: NSObject {
   // Mention detection
   private let mentionDetector = MentionDetector()
   private var currentMentionRange: MentionRange?
+  private var suppressMentionDetection = false
 
   // Completion view
   private var mentionCompletionView: MentionCompletionView?
@@ -100,6 +103,17 @@ class MentionManager: NSObject {
 
   func handleTextChange(in textView: UITextView) {
     detectMentionAtCursor(in: textView)
+  }
+
+  /// Notify the manager about incoming text to decide if suppression should be lifted.
+  func handleIncomingText(_ text: String) {
+    guard suppressMentionDetection else { return }
+    guard !text.isEmpty else { return } // deletions keep suppression
+    let delimiters = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ".,!?;:"))
+    let containsNonDelimiter = text.unicodeScalars.contains { !delimiters.contains($0) }
+    if containsNonDelimiter {
+      suppressMentionDetection = false
+    }
   }
 
   func handleKeyPress(_ key: String) -> Bool {
@@ -198,6 +212,12 @@ class MentionManager: NSObject {
     // Apply the user's deletion on the now-plain text.
     mutable.replaceCharacters(in: changeRange, with: "")
 
+    if Self.suppressAfterDeleteEnabled {
+      suppressMentionDetection = true
+      currentMentionRange = nil
+      hideMentionCompletion()
+    }
+
     textView.attributedText = mutable.copy() as? NSAttributedString
     textView.selectedRange = NSRange(location: changeRange.location, length: 0)
     return true
@@ -217,6 +237,11 @@ class MentionManager: NSObject {
     let attributedText = textView.attributedText ?? NSAttributedString()
 
     Log.shared.debug("🔍 detectMentionAtCursor: cursor=\(cursorPosition), text='\(textView.text ?? "")'")
+
+    if suppressMentionDetection {
+      Log.shared.debug("🔍 Mention detection suppressed after delete")
+      return
+    }
 
     if let mentionRange = mentionDetector.detectMentionAt(cursorPosition: cursorPosition, in: attributedText) {
       currentMentionRange = mentionRange
