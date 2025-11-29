@@ -11,6 +11,10 @@ protocol MentionManagerDelegate: AnyObject {
 }
 
 class MentionManager: NSObject {
+  // Feature flag: enable auto-picking an exact single mention match on whitespace/punctuation.
+  // Toggle to false to disable the behavior without removing the code path.
+  static let autoPickExactMatchEnabled = true
+
   weak var delegate: MentionManagerDelegate?
 
   // Dependencies
@@ -114,6 +118,51 @@ class MentionManager: NSObject {
       default:
         return false
     }
+  }
+
+  /// Attempts to auto-complete a mention when the user types a trailing space/punctuation.
+  /// Returns true if the change was handled and should not be applied by the text view.
+  func handleAutoPickIfNeeded(
+    in textView: UITextView,
+    changeRange: NSRange,
+    replacementText text: String
+  ) -> Bool {
+    guard Self.autoPickExactMatchEnabled else { return false }
+    guard let mentionCompletionView,
+          mentionCompletionView.isVisible,
+          let mentionRange = currentMentionRange else { return false }
+
+    // Only react to a single delimiter character (space or limited punctuation) inserted exactly at the end of the mention.
+    // Keep to 1 char so entity length math remains correct.
+    guard text.count == 1,
+          let scalar = text.unicodeScalars.first,
+          CharacterSet.whitespaces.union(CharacterSet(charactersIn: ".,!?;:")).contains(scalar)
+    else { return false }
+
+    let insertionPoint = changeRange.location
+    guard insertionPoint == mentionRange.range.location + mentionRange.range.length else { return false }
+    guard let user = mentionCompletionView.singleFilteredParticipant() else { return false }
+    guard query(mentionRange.query, matches: user) else { return false }
+
+    // Build the mention text (uses first name like existing selection path)
+    let firstName = user.user.fullName.components(separatedBy: " ").first ?? user.user.fullName
+    let mentionText = "@\(firstName)"
+
+    // Replace mention and append the typed character as trailing text.
+    let currentAttributedText = textView.attributedText ?? NSAttributedString()
+    let result = mentionDetector.replaceMention(
+      in: currentAttributedText,
+      range: mentionRange.range,
+      with: mentionText,
+      userId: user.user.id,
+      trailingText: String(text)
+    )
+
+    textView.attributedText = result.newAttributedText
+    textView.selectedRange = NSRange(location: result.newCursorPosition, length: 0)
+    hideMentionCompletion()
+    delegate?.mentionManager(self, didSelectMention: mentionText, userId: user.user.id, for: mentionRange.range)
+    return true
   }
 
   func cleanup() {
@@ -226,6 +275,29 @@ class MentionManager: NSObject {
 
   func extractMentionEntities(from attributedText: NSAttributedString) -> [MessageEntity] {
     mentionDetector.extractMentionEntities(from: attributedText)
+  }
+
+  private func query(_ query: String, matches user: UserInfo) -> Bool {
+    let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+      .folding(options: .diacriticInsensitive, locale: .current)
+      .lowercased()
+    guard !normalizedQuery.isEmpty else { return false }
+
+    var candidates: [String] = []
+    if !user.user.fullName.isEmpty {
+      candidates.append(user.user.fullName)
+      if let first = user.user.fullName.split(separator: " ").first {
+        candidates.append(String(first))
+      }
+    }
+    if let username = user.user.username {
+      candidates.append(username)
+    }
+
+    return candidates.contains {
+      $0.folding(options: .diacriticInsensitive, locale: .current)
+        .lowercased() == normalizedQuery
+    }
   }
 }
 
