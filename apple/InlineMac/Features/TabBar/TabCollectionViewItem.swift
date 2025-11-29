@@ -1,5 +1,21 @@
 import AppKit
 
+private final class TabBarItemView: NSView {
+  override var mouseDownCanMoveWindow: Bool { false }
+}
+
+private final class NonDraggableTextField: NSTextField {
+  override var mouseDownCanMoveWindow: Bool { false }
+}
+
+private final class NonDraggableButton: NSButton {
+  override var mouseDownCanMoveWindow: Bool { false }
+}
+
+private final class NonDraggableImageView: NSImageView {
+  override var mouseDownCanMoveWindow: Bool { false }
+}
+
 class TabCollectionViewItem: NSCollectionViewItem {
   var onClose: (() -> Void)?
 
@@ -7,9 +23,9 @@ class TabCollectionViewItem: NSCollectionViewItem {
 
   private enum Style {
     // Selected tab background (extends beyond bounds with melting effect)
-    static let selectedTopRadius: CGFloat = 8
-    static let selectedBottomCurveHeight: CGFloat = 10
-    static let selectedBackgroundExtension: CGFloat = 11
+    static let selectedTopRadius: CGFloat = 14
+    static let selectedBottomCurveHeight: CGFloat = 12
+    static let selectedBackgroundExtension: CGFloat = 10
 
     // Hover background (stays within bounds)
     static let hoverCornerRadius: CGFloat = 8
@@ -17,6 +33,14 @@ class TabCollectionViewItem: NSCollectionViewItem {
 
     // Animation
     static let animationDuration: TimeInterval = 0.15
+
+    // Typography & sizing
+    static let titleFontSize: CGFloat = 13
+    static let iconSize: CGFloat = 22
+    static let homeIconPointSize: CGFloat = 15
+    static let iconCornerRadius: CGFloat = 6
+    static let iconLeadingPadding: CGFloat = 10
+    static let iconTrailingPadding: CGFloat = 8
   }
 
   // MARK: - State
@@ -33,9 +57,19 @@ class TabCollectionViewItem: NSCollectionViewItem {
   private let shadowView = NSView()
   private let backgroundView = NSView()
   private let hoverBackgroundView = NSView()
-  private let iconImageView = NSImageView()
-  private let titleLabel = NSTextField(labelWithString: "")
-  private let closeButton = NSButton()
+  private let iconImageView = NonDraggableImageView()
+  private let titleLabel = NonDraggableTextField(labelWithString: "")
+  private let closeButton = NonDraggableButton()
+
+  // Constraints we toggle for home vs regular tabs
+  private var titleLeadingConstraint: NSLayoutConstraint!
+  private var closeLeadingConstraint: NSLayoutConstraint!
+  private var closeTrailingConstraint: NSLayoutConstraint!
+  private var closeWidthConstraint: NSLayoutConstraint!
+  private var iconTrailingConstraintForHome: NSLayoutConstraint!
+  private var mainTrackingArea: NSTrackingArea?
+  private var closeTrackingArea: NSTrackingArea?
+  private var isCloseHovered = false
 
   override init(nibName _: NSNib.Name?, bundle _: Bundle?) {
     super.init(nibName: nil, bundle: nil)
@@ -48,7 +82,7 @@ class TabCollectionViewItem: NSCollectionViewItem {
   }
 
   private func setupViews() {
-    view = NSView()
+    view = TabBarItemView()
     view.wantsLayer = true
 
     // Shadow/glow for selected tabs (blurred duplicate of background shape)
@@ -70,11 +104,13 @@ class TabCollectionViewItem: NSCollectionViewItem {
     view.addSubview(hoverBackgroundView)
 
     iconImageView.wantsLayer = true
-    iconImageView.imageScaling = .scaleProportionallyDown
+    iconImageView.imageScaling = .scaleProportionallyUpOrDown
     iconImageView.translatesAutoresizingMaskIntoConstraints = false
+    // Prevent drags starting on the icon from moving the window when inside the titlebar area.
+    iconImageView.postsFrameChangedNotifications = false
     view.addSubview(iconImageView)
 
-    titleLabel.font = NSFont.systemFont(ofSize: 13)
+    titleLabel.font = NSFont.systemFont(ofSize: Style.titleFontSize)
     titleLabel.translatesAutoresizingMaskIntoConstraints = false
     titleLabel.maximumNumberOfLines = 1
     titleLabel.lineBreakMode = .byTruncatingTail
@@ -89,6 +125,7 @@ class TabCollectionViewItem: NSCollectionViewItem {
     closeButton.imageScaling = .scaleProportionallyDown
     closeButton.contentTintColor = .secondaryLabelColor
     closeButton.translatesAutoresizingMaskIntoConstraints = false
+    closeButton.setButtonType(.momentaryChange)
     closeButton.target = self
     closeButton.action = #selector(closeButtonTapped)
     closeButton.alphaValue = 0
@@ -97,8 +134,20 @@ class TabCollectionViewItem: NSCollectionViewItem {
       .withSymbolConfiguration(config)
     view.addSubview(closeButton)
 
-    iconWidthConstraint = iconImageView.widthAnchor.constraint(equalToConstant: 16)
-    iconHeightConstraint = iconImageView.heightAnchor.constraint(equalToConstant: 16)
+    iconWidthConstraint = iconImageView.widthAnchor.constraint(equalToConstant: Style.iconSize)
+    iconHeightConstraint = iconImageView.heightAnchor.constraint(equalToConstant: Style.iconSize)
+
+    titleLeadingConstraint = titleLabel.leadingAnchor.constraint(
+      equalTo: iconImageView.trailingAnchor,
+      constant: Style.iconTrailingPadding
+    )
+    closeLeadingConstraint = closeButton.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 6)
+    closeTrailingConstraint = closeButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -6)
+    closeWidthConstraint = closeButton.widthAnchor.constraint(equalToConstant: 14)
+    iconTrailingConstraintForHome = iconImageView.trailingAnchor.constraint(
+      equalTo: view.trailingAnchor,
+      constant: -Style.iconLeadingPadding
+    )
 
     NSLayoutConstraint.activate([
       shadowView.topAnchor.constraint(equalTo: view.topAnchor),
@@ -122,61 +171,110 @@ class TabCollectionViewItem: NSCollectionViewItem {
       hoverBackgroundView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: 0),
       hoverBackgroundView.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -Style.hoverInset),
 
-      iconImageView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 8),
+      iconImageView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Style.iconLeadingPadding),
       iconImageView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
       iconWidthConstraint,
       iconHeightConstraint,
 
-      titleLabel.leadingAnchor.constraint(equalTo: iconImageView.trailingAnchor, constant: 6),
+      titleLeadingConstraint!,
       titleLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
 
-      closeButton.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 6),
-      closeButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -6),
+      closeLeadingConstraint!,
+      closeTrailingConstraint!,
       closeButton.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-      closeButton.widthAnchor.constraint(equalToConstant: 14),
+      closeWidthConstraint!,
       closeButton.heightAnchor.constraint(equalToConstant: 14),
     ])
 
-    let trackingArea = NSTrackingArea(
-      rect: view.bounds,
-      options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-      owner: self,
-      userInfo: nil
-    )
-    view.addTrackingArea(trackingArea)
+    refreshTrackingAreas()
   }
 
-  func configure(with tab: TabModel, iconSize: CGFloat, selected: Bool, closable: Bool) {
+  private func refreshTrackingAreas() {
+    if let mainTrackingArea {
+      view.removeTrackingArea(mainTrackingArea)
+    }
+    let mainOptions: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect]
+    let newMain = NSTrackingArea(rect: view.bounds, options: mainOptions, owner: self, userInfo: nil)
+    view.addTrackingArea(newMain)
+    mainTrackingArea = newMain
+
+    if let closeTrackingArea {
+      closeButton.removeTrackingArea(closeTrackingArea)
+    }
+    let closeOptions: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect]
+    let newClose = NSTrackingArea(
+      rect: closeButton.bounds,
+      options: closeOptions,
+      owner: self,
+      userInfo: ["close": true]
+    )
+    closeButton.addTrackingArea(newClose)
+    closeTrackingArea = newClose
+  }
+
+  func configure(
+    with tab: TabModel,
+    iconSize: CGFloat,
+    selected: Bool,
+    closable: Bool,
+    iconImage: NSImage? = nil
+  ) {
     isTabSelected = selected
     isClosable = closable
 
     let isHomeTab = tab.icon == "house"
 
+    // Toggle layout constraints for home vs regular tabs
+    titleLeadingConstraint.constant = isHomeTab ? 0 : Style.iconTrailingPadding
+    titleLeadingConstraint.isActive = true
+    closeLeadingConstraint.constant = isHomeTab ? 0 : 6
+    closeLeadingConstraint.isActive = true
+    closeTrailingConstraint.isActive = true
+    iconTrailingConstraintForHome.isActive = isHomeTab
+
     if isHomeTab {
-      // Home tab: 20x20 icon (4px larger), no circle background
-      iconWidthConstraint.constant = 20
-      iconHeightConstraint.constant = 20
+      // Home tab: uses system house symbol, no title or close button
+      iconWidthConstraint.constant = Style.homeIconPointSize
+      iconHeightConstraint.constant = Style.homeIconPointSize
       iconImageView.layer?.cornerRadius = 0
       iconImageView.layer?.backgroundColor = NSColor.clear.cgColor
+      iconImageView.imageScaling = .scaleNone
 
-      let config = NSImage.SymbolConfiguration(pointSize: 20, weight: .regular)
+      let config = NSImage.SymbolConfiguration(
+        pointSize: Style.homeIconPointSize,
+        weight: .semibold,
+        scale: .medium
+      )
       iconImageView.image = NSImage(systemSymbolName: tab.icon, accessibilityDescription: nil)?
         .withSymbolConfiguration(config)
+      iconImageView.contentTintColor = .labelColor
+      titleLabel.stringValue = ""
+      titleLabel.isHidden = true
+      closeWidthConstraint.constant = 0
+      closeButton.isHidden = true
     } else {
-      // Other tabs: 18x18 empty circle
-      iconWidthConstraint.constant = 18
-      iconHeightConstraint.constant = 18
-      iconImageView.layer?.cornerRadius = 9
-      iconImageView.layer?.backgroundColor = NSColor.systemGray.withAlphaComponent(0.3).cgColor
-      iconImageView.image = nil
+      // Other tabs: square badge with soft corners
+      iconWidthConstraint.constant = iconSize
+      iconHeightConstraint.constant = iconSize
+      iconImageView.layer?.cornerRadius = Style.iconCornerRadius
+      iconImageView.layer?.backgroundColor = iconImage == nil
+        ? NSColor.systemGray.withAlphaComponent(0.3).cgColor
+        : NSColor.clear.cgColor
+      iconImageView.imageScaling = .scaleProportionallyUpOrDown
+      iconImageView.image = iconImage
+      titleLabel.stringValue = tab.title
+      titleLabel.isHidden = false
+      closeWidthConstraint.constant = 14
+      closeButton.isHidden = false
     }
 
-    titleLabel.stringValue = tab.title
-    updateAppearance()
+    titleLabel.stringValue = isHomeTab ? "" : tab.title
+    updateAppearance(animated: false)
   }
 
   override func viewDidLayout() {
     super.viewDidLayout()
+    refreshTrackingAreas()
     updateBackgroundShape()
   }
 
@@ -267,48 +365,85 @@ class TabCollectionViewItem: NSCollectionViewItem {
 
   override func mouseEntered(with event: NSEvent) {
     super.mouseEntered(with: event)
-    isHovered = true
+    if event.trackingArea == closeTrackingArea {
+      isCloseHovered = true
+    } else {
+      isHovered = true
+    }
     updateAppearance()
   }
 
   override func mouseExited(with event: NSEvent) {
     super.mouseExited(with: event)
-    isHovered = false
+    if event.trackingArea == closeTrackingArea {
+      isCloseHovered = false
+    } else {
+      isHovered = false
+    }
     updateAppearance()
   }
 
-  private func updateAppearance() {
+  override func prepareForReuse() {
+    super.prepareForReuse()
+    isHovered = false
+    isCloseHovered = false
+    isTabSelected = false
+    isClosable = true
+    updateAppearance(animated: false)
+  }
+
+  private func updateAppearance(animated _: Bool = false) {
     updateBackgroundShape()
 
-    NSAnimationContext.runAnimationGroup { context in
-      context.duration = Style.animationDuration
+    let showClose = isHovered && isClosable
+    let targetCloseWidth: CGFloat = showClose ? 14 : 0
+    let targetCloseLeading: CGFloat = showClose ? 6 : 0
+    let targetCloseTrailing: CGFloat = showClose ? -6 : 0
+    let closeAlpha: CGFloat = showClose ? 1 : 0
 
-      closeButton.animator().alphaValue = (isHovered && isClosable) ? 1 : 0
+    let shadowAlpha: CGFloat
+    let backgroundAlpha: CGFloat
+    let hoverAlpha: CGFloat
 
-      if isTabSelected {
-        // Show selected background with custom shape and shadow/glow
-        shadowView.animator().alphaValue = 1
-        backgroundView.animator().alphaValue = 1
-        hoverBackgroundView.animator().alphaValue = 0
-
-        if NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
-          backgroundView.layer?.backgroundColor = NSColor.darkGray.withAlphaComponent(0.3).cgColor
-        } else {
-          backgroundView.layer?.backgroundColor = NSColor.white.cgColor
-        }
-      } else if isHovered {
-        // Show hover background with simple rounded corners
-        shadowView.animator().alphaValue = 0
-        backgroundView.animator().alphaValue = 0
-        hoverBackgroundView.animator().alphaValue = 1
-        hoverBackgroundView.layer?.backgroundColor = NSColor.systemGray.withAlphaComponent(0.15).cgColor
+    if isTabSelected {
+      shadowAlpha = 1
+      backgroundAlpha = 1
+      hoverAlpha = 0
+      if NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
+        backgroundView.layer?.backgroundColor = NSColor.darkGray.withAlphaComponent(0.3).cgColor
       } else {
-        // Hide all backgrounds
-        shadowView.animator().alphaValue = 0
-        backgroundView.animator().alphaValue = 0
-        hoverBackgroundView.animator().alphaValue = 0
+        backgroundView.layer?.backgroundColor = NSColor.white.cgColor
       }
+    } else if isHovered {
+      shadowAlpha = 0
+      backgroundAlpha = 0
+      hoverAlpha = 1
+      hoverBackgroundView.layer?.backgroundColor = NSColor.systemGray.withAlphaComponent(0.15).cgColor
+    } else {
+      shadowAlpha = 0
+      backgroundAlpha = 0
+      hoverAlpha = 0
     }
+
+    let closeBackground = isCloseHovered
+      ? NSColor.systemGray.withAlphaComponent(0.18).cgColor
+      : NSColor.clear.cgColor
+    closeButton.wantsLayer = true
+    closeButton.layer?.cornerRadius = 4
+
+    closeWidthConstraint.constant = targetCloseWidth
+    closeLeadingConstraint.constant = targetCloseLeading
+    closeTrailingConstraint.constant = targetCloseTrailing
+
+    closeButton.alphaValue = closeAlpha
+    closeButton.isHidden = !showClose
+    closeButton.layer?.backgroundColor = closeBackground
+
+    shadowView.alphaValue = shadowAlpha
+    backgroundView.alphaValue = backgroundAlpha
+    hoverBackgroundView.alphaValue = hoverAlpha
+
+    view.layoutSubtreeIfNeeded()
   }
 
   @objc private func closeButtonTapped() {
