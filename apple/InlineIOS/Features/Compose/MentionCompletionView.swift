@@ -149,6 +149,11 @@ public class MentionCompletionView: UIView {
     updateHeight()
   }
 
+  /// Returns the only filtered participant when exactly one remains, otherwise nil.
+  func singleFilteredParticipant() -> UserInfo? {
+    filteredParticipants.count == 1 ? filteredParticipants.first : nil
+  }
+
   func show() {
     guard !filteredParticipants.isEmpty else { return }
 

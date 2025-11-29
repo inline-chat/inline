@@ -114,9 +114,10 @@ public class MentionDetector {
     in attributedText: NSAttributedString,
     range: NSRange,
     with mentionText: String,
-    userId: Int64
+    userId: Int64,
+    trailingText: String = " "
   ) -> (newAttributedText: NSAttributedString, newCursorPosition: Int) {
-    let mentionString = mentionText + " "
+    let mentionString = mentionText + trailingText
     let newAttributedText = AttributedStringHelpers.replaceMentionInAttributedString(
       attributedText,
       range: range,
