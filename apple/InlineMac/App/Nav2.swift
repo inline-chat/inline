@@ -54,6 +54,9 @@ struct Nav2Entry: Codable {
 
   var activeTabIndex: Int = 0
 
+  /// Last opened route per tab so we can restore when switching.
+  var lastRoutes: [TabId: Nav2Route] = [:]
+
   /// History of navigation entries, current entry is last item in the history array
   var history: [Nav2Entry] = []
 
@@ -67,10 +70,15 @@ struct Nav2Entry: Codable {
     tabs[activeTabIndex]
   }
 
+  var currentRoute: Nav2Route {
+    history.last?.route ?? .empty
+  }
+
   // MARK: - Methods
 
   func navigate(to route: Nav2Route) {
     log.trace("Navigating to \(route)")
+    lastRoutes[activeTab] = route
     history.append(Nav2Entry(route: route, tab: activeTab))
   }
 
@@ -92,8 +100,7 @@ struct Nav2Entry: Codable {
 
   func setActiveTab(index: Int) {
     guard index < tabs.count else { return }
-    activeTabIndex = index
-    saveStateLowPriority()
+    activateTab(at: index)
   }
 
   /// Open (or activate) a space tab by id; updates the tab name if it changed.
@@ -106,14 +113,13 @@ struct Nav2Entry: Codable {
       if case let .space(id, name) = tabs[existingIndex], name != space.displayName {
         tabs[existingIndex] = .space(id: id, name: space.displayName)
       }
-      setActiveTab(index: existingIndex)
+      activateTab(at: existingIndex)
       return
     }
 
     // Otherwise append a new tab and activate it
     tabs.append(.space(id: space.id, name: space.displayName))
-    activeTabIndex = tabs.count - 1
-    saveStateLowPriority()
+    activateTab(at: tabs.count - 1, routeOverride: .empty)
   }
 
   // MARK: - Initialization & Persistence
@@ -186,5 +192,22 @@ struct Nav2Entry: Codable {
     saveStateTask = Task(priority: .background) {
       saveState()
     }
+  }
+
+  /// Centralized tab activation that restores the last route for that tab (or .empty).
+  private func activateTab(at index: Int, routeOverride: Nav2Route? = nil) {
+    guard index < tabs.count else { return }
+
+    let targetTab = tabs[index]
+    activeTabIndex = index
+
+    let targetRoute = routeOverride ?? lastRoutes[targetTab] ?? .empty
+
+    if history.last?.tab != targetTab || history.last?.route != targetRoute {
+      history.append(Nav2Entry(route: targetRoute, tab: targetTab))
+      forwardHistory.removeAll()
+    }
+
+    saveStateLowPriority()
   }
 }
