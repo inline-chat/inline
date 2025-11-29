@@ -18,22 +18,15 @@ class ChatIconSwiftUIBridge: NSView {
       height: size
     ))
 
+    translatesAutoresizingMaskIntoConstraints = false
+
     setupView()
     updateAvatar()
   }
 
   func setupView() {
-    // Layer optimization
     wantsLayer = true
     layerContentsRedrawPolicy = .onSetNeedsDisplay
-    layer?.drawsAsynchronously = true
-
-    // Only enable if content rarely changes
-    layer?.shouldRasterize = true
-    layer?.rasterizationScale = window?.backingScaleFactor ?? 2.0
-
-    // 3. For manual layout, set this to true
-    translatesAutoresizingMaskIntoConstraints = true
   }
 
   @available(*, unavailable)
@@ -53,14 +46,15 @@ class ChatIconSwiftUIBridge: NSView {
       size: size
     )
     let newHostingView = NSHostingView(rootView: swiftUIView)
-
-    // 4. For manual layout, set this to true
-    newHostingView.translatesAutoresizingMaskIntoConstraints = true
-
-    // 5. Set initial frame
-    newHostingView.frame = bounds
+    newHostingView.translatesAutoresizingMaskIntoConstraints = false
 
     addSubview(newHostingView)
+    NSLayoutConstraint.activate([
+      newHostingView.topAnchor.constraint(equalTo: topAnchor),
+      newHostingView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      newHostingView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      newHostingView.trailingAnchor.constraint(equalTo: trailingAnchor),
+    ])
     hostingView = newHostingView
   }
 
@@ -85,8 +79,5 @@ class ChatIconSwiftUIBridge: NSView {
 
   override func layout() {
     super.layout()
-
-    // 7. Update hosting view frame during layout
-    hostingView?.frame = bounds
   }
 }
