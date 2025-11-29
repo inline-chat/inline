@@ -30,6 +30,8 @@ class MentionManager: NSObject {
   private let mentionDetector = MentionDetector()
   private var currentMentionRange: MentionRange?
   private var suppressMentionDetection = false
+  // Suppression currently clears only when user-entered text flows through handleIncomingText;
+  // programmatic mutations that should re-enable mentions need to call into it or reset the flag explicitly.
 
   // Completion view
   private var mentionCompletionView: MentionCompletionView?
