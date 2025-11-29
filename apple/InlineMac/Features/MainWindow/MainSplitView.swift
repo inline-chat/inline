@@ -1,7 +1,10 @@
 import AppKit
+import InlineKit
+import Observation
+import SwiftUI
 
 class MainSplitView: NSViewController {
-  private let dependencies: AppDependencies
+  let dependencies: AppDependencies
 
   // Views
 
@@ -17,6 +20,8 @@ class MainSplitView: NSViewController {
   private var sideWidth: CGFloat = 240
   private var innerPadding: CGFloat = Theme.mainSplitViewInnerPadding
   private var contentRadius: CGFloat = Theme.mainSplitViewContentRadius
+
+  private var lastRenderedRoute: Nav2Route?
 
   // ....
 
@@ -84,10 +89,31 @@ class MainSplitView: NSViewController {
 
     setSidebar(viewController: MainSidebar(dependencies: dependencies))
     setTabBar(viewController: MainTabBar(dependencies: dependencies))
+
+    setupNav()
   }
 
   override func viewDidLoad() {
     super.viewDidLoad()
+  }
+
+  private func setupNav() {
+    guard let nav2 = dependencies.nav2 else { return }
+
+    // Render immediately so we have the right content on first load.
+    updateContent(for: nav2.currentRoute)
+
+    // Re-register observation on every change (Observation doesn't keep watchers alive).
+    withObservationTracking { [weak self] in
+      guard let self else { return }
+      _ = nav2.currentRoute
+    } onChange: { [weak self] in
+      Task { @MainActor [weak self] in
+        guard let self, let nav2 = dependencies.nav2 else { return }
+        updateContent(for: nav2.currentRoute)
+        setupNav()
+      }
+    }
   }
 
   // MARK: - Public API
@@ -132,5 +158,32 @@ class MainSplitView: NSViewController {
       viewController.view.leadingAnchor.constraint(equalTo: tabsArea.leadingAnchor),
       viewController.view.trailingAnchor.constraint(equalTo: tabsArea.trailingAnchor),
     ])
+  }
+
+  private func setContentArea(viewController: NSViewController) {
+    contentVC?.removeFromParent()
+    contentVC?.view.removeFromSuperview()
+    contentVC = viewController
+
+    addChild(viewController)
+    contentArea.addSubview(viewController.view)
+
+    // Pin to superview
+    viewController.view.translatesAutoresizingMaskIntoConstraints = false
+    NSLayoutConstraint.activate([
+      viewController.view.topAnchor.constraint(equalTo: contentArea.topAnchor),
+      viewController.view.bottomAnchor.constraint(equalTo: contentArea.bottomAnchor),
+      viewController.view.leadingAnchor.constraint(equalTo: contentArea.leadingAnchor),
+      viewController.view.trailingAnchor.constraint(equalTo: contentArea.trailingAnchor),
+    ])
+  }
+
+  @MainActor
+  private func updateContent(for route: Nav2Route) {
+    guard route != lastRenderedRoute else { return }
+    lastRenderedRoute = route
+
+    let viewController = viewController(for: route)
+    setContentArea(viewController: viewController)
   }
 }

@@ -2,11 +2,13 @@ import AppKit
 import Combine
 import InlineKit
 import Logger
+import Observation
 
 class MainSidebarItemCell: NSView {
   typealias ScrollEvent = MainSidebarAppKit.ScrollEvent
 
   private var dependencies: AppDependencies?
+  private var nav2: Nav2?
   private weak var events: PassthroughSubject<ScrollEvent, Never>?
 
   private var item: HomeChatItem?
@@ -174,46 +176,49 @@ class MainSidebarItemCell: NSView {
     stackView.setCustomSpacing(Self.avatarSpacing, after: avatarView)
   }
 
+  struct Content {
+    enum Kind {
+      case chat(HomeChatItem)
+      case member(Member, UserInfo?)
+      case header(title: String, symbol: String)
+    }
+
+    let kind: Kind
+  }
+
   func configure(
-    with item: HomeChatItem,
+    with content: MainSidebarItemCollectionViewItem.Content,
     dependencies: AppDependencies,
     events: PassthroughSubject<ScrollEvent, Never>
   ) {
     preparingForReuse = false
-    self.item = item
+    item = nil
+    switch content.kind {
+      case let .chat(chatItem):
+        item = chatItem
+      case .member, .header:
+        break
+    }
     self.dependencies = dependencies
+    nav2 = dependencies.nav2
     self.events = events
 
     cancellables.removeAll()
 
-    if let user = item.user {
-      NSAnimationContext.runAnimationGroup { context in
-        context.allowsImplicitAnimation = false
-        context.duration = 0.0
+    configureLeadingView(for: content.kind)
+    nameLabel.stringValue = title(for: content.kind)
 
-        avatarView.removeFromSuperview()
-        avatarView = ChatIconSwiftUIBridge(
-          .user(user),
-          size: Self.avatarSize
-        )
-        avatarView.translatesAutoresizingMaskIntoConstraints = false
-        stackView.insertArrangedSubview(avatarView, at: 0)
-        stackView.setCustomSpacing(Self.avatarSpacing, after: avatarView)
-      }
+    let hasUnread: Bool
+    let isPinned: Bool
+
+    switch content.kind {
+      case let .chat(chatItem):
+        hasUnread = (chatItem.dialog.unreadCount ?? 0) > 0 || (chatItem.dialog.unreadMark == true)
+        isPinned = chatItem.dialog.pinned ?? false
+      case .member, .header:
+        hasUnread = false
+        isPinned = false
     }
-
-    if let user = item.user {
-      nameLabel.stringValue = user.user.firstName ??
-        user.user.lastName ??
-        user.user.username ??
-        user.user.phoneNumber ??
-        user.user.email ?? ""
-    } else {
-      nameLabel.stringValue = ""
-    }
-
-    let hasUnread = (item.dialog.unreadCount ?? 0) > 0 || (item.dialog.unreadMark == true)
-    let isPinned = item.dialog.pinned ?? false
 
     badgeView?.removeFromSuperview()
     badgeView = nil
@@ -226,9 +231,10 @@ class MainSidebarItemCell: NSView {
       stackView.addArrangedSubview(badgeView!)
     }
 
-    isSelected = dependencies.nav.currentRoute == route
+    isSelected = nav2?.currentRoute == route
 
     setupEventListeners()
+    observeNavRoute()
   }
 
   private var preparingForReuse = false
@@ -318,7 +324,7 @@ class MainSidebarItemCell: NSView {
     }
   }
 
-  private var route: NavEntry.Route? {
+  private var route: Nav2Route? {
     guard let item else { return nil }
     return .chat(peer: item.peerId)
   }
@@ -331,12 +337,6 @@ class MainSidebarItemCell: NSView {
     }
     .store(in: &cancellables)
 
-    dependencies.nav.$currentRoute
-      .sink { [weak self] currentRoute in
-        guard let self else { return }
-        isSelected = currentRoute == route
-      }
-      .store(in: &cancellables)
   }
 
   private func handleScrollEvent(_ event: ScrollEvent) {
@@ -388,6 +388,69 @@ class MainSidebarItemCell: NSView {
     addGestureRecognizer(tapGesture)
   }
 
+  private func configureLeadingView(for kind: MainSidebarItemCollectionViewItem.Content.Kind) {
+    // Remove current leading view
+    stackView.arrangedSubviews.first?.removeFromSuperview()
+
+    switch kind {
+      case let .chat(chatItem):
+        if let user = chatItem.user {
+          avatarView = ChatIconSwiftUIBridge(.user(user), size: Self.avatarSize)
+        } else if let chat = chatItem.chat {
+          avatarView = ChatIconSwiftUIBridge(.chat(chat), size: Self.avatarSize)
+        } else {
+          avatarView = ChatIconSwiftUIBridge(.user(.deleted), size: Self.avatarSize)
+        }
+        stackView.insertArrangedSubview(avatarView, at: 0)
+        stackView.setCustomSpacing(Self.avatarSpacing, after: avatarView)
+        avatarView.widthAnchor.constraint(equalToConstant: Self.avatarSize).isActive = true
+        avatarView.heightAnchor.constraint(equalToConstant: Self.avatarSize).isActive = true
+      case let .member(_, userInfo):
+        if let user = userInfo {
+          avatarView = ChatIconSwiftUIBridge(.user(user), size: Self.avatarSize)
+        } else {
+          avatarView = ChatIconSwiftUIBridge(.user(.deleted), size: Self.avatarSize)
+        }
+        stackView.insertArrangedSubview(avatarView, at: 0)
+        stackView.setCustomSpacing(Self.avatarSpacing, after: avatarView)
+        avatarView.widthAnchor.constraint(equalToConstant: Self.avatarSize).isActive = true
+        avatarView.heightAnchor.constraint(equalToConstant: Self.avatarSize).isActive = true
+      case let .header(title: _, symbol: symbol):
+        let iconView = NSImageView()
+        let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+          .applying(.init(paletteColors: [.secondaryLabelColor]))
+        iconView.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+          .withSymbolConfiguration(config)
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.setContentCompressionResistancePriority(.required, for: .horizontal)
+        iconView.setContentHuggingPriority(.required, for: .horizontal)
+        stackView.insertArrangedSubview(iconView, at: 0)
+        stackView.setCustomSpacing(Self.avatarSpacing, after: iconView)
+        iconView.widthAnchor.constraint(equalToConstant: Self.avatarSize).isActive = true
+        iconView.heightAnchor.constraint(equalToConstant: Self.avatarSize).isActive = true
+        avatarView = ChatIconSwiftUIBridge(.user(.deleted), size: Self.avatarSize) // placeholder for reuse safety
+    }
+  }
+
+  private func title(for kind: MainSidebarItemCollectionViewItem.Content.Kind) -> String {
+    switch kind {
+      case let .chat(chatItem):
+        return chatItem.user?.user.firstName ??
+          chatItem.user?.user.lastName ??
+          chatItem.user?.user.username ??
+          chatItem.chat?.title ??
+          chatItem.space?.displayName ??
+          "Chat"
+      case let .member(_, user):
+        return user?.user.firstName ??
+          user?.user.lastName ??
+          user?.user.username ??
+          "Member"
+      case let .header(title, _):
+        return title
+    }
+  }
+
   private func updateAppearance() {
     let color = isSelected ? selectedColor : isHovered ? hoverColor : .clear
 
@@ -404,7 +467,27 @@ class MainSidebarItemCell: NSView {
   }
 
   @objc private func handleTap() {
-    guard let route, let dependencies else { return }
-    dependencies.nav.open(route)
+    guard let dependencies, let item else { return }
+
+    if let nav2 {
+      nav2.navigate(to: .chat(peer: item.peerId))
+    } else {
+      // Fallback to legacy nav
+      dependencies.nav.open(.chat(peer: item.peerId))
+    }
+  }
+
+  private func observeNavRoute() {
+    guard let nav2 else { return }
+
+    withObservationTracking { [weak self] in
+      _ = nav2.currentRoute
+      guard let self else { return }
+      isSelected = nav2.currentRoute == route
+    } onChange: { [weak self] in
+      Task { @MainActor [weak self] in
+        self?.observeNavRoute()
+      }
+    }
   }
 }
