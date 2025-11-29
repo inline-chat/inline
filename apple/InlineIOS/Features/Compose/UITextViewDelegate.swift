@@ -49,6 +49,11 @@ extension ComposeView: UITextViewDelegate {
       }
     }
 
+    // Auto-pick an exact mention match when typing space/punctuation at the end of a single result.
+    if mentionManager?.handleAutoPickIfNeeded(in: textView, changeRange: range, replacementText: text) == true {
+      return false
+    }
+
     // Check if the change might affect existing mentions or entities
     if let originalEntities = originalDraftEntities, !originalEntities.entities.isEmpty {
       // Check if the change overlaps with any existing entity ranges
