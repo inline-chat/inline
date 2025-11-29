@@ -23,8 +23,8 @@ class TabCollectionViewItem: NSCollectionViewItem {
 
   private enum Style {
     // Selected tab background (extends beyond bounds with melting effect)
-    static let selectedTopRadius: CGFloat = 14
-    static let selectedBottomCurveHeight: CGFloat = 12
+    static let selectedTopRadius: CGFloat = 12
+    static let selectedBottomCurveHeight: CGFloat = 10
     static let selectedBackgroundExtension: CGFloat = 10
 
     // Hover background (stays within bounds)

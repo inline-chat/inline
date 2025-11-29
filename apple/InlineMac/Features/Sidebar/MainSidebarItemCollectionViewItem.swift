@@ -16,8 +16,18 @@ class MainSidebarItemCollectionViewItem: NSCollectionViewItem {
     cellView?.reset()
   }
 
+  struct Content {
+    enum Kind {
+      case chat(HomeChatItem)
+      case member(Member, UserInfo?)
+      case header(title: String, symbol: String)
+    }
+
+    let kind: Kind
+  }
+
   func configure(
-    with item: HomeChatItem,
+    with item: Content,
     dependencies: AppDependencies,
     events: PassthroughSubject<MainSidebarAppKit.ScrollEvent, Never>
   ) {
