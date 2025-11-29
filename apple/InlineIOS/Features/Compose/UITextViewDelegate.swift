@@ -49,6 +49,8 @@ extension ComposeView: UITextViewDelegate {
       }
     }
 
+    mentionManager?.handleIncomingText(text)
+
     // If deleting inside a mention, strip mention styling first, then apply the delete.
     if mentionManager?.handleMentionRemovalOnDelete(in: textView, changeRange: range, replacementText: text) == true {
       return false
