@@ -49,6 +49,11 @@ extension ComposeView: UITextViewDelegate {
       }
     }
 
+    // If deleting inside a mention, strip mention styling first, then apply the delete.
+    if mentionManager?.handleMentionRemovalOnDelete(in: textView, changeRange: range, replacementText: text) == true {
+      return false
+    }
+
     // Auto-pick an exact mention match when typing space/punctuation at the end of a single result.
     if mentionManager?.handleAutoPickIfNeeded(in: textView, changeRange: range, replacementText: text) == true {
       return false
