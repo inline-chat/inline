@@ -1,5 +1,21 @@
 import AppKit
 import Combine
+import InlineKit
+
+private final class TabBarContainerView: NSView {
+  // Allow window dragging when clicking outside tab controls.
+  override var mouseDownCanMoveWindow: Bool { true }
+}
+
+private final class TabBarCollectionView: NSCollectionView {
+  override var mouseDownCanMoveWindow: Bool { false }
+
+  // Let empty background clicks pass through so the window can be dragged.
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    guard let hit = super.hitTest(point) else { return nil }
+    return hit === self ? nil : hit
+  }
+}
 
 struct TabModel: Hashable {
   let id: UUID = .init()
@@ -9,22 +25,33 @@ struct TabModel: Hashable {
 
 class MainTabBar: NSViewController {
   private let tabHeight: CGFloat = Theme.tabBarItemHeight
-  private let tabMaxWidth: CGFloat = 110
-  private let iconSize: CGFloat = 16
+  private let tabWidth: CGFloat = 110
+  private let homeTabWidth: CGFloat = 50
+  private let iconSize: CGFloat = 22
 
   private var topGap: CGFloat {
     Theme.tabBarHeight - tabHeight
   }
 
   private var collectionView: NSCollectionView!
+  private var pinnedStack: NSStackView!
+  private weak var spacesButton: TabSurfaceButton?
 
   private var dependencies: AppDependencies
   private var nav2: Nav2 { dependencies.nav2! }
+  private var homeViewModel: HomeViewModel
+  private var spaces: [HomeSpaceItem] = []
+  private var spacesCancellable: AnyCancellable?
+
+  private var lastObservedTabs: [TabId] = []
+  private var lastObservedActiveIndex: Int = 0
 
   init(dependencies: AppDependencies) {
     self.dependencies = dependencies
+    homeViewModel = HomeViewModel(db: dependencies.database)
     super.init(nibName: nil, bundle: nil)
     setupObservers()
+    observeSpaces()
   }
 
   @available(*, unavailable)
@@ -33,16 +60,15 @@ class MainTabBar: NSViewController {
   }
 
   override func loadView() {
-    let containerView = NSView()
+    let containerView = TabBarContainerView()
     containerView.wantsLayer = true
 
     let layout = NSCollectionViewFlowLayout()
     layout.scrollDirection = .horizontal
     layout.minimumInteritemSpacing = Theme.tabBarItemInset // Matches the inset for hovered
-    // layout.minimumLineSpacing = 4
-    layout.sectionInset = NSEdgeInsets(top: topGap, left: 24, bottom: 0, right: 40)
+    layout.sectionInset = NSEdgeInsets(top: topGap, left: 0, bottom: 0, right: 40)
 
-    collectionView = NSCollectionView()
+    collectionView = TabBarCollectionView()
     collectionView.collectionViewLayout = layout
     collectionView.dataSource = self
     collectionView.delegate = self
@@ -55,11 +81,36 @@ class MainTabBar: NSViewController {
     )
     collectionView.translatesAutoresizingMaskIntoConstraints = false
 
+    pinnedStack = NSStackView()
+    pinnedStack.orientation = .horizontal
+    pinnedStack.spacing = 6
+    pinnedStack.alignment = .centerY
+    pinnedStack.translatesAutoresizingMaskIntoConstraints = false
+
+    let spacesButton = TabSurfaceButton(
+      symbolName: "square.grid.2x2.fill",
+      pointSize: 17,
+      weight: .medium,
+      tintColor: .tertiaryLabelColor
+    )
+    spacesButton.toolTip = "Spaces"
+    spacesButton.onTap = { [weak self] in
+      self?.openSpacesMenu(from: spacesButton)
+    }
+    self.spacesButton = spacesButton
+
+    pinnedStack.addArrangedSubview(spacesButton)
+
     containerView.addSubview(collectionView)
+    containerView.addSubview(pinnedStack)
 
     NSLayoutConstraint.activate([
+      pinnedStack.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 12),
+      pinnedStack.topAnchor.constraint(equalTo: containerView.topAnchor, constant: topGap),
+      pinnedStack.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
+
       collectionView.topAnchor.constraint(equalTo: containerView.topAnchor),
-      collectionView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 0),
+      collectionView.leadingAnchor.constraint(equalTo: pinnedStack.trailingAnchor, constant: 4),
       collectionView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: 0),
       collectionView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
     ])
@@ -70,17 +121,56 @@ class MainTabBar: NSViewController {
   override func viewDidLoad() {
     super.viewDidLoad()
     collectionView.reloadData()
+    selectActiveTab()
   }
 
   private func setupObservers() {
-    withObservationTracking {
-      _ = nav2.tabs
-      _ = nav2.activeTabIndex
-    } onChange: {
+    withObservationTracking { [weak self] in
+      guard let self else { return }
+      lastObservedTabs = nav2.tabs
+      lastObservedActiveIndex = nav2.activeTabIndex
+    } onChange: { [weak self] in
       Task { @MainActor [weak self] in
-        self?.collectionView?.reloadData()
-        self?.setupObservers()
+        guard let self else { return }
+
+        let previousTabs = lastObservedTabs
+        let previousActive = lastObservedActiveIndex
+        let currentTabs = nav2.tabs
+        let currentActive = nav2.activeTabIndex
+
+        if previousTabs != currentTabs {
+          collectionView?.reloadData()
+        } else {
+          var indexPaths = Set<IndexPath>()
+
+          if previousActive < currentTabs.count {
+            indexPaths.insert(IndexPath(item: previousActive, section: 0))
+          }
+          if currentActive < currentTabs.count {
+            indexPaths.insert(IndexPath(item: currentActive, section: 0))
+          }
+
+          if !indexPaths.isEmpty {
+            collectionView?.reloadItems(at: indexPaths)
+          }
+        }
+
+        selectActiveTab()
+        setupObservers()
       }
+    }
+  }
+
+  private func selectActiveTab() {
+    guard let collectionView else { return }
+
+    let activeIndex = nav2.activeTabIndex
+
+    collectionView.deselectAll(nil)
+
+    if activeIndex < nav2.tabs.count {
+      let indexPath = IndexPath(item: activeIndex, section: 0)
+      collectionView.selectItems(at: [indexPath], scrollPosition: [])
     }
   }
 
@@ -93,12 +183,148 @@ class MainTabBar: NSViewController {
     }
   }
 
+  private func space(for tabId: TabId) -> Space? {
+    switch tabId {
+      case let .space(id, _):
+        if let local = spaces.first(where: { $0.space.id == id })?.space {
+          return local
+        }
+        return ObjectCache.shared.getSpace(id: id)
+      case .home:
+        return nil
+    }
+  }
+
+  private func spaceAvatar(for space: Space, size: CGFloat) -> NSImage? {
+    let initials = space.displayName
+      .split(separator: " ")
+      .compactMap { $0.first }
+      .prefix(2)
+      .map(String.init)
+      .joined()
+      .uppercased()
+
+    let image = NSImage(size: NSSize(width: size, height: size))
+    image.lockFocus()
+
+    let rect = NSRect(x: 0, y: 0, width: size, height: size)
+    let path = NSBezierPath(ovalIn: rect)
+    NSColor.controlAccentColor.withAlphaComponent(0.18).setFill()
+    path.fill()
+
+    let paragraph = NSMutableParagraphStyle()
+    paragraph.alignment = .center
+
+    let attributes: [NSAttributedString.Key: Any] = [
+      .font: NSFont.systemFont(ofSize: size * 0.45, weight: .semibold),
+      .foregroundColor: NSColor.labelColor,
+      .paragraphStyle: paragraph,
+    ]
+
+    let string = initials.isEmpty ? "·" : initials
+    let attr = NSAttributedString(string: string, attributes: attributes)
+    let strSize = attr.size()
+    let strRect = NSRect(
+      x: (size - strSize.width) / 2,
+      y: (size - strSize.height) / 2,
+      width: strSize.width,
+      height: strSize.height
+    )
+    attr.draw(in: strRect)
+
+    image.unlockFocus()
+    return image
+  }
+
   private func isTabClosable(at index: Int) -> Bool {
     guard index < nav2.tabs.count else { return false }
-    if nav2.tabs.count == 1, nav2.tabs[index] == .home {
-      return false
+    return nav2.tabs[index] != .home
+  }
+
+  private func observeSpaces() {
+    spacesCancellable = homeViewModel.$spaces
+      .receive(on: RunLoop.main)
+      .sink { [weak self] items in
+        self?.spaces = items
+      }
+  }
+
+  private func openSpacesMenu(from anchor: NSView) {
+    let menu = NSMenu()
+
+    if spaces.isEmpty {
+      let empty = NSMenuItem(title: "No spaces yet", action: nil, keyEquivalent: "")
+      empty.isEnabled = false
+      menu.addItem(empty)
+    } else {
+      for spaceItem in spaces {
+        let item = NSMenuItem(
+          title: spaceItem.space.displayName,
+          action: #selector(didSelectSpace(_:)),
+          keyEquivalent: ""
+        )
+        item.target = self
+        item.representedObject = spaceItem.space
+        item.image = makeInitialsImage(text: spaceItem.space.displayName)
+        menu.addItem(item)
+      }
     }
-    return true
+
+    // Refresh spaces from backend in the background
+    Task.detached { [weak self] in
+      guard let deps = self?.dependencies else { return }
+      try? await deps.data.getSpaces()
+    }
+
+    // Show the menu just below the button so it doesn't cover it
+    let location = NSPoint(x: 0, y: -4)
+    menu.popUp(positioning: nil, at: location, in: anchor)
+  }
+
+  @objc
+  private func didSelectSpace(_ sender: NSMenuItem) {
+    guard let space = sender.representedObject as? Space else { return }
+    nav2.openSpace(space)
+    collectionView.reloadData()
+  }
+
+  private func makeInitialsImage(text: String, diameter: CGFloat = 20) -> NSImage? {
+    let image = NSImage(size: NSSize(width: diameter, height: diameter))
+    image.lockFocus()
+
+    let circlePath = NSBezierPath(ovalIn: NSRect(x: 0, y: 0, width: diameter, height: diameter))
+    NSColor.controlAccentColor.withAlphaComponent(0.18).setFill()
+    circlePath.fill()
+
+    let initials = text
+      .split(separator: " ")
+      .compactMap { $0.first }
+      .prefix(2)
+      .map(String.init)
+      .joined()
+      .uppercased()
+
+    let paragraph = NSMutableParagraphStyle()
+    paragraph.alignment = .center
+
+    let attributes: [NSAttributedString.Key: Any] = [
+      .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+      .foregroundColor: NSColor.labelColor,
+      .paragraphStyle: paragraph,
+    ]
+
+    let attributed = NSAttributedString(string: initials.isEmpty ? "·" : initials, attributes: attributes)
+    let size = attributed.size()
+    let rect = NSRect(
+      x: (diameter - size.width) / 2,
+      y: (diameter - size.height) / 2,
+      width: size.width,
+      height: size.height
+    )
+    attributed.draw(in: rect)
+
+    image.unlockFocus()
+    return image
   }
 }
 
@@ -120,8 +346,28 @@ extension MainTabBar: NSCollectionViewDataSource {
     let tab = tabModel(for: tabId)
     let selected = nav2.activeTabIndex == indexPath.item
     let closable = isTabClosable(at: indexPath.item)
+    let iconImage: NSImage? = {
+      switch tabId {
+        case .home:
+          return nil
+        case let .space(id, _):
+          if let space = space(for: tabId) {
+            return spaceAvatar(for: space, size: iconSize)
+          } else {
+            // Start observing for updates
+            ObjectCache.shared.observeSpace(id: id)
+            return nil
+          }
+      }
+    }()
 
-    item.configure(with: tab, iconSize: iconSize, selected: selected, closable: closable)
+    item.configure(
+      with: tab,
+      iconSize: iconSize,
+      selected: selected,
+      closable: closable,
+      iconImage: iconImage
+    )
     item.onClose = { [weak self] in
       self?.nav2.removeTab(at: indexPath.item)
     }
@@ -143,6 +389,8 @@ extension MainTabBar: NSCollectionViewDelegateFlowLayout {
     layout _: NSCollectionViewLayout,
     sizeForItemAt indexPath: IndexPath
   ) -> NSSize {
-    NSSize(width: tabMaxWidth, height: tabHeight)
+    let tabId = nav2.tabs[indexPath.item]
+    let width = tabId == .home ? homeTabWidth : tabWidth
+    return NSSize(width: width, height: tabHeight)
   }
 }
