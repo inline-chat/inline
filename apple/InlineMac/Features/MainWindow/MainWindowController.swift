@@ -12,7 +12,7 @@ class MainWindowController: NSWindowController, NSWindowDelegate {
 
   private var nav2: Nav2 = .init()
 
-  private var defaultSize = NSSize(width: 850, height: 620)
+  private var defaultSize = NSSize(width: 860, height: 640)
   private var minSize = NSSize(width: 640, height: 320)
 
   private var topLevelRoute: TopLevelRoute {
@@ -33,7 +33,7 @@ class MainWindowController: NSWindowController, NSWindowDelegate {
     self.dependencies = dependencies
 
     let window = NSWindow(
-      contentRect: NSRect(origin: .zero, size: CGSize(width: 900, height: 600)),
+      contentRect: NSRect(origin: .zero, size: defaultSize),
       styleMask: [
         .titled,
         .closable,
@@ -80,7 +80,7 @@ class MainWindowController: NSWindowController, NSWindowDelegate {
     window.setFrameAutosaveName("MainWindow")
     window.contentViewController = windowView
     window.delegate = self
-    window.setContentSize(NSSize(width: 780, height: 500))
+    window.setContentSize(defaultSize)
 
     switchTopLevel(topLevelRoute)
   }
@@ -96,7 +96,7 @@ class MainWindowController: NSWindowController, NSWindowDelegate {
     // configure window
     window?.isMovableByWindowBackground = true
     window?.backgroundColor = .clear
-    window?.setContentSize(NSSize(width: 780, height: 500))
+    window?.setContentSize(defaultSize)
   }
 
   private func setupMainSplitView() {
@@ -127,7 +127,7 @@ class MainWindowController: NSWindowController, NSWindowDelegate {
     // TODO: fix window sizing
     window?.setContentSize(defaultSize)
     window?.setFrameUsingName("MainWindow")
-    window?.minSize = NSSize(width: 330, height: 220)
+    window?.minSize = minSize
   }
 
   private var cancellables: Set<AnyCancellable> = []
