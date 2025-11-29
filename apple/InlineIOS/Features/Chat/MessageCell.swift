@@ -185,6 +185,11 @@ extension MessageCollectionViewCell {
 
     let velocity = panGesture.velocity(in: contentView)
 
+    // If the gesture starts as a rightward swipe, let the navigation controller
+    // (back swipe) handle it by declining recognition here.
+    let isLikelyBackSwipe = velocity.x > 0 && abs(velocity.x) > abs(velocity.y)
+    if isLikelyBackSwipe { return false }
+
     // Calculate angle and only allow nearly horizontal swipes
     // An 16 degree angle corresponds to tan(16°) ≈ 0.287
     // This means vertical component should be at most 0.287 times the horizontal component
@@ -193,6 +198,17 @@ extension MessageCollectionViewCell {
     let isHorizontalEnough = abs(velocity.y) <= abs(velocity.x) * maxAngleTangent
 
     return abs(velocity.x) > abs(velocity.y) && isHorizontalEnough // Must be predominantly horizontal
+  }
+
+  func gestureRecognizer(
+    _ gestureRecognizer: UIGestureRecognizer,
+    shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+  ) -> Bool {
+    // Allow the system's interactive pop (back swipe) recognizer to proceed when present.
+    if otherGestureRecognizer is UIScreenEdgePanGestureRecognizer {
+      return true
+    }
+    return false
   }
 
   @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
