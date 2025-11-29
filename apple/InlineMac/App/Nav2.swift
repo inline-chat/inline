@@ -50,7 +50,7 @@ struct Nav2Entry: Codable {
 
   // MARK: - State
 
-  var tabs: [TabId] = [.home, .space(id: 1, name: "Inline")]
+  var tabs: [TabId] = [.home]
 
   var activeTabIndex: Int = 0
 
@@ -76,6 +76,7 @@ struct Nav2Entry: Codable {
 
   func removeTab(at index: Int) {
     guard index < tabs.count else { return }
+    guard index != 0 else { return } // keep Home pinned
     guard tabs.count > 1 else { return }
 
     tabs.remove(at: index)
@@ -92,6 +93,26 @@ struct Nav2Entry: Codable {
   func setActiveTab(index: Int) {
     guard index < tabs.count else { return }
     activeTabIndex = index
+    saveStateLowPriority()
+  }
+
+  /// Open (or activate) a space tab by id; updates the tab name if it changed.
+  func openSpace(_ space: Space) {
+    // If tab exists, activate it and refresh the name if different
+    if let existingIndex = tabs.firstIndex(where: { tab in
+      if case let .space(id, _) = tab { return id == space.id }
+      return false
+    }) {
+      if case let .space(id, name) = tabs[existingIndex], name != space.displayName {
+        tabs[existingIndex] = .space(id: id, name: space.displayName)
+      }
+      setActiveTab(index: existingIndex)
+      return
+    }
+
+    // Otherwise append a new tab and activate it
+    tabs.append(.space(id: space.id, name: space.displayName))
+    activeTabIndex = tabs.count - 1
     saveStateLowPriority()
   }
 
