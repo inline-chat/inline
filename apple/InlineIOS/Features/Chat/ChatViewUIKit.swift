@@ -7,6 +7,8 @@ public class ChatContainerView: UIView {
   let chatId: Int64?
   let spaceId: Int64
 
+  private weak var edgePanGestureRecognizer: UIScreenEdgePanGestureRecognizer?
+
   private lazy var messagesCollectionView: MessagesCollectionView = {
     let collectionView = MessagesCollectionView(peerId: peerId, chatId: chatId ?? 0, spaceId: spaceId)
     collectionView.translatesAutoresizingMaskIntoConstraints = false
@@ -100,11 +102,17 @@ public class ChatContainerView: UIView {
     super.init(frame: .zero)
     setupViews()
     setupObservers()
+    attachEdgePanHandlerIfNeeded()
   }
 
   @available(*, unavailable)
-  required init?(coder: NSCoder) {
+  required init?(coder _: NSCoder) {
     fatalError("init(coder:) has not been implemented")
+  }
+
+  override public func didMoveToWindow() {
+    super.didMoveToWindow()
+    attachEdgePanHandlerIfNeeded()
   }
 
   private var composeEmbedHeightConstraint: NSLayoutConstraint!
@@ -498,6 +506,49 @@ public class ChatContainerView: UIView {
       ]
     }
   }
+
+  private func attachEdgePanHandlerIfNeeded() {
+    guard edgePanGestureRecognizer == nil else { return }
+
+    // SwiftUI NavigationStack still hosts inside a UINavigationController; grab its back-swipe recognizer.
+    guard let edgePan = findViewController()?.navigationController?.interactivePopGestureRecognizer
+      as? UIScreenEdgePanGestureRecognizer
+    else { return }
+
+    edgePan.addTarget(self, action: #selector(handleEdgePan(_:)))
+    edgePanGestureRecognizer = edgePan
+  }
+
+  @objc private func handleEdgePan(_ gesture: UIGestureRecognizer) {
+    // Dismiss keyboard as soon as back-swipe begins and guard against auto-refocus after cancel.
+    switch gesture.state {
+    case .began:
+      composeView.textView.isEditable = false
+      composeView.textView.resignFirstResponder()
+
+    case .ended, .cancelled, .failed:
+      // Briefly disable editing so the system doesn't restore the first responder on cancellation.
+      // Important note: Less than 0.3s would not work
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+        guard let self else { return }
+        composeView.textView.isEditable = true
+      }
+
+    default:
+      break
+    }
+  }
+
+  private func findViewController() -> UIViewController? {
+    var responder: UIResponder? = self
+    while let nextResponder = responder?.next {
+      if let viewController = nextResponder as? UIViewController {
+        return viewController
+      }
+      responder = nextResponder
+    }
+    return nil
+  }
 }
 
 struct ChatViewUIKit: UIViewRepresentable {
@@ -507,7 +558,7 @@ struct ChatViewUIKit: UIViewRepresentable {
   @EnvironmentObject var data: DataManager
   @EnvironmentObject var fullChatViewModel: FullChatViewModel
 
-  func makeUIView(context: Context) -> ChatContainerView {
+  func makeUIView(context _: Context) -> ChatContainerView {
     let view = ChatContainerView(peerId: peerId, chatId: chatId, spaceId: spaceId)
 
     if let draftMessage = fullChatViewModel.chatItem?.dialog.draftMessage {
@@ -520,5 +571,5 @@ struct ChatViewUIKit: UIViewRepresentable {
     return view
   }
 
-  func updateUIView(_ uiView: ChatContainerView, context: Context) {}
+  func updateUIView(_: ChatContainerView, context _: Context) {}
 }
