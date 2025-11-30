@@ -450,6 +450,15 @@ final class AppMenu: NSObject {
     websiteItem.target = self
     websiteItem.image = NSImage(systemSymbolName: "safari", accessibilityDescription: nil)
     helpMenu.addItem(websiteItem)
+
+    let statusPageItem = NSMenuItem(
+      title: "Status Page",
+      action: #selector(openStatusPage(_:)),
+      keyEquivalent: ""
+    )
+    statusPageItem.target = self
+    statusPageItem.image = NSImage(systemSymbolName: "antenna.radiowaves.left.and.right", accessibilityDescription: nil)
+    helpMenu.addItem(statusPageItem)
   }
 
   private var settingsWindowController: SettingsWindowController?
@@ -501,6 +510,11 @@ final class AppMenu: NSObject {
 
   @objc private func openWebsite(_ sender: Any?) {
     guard let url = URL(string: "https://inline.chat") else { return }
+    NSWorkspace.shared.open(url)
+  }
+
+  @objc private func openStatusPage(_ sender: Any?) {
+    guard let url = URL(string: "https://status.inline.chat/") else { return }
     NSWorkspace.shared.open(url)
   }
 
