@@ -23,7 +23,6 @@ enum Destination: DestinationType, Codable {
   case space(id: Int64)
   case chat(peer: Peer)
   case chatInfo(chatItem: SpaceChatItem)
-  case settings
   case spaceSettings(spaceId: Int64)
   case spaceIntegrations(spaceId: Int64)
   case integrationOptions(spaceId: Int64, provider: String)
@@ -36,6 +35,8 @@ enum Sheet: SheetType, Codable {
 
   case alphaSheet
 
+  case settings
+
   case addMember(spaceId: Int64)
   var id: String {
     switch self {
@@ -44,6 +45,9 @@ enum Sheet: SheetType, Codable {
 
       case .alphaSheet:
         "alphaSheet"
+
+      case .settings:
+        "settings"
 
       case let .addMember(spaceId):
         "addMember_\(spaceId)"

@@ -77,7 +77,7 @@ struct SpacesView: View {
       }
 
       Button {
-        router.push(.settings)
+        router.presentSheet(.settings)
       } label: {
         Label("Settings", systemImage: "gearshape")
       }

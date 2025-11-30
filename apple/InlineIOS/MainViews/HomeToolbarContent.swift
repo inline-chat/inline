@@ -98,7 +98,7 @@ struct HomeToolbarContent: ToolbarContent {
       }
 
       Button {
-        router.push(.settings)
+        router.presentSheet(.settings)
       } label: {
         Label("Settings", systemImage: "gearshape")
       }
@@ -127,7 +127,7 @@ struct HomeToolbarContent: ToolbarContent {
   @ViewBuilder
   private var settingsButton: some View {
     Button {
-      router.push(.settings)
+      router.presentSheet(.settings)
     } label: {
       Image(systemName: "gearshape")
         .tint(Color.secondary)
