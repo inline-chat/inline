@@ -131,26 +131,6 @@ public struct InviteToSpaceTransaction: Transaction2 {
             log.error("Failed to save member", error: error)
           }
         }
-
-        // Save chat if present
-        if response.hasChat {
-          do {
-            let chat = Chat(from: response.chat)
-            try chat.save(db)
-          } catch {
-            log.error("Failed to save chat", error: error)
-          }
-        }
-
-        // Save dialog if present
-        if response.hasDialog {
-          do {
-            let dialog = Dialog(from: response.dialog)
-            try dialog.save(db)
-          } catch {
-            log.error("Failed to save dialog", error: error)
-          }
-        }
       }
       log.trace("inviteToSpace saved")
     } catch {
