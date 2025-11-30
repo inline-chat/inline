@@ -819,7 +819,24 @@ private extension MessagesCollectionView {
     private let maxCacheSize = 1_000
 
     func createReactionPickerView(for message: Message, at indexPath: IndexPath) -> UIView {
-      let reactions = ["🥹", "❤️", "🫡", "👍", "👎", "💯", "😂"] // ✔️
+      let reactions = [
+        "🥹",
+        "❤️",
+        "🫡",
+        "👍",
+        "👎",
+        "💯",
+        "😂",
+        "✔️",
+        "🎉",
+        "🔥",
+        "👏",
+        "🙏",
+        "🤔",
+        "😮",
+        "😢",
+        "😡",
+      ]
 
       let containerView = UIView()
       containerView.translatesAutoresizingMaskIntoConstraints = true
@@ -829,33 +846,22 @@ private extension MessagesCollectionView {
       blurView.translatesAutoresizingMaskIntoConstraints = false
       containerView.addSubview(blurView)
 
+      let preferredWidth = min(UIScreen.main.bounds.width - 40, 320)
+      let scrollView = UIScrollView()
+      scrollView.translatesAutoresizingMaskIntoConstraints = false
+      scrollView.showsHorizontalScrollIndicator = false
+      scrollView.alwaysBounceHorizontal = true
+      blurView.contentView.addSubview(scrollView)
+
       let stackView = UIStackView()
       stackView.axis = .horizontal
-      stackView.distribution = .fillEqually
+      stackView.alignment = .center
       stackView.spacing = 6
       stackView.translatesAutoresizingMaskIntoConstraints = false
-      blurView.contentView.addSubview(stackView)
+      scrollView.addSubview(stackView)
 
       for (index, reaction) in reactions.enumerated() {
-        let button: UIButton
-        if reaction == "✔️" || reaction == "✓" {
-          button = UIButton(type: .system)
-          button.translatesAutoresizingMaskIntoConstraints = false
-          let config = UIImage.SymbolConfiguration(pointSize: 22, weight: .medium)
-          let image = UIImage(systemName: "checkmark", withConfiguration: config)?
-            .withTintColor(UIColor(hex: "#2AAC28")!, renderingMode: .alwaysOriginal)
-          button.setImage(image, for: .normal)
-          // Use message ID for reliable lookup across sectioned data
-          let baseTag = Int(message.messageId % Int64(Int.max - 1_000))
-          button.tag = baseTag + index
-          button.layer.cornerRadius = 19
-          button.clipsToBounds = true
-          button.addTarget(self, action: #selector(handleReactionButtonTap(_:)), for: .touchUpInside)
-          button.addTarget(self, action: #selector(buttonTouchDown(_:)), for: .touchDown)
-          button.addTarget(self, action: #selector(buttonTouchUp(_:)), for: [.touchUpOutside, .touchCancel])
-        } else {
-          button = createReactionButton(reaction: reaction, messageId: message.messageId, reactionIndex: index)
-        }
+        let button = createReactionButton(reaction: reaction, messageId: message.messageId, reactionIndex: index)
         stackView.addArrangedSubview(button)
       }
 
@@ -865,10 +871,18 @@ private extension MessagesCollectionView {
         blurView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
         blurView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
 
-        stackView.topAnchor.constraint(equalTo: blurView.contentView.topAnchor, constant: 7),
-        stackView.leadingAnchor.constraint(equalTo: blurView.contentView.leadingAnchor, constant: 8),
-        stackView.trailingAnchor.constraint(equalTo: blurView.contentView.trailingAnchor, constant: -8),
-        stackView.bottomAnchor.constraint(equalTo: blurView.contentView.bottomAnchor, constant: -7),
+        scrollView.topAnchor.constraint(equalTo: blurView.contentView.topAnchor),
+        scrollView.leadingAnchor.constraint(equalTo: blurView.contentView.leadingAnchor),
+        scrollView.trailingAnchor.constraint(equalTo: blurView.contentView.trailingAnchor),
+        scrollView.bottomAnchor.constraint(equalTo: blurView.contentView.bottomAnchor),
+        scrollView.widthAnchor.constraint(equalToConstant: preferredWidth),
+        scrollView.heightAnchor.constraint(equalToConstant: 52),
+
+        stackView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor, constant: 7),
+        stackView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor, constant: 8),
+        stackView.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor, constant: -8),
+        stackView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor, constant: -7),
+        stackView.heightAnchor.constraint(equalToConstant: 38),
       ])
 
       containerView.layer.cornerRadius = 24
@@ -883,24 +897,36 @@ private extension MessagesCollectionView {
       button.translatesAutoresizingMaskIntoConstraints = false
 
       var configuration = UIButton.Configuration.plain()
-      configuration.title = reaction
+      configuration.contentInsets = NSDirectionalEdgeInsets(top: 2, leading: 2, bottom: 2, trailing: 2)
 
-      configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
-        var outgoing = incoming
-        outgoing.font = .systemFont(ofSize: 22)
-        return outgoing
+      if reaction == "✔️" || reaction == "✓" {
+        let symbolConfig = UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
+        let image = UIImage(systemName: "checkmark", withConfiguration: symbolConfig)?
+          .withTintColor(UIColor(hex: "#2AAC28")!, renderingMode: .alwaysOriginal)
+        configuration.image = image
+      } else {
+        configuration.title = reaction
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+          var outgoing = incoming
+          outgoing.font = .systemFont(ofSize: 22)
+          return outgoing
+        }
       }
 
-      configuration.contentInsets = NSDirectionalEdgeInsets(top: 2, leading: 2, bottom: 2, trailing: 2)
       button.configuration = configuration
 
       // Use message ID for reliable lookup across sectioned data
       // Format: (messageId % safe_range) * 1000 + reactionIndex
       let baseTag = Int(messageId % Int64(Int.max / 10_000)) // Ensure we don't overflow
       button.tag = baseTag * 1_000 + reactionIndex
+      button.accessibilityLabel = reaction
 
       button.layer.cornerRadius = 19
       button.clipsToBounds = true
+      NSLayoutConstraint.activate([
+        button.widthAnchor.constraint(equalToConstant: 38),
+        button.heightAnchor.constraint(equalToConstant: 38),
+      ])
 
       button.addTarget(self, action: #selector(handleReactionButtonTap(_:)), for: .touchUpInside)
       button.addTarget(self, action: #selector(buttonTouchDown(_:)), for: .touchDown)
@@ -952,7 +978,7 @@ private extension MessagesCollectionView {
       }
       let message = fullMessage.message
 
-      guard let emoji = sender.configuration?.title else { return }
+      guard let emoji = sender.configuration?.title ?? sender.accessibilityLabel else { return }
 
       buttonTouchUp(sender)
       MessagesCollectionView.contextMenuOpen = false
