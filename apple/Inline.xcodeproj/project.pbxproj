@@ -35,6 +35,8 @@
 		C3E6D5CB2CAE82B00048D2D8 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = C3E6D5CA2CAE82B00048D2D8 /* GRDB */; };
 		CD0240C42EA439D400976FDE /* Invite in Frameworks */ = {isa = PBXBuildFile; productRef = CD0240C32EA439D400976FDE /* Invite */; };
 		CD0240C62EA439DA00976FDE /* Invite in Frameworks */ = {isa = PBXBuildFile; productRef = CD0240C52EA439DA00976FDE /* Invite */; };
+		CD092C4D2EDC6F4A00E867E5 /* InlineMacUI in Frameworks */ = {isa = PBXBuildFile; productRef = CD092C4C2EDC6F4A00E867E5 /* InlineMacUI */; };
+		CD092C4F2EDC6F4A00E867E5 /* MacTheme in Frameworks */ = {isa = PBXBuildFile; productRef = CD092C4E2EDC6F4A00E867E5 /* MacTheme */; };
 		CD0A3CDA2CD536DF0081AD69 /* GRDBQuery in Frameworks */ = {isa = PBXBuildFile; productRef = CD0A3CD92CD536DF0081AD69 /* GRDBQuery */; };
 		CD27856F2CFB053C008A0EEF /* InlineConfig in Frameworks */ = {isa = PBXBuildFile; productRef = CD27856E2CFB053C008A0EEF /* InlineConfig */; };
 		CD2785712CFB0916008A0EEF /* InlineConfig in Frameworks */ = {isa = PBXBuildFile; productRef = CD2785702CFB0916008A0EEF /* InlineConfig */; };
@@ -83,6 +85,7 @@
 		C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = InlineIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C3AA8E4E2CB942BF00800A03 /* InlineKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineKit; sourceTree = "<group>"; };
 		C3CC99172CCE9A7E007F7F77 /* InlineUI */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineUI; sourceTree = "<group>"; };
+		CD092C4B2EDC6D8200E867E5 /* InlineMacUI */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineMacUI; sourceTree = "<group>"; };
 		CD2661652CA01E3E00EB186F /* Inline.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Inline.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD5326842CE113CD00EC348D /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		CD5326862CE1149700EC348D /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
@@ -224,6 +227,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CD092C4D2EDC6F4A00E867E5 /* InlineMacUI in Frameworks */,
 				CDB123D52D3E8066001AFC1A /* Nuke in Frameworks */,
 				CD2785712CFB0916008A0EEF /* InlineConfig in Frameworks */,
 				CD4D56CD2D2D4393006072AE /* Throttler in Frameworks */,
@@ -233,6 +237,7 @@
 				CD4CAEF02E5E14AA00698C43 /* Sentry in Frameworks */,
 				CDC72E3D2D999C6D001E8A0C /* GRDB in Frameworks */,
 				C38C90602CB9432200B78B8A /* InlineKit in Frameworks */,
+				CD092C4F2EDC6F4A00E867E5 /* MacTheme in Frameworks */,
 				CD7C6F132E5847CD00C89032 /* RealtimeV2 in Frameworks */,
 				CDB123D72D3E8066001AFC1A /* NukeUI in Frameworks */,
 				CD0A3CDA2CD536DF0081AD69 /* GRDBQuery in Frameworks */,
@@ -259,6 +264,7 @@
 				CDBF277B2EC87E4D0082B11D /* Icons */,
 				C3CC99172CCE9A7E007F7F77 /* InlineUI */,
 				C3AA8E4E2CB942BF00800A03 /* InlineKit */,
+				CD092C4B2EDC6D8200E867E5 /* InlineMacUI */,
 				CD2661662CA01E3E00EB186F /* InlineMac */,
 				B7020C432DCE1534007099D9 /* InlineShareExtension */,
 				C38A28382CA5AB8F00D3DFB8 /* InlineIOS */,
@@ -419,6 +425,8 @@
 				CD7C6F122E5847CD00C89032 /* RealtimeV2 */,
 				CD4CAEEF2E5E14AA00698C43 /* Sentry */,
 				CD0240C52EA439DA00976FDE /* Invite */,
+				CD092C4C2EDC6F4A00E867E5 /* InlineMacUI */,
+				CD092C4E2EDC6F4A00E867E5 /* MacTheme */,
 			);
 			productName = InlineMac;
 			productReference = CD2661652CA01E3E00EB186F /* Inline.app */;
@@ -1424,6 +1432,14 @@
 		CD0240C52EA439DA00976FDE /* Invite */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = Invite;
+		};
+		CD092C4C2EDC6F4A00E867E5 /* InlineMacUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineMacUI;
+		};
+		CD092C4E2EDC6F4A00E867E5 /* MacTheme */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MacTheme;
 		};
 		CD0A3CD92CD536DF0081AD69 /* GRDBQuery */ = {
 			isa = XCSwiftPackageProductDependency;
