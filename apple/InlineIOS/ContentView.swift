@@ -111,8 +111,6 @@ struct ContentView2: View {
       ChatView(peer: peer)
     case let .chatInfo(chatItem):
       ChatInfoView(chatItem: chatItem)
-    case .settings:
-      SettingsView()
     case let .spaceSettings(spaceId):
       SpaceSettingsView(spaceId: spaceId)
     case let .spaceIntegrations(spaceId):
@@ -134,6 +132,11 @@ struct ContentView2: View {
 
     case .alphaSheet:
       AlphaSheet()
+
+    case .settings:
+      NavigationStack {
+        SettingsView()
+      }
 
     case let .addMember(spaceId):
       // AddMember(showSheet: showSheet, spaceId: spaceId)

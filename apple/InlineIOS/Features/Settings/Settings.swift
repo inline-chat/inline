@@ -8,7 +8,8 @@ import Translation
 struct SettingsView: View {
   @Query(CurrentUser()) var currentUser: UserInfo?
   @Environment(\.auth) var auth
-  @EnvironmentObject private var navigation: Navigation
+  @Environment(Router.self) private var router
+  @Environment(\.dismiss) private var dismiss
   @EnvironmentObject private var onboardingNavigation: OnboardingNavigation
   @EnvironmentObject private var mainRouter: MainViewRouter
   @EnvironmentObject private var fileUploadViewModel: FileUploadViewModel
@@ -92,6 +93,7 @@ struct SettingsView: View {
     }
     .listStyle(.insetGrouped)
     .navigationBarTitleDisplayMode(.inline)
+    .navigationBarBackButtonHidden(true)
     .toolbarRole(.editor)
     .toolbar(.hidden, for: .tabBar)
     .toolbar {
@@ -105,6 +107,15 @@ struct SettingsView: View {
               .font(.body)
               .fontWeight(.semibold)
           }
+        }
+      }
+
+      ToolbarItem(placement: .topBarLeading) {
+        Button {
+          dismissSettings()
+        } label: {
+          Image(systemName: "xmark")
+            .fontWeight(.semibold)
         }
       }
     }
@@ -167,10 +178,10 @@ struct SettingsView: View {
 
   private func clearCache() {
     isClearing = true
+    dismissSettings()
 
     Task {
       do {
-        navigation.pop()
         try await FileCache.shared.clearCache()
         Transactions.shared.clearAll()
         try? AppDatabase.clearDB()
@@ -186,9 +197,18 @@ struct SettingsView: View {
       }
     }
   }
+
+  private func dismissSettings() {
+    router.dismissSheet()
+    dismiss()
+  }
 }
 
 #Preview("Settings") {
   SettingsView()
     .environmentObject(RootData(db: AppDatabase.empty(), auth: Auth.shared))
+    .environmentObject(OnboardingNavigation())
+    .environmentObject(MainViewRouter())
+    .environmentObject(FileUploadViewModel())
+    .environment(Router(initialTab: .chats))
 }
