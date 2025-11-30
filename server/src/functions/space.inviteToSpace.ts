@@ -1,33 +1,13 @@
-import { db } from "@in/server/db"
-import { and, eq } from "drizzle-orm"
-import {
-  members,
-  type DbChat,
-  type DbDialog,
-  type DbMember,
-  type DbMemberRole,
-  type DbSpace,
-  type DbUser,
-} from "@in/server/db/schema"
+import { type DbMember, type DbMemberRole, type DbSpace, type DbUser } from "@in/server/db/schema"
 import { UsersModel } from "@in/server/db/models/users"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import type { FunctionContext } from "@in/server/functions/_types"
 
-import {
-  Member_Role,
-  Update,
-  type InviteToSpaceInput,
-  type InviteToSpaceResult,
-  type Member,
-  type User,
-} from "@in/protocol/core"
+import { Update, type InviteToSpaceInput, type InviteToSpaceResult } from "@in/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
-import { isValidEmail, isValidPhoneNumber, isValidSpaceId } from "@in/server/utils/validate"
+import { isValidEmail, isValidSpaceId } from "@in/server/utils/validate"
 import { Authorize } from "@in/server/utils/authorize"
 import { MembersModel } from "@in/server/db/models/members"
-import { ProtocolConvertors } from "@in/server/types/protocolConvertors"
-import { DialogsModel } from "@in/server/db/models/dialogs"
-import { ChatModel } from "@in/server/db/models/chats"
 import { sendEmail } from "@in/server/utils/email"
 import { SpaceModel } from "@in/server/db/models/spaces"
 import { Notifications } from "@in/server/modules/notifications/notifications"
@@ -88,9 +68,9 @@ export const inviteToSpace = async (
       throw RealtimeRpcError.BadRequest
   }
 
-  // Create member and chat
+  // Create member (no chat/dialog auto-creation)
   let member = await createMember(spaceId, inviteInfo.user.id, input, context)
-  let { chat, dialog } = await createChat(inviteInfo.user.id, context)
+  // NOTE: We intentionally do not auto-create a DM chat/dialog during space invite.
 
   // Send invite
   sendInvite(inviteInfo.user, space, input, context)
@@ -108,8 +88,6 @@ export const inviteToSpace = async (
   return {
     user: Encoders.user({ user: inviteInfo.user, min: false }),
     member: Encoders.member(member),
-    chat: Encoders.chat(chat, { encodingForUserId: context.currentUserId }),
-    dialog: Encoders.dialog(dialog, { unreadCount: 0 }),
   }
 }
 
@@ -205,17 +183,6 @@ async function createMember(
   })
 
   return newMember
-}
-
-async function createChat(userId: number, context: FunctionContext): Promise<{ chat: DbChat; dialog: DbDialog }> {
-  // Create chat
-  const { chat, dialog } = await ChatModel.createUserChatAndDialog({
-    peerUserId: userId,
-    currentUserId: context.currentUserId,
-  })
-
-  // Return result
-  return { chat, dialog }
 }
 
 async function sendInvite(user: DbUser, space: DbSpace, input: InviteToSpaceInput, context: FunctionContext) {
