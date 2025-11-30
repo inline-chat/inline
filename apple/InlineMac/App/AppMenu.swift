@@ -27,6 +27,7 @@ final class AppMenu: NSObject {
     setupEditMenu()
     setupViewMenu()
     setupWindowMenu()
+    setupHelpMenu()
   }
 
   private func setupApplicationMenu() {
@@ -435,6 +436,22 @@ final class AppMenu: NSObject {
     NSApp.windowsMenu = windowMenu
   }
 
+  private func setupHelpMenu() {
+    let helpMenu = NSMenu(title: "Help")
+    let helpMenuItem = NSMenuItem(title: "Help", action: nil, keyEquivalent: "")
+    helpMenuItem.submenu = helpMenu
+    mainMenu.addItem(helpMenuItem)
+
+    let websiteItem = NSMenuItem(
+      title: "Website",
+      action: #selector(openWebsite(_:)),
+      keyEquivalent: ""
+    )
+    websiteItem.target = self
+    websiteItem.image = NSImage(systemSymbolName: "safari", accessibilityDescription: nil)
+    helpMenu.addItem(websiteItem)
+  }
+
   private var settingsWindowController: SettingsWindowController?
 
   @objc private func showPreferences(_ sender: Any?) {
@@ -480,6 +497,11 @@ final class AppMenu: NSObject {
     Task {
       await TranslationAlertDismiss.shared.resetAllDismissStates()
     }
+  }
+
+  @objc private func openWebsite(_ sender: Any?) {
+    guard let url = URL(string: "https://inline.chat") else { return }
+    NSWorkspace.shared.open(url)
   }
 
   @objc private func toggleAlwaysOnTop(_ sender: NSMenuItem) {
