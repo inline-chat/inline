@@ -104,12 +104,10 @@ describe("getChats", () => {
     const [user4, user5] = users
 
     const existingChat = (await testUtils.createPrivateChat(user4!, user5!))!
-    await db
-      .insert(schema.dialogs)
-      .values([
-        { chatId: existingChat.id, userId: user4!.id, peerUserId: user5!.id },
-        { chatId: existingChat.id, userId: user5!.id, peerUserId: user4!.id },
-      ])
+    await db.insert(schema.dialogs).values([
+      { chatId: existingChat.id, userId: user4!.id, peerUserId: user5!.id },
+      { chatId: existingChat.id, userId: user5!.id, peerUserId: user4!.id },
+    ])
 
     await getChats({}, makeHandlerContext(user4!.id))
 
@@ -313,7 +311,9 @@ describe("getChats", () => {
 
     const [user1, user2, user3] = users
 
-    await db.delete(schema.members).where(and(eq(schema.members.userId, user3.id), eq(schema.members.spaceId, space.id)))
+    await db
+      .delete(schema.members)
+      .where(and(eq(schema.members.userId, user3.id), eq(schema.members.spaceId, space.id)))
 
     await getChats({}, makeHandlerContext(user1.id))
 
