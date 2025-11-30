@@ -27,7 +27,7 @@ export const inviteToSpace = async (
   return {
     member: result.member,
     user: result.user,
-    dialog: result.dialog,
-    chat: result.chat,
+    // dialog: result.dialog,
+    // chat: result.chat,
   }
 }

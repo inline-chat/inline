@@ -140,7 +140,7 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
 
   // TEMPORARY UNTIL getChats is integrated into the clients
   // TODO: DELETE ONCE getChats is integrated into the clients) also remove the tests
-  await ensurePrivateChatsForSpaceMembers(currentUserId)
+  // await ensurePrivateChatsForSpaceMembers(currentUserId)
 
   // Buckets for results
   let dialogsList: DbDialog[] = []
