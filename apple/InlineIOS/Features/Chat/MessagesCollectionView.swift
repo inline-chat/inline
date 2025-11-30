@@ -82,6 +82,8 @@ final class MessagesCollectionView: UICollectionView {
     NotificationCenter.default.removeObserver(self)
     Log.shared.debug("CollectionView deinit")
 
+    coordinator.dispose()
+
     Task {
       await ImagePrefetcher.shared.clearCache()
     }
@@ -570,6 +572,12 @@ private extension MessagesCollectionView {
       setupNotionTaskManager()
     }
 
+    func dispose() {
+      viewModel.dispose()
+      cancellables.forEach { $0.cancel() }
+      cancellables.removeAll()
+    }
+
     private func setupNotionTaskManager() {
       NotionTaskManager.shared.delegate = self
       Task {
@@ -800,6 +808,10 @@ private extension MessagesCollectionView {
     }
 
     func updateUnreadIfNeeded() {
+      // Only mark as read when the chat is actually on-screen.
+      guard let collectionView = currentCollectionView, collectionView.window != nil else {
+        return
+      }
       UnreadManager.shared.readAll(peerId, chatId: chatId)
     }
 
