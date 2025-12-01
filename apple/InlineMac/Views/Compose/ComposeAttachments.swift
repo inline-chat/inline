@@ -4,6 +4,7 @@ import InlineKit
 class ComposeAttachments: NSView {
   private weak var compose: ComposeAppKit?
   private var attachments: [String: ImageAttachmentView] = [:]
+  private var videoAttachments: [String: VideoAttachmentView] = [:]
   private var docAttachments: [String: DocumentView] = [:]
 
   private let stackView: NSStackView
@@ -39,12 +40,12 @@ class ComposeAttachments: NSView {
 
   // Modify updateHeight to be public and return the height
   func getHeight() -> CGFloat {
-    if attachments.isEmpty, docAttachments.isEmpty {
+    if attachments.isEmpty, docAttachments.isEmpty, videoAttachments.isEmpty {
       return 0
     }
 
     let paddings = 2 * verticalPadding
-    let imagesHeight = attachments.isEmpty ? 0 : Theme.composeAttachmentImageHeight
+    let imagesHeight = (attachments.isEmpty && videoAttachments.isEmpty) ? 0 : Theme.composeAttachmentImageHeight
     let documentsHeight = docAttachments.isEmpty ? 0 : Theme.documentViewHeight * CGFloat(docAttachments.count)
     return paddings + imagesHeight + documentsHeight
   }
@@ -169,12 +170,36 @@ class ComposeAttachments: NSView {
     docAttachments.removeAll()
   }
 
-  public func addVideoView(_ videoInfo: VideoInfo) {
-    // todo
+  public func addVideoView(_ videoInfo: VideoInfo, id: String) {
+    if videoAttachments[id] != nil { return }
+
+    let thumbnail: NSImage? = {
+      guard let localPath = videoInfo.thumbnail?.sizes.first?.localPath else { return nil }
+      let url = FileHelpers.getLocalCacheDirectory(for: .photos).appendingPathComponent(localPath)
+      return NSImage(contentsOf: url)
+    }()
+
+    let videoURL: URL? = {
+      guard let localPath = videoInfo.video.localPath else { return nil }
+      return FileHelpers.getLocalCacheDirectory(for: .videos).appendingPathComponent(localPath)
+    }()
+
+    let view = VideoAttachmentView(thumbnail: thumbnail, videoURL: videoURL) { [weak self] in
+      self?.compose?.removeVideo(id)
+    }
+
+    videoAttachments[id] = view
+    stackView.addArrangedSubview(view)
+    view.fadeIn()
+    updateHeight()
   }
 
-  public func removeVideoView(_ videoInfo: VideoInfo) {
-    // todo
+  public func removeVideoView(id: String) {
+    guard let view = videoAttachments[id] else { return }
+    videoAttachments.removeValue(forKey: id)
+    stackView.removeArrangedSubview(view)
+    view.removeFromSuperview()
+    updateHeight()
   }
 
   public func clearViews(animated: Bool = false) {
@@ -184,6 +209,13 @@ class ComposeAttachments: NSView {
       value.removeFromSuperview()
     }
     attachments.removeAll()
+
+    // Clear videos
+    for (_, value) in videoAttachments {
+      stackView.removeArrangedSubview(value)
+      value.removeFromSuperview()
+    }
+    videoAttachments.removeAll()
 
     // Clear documents
     clearDocumentViews(animated: animated)
