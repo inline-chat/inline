@@ -122,8 +122,12 @@ class ComposeMenuButton: NSView {
             !panel.urls.isEmpty else { return }
 
       for url in panel.urls {
-        if let image = NSImage(contentsOf: url) {
+        let type = UTType(filenameExtension: url.pathExtension)
+        let isVideo = type?.conforms(to: .movie) == true || type?.conforms(to: .video) == true
+        if let image = NSImage(contentsOf: url), !isVideo {
           delegate?.composeMenuButton(self, didSelectImage: image, url: url)
+        } else {
+          delegate?.composeMenuButton(self, didSelectVideo: url)
         }
       }
     }
@@ -465,6 +469,7 @@ extension CameraViewController: AVCapturePhotoCaptureDelegate {
 
 protocol ComposeMenuButtonDelegate: AnyObject {
   func composeMenuButton(_ button: ComposeMenuButton, didSelectImage image: NSImage, url: URL)
+  func composeMenuButton(_ button: ComposeMenuButton, didSelectVideo url: URL)
   func composeMenuButton(_ button: ComposeMenuButton, didSelectFiles urls: [URL])
   func composeMenuButton(didCaptureImage image: NSImage)
 }
