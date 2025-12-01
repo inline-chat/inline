@@ -28,6 +28,16 @@ public enum LogLevel: String, Sendable {
       case .trace: .debug
     }
   }
+
+  var priority: Int {
+    switch self {
+      case .trace: 0
+      case .debug: 1
+      case .info: 2
+      case .warning: 3
+      case .error: 4
+    }
+  }
 }
 
 public protocol Logging {
@@ -81,6 +91,9 @@ public final class Log: @unchecked Sendable {
   ) {
     let fileName = (file as NSString).lastPathComponent
     let errorDescription = error?.localizedDescription ?? ""
+
+    // Respect the logger's configured minimum level
+    guard level.priority >= self.level.priority else { return }
 
     let logMessage: String
     let scope_ = scope
