@@ -1,5 +1,5 @@
 //
-//  MainWindowBg.swift
+//  MainWindowView.swift
 //  Inline
 //
 //  Created by Mohammad Rajabifard on 10/19/25.
@@ -10,7 +10,6 @@ import AppKit
 class MainWindowView: NSViewController {
   override func loadView() {
     view = MainWindowBg()
-    //view.translatesAutoresizingMaskIntoConstraints = false
   }
 
   private var currentViewController: NSViewController?
@@ -30,5 +29,6 @@ class MainWindowView: NSViewController {
       viewController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
       viewController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
     ])
+    currentViewController = viewController
   }
 }
