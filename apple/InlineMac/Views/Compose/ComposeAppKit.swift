@@ -672,6 +672,43 @@ class ComposeAppKit: NSView {
     attachmentItems.removeValue(forKey: id)
   }
 
+  private func isVideoFile(_ url: URL) -> Bool {
+    let ext = url.pathExtension.lowercased()
+    return ["mp4", "mov", "m4v", "avi", "mkv", "webm"].contains(ext)
+  }
+
+  private func loadThumbnail(from photoInfo: PhotoInfo?) -> NSImage? {
+    guard let localPath = photoInfo?.sizes.first?.localPath else { return nil }
+    let url = FileHelpers.getLocalCacheDirectory(for: .photos).appendingPathComponent(localPath)
+    return NSImage(contentsOf: url)
+  }
+
+  func addVideo(_ url: URL, thumbnail: NSImage? = nil) {
+    do {
+      let videoInfo = try FileCache.saveVideo(url: url, thumbnail: thumbnail)
+      let mediaItem = FileMediaItem.video(videoInfo)
+      let uniqueId = mediaItem.getItemUniqueId()
+
+      attachments.addVideoView(videoInfo, id: uniqueId)
+      // ensure a thumbnail is visible if we generated one after saving
+      if videoInfo.thumbnail != nil {
+        attachments.removeVideoView(id: uniqueId)
+        attachments.addVideoView(videoInfo, id: uniqueId)
+      }
+
+      attachmentItems[uniqueId] = mediaItem
+      updateHeight(animate: true)
+    } catch {
+      Log.shared.error("Failed to save video in attachments", error: error)
+    }
+  }
+
+  func removeVideo(_ id: String) {
+    attachments.removeVideoView(id: id)
+    attachmentItems.removeValue(forKey: id)
+    updateHeight(animate: true)
+  }
+
   func addFile(_ url: URL) {
     do {
       let documentInfo = try FileCache.saveDocument(url: url)
@@ -936,7 +973,11 @@ class ComposeAppKit: NSView {
 extension ComposeAppKit {
   func handleFileDrop(_ urls: [URL]) {
     for url in urls {
-      addFile(url)
+      if isVideoFile(url) {
+        addVideo(url)
+      } else {
+        addFile(url)
+      }
     }
   }
 
@@ -1013,8 +1054,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func textView(_ textView: NSTextView, didReceiveVideo url: URL) {
-    // TODO: Handle video
-    handleFileDrop([url])
+    addVideo(url)
   }
 
   /// Note(@mo): User reported Chinese users still see the placeholder when they start typing in Chinese characters.
@@ -1181,6 +1221,10 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
 extension ComposeAppKit: ComposeMenuButtonDelegate {
   func composeMenuButton(_ button: ComposeMenuButton, didSelectImage image: NSImage, url: URL) {
     handleImageDropOrPaste(image, url)
+  }
+
+  func composeMenuButton(_ button: ComposeMenuButton, didSelectVideo url: URL) {
+    addVideo(url)
   }
 
   func composeMenuButton(_ button: ComposeMenuButton, didSelectFiles urls: [URL]) {
