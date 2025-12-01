@@ -5,7 +5,7 @@ import Logger
 import Observation
 
 class MainSidebarItemCell: NSView {
-  typealias ScrollEvent = MainSidebarAppKit.ScrollEvent
+  typealias ScrollEvent = MainSidebarList.ScrollEvent
 
   private var dependencies: AppDependencies?
   private var nav2: Nav2?
@@ -336,7 +336,6 @@ class MainSidebarItemCell: NSView {
       self?.handleScrollEvent(event)
     }
     .store(in: &cancellables)
-
   }
 
   private func handleScrollEvent(_ event: ScrollEvent) {
@@ -435,19 +434,19 @@ class MainSidebarItemCell: NSView {
   private func title(for kind: MainSidebarItemCollectionViewItem.Content.Kind) -> String {
     switch kind {
       case let .chat(chatItem):
-        return chatItem.user?.user.firstName ??
+        chatItem.user?.user.firstName ??
           chatItem.user?.user.lastName ??
           chatItem.user?.user.username ??
           chatItem.chat?.title ??
           chatItem.space?.displayName ??
           "Chat"
       case let .member(_, user):
-        return user?.user.firstName ??
+        user?.user.firstName ??
           user?.user.lastName ??
           user?.user.username ??
           "Member"
       case let .header(title, _):
-        return title
+        title
     }
   }
 

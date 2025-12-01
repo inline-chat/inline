@@ -3,19 +3,15 @@ import Combine
 import InlineKit
 import Observation
 
-class MainSidebarAppKit: NSViewController {
+class MainSidebarList: NSView {
   private let dependencies: AppDependencies
-  private var homeViewModel: HomeViewModel
-  private var nav2: Nav2?
-  private var cancellables = Set<AnyCancellable>()
+  private let homeViewModel: HomeViewModel
 
-  private static let itemHeight: CGFloat = 34
+  private static let itemHeight: CGFloat = 32
   private static let itemSpacing: CGFloat = 1
   private static let contentInsetTop: CGFloat = 0
   private static let contentInsetBottom: CGFloat = 8
-  // private static let contentInsetLeading: CGFloat = 6
   private static let contentInsetLeading: CGFloat = 8
-  // private static let contentInsetTrailing: CGFloat = 6
   private static let contentInsetTrailing: CGFloat = 8
 
   enum Section: Hashable {
@@ -30,27 +26,21 @@ class MainSidebarAppKit: NSViewController {
     case member(Member.ID)
   }
 
+  enum ScrollEvent {
+    case didLiveScroll
+    case didEndLiveScroll
+  }
+
   private var dataSource: NSCollectionViewDiffableDataSource<Section, Item>!
   private var previousItemsByID: [Item: AnyHashable] = [:]
   private var currentSections: [Section] = []
   private var chatByID: [HomeChatItem.ID: HomeChatItem] = [:]
   private var memberByID: [Member.ID: Member] = [:]
   private var memberUserCancellables = Set<AnyCancellable>()
+  private var cancellables = Set<AnyCancellable>()
+  private var scrollEventsSubject = PassthroughSubject<ScrollEvent, Never>()
 
-  init(dependencies: AppDependencies) {
-    self.dependencies = dependencies
-    nav2 = dependencies.nav2
-    homeViewModel = HomeViewModel(
-      db: dependencies.database
-    )
-
-    super.init(nibName: nil, bundle: nil)
-  }
-
-  @available(*, unavailable)
-  required init?(coder _: NSCoder) {
-    fatalError("init(coder:) has not been implemented")
-  }
+  private var nav2: Nav2? { dependencies.nav2 }
 
   lazy var collectionView: NSCollectionView = {
     let collectionView = NSCollectionView()
@@ -76,60 +66,40 @@ class MainSidebarAppKit: NSViewController {
     return scrollView
   }()
 
-  enum ScrollEvent {
-    case didLiveScroll
-    case didEndLiveScroll
-  }
+  init(dependencies: AppDependencies) {
+    self.dependencies = dependencies
+    homeViewModel = HomeViewModel(
+      db: dependencies.database
+    )
 
-  private var scrollEventsSubject = PassthroughSubject<ScrollEvent, Never>()
+    super.init(frame: .zero)
+    translatesAutoresizingMaskIntoConstraints = false
 
-  // Header
-  private lazy var headerStack: NSStackView = {
-    let stack = NSStackView()
-    stack.orientation = .horizontal
-    stack.alignment = .centerY
-    stack.distribution = .fill
-    stack.spacing = 6
-    stack.translatesAutoresizingMaskIntoConstraints = false
-    return stack
-  }()
-
-  private lazy var titleLabel: NSTextField = {
-    let label = NSTextField(labelWithString: "")
-    label.font = .systemFont(ofSize: 13, weight: .semibold)
-    label.textColor = .secondaryLabelColor
-    label.lineBreakMode = .byTruncatingTail
-    label.translatesAutoresizingMaskIntoConstraints = false
-    return label
-  }()
-
-  private var headerTopConstraint: NSLayoutConstraint?
-
-  override func loadView() {
-    view = NSView()
-    view.translatesAutoresizingMaskIntoConstraints = false
-    view.wantsLayer = true
     setupViews()
     setupNotifications()
+    setupDataSource()
+    bindHomeViewModel()
+    observeNav()
+    applySnapshot(animated: false)
+  }
+
+  @available(*, unavailable)
+  required init?(coder _: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  deinit {
+    NotificationCenter.default.removeObserver(self)
   }
 
   private func setupViews() {
-    headerStack.addArrangedSubview(titleLabel)
-
-    view.addSubview(headerStack)
-    view.addSubview(scrollView)
-
-    headerTopConstraint = headerStack.topAnchor.constraint(equalTo: view.topAnchor, constant: headerTopInset())
+    addSubview(scrollView)
 
     NSLayoutConstraint.activate([
-      headerStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-      headerStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-      headerTopConstraint!,
-
-      scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-      scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-      scrollView.topAnchor.constraint(equalTo: headerStack.bottomAnchor, constant: 6),
-      scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+      scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      scrollView.topAnchor.constraint(equalTo: topAnchor),
+      scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
   }
 
@@ -160,31 +130,14 @@ class MainSidebarAppKit: NSViewController {
     let sectionProvider: NSCollectionViewCompositionalLayoutSectionProvider = { [weak self] sectionIndex, _ in
       guard
         let self,
-        sectionIndex < self.currentSections.count
+        sectionIndex < currentSections.count
       else { return nil }
 
-      let sectionKind = self.currentSections[sectionIndex]
-      return self.layout(for: sectionKind)
+      let sectionKind = currentSections[sectionIndex]
+      return layout(for: sectionKind)
     }
 
     return NSCollectionViewCompositionalLayout(sectionProvider: sectionProvider)
-  }
-
-  override func viewDidLoad() {
-    super.viewDidLoad()
-
-    setupDataSource()
-
-    homeViewModel.$myChats
-      .receive(on: DispatchQueue.main)
-      .sink { [weak self] _ in
-        self?.applySnapshot()
-      }
-      .store(in: &cancellables)
-
-    observeNav()
-    updateTitle()
-    applySnapshot(animated: false)
   }
 
   private func setupDataSource() {
@@ -203,7 +156,7 @@ class MainSidebarAppKit: NSViewController {
         for: indexPath
       ) as? MainSidebarItemCollectionViewItem
 
-      if let content = self.content(for: itemID) {
+      if let content = content(for: itemID) {
         cellItem?.configure(
           with: content,
           dependencies: dependencies,
@@ -215,6 +168,15 @@ class MainSidebarAppKit: NSViewController {
     }
 
     applySnapshot(animated: false)
+  }
+
+  private func bindHomeViewModel() {
+    homeViewModel.$myChats
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] _ in
+        self?.applySnapshot()
+      }
+      .store(in: &cancellables)
   }
 
   private func applySnapshot(animated: Bool = true) {
@@ -296,8 +258,8 @@ class MainSidebarAppKit: NSViewController {
         memberByID: [:],
         valuesByItem: Dictionary(uniqueKeysWithValues: defaultItems.compactMap { item in
           switch item {
-            case let .chat(id): return (item, defaultChatMap[id] as AnyHashable? ?? "" as AnyHashable)
-            default: return nil
+            case let .chat(id): (item, defaultChatMap[id] as AnyHashable? ?? "" as AnyHashable)
+            default: nil
           }
         })
       )
@@ -315,8 +277,8 @@ class MainSidebarAppKit: NSViewController {
           memberByID: [:],
           valuesByItem: Dictionary(uniqueKeysWithValues: items.compactMap { item in
             switch item {
-              case let .chat(id): return (item, chatMap[id] as AnyHashable? ?? "" as AnyHashable)
-              default: return nil
+              case let .chat(id): (item, chatMap[id] as AnyHashable? ?? "" as AnyHashable)
+              default: nil
             }
           })
         )
@@ -332,14 +294,14 @@ class MainSidebarAppKit: NSViewController {
         let memberMap = Dictionary(uniqueKeysWithValues: spaceMembers.map { ($0.id, $0) })
 
         var values: [Item: AnyHashable] = [:]
-        threadItems.forEach { item in
+        for item in threadItems {
           switch item {
             case let .chat(cid): values[item] = chatMap[cid]
             case let .header(section): values[item] = "header-\(section)" as AnyHashable
             default: break
           }
         }
-        memberItems.forEach { item in
+        for item in memberItems {
           switch item {
             case let .member(mid): values[item] = memberMap[mid]
             case let .header(section): values[item] = "header-\(section)" as AnyHashable
@@ -390,30 +352,24 @@ class MainSidebarAppKit: NSViewController {
 
     withObservationTracking { [weak self] in
       guard let self else { return }
-      _ = self.nav2?.activeTab
-      _ = self.nav2?.tabs
+      _ = nav2?.activeTab
+      _ = nav2?.tabs
     } onChange: { [weak self] in
       Task { @MainActor [weak self] in
-        self?.updateTitle()
         self?.applySnapshot()
         self?.observeNav()
       }
     }
   }
 
-  private func updateTitle() {
-    let title = nav2?.activeTab.tabTitle ?? "Home"
-    titleLabel.stringValue = title
-  }
-
   private func value(for item: Item) -> AnyHashable? {
     switch item {
       case let .chat(id):
-        return chatByID[id]
+        chatByID[id]
       case let .member(id):
-        return memberByID[id]
+        memberByID[id]
       case let .header(section):
-        return "header-\(section)" as AnyHashable
+        "header-\(section)" as AnyHashable
     }
   }
 
@@ -455,18 +411,5 @@ class MainSidebarAppKit: NSViewController {
         }
         .store(in: &memberUserCancellables)
     }
-  }
-
-  private func headerTopInset() -> CGFloat {
-    if let window = view.window, window.styleMask.contains(.fullSizeContentView) {
-      // Leave room for traffic lights when content is full-height.
-      return 40
-    }
-    return 8
-  }
-
-  override func viewDidLayout() {
-    super.viewDidLayout()
-    headerTopConstraint?.constant = headerTopInset()
   }
 }
