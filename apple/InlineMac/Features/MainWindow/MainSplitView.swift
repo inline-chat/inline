@@ -53,8 +53,6 @@ class MainSplitView: NSViewController {
     tabsArea.wantsLayer = true
     contentArea.wantsLayer = true
 
-//    tabsArea.layer?.backgroundColor = NSColor.controlBackgroundColor
-//      .withAlphaComponent(0.4).cgColor
     tabsArea.layer?.backgroundColor = .clear
     sideArea.layer?.backgroundColor = .clear
     contentArea.layer?.backgroundColor = NSColor.controlBackgroundColor
