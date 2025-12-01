@@ -1,6 +1,7 @@
 import Foundation
 import Logger
 import Nuke
+import AVFoundation
 
 #if os(iOS)
 import UIKit
@@ -346,8 +347,53 @@ public actor FileCache: Sendable {
     return photoInfo
   }
 
-  public static func saveVideo() throws -> InlineKit.VideoInfo {
-    fatalError("Not implemented")
+  public static func saveVideo(url: URL, thumbnail: PlatformImage? = nil) throws -> InlineKit.VideoInfo {
+    let asset = AVURLAsset(url: url)
+
+    // Dimensions
+    let track = asset.tracks(withMediaType: .video).first
+    let naturalSize = track?.naturalSize.applying(track?.preferredTransform ?? .identity) ?? .zero
+    let width = Int(abs(naturalSize.width.rounded()))
+    let height = Int(abs(naturalSize.height.rounded()))
+
+    // Duration in seconds
+    let durationSeconds = Int(CMTimeGetSeconds(asset.duration).rounded())
+
+    // Persist the video to app cache
+    let directory = FileHelpers.getLocalCacheDirectory(for: .videos)
+    let fileManager = FileManager.default
+    let fileExtension = url.pathExtension.isEmpty ? "mp4" : url.pathExtension
+    let localPath = UUID().uuidString + "." + fileExtension
+    let localUrl = directory.appendingPathComponent(localPath)
+
+    // Handle security scoped URL if needed
+    let hasAccess = url.startAccessingSecurityScopedResource()
+    defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
+
+    try fileManager.copyItem(at: url, to: localUrl)
+    let fileSize = FileHelpers.getFileSize(at: localUrl)
+
+    // Generate or reuse thumbnail
+    let thumbImage: PlatformImage? = if let thumbnail {
+      thumbnail
+    } else {
+      try? generateThumbnailImage(from: asset)
+    }
+
+    let thumbnailInfo: PhotoInfo? = if let image = thumbImage {
+      try? savePhoto(image: image, preferredFormat: .jpeg)
+    } else { nil }
+
+    let video = try MediaHelpers.shared.createLocalVideo(
+      width: width,
+      height: height,
+      duration: durationSeconds,
+      size: fileSize,
+      thumbnail: thumbnailInfo?.photo,
+      localPath: localPath
+    )
+
+    return VideoInfo(video: video, photoInfo: thumbnailInfo)
   }
 
   public static func saveDocument(url: URL) throws -> InlineKit.DocumentInfo {
@@ -388,6 +434,21 @@ enum FileCacheError: Error {
   case failedToSave
   case failedToFetch
   case failedToRemove
+}
+
+// MARK: - Video helpers
+
+private func generateThumbnailImage(from asset: AVAsset) throws -> PlatformImage {
+  let imageGenerator = AVAssetImageGenerator(asset: asset)
+  imageGenerator.appliesPreferredTrackTransform = true
+  let time = CMTime(seconds: min(1.0, CMTimeGetSeconds(asset.duration)), preferredTimescale: 600)
+  let cgImage = try imageGenerator.copyCGImage(at: time, actualTime: nil)
+
+  #if os(iOS)
+  return UIImage(cgImage: cgImage)
+  #else
+  return NSImage(cgImage: cgImage, size: .zero)
+  #endif
 }
 
 // MARK: - Clear Cache

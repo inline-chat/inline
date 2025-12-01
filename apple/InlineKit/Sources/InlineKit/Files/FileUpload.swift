@@ -159,8 +159,43 @@ public actor FileUploader {
   public func uploadVideo(
     videoInfo: VideoInfo
   ) async throws -> Int64 {
-    // todo
-    0
+    guard let localPath = videoInfo.video.localPath else {
+      throw FileUploadError.invalidVideo
+    }
+
+    let localUrl = FileHelpers.getLocalCacheDirectory(for: .videos).appendingPathComponent(localPath)
+    let fileName = localUrl.lastPathComponent
+    let mimeType = MIMEType(text: FileHelpers.getMimeType(for: localUrl))
+
+    let uploadId = getUploadId(videoId: videoInfo.video.id!)
+
+    if let handler = progressHandlers[uploadId] {
+      Task { @MainActor in
+        await MainActor.run {
+          handler(-1)
+        }
+      }
+    }
+
+    let thumbnailPayload = try? thumbnailData(from: videoInfo.thumbnail)
+    let videoMetadata = ApiClient.VideoUploadMetadata(
+      width: videoInfo.video.width ?? 0,
+      height: videoInfo.video.height ?? 0,
+      duration: videoInfo.video.duration ?? 0,
+      thumbnail: thumbnailPayload?.0,
+      thumbnailMimeType: thumbnailPayload?.1
+    )
+
+    try startUpload(
+      media: .video(videoInfo),
+      localUrl: localUrl,
+      mimeType: mimeType.text,
+      fileName: fileName,
+      videoMetadata: videoMetadata
+    )
+
+    guard let localVideoId = videoInfo.video.id else { throw FileUploadError.invalidVideoId }
+    return localVideoId
   }
 
   public func uploadDocument(
@@ -191,7 +226,8 @@ public actor FileUploader {
     localUrl: URL,
     mimeType: String,
     fileName: String,
-    priority: TaskPriority = .userInitiated
+    priority: TaskPriority = .userInitiated,
+    videoMetadata: ApiClient.VideoUploadMetadata? = nil
   ) throws {
     let type: MessageFileType
     let uploadId: String
@@ -220,9 +256,7 @@ public actor FileUploader {
       return 
     }
 
-    let task = Task<UploadResult, any Error>(priority: priority) { [weak self] in
-      guard let self else { throw FileUploadError.uploadCancelled }
-
+    let task = Task<UploadResult, any Error>(priority: priority) {
       Log.shared.debug("[FileUploader] Starting upload for \(uploadId)")
 
       // Compress image if it's a photo
@@ -246,16 +280,16 @@ public actor FileUploader {
       let data = try Data(contentsOf: uploadUrl)
 
       // upload file with progress tracking
+      let progressHandler = FileUploader.progressHandler(for: uploadId)
+
       let result = try await ApiClient.shared.uploadFile(
         type: type,
         data: data,
         filename: fileName,
-        mimeType: MIMEType(text: mimeType)
-      ) { [weak self] progress in
-        Task { [weak self] in
-          await self?.updateProgress(uploadId: uploadId, progress: progress)
-        }
-      }
+        mimeType: MIMEType(text: mimeType),
+        videoMetadata: videoMetadata,
+        progress: progressHandler
+      )
 
       // TODO: Set compressed file in db if it was created
 
@@ -345,6 +379,12 @@ public actor FileUploader {
             try AppDatabase.updateVideoWithServerId(db, localVideo: videoInfo.video, serverId: serverId)
           }
         }
+
+        if let serverThumbId = result.photoId, let localThumb = videoInfo.thumbnail?.photo {
+          try await AppDatabase.shared.dbWriter.write { db in
+            try AppDatabase.updatePhotoWithServerId(db, localPhoto: localThumb, serverId: serverThumbId)
+          }
+        }
       case let .document(documentInfo):
         if let serverId = result.documentId {
           try await AppDatabase.shared.dbWriter.write { db in
@@ -370,6 +410,27 @@ public actor FileUploader {
 
   private func getUploadId(documentId: Int64) -> String {
     "document_\(documentId)"
+  }
+
+  // Nonisolated helper so progress closures don't capture actor-isolated state
+  nonisolated static func progressHandler(for uploadId: String) -> @Sendable (Double) -> Void {
+    return { progress in
+      Task {
+        await FileUploader.shared.updateProgress(uploadId: uploadId, progress: progress)
+      }
+    }
+  }
+
+  private func thumbnailData(from photoInfo: PhotoInfo?) throws -> (Data, MIMEType)? {
+    guard
+      let photoInfo,
+      let localPath = photoInfo.sizes.first?.localPath
+    else { return nil }
+
+    let url = FileHelpers.getLocalCacheDirectory(for: .photos).appendingPathComponent(localPath)
+    let data = try Data(contentsOf: url)
+    let mimeType = MIMEType(text: FileHelpers.getMimeType(for: url))
+    return (data, mimeType)
   }
 
   // MARK: - Wait for Upload
