@@ -61,7 +61,7 @@ final class TabSurfaceButton: NSControl {
 
   override func hitTest(_ point: NSPoint) -> NSView? {
     // Route interactions to the control itself to avoid window-drag hits on subviews.
-    return bounds.contains(point) ? self : nil
+    bounds.contains(point) ? self : nil
   }
 
   override var intrinsicContentSize: NSSize {
@@ -104,7 +104,7 @@ final class TabSurfaceButton: NSControl {
 
   override func mouseUp(with event: NSEvent) {
     let containsPoint = bounds.contains(convert(event.locationInWindow, from: nil))
-    if isPressed && containsPoint {
+    if isPressed, containsPoint {
       onTap?()
       sendAction(action, to: target)
     }
@@ -117,8 +117,4 @@ final class TabSurfaceButton: NSControl {
     let base = isPressed ? 0.22 : (isHovered ? 0.15 : 0.0)
     layer?.backgroundColor = NSColor.systemGray.withAlphaComponent(base).cgColor
   }
-}
-
-private final class NonDraggableImageView: NSImageView {
-  override var mouseDownCanMoveWindow: Bool { false }
 }
