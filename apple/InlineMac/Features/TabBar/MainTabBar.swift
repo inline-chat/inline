@@ -7,6 +7,12 @@ private final class TabBarContainerView: NSView {
   override var mouseDownCanMoveWindow: Bool { true }
 }
 
+private final class ShrinkingFlowLayout: NSCollectionViewFlowLayout {
+  override func shouldInvalidateLayout(forBoundsChange _: NSRect) -> Bool {
+    true
+  }
+}
+
 private final class TabBarCollectionView: NSCollectionView {
   override var mouseDownCanMoveWindow: Bool { false }
 
@@ -18,7 +24,6 @@ private final class TabBarCollectionView: NSCollectionView {
 }
 
 struct TabModel: Hashable {
-  let id: UUID = .init()
   let icon: String
   let title: String
 }
@@ -27,7 +32,9 @@ class MainTabBar: NSViewController {
   private let tabHeight: CGFloat = Theme.tabBarItemHeight
   private let tabWidth: CGFloat = 120
   private let homeTabWidth: CGFloat = 50
+  private let baseTabSpacing: CGFloat = Theme.tabBarItemInset
   private let iconSize: CGFloat = 22
+  private var currentScale: CGFloat = 1
 
   private var topGap: CGFloat {
     Theme.tabBarHeight - tabHeight
@@ -63,9 +70,9 @@ class MainTabBar: NSViewController {
     let containerView = TabBarContainerView()
     containerView.wantsLayer = true
 
-    let layout = NSCollectionViewFlowLayout()
+    let layout = ShrinkingFlowLayout()
     layout.scrollDirection = .horizontal
-    layout.minimumInteritemSpacing = Theme.tabBarItemInset // Matches the inset for hovered
+    layout.minimumInteritemSpacing = baseTabSpacing // Matches the inset for hovered
     layout.sectionInset = NSEdgeInsets(top: topGap, left: 0, bottom: 0, right: 40)
 
     collectionView = TabBarCollectionView()
@@ -122,6 +129,27 @@ class MainTabBar: NSViewController {
     super.viewDidLoad()
     collectionView.reloadData()
     selectActiveTab()
+  }
+
+  override func viewDidLayout() {
+    super.viewDidLayout()
+    updateLayoutForCurrentWidth()
+    collectionView.collectionViewLayout?.invalidateLayout()
+  }
+
+  private func updateLayoutForCurrentWidth() {
+    guard let layout = collectionView.collectionViewLayout as? NSCollectionViewFlowLayout else { return }
+    let availableWidth = max(
+      collectionView.bounds.width - layout.sectionInset.left - layout.sectionInset.right,
+      1
+    )
+    let scale = layoutScale(forAvailableWidth: availableWidth)
+    currentScale = scale
+    layout.minimumInteritemSpacing = baseTabSpacing * scale
+
+    // Force relayout so the delegate size calculation re-runs after space changes.
+    collectionView.collectionViewLayout?.invalidateLayout()
+    collectionView.collectionViewLayout?.prepare()
   }
 
   private func setupObservers() {
@@ -273,11 +301,11 @@ class MainTabBar: NSViewController {
     // Refresh spaces from backend in the background
     Task.detached { [weak self] in
       guard let deps = self?.dependencies else { return }
-      try? await deps.data.getSpaces()
+      _ = try? await deps.data.getSpaces()
     }
 
     // Show the menu just below the button so it doesn't cover it
-    let location = NSPoint(x: 0, y: -4)
+    let location = NSPoint(x: 0, y: -10)
     menu.popUp(positioning: nil, at: location, in: anchor)
   }
 
@@ -364,6 +392,7 @@ extension MainTabBar: NSCollectionViewDataSource {
     item.configure(
       with: tab,
       iconSize: iconSize,
+      scale: currentScale,
       selected: selected,
       closable: closable,
       iconImage: iconImage
@@ -389,8 +418,39 @@ extension MainTabBar: NSCollectionViewDelegateFlowLayout {
     layout _: NSCollectionViewLayout,
     sizeForItemAt indexPath: IndexPath
   ) -> NSSize {
+    guard indexPath.item < nav2.tabs.count else { return NSSize(width: 0, height: tabHeight) }
     let tabId = nav2.tabs[indexPath.item]
-    let width = tabId == .home ? homeTabWidth : tabWidth
-    return NSSize(width: width, height: tabHeight)
+    let baseWidth = tabId == .home ? homeTabWidth : tabWidth
+
+    guard let layout = collectionView.collectionViewLayout as? NSCollectionViewFlowLayout else {
+      return NSSize(width: baseWidth, height: tabHeight)
+    }
+
+    // Available width within the collection view’s content area.
+    let availableWidth = max(
+      collectionView.bounds.width - layout.sectionInset.left - layout.sectionInset.right,
+      1
+    )
+
+    let scale = layoutScale(forAvailableWidth: availableWidth)
+    currentScale = scale
+    let scaledWidth = floor(baseWidth * scale)
+
+    return NSSize(width: scaledWidth, height: tabHeight)
+  }
+
+  private func layoutScale(forAvailableWidth availableWidth: CGFloat) -> CGFloat {
+    let tabCount = CGFloat(nav2.tabs.count)
+    guard tabCount > 0 else { return 1 }
+
+    let baseSpacingTotal = baseTabSpacing * max(0, tabCount - 1)
+    let baseWidthTotal = CGFloat(nav2.tabs.reduce(0) { sum, tab in
+      sum + (tab == .home ? homeTabWidth : tabWidth)
+    })
+
+    let denominator = baseWidthTotal + baseSpacingTotal
+    guard denominator > 0 else { return 1 }
+
+    return min(1, availableWidth / denominator)
   }
 }
