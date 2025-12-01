@@ -70,6 +70,25 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   public init() {}
 
   private let log = Log.scoped("ApiClient")
+  private final class UploadTaskDelegate: NSObject, URLSessionTaskDelegate {
+    private let progressHandler: (Double) -> Void
+
+    init(progressHandler: @escaping (Double) -> Void) {
+      self.progressHandler = progressHandler
+    }
+
+    func urlSession(
+      _ session: URLSession,
+      task: URLSessionTask,
+      didSendBodyData bytesSent: Int64,
+      totalBytesSent: Int64,
+      totalBytesExpectedToSend: Int64
+    ) {
+      guard totalBytesExpectedToSend > 0 else { return }
+      let fraction = Double(totalBytesSent) / Double(totalBytesExpectedToSend)
+      progressHandler(min(max(fraction, 0), 1))
+    }
+  }
 
   public static let serverURL: String = {
     if ProjectConfig.useProductionApi {
@@ -603,11 +622,28 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     )
   }
 
+  public struct VideoUploadMetadata {
+    public let width: Int
+    public let height: Int
+    public let duration: Int
+    public let thumbnail: Data?
+    public let thumbnailMimeType: MIMEType?
+
+    public init(width: Int, height: Int, duration: Int, thumbnail: Data?, thumbnailMimeType: MIMEType?) {
+      self.width = width
+      self.height = height
+      self.duration = duration
+      self.thumbnail = thumbnail
+      self.thumbnailMimeType = thumbnailMimeType
+    }
+  }
+
   public func uploadFile(
     type: MessageFileType,
     data: Data,
     filename: String,
     mimeType: MIMEType,
+    videoMetadata: VideoUploadMetadata? = nil,
     progress: @escaping (Double) -> Void
   ) async throws -> UploadFileResult {
     guard let url = URL(string: "\(baseURL)/uploadFile") else {
@@ -616,35 +652,64 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
     log.debug("[uploadFile] Uploading a file with type \(type) and filename \(filename) with size \(data.count) bytes")
 
+    var fields: [(name: String, filename: String?, mimeType: MIMEType?, data: Data)] = [
+      (
+        name: "type",
+        filename: nil,
+        mimeType: nil,
+        data: type.rawValue.data(using: .utf8)!
+      ),
+      (
+        name: "file",
+        filename: filename,
+        mimeType: mimeType,
+        data: data
+      ),
+    ]
+
+    if let videoMetadata {
+      fields.append(contentsOf: [
+        (name: "width", filename: nil, mimeType: nil, data: "\(videoMetadata.width)".data(using: .utf8)!),
+        (name: "height", filename: nil, mimeType: nil, data: "\(videoMetadata.height)".data(using: .utf8)!),
+        (name: "duration", filename: nil, mimeType: nil, data: "\(videoMetadata.duration)".data(using: .utf8)!),
+      ])
+
+      if let thumb = videoMetadata.thumbnail, let thumbMime = videoMetadata.thumbnailMimeType {
+        let thumbFilename: String = {
+          let mime = thumbMime.text.lowercased()
+          if mime.contains("png") { return "thumbnail.png" }
+          if mime.contains("gif") { return "thumbnail.gif" }
+          return "thumbnail.jpg"
+        }()
+
+        fields.append((
+          name: "thumbnail",
+          filename: thumbFilename,
+          mimeType: thumbMime,
+          data: thumb
+        ))
+      }
+    }
+
     let multipartFormData = try MultipartFormData.Builder.build(
-      with: [
-        (
-          name: "type",
-          filename: nil,
-          mimeType: nil,
-          data: type.rawValue.data(using: .utf8)!
-        ),
-        (
-          name: "file",
-          filename: filename,
-          mimeType: mimeType,
-          data: data
-        ),
-      ],
+      with: fields,
       willSeparateBy: RandomBoundaryGenerator.generate()
     )
 
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
     request.setValue(multipartFormData.contentType, forHTTPHeaderField: "Content-Type")
-    request.httpBody = multipartFormData.body
 
     if let token = Auth.shared.getToken() {
       request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
 
     do {
-      let (data, response) = try await URLSession.shared.data(for: request)
+      let delegate = UploadTaskDelegate(progressHandler: progress)
+      let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+      defer { session.invalidateAndCancel() }
+      progress(0)
+      let (data, response) = try await session.upload(for: request, from: multipartFormData.body)
 
       guard let httpResponse = response as? HTTPURLResponse else {
         throw APIError.invalidResponse
@@ -655,6 +720,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
           let apiResponse = try decoder.decode(APIResponse<UploadFileResult>.self, from: data)
           switch apiResponse {
             case let .success(data):
+              progress(1)
               return data
             case let .error(error, errorCode, description):
               log.error("Error \(error): \(description ?? "")")

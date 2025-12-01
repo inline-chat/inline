@@ -28,9 +28,9 @@ export const Input = Type.Object({
   ),
 
   // For videos
-  width: Optional(Type.Number()),
-  height: Optional(Type.Number()),
-  duration: Optional(Type.Number()),
+  width: Optional(Type.String()),
+  height: Optional(Type.String()),
+  duration: Optional(Type.String()),
 
   // For documents
   // photoId: Optional(Type.Number()),
@@ -51,31 +51,44 @@ const handler = async (input: Static<typeof Input>, context: HandlerContext): Pr
       userId: context.currentUserId,
     })
 
+    const width = input.width ? parseInt(input.width) : undefined
+    const height = input.height ? parseInt(input.height) : undefined
+    const duration = input.duration ? parseInt(input.duration) : undefined
+
     // Validate video metadata if present
     if (input.type === FileTypes.VIDEO) {
-      if (!input.width || !input.height || !input.duration) {
+      if (!width || !height || !duration) {
         log.error("Missing video metadata", {
-          hasWidth: !!input.width,
-          hasHeight: !!input.height,
-          hasDuration: !!input.duration,
+          hasWidth: !!width,
+          hasHeight: !!height,
+          hasDuration: !!duration,
         })
         throw new Error("Missing required video metadata")
       }
     }
 
     let result: UploadFileResult
+    let videoThumbnailId: number | undefined
+
     try {
       switch (input.type) {
         case FileTypes.PHOTO:
           result = await uploadPhoto(input.file, { userId: context.currentUserId })
           break
         case FileTypes.VIDEO:
+          // Upload optional thumbnail first so we can associate it with the video row
+          if (input.thumbnail) {
+            const thumbResult = await uploadPhoto(input.thumbnail, { userId: context.currentUserId })
+            videoThumbnailId = thumbResult.photoId
+          }
+
           result = await uploadVideo(
             input.file,
             {
-              width: input.width ?? 1280,
-              height: input.height ?? 720,
-              duration: input.duration ?? 0,
+              width: width ?? 1280,
+              height: height ?? 720,
+              duration: duration ?? 0,
+              photoId: videoThumbnailId ? BigInt(videoThumbnailId) : undefined,
             },
             { userId: context.currentUserId },
           )
@@ -97,7 +110,7 @@ const handler = async (input: Static<typeof Input>, context: HandlerContext): Pr
 
     return {
       fileUniqueId: result.fileUniqueId,
-      photoId: result.photoId,
+      photoId: videoThumbnailId ?? result.photoId,
       videoId: result.videoId,
       documentId: result.documentId,
     }
