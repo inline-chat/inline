@@ -126,7 +126,7 @@ struct Nav2Entry: Codable {
 
   init() {
     // UNCOMMENT THIS WHEN WE HAVE A PERSISTENT STATE
-    // loadState()
+    loadState()
   }
 
   // File URL for persistence
