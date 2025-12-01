@@ -29,7 +29,7 @@ class MainSidebarItemCollectionViewItem: NSCollectionViewItem {
   func configure(
     with item: Content,
     dependencies: AppDependencies,
-    events: PassthroughSubject<MainSidebarAppKit.ScrollEvent, Never>
+    events: PassthroughSubject<MainSidebarList.ScrollEvent, Never>
   ) {
     cellView?.configure(
       with: item,
