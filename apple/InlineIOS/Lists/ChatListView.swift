@@ -45,6 +45,12 @@ struct ChatListView: View {
       List {
         ForEach(items, id: \.id) { item in
           chatRow(for: item)
+            .listRowInsets(EdgeInsets(
+              top: 8,
+              leading: 16,
+              bottom: 8,
+              trailing: 16
+            ))
         }
       }
       .listStyle(.plain)
