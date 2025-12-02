@@ -22,7 +22,7 @@ struct NotificationSettingsButton: View {
               }
             }
         }
-        .themedSheet()
+          
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
       }
@@ -60,7 +60,7 @@ struct NotificationSettingsButton: View {
       VStack(alignment: .leading, spacing: 4) {
         Text("Control how you receive notifications")
           .font(.subheadline)
-          .themedSecondaryText()
+            
       }
       .padding(.horizontal, 16)
 
@@ -118,7 +118,7 @@ struct NotificationSettingsButton: View {
       Spacer()
     }
     .padding(.vertical, 20)
-    .background(ThemeManager.shared.backgroundColorSwiftUI)
+    .background(Color(.systemBackground))
   }
 
   private func close() {
@@ -156,10 +156,10 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
           Text(title)
             .font(.body)
             .fontWeight(.medium)
-            .themedPrimaryText()
+              
           Text(description)
             .font(.caption)
-            .themedSecondaryText()
+              
         }
 
         Spacer()

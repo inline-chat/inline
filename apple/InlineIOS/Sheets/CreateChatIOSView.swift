@@ -89,7 +89,7 @@ public struct CreateChatIOSView: View {
           }
         }
       }
-      .themedListStyle()
+        
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .topBarTrailing) {
@@ -110,13 +110,13 @@ public struct CreateChatIOSView: View {
         await spaceViewModel.refetchMembers()
       }
     }
-    .themedSheet()
+      
   }
 
   private func memberRow(_ member: FullMemberItem) -> some View {
     HStack {
       Text(member.userInfo.user.displayName)
-        .themedPrimaryText()
+          
       Spacer()
       if selectedPeople.contains(member.userInfo.user.id) {
         Image(systemName: "checkmark")

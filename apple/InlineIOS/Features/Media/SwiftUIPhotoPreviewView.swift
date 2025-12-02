@@ -176,7 +176,7 @@ struct SwiftUIPhotoPreviewView: View {
     GeometryReader { geometry in
       ZStack {
         // Background
-        ThemeManager.shared.backgroundColorSwiftUI
+        Color(.systemBackground)
           .ignoresSafeArea()
 
         // Main image with zoom and pan
@@ -403,7 +403,7 @@ struct SwiftUIPhotoPreviewView: View {
       .padding(.vertical, textFieldVerticalPadding)
       .background {
         RoundedRectangle(cornerRadius: 20)
-          .fill(ThemeManager.shared.backgroundColorSwiftUI)
+          .fill(Color(.systemBackground))
           .stroke(ThemeManager.shared.borderColor, lineWidth: 1)
       }
       .lineLimit(isCaptionFocused ? (1 ... 4) : (1 ... 1))
