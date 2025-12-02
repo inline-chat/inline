@@ -27,14 +27,31 @@ final class SimplePhotoView: NSView {
     return view
   }()
 
+  private let overlayImageView: NSImageView = {
+    let iv = NSImageView()
+    iv.translatesAutoresizingMaskIntoConstraints = false
+    iv.contentTintColor = .white
+    iv.symbolConfiguration = .init(pointSize: 16, weight: .semibold)
+    iv.isHidden = true
+    return iv
+  }()
+
   private var photoInfo: PhotoInfo?
   private var widthConstraint: NSLayoutConstraint?
   private var heightConstraint: NSLayoutConstraint?
   private var relatedMessage: Message?
+  private var overlaySymbol: String?
 
-  init(photoInfo: PhotoInfo, width: CGFloat, height: CGFloat, relatedMessage: Message? = nil) {
+  init(
+    photoInfo: PhotoInfo,
+    width: CGFloat,
+    height: CGFloat,
+    relatedMessage: Message? = nil,
+    overlaySymbol: String? = nil
+  ) {
     self.photoInfo = photoInfo
     self.relatedMessage = relatedMessage
+    self.overlaySymbol = overlaySymbol
     super.init(frame: .zero)
     setupView()
     setSize(width: width, height: height)
@@ -54,6 +71,7 @@ final class SimplePhotoView: NSView {
 
     addSubview(backgroundView)
     addSubview(imageView)
+    addSubview(overlayImageView)
 
     NSLayoutConstraint.activate([
       backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -65,10 +83,14 @@ final class SimplePhotoView: NSView {
       imageView.trailingAnchor.constraint(equalTo: trailingAnchor),
       imageView.topAnchor.constraint(equalTo: topAnchor),
       imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+      overlayImageView.centerXAnchor.constraint(equalTo: centerXAnchor),
+      overlayImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
     ])
 
     imageView.layer?.addSublayer(imageLayer)
     showLoadingView()
+    updateOverlayImage()
   }
 
   private func setSize(width: CGFloat, height: CGFloat) {
@@ -116,6 +138,22 @@ final class SimplePhotoView: NSView {
     CATransaction.commit()
   }
 
+  private func updateOverlayImage() {
+    if let overlaySymbol {
+      overlayImageView.image = NSImage(
+        systemSymbolName: overlaySymbol,
+        accessibilityDescription: "Overlay"
+      )
+      overlayImageView.isHidden = false
+      overlayImageView.layer?.shadowColor = NSColor.black.cgColor
+      overlayImageView.layer?.shadowOpacity = 0.35
+      overlayImageView.layer?.shadowRadius = 6
+      overlayImageView.layer?.shadowOffset = .zero
+    } else {
+      overlayImageView.isHidden = true
+    }
+  }
+
   private func showLoadingView() {
     backgroundView.alphaValue = 1.0
   }
@@ -140,8 +178,10 @@ final class SimplePhotoView: NSView {
     return nil
   }
 
-  func update(with photoInfo: PhotoInfo) {
+  func update(with photoInfo: PhotoInfo, overlaySymbol: String? = nil) {
     self.photoInfo = photoInfo
+    self.overlaySymbol = overlaySymbol
+    updateOverlayImage()
     updateImage()
   }
 }
