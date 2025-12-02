@@ -235,6 +235,7 @@ class EmbeddedMessageView: NSView {
       from: from,
       kind: kind,
       photoInfo: embeddedMessage.photoInfo,
+      videoInfo: embeddedMessage.videoInfo,
       messageContent: messageContent
     )
   }
@@ -256,6 +257,7 @@ class EmbeddedMessageView: NSView {
       from: from,
       kind: kind,
       photoInfo: fullMessage.photoInfo,
+      videoInfo: fullMessage.videoInfo,
       messageContent: messageContent
     )
   }
@@ -265,6 +267,7 @@ class EmbeddedMessageView: NSView {
     from: User,
     kind: Kind,
     photoInfo: PhotoInfo?,
+    videoInfo: VideoInfo?,
     messageContent: String
   ) {
     self.kind = kind
@@ -296,7 +299,9 @@ class EmbeddedMessageView: NSView {
     layer?.backgroundColor = backgroundColor?.cgColor
 
     // Handle photo if available
-    updatePhotoView(photoInfo: photoInfo)
+    let previewPhoto = photoInfo ?? videoInfo?.thumbnail
+    let overlaySymbol = videoInfo != nil ? "play.circle.fill" : nil
+    updatePhotoView(photoInfo: previewPhoto, overlaySymbol: overlaySymbol)
 
     messageLabel.stringValue = messageContent
   }
@@ -315,16 +320,17 @@ class EmbeddedMessageView: NSView {
     }
   }
 
-  private func updatePhotoView(photoInfo: PhotoInfo?) {
+  private func updatePhotoView(photoInfo: PhotoInfo?, overlaySymbol: String?) {
     if let photoInfo {
       if let existingPhotoView = simplePhotoView {
-        existingPhotoView.update(with: photoInfo)
+        existingPhotoView.update(with: photoInfo, overlaySymbol: overlaySymbol)
       } else {
         let photoView = SimplePhotoView(
           photoInfo: photoInfo,
           width: Constants.photoWidth,
           height: Constants.photoHeight,
-          relatedMessage: relatedMessage
+          relatedMessage: relatedMessage,
+          overlaySymbol: overlaySymbol
         )
         simplePhotoView = photoView
         addSubview(photoView)
