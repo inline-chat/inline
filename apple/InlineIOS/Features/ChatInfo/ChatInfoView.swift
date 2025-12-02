@@ -10,6 +10,7 @@ struct ChatInfoView: View {
   let chatItem: SpaceChatItem
   @StateObject var participantsWithMembersViewModel: ChatParticipantsWithMembersViewModel
   @EnvironmentStateObject var documentsViewModel: ChatDocumentsViewModel
+  @EnvironmentStateObject var photosViewModel: ChatPhotosViewModel
   @EnvironmentStateObject var spaceMembersViewModel: SpaceMembersViewModel
   @State private var space: Space?
   @State var isSearching = false
@@ -19,14 +20,16 @@ struct ChatInfoView: View {
   @StateObject var searchDebouncer = Debouncer(delay: 0.3)
   @EnvironmentObject var nav: Navigation
   @EnvironmentObject var api: ApiClient
-  @State private var selectedTab: ChatInfoTab
-  @Namespace private var tabSelection
+  @Environment(Router.self) var router
+  @State var selectedTab: ChatInfoTab
+  @Namespace var tabSelection
 
   @Environment(\.appDatabase) var database
   @Environment(\.colorScheme) var colorScheme
 
   enum ChatInfoTab: String, CaseIterable {
     case info = "Info"
+    // case photos = "Photos"
     case files = "Files"
   }
 
@@ -82,13 +85,24 @@ struct ChatInfoView: View {
       )
     }
 
+    _photosViewModel = EnvironmentStateObject { env in
+      ChatPhotosViewModel(
+        db: env.appDatabase,
+        chatId: chatItem.chat?.id ?? 0
+      )
+    }
+
     _spaceMembersViewModel = EnvironmentStateObject { env in
       SpaceMembersViewModel(db: env.appDatabase, spaceId: chatItem.chat?.spaceId ?? 0)
     }
 
     // Default tab based on chat type
     // DMs have no info tab
-    selectedTab = chatItem.chat?.type == .thread ? .info : .files
+    if chatItem.chat?.type == .thread {
+      selectedTab = .info
+    } else {
+      selectedTab = .files
+    }
   }
 
   var body: some View {
@@ -198,7 +212,7 @@ struct ChatInfoView: View {
 
         // Set default tab based on chat type
         if isDM, selectedTab == .info {
-          selectedTab = .files
+          //  selectedTab = .photos
         }
       }
     }

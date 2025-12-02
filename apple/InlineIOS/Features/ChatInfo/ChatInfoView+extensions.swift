@@ -69,6 +69,26 @@ extension ChatInfoView {
     }
   }
 
+  func showMessageInChat(_ message: Message) {
+    router.selectedTab = .chats
+    router.pop(for: .chats)
+
+    if !nav.pathComponents.isEmpty {
+      nav.pop()
+    }
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+      NotificationCenter.default.post(
+        name: Notification.Name("ScrollToRepliedMessage"),
+        object: nil,
+        userInfo: [
+          "repliedToMessageId": message.messageId,
+          "chatId": message.chatId,
+        ]
+      )
+    }
+  }
+
   func formatSectionDate(_ date: Date) -> String {
     let calendar = Calendar.current
     let now = Date()
