@@ -54,15 +54,8 @@ struct HomeView: View {
   @State private var spacesPath: [Navigation.Destination] = []
 
   var chatItems: [HomeChatItem] {
-    home.chats.filter {
-      $0.dialog.archived != true
-    }.sorted { (item1: HomeChatItem, item2: HomeChatItem) in
-      let pinned1 = item1.dialog.pinned ?? false
-      let pinned2 = item2.dialog.pinned ?? false
-      if pinned1 != pinned2 { return pinned1 }
-      return item1.lastMessage?.message.date ?? item1.chat?.date ?? Date.now > item2.lastMessage?.message.date ?? item2
-        .chat?.date ?? Date.now
-    }
+    let visibleChats = home.chats.filter { $0.dialog.archived != true }
+    return HomeViewModel.sortChats(visibleChats)
   }
 
   var localSearchResults: [SearchResult] {

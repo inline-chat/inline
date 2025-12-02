@@ -126,8 +126,15 @@ public extension Member {
               all: User.photos
                 .forKey("profilePhoto")
             )
-        ))
-    )
+        )
+          .including(all: Message.translations.forKey("translations"))
+          .including(
+            optional: Message.photo
+              .forKey("photoInfo")
+              .including(all: Photo.sizes.forKey(PhotoInfo.CodingKeys.sizes))
+          )
+      ))
+    
     .including(optional: Member.dialog)
     .asRequest(of: SpaceChatItem.self)
   }

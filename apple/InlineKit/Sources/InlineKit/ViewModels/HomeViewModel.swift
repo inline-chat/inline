@@ -257,7 +257,7 @@ public extension AppDatabase {
   }
 }
 
-extension HomeViewModel {
+public extension HomeViewModel {
   nonisolated static func sortChats(_ chats: [HomeChatItem]) -> [HomeChatItem] {
     chats.sorted { item1, item2 in
       // First sort by pinned status

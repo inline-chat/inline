@@ -698,6 +698,9 @@
     "No files found in this chat." : {
 
     },
+    "No photos found in this chat." : {
+
+    },
     "No Spaces Yet" : {
 
     },
@@ -862,6 +865,9 @@
       "comment" : "Profile setup title"
     },
     "Shared Data" : {
+
+    },
+    "Show in Chat" : {
 
     },
     "Sign in with email" : {

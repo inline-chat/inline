@@ -17,6 +17,8 @@ public struct SpaceChatItem: Codable, FetchableRecord, PersistableRecord, Sendab
   // Last message
   public var message: Message?
   public var from: UserInfo?
+  public var translations: [Translation] = []
+  public var photoInfo: PhotoInfo?
   // ------ GETTERS ----------
   // Peer user
   public var peerId: Peer {
