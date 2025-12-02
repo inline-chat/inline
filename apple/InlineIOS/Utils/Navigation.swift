@@ -233,8 +233,13 @@ class Navigation: ObservableObject, @unchecked Sendable {
   // MARK: - Reset
 
   func reset() {
+    pathComponents = []
     navigationPath = NavigationPath()
     activeSheet = nil
-    activeDestination = .main
+    activeDestination = nil
+
+    // Clear persisted navigation state
+    UserDefaults.standard.removeObject(forKey: Self.pathKey)
+    UserDefaults.standard.removeObject(forKey: Self.sheetKey)
   }
 }

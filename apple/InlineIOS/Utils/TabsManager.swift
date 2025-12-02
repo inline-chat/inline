@@ -36,7 +36,6 @@ class TabsManager: ObservableObject {
   }
 
   func clearActiveSpaceId() {
-    print("Clearning active spaceId")
     activeSpaceId = nil
     saveActiveSpaceId()
   }
