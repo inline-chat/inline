@@ -65,13 +65,13 @@ struct CreateThread: View {
           }
         }
       }
-      .themedListStyle()
+        
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .topBarLeading) {
           Text("Create Chat")
             .fontWeight(.bold)
-            .themedPrimaryText()
+              
         }
         ToolbarItem(placement: .topBarTrailing) {
           Button(formState.isLoading ? "Creating..." : "Create") {
@@ -86,7 +86,7 @@ struct CreateThread: View {
         isFocused = true
       }
     }
-    .themedSheet()
+      
   }
 
   func submit() {

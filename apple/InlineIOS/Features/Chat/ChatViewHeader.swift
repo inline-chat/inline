@@ -25,8 +25,8 @@ struct ChatViewHeader: View {
         .background(
           LinearGradient(
             gradient: Gradient(colors: [
-              ThemeManager.shared.backgroundColorSwiftUI.opacity(1),
-              ThemeManager.shared.backgroundColorSwiftUI.opacity(0.0),
+              Color(.systemBackground).opacity(1),
+              Color(.systemBackground).opacity(0.0),
             ]),
             startPoint: .top,
             endPoint: .bottom

@@ -24,13 +24,13 @@ struct LocalSearchItem: View {
             VStack(alignment: .leading, spacing: 0) {
               Text(threadInfo.chat.title ?? "")
                 .font(.body)
-                .themedPrimaryText()
+                  
                 .lineLimit(1)
 
               if let spaceName = threadInfo.space?.name {
                 Text(spaceName)
                   .font(.caption)
-                  .themedSecondaryText()
+                    
                   .lineLimit(1)
               }
             }
@@ -40,7 +40,7 @@ struct LocalSearchItem: View {
 
             Text(user.displayName)
               .font(.body)
-              .themedPrimaryText()
+                
               .lineLimit(1)
         }
 

@@ -24,11 +24,11 @@ struct ThemeSelectionView: View {
       ToolbarItem(placement: .principal) {
         HStack {
           Image(systemName: "paintpalette.fill")
-            .themedSecondaryText()
+              
             .font(.callout)
           Text("Themes")
             .font(.headline)
-            .themedPrimaryText()
+              
         }
       }
     }
