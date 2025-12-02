@@ -398,6 +398,9 @@
         }
       }
     },
+    "Create New Space" : {
+
+    },
     "Create Space" : {
 
     },
@@ -877,6 +880,9 @@
       "comment" : "Phone sign in title"
     },
     "Space" : {
+
+    },
+    "Space name" : {
 
     },
     "Start a chat" : {
