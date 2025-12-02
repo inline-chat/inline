@@ -49,6 +49,14 @@ struct SpaceView: View {
     viewModel.members.first { $0.userInfo.user.id == Auth.shared.getCurrentUserId() }?.member
   }
 
+  private var chatItems: [HomeChatItem] {
+    HomeViewModel.sortChats(viewModel.filteredChats.map(homeItem(from:)))
+  }
+
+  private var memberChatItems: [HomeChatItem] {
+    sortMembers(viewModel.filteredMemberChats.map(homeItem(from:)))
+  }
+
   private var isCreator: Bool {
     currentUserMember?.role == .owner || currentUserMember?.role == .admin
   }
@@ -79,11 +87,27 @@ struct SpaceView: View {
     Group {
       switch Segment(rawValue: selectedSegment) {
         case .chats:
-          ChatListContent(items: viewModel.filteredChats)
-            .environmentObject(viewModel)
+          ChatListView(
+            items: chatItems,
+            isArchived: false,
+            onItemTap: handleItemTap,
+            onArchive: handleArchive,
+            onPin: handlePin,
+            onRead: handleRead,
+            onUnread: handleUnread
+          )
         case .members:
-          MemberListView(members: viewModel.members)
-            .environmentObject(viewModel)
+          ChatListView(
+            items: memberChatItems,
+            isArchived: false,
+            showPinnedStyling: false,
+            showPinAction: false,
+            onItemTap: handleItemTap,
+            onArchive: handleArchive,
+            onPin: handlePin,
+            onRead: handleRead,
+            onUnread: handleUnread
+          )
         case .none:
           EmptyView()
       }
@@ -121,6 +145,79 @@ struct SpaceView: View {
 
   // MARK: - Actions
 
+  private func handleItemTap(_ item: HomeChatItem) {
+    if let user = item.user {
+      router.push(.chat(peer: .user(id: user.user.id)))
+    } else if let chat = item.chat {
+      router.push(.chat(peer: .thread(id: chat.id)))
+    }
+  }
+
+  private func handleArchive(_ item: HomeChatItem) {
+    Task {
+      if let user = item.user {
+        try await data.updateDialog(peerId: .user(id: user.user.id), archived: true)
+      } else if let chat = item.chat {
+        try await data.updateDialog(peerId: .thread(id: chat.id), archived: true)
+      }
+    }
+  }
+
+  private func handlePin(_ item: HomeChatItem) {
+    Task {
+      let isPinned = item.dialog.pinned ?? false
+      if let user = item.user {
+        try await data.updateDialog(peerId: .user(id: user.user.id), pinned: !isPinned)
+      } else if let chat = item.chat {
+        try await data.updateDialog(peerId: .thread(id: chat.id), pinned: !isPinned)
+      }
+    }
+  }
+
+  private func handleRead(_ item: HomeChatItem) {
+    Task {
+      UnreadManager.shared.readAll(item.dialog.peerId, chatId: item.chat?.id ?? 0)
+    }
+  }
+
+  private func handleUnread(_ item: HomeChatItem) {
+    Task {
+      do {
+        try await realtimeV2.send(.markAsUnread(peerId: item.dialog.peerId))
+      } catch {
+        Log.shared.error("Failed to mark as unread", error: error)
+      }
+    }
+  }
+
+  private func homeItem(from item: SpaceChatItem) -> HomeChatItem {
+    HomeChatItem(
+      dialog: item.dialog,
+      user: item.userInfo,
+      chat: item.chat,
+      lastMessage: embeddedMessage(for: item),
+      space: viewModel.space
+    )
+  }
+
+  private func embeddedMessage(for item: SpaceChatItem) -> EmbeddedMessage? {
+    guard let message = item.message else { return nil }
+    return EmbeddedMessage(
+      message: message,
+      senderInfo: item.from,
+      translations: item.translations,
+      photoInfo: item.photoInfo
+    )
+  }
+
+  private func sortMembers(_ items: [HomeChatItem]) -> [HomeChatItem] {
+    items.sorted { lhs, rhs in
+      let date1 = lhs.lastMessage?.message.date ?? lhs.chat?.date ?? Date.distantPast
+      let date2 = rhs.lastMessage?.message.date ?? rhs.chat?.date ?? Date.distantPast
+      return date1 > date2
+    }
+  }
+
   private func loadData() async {
     do {
       try await data.getSpace(spaceId: spaceId)
@@ -153,48 +250,6 @@ private struct SpaceHeaderView: View {
         .font(.title3)
         .fontWeight(.semibold)
     }
-  }
-}
-
-private struct MemberListView: View {
-  let members: [FullMemberItem]
-  @EnvironmentObject private var viewModel: FullSpaceViewModel
-
-  var body: some View {
-    List {
-      ForEach(members, id: \.userInfo.user.id) { member in
-        MemberItemRow(
-          member: member,
-          hasUnread: {
-            if let dialog = viewModel.filteredMemberChats.first(where: { $0.user?.id == member.userInfo.user.id })?
-              .dialog
-            {
-              return (dialog.unreadCount ?? 0) > 0 || (dialog.unreadMark == true)
-            }
-            return false
-          }()
-        )
-        .listRowInsets(.init(top: 4, leading: 12, bottom: 4, trailing: 0))
-        .themedListRow()
-      }
-    }
-    .themedListStyle()
-  }
-}
-
-private struct ChatListContent: View {
-  let items: [SpaceChatItem]
-  @EnvironmentObject private var viewModel: FullSpaceViewModel
-
-  var body: some View {
-    List {
-      ForEach(items, id: \.id) { item in
-        ChatItemRow(item: item)
-          .listRowInsets(.init(top: 9, leading: 16, bottom: 2, trailing: 0))
-          .themedListRow()
-      }
-    }
-    .themedListStyle()
   }
 }
 

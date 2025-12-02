@@ -10,6 +10,30 @@ struct ChatListView: View {
   let onPin: (HomeChatItem) -> Void
   let onRead: (HomeChatItem) -> Void
   let onUnread: (HomeChatItem) -> Void
+  let showPinnedStyling: Bool
+  let showPinAction: Bool
+
+  init(
+    items: [HomeChatItem],
+    isArchived: Bool,
+    showPinnedStyling: Bool = true,
+    showPinAction: Bool = true,
+    onItemTap: @escaping (HomeChatItem) -> Void,
+    onArchive: @escaping (HomeChatItem) -> Void,
+    onPin: @escaping (HomeChatItem) -> Void,
+    onRead: @escaping (HomeChatItem) -> Void,
+    onUnread: @escaping (HomeChatItem) -> Void
+  ) {
+    self.items = items
+    self.isArchived = isArchived
+    self.showPinnedStyling = showPinnedStyling
+    self.onItemTap = onItemTap
+    self.onArchive = onArchive
+    self.onPin = onPin
+    self.onRead = onRead
+    self.onUnread = onUnread
+    self.showPinAction = showPinAction
+  }
 
   @Environment(Router.self) private var router
   @State private var previousItems: [HomeChatItem] = []
@@ -20,16 +44,7 @@ struct ChatListView: View {
     } else {
       List {
         ForEach(items, id: \.id) { item in
-          ChatListItem(
-            item: item,
-            onTap: { onItemTap(item) },
-            onArchive: { onArchive(item) },
-            onPin: { onPin(item) },
-            onRead: { onRead(item) },
-            onUnread: { onUnread(item) },
-            isArchived: isArchived
-          )
-          .themedListRow()
+          chatRow(for: item)
         }
       }
       .listStyle(.plain)
@@ -41,7 +56,92 @@ struct ChatListView: View {
     }
   }
 
-  func processForTranslation(items: [HomeChatItem]) {
+  @ViewBuilder
+  private func chatRow(for item: HomeChatItem) -> some View {
+    let isPinned = item.dialog.pinned == true
+
+    Button {
+      onItemTap(item)
+    } label: {
+      if let user = item.user {
+        ChatListItem(
+          type: .user(user, chat: item.chat),
+          dialog: item.dialog,
+          lastMessage: item.lastMessage?.message,
+          lastMessageSender: item.lastMessage?.senderInfo,
+          embeddedLastMessage: item.lastMessage,
+          showsPinnedIndicator: showPinAction
+        )
+      } else if let chat = item.chat {
+        ChatListItem(
+          type: .chat(chat, spaceName: item.space?.name),
+          dialog: item.dialog,
+          lastMessage: item.lastMessage?.message,
+          lastMessageSender: item.lastMessage?.senderInfo,
+          embeddedLastMessage: item.lastMessage,
+          showsPinnedIndicator: showPinAction
+        )
+      } else {
+        EmptyView()
+      }
+    }
+    .listRowBackground(rowBackground(isPinned: isPinned))
+    .swipeActions(edge: .leading, allowsFullSwipe: false) {
+      readUnreadButton(for: item)
+    }
+    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+      archiveButton(for: item)
+      if showPinAction {
+        pinButton(for: item)
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func pinButton(for item: HomeChatItem) -> some View {
+    let isPinned = item.dialog.pinned ?? false
+
+    Button {
+      onPin(item)
+    } label: {
+      Label(isPinned ? "Unpin" : "Pin", systemImage: isPinned ? "pin.slash.fill" : "pin.fill")
+    }
+    .tint(.indigo)
+  }
+
+  @ViewBuilder
+  private func archiveButton(for item: HomeChatItem) -> some View {
+    Button(role: isArchived ? nil : .destructive) {
+      onArchive(item)
+    } label: {
+      Label(
+        isArchived ? "Unarchive" : "Archive",
+        systemImage: isArchived ? "tray.and.arrow.up.fill" : "tray.and.arrow.down.fill"
+      )
+    }
+    .tint(Color(.systemPurple))
+  }
+
+  @ViewBuilder
+  private func readUnreadButton(for item: HomeChatItem) -> some View {
+    let hasUnread = (item.dialog.unreadCount ?? 0) > 0 || item.dialog.unreadMark == true
+
+    Button {
+      if hasUnread {
+        onRead(item)
+      } else {
+        onUnread(item)
+      }
+    } label: {
+      Label(
+        hasUnread ? "Mark Read" : "Mark Unread",
+        systemImage: hasUnread ? "checkmark.message.fill" : "envelope.badge.fill"
+      )
+    }
+    .tint(.blue)
+  }
+
+  private func processForTranslation(items: [HomeChatItem]) {
     let currentPath = router.selectedTabPath
 
     let itemsToProcess = items.filter { newItem in
@@ -65,5 +165,12 @@ struct ChatListView: View {
         TranslationViewModel.translateMessages(for: item.peerId, messages: [FullMessage(from: lastMessage)])
       }
     }
+  }
+
+  private func rowBackground(isPinned: Bool) -> Color {
+    guard showPinnedStyling else {
+      return Color(.systemBackground)
+    }
+    return isPinned ? Color(.systemGray6).opacity(0.5) : Color(.systemBackground)
   }
 }

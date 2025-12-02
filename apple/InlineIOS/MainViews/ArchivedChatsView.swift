@@ -138,14 +138,7 @@ struct ArchivedChatsView: View {
   }
 
   private var chatItems: [HomeChatItem] {
-    home.chats.filter { $0.dialog.archived == true }
-      .sorted { (item1: HomeChatItem, item2: HomeChatItem) in
-        let pinned1 = item1.dialog.pinned ?? false
-        let pinned2 = item2.dialog.pinned ?? false
-        if pinned1 != pinned2 { return pinned1 }
-        return item1.lastMessage?.message.date ?? item1.chat?.date ?? Date.now > item2.lastMessage?.message
-          .date ?? item2.chat?.date ?? Date.now
-      }
+    home.archivedChats
   }
 
   private var spaceArchivedView: some View {
@@ -179,6 +172,29 @@ struct ArchivedChatsView: View {
                 trailing: 0
               ))
               //ListRow()
+              .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                Button {
+                  toggleReadState(item)
+                } label: {
+                  Label(item.hasUnread ? "Mark Read" : "Mark Unread", systemImage: item.hasUnread ? "checkmark.message.fill" : "envelope.badge.fill")
+                }
+                .tint(.blue)
+              }
+              .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button {
+                  togglePin(item)
+                } label: {
+                  Label(item.isPinned ? "Unpin" : "Pin", systemImage: item.isPinned ? "pin.slash.fill" : "pin.fill")
+                }
+                .tint(.indigo)
+
+                Button(role: item.dialog.archived == true ? nil : .destructive) {
+                  toggleArchive(item)
+                } label: {
+                  Label(item.dialog.archived == true ? "Unarchive" : "Archive", systemImage: item.dialog.archived == true ? "tray.and.arrow.up.fill" : "tray.and.arrow.down.fill")
+                }
+                .tint(Color(.systemPurple))
+              }
           }
         }
           
@@ -192,100 +208,32 @@ struct ArchivedChatsView: View {
   private func combinedItemRow(for item: SpaceCombinedItem) -> some View {
     switch item {
       case let .member(memberChat):
-        ChatListItem(
-          item: HomeChatItem(
+        if let userInfo = memberChat.userInfo {
+          ChatListItem(
+            type: .user(userInfo, chat: memberChat.chat),
             dialog: memberChat.dialog,
-            user: memberChat.userInfo,
-            chat: memberChat.chat,
-            lastMessage: memberChat.message != nil ? EmbeddedMessage(
-              message: memberChat.message!,
-              senderInfo: memberChat.from
-            ) : nil,
-            space: nil
-          ),
-          onTap: {
+            lastMessage: memberChat.message,
+            lastMessageSender: memberChat.from
+          )
+          .contentShape(Rectangle())
+          .onTapGesture {
             router.push(.chat(peer: .user(id: memberChat.user?.id ?? 0)))
-          },
-          onArchive: {
-            Task {
-              try await data.updateDialog(
-                peerId: .user(id: memberChat.user?.id ?? 0),
-                archived: false
-              )
-            }
-          },
-          onPin: {
-            Task {
-              try await data.updateDialog(
-                peerId: .user(id: memberChat.user?.id ?? 0),
-                pinned: !(memberChat.dialog.pinned ?? false)
-              )
-            }
-          },
-          onRead: {
-            Task {
-              UnreadManager.shared.readAll(memberChat.dialog.peerId, chatId: memberChat.chat?.id ?? 0)
-            }
-          },
-          onUnread: {
-            Task {
-              do {
-                try await realtimeV2.send(.markAsUnread(peerId: memberChat.dialog.peerId))
-              } catch {
-                Log.shared.error("Failed to mark as unread", error: error)
-              }
-            }
-          },
-          isArchived: true
-        )
+          }
+        }
 
       case let .chat(chat):
-        ChatListItem(
-          item: HomeChatItem(
+        if let chatInfo = chat.chat {
+          ChatListItem(
+            type: .chat(chatInfo, spaceName: chatInfo.spaceId != nil ? fullSpaceViewModel.space?.name : nil),
             dialog: chat.dialog,
-            user: chat.userInfo,
-            chat: chat.chat,
-            lastMessage: chat.message != nil ? EmbeddedMessage(
-              message: chat.message!,
-              senderInfo: chat.from
-            ) : nil,
-            space: chat.chat?.spaceId != nil ? fullSpaceViewModel.space : nil
-          ),
-          onTap: {
+            lastMessage: chat.message,
+            lastMessageSender: chat.from
+          )
+          .contentShape(Rectangle())
+          .onTapGesture {
             router.push(.chat(peer: chat.peerId))
-          },
-          onArchive: {
-            Task {
-              try await data.updateDialog(
-                peerId: chat.peerId,
-                archived: false
-              )
-            }
-          },
-          onPin: {
-            Task {
-              try await data.updateDialog(
-                peerId: chat.peerId,
-                pinned: !(chat.dialog.pinned ?? false)
-              )
-            }
-          },
-          onRead: {
-            Task {
-              UnreadManager.shared.readAll(chat.dialog.peerId, chatId: chat.chat?.id ?? 0)
-            }
-          },
-          onUnread: {
-            Task {
-              do {
-                try await realtimeV2.send(.markAsUnread(peerId: chat.dialog.peerId))
-              } catch {
-                Log.shared.error("Failed to mark as unread", error: error)
-              }
-            }
-          },
-          isArchived: true
-        )
+          }
+        }
     }
   }
 }
@@ -312,6 +260,65 @@ private enum SpaceCombinedItem: Identifiable {
     switch self {
       case let .member(item): item.dialog.pinned ?? false
       case let .chat(item): item.dialog.pinned ?? false
+    }
+  }
+
+  var dialog: Dialog {
+    switch self {
+      case let .member(item): item.dialog
+      case let .chat(item): item.dialog
+    }
+  }
+
+  var hasUnread: Bool {
+    (dialog.unreadCount ?? 0) > 0 || dialog.unreadMark == true
+  }
+
+  var peerId: Peer {
+    switch self {
+      case let .member(item): item.peerId
+      case let .chat(item): item.peerId
+    }
+  }
+
+  var chatId: Int64? {
+    switch self {
+      case let .member(item): item.chat?.id
+      case let .chat(item): item.chat?.id
+    }
+  }
+}
+
+private extension ArchivedChatsView {
+  func togglePin(_ item: SpaceCombinedItem) {
+    Task {
+      try await data.updateDialog(
+        peerId: item.peerId,
+        pinned: !item.isPinned
+      )
+    }
+  }
+
+  func toggleArchive(_ item: SpaceCombinedItem) {
+    Task {
+      try await data.updateDialog(
+        peerId: item.peerId,
+        archived: !(item.dialog.archived ?? false)
+      )
+    }
+  }
+
+  func toggleReadState(_ item: SpaceCombinedItem) {
+    Task {
+      do {
+        if item.hasUnread {
+          UnreadManager.shared.readAll(item.peerId, chatId: item.chatId ?? 0)
+        } else {
+          try await realtimeV2.send(.markAsUnread(peerId: item.peerId))
+        }
+      } catch {
+        Log.shared.error("Failed to update read/unread status", error: error)
+      }
     }
   }
 }
