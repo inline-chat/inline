@@ -32,7 +32,7 @@ struct ChatListView: View {
           .themedListRow()
         }
       }
-      .themedListStyle()
+      .listStyle(.plain)
       .animation(.default, value: items)
       .onChange(of: items) { _, newItems in
         processForTranslation(items: newItems)

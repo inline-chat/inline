@@ -85,7 +85,7 @@ struct ChatView: View {
         loadingOverlay
       }
 
-      if case .error(let error) = pageState {
+      if case let .error(error) = pageState {
         errorOverlay(error: error)
       }
     }
