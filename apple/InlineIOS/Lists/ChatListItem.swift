@@ -24,8 +24,8 @@ struct ChatListItem: View {
   // sizes
   static var avatarSize: CGFloat = 56
   static var avatarAndContentSpacing: CGFloat = 12
-  static var verticalPadding: CGFloat = 10
-  static var horizontalPadding: CGFloat = 16
+  // static var verticalPadding: CGFloat = 0
+  // static var horizontalPadding: CGFloat = 16
 
   // colors
   static var titleColor: Color = .primary
@@ -70,7 +70,7 @@ struct ChatListItem: View {
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
-    .frame(height: 56)
+    .frame(height: 66)
     // .listRowInsets(EdgeInsets(
     //   top: Self.verticalPadding,
     //   leading: Self.horizontalPadding,
@@ -122,20 +122,19 @@ struct ChatListItem: View {
           }
         }
       case let .user(userInfo, _):
-        HStack(spacing: 0) {
-          Text(userInfo.user.displayName)
-            .font(Self.titleFont)
-            .foregroundColor(Self.titleColor)
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-          Text(resolvedLastMessage?.date.formatted() ?? "")
-            .font(Self.tertiaryFont)
-            .foregroundStyle(Self.tertiaryColor)
-            .lineLimit(1)
-            .truncationMode(.tail)
-        }
+        // HStack(spacing: 0) {
+        Text(userInfo.user.displayName)
+          .font(Self.titleFont)
+          .foregroundColor(Self.titleColor)
+          .lineLimit(1)
+          .truncationMode(.tail)
+          .frame(maxWidth: .infinity, alignment: .leading)
+        // Text(resolvedLastMessage?.date.formatted() ?? "")
+        //   .font(Self.tertiaryFont)
+        //   .foregroundStyle(Self.tertiaryColor)
+        //   .lineLimit(1)
+        //   .truncationMode(.tail)
+        // }
     }
   }
 
@@ -153,6 +152,7 @@ struct ChatListItem: View {
               .frame(maxWidth: .infinity, alignment: .leading)
           } else {
             Text(" ")
+              .lineLimit(2)
               .frame(maxWidth: .infinity, alignment: .leading)
           }
           unreadCountView
@@ -169,6 +169,7 @@ struct ChatListItem: View {
               .frame(maxWidth: .infinity, alignment: .leading)
           } else {
             Text(" ")
+              .lineLimit(2)
               .frame(maxWidth: .infinity, alignment: .leading)
           }
           unreadCountView
@@ -194,7 +195,7 @@ struct ChatListItem: View {
         .fill(Self.unreadCircleColor)
         .frame(width: 10, height: 10)
         .padding(.top, 18)
-    } else if isPinned && showsPinnedIndicator {
+    } else if isPinned, showsPinnedIndicator {
       Image(systemName: "pin.fill")
         .font(.system(size: 13, weight: .semibold))
         .foregroundColor(.secondary)

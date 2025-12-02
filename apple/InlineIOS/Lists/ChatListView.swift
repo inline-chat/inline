@@ -80,7 +80,7 @@ struct ChatListView: View {
         )
       } else if let chat = item.chat {
         ChatListItem(
-          type: .chat(chat, spaceName: item.space?.name),
+          type: .chat(chat, spaceName: item.space?.nameWithoutEmoji),
           dialog: item.dialog,
           lastMessage: item.lastMessage?.message,
           lastMessageSender: item.lastMessage?.senderInfo,
@@ -91,7 +91,7 @@ struct ChatListView: View {
         EmptyView()
       }
     }
-    .listRowBackground(rowBackground(isPinned: isPinned))
+    // .listRowBackground(rowBackground(isPinned: isPinned))
     .swipeActions(edge: .leading, allowsFullSwipe: false) {
       readUnreadButton(for: item)
     }
