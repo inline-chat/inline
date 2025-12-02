@@ -2028,6 +2028,16 @@ extension MessageViewAppKit: NSMenuDelegate {
       openItem.isEnabled = true
       openItem.image = NSImage(systemSymbolName: "play.circle", accessibilityDescription: "Play")
       menu.addItem(openItem)
+
+      let saveItem = NSMenuItem(
+        title: "Save Video",
+        action: #selector(videoView.saveVideo),
+        keyEquivalent: "s"
+      )
+      saveItem.target = videoView
+      saveItem.isEnabled = true
+      saveItem.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Save Video")
+      menu.addItem(saveItem)
     }
 
     // Add document actions
