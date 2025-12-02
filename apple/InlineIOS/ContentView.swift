@@ -121,6 +121,8 @@ struct ContentView2: View {
       CreateChatView(spaceId: spaceId)
     case .createSpaceChat:
       CreateChatView(spaceId: nil)
+    case .createSpace:
+      CreateSpaceView()
     }
   }
 

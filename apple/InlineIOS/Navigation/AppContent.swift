@@ -28,6 +28,7 @@ enum Destination: DestinationType, Codable {
   case integrationOptions(spaceId: Int64, provider: String)
   case createSpaceChat
   case createThread(spaceId: Int64)
+  case createSpace
 }
 
 enum Sheet: SheetType, Codable {
