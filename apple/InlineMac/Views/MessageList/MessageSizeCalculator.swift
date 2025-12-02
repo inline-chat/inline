@@ -126,6 +126,9 @@ class MessageSizeCalculator {
     /// photo is always above text
     var photo: LayoutPlan?
 
+    /// video is always above text, mutually exclusive with other media types
+    var video: LayoutPlan?
+
     /// document is always above text, and it's mutually exclusive with other media types
     var document: LayoutPlan?
 
@@ -166,6 +169,7 @@ class MessageSizeCalculator {
 
     var hasText: Bool { text != nil }
     var hasPhoto: Bool { photo != nil }
+    var hasVideo: Bool { video != nil }
     var hasAvatar: Bool { avatar != nil }
     var hasName: Bool { name != nil }
     var hasReply: Bool { reply != nil }
@@ -177,6 +181,8 @@ class MessageSizeCalculator {
     var topMostContentTopSpacing: CGFloat {
       if let reply {
         reply.spacing.top
+      } else if let video {
+        video.spacing.top
       } else if let photo {
         photo.spacing.top
       } else if let document {
@@ -194,6 +200,8 @@ class MessageSizeCalculator {
         reactions.spacing.bottom
       } else if let text {
         text.spacing.bottom
+      } else if let video {
+        video.spacing.bottom
       } else if let photo {
         photo.spacing.bottom
       } else if let document {
@@ -215,6 +223,14 @@ class MessageSizeCalculator {
       return top
     }
 
+    var videoContentViewTop: CGFloat {
+      var top: CGFloat = video?.spacing.top ?? 0
+      if let reply {
+        top += reply.spacing.top + reply.size.height + reply.spacing.bottom
+      }
+      return top
+    }
+
     var documentContentViewTop: CGFloat {
       var top: CGFloat = document?.spacing.top ?? 0
       if let reply {
@@ -227,6 +243,9 @@ class MessageSizeCalculator {
       var top: CGFloat = text?.spacing.top ?? 0
       if let reply {
         top += reply.spacing.top + reply.size.height + reply.spacing.bottom
+      }
+      if let video {
+        top += video.spacing.top + video.size.height + video.spacing.bottom
       }
       if let photo {
         top += photo.spacing.top + photo.size.height + photo.spacing.bottom
@@ -241,6 +260,9 @@ class MessageSizeCalculator {
       var top: CGFloat = reactions?.spacing.top ?? 0
       if let reply {
         top += reply.spacing.top + reply.size.height + reply.spacing.bottom
+      }
+      if let video {
+        top += video.spacing.top + video.size.height + video.spacing.bottom
       }
       if let photo {
         top += photo.spacing.top + photo.size.height + photo.spacing.bottom
@@ -258,6 +280,9 @@ class MessageSizeCalculator {
       var top: CGFloat = attachments?.spacing.top ?? 0
       if let reply {
         top += reply.spacing.top + reply.size.height + reply.spacing.bottom
+      }
+      if let video {
+        top += video.spacing.top + video.size.height + video.spacing.bottom
       }
       if let photo {
         top += photo.spacing.top + photo.size.height + photo.spacing.bottom
@@ -310,6 +335,7 @@ class MessageSizeCalculator {
     var isSticker = message.message.isSticker == true
     var textSize: CGSize?
     var photoSize: CGSize?
+    var videoSize: CGSize?
     let isTextOnly: Bool = hasText && !hasMedia && !hasDocument && !hasAttachments
     let emojiInfo: (count: Int, isAllEmojis: Bool) = isTextOnly ? text.emojiInfo : (0, false)
     // TODO: remove has reply once we confirm reply embed style looks good with emojis
@@ -373,7 +399,17 @@ class MessageSizeCalculator {
         let photo = photoInfo.bestPhotoSize()
         width = ceil(CGFloat(photo?.width ?? 0))
         height = ceil(CGFloat(photo?.height ?? 0))
+      } else if let videoInfo = message.videoInfo {
+        width = ceil(CGFloat(videoInfo.video.width ?? 0))
+        height = ceil(CGFloat(videoInfo.video.height ?? 0))
+
+        // Fallback to thumbnail size if intrinsic video dimensions are missing
+        if (width == 0 || height == 0), let thumb = videoInfo.thumbnail?.bestPhotoSize() {
+          width = ceil(CGFloat(thumb.width ?? 0))
+          height = ceil(CGFloat(thumb.height ?? 0))
+        }
       }
+
       if message.message.isSticker == true {
         photoSize = calculatePhotoSize(
           width: min(120, width),
@@ -388,8 +424,14 @@ class MessageSizeCalculator {
           parentAvailableWidth: parentAvailableWidth,
           hasCaption: hasText
         )
+      } else if message.videoInfo != nil {
+        videoSize = calculatePhotoSize(
+          width: width,
+          height: height,
+          parentAvailableWidth: parentAvailableWidth,
+          hasCaption: hasText
+        )
       }
-      // todo video
     }
 
     // Calculate document width first if we have a document
@@ -409,11 +451,13 @@ class MessageSizeCalculator {
     }
 
     // What's the available width for the text
-    var availableWidth = min(parentAvailableWidth, photoSize?.width ?? parentAvailableWidth)
+    var availableWidth = min(parentAvailableWidth, photoSize?.width ?? videoSize?.width ?? parentAvailableWidth)
 
     if let photoSize {
       // if we have photo, min available width is the photo width
       availableWidth = max(availableWidth, photoSize.width)
+    } else if let videoSize {
+      availableWidth = max(availableWidth, videoSize.width)
     }
 
     // When we have media that constrains the width, we need to account for bubble padding
@@ -421,6 +465,8 @@ class MessageSizeCalculator {
     if hasMedia, let photoSize {
       // Photos strictly constrain text width
       availableWidth = photoSize.width - (Theme.messageBubbleContentHorizontalInset * 2)
+    } else if hasMedia, let videoSize {
+      availableWidth = videoSize.width - (Theme.messageBubbleContentHorizontalInset * 2)
     } else if hasDocument {
       // Documents don't restrict text width like photos - text can use full parent width
       availableWidth = parentAvailableWidth - (Theme.messageBubbleContentHorizontalInset * 2)
@@ -525,6 +571,7 @@ class MessageSizeCalculator {
     var avatarPlan: LayoutPlan?
     var textPlan: LayoutPlan?
     var photoPlan: LayoutPlan?
+    var videoPlan: LayoutPlan?
     var documentPlan: LayoutPlan?
     var replyPlan: LayoutPlan?
     var reactionsPlan: LayoutPlan?
@@ -616,6 +663,19 @@ class MessageSizeCalculator {
         photoPlan!.spacing = .bottom(Theme.messageTextAndPhotoSpacing)
       } else {
         photoPlan!.spacing = .zero
+      }
+    }
+
+    // MARK: - Video
+
+    if let videoSize {
+      videoPlan = LayoutPlan(size: .zero, spacing: .zero)
+      videoPlan!.size = videoSize
+
+      if hasText {
+        videoPlan!.spacing = .bottom(Theme.messageTextAndPhotoSpacing)
+      } else {
+        videoPlan!.spacing = .zero
       }
     }
 
@@ -754,13 +814,14 @@ class MessageSizeCalculator {
       timePlan!.spacing = .init(top: 1.0, left: 0.0, bottom: 5.0, right: 6.0)
     }
 
-    // modify isSignleLine to be false if we have photo or document and text won't fit in a single line with time
-    if isSingleLine, let textPlan, let photoPlan {
+    // modify isSignleLine to be false if we have media and text won't fit in a single line with time
+    if isSingleLine, let textPlan, (photoPlan != nil || videoPlan != nil) {
       let textWidth = textPlan.size.width + textPlan.spacing.horizontalTotal
       let timeWidth = timePlan!.size.width + timePlan!.spacing.horizontalTotal
       let totalWidth = textWidth + timeWidth
 
-      if totalWidth > photoPlan.size.width {
+      let mediaWidth = photoPlan?.size.width ?? videoPlan?.size.width ?? 0
+      if totalWidth > mediaWidth {
         isSingleLine = false
       }
     }
@@ -788,6 +849,11 @@ class MessageSizeCalculator {
       bubbleHeight += photoPlan.size.height
       bubbleHeight += photoPlan.spacing.bottom
       bubbleWidth = photoPlan.size.width
+    }
+    if let videoPlan {
+      bubbleHeight += videoPlan.size.height
+      bubbleHeight += videoPlan.spacing.bottom
+      bubbleWidth = videoPlan.size.width
     }
     if let documentPlan {
       bubbleHeight += documentPlan.size.height
@@ -859,6 +925,7 @@ class MessageSizeCalculator {
       bubble: bubblePlan,
       text: textPlan,
       photo: photoPlan,
+      video: videoPlan,
       document: documentPlan,
       attachmentItems: attachmentItemsPlans,
       attachments: attachmentsPlan,
