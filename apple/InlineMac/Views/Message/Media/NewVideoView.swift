@@ -1,4 +1,6 @@
 import AppKit
+import Combine
+import GRDB
 import InlineKit
 import Logger
 #if canImport(QuickLookUI)
@@ -6,6 +8,7 @@ import QuickLookUI
 #elseif canImport(QuickLook)
 import QuickLook
 #endif
+import UniformTypeIdentifiers
 
 final class NewVideoView: NSView {
   private let imageView: NSView = {
@@ -62,6 +65,7 @@ final class NewVideoView: NSView {
   private let maskLayer = CAShapeLayer()
   private var isDownloading = false
   private var isShowingPreview = false
+  private var progressCancellable: AnyCancellable?
   private var activityState: ActivityState = .idle {
     didSet { updateActivityUI() }
   }
@@ -73,10 +77,10 @@ final class NewVideoView: NSView {
 
     var isBusy: Bool {
       switch self {
-        case .idle:
-          false
-        case .loadingThumb, .downloadingVideo:
-          true
+      case .idle:
+        false
+      case .loadingThumb, .downloadingVideo:
+        true
       }
     }
   }
@@ -193,20 +197,21 @@ final class NewVideoView: NSView {
 
   private func updateImage() {
     if let url = imageLocalUrl() {
-      activityState = .loadingThumb
       let loadSync = !isScrolling
       ImageCacheManager.shared.image(for: url, loadSync: loadSync) { [weak self] image in
-        guard let self, let image else {
-          self?.hideLoadingView()
-          return
-        }
+        DispatchQueue.main.async { [weak self] in
+          guard let self, let image else {
+            self?.hideLoadingView()
+            return
+          }
 
-        self.addImageViewIfNeeded()
-        if loadSync {
-          self.setImage(image)
-          self.hideLoadingView()
-        } else {
-          self.animateImageTransition(to: image)
+          self.addImageViewIfNeeded()
+          if loadSync {
+            self.setImage(image)
+            self.hideLoadingView()
+          } else {
+            self.animateImageTransition(to: image)
+          }
         }
       }
     } else {
@@ -255,8 +260,19 @@ final class NewVideoView: NSView {
   }
 
   private func videoLocalUrl() -> URL? {
-    guard let localPath = fullMessage.videoInfo?.video.localPath else { return nil }
-    return FileCache.getUrl(for: .videos, localPath: localPath)
+    if let localPath = fullMessage.videoInfo?.video.localPath {
+      return FileCache.getUrl(for: .videos, localPath: localPath)
+    }
+
+    // Fallback to latest DB value (in case download finished while this view was off-screen)
+    guard let videoId = fullMessage.videoInfo?.video.id else { return nil }
+    if let latestLocalPath = try? AppDatabase.shared.reader.read({ db in
+      try Video.filter(Video.Columns.id == videoId).fetchOne(db)?.localPath
+    }) {
+      return FileCache.getUrl(for: .videos, localPath: latestLocalPath)
+    }
+
+    return nil
   }
 
   private func videoCdnUrl() -> URL? {
@@ -288,11 +304,11 @@ final class NewVideoView: NSView {
   }
 
   private func showLoadingView() {
-    activityState = .loadingThumb
+    DispatchQueue.main.async { [weak self] in self?.activityState = .loadingThumb }
   }
 
   private func hideLoadingView() {
-    activityState = .idle
+    DispatchQueue.main.async { [weak self] in self?.activityState = .idle }
   }
 
   private func updateDurationLabel() {
@@ -318,12 +334,19 @@ final class NewVideoView: NSView {
   }
 
   private func updateActivityUI() {
+    if !Thread.isMainThread {
+      DispatchQueue.main.async { [weak self] in self?.updateActivityUI() }
+      return
+    }
+
     if activityState.isBusy {
       spinner.startAnimation(nil)
     } else {
       spinner.stopAnimation(nil)
     }
-    playBadge.isHidden = activityState.isBusy || isShowingPreview
+    // Keep play badge visible while loading thumbnail so it doesn't flicker away
+    let hideForBusy = activityState == .downloadingVideo
+    playBadge.isHidden = hideForBusy || isShowingPreview
     backgroundView.alphaValue = activityState.isBusy ? 1.0 : 0.0
   }
 
@@ -339,39 +362,13 @@ final class NewVideoView: NSView {
   }
 
   private func handleClickAction() {
-    if let _ = videoLocalUrl() {
-      openQuickLook()
-      return
-    }
-
-    // no local file; try to download then preview
-    downloadVideoThenPreview()
-  }
-
-  private func downloadVideoThenPreview() {
-    guard let videoInfo = fullMessage.videoInfo, !isDownloading else { return }
-    guard videoInfo.video.cdnUrl != nil else {
-      Log.shared.warning("Video has no CDN URL, cannot download for preview")
-      return
-    }
-
-    isDownloading = true
-    activityState = .downloadingVideo
-
-    FileDownloader.shared.downloadVideo(video: videoInfo, for: fullMessage.message) { [weak self] result in
-      DispatchQueue.main.async {
-        guard let self else { return }
-        self.isDownloading = false
-        self.activityState = .idle
-
-        switch result {
-          case .success:
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-              self.openQuickLook()
-            }
-          case let .failure(error):
-            Log.shared.error("Failed to download video for preview", error: error)
-        }
+    ensureVideoAvailable { [weak self] result in
+      guard let self else { return }
+      switch result {
+      case .success:
+        openQuickLook()
+      case .failure:
+        break
       }
     }
   }
@@ -394,10 +391,10 @@ final class NewVideoView: NSView {
     }
 
     // If we don't yet have the file, try to fetch it first
-    downloadVideoThenPreview()
+    handleClickAction()
   }
 
-  @objc func openQuickLook(_ sender: Any? = nil) {
+  @objc func openQuickLook(_: Any? = nil) {
     handleClickAction()
   }
 
@@ -432,12 +429,16 @@ final class NewVideoView: NSView {
     }
     return became
   }
+
+  deinit {
+    progressCancellable?.cancel()
+  }
 }
 
 // MARK: - QLPreviewPanel
 
 extension NewVideoView {
-  override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool {
+  override func acceptsPreviewPanelControl(_: QLPreviewPanel!) -> Bool {
     true
   }
 
@@ -470,7 +471,7 @@ extension NewVideoView: QLPreviewPanelDataSource {
 // MARK: - QLPreviewPanelDelegate
 
 extension NewVideoView: QLPreviewPanelDelegate {
-  func previewPanel(_ panel: QLPreviewPanel!, sourceFrameOnScreenFor _: QLPreviewItem!) -> NSRect {
+  func previewPanel(_: QLPreviewPanel!, sourceFrameOnScreenFor _: QLPreviewItem!) -> NSRect {
     window?.convertToScreen(convert(bounds, to: nil)) ?? .zero
   }
 
@@ -492,5 +493,216 @@ extension NewVideoView: QLPreviewItem {
 
   var previewItemTitle: String! {
     "Video"
+  }
+}
+
+// MARK: - Save Support
+
+extension NewVideoView {
+  func ensureVideoAvailable(completion: @escaping (Result<URL, Error>) -> Void) {
+    if let local = videoLocalUrl(), FileManager.default.fileExists(atPath: local.path) {
+      completion(.success(local))
+      return
+    }
+
+    guard let videoInfo = fullMessage.videoInfo else {
+      let error = NSError(domain: "NewVideoView", code: -2, userInfo: [NSLocalizedDescriptionKey: "Missing video info"])
+      completion(.failure(error))
+      return
+    }
+    guard videoInfo.video.cdnUrl != nil else {
+      Log.shared.warning("Video has no CDN URL, cannot download")
+      let error = NSError(
+        domain: "NewVideoView",
+        code: -1,
+        userInfo: [NSLocalizedDescriptionKey: "Video not available"]
+      )
+      completion(.failure(error))
+      return
+    }
+
+    // If a download is already running globally, observe it instead of starting another one.
+    if FileDownloader.shared.isVideoDownloadActive(videoId: videoInfo.id) {
+      activityState = .downloadingVideo
+      progressCancellable = FileDownloader.shared.videoProgressPublisher(videoId: videoInfo.id)
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] progress in
+          guard let self else { return }
+          if let error = progress.error {
+            progressCancellable = nil
+            activityState = .idle
+            completion(.failure(error))
+            return
+          }
+
+          if progress.isComplete, let local = videoLocalUrl() {
+            progressCancellable = nil
+            activityState = .idle
+            completion(.success(local))
+          }
+        }
+      return
+    }
+
+    isDownloading = true
+    activityState = .downloadingVideo
+
+    FileDownloader.shared.downloadVideo(video: videoInfo, for: fullMessage.message) { [weak self] result in
+      DispatchQueue.main.async {
+        guard let self else { return }
+        self.isDownloading = false
+        self.activityState = .idle
+        completion(result)
+      }
+    }
+  }
+
+  @objc func saveVideo() {
+    guard let videoInfo = fullMessage.videoInfo else { return }
+    guard let window else { return }
+
+    let savePanel = NSSavePanel()
+    savePanel.allowedContentTypes = [UTType.mpeg4Movie, UTType.movie].compactMap(\.self)
+    let defaultName = fullMessage.file?.fileName ?? "video_\(fullMessage.videoInfo?.id ?? fullMessage.message.id).mp4"
+    savePanel.nameFieldStringValue = defaultName
+    savePanel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+
+    savePanel.beginSheetModal(for: window) { [weak self] response in
+      guard let self, response == .OK, let destinationURL = savePanel.url else { return }
+
+      if let local = videoLocalUrl() {
+        copyVideo(from: local, to: destinationURL)
+        return
+      }
+
+      downloadWithBlockingSheet(videoInfo: videoInfo) { [weak self] downloadResult in
+        guard let self else { return }
+        switch downloadResult {
+        case let .success(localUrl):
+          copyVideo(from: localUrl, to: destinationURL)
+        case let .failure(error):
+          Log.shared.error("Failed to download video for saving", error: error)
+          presentAlert(title: "Download Failed", message: error.localizedDescription)
+        }
+      }
+    }
+  }
+
+  private func copyVideo(from source: URL, to destinationURL: URL) {
+    do {
+      let fileManager = FileManager.default
+      if fileManager.fileExists(atPath: destinationURL.path) {
+        try fileManager.removeItem(at: destinationURL)
+      }
+
+      try FileManager.default.copyItem(at: source, to: destinationURL)
+      presentAlert(
+        title: "Saved Video",
+        message: "Video saved to \(destinationURL.lastPathComponent)"
+      )
+      NSWorkspace.shared.activateFileViewerSelecting([destinationURL])
+    } catch {
+      Log.shared.error("Failed to save video", error: error)
+      presentAlert(title: "Save Failed", message: error.localizedDescription)
+    }
+  }
+
+  func presentAlert(title: String, message: String) {
+    guard let window else { return }
+    let alert = NSAlert()
+    alert.messageText = title
+    alert.informativeText = message
+    alert.alertStyle = .informational
+    alert.beginSheetModal(for: window, completionHandler: nil)
+  }
+
+  func downloadWithBlockingSheet(
+    videoInfo: VideoInfo,
+    completion: @escaping (Result<URL, Error>) -> Void
+  ) {
+    guard let window else { return }
+
+    let alert = NSAlert()
+    alert.messageText = "Downloading video…"
+    alert.informativeText = "Please wait while the video downloads."
+    alert.alertStyle = .informational
+    alert.addButton(withTitle: "Cancel")
+
+    let spinner = NSProgressIndicator()
+    spinner.style = .spinning
+    spinner.controlSize = .regular
+    spinner.startAnimation(nil)
+    alert.accessoryView = spinner
+
+    var finished = false
+    var downloadCancellable: AnyCancellable?
+
+    alert.beginSheetModal(for: window) { [weak self] _ in
+      guard let self else { return }
+      guard !finished else { return }
+      finished = true
+      downloadCancellable?.cancel()
+      downloadCancellable = nil
+      FileDownloader.shared.cancelVideoDownload(videoId: videoInfo.id)
+      let error = NSError(
+        domain: "NewVideoView",
+        code: -999,
+        userInfo: [NSLocalizedDescriptionKey: "Download cancelled"]
+      )
+      completion(.failure(error))
+    }
+
+    // Start download if needed
+    if !FileDownloader.shared.isVideoDownloadActive(videoId: videoInfo.id) {
+      FileDownloader.shared.downloadVideo(video: videoInfo, for: fullMessage.message) { result in
+        DispatchQueue.main.async {
+          guard !finished else { return }
+          finished = true
+          if let parent = alert.window.sheetParent {
+            parent.endSheet(alert.window)
+          }
+          downloadCancellable?.cancel()
+          downloadCancellable = nil
+          completion(result)
+        }
+      }
+    }
+
+    downloadCancellable = FileDownloader.shared.videoProgressPublisher(videoId: videoInfo.id)
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] progress in
+        guard let self else { return }
+
+        if let error = progress.error, !finished {
+          finished = true
+          if let parent = alert.window.sheetParent {
+            parent.endSheet(alert.window)
+          }
+          downloadCancellable?.cancel()
+          downloadCancellable = nil
+          completion(.failure(error))
+          return
+        }
+
+        if progress.isComplete, !finished {
+          finished = true
+          if let parent = alert.window.sheetParent {
+            parent.endSheet(alert.window)
+          }
+          downloadCancellable?.cancel()
+          downloadCancellable = nil
+          // Use the cached path
+          if let local = videoLocalUrl() {
+            completion(.success(local))
+          } else {
+            let error = NSError(
+              domain: "NewVideoView",
+              code: -3,
+              userInfo: [NSLocalizedDescriptionKey: "Downloaded but missing local file"]
+            )
+            completion(.failure(error))
+          }
+        }
+      }
   }
 }
