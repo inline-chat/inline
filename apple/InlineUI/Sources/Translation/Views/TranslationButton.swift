@@ -78,6 +78,7 @@ public struct TranslationButton: View {
         popover
       }
 
+#if os(macOS)
       .overlay(alignment: .bottom) {
         Color.clear.frame(width: 1, height: 1)
           .allowsHitTesting(false)
@@ -85,6 +86,7 @@ public struct TranslationButton: View {
             prompt
           }
       }
+#endif
 
       .sheet(isPresented: $showOptionsSheet) {
         TranslationOptions(peer: peer)
@@ -97,6 +99,7 @@ public struct TranslationButton: View {
         isTranslationEnabled = enabled
       }
 
+#if os(macOS)
       /// Listen for translation needed prompt
       .onReceive(TranslationDetector.shared.needsTranslation) { event in
         if event.peer == peer,
@@ -108,6 +111,7 @@ public struct TranslationButton: View {
           showPrompt = true
         }
       }
+#endif
   }
 
   private func pressed() {
