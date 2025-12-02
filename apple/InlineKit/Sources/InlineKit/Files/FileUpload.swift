@@ -356,6 +356,10 @@ public actor FileUploader {
     }
   }
 
+  public func cancelVideoUpload(videoLocalId: Int64) {
+    cancel(uploadId: getUploadId(videoId: videoLocalId))
+  }
+
   public func cancelAll() {
     Log.shared.debug("[FileUploader] Cancelling all uploads")
 
