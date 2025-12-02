@@ -130,6 +130,7 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
     senderInfo = embeddedMessage.senderInfo
     translations = embeddedMessage.translations
     photoInfo = embeddedMessage.photoInfo
+    videoInfo = embeddedMessage.videoInfo
     reactions = []
     repliedToMessage = nil
     attachments = []
@@ -204,6 +205,14 @@ public extension FullMessage {
           .including(
             optional: Message.photo.forKey(EmbeddedMessage.CodingKeys.photoInfo)
               .including(all: Photo.sizes.forKey(PhotoInfo.CodingKeys.sizes))
+          )
+          .including(
+            optional: Message.video.forKey(EmbeddedMessage.CodingKeys.videoInfo)
+              .including(
+                optional: Video.thumbnail
+                  .including(all: Photo.sizes.forKey(PhotoInfo.CodingKeys.sizes))
+                  .forKey(VideoInfo.CodingKeys.thumbnail)
+              )
           )
       )
       .including(
