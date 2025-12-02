@@ -94,14 +94,8 @@ struct CreateChatView: View {
     Task {
       do {
         formState.startLoading()
-        let participants: [Int64] = if selectedChatType == .public {
-          spaceViewModel.members.compactMap { member in
-            guard member.userInfo.user.pendingSetup != true else { return nil }
-            return member.userInfo.user.id
-          }
-        } else {
-          selectedParticipants.map(\.self)
-        }
+        // For public threads the server requires an empty participants list
+        let participants: [Int64] = selectedChatType == .public ? [] : selectedParticipants.map(\.self)
 
         let result = try await realtimeV2.send(
           .createChat(
