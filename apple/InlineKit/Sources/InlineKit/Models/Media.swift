@@ -102,16 +102,16 @@ public struct Video: Codable, Sendable, Equatable, Hashable, Identifiable, Fetch
   public var localPath: String?
 
   public enum Columns {
-    static let id = Column(CodingKeys.id)
-    static let videoId = Column(CodingKeys.videoId)
-    static let date = Column(CodingKeys.date)
-    static let width = Column(CodingKeys.width)
-    static let height = Column(CodingKeys.height)
-    static let duration = Column(CodingKeys.duration)
-    static let size = Column(CodingKeys.size)
-    static let thumbnailPhotoId = Column(CodingKeys.thumbnailPhotoId)
-    static let cdnUrl = Column(CodingKeys.cdnUrl)
-    static let localPath = Column(CodingKeys.localPath)
+    public static let id = Column(CodingKeys.id)
+    public static let videoId = Column(CodingKeys.videoId)
+    public static let date = Column(CodingKeys.date)
+    public static let width = Column(CodingKeys.width)
+    public static let height = Column(CodingKeys.height)
+    public static let duration = Column(CodingKeys.duration)
+    public static let size = Column(CodingKeys.size)
+    public static let thumbnailPhotoId = Column(CodingKeys.thumbnailPhotoId)
+    public static let cdnUrl = Column(CodingKeys.cdnUrl)
+    public static let localPath = Column(CodingKeys.localPath)
   }
 }
 
