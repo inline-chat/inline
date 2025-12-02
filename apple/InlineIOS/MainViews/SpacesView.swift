@@ -33,21 +33,19 @@ struct SpacesView: View {
               VStack(alignment: .leading, spacing: 0) {
                 Text(space.space.nameWithoutEmoji)
                   .font(.body)
-                    
+                  .foregroundColor(.primary)
                 Text("\(space.members.count) \(space.members.count == 1 ? "member" : "members")")
                   .font(.subheadline)
                   .fontWeight(.regular)
-                    
+                  .foregroundColor(.secondary)
               }
             }
           }
           .listRowInsets(EdgeInsets(top: 9, leading: 16, bottom: 9, trailing: 16))
-          //ListRow()
         }
-          
+        .listStyle(.plain)
       }
     }
-    .background(Color(.systemBackground))
     .navigationBarTitleDisplayMode(.inline)
     .toolbar {
       toolbarContent
@@ -99,7 +97,6 @@ struct SpacesView: View {
         Text(shouldShow ? realtimeState.connectionState.title : "Chats")
           .font(.title3)
           .fontWeight(.semibold)
-            
           .contentTransition(.numericText())
           .animation(.spring(duration: 0.5), value: realtimeState.connectionState.title)
           .animation(.spring(duration: 0.5), value: shouldShow)
@@ -139,14 +136,12 @@ struct EmptySpacesView: View {
         Text("No Spaces Yet")
           .font(.title2)
           .fontWeight(.semibold)
-            
           .opacity(isVisible ? 1 : 0)
           .offset(y: isVisible ? 0 : 20)
           .animation(.easeOut(duration: 0.25).delay(0.15), value: isVisible)
 
         Text("Your spaces will appear here")
           .font(.subheadline)
-            
           .multilineTextAlignment(.center)
           .opacity(isVisible ? 1 : 0)
           .offset(y: isVisible ? 0 : 20)

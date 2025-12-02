@@ -293,14 +293,23 @@ public extension Dialog {
     // chat through dialog thread
     including(
       optional: Dialog.peerThread
-        .including(optional: Chat.lastMessage.including(
-          optional: Message.from.forKey("from")
-            .including(
-              all: User.photos
-                .forKey("profilePhoto")
-            )
-        ))
+        .including(
+          optional: Chat.lastMessage.including(
+            optional: Message.from.forKey("from")
+              .including(
+                all: User.photos
+                  .forKey("profilePhoto")
+              )
+          )
+          .including(all: Message.translations.forKey("translations"))
+          .including(
+            optional: Message.photo
+              .forKey("photoInfo")
+              .including(all: Photo.sizes.forKey(PhotoInfo.CodingKeys.sizes))
+          )
+        )
     )
+
     // user info
     .including(
       optional: Dialog.peerUser.forKey("userInfo")
@@ -318,7 +327,24 @@ public extension Dialog {
         .including(all: User.photos.forKey("profilePhoto"))
     )
     // chat through user
-    .including(optional: Dialog.peerUserChat)
+    .including(
+      optional: Dialog.peerUserChat
+        .including(
+          optional: Chat.lastMessage.including(
+            optional: Message.from.forKey("from")
+              .including(
+                all: User.photos
+                  .forKey("profilePhoto")
+              )
+          )
+          .including(all: Message.translations.forKey("translations"))
+          .including(
+            optional: Message.photo
+              .forKey("photoInfo")
+              .including(all: Photo.sizes.forKey(PhotoInfo.CodingKeys.sizes))
+          )
+        )
+    )
     .asRequest(of: SpaceChatItem.self)
   }
 
@@ -326,14 +352,23 @@ public extension Dialog {
     // chat through dialog thread
     including(
       optional: Dialog.peerThread
-        .including(optional: Chat.lastMessage.including(
-          optional: Message.from.forKey("from")
-            .including(
-              all: User.photos
-                .forKey("profilePhoto")
-            )
-        ))
+        .including(
+          optional: Chat.lastMessage.including(
+            optional: Message.from.forKey("from")
+              .including(
+                all: User.photos
+                  .forKey("profilePhoto")
+              )
+          )
+          .including(all: Message.translations.forKey("translations"))
+          .including(
+            optional: Message.photo
+              .forKey("photoInfo")
+              .including(all: Photo.sizes.forKey(PhotoInfo.CodingKeys.sizes))
+          )
+        )
     )
+
     .asRequest(of: SpaceChatItem.self)
   }
 }

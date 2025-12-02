@@ -1,96 +1,204 @@
 import InlineKit
+import InlineUI
 import SwiftUI
 
 struct ChatListItem: View {
-  let item: HomeChatItem
-  let onTap: () -> Void
-  let onArchive: () -> Void
-  let onPin: () -> Void
-  let onRead: () -> Void
-  let onUnread: () -> Void
-  let isArchived: Bool
+  enum ChatListItemType {
+    case chat(Chat, spaceName: String?)
+    case user(UserInfo, chat: Chat?)
+  }
 
-  @EnvironmentObject private var nav: Navigation
-  @EnvironmentObject private var data: DataManager
-  @Environment(\.realtime) var realtime
-  @Environment(\.appDatabase) private var database
+  var type: ChatListItemType
+  var dialog: Dialog?
+  var lastMessage: Message?
+  var lastMessageSender: UserInfo?
+  var embeddedLastMessage: EmbeddedMessage? = nil
+  var showsPinnedIndicator: Bool = true
+
+  // fonts
+  static var titleFont: Font = .system(size: 17.0).weight(.regular)
+  static var subtitleFont: Font = .system(size: 17.0).weight(.regular)
+  static var tertiaryFont: Font = .system(size: 15.0).weight(.regular)
+  static var unreadCountFont: Font = .system(size: 15.0).weight(.regular)
+
+  // sizes
+  static var avatarSize: CGFloat = 56
+  static var avatarAndContentSpacing: CGFloat = 12
+  static var verticalPadding: CGFloat = 10
+  static var horizontalPadding: CGFloat = 16
+
+  // colors
+  static var titleColor: Color = .primary
+  static var subtitleColor: Color = .secondary
+  static var tertiaryColor: some ShapeStyle { .tertiary }
+  static var unreadCountColor: Color = .white
+  static var unreadCircleColor: Color = .init(.systemGray2)
+
+  private var resolvedLastMessage: Message? { embeddedLastMessage?.message ?? lastMessage }
+  private var resolvedLastMessageSender: UserInfo? {
+    embeddedLastMessage?.senderInfo ?? lastMessageSender
+  }
+
+  private var translatedLastMessageText: String? { embeddedLastMessage?.displayTextForLastMessage }
+
+  var lastMessageText: String {
+    translatedLastMessageText ?? resolvedLastMessage?.stringRepresentationWithEmoji ?? " "
+  }
+
+  var unreadCount: Int? {
+    if let unreadCount = dialog?.unreadCount, unreadCount > 0 {
+      unreadCount
+    } else {
+      nil
+    }
+  }
+
+  private var hasUnreadMark: Bool {
+    dialog?.unreadMark == true
+  }
+
+  private var isPinned: Bool {
+    dialog?.pinned == true
+  }
 
   var body: some View {
-    Button(action: onTap) {
-      if let user = item.user {
-        DirectChatItem(props: Props(
-          dialog: item.dialog,
-          user: user,
-          chat: item.chat,
-          message: item.lastMessage
-        ))
-      } else if let chat = item.chat {
-        ChatItemView(props: ChatItemProps(
-          dialog: item.dialog,
-          user: item.user,
-          chat: chat,
-          message: item.lastMessage,
-          space: item.space
-        ))
+    HStack(alignment: .top, spacing: 12) {
+      avatarView
+      VStack(alignment: .leading, spacing: 0) {
+        titleView
+        subTitleView
       }
     }
-    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-      Button(role: .destructive) {
-        onArchive()
-      } label: {
-        Image(systemName: isArchived ? "tray.and.arrow.up.fill" : "tray.and.arrow.down.fill")
-      }
-      .tint(.indigo)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .frame(height: 56)
+    .listRowInsets(EdgeInsets(
+      top: Self.verticalPadding,
+      leading: Self.horizontalPadding,
+      bottom: Self.verticalPadding,
+      trailing: Self.horizontalPadding
+    ))
+  }
 
-      Button {
-        onPin()
-      } label: {
-        Image(systemName: item.dialog.pinned ?? false ? "pin.slash.fill" : "pin.fill")
-      }
-      .tint(.yellow)
-    }
-    .swipeActions(edge: .leading, allowsFullSwipe: true) {
-      let hasUnread = (item.dialog.unreadCount ?? 0) > 0 || (item.dialog.unreadMark == true)
+  @ViewBuilder
+  var avatarView: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      switch type {
+        case let .chat(chat, _):
+          Circle()
+            .fill(
+              Color(.systemGray6)
+            )
+            .overlay {
+              Text(chat.emoji ?? "💬")
+                .font(.system(size: Self.avatarSize * 0.55, weight: .regular))
+                .foregroundColor(.secondary)
+            }
+            .frame(width: Self.avatarSize, height: Self.avatarSize)
 
-      if hasUnread {
-        Button {
-          onRead()
-        } label: {
-          Image(systemName: "checkmark.message.fill")
-        }
-        .tint(.blue)
-      } else {
-        Button {
-          onUnread()
-        } label: {
-          Image(systemName: "message.badge.filled.fill")
-        }
-        .tint(.teal)
+        case let .user(userInfo, _):
+          UserAvatar(userInfo: userInfo, size: Self.avatarSize)
+            .frame(width: Self.avatarSize, height: Self.avatarSize)
       }
     }
-    .listRowInsets(.init(top: 16, leading: 16, bottom: 16, trailing: 16))
-//    .contextMenu {
-//      Button {
-//        onTap()
-//      } label: {
-//        Label("Open Chat", systemImage: "bubble.left")
-//      }
-//    } preview: {
-//      if let user = item.user {
-//        ChatView(peer: .user(id: user.user.id), preview: true)
-//          .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
-//          .environmentObject(nav)
-//          .environmentObject(data)
-//          .environment(\.realtime, realtime)
-//          .environment(\.appDatabase, database)
-//      } else if let chat = item.chat {
-//        ChatView(peer: .thread(id: chat.id), preview: true)
-//          .frame(width: Theme.shared.chatPreviewSize.width, height: Theme.shared.chatPreviewSize.height)
-//          .environmentObject(nav)
-//          .environmentObject(data)
-//          .environment(\.realtime, realtime)
-//          .environment(\.appDatabase, database)
-//      }
-//    }
+  }
+
+  @ViewBuilder
+  var titleView: some View {
+    switch type {
+      case let .chat(chat, spaceName):
+        HStack(spacing: 0) {
+          Text(chat.title ?? "Unknown Chat")
+            .font(Self.titleFont)
+            .foregroundColor(Self.titleColor)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(maxWidth: .infinity, alignment: .leading)
+          if let spaceName {
+            Text(spaceName)
+              .font(Self.tertiaryFont)
+              .foregroundStyle(Self.tertiaryColor)
+              .lineLimit(1)
+              .truncationMode(.tail)
+          }
+        }
+      case let .user(userInfo, _):
+        HStack(spacing: 0) {
+          Text(userInfo.user.displayName)
+            .font(Self.titleFont)
+            .foregroundColor(Self.titleColor)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+          Text(resolvedLastMessage?.date.formatted() ?? "")
+            .font(Self.tertiaryFont)
+            .foregroundStyle(Self.tertiaryColor)
+            .lineLimit(1)
+            .truncationMode(.tail)
+        }
+    }
+  }
+
+  @ViewBuilder
+  var subTitleView: some View {
+    switch type {
+      case .chat:
+        HStack(alignment: .top, spacing: 0) {
+          if resolvedLastMessage != nil {
+            Text("\(resolvedLastMessageSender?.user.shortDisplayName ?? ""): \(lastMessageText)")
+              .font(Self.subtitleFont)
+              .foregroundColor(Self.subtitleColor)
+              .lineLimit(2)
+              .truncationMode(.tail)
+              .frame(maxWidth: .infinity, alignment: .leading)
+          } else {
+            Text(" ")
+              .frame(maxWidth: .infinity, alignment: .leading)
+          }
+          unreadCountView
+        }
+//        .animation(.easeInOut, value: unreadCount)
+      case .user:
+        HStack(alignment: .top, spacing: 0) {
+          if resolvedLastMessage != nil {
+            Text("\(lastMessageText)")
+              .font(Self.subtitleFont)
+              .foregroundColor(Self.subtitleColor)
+              .lineLimit(2)
+              .truncationMode(.tail)
+              .frame(maxWidth: .infinity, alignment: .leading)
+          } else {
+            Text(" ")
+              .frame(maxWidth: .infinity, alignment: .leading)
+          }
+          unreadCountView
+        }
+//        .animation(.easeInOut, value: unreadCount)
+    }
+  }
+
+  @ViewBuilder
+  var unreadCountView: some View {
+    if let unreadCount {
+      Text(String(unreadCount))
+        .font(Self.unreadCountFont)
+        .foregroundColor(Self.unreadCountColor)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .frame(minWidth: 21, alignment: .center)
+        .background(Self.unreadCircleColor)
+        .cornerRadius(12)
+        .padding(.top, 14)
+    } else if hasUnreadMark {
+      Circle()
+        .fill(Self.unreadCircleColor)
+        .frame(width: 10, height: 10)
+        .padding(.top, 18)
+    } else if isPinned && showsPinnedIndicator {
+      Image(systemName: "pin.fill")
+        .font(.system(size: 13, weight: .semibold))
+        .foregroundColor(.secondary)
+        .padding(.top, 18)
+    }
   }
 }
