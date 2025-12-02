@@ -109,6 +109,13 @@ final class ChatState: ObservableObject {
       states = decoded
     }
   }
+
+  func reset() {
+    states = [:]
+    currentPeer = nil
+    defaults.removeObject(forKey: statesKey)
+    defaults.removeObject(forKey: currentPeerKey)
+  }
 }
 
 // Make State codable for persistence
