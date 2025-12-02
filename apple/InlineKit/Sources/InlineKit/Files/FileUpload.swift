@@ -3,6 +3,7 @@ import GRDB
 import InlineProtocol
 import Logger
 import MultipartFormDataKit
+import AVFoundation
 
 #if canImport(AppKit)
 import AppKit
@@ -159,7 +160,14 @@ public actor FileUploader {
   public func uploadVideo(
     videoInfo: VideoInfo
   ) async throws -> Int64 {
-    guard let localPath = videoInfo.video.localPath else {
+    // Ensure we have a persisted local video row and id
+    var resolvedVideoInfo = videoInfo
+    var video = resolvedVideoInfo.video
+    let localVideoId = try resolveLocalVideoId(for: video)
+    video.id = localVideoId
+    resolvedVideoInfo.video = video
+
+    guard let localPath = resolvedVideoInfo.video.localPath else {
       throw FileUploadError.invalidVideo
     }
 
@@ -167,7 +175,13 @@ public actor FileUploader {
     let fileName = localUrl.lastPathComponent
     let mimeType = MIMEType(text: FileHelpers.getMimeType(for: localUrl))
 
-    let uploadId = getUploadId(videoId: videoInfo.video.id!)
+    // Ensure we have required metadata before hitting the API
+    let (width, height, duration) = try await getValidatedVideoMetadata(
+      from: resolvedVideoInfo,
+      localUrl: localUrl
+    )
+
+    let uploadId = getUploadId(videoId: localVideoId)
 
     if let handler = progressHandlers[uploadId] {
       Task { @MainActor in
@@ -177,24 +191,23 @@ public actor FileUploader {
       }
     }
 
-    let thumbnailPayload = try? thumbnailData(from: videoInfo.thumbnail)
+    let thumbnailPayload = try? thumbnailData(from: resolvedVideoInfo.thumbnail)
     let videoMetadata = ApiClient.VideoUploadMetadata(
-      width: videoInfo.video.width ?? 0,
-      height: videoInfo.video.height ?? 0,
-      duration: videoInfo.video.duration ?? 0,
+      width: width,
+      height: height,
+      duration: duration,
       thumbnail: thumbnailPayload?.0,
       thumbnailMimeType: thumbnailPayload?.1
     )
 
     try startUpload(
-      media: .video(videoInfo),
+      media: .video(resolvedVideoInfo),
       localUrl: localUrl,
       mimeType: mimeType.text,
       fileName: fileName,
       videoMetadata: videoMetadata
     )
 
-    guard let localVideoId = videoInfo.video.id else { throw FileUploadError.invalidVideoId }
     return localVideoId
   }
 
@@ -237,7 +250,11 @@ public actor FileUploader {
         uploadId = getUploadId(photoId: photoInfo.photo.id!)
         type = .photo
       case let .video(videoInfo):
-        uploadId = getUploadId(videoId: videoInfo.video.id!)
+        guard let localVideoId = videoInfo.video.id else {
+          throw FileUploadError.invalidVideoId
+        }
+
+        uploadId = getUploadId(videoId: localVideoId)
         type = .video
       case let .document(documentInfo):
         uploadId = getUploadId(documentId: documentInfo.document.id!)
@@ -412,6 +429,23 @@ public actor FileUploader {
     "document_\(documentId)"
   }
 
+  private func resolveLocalVideoId(for video: Video) throws -> Int64 {
+    if let id = video.id { return id }
+
+    // Try to fetch the video row by temporary/server videoId
+    let fetched: Video? = try AppDatabase.shared.dbWriter.read { db in
+      try Video
+        .filter(Video.Columns.videoId == video.videoId)
+        .fetchOne(db)
+    }
+
+    guard let fetched, let id = fetched.id else {
+      throw FileUploadError.invalidVideoId
+    }
+
+    return id
+  }
+
   // Nonisolated helper so progress closures don't capture actor-isolated state
   nonisolated static func progressHandler(for uploadId: String) -> @Sendable (Double) -> Void {
     return { progress in
@@ -431,6 +465,43 @@ public actor FileUploader {
     let data = try Data(contentsOf: url)
     let mimeType = MIMEType(text: FileHelpers.getMimeType(for: url))
     return (data, mimeType)
+  }
+
+  // MARK: - Video Metadata Helpers
+
+  private func getValidatedVideoMetadata(
+    from videoInfo: VideoInfo,
+    localUrl: URL
+  ) async throws -> (Int, Int, Int) {
+    var width = videoInfo.video.width ?? 0
+    var height = videoInfo.video.height ?? 0
+    var duration = videoInfo.video.duration ?? 0
+
+    // Fallback to reading from the file if any value is missing/zero
+    if width == 0 || height == 0 || duration == 0 {
+      let asset = AVURLAsset(url: localUrl)
+      let tracks = try await asset.loadTracks(withMediaType: .video)
+      if let track = tracks.first {
+        let naturalSize = try await track.load(.naturalSize)
+        let transform = try await track.load(.preferredTransform)
+        let transformedSize = naturalSize.applying(transform)
+        width = Int(abs(transformedSize.width.rounded()))
+        height = Int(abs(transformedSize.height.rounded()))
+      }
+
+      let durationTime = try await asset.load(.duration)
+      let seconds = CMTimeGetSeconds(durationTime)
+      if seconds.isFinite {
+        duration = max(duration, Int(seconds.rounded()))
+      }
+    }
+
+    // Guard against missing metadata because the server requires them
+    guard width > 0, height > 0, duration > 0 else {
+      throw FileUploadError.invalidVideoMetadata
+    }
+
+    return (width, height, duration)
   }
 
   // MARK: - Wait for Upload
@@ -472,6 +543,7 @@ public enum FileUploadError: Error {
   case invalidPhotoId
   case invalidDocumentId
   case invalidVideoId
+  case invalidVideoMetadata
   case uploadAlreadyInProgress
   case uploadAlreadyCompleted
   case uploadCancelled
