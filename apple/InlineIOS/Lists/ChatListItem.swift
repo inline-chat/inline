@@ -71,12 +71,12 @@ struct ChatListItem: View {
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .frame(height: 56)
-    .listRowInsets(EdgeInsets(
-      top: Self.verticalPadding,
-      leading: Self.horizontalPadding,
-      bottom: Self.verticalPadding,
-      trailing: Self.horizontalPadding
-    ))
+    // .listRowInsets(EdgeInsets(
+    //   top: Self.verticalPadding,
+    //   leading: Self.horizontalPadding,
+    //   bottom: Self.verticalPadding,
+    //   trailing: Self.horizontalPadding
+    // ))
   }
 
   @ViewBuilder
