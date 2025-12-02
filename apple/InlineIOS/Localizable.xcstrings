@@ -4,6 +4,9 @@
     "" : {
 
     },
+    " " : {
+
+    },
     "@%@" : {
 
     },
@@ -11,6 +14,9 @@
 
     },
     "@mo" : {
+
+    },
+    "%@" : {
 
     },
     "%@ %@" : {
@@ -45,6 +51,16 @@
     },
     "%@: " : {
 
+    },
+    "%@: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@: %2$@"
+          }
+        }
+      }
     },
     "%lld" : {
 
@@ -152,6 +168,9 @@
           }
         }
       }
+    },
+    "Archive" : {
+
     },
     "Are you sure you want to logout? This will clear your local data and return you to the welcome screen." : {
 
@@ -627,6 +646,12 @@
     "Logout" : {
 
     },
+    "Mark Read" : {
+
+    },
+    "Mark Unread" : {
+
+    },
     "name@example.com" : {
       "comment" : "Email placeholder",
       "extractionState" : "stale",
@@ -728,6 +753,9 @@
           }
         }
       }
+    },
+    "Pin" : {
+
     },
     "Please search a username or start a new chat or message                               , or create a new space by clicking the + button" : {
 
@@ -888,7 +916,13 @@
     "Type to find existing chats or search for people to start new conversations" : {
 
     },
+    "Unarchive" : {
+
+    },
     "Unknown User" : {
+
+    },
+    "Unpin" : {
 
     },
     "Unsupported message" : {

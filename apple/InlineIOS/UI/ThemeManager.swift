@@ -101,23 +101,6 @@ class ThemeManager: ObservableObject {
 // MARK: - SwiftUI Color Extensions
 
 extension ThemeManager {
-  /// SwiftUI Color accessors for the theme
-  var listRowBackgroundColor: Color {
-    Color(selected.listRowBackground ?? .systemBackground)
-  }
-
-  var listSeparatorColor: Color {
-    Color(selected.listSeparatorColor ?? .separator)
-  }
-
-  var navigationBarBackgroundColor: Color {
-    Color(selected.navigationBarBackground ?? .systemBackground)
-  }
-
-  var toolbarBackgroundColor: Color {
-    Color(selected.toolbarBackground ?? .systemBackground)
-  }
-
   var surfaceBackgroundColor: Color {
     Color(selected.surfaceBackground ?? .secondarySystemBackground)
   }
@@ -166,89 +149,11 @@ extension ThemeManager {
     Color(selected.accent)
   }
 
-  var backgroundColorSwiftUI: Color {
-    Color(selected.backgroundColor)
-  }
-
   var sheetTintColor: Color {
     Color(selected.sheetTintColor ?? selected.accent)
   }
 
   var logoutRedColor: Color {
     Color(selected.logoutRed)
-  }
-}
-
-// MARK: - View Modifiers
-
-extension View {
-  /// Applies theme colors to list rows
-  func themedListRow() -> some View {
-    listRowBackground(ThemeManager.shared.listRowBackgroundColor)
-      .foregroundColor(ThemeManager.shared.textPrimaryColor)
-  }
-
-  /// Applies theme colors to list separators
-  func themedListStyle() -> some View {
-    listStyle(.plain)
-      .scrollContentBackground(.hidden)
-      .background(ThemeManager.shared.backgroundColorSwiftUI)
-  }
-
-  func themedInsetGroupedListStyle() -> some View {
-    listStyle(.insetGrouped)
-      .scrollContentBackground(.hidden)
-      .background(ThemeManager.shared.backgroundColorSwiftUI)
-  }
-
-  /// Applies theme colors to navigation bars
-  func themedNavigationBar() -> some View {
-    toolbarBackground(ThemeManager.shared.navigationBarBackgroundColor, for: .navigationBar)
-      .toolbarColorScheme(.dark, for: .navigationBar)
-  }
-
-  /// Applies theme colors to text
-  func themedPrimaryText() -> some View {
-    foregroundColor(ThemeManager.shared.textPrimaryColor)
-  }
-
-  func themedSecondaryText() -> some View {
-    foregroundColor(ThemeManager.shared.textSecondaryColor)
-  }
-
-  func themedTertiaryText() -> some View {
-    foregroundColor(ThemeManager.shared.textTertiaryColor)
-  }
-
-  /// Applies theme colors to cards and surfaces
-  func themedCard() -> some View {
-    background(ThemeManager.shared.cardBackgroundColor)
-      .foregroundColor(ThemeManager.shared.textPrimaryColor)
-  }
-
-  func themedSurface() -> some View {
-    background(ThemeManager.shared.surfaceBackgroundColor)
-      .foregroundColor(ThemeManager.shared.textPrimaryColor)
-  }
-
-  /// Applies theme colors to buttons
-  func themedPrimaryButton() -> some View {
-    background(ThemeManager.shared.buttonBackgroundColor)
-      .foregroundColor(.white)
-  }
-
-  func themedSecondaryButton() -> some View {
-    background(ThemeManager.shared.buttonSecondaryBackgroundColor)
-      .foregroundColor(ThemeManager.shared.textPrimaryColor)
-  }
-
-  /// Applies theme accent color
-  func themedAccent() -> some View {
-    accentColor(ThemeManager.shared.accentColor)
-  }
-
-  /// Applies theme tint color for sheets
-  func themedSheet() -> some View {
-    tint(ThemeManager.shared.sheetTintColor)
   }
 }

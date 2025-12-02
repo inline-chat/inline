@@ -114,7 +114,7 @@ struct HomeView: View {
 
   var body: some View {
     homeContent
-      .background(ThemeManager.shared.backgroundColorSwiftUI)
+      .background(Color(.systemBackground))
       .searchable(text: $text, prompt: "Find")
       .onChange(of: text) { _, newValue in
         searchUsers(query: newValue)
@@ -331,13 +331,13 @@ struct HomeView: View {
         VStack(alignment: .leading, spacing: 0) {
           Text(getDisplayName(for: result))
             .font(.body)
-            .themedPrimaryText()
+              
             .lineLimit(1)
 
           if let subtitle = getSubtitle(for: result) {
             Text(subtitle)
               .font(.caption)
-              .themedSecondaryText()
+                
               .lineLimit(1)
           }
         }
@@ -485,18 +485,18 @@ struct SearchedView: View {
         VStack(spacing: 4) {
           Text("🔍")
             .font(.largeTitle)
-            .themedPrimaryText()
+              
             .padding(.bottom, 14)
           Text("Search for chats and people")
             .font(.headline)
-            .themedPrimaryText()
+              
           Text("Type to find existing chats or search for people to start new conversations")
-            .themedSecondaryText()
+              
             .multilineTextAlignment(.center)
         }
         .padding(.horizontal, 45)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(ThemeManager.shared.backgroundColorSwiftUI)
+        .background(Color(.systemBackground))
         .transition(.opacity)
       }
     }
