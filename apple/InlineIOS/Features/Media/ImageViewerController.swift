@@ -9,6 +9,7 @@ final class ImageViewerController: UIViewController {
   private weak var sourceView: UIView?
   private let sourceImage: UIImage?
   private let sourceFrame: CGRect
+  private let showInChatAction: (() -> Void)?
     
   private lazy var scrollView: UIScrollView = {
     let scrollView = UIScrollView()
@@ -76,13 +77,31 @@ final class ImageViewerController: UIViewController {
     button.addTarget(self, action: #selector(shareButtonTapped), for: .touchUpInside)
     return button
   }()
+
+  private lazy var showInChatButton: UIButton = {
+    let button = UIButton(type: .system)
+    button.setTitle("Show in Chat", for: .normal)
+    button.setImage(UIImage(systemName: "text.bubble"), for: .normal)
+    button.tintColor = .white
+    button.setTitleColor(.white, for: .normal)
+    button.titleLabel?.font = .systemFont(ofSize: 14, weight: .semibold)
+    button.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+    button.layer.cornerRadius = 18
+    button.contentEdgeInsets = UIEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
+    button.semanticContentAttribute = .forceLeftToRight
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.addTarget(self, action: #selector(showInChatButtonTapped), for: .touchUpInside)
+    button.isHidden = showInChatAction == nil
+    return button
+  }()
     
   // MARK: - Initialization
     
-  init(imageURL: URL, sourceView: UIView, sourceImage: UIImage? = nil) {
+  init(imageURL: URL, sourceView: UIView, sourceImage: UIImage? = nil, showInChatAction: (() -> Void)? = nil) {
     self.imageURL = imageURL
     self.sourceView = sourceView
     self.sourceImage = sourceImage
+    self.showInChatAction = showInChatAction
     self.sourceFrame = sourceView.convert(sourceView.bounds, to: nil)
       
     super.init(nibName: nil, bundle: nil)
@@ -129,6 +148,7 @@ final class ImageViewerController: UIViewController {
     view.addSubview(controlsContainerView)
     controlsContainerView.addSubview(closeButton)
     controlsContainerView.addSubview(shareButton)
+    controlsContainerView.addSubview(showInChatButton)
         
     NSLayoutConstraint.activate([
       scrollView.topAnchor.constraint(equalTo: view.topAnchor),
@@ -154,7 +174,13 @@ final class ImageViewerController: UIViewController {
       shareButton.topAnchor.constraint(equalTo: controlsContainerView.topAnchor, constant: 16),
       shareButton.trailingAnchor.constraint(equalTo: controlsContainerView.trailingAnchor, constant: -16),
       shareButton.widthAnchor.constraint(equalToConstant: 40),
-      shareButton.heightAnchor.constraint(equalToConstant: 40)
+      shareButton.heightAnchor.constraint(equalToConstant: 40),
+
+      showInChatButton.topAnchor.constraint(equalTo: controlsContainerView.topAnchor, constant: 16),
+      showInChatButton.centerXAnchor.constraint(equalTo: controlsContainerView.centerXAnchor),
+      showInChatButton.heightAnchor.constraint(equalToConstant: 36),
+      showInChatButton.leadingAnchor.constraint(greaterThanOrEqualTo: closeButton.trailingAnchor, constant: 8),
+      showInChatButton.trailingAnchor.constraint(lessThanOrEqualTo: shareButton.leadingAnchor, constant: -8)
     ])
         
     setupImageViewConstraints()
@@ -484,6 +510,21 @@ final class ImageViewerController: UIViewController {
     }
         
     present(activityViewController, animated: true)
+  }
+
+  @objc private func showInChatButtonTapped() {
+    guard let showInChatAction else { return }
+
+    animateImageOut { [weak self] in
+      guard let self else {
+        showInChatAction()
+        return
+      }
+
+      self.dismiss(animated: false) {
+        showInChatAction()
+      }
+    }
   }
     
   @objc func image(_ image: UIImage, didFinishSavingWithError error: Error?, contextInfo: UnsafeRawPointer) {
