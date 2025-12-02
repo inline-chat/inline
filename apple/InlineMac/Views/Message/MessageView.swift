@@ -70,7 +70,7 @@ class MessageViewAppKit: NSView {
   }
 
   private var hasVideo: Bool {
-    false
+    props.layout.hasVideo
   }
 
   private var hasDocument: Bool {
@@ -204,6 +204,12 @@ class MessageViewAppKit: NSView {
 
   private lazy var photoView: NewPhotoView = {
     let view = NewPhotoView(fullMessage, scrollState: scrollState)
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
+
+  private lazy var videoView: NewVideoView = {
+    let view = NewVideoView(fullMessage, scrollState: scrollState)
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -433,6 +439,10 @@ class MessageViewAppKit: NSView {
 
     if hasPhoto {
       contentView.addSubview(photoView)
+    }
+
+    if hasVideo {
+      contentView.addSubview(videoView)
     }
 
     if hasDocument, let documentView {
@@ -933,6 +943,24 @@ class MessageViewAppKit: NSView {
         photoView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: photo.spacing.left),
       ])
     }
+
+    // Video
+
+    if let video = layout.video {
+      videoViewTopConstraint = videoView.topAnchor.constraint(
+        equalTo: contentView.topAnchor,
+        constant: layout.videoContentViewTop
+      )
+      videoViewHeightConstraint = videoView.heightAnchor.constraint(equalToConstant: video.size.height)
+      videoViewWidthConstraint = videoView.widthAnchor
+        .constraint(equalToConstant: video.size.width)
+      constraints.append(contentsOf: [
+        videoViewTopConstraint!,
+        videoViewHeightConstraint!,
+        videoViewWidthConstraint!,
+        videoView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: video.spacing.left),
+      ])
+    }
   }
 
   // MARK: - Constraints
@@ -945,6 +973,10 @@ class MessageViewAppKit: NSView {
   private var photoViewHeightConstraint: NSLayoutConstraint?
   private var photoViewWidthConstraint: NSLayoutConstraint?
   private var photoViewTopConstraint: NSLayoutConstraint?
+
+  private var videoViewHeightConstraint: NSLayoutConstraint?
+  private var videoViewWidthConstraint: NSLayoutConstraint?
+  private var videoViewTopConstraint: NSLayoutConstraint?
 
   private var replyViewTopConstraint: NSLayoutConstraint?
 
@@ -1054,6 +1086,39 @@ class MessageViewAppKit: NSView {
       if photoViewTopConstraint.constant != props.layout.photoContentViewTop {
         photoViewTopConstraint.constant = props.layout.photoContentViewTop
       }
+    }
+
+    if let video = props.layout.video,
+       let videoViewHeightConstraint,
+       let videoViewWidthConstraint,
+       let videoViewTopConstraint
+    {
+      log.trace("Updating video view constraints for message \(video.size)")
+      if videoViewHeightConstraint.constant != video.size.height {
+        videoViewHeightConstraint.constant = video.size.height
+      }
+
+      if videoViewWidthConstraint.constant != video.size.width {
+        videoViewWidthConstraint.constant = video.size.width
+      }
+
+      if videoViewTopConstraint.constant != props.layout.videoContentViewTop {
+        videoViewTopConstraint.constant = props.layout.videoContentViewTop
+      }
+    } else if let video = props.layout.video {
+      // Set up constraints if they didn't exist (e.g. view reused for a different message)
+      videoViewTopConstraint = videoView.topAnchor.constraint(
+        equalTo: contentView.topAnchor,
+        constant: props.layout.videoContentViewTop
+      )
+      videoViewHeightConstraint = videoView.heightAnchor.constraint(equalToConstant: video.size.height)
+      videoViewWidthConstraint = videoView.widthAnchor.constraint(equalToConstant: video.size.width)
+      NSLayoutConstraint.activate([
+        videoViewTopConstraint!,
+        videoViewHeightConstraint!,
+        videoViewWidthConstraint!,
+        videoView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: video.spacing.left),
+      ])
     }
 
     if let document = props.layout.document,
@@ -1462,6 +1527,11 @@ class MessageViewAppKit: NSView {
 
     prevInViewport = false
 
+    // Ensure media views exist before constraint updates when reusing the view
+    if props.layout.video != nil, videoView.superview == nil {
+      contentView.addSubview(videoView)
+    }
+
     // update internal props
     self.fullMessage = fullMessage
 
@@ -1489,6 +1559,14 @@ class MessageViewAppKit: NSView {
     // Photo
     if hasPhoto {
       photoView.update(with: fullMessage)
+    }
+
+    // Video
+    if hasVideo {
+      if videoView.superview == nil {
+        contentView.addSubview(videoView)
+      }
+      videoView.update(with: fullMessage)
     }
 
     // Document
@@ -1566,6 +1644,13 @@ class MessageViewAppKit: NSView {
           photoView.setIsScrolling(false)
         } else {
           photoView.setIsScrolling(true)
+        }
+      }
+      if hasVideo {
+        if scrollState == .idle {
+          videoView.setIsScrolling(false)
+        } else {
+          videoView.setIsScrolling(true)
         }
       }
     }
@@ -1933,6 +2018,16 @@ extension MessageViewAppKit: NSMenuDelegate {
       saveItem.isEnabled = true
       saveItem.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Save Image")
       menu.addItem(saveItem)
+    }
+
+    // Add video actions
+    if hasVideo {
+      menu.addItem(NSMenuItem.separator())
+      let openItem = NSMenuItem(title: "Open Video", action: #selector(videoView.openQuickLook), keyEquivalent: "v")
+      openItem.target = videoView
+      openItem.isEnabled = true
+      openItem.image = NSImage(systemSymbolName: "play.circle", accessibilityDescription: "Play")
+      menu.addItem(openItem)
     }
 
     // Add document actions
