@@ -86,7 +86,7 @@ struct HomeToolbarContent: ToolbarContent {
   private var dotsButton: some View {
     Menu {
       Button {
-        router.presentSheet(.createSpace)
+        router.push(.createSpace)
       } label: {
         Label("Create Space", systemImage: "building")
       }
@@ -116,7 +116,7 @@ struct HomeToolbarContent: ToolbarContent {
   @ViewBuilder
   private var createSpaceButton: some View {
     Button {
-      router.presentSheet(.createSpace)
+      router.push(.createSpace)
     } label: {
       Image(systemName: "plus")
         .tint(Color.secondary)
