@@ -55,7 +55,7 @@ struct LogoutSection: View {
 
   private func performLogout() async {
     do {
-      // 2. Close active connections first
+      // 1. Close active connections first
       await Realtime.shared.loggedOut()
 
       do {
@@ -81,20 +81,30 @@ struct LogoutSection: View {
         Log.shared.error("Logout API call failed: \(error.localizedDescription)")
       }
 
+      // 2. Clear analytics user
       Analytics.logout()
 
-      // 4. Clear local authentication state
+      // 3. Clear local authentication state
       await Auth.shared.logOut()
 
-      // 5. Clear database (combine operations if possible)
+      // 4. Clear database (loggedOut() already calls clearDB() internally)
       try AppDatabase.loggedOut()
-      try AppDatabase.clearDB()
 
-      // 6. Update UI on main thread
+      // 5. Clear pending transactions
+      Transactions.shared.clearAll()
+
+      // 6. Clear app state that's persisted in UserDefaults
+      await MainActor.run {
+        TabsManager.shared.reset()
+        TabsManager.shared.clearActiveSpaceId()
+        ChatState.shared.reset()
+        navigation.reset()
+      }
+
+      // 7. Update UI on main thread
       await MainActor.run {
         mainRouter.setRoute(route: .onboarding)
-        onboardingNavigation.push(.welcome)
-        navigation.popToRoot()
+        onboardingNavigation.reset()
         router.reset()
       }
     } catch {
