@@ -17,7 +17,7 @@ struct ChatListItem: View {
 
   // fonts
   static var titleFont: Font = .system(size: 17.0).weight(.regular)
-  static var subtitleFont: Font = .system(size: 17.0).weight(.regular)
+  static var subtitleFont: Font = .system(size: 16.0).weight(.regular)
   static var tertiaryFont: Font = .system(size: 15.0).weight(.regular)
   static var unreadCountFont: Font = .system(size: 15.0).weight(.regular)
 
@@ -113,28 +113,41 @@ struct ChatListItem: View {
             .lineLimit(1)
             .truncationMode(.tail)
             .frame(maxWidth: .infinity, alignment: .leading)
-          if let spaceName {
-            Text(spaceName)
-              .font(Self.tertiaryFont)
-              .foregroundStyle(Self.tertiaryColor)
-              .lineLimit(1)
-              .truncationMode(.tail)
+          HStack(spacing: 0) {
+            if let spaceName {
+              Text(spaceName)
+                .font(Self.tertiaryFont)
+                .foregroundStyle(Self.tertiaryColor)
+                .lineLimit(1)
+                .truncationMode(.tail)
+              if isPinned, showsPinnedIndicator {
+                Image(systemName: "pin.fill")
+                  .font(.system(size: 12, weight: .semibold))
+                  .foregroundColor(.secondary)
+                  .padding(.leading, 4)
+              }
+            }
           }
         }
       case let .user(userInfo, _):
-        // HStack(spacing: 0) {
-        Text(userInfo.user.displayName)
-          .font(Self.titleFont)
-          .foregroundColor(Self.titleColor)
-          .lineLimit(1)
-          .truncationMode(.tail)
-          .frame(maxWidth: .infinity, alignment: .leading)
-        // Text(resolvedLastMessage?.date.formatted() ?? "")
-        //   .font(Self.tertiaryFont)
-        //   .foregroundStyle(Self.tertiaryColor)
-        //   .lineLimit(1)
-        //   .truncationMode(.tail)
-        // }
+        HStack(spacing: 0) {
+          Text(userInfo.user.displayName)
+            .font(Self.titleFont)
+            .foregroundColor(Self.titleColor)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(maxWidth: .infinity, alignment: .leading)
+          if isPinned, showsPinnedIndicator {
+            Image(systemName: "pin.fill")
+              .font(.system(size: 12, weight: .semibold))
+              .foregroundColor(.secondary)
+          }
+          // Text(resolvedLastMessage?.date.formatted() ?? "")
+          //   .font(Self.tertiaryFont)
+          //   .foregroundStyle(Self.tertiaryColor)
+          //   .lineLimit(1)
+          //   .truncationMode(.tail)
+        }
     }
   }
 
@@ -194,11 +207,6 @@ struct ChatListItem: View {
       Circle()
         .fill(Self.unreadCircleColor)
         .frame(width: 10, height: 10)
-        .padding(.top, 18)
-    } else if isPinned, showsPinnedIndicator {
-      Image(systemName: "pin.fill")
-        .font(.system(size: 13, weight: .semibold))
-        .foregroundColor(.secondary)
         .padding(.top, 18)
     }
   }
