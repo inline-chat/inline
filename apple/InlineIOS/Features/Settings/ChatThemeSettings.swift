@@ -1,17 +1,16 @@
-// ThemeSelectionView.swift
 import SwiftUI
 
 struct ThemeSelectionView: View {
-  @StateObject private var themeManager = ThemeManager.shared
+  @Bindable private var store = ThemeStore.shared
   @State private var selectedThemeId: String
 
   init() {
-    _selectedThemeId = State(initialValue: ThemeManager.shared.selected.id)
+    _selectedThemeId = State(initialValue: ThemeStore.shared.current.id)
   }
 
   var body: some View {
     List {
-      ThemePreviewCard(theme: themeManager.selected)
+      ThemePreviewCard(theme: store.current)
         .listRowInsets(EdgeInsets())
 
       themeGrid
@@ -24,11 +23,9 @@ struct ThemeSelectionView: View {
       ToolbarItem(placement: .principal) {
         HStack {
           Image(systemName: "paintpalette.fill")
-              
             .font(.callout)
           Text("Themes")
             .font(.headline)
-              
         }
       }
     }
@@ -38,7 +35,7 @@ struct ThemeSelectionView: View {
   private var themeGrid: some View {
     ScrollView(.horizontal, showsIndicators: false) {
       LazyHStack(spacing: 12) {
-        ForEach(ThemeManager.themes, id: \.id) { theme in
+        ForEach(AppTheme.allThemes) { theme in
           ThemeCard(
             theme: theme,
             isSelected: theme.id == selectedThemeId
@@ -53,21 +50,21 @@ struct ThemeSelectionView: View {
     }
   }
 
-  private func selectTheme(_ theme: ThemeConfig) {
+  private func selectTheme(_ theme: AppTheme) {
     selectedThemeId = theme.id
-    themeManager.switchToTheme(theme)
+    store.select(theme)
     UIImpactFeedbackGenerator(style: .light).impactOccurred()
   }
 }
 
 struct ThemeCard: View {
-  let theme: ThemeConfig
+  let theme: AppTheme
   let isSelected: Bool
 
   var body: some View {
     VStack(alignment: .center) {
       Circle()
-        .fill(Color(theme.bubbleBackground))
+        .fill(theme.colors.bubbleOutgoingColor)
         .frame(width: 50)
         .padding(2)
         .background(
@@ -82,36 +79,24 @@ struct ThemeCard: View {
     }
     .frame(minWidth: 80)
   }
-
-  private func messageBubble(outgoing: Bool, text: String) -> some View {
-    HStack {
-      if outgoing { Spacer() }
-
-      Text(text)
-        .font(.caption)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(
-          outgoing ? Color(theme.bubbleBackground) : Color(theme.incomingBubbleBackground)
-        )
-        .foregroundColor(outgoing ? .white : .primary)
-        .cornerRadius(10)
-
-      if !outgoing { Spacer() }
-    }
-  }
 }
 
 struct ThemePreviewCard: View {
-  let theme: ThemeConfig
+  let theme: AppTheme
 
   var body: some View {
     VStack(spacing: 12) {
-      messageBubble(outgoing: false, text: "Hey! Just pushed an update for users! Have you checked it out yet?")
-      messageBubble(outgoing: true, text: "Nice. Cheking it out now.")
+      messageBubble(
+        outgoing: false,
+        text: "Hey! Just pushed an update for users! Have you checked it out yet?"
+      )
+      messageBubble(
+        outgoing: true,
+        text: "Nice. Checking it out now."
+      )
     }
     .padding()
-    .background(Color(theme.backgroundColor).ignoresSafeArea())
+    .background(theme.colors.backgroundColor.ignoresSafeArea())
   }
 
   private func messageBubble(outgoing: Bool, text: String) -> some View {
@@ -123,7 +108,9 @@ struct ThemePreviewCard: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(
-          outgoing ? Color(theme.bubbleBackground) : Color(theme.incomingBubbleBackground)
+          outgoing
+            ? theme.colors.bubbleOutgoingColor
+            : theme.colors.bubbleIncomingColor
         )
         .foregroundColor(outgoing ? .white : .primary)
         .cornerRadius(18)
