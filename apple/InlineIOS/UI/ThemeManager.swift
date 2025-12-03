@@ -1,6 +1,10 @@
 import SwiftUI
 import UIKit
 
+// MARK: - Legacy Compatibility Layer
+// This provides backward compatibility with existing code while migrating to the new theme system.
+// New code should use ThemeStore.shared and @Environment(\.theme) directly.
+
 protocol ThemeConfig {
   var backgroundColor: UIColor { get }
   var accent: UIColor { get }
@@ -9,7 +13,6 @@ protocol ThemeConfig {
   var incomingBubbleBackground: UIColor { get }
   var failedBubbleBackground: UIColor { get }
 
-  // only for incoming messages for now
   var primaryTextColor: UIColor? { get }
   var secondaryTextColor: UIColor? { get }
 
@@ -21,7 +24,6 @@ protocol ThemeConfig {
 
   var documentIconBackground: UIColor? { get }
 
-  // New Catppuccin Mocha colors for comprehensive theming
   var listRowBackground: UIColor? { get }
   var listSeparatorColor: UIColor? { get }
   var navigationBarBackground: UIColor? { get }
@@ -44,61 +46,83 @@ protocol ThemeConfig {
   var name: String { get }
 }
 
+// MARK: - AppTheme to ThemeConfig Adapter
+
+extension AppTheme: ThemeConfig {
+  var backgroundColor: UIColor { colors.background }
+  var accent: UIColor { colors.accent }
+  var bubbleBackground: UIColor { colors.bubbleOutgoing }
+  var incomingBubbleBackground: UIColor { colors.bubbleIncoming }
+  var failedBubbleBackground: UIColor { colors.bubbleFailed }
+
+  var primaryTextColor: UIColor? { colors.textPrimary }
+  var secondaryTextColor: UIColor? { colors.textSecondary }
+
+  var reactionOutgoingPrimary: UIColor? { colors.reactionOutgoingPrimary }
+  var reactionOutgoingSecoundry: UIColor? { colors.reactionOutgoingSecondary }
+  var reactionIncomingPrimary: UIColor? { colors.reactionIncomingPrimary }
+  var reactionIncomingSecoundry: UIColor? { colors.reactionIncomingSecondary }
+
+  var documentIconBackground: UIColor? { colors.documentIconBackground }
+
+  var listRowBackground: UIColor? { colors.background }
+  var listSeparatorColor: UIColor? { colors.separator }
+  var navigationBarBackground: UIColor? { colors.navigationBar }
+  var toolbarBackground: UIColor? { colors.toolbar }
+  var surfaceBackground: UIColor? { colors.surface }
+  var surfaceSecondary: UIColor? { colors.surfaceSecondary }
+  var textPrimary: UIColor? { colors.textPrimary }
+  var textSecondary: UIColor? { colors.textSecondary }
+  var textTertiary: UIColor? { colors.textTertiary }
+  var borderColor: UIColor? { colors.border }
+  var overlayBackground: UIColor? { colors.overlay }
+  var cardBackground: UIColor? { colors.card }
+  var searchBarBackground: UIColor? { colors.searchBar }
+  var buttonBackground: UIColor? { colors.buttonPrimary }
+  var buttonSecondaryBackground: UIColor? { colors.buttonSecondary }
+  var sheetTintColor: UIColor? { colors.accent }
+  var logoutRed: UIColor { colors.destructive }
+}
+
+// MARK: - ThemeManager (Legacy Wrapper)
+
 class ThemeManager: ObservableObject {
   static let shared = ThemeManager()
 
-  static let themes: [ThemeConfig] = [
-    Default(),
-    CatppuccinMocha(),
-    PeonyPink(),
-    Orchid(),
-  ]
-
-  private let defaults = UserDefaults.standard
-  private let currentThemeKey = "selected_theme_id"
-
-  @Published var selected: ThemeConfig {
-    didSet {
-      saveCurrentTheme()
-    }
+  static var themes: [ThemeConfig] {
+    AppTheme.allThemes
   }
 
-  init() {
-    if let savedThemeID = defaults.string(forKey: currentThemeKey),
-       let savedTheme = Self.findTheme(withID: savedThemeID)
-    {
-      selected = savedTheme
-    } else {
-      selected = Default()
-    }
-  }
+  @Published var selected: ThemeConfig
 
-  private func saveCurrentTheme() {
-    defaults.set(selected.id, forKey: currentThemeKey)
+  private init() {
+    selected = ThemeStore.shared.current
   }
 
   func switchToTheme(_ theme: ThemeConfig) {
-    selected = theme
+    if let appTheme = theme as? AppTheme {
+      ThemeStore.shared.select(appTheme)
+      selected = appTheme
+    }
   }
 
   func switchToTheme(withID id: String) {
     if let theme = Self.findTheme(withID: id) {
-      selected = theme
+      switchToTheme(theme)
     }
   }
 
   func resetToDefaultTheme() {
-    selected = Default()
+    ThemeStore.shared.reset()
+    selected = ThemeStore.shared.current
   }
 
-  // MARK: - Helper Methods
-
   static func findTheme(withID id: String) -> ThemeConfig? {
-    themes.first { $0.id == id }
+    AppTheme.find(byId: id)
   }
 }
 
-// MARK: - SwiftUI Color Extensions
+// MARK: - SwiftUI Color Extensions (Legacy)
 
 extension ThemeManager {
   var surfaceBackgroundColor: Color {
