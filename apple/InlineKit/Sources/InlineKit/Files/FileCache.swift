@@ -348,6 +348,10 @@ public actor FileCache: Sendable {
   }
 
   public static func saveVideo(url: URL, thumbnail: PlatformImage? = nil) async throws -> InlineKit.VideoInfo {
+    // Handle security scoped URL before any reads
+    let hasAccess = url.startAccessingSecurityScopedResource()
+    defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
+
     let asset = AVURLAsset(url: url)
 
     // Dimensions
@@ -370,10 +374,6 @@ public actor FileCache: Sendable {
     let fileExtension = url.pathExtension.isEmpty ? "mp4" : url.pathExtension
     let localPath = UUID().uuidString + "." + fileExtension
     let localUrl = directory.appendingPathComponent(localPath)
-
-    // Handle security scoped URL if needed
-    let hasAccess = url.startAccessingSecurityScopedResource()
-    defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
 
     try fileManager.copyItem(at: url, to: localUrl)
     let fileSize = FileHelpers.getFileSize(at: localUrl)
