@@ -51,9 +51,9 @@ const handler = async (input: Static<typeof Input>, context: HandlerContext): Pr
       userId: context.currentUserId,
     })
 
-    const width = input.width ? parseInt(input.width) : undefined
-    const height = input.height ? parseInt(input.height) : undefined
-    const duration = input.duration ? parseInt(input.duration) : undefined
+    const width = parseOptionalInt("width", input.width)
+    const height = parseOptionalInt("height", input.height)
+    const duration = parseOptionalInt("duration", input.duration)
 
     // Validate video metadata if present
     if (input.type === FileTypes.VIDEO) {
@@ -110,7 +110,7 @@ const handler = async (input: Static<typeof Input>, context: HandlerContext): Pr
 
     return {
       fileUniqueId: result.fileUniqueId,
-      photoId: videoThumbnailId ?? result.photoId,
+      photoId: result.photoId ?? videoThumbnailId,
       videoId: result.videoId,
       documentId: result.documentId,
     }
@@ -151,3 +151,13 @@ export const uploadFileRoute = new Elysia({ tags: ["POST"] }).use(authenticate).
     response: response,
   },
 )
+
+function parseOptionalInt(name: string, value?: string): number | undefined {
+  if (value === undefined) return undefined
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) {
+    log.error(`Invalid numeric value for ${name}`, { value })
+    return undefined
+  }
+  return parsed
+}

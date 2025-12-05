@@ -683,15 +683,19 @@ class ComposeAppKit: NSView {
     return NSImage(contentsOf: url)
   }
 
-  func addVideo(_ url: URL, thumbnail: NSImage? = nil) {
+  @MainActor
+  func addVideo(_ url: URL, thumbnail: NSImage? = nil) async {
     do {
-      let videoInfo = try FileCache.saveVideo(url: url, thumbnail: thumbnail)
+      let videoInfo = try await FileCache.saveVideo(url: url, thumbnail: thumbnail)
       let mediaItem = FileMediaItem.video(videoInfo)
       let uniqueId = mediaItem.getItemUniqueId()
 
       attachments.addVideoView(videoInfo, id: uniqueId)
-      // ensure a thumbnail is visible if we generated one after saving
-      if videoInfo.thumbnail != nil {
+      // Only swap the view if we just generated a new thumbnail
+      if let previousItem = attachmentItems[uniqueId],
+         case let FileMediaItem.video(prevVideoInfo) = previousItem,
+         prevVideoInfo.thumbnail == nil,
+         videoInfo.thumbnail != nil {
         attachments.removeVideoView(id: uniqueId)
         attachments.addVideoView(videoInfo, id: uniqueId)
       }
@@ -974,7 +978,7 @@ extension ComposeAppKit {
   func handleFileDrop(_ urls: [URL]) {
     for url in urls {
       if isVideoFile(url) {
-        addVideo(url)
+        Task { [weak self] in await self?.addVideo(url) }
       } else {
         addFile(url)
       }
@@ -1054,7 +1058,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func textView(_ textView: NSTextView, didReceiveVideo url: URL) {
-    addVideo(url)
+    Task { [weak self] in await self?.addVideo(url) }
   }
 
   /// Note(@mo): User reported Chinese users still see the placeholder when they start typing in Chinese characters.
@@ -1224,7 +1228,7 @@ extension ComposeAppKit: ComposeMenuButtonDelegate {
   }
 
   func composeMenuButton(_ button: ComposeMenuButton, didSelectVideo url: URL) {
-    addVideo(url)
+    Task { [weak self] in await self?.addVideo(url) }
   }
 
   func composeMenuButton(_ button: ComposeMenuButton, didSelectFiles urls: [URL]) {
