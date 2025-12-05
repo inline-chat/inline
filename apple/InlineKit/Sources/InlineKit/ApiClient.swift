@@ -622,7 +622,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     )
   }
 
-  public struct VideoUploadMetadata {
+  public struct VideoUploadMetadata: @unchecked Sendable {
     public let width: Int
     public let height: Int
     public let duration: Int
@@ -707,9 +707,9 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     do {
       let delegate = UploadTaskDelegate(progressHandler: progress)
       let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
-      defer { session.invalidateAndCancel() }
       progress(0)
       let (data, response) = try await session.upload(for: request, from: multipartFormData.body)
+      session.finishTasksAndInvalidate()
 
       guard let httpResponse = response as? HTTPURLResponse else {
         throw APIError.invalidResponse

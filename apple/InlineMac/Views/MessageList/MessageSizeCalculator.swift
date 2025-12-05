@@ -814,7 +814,7 @@ class MessageSizeCalculator {
       timePlan!.spacing = .init(top: 1.0, left: 0.0, bottom: 5.0, right: 6.0)
     }
 
-    // modify isSignleLine to be false if we have media and text won't fit in a single line with time
+    // modify isSingleLine to be false if we have media and text won't fit in a single line with time
     if isSingleLine, let textPlan, (photoPlan != nil || videoPlan != nil) {
       let textWidth = textPlan.size.width + textPlan.spacing.horizontalTotal
       let timeWidth = timePlan!.size.width + timePlan!.spacing.horizontalTotal
