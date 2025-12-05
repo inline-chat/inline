@@ -109,7 +109,7 @@ final class SimplePhotoView: NSView {
       if let photoInfo {
         Task.detached { [weak self] in
           guard let self else { return }
-          await FileCache.shared.download(photo: photoInfo, reloadMessageOnFinish: self.relatedMessage)
+          await FileCache.shared.download(photo: photoInfo, reloadMessageOnFinish: relatedMessage)
         }
       }
       return

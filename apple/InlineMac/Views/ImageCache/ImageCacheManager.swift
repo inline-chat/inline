@@ -29,8 +29,9 @@ final class ImageCacheManager {
     try? fileManager.createDirectory(at: diskCacheURL, withIntermediateDirectories: true)
   }
 
-  func image(for url: URL, loadSync: Bool, completion: @escaping (NSImage?) -> Void) {
-    let cacheKey = url.absoluteString as NSString
+  func image(for url: URL, loadSync: Bool, cacheKey: String? = nil, completion: @escaping (NSImage?) -> Void) {
+    let keyString = cacheKey ?? url.absoluteString
+    let cacheKey = keyString as NSString
 
     // Memory cache check (always sync)
     if let cachedImage = memoryCache.object(forKey: cacheKey) {
@@ -42,7 +43,7 @@ final class ImageCacheManager {
       // Synchronous path with proper QoS handling
       var diskImage: NSImage?
       syncQueue.sync {
-        diskImage = self.loadFromDiskSync(url: url)
+        diskImage = self.loadFromDiskSync(key: keyString)
       }
 
       if let diskImage {
@@ -64,7 +65,7 @@ final class ImageCacheManager {
         return
       }
 
-      // Load from local URL
+      // Load from local or remote URL
       guard let image = NSImage(contentsOf: url) else {
         DispatchQueue.main.async { completion(nil) }
         return
@@ -76,14 +77,19 @@ final class ImageCacheManager {
     }
   }
 
-  private func loadFromDiskSync(url: URL) -> NSImage? {
-    let diskKey = diskCacheKey(for: url)
+  private func loadFromDiskSync(key: String) -> NSImage? {
+    let diskKey = diskCacheKey(for: key)
     let diskPath = diskCacheURL.appendingPathComponent(diskKey)
     return NSImage(contentsOf: diskPath)
   }
 
-  private func diskCacheKey(for url: URL) -> String {
-    url.absoluteString.data(using: .utf8)?.base64EncodedString() ?? UUID().uuidString
+  private func diskCacheKey(for key: String) -> String {
+    key.data(using: .utf8)?.base64EncodedString() ?? UUID().uuidString
+  }
+
+  /// Fast in-memory lookup using an explicit cache key.
+  func cachedImage(cacheKey: String) -> NSImage? {
+    memoryCache.object(forKey: cacheKey as NSString)
   }
 
   func clearCache() {
