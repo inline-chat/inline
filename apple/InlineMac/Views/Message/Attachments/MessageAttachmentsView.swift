@@ -1,4 +1,5 @@
 import AppKit
+import Foundation
 import InlineKit
 import Logger
 
@@ -8,8 +9,8 @@ class MessageAttachmentsView: NSStackView {
   /// Message
   let message: Message
 
-  /// Attachments
-  var attachments: Set<FullAttachment>
+  /// Renderable attachments (order preserved)
+  var attachments: [FullAttachment]
 
   /// Track attachment views by id
   var attachmentViews: [Int64: AttachmentView] = [:]
@@ -18,8 +19,8 @@ class MessageAttachmentsView: NSStackView {
 
   init(attachments: [FullAttachment], message: Message) {
     self.message = message
-    // Initialize attachments as empty set, we'll add attachments later in configure()
-    self.attachments = Set()
+    // Initialize attachments as empty array, we'll add attachments later in configure()
+    self.attachments = []
     super.init(frame: .zero)
 
     // Setup
@@ -50,33 +51,18 @@ class MessageAttachmentsView: NSStackView {
   func configure(attachments: [FullAttachment]) {
     log.trace("Configuring attachments: \(attachments)")
 
-    // Track what changed.
-    let newAttachments = Set(attachments)
-    let removedAttachments = self.attachments.subtracting(newAttachments)
-    let addedAttachments = newAttachments.subtracting(self.attachments)
+    let renderableAttachments = attachments.filter(\.isRenderableAttachment)
+    let renderableIds = renderableAttachments.map(\.id)
+    let currentIds = self.attachments.map(\.id)
 
-    // Update attachments
-    self.attachments = newAttachments
+    // Short‑circuit if nothing changed
+    guard renderableIds != currentIds else { return }
 
-    // TODO: Update existing attachments
-    // for attachment in self.attachments {
-    //   if let attachmentView = attachmentViews[attachment.id] {
-    //     attachmentView.configure(attachment: attachment)
-    //   }
-    // }
+    // Reset and rebuild in message order to keep UI deterministic
+    attachmentsViewCleanup()
+    self.attachments = renderableAttachments
 
-    // Remove removed attachments
-    for attachment in removedAttachments {
-      log.trace("Removing attachment: \(attachment)")
-      if let attachmentView = attachmentViews[attachment.id] {
-        removeArrangedSubview(attachmentView)
-        attachmentView.removeFromSuperview()
-        attachmentViews.removeValue(forKey: attachment.id)
-      }
-    }
-
-    // Add new attachments
-    for attachment in addedAttachments {
+    for attachment in renderableAttachments {
       log.trace("Adding attachment: \(attachment)")
       addAttachment(attachment)
     }
@@ -90,9 +76,8 @@ class MessageAttachmentsView: NSStackView {
 
     if let _ = attachment.externalTask {
       attachmentView = ExternalTaskAttachmentView(fullAttachment: attachment, message: message)
-    } else if let _ = attachment.urlPreview {
-      // TODO: Loom
-      return
+    } else if attachment.isLoomPreview {
+      attachmentView = LoomAttachmentView(fullAttachment: attachment, message: message)
     } else {
       // Unsupported attachment type
       return
@@ -102,5 +87,37 @@ class MessageAttachmentsView: NSStackView {
     attachmentViews[attachment.id] = attachmentView
   }
 
+  private func attachmentsViewCleanup() {
+    for view in arrangedSubviews {
+      removeArrangedSubview(view)
+      view.removeFromSuperview()
+    }
+    attachmentViews.removeAll()
+  }
+
   // MARK: - Computed
+}
+
+// MARK: - Helpers
+
+extension FullAttachment {
+  /// Whether this attachment carries a Loom URL preview we can render.
+  var isLoomPreview: Bool {
+    guard let preview = urlPreview else { return false }
+
+    if let siteName = preview.siteName?.lowercased(), siteName.contains("loom") {
+      return true
+    }
+
+    if let host = URLComponents(string: preview.url)?.host?.lowercased(), host.contains("loom.com") {
+      return true
+    }
+
+    return preview.url.lowercased().contains("loom.com")
+  }
+
+  /// Any attachment type the mac client currently knows how to render inline.
+  var isRenderableAttachment: Bool {
+    externalTask != nil || isLoomPreview
+  }
 }

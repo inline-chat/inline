@@ -133,6 +133,7 @@ public enum Theme {
   public static let documentViewWidth: CGFloat = 200.0
   public static let attachmentViewWidth: CGFloat = 260.0
   public static let externalTaskViewHeight: CGFloat = 46.0
+  public static let loomPreviewHeight: CGFloat = 84.0
   public static let messageAttachmentsSpacing: CGFloat = 8.0
   public static let scrollButtonSize: CGFloat = 32.0
 
