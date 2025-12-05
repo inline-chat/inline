@@ -12,11 +12,13 @@ import {
 import type { HandlerContext, RootContext, Ws } from "./types"
 import { handleConnectionInit } from "@in/server/realtime/handlers/_connectionInit"
 import { Log, LogLevel } from "@in/server/utils/log"
-import { handleRpcCall } from "@in/server/realtime/handlers/_rpc"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { InlineError } from "@in/server/types/errors"
 
 const log = new Log("realtime")
+
+// Cache for lazily-loaded RPC handler to avoid circular import and per-call dynamic import cost
+let rpcHandlerModulePromise: Promise<typeof import("@in/server/realtime/handlers/_rpc")> | null = null
 
 export const handleMessage = async (message: ClientMessage, rootContext: RootContext) => {
   const { ws, connectionId } = rootContext
@@ -94,6 +96,9 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
         break
 
       case "rpcCall":
+        // Import lazily to avoid circular dependency with function registry during module init.
+        // Cache the promise so we only pay the dynamic import cost once.
+        const { handleRpcCall } = await (rpcHandlerModulePromise ??= import("@in/server/realtime/handlers/_rpc"))
         let result = await handleRpcCall(message.body.rpcCall, handlerContext)
         sendRpcReply(result)
         break
