@@ -225,8 +225,6 @@ extension AppDelegate {
     if let peerId = getPeerFromNotification(userInfo) {
       Task(priority: .userInitiated) { @MainActor in
         dependencies.nav.open(.chat(peer: peerId))
-
-        // TODO: Handle notification from threads/space chats
       }
     }
   }
