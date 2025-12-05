@@ -184,6 +184,13 @@ public struct SendMessageTransaction: Transaction2 {
           MessagesPublisher.shared.messageUpdatedSync(message: message, peer: context.peerId, animated: true)
         }
       }
+
+      #if os(macOS)
+      await MacNotifications.shared.showMessageFailedNotification(
+        chatId: context.chatId,
+        peerId: context.peerId
+      )
+      #endif
     } catch {
       log.error("Failed to update message status on failure", error: error)
     }
