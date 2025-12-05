@@ -61,6 +61,35 @@ public actor MacNotifications: Sendable {
 }
 
 extension MacNotifications {
+  public func showMessageFailedNotification(
+    chatId: Int64,
+    peerId: Peer
+  ) async {
+    let chat = await ObjectCache.shared.getChat(id: chatId)
+    let chatName = chat?.title ?? "Chat"
+
+    let title = "Message failed to send"
+    let body = "Tap to open \(chatName) and retry"
+
+    var userInfo: [String: Any] = [
+      "type": "messageFailed",
+      "chatId": chatId,
+      "isThread": peerId.isThread,
+    ]
+
+    if peerId.isThread {
+      userInfo["threadId"] = peerId.id
+    } else if let userId = peerId.asUserId() {
+      userInfo["userId"] = userId
+    }
+
+    await showMessageNotification(
+      title: title,
+      body: body,
+      userInfo: userInfo
+    )
+  }
+
   func handleNewMessage(protocolMsg: InlineProtocol.Message) async {
     // Only show notification for incoming messages
     guard protocolMsg.out == false else { return }
