@@ -273,70 +273,91 @@ public actor FileUploader {
       return 
     }
 
+    let metadata = videoMetadata
     let task = Task<UploadResult, any Error>(priority: priority) {
-      Log.shared.debug("[FileUploader] Starting upload for \(uploadId)")
-
-      // Compress image if it's a photo
-      let uploadUrl: URL
-      if case .photo = media {
-        do {
-          let options = mimeType.lowercased().contains("png") ?
-            ImageCompressionOptions.defaultPNG :
-            ImageCompressionOptions.defaultPhoto
-          uploadUrl = try await ImageCompressor.shared.compressImage(at: localUrl, options: options)
-
-        } catch {
-          // Fallback to original URL if compression fails
-          uploadUrl = localUrl
-        }
-      } else {
-        uploadUrl = localUrl
-      }
-
-      // get data from file
-      let data = try Data(contentsOf: uploadUrl)
-
-      // upload file with progress tracking
-      let progressHandler = FileUploader.progressHandler(for: uploadId)
-
-      let result = try await ApiClient.shared.uploadFile(
+      try await FileUploader.shared.performUpload(
+        uploadId: uploadId,
+        media: media,
+        localUrl: localUrl,
+        mimeType: mimeType,
+        fileName: fileName,
         type: type,
-        data: data,
-        filename: fileName,
-        mimeType: MIMEType(text: mimeType),
-        videoMetadata: videoMetadata,
-        progress: progressHandler
+        videoMetadata: metadata
       )
-
-      // TODO: Set compressed file in db if it was created
-
-      // return IDs
-      let result_ = UploadResult(
-        photoId: result.photoId,
-        videoId: result.videoId,
-        documentId: result.documentId
-      )
-
-      // Update database with new ID
-      do {
-        try await updateDatabaseWithServerIds(media: media, result: result)
-        Log.shared.debug("[FileUploader] Successfully updated database for \(uploadId)")
-
-        // Store result after successful database update
-        await storeUploadResult(uploadId: uploadId, result: result_)
-      } catch {
-        Log.shared.error(
-          "[FileUploader] Failed to update database with new server ID for \(uploadId)",
-          error: error
-        )
-        throw FileUploadError.failedToSave
-      }
-
-      return result_
     }
 
     // Register the task
     registerTask(uploadId: uploadId, task: task, priority: priority)
+  }
+
+  private func performUpload(
+    uploadId: String,
+    media: FileMediaItem,
+    localUrl: URL,
+    mimeType: String,
+    fileName: String,
+    type: MessageFileType,
+    videoMetadata: ApiClient.VideoUploadMetadata?
+  ) async throws -> UploadResult {
+    Log.shared.debug("[FileUploader] Starting upload for \(uploadId)")
+
+    // Compress image if it's a photo
+    let uploadUrl: URL
+    if case .photo = media {
+      do {
+        let options = mimeType.lowercased().contains("png") ?
+          ImageCompressionOptions.defaultPNG :
+          ImageCompressionOptions.defaultPhoto
+        uploadUrl = try await ImageCompressor.shared.compressImage(at: localUrl, options: options)
+
+      } catch {
+        // Fallback to original URL if compression fails
+        uploadUrl = localUrl
+      }
+    } else {
+      uploadUrl = localUrl
+    }
+
+    // get data from file
+    let data = try Data(contentsOf: uploadUrl)
+
+    // upload file with progress tracking
+    let progressHandler = FileUploader.progressHandler(for: uploadId)
+
+    let result = try await ApiClient.shared.uploadFile(
+      type: type,
+      data: data,
+      filename: fileName,
+      mimeType: MIMEType(text: mimeType),
+      videoMetadata: videoMetadata,
+      progress: progressHandler
+    )
+
+    // TODO: Set compressed file in db if it was created
+
+    // return IDs
+    let result_ = UploadResult(
+      photoId: result.photoId,
+      videoId: result.videoId,
+      documentId: result.documentId
+    )
+
+    // Update database with new ID
+    do {
+      try await updateDatabaseWithServerIds(media: media, result: result)
+      Log.shared.debug("[FileUploader] Successfully updated database for \(uploadId)")
+
+      // Store result after successful database update
+      await storeUploadResult(uploadId: uploadId, result: result_)
+    } catch {
+      Log.shared.error(
+        "[FileUploader] Failed to update database with new server ID for \(uploadId)",
+        error: error
+      )
+      throw FileUploadError.failedToSave
+    }
+
+    return result_
   }
 
   private func storeUploadResult(uploadId: String, result: UploadResult) {
@@ -496,7 +517,7 @@ public actor FileUploader {
       let durationTime = try await asset.load(.duration)
       let seconds = CMTimeGetSeconds(durationTime)
       if seconds.isFinite {
-        duration = max(duration, Int(seconds.rounded()))
+        duration = Int(seconds.rounded())
       }
     }
 

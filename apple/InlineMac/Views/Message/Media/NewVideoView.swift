@@ -745,15 +745,19 @@ final class NewVideoView: NSView {
         let messageId = message.messageId
         let peerId = message.peerId
 
-        let _ = try? await AppDatabase.shared.dbWriter.write { db in
-          try Message
-            .filter(Column("chatId") == chatId)
-            .filter(Column("messageId") == messageId)
-            .deleteAll(db)
-        }
+        do {
+          try await AppDatabase.shared.dbWriter.write { db in
+            try Message
+              .filter(Column("chatId") == chatId)
+              .filter(Column("messageId") == messageId)
+              .deleteAll(db)
+          }
 
-        MessagesPublisher.shared
-          .messagesDeleted(messageIds: [messageId], peer: peerId)
+          MessagesPublisher.shared
+            .messagesDeleted(messageIds: [messageId], peer: peerId)
+        } catch {
+          Log.shared.error("Failed to delete local message row for cancel", error: error)
+        }
       }
 
       isDownloading = false
