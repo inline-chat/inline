@@ -1857,6 +1857,60 @@ class MessageViewAppKit: NSView {
       }
     }
   }
+
+  @objc private func resendMessage() {
+    Task {
+      var mediaItems: [FileMediaItem] = []
+
+      if let photoInfo = fullMessage.photoInfo {
+        mediaItems.append(.photo(photoInfo))
+      }
+
+      if let videoInfo = fullMessage.videoInfo {
+        mediaItems.append(.video(videoInfo))
+      }
+
+      if let documentInfo = fullMessage.documentInfo {
+        mediaItems.append(.document(documentInfo))
+      }
+
+      let messageId = self.message.messageId
+      let chatId = self.message.chatId
+      _ = try? await AppDatabase.shared.dbWriter.write { db in
+        try Message.deleteMessages(db, messageIds: [messageId], chatId: chatId)
+      }
+
+      await MainActor.run {
+        MessagesPublisher.shared
+          .messagesDeleted(messageIds: [message.messageId], peer: message.peerId)
+      }
+
+      if mediaItems.isEmpty {
+        try await Api.realtime.send(
+          .sendMessage(
+            text: message.text ?? "",
+            peerId: message.peerId,
+            chatId: message.chatId,
+            replyToMsgId: message.repliedToMessageId,
+            isSticker: message.isSticker,
+            entities: message.entities
+          )
+        )
+      } else {
+        await Transactions.shared.mutate(
+          transaction: .sendMessage(.init(
+            text: message.text,
+            peerId: message.peerId,
+            chatId: message.chatId,
+            mediaItems: mediaItems,
+            replyToMsgId: message.repliedToMessageId,
+            isSticker: message.isSticker,
+            entities: message.entities
+          ))
+        )
+      }
+    }
+  }
 }
 
 // MARK: - Tracking Area & Hover
@@ -2067,6 +2121,14 @@ extension MessageViewAppKit: NSMenuDelegate {
     }
 
     menu.addItem(NSMenuItem.separator())
+
+    // Resend for failed messages
+    if message.status == .failed {
+      let resendItem = NSMenuItem(title: "Resend", action: #selector(resendMessage), keyEquivalent: "")
+      resendItem.target = self
+      resendItem.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Resend")
+      menu.addItem(resendItem)
+    }
 
     // Delete or cancel button
     if message.status == .sending {
