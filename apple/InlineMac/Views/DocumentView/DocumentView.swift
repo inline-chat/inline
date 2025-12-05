@@ -11,6 +11,11 @@ class DocumentView: NSView {
   private static var iconSpacing: CGFloat = 8
   private static var textsSpacing: CGFloat = 2
 
+  private enum Symbol {
+    static let download = "arrow.down"
+    static let cancel = "xmark"
+  }
+
   enum DocumentState: Equatable {
     case locallyAvailable
     case needsDownload
@@ -38,10 +43,8 @@ class DocumentView: NSView {
     let imageView = NSImageView()
     imageView.translatesAutoresizingMaskIntoConstraints = false
     imageView.wantsLayer = true
-    imageView.image = NSImage(systemSymbolName: "document", accessibilityDescription: nil)
-    imageView.contentTintColor = white ?
-      .white :
-      .secondaryLabelColor
+    imageView.image = NSImage(systemSymbolName: Symbol.download, accessibilityDescription: nil)
+    imageView.contentTintColor = white ? .white : .secondaryLabelColor
 
     let config = NSImage.SymbolConfiguration(pointSize: 21, weight: .regular)
     imageView.symbolConfiguration = config
@@ -53,7 +56,7 @@ class DocumentView: NSView {
     let imageView = NSImageView()
     imageView.translatesAutoresizingMaskIntoConstraints = false
     imageView.wantsLayer = true
-    imageView.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Cancel")
+    imageView.image = NSImage(systemSymbolName: Symbol.cancel, accessibilityDescription: "Cancel")
     imageView.contentTintColor = NSColor.systemBlue
 
     let config = NSImage.SymbolConfiguration(pointSize: 21, weight: .regular)
@@ -141,7 +144,21 @@ class DocumentView: NSView {
   var documentState: DocumentState = .needsDownload {
     didSet {
       updateButtonState()
+      updateIconForCurrentState()
     }
+  }
+
+  private func stopMonitoringProgress() {
+    progressSubscription?.cancel()
+    progressSubscription = nil
+  }
+
+  private func cancelExistingDownloadIfAny() {
+    let documentId = documentInfo.id
+    if FileDownloader.shared.isDocumentDownloadActive(documentId: documentId) {
+      FileDownloader.shared.cancelDocumentDownload(documentId: documentId)
+    }
+    stopMonitoringProgress()
   }
 
   // MARK: - Initialization
@@ -174,7 +191,7 @@ class DocumentView: NSView {
   }
 
   @available(*, unavailable)
-  required init?(coder: NSCoder) {
+  required init?(coder _: NSCoder) {
     fatalError("init(coder:) has not been implemented")
   }
 
@@ -267,10 +284,9 @@ class DocumentView: NSView {
     cancelIcon.addGestureRecognizer(tapGesture)
     cancelIcon.isEnabled = true
 
-    // Add gesture recognizers to icon and filename for showing in Finder
+    // Add gesture recognizers to icon and filename so they behave like the primary action button
     let iconTapGesture = NSClickGestureRecognizer(target: self, action: #selector(handleIconOrNameClick))
-    iconView.addGestureRecognizer(iconTapGesture)
-    iconView.isEnabled = true
+    iconContainer.addGestureRecognizer(iconTapGesture)
 
     let nameTapGesture = NSClickGestureRecognizer(target: self, action: #selector(handleIconOrNameClick))
     fileNameLabel.addGestureRecognizer(nameTapGesture)
@@ -281,53 +297,53 @@ class DocumentView: NSView {
     fileNameLabel.stringValue = documentInfo.document.fileName ?? "Unknown File"
     fileSizeLabel.stringValue = FileHelpers
       .formatFileSize(UInt64(documentInfo.document.size ?? 0))
+    updateIconForCurrentState()
+  }
 
-    // Set appropriate icon based on file type
-    if let mimeType = documentInfo.document.mimeType {
-      var iconName = "document"
+  /// Update the icon to match the current document state and theme
+  private func updateIconForCurrentState() {
+    iconView.contentTintColor = white ? .white : .secondaryLabelColor
 
-      if mimeType.hasPrefix("image/") {
-        iconName = "photo"
-      } else if mimeType.hasPrefix("video/") {
-        iconName = "video"
-      } else if mimeType.hasPrefix("audio/") {
-        iconName = "music.note"
-      } else if mimeType == "application/pdf" {
-        iconName = "text.document"
-      } else if mimeType == "application/zip" || mimeType == "application/x-rar-compressed" {
-        iconName = "shippingbox"
-      }
-
-      iconView.image = NSImage(systemSymbolName: iconName, accessibilityDescription: nil)
-    } else if let fileName = documentInfo.document.fileName,
-              let fileExtension = fileName.components(separatedBy: ".").last?.lowercased()
-    {
-      // Fallback to extension-based icon if mime type is not available
-      var iconName = "doc.circle.fill"
-
-      switch fileExtension {
-        case "pdf":
-          iconName = "document"
-        case "jpg", "jpeg", "png", "gif", "heic":
-          iconName = "photo"
-        case "mp4", "mov", "avi":
-          iconName = "video"
-        case "mp3", "wav", "aac":
-          iconName = "music.note"
-        case "zip", "rar", "7z":
-          iconName = "shippingbox"
-        case "doc", "docx":
-          iconName = "text.document"
-        case "xls", "xlsx":
-          iconName = "chart.pie"
-        case "ppt", "pptx":
-          iconName = "videoprojector"
-        default:
-          iconName = "document"
-      }
-
-      iconView.image = NSImage(systemSymbolName: iconName, accessibilityDescription: nil)
+    switch documentState {
+      case .needsDownload:
+        iconView.image = NSImage(systemSymbolName: Symbol.download, accessibilityDescription: "Download")
+      case .locallyAvailable:
+        iconView.image = NSImage(systemSymbolName: fileTypeSymbolName(), accessibilityDescription: nil)
+      case .downloading:
+        // Icon hidden while cancel is visible; keep the last file icon ready for completion
+        iconView.image = NSImage(systemSymbolName: fileTypeSymbolName(), accessibilityDescription: nil)
     }
+
+    // Keep the cancel icon color aligned with bubble style
+    cancelIcon.contentTintColor = white ? .white : NSColor.systemBlue
+  }
+
+  private func fileTypeSymbolName() -> String {
+    if let mimeType = documentInfo.document.mimeType {
+      if mimeType.hasPrefix("image/") { return "photo" }
+      if mimeType.hasPrefix("video/") { return "video" }
+      if mimeType.hasPrefix("audio/") { return "music.note" }
+      if mimeType == "application/pdf" { return "text.document" }
+      if mimeType == "application/zip" || mimeType == "application/x-rar-compressed" { return "shippingbox" }
+      return "document"
+    }
+
+    if let fileName = documentInfo.document.fileName,
+       let fileExtension = fileName.components(separatedBy: ".").last?.lowercased() {
+      switch fileExtension {
+        case "pdf": return "document"
+        case "jpg", "jpeg", "png", "gif", "heic": return "photo"
+        case "mp4", "mov", "avi": return "video"
+        case "mp3", "wav", "aac": return "music.note"
+        case "zip", "rar", "7z": return "shippingbox"
+        case "doc", "docx": return "text.document"
+        case "xls", "xlsx": return "chart.pie"
+        case "ppt", "pptx": return "videoprojector"
+        default: return "document"
+      }
+    }
+
+    return "document"
   }
 
   private func updateButtonState() {
@@ -340,6 +356,7 @@ class DocumentView: NSView {
         fileSizeLabel.stringValue = FileHelpers.formatFileSize(UInt64(documentInfo.document.size ?? 0))
         actionButton.title = "Show in Finder"
         actionButton.contentTintColor = white ? .white : NSColor.systemBlue
+        updateIconForCurrentState()
 
       case .needsDownload:
         // Show download button
@@ -349,12 +366,17 @@ class DocumentView: NSView {
         fileSizeLabel.stringValue = FileHelpers.formatFileSize(UInt64(documentInfo.document.size ?? 0))
         actionButton.title = "Download"
         actionButton.contentTintColor = white ? .white : NSColor.controlAccentColor
+        updateIconForCurrentState()
 
       case let .downloading(bytesReceived, totalBytes):
         // Show download progress
         iconView.isHidden = true
         cancelIcon.isHidden = false
         actionButton.isHidden = true
+
+        // Ensure cancel icon matches the current bubble color scheme
+        cancelIcon.contentTintColor = white ? .white : NSColor.systemBlue
+        cancelIcon.image = NSImage(systemSymbolName: Symbol.cancel, accessibilityDescription: "Cancel")
 
         // Format the progress text
         let downloadedStr = FileHelpers.formatFileSize(UInt64(bytesReceived))
@@ -385,6 +407,9 @@ class DocumentView: NSView {
       return
     }
 
+    // Prevent overlapping downloads for the same document by cancelling any existing task
+    cancelExistingDownloadIfAny()
+
     // Check if download is already in progress by subscribing to progress
     let documentId = documentInfo.document.documentId
 
@@ -404,27 +429,30 @@ class DocumentView: NSView {
       guard let self else { return }
 
       switch result {
-        case .success:
-          break
-        // Success - refresh document info
-        // refreshDocumentInfo()
-        case let .failure(error):
-          Log.shared.error("Document download failed: \(error)")
-          documentState = .needsDownload
+      case .success:
+        DispatchQueue.main.async {
+          self.documentState = .locallyAvailable
+        }
+      // Success - refresh document info
+      // refreshDocumentInfo()
+      case let .failure(error):
+        Log.shared.error("Document download failed: \(error)")
+        documentState = .needsDownload
+        stopMonitoringProgress()
       }
     }
   }
 
   @objc private func actionButtonTapped() {
     switch documentState {
-      case .locallyAvailable:
-        showInFinder()
+    case .locallyAvailable:
+      showInFinder()
 
-      case .needsDownload:
-        downloadAction()
+    case .needsDownload:
+      downloadAction()
 
-      default:
-        break
+    default:
+      break
     }
   }
 
@@ -439,9 +467,13 @@ class DocumentView: NSView {
   }
 
   @objc private func handleIconOrNameClick() {
-    // Only show in Finder if the file is locally available
-    if case .locallyAvailable = documentState {
+    switch documentState {
+    case .locallyAvailable:
       showInFinder()
+    case .needsDownload:
+      downloadAction()
+    case .downloading:
+      break
     }
   }
 
@@ -526,12 +558,13 @@ class DocumentView: NSView {
         Log.shared.info("Document \(documentId) progress: \(progress)")
 
         if progress.isComplete {
-          // Download completed - refresh document info
-          // self.refreshDocumentInfo()
+          documentState = .locallyAvailable
+          stopMonitoringProgress()
         } else if let error = progress.error {
           // Download failed
           Log.shared.error("Document download failed: \(error)")
           documentState = .needsDownload
+          stopMonitoringProgress()
         } else if FileDownloader.shared.isDocumentDownloadActive(documentId: documentId) {
           // Download is active - update progress
           documentState = .downloading(
