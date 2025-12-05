@@ -273,6 +273,9 @@ class MessageSizeCalculator {
       if let text {
         top += text.spacing.top + text.size.height + text.spacing.bottom
       }
+      if let attachments {
+        top += attachments.spacing.top + attachments.size.height + attachments.spacing.bottom
+      }
       return top
     }
 
@@ -292,9 +295,6 @@ class MessageSizeCalculator {
       }
       if let text {
         top += text.spacing.top + text.size.height + text.spacing.bottom
-      }
-      if let reactions {
-        top += reactions.spacing.top + reactions.size.height // + reactions.spacing.bottom
       }
       return top
     }
@@ -329,7 +329,8 @@ class MessageSizeCalculator {
     let hasDocument = message.documentInfo != nil
     let hasReply = message.message.repliedToMessageId != nil
     let hasReactions = message.reactions.count > 0
-    let hasAttachments = message.attachments.count > 0
+    let renderableAttachments = message.attachments.filter(\.isRenderableAttachment)
+    let hasAttachments = !renderableAttachments.isEmpty
     let isOutgoing = message.message.out == true
     var isSingleLine = false
     var isSticker = message.message.isSticker == true
@@ -716,7 +717,7 @@ class MessageSizeCalculator {
         right: Theme.messageBubbleContentHorizontalInset
       )
 
-      attachmentItemsPlans = message.attachments.map { attachment in
+      attachmentItemsPlans = renderableAttachments.map { attachment in
         var attachmentPlan = LayoutPlan(size: .zero, spacing: .zero)
 
         // Handle different types of attachments
@@ -724,8 +725,10 @@ class MessageSizeCalculator {
         if let _ = attachment.externalTask {
           attachmentPlan.size = NSSize(width: attachmentsWidth, height: Theme.externalTaskViewHeight)
           attachmentPlan.spacing = .bottom(Theme.messageAttachmentsSpacing)
+        } else if attachment.isLoomPreview {
+          attachmentPlan.size = NSSize(width: attachmentsWidth, height: Theme.loomPreviewHeight)
+          attachmentPlan.spacing = .bottom(Theme.messageAttachmentsSpacing)
         }
-        // TODO: Loom
 
         // Add to total height
         attachmentsPlan!.size.height += attachmentPlan.size.height
