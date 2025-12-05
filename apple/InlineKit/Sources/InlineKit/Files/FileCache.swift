@@ -347,17 +347,22 @@ public actor FileCache: Sendable {
     return photoInfo
   }
 
-  public static func saveVideo(url: URL, thumbnail: PlatformImage? = nil) throws -> InlineKit.VideoInfo {
+  public static func saveVideo(url: URL, thumbnail: PlatformImage? = nil) async throws -> InlineKit.VideoInfo {
     let asset = AVURLAsset(url: url)
 
     // Dimensions
-    let track = asset.tracks(withMediaType: .video).first
-    let naturalSize = track?.naturalSize.applying(track?.preferredTransform ?? .identity) ?? .zero
-    let width = Int(abs(naturalSize.width.rounded()))
-    let height = Int(abs(naturalSize.height.rounded()))
+    let tracks = try await asset.loadTracks(withMediaType: .video)
+    let track = tracks.first
+    let naturalSize = try await track?.load(.naturalSize)
+    let preferredTransform = try await track?.load(.preferredTransform) ?? .identity
+    let transformedSize = naturalSize?.applying(preferredTransform) ?? .zero
+    let width = Int(abs(transformedSize.width.rounded()))
+    let height = Int(abs(transformedSize.height.rounded()))
 
     // Duration in seconds
-    let durationSeconds = Int(CMTimeGetSeconds(asset.duration).rounded())
+    let durationTime = try await asset.load(.duration)
+    guard durationTime.isValid else { throw FileCacheError.failedToSave }
+    let durationSeconds = Int(CMTimeGetSeconds(durationTime).rounded())
 
     // Persist the video to app cache
     let directory = FileHelpers.getLocalCacheDirectory(for: .videos)
