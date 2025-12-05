@@ -266,7 +266,7 @@ final class NewVideoView: NSView {
   })
 
   private var currentImage: NSImage?
-  private var currentImageUrl: URL?
+  private var currentImageKey: String?
   private var isThumbnailLoading = false
   private var fullMessage: FullMessage
   private var isScrolling = false
@@ -395,65 +395,89 @@ final class NewVideoView: NSView {
   // MARK: - Image loading
 
   private func updateImage() {
-    if let url = imageLocalUrl() {
-      // If we already have this thumbnail set, avoid reloading to prevent flicker.
-      if let current = currentImage, currentImageUrl == url {
-        isThumbnailLoading = false
-        updateOverlay()
-        return
-      }
+    guard let thumb = fullMessage.videoInfo?.thumbnail,
+          let size = thumb.bestPhotoSize()
+    else {
+      isThumbnailLoading = false
+      updateOverlay()
+      return
+    }
 
-      let loadSync = !isScrolling
-      isThumbnailLoading = !loadSync
-      if isThumbnailLoading {
-        updateOverlay()
+    let videoId = fullMessage.videoInfo?.video.id ?? thumb.id
+    let cacheKey = "video-thumb-\(videoId)"
+    let url: URL? =
+      (size.localPath.flatMap { FileCache.getUrl(for: .photos, localPath: $0) }) ??
+      (size.cdnUrl.flatMap { URL(string: $0) })
+
+    // Fast path: memory cache hit with stable key (avoids spinner/flicker)
+    if let cached = ImageCacheManager.shared.cachedImage(cacheKey: cacheKey) {
+      addImageViewIfNeeded()
+      setImage(cached, key: cacheKey)
+      updateOverlay()
+      return
+    }
+
+    // If we only have a CDN URL, kick off a background download so FileCache writes a localPath for future views.
+    // NOTE: Unlike NewPhotoView, this path still relies on the incoming thumbnail data; investigate why
+    // thumbnail localPath isn’t always persisted/used the same way as photos.
+    if size.localPath == nil, let thumbnail = fullMessage.videoInfo?.thumbnail {
+      Task.detached { [message = fullMessage.message] in
+        await FileCache.shared.download(photo: thumbnail, reloadMessageOnFinish: message)
       }
-      ImageCacheManager.shared.image(for: url, loadSync: loadSync) { [weak self] image in
-        DispatchQueue.main.async { [weak self] in
-          guard let self else { return }
-          self.isThumbnailLoading = false
+    }
+
+    guard let url else {
+      // Kick off download so next refresh can use local path
+      isThumbnailLoading = true
+      updateOverlay()
+      Task.detached { [thumb, message = fullMessage.message] in
+        await FileCache.shared.download(photo: thumb, reloadMessageOnFinish: message)
+      }
+      return
+    }
+
+    // Avoid reload/flicker if we already set this image for this key
+    if currentImageKey == cacheKey {
+      isThumbnailLoading = false
+      updateOverlay()
+      return
+    }
+
+    let loadSync = true // prefer sync cache hit to avoid spinner flicker
+    isThumbnailLoading = false
+
+    ImageCacheManager.shared.image(for: url, loadSync: loadSync, cacheKey: cacheKey) { [weak self] image in
+      DispatchQueue.main.async { [weak self] in
+        guard let self else { return }
+        self.isThumbnailLoading = false
+        self.updateOverlay()
+        guard let image else { return }
+
+        self.addImageViewIfNeeded()
+        if loadSync {
+          self.setImage(image, key: cacheKey)
           self.updateOverlay()
-          guard let image else { return }
-
-          self.addImageViewIfNeeded()
-          if loadSync {
-            self.setImage(image, url: url)
-            self.updateOverlay()
-          } else {
-            self.animateImageTransition(to: image, url: url)
-          }
+        } else {
+          self.animateImageTransition(to: image, key: cacheKey)
         }
-      }
-    } else {
-      // No cached thumbnail; begin fetching if possible but keep spinner hidden.
-      if fullMessage.videoInfo?.thumbnail != nil {
-        isThumbnailLoading = true
-        updateOverlay()
-        Task.detached { [weak self] in
-          guard let self else { return }
-          await FileCache.shared.download(photo: fullMessage.videoInfo!.thumbnail!, reloadMessageOnFinish: fullMessage.message)
-        }
-      } else {
-        isThumbnailLoading = false
-        updateOverlay()
       }
     }
   }
 
-  private func setImage(_ image: NSImage, url: URL?) {
+  private func setImage(_ image: NSImage, key: String?) {
     currentImage = image
-    currentImageUrl = url
+    currentImageKey = key
     imageLayer.contents = image
     updateImageLayerFrame()
   }
 
-  private func animateImageTransition(to image: NSImage, url: URL?) {
+  private func animateImageTransition(to image: NSImage, key: String?) {
     // Avoid re-animating if we already have this image set
-    if currentImage === image { return }
+    if currentImageKey == key { return }
 
     if currentImage == nil {
       imageView.alphaValue = 0.0
-      setImage(image, url: url)
+      setImage(image, key: key)
       needsLayout = true
       layoutSubtreeIfNeeded()
 
@@ -471,13 +495,15 @@ final class NewVideoView: NSView {
       }
     } else {
       // When replacing an existing image, avoid fade to prevent flicker.
-      setImage(image, url: url)
+      setImage(image, key: key)
       isThumbnailLoading = false
       updateOverlay()
     }
   }
 
   fileprivate func imageLocalUrl() -> URL? {
+ 
+
     guard let size = fullMessage.videoInfo?.thumbnail?.bestPhotoSize(),
           let localPath = size.localPath
     else { return nil }
@@ -500,6 +526,7 @@ final class NewVideoView: NSView {
 
     return nil
   }
+
 
   fileprivate func hasLocalVideoFile() -> Bool {
     guard let local = videoLocalUrl() else { return false }
