@@ -9,8 +9,8 @@ class LoomAttachmentView: NSView, AttachmentView {
     static let padding: CGFloat = 8
     static let spacing: CGFloat = 10
     static let accentWidth: CGFloat = 3
-    static let imageWidth: CGFloat = 120
-    static let imageHeight: CGFloat = 68
+    static let imageSide: CGFloat = 68
+    static let playIconSize: CGFloat = 18
     static let loomTagFontSize: CGFloat = 10
   }
 
@@ -59,6 +59,7 @@ class LoomAttachmentView: NSView, AttachmentView {
     view.wantsLayer = true
     view.layer?.cornerRadius = 6
     view.layer?.masksToBounds = true
+    view.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.05).cgColor
     view.setContentCompressionResistancePriority(.required, for: .horizontal)
     return view
   }()
@@ -97,7 +98,7 @@ class LoomAttachmentView: NSView, AttachmentView {
   private lazy var descriptionLabel: NSTextField = {
     let label = NSTextField(labelWithString: "")
     label.font = .systemFont(ofSize: Theme.messageTextFontSize - 1)
-    label.lineBreakMode = .byWordWrapping
+    label.lineBreakMode = .byTruncatingTail
     label.maximumNumberOfLines = 2
     label.translatesAutoresizingMaskIntoConstraints = false
     return label
@@ -106,8 +107,8 @@ class LoomAttachmentView: NSView, AttachmentView {
   private lazy var placeholderImageView: NSImageView = {
     let view = NSImageView()
     view.translatesAutoresizingMaskIntoConstraints = false
-    view.image = NSImage(systemSymbolName: "play.rectangle.fill", accessibilityDescription: "Loom")
-    view.contentTintColor = .secondaryLabelColor
+    view.image = nil
+    view.contentTintColor = .clear
     view.imageScaling = .scaleProportionallyUpOrDown
     view.wantsLayer = true
     view.layer?.cornerRadius = 6
@@ -115,6 +116,7 @@ class LoomAttachmentView: NSView, AttachmentView {
     view.layer?.backgroundColor = NSColor.gray.withAlphaComponent(0.08).cgColor
     return view
   }()
+
   private lazy var imageView: NSImageView = {
     let view = NSImageView()
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -123,6 +125,16 @@ class LoomAttachmentView: NSView, AttachmentView {
     view.layer?.cornerRadius = 6
     view.layer?.masksToBounds = true
     view.isHidden = true
+    return view
+  }()
+
+  private lazy var playIconView: NSImageView = {
+    let view = NSImageView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.symbolConfiguration = .init(pointSize: Constants.playIconSize, weight: .medium)
+    view.image = NSImage(systemSymbolName: "play.fill", accessibilityDescription: "Play")
+    view.contentTintColor = .secondaryLabelColor
+    view.imageScaling = .scaleProportionallyUpOrDown
     return view
   }()
 
@@ -183,8 +195,8 @@ class LoomAttachmentView: NSView, AttachmentView {
     contentStack.addArrangedSubview(textStack)
 
     NSLayoutConstraint.activate([
-      imageContainer.widthAnchor.constraint(equalToConstant: Constants.imageWidth),
-      imageContainer.heightAnchor.constraint(equalToConstant: Constants.imageHeight),
+      imageContainer.widthAnchor.constraint(equalToConstant: Constants.imageSide),
+      imageContainer.heightAnchor.constraint(equalToConstant: Constants.imageSide),
     ])
 
     imageContainer.addSubview(placeholderImageView)
@@ -236,13 +248,13 @@ class LoomAttachmentView: NSView, AttachmentView {
       ImageCacheManager.shared.image(for: photoURL, loadSync: true, cacheKey: cacheKey) { [weak self] image in
         guard let self else { return }
         if let image {
-          self.imageView.image = image
-          self.imageView.isHidden = false
-          self.placeholderImageView.isHidden = true
+          imageView.image = image
+          imageView.isHidden = false
+          placeholderImageView.isHidden = true
         } else {
-          self.imageView.image = nil
-          self.imageView.isHidden = true
-          self.placeholderImageView.isHidden = false
+          imageView.image = nil
+          imageView.isHidden = true
+          placeholderImageView.isHidden = false
         }
       }
     } else {
@@ -268,7 +280,7 @@ class LoomAttachmentView: NSView, AttachmentView {
   }
 
   private var backgroundColor: NSColor {
-    message.outgoing ? .white.withAlphaComponent(0.08) : .labelColor.withAlphaComponent(0.07)
+    message.outgoing ? .white.withAlphaComponent(0.08) : .labelColor.withAlphaComponent(0.02)
   }
 
   private var primaryTextColor: NSColor {
