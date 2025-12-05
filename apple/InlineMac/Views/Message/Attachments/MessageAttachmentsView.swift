@@ -31,7 +31,7 @@ class MessageAttachmentsView: NSStackView {
   }
 
   @available(*, unavailable)
-  required init?(coder: NSCoder) {
+  required init?(coder _: NSCoder) {
     fatalError("init(coder:) has not been implemented")
   }
 
@@ -46,6 +46,7 @@ class MessageAttachmentsView: NSStackView {
     translatesAutoresizingMaskIntoConstraints = false
     spacing = Theme.messageAttachmentsSpacing
     edgeInsets = .zero
+    alignment = .leading
   }
 
   func configure(attachments: [FullAttachment]) {
