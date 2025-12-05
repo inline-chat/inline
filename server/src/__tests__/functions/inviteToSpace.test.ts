@@ -36,8 +36,9 @@ describe("inviteToSpace", () => {
       expect(result.user.email).toBe("invitee@ex.com")
       expect(result.member.spaceId).toBe(BigInt(space.id))
     }
-    expect(result.chat).toBeTruthy()
-    expect(result.dialog).toBeTruthy()
+    // Chat & dialog are no longer created as part of invite flow
+    expect(result.chat).toBeUndefined()
+    expect(result.dialog).toBeUndefined()
   })
 
   test("throws error for invalid spaceId", async () => {
