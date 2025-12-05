@@ -68,11 +68,14 @@ final class GlobalHotkeys {
     eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
       guard let self else { return event }
 
-      // Respect text inputs – don’t interfere while typing.
-      if isTextInputFocused { return event }
-
       // Match event to a hotkey
       guard let matched = match(event: event) else { return event }
+
+      // Respect text inputs – except when the compose field has focus, where
+      // users still expect chat navigation (Ctrl+J/K or Ctrl+N/P) to work.
+      if isTextInputFocused && !shouldHandleWhileTyping(matched) {
+        return event
+      }
 
       // For navigation keys, ensure we’re in Inbox/Archive; for others it may
       // not matter. Extend this logic per-action as needed.
@@ -93,6 +96,32 @@ final class GlobalHotkeys {
     return hotkeys.first(where: { hotkey in
       hotkey.key == char && event.modifierFlags.isSuperset(of: hotkey.modifierFlags)
     })
+  }
+
+  /// Allow navigation hotkeys even when the compose text view is the first responder
+  /// so users can move between chats without leaving the message field.
+  private func shouldHandleWhileTyping(_ hotkey: Hotkey) -> Bool {
+    switch hotkey.action {
+      case .previousChat, .nextChat:
+        break // continue checks below
+      default:
+        return false
+    }
+
+    guard let responder = NSApp.keyWindow?.firstResponder else { return false }
+
+    // Explicitly allow the compose text view (and subclasses) to keep vim navigation active.
+    if responder is ComposeNSTextView {
+      return true
+    }
+
+    // Also allow any NSTextView that uses the compose delegate so future compose variants work.
+    if let textView = responder as? NSTextView,
+       textView.delegate is ComposeTextViewDelegate {
+      return true
+    }
+
+    return false
   }
 
   // MARK: Helper state checks
