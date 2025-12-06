@@ -17,21 +17,21 @@ struct ChatViewHeader: View {
 //      startPoint: .top,
 //      endPoint: .bottom
 //    )
-    VariableBlurView(maxBlurRadius: 2)
+    VariableBlurView(maxBlurRadius: 6)
       /// +28 to enhance the variant blur effect; it needs more space to cover the full navigation bar background
 //    .frame(height: 60)  was 38
       .frame(height: navBarHeight + 12) // was 38
-       .contentShape(Rectangle())
-        .background(
-          LinearGradient(
-            gradient: Gradient(colors: [
-              Color(.systemBackground).opacity(1),
-              Color(.systemBackground).opacity(0.0),
-            ]),
-            startPoint: .top,
-            endPoint: .bottom
-          )
+      .contentShape(Rectangle())
+      .background(
+        LinearGradient(
+          gradient: Gradient(colors: [
+            Color(.systemBackground).opacity(1),
+            Color(.systemBackground).opacity(0.0),
+          ]),
+          startPoint: .top,
+          endPoint: .bottom
         )
+      )
 
       // Spacer()
       .ignoresSafeArea(.all)
