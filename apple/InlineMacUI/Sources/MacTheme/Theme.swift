@@ -35,6 +35,19 @@ public enum Theme {
 
   public static let collapseSidebarAtWindowSize: CGFloat = 500
 
+  // MARK: - Tab Bar
+
+  public static let tabBarHeight: CGFloat = 42
+  public static let tabBarItemHeight: CGFloat = 36
+  public static let tabBarItemInset: CGFloat = 4
+
+  // MARK: - Main Split View
+
+  // public static let mainSplitViewInnerPadding: CGFloat = 10
+  // public static let mainSplitViewContentRadius: CGFloat = 16
+  public static let mainSplitViewInnerPadding: CGFloat = 8
+  public static let mainSplitViewContentRadius: CGFloat = 18
+
   // MARK: - Sidebar
 
   /// 190 is minimum that fits both sidebar collapse button and plus button

@@ -18,6 +18,7 @@ public struct AppDependencies {
 
   // Per window
   let nav: Nav = .main
+  var nav2: Nav2? = nil
   var keyMonitor: KeyMonitor?
 
   // Optional
@@ -26,7 +27,8 @@ public struct AppDependencies {
 }
 
 extension View {
-  func environment(dependencies deps: AppDependencies) -> AnyView {
+  @ViewBuilder
+  func environment(dependencies deps: AppDependencies) -> some View {
     var result = environment(\.auth, deps.auth)
       .environmentObject(deps.viewModel)
       .environmentObject(deps.overlay)
@@ -42,12 +44,12 @@ extension View {
       .environment(\.logOut, deps.logOut)
       .environment(\.keyMonitor, deps.keyMonitor)
       .environment(\.dependencies, deps)
-      .eraseToAnyView()
+      .environment(deps.nav2)
 
     if let rootData = deps.rootData {
-      result = result.environmentObject(rootData).eraseToAnyView()
+      result.environmentObject(rootData)
+    } else {
+      result
     }
-
-    return result
   }
 }
