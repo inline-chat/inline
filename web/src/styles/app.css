@@ -1,1 +1,36 @@
-@import "tailwindcss";
+@font-face {
+  font-family: "Days One";
+  src: url("/fonts/DaysOne-Regular.woff2") format("woff2"), url("/fonts/DaysOne-Regular.ttf") format("ttf");
+  font-weight: 400;
+  font-style: normal;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+div,
+span,
+p,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+label,
+img,
+button,
+a {
+  user-select: none;
+  cursor: default;
+  -webkit-user-drag: none;
+}
+
+button,
+a {
+  cursor: default;
+}

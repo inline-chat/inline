@@ -6,8 +6,8 @@ app.whenReady().then(() => {
     height: 600,
     transparent: true,
     trafficLightPosition: {
-      x: 18,
-      y: 18,
+      x: 14,
+      y: 14,
     },
 
     frame: true,
@@ -17,5 +17,5 @@ app.whenReady().then(() => {
     titleBarStyle: "hidden",
     vibrancy: "popover",
   });
-  mainWindow.loadURL("http://localhost:8001");
+  mainWindow.loadURL("http://localhost:8001/app");
 });
