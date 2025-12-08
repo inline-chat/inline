@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import stylesheet from "../styles/app.css?url"
+import stylesheet from "../styles/tailwind.css?url"
 import stylesheet2 from "../styles/stylex.css?url"
 import { type ReactNode } from "react"
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router"

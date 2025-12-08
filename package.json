@@ -17,5 +17,8 @@
   },
   "devDependencies": {
     "oxlint": "^0.16.0"
+  },
+  "dependencies": {
+    "zustand": "^5.0.9"
   }
 }
