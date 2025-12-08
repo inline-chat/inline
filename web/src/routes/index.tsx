@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { Landing } from "../landing"
+import styleCssUrl from "../landing/styles/style.css?url"
 
 function Home() {
   return <Landing />
@@ -17,6 +18,8 @@ export const Route = createFileRoute("/")({
         as: "image",
         media: "(-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi)",
       },
+
+      { rel: "stylesheet", href: styleCssUrl },
     ],
 
     meta: [
