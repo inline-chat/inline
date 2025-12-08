@@ -5,7 +5,7 @@ import { PageContainer, PageLongFormContent, PageHeader } from "../landing/compo
 import { PageFooter } from "../landing/components/PageFooter"
 import { PageMarkdown } from "~/landing/components/PageMarkdown"
 
-import "../landing/styles/style.css"
+import styleCssUrl from "../landing/styles/style.css?url"
 import "../landing/styles/page-content.css"
 import { createFileRoute } from "@tanstack/react-router"
 
@@ -13,6 +13,10 @@ import { createFileRoute } from "@tanstack/react-router"
 
 export const Route = createFileRoute("/docs")({
   component: Docs,
+
+  head: () => ({
+    links: [{ rel: "stylesheet", href: styleCssUrl }],
+  }),
 })
 
 function Docs() {

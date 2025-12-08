@@ -5,7 +5,7 @@ import { PageContainer, PageLongFormContent, PageHeader } from "../landing/compo
 import { PageFooter } from "../landing/components/PageFooter"
 import { PageMarkdown } from "~/landing/components/PageMarkdown"
 
-import "../landing/styles/style.css"
+import styleCssUrl from "../landing/styles/style.css?url"
 import "../landing/styles/page-content.css"
 
 export const Route = createFileRoute("/privacy")({
@@ -19,6 +19,8 @@ export const Route = createFileRoute("/privacy")({
         content: "We're committed to protect Inline users' privacy and data while providing a great user experience.",
       },
     ],
+
+    links: [{ rel: "stylesheet", href: styleCssUrl }],
   }),
 })
 

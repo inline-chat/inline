@@ -7,7 +7,7 @@
     "dev": "bun scripts/dev.ts"
   },
   "dependencies": {
-    "electron": "^38.2.2"
+    "electron": "^39.2.6"
   },
   "devDependencies": {}
 }

@@ -5,7 +5,7 @@ import * as stylex from "@stylexjs/stylex"
 import { useEffect, useRef, useState } from "react"
 import { AnimatePresence, motion } from "motion/react"
 
-import "./styles/style.css"
+//import "./styles/style.css"
 
 const addTransitionEffect = () => {
   const style = document.createElement("style")
