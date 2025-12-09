@@ -5,7 +5,7 @@ import type { DbFullDocument } from "@in/server/db/models/files"
 import { MessageModel } from "@in/server/db/models/messages"
 import { type DbChat, type DbMessage } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
-import { getCachedUserName, UserNamesCache } from "@in/server/modules/cache/userNames"
+import { getCachedUserName, UserNamesCache, type UserName } from "@in/server/modules/cache/userNames"
 import { decryptMessage, encryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { Notifications } from "@in/server/modules/notifications/notifications"
 import { getUpdateGroupFromInputPeer, type UpdateGroup } from "@in/server/modules/updates"
@@ -26,6 +26,7 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { debugDelay } from "@in/server/utils/helpers/time"
 import { connectionManager } from "@in/server/ws/connections"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
+import { getCachedUserProfilePhotoUrl } from "@in/server/modules/cache/userPhotos"
 
 type Input = {
   peerId: InputPeer
@@ -459,6 +460,9 @@ async function sendNotifications(input: SendPushForMsgInput) {
   let messageText = input.unencryptedText
   let messageEntities = input.unencryptedEntities
 
+  const senderNameInfo = await getCachedUserName(messageInfo.message.fromId)
+  const senderProfilePhotoUrl = await getCachedUserProfilePhotoUrl(messageInfo.message.fromId)
+
   // TODO: send to users who have it set to All immediately
   // Handle DMs and threads
   for (let userId of updateGroup.userIds) {
@@ -478,6 +482,8 @@ async function sendNotifications(input: SendPushForMsgInput) {
       updateGroup,
       inputPeer,
       currentUserId,
+      senderNameInfo,
+      senderProfilePhotoUrl,
     })
   }
 }
@@ -494,6 +500,8 @@ async function sendNotificationToUser({
   updateGroup,
   inputPeer,
   currentUserId,
+  senderNameInfo,
+  senderProfilePhotoUrl,
 }: {
   userId: number
   messageInfo: MessageInfo
@@ -506,6 +514,8 @@ async function sendNotificationToUser({
   updateGroup: UpdateGroup
   inputPeer: InputPeer
   currentUserId: number
+  senderNameInfo?: UserName
+  senderProfilePhotoUrl?: string
 }) {
   // FIRST, check if we should notify this user or not ---------------------------------
   let needsExplicitMacNotification = false
@@ -552,10 +562,10 @@ async function sendNotificationToUser({
 
   // THEN, send notification ------------------------------------------------------------
 
-  const userName = await getCachedUserName(messageInfo.message.fromId)
+  const senderUserName = senderNameInfo ?? (await getCachedUserName(messageInfo.message.fromId))
 
-  if (!userName) {
-    Log.shared.warn("No user name found for user", { userId })
+  if (!senderUserName) {
+    Log.shared.warn("No user name found for sender", { senderUserId: messageInfo.message.fromId })
     return
   }
 
@@ -563,7 +573,7 @@ async function sendNotificationToUser({
   let body = "New message" // default
 
   let includeSenderNameInMessage = false
-  const senderName = UserNamesCache.getDisplayName(userName)
+  const senderName = UserNamesCache.getDisplayName(senderUserName)
   // Only provide chat title for threads not DMs
   const chatTitle = chat?.type === "thread" ? chat.title ?? undefined : undefined
 
@@ -607,6 +617,9 @@ async function sendNotificationToUser({
     body = `${senderName}: ${body}`
   }
 
+  const senderEmail = senderUserName.email ?? undefined
+  const senderPhone = senderUserName.phone ?? undefined
+
   Notifications.sendToUser({
     userId,
     senderUserId: messageInfo.message.fromId,
@@ -614,6 +627,11 @@ async function sendNotificationToUser({
     isThread: chat?.type == "thread",
     title,
     body,
+    senderDisplayName: senderName ?? undefined,
+    senderEmail,
+    senderPhone,
+    senderProfilePhotoUrl,
+    threadEmoji: chat?.emoji ?? undefined,
   })
 
   if (needsExplicitMacNotification) {
