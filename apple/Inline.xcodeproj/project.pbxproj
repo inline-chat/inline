@@ -40,6 +40,7 @@
 		CD0A3CDA2CD536DF0081AD69 /* GRDBQuery in Frameworks */ = {isa = PBXBuildFile; productRef = CD0A3CD92CD536DF0081AD69 /* GRDBQuery */; };
 		CD27856F2CFB053C008A0EEF /* InlineConfig in Frameworks */ = {isa = PBXBuildFile; productRef = CD27856E2CFB053C008A0EEF /* InlineConfig */; };
 		CD2785712CFB0916008A0EEF /* InlineConfig in Frameworks */ = {isa = PBXBuildFile; productRef = CD2785702CFB0916008A0EEF /* InlineConfig */; };
+		CD3AF3002EE731EB001DA73E /* InlineNotificationExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = CD3AF2F92EE731EB001DA73E /* InlineNotificationExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		CD4CAEF02E5E14AA00698C43 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = CD4CAEEF2E5E14AA00698C43 /* Sentry */; };
 		CD4D56CD2D2D4393006072AE /* Throttler in Frameworks */ = {isa = PBXBuildFile; productRef = CD4D56CC2D2D4393006072AE /* Throttler */; };
 		CD4E8E2A2E088F6100CE6BC0 /* TextProcessing in Frameworks */ = {isa = PBXBuildFile; productRef = CD4E8E292E088F6100CE6BC0 /* TextProcessing */; };
@@ -63,6 +64,13 @@
 			remoteGlobalIDString = B7020C412DCE1534007099D9;
 			remoteInfo = InlineShareExtension;
 		};
+		CD3AF2FE2EE731EB001DA73E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CD2660FC2CA01CAE00EB186F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CD3AF2F82EE731EB001DA73E;
+			remoteInfo = InlineNotificationExtension;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -72,6 +80,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
+				CD3AF3002EE731EB001DA73E /* InlineNotificationExtension.appex in Embed Foundation Extensions */,
 				B7020C4C2DCE1534007099D9 /* InlineShareExtension.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
@@ -87,6 +96,7 @@
 		C3CC99172CCE9A7E007F7F77 /* InlineUI */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineUI; sourceTree = "<group>"; };
 		CD092C4B2EDC6D8200E867E5 /* InlineMacUI */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineMacUI; sourceTree = "<group>"; };
 		CD2661652CA01E3E00EB186F /* Inline.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Inline.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CD3AF2F92EE731EB001DA73E /* InlineNotificationExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = InlineNotificationExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD5326842CE113CD00EC348D /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		CD5326862CE1149700EC348D /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -113,6 +123,13 @@
 				Info.plist,
 			);
 			target = C38A28362CA5AB8F00D3DFB8 /* InlineIOS */;
+		};
+		CD3AF3052EE731EB001DA73E /* Exceptions for "InlineNotificationExtension" folder in "InlineNotificationExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = CD3AF2F82EE731EB001DA73E /* InlineNotificationExtension */;
 		};
 		CD4F9CBD2CCCEB2F006AA93E /* Exceptions for "InlineMac" folder in "InlineMac" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
@@ -161,6 +178,14 @@
 				CD4F9CBD2CCCEB2F006AA93E /* Exceptions for "InlineMac" folder in "InlineMac" target */,
 			);
 			path = InlineMac;
+			sourceTree = "<group>";
+		};
+		CD3AF2FA2EE731EB001DA73E /* InlineNotificationExtension */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				CD3AF3052EE731EB001DA73E /* Exceptions for "InlineNotificationExtension" folder in "InlineNotificationExtension" target */,
+			);
+			path = InlineNotificationExtension;
 			sourceTree = "<group>";
 		};
 		CDBF277B2EC87E4D0082B11D /* Icons */ = {
@@ -248,6 +273,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		CD3AF2F62EE731EB001DA73E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -268,6 +300,7 @@
 				CD2661662CA01E3E00EB186F /* InlineMac */,
 				B7020C432DCE1534007099D9 /* InlineShareExtension */,
 				C38A28382CA5AB8F00D3DFB8 /* InlineIOS */,
+				CD3AF2FA2EE731EB001DA73E /* InlineNotificationExtension */,
 				C31675032CAC167D009A1FD8 /* Frameworks */,
 				CD2661052CA01CAE00EB186F /* Products */,
 				CD5326842CE113CD00EC348D /* Debug.xcconfig */,
@@ -282,6 +315,7 @@
 				C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */,
 				B7C0674E2DB7F2BA00EAADA4 /* iMessageUI.framework */,
 				B7020C422DCE1534007099D9 /* InlineShareExtension.appex */,
+				CD3AF2F92EE731EB001DA73E /* InlineNotificationExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -363,6 +397,7 @@
 			);
 			dependencies = (
 				B7020C4B2DCE1534007099D9 /* PBXTargetDependency */,
+				CD3AF2FF2EE731EB001DA73E /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				C38A28382CA5AB8F00D3DFB8 /* InlineIOS */,
@@ -432,6 +467,28 @@
 			productReference = CD2661652CA01E3E00EB186F /* Inline.app */;
 			productType = "com.apple.product-type.application";
 		};
+		CD3AF2F82EE731EB001DA73E /* InlineNotificationExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CD3AF3042EE731EB001DA73E /* Build configuration list for PBXNativeTarget "InlineNotificationExtension" */;
+			buildPhases = (
+				CD3AF2F52EE731EB001DA73E /* Sources */,
+				CD3AF2F62EE731EB001DA73E /* Frameworks */,
+				CD3AF2F72EE731EB001DA73E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				CD3AF2FA2EE731EB001DA73E /* InlineNotificationExtension */,
+			);
+			name = InlineNotificationExtension;
+			packageProductDependencies = (
+			);
+			productName = InlineNotificationExtension;
+			productReference = CD3AF2F92EE731EB001DA73E /* InlineNotificationExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -453,6 +510,9 @@
 					};
 					CD2661642CA01E3E00EB186F = {
 						CreatedOnToolsVersion = 16.0;
+					};
+					CD3AF2F82EE731EB001DA73E = {
+						CreatedOnToolsVersion = 26.0;
 					};
 				};
 			};
@@ -488,6 +548,7 @@
 				C38A28362CA5AB8F00D3DFB8 /* InlineIOS */,
 				B7C0674D2DB7F2BA00EAADA4 /* iMessageUI */,
 				B7020C412DCE1534007099D9 /* InlineShareExtension */,
+				CD3AF2F82EE731EB001DA73E /* InlineNotificationExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -515,6 +576,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		CD2661632CA01E3E00EB186F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CD3AF2F72EE731EB001DA73E /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -552,6 +620,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		CD3AF2F52EE731EB001DA73E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -559,6 +634,11 @@
 			isa = PBXTargetDependency;
 			target = B7020C412DCE1534007099D9 /* InlineShareExtension */;
 			targetProxy = B7020C4A2DCE1534007099D9 /* PBXContainerItemProxy */;
+		};
+		CD3AF2FF2EE731EB001DA73E /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = CD3AF2F82EE731EB001DA73E /* InlineNotificationExtension */;
+			targetProxy = CD3AF2FE2EE731EB001DA73E /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -772,15 +852,20 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = InlineIOS/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Inline;
+				INFOPLIST_KEY_CFBundleDisplayName = "$(DISPLAY_NAME)";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
-				INFOPLIST_KEY_NSCameraUsageDescription = "Inline needs access to your camera to take photos";
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Inline needs access to your camera to take and share photos in your conversations.";
+				INFOPLIST_KEY_NSDocumentsFolderUsageDescription = "Inline needs access to documents to share files in your conversations.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Inline needs access to your microphone to record audio messages and videos.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Inline needs access to your photo library to save photos";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Inline needs access to your photo library to share photos and videos in your conversations.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_UISupportsDocumentBrowser = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -813,15 +898,20 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = InlineIOS/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Inline;
+				INFOPLIST_KEY_CFBundleDisplayName = "$(DISPLAY_NAME)";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
-				INFOPLIST_KEY_NSCameraUsageDescription = "Inline needs access to your camera to take photos";
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Inline needs access to your camera to take and share photos in your conversations.";
+				INFOPLIST_KEY_NSDocumentsFolderUsageDescription = "Inline needs access to documents to share files in your conversations.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Inline needs access to your microphone to record audio messages and videos.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Inline needs access to your photo library to save photos";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Inline needs access to your photo library to share photos and videos in your conversations.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_UISupportsDocumentBrowser = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1031,6 +1121,99 @@
 			};
 			name = Release;
 		};
+		CD3AF3012EE731EB001DA73E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 2487AN8AL4;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = InlineNotificationExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = InlineNotificationExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineIOS.debug.InlineNotificationExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		CD3AF3022EE731EB001DA73E /* Debug #2 */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 2487AN8AL4;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = InlineNotificationExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = InlineNotificationExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineIOS.InlineNotificationExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = "Debug #2";
+		};
+		CD3AF3032EE731EB001DA73E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 2487AN8AL4;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = InlineNotificationExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = InlineNotificationExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineIOS.InlineNotificationExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
 		CDE960F92CE9052F00007797 /* Debug #2 */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1145,15 +1328,20 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = InlineIOS/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Inline;
+				INFOPLIST_KEY_CFBundleDisplayName = "$(DISPLAY_NAME)";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
-				INFOPLIST_KEY_NSCameraUsageDescription = "Inline needs access to your camera to take photos";
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Inline needs access to your camera to take and share photos in your conversations.";
+				INFOPLIST_KEY_NSDocumentsFolderUsageDescription = "Inline needs access to documents to share files in your conversations.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Inline needs access to your microphone to record audio messages and videos.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Inline needs access to your photo library to save photos";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Inline needs access to your photo library to share photos and videos in your conversations.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_UISupportsDocumentBrowser = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1221,6 +1409,16 @@
 				CD2661882CA01E4000EB186F /* Debug */,
 				CDE960FA2CE9052F00007797 /* Debug #2 */,
 				CD2661892CA01E4000EB186F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CD3AF3042EE731EB001DA73E /* Build configuration list for PBXNativeTarget "InlineNotificationExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CD3AF3012EE731EB001DA73E /* Debug */,
+				CD3AF3022EE731EB001DA73E /* Debug #2 */,
+				CD3AF3032EE731EB001DA73E /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
