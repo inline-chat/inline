@@ -13,6 +13,11 @@ type SendPushNotificationToUserInput = {
   body: string
   subtitle?: string
   isThread?: boolean
+  senderDisplayName?: string
+  senderEmail?: string
+  senderPhone?: string
+  senderProfilePhotoUrl?: string
+  threadEmoji?: string
 }
 
 const log = new Log("notifications.sendToUser")
@@ -27,6 +32,11 @@ export const sendPushNotificationToUser = async ({
   body,
   subtitle,
   isThread = false,
+  senderDisplayName,
+  senderEmail,
+  senderPhone,
+  senderProfilePhotoUrl,
+  threadEmoji,
 }: SendPushNotificationToUserInput) => {
   try {
     // Get all sessions for the user
@@ -47,12 +57,22 @@ export const sendPushNotificationToUser = async ({
 
       // Configure notification
       const notification = new Notification()
-      notification.payload = {
+      const senderPayload: Record<string, unknown> = { id: senderUserId }
+
+      if (senderDisplayName) senderPayload["displayName"] = senderDisplayName
+      if (senderEmail) senderPayload["email"] = senderEmail
+      if (senderPhone) senderPayload["phone"] = senderPhone
+      if (senderProfilePhotoUrl) senderPayload["profilePhotoUrl"] = senderProfilePhotoUrl
+
+      const payload: Record<string, unknown> = {
         userId: senderUserId,
         threadId,
         isThread,
-        // from?
+        sender: senderPayload,
+        threadEmoji,
       }
+
+      notification.payload = payload
       notification.contentAvailable = true
       notification.mutableContent = true
       notification.topic = topic
