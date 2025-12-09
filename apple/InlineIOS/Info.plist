@@ -2,42 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleTypeRole</key>
-			<string>Editor</string>
-			<key>CFBundleURLName</key>
-			<string>chat.inline.inlineIOS</string>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>in</string>
-			</array>
-		</dict>
-		<dict/>
-	</array>
-	<key>CFBundleDisplayName</key>
-	<string>$(DISPLAY_NAME)</string>
-	<key>DEV_HOST</key>
-	<string>$(DEV_HOST)</string>
-	<key>UIAppFonts</key>
-	<array/>
-	<key>USE_PRODUCTION_API</key>
-	<string>$(USE_PRODUCTION_API)</string>
-	<key>NSDocumentsFolderUsageDescription</key>
-	<string>Inline needs access to documents to share files in your conversations.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Inline needs access to your photo library to share photos and videos in your conversations.</string>
-	<key>NSCameraUsageDescription</key>
-	<string>Inline needs access to your camera to take and share photos in your conversations.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Inline needs access to your microphone to record audio messages and videos.</string>
-	<key>LSSupportsOpeningDocumentsInPlace</key>
-	<true/>
-	<key>UISupportsDocumentBrowser</key>
-	<true/>
-	<key>UIFileSharingEnabled</key>
-	<true/>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
@@ -59,6 +23,46 @@
 			</array>
 		</dict>
 	</array>
+	<key>CFBundleDisplayName</key>
+	<string>$(DISPLAY_NAME)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>chat.inline.inlineIOS</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>in</string>
+			</array>
+		</dict>
+		<dict/>
+	</array>
+	<key>DEV_HOST</key>
+	<string>$(DEV_HOST)</string>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Inline needs access to your camera to take and share photos in your conversations.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Inline needs access to documents to share files in your conversations.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Inline needs access to your microphone to record audio messages and videos.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Inline needs access to your photo library to share photos and videos in your conversations.</string>
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>INSendMessageIntent</string>
+	</array>
+	<key>UIAppFonts</key>
+	<array/>
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>UISupportsDocumentBrowser</key>
+	<true/>
+	<key>USE_PRODUCTION_API</key>
+	<string>$(USE_PRODUCTION_API)</string>
 	<key>UTImportedTypeDeclarations</key>
 	<array>
 		<dict>
