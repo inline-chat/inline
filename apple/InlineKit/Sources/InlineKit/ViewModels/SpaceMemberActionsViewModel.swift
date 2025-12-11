@@ -5,6 +5,7 @@ import Logger
 @MainActor
 public final class SpaceMemberActionsViewModel: ObservableObject {
   @Published public private(set) var deletingMemberIds: Set<Int64> = []
+  @Published public private(set) var updatingMemberAccessIds: Set<Int64> = []
 
   private let spaceId: Int64
   private let log = Log.scoped("SpaceMemberActions")
@@ -15,6 +16,10 @@ public final class SpaceMemberActionsViewModel: ObservableObject {
 
   public func isDeleting(userId: Int64) -> Bool {
     deletingMemberIds.contains(userId)
+  }
+
+  public func isUpdatingAccess(userId: Int64) -> Bool {
+    updatingMemberAccessIds.contains(userId)
   }
 
   public func deleteMember(userId: Int64) async throws {
@@ -29,6 +34,25 @@ public final class SpaceMemberActionsViewModel: ObservableObject {
       _ = try await Api.realtime.send(transaction)
     } catch {
       log.error("Failed to delete member \(userId) in space \(spaceId)", error: error)
+      throw error
+    }
+  }
+
+  public func updateMemberAccess(
+    userId: Int64,
+    access: UpdateMemberAccessTransaction.Context.AccessRole
+  ) async throws {
+    guard updatingMemberAccessIds.contains(userId) == false else { return }
+
+    updatingMemberAccessIds.insert(userId)
+    defer { updatingMemberAccessIds.remove(userId) }
+
+    let transaction = UpdateMemberAccessTransaction(spaceId: spaceId, userId: userId, access: access)
+
+    do {
+      _ = try await Api.realtime.send(transaction)
+    } catch {
+      log.error("Failed to update member access \(userId) in space \(spaceId)", error: error)
       throw error
     }
   }

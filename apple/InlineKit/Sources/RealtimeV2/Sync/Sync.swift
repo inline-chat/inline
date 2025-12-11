@@ -201,40 +201,37 @@ actor Sync {
   private func getBucketKey(for update: InlineProtocol.Update) -> BucketKey? {
     switch update.update {
       case let .newMessage(payload):
-        return .chat(peer: payload.message.peerID)
+        .chat(peer: payload.message.peerID)
       case let .editMessage(payload):
-        return .chat(peer: payload.message.peerID)
+        .chat(peer: payload.message.peerID)
       case let .deleteMessages(payload):
-        return .chat(peer: payload.peerID)
+        .chat(peer: payload.peerID)
       case let .messageAttachment(payload):
-        return .chat(peer: payload.peerID)
+        .chat(peer: payload.peerID)
       case let .updateReaction(payload):
-        return .chat(peer: .with { $0.chat = .with { $0.chatID = payload.reaction.chatID } })
+        .chat(peer: .with { $0.chat = .with { $0.chatID = payload.reaction.chatID } })
       case let .deleteReaction(payload):
-        return .chat(peer: .with { $0.chat = .with { $0.chatID = payload.chatID } })
-
+        .chat(peer: .with { $0.chat = .with { $0.chatID = payload.chatID } })
       case let .deleteChat(payload):
-        return .chat(peer: payload.peerID)
+        .chat(peer: payload.peerID)
       case let .markAsUnread(payload):
-        return .chat(peer: payload.peerID)
-
+        .chat(peer: payload.peerID)
       case let .spaceMemberAdd(payload):
-        return .space(id: payload.member.spaceID)
+        .space(id: payload.member.spaceID)
       case let .spaceMemberDelete(payload):
-        return .space(id: payload.spaceID)
+        .space(id: payload.spaceID)
+      case let .spaceMemberUpdate(payload):
+        .space(id: payload.member.spaceID)
       case let .joinSpace(payload):
-        return .space(id: payload.space.id)
-
+        .space(id: payload.space.id)
       case .updateUserStatus, .updateUserSettings, .newChat:
-        return .user
-
+        .user
       case let .participantAdd(payload):
-        return .chat(peer: .with { $0.chat = .with { $0.chatID = payload.chatID } })
+        .chat(peer: .with { $0.chat = .with { $0.chatID = payload.chatID } })
       case let .participantDelete(payload):
-        return .chat(peer: .with { $0.chat = .with { $0.chatID = payload.chatID } })
-
+        .chat(peer: .with { $0.chat = .with { $0.chatID = payload.chatID } })
       default:
-        return nil
+        nil
     }
   }
 }
@@ -280,6 +277,10 @@ actor BucketActor {
       case .deleteChat:
         true
       case .deleteMessages:
+        true
+      case .spaceMemberUpdate:
+        true
+      case .spaceMemberAdd:
         true
       default:
         // Note: We explicitly skip other updates (like messages) during catch-up for now

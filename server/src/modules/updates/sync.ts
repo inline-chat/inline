@@ -237,6 +237,19 @@ function convertSpaceUpdate(update: DecryptedUpdate): Update | null {
     }
   }
 
+  if (payload.oneofKind === "spaceMemberUpdate") {
+    return {
+      seq,
+      date,
+      update: {
+        oneofKind: "spaceMemberUpdate",
+        spaceMemberUpdate: {
+          member: payload.spaceMemberUpdate.member,
+        },
+      },
+    }
+  }
+
   log.warn("Unhandled space update", { type: payload.oneofKind })
   return null
 }
