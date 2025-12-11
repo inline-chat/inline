@@ -30,10 +30,22 @@ public enum Theme {
   // MARK: - Window
 
   public static let windowMinimumSize: CGSize = .init(width: 320, height: 300)
+  public static let windowBackgroundColor: NSColor = .init(
+    "windowBackgroundColor",
+    light: NSColor(red: 249 / 255, green: 251 / 255, blue: 255 / 255, alpha: 0.5),
+    dark: NSColor(red: 25 / 255, green: 25 / 255, blue: 26 / 255, alpha: 0.6)
+  )
+
+  public static let windowContentBackgroundColor: NSColor = .init(
+    "windowContentBackgroundColor",
+    light: NSColor(red: 249 / 255, green: 249 / 255, blue: 250 / 255, alpha: 1),
+    dark: NSColor(red: 15 / 255, green: 15 / 255, blue: 16 / 255, alpha: 1)
+  )
 
   // MARK: - Main View & Split View
 
   public static let collapseSidebarAtWindowSize: CGFloat = 500
+  public static let toolbarHeight: CGFloat = 52
 
   // MARK: - Tab Bar
 
@@ -45,8 +57,10 @@ public enum Theme {
 
   // public static let mainSplitViewInnerPadding: CGFloat = 10
   // public static let mainSplitViewContentRadius: CGFloat = 16
-  public static let mainSplitViewInnerPadding: CGFloat = 8
-  public static let mainSplitViewContentRadius: CGFloat = 18
+  // public static let mainSplitViewInnerPadding: CGFloat = 8
+  // public static let mainSplitViewContentRadius: CGFloat = 18
+  public static let mainSplitViewInnerPadding: CGFloat = 6
+  public static let mainSplitViewContentRadius: CGFloat = 20
 
   // MARK: - Sidebar
 
@@ -166,4 +180,12 @@ public enum Theme {
   // MARK: - Devtools
 
   public static let devtoolsHeight: CGFloat = 30
+}
+
+extension NSColor {
+  convenience init(_ name: String, light: NSColor, dark: NSColor) {
+    self.init(name: name) { appearance in
+      appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
+    }
+  }
 }
