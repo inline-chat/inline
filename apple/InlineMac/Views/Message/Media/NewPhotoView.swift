@@ -565,31 +565,39 @@ extension NewPhotoView: NSDraggingSource {
 
 extension NewPhotoView {
   @objc func copyImage() {
-    guard let image = currentImage else { return }
+    guard
+      let image = currentImage,
+      let tiff = image.tiffRepresentation,
+      let bitmap = NSBitmapImageRep(data: tiff),
+      let png = bitmap.representation(using: .png, properties: [:])
+    else { return }
+
+    let jpeg = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 1.0])
+
+    // Write a temp file so apps that expect a file paste/drop can consume it.
+    let tempURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("inline-image-\(UUID().uuidString)")
+      .appendingPathExtension("png")
+
+    do {
+      try png.write(to: tempURL)
+    } catch {
+      Log.shared.error("Failed to write temp image for pasteboard: \(error)")
+      return
+    }
+
+    let item = NSPasteboardItem()
+    item.setData(tiff, forType: .tiff)
+    item.setData(png, forType: .png)
+    item.setData(png, forType: NSPasteboard.PasteboardType("public.image"))
+    if let jpeg {
+      item.setData(jpeg, forType: NSPasteboard.PasteboardType("public.jpeg"))
+    }
+    item.setString(tempURL.absoluteString, forType: .fileURL)
+
     let pasteboard = NSPasteboard.general
     pasteboard.clearContents()
-
-    // Add the image with a custom type that will be recognized by our paste handler
-    pasteboard.declareTypes([
-      .tiff,
-      .png,
-      NSPasteboard.PasteboardType("public.image"),
-      NSPasteboard.PasteboardType("public.jpeg"),
-      NSPasteboard.PasteboardType("image/png"),
-      NSPasteboard.PasteboardType("image/jpeg"),
-      .fileURL,
-    ], owner: nil)
-
-    // Write the image data
-    pasteboard.writeObjects([image])
-
-    // TODO:
-    // If we have a local URL, add it too
-//    if let url = imageLocalUrl() {
-//      pasteboard.writeObjects([image, url as NSURL])
-//    } else {
-//      pasteboard.writeObjects([image])
-//    }
+    pasteboard.writeObjects([item])
   }
 
   @objc func saveImage() {
