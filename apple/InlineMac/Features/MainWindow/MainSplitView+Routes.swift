@@ -42,4 +42,24 @@ extension MainSplitView {
         return PlaceholderContentViewController(message: "Open a space to invite members")
     }
   }
+
+  func toolbar(for route: Nav2Route) -> MainToolbarItems {
+    switch route {
+      case let .chat(peer):
+        MainToolbarItems(
+          items: [
+            .navigationBack,
+            .navigationForward,
+            .chatTitle(peer: peer),
+            .spacer,
+            .participants(peer: peer),
+            .translationIcon(peer: peer),
+          ],
+        )
+
+      default:
+        // TODO: Show a basic toolbar with undo redo and a title
+        MainToolbarItems.defaultItems()
+    }
+  }
 }
