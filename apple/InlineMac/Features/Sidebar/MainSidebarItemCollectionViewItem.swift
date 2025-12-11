@@ -18,8 +18,7 @@ class MainSidebarItemCollectionViewItem: NSCollectionViewItem {
 
   struct Content {
     enum Kind {
-      case chat(HomeChatItem)
-      case member(Member, UserInfo?)
+      case item(ChatListItem)
       case header(title: String, symbol: String)
     }
 

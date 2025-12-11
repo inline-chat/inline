@@ -5,14 +5,15 @@ import Observation
 
 class MainSidebarList: NSView {
   private let dependencies: AppDependencies
-  private let homeViewModel: HomeViewModel
+  private let homeChatsViewModel: ChatsViewModel
+  private var spaceChatsViewModels: [Int64: ChatsViewModel] = [:]
 
-  private static let itemHeight: CGFloat = 32
-  private static let itemSpacing: CGFloat = 1
-  private static let contentInsetTop: CGFloat = 0
+  private static let itemHeight: CGFloat = MainSidebar.itemHeight
+  private static let itemSpacing: CGFloat = MainSidebar.itemSpacing
+  private static let contentInsetTop: CGFloat = MainSidebar.outerEdgeInsets
   private static let contentInsetBottom: CGFloat = 8
-  private static let contentInsetLeading: CGFloat = 8
-  private static let contentInsetTrailing: CGFloat = 8
+  private static let contentInsetLeading: CGFloat = MainSidebar.outerEdgeInsets
+  private static let contentInsetTrailing: CGFloat = MainSidebar.outerEdgeInsets
 
   enum Section: Hashable {
     case homeChats
@@ -22,8 +23,7 @@ class MainSidebarList: NSView {
 
   enum Item: Hashable {
     case header(Section)
-    case chat(HomeChatItem.ID)
-    case member(Member.ID)
+    case chat(ChatListItem.Identifier)
   }
 
   enum ScrollEvent {
@@ -34,10 +34,8 @@ class MainSidebarList: NSView {
   private var dataSource: NSCollectionViewDiffableDataSource<Section, Item>!
   private var previousItemsByID: [Item: AnyHashable] = [:]
   private var currentSections: [Section] = []
-  private var chatByID: [HomeChatItem.ID: HomeChatItem] = [:]
-  private var memberByID: [Member.ID: Member] = [:]
-  private var memberUserCancellables = Set<AnyCancellable>()
-  private var cancellables = Set<AnyCancellable>()
+  private var chatItemsByID: [ChatListItem.Identifier: ChatListItem] = [:]
+  private var activeViewModelCancellables = Set<AnyCancellable>()
   private var scrollEventsSubject = PassthroughSubject<ScrollEvent, Never>()
 
   private var nav2: Nav2? { dependencies.nav2 }
@@ -68,7 +66,8 @@ class MainSidebarList: NSView {
 
   init(dependencies: AppDependencies) {
     self.dependencies = dependencies
-    homeViewModel = HomeViewModel(
+    homeChatsViewModel = ChatsViewModel(
+      source: .home,
       db: dependencies.database
     )
 
@@ -78,7 +77,7 @@ class MainSidebarList: NSView {
     setupViews()
     setupNotifications()
     setupDataSource()
-    bindHomeViewModel()
+    bindActiveChatsViewModel()
     observeNav()
     applySnapshot(animated: false)
   }
@@ -170,22 +169,26 @@ class MainSidebarList: NSView {
     applySnapshot(animated: false)
   }
 
-  private func bindHomeViewModel() {
-    homeViewModel.$myChats
+  private func bindActiveChatsViewModel() {
+    let viewModel = activeChatsViewModel()
+    activeViewModelCancellables.removeAll()
+
+    viewModel.$threads
+      .combineLatest(viewModel.$contacts)
       .receive(on: DispatchQueue.main)
       .sink { [weak self] _ in
         self?.applySnapshot()
       }
-      .store(in: &cancellables)
+      .store(in: &activeViewModelCancellables)
   }
 
-  private func applySnapshot(animated: Bool = true) {
+  private func applySnapshot(animated: Bool = false) {
     let data = makeSnapshotData()
     currentSections = data.sections
 
     var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
     var itemsToReload: [Item] = []
-
+ 
     for section in data.sections {
       snapshot.appendSections([section])
       let sectionItems = data.items[section] ?? []
@@ -201,8 +204,7 @@ class MainSidebarList: NSView {
       itemsToReload.append(contentsOf: reloadCandidates)
     }
 
-    chatByID = data.chatByID
-    memberByID = data.memberByID
+    chatItemsByID = data.chatItemsByID
 
     dataSource.apply(snapshot, animatingDifferences: animated) { [weak self] in
       if !itemsToReload.isEmpty {
@@ -240,83 +242,60 @@ class MainSidebarList: NSView {
   private struct SnapshotData {
     let sections: [Section]
     let items: [Section: [Item]]
-    let chatByID: [HomeChatItem.ID: HomeChatItem]
-    let memberByID: [Member.ID: Member]
+    let chatItemsByID: [ChatListItem.Identifier: ChatListItem]
     let valuesByItem: [Item: AnyHashable]
   }
 
   private func makeSnapshotData() -> SnapshotData {
-    let defaultChats = homeViewModel.myChats
-    let defaultItems: [Item] = defaultChats.map { .chat($0.id) }
-    let defaultChatMap = Dictionary(uniqueKeysWithValues: defaultChats.map { ($0.id, $0) })
+    let viewModel = activeChatsViewModel()
 
-    guard let activeTab = nav2?.activeTab else {
-      return SnapshotData(
-        sections: [.homeChats],
-        items: [.homeChats: defaultItems],
-        chatByID: defaultChatMap,
-        memberByID: [:],
-        valuesByItem: Dictionary(uniqueKeysWithValues: defaultItems.compactMap { item in
-          switch item {
-            case let .chat(id): (item, defaultChatMap[id] as AnyHashable? ?? "" as AnyHashable)
-            default: nil
-          }
-        })
-      )
+    let threads = viewModel.threads
+    let contacts = viewModel.contacts
+    let allItems = threads + contacts
+    let chatMap = Dictionary(uniqueKeysWithValues: allItems.map { ($0.id, $0) })
+
+    let sections: [Section]
+    var items: [Section: [Item]] = [:]
+    var valuesByItem: [Item: AnyHashable] = [:]
+
+    if viewModel.isSpaceSource {
+      let threadItems: [Item] = [.header(.spaceThreads)] + threads.map { .chat($0.id) }
+      let contactItems: [Item] = [.header(.spaceMembers)] + contacts.map { .chat($0.id) }
+
+      sections = [.spaceThreads, .spaceMembers]
+      items[.spaceThreads] = threadItems
+      items[.spaceMembers] = contactItems
+
+      threadItems.forEach { item in
+        switch item {
+          case let .chat(id): valuesByItem[item] = chatMap[id]
+          case let .header(section): valuesByItem[item] = "header-\(section)" as AnyHashable
+        }
+      }
+
+      contactItems.forEach { item in
+        switch item {
+          case let .chat(id): valuesByItem[item] = chatMap[id]
+          case let .header(section): valuesByItem[item] = "header-\(section)" as AnyHashable
+        }
+      }
+    } else {
+      let chatItems: [Item] = threads.map { .chat($0.id) }
+      sections = [.homeChats]
+      items[.homeChats] = chatItems
+      chatItems.forEach { item in
+        if case let .chat(id) = item {
+          valuesByItem[item] = chatMap[id]
+        }
+      }
     }
 
-    switch activeTab {
-      case .home:
-        let chats = homeViewModel.myChats.filter { $0.space == nil }
-        let items: [Item] = chats.map { .chat($0.id) }
-        let chatMap = Dictionary(uniqueKeysWithValues: chats.map { ($0.id, $0) })
-        return SnapshotData(
-          sections: [.homeChats],
-          items: [.homeChats: items],
-          chatByID: chatMap,
-          memberByID: [:],
-          valuesByItem: Dictionary(uniqueKeysWithValues: items.compactMap { item in
-            switch item {
-              case let .chat(id): (item, chatMap[id] as AnyHashable? ?? "" as AnyHashable)
-              default: nil
-            }
-          })
-        )
-      case let .space(id, _):
-        let threads = homeViewModel.myChats.filter { $0.space?.id == id }
-        let spaceMembers = homeViewModel.spaces.first(where: { $0.space.id == id })?.members ?? []
-        updateMemberSubscriptions(members: spaceMembers)
-
-        let threadItems: [Item] = [.header(.spaceThreads)] + threads.map { .chat($0.id) }
-        let memberItems: [Item] = [.header(.spaceMembers)] + spaceMembers.map { .member($0.id) }
-
-        let chatMap = Dictionary(uniqueKeysWithValues: threads.map { ($0.id, $0) })
-        let memberMap = Dictionary(uniqueKeysWithValues: spaceMembers.map { ($0.id, $0) })
-
-        var values: [Item: AnyHashable] = [:]
-        for item in threadItems {
-          switch item {
-            case let .chat(cid): values[item] = chatMap[cid]
-            case let .header(section): values[item] = "header-\(section)" as AnyHashable
-            default: break
-          }
-        }
-        for item in memberItems {
-          switch item {
-            case let .member(mid): values[item] = memberMap[mid]
-            case let .header(section): values[item] = "header-\(section)" as AnyHashable
-            default: break
-          }
-        }
-
-        return SnapshotData(
-          sections: [.spaceThreads, .spaceMembers],
-          items: [.spaceThreads: threadItems, .spaceMembers: memberItems],
-          chatByID: chatMap,
-          memberByID: memberMap,
-          valuesByItem: values
-        )
-    }
+    return SnapshotData(
+      sections: sections,
+      items: items,
+      chatItemsByID: chatMap,
+      valuesByItem: valuesByItem
+    )
   }
 
   private func layout(for _: Section) -> NSCollectionLayoutSection {
@@ -356,6 +335,7 @@ class MainSidebarList: NSView {
       _ = nav2?.tabs
     } onChange: { [weak self] in
       Task { @MainActor [weak self] in
+        self?.bindActiveChatsViewModel()
         self?.applySnapshot()
         self?.observeNav()
       }
@@ -365,9 +345,7 @@ class MainSidebarList: NSView {
   private func value(for item: Item) -> AnyHashable? {
     switch item {
       case let .chat(id):
-        chatByID[id]
-      case let .member(id):
-        memberByID[id]
+        chatItemsByID[id]
       case let .header(section):
         "header-\(section)" as AnyHashable
     }
@@ -376,12 +354,8 @@ class MainSidebarList: NSView {
   private func content(for item: Item) -> MainSidebarItemCollectionViewItem.Content? {
     switch item {
       case let .chat(id):
-        guard let chat = chatByID[id] else { return nil }
-        return .init(kind: .chat(chat))
-      case let .member(id):
-        guard let member = memberByID[id] else { return nil }
-        let userInfo = ObjectCache.shared.getUser(id: member.userId)
-        return .init(kind: .member(member, userInfo))
+        guard let chat = chatItemsByID[id] else { return nil }
+        return .init(kind: .item(chat))
       case let .header(section):
         let title: String
         let symbol: String
@@ -400,16 +374,21 @@ class MainSidebarList: NSView {
     }
   }
 
-  private func updateMemberSubscriptions(members: [Member]) {
-    memberUserCancellables.removeAll()
-    for member in members {
-      let publisher = ObjectCache.shared.getUserPublisher(id: member.userId)
-      publisher
-        .receive(on: DispatchQueue.main)
-        .sink { [weak self] _ in
-          self?.applySnapshot()
+  private func activeChatsViewModel() -> ChatsViewModel {
+    guard let activeTab = nav2?.activeTab else {
+      return homeChatsViewModel
+    }
+
+    switch activeTab {
+      case .home:
+        return homeChatsViewModel
+      case let .space(id, _):
+        if let existing = spaceChatsViewModels[id] {
+          return existing
         }
-        .store(in: &memberUserCancellables)
+        let viewModel = ChatsViewModel(source: .space(id: id), db: dependencies.database)
+        spaceChatsViewModels[id] = viewModel
+        return viewModel
     }
   }
 }
