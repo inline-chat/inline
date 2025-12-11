@@ -230,6 +230,8 @@ class ComposeAppKit: NSView {
     textHeightConstraint = textEditor.heightAnchor.constraint(equalToConstant: minHeight)
 
     let textViewHorizontalPadding = textEditor.horizontalPadding
+    let attachmentsHorizontalInset = horizontalOuterSpacing + Theme.composeButtonSize + textViewHorizontalPadding
+    attachments.setHorizontalContentInset(attachmentsHorizontalInset)
 
     NSLayoutConstraint.activate([
       heightConstraint,
@@ -255,8 +257,8 @@ class ComposeAppKit: NSView {
       messageView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalOuterSpacing),
 
       // attachments
-      attachments.leadingAnchor.constraint(equalTo: textEditor.leadingAnchor, constant: textViewHorizontalPadding),
-      attachments.trailingAnchor.constraint(equalTo: textEditor.trailingAnchor),
+      attachments.leadingAnchor.constraint(equalTo: leadingAnchor),
+      attachments.trailingAnchor.constraint(equalTo: trailingAnchor),
       attachments.topAnchor.constraint(equalTo: messageView.bottomAnchor),
 
       // text editor
