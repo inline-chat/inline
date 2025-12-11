@@ -6,11 +6,22 @@ class ImageAttachmentView: NSView, QLPreviewItem {
   private let closeButton: NSButton
   private var onRemove: (() -> Void)?
   
-  private let height: CGFloat = 80
+  private let height: CGFloat
+  private let maxWidth: CGFloat
+  private let minWidth: CGFloat
   private var width: CGFloat = 80
 
-  init(image: NSImage, onRemove: @escaping () -> Void) {
+  init(
+    image: NSImage,
+    onRemove: @escaping () -> Void,
+    height: CGFloat = 80,
+    maxWidth: CGFloat = 180,
+    minWidth: CGFloat = 60
+  ) {
     self.onRemove = onRemove
+    self.height = height
+    self.maxWidth = maxWidth
+    self.minWidth = minWidth
 
     // Initialize imageView
     imageView = NSImageView(frame: .zero)
@@ -19,8 +30,9 @@ class ImageAttachmentView: NSView, QLPreviewItem {
     imageView.translatesAutoresizingMaskIntoConstraints = false
     
     // calc width
-    let aspectRatio = image.size.width / image.size.height
-    width = height * aspectRatio
+    let aspectRatio = image.size.width / max(image.size.height, 1)
+    let calculatedWidth = height * aspectRatio
+    width = min(max(calculatedWidth, minWidth), maxWidth)
 
     // Initialize close button
     closeButton = NSButton(frame: .zero)
@@ -57,8 +69,6 @@ class ImageAttachmentView: NSView, QLPreviewItem {
       imageView.trailingAnchor.constraint(equalTo: trailingAnchor),
       imageView.topAnchor.constraint(equalTo: topAnchor),
       imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      imageView.widthAnchor.constraint(equalToConstant: width),
-      imageView.heightAnchor.constraint(equalToConstant: height),
 
       // Close button constraints
       closeButton.topAnchor.constraint(equalTo: topAnchor, constant: 4),
@@ -113,6 +123,10 @@ class ImageAttachmentView: NSView, QLPreviewItem {
 
   override var acceptsFirstResponder: Bool {
     true
+  }
+
+  override var intrinsicContentSize: NSSize {
+    NSSize(width: width, height: height)
   }
 
   override func becomeFirstResponder() -> Bool {

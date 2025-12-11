@@ -1,23 +1,71 @@
 import AppKit
 import InlineKit
 
-class ComposeAttachments: NSView {
+final class ComposeAttachments: NSView {
   private weak var compose: ComposeAppKit?
+
   private var attachments: [String: ImageAttachmentView] = [:]
   private var videoAttachments: [String: VideoAttachmentView] = [:]
   private var docAttachments: [String: DocumentView] = [:]
+  private var orderedMediaIds: [String] = []
+  private var mediaMeta: [String: MediaMeta] = [:]
 
-  private let stackView: NSStackView
+  private enum MediaSection {
+    case media
+  }
+
+  private var mediaDataSource: NSCollectionViewDiffableDataSource<MediaSection, String>!
+  // AppKit diffable insert animations can be inconsistent in some drag/drop paths
+  // (especially when the NSTextView text system owns the operation).
+  // Keep a small explicit fade-in for newly inserted items.
+  // TODO(@mo): Investigate AppKit animation suppression during text-system drag ops.
+  private var pendingInsertionIds: Set<String> = []
+  private var lastMediaIds: Set<String> = []
+  private var pendingScrollToId: String?
+
+  private var horizontalContentInset: CGFloat = 0 {
+    didSet {
+      updateHorizontalInsets()
+    }
+  }
+
+  private let mediaScrollView: NSScrollView
+  private let mediaCollectionView: NSCollectionView
+  private let mediaLayout: NSCollectionViewFlowLayout
   private let filesStackView: NSStackView
+
+  private let maxAttachmentWidth: CGFloat = 180
+  private let minAttachmentWidth: CGFloat = 60
+
+  private var heightConstraint: NSLayoutConstraint!
+  private var mediaScrollHeightConstraint: NSLayoutConstraint!
+  private var mediaCollectionHeightConstraint: NSLayoutConstraint!
+  private var mediaTopConstraint: NSLayoutConstraint!
+  private var mediaBottomConstraint: NSLayoutConstraint!
+  private var filesLeadingConstraint: NSLayoutConstraint!
+  private var verticalPadding: CGFloat = Theme.composeAttachmentsVPadding
 
   init(frame: NSRect, compose: ComposeAppKit) {
     self.compose = compose
 
-    stackView = NSStackView(frame: .zero)
-    stackView.orientation = .horizontal
-    stackView.spacing = 8
-    stackView.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
-    stackView.translatesAutoresizingMaskIntoConstraints = false
+    mediaLayout = NSCollectionViewFlowLayout()
+    mediaLayout.scrollDirection = .horizontal
+    mediaLayout.minimumInteritemSpacing = 8
+    mediaLayout.minimumLineSpacing = 8
+
+    mediaCollectionView = NSCollectionView(frame: .zero)
+    mediaCollectionView.collectionViewLayout = mediaLayout
+    mediaCollectionView.isSelectable = false
+    mediaCollectionView.backgroundColors = [.clear]
+    mediaCollectionView.translatesAutoresizingMaskIntoConstraints = false
+
+    mediaScrollView = NSScrollView(frame: .zero)
+    mediaScrollView.drawsBackground = false
+    mediaScrollView.hasHorizontalScroller = true
+    mediaScrollView.hasVerticalScroller = false
+    mediaScrollView.translatesAutoresizingMaskIntoConstraints = false
+    mediaScrollView.scrollerStyle = .overlay
+    mediaScrollView.documentView = mediaCollectionView
 
     filesStackView = NSStackView(frame: .zero)
     filesStackView.orientation = .vertical
@@ -35,26 +83,49 @@ class ComposeAttachments: NSView {
     fatalError("init(coder:) has not been implemented")
   }
 
-  private var heightConstraint: NSLayoutConstraint!
-  private var verticalPadding: CGFloat = Theme.composeAttachmentsVPadding
+  // MARK: - Layout / Height
 
-  // Modify updateHeight to be public and return the height
   func getHeight() -> CGFloat {
     if attachments.isEmpty, docAttachments.isEmpty, videoAttachments.isEmpty {
       return 0
     }
 
-    let paddings = 2 * verticalPadding
-    let imagesHeight = (attachments.isEmpty && videoAttachments.isEmpty) ? 0 : Theme.composeAttachmentImageHeight
-    let documentsHeight = docAttachments.isEmpty ? 0 : Theme.documentViewHeight * CGFloat(docAttachments.count)
-    return paddings + imagesHeight + documentsHeight
+    let hasMedia = !(attachments.isEmpty && videoAttachments.isEmpty)
+    let hasDocuments = !docAttachments.isEmpty
+    let paddings = (hasMedia || hasDocuments) ? 2 * verticalPadding : 0
+    let mediaHeight = hasMedia ? Theme.composeAttachmentImageHeight : 0
+    let documentsHeight = hasDocuments ? Theme.documentViewHeight * CGFloat(docAttachments.count) : 0
+    return paddings + mediaHeight + documentsHeight
   }
 
   public func updateHeight(animated: Bool = false) {
+    let newHeight = getHeight()
+    let mediaHeight = (attachments.isEmpty && videoAttachments.isEmpty)
+      ? 0
+      : (Theme.composeAttachmentImageHeight + 2 * verticalPadding)
+    let collectionHeight = (attachments.isEmpty && videoAttachments.isEmpty)
+      ? 0
+      : Theme.composeAttachmentImageHeight
+    let padding = collectionHeight == 0 ? 0 : verticalPadding
+
+    let applyChanges = {
+      self.heightConstraint.constant = newHeight
+      self.mediaScrollHeightConstraint.constant = mediaHeight
+      self.mediaCollectionHeightConstraint.constant = collectionHeight
+      self.mediaTopConstraint.constant = padding
+      self.mediaBottomConstraint.constant = -padding
+      self.mediaScrollView.isHidden = mediaHeight == 0
+    }
+
     if animated {
-      heightConstraint.animator().constant = getHeight()
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = 0.15
+        context.allowsImplicitAnimation = true
+        applyChanges()
+        self.layoutSubtreeIfNeeded()
+      }
     } else {
-      heightConstraint.constant = getHeight()
+      applyChanges()
     }
   }
 
@@ -62,55 +133,146 @@ class ComposeAttachments: NSView {
     clipsToBounds = true
 
     heightConstraint = heightAnchor.constraint(equalToConstant: getHeight())
+    mediaScrollHeightConstraint = mediaScrollView.heightAnchor.constraint(equalToConstant: 0)
 
-    addSubview(stackView)
+    mediaCollectionView.delegate = self
+    mediaCollectionView.register(
+      AttachmentCollectionItem.self,
+      forItemWithIdentifier: AttachmentCollectionItem.identifier
+    )
+    mediaDataSource = makeMediaDataSource()
+
+    // Pin collection view to the scroll view's content view
+    let clipView = mediaScrollView.contentView
+    mediaTopConstraint = mediaCollectionView.topAnchor.constraint(
+      equalTo: clipView.topAnchor,
+      constant: verticalPadding
+    )
+    mediaBottomConstraint = mediaCollectionView.bottomAnchor.constraint(
+      equalTo: clipView.bottomAnchor,
+      constant: -verticalPadding
+    )
+    mediaCollectionHeightConstraint = mediaCollectionView.heightAnchor.constraint(
+      equalToConstant: Theme.composeAttachmentImageHeight
+    )
+
+    NSLayoutConstraint.activate([
+      mediaCollectionView.leadingAnchor.constraint(equalTo: clipView.leadingAnchor),
+      mediaTopConstraint,
+      mediaBottomConstraint,
+      mediaCollectionView.widthAnchor.constraint(greaterThanOrEqualTo: clipView.widthAnchor),
+      mediaCollectionHeightConstraint,
+    ])
+
+    addSubview(mediaScrollView)
     addSubview(filesStackView)
+
+    filesLeadingConstraint = filesStackView.leadingAnchor.constraint(
+      equalTo: leadingAnchor,
+      constant: horizontalContentInset
+    )
 
     NSLayoutConstraint.activate([
       heightConstraint,
+      mediaScrollHeightConstraint,
 
-      // no top for stack.
-      stackView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      stackView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
-      // stackView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      mediaScrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      mediaScrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      mediaScrollView.topAnchor.constraint(equalTo: topAnchor),
 
-      // files stack
-      filesStackView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      filesLeadingConstraint,
       filesStackView.trailingAnchor.constraint(equalTo: trailingAnchor),
       filesStackView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      filesStackView.topAnchor.constraint(equalTo: stackView.bottomAnchor),
+      filesStackView.topAnchor.constraint(equalTo: mediaScrollView.bottomAnchor),
     ])
+
+    applyMediaSnapshot(animating: false)
+    updateHeight(animated: false)
   }
 
+  // MARK: - Media
+
   public func removeImageView(id: String) {
-    if let attachment = attachments[id] {
-      attachments.removeValue(forKey: id)
-
-      if attachments.isEmpty {
-        // animate last one
-        attachment.fadeOut { [weak self] in
-          self?.stackView.removeArrangedSubview(attachment)
-          attachment.removeFromSuperview()
-        }
-        return
-      }
-
-      stackView.removeArrangedSubview(attachment)
-      attachment.removeFromSuperview()
-    }
+    attachments.removeValue(forKey: id)
+    orderedMediaIds.removeAll { $0 == id }
+    mediaMeta.removeValue(forKey: id)
+    pendingInsertionIds.remove(id)
+    applyMediaSnapshot(animating: true)
+    updateHeight(animated: true)
   }
 
   public func addImageView(_ image: NSImage, id: String) {
-    let attachmentView = ImageAttachmentView(image: image) { [weak self] in
-      self?.compose?.removeImage(id)
-    }
+    if attachments[id] != nil { return }
+    let aspectRatio = image.size.width / max(image.size.height, 1)
+    mediaMeta[id] = .init(kind: .image, aspectRatio: aspectRatio)
+    orderedMediaIds.append(id)
+    let attachmentView = ImageAttachmentView(
+      image: image,
+      onRemove: { [weak self] in
+        self?.compose?.removeImage(id)
+      },
+      height: Theme.composeAttachmentImageHeight,
+      maxWidth: maxAttachmentWidth,
+      minWidth: minAttachmentWidth
+    )
     attachmentView.translatesAutoresizingMaskIntoConstraints = false
+
     attachments[id] = attachmentView
-
-    stackView.addArrangedSubview(attachmentView)
-
-    attachmentView.fadeIn()
+    applyMediaSnapshot(animating: true)
+    updateHeight(animated: true)
   }
+
+  public func addVideoView(_ videoInfo: VideoInfo, id: String) {
+    if videoAttachments[id] != nil { return }
+
+    let thumbnail: NSImage? = {
+      guard let localPath = videoInfo.thumbnail?.sizes.first?.localPath else { return nil }
+      let url = FileHelpers.getLocalCacheDirectory(for: .photos).appendingPathComponent(localPath)
+      return NSImage(contentsOf: url)
+    }()
+
+    let videoURL: URL? = {
+      guard let localPath = videoInfo.video.localPath else { return nil }
+      return FileHelpers.getLocalCacheDirectory(for: .videos).appendingPathComponent(localPath)
+    }()
+
+    let aspectRatio: CGFloat
+    if let thumb = thumbnail {
+      aspectRatio = thumb.size.width / max(thumb.size.height, 1)
+    } else {
+      aspectRatio = 16.0 / 9.0
+    }
+    mediaMeta[id] = .init(kind: .video, aspectRatio: aspectRatio)
+    orderedMediaIds.append(id)
+
+    let view = VideoAttachmentView(
+      thumbnail: thumbnail,
+      videoURL: videoURL,
+      onRemove: { [weak self] in
+        self?.compose?.removeVideo(id)
+      },
+      height: Theme.composeAttachmentImageHeight,
+      maxWidth: maxAttachmentWidth,
+      minWidth: minAttachmentWidth
+    )
+
+    view.translatesAutoresizingMaskIntoConstraints = false
+
+    videoAttachments[id] = view
+    applyMediaSnapshot(animating: true)
+    updateHeight(animated: true)
+  }
+
+  public func removeVideoView(id: String) {
+    videoAttachments.removeValue(forKey: id)
+    orderedMediaIds.removeAll { $0 == id }
+    mediaMeta.removeValue(forKey: id)
+    pendingInsertionIds.remove(id)
+    applyMediaSnapshot(animating: true)
+    updateHeight(animated: true)
+  }
+
+  // MARK: - Documents
 
   public func addDocumentView(_ documentInfo: DocumentInfo, id: String) {
     // Check if we already have this document
@@ -136,27 +298,24 @@ class ComposeAttachments: NSView {
     documentView.fadeIn()
 
     // Update height
-    updateHeight()
+    updateHeight(animated: true)
   }
 
   public func removeDocumentView(id: String) {
-    if let documentView = docAttachments[id] {
-      docAttachments.removeValue(forKey: id)
+    guard let documentView = docAttachments[id] else { return }
+    docAttachments.removeValue(forKey: id)
 
-      if docAttachments.isEmpty {
-        // Animate removal of last document
-        documentView.fadeOut { [weak self] in
-          self?.filesStackView.removeArrangedSubview(documentView)
-          documentView.removeFromSuperview()
-        }
-      } else {
-        // Remove without animation if there are other documents
-        filesStackView.removeArrangedSubview(documentView)
+    if docAttachments.isEmpty {
+      // Animate removal of last document
+      documentView.fadeOut { [weak self] in
+        self?.filesStackView.removeArrangedSubview(documentView)
         documentView.removeFromSuperview()
+        self?.updateHeight(animated: true)
       }
-
-      // Update height
-      updateHeight()
+    } else {
+      filesStackView.removeArrangedSubview(documentView)
+      documentView.removeFromSuperview()
+      updateHeight(animated: true)
     }
   }
 
@@ -170,57 +329,189 @@ class ComposeAttachments: NSView {
     docAttachments.removeAll()
   }
 
-  public func addVideoView(_ videoInfo: VideoInfo, id: String) {
-    if videoAttachments[id] != nil { return }
-
-    let thumbnail: NSImage? = {
-      guard let localPath = videoInfo.thumbnail?.sizes.first?.localPath else { return nil }
-      let url = FileHelpers.getLocalCacheDirectory(for: .photos).appendingPathComponent(localPath)
-      return NSImage(contentsOf: url)
-    }()
-
-    let videoURL: URL? = {
-      guard let localPath = videoInfo.video.localPath else { return nil }
-      return FileHelpers.getLocalCacheDirectory(for: .videos).appendingPathComponent(localPath)
-    }()
-
-    let view = VideoAttachmentView(thumbnail: thumbnail, videoURL: videoURL) { [weak self] in
-      self?.compose?.removeVideo(id)
-    }
-
-    videoAttachments[id] = view
-    stackView.addArrangedSubview(view)
-    view.fadeIn()
-    updateHeight()
-  }
-
-  public func removeVideoView(id: String) {
-    guard let view = videoAttachments[id] else { return }
-    videoAttachments.removeValue(forKey: id)
-    stackView.removeArrangedSubview(view)
-    view.removeFromSuperview()
-    updateHeight()
-  }
+  // MARK: - Clear
 
   public func clearViews(animated: Bool = false) {
-    // Clear images
-    for (_, value) in attachments {
-      stackView.removeArrangedSubview(value)
-      value.removeFromSuperview()
-    }
     attachments.removeAll()
 
-    // Clear videos
-    for (_, value) in videoAttachments {
-      stackView.removeArrangedSubview(value)
-      value.removeFromSuperview()
-    }
     videoAttachments.removeAll()
+    orderedMediaIds.removeAll()
+    mediaMeta.removeAll()
+    pendingInsertionIds.removeAll()
+    lastMediaIds.removeAll()
 
     // Clear documents
     clearDocumentViews(animated: animated)
+
+    applyMediaSnapshot(animating: animated)
+    updateHeight(animated: animated)
+  }
+
+  // MARK: - Helpers
+
+  private func makeMediaDataSource() -> NSCollectionViewDiffableDataSource<MediaSection, String> {
+    NSCollectionViewDiffableDataSource<MediaSection, String>(
+      collectionView: mediaCollectionView
+    ) { [weak self] collectionView, indexPath, id in
+      guard let self else { return nil }
+      let item = collectionView.makeItem(
+        withIdentifier: AttachmentCollectionItem.identifier,
+        for: indexPath
+      )
+
+      guard let attachmentItem = item as? AttachmentCollectionItem else { return item }
+
+      if let attachmentView = self.view(for: id) {
+        attachmentItem.configure(with: attachmentView)
+      } else {
+        attachmentItem.configureEmpty()
+      }
+
+      if self.pendingInsertionIds.contains(id) {
+        attachmentItem.animateInsertion()
+        self.pendingInsertionIds.remove(id)
+      }
+
+      return attachmentItem
+    }
+  }
+
+  private func applyMediaSnapshot(animating: Bool) {
+    let newIds = Set(orderedMediaIds)
+    let inserted = newIds.subtracting(lastMediaIds)
+    if !inserted.isEmpty {
+      pendingInsertionIds.formUnion(inserted)
+      let insertedOrdered = orderedMediaIds.filter { inserted.contains($0) }
+      pendingScrollToId = insertedOrdered.last
+    } else {
+      pendingScrollToId = nil
+    }
+    lastMediaIds = newIds
+
+    var snapshot = NSDiffableDataSourceSnapshot<MediaSection, String>()
+    snapshot.appendSections([.media])
+    snapshot.appendItems(orderedMediaIds, toSection: .media)
+    mediaDataSource.apply(snapshot, animatingDifferences: animating) { [weak self] in
+      self?.scrollToPendingInsertionIfNeeded()
+    }
+  }
+
+  private func clampedWidth(for aspectRatio: CGFloat) -> CGFloat {
+    let calculated = Theme.composeAttachmentImageHeight * aspectRatio
+    return min(max(calculated, minAttachmentWidth), maxAttachmentWidth)
+  }
+
+  private func scrollToPendingInsertionIfNeeded() {
+    guard let id = pendingScrollToId,
+          let index = orderedMediaIds.firstIndex(of: id)
+    else { return }
+    pendingScrollToId = nil
+
+    mediaCollectionView.layoutSubtreeIfNeeded()
+    let indexPath = IndexPath(item: index, section: 0)
+    mediaCollectionView.scrollToItems(at: [indexPath], scrollPosition: .right)
+  }
+
+  private func updateHorizontalInsets() {
+    mediaLayout.sectionInset = NSEdgeInsets(
+      top: 0,
+      left: horizontalContentInset,
+      bottom: 0,
+      right: horizontalContentInset
+    )
+    filesLeadingConstraint?.constant = horizontalContentInset
+    mediaLayout.invalidateLayout()
+  }
+
+  func setHorizontalContentInset(_ inset: CGFloat) {
+    horizontalContentInset = inset
+  }
+
+  private func view(for id: String) -> NSView? {
+    if let imageView = attachments[id] {
+      return imageView
+    }
+    if let videoView = videoAttachments[id] {
+      return videoView
+    }
+    return nil
   }
 }
+
+// MARK: - Collection View
+
+extension ComposeAttachments: NSCollectionViewDelegateFlowLayout {
+  func collectionView(
+    _ collectionView: NSCollectionView,
+    layout collectionViewLayout: NSCollectionViewLayout,
+    sizeForItemAt indexPath: IndexPath
+  ) -> NSSize {
+    guard let id = mediaDataSource.itemIdentifier(for: indexPath) else {
+      return NSSize(width: minAttachmentWidth, height: Theme.composeAttachmentImageHeight)
+    }
+    let aspect = mediaMeta[id]?.aspectRatio ?? 1.0
+    let width = clampedWidth(for: aspect)
+    return NSSize(width: width, height: Theme.composeAttachmentImageHeight)
+  }
+}
+
+// MARK: - Helpers
+
+private struct MediaMeta {
+  enum Kind {
+    case image
+    case video
+  }
+
+  let kind: Kind
+  let aspectRatio: CGFloat
+}
+
+private final class AttachmentCollectionItem: NSCollectionViewItem {
+  static let identifier = NSUserInterfaceItemIdentifier("AttachmentCollectionItem")
+
+  override func loadView() {
+    view = NSView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+  }
+
+  override func prepareForReuse() {
+    super.prepareForReuse()
+    configureEmpty()
+    view.alphaValue = 1
+  }
+
+  func configure(with child: NSView) {
+    configureEmpty()
+
+    child.translatesAutoresizingMaskIntoConstraints = false
+    view.addSubview(child)
+
+    NSLayoutConstraint.activate([
+      child.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+      child.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+      child.topAnchor.constraint(equalTo: view.topAnchor),
+      child.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+    ])
+  }
+
+  func configureEmpty() {
+    view.subviews.forEach { $0.removeFromSuperview() }
+  }
+
+  func animateInsertion() {
+    view.wantsLayer = true
+    view.alphaValue = 0
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = 0.2
+      context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+      context.allowsImplicitAnimation = true
+      view.animator().alphaValue = 1
+    }
+  }
+}
+
+// MARK: - Animations
 
 extension NSView {
   func fadeOut(completionHandler: (() -> Void)?) {
