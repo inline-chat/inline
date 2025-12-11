@@ -30,10 +30,9 @@ struct TabModel: Hashable {
 
 class MainTabBar: NSViewController {
   private let tabHeight: CGFloat = Theme.tabBarItemHeight
-  private let tabWidth: CGFloat = 120
   private let homeTabWidth: CGFloat = 50
   private let baseTabSpacing: CGFloat = Theme.tabBarItemInset
-  private let iconSize: CGFloat = 22
+  private let iconSize: CGFloat = 18
   private var currentScale: CGFloat = 1
 
   private var topGap: CGFloat {
@@ -420,7 +419,7 @@ extension MainTabBar: NSCollectionViewDelegateFlowLayout {
   ) -> NSSize {
     guard indexPath.item < nav2.tabs.count else { return NSSize(width: 0, height: tabHeight) }
     let tabId = nav2.tabs[indexPath.item]
-    let baseWidth = tabId == .home ? homeTabWidth : tabWidth
+    let baseWidth = baseWidth(for: tabId)
 
     guard let layout = collectionView.collectionViewLayout as? NSCollectionViewFlowLayout else {
       return NSSize(width: baseWidth, height: tabHeight)
@@ -444,13 +443,27 @@ extension MainTabBar: NSCollectionViewDelegateFlowLayout {
     guard tabCount > 0 else { return 1 }
 
     let baseSpacingTotal = baseTabSpacing * max(0, tabCount - 1)
-    let baseWidthTotal = CGFloat(nav2.tabs.reduce(0) { sum, tab in
-      sum + (tab == .home ? homeTabWidth : tabWidth)
-    })
+    let baseWidthTotal = CGFloat(
+      nav2.tabs.reduce(0) { sum, tabId in
+        sum + baseWidth(for: tabId)
+      }
+    )
 
     let denominator = baseWidthTotal + baseSpacingTotal
     guard denominator > 0 else { return 1 }
 
     return min(1, availableWidth / denominator)
+  }
+
+  private func baseWidth(for tabId: TabId) -> CGFloat {
+    switch tabId {
+      case .home:
+        return homeTabWidth
+      case .space:
+        return TabCollectionViewItem.preferredWidth(
+          for: tabModel(for: tabId),
+          iconSize: iconSize
+        )
+    }
   }
 }
