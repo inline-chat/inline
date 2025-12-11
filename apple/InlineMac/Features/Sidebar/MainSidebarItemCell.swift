@@ -11,7 +11,7 @@ class MainSidebarItemCell: NSView {
   private var nav2: Nav2?
   private weak var events: PassthroughSubject<ScrollEvent, Never>?
 
-  private var item: HomeChatItem?
+  private var item: ChatListItem?
 
   private static let height: CGFloat = MainSidebar.iconSize
   private static let avatarSize: CGFloat = MainSidebar.iconSize
@@ -26,11 +26,11 @@ class MainSidebarItemCell: NSView {
   private static let pinnedBadgePointSize: CGFloat = 8
 
   private var hoverColor: NSColor {
-    .gray.withAlphaComponent(Self.backgroundOpacity)
+    .white.withAlphaComponent(0.2)
   }
 
   private var selectedColor: NSColor {
-    NSColor.labelColor.withAlphaComponent(Self.backgroundOpacity)
+    Theme.windowContentBackgroundColor
   }
 
   private var isHovered = false {
@@ -101,7 +101,7 @@ class MainSidebarItemCell: NSView {
     label.isEditable = false
     label.isBordered = false
     label.drawsBackground = false
-    label.font = .systemFont(ofSize: Self.fontSize, weight: .regular)
+    label.font = Self.font
     label.textColor = .labelColor
     label.lineBreakMode = .byTruncatingTail
     label.maximumNumberOfLines = 1
@@ -174,15 +174,7 @@ class MainSidebarItemCell: NSView {
     stackView.setCustomSpacing(Self.avatarSpacing, after: avatarView)
   }
 
-  struct Content {
-    enum Kind {
-      case chat(HomeChatItem)
-      case member(Member, UserInfo?)
-      case header(title: String, symbol: String)
-    }
-
-    let kind: Kind
-  }
+  private var content: MainSidebarItemCollectionViewItem.Content?
 
   func configure(
     with content: MainSidebarItemCollectionViewItem.Content,
@@ -191,10 +183,11 @@ class MainSidebarItemCell: NSView {
   ) {
     preparingForReuse = false
     item = nil
+    self.content = content
     switch content.kind {
-      case let .chat(chatItem):
+      case let .item(chatItem):
         item = chatItem
-      case .member, .header:
+      case .header:
         break
     }
     self.dependencies = dependencies
@@ -204,30 +197,8 @@ class MainSidebarItemCell: NSView {
     cancellables.removeAll()
 
     configureLeadingView(for: content.kind)
-    nameLabel.stringValue = title(for: content.kind)
-
-    let hasUnread: Bool
-    let isPinned: Bool
-
-    switch content.kind {
-      case let .chat(chatItem):
-        hasUnread = (chatItem.dialog.unreadCount ?? 0) > 0 || (chatItem.dialog.unreadMark == true)
-        isPinned = chatItem.dialog.pinned ?? false
-      case .member, .header:
-        hasUnread = false
-        isPinned = false
-    }
-
-    badgeView?.removeFromSuperview()
-    badgeView = nil
-
-    if hasUnread {
-      badgeView = createUnreadBadge()
-      stackView.addArrangedSubview(badgeView!)
-    } else if isPinned {
-      badgeView = createPinnedBadge()
-      stackView.addArrangedSubview(badgeView!)
-    }
+    configureTitle(for: content.kind)
+    configureBadges(for: content.kind)
 
     isSelected = nav2?.currentRoute == route
 
@@ -242,15 +213,15 @@ class MainSidebarItemCell: NSView {
     preparingForReuse = true
     isHovered = false
     isSelected = false
+    badgeView = nil
     cancellables.removeAll()
   }
 
   override func menu(for event: NSEvent) -> NSMenu? {
-    guard let item, let dependencies else { return nil }
+    guard let item, let dependencies, item.dialog != nil else { return nil }
 
     let menu = NSMenu()
 
-    let isPinned = item.dialog.pinned ?? false
     let pinItem = NSMenuItem(
       title: isPinned ? "Unpin" : "Pin",
       action: #selector(handlePinAction),
@@ -260,7 +231,6 @@ class MainSidebarItemCell: NSView {
     pinItem.image = NSImage(systemSymbolName: isPinned ? "pin.slash" : "pin", accessibilityDescription: nil)
     menu.addItem(pinItem)
 
-    let hasUnread = (item.dialog.unreadCount ?? 0) > 0 || (item.dialog.unreadMark == true)
     let readUnreadItem = NSMenuItem(
       title: hasUnread ? "Mark as Read" : "Mark as Unread",
       action: #selector(handleReadUnreadAction),
@@ -273,7 +243,6 @@ class MainSidebarItemCell: NSView {
     )
     menu.addItem(readUnreadItem)
 
-    let isArchived = item.dialog.archived ?? false
     let archiveItem = NSMenuItem(
       title: isArchived ? "Unarchive" : "Archive",
       action: #selector(handleArchiveAction),
@@ -290,31 +259,28 @@ class MainSidebarItemCell: NSView {
   }
 
   @objc private func handlePinAction() {
-    guard let item else { return }
-    let isPinned = item.dialog.pinned ?? false
+    guard let item, let peer = item.peerId else { return }
     Task(priority: .userInitiated) {
-      try await DataManager.shared.updateDialog(peerId: item.peerId, pinned: !isPinned)
+      try await DataManager.shared.updateDialog(peerId: peer, pinned: !isPinned)
     }
   }
 
   @objc private func handleArchiveAction() {
-    guard let item else { return }
-    let isArchived = item.dialog.archived ?? false
+    guard let item, let peer = item.peerId else { return }
     Task(priority: .userInitiated) {
-      try await DataManager.shared.updateDialog(peerId: item.peerId, archived: !isArchived)
+      try await DataManager.shared.updateDialog(peerId: peer, archived: !isArchived)
     }
   }
 
   @objc private func handleReadUnreadAction() {
-    guard let item, let dependencies else { return }
-    let hasUnread = (item.dialog.unreadCount ?? 0) > 0 || (item.dialog.unreadMark == true)
+    guard let item, let dependencies, let peer = item.peerId else { return }
 
     Task(priority: .userInitiated) {
       do {
         if hasUnread {
-          UnreadManager.shared.readAll(item.peerId, chatId: item.chat?.id ?? 0)
+          UnreadManager.shared.readAll(peer, chatId: item.chat?.id ?? 0)
         } else {
-          try await dependencies.realtimeV2.send(.markAsUnread(peerId: item.peerId))
+          try await dependencies.realtimeV2.send(.markAsUnread(peerId: peer))
         }
       } catch {
         Log.shared.error("Failed to update read/unread status", error: error)
@@ -323,8 +289,23 @@ class MainSidebarItemCell: NSView {
   }
 
   private var route: Nav2Route? {
-    guard let item else { return nil }
-    return .chat(peer: item.peerId)
+    guard let item, let peer = item.peerId else { return nil }
+    return .chat(peer: peer)
+  }
+
+  private var hasUnread: Bool {
+    guard let dialog = item?.dialog else { return false }
+    return (dialog.unreadCount ?? 0) > 0 || (dialog.unreadMark == true)
+  }
+
+  private var isPinned: Bool {
+    guard let dialog = item?.dialog else { return false }
+    return dialog.pinned ?? false
+  }
+
+  private var isArchived: Bool {
+    guard let dialog = item?.dialog else { return false }
+    return dialog.archived ?? false
   }
 
   private func setupEventListeners() {
@@ -390,21 +371,11 @@ class MainSidebarItemCell: NSView {
     stackView.arrangedSubviews.first?.removeFromSuperview()
 
     switch kind {
-      case let .chat(chatItem):
+      case let .item(chatItem):
         if let user = chatItem.user {
           avatarView = ChatIconSwiftUIBridge(.user(user), size: Self.avatarSize)
         } else if let chat = chatItem.chat {
           avatarView = ChatIconSwiftUIBridge(.chat(chat), size: Self.avatarSize)
-        } else {
-          avatarView = ChatIconSwiftUIBridge(.user(.deleted), size: Self.avatarSize)
-        }
-        stackView.insertArrangedSubview(avatarView, at: 0)
-        stackView.setCustomSpacing(Self.avatarSpacing, after: avatarView)
-        avatarView.widthAnchor.constraint(equalToConstant: Self.avatarSize).isActive = true
-        avatarView.heightAnchor.constraint(equalToConstant: Self.avatarSize).isActive = true
-      case let .member(_, userInfo):
-        if let user = userInfo {
-          avatarView = ChatIconSwiftUIBridge(.user(user), size: Self.avatarSize)
         } else {
           avatarView = ChatIconSwiftUIBridge(.user(.deleted), size: Self.avatarSize)
         }
@@ -429,48 +400,57 @@ class MainSidebarItemCell: NSView {
     }
   }
 
+  private func configureTitle(for kind: MainSidebarItemCollectionViewItem.Content.Kind) {
+    nameLabel.stringValue = title(for: kind)
+  }
+
   private func title(for kind: MainSidebarItemCollectionViewItem.Content.Kind) -> String {
     switch kind {
-      case let .chat(chatItem):
-        chatItem.user?.user.firstName ??
-          chatItem.user?.user.lastName ??
-          chatItem.user?.user.username ??
-          chatItem.chat?.title ??
-          chatItem.space?.displayName ??
-          "Chat"
-      case let .member(_, user):
-        user?.user.firstName ??
-          user?.user.lastName ??
-          user?.user.username ??
-          "Member"
+      case let .item(chatItem):
+        chatItem.displayTitle
       case let .header(title, _):
         title
     }
   }
 
-  private func updateAppearance() {
-    let color = isSelected ? selectedColor : isHovered ? hoverColor : .clear
+  private func configureBadges(for kind: MainSidebarItemCollectionViewItem.Content.Kind) {
+    badgeView?.removeFromSuperview()
+    badgeView = nil
 
-    if preparingForReuse {
-      containerView.layer?.backgroundColor = color.cgColor
-    } else {
-      NSAnimationContext.runAnimationGroup { context in
-        context.duration = isHovered || isSelected ? Self.animationDurationFast : Self.animationDurationSlow
-        context.allowsImplicitAnimation = true
-        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        containerView.layer?.backgroundColor = color.cgColor
-      }
+    guard case .item = kind, item?.kind == .thread else { return }
+
+    if hasUnread {
+      badgeView = createUnreadBadge()
+    } else if isPinned {
+      badgeView = createPinnedBadge()
+    }
+
+    if let badgeView {
+      stackView.addArrangedSubview(badgeView)
     }
   }
 
-  @objc private func handleTap() {
-    guard let dependencies, let item else { return }
+  private func updateAppearance() {
+    updateLayer()
+  }
 
-    if let nav2 {
-      nav2.navigate(to: .chat(peer: item.peerId))
-    } else {
-      // Fallback to legacy nav
-      dependencies.nav.open(.chat(peer: item.peerId))
+  override func updateLayer() {
+    containerView.effectiveAppearance.performAsCurrentDrawingAppearance {
+      containerView.layer?.backgroundColor = isSelected ? selectedColor.cgColor : isHovered ? hoverColor
+        .cgColor : .clear
+    }
+    super.updateLayer()
+  }
+
+  @objc private func handleTap() {
+    guard let nav2, let content else { return }
+
+    switch content.kind {
+      case let .item(item):
+        guard let peer = item.peerId else { return }
+        nav2.navigate(to: .chat(peer: peer))
+      case .header:
+        return
     }
   }
 
