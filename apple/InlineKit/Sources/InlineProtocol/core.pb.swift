@@ -50,6 +50,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case getUpdatesState // = 24
   case getChat // = 25
   case getUpdates // = 26
+  case updateMemberAccess // = 27
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -85,6 +86,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 24: self = .getUpdatesState
     case 25: self = .getChat
     case 26: self = .getUpdates
+    case 27: self = .updateMemberAccess
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -118,6 +120,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .getUpdatesState: return 24
     case .getChat: return 25
     case .getUpdates: return 26
+    case .updateMemberAccess: return 27
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -151,6 +154,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .getUpdatesState,
     .getChat,
     .getUpdates,
+    .updateMemberAccess,
   ]
 
 }
@@ -2303,6 +2307,14 @@ public struct RpcCall: Sendable {
     set {input = .getUpdates(newValue)}
   }
 
+  public var updateMemberAccess: UpdateMemberAccessInput {
+    get {
+      if case .updateMemberAccess(let v)? = input {return v}
+      return UpdateMemberAccessInput()
+    }
+    set {input = .updateMemberAccess(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Input: Equatable, Sendable {
@@ -2332,6 +2344,7 @@ public struct RpcCall: Sendable {
     case getUpdatesState(GetUpdatesStateInput)
     case getChat(GetChatInput)
     case getUpdates(GetUpdatesInput)
+    case updateMemberAccess(UpdateMemberAccessInput)
 
   }
 
@@ -2561,6 +2574,14 @@ public struct RpcResult: @unchecked Sendable {
     set {_uniqueStorage()._result = .getUpdates(newValue)}
   }
 
+  public var updateMemberAccess: UpdateMemberAccessResult {
+    get {
+      if case .updateMemberAccess(let v)? = _storage._result {return v}
+      return UpdateMemberAccessResult()
+    }
+    set {_uniqueStorage()._result = .updateMemberAccess(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Result: Equatable, Sendable {
@@ -2590,6 +2611,7 @@ public struct RpcResult: @unchecked Sendable {
     case getUpdatesState(GetUpdatesStateResult)
     case getChat(GetChatResult)
     case getUpdates(GetUpdatesResult)
+    case updateMemberAccess(UpdateMemberAccessResult)
 
   }
 
@@ -2805,6 +2827,47 @@ public struct DeleteMemberInput: Sendable {
 
 /// Remove member from space result
 public struct DeleteMemberResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var updates: [Update] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Update an existing member's access/role within a space
+public struct UpdateMemberAccessInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Space ID
+  public var spaceID: Int64 = 0
+
+  /// Member user ID
+  public var userID: Int64 = 0
+
+  /// Updated role/options
+  public var role: SpaceMemberRole {
+    get {return _role ?? SpaceMemberRole()}
+    set {_role = newValue}
+  }
+  /// Returns true if `role` has been explicitly set.
+  public var hasRole: Bool {return self._role != nil}
+  /// Clears the value of `role`. Subsequent reads from it will return its default value.
+  public mutating func clearRole() {self._role = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _role: SpaceMemberRole? = nil
+}
+
+public struct UpdateMemberAccessResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -4084,6 +4147,14 @@ public struct Update: @unchecked Sendable {
     set {_uniqueStorage()._update = .spaceHasNewUpdates(newValue)}
   }
 
+  public var spaceMemberUpdate: UpdateSpaceMemberUpdate {
+    get {
+      if case .spaceMemberUpdate(let v)? = _storage._update {return v}
+      return UpdateSpaceMemberUpdate()
+    }
+    set {_uniqueStorage()._update = .spaceMemberUpdate(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Update: Equatable, Sendable {
@@ -4120,6 +4191,7 @@ public struct Update: @unchecked Sendable {
     case chatSkipPts(UpdateChatSkipPts)
     case chatHasNewUpdates(UpdateChatHasNewUpdates)
     case spaceHasNewUpdates(UpdateSpaceHasNewUpdates)
+    case spaceMemberUpdate(UpdateSpaceMemberUpdate)
 
   }
 
@@ -4315,6 +4387,28 @@ public struct UpdateSpaceMemberDelete: Sendable {
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+}
+
+/// Update when a space member's access/role changes
+public struct UpdateSpaceMemberUpdate: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var member: Member {
+    get {return _member ?? Member()}
+    set {_member = newValue}
+  }
+  /// Returns true if `member` has been explicitly set.
+  public var hasMember: Bool {return self._member != nil}
+  /// Clears the value of `member`. Subsequent reads from it will return its default value.
+  public mutating func clearMember() {self._member = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _member: Member? = nil
 }
 
 /// Update when we joined a space
@@ -5190,6 +5284,7 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     24: .same(proto: "GET_UPDATES_STATE"),
     25: .same(proto: "GET_CHAT"),
     26: .same(proto: "GET_UPDATES"),
+    27: .same(proto: "UPDATE_MEMBER_ACCESS"),
   ]
 }
 
@@ -8024,6 +8119,7 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     25: .same(proto: "getUpdatesState"),
     26: .same(proto: "getChat"),
     27: .same(proto: "getUpdates"),
+    28: .same(proto: "updateMemberAccess"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -8371,6 +8467,19 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
           self.input = .getUpdates(v)
         }
       }()
+      case 28: try {
+        var v: UpdateMemberAccessInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .updateMemberAccess(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .updateMemberAccess(v)
+        }
+      }()
       default: break
       }
     }
@@ -8489,6 +8598,10 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       guard case .getUpdates(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 27)
     }()
+    case .updateMemberAccess?: try {
+      guard case .updateMemberAccess(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 28)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -8532,6 +8645,7 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     25: .same(proto: "getUpdatesState"),
     26: .same(proto: "getChat"),
     27: .same(proto: "getUpdates"),
+    28: .same(proto: "updateMemberAccess"),
   ]
 
   fileprivate class _StorageClass {
@@ -8910,6 +9024,19 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
             _storage._result = .getUpdates(v)
           }
         }()
+        case 28: try {
+          var v: UpdateMemberAccessResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .updateMemberAccess(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .updateMemberAccess(v)
+          }
+        }()
         default: break
         }
       }
@@ -9029,6 +9156,10 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
       case .getUpdates?: try {
         guard case .getUpdates(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 27)
+      }()
+      case .updateMemberAccess?: try {
+        guard case .updateMemberAccess(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 28)
       }()
       case nil: break
       }
@@ -9408,6 +9539,86 @@ extension DeleteMemberResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
   }
 
   public static func ==(lhs: DeleteMemberResult, rhs: DeleteMemberResult) -> Bool {
+    if lhs.updates != rhs.updates {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateMemberAccessInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateMemberAccessInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "space_id"),
+    2: .standard(proto: "user_id"),
+    3: .same(proto: "role"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.spaceID) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.userID) }()
+      case 3: try { try decoder.decodeSingularMessageField(value: &self._role) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.spaceID != 0 {
+      try visitor.visitSingularInt64Field(value: self.spaceID, fieldNumber: 1)
+    }
+    if self.userID != 0 {
+      try visitor.visitSingularInt64Field(value: self.userID, fieldNumber: 2)
+    }
+    try { if let v = self._role {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateMemberAccessInput, rhs: UpdateMemberAccessInput) -> Bool {
+    if lhs.spaceID != rhs.spaceID {return false}
+    if lhs.userID != rhs.userID {return false}
+    if lhs._role != rhs._role {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateMemberAccessResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateMemberAccessResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "updates"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.updates) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.updates.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.updates, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateMemberAccessResult, rhs: UpdateMemberAccessResult) -> Bool {
     if lhs.updates != rhs.updates {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
@@ -11250,6 +11461,7 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     24: .standard(proto: "chat_skip_pts"),
     25: .standard(proto: "chat_has_new_updates"),
     26: .standard(proto: "space_has_new_updates"),
+    27: .standard(proto: "space_member_update"),
   ]
 
   fileprivate class _StorageClass {
@@ -11592,6 +11804,19 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
             _storage._update = .spaceHasNewUpdates(v)
           }
         }()
+        case 27: try {
+          var v: UpdateSpaceMemberUpdate?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .spaceMemberUpdate(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .spaceMemberUpdate(v)
+          }
+        }()
         default: break
         }
       }
@@ -11702,6 +11927,10 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
       case .spaceHasNewUpdates?: try {
         guard case .spaceHasNewUpdates(let v)? = _storage._update else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 26)
+      }()
+      case .spaceMemberUpdate?: try {
+        guard case .spaceMemberUpdate(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 27)
       }()
       case nil: break
       }
@@ -12047,6 +12276,42 @@ extension UpdateSpaceMemberDelete: SwiftProtobuf.Message, SwiftProtobuf._Message
   public static func ==(lhs: UpdateSpaceMemberDelete, rhs: UpdateSpaceMemberDelete) -> Bool {
     if lhs.spaceID != rhs.spaceID {return false}
     if lhs.userID != rhs.userID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateSpaceMemberUpdate: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateSpaceMemberUpdate"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "member"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._member) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._member {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateSpaceMemberUpdate, rhs: UpdateSpaceMemberUpdate) -> Bool {
+    if lhs._member != rhs._member {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

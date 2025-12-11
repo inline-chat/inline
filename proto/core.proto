@@ -574,6 +574,7 @@ enum Method {
   GET_UPDATES_STATE = 24;
   GET_CHAT = 25;
   GET_UPDATES = 26;
+  UPDATE_MEMBER_ACCESS = 27;
 }
 
 message RpcCall {
@@ -605,6 +606,7 @@ message RpcCall {
     GetUpdatesStateInput getUpdatesState = 25;
     GetChatInput getChat = 26;
     GetUpdatesInput getUpdates = 27;
+    UpdateMemberAccessInput updateMemberAccess = 28;
   }
 }
 
@@ -638,6 +640,7 @@ message RpcResult {
     GetUpdatesStateResult getUpdatesState = 25;
     GetChatResult getChat = 26;
     GetUpdatesResult getUpdates = 27;
+    UpdateMemberAccessResult updateMemberAccess = 28;
   }
 }
 
@@ -703,6 +706,20 @@ message DeleteMemberInput {
 
 // Remove member from space result
 message DeleteMemberResult { repeated Update updates = 1; }
+
+// Update an existing member's access/role within a space
+message UpdateMemberAccessInput {
+  // Space ID
+  int64 space_id = 1;
+
+  // Member user ID
+  int64 user_id = 2;
+
+  // Updated role/options
+  SpaceMemberRole role = 3;
+}
+
+message UpdateMemberAccessResult { repeated Update updates = 1; }
 
 message GetUpdatesStateInput {
   reserved 1;
@@ -1010,6 +1027,7 @@ message Update {
     UpdateChatSkipPts chat_skip_pts = 24;
     UpdateChatHasNewUpdates chat_has_new_updates = 25;
     UpdateSpaceHasNewUpdates space_has_new_updates = 26;
+    UpdateSpaceMemberUpdate space_member_update = 27;
   }
 }
 
@@ -1065,6 +1083,9 @@ message UpdateSpaceMemberDelete {
   // User ID
   int64 user_id = 2;
 }
+
+// Update when a space member's access/role changes
+message UpdateSpaceMemberUpdate { Member member = 1; }
 
 // Update when we joined a space
 message UpdateJoinSpace {

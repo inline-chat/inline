@@ -26,6 +26,7 @@ import { updateUserSettingsHandler } from "./user.updateUserSettings"
 import { sendComposeActionHandler } from "./messages.sendComposeAction"
 import { createBotHandler } from "./createBot"
 import { deleteMemberHandler } from "@in/server/realtime/handlers/space.deleteMember"
+import { updateMemberAccessHandler } from "@in/server/realtime/handlers/space.updateMemberAccess"
 import { markAsUnread } from "./messages.markAsUnread"
 import { getUpdatesState } from "@in/server/realtime/handlers/updates.getUpdatesState"
 import { getUpdates } from "@in/server/realtime/handlers/updates.getUpdates"
@@ -214,6 +215,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await deleteMemberHandler(call.input.deleteMember, handlerContext)
       return { oneofKind: "deleteMember", deleteMember: result }
+    }
+
+    case Method.UPDATE_MEMBER_ACCESS: {
+      if (call.input.oneofKind !== "updateMemberAccess") {
+        throw RealtimeRpcError.BadRequest
+      }
+      let result = await updateMemberAccessHandler(call.input.updateMemberAccess, handlerContext)
+      return { oneofKind: "updateMemberAccess", updateMemberAccess: result }
     }
 
     case Method.MARK_AS_UNREAD: {
