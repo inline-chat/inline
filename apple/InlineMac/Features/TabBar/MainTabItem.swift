@@ -11,7 +11,7 @@ class TabCollectionViewItem: NSCollectionViewItem, TabBarItemHoverDelegate {
 
   private enum Style {
     // Selected tab background (extends beyond bounds with melting effect)
-    static let selectedTopRadius: CGFloat = 10
+    static let selectedTopRadius: CGFloat = 14
     static let selectedBottomCurveHeight: CGFloat = 10
     static let selectedBackgroundExtension: CGFloat = 10
 
@@ -23,8 +23,8 @@ class TabCollectionViewItem: NSCollectionViewItem, TabBarItemHoverDelegate {
     static let animationDuration: TimeInterval = 0.15
 
     // Typography & sizing
-    static let titleFontSize: CGFloat = 13
-    static let iconSize: CGFloat = 22
+    static let titleFontSize: CGFloat = 12
+    static let iconSize: CGFloat = 18
     static let homeIconPointSize: CGFloat = 14
     static let iconCornerRadius: CGFloat = 6
     static let iconLeadingPadding: CGFloat = 10
@@ -34,6 +34,22 @@ class TabCollectionViewItem: NSCollectionViewItem, TabBarItemHoverDelegate {
     static let trailingInsetWithClose: CGFloat = 5
     static let closeOverlayWidth: CGFloat = 25
     static let extraFadePadding: CGFloat = 5
+  }
+
+  static func preferredWidth(for tab: TabModel, iconSize: CGFloat) -> CGFloat {
+    // Home tab is handled separately (fixed width).
+    guard tab.icon != "house" else { return 0 }
+
+    let font = NSFont.systemFont(ofSize: Style.titleFontSize)
+    let titleWidth = (tab.title as NSString).size(withAttributes: [.font: font]).width
+    // Don't reserve extra room for the close overlay; it floats over the tab.
+    let trailing = Style.trailingInsetDefault
+
+    return Style.iconLeadingPadding
+      + iconSize
+      + Style.iconTrailingPadding
+      + ceil(titleWidth)
+      + trailing
   }
 
   // MARK: - State
@@ -52,7 +68,7 @@ class TabCollectionViewItem: NSCollectionViewItem, TabBarItemHoverDelegate {
   private var iconCenterXForHome: NSLayoutConstraint!
 
   private let shadowView = NSView()
-  private let backgroundView = NSView()
+  private let backgroundView = TabSelectedBackgroundView()
   private let hoverBackgroundView = NSView()
   private let iconImageView = NonDraggableImageView()
   private let titleLabel = NonDraggableTextField(labelWithString: "")
@@ -74,7 +90,12 @@ class TabCollectionViewItem: NSCollectionViewItem, TabBarItemHoverDelegate {
 
   private func setupViews() {
     view = TabBarItemView()
-    (view as? TabBarItemView)?.hoverDelegate = self
+    if let tabView = view as? TabBarItemView {
+      tabView.hoverDelegate = self
+      tabView.onAppearanceChanged = { [weak self] in
+        self?.updateAppearance(animated: false)
+      }
+    }
     view.wantsLayer = true
 
     // Shadow/glow for selected tabs (blurred duplicate of background shape)
@@ -368,9 +389,10 @@ class TabCollectionViewItem: NSCollectionViewItem, TabBarItemHoverDelegate {
     updateBackgroundShape()
 
     let isDarkMode = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-    let activeBackgroundColor = isDarkMode
-      ? NSColor.darkGray.withAlphaComponent(0.3)
-      : NSColor.white
+     let activeBackgroundColor = resolvedColor(
+       Theme.windowContentBackgroundColor,
+       for: view.effectiveAppearance
+     )
 
     let shadowAlpha: CGFloat
     let backgroundAlpha: CGFloat
@@ -380,7 +402,7 @@ class TabCollectionViewItem: NSCollectionViewItem, TabBarItemHoverDelegate {
       shadowAlpha = 1
       backgroundAlpha = 1
       hoverAlpha = 0
-      backgroundView.layer?.backgroundColor = activeBackgroundColor.cgColor
+      // backgroundView.layer?.backgroundColor = activeBackgroundColor.cgColor
     } else if isHovered {
       shadowAlpha = 0
       backgroundAlpha = 0
@@ -406,11 +428,10 @@ class TabCollectionViewItem: NSCollectionViewItem, TabBarItemHoverDelegate {
       context.duration = 0
       context.allowsImplicitAnimation = false
 
-      let trailingConstant: CGFloat
-      if shouldShowClose {
-        trailingConstant = -(Style.closeOverlayWidth + Style.trailingInsetWithClose)
+      let trailingConstant: CGFloat = if shouldShowClose {
+        -(Style.closeOverlayWidth + Style.trailingInsetWithClose)
       } else {
-        trailingConstant = -Style.trailingInsetDefault
+        -Style.trailingInsetDefault
       }
       titleTrailingConstraint.constant = trailingConstant
 
@@ -426,7 +447,8 @@ class TabCollectionViewItem: NSCollectionViewItem, TabBarItemHoverDelegate {
     let bounds = titleLabel.bounds
     guard bounds.width > 0, bounds.height > 0 else { return }
 
-    let extraPadding = (titleTrailingConstraint.constant == -(Style.closeOverlayWidth + Style.trailingInsetWithClose)) ? 0 : Style.extraFadePadding
+    let extraPadding = (titleTrailingConstraint.constant == -(Style.closeOverlayWidth + Style.trailingInsetWithClose)) ?
+      0 : Style.extraFadePadding
     let fadeWidth = min(Style.titleFadeWidth + extraPadding, bounds.width)
 
     // Measure text width
@@ -457,5 +479,30 @@ class TabCollectionViewItem: NSCollectionViewItem, TabBarItemHoverDelegate {
     ]
 
     layer.mask = titleMaskLayer
+  }
+}
+
+private func resolvedColor(_ color: NSColor, for appearance: NSAppearance) -> NSColor {
+  var resolved = color
+  appearance.performAsCurrentDrawingAppearance {
+    resolved = color
+  }
+  return resolved
+}
+
+private class TabSelectedBackgroundView: NSView {
+  init() {
+    super.init(frame: .zero)
+    wantsLayer = true
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override func updateLayer() {
+    super.updateLayer()
+    layer?.backgroundColor = Theme.windowContentBackgroundColor.cgColor
   }
 }
