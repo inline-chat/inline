@@ -332,16 +332,31 @@ public struct MemberManagementView: View {
   private func actionMenu(for member: FullMemberItem) -> some View {
     let userId = member.userInfo.user.id
     let isDeleting = memberActionsViewModel.isDeleting(userId: userId)
+    let isUpdatingAccess = memberActionsViewModel.isUpdatingAccess(userId: userId)
+    let isBusy = isDeleting || isUpdatingAccess
 
     return Menu {
+      if canToggleGuest(member: member) {
+        let makeGuest = member.member.canAccessPublicChats
+        Button(
+          makeGuest ? "Make Guest" : "Allow Public Threads",
+          systemImage: makeGuest ? "lock.fill" : "lock.open"
+        ) {
+          Task {
+            await toggleGuestAccess(member: member)
+          }
+        }
+        .disabled(isUpdatingAccess)
+      }
+
       Button("Delete", systemImage: "trash", role: .destructive) {
         Task {
           await confirmAndDelete(member: member)
         }
       }
-      .disabled(!canDelete(member: member) || isDeleting)
+      .disabled(!canDelete(member: member) || isBusy)
     } label: {
-      if isDeleting {
+      if isBusy {
         ProgressView()
           .controlSize(.small)
       } else {
@@ -357,6 +372,27 @@ public struct MemberManagementView: View {
     if member.member.role == .owner { return false }
     if member.userInfo.user.isCurrentUser() { return false }
     return true
+  }
+
+  private func canToggleGuest(member: FullMemberItem) -> Bool {
+    guard membershipStatusViewModel.canManageMembers else { return false }
+    if member.member.role != .member { return false }
+    if member.userInfo.user.isCurrentUser() { return false }
+    return true
+  }
+
+  private func toggleGuestAccess(member: FullMemberItem) async {
+    guard canToggleGuest(member: member) else { return }
+
+    let userId = member.userInfo.user.id
+    let makeGuest = member.member.canAccessPublicChats
+    let access: UpdateMemberAccessTransaction.Context.AccessRole = .member(canAccessPublicChats: !makeGuest)
+
+    do {
+      try await memberActionsViewModel.updateMemberAccess(userId: userId, access: access)
+    } catch {
+      errorMessage = error.localizedDescription
+    }
   }
 
   private func confirmAndDelete(member: FullMemberItem) async {
