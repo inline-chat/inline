@@ -4,10 +4,16 @@ import AppKit
 
 final class TabBarItemView: NSView {
   weak var hoverDelegate: TabBarItemHoverDelegate?
+  var onAppearanceChanged: (() -> Void)?
 
   private var trackingArea: NSTrackingArea?
 
   override var mouseDownCanMoveWindow: Bool { false }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    onAppearanceChanged?()
+  }
 
   override func updateTrackingAreas() {
     super.updateTrackingAreas()
