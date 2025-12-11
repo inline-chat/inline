@@ -66,6 +66,14 @@ struct Nav2Entry: Codable {
     history.last?.tab.spaceId
   }
 
+  var canGoBack: Bool {
+    history.count > 1
+  }
+
+  var canGoForward: Bool {
+    !forwardHistory.isEmpty
+  }
+
   var activeTab: TabId {
     tabs[activeTabIndex]
   }
@@ -80,6 +88,26 @@ struct Nav2Entry: Codable {
     log.trace("Navigating to \(route)")
     lastRoutes[activeTab] = route
     history.append(Nav2Entry(route: route, tab: activeTab))
+    forwardHistory.removeAll()
+  }
+
+  func goBack() {
+    guard canGoBack else { return }
+    let current = history.removeLast()
+    forwardHistory.append(current)
+
+    if let last = history.last,
+       let tabIndex = tabs.firstIndex(of: last.tab) {
+      activeTabIndex = tabIndex
+    }
+  }
+
+  func goForward() {
+    guard let next = forwardHistory.popLast() else { return }
+    if let tabIndex = tabs.firstIndex(of: next.tab) {
+      activeTabIndex = tabIndex
+    }
+    history.append(next)
   }
 
   func removeTab(at index: Int) {
