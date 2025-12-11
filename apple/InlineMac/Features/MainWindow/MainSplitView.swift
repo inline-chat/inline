@@ -12,7 +12,21 @@ class MainSplitView: NSViewController {
 
   lazy var sideArea: NSView = .init()
 
-  lazy var contentArea: NSView = .init()
+  lazy var contentContainer: NSView = .init()
+
+  lazy var contentArea: NSView = {
+    let view = ContentAreaView()
+    view.wantsLayer = true
+    return view
+  }()
+
+  lazy var toolbarArea: MainToolbarView = {
+    let view = MainToolbarView(dependencies: dependencies)
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.wantsLayer = true
+    view.transparent = true
+    return view
+  }()
 
   // Constants
 
@@ -36,35 +50,49 @@ class MainSplitView: NSViewController {
   }
 
   override func loadView() {
-    view = NSView()
+    let rootView = NSView()
+    view = rootView
     view.wantsLayer = true
-    // view.layer?.backgroundColor = CGColor(red: 0.0, green: 1.0, blue: 0, alpha: 1)
-    // view.translatesAutoresizingMaskIntoConstraints = false
 
-    view.addSubview(contentArea)
+    view.addSubview(contentContainer)
+
+    contentContainer.addSubview(contentArea)
+    contentArea.addSubview(toolbarArea)
+
     view.addSubview(tabsArea)
     view.addSubview(sideArea)
 
     sideArea.translatesAutoresizingMaskIntoConstraints = false
     tabsArea.translatesAutoresizingMaskIntoConstraints = false
+    contentContainer.translatesAutoresizingMaskIntoConstraints = false
     contentArea.translatesAutoresizingMaskIntoConstraints = false
 
     sideArea.wantsLayer = true
     tabsArea.wantsLayer = true
+    contentContainer.wantsLayer = true
     contentArea.wantsLayer = true
 
     tabsArea.layer?.backgroundColor = .clear
     sideArea.layer?.backgroundColor = .clear
-    contentArea.layer?.backgroundColor = NSColor.controlBackgroundColor
-      .withAlphaComponent(1.0).cgColor
 
     let shadow = NSShadow()
     shadow.shadowColor = NSColor.black.withAlphaComponent(0.1)
     shadow.shadowBlurRadius = 2.0
-    shadow.shadowOffset = .init(width: 0.0, height: 0.0)
-    contentArea.shadow = shadow
+    shadow.shadowOffset = .init(width: 0.0, height: -1.0)
+    contentContainer.shadow = shadow
+
+    contentContainer.layer?.cornerRadius = contentRadius
+    contentContainer.layer?.cornerCurve = .continuous
 
     contentArea.layer?.cornerRadius = contentRadius
+    contentArea.layer?.cornerCurve = .continuous
+    contentArea.layer?.maskedCorners = [
+      .layerMinXMinYCorner,
+      .layerMaxXMinYCorner,
+      .layerMinXMaxYCorner,
+      .layerMaxXMaxYCorner,
+    ]
+    contentArea.layer?.masksToBounds = true
 
     NSLayoutConstraint.activate([
       tabsArea.heightAnchor.constraint(equalToConstant: tabsHeight),
@@ -74,15 +102,30 @@ class MainSplitView: NSViewController {
       sideArea.topAnchor.constraint(equalTo: view.topAnchor),
       sideArea.bottomAnchor.constraint(equalTo: view.bottomAnchor),
 
-      contentArea.leadingAnchor.constraint(equalTo: sideArea.trailingAnchor),
-      contentArea.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -innerPadding),
+      contentContainer.leadingAnchor.constraint(equalTo: sideArea.trailingAnchor),
+      contentContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -innerPadding),
+
+      toolbarArea
+        .leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
+      toolbarArea
+        .trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
+      toolbarArea
+        .topAnchor.constraint(equalTo: contentContainer.topAnchor),
+      toolbarArea
+        .heightAnchor.constraint(equalToConstant: Theme.toolbarHeight),
+
       tabsArea.leadingAnchor.constraint(equalTo: sideArea.trailingAnchor),
       tabsArea.trailingAnchor.constraint(equalTo: view.trailingAnchor),
 
       tabsArea.topAnchor.constraint(equalTo: view.topAnchor),
-      contentArea.topAnchor
+      contentContainer.topAnchor
         .constraint(equalTo: tabsArea.bottomAnchor),
-      contentArea.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -innerPadding),
+      contentContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -innerPadding),
+
+      contentArea.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
+      contentArea.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor),
+      contentArea.topAnchor.constraint(equalTo: contentContainer.topAnchor),
+      contentArea.bottomAnchor.constraint(equalTo: contentContainer.bottomAnchor),
     ])
 
     setSidebar(viewController: MainSidebar(dependencies: dependencies))
@@ -105,6 +148,7 @@ class MainSplitView: NSViewController {
     withObservationTracking { [weak self] in
       guard let self else { return }
       _ = nav2.currentRoute
+      // updateContent(for: nav2.currentRoute)
     } onChange: { [weak self] in
       Task { @MainActor [weak self] in
         guard let self, let nav2 = dependencies.nav2 else { return }
@@ -164,7 +208,7 @@ class MainSplitView: NSViewController {
     contentVC = viewController
 
     addChild(viewController)
-    contentArea.addSubview(viewController.view)
+    contentArea.addSubview(viewController.view, positioned: .below, relativeTo: toolbarArea)
 
     // Pin to superview
     viewController.view.translatesAutoresizingMaskIntoConstraints = false
@@ -182,6 +226,25 @@ class MainSplitView: NSViewController {
     lastRenderedRoute = route
 
     let viewController = viewController(for: route)
+    let toolbar = toolbar(for: route)
+    toolbarArea.update(with: toolbar)
     setContentArea(viewController: viewController)
+  }
+}
+
+class ContentAreaView: NSView {
+  init() {
+    super.init(frame: .zero)
+    wantsLayer = true
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override func updateLayer() {
+    layer?.backgroundColor = Theme.windowContentBackgroundColor.cgColor
+    super.updateLayer()
   }
 }
