@@ -604,7 +604,13 @@ extension NewPhotoView {
     guard currentImage != nil else { return }
     let savePanel = NSSavePanel()
     savePanel.allowedContentTypes = [.png, .jpeg]
-    savePanel.nameFieldStringValue = fullMessage.file?.fileName ?? "image"
+    // Prefer original filename, otherwise generate a unique one to avoid overwriting.
+    if let originalName = fullMessage.file?.fileName, !originalName.isEmpty {
+      savePanel.nameFieldStringValue = originalName
+    } else {
+      let ext = fullMessage.photoInfo?.bestPhotoSize()?.fileExtension ?? "png"
+      savePanel.nameFieldStringValue = "inline-\(UUID().uuidString.prefix(8)).\(ext)"
+    }
     savePanel.begin { response in
       guard response == .OK, let url = savePanel.url else { return }
 
