@@ -12,7 +12,6 @@
 --hexgrouping 4
 --octalgrouping 4
 --exponentcase lowercase
---header strip
 --ifdef no-indent
 --linebreaks lf
 --patternlet hoist
