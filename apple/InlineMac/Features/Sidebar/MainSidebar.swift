@@ -15,11 +15,12 @@ class MainSidebar: NSViewController {
   static let iconSize: CGFloat = 24
   static let itemHeight: CGFloat = 32
   static let iconTrailingPadding: CGFloat = 8
-  static let fontSize: CGFloat = 14
+  static let fontSize: CGFloat = 13
   static let fontWeight: NSFont.Weight = .regular
   static let font: NSFont = .systemFont(ofSize: fontSize, weight: fontWeight)
-  static let outerEdgeInsets: CGFloat = 12
-  static let innerEdgeInsets: CGFloat = 6
+  static let itemSpacing: CGFloat = 2
+  static let outerEdgeInsets: CGFloat = 10
+  static let innerEdgeInsets: CGFloat = 8
   static let edgeInsets: CGFloat = MainSidebar.outerEdgeInsets + MainSidebar.innerEdgeInsets
 
   init(dependencies: AppDependencies) {
@@ -75,7 +76,7 @@ class MainSidebar: NSViewController {
   private func headerTopInset() -> CGFloat {
     if let window = view.window, window.styleMask.contains(.fullSizeContentView) {
       // Leave room for traffic lights when content is full-height.
-      return 50
+      return 44
     }
     return 8
   }
