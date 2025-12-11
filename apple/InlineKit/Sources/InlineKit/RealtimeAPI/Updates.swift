@@ -57,6 +57,9 @@ public actor UpdatesEngine: Sendable {
         case let .spaceMemberDelete(spaceMemberDelete):
           try spaceMemberDelete.apply(db)
 
+        case let .spaceMemberUpdate(spaceMemberUpdate):
+          try spaceMemberUpdate.apply(db)
+
         case let .joinSpace(joinSpace):
           try joinSpace.apply(db)
 
@@ -537,6 +540,65 @@ extension InlineProtocol.UpdateSpaceMemberDelete {
       }
     } catch {
       Log.shared.error("Failed to delete space member", error: error)
+    }
+  }
+}
+
+extension InlineProtocol.UpdateSpaceMemberUpdate {
+  func apply(_ db: Database) throws {
+    let updatedMember = Member(from: member)
+
+    let existingMember = try Member
+      .filter(Member.Columns.userId == updatedMember.userId)
+      .filter(Member.Columns.spaceId == updatedMember.spaceId)
+      .fetchOne(db)
+
+    let previousCanAccessPublic = existingMember?.canAccessPublicChats ?? true
+
+    try updatedMember.save(db)
+
+    let currentUserId = Auth.shared.getCurrentUserId()
+    if updatedMember.userId == currentUserId,
+       previousCanAccessPublic == true,
+       updatedMember.canAccessPublicChats == false {
+      removePublicThreadsForSpace(spaceId: updatedMember.spaceId, db: db)
+    }
+  }
+
+  private func removePublicThreadsForSpace(spaceId: Int64, db: Database) {
+    func cleanupStep(_ label: String, _ block: () throws -> Void) {
+      do { try block() } catch {
+        Log.shared.error("Public threads cleanup failed: \(label)", error: error)
+      }
+    }
+
+    let publicThreads: [Chat] = (try? Chat
+      .filter(Chat.Columns.spaceId == spaceId)
+      .filter(Chat.Columns.type == ChatType.thread.rawValue)
+      .filter(Chat.Columns.isPublic == true)
+      .fetchAll(db)) ?? []
+
+    let chatIds = publicThreads.map(\.id)
+    guard !chatIds.isEmpty else { return }
+
+    cleanupStep("delete messages for public threads") {
+      try Message.filter(chatIds.contains(Column("chatId"))).deleteAll(db)
+    }
+
+    cleanupStep("delete dialogs for public threads") {
+      try Dialog.filter(chatIds.contains(Column("chatId"))).deleteAll(db)
+      try Dialog.filter(chatIds.contains(Column("peerThreadId"))).deleteAll(db)
+    }
+
+    cleanupStep("delete sync buckets for public threads") {
+      let chatBucketIds = chatIds.map { -$0 }
+      try DbBucketState
+        .filter(DbBucketState.Columns.bucketType == 1 && chatBucketIds.contains(DbBucketState.Columns.entityId))
+        .deleteAll(db)
+    }
+
+    cleanupStep("delete public thread chats") {
+      try Chat.filter(chatIds.contains(Column("id"))).deleteAll(db)
     }
   }
 }
