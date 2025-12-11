@@ -6,13 +6,25 @@ final class VideoAttachmentView: NSView, QLPreviewItem {
   private let closeButton: NSButton
   private let playOverlay: NSImageView
   private var onRemove: (() -> Void)?
-  private let height: CGFloat = 80
+  private let height: CGFloat
+  private let maxWidth: CGFloat
+  private let minWidth: CGFloat
   private var width: CGFloat = 80
   private let videoURL: URL?
 
-  init(thumbnail: NSImage?, videoURL: URL?, onRemove: @escaping () -> Void) {
+  init(
+    thumbnail: NSImage?,
+    videoURL: URL?,
+    onRemove: @escaping () -> Void,
+    height: CGFloat = 80,
+    maxWidth: CGFloat = 180,
+    minWidth: CGFloat = 60
+  ) {
     self.onRemove = onRemove
     self.videoURL = videoURL
+    self.height = height
+    self.maxWidth = maxWidth
+    self.minWidth = minWidth
 
     imageView = NSImageView(frame: .zero)
     imageView.image = thumbnail ?? NSImage(systemSymbolName: "film", accessibilityDescription: nil)
@@ -25,7 +37,8 @@ final class VideoAttachmentView: NSView, QLPreviewItem {
     } else {
       aspectRatio = 16.0 / 9.0
     }
-    width = max(80, height * aspectRatio)
+    let calculatedWidth = height * aspectRatio
+    width = min(max(calculatedWidth, minWidth), maxWidth)
 
     closeButton = NSButton(frame: .zero)
     closeButton.bezelStyle = .circular
@@ -63,8 +76,6 @@ final class VideoAttachmentView: NSView, QLPreviewItem {
       imageView.trailingAnchor.constraint(equalTo: trailingAnchor),
       imageView.topAnchor.constraint(equalTo: topAnchor),
       imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      imageView.widthAnchor.constraint(equalToConstant: width),
-      imageView.heightAnchor.constraint(equalToConstant: height),
 
       closeButton.topAnchor.constraint(equalTo: topAnchor, constant: 4),
       closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
@@ -89,6 +100,10 @@ final class VideoAttachmentView: NSView, QLPreviewItem {
     super.mouseDown(with: event)
     window?.makeFirstResponder(self)
     showQuickLookPreview()
+  }
+
+  override var intrinsicContentSize: NSSize {
+    NSSize(width: width, height: height)
   }
 
   // MARK: Quick Look
