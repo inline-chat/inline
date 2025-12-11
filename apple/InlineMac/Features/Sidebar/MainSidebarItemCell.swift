@@ -13,19 +13,17 @@ class MainSidebarItemCell: NSView {
 
   private var item: HomeChatItem?
 
-  private static let height: CGFloat = 34
-  private static let avatarSize: CGFloat = 28
-  private static let horizontalPadding: CGFloat = 6
-  private static let avatarSpacing: CGFloat = 6
-  private static let cornerRadius: CGFloat = 8
+  private static let height: CGFloat = MainSidebar.iconSize
+  private static let avatarSize: CGFloat = MainSidebar.iconSize
+  private static let avatarSpacing: CGFloat = MainSidebar.iconTrailingPadding
+  private static let horizontalPadding: CGFloat = MainSidebar.innerEdgeInsets
+  private static let font: NSFont = MainSidebar.font
+
+  private static let cornerRadius: CGFloat = 10
   private static let unreadBadgeSize: CGFloat = 5
   private static let unreadBadgeCornerRadius: CGFloat = 2.5
   private static let pinnedBadgeSize: CGFloat = 8
   private static let pinnedBadgePointSize: CGFloat = 8
-  private static let fontSize: CGFloat = 13
-  private static let backgroundOpacity: CGFloat = 0.1
-  private static let animationDurationFast: TimeInterval = 0.08
-  private static let animationDurationSlow: TimeInterval = 0.15
 
   private var hoverColor: NSColor {
     .gray.withAlphaComponent(Self.backgroundOpacity)
