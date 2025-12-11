@@ -8,6 +8,12 @@
 import AppKit
 
 class MainWindowBg: NSVisualEffectView {
+  private let overlayView: NSView = {
+    let view = NSView()
+    view.wantsLayer = true
+    return view
+  }()
+
   init() {
     super.init(frame: NSRect(origin: .zero, size: .init(width: 400, height: 500)))
     setupView()
@@ -18,11 +24,16 @@ class MainWindowBg: NSVisualEffectView {
     fatalError("Not supported")
   }
 
+  override func updateLayer() {
+    overlayView.layer?.backgroundColor = Theme.windowBackgroundColor.cgColor
+    super.updateLayer()
+  }
+
   private func setupView() {
     // Material
     material = .hudWindow
     blendingMode = .behindWindow
-    state = .active
+    state = .followsWindowActiveState
 
     addOverlay()
     addTopHighlight()
@@ -30,9 +41,6 @@ class MainWindowBg: NSVisualEffectView {
 
   private func addOverlay() {
     // Overlay view for tinting
-    let overlayView = NSView()
-    overlayView.wantsLayer = true
-    overlayView.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.3).cgColor
     addSubview(overlayView)
     overlayView.translatesAutoresizingMaskIntoConstraints = false
     NSLayoutConstraint.activate([
@@ -47,7 +55,7 @@ class MainWindowBg: NSVisualEffectView {
     // Create top inner highlight border
     let topHighlight = NSView()
     topHighlight.wantsLayer = true
-    topHighlight.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.1).cgColor
+    topHighlight.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.15).cgColor
 
     addSubview(topHighlight)
     topHighlight.translatesAutoresizingMaskIntoConstraints = false
