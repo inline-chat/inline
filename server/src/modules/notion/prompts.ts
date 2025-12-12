@@ -23,10 +23,10 @@ Output rules (follow exactly):
 - icon: always null (the server sets the page icon).
 
 Notion API reference (for format only):
-- Notion `pages.create` accepts: { parent, properties, children, icon, cover }.
+- Notion pages.create accepts: { parent, properties, children, icon, cover }.
 - Your output must NOT include parent/children/cover. The server supplies parent+icon and maps:
-  - your `properties` → Notion `properties`
-  - your `description` → Notion `children`
+  - your properties → Notion properties
+  - your description → Notion children
 
 Property value formats (match Notion docs):
 - title: { "title": [{ "text": { "content": "..." } }] }
