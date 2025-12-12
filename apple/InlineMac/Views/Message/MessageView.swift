@@ -1435,6 +1435,57 @@ class MessageViewAppKit: NSView {
     }
   }
 
+  @objc private func handleCreateLinearIssue() {
+    guard let text = message.text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return }
+
+    Task { @MainActor in
+      let spaceId: Int64? = if message.peerId.isThread {
+        try? Chat.getByPeerId(peerId: message.peerId)?.spaceId
+      } else {
+        nil
+      }
+
+      guard let spaceId else {
+        ToastCenter.shared.showError("Create Linear issues from a space thread")
+        return
+      }
+
+      do {
+        ToastCenter.shared.showLoading("Creating Linear issue…")
+
+        let integrations = try await ApiClient.shared.getIntegrations(
+          userId: Auth.shared.getCurrentUserId() ?? 0,
+          spaceId: spaceId
+        )
+
+        guard integrations.hasLinearConnected else {
+          ToastCenter.shared.showError("Linear is not connected for this space")
+          return
+        }
+
+        let result = try await ApiClient.shared.createLinearIssue(
+          text: text,
+          messageId: message.messageId,
+          peerId: message.peerId,
+          chatId: message.chatId,
+          fromId: Auth.shared.getCurrentUserId() ?? 0,
+          spaceId: spaceId
+        )
+
+        if let link = result.link, let url = URL(string: link) {
+          ToastCenter.shared.showSuccess("Linear issue created", actionTitle: "Open") {
+            NSWorkspace.shared.open(url)
+          }
+        } else {
+          ToastCenter.shared.showSuccess("Linear issue created")
+        }
+      } catch {
+        ToastCenter.shared.showError("Failed to create Linear issue")
+        Log.shared.error("Failed to create Linear issue", error: error)
+      }
+    }
+  }
+
   @objc private func saveDocument() {
     guard let documentInfo = fullMessage.documentInfo else { return }
 
@@ -2025,6 +2076,19 @@ extension MessageViewAppKit: NSMenuDelegate {
       let willDoItem = NSMenuItem(title: "Will Do", action: #selector(handleWillDo), keyEquivalent: "")
       willDoItem.image = NSImage(systemSymbolName: "circle.badge.plus", accessibilityDescription: "Create Notion Task")
       menu.addItem(willDoItem)
+    }
+
+    if regularMessage, message.peerId.isThread, hasText {
+      let createLinearIssueItem = NSMenuItem(
+        title: "Create Linear Issue",
+        action: #selector(handleCreateLinearIssue),
+        keyEquivalent: ""
+      )
+      createLinearIssueItem.image = NSImage(
+        systemSymbolName: "circle.badge.plus",
+        accessibilityDescription: "Create Linear Issue"
+      )
+      menu.addItem(createLinearIssueItem)
     }
 
     if menu.items.count > 0 {
