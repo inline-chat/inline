@@ -23,7 +23,7 @@ import {
   getPropertyDescriptions,
 } from "./schemaGenerator"
 import { formatMessage } from "@in/server/modules/notifications/eval"
-import { systemPrompt12, systemPrompt14 } from "./prompts"
+import { systemPrompt14 } from "./prompts"
 
 const log = new Log("NotionAgent", LogLevel.INFO)
 
@@ -106,7 +106,7 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
 
   // throw new Error("test")
   const completion = await openaiClient.chat.completions.create({
-    model: "gpt-5.1",
+    model: "gpt-5.2",
     verbosity: "high",
     reasoning_effort: "medium",
 
