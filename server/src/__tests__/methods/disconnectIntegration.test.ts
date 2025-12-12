@@ -76,7 +76,7 @@ describe("disconnectIntegration", () => {
     expect(remaining.length).toBe(0)
   })
 
-  test("fails disconnect if Linear revoke fails (keeps integration row)", async () => {
+  test("disconnects even if Linear revoke fails (deletes integration row)", async () => {
     const { space, users } = await testUtils.createSpaceWithMembers("Linear Space 2", ["linear-admin2@example.com"])
     const user = users[0]
     if (!user) throw new Error("Failed to create user")
@@ -106,13 +106,12 @@ describe("disconnectIntegration", () => {
       return new Response("unexpected fetch", { status: 500 })
     }) as any
 
-    await expect(handler({ spaceId: space.id, provider: "linear" }, makeContext(user.id))).rejects.toBeDefined()
+    await handler({ spaceId: space.id, provider: "linear" }, makeContext(user.id))
 
     const remaining = await db
       .select()
       .from(schema.integrations)
       .where(and(eq(schema.integrations.spaceId, space.id), eq(schema.integrations.provider, "linear")))
-    expect(remaining.length).toBe(1)
+    expect(remaining.length).toBe(0)
   })
 })
-
