@@ -11,7 +11,7 @@ if (isDev && process.env.NOTION_CLIENT_ID_DEV && process.env.NOTION_CLIENT_SECRE
   notionOauth = new arctic.Notion(
     process.env.NOTION_CLIENT_ID_DEV,
     process.env.NOTION_CLIENT_SECRET_DEV,
-    "https://api.inline.chat/integrations/notion/callback",
+    "http://127.0.0.1:8000/integrations/notion/callback",
   )
 } else if (!isDev && process.env.NOTION_CLIENT_ID && process.env.NOTION_CLIENT_SECRET) {
   notionOauth = new arctic.Notion(
@@ -56,6 +56,16 @@ export const handleNotionCallback = async ({
           accessTokenEncrypted: encryptedToken.encrypted,
           accessTokenIv: encryptedToken.iv,
           accessTokenTag: encryptedToken.authTag,
+        })
+        .onConflictDoUpdate({
+          target: [integrations.spaceId, integrations.provider],
+          set: {
+            userId,
+            accessTokenEncrypted: encryptedToken.encrypted,
+            accessTokenIv: encryptedToken.iv,
+            accessTokenTag: encryptedToken.authTag,
+            date: new Date(),
+          },
         })
         .returning()
 

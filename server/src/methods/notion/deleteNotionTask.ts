@@ -13,6 +13,7 @@ import type { MessageAttachment } from "@in/protocol/core"
 import { InlineError } from "../../types/errors"
 import { connectionManager } from "../../ws/connections"
 import type { TPeerInfo } from "../../api-types"
+import { deleteLinearIssue } from "@in/server/libs/linear"
 
 export const Input = Type.Object({
   externalTaskId: Type.Number(),
@@ -33,18 +34,30 @@ export const handler = async (
 
   try {
     // Verify task ownership and get required data
-    const { externalTask, message, chat } = await verifyAndGetData(
+    const { externalTask, message, chat, messageAttachmentId } = await verifyAndGetData(
       externalTaskId,
       messageId,
       chatId,
       context.currentUserId,
     )
 
-    await deleteFromNotion(pageId, chat)
+    if (externalTask.application === "linear") {
+      await deleteFromLinear(pageId, chat)
+    } else {
+      await deleteFromNotion(pageId, chat)
+    }
 
     await deleteFromDatabase(externalTaskId, messageId)
 
-    await sendAttachmentDeletedUpdate(message, chat, externalTaskId, messageId, chatId, context.currentUserId)
+    await sendAttachmentDeletedUpdate(
+      message,
+      chat,
+      externalTaskId,
+      messageAttachmentId,
+      messageId,
+      chatId,
+      context.currentUserId,
+    )
 
     Log.shared.info("Successfully deleted attachment and external task", {
       externalTaskId,
@@ -55,7 +68,7 @@ export const handler = async (
 
     return { success: true }
   } catch (error) {
-    Log.shared.error("Failed to delete Notion task", { error })
+    Log.shared.error("Failed to delete external task attachment", { error })
     throw error
   }
 }
@@ -98,7 +111,28 @@ const verifyAndGetData = async (externalTaskId: number, messageId: number, chatI
     throw new InlineError(InlineError.ApiError.CHAT_ID_INVALID)
   }
 
-  return { externalTask, message, chat }
+  // Get message attachment id if it exists (may be missing for legacy/broken rows)
+  const [messageAttachment] = await db
+    .select({ id: messageAttachments.id })
+    .from(messageAttachments)
+    .where(and(eq(messageAttachments.externalTaskId, BigInt(externalTaskId)), eq(messageAttachments.messageId, message.globalId)))
+
+  return { externalTask, message, chat, messageAttachmentId: messageAttachment?.id }
+}
+
+const deleteFromLinear = async (issueId: string, chat: any) => {
+  try {
+    if (chat?.spaceId) {
+      await deleteLinearIssue({ spaceId: Number(chat.spaceId), issueId })
+    } else {
+      Log.shared.warn("No space ID found for chat, skipping Linear deletion", { chatId: chat.id })
+    }
+  } catch (linearError) {
+    Log.shared.error("Failed to delete Linear issue", {
+      issueId,
+      error: linearError instanceof Error ? linearError.message : String(linearError),
+    })
+  }
 }
 
 const deleteFromNotion = async (pageId: string, chat: any) => {
@@ -137,6 +171,7 @@ const sendAttachmentDeletedUpdate = async (
   message: any,
   chat: any,
   externalTaskId: number,
+  messageAttachmentId: number | undefined,
   messageId: number,
   chatId: number,
   currentUserId: number,
@@ -150,8 +185,18 @@ const sendAttachmentDeletedUpdate = async (
     const updateGroup = await getUpdateGroup(peerId, { currentUserId })
 
     // Create a delete attachment update using existing UpdateMessageAttachment with null attachment
+    const deletionId = messageAttachmentId ?? externalTaskId
+    Log.shared.info("Pushing messageAttachment deletion update", {
+      currentUserId,
+      chatId,
+      messageId,
+      externalTaskId,
+      messageAttachmentId,
+      deletionId,
+      updateGroupType: updateGroup.type,
+    })
     const deletedAttachment: MessageAttachment = {
-      id: BigInt(externalTaskId),
+      id: BigInt(deletionId),
       attachment: { oneofKind: undefined },
     }
 
@@ -159,12 +204,14 @@ const sendAttachmentDeletedUpdate = async (
 
     // Send updates to appropriate users - following the same pattern as createNotionTask
     if (updateGroup.type === "dmUsers") {
+      const currentUserInputPeer = ProtocolConvertors.zodPeerToProtocolInputPeer({ userId: currentUserId })
       updateGroup.userIds.forEach((userId: number) => {
+        const encodingForInputPeer = userId === currentUserId ? inputPeer : currentUserInputPeer
         const update = encodeMessageAttachmentUpdate({
           messageId: BigInt(messageId),
           chatId: BigInt(chatId),
           encodingForUserId: userId,
-          encodingForPeer: { inputPeer },
+          encodingForPeer: { inputPeer: encodingForInputPeer },
           attachment: deletedAttachment,
         })
         RealtimeUpdates.pushToUser(userId, [update])
