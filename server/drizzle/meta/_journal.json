@@ -309,6 +309,20 @@
       "when": 1760820886901,
       "tag": "0043_can_access_public_threads",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1765485913170,
+      "tag": "0044_add_linear_team_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1765486951267,
+      "tag": "0045_add_integrations_space_provider_unique",
+      "breakpoints": true
     }
   ]
 }

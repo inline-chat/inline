@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "integrations_space_provider_unique" ON "integrations" USING btree ("space_id","provider");

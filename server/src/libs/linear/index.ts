@@ -1,9 +1,7 @@
 import { IntegrationsModel } from "@in/server/db/models/integrations"
 import * as arctic from "arctic"
-import type { Issue, Organization, Team } from "@linear/sdk"
-import { LinearClient, LinearSdk } from "@linear/sdk"
+import type { Issue, Organization } from "@linear/sdk"
 import { Log } from "@in/server/utils/log"
-import { error } from "elysia"
 
 // export const linearOauth = new arctic.Linear(
 //   process.env.LINEAR_CLIENT_ID,
@@ -19,18 +17,78 @@ if (process.env.LINEAR_CLIENT_ID && process.env.LINEAR_CLIENT_SECRET) {
     process.env.LINEAR_CLIENT_SECRET,
     process.env.NODE_ENV === "production"
       ? "https://api.inline.chat/integrations/linear/callback"
-      : "https://api.inline.chat/",
+      : "http://127.0.0.1:8000/integrations/linear/callback",
   )
 }
 
 export const getLinearAuthUrl = (state: string) => {
   const scopes = ["read", "write"]
   const url = linearOauth?.createAuthorizationURL(state, scopes)
+  if (!url) return { url }
 
-  return { url }
+  const authUrl = new URL(url.toString())
+  // Use app-actor tokens so created issues appear as Inline (Linear OAuth actor authorization).
+  // https://linear.app/developers/oauth-actor-authorization
+  authUrl.searchParams.set("actor", "app")
+
+  authUrl.searchParams.set("prompt", "consent")
+
+  return { url: authUrl.toString() }
 }
 
-export const queryLinear = async (input: { query: string; token: string }) => {
+export const revokeLinearToken = async (input: {
+  accessToken?: string | null
+  refreshToken?: string | null
+}): Promise<{ ok: boolean; status?: number }> => {
+  const revokeUrl = "https://api.linear.app/oauth/revoke"
+
+  const tryRevoke = async (init: RequestInit): Promise<{ ok: boolean; status?: number }> => {
+    try {
+      const response = await fetch(revokeUrl, init)
+      if (response.status === 200 || response.status === 400) {
+        // 400 can happen if token was already revoked.
+        return { ok: true, status: response.status }
+      }
+      return { ok: false, status: response.status }
+    } catch (error) {
+      Log.shared.warn("Linear token revoke request failed", { error })
+      return { ok: false }
+    }
+  }
+
+  if (input.refreshToken) {
+    const body = new URLSearchParams()
+    body.set("refresh_token", input.refreshToken)
+
+    const result = await tryRevoke({
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+    })
+
+    if (result.ok) return result
+  }
+
+  if (input.accessToken) {
+    const body = new URLSearchParams()
+    body.set("access_token", input.accessToken)
+
+    const result = await tryRevoke({
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization: `Bearer ${input.accessToken}`,
+      },
+      body,
+    })
+
+    if (result.ok) return result
+  }
+
+  return { ok: false }
+}
+
+export const queryLinear = async (input: { query: string; token: string; variables?: Record<string, unknown> }) => {
   return await fetch("https://api.linear.app/graphql", {
     method: "POST",
     headers: {
@@ -39,12 +97,20 @@ export const queryLinear = async (input: { query: string; token: string }) => {
     },
     body: JSON.stringify({
       query: input.query,
+      variables: input.variables,
     }),
   })
 }
 
+const getLinearAccess = async (spaceId: number) => {
+  if (isNaN(spaceId)) {
+    throw new Error("Invalid spaceId")
+  }
+  return await IntegrationsModel.getAuthTokenWithSpaceId(spaceId, "linear")
+}
+
 interface CreateIssueParams {
-  userId: number
+  spaceId: number
   title: string
   description: string
   teamId: string
@@ -52,15 +118,10 @@ interface CreateIssueParams {
   chatId: number
   labelIds?: string[]
   assigneeId?: string
-  statusId?: string
 }
 
-const getLinearIssueLabels = async ({ userId }: { userId: number }) => {
-  if (isNaN(userId)) {
-    throw new Error("Invalid userId")
-  }
-
-  const { accessToken } = await IntegrationsModel.getWithUserId(userId)
+const getLinearIssueLabels = async ({ spaceId }: { spaceId: number }) => {
+  const { accessToken } = await getLinearAccess(spaceId)
 
   const response = await queryLinear({
     query: "{ issueLabels { nodes { name createdAt id } } }",
@@ -78,12 +139,8 @@ const getLinearIssueLabels = async ({ userId }: { userId: number }) => {
   }
 }
 
-const getLinearIssueStatuses = async ({ userId }: { userId: number }) => {
-  if (isNaN(userId)) {
-    throw new Error("Invalid userId")
-  }
-
-  const { accessToken } = await IntegrationsModel.getWithUserId(userId)
+const getLinearIssueStatuses = async ({ spaceId }: { spaceId: number }) => {
+  const { accessToken } = await getLinearAccess(spaceId)
 
   const response = await queryLinear({
     query: `{ workflowStates { nodes { id color type position description createdAt updatedAt } } }`,
@@ -101,12 +158,10 @@ const getLinearIssueStatuses = async ({ userId }: { userId: number }) => {
   }
 }
 
-const getLinearTeams = async ({ userId }: { userId: number }): Promise<Team | undefined> => {
-  if (isNaN(userId)) {
-    throw new Error("Invalid userId")
-  }
+export type LinearTeam = { id: string; name: string; key: string }
 
-  const { accessToken } = await IntegrationsModel.getWithUserId(userId)
+const listLinearTeams = async ({ spaceId }: { spaceId: number }): Promise<LinearTeam[]> => {
+  const { accessToken } = await getLinearAccess(spaceId)
 
   const response = await queryLinear({
     query: "{ teams { nodes { id name key } } }",
@@ -119,15 +174,31 @@ const getLinearTeams = async ({ userId }: { userId: number }): Promise<Team | un
     throw new Error("Invalid response from Linear API")
   }
 
-  return teamsData.data.teams.nodes[0]
+  return teamsData.data.teams.nodes
 }
 
-const getLinearOrg = async ({ userId }: { userId: number }): Promise<Organization | undefined> => {
-  if (isNaN(userId)) {
-    throw new Error("Invalid userId")
+const getLinearTeams = async ({
+  spaceId,
+  requireSavedTeam = false,
+}: {
+  spaceId: number
+  requireSavedTeam?: boolean
+}): Promise<LinearTeam | undefined> => {
+  const { linearTeamId } = await getLinearAccess(spaceId)
+  const teams = await listLinearTeams({ spaceId })
+
+  if (teams.length === 0) return undefined
+  if (requireSavedTeam && !linearTeamId) return undefined
+  if (linearTeamId) {
+    const match = teams.find((team) => team.id === linearTeamId)
+    if (match) return match
   }
 
-  const { accessToken } = await IntegrationsModel.getWithUserId(userId)
+  return requireSavedTeam ? undefined : teams[0]
+}
+
+const getLinearOrg = async ({ spaceId }: { spaceId: number }): Promise<Organization | undefined> => {
+  const { accessToken } = await getLinearAccess(spaceId)
 
   const response = await queryLinear({
     query: "{ organization{ id name urlKey} }",
@@ -143,12 +214,8 @@ const getLinearOrg = async ({ userId }: { userId: number }): Promise<Organizatio
   return orgData.data.organization
 }
 
-const getLinearUser = async ({ userId }: { userId: number }) => {
-  if (isNaN(userId)) {
-    throw new Error("Invalid userId")
-  }
-
-  const { accessToken } = await IntegrationsModel.getWithUserId(userId)
+const getLinearUser = async ({ spaceId }: { spaceId: number }) => {
+  const { accessToken } = await getLinearAccess(spaceId)
 
   const response = await fetch("https://api.linear.app/graphql", {
     method: "POST",
@@ -172,12 +239,8 @@ const getLinearUser = async ({ userId }: { userId: number }) => {
   }
 }
 
-const getLinearUsers = async ({ userId }: { userId: number }) => {
-  if (isNaN(userId)) {
-    throw new Error("Invalid userId")
-  }
-
-  const { accessToken } = await IntegrationsModel.getWithUserId(userId)
+const getLinearUsers = async ({ spaceId }: { spaceId: number }) => {
+  const { accessToken } = await getLinearAccess(spaceId)
 
   const response = await queryLinear({
     query: `{ users { nodes { id name email } } }`,
@@ -196,20 +259,14 @@ const getLinearUsers = async ({ userId }: { userId: number }) => {
 }
 
 const createIssue = async ({
-  userId,
+  spaceId,
   title,
   description,
   teamId,
   labelIds = [],
   assigneeId,
-  statusId,
 }: CreateIssueParams): Promise<Issue | undefined> => {
-  if (isNaN(userId)) {
-    Log.shared.error("Failed to create issue - userId is invalid")
-    throw new Error("Failed to create issue - userId is invalid")
-  }
-
-  const { accessToken } = await IntegrationsModel.getWithUserId(userId)
+  const { accessToken } = await getLinearAccess(spaceId)
 
   const response = await fetch("https://api.linear.app/graphql", {
     method: "POST",
@@ -218,14 +275,13 @@ const createIssue = async ({
       Authorization: `Bearer ${accessToken}`,
     },
     body: JSON.stringify({
-      query: `mutation IssueCreate($title: String!, $description: String!, $teamId: String!, $labelIds: [String!], $assigneeId: String, $statusId: String) {
+      query: `mutation IssueCreate($title: String!, $description: String!, $teamId: String!, $labelIds: [String!], $assigneeId: String) {
           issueCreate(input: {
             title: $title,
             description: $description,
             teamId: $teamId,
             labelIds: $labelIds,
-            assigneeId: $assigneeId,
-            stateId: $statusId
+            assigneeId: $assigneeId
           }) {
             success
             issue {
@@ -242,18 +298,83 @@ const createIssue = async ({
         teamId,
         labelIds,
         assigneeId,
-        statusId,
       },
     }),
   })
-  const result = await response.json()
-
-  if (!result.data.issueCreate.success) {
-    Log.shared.error("Failed to create issue", error)
-    throw new Error("Failed to create issue")
+  let result: any
+  let rawText: string | undefined
+  try {
+    result = await response.json()
+  } catch {
+    rawText = await response.text().catch(() => undefined)
   }
 
-  return result.data.issueCreate.issue
+  if (!result && rawText) {
+    Log.shared.error("Linear API returned non-JSON response", {
+      spaceId,
+      teamId,
+      httpStatus: response.status,
+      labelIdsCount: labelIds.length,
+      hasAssignee: Boolean(assigneeId),
+      responsePreview: rawText.slice(0, 800),
+    })
+    throw new Error("Invalid response from Linear API")
+  }
+
+  if (!response.ok) {
+    Log.shared.error("Linear API request failed", {
+      spaceId,
+      teamId,
+      httpStatus: response.status,
+      labelIdsCount: labelIds.length,
+      hasAssignee: Boolean(assigneeId),
+      responsePreview: rawText ? rawText.slice(0, 800) : undefined,
+    })
+    throw new Error("Linear API request failed")
+  }
+
+  const errorMessages: string[] | undefined = Array.isArray(result?.errors)
+    ? result.errors.map((e: any) => String(e?.message ?? e)).slice(0, 10)
+    : undefined
+
+  const issueCreate = result?.data?.issueCreate
+  const success = issueCreate?.success === true
+  if (!success || !issueCreate?.issue) {
+    Log.shared.error("Failed to create Linear issue", {
+      spaceId,
+      teamId,
+      httpStatus: response.status,
+      labelIdsCount: labelIds.length,
+      hasAssignee: Boolean(assigneeId),
+      errorMessages,
+    })
+    throw new Error(errorMessages?.[0] ?? "Failed to create Linear issue")
+  }
+
+  return issueCreate.issue
+}
+
+const deleteLinearIssue = async ({ spaceId, issueId }: { spaceId: number; issueId: string }) => {
+  const { accessToken } = await getLinearAccess(spaceId)
+
+  const response = await queryLinear({
+    query: `mutation IssueDelete($id: String!) {
+      issueDelete(id: $id) {
+        success
+      }
+    }`,
+    token: accessToken,
+    variables: { id: issueId },
+  })
+
+  const result = await response.json()
+  const success = result?.data?.issueDelete?.success === true
+
+  if (!success) {
+    Log.shared.warn("Failed to delete Linear issue", { spaceId, issueId, result })
+  }
+
+  return { success }
 }
 
 const generateIssueLink = (identifier: string, organizations: string) => {
@@ -266,9 +387,11 @@ export {
   getLinearIssueLabels,
   getLinearIssueStatuses,
   getLinearTeams,
+  listLinearTeams,
   getLinearOrg,
   getLinearUser,
   createIssue,
+  deleteLinearIssue,
   generateIssueLink,
   getLinearUsers,
 }

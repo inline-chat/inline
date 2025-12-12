@@ -15,7 +15,16 @@ export const Response = Type.Object({
   hasLinearConnected: Type.Boolean(),
   hasNotionConnected: Type.Boolean(),
   hasIntegrationAccess: Type.Boolean(),
+  linearTeamId: Type.Optional(Type.String()),
   notionSpaces: Type.Optional(
+    Type.Array(
+      Type.Object({
+        spaceId: Type.Integer(),
+        spaceName: Type.String(),
+      }),
+    ),
+  ),
+  linearSpaces: Type.Optional(
     Type.Array(
       Type.Object({
         spaceId: Type.Integer(),
@@ -34,11 +43,16 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
   let hasLinearConnected = false
   let hasNotionConnected = false
   let hasIntegrationAccess = false
+  let linearTeamId: string | undefined = undefined
   let notionSpaces: Array<{ spaceId: number; spaceName: string }> | undefined
+  let linearSpaces: Array<{ spaceId: number; spaceName: string }> | undefined
 
-  // Check Linear integrations (user-specific)
-  const userIntegrations = await db.select().from(integrations).where(eq(integrations.userId, userId))
-  hasLinearConnected = userIntegrations.some((integration) => integration.provider === "linear")
+  // Check Linear integrations for this user (fallback for legacy rows)
+  const linearByUser = await db
+    .select({ id: integrations.id })
+    .from(integrations)
+    .where(and(eq(integrations.userId, userId), eq(integrations.provider, "linear")))
+  hasLinearConnected = linearByUser.length > 0
 
   // Check Notion integrations (space-specific)
   if (input.spaceId) {
@@ -49,9 +63,11 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
 
       const spaceIntegrations = await db.select().from(integrations).where(eq(integrations.spaceId, spaceId))
       hasNotionConnected = spaceIntegrations.some((integration) => integration.provider === "notion")
+      hasLinearConnected = spaceIntegrations.some((integration) => integration.provider === "linear")
+      linearTeamId = spaceIntegrations.find((integration) => integration.provider === "linear")?.linearTeamId ?? undefined
 
       // User has integration access if they're a member of this space and it has integrations
-      hasIntegrationAccess = spaceIntegrations.length > 0 || hasLinearConnected
+      hasIntegrationAccess = spaceIntegrations.length > 0
     }
   } else {
     // If no specific spaceId provided, check if user is member of any space with Notion integration
@@ -82,6 +98,24 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
         }))
       }
 
+      // Check for any Linear integrations in these spaces
+      const spacesWithLinear = await db
+        .select({
+          spaceId: integrations.spaceId,
+          spaceName: spaces.name,
+        })
+        .from(integrations)
+        .innerJoin(spaces, eq(integrations.spaceId, spaces.id))
+        .where(and(inArray(integrations.spaceId, spaceIds), eq(integrations.provider, "linear")))
+
+      hasLinearConnected = spacesWithLinear.length > 0
+      if (hasLinearConnected) {
+        linearSpaces = spacesWithLinear.map((space) => ({
+          spaceId: space.spaceId!,
+          spaceName: space.spaceName,
+        }))
+      }
+
       // Check if user has access to any integrations using the utility function
       hasIntegrationAccess = await Authorize.hasIntegrationAccess(context.currentUserId)
     }
@@ -91,6 +125,8 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
     hasLinearConnected,
     hasNotionConnected,
     hasIntegrationAccess,
+    linearTeamId,
     notionSpaces,
+    linearSpaces,
   }
 }

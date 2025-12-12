@@ -1,28 +1,40 @@
-import { pgTable, integer, text, timestamp, serial } from "drizzle-orm/pg-core"
+import { pgTable, integer, text, serial, uniqueIndex } from "drizzle-orm/pg-core"
 import { users } from "./users"
 import { relations } from "drizzle-orm/_relations"
 import { bytea, creationDate } from "@in/server/db/schema/common"
 import { spaces } from "./spaces"
 
-export const integrations = pgTable("integrations", {
-  id: serial("id").primaryKey(),
+export const integrations = pgTable(
+  "integrations",
+  {
+    id: serial("id").primaryKey(),
 
-  userId: integer("user_id").references(() => users.id),
+    userId: integer("user_id").references(() => users.id),
 
-  spaceId: integer("space_id").references(() => spaces.id),
+    spaceId: integer("space_id").references(() => spaces.id),
 
-  provider: text("provider").notNull(),
+    provider: text("provider").notNull(),
 
-  // Encrypted token data
-  accessTokenEncrypted: bytea("access_token_encrypted"),
-  accessTokenIv: bytea("access_token_iv"),
-  accessTokenTag: bytea("access_token_tag"),
+    // Encrypted token data
+    accessTokenEncrypted: bytea("access_token_encrypted"),
+    accessTokenIv: bytea("access_token_iv"),
+    accessTokenTag: bytea("access_token_tag"),
 
-  // Notion related data
-  notionDatabaseId: text("notion_database_id"),
+    // Notion related data
+    notionDatabaseId: text("notion_database_id"),
 
-  date: creationDate,
-})
+    // Linear related data (space-level selection)
+    linearTeamId: text("linear_team_id"),
+
+    date: creationDate,
+  },
+  (table) => ({
+    integrations_space_provider_unique: uniqueIndex("integrations_space_provider_unique").on(
+      table.spaceId,
+      table.provider,
+    ),
+  }),
+)
 
 export const integrationRelations = relations(integrations, ({ one }) => ({
   user: one(users, {

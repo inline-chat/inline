@@ -24,17 +24,45 @@ export const handleLinearCallback = async ({
     }
     const encryptedToken = encryptLinearTokens(tokens)
 
+    const numericSpaceId = Number(spaceId)
+    if (isNaN(numericSpaceId)) {
+      return {
+        ok: false,
+        error: "Invalid spaceId",
+      }
+    }
+
     try {
-      await db.insert(integrations).values({
-        userId,
-        spaceId: Number(spaceId),
-        provider: "linear",
-        accessTokenEncrypted: encryptedToken.encrypted,
-        accessTokenIv: encryptedToken.iv,
-        accessTokenTag: encryptedToken.authTag,
-      })
+      await db
+        .insert(integrations)
+        .values({
+          userId,
+          spaceId: numericSpaceId,
+          provider: "linear",
+          accessTokenEncrypted: encryptedToken.encrypted,
+          accessTokenIv: encryptedToken.iv,
+          accessTokenTag: encryptedToken.authTag,
+        })
+        .onConflictDoUpdate({
+          target: [integrations.spaceId, integrations.provider],
+          set: {
+            userId,
+            accessTokenEncrypted: encryptedToken.encrypted,
+            accessTokenIv: encryptedToken.iv,
+            accessTokenTag: encryptedToken.authTag,
+            date: new Date(),
+          },
+        })
     } catch (e) {
-      Log.shared.error("Failed to create integration", e)
+      if (e instanceof Error) {
+        Log.shared.error("Failed to upsert Linear integration", e, { userId, spaceId: numericSpaceId })
+      } else {
+        Log.shared.error("Failed to upsert Linear integration", { userId, spaceId: numericSpaceId, error: e })
+      }
+      return {
+        ok: false,
+        error: "Failed to save Linear integration",
+      }
     }
 
     return {
