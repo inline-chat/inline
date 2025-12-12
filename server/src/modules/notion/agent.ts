@@ -292,24 +292,33 @@ function taskPrompt(
   const statusProperty = database.properties?.Status || database.properties?.status
   const statusOptions = statusProperty?.status?.options?.map((option: any) => option.name) || []
 
+  const actor = participantNames.find((p) => p.id === currentUserId)
+  const actorDisplayName = actor
+    ? [actor.firstName, actor.lastName].filter(Boolean).join(" ") || actor.username || actor.email || `User ${actor.id}`
+    : `User ${currentUserId}`
+
   return `
-Today's date: ${new Date().toISOString()}
-Actor user ID (who triggered the will do): ${currentUserId}
-
-Target message: ${formatMessage(targetMessage)}
-
-<active-team-context>
-${JSON.stringify(process.env.WANVER_TRANSLATION_CONTEXT, null, 2)}
-</active-team-context>
-
-<conversation_context>
-Recent conversation:
-${limitedMessages.map((message, index: number) => `[${index}] ${formatMessage(message)}`).join("\n")}
-</conversation_context>
+<metadata>
+today: ${new Date().toISOString()}
+actor_inline_user_id: ${currentUserId}
+actor_display_name: ${actorDisplayName}
+</metadata>
 
 <context>
 Chat: "${chatInfo?.title}"
 </context>
+
+<target_message>
+${formatMessage(targetMessage)}
+</target_message>
+
+<active-team-context>
+${WANVER_TRANSLATION_CONTEXT ?? ""}
+</active-team-context>
+
+<conversation_context>
+${limitedMessages.map((message) => formatMessage(message)).join("\n")}
+</conversation_context>
 
 <database_schema>
 Properties: ${getPropertyDescriptions(database)}
