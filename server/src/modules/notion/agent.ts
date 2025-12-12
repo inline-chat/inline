@@ -15,11 +15,7 @@ import { getCachedChatInfo, type CachedChatInfo } from "@in/server/modules/cache
 import { getCachedSpaceInfo } from "@in/server/modules/cache/spaceCache"
 import { getCachedUserName, type UserName } from "@in/server/modules/cache/userNames"
 import { filterFalsy } from "@in/server/utils/filter"
-import {
-  findTitleProperty,
-  extractTaskTitle,
-  getPropertyDescriptions,
-} from "./schemaGenerator"
+import { findTitleProperty, extractTaskTitle, getPropertyDescriptions } from "./schemaGenerator"
 import { formatMessage } from "@in/server/modules/notifications/eval"
 import { systemPrompt14 } from "./prompts"
 
@@ -98,8 +94,8 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
   // throw new Error("test")
   const completion = await openaiClient.chat.completions.create({
     model: "gpt-5.2",
-    verbosity: "high",
-    reasoning_effort: "medium",
+    verbosity: "medium",
+    reasoning_effort: "low", // was "hard"
 
     messages: [
       {
