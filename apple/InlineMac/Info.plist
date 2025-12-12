@@ -10,6 +10,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>inline</string>
+				<string>in</string>
 			</array>
 		</dict>
 	</array>

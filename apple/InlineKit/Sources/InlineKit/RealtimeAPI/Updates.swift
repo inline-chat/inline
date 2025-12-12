@@ -319,17 +319,41 @@ extension InlineProtocol.UpdateMessageAttachment {
     if attachment.attachment == nil {
       let attachmentId = attachment.id
 
-      try Attachment
-        .filter(Column("externalTaskId") == attachmentId)
-        .deleteAll(db)
+      if let existing = try Attachment
+        .filter(Column("attachmentId") == attachmentId)
+        .fetchOne(db)
+      {
+        if let externalTaskId = existing.externalTaskId {
+          try ExternalTask
+            .filter(Column("id") == externalTaskId)
+            .deleteAll(db)
+        }
 
-      try ExternalTask
-        .filter(Column("id") == attachmentId)
-        .deleteAll(db)
+        if let urlPreviewId = existing.urlPreviewId {
+          try UrlPreview
+            .filter(Column("id") == urlPreviewId)
+            .deleteAll(db)
+        }
 
-      Log.shared.debug("Deleted attachment with ID: \(attachmentId)")
+        try Attachment
+          .filter(Column("attachmentId") == attachmentId)
+          .deleteAll(db)
+
+        Log.shared.debug("Deleted attachment (attachmentId: \(attachmentId))")
+      } else {
+        // Legacy fallback: older servers used the externalTaskId as the MessageAttachment.id for deletion updates.
+        try Attachment
+          .filter(Column("externalTaskId") == attachmentId)
+          .deleteAll(db)
+
+        try ExternalTask
+          .filter(Column("id") == attachmentId)
+          .deleteAll(db)
+
+        Log.shared.debug("Deleted attachment via legacy externalTaskId: \(attachmentId)")
+      }
     } else {
-      guard let messageAttachment = attachment.attachment else {
+      guard attachment.attachment != nil else {
         Log.shared.error("Message attachment is nil")
         return
       }
@@ -339,6 +363,9 @@ extension InlineProtocol.UpdateMessageAttachment {
 
       if let message {
         _ = try Attachment.saveWithInnerItems(db, attachment: attachment, messageClientGlobalId: message.globalId!)
+        Log.shared.debug("Saved message attachment (attachmentId: \(attachment.id)) for message \(messageID) in chat \(chatID)")
+      } else {
+        Log.shared.warning("Message not found for attachment update")
       }
     }
 

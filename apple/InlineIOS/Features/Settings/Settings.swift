@@ -37,13 +37,8 @@ struct SettingsView: View {
         }
       }
 
-      NavigationLink(destination: IntegrationsView()) {
-        SettingsItem(
-          icon: "app.connected.to.app.below.fill",
-          iconColor: .purple,
-          title: "Integrations"
-        )
-      }
+      // Integrations are now managed per-space (Linear/Notion are space-scoped).
+      // Global Integrations UI is temporarily disabled.
 
       NavigationLink(destination: ThemeSelectionView()) {
         SettingsItem(

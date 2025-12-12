@@ -54,15 +54,19 @@ public class NotionTaskManager: @unchecked Sendable {
   // MARK: - Public Interface
 
   /// Checks if user has integration access for the given peer and space
-  public func checkIntegrationAccess(peerId: Peer, spaceId: Int64?) async {
+  public func checkIntegrationAccess(peerId: Peer, spaceId: Int64?, integrations: GetIntegrations? = nil) async {
     do {
-      let integrations = try await ApiClient.shared.getIntegrations(
-        userId: Auth.shared.getCurrentUserId() ?? 0,
-        spaceId: peerId.isThread ? spaceId : nil
-      )
+      let resolvedIntegrations = if let integrations {
+        integrations
+      } else {
+        try await ApiClient.shared.getIntegrations(
+          userId: Auth.shared.getCurrentUserId() ?? 0,
+          spaceId: peerId.isThread ? spaceId : nil
+        )
+      }
 
       accessQueue.async(flags: .barrier) {
-        self._hasIntegrationAccess = integrations.hasIntegrationAccess
+        self._hasIntegrationAccess = resolvedIntegrations.hasIntegrationAccess && resolvedIntegrations.hasNotionConnected
       }
     } catch {
       log.error("Error checking integration access: \(error)")

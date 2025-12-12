@@ -56,11 +56,14 @@ public enum Path: String {
   case deleteMessage
   case createLinearIssue
   case getIntegrations
+  case disconnectIntegration
   case getAlphaText
   case sendSmsCode
   case verifySmsCode
   case getNotionDatabases
   case saveNotionDatabaseId
+  case getLinearTeams
+  case saveLinearTeamId
   case createNotionTask
   case deleteAttachment
 }
@@ -448,7 +451,8 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     messageId: Int64,
     peerId: Peer,
     chatId: Int64,
-    fromId: Int64
+    fromId: Int64,
+    spaceId: Int64? = nil
   ) async throws -> CreateLinearIssue {
     var body: [String: Any] = [
       "text": text,
@@ -468,6 +472,9 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
     // Add the peerId object to the body
     body["peerId"] = peerIdObject
+    if let spaceId {
+      body["spaceId"] = spaceId
+    }
 
     return try await postRequest(
       .createLinearIssue,
@@ -490,6 +497,17 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     }
 
     return try await request(.getChatHistory, queryItems: queryItems, includeToken: true)
+  }
+
+  public func disconnectIntegration(spaceId: Int64, provider: String) async throws -> DisconnectIntegration {
+    try await request(
+      .disconnectIntegration,
+      queryItems: [
+        URLQueryItem(name: "spaceId", value: "\(spaceId)"),
+        URLQueryItem(name: "provider", value: provider),
+      ],
+      includeToken: true
+    )
   }
 
   public func savePushNotification(pushToken: String) async throws -> EmptyPayload {
@@ -803,6 +821,25 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     )
   }
 
+  public func getLinearTeams(spaceId: Int64) async throws -> [LinearTeam] {
+    try await request(
+      .getLinearTeams,
+      queryItems: [URLQueryItem(name: "spaceId", value: "\(spaceId)")],
+      includeToken: true
+    )
+  }
+
+  public func saveLinearTeamId(spaceId: Int64, teamId: String) async throws -> EmptyPayload {
+    try await request(
+      .saveLinearTeamId,
+      queryItems: [
+        URLQueryItem(name: "spaceId", value: "\(spaceId)"),
+        URLQueryItem(name: "teamId", value: teamId),
+      ],
+      includeToken: true
+    )
+  }
+
   public func createNotionTask(
     spaceId: Int64,
     messageId: Int64,
@@ -895,7 +932,9 @@ public struct GetIntegrations: Codable, Sendable {
   public let hasLinearConnected: Bool
   public let hasNotionConnected: Bool
   public let hasIntegrationAccess: Bool
+  public let linearTeamId: String?
   public let notionSpaces: [NotionSpace]?
+  public let linearSpaces: [LinearSpace]?
 
   // Computed property for easy access to first Notion space
   public var firstNotionSpace: NotionSpace? {
@@ -908,14 +947,29 @@ public struct NotionSpace: Codable, Sendable {
   public let spaceName: String
 }
 
+public struct LinearSpace: Codable, Sendable {
+  public let spaceId: Int64
+  public let spaceName: String
+}
+
 public struct NotionSimplifiedDatabase: Codable, Sendable {
   public let id: String
   public let title: String
   public let icon: String?
 }
 
+public struct LinearTeam: Codable, Sendable {
+  public let id: String
+  public let name: String
+  public let key: String
+}
+
 public struct CreateLinearIssue: Codable, Sendable {
   public let link: String?
+}
+
+public struct DisconnectIntegration: Codable, Sendable {
+  public let ok: Bool
 }
 
 public struct VerifyCode: Codable, Sendable {

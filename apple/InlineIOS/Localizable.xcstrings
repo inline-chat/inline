@@ -445,6 +445,9 @@
         }
       }
     },
+    "Disconnect" : {
+
+    },
     "Dismiss" : {
       "extractionState" : "stale",
       "localizations" : {

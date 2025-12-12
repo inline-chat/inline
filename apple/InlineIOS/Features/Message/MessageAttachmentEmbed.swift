@@ -82,12 +82,20 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
     self.externalTask = externalTask
     self.messageId = messageId
     self.chatId = chatId
-
-    print("TITLE is \(title)")
     avatarView.configure(with: userInfo, size: Constants.avatarSize)
 
     let userName = userInfo.user.firstName ?? "User"
-    usernameLabel.text = "\(userName) will do"
+    if externalTask?.application == "linear" {
+      usernameLabel.text = "\(userName) created a Linear issue"
+      if let linearImage = UIImage(named: "linear-icon")?.withRenderingMode(.alwaysTemplate) {
+        checkboxImageView.image = linearImage
+      } else {
+        checkboxImageView.image = UIImage(systemName: "app.connected.to.app.below.fill")
+      }
+    } else {
+      usernameLabel.text = "\(userName) will do"
+      checkboxImageView.image = UIImage(systemName: "square")
+    }
 
     taskTitleLabel.text = title ?? "Task"
 
@@ -218,9 +226,10 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
   private func showDeleteConfirmation() {
     guard let viewController = findViewController() else { return }
 
+    let integrationName = (externalTask?.application == "linear") ? "Linear" : "Notion"
     let alert = UIAlertController(
       title: "Delete Task",
-      message: "This will delete the task from both Inline and Notion. This action cannot be undone.",
+      message: "This will delete the task from both Inline and \(integrationName). This action cannot be undone.",
       preferredStyle: .alert
     )
 
