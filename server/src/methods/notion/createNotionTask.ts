@@ -3,8 +3,8 @@ import { Log } from "../../utils/log"
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import { createNotionPage } from "@in/server/modules/notion/agent"
 import { db } from "@in/server/db"
-import { externalTasks, messageAttachments, messages } from "@in/server/db/schema"
-import { and, eq } from "drizzle-orm"
+import { externalTasks, messageAttachments, messages, users } from "@in/server/db/schema"
+import { count, and, eq } from "drizzle-orm"
 import { TInputPeerInfo, TPeerInfo } from "../../api-types"
 import { getUpdateGroup } from "../../modules/updates"
 import { connectionManager } from "../../ws/connections"
@@ -16,7 +16,6 @@ import {
 } from "@in/protocol/core"
 import { RealtimeUpdates } from "../../realtime/message"
 import { Notifications } from "../../modules/notifications/notifications"
-import { getCachedUserName, UserNamesCache } from "@in/server/modules/cache/userNames"
 import { decrypt, encrypt, type EncryptedData } from "@in/server/modules/encryption/encryption"
 import { decryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { encodeMessageAttachmentUpdate } from "../../realtime/encoders/encodeMessageAttachment"
@@ -107,16 +106,28 @@ export const handler = async (
 
     // Create message attachment and get sender user info in parallel
     const attachmentStart = Date.now()
-    const [, senderUserName] = await Promise.all([
-      db.insert(messageAttachments).values({
-        messageId: message.globalId,
-        externalTaskId: BigInt(externalTaskResult.id),
-      }),
-      getCachedUserName(context.currentUserId),
+    const [messageAttachmentRow, senderUser] = await Promise.all([
+      db
+        .insert(messageAttachments)
+        .values({
+          messageId: message.globalId,
+          externalTaskId: BigInt(externalTaskResult.id),
+        })
+        .returning()
+        .then(([row]) => row),
+      db
+        .select()
+        .from(users)
+        .where(eq(users.id, context.currentUserId))
+        .then(([user]) => user),
     ])
     Log.shared.info("🕐 Message attachment and user info completed", {
       durationSeconds: ((Date.now() - attachmentStart) / 1000).toFixed(3),
     })
+
+    if (!messageAttachmentRow?.id) {
+      throw new Error("Failed to create message attachment")
+    }
 
     // Prepare all parallel operations for updates and notifications
     const updatesStart = Date.now()
@@ -128,6 +139,7 @@ export const handler = async (
         messageId,
         peerId,
         currentUserId: context.currentUserId,
+        messageAttachmentId: BigInt(messageAttachmentRow.id),
         externalTask: externalTaskResult,
         chatId,
         decryptedTitle: result.taskTitle,
@@ -135,12 +147,7 @@ export const handler = async (
       }),
     )
 
-    if (result.taskTitle) {
-      const senderDisplayName = senderUserName ? UserNamesCache.getDisplayName(senderUserName) : null
-      const senderTitleName = senderDisplayName ?? "Someone"
-      const senderEmail = senderUserName?.email ?? undefined
-      const senderPhone = senderUserName?.phone ?? undefined
-
+    if (result.taskTitle && senderUser) {
       // Notify only the message sender
       const messageSenderId = message.fromId
 
@@ -160,13 +167,10 @@ export const handler = async (
             userId: messageSenderId,
             senderUserId: context.currentUserId,
             threadId: `chat_${chatId}`,
-            title: `${senderTitleName} will do`,
-            // subtitle:  ?? undefined,
-            body: "Created a task from your messages: " + result.taskTitle,
+            title: `${senderUser.firstName ?? "Someone"} will do`,
+            subtitle: result.taskTitle ?? undefined,
+            body: messageText || "A new task has been created from a message",
             isThread: updateGroup.type === "threadUsers",
-            senderDisplayName: senderDisplayName ?? undefined,
-            senderEmail,
-            senderPhone,
           }).catch((error) => {
             Log.shared.error("Failed to send task creation notification", { error })
           }),
@@ -202,6 +206,7 @@ const messageAttachmentUpdate = async ({
   messageId,
   peerId,
   currentUserId,
+  messageAttachmentId,
   externalTask,
   chatId,
   decryptedTitle,
@@ -210,6 +215,7 @@ const messageAttachmentUpdate = async ({
   messageId: number
   peerId: TPeerInfo
   currentUserId: number
+  messageAttachmentId: bigint
   externalTask: any
   chatId: number
   decryptedTitle: string | null
@@ -218,10 +224,19 @@ const messageAttachmentUpdate = async ({
   try {
     // Use passed updateGroup or fetch if not provided (for backward compatibility)
     const finalUpdateGroup = updateGroup || (await getUpdateGroup(peerId, { currentUserId }))
+    Log.shared.info("Pushing messageAttachment update for Notion external task", {
+      currentUserId,
+      chatId,
+      messageId,
+      messageAttachmentId: messageAttachmentId.toString(),
+      externalTaskId: externalTask.id,
+      updateGroupType: finalUpdateGroup.type,
+      recipientCount: Array.isArray(finalUpdateGroup.userIds) ? finalUpdateGroup.userIds.length : undefined,
+    })
 
     // Create the MessageAttachment object
     const attachment: MessageAttachment = {
-      id: BigInt(externalTask.id),
+      id: messageAttachmentId,
       attachment: {
         oneofKind: "externalTask",
         externalTask: {
@@ -232,7 +247,7 @@ const messageAttachmentUpdate = async ({
           assignedUserId: BigInt(currentUserId),
           number: "",
           url: externalTask.url ?? "",
-          date: BigInt(Date.now().toString()),
+          date: BigInt(Math.round(Date.now() / 1000)),
           title: decryptedTitle ?? "",
         },
       },
@@ -242,7 +257,20 @@ const messageAttachmentUpdate = async ({
     const inputPeer = ProtocolConvertors.zodPeerToProtocolInputPeer(peerId)
 
     // Send updates to appropriate users
-    if (finalUpdateGroup.type === "dmUsers" || finalUpdateGroup.type === "threadUsers") {
+    if (finalUpdateGroup.type === "dmUsers") {
+      const currentUserInputPeer = ProtocolConvertors.zodPeerToProtocolInputPeer({ userId: currentUserId })
+      finalUpdateGroup.userIds.forEach((userId: number) => {
+        const encodingForInputPeer = userId === currentUserId ? inputPeer : currentUserInputPeer
+        const update = encodeMessageAttachmentUpdate({
+          messageId: BigInt(messageId),
+          chatId: BigInt(chatId),
+          encodingForUserId: userId,
+          encodingForPeer: { inputPeer: encodingForInputPeer },
+          attachment,
+        })
+        RealtimeUpdates.pushToUser(userId, [update])
+      })
+    } else if (finalUpdateGroup.type === "threadUsers") {
       finalUpdateGroup.userIds.forEach((userId: number) => {
         const update = encodeMessageAttachmentUpdate({
           messageId: BigInt(messageId),

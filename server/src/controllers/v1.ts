@@ -165,10 +165,28 @@ import {
 } from "@in/server/methods/createLinearIssue"
 
 import {
+  handler as getLinearTeamsHandler,
+  Input as GetLinearTeamsInput,
+  Response as GetLinearTeamsResponse,
+} from "@in/server/methods/linear/getLinearTeams"
+
+import {
+  handler as saveLinearTeamIdHandler,
+  Input as SaveLinearTeamIdInput,
+  Response as SaveLinearTeamIdResponse,
+} from "@in/server/methods/linear/saveLinearTeamId"
+
+import {
   handler as getIntegrationsHandler,
   Input as GetIntegrationsInput,
   Response as GetIntegrationsResponse,
 } from "@in/server/methods/getIntegrations"
+
+import {
+  handler as disconnectIntegrationHandler,
+  Input as DisconnectIntegrationInput,
+  Response as DisconnectIntegrationResponse,
+} from "@in/server/methods/disconnectIntegration"
 
 import {
   handler as getAlphaTextHandler,
@@ -208,7 +226,8 @@ import {
 
 export const apiV1 = new Elysia({ name: "v1" })
   .group("v1", (app) => {
-    return app
+    return ((
+      app
       .use(setup)
       .use(makeUnauthApiRoute("/sendSmsCode", SendSmsCodeInput, SendSmsCodeResponse, sendSmsCodeHandler))
       .use(makeUnauthApiRoute("/verifySmsCode", VerifySmsCodeInput, VerifySmsCodeResponse, verifySmsCodeHandler))
@@ -267,6 +286,14 @@ export const apiV1 = new Elysia({ name: "v1" })
       )
       .use(makeApiRoute("/deleteMessage", DeleteMessageInput, DeleteMessageResponse, deleteMessageHandler))
       .use(makeApiRoute("/getIntegrations", GetIntegrationsInput, GetIntegrationsResponse, getIntegrationsHandler))
+      .use(
+        makeApiRoute(
+          "/disconnectIntegration",
+          DisconnectIntegrationInput,
+          DisconnectIntegrationResponse,
+          disconnectIntegrationHandler,
+        ),
+      )
       .use(makeApiRoute("/getAlphaText", GetAlphaTextInput, GetAlphaTextResponse, getAlphaTextHandler))
       .use(
         makeApiRoute(
@@ -292,8 +319,27 @@ export const apiV1 = new Elysia({ name: "v1" })
           saveNotionDatabaseIdHandler,
         ),
       )
+      .use(
+        makeApiRoute(
+          "/getLinearTeams",
+          GetLinearTeamsInput,
+          GetLinearTeamsResponse,
+          getLinearTeamsHandler,
+        ),
+      )
+      .use(
+        makeApiRoute(
+          "/saveLinearTeamId",
+          SaveLinearTeamIdInput,
+          SaveLinearTeamIdResponse,
+          saveLinearTeamIdHandler,
+        ),
+      )
       .use(makeApiRoute("/createNotionTask", CreateNotionTaskInput, CreateNotionTaskResponse, createNotionTaskHandler))
-      .use(makeApiRoute("/deleteAttachment", DeleteNotionTaskInput, DeleteNotionTaskResponse, deleteNotionTaskHandler))
+      .use(
+        makeApiRoute("/deleteAttachment", DeleteNotionTaskInput, DeleteNotionTaskResponse, deleteNotionTaskHandler),
+      )
+    ) as any)
       .all("/*", () => {
         // fallback
         return { ok: false, errorCode: 404, description: "Method not found" }
