@@ -3,8 +3,8 @@ import { Log } from "../../utils/log"
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import { createNotionPage } from "@in/server/modules/notion/agent"
 import { db } from "@in/server/db"
-import { externalTasks, messageAttachments, messages, users } from "@in/server/db/schema"
-import { count, and, eq } from "drizzle-orm"
+import { externalTasks, messageAttachments, messages } from "@in/server/db/schema"
+import { and, eq } from "drizzle-orm"
 import { TInputPeerInfo, TPeerInfo } from "../../api-types"
 import { getUpdateGroup } from "../../modules/updates"
 import { connectionManager } from "../../ws/connections"
@@ -16,6 +16,7 @@ import {
 } from "@in/protocol/core"
 import { RealtimeUpdates } from "../../realtime/message"
 import { Notifications } from "../../modules/notifications/notifications"
+import { getCachedUserName, UserNamesCache } from "@in/server/modules/cache/userNames"
 import { decrypt, encrypt, type EncryptedData } from "@in/server/modules/encryption/encryption"
 import { decryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { encodeMessageAttachmentUpdate } from "../../realtime/encoders/encodeMessageAttachment"
@@ -106,16 +107,12 @@ export const handler = async (
 
     // Create message attachment and get sender user info in parallel
     const attachmentStart = Date.now()
-    const [, senderUser] = await Promise.all([
+    const [, senderUserName] = await Promise.all([
       db.insert(messageAttachments).values({
         messageId: message.globalId,
         externalTaskId: BigInt(externalTaskResult.id),
       }),
-      db
-        .select()
-        .from(users)
-        .where(eq(users.id, context.currentUserId))
-        .then(([user]) => user),
+      getCachedUserName(context.currentUserId),
     ])
     Log.shared.info("🕐 Message attachment and user info completed", {
       durationSeconds: ((Date.now() - attachmentStart) / 1000).toFixed(3),
@@ -138,7 +135,12 @@ export const handler = async (
       }),
     )
 
-    if (result.taskTitle && senderUser) {
+    if (result.taskTitle) {
+      const senderDisplayName = senderUserName ? UserNamesCache.getDisplayName(senderUserName) : null
+      const senderTitleName = senderDisplayName ?? "Someone"
+      const senderEmail = senderUserName?.email ?? undefined
+      const senderPhone = senderUserName?.phone ?? undefined
+
       // Notify only the message sender
       const messageSenderId = message.fromId
 
@@ -158,10 +160,13 @@ export const handler = async (
             userId: messageSenderId,
             senderUserId: context.currentUserId,
             threadId: `chat_${chatId}`,
-            title: `${senderUser.firstName ?? "Someone"} will do`,
+            title: `${senderTitleName} will do`,
             subtitle: result.taskTitle ?? undefined,
             body: messageText || "A new task has been created from a message",
             isThread: updateGroup.type === "threadUsers",
+            senderDisplayName: senderDisplayName ?? undefined,
+            senderEmail,
+            senderPhone,
           }).catch((error) => {
             Log.shared.error("Failed to send task creation notification", { error })
           }),
