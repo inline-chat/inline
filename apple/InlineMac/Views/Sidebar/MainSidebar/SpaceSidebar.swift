@@ -269,6 +269,13 @@ struct SpaceSidebar: View {
         .disabled(true)
         .opacity(0.5)
       }
+
+      Divider()
+
+      Button("Integrations", systemImage: "app.connected.to.app.below.fill") {
+        nav.open(.spaceIntegrations(spaceId: spaceId))
+      }
+      .disabled(!membershipStatus.canManageMembers)
     } label: {
       Image(systemName: "plus")
         .font(.system(size: 15, weight: .medium))

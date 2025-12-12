@@ -85,6 +85,45 @@ public extension Attachment {
       attachmentId: attachment.id
     )
 
+    // Backward/repair path: if older updates used a different MessageAttachment.id, dedupe by the inner item id.
+    if let externalTaskId {
+      if let existing = try Attachment
+        .filter(Column("messageId") == messageClientGlobalId)
+        .filter(Column("externalTaskId") == externalTaskId)
+        .fetchOne(db)
+      {
+        if
+          let existingRowId = existing.id,
+          let newAttachmentId = attachment.attachmentId,
+          existing.attachmentId != newAttachmentId
+        {
+          try Attachment
+            .filter(Column("id") == existingRowId)
+            .updateAll(db, [Column("attachmentId").set(to: newAttachmentId)])
+        }
+        return existing
+      }
+    }
+
+    if let urlPreviewId {
+      if let existing = try Attachment
+        .filter(Column("messageId") == messageClientGlobalId)
+        .filter(Column("urlPreviewId") == urlPreviewId)
+        .fetchOne(db)
+      {
+        if
+          let existingRowId = existing.id,
+          let newAttachmentId = attachment.attachmentId,
+          existing.attachmentId != newAttachmentId
+        {
+          try Attachment
+            .filter(Column("id") == existingRowId)
+            .updateAll(db, [Column("attachmentId").set(to: newAttachmentId)])
+        }
+        return existing
+      }
+    }
+
     if let attachmentId = attachment.attachmentId {
       if let existing = try Attachment.filter(Column("attachmentId") == attachmentId).fetchOne(db) {
         return existing
