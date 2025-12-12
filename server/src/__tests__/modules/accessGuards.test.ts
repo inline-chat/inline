@@ -79,6 +79,29 @@ describe("AccessGuards", () => {
     await expect(AccessGuards.ensureChatAccess(chat, outsider.id)).rejects.toBe(RealtimeRpcError.SpaceIdInvalid)
   })
 
+  it("blocks guests from public threads", async () => {
+    const creator = requireUser(await testUtils.createUser("owner@example.com"), "creator")
+    const guest = requireUser(await testUtils.createUser("guest@example.com"), "guest")
+    const space = requireSpace(await testUtils.createSpace("Public Space"), "space")
+
+    await MembersModel.addMemberToSpace(space.id, creator.id, "owner")
+    await MembersModel.createMember(space.id, guest.id, "member", { canAccessPublicChats: false })
+
+    const [chatRecord] = await db
+      .insert(schema.chats)
+      .values({
+        type: "thread",
+        spaceId: space.id,
+        publicThread: true,
+        title: "Public Thread",
+      })
+      .returning()
+    const chat = requireChat(chatRecord, "public-thread")
+
+    await expect(AccessGuards.ensureChatAccess(chat, creator.id)).resolves.toBeUndefined()
+    await expect(AccessGuards.ensureChatAccess(chat, guest.id)).rejects.toBe(RealtimeRpcError.PeerIdInvalid)
+  })
+
   it("validates space membership", async () => {
     const user = requireUser(await testUtils.createUser("space-member@example.com"), "space member")
     const outsider = requireUser(await testUtils.createUser("space-outsider@example.com"), "outsider")
