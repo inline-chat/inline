@@ -12,7 +12,6 @@ import { MessageModel, type ProcessedMessage } from "@in/server/db/models/messag
 import { Log, LogLevel } from "@in/server/utils/log"
 import { WANVER_TRANSLATION_CONTEXT } from "@in/server/env"
 import { getCachedChatInfo, type CachedChatInfo } from "@in/server/modules/cache/chatInfo"
-import { getCachedSpaceInfo } from "@in/server/modules/cache/spaceCache"
 import { getCachedUserName, type UserName } from "@in/server/modules/cache/userNames"
 import { filterFalsy } from "@in/server/utils/filter"
 import { findTitleProperty, extractTaskTitle, getPropertyDescriptions } from "./schemaGenerator"
@@ -20,6 +19,18 @@ import { formatMessage } from "@in/server/modules/notifications/eval"
 import { systemPrompt14 } from "./prompts"
 
 const log = new Log("NotionAgent", LogLevel.INFO)
+
+function inlineUserDisplayName(user: UserName | undefined, fallbackUserId: number): string {
+  if (user) {
+    const fullName = [user.firstName, user.lastName].filter(Boolean).join(" ")
+    if (fullName) return fullName
+    if (user.username) return user.username
+    if (user.email) return user.email
+    if (user.phone) return user.phone
+  }
+
+  return `User ${fallbackUserId}`
+}
 
 async function createNotionPage(input: { spaceId: number; chatId: number; messageId: number; currentUserId: number }) {
   const startTime = Date.now()
@@ -41,22 +52,22 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
 
   // Run all data fetching operations in parallel - this is the biggest optimization
   const dataFetchStart = Date.now()
-  const [notionUsers, database, samplePages, targetMessage, messages, chatInfo, participantNames] = await Promise.all([
-    getNotionUsers(input.spaceId, client).then(formatNotionUsers),
-    getActiveDatabaseData(input.spaceId, databaseId, client),
-    getSampleDatabasePages(input.spaceId, databaseId, 3, client),
-    MessageModel.getMessage(input.messageId, input.chatId),
-    MessageModel.getMessagesAroundTarget(input.chatId, input.messageId, 20, 10),
-    getCachedChatInfo(input.chatId),
-    // Fetch participant names in parallel instead of sequentially
-    getCachedChatInfo(input.chatId).then(async (chatInfo) => {
-      if (!chatInfo?.participantUserIds) return []
-      const names = await Promise.all(chatInfo.participantUserIds.map((userId) => getCachedUserName(userId)))
-      return names.filter(filterFalsy)
-    }),
-  ])
-  console.log("🌴 messages", messages)
-  console.log("🌴 SMAPLE PAGES", samplePages)
+  const [notionUsers, database, samplePages, targetMessage, messages, chatInfo, participantNames, currentUserName] =
+    await Promise.all([
+      getNotionUsers(input.spaceId, client).then(formatNotionUsers),
+      getActiveDatabaseData(input.spaceId, databaseId, client),
+      getSampleDatabasePages(input.spaceId, databaseId, 3, client),
+      MessageModel.getMessage(input.messageId, input.chatId),
+      MessageModel.getMessagesAroundTarget(input.chatId, input.messageId, 20, 10),
+      getCachedChatInfo(input.chatId),
+      // Fetch participant names in parallel instead of sequentially
+      getCachedChatInfo(input.chatId).then(async (chatInfo) => {
+        if (!chatInfo?.participantUserIds) return []
+        const names = await Promise.all(chatInfo.participantUserIds.map((userId) => getCachedUserName(userId)))
+        return names.filter(filterFalsy)
+      }),
+      getCachedUserName(input.currentUserId),
+    ])
   log.info("🕐 Completed parallel data fetching", {
     durationSeconds: ((Date.now() - dataFetchStart) / 1000).toFixed(3),
   })
@@ -80,9 +91,9 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
     targetMessage,
     chatInfo,
     participantNames,
+    currentUserName,
     input.currentUserId,
   )
-  console.log("🌴 userPrompt", userPrompt)
   log.info("🕐 Generated user prompt", { durationSeconds: ((Date.now() - promptStart) / 1000).toFixed(3) })
 
   const openaiStart = Date.now()
@@ -273,6 +284,7 @@ function taskPrompt(
   targetMessage: ProcessedMessage,
   chatInfo: CachedChatInfo,
   participantNames: UserName[],
+  currentUserName: UserName | undefined,
   currentUserId: number,
 ): string {
   // Limit messages to reduce token usage and improve speed
@@ -288,10 +300,8 @@ function taskPrompt(
   const statusProperty = database.properties?.Status || database.properties?.status
   const statusOptions = statusProperty?.status?.options?.map((option: any) => option.name) || []
 
-  const actor = participantNames.find((p) => p.id === currentUserId)
-  const actorDisplayName = actor
-    ? [actor.firstName, actor.lastName].filter(Boolean).join(" ") || actor.username || actor.email || `User ${actor.id}`
-    : `User ${currentUserId}`
+  const actor = currentUserName ?? participantNames.find((p) => p.id === currentUserId)
+  const actorDisplayName = inlineUserDisplayName(actor, currentUserId)
 
   return `
 <metadata>
