@@ -53,6 +53,7 @@ export class IntegrationsModel {
     return {
       accessToken: parsedToken.data.access_token,
       databaseId: integration.notionDatabaseId,
+      linearTeamId: integration.linearTeamId,
     }
   }
 }
