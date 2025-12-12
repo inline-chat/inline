@@ -91,6 +91,10 @@ class ContentViewController: NSViewController {
         let membersVC = MemberManagementViewController(spaceId: spaceId, dependencies: dependencies)
         addRouteSubview(membersVC.view, membersVC)
 
+      case let .spaceIntegrations(spaceId):
+        let integrationsVC = SpaceIntegrationsViewController(spaceId: spaceId, dependencies: dependencies)
+        addRouteSubview(integrationsVC.view, integrationsVC)
+
       default:
         break
     }

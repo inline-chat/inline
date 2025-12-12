@@ -16,6 +16,7 @@ struct NavEntry: Hashable, Codable, Equatable {
     case newChat(spaceId: Int64)
     case inviteToSpace(spaceId: Int64)
     case members(spaceId: Int64)
+    case spaceIntegrations(spaceId: Int64)
 
     static func == (lhs: Route, rhs: Route) -> Bool {
       switch (lhs, rhs) {
@@ -34,6 +35,8 @@ struct NavEntry: Hashable, Codable, Equatable {
         case let (.inviteToSpace(lhsSpaceId), .inviteToSpace(rhsSpaceId)):
           lhsSpaceId == rhsSpaceId
         case let (.members(lhsSpaceId), .members(rhsSpaceId)):
+          lhsSpaceId == rhsSpaceId
+        case let (.spaceIntegrations(lhsSpaceId), .spaceIntegrations(rhsSpaceId)):
           lhsSpaceId == rhsSpaceId
         default:
           false

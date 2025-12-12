@@ -100,8 +100,7 @@ struct SpaceMembersView: View {
 
       Spacer()
 
-      manageMembersButton
-      plusButton
+      actionMenuButton
     }
     .padding(.top, -6)
     .padding(.bottom, 8)
@@ -191,24 +190,7 @@ struct SpaceMembersView: View {
   }
 
   @ViewBuilder
-  var manageMembersButton: some View {
-    Button {
-      nav.open(.members(spaceId: spaceId))
-    } label: {
-      Image(systemName: "person.2")
-        .font(.system(size: 15, weight: .medium))
-        .foregroundStyle(.tertiary)
-        .contentShape(.circle)
-        .frame(width: 24, height: 24, alignment: .center)
-    }
-    .buttonStyle(.plain)
-    .opacity(membershipStatus.canManageMembers ? 1 : 0.5)
-    .disabled(!membershipStatus.canManageMembers)
-    .padding(.trailing, 8)
-  }
-
-  @ViewBuilder
-  var plusButton: some View {
+  var actionMenuButton: some View {
     Menu {
       Button("New Chat", systemImage: "bubble.left") {
         nav.open(.newChat(spaceId: spaceId))
@@ -217,8 +199,20 @@ struct SpaceMembersView: View {
       Button("Invite to Space", systemImage: "person.badge.plus") {
         nav.open(.inviteToSpace(spaceId: spaceId))
       }
+
+      Divider()
+
+      Button("Members", systemImage: "person.2") {
+        nav.open(.members(spaceId: spaceId))
+      }
+      .disabled(!membershipStatus.canManageMembers)
+
+      Button("Integrations", systemImage: "app.connected.to.app.below.fill") {
+        nav.open(.spaceIntegrations(spaceId: spaceId))
+      }
+      .disabled(!membershipStatus.canManageMembers)
     } label: {
-      Image(systemName: "plus")
+      Image(systemName: "ellipsis.circle")
         .font(.system(size: 15, weight: .medium))
         .foregroundStyle(.tertiary)
         .contentShape(.circle)
