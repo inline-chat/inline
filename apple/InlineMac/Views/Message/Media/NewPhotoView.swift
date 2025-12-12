@@ -608,7 +608,12 @@ extension NewPhotoView {
     if let originalName = fullMessage.file?.fileName, !originalName.isEmpty {
       savePanel.nameFieldStringValue = originalName
     } else {
-      let ext = fullMessage.photoInfo?.bestPhotoSize()?.fileExtension ?? "png"
+      let ext: String = {
+        if let localExt = imageLocalUrl()?.pathExtension, !localExt.isEmpty {
+          return localExt
+        }
+        return "png"
+      }()
       savePanel.nameFieldStringValue = "inline-\(UUID().uuidString.prefix(8)).\(ext)"
     }
     savePanel.begin { response in
