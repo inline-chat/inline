@@ -29,6 +29,7 @@ class MainSplitViewController: NSSplitViewController {
   override func viewDidLoad() {
     super.viewDidLoad()
     configureHierarchy()
+    configureToasts()
   }
 
   func setup() {
@@ -75,6 +76,14 @@ class MainSplitViewController: NSSplitViewController {
 
   deinit {
     NotificationCenter.default.removeObserver(self)
+  }
+}
+
+// MARK: - Toasts
+
+extension MainSplitViewController {
+  private func configureToasts() {
+    dependencies.overlay.attachToast(to: view)
   }
 }
 
