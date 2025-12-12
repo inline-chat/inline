@@ -196,8 +196,12 @@ export interface NotionUser {
 
 export function formatNotionUsers(notionUsers: any): NotionUser[] {
   const users: NotionUser[] = []
+  const results = notionUsers?.results
+  if (!Array.isArray(results)) return users
 
-  for (const user of notionUsers.results) {
+  for (const user of results) {
+    if (user?.type === "bot") continue
+
     let email = undefined
     if (user.type === "person" && user.person?.email) {
       email = user.person.email
