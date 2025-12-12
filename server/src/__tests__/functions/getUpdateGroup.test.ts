@@ -3,7 +3,7 @@ import { getUpdateGroup, getUpdateGroupFromInputPeer } from "@in/server/modules/
 import { testUtils, setupTestLifecycle } from "../setup"
 import { db } from "../../db"
 import * as schema from "../../db/schema"
-import { eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import type { TPeerInfo } from "@in/server/api-types"
 import type { InputPeer } from "@in/protocol/core"
 
@@ -44,7 +44,7 @@ describe("getUpdateGroup & getUpdateGroupFromInputPeer", () => {
     expect((group as any).userIds).toEqual([user.id])
   })
 
-  test("returns all space members for public thread", async () => {
+  test("returns only public-access members for public thread", async () => {
     const { space, users } = await testUtils.createSpaceWithMembers("Public Thread Space", [
       "a@ex.com",
       "b@ex.com",
@@ -54,11 +54,17 @@ describe("getUpdateGroup & getUpdateGroupFromInputPeer", () => {
     if (!chat) throw new Error("Chat not created")
     // Patch chat to be public
     await db.update(schema.chats).set({ publicThread: true }).where(eq(schema.chats.id, chat!.id)).execute()
+    // Make one member a guest (no public access)
+    await db
+      .update(schema.members)
+      .set({ canAccessPublicChats: false })
+      .where(and(eq(schema.members.spaceId, space.id), eq(schema.members.userId, users[2]!.id)))
+      .execute()
     const peer: TPeerInfo = { threadId: chat!.id }
     const context = { currentUserId: users[0].id }
     const group = await getUpdateGroup(peer, context)
     expect(group.type).toBe("threadUsers")
-    expect((group as any).userIds.sort()).toEqual(users.map((u) => u.id).sort())
+    expect((group as any).userIds.sort()).toEqual([users[0].id, users[1].id].sort())
   })
 
   test("returns only participants for private thread", async () => {
@@ -98,10 +104,15 @@ describe("getUpdateGroup & getUpdateGroupFromInputPeer", () => {
     const chat = await testUtils.createChat(space.id, "Thread Chat", "thread")
     if (!chat) throw new Error("Chat not created")
     await db.update(schema.chats).set({ publicThread: true }).where(eq(schema.chats.id, chat!.id)).execute()
+    await db
+      .update(schema.members)
+      .set({ canAccessPublicChats: false })
+      .where(and(eq(schema.members.spaceId, space.id), eq(schema.members.userId, users[1]!.id)))
+      .execute()
     const inputPeer = makeInputPeerChat(chat!.id)
     const context = { currentUserId: users[0].id }
     const group = await getUpdateGroupFromInputPeer(inputPeer, context)
     expect(group.type).toBe("threadUsers")
-    expect((group as any).userIds.sort()).toEqual(users.map((u) => u.id).sort())
+    expect((group as any).userIds.sort()).toEqual([users[0].id])
   })
 })

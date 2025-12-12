@@ -11,6 +11,8 @@ export const AccessGuards = {
   ensureSpaceMember,
 }
 
+// TODO: this can all be optimized to use less queries and be smarter about caching with a simpler API.
+
 async function ensureChatAccess(chat: DbChat, userId: number) {
   if (chat.type === "private") {
     if (chat.minUserId !== userId && chat.maxUserId !== userId) {
@@ -24,6 +26,15 @@ async function ensureChatAccess(chat: DbChat, userId: number) {
   }
 
   await ensureSpaceMember(chat.spaceId, userId)
+
+  // Public threads are only accessible to members with public access enabled.
+  if (chat.publicThread) {
+    const member = await MembersModel.getMemberByUserId(chat.spaceId, userId)
+    if (!member || member.canAccessPublicChats === false) {
+      throw RealtimeRpcError.PeerIdInvalid
+    }
+    return
+  }
 
   if (!chat.publicThread) {
     const cachedParticipant = AccessGuardsCache.getChatParticipant(chat.id, userId)

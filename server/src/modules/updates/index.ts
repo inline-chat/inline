@@ -1,5 +1,5 @@
 import { db } from "@in/server/db"
-import { eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import { chatParticipants, dialogs, members } from "@in/server/db/schema"
 import { InlineError } from "@in/server/types/errors"
 import { ChatModel, getChatFromPeer } from "@in/server/db/models/chats"
@@ -38,8 +38,11 @@ export const getUpdateGroup = async (peerId: TPeerInfo, context: { currentUserId
       // Legacy
       //return { type: "space", spaceId: chat.spaceId }
 
-      // For now, fetch all users in the space
-      const users = await db.select({ userId: members.userId }).from(members).where(eq(members.spaceId, chat.spaceId))
+      // For public threads, only members with public access should receive updates
+      const users = await db
+        .select({ userId: members.userId })
+        .from(members)
+        .where(and(eq(members.spaceId, chat.spaceId), eq(members.canAccessPublicChats, true)))
       return { type: "threadUsers", spaceId: chat.spaceId, userIds: users.map((user) => user.userId) }
     } else {
       // get participant ids from chatParticipants
@@ -81,8 +84,11 @@ export const getUpdateGroupFromInputPeer = async (
       // Legacy
       //return { type: "space", spaceId: chat.spaceId }
 
-      // For now, fetch all users in the space
-      const users = await db.select({ userId: members.userId }).from(members).where(eq(members.spaceId, chat.spaceId))
+      // For public threads, only members with public access should receive updates
+      const users = await db
+        .select({ userId: members.userId })
+        .from(members)
+        .where(and(eq(members.spaceId, chat.spaceId), eq(members.canAccessPublicChats, true)))
       return { type: "threadUsers", spaceId: chat.spaceId, userIds: users.map((user) => user.userId) }
     } else {
       // get participant ids from chatParticipants
