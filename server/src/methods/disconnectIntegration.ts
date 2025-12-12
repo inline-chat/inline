@@ -49,7 +49,7 @@ export const handler = async (
           spaceId,
           status: revokeResult.status,
         })
-        throw new Error("Failed to revoke Linear access. Please try again.")
+        // Token revoke is best-effort. Even if it fails, proceed with disconnecting and delete the record.
       }
     } else {
       Log.shared.warn("Linear integration missing token encryption data during disconnect", { spaceId })
