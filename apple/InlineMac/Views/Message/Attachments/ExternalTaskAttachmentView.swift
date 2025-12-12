@@ -164,7 +164,11 @@ class ExternalTaskAttachmentView: NSView, AttachmentView {
       userAvatarView = avatarView
 
       // Update task creator label
-      taskCreatorLabel.stringValue = taskCreator.user.displayName + " will do"
+      if externalTask.application == "linear" {
+        taskCreatorLabel.stringValue = taskCreator.user.displayName + " created a Linear issue"
+      } else {
+        taskCreatorLabel.stringValue = taskCreator.user.displayName + " will do"
+      }
     } else {
       // No avatar, just update label
       taskCreatorLabel.stringValue = "Unassigned"
@@ -256,7 +260,11 @@ class ExternalTaskAttachmentView: NSView, AttachmentView {
   @objc private func showDeleteConfirmation() {
     let alert = NSAlert()
     alert.messageText = "Delete Task"
-    alert.informativeText = "This will delete the task from both Inline and Notion. This action cannot be undone."
+    if task?.application == "linear" {
+      alert.informativeText = "This will delete the task from both Inline and Linear. This action cannot be undone."
+    } else {
+      alert.informativeText = "This will delete the task from both Inline and Notion. This action cannot be undone."
+    }
     alert.alertStyle = .warning
     alert.addButton(withTitle: "Delete")
     alert.addButton(withTitle: "Cancel")

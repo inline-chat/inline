@@ -121,9 +121,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   private func handleCustomURL(_ url: URL) {
-    // Ensure we have the inline:// scheme
-    guard url.scheme == "inline" else {
-      log.warning("Received non-inline URL scheme: \(url.scheme ?? "nil")")
+    // Accept both inline:// and in:// schemes
+    guard let scheme = url.scheme, scheme == "inline" || scheme == "in" else {
+      log.warning("Received unsupported URL scheme: \(url.scheme ?? "nil")")
       return
     }
 
@@ -139,6 +139,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       switch url.host {
         case "user":
           handleUserURL(pathComponents: pathComponents)
+        case "integrations":
+          NotificationCenter.default.post(name: .integrationCallback, object: url)
         default:
           log.warning("Unhandled URL host: \(url.host ?? "nil")")
       }

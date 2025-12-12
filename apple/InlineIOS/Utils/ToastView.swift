@@ -8,8 +8,8 @@ struct ToastView: View {
   var body: some View {
     HStack(alignment: .top, spacing: 8) {
       if let systemImage = toast.systemImage {
-        if systemImage == "notion-logo" {
-          Image("notion-logo")
+        if systemImage == "notion-logo" || systemImage == "linear-icon" {
+          Image(systemImage)
             .resizable()
             .frame(width: 18, height: 18)
             .padding(.top, 2)

@@ -558,29 +558,20 @@ public class DataManager: ObservableObject {
     messageId: Int64,
     chatId: Int64
   ) async throws {
-    log.debug("deleteAttachment: \(externalTask.id)")
-    try await database.dbWriter.write { db in
-      try Attachment
-        .filter(Column("externalTaskId") == externalTask.id)
-        .filter(Column("messageId") == messageId)
-        .deleteAll(db)
-
-      try ExternalTask
-        .filter(Column("id") == externalTask.id)
-        .deleteAll(db)
+    guard let externalTaskId = externalTask.id, let taskId = externalTask.taskId else {
+      let message = "Missing required data for attachment deletion"
+      log.error(message)
+      throw NSError(domain: "InlineKit.DataManager", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
     }
 
-    Task { @MainActor in
-      if let message = try? await database.reader.read({ db in
-        try Message.filter(Column("messageId") == messageId && Column("chatId") == chatId).fetchOne(db)
-      }) {
-        MessagesPublisher.shared.messageUpdatedSync(message: message, peer: message.peerId, animated: true)
-      }
-    }
+    log.info(
+      "deleteAttachment requested (externalTaskId: \(externalTaskId), application: \(externalTask.application), messageId: \(messageId), chatId: \(chatId))"
+    )
 
-    let _ = try await ApiClient.shared.deleteAttachment(
-      externalTaskId: externalTask.id ?? 0,
-      pageId: externalTask.taskId ?? "",
+    // Rely on realtime updates to remove the attachment locally.
+    _ = try await ApiClient.shared.deleteAttachment(
+      externalTaskId: externalTaskId,
+      pageId: taskId,
       messageId: messageId,
       chatId: chatId
     )

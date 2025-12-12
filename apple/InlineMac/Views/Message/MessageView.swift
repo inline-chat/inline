@@ -1436,53 +1436,10 @@ class MessageViewAppKit: NSView {
   }
 
   @objc private func handleCreateLinearIssue() {
-    guard let text = message.text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return }
+    guard let window else { return }
 
     Task { @MainActor in
-      let spaceId: Int64? = if message.peerId.isThread {
-        try? Chat.getByPeerId(peerId: message.peerId)?.spaceId
-      } else {
-        nil
-      }
-
-      guard let spaceId else {
-        ToastCenter.shared.showError("Create Linear issues from a space thread")
-        return
-      }
-
-      do {
-        ToastCenter.shared.showLoading("Creating Linear issue…")
-
-        let integrations = try await ApiClient.shared.getIntegrations(
-          userId: Auth.shared.getCurrentUserId() ?? 0,
-          spaceId: spaceId
-        )
-
-        guard integrations.hasLinearConnected else {
-          ToastCenter.shared.showError("Linear is not connected for this space")
-          return
-        }
-
-        let result = try await ApiClient.shared.createLinearIssue(
-          text: text,
-          messageId: message.messageId,
-          peerId: message.peerId,
-          chatId: message.chatId,
-          fromId: Auth.shared.getCurrentUserId() ?? 0,
-          spaceId: spaceId
-        )
-
-        if let link = result.link, let url = URL(string: link) {
-          ToastCenter.shared.showSuccess("Linear issue created", actionTitle: "Open") {
-            NSWorkspace.shared.open(url)
-          }
-        } else {
-          ToastCenter.shared.showSuccess("Linear issue created")
-        }
-      } catch {
-        ToastCenter.shared.showError("Failed to create Linear issue")
-        Log.shared.error("Failed to create Linear issue", error: error)
-      }
+      await LinearIssueCoordinator.shared.handleCreateLinearIssue(message: message, window: window)
     }
   }
 
@@ -2072,26 +2029,55 @@ extension MessageViewAppKit: NSMenuDelegate {
       menu.addItem(addReactionItem)
     }
 
+    // Integrations section (separator above + below)
+    var integrationItems: [NSMenuItem] = []
+
     if regularMessage, NotionTaskService.shared.hasAccess {
       let willDoItem = NSMenuItem(title: "Will Do", action: #selector(handleWillDo), keyEquivalent: "")
       willDoItem.image = NSImage(systemSymbolName: "circle.badge.plus", accessibilityDescription: "Create Notion Task")
-      menu.addItem(willDoItem)
+      integrationItems.append(willDoItem)
     }
 
-    if regularMessage, message.peerId.isThread, hasText {
-      let createLinearIssueItem = NSMenuItem(
-        title: "Create Linear Issue",
-        action: #selector(handleCreateLinearIssue),
-        keyEquivalent: ""
-      )
-      createLinearIssueItem.image = NSImage(
-        systemSymbolName: "circle.badge.plus",
-        accessibilityDescription: "Create Linear Issue"
-      )
-      menu.addItem(createLinearIssueItem)
+    if regularMessage, hasText {
+      if message.peerId.isThread {
+        if let spaceId = (try? Chat.getByPeerId(peerId: message.peerId)?.spaceId) {
+          if LinearIntegrationService.shared.isConnected(spaceId: spaceId) == nil {
+            // Warm the cache for future menus. We'll only show the action once we know Linear is connected.
+            LinearIntegrationService.shared.refresh(spaceId: spaceId)
+          }
+
+          if LinearIntegrationService.shared.isConnected(spaceId: spaceId) == true {
+            let createLinearIssueItem = NSMenuItem(
+              title: "Create Linear Issue",
+              action: #selector(handleCreateLinearIssue),
+              keyEquivalent: ""
+            )
+            createLinearIssueItem.image = NSImage(
+              systemSymbolName: "circle.badge.plus",
+              accessibilityDescription: "Create Linear Issue"
+            )
+            integrationItems.append(createLinearIssueItem)
+          }
+        }
+      } else {
+        let createLinearIssueItem = NSMenuItem(
+          title: "Create Linear Issue",
+          action: #selector(handleCreateLinearIssue),
+          keyEquivalent: ""
+        )
+        createLinearIssueItem.image = NSImage(
+          systemSymbolName: "circle.badge.plus",
+          accessibilityDescription: "Create Linear Issue"
+        )
+        integrationItems.append(createLinearIssueItem)
+      }
     }
 
-    if menu.items.count > 0 {
+    if !integrationItems.isEmpty {
+      if !menu.items.isEmpty {
+        menu.addItem(NSMenuItem.separator())
+      }
+      integrationItems.forEach { menu.addItem($0) }
       menu.addItem(NSMenuItem.separator())
     }
 

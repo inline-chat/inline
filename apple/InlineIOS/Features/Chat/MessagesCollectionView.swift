@@ -581,9 +581,34 @@ private extension MessagesCollectionView {
     private func setupNotionTaskManager() {
       NotionTaskManager.shared.delegate = self
       Task {
-        await NotionTaskManager.shared.checkIntegrationAccess(peerId: peerId, spaceId: spaceId)
+        do {
+          let integrations = try await ApiClient.shared.getIntegrations(
+            userId: Auth.shared.getCurrentUserId() ?? 0,
+            spaceId: peerId.isThread ? spaceId : nil
+          )
+
+          await NotionTaskManager.shared.checkIntegrationAccess(
+            peerId: peerId,
+            spaceId: spaceId,
+            integrations: integrations
+          )
+
+          DispatchQueue.main.async { [weak self] in
+            self?.hasLinearConnected = integrations.hasLinearConnected
+            self?.linearTeamId = integrations.linearTeamId
+          }
+        } catch {
+          await NotionTaskManager.shared.checkIntegrationAccess(peerId: peerId, spaceId: spaceId, integrations: nil)
+          DispatchQueue.main.async { [weak self] in
+            self?.hasLinearConnected = false
+            self?.linearTeamId = nil
+          }
+        }
       }
     }
+
+    private var hasLinearConnected: Bool = false
+    private var linearTeamId: String?
 
     func setupDataSource(_ collectionView: UICollectionView) {
       currentCollectionView = collectionView
@@ -1258,6 +1283,7 @@ private extension MessagesCollectionView {
         }
 
         let willDoAction = createWillDoMenu(for: message)
+        let linearIssueAction = createLinearIssueMenu(for: message)
 
         let deleteAction = UIAction(
           title: "Delete",
@@ -1283,9 +1309,10 @@ private extension MessagesCollectionView {
           menuChildren.append(basicMenu)
         }
 
-        if let willDoAction {
-          let willDoMenu = UIMenu(title: "", options: .displayInline, children: [willDoAction])
-          menuChildren.append(willDoMenu)
+        let integrationActions = [willDoAction, linearIssueAction].compactMap { $0 }
+        if !integrationActions.isEmpty {
+          let integrationsMenu = UIMenu(title: "", options: .displayInline, children: integrationActions)
+          menuChildren.append(integrationsMenu)
         }
 
         let deleteMenu = UIMenu(title: "", options: .displayInline, children: [deleteAction])
@@ -1620,6 +1647,161 @@ private extension MessagesCollectionView {
         }
       }
     }
+
+    private func createLinearIssueMenu(for message: Message) -> UIAction? {
+      guard let text = message.text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        return nil
+      }
+
+      // Only show in spaces that have Linear connected (avoid showing action in spaces without Linear).
+      // For DMs, we allow the action and will prompt the user to select a connected space.
+      if message.peerId.isThread {
+        guard hasLinearConnected else { return nil }
+        guard let linearTeamId, !linearTeamId.isEmpty else { return nil }
+      }
+
+      return UIAction(
+        title: "Create Linear Issue",
+        image: UIImage(systemName: "circle.badge.plus")
+      ) { _ in
+        Task { [weak self] in
+          guard let self else { return }
+
+          if message.peerId.isThread {
+            guard self.hasLinearConnected else { return }
+            guard let linearTeamId = self.linearTeamId, !linearTeamId.isEmpty else {
+              ToastManager.shared.showToast(
+                "Select a default Linear team in Space Integrations first.",
+                type: .error,
+                systemImage: "exclamationmark.triangle"
+              )
+              return
+            }
+            await self.createLinearIssue(text: text, message: message, spaceId: nil)
+            return
+          }
+
+          do {
+            let integrations = try await ApiClient.shared.getIntegrations(
+              userId: Auth.shared.getCurrentUserId() ?? 0,
+              spaceId: nil
+            )
+
+            guard integrations.hasLinearConnected else {
+              ToastManager.shared.showToast(
+                "No Linear integration found. Connect Linear in one of your spaces.",
+                type: .error,
+                systemImage: "exclamationmark.triangle"
+              )
+              return
+            }
+
+            guard let linearSpaces = integrations.linearSpaces, !linearSpaces.isEmpty else {
+              ToastManager.shared.showToast(
+                "No accessible Linear integrations found",
+                type: .error,
+                systemImage: "exclamationmark.triangle"
+              )
+              return
+            }
+
+            self.showIntegrationSpaceSelectionSheet(
+              title: "Select Space",
+              message: "Choose which space to create the Linear issue in:",
+              spaces: linearSpaces.map { (id: $0.spaceId, name: $0.spaceName) },
+              completion: { selectedSpaceId in
+                Task { [weak self] in
+                  guard let self else { return }
+                  do {
+                    let perSpace = try await ApiClient.shared.getIntegrations(
+                      userId: Auth.shared.getCurrentUserId() ?? 0,
+                      spaceId: selectedSpaceId
+                    )
+
+                    guard perSpace.hasLinearConnected else {
+                      ToastManager.shared.showToast(
+                        "Linear isn’t connected for that space.",
+                        type: .error,
+                        systemImage: "exclamationmark.triangle"
+                      )
+                      return
+                    }
+
+                    guard let teamId = perSpace.linearTeamId, !teamId.isEmpty else {
+                      ToastManager.shared.showToast(
+                        "Select a default Linear team for that space first.",
+                        type: .error,
+                        systemImage: "exclamationmark.triangle"
+                      )
+                      return
+                    }
+
+                    await self.createLinearIssue(text: text, message: message, spaceId: selectedSpaceId)
+                  } catch {
+                    ToastManager.shared.showToast(
+                      "Failed to fetch integrations for that space",
+                      type: .error,
+                      systemImage: "exclamationmark.triangle"
+                    )
+                  }
+                }
+              }
+            )
+          } catch {
+            ToastManager.shared.showToast(
+              "Failed to fetch integrations",
+              type: .error,
+              systemImage: "exclamationmark.triangle"
+            )
+          }
+        }
+      }
+    }
+
+    private func createLinearIssue(text: String, message: Message, spaceId: Int64?) async {
+      ToastManager.shared.showToast(
+        "Creating Linear issue…",
+        type: .info,
+        systemImage: "linear-icon",
+        shouldStayVisible: true
+      )
+
+      do {
+        let result = try await ApiClient.shared.createLinearIssue(
+          text: text,
+          messageId: message.messageId,
+          peerId: message.peerId,
+          chatId: message.chatId,
+          fromId: Auth.shared.getCurrentUserId() ?? 0,
+          spaceId: spaceId
+        )
+
+        guard let link = result.link, let url = URL(string: link) else {
+          ToastManager.shared.showToast(
+            "Failed to create Linear issue",
+            type: .error,
+            systemImage: "exclamationmark.triangle"
+          )
+          return
+        }
+
+        ToastManager.shared.showToast(
+          "Linear issue created",
+          type: .success,
+          systemImage: "checkmark.circle",
+          action: {
+            UIApplication.shared.open(url)
+          },
+          actionTitle: "Open"
+        )
+      } catch {
+        ToastManager.shared.showToast(
+          "Failed to create Linear issue",
+          type: .error,
+          systemImage: "exclamationmark.triangle"
+        )
+      }
+    }
   }
 }
 
@@ -1657,6 +1839,20 @@ extension MessagesCollectionView.Coordinator: InlineKit.NotionTaskManagerDelegat
   }
 
   func showSpaceSelectionSheet(spaces: [InlineKit.NotionSpace], completion: @escaping @Sendable (Int64) -> Void) {
+    showIntegrationSpaceSelectionSheet(
+      title: "Select Space",
+      message: "Choose which space to create the Notion task in the selected database:",
+      spaces: spaces.map { (id: $0.spaceId, name: $0.spaceName) },
+      completion: completion
+    )
+  }
+
+  private func showIntegrationSpaceSelectionSheet(
+    title: String,
+    message: String,
+    spaces: [(id: Int64, name: String)],
+    completion: @escaping @Sendable (Int64) -> Void
+  ) {
     // Ensure UI operations happen on the main thread
     DispatchQueue.main.async { [weak self] in
       guard let self else { return }
@@ -1678,14 +1874,14 @@ extension MessagesCollectionView.Coordinator: InlineKit.NotionTaskManagerDelegat
       guard let viewController = findViewController(from: currentCollectionView) else { return }
 
       let alert = UIAlertController(
-        title: "Select Space",
-        message: "Choose which space to create the Notion task in the selected database:",
+        title: title,
+        message: message,
         preferredStyle: .actionSheet
       )
 
       for space in spaces {
-        let action = UIAlertAction(title: space.spaceName, style: .default) { _ in
-          completion(space.spaceId)
+        let action = UIAlertAction(title: space.name, style: .default) { _ in
+          completion(space.id)
         }
         alert.addAction(action)
       }

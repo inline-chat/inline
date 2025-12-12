@@ -28,7 +28,7 @@ struct IntegrationCard: View {
       HStack(alignment: .center, spacing: 12) {
         Image(image)
           .resizable()
-          .frame(width: 55, height: 55)
+          .frame(width: 36, height: 36)
           .clipShape(RoundedRectangle(cornerRadius: clipped ? 18 : 0))
 
         VStack(alignment: .leading, spacing: 2) {
@@ -48,6 +48,7 @@ struct IntegrationCard: View {
         guard let token = Auth.shared.getToken() else {
           return
         }
+        isConnecting = true
         if let spaceId {
           if let url =
             URL(string: "\(baseURL)/integrations/\(provider)/integrate?token=\(token)&spaceId=\(spaceId)")
@@ -60,6 +61,10 @@ struct IntegrationCard: View {
             Log.shared.debug("Opening URL: \(url)")
             openURL(url)
           }
+        }
+        Task { @MainActor in
+          try? await Task.sleep(nanoseconds: 400_000_000)
+          isConnecting = false
         }
       }) {
         HStack {
@@ -76,13 +81,33 @@ struct IntegrationCard: View {
         }
       }
       .disabled(isConnecting || isConnected || (permissionCheck?() == false))
+      .buttonStyle(.bordered)
+      .tint(.secondary)
 
       if isConnected, hasOptions, let navigateToOptions {
         Button("Options") {
           navigateToOptions()
         }
-          
+        .buttonStyle(.bordered)
+        .tint(.secondary)
         .disabled(permissionCheck?() == false)
+      }
+
+      if isConnected, let spaceId {
+        Button("Disconnect", role: .destructive) {
+          Task {
+            do {
+              _ = try await ApiClient.shared.disconnectIntegration(spaceId: spaceId, provider: provider)
+              await MainActor.run {
+                isConnected = false
+              }
+              completion()
+            } catch {
+              Log.shared.error("Failed to disconnect integration", error: error)
+            }
+          }
+        }
+        .buttonStyle(.bordered)
       }
     }
     .onOpenURL { url in
