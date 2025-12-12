@@ -1,0 +1,1 @@
+ALTER TABLE "integrations" ADD COLUMN "linear_team_id" text;
