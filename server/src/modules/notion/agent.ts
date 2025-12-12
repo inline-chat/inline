@@ -15,9 +15,7 @@ import { getCachedChatInfo, type CachedChatInfo } from "@in/server/modules/cache
 import { getCachedSpaceInfo } from "@in/server/modules/cache/spaceCache"
 import { getCachedUserName, type UserName } from "@in/server/modules/cache/userNames"
 import { filterFalsy } from "@in/server/utils/filter"
-import { zodResponseFormat } from "openai/helpers/zod.mjs"
 import {
-  generateNotionPropertiesSchema,
   findTitleProperty,
   extractTaskTitle,
   getPropertyDescriptions,
@@ -97,13 +95,6 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
     throw new Error("OpenAI client not initialized")
   }
 
-  // Generate and validate the schema before sending to OpenAI
-  const schema = generateNotionPropertiesSchema(database)
-  log.info("Generated Notion properties schema", {
-    databaseId: database.id,
-    totalProperties: Object.keys(database.properties || {}).length,
-  })
-
   // throw new Error("test")
   const completion = await openaiClient.chat.completions.create({
     model: "gpt-5.2",
@@ -120,8 +111,6 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
         content: userPrompt,
       },
     ],
-    // response_format: { type: "text" },
-    response_format: zodResponseFormat(schema, "notionProperties"),
   })
   log.info("🕐 OpenAI completion finished", { durationSeconds: ((Date.now() - openaiStart) / 1000).toFixed(3) })
 
@@ -142,12 +131,17 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
   log.info("Notion agent response", { response: parsedResponse })
 
   const parseStart = Date.now()
-  const validatedData = schema.parse(JSON.parse(parsedResponse))
-  log.info("🕐 Parsed and validated response", { durationSeconds: ((Date.now() - parseStart) / 1000).toFixed(3) })
+  let validatedData: any
+  try {
+    validatedData = JSON.parse(parsedResponse)
+  } catch (err) {
+    log.error("Failed to parse Notion agent JSON", { err, response: parsedResponse })
+    throw new Error("Notion agent returned invalid JSON")
+  }
+  log.info("🕐 Parsed response JSON", { durationSeconds: ((Date.now() - parseStart) / 1000).toFixed(3) })
 
-  // Extract properties and description from the validated data
-  const propertiesFromResponse = validatedData.properties || {}
-  const descriptionFromResponse = validatedData.description
+  const propertiesFromResponse = validatedData?.properties || {}
+  const descriptionFromResponse = validatedData?.description
 
   // Use hardcoded icon instead of AI-generated one
   const iconFromResponse = {
