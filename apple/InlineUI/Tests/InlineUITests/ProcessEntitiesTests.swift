@@ -85,6 +85,10 @@ struct ProcessEntitiesTests {
     return messageEntities
   }
 
+  private func rangeOfSubstring(_ substring: String, in text: String) -> NSRange {
+    (text as NSString).range(of: substring)
+  }
+
   // MARK: - toAttributedString Tests
 
   @Test("Simple mention")
@@ -652,8 +656,181 @@ struct ProcessEntitiesTests {
     // Find the bold entity
     let boldEntity = result.entities.entities.first { $0.type == .bold }
     #expect(boldEntity != nil)
-    #expect(boldEntity!.offset == 1) // After emoji (which takes UTF-16 position 0-1) and space at position 1
+    #expect(boldEntity!.offset == 3) // After emoji (UTF-16 length 2) and a space (1)
     #expect(boldEntity!.length == 9) // "bold text"
+  }
+
+  @Test("Mention inside bold markdown keeps correct offsets")
+  func testMentionInsideBoldMarkdownOffsets() {
+    let text = "**@john**"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let mentionRange = NSRange(location: 2, length: 5) // "@john"
+    attributedString.addAttributes([
+      .mentionUserId: Int64(123),
+      .foregroundColor: testConfiguration.linkColor,
+      .link: "inline://user/123",
+    ], range: mentionRange)
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+
+    #expect(result.text == "@john")
+
+    let mentionEntity = result.entities.entities.first { $0.type == .mention }
+    #expect(mentionEntity != nil)
+    #expect(mentionEntity!.offset == 0)
+    #expect(mentionEntity!.length == 5)
+
+    let boldEntity = result.entities.entities.first { $0.type == .bold }
+    #expect(boldEntity != nil)
+    #expect(boldEntity!.offset == 0)
+    #expect(boldEntity!.length == 5)
+  }
+
+  @Test("Multiple bold markdown segments keep correct offsets")
+  func testMultipleBoldMarkdownSegmentsOffsets() {
+    let text = "**one** **two**"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+
+    #expect(result.text == "one two")
+
+    let boldEntities = result.entities.entities
+      .filter { $0.type == .bold }
+      .sorted { $0.offset < $1.offset }
+    #expect(boldEntities.count == 2)
+    #expect(boldEntities[0].offset == 0)
+    #expect(boldEntities[0].length == 3)
+    #expect(boldEntities[1].offset == 4)
+    #expect(boldEntities[1].length == 3)
+  }
+
+  @Test("Multiple entities with markdown and emojis keep correct offsets")
+  func testMultipleEntitiesWithMarkdownAndEmojisOffsets() {
+    let text = "🙂 Hello **@john** and _@jane_ and `code` 👍"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let johnRange = rangeOfSubstring("@john", in: text)
+    #expect(johnRange.location != NSNotFound)
+    attributedString.addAttributes([
+      .mentionUserId: Int64(123),
+      .foregroundColor: testConfiguration.linkColor,
+      .link: "inline://user/123",
+    ], range: johnRange)
+
+    let janeRange = rangeOfSubstring("@jane", in: text)
+    #expect(janeRange.location != NSNotFound)
+    attributedString.addAttributes([
+      .mentionUserId: Int64(456),
+      .foregroundColor: testConfiguration.linkColor,
+      .link: "inline://user/456",
+    ], range: janeRange)
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+
+    #expect(result.text == "🙂 Hello @john and @jane and code 👍")
+
+    let resultJohnRange = rangeOfSubstring("@john", in: result.text)
+    let resultJaneRange = rangeOfSubstring("@jane", in: result.text)
+    let resultCodeRange = rangeOfSubstring("code", in: result.text)
+    #expect(resultJohnRange.location != NSNotFound)
+    #expect(resultJaneRange.location != NSNotFound)
+    #expect(resultCodeRange.location != NSNotFound)
+
+    let entities = result.entities.entities
+
+    let johnMention = entities.first { $0.type == .mention && $0.mention.userID == 123 }
+    #expect(johnMention != nil)
+    #expect(johnMention!.offset == Int64(resultJohnRange.location))
+    #expect(johnMention!.length == Int64(resultJohnRange.length))
+
+    let janeMention = entities.first { $0.type == .mention && $0.mention.userID == 456 }
+    #expect(janeMention != nil)
+    #expect(janeMention!.offset == Int64(resultJaneRange.location))
+    #expect(janeMention!.length == Int64(resultJaneRange.length))
+
+    let boldEntity = entities.first { $0.type == .bold }
+    #expect(boldEntity != nil)
+    #expect(boldEntity!.offset == Int64(resultJohnRange.location))
+    #expect(boldEntity!.length == Int64(resultJohnRange.length))
+
+    let italicEntity = entities.first { $0.type == .italic }
+    #expect(italicEntity != nil)
+    #expect(italicEntity!.offset == Int64(resultJaneRange.location))
+    #expect(italicEntity!.length == Int64(resultJaneRange.length))
+
+    let codeEntity = entities.first { $0.type == .code }
+    #expect(codeEntity != nil)
+    #expect(codeEntity!.offset == Int64(resultCodeRange.location))
+    #expect(codeEntity!.length == Int64(resultCodeRange.length))
+  }
+
+  @Test("Inline code inside bold markdown keeps correct offsets")
+  func testInlineCodeInsideBoldMarkdownOffsets() {
+    let text = "Start **one `code` two** end"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+    #expect(result.text == "Start one code two end")
+
+    let boldRange = rangeOfSubstring("one code two", in: result.text)
+    let codeRange = rangeOfSubstring("code", in: result.text)
+    #expect(boldRange.location != NSNotFound)
+    #expect(codeRange.location != NSNotFound)
+
+    let boldEntity = result.entities.entities.first { $0.type == .bold }
+    #expect(boldEntity != nil)
+    #expect(boldEntity!.offset == Int64(boldRange.location))
+    #expect(boldEntity!.length == Int64(boldRange.length))
+
+    let codeEntity = result.entities.entities.first { $0.type == .code }
+    #expect(codeEntity != nil)
+    #expect(codeEntity!.offset == Int64(codeRange.location))
+    #expect(codeEntity!.length == Int64(codeRange.length))
+  }
+
+  @Test("Pre code block markdown keeps correct offsets for entities after it")
+  func testPreCodeBlockOffsetsForFollowingEntities() {
+    let text = "🙂 ```\nlet x = 1\n``` @john"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let mentionRange = rangeOfSubstring("@john", in: text)
+    #expect(mentionRange.location != NSNotFound)
+    attributedString.addAttributes([
+      .mentionUserId: Int64(123),
+      .foregroundColor: testConfiguration.linkColor,
+      .link: "inline://user/123",
+    ], range: mentionRange)
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+    #expect(result.text == "🙂 \nlet x = 1\n @john")
+
+    let resultMentionRange = rangeOfSubstring("@john", in: result.text)
+    #expect(resultMentionRange.location != NSNotFound)
+
+    let preEntity = result.entities.entities.first { $0.type == .pre }
+    #expect(preEntity != nil)
+
+    let mentionEntity = result.entities.entities.first { $0.type == .mention }
+    #expect(mentionEntity != nil)
+    #expect(mentionEntity!.offset == Int64(resultMentionRange.location))
+    #expect(mentionEntity!.length == Int64(resultMentionRange.length))
   }
 
   @Test("Code, bold, italic, and mention entities convert to attributed string correctly")
@@ -749,7 +926,7 @@ struct ProcessEntitiesTests {
     // Find the italic entity
     let italicEntity = result.entities.entities.first { $0.type == .italic }
     #expect(italicEntity != nil)
-    #expect(italicEntity!.offset == 7) // Position after markdown is stripped
+    #expect(italicEntity!.offset == 8) // Position after markdown is stripped
     #expect(italicEntity!.length == 6) // "italic"
   }
 
