@@ -12,6 +12,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   // Main Window
   private var mainWindowController: MainWindowController?
 
+  @MainActor private let dockBadgeService = DockBadgeService()
+
   // Common Dependencies
   @MainActor private var dependencies = AppDependencies()
 
@@ -44,6 +46,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     setupMainWindow()
     setupMainMenu()
     setupNotificationsSoundSetting()
+    Task { @MainActor in
+      self.dockBadgeService.start()
+    }
     // Register Vim-style shortcuts (Ctrl-K / Ctrl-J) for chat navigation
     Task { @MainActor in
       self.globalHotkeys = GlobalHotkeys(dependencies: self.dependencies)

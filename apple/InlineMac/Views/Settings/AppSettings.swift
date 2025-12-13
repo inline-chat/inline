@@ -33,11 +33,18 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  @Published var showDockBadgeUnreadDMs: Bool {
+    didSet {
+      UserDefaults.standard.set(showDockBadgeUnreadDMs, forKey: "showDockBadgeUnreadDMs")
+    }
+  }
+
   private init() {
     sendsWithCmdEnter = UserDefaults.standard.bool(forKey: "sendsWithCmdEnter")
     automaticSpellCorrection = UserDefaults.standard.object(forKey: "automaticSpellCorrection") as? Bool ?? true
     checkSpellingWhileTyping = UserDefaults.standard.object(forKey: "checkSpellingWhileTyping") as? Bool ?? true
     disableNotificationSound = UserDefaults.standard.bool(forKey: "disableNotificationSound")
+    showDockBadgeUnreadDMs = UserDefaults.standard.object(forKey: "showDockBadgeUnreadDMs") as? Bool ?? true
   }
 }
 
