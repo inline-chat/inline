@@ -434,6 +434,12 @@ extension InlineProtocol.UpdateDeleteReaction {
 
 extension InlineProtocol.UpdateEditMessage {
   func apply(_ db: Database) throws {
+    // Delete stale translations for this message since the text has changed
+    try Translation
+      .filter(Column("messageId") == message.id)
+      .filter(Column("chatId") == message.chatID)
+      .deleteAll(db)
+
     let savedMessage = try Message.save(db, protocolMessage: message, publishChanges: true)
 
     db.afterNextTransaction { _ in
