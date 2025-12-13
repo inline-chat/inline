@@ -143,11 +143,12 @@ public class ProcessEntities {
   ) -> (text: String, entities: MessageEntities) {
     var text = attributedString.string
     var entities: [MessageEntity] = []
+    let fullRange = NSRange(location: 0, length: attributedString.length)
 
     // Extract mention entities first (before text modification)
     attributedString.enumerateAttribute(
       .mentionUserId,
-      in: NSRange(location: 0, length: text.count),
+      in: fullRange,
       options: []
     ) { value, range, _ in
       if let userId = value as? Int64 {
@@ -165,7 +166,7 @@ public class ProcessEntities {
     // Extract inline code entities from custom attribute
     attributedString.enumerateAttribute(
       .inlineCode,
-      in: NSRange(location: 0, length: text.count),
+      in: fullRange,
       options: []
     ) { value, range, _ in
       if value != nil {
@@ -180,7 +181,7 @@ public class ProcessEntities {
     // Extract pre code entities from custom attribute
     attributedString.enumerateAttribute(
       .preCode,
-      in: NSRange(location: 0, length: text.count),
+      in: fullRange,
       options: []
     ) { value, range, _ in
       if value != nil {
@@ -197,7 +198,7 @@ public class ProcessEntities {
     // Extract italic entities from font attributes (only if no custom italic attribute exists)
     attributedString.enumerateAttribute(
       .font,
-      in: NSRange(location: 0, length: text.count),
+      in: fullRange,
       options: []
     ) { value, range, _ in
       if let font = value as? PlatformFont {
@@ -225,7 +226,7 @@ public class ProcessEntities {
     // Also check for custom italic attribute (fallback)
     attributedString.enumerateAttribute(
       .italic,
-      in: NSRange(location: 0, length: text.count),
+      in: fullRange,
       options: []
     ) { value, range, _ in
       if value != nil {
@@ -240,7 +241,7 @@ public class ProcessEntities {
     // Extract bold entities from font attributes (only if no existing bold entity)
     attributedString.enumerateAttribute(
       .font,
-      in: NSRange(location: 0, length: text.count),
+      in: fullRange,
       options: []
     ) { value, range, _ in
       if let font = value as? PlatformFont {
@@ -396,6 +397,31 @@ public class ProcessEntities {
     return false
   }
 
+  private struct OffsetRemoval {
+    let position: Int
+    let length: Int
+  }
+
+  private static func totalRemovedCharacters(before offset: Int, removals: [OffsetRemoval]) -> Int {
+    var total = 0
+    for removal in removals {
+      if offset > removal.position {
+        total += removal.length
+      }
+    }
+    return total
+  }
+
+  private static func applyOffsetRemovals(_ entities: inout [MessageEntity], removals: [OffsetRemoval]) {
+    guard !removals.isEmpty else { return }
+
+    for i in 0 ..< entities.count {
+      let entityOffset = Int(entities[i].offset)
+      let adjustment = totalRemovedCharacters(before: entityOffset, removals: removals)
+      entities[i].offset = Int64(max(0, entityOffset - adjustment))
+    }
+  }
+
   private static func createBoldFont(from font: PlatformFont) -> PlatformFont {
     #if os(macOS)
     // NSFontManager.convert may return nil depending on the source font/traits. Provide safe fallbacks.
@@ -471,7 +497,7 @@ public class ProcessEntities {
       let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsText.length))
 
       // Process matches in reverse order to avoid offset issues when removing ** markers
-      var offsetAdjustments: [Int: Int] = [:] // position -> characters removed
+      var removals: [OffsetRemoval] = []
 
       for match in matches.reversed() {
         // Get the full match range (including **)
@@ -500,33 +526,24 @@ public class ProcessEntities {
             // Replace the full match with just the content
             text.replaceSubrange(swiftFullRange, with: contentText)
 
-            // Track that 4 characters were removed at this position (2 ** at start + 2 ** at end)
-            offsetAdjustments[fullRange.location] = 4
+            let openMarkerLength = 2
+            let closeMarkerLength = 2
+            let closeMarkerPosition = fullRange.location + fullRange.length - closeMarkerLength
+            removals.append(OffsetRemoval(position: fullRange.location, length: openMarkerLength))
+            removals.append(OffsetRemoval(position: closeMarkerPosition, length: closeMarkerLength))
 
-            // Now create bold entity with the correct position (after ** removal)
+            // Store the entity position in pre-removal coordinates; map after applying removals.
             var boldEntity = MessageEntity()
             boldEntity.type = .bold
-            boldEntity.offset = Int64(fullRange.location) // Position where content now starts (after ** removed)
+            boldEntity.offset = Int64(contentRange.location)
             boldEntity.length = Int64(contentRange.length)
             boldEntities.append(boldEntity)
           }
         }
       }
 
-      // Update offsets of all existing entities that come after removed ** markers
-      for i in 0 ..< allEntities.count {
-        let entityOffset = Int(allEntities[i].offset)
-        var adjustment = 0
-
-        // Calculate total adjustment for this entity's position
-        for (removalPosition, charsRemoved) in offsetAdjustments {
-          if entityOffset > removalPosition {
-            adjustment += charsRemoved
-          }
-        }
-
-        allEntities[i].offset = Int64(entityOffset - adjustment)
-      }
+      applyOffsetRemovals(&allEntities, removals: removals)
+      applyOffsetRemovals(&boldEntities, removals: removals)
 
       // Add bold entities to the list
       allEntities.append(contentsOf: boldEntities)
@@ -551,7 +568,7 @@ public class ProcessEntities {
       let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsText.length))
 
       // Process matches in reverse order to avoid offset issues when removing ` markers
-      var offsetAdjustments: [Int: Int] = [:] // position -> characters removed
+      var removals: [OffsetRemoval] = []
 
       for match in matches.reversed() {
         // Get the full match range (including `)
@@ -580,33 +597,24 @@ public class ProcessEntities {
             // Replace the full match with just the content
             text.replaceSubrange(swiftFullRange, with: contentText)
 
-            // Track that 2 characters were removed at this position (1 ` at start + 1 ` at end)
-            offsetAdjustments[fullRange.location] = 2
+            let openMarkerLength = 1
+            let closeMarkerLength = 1
+            let closeMarkerPosition = fullRange.location + fullRange.length - closeMarkerLength
+            removals.append(OffsetRemoval(position: fullRange.location, length: openMarkerLength))
+            removals.append(OffsetRemoval(position: closeMarkerPosition, length: closeMarkerLength))
 
-            // Now create inline code entity with the correct position (after ` removal)
+            // Store the entity position in pre-removal coordinates; map after applying removals.
             var inlineCodeEntity = MessageEntity()
             inlineCodeEntity.type = .code
-            inlineCodeEntity.offset = Int64(fullRange.location) // Position where content now starts (after ` removed)
+            inlineCodeEntity.offset = Int64(contentRange.location)
             inlineCodeEntity.length = Int64(contentRange.length)
             inlineCodeEntities.append(inlineCodeEntity)
           }
         }
       }
 
-      // Update offsets of all existing entities that come after removed ` markers
-      for i in 0 ..< allEntities.count {
-        let entityOffset = Int(allEntities[i].offset)
-        var adjustment = 0
-
-        // Calculate total adjustment for this entity's position
-        for (removalPosition, charsRemoved) in offsetAdjustments {
-          if entityOffset > removalPosition {
-            adjustment += charsRemoved
-          }
-        }
-
-        allEntities[i].offset = Int64(entityOffset - adjustment)
-      }
+      applyOffsetRemovals(&allEntities, removals: removals)
+      applyOffsetRemovals(&inlineCodeEntities, removals: removals)
 
       // Add inline code entities to the list
       allEntities.append(contentsOf: inlineCodeEntities)
@@ -631,7 +639,7 @@ public class ProcessEntities {
       let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsText.length))
 
       // Process matches in reverse order to avoid offset issues when removing ``` markers
-      var offsetAdjustments: [Int: Int] = [:] // position -> characters removed
+      var removals: [OffsetRemoval] = []
 
       for match in matches.reversed() {
         // Get the full match range (including ``` and language)
@@ -664,33 +672,29 @@ public class ProcessEntities {
           // Replace the full match with just the content
           text.replaceSubrange(swiftFullRange, with: contentText)
 
-          // Calculate characters removed (original full match length - content length)
-          let charsRemoved = fullRange.length - contentText.count
-          offsetAdjustments[fullRange.location] = charsRemoved
+          let prefixRemovedLength = contentRange.location - fullRange.location
+          let fullRangeEnd = fullRange.location + fullRange.length
+          let contentRangeEnd = contentRange.location + contentRange.length
+          let suffixRemovedLength = fullRangeEnd - contentRangeEnd
 
-          // Now create pre entity with the correct position (after ``` removal)
+          if prefixRemovedLength > 0 {
+            removals.append(OffsetRemoval(position: fullRange.location, length: prefixRemovedLength))
+          }
+          if suffixRemovedLength > 0 {
+            removals.append(OffsetRemoval(position: contentRangeEnd, length: suffixRemovedLength))
+          }
+
+          // Store the entity position in pre-removal coordinates; map after applying removals.
           var preEntity = MessageEntity()
           preEntity.type = .pre
-          preEntity.offset = Int64(fullRange.location) // Position where content now starts
-          preEntity.length = Int64(contentText.count)
+          preEntity.offset = Int64(contentRange.location)
+          preEntity.length = Int64(contentRange.length)
           preEntities.append(preEntity)
         }
       }
 
-      // Update offsets of all existing entities that come after removed ``` markers
-      for i in 0 ..< allEntities.count {
-        let entityOffset = Int(allEntities[i].offset)
-        var adjustment = 0
-
-        // Calculate total adjustment for this entity's position
-        for (removalPosition, charsRemoved) in offsetAdjustments {
-          if entityOffset > removalPosition {
-            adjustment += charsRemoved
-          }
-        }
-
-        allEntities[i].offset = Int64(entityOffset - adjustment)
-      }
+      applyOffsetRemovals(&allEntities, removals: removals)
+      applyOffsetRemovals(&preEntities, removals: removals)
 
       // Add pre entities to the list
       allEntities.append(contentsOf: preEntities)
@@ -717,7 +721,7 @@ public class ProcessEntities {
       let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsText.length))
 
       // Process matches in reverse order to avoid offset issues when removing _ markers
-      var offsetAdjustments: [Int: Int] = [:] // position -> characters removed
+      var removals: [OffsetRemoval] = []
 
       for match in matches.reversed() {
         // Get the full match range (including surrounding whitespace/boundaries and _)
@@ -759,34 +763,23 @@ public class ProcessEntities {
             // Replace the full match with the replacement text
             text.replaceSubrange(swiftFullRange, with: replacementText)
 
-            // Track that 2 characters were removed at this position (1 _ at start + 1 _ at end)
-            offsetAdjustments[fullRange.location] = 2
+            let openMarkerPosition = contentRange.location - 1
+            let closeMarkerPosition = contentRange.location + contentRange.length
+            removals.append(OffsetRemoval(position: openMarkerPosition, length: 1))
+            removals.append(OffsetRemoval(position: closeMarkerPosition, length: 1))
 
-            // Now create italic entity with the correct position (after _ removal, accounting for leading whitespace)
+            // Store the entity position in pre-removal coordinates; map after applying removals.
             var italicEntity = MessageEntity()
             italicEntity.type = .italic
-            italicEntity
-              .offset = Int64(fullRange.location + leadingLength) // Position where content now starts (after _ removed)
+            italicEntity.offset = Int64(contentRange.location)
             italicEntity.length = Int64(contentRange.length)
             italicEntities.append(italicEntity)
           }
         }
       }
 
-      // Update offsets of all existing entities that come after removed _ markers
-      for i in 0 ..< allEntities.count {
-        let entityOffset = Int(allEntities[i].offset)
-        var adjustment = 0
-
-        // Calculate total adjustment for this entity's position
-        for (removalPosition, charsRemoved) in offsetAdjustments {
-          if entityOffset > removalPosition {
-            adjustment += charsRemoved
-          }
-        }
-
-        allEntities[i].offset = Int64(entityOffset - adjustment)
-      }
+      applyOffsetRemovals(&allEntities, removals: removals)
+      applyOffsetRemovals(&italicEntities, removals: removals)
 
       // Add italic entities to the list
       allEntities.append(contentsOf: italicEntities)
