@@ -31,6 +31,18 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
         // First, get the chat to check if it's a public thread
         let chat = try Chat.fetchOne(db, id: chatId)
 
+        // DMs: mention candidates should only include the peer (not chat_participants).
+        if let chat, chat.type == .privateChat, let peerUserId = chat.peerUserId {
+          log.debug("🔍 DM chat, fetching peer user")
+          let peer = try User
+            .filter(Column("id") == peerUserId)
+            .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
+            .asRequest(of: UserInfo.self)
+            .fetchOne(db)
+
+          return peer.map { [$0] } ?? []
+        }
+
         if let chat, chat.isPublic == true {
           log.debug("🔍 Public thread, fetching space members")
           let spaceMembers = try Member
