@@ -7,10 +7,11 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
   private enum Constants {
     static let cornerRadius: CGFloat = 10
     static let contentSpacing: CGFloat = 6
-    static let verticalPadding: CGFloat = 8
-    static let horizontalPadding: CGFloat = 8
-    static let avatarSize: CGFloat = 20
-    static let lineSpacing: CGFloat = 4
+    static let verticalPadding: CGFloat = 10
+    static let horizontalPadding: CGFloat = 10
+    static let avatarSize: CGFloat = 18
+    static let checkboxSize: CGFloat = 16
+    static let lineSpacing: CGFloat = 6
   }
 
   private var outgoing: Bool = false
@@ -30,23 +31,24 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
   private lazy var usernameLabel: UILabel = {
     let label = UILabel()
     label.translatesAutoresizingMaskIntoConstraints = false
-    label.font = .systemFont(ofSize: 15, weight: .medium)
+    label.font = .systemFont(ofSize: 14, weight: .medium)
     label.numberOfLines = 1
     return label
   }()
 
-  private lazy var checkboxImageView: UIImageView = {
-    let imageView = UIImageView()
-    imageView.translatesAutoresizingMaskIntoConstraints = false
-    imageView.image = UIImage(systemName: "square")
-    imageView.contentMode = .scaleAspectFit
-    return imageView
+  private lazy var checkboxView: UIView = {
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.layer.cornerRadius = 3
+    view.layer.borderWidth = 1.5
+    view.backgroundColor = .clear
+    return view
   }()
 
   private lazy var taskTitleLabel: UILabel = {
     let label = UILabel()
     label.translatesAutoresizingMaskIntoConstraints = false
-    label.font = .systemFont(ofSize: 15)
+    label.font = .systemFont(ofSize: 14)
     label.numberOfLines = 0
     return label
   }()
@@ -87,14 +89,8 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
     let userName = userInfo.user.firstName ?? "User"
     if externalTask?.application == "linear" {
       usernameLabel.text = "\(userName) created a Linear issue"
-      if let linearImage = UIImage(named: "linear-icon")?.withRenderingMode(.alwaysTemplate) {
-        checkboxImageView.image = linearImage
-      } else {
-        checkboxImageView.image = UIImage(systemName: "app.connected.to.app.below.fill")
-      }
     } else {
       usernameLabel.text = "\(userName) will do"
-      checkboxImageView.image = UIImage(systemName: "square")
     }
 
     taskTitleLabel.text = title ?? "Task"
@@ -293,7 +289,7 @@ private extension MessageAttachmentEmbed {
   func setupViews() {
     addSubview(avatarView)
     addSubview(usernameLabel)
-    addSubview(checkboxImageView)
+    addSubview(checkboxView)
     addSubview(taskTitleLabel)
 
     NSLayoutConstraint.activate([
@@ -320,21 +316,21 @@ private extension MessageAttachmentEmbed {
       ),
 
       // Second line - Checkbox and task title
-      checkboxImageView.leadingAnchor.constraint(
+      checkboxView.leadingAnchor.constraint(
         equalTo: usernameLabel.leadingAnchor
       ),
-      checkboxImageView.topAnchor.constraint(
+      checkboxView.topAnchor.constraint(
         equalTo: usernameLabel.bottomAnchor,
         constant: Constants.lineSpacing
       ),
-      checkboxImageView.widthAnchor.constraint(equalToConstant: Constants.avatarSize),
-      checkboxImageView.heightAnchor.constraint(equalToConstant: Constants.avatarSize),
+      checkboxView.widthAnchor.constraint(equalToConstant: Constants.checkboxSize),
+      checkboxView.heightAnchor.constraint(equalToConstant: Constants.checkboxSize),
 
       taskTitleLabel.leadingAnchor.constraint(
-        equalTo: checkboxImageView.trailingAnchor,
+        equalTo: checkboxView.trailingAnchor,
         constant: Constants.contentSpacing
       ),
-      taskTitleLabel.topAnchor.constraint(equalTo: checkboxImageView.topAnchor),
+      taskTitleLabel.centerYAnchor.constraint(equalTo: checkboxView.centerYAnchor),
       taskTitleLabel.trailingAnchor.constraint(
         lessThanOrEqualTo: trailingAnchor,
         constant: -Constants.horizontalPadding
@@ -354,13 +350,12 @@ private extension MessageAttachmentEmbed {
 
   func updateColors() {
     let textColor: UIColor = outgoing ? .white : .label
-    let secondaryTextColor: UIColor = outgoing ? .white.withAlphaComponent(0.9) : .secondaryLabel
     let bgAlpha: CGFloat = outgoing ? 0.13 : 0.08
     backgroundColor = outgoing ? .white.withAlphaComponent(bgAlpha) : .systemGray.withAlphaComponent(bgAlpha)
 
     usernameLabel.textColor = textColor
     taskTitleLabel.textColor = textColor
-    checkboxImageView.tintColor = textColor
+    checkboxView.layer.borderColor = textColor.cgColor
     avatarView.tintColor = textColor
   }
 }
