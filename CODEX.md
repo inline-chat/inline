@@ -14,7 +14,8 @@
 - Prefer `rg` for search; keep edits ASCII; strip debug prints; use logging utilities (`Log` in Swift, `server/src/utils/log.ts`).
 - Regenerate protobufs after proto changes with `bun run generate:proto` (or per-language commands in `scripts/`); rebuild Swift `InlineProtocol` target if needed.
 - Default test timeout 25s; run focused tests from relevant package roots; avoid heavy/unapproved tooling (e.g., do not run `xcodebuild` full apps).
-- NEVER revert, discard, reset unrelated changes to the work you are doing or files you are touching. User may be working on other files simultanously. NEVER clean files you have not edited, created or moved. When asked to commit, just commit your changes.
+- NEVER revert, discard, reset unrelated changes to the work you are doing or files you are touching. User may be working on other files simultaneously. NEVER clean files you have not edited, created or moved. When asked to commit, just commit your changes.
+- For larger tasks, write a comprehensive plan first; if there are multiple design choices or any room for ambiguity, ask clarifying questions; when implementing a large plan (more than a few tasks) save the plan in a markdown file in .agent-docs/ and update it after each task before starting next one.
 
 ## Common Commands
 
