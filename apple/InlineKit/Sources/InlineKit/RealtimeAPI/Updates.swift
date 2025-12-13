@@ -81,6 +81,9 @@ public actor UpdatesEngine: Sendable {
         case let .markAsUnread(markAsUnread):
           try markAsUnread.apply(db)
 
+        case let .updateReadMaxID(updateReadMaxID):
+          try updateReadMaxID.apply(db)
+
         default:
           break
       }
@@ -717,6 +720,23 @@ extension InlineProtocol.UpdateMarkAsUnread {
       Log.shared.debug("Updated dialog unread mark to \(unreadMark)")
     } else {
       Log.shared.warning("Could not find dialog for peer \(peerID.toPeer()) to update unread mark")
+    }
+  }
+}
+
+extension InlineProtocol.UpdateReadMaxId {
+  func apply(_ db: Database) throws {
+    Log.shared.debug(
+      "update read max id for peer \(peerID.toPeer()) readMaxId: \(readMaxID) unreadCount: \(unreadCount)"
+    )
+
+    if var dialog = try Dialog.get(peerId: peerID.toPeer()).fetchOne(db) {
+      dialog.readInboxMaxId = readMaxID
+      dialog.unreadCount = Int(unreadCount)
+      dialog.unreadMark = false
+      try dialog.update(db)
+    } else {
+      Log.shared.warning("Could not find dialog for peer \(peerID.toPeer()) to update read state")
     }
   }
 }
