@@ -10,7 +10,7 @@ import {
 } from "./notion"
 import { MessageModel, type ProcessedMessage } from "@in/server/db/models/messages"
 import { Log, LogLevel } from "@in/server/utils/log"
-import { WANVER_TRANSLATION_CONTEXT } from "@in/server/env"
+import { HARDCODED_TRANSLATION_CONTEXT } from "@in/server/env"
 import { getCachedChatInfo, type CachedChatInfo } from "@in/server/modules/cache/chatInfo"
 import { getCachedUserName, type UserName } from "@in/server/modules/cache/userNames"
 import { filterFalsy } from "@in/server/utils/filter"
@@ -319,7 +319,7 @@ ${formatMessage(targetMessage)}
 </target_message>
 
 <active-team-context>
-${WANVER_TRANSLATION_CONTEXT ?? ""}
+${HARDCODED_TRANSLATION_CONTEXT ?? ""}
 </active-team-context>
 
 <conversation_context>

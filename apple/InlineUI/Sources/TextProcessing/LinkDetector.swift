@@ -42,12 +42,14 @@ public final class LinkDetector: Sendable {
     "com", "net", "org", "edu", "gov", "mil", "int",
 
     // Popular generic + brand-new gTLDs
-    "app", "blog", "biz", "cloud", "club", "dev", "digital", "live", "news", "online", "page", "site", "shop", "store", "tech", "top", "xyz", "chat",
+    "app", "blog", "biz", "cloud", "club", "dev", "digital", "live", "news", "online", "page", "site", "shop", "store",
+    "tech", "top", "xyz", "chat",
 
     // Frequently used two-letter ccTLDs (selection)
     "ac", "ad", "ae", "af", "ag", "ai", "al", "am", "ao", "ar", "as", "at", "au", "aw", "az",
     "ba", "bb", "bd", "be", "bf", "bg", "bh", "bi", "bj", "bm", "bn", "bo", "br", "bs", "bt", "bw", "by", "bz",
-    "ca", "cat", "cc", "cd", "cf", "cg", "ch", "ci", "ck", "cl", "cm", "cn", "co", "cr", "cu", "cv", "cw", "cx", "cy", "cz",
+    "ca", "cat", "cc", "cd", "cf", "cg", "ch", "ci", "ck", "cl", "cm", "cn", "co", "cr", "cu", "cv", "cw", "cx", "cy",
+    "cz",
     "de", "dj", "dk", "dm", "do", "dz",
     "ec", "ee", "eg", "er", "es", "et", "eu",
     "fi", "fj", "fk", "fm", "fo", "fr",
@@ -57,13 +59,17 @@ public final class LinkDetector: Sendable {
     "je", "jm", "jo", "jp",
     "ke", "kg", "kh", "ki", "km", "kn", "kp", "kr", "kw", "ky", "kz",
     "la", "lb", "lc", "li", "lk", "lr", "ls", "lt", "lu", "lv", "ly",
-    "ma", "mc", "md", "me", "mg", "mh", "mk", "ml", "mm", "mn", "mo", "mp", "mq", "mr", "ms", "mt", "mu", "mv", "mw", "mx", "my", "mz",
+    "ma", "mc", "md", "me", "mg", "mh", "mk", "ml", "mm", "mn", "mo", "mp", "mq", "mr", "ms", "mt", "mu", "mv", "mw",
+    "mx",
+    "my", "mz",
     "na", "nc", "ne", "nf", "ng", "ni", "nl", "no", "np", "nr", "nu", "nz",
     "om",
     "pa", "pe", "pf", "pg", "ph", "pk", "pl", "pm", "pn", "pr", "ps", "pt", "pw", "py",
     "qa",
     "re", "ro", "rs", "ru", "rw",
-    "sa", "sb", "sc", "sd", "se", "sg", "sh", "si", "sk", "sl", "sm", "sn", "so", "sr", "ss", "st", "su", "sv", "sx", "sy", "sz",
+    "sa", "sb", "sc", "sd", "se", "sg", "sh", "si", "sk", "sl", "sm", "sn", "so", "sr", "ss", "st", "su", "sv", "sx",
+    "sy",
+    "sz",
     "tc", "td", "tf", "tg", "th", "tj", "tk", "tl", "tm", "tn", "to", "tr", "tt", "tv", "tw", "tz",
     "ua", "ug", "uk", "us", "uy", "uz",
     "va", "vc", "ve", "vg", "vi", "vn", "vu",
@@ -80,11 +86,12 @@ public final class LinkDetector: Sendable {
   /// Regex pattern for detecting bare domains with whitelisted TLDs (without protocol)
   /// This pattern matches domains like "shopline.shop" or "inline.chat" or "x.ai"
   private static let bareDomainRegex: NSRegularExpression = {
-    // Sort TLDs by length in descending order so that longer ones like "team" match before shorter ones like "ai" or "co"
+    // Sort TLDs by length in descending order so that longer ones like "team" match before shorter ones like "ai" or
+    // "co"
     let tlds = whitelistedTLDs.sorted { $0.count > $1.count }.joined(separator: "|")
-    // Support multiple sub-domain components (e.g. bot.wanver.shop)
+    // Support multiple sub-domain components (e.g. bot.x.shop)
     // Capture optional path and query segments that immediately follow the domain
-    // Example matches: "inline.chat/path", "google.com/path?query=1", "bot.wanver.shop" (no path)
+    // Example matches: "inline.chat/path", "google.com/path?query=1", "bot.x.shop" (no path)
     // Require a word boundary (\b) immediately after the TLD so we don't match partial overlaps like
     // "test.srt" where "sr" would incorrectly satisfy the "sr" TLD. The boundary still allows
     // valid URL continuations such as whitespace or path/query characters (e.g. "/", "?", "#").
@@ -194,7 +201,8 @@ public final class LinkDetector: Sendable {
       // Determine if this URL ends with a whitelisted TLD
       var isWhitelisted = false
       if let host = url.host?.lowercased(),
-         let tld = host.components(separatedBy: ".").last {
+         let tld = host.components(separatedBy: ".").last
+      {
         isWhitelisted = Self.whitelistedTLDs.contains(tld)
       }
 
@@ -284,32 +292,33 @@ public final class LinkDetector: Sendable {
   /// Trims trailing punctuation from URLs while preserving balanced parentheses
   private func trimTrailingPunctuation(from urlString: String) -> String {
     var result = urlString
-    
+
     // Count opening and closing parentheses to determine balance
-    let openParens = result.filter { $0 == "(" }.count
-    let closeParens = result.filter { $0 == ")" }.count
-    
+    let openParens = result.count(where: { $0 == "(" })
+    let closeParens = result.count(where: { $0 == ")" })
+
     // Basic punctuation that should always be trimmed
     let basicPunctuation = CharacterSet(charactersIn: ",.!?:;'\"")
-    
+
     // Trim basic punctuation
     while let lastScalar = result.unicodeScalars.last,
-          basicPunctuation.contains(lastScalar) {
+          basicPunctuation.contains(lastScalar)
+    {
       result.removeLast()
     }
-    
+
     // Only trim unmatched closing parentheses, brackets, or braces
     let closingChars = [")", "]", "}"]
     let openingChars = ["(", "[", "{"]
-    
+
     while !result.isEmpty {
       let lastChar = String(result.last!)
-      
+
       if let index = closingChars.firstIndex(of: lastChar) {
         let openingChar = openingChars[index]
-        let openCount = result.filter { String($0) == openingChar }.count
-        let closeCount = result.filter { String($0) == lastChar }.count
-        
+        let openCount = result.count(where: { String($0) == openingChar })
+        let closeCount = result.count(where: { String($0) == lastChar })
+
         // Only trim if there are more closing than opening
         if closeCount > openCount {
           result.removeLast()
@@ -320,7 +329,7 @@ public final class LinkDetector: Sendable {
         break
       }
     }
-    
+
     return result
   }
 

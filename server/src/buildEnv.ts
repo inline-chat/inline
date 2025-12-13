@@ -51,7 +51,7 @@ declare global {
       NOTION_CLIENT_SECRET?: string
       NOTION_CLIENT_ID_DEV?: string
       NOTION_CLIENT_SECRET_DEV?: string
-      WANVER_TRANSLATION_CONTEXT?: string
+      HARDCODED_TRANSLATION_CONTEXT?: string
       // Allow for additional dynamic environment variables
       [key: string]: string | undefined
     }

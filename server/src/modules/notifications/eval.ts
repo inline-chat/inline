@@ -2,7 +2,7 @@ import { MessageEntity_Type, type MessageEntities } from "@in/protocol/core"
 import { MessageModel, type ProcessedMessage } from "@in/server/db/models/messages"
 import { UserSettingsNotificationsMode, type UserSettingsGeneral } from "@in/server/db/models/userSettings/types"
 import type { DbMessage } from "@in/server/db/schema"
-import { isProd, WANVER_TRANSLATION_CONTEXT } from "@in/server/env"
+import { isProd, HARDCODED_TRANSLATION_CONTEXT } from "@in/server/env"
 import { openaiClient } from "@in/server/libs/openAI"
 import { getCachedChatInfo } from "@in/server/modules/cache/chatInfo"
 import { getCachedSpaceInfo } from "@in/server/modules/cache/spaceCache"
@@ -205,7 +205,7 @@ const getContext = async (input: Input): Promise<string> => {
   ${chatInfo?.title ? `Chat: ${chatInfo?.title}` : ""}
   Chat Type: ${chatInfo?.type === "thread" ? "group chat" : dmParticipants}
   ${spaceInfo ? `Workspace: ${spaceInfo?.name}` : ""}
-  ${spaceInfo ? `Description: ${spaceInfo?.name?.includes("Wanver") ? WANVER_TRANSLATION_CONTEXT : ""}` : ""}
+  ${spaceInfo ? `Description: ${spaceInfo?.id == 54 ? HARDCODED_TRANSLATION_CONTEXT : ""}` : ""}
   </chat_info>
 
   <participants>

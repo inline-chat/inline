@@ -4,7 +4,7 @@ import invariant from "tiny-invariant"
 import { z } from "zod"
 import { openaiClient } from "@in/server/libs/openAI"
 import { getCachedUserName } from "@in/server/modules/cache/userNames"
-import { WANVER_TRANSLATION_CONTEXT } from "@in/server/env"
+import { HARDCODED_TRANSLATION_CONTEXT } from "@in/server/env"
 import { Log } from "@in/server/utils/log"
 import type { TranslationCallInput } from "./types"
 import { relativeTimeFromNow } from "@in/server/modules/notifications/eval"
@@ -83,7 +83,7 @@ export async function translateTexts(
         ${input.chat.title ? `Title: ${input.chat.title}` : ""}
         Type: ${input.chat.type}
         Date: ${new Date().toLocaleDateString()}
-        ${WANVER_TRANSLATION_CONTEXT}
+        ${HARDCODED_TRANSLATION_CONTEXT}
         </chat_context>   
   
         `

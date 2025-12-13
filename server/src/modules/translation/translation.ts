@@ -4,7 +4,7 @@ import { Log } from "@in/server/utils/log"
 import { translateTexts } from "./textTranslation"
 import { convertEntityOffsets } from "./entityConversion"
 import type { TranslationCallInput } from "./types"
-import { isProd, WANVER_TRANSLATION_CONTEXT } from "@in/server/env"
+import { isProd, HARDCODED_TRANSLATION_CONTEXT } from "@in/server/env"
 
 const log = new Log("modules/translation")
 
@@ -12,8 +12,8 @@ export const TranslationModule = {
   translateMessages,
 }
 
-if (!WANVER_TRANSLATION_CONTEXT && isProd) {
-  log.warn("WANVER_TRANSLATION_CONTEXT is not available")
+if (!HARDCODED_TRANSLATION_CONTEXT && isProd) {
+  log.warn("HARDCODED_TRANSLATION_CONTEXT is not available")
 }
 
 async function translateMessages(input: TranslationCallInput): Promise<InputTranslation[]> {

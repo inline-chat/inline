@@ -28,13 +28,13 @@ struct LinkDetectorTests {
     #expect(matches.isEmpty, "Misspellings should not be treated as a link")
   }
 
-  @Test("Detects bare sub-domain links (bot.wanver.shop)")
+  @Test("Detects bare sub-domain links (bot.x.shop)")
   func detectsSubdomainBareDomain() async throws {
-    let text = "The service is hosted at bot.wanver.shop and is always online."
+    let text = "The service is hosted at bot.x.shop and is always online."
     let matches = detector.detectLinks(in: text)
 
     #expect(matches.count == 1, "Should detect exactly one link in the sentence")
-    #expect(matches.first?.url.absoluteString == "https://bot.wanver.shop")
+    #expect(matches.first?.url.absoluteString == "https://bot.x.shop")
   }
 
   @Test("Detects full query string in long URLs")
@@ -215,7 +215,7 @@ struct LinkDetectorTests {
     let url = "https://en.wikipedia.org/wiki/X_(XYZ)"
     let text = "Check out this article: \(url)"
     let matches = detector.detectLinks(in: text)
-    
+
     #expect(matches.count == 1, "Should detect the Wikipedia URL with parentheses")
     #expect(matches.first?.url.absoluteString == url, "Should detect the complete URL including parentheses")
   }
