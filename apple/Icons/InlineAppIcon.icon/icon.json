@@ -1,68 +1,61 @@
 {
   "fill" : {
     "linear-gradient" : [
-      "srgb:0.38431,0.76471,1.00000,1.00000",
-      "srgb:0.00000,0.50196,1.00000,1.00000"
+      "display-p3:0.97146,0.97146,0.97146,1.00000",
+      "display-p3:0.74477,0.78577,0.80277,1.00000"
     ]
   },
   "groups" : [
     {
-      "blend-mode" : "normal",
-      "blur-material" : 0.5,
       "layers" : [
         {
-          "image-name" : "Frame 220 3.png",
-          "name" : "Frame 220 3"
-        },
-        {
-          "hidden" : true,
-          "image-name" : "Frame 218.png",
-          "name" : "Frame 218"
+          "fill-specializations" : [
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "display-p3:0.98484,1.00000,0.98677,1.00000"
+              }
+            },
+            {
+              "appearance" : "tinted",
+              "value" : {
+                "solid" : "display-p3:0.96863,0.96863,0.96863,1.00000"
+              }
+            }
+          ],
+          "image-name" : "icon-square.png",
+          "name" : "icon-square",
+          "position-specializations" : [
+            {
+              "idiom" : "square",
+              "value" : {
+                "scale" : 0.57,
+                "translation-in-points" : [
+                  0,
+                  0
+                ]
+              }
+            }
+          ]
         }
       ],
-      "name" : "Group",
-      "position" : {
-        "scale" : 0.97,
-        "translation-in-points" : [
-          0,
-          0
-        ]
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 1
       },
-      "shadow-specializations" : [
-        {
-          "value" : {
-            "kind" : "neutral",
-            "opacity" : 0.9
-          }
-        },
-        {
-          "appearance" : "dark",
-          "value" : {
-            "kind" : "neutral",
-            "opacity" : 0.7
-          }
-        },
-        {
-          "appearance" : "tinted",
-          "value" : {
-            "kind" : "neutral",
-            "opacity" : 1
-          }
-        }
-      ],
-      "specular" : true,
+      "specular" : false,
       "translucency-specializations" : [
         {
           "value" : {
             "enabled" : true,
-            "value" : 0.62
+            "value" : 0.5
           }
         },
         {
           "appearance" : "tinted",
           "value" : {
             "enabled" : true,
-            "value" : 0.74
+            "value" : 0.6
           }
         }
       ]
