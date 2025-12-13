@@ -6,6 +6,10 @@
 - Web client in `web/` uses React Router v7, Tailwind + StyleX, Vite.
 - Use `bun` for JS/TS tooling (not npm/yarn); keep IDs as `Int64` (Swift `Id`, proto `ID`), timestamps in seconds unless host API needs ms.
 
+## Critical Rules
+
+- Never revert a file; never discard a change yourself; never undo work on any file by destructive shell commands or clearing files unless explicitly given permission to do so. Otherwise keep a copy or comment out, do not do irreversible deletions especially to files you have not made those changes to.
+
 ## Working Rules
 
 - Do requested work only; mirror existing patterns; add comments only when clarifying non-obvious logic; never touch `.env` or delete others’ work.
