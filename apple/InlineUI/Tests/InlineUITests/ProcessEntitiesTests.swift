@@ -469,10 +469,13 @@ struct ProcessEntitiesTests {
 
     #if os(macOS)
     let safeSize = max(testConfiguration.font.pointSize, 12.0)
-    let monospaceFont = NSFont.monospacedSystemFont(ofSize: safeSize, weight: .regular)
+    let monospaceFont = (NSFont.monospacedSystemFont(ofSize: safeSize, weight: .regular) as NSFont?) ??
+      NSFont.userFixedPitchFont(ofSize: safeSize) ??
+      testConfiguration.font
     #else
     let safeSize = max(testConfiguration.font.pointSize, 12.0)
-    let monospaceFont = UIFont.monospacedSystemFont(ofSize: safeSize, weight: .regular)
+    let monospaceFont = (UIFont.monospacedSystemFont(ofSize: safeSize, weight: .regular) as UIFont?) ??
+      UIFont.systemFont(ofSize: safeSize)
     #endif
 
     attributedString.addAttributes([
