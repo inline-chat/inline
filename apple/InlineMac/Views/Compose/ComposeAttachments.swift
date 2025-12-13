@@ -21,7 +21,6 @@ final class ComposeAttachments: NSView {
   // TODO(@mo): Investigate AppKit animation suppression during text-system drag ops.
   private var pendingInsertionIds: Set<String> = []
   private var lastMediaIds: Set<String> = []
-  private var pendingScrollToId: String?
 
   private var horizontalContentInset: CGFloat = 0 {
     didSet {
@@ -115,6 +114,9 @@ final class ComposeAttachments: NSView {
       self.mediaTopConstraint.constant = padding
       self.mediaBottomConstraint.constant = -padding
       self.mediaScrollView.isHidden = mediaHeight == 0
+      if mediaHeight == 0 {
+        self.resetMediaScrollPosition()
+      }
     }
 
     if animated {
@@ -381,35 +383,18 @@ final class ComposeAttachments: NSView {
     let inserted = newIds.subtracting(lastMediaIds)
     if !inserted.isEmpty {
       pendingInsertionIds.formUnion(inserted)
-      let insertedOrdered = orderedMediaIds.filter { inserted.contains($0) }
-      pendingScrollToId = insertedOrdered.last
-    } else {
-      pendingScrollToId = nil
     }
     lastMediaIds = newIds
 
     var snapshot = NSDiffableDataSourceSnapshot<MediaSection, String>()
     snapshot.appendSections([.media])
     snapshot.appendItems(orderedMediaIds, toSection: .media)
-    mediaDataSource.apply(snapshot, animatingDifferences: animating) { [weak self] in
-      self?.scrollToPendingInsertionIfNeeded()
-    }
+    mediaDataSource.apply(snapshot, animatingDifferences: animating)
   }
 
   private func clampedWidth(for aspectRatio: CGFloat) -> CGFloat {
     let calculated = Theme.composeAttachmentImageHeight * aspectRatio
     return min(max(calculated, minAttachmentWidth), maxAttachmentWidth)
-  }
-
-  private func scrollToPendingInsertionIfNeeded() {
-    guard let id = pendingScrollToId,
-          let index = orderedMediaIds.firstIndex(of: id)
-    else { return }
-    pendingScrollToId = nil
-
-    mediaCollectionView.layoutSubtreeIfNeeded()
-    let indexPath = IndexPath(item: index, section: 0)
-    mediaCollectionView.scrollToItems(at: [indexPath], scrollPosition: .right)
   }
 
   private func updateHorizontalInsets() {
@@ -435,6 +420,12 @@ final class ComposeAttachments: NSView {
       return videoView
     }
     return nil
+  }
+
+  private func resetMediaScrollPosition() {
+    let clipView = mediaScrollView.contentView
+    clipView.setBoundsOrigin(.zero)
+    mediaScrollView.reflectScrolledClipView(clipView)
   }
 }
 
