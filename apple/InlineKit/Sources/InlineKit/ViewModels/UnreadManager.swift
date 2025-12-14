@@ -30,6 +30,10 @@ public final class UnreadManager: Sendable {
     Task {
       try? await apiClient.readMessages(peerId: peerId, maxId: maxId)
     }
+
+#if os(iOS)
+    NotificationCleanup.removeNotifications(threadId: "chat_\(chatId)", upToMessageId: maxId)
+#endif
   }
 
   // Useful in context menu to mark all messages as read
@@ -59,5 +63,9 @@ public final class UnreadManager: Sendable {
         log.error("Failed to update remote server", error: error)
       }
     }
+
+#if os(iOS)
+    NotificationCleanup.removeNotifications(threadId: "chat_\(chatId)", upToMessageId: nil)
+#endif
   }
 }
