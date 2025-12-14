@@ -9,13 +9,16 @@
 ## Critical Rules
 
 - Never revert a file; never discard a change yourself; never undo work on any file by destructive shell commands or clearing files unless explicitly given permission to do so. Otherwise keep a copy or comment out, do not do irreversible deletions especially to files you have not made those changes to.
+- Never discard/restore/reset all files (or “start over”) without asking for explicit permission first (e.g., avoid `git restore .`, `git checkout .`, `git reset --hard`).
 
 ## Working Rules
 
 - Do requested work only; mirror existing patterns; add comments only when clarifying non-obvious logic; never touch `.env` or delete others’ work.
 - Avoid destructive git commands; keep commits atomic and scoped; do not amend existing commits; quote paths with special chars; check status before committing.
+- If you need to undo your work in a file, first check whether that file has any other uncommitted changes in git; if it does, ask for explicit permission before undoing anything in that file.
 - Commit style: platform-prefixed, lowercase, scoped messages (e.g., `apple: fix sync`); add a brief description or bullets when extra context is needed.
 - Prefer `rg` for search; keep edits ASCII; strip debug prints; use logging utilities (`Log` in Swift, `server/src/utils/log.ts`).
+- Avoid `Any`/`any`, force unwraps (`!`), `try!`, forced/unsafe casts (e.g. `as!`), and other unsafe patterns that can crash or trigger runtime fatal errors; use safe alternatives whenever possible unless there is no other way.
 - Regenerate protobufs after proto changes with `bun run generate:proto` (or per-language commands in `scripts/`); rebuild Swift `InlineProtocol` target if needed.
 - Default test timeout 25s; run focused tests from relevant package roots; avoid heavy/unapproved tooling (e.g., do not run `xcodebuild` full apps).
 - NEVER revert, discard, reset unrelated changes to the work you are doing or files you are touching. User may be working on other files simultaneously. NEVER clean files you have not edited, created or moved. When asked to commit, just commit your changes.
