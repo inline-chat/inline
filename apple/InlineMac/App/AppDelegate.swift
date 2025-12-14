@@ -74,6 +74,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
   }
 
+  func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    MainActor.assumeIsolated {
+      dockBadgeService.prepareForTermination()
+    }
+    return .terminateNow
+  }
+
   func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
     true
   }

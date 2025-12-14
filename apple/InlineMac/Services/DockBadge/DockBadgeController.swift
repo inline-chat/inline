@@ -61,4 +61,3 @@ final class DockBadgeController {
     NSApplication.shared.dockTile.badgeLabel = label
   }
 }
-
