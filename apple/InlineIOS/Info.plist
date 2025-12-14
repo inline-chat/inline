@@ -55,6 +55,10 @@
 	<array>
 		<string>INSendMessageIntent</string>
 	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<key>UIAppFonts</key>
 	<array/>
 	<key>UIFileSharingEnabled</key>
