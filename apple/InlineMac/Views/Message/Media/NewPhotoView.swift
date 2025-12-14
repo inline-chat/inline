@@ -42,7 +42,6 @@ final class NewPhotoView: NSView {
     isScrolling = scrollState.isScrolling
     let text = fullMessage.message.text
     let hasText = text != nil && text?.isEmpty == false
-    let hasReactions = !fullMessage.reactions.isEmpty
 
     if fullMessage.message.isSticker == true {
       backgroundView.backgroundColor = .clear
@@ -53,11 +52,6 @@ final class NewPhotoView: NSView {
       topRightRadius = Theme.messageBubbleCornerRadius - 1
       bottomLeftRadius = 2.0
       bottomRightRadius = 2.0
-    } else if hasReactions {
-      topLeftRadius = Theme.messageBubbleCornerRadius - 1
-      topRightRadius = Theme.messageBubbleCornerRadius - 1
-      bottomLeftRadius = 0.0
-      bottomRightRadius = 0.0
     } else {
       topLeftRadius = Theme.messageBubbleCornerRadius - 1
       topRightRadius = Theme.messageBubbleCornerRadius - 1
@@ -135,21 +129,6 @@ final class NewPhotoView: NSView {
   public func update(with fullMessage: FullMessage) {
     let prev = self.fullMessage
     self.fullMessage = fullMessage
-
-    // Corner style can change (caption/reactions) even when the photo does not.
-    let hasText = (fullMessage.message.text?.isEmpty == false)
-    let hasReactions = !fullMessage.reactions.isEmpty
-    if hasText {
-      bottomLeftRadius = 2.0
-      bottomRightRadius = 2.0
-    } else if hasReactions {
-      bottomLeftRadius = 0.0
-      bottomRightRadius = 0.0
-    } else {
-      bottomLeftRadius = Theme.messageBubbleCornerRadius - 1
-      bottomRightRadius = Theme.messageBubbleCornerRadius - 1
-    }
-    updateMasks()
 
     // Only reload if file id or image source has changed
     if
