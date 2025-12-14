@@ -47,6 +47,13 @@ final class DockBadgeService {
     refreshUnreadDMBadging(applyImmediately: true)
   }
 
+  func prepareForTermination() {
+    cancellables.removeAll()
+    unreadDMCountCancellable?.cancel()
+    unreadDMCountCancellable = nil
+    dockBadgeController.setUnreadDMCount(0, debounceIncreases: false)
+  }
+
   // MARK: - Unread DMs
 
   private func refreshUnreadDMBadging(applyImmediately: Bool) {
@@ -74,4 +81,3 @@ final class DockBadgeService {
       }
   }
 }
-
