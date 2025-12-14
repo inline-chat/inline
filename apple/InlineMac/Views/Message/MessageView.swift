@@ -8,6 +8,8 @@ import InlineKit
 import InlineUI
 import Logger
 import Nuke
+import NukeUI
+import SwiftUI
 import TextProcessing
 import Throttler
 import Translation
@@ -143,9 +145,6 @@ class MessageViewAppKit: NSView {
   private var isTimeOverlay: Bool {
     // If we have a document and the message is empty, we don't want to show the time overlay
     if props.layout.hasDocument, !props.layout.hasText {
-      false
-    } else if (props.layout.hasPhoto || props.layout.hasVideo), !props.layout.hasText, props.layout.hasReactions {
-      // If we have reactions under media (no caption), time pill should live below the content (not overlay).
       false
     } else if emojiMessage {
       true
@@ -356,7 +355,8 @@ class MessageViewAppKit: NSView {
     }
   }()
 
-  private var reactionsView: MessageReactionsView?
+  private var reactionsViewModel: ReactionsViewModel?
+  private var reactionsView: NSView?
 
   // MARK: - Link Detection
 
@@ -454,7 +454,7 @@ class MessageViewAppKit: NSView {
     }
 
     if hasReactions {
-      setupReactions(props: props)
+      setupReactions()
     }
 
     if hasAttachments {
@@ -513,13 +513,22 @@ class MessageViewAppKit: NSView {
 
   // MARK: - Reactions UI
 
-  private func setupReactions(animated: Bool = false, props: MessageViewProps) {
+  private func setupReactions() {
+    // View model
+    reactionsViewModel = ReactionsViewModel(
+      reactions: fullMessage.groupedReactions,
+      offsets: props.layout.reactionItems,
+      fullMessage: fullMessage,
+      width: props.layout.reactions?.size.width ?? 0,
+      height: props.layout.reactions?.size.height ?? 0,
+    )
+
     if let oldView = reactionsView {
       oldView.removeFromSuperview()
     }
 
     // View
-    let view = MessageReactionsView()
+    let view = NSHostingView<ReactionsView>(rootView: ReactionsView(viewModel: reactionsViewModel!))
     view.translatesAutoresizingMaskIntoConstraints = false
     reactionsView = view
 
@@ -531,12 +540,6 @@ class MessageViewAppKit: NSView {
 //    reactionsView = view
 
     contentView.addSubview(reactionsView!)
-    reactionsView?.update(
-      reactions: fullMessage.groupedReactions,
-      plans: props.layout.reactionItems,
-      fullMessage: fullMessage,
-      animated: animated
-    )
 
     // Reactions
     if let reactionsPlan = props.layout.reactions, let reactionsView {
@@ -550,81 +553,49 @@ class MessageViewAppKit: NSView {
         equalTo: contentView.topAnchor,
         constant: props.layout.reactionsViewTop
       )
-      reactionViewLeadingConstraint = reactionsView.leadingAnchor.constraint(
-        equalTo: contentView.leadingAnchor,
-        constant: reactionsPlan.spacing.left
-      )
 
       NSLayoutConstraint.activate(
         [
           reactionViewHeightConstraint,
           reactionViewWidthConstraint,
           reactionViewTopConstraint,
-          reactionViewLeadingConstraint,
+          reactionsView.leadingAnchor.constraint(
+            equalTo: contentView.leadingAnchor,
+            constant: reactionsPlan.spacing.left
+          ),
         ]
       )
     }
   }
 
   private func updateReactionsSizes() {
-    reactionsView?.update(
-      reactions: fullMessage.groupedReactions,
-      plans: props.layout.reactionItems,
-      fullMessage: fullMessage,
-      animated: false
-    )
+    // Update
+    reactionsViewModel?.reactions = fullMessage.groupedReactions
+    reactionsViewModel?.offsets = props.layout.reactionItems
+    reactionsViewModel?.width = props.layout.reactions?.size.width ?? 0
+    reactionsViewModel?.height = props.layout.reactions?.size.height ?? 0
   }
 
-  private func updateReactions(prev _: FullMessage, next: FullMessage, props: MessageViewProps, animated: Bool) {
+  private func updateReactions(prev _: FullMessage, next: FullMessage, props: MessageViewProps) {
     if reactionsView == nil, next.reactions.count > 0 {
       log.trace("Adding reactions view \(props.layout.reactions)")
       // Added
-      setupReactions(animated: animated, props: props)
+      setupReactions()
+      needsUpdateConstraints = true
+      layoutSubtreeIfNeeded()
     } else if reactionsView != nil, next.reactions.count == 0 {
       log.trace("Removing reactions view")
       // Remove
-      removeReactionsView(animated: animated)
+      reactionsView?.removeFromSuperview()
+      reactionsView = nil
     } else {
       log.trace("Updating reactions view")
       // Update
-      reactionsView?.update(
-        reactions: next.groupedReactions,
-        plans: props.layout.reactionItems,
-        fullMessage: next,
-        animated: animated
-      )
-    }
-  }
-
-  private func removeReactionsView(animated: Bool) {
-    guard let view = reactionsView else { return }
-
-    let constraintsToDeactivate = [
-      reactionViewWidthConstraint,
-      reactionViewHeightConstraint,
-      reactionViewTopConstraint,
-      reactionViewLeadingConstraint,
-    ].compactMap { $0 }
-    NSLayoutConstraint.deactivate(constraintsToDeactivate)
-    reactionViewWidthConstraint = nil
-    reactionViewHeightConstraint = nil
-    reactionViewTopConstraint = nil
-    reactionViewLeadingConstraint = nil
-
-    reactionsView = nil
-
-    guard animated else {
-      view.removeFromSuperview()
-      return
-    }
-
-    NSAnimationContext.runAnimationGroup { context in
-      // Keep in sync with `MessageListAppKit.applyUpdate` row-height animations.
-      context.duration = Self.messageListRowAnimationDuration
-      context.timingFunction = Self.messageListRowTimingFunction
-      view.animator().alphaValue = 0
-    } completionHandler: {
-      view.removeFromSuperview()
+      reactionsViewModel?.width = props.layout.reactions?.size.width ?? 0
+      reactionsViewModel?.height = props.layout.reactions?.size.height ?? 0
+      reactionsViewModel?.offsets = props.layout.reactionItems
+      reactionsViewModel?.reactions = next.groupedReactions
+      reactionsViewModel?.fullMessage = next
     }
   }
 
@@ -867,17 +838,16 @@ class MessageViewAppKit: NSView {
         equalTo: contentView.topAnchor,
         constant: layout.reactionsViewTop
       )
-      reactionViewLeadingConstraint = reactionsView.leadingAnchor.constraint(
-        equalTo: contentView.leadingAnchor,
-        constant: reactionsPlan.spacing.left
-      )
 
       constraints.append(
         contentsOf: [
           reactionViewHeightConstraint,
           reactionViewWidthConstraint,
           reactionViewTopConstraint,
-          reactionViewLeadingConstraint,
+          reactionsView.leadingAnchor.constraint(
+            equalTo: contentView.leadingAnchor,
+            constant: reactionsPlan.spacing.left
+          ),
         ]
       )
     }
@@ -1017,7 +987,6 @@ class MessageViewAppKit: NSView {
   private var reactionViewWidthConstraint: NSLayoutConstraint!
   private var reactionViewHeightConstraint: NSLayoutConstraint!
   private var reactionViewTopConstraint: NSLayoutConstraint!
-  private var reactionViewLeadingConstraint: NSLayoutConstraint!
 
   private var contentViewWidthConstraint: NSLayoutConstraint!
   private var contentViewHeightConstraint: NSLayoutConstraint!
@@ -1189,8 +1158,7 @@ class MessageViewAppKit: NSView {
     if let reactionsPlan = props.layout.reactions,
        let reactionViewWidthConstraint,
        let reactionViewHeightConstraint,
-       let reactionViewTopConstraint,
-       let reactionViewLeadingConstraint
+       let reactionViewTopConstraint
     {
       log.trace("Updating reactions view constraints for message \(reactionsPlan.size)")
       if reactionViewWidthConstraint.constant != reactionsPlan.size.width {
@@ -1204,10 +1172,6 @@ class MessageViewAppKit: NSView {
       if reactionViewTopConstraint.constant != props.layout.reactionsViewTop {
         reactionViewTopConstraint.constant = props.layout.reactionsViewTop
       }
-
-      if reactionViewLeadingConstraint.constant != reactionsPlan.spacing.left {
-        reactionViewLeadingConstraint.constant = reactionsPlan.spacing.left
-      }
     } else if let reactionsView, let reactionsPlan = props.layout.reactions {
       // setup
       reactionViewHeightConstraint = reactionsView.heightAnchor.constraint(
@@ -1220,15 +1184,14 @@ class MessageViewAppKit: NSView {
         equalTo: contentView.topAnchor,
         constant: props.layout.reactionsViewTop
       )
-      reactionViewLeadingConstraint = reactionsView.leadingAnchor.constraint(
-        equalTo: contentView.leadingAnchor,
-        constant: reactionsPlan.spacing.left
-      )
       NSLayoutConstraint.activate([
         reactionViewHeightConstraint,
         reactionViewWidthConstraint,
         reactionViewTopConstraint,
-        reactionViewLeadingConstraint,
+        reactionsView.leadingAnchor.constraint(
+          equalTo: contentView.leadingAnchor,
+          constant: reactionsPlan.spacing.left
+        ),
       ])
     }
 //    if hasReactions {
@@ -1539,16 +1502,18 @@ class MessageViewAppKit: NSView {
       textView.textContainer?.size = props.layout.text?.size ?? .zero
     }
 
+    layoutSubtreeIfNeeded()
+
     needsUpdateConstraints = true
 
     if animate {
       // Animate the changes
       NSAnimationContext.runAnimationGroup { context in
-        context.duration = Self.messageListRowAnimationDuration
-        context.timingFunction = Self.messageListRowTimingFunction
+        context.duration = 0.15
+        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
         context.allowsImplicitAnimation = true
 
-        self.updateConstraintsForSubtreeIfNeeded()
+        // self.animator().layoutSubtreeIfNeeded()
         self.layoutSubtreeIfNeeded()
       } completionHandler: { [weak self] in
         // Completion block
@@ -1558,9 +1523,6 @@ class MessageViewAppKit: NSView {
             .layoutViewport()
         }
       }
-    } else {
-      updateConstraintsForSubtreeIfNeeded()
-      layoutSubtreeIfNeeded()
     }
   }
 
@@ -1580,8 +1542,6 @@ class MessageViewAppKit: NSView {
 
     // update internal props
     self.fullMessage = fullMessage
-    // Ensure computed flags (hasReactions/hasPhoto/etc) reflect the incoming layout during this update.
-    self.props = props
 
     // Update related message for reply view
     if hasReply {
@@ -1591,12 +1551,12 @@ class MessageViewAppKit: NSView {
       }
     }
 
-    // Reactions
-    // TODO: Reactions are not updating as expected
-    updateReactions(prev: prev, next: fullMessage, props: props, animated: animate)
-
     // Update props and reflect changes
     updatePropsAndUpdateLayout(props: props, disableTextRelayout: true, animate: animate)
+
+    // Reactions
+    // TODO: Reactions are not updating as expected
+    updateReactions(prev: prev, next: fullMessage, props: props)
 
     // Text
     setupMessageText()
@@ -1703,10 +1663,6 @@ class MessageViewAppKit: NSView {
       }
     }
   }
-
-  // Keep these in sync with `MessageListAppKit.applyUpdate` row-height animations.
-  private static let messageListRowAnimationDuration: TimeInterval = 0.15
-  private static let messageListRowTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
 
   private var hoverTrackingArea: NSTrackingArea?
   private func setupScrollStateObserver() {

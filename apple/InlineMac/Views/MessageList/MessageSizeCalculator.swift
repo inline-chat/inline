@@ -752,30 +752,35 @@ class MessageSizeCalculator {
       )
 
       let reactionsSpacing = 6.0
-      let reactionsMaxWidth = max(0, availableWidth - reactionsPlan!.spacing.horizontalTotal)
+      let reactionSpacing = NSEdgeInsets(
+        top: reactionsSpacing,
+        left: 0,
+        bottom: reactionsSpacing,
+        right: reactionsSpacing
+      )
 
       // line index of reactions row
       var reactionsCurrentLine = 0
-      var currentLineWidth: CGFloat = 0 // width used on the current line, without trailing spacing
+      var currentLineWidth: CGFloat = 0
 
       // layout each reaction item
       for reaction in message.groupedReactions {
         let emoji = reaction.emoji
+        let reactions = reaction.reactions
         // Get reaction size - this will be replaced with actual calculation later
-        let reactionSize = ReactionPillMetrics.size(group: reaction)
+        let reactionSize = ReactionItem.size(group: reaction)
 
-        var x: CGFloat = currentLineWidth == 0 ? 0 : (currentLineWidth + reactionsSpacing)
-        if x + reactionSize.width > reactionsMaxWidth, currentLineWidth > 0 {
+        // Check if we need to move to next line
+        if currentLineWidth + reactionSize.width + reactionsSpacing > availableWidth {
           // go to next line
           reactionsCurrentLine += 1
           currentLineWidth = 0
-          x = 0
         }
 
         // Calculate absolute position in grid based on final line position
         let spacing = NSEdgeInsets(
           top: CGFloat(reactionsCurrentLine) * (reactionSize.height + reactionsSpacing), // Row offset
-          left: x, // Column offset
+          left: currentLineWidth, // Column offset
           bottom: 0,
           right: 0
         )
@@ -786,13 +791,12 @@ class MessageSizeCalculator {
         )
         reactionItemsPlan[emoji] = reactionPlan
 
-        // Advance line width (without trailing spacing)
-        currentLineWidth = x + reactionSize.width
+        // Add this reaction to current line
+        currentLineWidth += reactionSize.width + reactionsSpacing
 
         // Update reactions container size
         reactionsPlan!.size.width = max(reactionsPlan!.size.width, currentLineWidth)
-        reactionsPlan!.size.height = CGFloat(reactionsCurrentLine + 1) * reactionSize.height +
-          CGFloat(reactionsCurrentLine) * reactionsSpacing
+        reactionsPlan!.size.height = CGFloat(reactionsCurrentLine + 1) * (reactionSize.height + reactionsSpacing)
       }
     }
 
@@ -866,24 +870,17 @@ class MessageSizeCalculator {
       bubbleWidth = max(bubbleWidth, attachmentsPlan.size.width + attachmentsPlan.spacing.horizontalTotal)
     }
     if let reactionsPlan {
-      bubbleHeight += reactionsPlan.spacing.top
       bubbleHeight += reactionsPlan.size.height
       bubbleHeight += reactionsPlan.spacing.bottom
       bubbleWidth = max(bubbleWidth, reactionsPlan.size.width + reactionsPlan.spacing.horizontalTotal)
     }
     if let timePlan {
-      let shouldPlaceTimeBelowContentForMediaWithoutCaption = !hasText && hasReactions && (photoPlan != nil || videoPlan != nil)
-
       if !isSingleLine, hasText {
         bubbleHeight += timePlan.size.height
         bubbleHeight += timePlan.spacing.verticalTotal // ??? probably too much
       }
       if !isSingleLine, hasDocument, !hasText {
         bubbleHeight += timePlan.size.height
-      }
-      if !isSingleLine, shouldPlaceTimeBelowContentForMediaWithoutCaption {
-        bubbleHeight += timePlan.size.height
-        bubbleHeight += timePlan.spacing.verticalTotal
       }
       // ensure we have enough width for the time when multiline
       bubbleWidth = max(bubbleWidth, timePlan.size.width + timePlan.spacing.horizontalTotal)
