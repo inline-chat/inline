@@ -622,16 +622,20 @@ async function sendNotificationToUser({
 
   Notifications.sendToUser({
     userId,
-    senderUserId: messageInfo.message.fromId,
-    threadId: `chat_${messageInfo.message.chatId}`,
-    isThread: chat?.type == "thread",
-    title,
-    body,
-    senderDisplayName: senderName ?? undefined,
-    senderEmail,
-    senderPhone,
-    senderProfilePhotoUrl,
-    threadEmoji: chat?.emoji ?? undefined,
+    payload: {
+      kind: "send_message",
+      senderUserId: messageInfo.message.fromId,
+      threadId: `chat_${messageInfo.message.chatId}`,
+      isThread: chat?.type == "thread",
+      messageId: String(messageInfo.message.messageId),
+      title,
+      body,
+      senderDisplayName: senderName ?? undefined,
+      senderEmail,
+      senderPhone,
+      senderProfilePhotoUrl,
+      threadEmoji: chat?.emoji ?? undefined,
+    },
   })
 
   if (needsExplicitMacNotification) {

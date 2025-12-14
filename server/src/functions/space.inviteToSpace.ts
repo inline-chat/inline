@@ -213,10 +213,13 @@ async function sendInvite(user: DbUser, space: DbSpace, input: InviteToSpaceInpu
     // Now send push notification
     await Notifications.sendToUser({
       userId: user.id,
-      senderUserId: context.currentUserId,
-      threadId: `invite_${space.id}`,
-      title: `${inviterName ?? "Someone"} added you to "${space?.name ?? "Unnamed"}" space`,
-      body: `Open the app, tap on the space name to start chatting.`,
+      payload: {
+        kind: "alert",
+        senderUserId: context.currentUserId,
+        threadId: `invite_${space.id}`,
+        title: `${inviterName ?? "Someone"} added you to "${space?.name ?? "Unnamed"}" space`,
+        body: `Open the app, tap on the space name to start chatting.`,
+      },
     })
   }
 }

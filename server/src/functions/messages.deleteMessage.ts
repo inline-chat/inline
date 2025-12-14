@@ -10,6 +10,7 @@ import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { Log } from "@in/server/utils/log"
+import { Notifications } from "@in/server/modules/notifications/notifications"
 
 type Input = {
   messageIds: bigint[]
@@ -38,12 +39,25 @@ export const deleteMessage = async (input: Input, context: FunctionContext): Pro
 
   let { update } = await MessageModel.deleteMessages(input.messageIds, chat.id)
 
-  const { selfUpdates } = await pushUpdates({
+  const { selfUpdates, updateGroup } = await pushUpdates({
     inputPeer: input.peer,
     messageIds: input.messageIds,
     currentUserId: context.currentUserId,
     update,
   })
+
+  await Promise.all(
+    updateGroup.userIds.map(async (userId) => {
+      await Notifications.sendToUser({
+        userId,
+        payload: {
+          kind: "message_deleted",
+          threadId: `chat_${chat.id}`,
+          messageIds: input.messageIds.map((id) => id.toString()),
+        },
+      })
+    }),
+  )
 
   return { updates: selfUpdates }
 }
