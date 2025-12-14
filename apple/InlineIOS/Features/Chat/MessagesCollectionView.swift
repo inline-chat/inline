@@ -1654,10 +1654,12 @@ private extension MessagesCollectionView {
       }
 
       // Only show in spaces that have Linear connected (avoid showing action in spaces without Linear).
-      // For DMs, we allow the action and will prompt the user to select a connected space.
+      // For DMs, only show if the user has Linear connected in at least one space.
       if message.peerId.isThread {
         guard hasLinearConnected else { return nil }
         guard let linearTeamId, !linearTeamId.isEmpty else { return nil }
+      } else {
+        guard hasLinearConnected else { return nil }
       }
 
       return UIAction(
