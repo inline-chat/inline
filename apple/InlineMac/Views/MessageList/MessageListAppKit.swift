@@ -16,6 +16,18 @@ class MessageListAppKit: NSViewController {
   private var messages: [FullMessage] { viewModel.messages }
   private var state: ChatState
 
+  // MARK: - Interleaved rows (messages + day separators)
+
+  private enum RowItem: Equatable, Hashable {
+    case daySeparator(dayStart: Date)
+    case message(id: Int64) // FullMessage.id (stable list identity)
+  }
+
+  private var rowItems: [RowItem] = []
+  private var messageIndexById: [Int64: Int] = [:]
+  private var rowIndexByMessageId: [Int64: Int] = [:]
+  private var dayStartsInRowItems: Set<Date> = []
+
   private let log = Log.scoped("MessageListAppKit", enableTracing: false)
   private let sizeCalculator = MessageSizeCalculator.shared
   private let defaultRowHeight = 45.0
@@ -60,6 +72,7 @@ class MessageListAppKit: NSViewController {
     super.init(nibName: nil, bundle: nil)
 
     sizeCalculator.prepareForUse()
+    rebuildRowItems()
 
     // observe data
     viewModel.observe { [weak self] update in
@@ -115,6 +128,55 @@ class MessageListAppKit: NSViewController {
   }
 
   private lazy var toolbarBgView: NSVisualEffectView = ChatToolbarView(dependencies: dependencies)
+
+  private func rebuildRowItems() {
+    messageIndexById.removeAll(keepingCapacity: true)
+    rowIndexByMessageId.removeAll(keepingCapacity: true)
+    dayStartsInRowItems.removeAll(keepingCapacity: true)
+
+    guard !messages.isEmpty else {
+      rowItems = []
+      return
+    }
+
+    let calendar = Calendar.autoupdatingCurrent
+    var newRowItems: [RowItem] = []
+    newRowItems.reserveCapacity(messages.count + 8)
+
+    var previousDayStart: Date?
+
+    for (index, message) in messages.enumerated() {
+      messageIndexById[message.id] = index
+
+      let dayStart = calendar.startOfDay(for: message.message.date)
+      if previousDayStart == nil || dayStart != previousDayStart {
+        newRowItems.append(.daySeparator(dayStart: dayStart))
+        dayStartsInRowItems.insert(dayStart)
+        previousDayStart = dayStart
+      }
+
+      newRowItems.append(.message(id: message.id))
+    }
+
+    rowItems = newRowItems
+
+    for (row, item) in rowItems.enumerated() {
+      if case let .message(id) = item {
+        rowIndexByMessageId[id] = row
+      }
+    }
+  }
+
+  private func rowItem(at row: Int) -> RowItem? {
+    guard row >= 0, row < rowItems.count else { return nil }
+    return rowItems[row]
+  }
+
+  private func messageStableId(forRow row: Int) -> Int64? {
+    guard let item = rowItem(at: row) else { return nil }
+    if case let .message(id) = item { return id }
+    return nil
+  }
 
   private func toggleToolbarVisibility(_ hide: Bool) {
     if #available(macOS 26.0, *) {
@@ -392,7 +454,7 @@ class MessageListAppKit: NSViewController {
   }
 
   private func scrollToBottom(animated: Bool) {
-    guard messages.count > 0 else { return }
+    guard !rowItems.isEmpty else { return }
     #if DEBUG
     log.trace("Scrolling to bottom animated=\(animated)")
     #endif
@@ -851,16 +913,35 @@ class MessageListAppKit: NSViewController {
         guard let self else { return false }
 
         log.trace("Loading batch at top")
-        let prevCount = viewModel.messages.count
+        let oldRowItems = rowItems
+        let oldRowCount = oldRowItems.count
         viewModel.loadBatch(at: direction, publish: false)
-        let newCount = viewModel.messages.count
-        let diff = newCount - prevCount
+        rebuildRowItems()
+        let newRowCount = rowItems.count
+        let diff = newRowCount - oldRowCount
 
         if diff > 0 {
-          let newIndexes = IndexSet(0 ..< diff)
-          tableView.beginUpdates()
-          tableView.insertRows(at: newIndexes, withAnimation: .none)
-          tableView.endUpdates()
+          // Only apply incremental inserts when it's provably a pure prefix insert.
+          if rowItems.suffix(oldRowCount).elementsEqual(oldRowItems) {
+            let newIndexes = IndexSet(0 ..< diff)
+            tableView.beginUpdates()
+            tableView.insertRows(at: newIndexes, withAnimation: .none)
+            tableView.endUpdates()
+          } else if
+            oldRowCount > 1,
+            newRowCount > 1,
+            rowItems.first == oldRowItems.first,
+            rowItems.suffix(oldRowCount - 1).elementsEqual(oldRowItems.dropFirst())
+          {
+            // Common case: loading older messages that are on the same day as the first visible message.
+            // The first day separator stays in place, and new message rows are inserted right after it.
+            let newIndexes = IndexSet(integersIn: 1 ..< (1 + diff))
+            tableView.beginUpdates()
+            tableView.insertRows(at: newIndexes, withAnimation: .none)
+            tableView.endUpdates()
+          } else {
+            tableView.reloadData()
+          }
 
           loadingBatch = false
           return true
@@ -874,6 +955,7 @@ class MessageListAppKit: NSViewController {
   }
 
   func applyInitialData() {
+    rebuildRowItems()
     tableView.reloadData()
   }
 
@@ -886,58 +968,191 @@ class MessageListAppKit: NSViewController {
     let shouldScroll = wasAtBottom && feature_scrollsToBottomOnNewMessage &&
       !isUserScrolling // to prevent jitter when user is scrolling
 
+    let oldRowItems = rowItems
+    let oldRowCount = oldRowItems.count
+    let oldRowIndexByMessageId = rowIndexByMessageId
+
+    rebuildRowItems()
+    let newRowItems = rowItems
+    let newRowCount = newRowItems.count
+
+    func reloadAll(animated: Bool) {
+      if animated {
+        NSAnimationContext.runAnimationGroup { [weak self] context in
+          guard let self else { return }
+          context.duration = animationDuration
+          tableView.reloadData()
+          if shouldScroll { scrollToBottom(animated: true) }
+        } completionHandler: { [weak self] in
+          self?.isPerformingUpdate = false
+        }
+      } else {
+        tableView.reloadData()
+        if shouldScroll { scrollToBottom(animated: false) }
+        isPerformingUpdate = false
+      }
+    }
+
+    func applyStructuralInsert(animated: Bool, inserted: IndexSet) {
+      if animated {
+        NSAnimationContext.runAnimationGroup { [weak self] context in
+          guard let self else { return }
+          context.duration = animationDuration
+          tableView.insertRows(at: inserted, withAnimation: .effectFade)
+          if shouldScroll { scrollToBottom(animated: true) }
+        } completionHandler: { [weak self] in
+          self?.isPerformingUpdate = false
+        }
+      } else {
+        tableView.beginUpdates()
+        tableView.insertRows(at: inserted, withAnimation: .none)
+        tableView.endUpdates()
+        if shouldScroll { scrollToBottom(animated: false) }
+        isPerformingUpdate = false
+      }
+    }
+
+    func applyStructuralRemove(animated: Bool, removed: IndexSet) {
+      if animated {
+        NSAnimationContext.runAnimationGroup { [weak self] context in
+          guard let self else { return }
+          context.duration = animationDuration
+          tableView.removeRows(at: removed, withAnimation: .effectFade)
+          if shouldScroll { scrollToBottom(animated: true) }
+        } completionHandler: { [weak self] in
+          self?.isPerformingUpdate = false
+        }
+      } else {
+        tableView.beginUpdates()
+        tableView.removeRows(at: removed, withAnimation: .none)
+        tableView.endUpdates()
+        if shouldScroll { scrollToBottom(animated: false) }
+        isPerformingUpdate = false
+      }
+    }
+
     switch update {
-      case let .added(_, indexSet):
+      case .added:
         log.trace("applying add changes")
 
-        // Note: we don't need to begin/end updates here as it's a single operation
-        NSAnimationContext.runAnimationGroup { [weak self] context in
-          guard let self else { return }
-          context.duration = animationDuration
-          tableView.insertRows(at: IndexSet(indexSet), withAnimation: .effectFade)
-          if shouldScroll { scrollToBottom(animated: true) }
-        } completionHandler: { [weak self] in
-          self?.isPerformingUpdate = false
+        // Do incremental inserts only for provably-correct prefix/suffix insertions.
+        if newRowCount > oldRowCount, newRowItems.starts(with: oldRowItems) {
+          let inserted = IndexSet(integersIn: oldRowCount ..< newRowCount)
+          applyStructuralInsert(animated: true, inserted: inserted)
+        } else if newRowCount > oldRowCount, newRowItems.suffix(oldRowCount).elementsEqual(oldRowItems) {
+          let inserted = IndexSet(integersIn: 0 ..< (newRowCount - oldRowCount))
+          applyStructuralInsert(animated: true, inserted: inserted)
+        } else {
+          reloadAll(animated: true)
         }
 
-      case let .deleted(_, indexSet):
-        for index in indexSet {
-          if let message = message(forRow: index) {
-            cellCache.removeCell(withType: "MessageCell", messageId: message.id)
+      case let .deleted(deletedIds, _):
+        // NOTE: indexSet refers to message indices (not row indices) and is not reliable for table updates.
+        // Prefer stable IDs for cache eviction and safe structural diffs based on old/new rowItems.
+        for deletedId in deletedIds {
+          cellCache.removeCell(withType: "MessageCell", messageId: deletedId)
+        }
+
+        if newRowCount < oldRowCount, oldRowItems.starts(with: newRowItems) {
+          let removed = IndexSet(integersIn: newRowCount ..< oldRowCount)
+          applyStructuralRemove(animated: true, removed: removed)
+          break
+        }
+
+        if newRowCount < oldRowCount, oldRowItems.suffix(newRowCount).elementsEqual(newRowItems) {
+          let removed = IndexSet(integersIn: 0 ..< (oldRowCount - newRowCount))
+          applyStructuralRemove(animated: true, removed: removed)
+          break
+        }
+
+        // Guarded delete animation for small mid-list deletes (correctness-first).
+        if !deletedIds.isEmpty, deletedIds.count <= 3 {
+          var removedIndexes = Set<Int>()
+          var removedDayStarts = Set<Date>()
+
+          for deletedId in deletedIds {
+            guard let messageRow = oldRowIndexByMessageId[deletedId] else { continue }
+            removedIndexes.insert(messageRow)
+
+            // Find the closest separator above the message in the old model.
+            var cursor = messageRow - 1
+            while cursor >= 0 {
+              if case let .daySeparator(dayStart) = oldRowItems[cursor] {
+                removedDayStarts.insert(dayStart)
+                break
+              }
+              cursor -= 1
+            }
+          }
+
+          for dayStart in removedDayStarts {
+            if !dayStartsInRowItems.contains(dayStart) {
+              // Remove that separator too (if it existed in the old model).
+              if let separatorIndex = oldRowItems.firstIndex(of: .daySeparator(dayStart: dayStart)) {
+                removedIndexes.insert(separatorIndex)
+              }
+            }
+          }
+
+          var removed = IndexSet()
+          for idx in removedIndexes {
+            removed.insert(idx)
+          }
+          if removed.count == oldRowCount - newRowCount {
+            var remaining: [RowItem] = []
+            remaining.reserveCapacity(oldRowCount - removed.count)
+            for (idx, item) in oldRowItems.enumerated() where !removed.contains(idx) {
+              remaining.append(item)
+            }
+
+            if remaining == newRowItems {
+              applyStructuralRemove(animated: true, removed: removed)
+              break
+            }
           }
         }
 
-        NSAnimationContext.runAnimationGroup { [weak self] context in
-          guard let self else { return }
-          context.duration = animationDuration
-          tableView.removeRows(at: IndexSet(indexSet), withAnimation: .effectFade)
-          if shouldScroll { scrollToBottom(animated: true) }
-        } completionHandler: { [weak self] in
-          self?.isPerformingUpdate = false
+        reloadAll(animated: true)
+
+      case let .updated(updatedMessages, indexSet, animated):
+        for message in updatedMessages {
+          cellCache.removeCell(withType: "MessageCell", messageId: message.id)
         }
 
-      case let .updated(_, indexSet, animated):
-        for index in indexSet {
-          if let message = message(forRow: index) {
-            cellCache.removeCell(withType: "MessageCell", messageId: message.id)
+        // Only do row-level reloads when structure is unchanged.
+        guard oldRowItems == newRowItems else {
+          reloadAll(animated: animated == true)
+          break
+        }
+
+        // Map message indices -> stable ids -> row indices.
+        var rowsToReload = IndexSet()
+        for messageIndex in indexSet {
+          guard messages.indices.contains(messageIndex) else { continue }
+          let stableId = messages[messageIndex].id
+          if let row = rowIndexByMessageId[stableId] {
+            rowsToReload.insert(row)
           }
+        }
+
+        if rowsToReload.isEmpty {
+          isPerformingUpdate = false
+          break
         }
 
         if animated == true {
           NSAnimationContext.runAnimationGroup { [weak self] context in
             guard let self else { return }
             context.duration = animationDuration
-            tableView
-              .reloadData(forRowIndexes: IndexSet(indexSet), columnIndexes: IndexSet([0]))
-            tableView.noteHeightOfRows(withIndexesChanged: IndexSet(indexSet))
+            tableView.reloadData(forRowIndexes: rowsToReload, columnIndexes: IndexSet([0]))
+            tableView.noteHeightOfRows(withIndexesChanged: rowsToReload)
             if shouldScroll { scrollToBottom(animated: true) } // ??
           } completionHandler: { [weak self] in
             self?.isPerformingUpdate = false
           }
         } else {
-          tableView
-            .reloadData(forRowIndexes: IndexSet(indexSet), columnIndexes: IndexSet([0]))
-          tableView.noteHeightOfRows(withIndexesChanged: IndexSet(indexSet))
+          tableView.reloadData(forRowIndexes: rowsToReload, columnIndexes: IndexSet([0]))
+          tableView.noteHeightOfRows(withIndexesChanged: rowsToReload)
           if shouldScroll { scrollToBottom(animated: true) }
           isPerformingUpdate = false
         }
@@ -945,9 +1160,7 @@ class MessageListAppKit: NSViewController {
       case .reload:
         cellCache.clearCache()
         log.trace("reloading data")
-        tableView.reloadData()
-        if shouldScroll { scrollToBottom(animated: false) }
-        isPerformingUpdate = false
+        reloadAll(animated: false)
     }
   }
 
@@ -1133,7 +1346,7 @@ class MessageListAppKit: NSViewController {
             isFirstMessage: inputProps.isFirstMessage,
             isRtl: inputProps.isRtl,
             isDM: chat?.type == .privateChat,
-            index: row,
+            index: messageIndexById[message.id],
             translated: inputProps.translated,
             layout: plan,
           )
@@ -1174,20 +1387,14 @@ class MessageListAppKit: NSViewController {
   }
 
   private func message(forRow row: Int) -> FullMessage? {
-    guard row >= 0, row < messages.count else {
-      return nil
-    }
-
-    return messages[row]
+    guard let stableId = messageStableId(forRow: row) else { return nil }
+    guard let messageIndex = messageIndexById[stableId], messages.indices.contains(messageIndex) else { return nil }
+    return messages[messageIndex]
   }
 
   private func getCachedSize(forRow row: Int) -> CGSize? {
-    guard row >= 0, row < messages.count else {
-      return nil
-    }
-
-    let message = messages[row]
-    return sizeCalculator.cachedSize(messageStableId: message.id)
+    guard let stableId = messageStableId(forRow: row) else { return nil }
+    return sizeCalculator.cachedSize(messageStableId: stableId)
   }
 
   // TODO: cache it
@@ -1196,7 +1403,7 @@ class MessageListAppKit: NSViewController {
   }
 
   private func messageProps(for row: Int) -> MessageViewInputProps {
-    guard row >= 0, row < messages.count else {
+    guard let message = message(forRow: row) else {
       return MessageViewInputProps(
         firstInGroup: true,
         isLastMessage: true,
@@ -1207,7 +1414,6 @@ class MessageListAppKit: NSViewController {
       )
     }
 
-    let message = messages[row]
     return MessageViewInputProps(
       firstInGroup: isFirstInGroup(at: row),
       isLastMessage: isLastMessage(at: row),
@@ -1219,11 +1425,10 @@ class MessageListAppKit: NSViewController {
   }
 
   private func calculateNewHeight(forRow row: Int) -> CGFloat {
-    guard row >= 0, row < messages.count else {
+    guard let message = message(forRow: row) else {
       return defaultRowHeight
     }
 
-    let message = messages[row]
     let props = messageProps(for: row)
 
     let (_, _, _, plan) = sizeCalculator.calculateSize(for: message, with: props, tableWidth: tableWidth())
@@ -1304,31 +1509,99 @@ class MessageListAppKit: NSViewController {
   private let cellCache = TableViewCellCache<MessageTableCell>(maxCacheSize: 200)
 }
 
+final class DateSeparatorTableCell: NSView {
+  static let height: CGFloat = 34
+
+  private let label = NSTextField(labelWithString: "")
+  private var currentDayStart: Date?
+
+  override init(frame: NSRect) {
+    super.init(frame: frame)
+    setupView()
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  private func setupView() {
+    wantsLayer = true
+    layer?.backgroundColor = .clear
+
+    label.translatesAutoresizingMaskIntoConstraints = false
+    label.font = .systemFont(ofSize: 12, weight: .regular)
+    label.textColor = .secondaryLabelColor
+    label.alignment = .center
+    label.lineBreakMode = .byTruncatingTail
+
+    addSubview(label)
+
+    NSLayoutConstraint.activate([
+      label.centerXAnchor.constraint(equalTo: centerXAnchor),
+      label.centerYAnchor.constraint(equalTo: centerYAnchor),
+      label.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 12),
+      label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
+    ])
+  }
+
+  func configure(dayStart: Date) {
+    guard currentDayStart != dayStart else { return }
+    currentDayStart = dayStart
+    label.stringValue = Self.displayString(for: dayStart)
+  }
+
+  private static func displayString(for dayStart: Date) -> String {
+    let calendar = Calendar.autoupdatingCurrent
+    if calendar.isDateInToday(dayStart) {
+      return NSLocalizedString("Today", comment: "Date separator label")
+    }
+    if calendar.isDateInYesterday(dayStart) {
+      return NSLocalizedString("Yesterday", comment: "Date separator label")
+    }
+    return dayStart.formatted(date: .abbreviated, time: .omitted)
+  }
+}
+
 extension MessageListAppKit: NSTableViewDataSource {
   func numberOfRows(in tableView: NSTableView) -> Int {
-    messages.count
+    rowItems.count
   }
 }
 
 extension MessageListAppKit: NSTableViewDelegate {
+  func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+    messageStableId(forRow: row) != nil
+  }
+
   func isFirstInGroup(at row: Int) -> Bool {
-    guard messages.indices.contains(row) else { return true }
-    guard row > 0 else { return true }
+    guard let message = message(forRow: row) else { return true }
+    guard let index = messageIndexById[message.id] else { return true }
+    guard index > 0 else { return true }
 
-    let current = messages[row]
-    let previous = messages[row - 1]
+    let current = messages[index]
+    let previous = messages[index - 1]
+    if previous.message.fromId != current.message.fromId {
+      return true
+    }
 
-    return previous.message.fromId != current.message.fromId
+    // Day boundary should start a new group (even for the same sender).
+    let calendar = Calendar.autoupdatingCurrent
+    return calendar.startOfDay(for: previous.message.date) != calendar.startOfDay(for: current.message.date)
 //    return previous.message.fromId != current.message.fromId ||
 //      current.message.date.timeIntervalSince(previous.message.date) > 300
   }
 
   func isLastMessage(at row: Int) -> Bool {
-    row == messages.count - 1
+    guard let message = message(forRow: row) else { return false }
+    guard let index = messageIndexById[message.id] else { return false }
+    return index == messages.count - 1
   }
 
   func isFirstMessage(at row: Int) -> Bool {
-    row == 0
+    guard let message = message(forRow: row) else { return false }
+    guard let index = messageIndexById[message.id] else { return false }
+    return index == 0
   }
 
   var animateUpdates: Bool {
@@ -1343,58 +1616,83 @@ extension MessageListAppKit: NSTableViewDelegate {
   }
 
   func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-    guard row >= 0, row < messages.count else { return nil }
+    guard let item = rowItem(at: row) else { return nil }
 
     #if DEBUG
     log.trace("Making/using view for row \(row)")
     #endif
 
-    let message = messages[row]
+    switch item {
+      case let .daySeparator(dayStart):
+        let identifier = NSUserInterfaceItemIdentifier("DateSeparatorCell")
+        let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? DateSeparatorTableCell
+          ?? DateSeparatorTableCell()
+        cell.identifier = identifier
+        cell.configure(dayStart: dayStart)
+        return cell
 
-    let identifier = NSUserInterfaceItemIdentifier("MessageCell")
-    let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? MessageTableCell
-      ?? MessageTableCell()
-    cell.identifier = identifier
+      case let .message(id):
+        guard let messageIndex = messageIndexById[id], messages.indices.contains(messageIndex) else { return nil }
+        let message = messages[messageIndex]
 
-    let inputProps = messageProps(for: row)
+        let identifier = NSUserInterfaceItemIdentifier("MessageCell")
+        let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? MessageTableCell
+          ?? MessageTableCell()
+        cell.identifier = identifier
 
-    let (_, _, _, layoutPlan) = sizeCalculator.calculateSize(for: message, with: inputProps, tableWidth: tableWidth())
+        let inputProps = messageProps(for: row)
 
-    let props = MessageViewProps(
-      firstInGroup: inputProps.firstInGroup,
-      isLastMessage: inputProps.isLastMessage,
-      isFirstMessage: inputProps.isFirstMessage,
-      isRtl: inputProps.isRtl,
-      isDM: chat?.type == .privateChat,
-      index: row,
-      translated: inputProps.translated,
-      layout: layoutPlan
-    )
+        let (_, _, _, layoutPlan) = sizeCalculator.calculateSize(
+          for: message,
+          with: inputProps,
+          tableWidth: tableWidth()
+        )
 
-    cell.setScrollState(scrollState)
-    cell.configure(with: message, props: props, animate: animateUpdates)
+        let props = MessageViewProps(
+          firstInGroup: inputProps.firstInGroup,
+          isLastMessage: inputProps.isLastMessage,
+          isFirstMessage: inputProps.isFirstMessage,
+          isRtl: inputProps.isRtl,
+          isDM: chat?.type == .privateChat,
+          index: messageIndex,
+          translated: inputProps.translated,
+          layout: layoutPlan
+        )
 
-    // Store the configured cell in cache
-    // cellCache.cacheCell(cell, withType: "MessageCell", messageId: message.id)
+        cell.setScrollState(scrollState)
+        cell.configure(with: message, props: props, animate: animateUpdates)
 
-    return cell
+        // Store the configured cell in cache
+        // cellCache.cacheCell(cell, withType: "MessageCell", messageId: message.id)
+
+        return cell
+    }
   }
 
   func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-    guard row >= 0, row < messages.count else {
+    guard let item = rowItem(at: row) else {
       return defaultRowHeight
     }
     #if DEBUG
     log.trace("Noting height change for row \(row)")
     #endif
 
-    let message = messages[row]
-    let props = messageProps(for: row)
-    let tableWidth = ceil(tableView.bounds.width)
+    switch item {
+      case .daySeparator:
+        return DateSeparatorTableCell.height
 
-    let (_, _, _, plan) = sizeCalculator.calculateSize(for: message, with: props, tableWidth: tableWidth)
+      case let .message(id):
+        guard let messageIndex = messageIndexById[id], messages.indices.contains(messageIndex) else {
+          return defaultRowHeight
+        }
+        let message = messages[messageIndex]
+        let props = messageProps(for: row)
+        let tableWidth = ceil(tableView.bounds.width)
 
-    return plan.totalHeight
+        let (_, _, _, plan) = sizeCalculator.calculateSize(for: message, with: props, tableWidth: tableWidth)
+
+        return plan.totalHeight
+    }
   }
 }
 
@@ -1448,7 +1746,7 @@ extension MessageListAppKit {
       return
     }
 
-    guard let index = messages.firstIndex(where: { $0.message.messageId == msgId }) else {
+    guard let messageIndex = messages.firstIndex(where: { $0.message.messageId == msgId }) else {
       log.error("Message not found for id \(msgId)")
 
       // TODO: Load more to get to it
@@ -1467,15 +1765,15 @@ extension MessageListAppKit {
       return
     }
 
-    // Verify index is valid for tableView before calling rect(ofRow:)
-    guard index >= 0, index < tableView.numberOfRows else {
-      log.error("Index \(index) is out of bounds for tableView with \(tableView.numberOfRows) rows")
+    let stableId = messages[messageIndex].id
+    guard let row = rowIndexByMessageId[stableId] else {
+      log.error("Row not found for stable message id \(stableId)")
       return
     }
 
     // Get current scroll position and target position
     let currentY = scrollView.contentView.bounds.origin.y
-    let targetRect = tableView.rect(ofRow: index)
+    let targetRect = tableView.rect(ofRow: row)
     let viewportHeight = scrollView.contentView.bounds.height
     let targetY = max(0, targetRect.midY - (viewportHeight / 2))
 
@@ -1509,7 +1807,7 @@ extension MessageListAppKit {
           // Clean up
           self?.isProgrammaticScroll = false
 
-          self?.highlightMessage(at: index)
+          self?.highlightMessage(at: row)
         }
       }
     } else {
@@ -1522,7 +1820,7 @@ extension MessageListAppKit {
         // Clean up
         self?.isProgrammaticScroll = false
 
-        self?.highlightMessage(at: index)
+        self?.highlightMessage(at: row)
       }
     }
   }
