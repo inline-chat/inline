@@ -1,18 +1,29 @@
 import { SessionsModel } from "@in/server/db/models/sessions"
-import { isProd } from "@in/server/env"
 import { getApnProvider } from "@in/server/libs/apn"
-import { getCachedUserName } from "@in/server/modules/cache/userNames"
 import { Log } from "@in/server/utils/log"
 import { Notification } from "apn"
+import { configureAlertNotification, configureBackgroundNotification, iOSTopic, isIOSPushSession } from "./utils"
 
-type SendPushNotificationToUserInput = {
-  userId: number
+type AlertPushPayload = {
+  kind: "alert"
   senderUserId: number
   threadId: string
   title: string
   body: string
   subtitle?: string
   isThread?: boolean
+  threadEmoji?: string
+}
+
+type SendMessagePushPayload = {
+  kind: "send_message"
+  senderUserId: number
+  threadId: string
+  title: string
+  body: string
+  subtitle?: string
+  isThread?: boolean
+  messageId: string
   senderDisplayName?: string
   senderEmail?: string
   senderPhone?: string
@@ -20,24 +31,32 @@ type SendPushNotificationToUserInput = {
   threadEmoji?: string
 }
 
-const log = new Log("notifications.sendToUser")
-const macOSTopic = isProd ? "chat.inline.InlineMac" : "chat.inline.InlineMac.debug"
-const iOSTopic = isProd ? "chat.inline.InlineIOS" : "chat.inline.InlineIOS.debug"
+type MessageDeletedPushPayload = {
+  kind: "message_deleted"
+  threadId: string
+  messageIds: string[]
+}
 
-export const sendPushNotificationToUser = async ({
-  userId,
-  senderUserId,
-  threadId,
-  title,
-  body,
-  subtitle,
-  isThread = false,
-  senderDisplayName,
-  senderEmail,
-  senderPhone,
-  senderProfilePhotoUrl,
-  threadEmoji,
-}: SendPushNotificationToUserInput) => {
+type MessagesReadUpToPushPayload = {
+  kind: "messages_read"
+  threadId: string
+  readUpToMessageId: string
+}
+
+export type PushToUserPayload =
+  | AlertPushPayload
+  | SendMessagePushPayload
+  | MessageDeletedPushPayload
+  | MessagesReadUpToPushPayload
+
+type SendPushToUserInput = {
+  userId: number
+  payload: PushToUserPayload
+}
+
+const log = new Log("notifications.sendToUser")
+
+export const sendPushNotificationToUser = async ({ userId, payload }: SendPushToUserInput) => {
   try {
     // Get all sessions for the user
     const userSessions = await SessionsModel.getValidSessionsByUserId(userId)
@@ -46,48 +65,92 @@ export const sendPushNotificationToUser = async ({
       return
     }
 
-    for (const session of userSessions) {
-      if (!session.applePushToken) continue
-      if (session.clientType === "macos") continue
+    const apnProvider = getApnProvider()
+    if (!apnProvider) {
+      Log.shared.error("APN provider not found", { userId })
+      return
+    }
 
-      //let topic = session.clientType === "ios" ? iOSTopic : null
-      let topic = iOSTopic
-
+    for (const session of userSessions.filter(isIOSPushSession)) {
+      const topic = iOSTopic
       if (!topic) continue
 
-      // Configure notification
       const notification = new Notification()
-      const senderPayload: Record<string, unknown> = { id: senderUserId }
-
-      if (senderDisplayName) senderPayload["displayName"] = senderDisplayName
-      if (senderEmail) senderPayload["email"] = senderEmail
-      if (senderPhone) senderPayload["phone"] = senderPhone
-      if (senderProfilePhotoUrl) senderPayload["profilePhotoUrl"] = senderProfilePhotoUrl
-
-      const payload: Record<string, unknown> = {
-        userId: senderUserId,
-        threadId,
-        isThread,
-        sender: senderPayload,
-        threadEmoji,
-      }
-
-      notification.payload = payload
-      notification.contentAvailable = true
-      notification.mutableContent = true
       notification.topic = topic
-      notification.threadId = threadId
+      notification.threadId = payload.threadId
 
-      notification.sound = "default"
-      notification.alert = {
-        title,
-        body,
-        subtitle,
-      }
+      if (payload.kind === "send_message") {
+        const senderPayload: Record<string, unknown> = { id: payload.senderUserId }
 
-      let apnProvider = getApnProvider()
-      if (!apnProvider) {
-        Log.shared.error("APN provider not found", { userId })
+        if (payload.senderDisplayName) senderPayload["displayName"] = payload.senderDisplayName
+        if (payload.senderEmail) senderPayload["email"] = payload.senderEmail
+        if (payload.senderPhone) senderPayload["phone"] = payload.senderPhone
+        if (payload.senderProfilePhotoUrl) senderPayload["profilePhotoUrl"] = payload.senderProfilePhotoUrl
+
+        const apsPayload: Record<string, unknown> = {
+          userId: payload.senderUserId,
+          threadId: payload.threadId,
+          isThread: payload.isThread ?? false,
+          sender: senderPayload,
+          threadEmoji: payload.threadEmoji,
+          messageId: payload.messageId,
+        }
+
+        notification.payload = apsPayload
+        notification.contentAvailable = true
+        notification.mutableContent = true
+        configureAlertNotification(notification)
+
+        notification.sound = "default"
+        notification.alert = {
+          title: payload.title,
+          body: payload.body,
+          subtitle: payload.subtitle,
+        }
+      } else if (payload.kind === "alert") {
+        notification.payload = {
+          kind: "alert",
+          userId: payload.senderUserId,
+          threadId: payload.threadId,
+          isThread: payload.isThread ?? false,
+          threadEmoji: payload.threadEmoji,
+        }
+
+        notification.contentAvailable = true
+        notification.mutableContent = false
+        configureAlertNotification(notification)
+
+        notification.sound = "default"
+        notification.alert = {
+          title: payload.title,
+          body: payload.body,
+          subtitle: payload.subtitle,
+        }
+      } else if (payload.kind === "message_deleted") {
+        if (!payload.messageIds.length) continue
+        configureBackgroundNotification({
+          notification,
+          expirySeconds: Math.floor(Date.now() / 1000) + 60 * 60,
+        })
+        notification.payload = {
+          kind: "message_deleted",
+          threadId: payload.threadId,
+          messageIds: payload.messageIds,
+        }
+      } else if (payload.kind === "messages_read") {
+        if (!payload.readUpToMessageId) continue
+        const collapseId = `messages_read:${payload.threadId}`
+        configureBackgroundNotification({
+          notification,
+          expirySeconds: Math.floor(Date.now() / 1000) + 60 * 10,
+          collapseId,
+        })
+        notification.payload = {
+          kind: "messages_read",
+          threadId: payload.threadId,
+          readUpToMessageId: payload.readUpToMessageId,
+        }
+      } else {
         continue
       }
 
@@ -99,19 +162,19 @@ export const sendPushNotificationToUser = async ({
             log.error("Failed to send push notification", {
               errors: result.failed.map((f) => f.response),
               userId,
-              threadId,
+              threadId: payload.threadId,
             })
           } else {
             log.debug("Push notification sent successfully", {
               userId,
-              threadId,
+              threadId: payload.threadId,
             })
           }
         } catch (error) {
           log.error("Error sending push notification", {
             error,
             userId,
-            threadId,
+            threadId: payload.threadId,
           })
         }
       }
@@ -122,7 +185,7 @@ export const sendPushNotificationToUser = async ({
     log.error("Error sending push notification", {
       error,
       userId,
-      threadId,
+      threadId: payload.threadId,
     })
   }
 }

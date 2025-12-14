@@ -548,12 +548,15 @@ async function sendNotificationToUser({
 
   Notifications.sendToUser({
     userId,
-    senderUserId: currentUserId,
-    threadId: `chat_${chatId}`,
-    title,
-    body,
-    subtitle: issueTitle,
-    isThread,
+    payload: {
+      kind: "alert",
+      senderUserId: currentUserId,
+      threadId: `chat_${chatId}`,
+      title,
+      body,
+      subtitle: issueTitle,
+      isThread,
+    },
   })
 }
 

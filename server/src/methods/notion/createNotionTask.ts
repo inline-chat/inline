@@ -165,12 +165,15 @@ export const handler = async (
         parallelOperations.push(
           Notifications.sendToUser({
             userId: messageSenderId,
-            senderUserId: context.currentUserId,
-            threadId: `chat_${chatId}`,
-            title: `${senderUser.firstName ?? "Someone"} will do`,
-            subtitle: result.taskTitle ?? undefined,
-            body: messageText || "A new task has been created from a message",
-            isThread: updateGroup.type === "threadUsers",
+            payload: {
+              kind: "alert",
+              senderUserId: context.currentUserId,
+              threadId: `chat_${chatId}`,
+              title: `${senderUser.firstName ?? "Someone"} will do`,
+              subtitle: result.taskTitle ?? undefined,
+              body: messageText || "A new task has been created from a message",
+              isThread: updateGroup.type === "threadUsers",
+            },
           }).catch((error) => {
             Log.shared.error("Failed to send task creation notification", { error })
           }),

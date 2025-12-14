@@ -10,6 +10,7 @@ import type { InputPeer, Update } from "@in/protocol/core"
 import { encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { DialogsModel } from "@in/server/db/models/dialogs"
+import { Notifications } from "@in/server/modules/notifications/notifications"
 
 export const Input = Type.Object({
   peerUserId: Optional(TInputId),
@@ -110,6 +111,22 @@ export const handler = async (
     ]
 
     RealtimeUpdates.pushToUser(context.currentUserId, updates, { skipSessionId: context.currentSessionId })
+
+    // Clear any delivered iOS notifications up to maxId across all iOS sessions.
+    if (chatId) {
+      try {
+        await Notifications.sendToUser({
+          userId: context.currentUserId,
+          payload: {
+            kind: "messages_read",
+            threadId: `chat_${chatId}`,
+            readUpToMessageId: String(maxId),
+          },
+        })
+      } catch {
+        // best-effort only; skip if session lookup fails
+      }
+    }
   }
 
   return {}
