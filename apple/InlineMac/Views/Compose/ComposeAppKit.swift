@@ -408,7 +408,6 @@ class ComposeAppKit: NSView {
   }
 
   private func hideMentionCompletion() {
-    Log.shared.debug("🔍 hideMentionCompletion")
     currentMentionRange = nil
     mentionCompletionMenu?.hide()
 
@@ -420,16 +419,12 @@ class ComposeAppKit: NSView {
   private func detectMentionAtCursor() {
     let cursorPosition = textEditor.textView.selectedRange().location
     let attributedText = textEditor.attributedString
-    let text = textEditor.plainText
-
-    Log.shared.debug("🔍 detectMentionAtCursor: cursor=\(cursorPosition), text='\(text)'")
+    log.trace("detectMentionAtCursor cursor=\(cursorPosition)")
 
     if let mentionRange = mentionDetector.detectMentionAt(cursorPosition: cursorPosition, in: attributedText) {
       currentMentionRange = mentionRange
-      Log.shared.debug("🔍 Mention detected: '\(mentionRange.query)' at \(mentionRange.range)")
       showMentionCompletion(for: mentionRange.query)
     } else {
-      Log.shared.debug("🔍 No mention detected")
       hideMentionCompletion()
     }
   }
@@ -645,26 +640,49 @@ class ComposeAppKit: NSView {
       return
     }
 
-    do {
-      // Save
+    // Add a placeholder view immediately, then persist to cache/DB off the main thread.
+    let pendingId = "pending_photo_\(UUID().uuidString)"
+    attachments.addImageView(image, id: pendingId)
+    updateHeight(animate: true)
 
-      let photoInfo = try FileCache.savePhoto(image: image, preferredFormat: preferredImageFormat)
-      let mediaItem = FileMediaItem.photo(photoInfo)
-      let uniqueId = mediaItem.getItemUniqueId()
+    let task = Task.detached(priority: .userInitiated) { [weak self] in
+      guard let self else { return }
+      if Task.isCancelled { return }
+      do {
+        let photoInfo = try FileCache.savePhoto(image: image, preferredFormat: preferredImageFormat)
+        let mediaItem = FileMediaItem.photo(photoInfo)
+        let uniqueId = mediaItem.getItemUniqueId()
 
-      // Update UI
-      attachments.addImageView(image, id: uniqueId)
-      updateHeight(animate: true)
+        await MainActor.run { [weak self] in
+          guard let self else { return }
+          guard self.pendingImageSaveTasks[pendingId] != nil else { return } // removed/cancelled
+          self.pendingImageSaveTasks.removeValue(forKey: pendingId)
 
-      // Update State
-      attachmentItems[uniqueId] = mediaItem
-    } catch {
-      Log.shared.error("Failed to save photo in attachments", error: error)
+          // Swap the placeholder with the persisted attachment id.
+          self.attachments.removeImageView(id: pendingId)
+          self.attachments.addImageView(image, id: uniqueId)
+          self.attachmentItems[uniqueId] = mediaItem
+          self.updateHeight(animate: true)
+        }
+      } catch {
+        await MainActor.run { [weak self] in
+          guard let self else { return }
+          guard self.pendingImageSaveTasks[pendingId] != nil else { return } // removed/cancelled
+          self.pendingImageSaveTasks.removeValue(forKey: pendingId)
+          self.attachments.removeImageView(id: pendingId)
+          self.updateHeight(animate: true)
+        }
+        Log.shared.error("Failed to save photo in attachments", error: error)
+      }
     }
+
+    pendingImageSaveTasks[pendingId] = task
   }
 
   func removeImage(_ id: String) {
-    // TODO: Delete from cache as well
+    if let task = pendingImageSaveTasks.removeValue(forKey: id) {
+      task.cancel()
+    }
 
     // Update UI
     attachments.removeImageView(id: id)
@@ -898,6 +916,7 @@ class ComposeAppKit: NSView {
 
   private var keyMonitorUnsubscribe: (() -> Void)?
   private var keyMonitorPasteUnsubscribe: (() -> Void)?
+  private var pendingImageSaveTasks: [String: Task<Void, Never>] = [:]
 
   private func setupKeyDownHandler() {
     keyMonitorUnsubscribe = dependencies.keyMonitor?.addHandler(
@@ -943,12 +962,15 @@ class ComposeAppKit: NSView {
   private func handleGlobalPaste() {
     let pasteboard = NSPasteboard.general
 
-    // Use the existing pasteboard handling from the text view
-    let handled = textEditor.textView.handleAttachments(from: pasteboard)
-
-    if handled {
+    // If this is non-text content, route through attachments.
+    if textEditor.textView.handleAttachments(from: pasteboard, includeText: false) {
       focus()
+      return
     }
+
+    // Otherwise, perform a native plain-text paste (undo/selection/IME friendly).
+    focus()
+    textEditor.textView.pasteAsPlainText(nil)
   }
 
   deinit {

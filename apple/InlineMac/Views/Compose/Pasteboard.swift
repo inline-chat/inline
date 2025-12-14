@@ -1,7 +1,7 @@
 import AppKit
 import AVFoundation
 import Foundation
-import UniformTypeIdentifiers
+import Logger
 
 enum PasteboardAttachment {
   case image(NSImage, URL?)
@@ -11,11 +11,34 @@ enum PasteboardAttachment {
 }
 
 class InlinePasteboard {
-  static func findAttachments(from pasteboard: NSPasteboard) -> [PasteboardAttachment] {
+  private static let preferredImageTypes: [NSPasteboard.PasteboardType] = [
+    .png,
+    NSPasteboard.PasteboardType("image/png"),
+    NSPasteboard.PasteboardType("public.jpeg"),
+    NSPasteboard.PasteboardType("image/jpeg"),
+    NSPasteboard.PasteboardType("public.heic"),
+    NSPasteboard.PasteboardType("image/heic"),
+    NSPasteboard.PasteboardType("public.webp"),
+    NSPasteboard.PasteboardType("image/webp"),
+    NSPasteboard.PasteboardType("public.gif"),
+    NSPasteboard.PasteboardType("image/gif"),
+    .tiff, // keep TIFF last; it's often much larger than PNG/JPEG
+    NSPasteboard.PasteboardType("public.image"),
+  ]
+
+  private static let preferredVideoTypes: [NSPasteboard.PasteboardType] = [
+    NSPasteboard.PasteboardType("public.mpeg-4"),
+    NSPasteboard.PasteboardType("video/mp4"),
+    NSPasteboard.PasteboardType("com.apple.quicktime-movie"),
+    NSPasteboard.PasteboardType("public.movie"),
+    NSPasteboard.PasteboardType("public.video"),
+  ]
+
+  static func findAttachments(from pasteboard: NSPasteboard, includeText: Bool = true) -> [PasteboardAttachment] {
     var attachments: [PasteboardAttachment] = []
 
     for item in pasteboard.pasteboardItems ?? [] {
-      if let attachment = findBestAttachment(for: item) {
+      if let attachment = findBestAttachment(for: item, includeText: includeText) {
         attachments.append(attachment)
       }
     }
@@ -23,7 +46,7 @@ class InlinePasteboard {
     return attachments
   }
 
-  private static func findBestAttachment(for item: NSPasteboardItem) -> PasteboardAttachment? {
+  private static func findBestAttachment(for item: NSPasteboardItem, includeText: Bool) -> PasteboardAttachment? {
     let types = item.types
 
     // Priority order: file URLs > specific content types > raw data > text
@@ -31,7 +54,7 @@ class InlinePasteboard {
     // 1. Check for file URLs first (highest priority)
     if types.contains(.fileURL) {
       if let urlString = item.string(forType: .fileURL),
-         let url = URL(string: urlString)
+         let url = parseFileURL(urlString)
       {
         return handleFileURL(url)
       }
@@ -46,25 +69,36 @@ class InlinePasteboard {
         thumbnail.addRepresentation(pdfRep)
 
         // Try to get URL if available, otherwise create temp file
-        let url = createTempFileURL(data: pdfData, extension: "pdf")
-        return .file(url, thumbnail: thumbnail)
+        do {
+          let url = try createTempFileURL(data: pdfData, extension: "pdf")
+          return .file(url, thumbnail: thumbnail)
+        } catch {
+          Log.shared.error("Failed to write temp PDF for pasteboard", error: error)
+          return nil
+        }
       }
     }
 
     // 3. Check for video content
-    if let videoType = types.first(where: { isVideoType($0) }) {
+    if let videoType = preferredVideoTypes.first(where: { types.contains($0) }) ??
+      types.first(where: { isVideoType($0) })
+    {
       if let videoData = item.data(forType: videoType) {
-        let url = createTempFileURL(data: videoData, extension: getFileExtension(for: videoType))
-        if let thumbnail = generateVideoThumbnail(from: url) {
-          return .video(url, thumbnail: thumbnail)
-        } else {
-          return .file(url, thumbnail: nil)
+        do {
+          let url = try createTempFileURL(data: videoData, extension: getFileExtension(for: videoType))
+          // Thumbnail generation can be expensive; defer to later pipeline.
+          return .video(url, thumbnail: nil)
+        } catch {
+          Log.shared.error("Failed to write temp video for pasteboard", error: error)
+          return nil
         }
       }
     }
 
     // 4. Check for images (including public.image and specific formats)
-    if let imageType = types.first(where: { isImageType($0) }) {
+    if let imageType = preferredImageTypes.first(where: { types.contains($0) }) ??
+      types.first(where: { isImageType($0) })
+    {
       if let imageData = item.data(forType: imageType),
          let image = NSImage(data: imageData)
       {
@@ -72,7 +106,7 @@ class InlinePasteboard {
         var sourceURL: URL? = nil
         if types.contains(.fileURL),
            let urlString = item.string(forType: .fileURL),
-           let url = URL(string: urlString)
+           let url = parseFileURL(urlString)
         {
           sourceURL = url
         }
@@ -82,7 +116,7 @@ class InlinePasteboard {
     }
 
     // 5. Check for text
-    if types.contains(.string) {
+    if includeText, types.contains(.string) {
       if let text = item.string(forType: .string) {
         return .text(text)
       }
@@ -124,6 +158,7 @@ class InlinePasteboard {
     let videoTypes: [String] = [
       "public.movie", "public.video", "public.mpeg-4",
       "com.apple.quicktime-movie", "public.avi", "public.3gpp",
+      "video/mp4",
     ]
     return videoTypes.contains(type.rawValue)
   }
@@ -133,6 +168,7 @@ class InlinePasteboard {
       "public.image", "public.png", "public.jpeg", "public.tiff",
       "com.apple.pict", "public.gif", "com.compuserve.gif",
       "public.heic", "public.webp",
+      "image/png", "image/jpeg", "image/gif", "image/webp", "image/heic",
     ]
     return imageTypes.contains(type.rawValue)
   }
@@ -150,21 +186,34 @@ class InlinePasteboard {
   private static func getFileExtension(for type: NSPasteboard.PasteboardType) -> String {
     switch type.rawValue {
       case "public.mpeg-4": "mp4"
+      case "video/mp4": "mp4"
       case "com.apple.quicktime-movie": "mov"
       case "public.png": "png"
+      case "image/png": "png"
       case "public.jpeg": "jpg"
+      case "image/jpeg": "jpg"
       case "public.tiff": "tiff"
       default: "dat"
     }
   }
 
-  private static func createTempFileURL(data: Data, extension ext: String) -> URL {
+  private static func createTempFileURL(data: Data, extension ext: String) throws -> URL {
     let tempDir = FileManager.default.temporaryDirectory
     let fileName = UUID().uuidString + "." + ext
     let url = tempDir.appendingPathComponent(fileName)
 
-    try? data.write(to: url)
+    // Avoid `.atomic` here to prevent doubling write work for large pasteboard payloads.
+    try data.write(to: url)
     return url
+  }
+
+  private static func parseFileURL(_ urlString: String) -> URL? {
+    if urlString.hasPrefix("file://") {
+      return URL(string: urlString)
+    }
+
+    // Some producers provide a path-like string instead of a file URL.
+    return URL(fileURLWithPath: urlString)
   }
 
   private static func generateVideoThumbnail(from url: URL) -> NSImage? {
