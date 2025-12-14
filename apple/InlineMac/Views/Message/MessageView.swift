@@ -9,7 +9,6 @@ import InlineUI
 import Logger
 import Nuke
 import NukeUI
-import SwiftUI
 import TextProcessing
 import Throttler
 import Translation
@@ -355,8 +354,7 @@ class MessageViewAppKit: NSView {
     }
   }()
 
-  private var reactionsViewModel: ReactionsViewModel?
-  private var reactionsView: NSView?
+  private var reactionsView: MessageReactionsView?
 
   // MARK: - Link Detection
 
@@ -454,7 +452,7 @@ class MessageViewAppKit: NSView {
     }
 
     if hasReactions {
-      setupReactions()
+      setupReactions(animate: false)
     }
 
     if hasAttachments {
@@ -513,22 +511,33 @@ class MessageViewAppKit: NSView {
 
   // MARK: - Reactions UI
 
-  private func setupReactions() {
-    // View model
-    reactionsViewModel = ReactionsViewModel(
-      reactions: fullMessage.groupedReactions,
-      offsets: props.layout.reactionItems,
-      fullMessage: fullMessage,
-      width: props.layout.reactions?.size.width ?? 0,
-      height: props.layout.reactions?.size.height ?? 0,
-    )
+  private func clearReactionsConstraints() {
+    let constraintsToDeactivate = [
+      reactionViewWidthConstraint,
+      reactionViewHeightConstraint,
+      reactionViewTopConstraint,
+    ].compactMap { $0 }
+    NSLayoutConstraint.deactivate(constraintsToDeactivate)
 
+    reactionViewWidthConstraint = nil
+    reactionViewHeightConstraint = nil
+    reactionViewTopConstraint = nil
+  }
+
+  private func setupReactions(animate: Bool) {
     if let oldView = reactionsView {
       oldView.removeFromSuperview()
     }
+    clearReactionsConstraints()
 
     // View
-    let view = NSHostingView<ReactionsView>(rootView: ReactionsView(viewModel: reactionsViewModel!))
+    let view = MessageReactionsView()
+    view.update(
+      fullMessage: fullMessage,
+      groups: fullMessage.groupedReactions,
+      layoutItems: props.layout.reactionItems,
+      animate: animate
+    )
     view.translatesAutoresizingMaskIntoConstraints = false
     reactionsView = view
 
@@ -569,18 +578,19 @@ class MessageViewAppKit: NSView {
   }
 
   private func updateReactionsSizes() {
-    // Update
-    reactionsViewModel?.reactions = fullMessage.groupedReactions
-    reactionsViewModel?.offsets = props.layout.reactionItems
-    reactionsViewModel?.width = props.layout.reactions?.size.width ?? 0
-    reactionsViewModel?.height = props.layout.reactions?.size.height ?? 0
+    reactionsView?.update(
+      fullMessage: fullMessage,
+      groups: fullMessage.groupedReactions,
+      layoutItems: props.layout.reactionItems,
+      animate: false
+    )
   }
 
   private func updateReactions(prev _: FullMessage, next: FullMessage, props: MessageViewProps) {
     if reactionsView == nil, next.reactions.count > 0 {
       log.trace("Adding reactions view \(props.layout.reactions)")
       // Added
-      setupReactions()
+      setupReactions(animate: true)
       needsUpdateConstraints = true
       layoutSubtreeIfNeeded()
     } else if reactionsView != nil, next.reactions.count == 0 {
@@ -588,14 +598,15 @@ class MessageViewAppKit: NSView {
       // Remove
       reactionsView?.removeFromSuperview()
       reactionsView = nil
+      clearReactionsConstraints()
     } else {
       log.trace("Updating reactions view")
-      // Update
-      reactionsViewModel?.width = props.layout.reactions?.size.width ?? 0
-      reactionsViewModel?.height = props.layout.reactions?.size.height ?? 0
-      reactionsViewModel?.offsets = props.layout.reactionItems
-      reactionsViewModel?.reactions = next.groupedReactions
-      reactionsViewModel?.fullMessage = next
+      reactionsView?.update(
+        fullMessage: next,
+        groups: next.groupedReactions,
+        layoutItems: props.layout.reactionItems,
+        animate: true
+      )
     }
   }
 
@@ -604,6 +615,7 @@ class MessageViewAppKit: NSView {
     longPressGesture = NSPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
     longPressGesture?.minimumPressDuration = 0.5
     longPressGesture?.allowableMovement = 10
+    longPressGesture?.delegate = self
     if let gesture = longPressGesture {
       addGestureRecognizer(gesture)
     }
@@ -612,6 +624,7 @@ class MessageViewAppKit: NSView {
     doubleClickGesture = NSClickGestureRecognizer(target: self, action: #selector(handleDoubleClick(_:)))
     doubleClickGesture?.numberOfClicksRequired = 2
     doubleClickGesture?.delaysPrimaryMouseButtonEvents = false
+    doubleClickGesture?.delegate = self
     if let gesture = doubleClickGesture {
       addGestureRecognizer(gesture)
     }
@@ -1980,6 +1993,22 @@ extension MessageViewAppKit {
   override func mouseExited(with event: NSEvent) {
     super.mouseExited(with: event)
     updateHoverState(false)
+  }
+}
+
+// MARK: - NSGestureRecognizerDelegate
+
+extension MessageViewAppKit: NSGestureRecognizerDelegate {
+  func gestureRecognizer(_: NSGestureRecognizer, shouldReceive event: NSEvent) -> Bool {
+    guard let reactionsView else { return true }
+
+    let locationInSelf = convert(event.locationInWindow, from: nil)
+    let locationInReactions = reactionsView.convert(locationInSelf, from: self)
+    if reactionsView.bounds.contains(locationInReactions) {
+      return false
+    }
+
+    return true
   }
 }
 

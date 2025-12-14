@@ -763,12 +763,12 @@ class MessageSizeCalculator {
       var reactionsCurrentLine = 0
       var currentLineWidth: CGFloat = 0
 
+      let sortedReactions = ReactionChipOrdering.sortForLayout(message.groupedReactions)
+
       // layout each reaction item
-      for reaction in message.groupedReactions {
+      for reaction in sortedReactions {
         let emoji = reaction.emoji
-        let reactions = reaction.reactions
-        // Get reaction size - this will be replaced with actual calculation later
-        let reactionSize = ReactionItem.size(group: reaction)
+        let reactionSize = ReactionChipMetrics.size(group: reaction)
 
         // Check if we need to move to next line
         if currentLineWidth + reactionSize.width + reactionsSpacing > availableWidth {
