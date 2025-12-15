@@ -10,6 +10,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
   let notificationHandler = NotificationHandler()
   let nav = Navigation()
   let router = NavigationModel<AppTab, Destination, Sheet>(initialTab: .chats)
+  private var protectedDataObserver: NSObjectProtocol?
 
   func application(
     _ application: UIApplication,
@@ -27,6 +28,23 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     Analytics.start()
+
+    // One-time refresh attempt on launch (covers normal unlocked launches).
+    Task {
+      await Auth.shared.refreshFromStorage()
+    }
+
+    // Keychain reads can return `nil` during background/early launch (e.g. notification tap while device locked).
+    // Refresh auth once protected data becomes available and when app becomes active so we can connect without restart.
+    protectedDataObserver = NotificationCenter.default.addObserver(
+      forName: UIApplication.protectedDataDidBecomeAvailableNotification,
+      object: nil,
+      queue: .main
+    ) { _ in
+      Task {
+        await Auth.shared.refreshFromStorage()
+      }
+    }
 
     NotificationCenter.default.addObserver(
       self,
