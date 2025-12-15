@@ -14,6 +14,10 @@ public final class Auth: ObservableObject, @unchecked Sendable {
   private let authManager: AuthManager
   private let lock = NSLock()
 
+  /// True when the current process has observed a token (or determined none is available) at least once after launch.
+  /// Used to distinguish "no token yet" vs "definitely logged out" in callers that want to wait for credential hydration.
+  @Published public private(set) var didHydrateCredentials: Bool = false
+
   // state
   @Published public private(set) var isLoggedIn: Bool
   @Published public private(set) var currentUserId: Int64?
@@ -41,12 +45,14 @@ public final class Auth: ObservableObject, @unchecked Sendable {
       for await isLoggedIn in await authManager.isLoggedIn {
         let newCUID = await authManager.getCurrentUserId()
         let newToken = await authManager.getToken()
+        let didHydrateCredentials = await authManager.getDidHydrateCredentials()
 
         Task { @MainActor in
           self.lock.withLock {
             self.isLoggedIn = isLoggedIn
             self.currentUserId = newCUID
             self.token = newToken
+            self.didHydrateCredentials = didHydrateCredentials
           }
         }
 
@@ -57,7 +63,11 @@ public final class Auth: ObservableObject, @unchecked Sendable {
               token: token
             ))
           } else {
-            log.warning("Auth published logged in without credentials; skipping login event")
+            // This is a key signal for diagnosing "app looks logged-in but can't connect" issues.
+            // Do not log the token itself (sensitive).
+            log.warning(
+              "AUTH_LOGGED_IN_WITHOUT_CREDENTIALS userIdPresent=\(newCUID != nil ? 1 : 0) tokenPresent=\(newToken != nil ? 1 : 0)"
+            )
           }
         } else {
           await events.send(.logout)
@@ -113,20 +123,32 @@ public final class Auth: ObservableObject, @unchecked Sendable {
       isLoggedIn = false
       currentUserId = nil
       token = nil
+      didHydrateCredentials = true
     }
     await authManager.logOut()
+    await update()
+  }
+
+  /// Re-reads token/userId from persistent storage (keychain + user defaults) and publishes updated state.
+  ///
+  /// This is primarily used to recover from iOS early-launch / background launches where keychain reads can
+  /// transiently return `nil` (e.g. protected data unavailable).
+  public func refreshFromStorage() async {
+    await authManager.reloadFromStorage()
     await update()
   }
 
   private func update() async {
     let newCUID = await authManager.getCurrentUserId()
     let newToken = await authManager.getToken()
+    let didHydrateCredentials = await authManager.getDidHydrateCredentials()
 
     let task = Task { @MainActor in
       self.lock.withLock {
         self.currentUserId = newCUID
         self.token = newToken
         self.isLoggedIn = newCUID != nil
+        self.didHydrateCredentials = didHydrateCredentials
       }
     }
     await task.value
@@ -155,6 +177,8 @@ actor AuthManager: Sendable {
   private var cachedUserId: Int64?
   private var cachedToken: String?
   private var userDefaultsKey: String
+  private var didHydrateCredentials: Bool = false
+  private var didLogMissingTokenForLoggedInUser: Bool = false
 
   // config
   private var accessGroup: String
@@ -208,6 +232,13 @@ actor AuthManager: Sendable {
     // load
     cachedToken = keychain.get("token")
     cachedUserId = Self.readUserId(key: userDefaultsKey)
+    didHydrateCredentials = true
+    if cachedUserId != nil, cachedToken == nil {
+      // Captured to Sentry as a warning so we can monitor how often this happens in production.
+      // Usually indicates keychain / protected data unavailable during early/background launch.
+      log.warning("AUTH_TOKEN_MISSING_FOR_LOGGED_IN_USER phase=init userIdPresent=1 tokenPresent=0")
+      didLogMissingTokenForLoggedInUser = true
+    }
 
     // set initial values
     initialToken = cachedToken
@@ -217,6 +248,7 @@ actor AuthManager: Sendable {
 
     Task {
       await self.updateLoginStatus()
+      // Try to recover token/userId if keychain was temporarily unavailable during init.
       await self.refreshKeychainAfterLaunch()
     }
   }
@@ -240,6 +272,7 @@ actor AuthManager: Sendable {
       cachedUserId = nil
       keychain.clear()
     }
+    didHydrateCredentials = true
 
     // set initial values
     initialToken = cachedToken
@@ -253,12 +286,16 @@ actor AuthManager: Sendable {
 
   func saveCredentials(token: String, userId: Int64) async {
     // persist
-    keychain.set(token, forKey: "token")
+    // Use after-first-unlock so background launches (e.g. notification taps / background fetch) can read the token.
+    // Without this, keychain reads may return `nil` in those launches, leaving the app "logged in" without a token.
+    keychain.set(token, forKey: "token", withAccess: .accessibleAfterFirstUnlock)
     Self.writeUserId(userId, key: userDefaultsKey)
 
     // cache
     cachedToken = token
     cachedUserId = userId
+    didHydrateCredentials = true
+    didLogMissingTokenForLoggedInUser = false
 
     // publish
     await updateLoginStatus()
@@ -272,6 +309,10 @@ actor AuthManager: Sendable {
     cachedUserId
   }
 
+  func getDidHydrateCredentials() -> Bool {
+    didHydrateCredentials
+  }
+
   func logOut() async {
     // persist
     keychain.delete("token")
@@ -280,27 +321,21 @@ actor AuthManager: Sendable {
     // cache
     cachedToken = nil
     cachedUserId = nil
+    didHydrateCredentials = true
+    didLogMissingTokenForLoggedInUser = false
 
     // publish
     await updateLoginStatus()
   }
 
-  private func updateLoginStatus() async {
-    let loggedIn = cachedUserId != nil
-
-    // Use Task to make this non-blocking
-    Task {
-      await isLoggedIn.send(loggedIn)
-    }
-  }
-
-  /// Keychain can be unavailable right at startup; re-read after a brief delay so token is picked up.
-  private func refreshKeychainAfterLaunch() async {
-    // Small delay to allow the shared keychain container to become available.
-    try? await Task.sleep(nanoseconds: 100_000_000)
-
+  /// Re-read keychain + user defaults and update caches.
+  ///
+  /// This is safe to call repeatedly; it only publishes if values change.
+  func reloadFromStorage() async {
     let refreshedToken = keychain.get("token")
     let refreshedUserId = Self.readUserId(key: userDefaultsKey)
+
+    didHydrateCredentials = true
 
     var changed = false
 
@@ -314,9 +349,38 @@ actor AuthManager: Sendable {
       changed = true
     }
 
+    // If we can read a token, re-save it with after-first-unlock accessibility to prevent future background failures.
+    if let token = refreshedToken {
+      _ = keychain.set(token, forKey: "token", withAccess: .accessibleAfterFirstUnlock)
+      didLogMissingTokenForLoggedInUser = false
+    } else if refreshedUserId != nil, !didLogMissingTokenForLoggedInUser {
+      // Only log once per "missing token while logged in" episode to avoid spamming Sentry.
+      log.warning("AUTH_TOKEN_MISSING_FOR_LOGGED_IN_USER phase=reload userIdPresent=1 tokenPresent=0")
+      didLogMissingTokenForLoggedInUser = true
+    }
+
     if changed {
       await updateLoginStatus()
     }
+  }
+
+  private func updateLoginStatus() async {
+    let loggedIn = cachedUserId != nil
+
+    // Use Task to make this non-blocking
+    Task {
+      await isLoggedIn.send(loggedIn)
+    }
+  }
+
+  /// Keychain can be unavailable right at startup; re-read after a brief delay so token is picked up.
+  private func refreshKeychainAfterLaunch() async {
+    // Keep this simple: a single delayed re-read handles common "keychain not ready at init" cases.
+    // Longer recovery (e.g. device unlock after background notification launch) is handled by the iOS app hook
+    // calling `Auth.refreshFromStorage()` on protected-data availability.
+    guard cachedUserId != nil, cachedToken == nil else { return }
+    try? await Task.sleep(nanoseconds: 300_000_000) // 0.3s
+    await reloadFromStorage()
   }
 
   private static func readUserId(key: String) -> Int64? {
