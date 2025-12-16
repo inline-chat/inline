@@ -34,10 +34,15 @@ public struct ChatParticipant: Codable, FetchableRecord, PersistableRecord {
 }
 
 public extension ChatParticipant {
+  // TODO: Fix server to consistently send seconds, then remove this milliseconds workaround.
+  // See also: Reaction.swift which has the same defensive check.
   init(from: InlineProtocol.ChatParticipant, chatId: Int64) {
     self.chatId = chatId
     userId = from.userID
-    date = Date(timeIntervalSince1970: TimeInterval(from.date))
+    // Handle both seconds and milliseconds timestamps
+    date = from.date > 1_000_000_000_000
+      ? Date(timeIntervalSince1970: TimeInterval(from.date) / 1_000)
+      : Date(timeIntervalSince1970: TimeInterval(from.date))
   }
 
   static func save(_ db: Database, from: InlineProtocol.ChatParticipant, chatId: Int64) {
