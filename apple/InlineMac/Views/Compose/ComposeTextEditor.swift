@@ -125,7 +125,14 @@ class ComposeTextEditor: NSView {
     textView.isVerticallyResizable = true
     textView.autoresizingMask = [.width]
     textView.isHorizontallyResizable = false
+    // TODO(@Mo): Replace AppKit automatic link detection with Inline link detection so compose never shows
+    // data-detector styling for non-URL content (phone numbers, dates, etc).
     textView.isAutomaticLinkDetectionEnabled = true
+    // We don't underline links (including in compose).
+    textView.linkTextAttributes = [
+      .foregroundColor: linkColor,
+      .underlineStyle: 0,
+    ]
 
     // Enables paste command for NSImages from clipboard
     textView.importsGraphics = true
@@ -284,6 +291,7 @@ class ComposeTextEditor: NSView {
   func clear() {
     let emptyAttributedString = createEmptyAttributedString()
     replaceAttributedString(emptyAttributedString)
+    resetFormattingState()
     showPlaceholder(true)
   }
 
@@ -355,6 +363,18 @@ class ComposeTextEditor: NSView {
       textView.setNeedsDisplay(textView.bounds)
     }
   }
+
+  private func resetFormattingState() {
+    textView.setSelectedRange(NSRange(location: 0, length: 0))
+    textView.font = font
+    textView.textColor = textColor
+    textView.typingAttributes = [
+      .paragraphStyle: paragraphStyle,
+      .font: font,
+      .foregroundColor: textColor,
+      .underlineStyle: 0,
+    ]
+  }
 }
 
 // MARK: - NSTextView Extensions for Attributed String Helpers
@@ -363,8 +383,11 @@ extension NSTextView {
   /// Default attributes for this text view
   var defaultTypingAttributes: [NSAttributedString.Key: Any] {
     [
-      .font: font ?? NSFont.preferredFont(forTextStyle: .body),
+      // Use a stable base font instead of `self.font` (which can be mutated by the text system based on
+      // selection/paste), otherwise resets can accidentally "lock in" monospace after pasting code blocks.
+      .font: ComposeTextEditor.font,
       .foregroundColor: NSColor.labelColor,
+      .underlineStyle: 0,
     ]
   }
 
@@ -385,23 +408,18 @@ extension NSTextView {
       (currentTypingAttributes[.foregroundColor] as? NSColor) == NSColor.systemBlue
   }
 
-  /// Check if cursor is positioned within a code block (inline or pre)
-  var isCursorInCodeBlock: Bool {
-    let selectedRange = selectedRange()
-    guard selectedRange.length == 0,
-          selectedRange.location > 0,
-          selectedRange.location <= attributedString().length else { return false }
-
-    let checkPosition = selectedRange.location - 1
-    guard checkPosition >= 0, checkPosition < attributedString().length else { return false }
-
-    let attributes = attributedString().attributes(at: checkPosition, effectiveRange: nil)
-    return ProcessEntities.isCursorInCodeBlock(attributes: attributes)
-  }
-
   /// Reset typing attributes to default to prevent mention style leakage
   func resetTypingAttributesToDefault() {
-    typingAttributes = defaultTypingAttributes
+    // Keep base font stable; AppKit may mutate `NSTextView.font` based on selection/paste contents.
+    font = ComposeTextEditor.font
+    textColor = NSColor.labelColor
+
+    var attributes = defaultTypingAttributes
+    if let paragraphStyle = typingAttributes[.paragraphStyle] {
+      attributes[.paragraphStyle] = paragraphStyle
+    }
+    attributes[.underlineStyle] = 0
+    typingAttributes = attributes
   }
 
   /// Update typing attributes based on cursor position to prevent style leakage
