@@ -1064,7 +1064,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = InlineMac/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Inline;
+				INFOPLIST_KEY_CFBundleDisplayName = "Inline Dev";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Inline uses camera when you choose to capture and send in a chat.";
