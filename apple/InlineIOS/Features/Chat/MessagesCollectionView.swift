@@ -833,8 +833,11 @@ private extension MessagesCollectionView {
     }
 
     func updateUnreadIfNeeded() {
-      // Only mark as read when the chat is actually on-screen.
-      guard let collectionView = currentCollectionView, collectionView.window != nil else {
+      // Only mark as read when the chat is actually on-screen and app is in foreground.
+      guard let collectionView = currentCollectionView,
+            collectionView.window != nil,
+            UIApplication.shared.applicationState == .active
+      else {
         return
       }
       UnreadManager.shared.readAll(peerId, chatId: chatId)
