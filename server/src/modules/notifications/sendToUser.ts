@@ -1,5 +1,6 @@
 import { SessionsModel } from "@in/server/db/models/sessions"
 import { getApnProvider } from "@in/server/libs/apn"
+import { isSuppressedApnFailure, shouldInvalidateTokenForApnFailure, summarizeApnFailure } from "@in/server/libs/apnFailures"
 import { Log } from "@in/server/utils/log"
 import { Notification } from "apn"
 import { configureAlertNotification, configureBackgroundNotification, iOSTopic, isIOSPushSession } from "./utils"
@@ -159,11 +160,34 @@ export const sendPushNotificationToUser = async ({ userId, payload }: SendPushTo
         try {
           const result = await apnProvider.send(notification, session.applePushToken)
           if (result.failed.length > 0) {
-            log.error("Failed to send push notification", {
-              errors: result.failed.map((f) => f.response),
-              userId,
-              threadId: payload.threadId,
-            })
+            const summaries = result.failed.map((failure) => summarizeApnFailure(failure))
+            const suppressed = summaries.filter((s) => isSuppressedApnFailure(s))
+            const important = summaries.filter((s) => !isSuppressedApnFailure(s))
+
+            if (important.length) {
+              log.warn("Failed to send push notification", {
+                failures: important,
+                suppressedFailureCount: suppressed.length,
+                userId,
+                sessionId: session.id,
+                threadId: payload.threadId,
+              })
+            } else {
+              log.debug("Failed to send push notification (expected)", {
+                failures: suppressed,
+                userId,
+                sessionId: session.id,
+                threadId: payload.threadId,
+              })
+            }
+
+            if (summaries.some((s) => shouldInvalidateTokenForApnFailure(s))) {
+              try {
+                await SessionsModel.clearApplePushToken(session.id)
+              } catch (error) {
+                log.debug("Failed to clear invalid push token", { error, userId, sessionId: session.id })
+              }
+            }
           } else {
             log.debug("Push notification sent successfully", {
               userId,

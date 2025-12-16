@@ -178,6 +178,22 @@ export class SessionsModel {
       .where(eq(sessions.id, id))
   }
 
+  static async clearApplePushToken(id: number): Promise<void> {
+    if (!id || id <= 0) {
+      throw new Error("Invalid session ID")
+    }
+
+    await db
+      .update(sessions)
+      .set({
+        applePushToken: null,
+        applePushTokenEncrypted: null,
+        applePushTokenIv: null,
+        applePushTokenTag: null,
+      })
+      .where(eq(sessions.id, id))
+  }
+
   // Revoke a session
   static async revoke(id: number): Promise<void> {
     if (!id || id <= 0) {
