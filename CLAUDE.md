@@ -15,11 +15,11 @@ inline/
 └── scripts/            # Build scripts
 ```
 
-| Platform | Stack |
-|----------|-------|
-| Backend | Bun, PostgreSQL/Drizzle, Elysia (REST), WebSocket RPC, Protocol Buffers |
-| Apple | Swift 6, SwiftUI/UIKit/AppKit hybrid, GRDB/SQLite, async/await |
-| Web | React Router v7, Tailwind CSS, Vite |
+| Platform | Stack                                                                   |
+| -------- | ----------------------------------------------------------------------- |
+| Backend  | Bun, PostgreSQL/Drizzle, Elysia (REST), WebSocket RPC, Protocol Buffers |
+| Apple    | Swift 6, SwiftUI/UIKit/AppKit hybrid, GRDB/SQLite, async/await          |
+| Web      | React Router v7, Tailwind CSS, Vite                                     |
 
 Key paths: `server/src/functions/` (business logic), `server/src/realtime/handlers/` (RPC handlers), `server/src/db/schema/` (Drizzle schemas), `apple/InlineKit/Sources/InlineKit/Models/` (GRDB models), `proto/core.proto` (protocol definitions)
 
@@ -111,7 +111,10 @@ Make atomic commits: one feature, bug fix, or refactor per commit. This makes hi
 Format: `platform: description` (e.g., `macos: fix navbar`, `api: add endpoint`). Use lowercase.
 
 Commit only files you touched with explicit paths:
+
 - Tracked files: `git commit -m "msg" -- path/to/file1 path/to/file2`
 - New files: `git restore --staged :/ && git add "file1" "file2" && git commit -m "msg" -- file1 file2`
 
 Quote paths containing brackets or parentheses so the shell doesn't interpret them as globs. Only amend commits with explicit approval since it rewrites history.
+
+Do not add yourself (Claude/Opus) as the coauthor.
