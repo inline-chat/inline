@@ -74,6 +74,36 @@ public class ProcessEntities {
       }
 
       switch entity.type {
+        case .url:
+          // URL is the text itself
+          let urlText = (text as NSString).substring(with: range)
+          var attributes: [NSAttributedString.Key: Any] = [
+            .foregroundColor: configuration.linkColor,
+            .link: urlText,
+            .underlineStyle: 0,
+          ]
+
+          #if os(macOS)
+          attributes[.cursor] = NSCursor.pointingHand
+          #endif
+
+          attributedString.addAttributes(attributes, range: range)
+
+        case .textURL:
+          if case let .textURL(textURL) = entity.entity {
+            var attributes: [NSAttributedString.Key: Any] = [
+              .foregroundColor: configuration.linkColor,
+              .link: textURL.url,
+              .underlineStyle: 0,
+            ]
+
+            #if os(macOS)
+            attributes[.cursor] = NSCursor.pointingHand
+            #endif
+
+            attributedString.addAttributes(attributes, range: range)
+          }
+
         case .mention:
           if case let .mention(mention) = entity.entity {
             if configuration.convertMentionsToLink {
@@ -81,6 +111,7 @@ public class ProcessEntities {
                 .mentionUserId: mention.userID,
                 .foregroundColor: configuration.linkColor,
                 .link: "inline://user/\(mention.userID)", // Custom URL scheme for mentions
+                .underlineStyle: 0,
               ]
 
               #if os(macOS)
@@ -163,6 +194,52 @@ public class ProcessEntities {
       }
     }
 
+    // Extract link entities (excluding mention links).
+    attributedString.enumerateAttribute(
+      .link,
+      in: fullRange,
+      options: []
+    ) { value, range, _ in
+      guard range.location != NSNotFound, range.length > 0 else { return }
+
+      // Skip if this range is a mention; mention extraction is authoritative.
+      let attributesAtLocation = attributedString.attributes(at: range.location, effectiveRange: nil)
+      if attributesAtLocation[.mentionUserId] != nil {
+        return
+      }
+
+      let urlString: String? = {
+        if let url = value as? URL { return url.absoluteString }
+        if let str = value as? String { return str }
+        return nil
+      }()
+
+      guard let urlString, !urlString.isEmpty else { return }
+
+      // Ignore data-detector / non-web link targets (we only support actual URLs as entities).
+      guard isAllowedExternalLink(urlString) else { return }
+
+      let rangeText = (attributedString.string as NSString).substring(with: range)
+
+      // Prefer URL entity when the visible text is the URL itself; otherwise use text_url.
+      if rangeText == urlString {
+        var entity = MessageEntity()
+        entity.type = .url
+        entity.offset = Int64(range.location)
+        entity.length = Int64(range.length)
+        entities.append(entity)
+      } else {
+        var entity = MessageEntity()
+        entity.type = .textURL
+        entity.offset = Int64(range.location)
+        entity.length = Int64(range.length)
+        entity.textURL = MessageEntity.MessageEntityTextUrl.with {
+          $0.url = urlString
+        }
+        entities.append(entity)
+      }
+    }
+
     // Extract inline code entities from custom attribute
     attributedString.enumerateAttribute(
       .inlineCode,
@@ -192,8 +269,6 @@ public class ProcessEntities {
         entities.append(entity)
       }
     }
-
-    // Note: Only rely on explicit .preCode and .inlineCode attributes for deterministic entity creation
 
     // Extract italic entities from font attributes (only if no custom italic attribute exists)
     attributedString.enumerateAttribute(
@@ -284,6 +359,15 @@ public class ProcessEntities {
     messageEntities.entities = entities
 
     return (text: text, entities: messageEntities)
+  }
+
+  private static let allowedExternalLinkSchemes: Set<String> = ["http", "https", "mailto"]
+
+  private static func isAllowedExternalLink(_ urlString: String) -> Bool {
+    guard let url = URL(string: urlString),
+          let scheme = url.scheme?.lowercased()
+    else { return false }
+    return allowedExternalLinkSchemes.contains(scheme)
   }
 
   // MARK: - Helper Methods

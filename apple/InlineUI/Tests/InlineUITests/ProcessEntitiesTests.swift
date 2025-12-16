@@ -153,6 +153,42 @@ struct ProcessEntitiesTests {
     #expect(isBold == true)
   }
 
+  @Test("URL and text_url entities apply link attributes")
+  func testURLAndTextURLEntities() {
+    let text = "Go to https://example.com and docs"
+
+    let urlRange = rangeOfSubstring("https://example.com", in: text)
+    var urlEntity = MessageEntity()
+    urlEntity.type = .url
+    urlEntity.offset = Int64(urlRange.location)
+    urlEntity.length = Int64(urlRange.length)
+
+    let docsRange = rangeOfSubstring("docs", in: text)
+    var textUrlEntity = MessageEntity()
+    textUrlEntity.type = .textURL
+    textUrlEntity.offset = Int64(docsRange.location)
+    textUrlEntity.length = Int64(docsRange.length)
+    textUrlEntity.textURL = MessageEntity.MessageEntityTextUrl.with {
+      $0.url = "https://docs.example.com"
+    }
+
+    let entities = createMessageEntities([urlEntity, textUrlEntity])
+
+    let result = ProcessEntities.toAttributedString(
+      text: text,
+      entities: entities,
+      configuration: testConfiguration
+    )
+
+    let urlAttributes = result.attributes(at: urlRange.location, effectiveRange: nil)
+    #expect(urlAttributes[.foregroundColor] as? PlatformColor == testConfiguration.linkColor)
+    #expect(urlAttributes[.link] as? String == "https://example.com")
+
+    let textUrlAttributes = result.attributes(at: docsRange.location, effectiveRange: nil)
+    #expect(textUrlAttributes[.foregroundColor] as? PlatformColor == testConfiguration.linkColor)
+    #expect(textUrlAttributes[.link] as? String == "https://docs.example.com")
+  }
+
   @Test("Italic text")
   func testItalicText() {
     let text = "This is italic text"
@@ -421,6 +457,67 @@ struct ProcessEntitiesTests {
     #expect(entity.offset == 6)
     #expect(entity.length == 5)
     #expect(entity.mention.userID == 123)
+  }
+
+  @Test("Ignore non-web link targets (e.g. data detectors)")
+  func testIgnoreNonWebLinkTargets() {
+    let text = "Call me"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let range = NSRange(location: 0, length: (text as NSString).length)
+    attributedString.addAttribute(.link, value: "x-apple-data-detectors://0", range: range)
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+    #expect(result.text == text)
+    #expect(result.entities.entities.isEmpty == true)
+  }
+
+  @Test("Extract text_url from attributed string link attribute")
+  func testExtractTextURLFromAttributedString() {
+    let text = "Inline"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let range = NSRange(location: 0, length: (text as NSString).length)
+    attributedString.addAttribute(.link, value: "https://example.com", range: range)
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+
+    #expect(result.text == text)
+    #expect(result.entities.entities.count == 1)
+
+    let entity = result.entities.entities[0]
+    #expect(entity.type == .textURL)
+    #expect(entity.offset == 0)
+    #expect(entity.length == Int64(range.length))
+    #expect(entity.textURL.url == "https://example.com")
+  }
+
+  @Test("Extract url from attributed string when visible text matches target")
+  func testExtractURLFromAttributedString() {
+    let urlText = "https://example.com"
+    let attributedString = NSMutableAttributedString(
+      string: urlText,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let range = NSRange(location: 0, length: (urlText as NSString).length)
+    attributedString.addAttribute(.link, value: urlText, range: range)
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+
+    #expect(result.text == urlText)
+    #expect(result.entities.entities.count == 1)
+
+    let entity = result.entities.entities[0]
+    #expect(entity.type == .url)
+    #expect(entity.offset == 0)
+    #expect(entity.length == Int64(range.length))
   }
 
   @Test("Extract bold from attributed string")
