@@ -968,9 +968,9 @@ class ComposeAppKit: NSView {
       return
     }
 
-    // Otherwise, perform a native plain-text paste (undo/selection/IME friendly).
+    // Otherwise, perform a native plain-text paste (ComposeNSTextView disables rich paste for reliability).
     focus()
-    textEditor.textView.pasteAsPlainText(nil)
+    textEditor.textView.paste(nil)
   }
 
   deinit {
