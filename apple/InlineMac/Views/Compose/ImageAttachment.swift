@@ -100,10 +100,18 @@ class ImageAttachmentView: NSView, QLPreviewItem {
   }
 
   @objc private func copyImage() {
-    guard let image = imageView.image else { return }
+    guard let image = imageView.image else {
+      Task { @MainActor in
+        ToastCenter.shared.showError("Failed to copy image")
+      }
+      return
+    }
     let pasteboard = NSPasteboard.general
     pasteboard.clearContents()
     pasteboard.writeObjects([image])
+    Task { @MainActor in
+      ToastCenter.shared.showSuccess("Copied image")
+    }
   }
 
   // Override keyDown to handle delete key

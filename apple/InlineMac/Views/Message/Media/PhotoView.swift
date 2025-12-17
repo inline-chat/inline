@@ -410,14 +410,27 @@ extension PhotoView: NSDraggingSource {
 
 extension PhotoView {
   @objc func copyImage() {
-    guard let image = imageView.image else { return }
+    guard let image = imageView.image else {
+      Task { @MainActor in
+        ToastCenter.shared.showError("Failed to copy image")
+      }
+      return
+    }
     let pasteboard = NSPasteboard.general
     pasteboard.clearContents()
     pasteboard.writeObjects([image])
+    Task { @MainActor in
+      ToastCenter.shared.showSuccess("Copied image")
+    }
   }
 
   @objc func saveImage() {
-    guard let image = imageView.image else { return }
+    guard imageView.image != nil else {
+      Task { @MainActor in
+        ToastCenter.shared.showError("Failed to save image")
+      }
+      return
+    }
     let savePanel = NSSavePanel()
     savePanel.allowedContentTypes = [.png, .jpeg]
     savePanel.nameFieldStringValue = fullMessage.file?.fileName ?? "image"
@@ -425,11 +438,34 @@ extension PhotoView {
       guard response == .OK, let url = savePanel.url else { return }
 
       // copy it from local url
-      guard let (_, localUrl) = self.imageUrl() else { return }
+      guard let (isLocal, localUrl) = self.imageUrl() else {
+        Task { @MainActor in
+          ToastCenter.shared.showError("Image isn’t available")
+        }
+        return
+      }
+      guard isLocal else {
+        Task { @MainActor in
+          ToastCenter.shared.showError("Image isn’t downloaded yet")
+        }
+        return
+      }
       do {
-        try FileManager.default.copyItem(at: localUrl, to: url)
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: url.path) {
+          try fileManager.removeItem(at: url)
+        }
+        try fileManager.copyItem(at: localUrl, to: url)
+        Task { @MainActor in
+          ToastCenter.shared.showSuccess("Image saved", actionTitle: "Show") {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+          }
+        }
       } catch {
         Log.shared.error("Failed to save image: \(error)")
+        Task { @MainActor in
+          ToastCenter.shared.showError("Failed to save image")
+        }
       }
     }
   }

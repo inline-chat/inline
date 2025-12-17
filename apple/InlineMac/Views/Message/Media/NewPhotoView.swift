@@ -570,7 +570,12 @@ extension NewPhotoView {
       let tiff = image.tiffRepresentation,
       let bitmap = NSBitmapImageRep(data: tiff),
       let png = bitmap.representation(using: .png, properties: [:])
-    else { return }
+    else {
+      Task { @MainActor in
+        ToastCenter.shared.showError("Failed to copy image")
+      }
+      return
+    }
 
     let jpeg = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 1.0])
 
@@ -583,6 +588,9 @@ extension NewPhotoView {
       try png.write(to: tempURL)
     } catch {
       Log.shared.error("Failed to write temp image for pasteboard: \(error)")
+      Task { @MainActor in
+        ToastCenter.shared.showError("Failed to copy image")
+      }
       return
     }
 
@@ -598,10 +606,19 @@ extension NewPhotoView {
     let pasteboard = NSPasteboard.general
     pasteboard.clearContents()
     pasteboard.writeObjects([item])
+
+    Task { @MainActor in
+      ToastCenter.shared.showSuccess("Copied image")
+    }
   }
 
   @objc func saveImage() {
-    guard currentImage != nil else { return }
+    guard currentImage != nil else {
+      Task { @MainActor in
+        ToastCenter.shared.showError("Failed to save image")
+      }
+      return
+    }
     let savePanel = NSSavePanel()
     savePanel.allowedContentTypes = [.png, .jpeg]
     // Prefer original filename, otherwise generate a unique one to avoid overwriting.
@@ -620,11 +637,28 @@ extension NewPhotoView {
       guard response == .OK, let url = savePanel.url else { return }
 
       // copy it from local url
-      guard let localUrl = self.imageLocalUrl() else { return }
+      guard let localUrl = self.imageLocalUrl() else {
+        Task { @MainActor in
+          ToastCenter.shared.showError("Image isn’t downloaded yet")
+        }
+        return
+      }
       do {
-        try FileManager.default.copyItem(at: localUrl, to: url)
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: url.path) {
+          try fileManager.removeItem(at: url)
+        }
+        try fileManager.copyItem(at: localUrl, to: url)
+        Task { @MainActor in
+          ToastCenter.shared.showSuccess("Image saved", actionTitle: "Show") {
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+          }
+        }
       } catch {
         Log.shared.error("Failed to save image: \(error)")
+        Task { @MainActor in
+          ToastCenter.shared.showError("Failed to save image")
+        }
       }
     }
   }
