@@ -1,8 +1,8 @@
 {
   "fill" : {
     "linear-gradient" : [
-      "display-p3:0.97146,0.97146,0.97146,1.00000",
-      "display-p3:0.74477,0.78577,0.80277,1.00000"
+      "display-p3:0.98039,0.98039,1.00000,1.00000",
+      "display-p3:0.91373,0.91373,0.92157,1.00000"
     ]
   },
   "groups" : [
@@ -29,7 +29,7 @@
             {
               "idiom" : "square",
               "value" : {
-                "scale" : 0.57,
+                "scale" : 0.6,
                 "translation-in-points" : [
                   0,
                   0
@@ -48,7 +48,7 @@
         {
           "value" : {
             "enabled" : true,
-            "value" : 0.5
+            "value" : 0.4
           }
         },
         {
