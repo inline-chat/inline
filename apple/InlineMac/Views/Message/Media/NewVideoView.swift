@@ -996,7 +996,9 @@ extension NewVideoView {
             self.copyVideo(from: localUrl, to: destinationURL)
           case let .failure(error):
             Log.shared.error("Failed to download video for saving", error: error)
-            self.presentAlert(title: "Download Failed", message: error.localizedDescription)
+            Task { @MainActor in
+              ToastCenter.shared.showError("Failed to download video")
+            }
           }
         }
       }
@@ -1011,23 +1013,15 @@ extension NewVideoView {
       }
 
       try FileManager.default.copyItem(at: source, to: destinationURL)
-      presentAlert(
-        title: "Saved Video",
-        message: "Video saved to \(destinationURL.lastPathComponent)"
-      )
+      Task { @MainActor in
+        ToastCenter.shared.showSuccess("Video saved")
+      }
       NSWorkspace.shared.activateFileViewerSelecting([destinationURL])
     } catch {
       Log.shared.error("Failed to save video", error: error)
-      presentAlert(title: "Save Failed", message: error.localizedDescription)
+      Task { @MainActor in
+        ToastCenter.shared.showError("Failed to save video")
+      }
     }
-  }
-
-  func presentAlert(title: String, message: String) {
-    guard let window else { return }
-    let alert = NSAlert()
-    alert.messageText = title
-    alert.informativeText = message
-    alert.alertStyle = .informational
-    alert.beginSheetModal(for: window, completionHandler: nil)
   }
 }

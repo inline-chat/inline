@@ -1458,11 +1458,23 @@ class MessageViewAppKit: NSView {
 
   @objc private func saveDocument() {
     guard let documentInfo = fullMessage.documentInfo else { return }
+    guard let window else { return }
 
     // Get the source file URL
     let cacheDirectory = FileHelpers.getLocalCacheDirectory(for: .documents)
-    guard let localPath = documentInfo.document.localPath else { return }
+    guard let localPath = documentInfo.document.localPath else {
+      Task { @MainActor in
+        ToastCenter.shared.showError("File isn’t available")
+      }
+      return
+    }
     let sourceURL = cacheDirectory.appendingPathComponent(localPath)
+    guard FileManager.default.fileExists(atPath: sourceURL.path) else {
+      Task { @MainActor in
+        ToastCenter.shared.showError("File isn’t downloaded yet")
+      }
+      return
+    }
 
     // Get the Downloads directory
     let fileManager = FileManager.default
@@ -1477,13 +1489,22 @@ class MessageViewAppKit: NSView {
     savePanel.directoryURL = downloadsURL
     savePanel.canCreateDirectories = true
 
-    savePanel.beginSheetModal(for: window!) { response in
+    savePanel.beginSheetModal(for: window) { [weak self] response in
       if response == .OK, let destinationURL = savePanel.url {
         do {
+          if fileManager.fileExists(atPath: destinationURL.path) {
+            try fileManager.removeItem(at: destinationURL)
+          }
           try fileManager.copyItem(at: sourceURL, to: destinationURL)
+          Task { @MainActor in
+            ToastCenter.shared.showSuccess("File saved")
+          }
           NSWorkspace.shared.activateFileViewerSelecting([destinationURL])
         } catch {
-          print("Error saving document: \(error)")
+          self?.log.error("Error saving document", error: error)
+          Task { @MainActor in
+            ToastCenter.shared.showError("Failed to save file")
+          }
         }
       }
     }
