@@ -34,7 +34,7 @@
             {
               "idiom" : "square",
               "value" : {
-                "scale" : 0.6,
+                "scale" : 0.58,
                 "translation-in-points" : [
                   0,
                   0
@@ -54,7 +54,7 @@
         {
           "value" : {
             "enabled" : true,
-            "value" : 0.35
+            "value" : 0.4
           }
         },
         {
