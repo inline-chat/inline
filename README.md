@@ -1,7 +1,7 @@
 <!-- LOGO -->
 <h1>
 <p align="center">
-  <img src="https://assets-cdn.noor.to/inline/GitHub%20Readme.png" alt="Logo" width="128" />
+  <img src="https://assets-cdn.noor.to/inline/AppIcon-medium.png" alt="Logo" width="86" />
   <br>Inline
 </h1>
   <p align="center">
