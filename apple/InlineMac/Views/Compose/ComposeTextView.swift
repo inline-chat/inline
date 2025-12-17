@@ -1,5 +1,6 @@
 import AppKit
 import InlineKit
+import TextProcessing
 
 protocol ComposeTextViewDelegate: NSTextViewDelegate {
   func textViewDidPressReturn(_ textView: NSTextView) -> Bool
@@ -21,6 +22,12 @@ protocol ComposeTextViewDelegate: NSTextViewDelegate {
 }
 
 class ComposeNSTextView: NSTextView {
+  // MARK: - Rich Text Configuration
+
+  /// When true, preserves rich text formatting (bold, italic, links, headings).
+  /// When false, falls back to plain text paste (legacy behavior).
+  var richTextPasteEnabled: Bool = true
+
   override func keyDown(with event: NSEvent) {
     // Handle return key
     if event.keyCode == 36 {
@@ -136,15 +143,88 @@ class ComposeNSTextView: NSTextView {
       return
     }
 
-    // Note(@Mo) Important: Temporarily disable rich-text paste entirely. We still rely on AppKit's native
-    // plain-text paste pipeline for correct undo/redo, IME behavior, and selection handling, but we do not
-    // allow any clipboard-provided styling to enter the compose view while we stabilize edge cases.
+    // Rich text paste mode: preserve formatting (bold, italic, links, headings).
+    if richTextPasteEnabled,
+       let attributed = readAttributedTextFromPasteboard(),
+       pasteWithSanitizedRichText(attributed)
+    {
+      return
+    }
+
+    // Fallback to plain text paste for correct undo/redo, IME, and selection handling.
     resetTypingAttributesToDefault()
     super.pasteAsPlainText(sender)
     resetTypingAttributesToDefault()
     DispatchQueue.main.async { [weak self] in
       self?.resetTypingAttributesToDefault()
     }
+  }
+
+  // MARK: - Rich Text Paste
+
+  private func readAttributedTextFromPasteboard() -> NSAttributedString? {
+    let pasteboard = NSPasteboard.general
+
+    // Try RTFD first (richest format), then HTML, then RTF.
+    let richTypes: [(NSPasteboard.PasteboardType, NSAttributedString.DocumentType)] = [
+      (.rtfd, .rtfd),
+      (.html, .html),
+      (.rtf, .rtf),
+    ]
+
+    for (pasteType, docType) in richTypes {
+      guard pasteboard.availableType(from: [pasteType]) == pasteType,
+            let data = pasteboard.data(forType: pasteType)
+      else { continue }
+
+      var options: [NSAttributedString.DocumentReadingOptionKey: Any] = [
+        .documentType: docType,
+      ]
+      if pasteType == .html {
+        options[.characterEncoding] = String.Encoding.utf8.rawValue
+      }
+
+      if let attributed = try? NSAttributedString(data: data, options: options, documentAttributes: nil) {
+        return attributed
+      }
+    }
+
+    return nil
+  }
+
+  private func pasteWithSanitizedRichText(_ attributed: NSAttributedString) -> Bool {
+    let baseFont = font ?? NSFont.preferredFont(forTextStyle: .body)
+    let baseColor = textColor ?? NSColor.labelColor
+
+    let config = RichTextSanitizer.Configuration.default(baseFont: baseFont, baseColor: baseColor)
+    let sanitizer = RichTextSanitizer(configuration: config)
+    let result = sanitizer.sanitize(attributed)
+    let sanitized = result.attributedString
+
+    // Skip whitespace-only content.
+    guard !sanitized.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return true }
+
+    // Insert directly into textStorage with undo support.
+    let selectedRange = self.selectedRange()
+    guard shouldChangeText(in: selectedRange, replacementString: sanitized.string) else { return false }
+
+    resetTypingAttributesToDefault()
+
+    textStorage?.beginEditing()
+    textStorage?.replaceCharacters(in: selectedRange, with: sanitized)
+    textStorage?.endEditing()
+    didChangeText()
+
+    // Move cursor to end of inserted text.
+    let newLocation = selectedRange.location + sanitized.length
+    setSelectedRange(NSRange(location: newLocation, length: 0))
+
+    resetTypingAttributesToDefault()
+    DispatchQueue.main.async { [weak self] in
+      self?.resetTypingAttributesToDefault()
+    }
+
+    return true
   }
 
   private func insertPlainText(_ inputText: String, replacementRange: NSRange? = nil) {
