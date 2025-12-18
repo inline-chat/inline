@@ -56,6 +56,8 @@ class MessageListAppKit: NSViewController {
   // Translation system
   private let translationViewModel: TranslationViewModel
   private var hasAnalyzedInitialMessages = false
+  private var deferredTranslationTask: Task<Void, Never>?
+  private var hasDeferredInitialTranslation = false
 
   init(dependencies: AppDependencies, peerId: Peer, chat: Chat) {
     self.dependencies = dependencies
@@ -1444,41 +1446,61 @@ class MessageListAppKit: NSViewController {
   // MARK: - Translation
 
   private func handleTranslationForUpdate(_ update: MessagesProgressiveViewModel.MessagesChangeSet) {
-    Task {
-      switch update {
-        case .reload:
-          // Trigger translation on all current messages
-          await translationViewModel.messagesDisplayed(messages: viewModel.messages)
+    switch update {
+      case .reload:
+        // Trigger translation on all current messages
+        scheduleTranslationWork(messages: viewModel.messages, analyzeForDetection: true)
 
-          // Analyze for translation detection on initial load
-          if !hasAnalyzedInitialMessages, !viewModel.messages.isEmpty {
-            await TranslationDetector.shared.analyzeMessages(peer: peerId, messages: viewModel.messages)
-            hasAnalyzedInitialMessages = true
-          }
+      case let .added(addedMessages, _):
+        // Trigger translation on added messages
+        if !addedMessages.isEmpty {
+          scheduleTranslationWork(messages: addedMessages, analyzeForDetection: true)
+        }
 
-        case let .added(addedMessages, _):
-          // Trigger translation on added messages
-          if !addedMessages.isEmpty {
-            await translationViewModel.messagesDisplayed(messages: addedMessages)
+      case let .updated(updatedMessages, _, _):
+        // Handle updated messages
+        if !updatedMessages.isEmpty {
+          scheduleTranslationWork(messages: updatedMessages, analyzeForDetection: false)
+        }
 
-            // Analyze new messages for detection if initial analysis not done
-            if !hasAnalyzedInitialMessages {
-              await TranslationDetector.shared.analyzeMessages(peer: peerId, messages: addedMessages)
-              hasAnalyzedInitialMessages = true
-            }
-          }
-
-        case let .updated(updatedMessages, _, _):
-          // Handle updated messages
-          if !updatedMessages.isEmpty {
-            await translationViewModel.messagesDisplayed(messages: updatedMessages)
-          }
-
-        case .deleted:
-          // No action needed for deletes
-          break
-      }
+      case .deleted:
+        // No action needed for deletes
+        break
     }
+  }
+
+  private func scheduleTranslationWork(messages: [FullMessage], analyzeForDetection: Bool) {
+    guard !messages.isEmpty else { return }
+
+    deferredTranslationTask?.cancel()
+    deferredTranslationTask = Task(priority: .userInitiated) { [weak self] in
+      guard let self else { return }
+      await self.performTranslationWork(messages: messages, analyzeForDetection: analyzeForDetection)
+    }
+  }
+
+  private func performTranslationWork(messages: [FullMessage], analyzeForDetection: Bool) async {
+    // Avoid competing with initial layout/scroll. Translation work is safe to delay.
+    if needsInitialScroll, !hasDeferredInitialTranslation {
+      await MainActor.run {
+        self.hasDeferredInitialTranslation = true
+      }
+      await delayForInitialScroll()
+      if Task.isCancelled { return }
+    }
+
+    translationViewModel.messagesDisplayed(messages: messages)
+
+    guard analyzeForDetection, !hasAnalyzedInitialMessages else { return }
+
+    await TranslationDetector.shared.analyzeMessages(peer: peerId, messages: messages)
+    await MainActor.run {
+      self.hasAnalyzedInitialMessages = true
+    }
+  }
+
+  private func delayForInitialScroll() async {
+    try? await Task.sleep(nanoseconds: 250_000_000)
   }
 
   // MARK: - Unread
@@ -1950,6 +1972,8 @@ extension MessageListAppKit {
     // Cancel any tasks
     eventMonitorTask?.cancel()
     eventMonitorTask = nil
+    deferredTranslationTask?.cancel()
+    deferredTranslationTask = nil
 
     // Remove all observers
     NotificationCenter.default.removeObserver(self)

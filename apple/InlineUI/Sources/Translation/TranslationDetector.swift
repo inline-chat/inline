@@ -3,8 +3,7 @@ import InlineKit
 import Logger
 import NaturalLanguage
 
-@MainActor
-public final class TranslationDetector {
+public final class TranslationDetector: @unchecked Sendable {
   public static let shared = TranslationDetector()
 
   // Minimum confidence threshold for language detection (0.0 to 1.0)
@@ -39,16 +38,24 @@ public final class TranslationDetector {
 
   /// Analyze messages to detect if translation is needed
   /// - Parameter messages: Array of messages to analyze
-  public func analyzeMessages(peer: Peer, messages: [FullMessage]) {
+  public func analyzeMessages(peer: Peer, messages: [FullMessage]) async {
     // Check if translation alert is dismissed for this peer
-    if TranslationAlertDismiss.shared.isDismissedForPeer(peer) {
+    let isDismissed = await MainActor.run {
+      TranslationAlertDismiss.shared.isDismissedForPeer(peer)
+    }
+    if isDismissed {
       log.debug("Translation alert dismissed for peer: \(peer.id)")
       return
     }
-    
-    let messagesToProcess = messages.suffix(3) // Only analyze the last 3 messages
 
-    Task(priority: .background) {
+    let peerSnapshot = peer
+    let textsToProcess = messages
+      .suffix(3)
+      .compactMap { $0.message.text }
+      .filter { !$0.isEmpty }
+
+    Task.detached(priority: .background) { [weak self] in
+      guard let self else { return }
       let userLanguage = UserLocale.getCurrentLanguage()
       let recognizer = NLLanguageRecognizer()
       recognizer.languageConstraints = supportedLanguages
@@ -58,9 +65,7 @@ public final class TranslationDetector {
       ]
 
       // Process messages one by one until we find a different language
-      for message in messagesToProcess {
-        guard let text = message.message.text, !text.isEmpty else { continue }
-
+      for text in textsToProcess {
         let cleanedText = LanguageDetector.cleanText(text)
         recognizer.processString(cleanedText)
 
@@ -71,14 +76,17 @@ public final class TranslationDetector {
 
         // If we found a message in a different language, stop and publish true
         if hypotheses.contains(where: { $0.language != userLanguage }) {
-          log.debug("Found message in different language: \(hypotheses)")
-          log.debug("Translation needed: true")
+          self.log.debug("Found message in different language: \(hypotheses)")
+          self.log.debug("Translation needed: true")
 
-          publisher.send(DetectionResult(
-            peer: peer,
+          let result = DetectionResult(
+            peer: peerSnapshot,
             needsTranslation: true,
             detectedLanguages: hypotheses
-          ))
+          )
+          await MainActor.run {
+            self.publisher.send(result)
+          }
           return
         }
 
@@ -86,14 +94,17 @@ public final class TranslationDetector {
       }
 
       // If we get here, all messages were in the user's language
-      log.debug("All messages in user's language")
-      log.debug("Translation needed: false")
+      self.log.debug("All messages in user's language")
+      self.log.debug("Translation needed: false")
 
-      publisher.send(DetectionResult(
-        peer: peer,
+      let result = DetectionResult(
+        peer: peerSnapshot,
         needsTranslation: false,
         detectedLanguages: []
-      ))
+      )
+      await MainActor.run {
+        self.publisher.send(result)
+      }
     }
   }
 }
