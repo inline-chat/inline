@@ -523,6 +523,76 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("chat message list indexes") { db in
+      try db.execute(
+        sql: """
+        CREATE INDEX IF NOT EXISTS message_peerThread_date_idx
+        ON message(peerThreadId, date DESC)
+        WHERE peerThreadId IS NOT NULL
+        """
+      )
+
+      try db.execute(
+        sql: """
+        CREATE INDEX IF NOT EXISTS message_peerUser_date_idx
+        ON message(peerUserId, date DESC)
+        WHERE peerUserId IS NOT NULL
+        """
+      )
+
+      try db.execute(
+        sql: """
+        CREATE INDEX IF NOT EXISTS attachment_messageId_idx
+        ON attachment(messageId)
+        """
+      )
+
+      try db.execute(
+        sql: """
+        CREATE INDEX IF NOT EXISTS photoSize_photoId_idx
+        ON photoSize(photoId)
+        """
+      )
+
+      try db.execute(
+        sql: """
+        CREATE INDEX IF NOT EXISTS file_profileForUserId_idx
+        ON file(profileForUserId)
+        """
+      )
+
+      try db.execute(sql: "ANALYZE")
+      try db.execute(sql: "PRAGMA optimize")
+    }
+
+    migrator.registerMigration("chat message prefetch indexes") { db in
+      try db.execute(
+        sql: """
+        CREATE INDEX IF NOT EXISTS message_chat_message_idx
+        ON message(chatId, messageId)
+        """
+      )
+
+      try db.execute(
+        sql: """
+        CREATE INDEX IF NOT EXISTS attachment_messageId_notnull_idx
+        ON attachment(messageId)
+        WHERE messageId IS NOT NULL
+        """
+      )
+
+      try db.execute(
+        sql: """
+        CREATE INDEX IF NOT EXISTS file_profileForUserId_notnull_idx
+        ON file(profileForUserId)
+        WHERE profileForUserId IS NOT NULL
+        """
+      )
+
+      try db.execute(sql: "ANALYZE")
+      try db.execute(sql: "PRAGMA optimize")
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage
