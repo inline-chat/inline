@@ -1,7 +1,7 @@
 import Foundation
-import RealtimeV2
 import GRDB
 import InlineProtocol
+import RealtimeV2
 
 // MARK: - Database Models
 
@@ -42,7 +42,7 @@ public struct GRDBSyncStorage: SyncStorage {
 
   public func getState() async -> SyncState {
     do {
-      return try await db.dbWriter.read { db in
+      return try await db.reader.read { db in
         if let state = try DbGlobalSyncState.fetchOne(db) {
           return SyncState(lastSyncDate: state.lastSyncDate)
         }
@@ -67,7 +67,7 @@ public struct GRDBSyncStorage: SyncStorage {
 
   public func getBucketState(for key: BucketKey) async -> BucketState {
     do {
-      return try await db.dbWriter.read { db in
+      return try await db.reader.read { db in
         if let state = try DbBucketState
           .filter(
             DbBucketState.Columns.bucketType == key.getBucket()

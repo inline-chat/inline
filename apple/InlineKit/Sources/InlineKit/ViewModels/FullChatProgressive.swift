@@ -228,7 +228,7 @@ public class MessagesProgressiveViewModel {
     let prevCount = messages.count
 
     do {
-      let messagesBatch: [FullMessage] = try db.dbWriter.read { db in
+      let messagesBatch: [FullMessage] = try db.reader.read { db in
         var query = baseQuery()
 
         query = query.order(Column("date").desc)
@@ -275,7 +275,7 @@ public class MessagesProgressiveViewModel {
       )
 
     do {
-      var messagesBatch: [FullMessage] = try db.dbWriter.read { db in
+      var messagesBatch: [FullMessage] = try db.reader.read { db in
         var query = baseQuery()
 
         // FIXME: we'll need to adjust it based on newest or oldest

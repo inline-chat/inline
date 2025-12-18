@@ -36,7 +36,7 @@ actor TranslationManager {
   }
 
   /// Filter messages that need translation
-  public func filterMessagesNeedingTranslation(
+  func filterMessagesNeedingTranslation(
     messages: [FullMessage],
     targetLanguage: String
   ) async throws -> [InlineKit.Message] {
@@ -79,7 +79,7 @@ actor TranslationManager {
 
   /// Get translation for a message
   func getTranslation(messageId: Int64, chatId: Int64, language: String) async throws -> Translation? {
-    try await db.dbWriter.read { db in
+    try await db.reader.read { db in
       try Translation
         .filter(Column("messageId") == messageId)
         .filter(Column("chatId") == chatId)
