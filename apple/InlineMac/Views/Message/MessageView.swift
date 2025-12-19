@@ -370,6 +370,27 @@ class MessageViewAppKit: NSView {
     }
   }
 
+  private func linkURLForContextMenu(at characterIndex: Int) -> URL? {
+    guard characterIndex != NSNotFound else { return nil }
+
+    if let match = detectedLinks.first(where: { NSLocationInRange(characterIndex, $0.range) }) {
+      return match.url
+    }
+
+    guard let textStorage = textView.textStorage, characterIndex < textStorage.length else { return nil }
+
+    if let value = textStorage.attribute(.link, at: characterIndex, effectiveRange: nil) {
+      if let url = value as? URL {
+        return url
+      }
+      if let urlString = value as? String, let url = URL(string: urlString) {
+        return url
+      }
+    }
+
+    return nil
+  }
+
   // MARK: - Initialization
 
   init(fullMessage: FullMessage, props: MessageViewProps, isScrolling: Bool = false) {
@@ -516,7 +537,7 @@ class MessageViewAppKit: NSView {
       reactionViewWidthConstraint,
       reactionViewHeightConstraint,
       reactionViewTopConstraint,
-    ].compactMap { $0 }
+    ].compactMap(\.self)
     NSLayoutConstraint.deactivate(constraintsToDeactivate)
 
     reactionViewWidthConstraint = nil
@@ -1399,6 +1420,12 @@ class MessageViewAppKit: NSView {
       .setString(fullMessage.displayText ?? "", forType: .string)
   }
 
+  @objc private func copyLinkAddress(_ sender: NSMenuItem) {
+    guard let url = sender.representedObject as? URL else { return }
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(url.absoluteString, forType: .string)
+  }
+
   @objc private func deleteMessage() {
     // Delete message
     Task(priority: .userInitiated) { @MainActor in
@@ -2036,8 +2063,9 @@ extension MessageViewAppKit: NSGestureRecognizerDelegate {
 // MARK: - NSTextViewDelegate
 
 extension MessageViewAppKit: NSTextViewDelegate {
-  func textView(_: NSTextView, menu: NSMenu, for _: NSEvent, at _: Int) -> NSMenu? {
-    createMenu(context: .textView, nativeMenu: menu)
+  func textView(_: NSTextView, menu: NSMenu, for _: NSEvent, at charIndex: Int) -> NSMenu? {
+    let linkURL = linkURLForContextMenu(at: charIndex)
+    return createMenu(context: .textView, nativeMenu: menu, linkURL: linkURL)
   }
 
   // func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
@@ -2053,7 +2081,7 @@ extension MessageViewAppKit: NSMenuDelegate {
     case textView
   }
 
-  func createMenu(context: MenuContext, nativeMenu: NSMenu? = nil) -> NSMenu {
+  func createMenu(context: MenuContext, nativeMenu: NSMenu? = nil, linkURL: URL? = nil) -> NSMenu {
     let menu = NSMenu()
 
     let regularMessage = message.status != .sending && message.status != .failed
@@ -2132,6 +2160,18 @@ extension MessageViewAppKit: NSMenuDelegate {
     }
 
     var rendersCopyText = false
+
+    if context == .textView, let linkURL {
+      let copyLinkItem = NSMenuItem(
+        title: "Copy Link Address",
+        action: #selector(copyLinkAddress),
+        keyEquivalent: ""
+      )
+      copyLinkItem.target = self
+      copyLinkItem.representedObject = linkURL
+      copyLinkItem.image = NSImage(systemSymbolName: "link", accessibilityDescription: "Copy Link")
+      menu.addItem(copyLinkItem)
+    }
 
     // Add native copy for selected text if in text view context
     if context == .textView,
