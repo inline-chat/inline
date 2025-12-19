@@ -64,6 +64,17 @@ class ChatIconSwiftUIBridge: NSView {
     hostingView = newHostingView
   }
 
+  func update(peerType: ChatIcon.PeerType) {
+    guard self.peerType != peerType else { return }
+    self.peerType = peerType
+
+    if let hostingView {
+      hostingView.rootView = ChatIcon(peer: peerType, size: size)
+    } else {
+      updateAvatar()
+    }
+  }
+
   override var intrinsicContentSize: NSSize {
     // 6. Provide intrinsic size
     NSSize(
