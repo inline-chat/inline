@@ -3,10 +3,51 @@ import InlineUI
 import SwiftUI
 
 struct ChatIcon: View {
-  enum PeerType {
+  enum PeerType: Equatable {
     case chat(Chat)
     case user(UserInfo)
     case savedMessage(User)
+
+    static func == (lhs: PeerType, rhs: PeerType) -> Bool {
+      switch (lhs, rhs) {
+        case let (.chat(lhsChat), .chat(rhsChat)):
+          return lhsChat.id == rhsChat.id
+            && lhsChat.title == rhsChat.title
+            && lhsChat.emoji == rhsChat.emoji
+
+        case let (.user(lhsUserInfo), .user(rhsUserInfo)):
+          return userNameSignature(lhsUserInfo.user) == userNameSignature(rhsUserInfo.user)
+            && profilePhotoId(lhsUserInfo) == profilePhotoId(rhsUserInfo)
+
+        case let (.savedMessage(lhsUser), .savedMessage(rhsUser)):
+          return userNameSignature(lhsUser) == userNameSignature(rhsUser)
+
+        default:
+          return false
+      }
+    }
+
+    private static func userNameSignature(_ user: User) -> UserNameSignature {
+      UserNameSignature(
+        firstName: user.firstName,
+        lastName: user.lastName,
+        username: user.username,
+        phoneNumber: user.phoneNumber,
+        email: user.email
+      )
+    }
+
+    private static func profilePhotoId(_ userInfo: UserInfo) -> String? {
+      userInfo.profilePhoto?.first?.id ?? userInfo.user.profileFileId
+    }
+
+    private struct UserNameSignature: Hashable {
+      let firstName: String?
+      let lastName: String?
+      let username: String?
+      let phoneNumber: String?
+      let email: String?
+    }
   }
 
   var peer: PeerType
