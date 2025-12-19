@@ -99,12 +99,14 @@ class SidebarItemRow: NSTableCellView {
 
   private var isHovered = false {
     didSet {
+      guard oldValue != isHovered else { return }
       updateAppearance()
     }
   }
 
   private var isSelected = false {
     didSet {
+      guard oldValue != isSelected else { return }
       updateAppearance()
     }
   }
@@ -808,17 +810,24 @@ extension SidebarItemRow {
 
   private func updateAppearance() {
     let color = isSelected ? selectedColor : isHovered ? hoverColor : .clear
+    let cgColor = color.cgColor
 
-    if preparingForReuse {
-      containerView.layer?.backgroundColor = color.cgColor
-    } else {
-      NSAnimationContext.runAnimationGroup { context in
-        context.duration = isHovered || isSelected ? 0.08 : 0.15
-        context.allowsImplicitAnimation = true
-        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        containerView.layer?.backgroundColor = color.cgColor
-      }
+    guard let layer = containerView.layer else { return }
+
+    // Skip if color hasn't changed
+    if layer.backgroundColor == cgColor {
+      return
     }
+
+    CATransaction.begin()
+    if preparingForReuse {
+      CATransaction.setDisableActions(true)
+    } else {
+      CATransaction.setAnimationDuration(isHovered || isSelected ? 0.08 : 0.15)
+      CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeInEaseOut))
+    }
+    layer.backgroundColor = cgColor
+    CATransaction.commit()
   }
 
   @objc private func handleTap() {
