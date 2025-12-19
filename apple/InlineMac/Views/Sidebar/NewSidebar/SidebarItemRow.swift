@@ -12,6 +12,65 @@ class SidebarItemRow: NSTableCellView {
 
   private var item: HomeChatItem?
 
+  // MARK: - Configuration Signature (for efficient updates)
+
+  /// Lightweight struct capturing only UI-relevant state for diffing
+  private struct RowSignature: Equatable {
+    let name: String
+    let message: String
+    let hasUnread: Bool
+    let isPinned: Bool
+    let isThread: Bool
+    let peerKey: String
+    let senderName: String?
+    let spaceName: String?
+  }
+
+  private var previousSignature: RowSignature?
+
+  /// Build signature from current item
+  private func makeSignature(from item: HomeChatItem) -> RowSignature {
+    let name: String
+    if let user = item.user {
+      name = user.user.firstName ?? user.user.lastName ?? user.user.username ?? user.user.phoneNumber ?? user.user.email ?? ""
+    } else if let chat = item.chat {
+      name = chat.title ?? "Unknown"
+    } else {
+      name = "Unknown"
+    }
+
+    let message: String
+    if let lastMessage = item.lastMessage {
+      message = lastMessage.displayTextForLastMessage ?? lastMessage.message.stringRepresentationWithEmoji ?? ""
+    } else {
+      message = ""
+    }
+
+    let peerKey: String
+    if let user = item.user {
+      peerKey = "user_\(user.user.id)"
+    } else if let chat = item.chat {
+      peerKey = "chat_\(chat.id)"
+    } else {
+      peerKey = ""
+    }
+
+    let isThread = item.dialog.peerThreadId != nil
+    let senderName = isThread ? item.lastMessage?.senderInfo?.user.firstName : nil
+    let spaceName = isThread ? item.space?.displayName : nil
+
+    return RowSignature(
+      name: name,
+      message: message,
+      hasUnread: (item.dialog.unreadCount ?? 0) > 0 || (item.dialog.unreadMark == true),
+      isPinned: item.dialog.pinned ?? false,
+      isThread: isThread,
+      peerKey: peerKey,
+      senderName: senderName,
+      spaceName: spaceName
+    )
+  }
+
   // MARK: - UI props
 
   static let avatarSize: CGFloat = 48
@@ -110,9 +169,8 @@ class SidebarItemRow: NSTableCellView {
     return view
   }()
 
-  private var unreadBadge: NSView?
-
-  private func createUnreadBadge() -> NSView {
+  /// Unread indicator badge (pre-created, toggle isHidden)
+  private lazy var unreadBadge: NSView = {
     let view = NSView()
     view.wantsLayer = true
     view.layer?.cornerRadius = 2.5
@@ -123,12 +181,12 @@ class SidebarItemRow: NSTableCellView {
     view.heightAnchor.constraint(equalToConstant: 5).isActive = true
     view.setContentHuggingPriority(.required, for: .horizontal)
     view.setContentHuggingPriority(.required, for: .vertical)
+    view.isHidden = true
     return view
-  }
+  }()
 
-  private var pinnedBadge: NSImageView?
-
-  private func createPinnedBadge() -> NSImageView {
+  /// Pinned indicator badge (pre-created, toggle isHidden)
+  private lazy var pinnedBadge: NSImageView = {
     let view = NSImageView()
     view.translatesAutoresizingMaskIntoConstraints = false
     let config = NSImage.SymbolConfiguration(
@@ -139,11 +197,11 @@ class SidebarItemRow: NSTableCellView {
     .applying(.init(paletteColors: [.tertiaryLabelColor]))
     view.image = NSImage(systemSymbolName: "pin.fill", accessibilityDescription: nil)?
       .withSymbolConfiguration(config)
-    // view.image?.isTemplate = true
     view.widthAnchor.constraint(equalToConstant: 10).isActive = true
     view.heightAnchor.constraint(equalToConstant: 10).isActive = true
+    view.isHidden = true
     return view
-  }
+  }()
 
   /// The avatar view
   lazy var avatarView: ChatIconSwiftUIBridge = {
@@ -199,7 +257,7 @@ class SidebarItemRow: NSTableCellView {
     return view
   }()
 
-  /// The space name label
+  /// The space name label (pre-created, toggle isHidden)
   /// Only used for threads that are in a space
   lazy var spaceNameLabel: NSTextView = {
     let view = NSTextView()
@@ -220,6 +278,7 @@ class SidebarItemRow: NSTableCellView {
     view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     view.setContentHuggingPriority(.defaultLow, for: .horizontal)
     view.heightAnchor.constraint(equalToConstant: 14).isActive = true
+    view.isHidden = true
     return view
   }()
 
@@ -269,6 +328,13 @@ class SidebarItemRow: NSTableCellView {
     contentStackView.addArrangedSubview(nameLabel)
     contentStackView.addArrangedSubview(messageContainerView)
     messageContainerView.addSubview(messageLabel)
+
+    // Pre-create badges (hidden by default, toggled in configure)
+    gutterView.addArrangedSubview(unreadBadge)
+    gutterView.addArrangedSubview(pinnedBadge)
+
+    // Pre-add spaceNameLabel (hidden by default, toggled in configure for threads)
+    contentStackView.insertArrangedSubview(spaceNameLabel, at: 0)
 
     // Set minimum height instead of fixed height
     heightAnchor.constraint(greaterThanOrEqualToConstant: Self.height).isActive = true
@@ -322,11 +388,21 @@ class SidebarItemRow: NSTableCellView {
 
   func configure(with item: HomeChatItem) {
     preparingForReuse = false
+
+    // Build signature for efficient comparison
+    let newSignature = makeSignature(from: item)
+
+    // Early exit if nothing changed
+    if let previousSignature, previousSignature == newSignature {
+      // Still update selection state (can change without item change)
+      isSelected = currentRoute == route
+      return
+    }
+
     self.item = item
+    previousSignature = newSignature
 
-    Log.shared.debug("SidebarItemRow configuring with item: \(item.dialog.id)")
-
-    // Configure avatar
+    // Configure avatar (update in place)
     let peer: ChatIcon.PeerType? = if let user = item.user {
       .user(user)
     } else if let chat = item.chat {
@@ -336,58 +412,32 @@ class SidebarItemRow: NSTableCellView {
     }
 
     if let peer {
-      NSAnimationContext.runAnimationGroup { context in
-        context.allowsImplicitAnimation = false
-        context.duration = 0.0
-
-        avatarView.removeFromSuperview()
-        avatarView = ChatIconSwiftUIBridge(
-          peer,
-          size: Self.avatarSize
-        )
-        avatarView.translatesAutoresizingMaskIntoConstraints = false
-        stackView.insertArrangedSubview(avatarView, at: 1)
-        stackView.setCustomSpacing(avatarSpacing, after: avatarView)
-      }
+      avatarView.update(peerType: peer)
     }
 
-    // Configure space name
-    if isThread {
-      if spaceNameLabel.superview == nil {
-        contentStackView.insertArrangedSubview(spaceNameLabel, at: 0)
-      }
-      spaceNameLabel.string = item.space?.displayName ?? "Unknown space"
-    } else {
-      spaceNameLabel.removeFromSuperview()
+    // Configure space name (toggle visibility)
+    let isThreadItem = newSignature.isThread
+    spaceNameLabel.isHidden = !isThreadItem
+    if isThreadItem {
+      spaceNameLabel.string = newSignature.spaceName ?? "Unknown space"
     }
 
-    // Configure name
-    if let user = item.user {
-      nameLabel.string = user.user.firstName ??
-        user.user.lastName ??
-        user.user.username ??
-        user.user.phoneNumber ??
-        user.user.email ?? ""
-    } else if let chat = item.chat {
-      nameLabel.string = chat.title ?? "Unknown"
-    } else {
-      nameLabel.string = "Unknown"
+    // Configure name (only if changed)
+    if nameLabel.string != newSignature.name {
+      nameLabel.string = newSignature.name
     }
 
     // Configure last message
-    let maxLines = isThread ? 1 : 2
+    let maxLines = isThreadItem ? 1 : 2
     messageLabel.textContainer?.maximumNumberOfLines = maxLines
     messageLabel.textContainer?.lineBreakMode = .byTruncatingTail
 
-    if let lastMessage = item.lastMessage {
-      messageLabel.string = lastMessage.displayTextForLastMessage
-        ?? lastMessage.message.stringRepresentationWithEmoji ?? ""
-    } else {
-      messageLabel.string = ""
+    if messageLabel.string != newSignature.message {
+      messageLabel.string = newSignature.message
     }
 
-    // Configure sender view
-    if isThread, let senderInfo = item.lastMessage?.senderInfo {
+    // Configure sender view (lazy creation, toggle visibility)
+    if isThreadItem, let senderInfo = item.lastMessage?.senderInfo {
       if senderView == nil {
         senderView = createSenderView()
         messageContainerView.addSubview(senderView!)
@@ -407,43 +457,19 @@ class SidebarItemRow: NSTableCellView {
         )
         messageLabelLeadingConstraint?.isActive = true
       }
-      senderView?.configure(with: senderInfo, inlineWithMessage: isThread)
+      senderView?.isHidden = false
+      senderView?.configure(with: senderInfo, inlineWithMessage: isThreadItem)
     } else {
-      senderView?.removeFromSuperview()
-      senderView = nil
-
-      // Reset message label constraints when sender view is removed
-      messageLabelLeadingConstraint?.isActive = false
-      messageLabelLeadingConstraint = messageLabel.leadingAnchor.constraint(equalTo: messageContainerView.leadingAnchor)
-      messageLabelLeadingConstraint?.isActive = true
+      senderView?.isHidden = true
     }
 
-    // Gutter badges ---
-    // Unread badge
-    if hasUnread {
-      if unreadBadge == nil {
-        // remove pinned badge if it exists
-        pinnedBadge?.removeFromSuperview()
-        pinnedBadge = nil
-
-        // add unread badge
-        unreadBadge = createUnreadBadge()
-        gutterView.addArrangedSubview(unreadBadge!)
-      }
+    // Configure badges (toggle visibility instead of add/remove)
+    if newSignature.hasUnread {
+      unreadBadge.isHidden = false
+      pinnedBadge.isHidden = true
     } else {
-      unreadBadge?.removeFromSuperview()
-      unreadBadge = nil
-
-      // Pinned icon
-      if isPinned {
-        if pinnedBadge == nil {
-          pinnedBadge = createPinnedBadge()
-          gutterView.addArrangedSubview(pinnedBadge!)
-        }
-      } else {
-        pinnedBadge?.removeFromSuperview()
-        pinnedBadge = nil
-      }
+      unreadBadge.isHidden = true
+      pinnedBadge.isHidden = !newSignature.isPinned
     }
 
     // Update selection state
@@ -454,8 +480,8 @@ class SidebarItemRow: NSTableCellView {
 
   override func prepareForReuse() {
     super.prepareForReuse()
-    Log.shared.debug("SidebarItemRow preparing for reuse")
     preparingForReuse = true
+    previousSignature = nil  // Reset signature to force reconfigure on reuse
     isHovered = false
     isSelected = false
   }
