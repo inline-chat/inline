@@ -569,7 +569,11 @@ class MessageViewAppKit: NSView {
 //    view.layer?.backgroundColor = NSColor.red.cgColor
 //    reactionsView = view
 
-    contentView.addSubview(reactionsView!)
+    if hasText, textView.superview != nil {
+      contentView.addSubview(reactionsView!, positioned: .below, relativeTo: textView)
+    } else {
+      contentView.addSubview(reactionsView!)
+    }
 
     // Reactions
     if let reactionsPlan = props.layout.reactions, let reactionsView {
