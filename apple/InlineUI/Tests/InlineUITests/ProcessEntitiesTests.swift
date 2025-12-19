@@ -182,11 +182,11 @@ struct ProcessEntitiesTests {
 
     let urlAttributes = result.attributes(at: urlRange.location, effectiveRange: nil)
     #expect(urlAttributes[.foregroundColor] as? PlatformColor == testConfiguration.linkColor)
-    #expect(urlAttributes[.link] as? String == "https://example.com")
+    #expect((urlAttributes[.link] as? URL)?.absoluteString == "https://example.com")
 
     let textUrlAttributes = result.attributes(at: docsRange.location, effectiveRange: nil)
     #expect(textUrlAttributes[.foregroundColor] as? PlatformColor == testConfiguration.linkColor)
-    #expect(textUrlAttributes[.link] as? String == "https://docs.example.com")
+    #expect((textUrlAttributes[.link] as? URL)?.absoluteString == "https://docs.example.com")
   }
 
   @Test("Italic text")
