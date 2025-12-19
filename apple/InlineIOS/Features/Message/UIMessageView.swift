@@ -574,7 +574,7 @@ class UIMessageView: UIView {
           length: attributedText.length
         )) { value, range, _ in
           if NSLocationInRange(characterIndex, range),
-             let url = value as? URL
+             let url = resolveLinkURL(from: value)
           {
             linkTapHandler?(url)
             return
@@ -582,6 +582,22 @@ class UIMessageView: UIView {
         }
       }
     }
+  }
+
+  private func resolveLinkURL(from value: Any?) -> URL? {
+    if let url = value as? URL {
+      return url
+    }
+
+    guard let urlString = value as? String else {
+      return nil
+    }
+
+    if let url = URL(string: urlString), url.scheme != nil {
+      return url
+    }
+
+    return URL(string: "https://\(urlString)")
   }
 
   @objc func handleDoubleTap(_ gesture: UITapGestureRecognizer) {

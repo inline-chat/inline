@@ -79,9 +79,13 @@ public class ProcessEntities {
           let urlText = (text as NSString).substring(with: range)
           var attributes: [NSAttributedString.Key: Any] = [
             .foregroundColor: configuration.linkColor,
-            .link: urlText,
             .underlineStyle: 0,
           ]
+          if let url = URL(string: urlText) {
+            attributes[.link] = url
+          } else {
+            attributes[.link] = urlText
+          }
 
           #if os(macOS)
           attributes[.cursor] = NSCursor.pointingHand
@@ -93,9 +97,13 @@ public class ProcessEntities {
           if case let .textURL(textURL) = entity.entity {
             var attributes: [NSAttributedString.Key: Any] = [
               .foregroundColor: configuration.linkColor,
-              .link: textURL.url,
               .underlineStyle: 0,
             ]
+            if let url = URL(string: textURL.url) {
+              attributes[.link] = url
+            } else {
+              attributes[.link] = textURL.url
+            }
 
             #if os(macOS)
             attributes[.cursor] = NSCursor.pointingHand
