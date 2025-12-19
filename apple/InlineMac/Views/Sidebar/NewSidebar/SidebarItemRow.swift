@@ -107,6 +107,10 @@ class SidebarItemRow: NSTableCellView {
   private var isSelected = false {
     didSet {
       guard oldValue != isSelected else { return }
+      // When deselecting, also clear hover (click moved elsewhere)
+      if !isSelected {
+        isHovered = false
+      }
       updateAppearance()
     }
   }

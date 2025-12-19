@@ -20,8 +20,9 @@ class NewSidebar: NSViewController {
   // Add diffable data source
   private var dataSource: NSTableViewDiffableDataSource<Section, HomeChatItem.ID>!
 
-  // Keep track of previous items to detect changes
-  private var previousItems: [HomeChatItem] = []
+  // Dictionaries for O(1) lookups
+  private var itemsById: [HomeChatItem.ID: HomeChatItem] = [:]
+  private var previousItemsById: [HomeChatItem.ID: HomeChatItem] = [:]
 
   init(dependencies: AppDependencies, tab: HomeSidebar.Tab) {
     self.dependencies = dependencies
@@ -185,7 +186,7 @@ class NewSidebar: NSViewController {
 
     // Observe chat changes
     homeViewModel.$myChats
-      .receive(on: DispatchQueue.main)
+      .debounce(for: .milliseconds(50), scheduler: DispatchQueue.main) // Experimental
       .sink { [weak self] chats in
         if self?.tab == .inbox {
           self?.updateDataSource(with: chats)
@@ -194,7 +195,7 @@ class NewSidebar: NSViewController {
       .store(in: &cancellables)
 
     homeViewModel.$archivedChats
-      .receive(on: DispatchQueue.main)
+      .debounce(for: .milliseconds(50), scheduler: DispatchQueue.main) // Experimental
       .sink { [weak self] chats in
         if self?.tab == .archive {
           self?.updateDataSource(with: chats)
@@ -209,7 +210,7 @@ class NewSidebar: NSViewController {
       tableView: tableView
     ) { [weak self] tableView, _, _, itemID in
       guard let self,
-            let item = items.first(where: { $0.id == itemID })
+            let item = itemsById[itemID]
       else {
         return NSView() // Return empty view instead of nil
       }
@@ -240,37 +241,44 @@ class NewSidebar: NSViewController {
   }
 
   private func updateDataSource(with items: [HomeChatItem], animated: Bool = true) {
+    // Update lookup dictionary (O(n))
+    itemsById = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+
     var snapshot = NSDiffableDataSourceSnapshot<Section, HomeChatItem.ID>()
     snapshot.appendSections([.main])
-
-    // Find items that need to be reloaded (exist in both old and new data but have changed)
-    let itemsToReload = items.filter { newItem in
-      if let oldItem = previousItems.first(where: { $0.id == newItem.id }) {
-        return oldItem != newItem
-      }
-      return false
-    }
-
-    processForTranslation(items: itemsToReload)
-
-    // Add all items to the new snapshot
     snapshot.appendItems(items.map(\.id), toSection: .main)
 
-    // // Apply the snapshot with animation
-    dataSource.apply(snapshot, animatingDifferences: animated) { [weak self] in
-      // After applying the snapshot, reload the cells that need updating
-      if !itemsToReload.isEmpty {
-        let indexes = itemsToReload.compactMap { item in
-          self?.items.firstIndex(where: { $0.id == item.id })
-        }
-        if !indexes.isEmpty {
-          self?.tableView.reloadData(forRowIndexes: IndexSet(indexes), columnIndexes: IndexSet([0]))
-        }
-      }
+    // Find changed items for translation only (O(n) with dictionary)
+    let changedItems = items.filter { newItem in
+      guard let oldItem = previousItemsById[newItem.id] else { return false }
+      return oldItem != newItem
     }
 
-    // Update previous items
-    previousItems = items
+    processForTranslation(items: changedItems)
+
+    // Apply snapshot (handles add/remove/move)
+    dataSource.apply(snapshot, animatingDifferences: animated) { [weak self] in
+      guard let self else { return }
+      // Reconfigure visible rows in place - avoids reloadData flash
+      // SidebarItemRow.configure() early-exits via RowSignature if unchanged
+      self.reconfigureVisibleRows()
+    }
+
+    // Store for next diff
+    previousItemsById = itemsById
+  }
+
+  /// Reconfigure visible rows without calling reloadData (avoids flash)
+  private func reconfigureVisibleRows() {
+    let visibleRows = tableView.rows(in: tableView.visibleRect)
+    guard visibleRows.length > 0 else { return }
+
+    for row in visibleRows.lowerBound..<visibleRows.upperBound {
+      guard row < items.count,
+            let rowView = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarItemRow
+      else { continue }
+      rowView.configure(with: items[row])
+    }
   }
 
   // MARK: - Chat Navigation
