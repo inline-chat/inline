@@ -27,6 +27,18 @@ final class MessageReactionsView: NSView {
     fatalError("init(coder:) has not been implemented")
   }
 
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    let hitView = super.hitTest(point)
+    var current = hitView
+    while let view = current {
+      if let button = view as? ReactionChipButton {
+        return button
+      }
+      current = view.superview
+    }
+    return nil
+  }
+
   func update(
     fullMessage: FullMessage,
     groups: [GroupedReaction],
