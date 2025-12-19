@@ -1,8 +1,8 @@
 {
   "fill" : {
     "linear-gradient" : [
-      "display-p3:0.99608,0.99608,1.00000,1.00000",
-      "display-p3:0.90196,0.90588,0.91373,1.00000"
+      "srgb:0.98511,0.98884,1.00000,1.00000",
+      "srgb:0.78192,0.79242,0.80076,1.00000"
     ]
   },
   "groups" : [
@@ -12,13 +12,16 @@
           "fill-specializations" : [
             {
               "value" : {
-                "solid" : "display-p3:0.14902,0.14902,0.14902,1.00000"
+                "linear-gradient" : [
+                  "srgb:0.34666,0.34666,0.34666,1.00000",
+                  "display-p3:0.14902,0.14902,0.14902,1.00000"
+                ]
               }
             },
             {
               "appearance" : "dark",
               "value" : {
-                "solid" : "display-p3:0.98484,1.00000,0.98677,1.00000"
+                "solid" : "srgb:0.97646,1.00000,0.98958,1.00000"
               }
             },
             {
@@ -34,7 +37,7 @@
             {
               "idiom" : "square",
               "value" : {
-                "scale" : 0.58,
+                "scale" : 0.57,
                 "translation-in-points" : [
                   0,
                   0
@@ -47,14 +50,33 @@
       "opacity" : 1,
       "shadow" : {
         "kind" : "neutral",
-        "opacity" : 0.4
+        "opacity" : 0.7
       },
-      "specular" : false,
+      "specular-specializations" : [
+        {
+          "value" : false
+        },
+        {
+          "appearance" : "dark",
+          "value" : true
+        },
+        {
+          "appearance" : "tinted",
+          "value" : true
+        }
+      ],
       "translucency-specializations" : [
         {
           "value" : {
             "enabled" : true,
-            "value" : 0.4
+            "value" : 0.18000000000000005
+          }
+        },
+        {
+          "appearance" : "dark",
+          "value" : {
+            "enabled" : true,
+            "value" : 0.5
           }
         },
         {
