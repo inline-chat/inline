@@ -10,7 +10,7 @@ import UserNotifications
 
 class AppDelegate: NSObject, NSApplicationDelegate {
   // Main Window
-  private var mainWindowController: MainWindowController?
+  private var mainWindowController: NSWindowController?
 
   @MainActor private let dockBadgeService = DockBadgeService()
 
@@ -112,7 +112,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // Create new window controller if it doesn't exist
-    let controller = MainWindowController(dependencies: dependencies)
+    let controller: NSWindowController
+    if AppSettings.shared.enableNewMacUI {
+      controller = MainWindowController(dependencies: dependencies)
+    } else {
+      controller = LegacyMainWindowController(dependencies: dependencies)
+    }
     controller.showWindow(nil)
     mainWindowController = controller
   }
