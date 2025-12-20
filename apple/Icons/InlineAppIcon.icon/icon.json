@@ -2,7 +2,7 @@
   "fill" : {
     "linear-gradient" : [
       "srgb:1.00000,1.00000,1.00000,1.00000",
-      "srgb:0.81861,0.82960,0.83834,1.00000"
+      "srgb:0.93037,0.93037,0.93037,1.00000"
     ]
   },
   "groups" : [
@@ -13,7 +13,7 @@
             {
               "value" : {
                 "linear-gradient" : [
-                  "srgb:0.34666,0.34666,0.34666,1.00000",
+                  "srgb:0.18689,0.18689,0.18689,1.00000",
                   "srgb:0.00000,0.00000,0.00000,1.00000"
                 ]
               }
@@ -37,7 +37,7 @@
             {
               "idiom" : "square",
               "value" : {
-                "scale" : 0.57,
+                "scale" : 0.56,
                 "translation-in-points" : [
                   0,
                   0
@@ -50,11 +50,11 @@
       "opacity" : 1,
       "shadow" : {
         "kind" : "neutral",
-        "opacity" : 0.5
+        "opacity" : 0
       },
       "specular-specializations" : [
         {
-          "value" : false
+          "value" : true
         },
         {
           "appearance" : "dark",
@@ -69,7 +69,7 @@
         {
           "value" : {
             "enabled" : true,
-            "value" : 0.28
+            "value" : 0
           }
         },
         {
