@@ -39,12 +39,21 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  // MARK: - Experimental Settings
+
+  @Published var enableNewMacUI: Bool {
+    didSet {
+      UserDefaults.standard.set(enableNewMacUI, forKey: "enableNewMacUI")
+    }
+  }
+
   private init() {
     sendsWithCmdEnter = UserDefaults.standard.bool(forKey: "sendsWithCmdEnter")
     automaticSpellCorrection = UserDefaults.standard.object(forKey: "automaticSpellCorrection") as? Bool ?? true
     checkSpellingWhileTyping = UserDefaults.standard.object(forKey: "checkSpellingWhileTyping") as? Bool ?? true
     disableNotificationSound = UserDefaults.standard.bool(forKey: "disableNotificationSound")
     showDockBadgeUnreadDMs = UserDefaults.standard.object(forKey: "showDockBadgeUnreadDMs") as? Bool ?? true
+    enableNewMacUI = UserDefaults.standard.bool(forKey: "enableNewMacUI")
   }
 }
 
