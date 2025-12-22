@@ -6,6 +6,7 @@ import Observation
 
 enum Nav2Route: Equatable, Hashable, Codable {
   case empty
+  case spaces
   case chat(peer: Peer)
   case chatInfo(peer: Peer)
   case profile(userId: Int64)
@@ -79,7 +80,10 @@ struct Nav2Entry: Codable {
   }
 
   var currentRoute: Nav2Route {
-    history.last?.route ?? .empty
+    if let route = history.last?.route {
+      return route
+    }
+    return activeTab == .home ? .spaces : .empty
   }
 
   // MARK: - Methods
@@ -155,6 +159,9 @@ struct Nav2Entry: Codable {
   init() {
     // UNCOMMENT THIS WHEN WE HAVE A PERSISTENT STATE
     loadState()
+    if history.isEmpty {
+      activateTab(at: activeTabIndex)
+    }
   }
 
   // File URL for persistence
@@ -229,7 +236,8 @@ struct Nav2Entry: Codable {
     let targetTab = tabs[index]
     activeTabIndex = index
 
-    let targetRoute = routeOverride ?? lastRoutes[targetTab] ?? .empty
+    let defaultRoute: Nav2Route = targetTab == .home ? .spaces : .empty
+    let targetRoute = routeOverride ?? lastRoutes[targetTab] ?? defaultRoute
 
     if history.last?.tab != targetTab || history.last?.route != targetRoute {
       history.append(Nav2Entry(route: targetRoute, tab: targetTab))
