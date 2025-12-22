@@ -111,7 +111,17 @@ class MainSidebarItemCell: NSView {
     return label
   }()
 
-  private var badgeView: NSView?
+  private lazy var badgeContainerView: NSStackView = {
+    let view = NSStackView()
+    view.orientation = .horizontal
+    view.spacing = 4
+    view.alignment = .centerY
+    view.distribution = .fill
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.setContentHuggingPriority(.required, for: .horizontal)
+    view.setContentCompressionResistancePriority(.required, for: .horizontal)
+    return view
+  }()
 
   private func createUnreadBadge() -> NSView {
     let view = NSView()
@@ -150,6 +160,7 @@ class MainSidebarItemCell: NSView {
     containerView.addSubview(stackView)
     stackView.addArrangedSubview(avatarView)
     stackView.addArrangedSubview(nameLabel)
+    stackView.addArrangedSubview(badgeContainerView)
 
     heightAnchor.constraint(equalToConstant: Self.height).isActive = true
 
@@ -213,7 +224,7 @@ class MainSidebarItemCell: NSView {
     preparingForReuse = true
     isHovered = false
     isSelected = false
-    badgeView = nil
+    clearBadges()
     cancellables.removeAll()
   }
 
@@ -414,19 +425,20 @@ class MainSidebarItemCell: NSView {
   }
 
   private func configureBadges(for kind: MainSidebarItemCollectionViewItem.Content.Kind) {
-    badgeView?.removeFromSuperview()
-    badgeView = nil
+    clearBadges()
 
     guard case .item = kind, item?.kind == .thread else { return }
 
     if hasUnread {
-      badgeView = createUnreadBadge()
+      badgeContainerView.addArrangedSubview(createUnreadBadge())
     } else if isPinned {
-      badgeView = createPinnedBadge()
+      badgeContainerView.addArrangedSubview(createPinnedBadge())
     }
+  }
 
-    if let badgeView {
-      stackView.addArrangedSubview(badgeView)
+  private func clearBadges() {
+    badgeContainerView.arrangedSubviews.forEach { badge in
+      badge.removeFromSuperview()
     }
   }
 

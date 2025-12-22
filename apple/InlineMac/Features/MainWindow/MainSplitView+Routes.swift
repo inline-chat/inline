@@ -8,6 +8,12 @@ extension MainSplitView {
       case .empty:
         return PlaceholderContentViewController(message: "Select a chat to get started")
 
+      case .spaces:
+        return NSHostingController(
+          rootView: HomeSpacesView()
+            .environment(dependencies: dependencies)
+        )
+
       case let .chat(peer):
         return ChatViewAppKit(peerId: peer, dependencies: dependencies)
 
