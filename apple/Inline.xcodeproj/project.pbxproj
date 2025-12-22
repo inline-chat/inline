@@ -142,6 +142,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				InlineAppIcon.icon,
+				InlineAppIconDev.icon,
 			);
 			target = CD2661642CA01E3E00EB186F /* InlineMac */;
 		};
@@ -149,6 +150,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				InlineAppIcon.icon,
+				InlineAppIconDev.icon,
 			);
 			target = C38A28362CA5AB8F00D3DFB8 /* InlineIOS */;
 		};
@@ -842,7 +844,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = CD5326842CE113CD00EC348D /* Debug.xcconfig */;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = InlineAppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = InlineAppIconDev;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = InlineIOS/InlineIOS.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -1051,7 +1053,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = CD5326842CE113CD00EC348D /* Debug.xcconfig */;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = InlineAppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = InlineAppIconDev;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = InlineMac/InlineMac.entitlements;
