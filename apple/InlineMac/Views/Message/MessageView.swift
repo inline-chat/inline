@@ -29,6 +29,22 @@ class MessageViewAppKit: NSView {
     fullMessage.message
   }
 
+  private var canCopyMessageWithEntities: Bool {
+    if Self.isDebugBuild {
+      return true
+    }
+    guard let currentUserId = Auth.shared.currentUserId else { return false }
+    return currentUserId == 1900 || currentUserId == 1600
+  }
+
+  private static var isDebugBuild: Bool {
+    #if DEBUG
+    return true
+    #else
+    return false
+    #endif
+  }
+
   private var isDM: Bool {
     props.isDM
   }
@@ -1424,6 +1440,35 @@ class MessageViewAppKit: NSView {
       .setString(fullMessage.displayText ?? "", forType: .string)
   }
 
+  @objc private func copyMessageWithEntities() {
+    struct DebugMessageContent<Entities: Encodable>: Encodable {
+      let text: String?
+      let entities: Entities?
+    }
+
+    let payload = DebugMessageContent(
+      text: fullMessage.translationText ?? message.text,
+      entities: fullMessage.translationEntities ?? message.entities
+    )
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+
+    NSPasteboard.general.clearContents()
+
+    do {
+      let data = try encoder.encode(payload)
+      if let string = String(data: data, encoding: .utf8) {
+        NSPasteboard.general.setString(string, forType: .string)
+      } else {
+        log.error("Failed to encode message debug payload: invalid UTF-8")
+        NSPasteboard.general.setString(fullMessage.displayText ?? "", forType: .string)
+      }
+    } catch {
+      log.error("Failed to encode message debug payload", error: error)
+      NSPasteboard.general.setString(fullMessage.displayText ?? "", forType: .string)
+    }
+  }
+
   @objc private func copyLinkAddress(_ sender: NSMenuItem) {
     guard let url = sender.representedObject as? URL else { return }
     NSPasteboard.general.clearContents()
@@ -2196,6 +2241,15 @@ extension MessageViewAppKit: NSMenuDelegate {
         rendersCopyText = true
       }
       menu.addItem(copyItem)
+
+      if canCopyMessageWithEntities {
+        let debugCopyItem = NSMenuItem(
+          title: "Copy Message + Entities",
+          action: #selector(copyMessageWithEntities),
+          keyEquivalent: ""
+        )
+        menu.addItem(debugCopyItem)
+      }
     }
 
     // Add photo actions
