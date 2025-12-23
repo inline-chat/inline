@@ -56,3 +56,4 @@
 - Scripts from `web/`: `bun run dev`, `bun run build`, `bun run typecheck`; ensure Bun runtime available.
 - Keep routing with TanStack conventions; prefer StyleX/Tailwind utilities over ad-hoc CSS; maintain SSR compatibility (Nitro).
 - When touching protocol-bound code, regenerate protos first (`bun run generate:proto`) to keep TS definitions synced.
+- Use StyleX variables for colors, fontSizes, fonts, radiuses, etc; Follow naming of Apple system variables for theming; Support dark and light theme; Check Theme for macOS/iOS if you are unsure about a variable;

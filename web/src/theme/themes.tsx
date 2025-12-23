@@ -5,16 +5,4 @@ import { colors } from "./tokens.stylex"
 const DARK = "@media (prefers-color-scheme: dark)"
 
 // Dracula theme
-export const darkTheme = stylex.createTheme(colors, {
-  accent: { default: "#222", [DARK]: "white" },
-  lineColor: { default: "gray", [DARK]: "white" },
-
-  primaryBg: { default: "black", [DARK]: "white" },
-  secondaryBg: { default: "gray", [DARK]: "white" },
-  tertiaryBg: { default: "darkgray", [DARK]: "white" },
-  quaternaryBg: { default: "darkergray", [DARK]: "white" },
-  quinaryBg: { default: "darkestgray", [DARK]: "white" },
-
-  primaryText: { default: "white", [DARK]: "black" },
-  secondaryText: { default: "gray", [DARK]: "white" },
-})
+export const darkTheme = stylex.createTheme(colors, {})

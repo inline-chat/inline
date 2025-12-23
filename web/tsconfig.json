@@ -10,7 +10,9 @@
     "rootDirs": ["."],
     "baseUrl": ".",
     "paths": {
-      "~/*": ["./src/*"]
+      "~/*": ["./src/*"],
+      "@in/server": ["../server/src"],
+      "@in/server/*": ["../server/src/*"]
     },
     "esModuleInterop": true,
     // Enabling verbatimModuleSyntax can result in server bundles leaking into client bundles. It is recommended to keep this option disabled.
