@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 import * as stylex from "@stylexjs/stylex"
-import { LargeButton } from "~/components/largeButton/LargeButton"
+import { LargeButton } from "~/components/form/LargeButton"
 
 export const Route = createFileRoute("/app/login/welcome")({
   component: RouteComponent,

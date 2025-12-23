@@ -18,7 +18,7 @@ export const LargeButton = (props: LargeButtonProps) => {
 const styles = stylex.create({
   largeButton: {
     backgroundColor: colors.accent,
-    color: colors.primaryText,
+    color: colors.whiteText,
     height: 40,
     lineHeight: "40px",
     borderRadius: 14,

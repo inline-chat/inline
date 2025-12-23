@@ -6,10 +6,9 @@ import tailwindcss from "@tailwindcss/vite"
 import stylex from "vite-plugin-stylex"
 import { nitro } from "nitro/vite"
 
-// @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST
 
-export default defineConfig({
+const config = {
   css: {
     postcss: "./postcss.config.cjs", // Vite will automatically pick this up
   },
@@ -48,7 +47,7 @@ export default defineConfig({
       //   ],
       // },
     }),
-  ],
+  ] as unknown as import("vite").PluginOption[],
 
   envPrefix: ["VITE_", "TAURI_"],
 
@@ -74,4 +73,6 @@ export default defineConfig({
   nitro: {
     preset: "bun",
   },
-})
+} as unknown as import("vite").UserConfig
+
+export default defineConfig(config)
