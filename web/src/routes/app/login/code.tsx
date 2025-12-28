@@ -5,7 +5,7 @@ import { useMemo, useState } from "react"
 import { LargeButton } from "~/components/form/LargeButton"
 import { LargeTextField } from "~/components/form/LargeTextField"
 import { ApiClient, ApiError } from "~/modules/api"
-import { useAuthStore } from "~/store/auth"
+import { useAuthActions } from "@inline/client"
 import { colors } from "~/theme/tokens.stylex"
 
 type LoginMethod = "email" | "phone"
@@ -16,7 +16,7 @@ export const Route = createFileRoute("/app/login/code")({
 
 function RouteComponent() {
   const navigate = useNavigate()
-  const saveAuthentication = useAuthStore((state) => state.saveAuthentication)
+  const { login } = useAuthActions()
   const [code, setCode] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -89,7 +89,7 @@ function RouteComponent() {
         return
       }
 
-      saveAuthentication(result.token, result.userId)
+      login({ token: result.token, userId: result.userId })
       ApiClient.setToken(result.token)
       await navigate({ to: "/app" })
     } catch (error) {

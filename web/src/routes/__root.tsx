@@ -4,6 +4,8 @@ import stylesheet from "../styles/tailwind.css?url"
 import stylesheet2 from "../styles/stylex.css?url"
 import { type ReactNode } from "react"
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router"
+import { InlineClientProvider } from "@inline/client"
+import { ClientRuntime } from "~/components/ClientRuntime"
 
 export const Route = createRootRoute({
   head: () => ({
@@ -49,7 +51,10 @@ export const Route = createRootRoute({
 function RootComponent() {
   return (
     <RootDocument>
-      <Outlet />
+      <InlineClientProvider>
+        <ClientRuntime />
+        <Outlet />
+      </InlineClientProvider>
     </RootDocument>
   )
 }
