@@ -43,7 +43,7 @@ export function useQueryObjects<K extends DbObjectKind, O extends DbModels[K]>(
       const { unsubscribe } = db.subscribeToQuery(key, DbQueryPlanType.Objects, kind, predicate, onStoreChange)
       return unsubscribe
     },
-    [key, kind, predicate],
+    [key, kind],
   )
 
   const getSnapshot = useCallback(() => {

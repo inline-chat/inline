@@ -1,5 +1,6 @@
 import * as stylex from "@stylexjs/stylex"
 import { DbObjectKind, type Dialog, useObject, useObjectRef } from "@inline/client"
+import { UserAvatar } from "~/components/avatar/UserAvatar"
 
 type SidebarChatItemProps = {
   dialog: Dialog
@@ -20,16 +21,16 @@ export const SidebarChatItem = ({ dialog }: SidebarChatItemProps) => {
   const user = useObject(userRef)
   const isDm = Boolean(dialog.peerUserId)
 
-  const title = isDm
-    ? getDisplayName(user?.firstName, user?.lastName, user?.username)
-    : chat?.title ?? "Thread"
+  const title = isDm ? getDisplayName(user?.firstName, user?.lastName, user?.username) : chat?.title ?? "Thread"
 
   const badge = isDm ? "DM" : "Thread"
   const emoji = !isDm ? chat?.emoji : undefined
 
   return (
     <div {...stylex.props(styles.wrapper)}>
-      <div {...stylex.props(styles.avatar)}>{emoji ?? (isDm ? "👤" : "💬")}</div>
+      <div {...stylex.props(styles.avatar)}>
+        {emoji ?? (isDm ? user ? <UserAvatar user={user} size={24} /> : null : "💬")}
+      </div>
       <div {...stylex.props(styles.content)}>
         <div {...stylex.props(styles.titleRow)}>
           <div {...stylex.props(styles.title)}>{title}</div>

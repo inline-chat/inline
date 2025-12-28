@@ -12,6 +12,7 @@ export enum DbObjectKind {
   Chat = "C",
   User = "U",
   Message = "M",
+  Space = "S",
 }
 
 export type DbModels = {
@@ -19,6 +20,7 @@ export type DbModels = {
   [DbObjectKind.Dialog]: Dialog
   [DbObjectKind.Chat]: Chat
   [DbObjectKind.Message]: Message
+  [DbObjectKind.Space]: Space
 }
 
 export interface DbModelBase<K extends DbObjectKind> {
@@ -33,6 +35,14 @@ export interface User extends DbModelBase<DbObjectKind.User> {
   lastName?: string
   username?: string
   email?: string
+  min?: boolean
+
+  profilePhoto?: {
+    fileUniqueId?: string
+    /** not filled out */
+    photoId?: number
+    cdnUrl?: string
+  }
 }
 
 export interface Dialog extends DbModelBase<DbObjectKind.Dialog> {
@@ -73,4 +83,28 @@ export interface Message extends DbModelBase<DbObjectKind.Message> {
   replyToMsgId?: number
   editDate?: number
   isSticker?: boolean
+}
+
+// export interface Photo extends DbModelBase<DbObjectKind.Photo> {
+//   kind: DbObjectKind.Photo
+//   id: number
+//   chatId: number
+//   messageId: number
+//   photoId: number
+//   photo: Photo
+// }
+
+export interface Space extends DbModelBase<DbObjectKind.Space> {
+  kind: DbObjectKind.Space
+
+  id: number
+
+  // Name of the space
+  name: string
+
+  // Whether the current user is the creator of the space
+  creator: boolean
+
+  // Date of creation
+  date: number
 }

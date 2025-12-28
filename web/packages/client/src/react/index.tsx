@@ -1,4 +1,13 @@
-import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from "react"
+import {
+  createContext,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react"
 import {
   useAuthActions as useAuthActionsBase,
   useAuthState as useAuthStateBase,
@@ -33,6 +42,10 @@ const getDefaultClient = () => {
 
 export type InlineClientProviderProps = {
   children: ReactNode
+  value: InlineClientContextValue
+}
+
+export type InlineClientProviderOptions = {
   value?: InlineClientContextValue
   realtime?: RealtimeClient
   db?: Db
@@ -40,16 +53,23 @@ export type InlineClientProviderProps = {
   autoConnect?: boolean
 }
 
-export function InlineClientProvider({
-  children,
+export type InlineClientProviderState = {
+  value: InlineClientContextValue
+  hasDbHydrated: boolean
+}
+
+export function useInlineClientProvider({
   value,
   realtime,
   db,
   auth,
   autoConnect = true,
-}: InlineClientProviderProps) {
+}: InlineClientProviderOptions = {}): InlineClientProviderState {
   const resolved = useMemo<InlineClientContextValue>(() => {
     if (value) return value
+    if (!auth && !db && !realtime) {
+      return getDefaultClient()
+    }
     const resolvedAuth = auth ?? defaultAuth
     const resolvedDb = db ?? defaultDb
     const resolvedRealtime = realtime ?? new RealtimeClient({ auth: resolvedAuth, db: resolvedDb })
@@ -76,7 +96,13 @@ export function InlineClientProvider({
     return unsubscribe
   }, [resolved, autoConnect])
 
-  return <InlineClientContext.Provider value={resolved}>{children}</InlineClientContext.Provider>
+  const hasDbHydrated = useDbHasHydrated(resolved.db)
+
+  return { value: resolved, hasDbHydrated }
+}
+
+export function InlineClientProvider({ children, value }: InlineClientProviderProps) {
+  return <InlineClientContext.Provider value={value}>{children}</InlineClientContext.Provider>
 }
 
 export function useInlineClient(): InlineClientContextValue {
@@ -93,6 +119,42 @@ export function useClientDb(): Db {
 
 export function useAuthStore(): AuthStore {
   return useInlineClient().auth
+}
+
+export function useDbHasHydrated(db?: Db): boolean {
+  const resolvedDb = db ?? useClientDb()
+  const [hydrated, setHydrated] = useState(resolvedDb.hasHydrated)
+
+  useEffect(() => {
+    let active = true
+    if (resolvedDb.hasHydrated) {
+      if (resolvedDb.hydrationState === "pending") {
+        console.error("db hasHydrated true while hydration pending", resolvedDb.hydrationState)
+      }
+      if (resolvedDb.hydrationState === "failed") {
+        console.error("db hydration failed", resolvedDb.hydrationState)
+      }
+      console.log("db already hydrated", resolvedDb.hasHydrated)
+      setHydrated(true)
+      return () => {
+        active = false
+      }
+    }
+
+    void resolvedDb.ready.then(() => {
+      if (resolvedDb.hydrationState === "failed") {
+        console.error("db hydration failed", resolvedDb.hydrationState)
+      }
+      console.log("db hydrated", resolvedDb.hasHydrated)
+      if (active) setHydrated(true)
+    })
+
+    return () => {
+      active = false
+    }
+  }, [resolvedDb])
+
+  return hydrated
 }
 
 export function useAuthState(): AuthState {

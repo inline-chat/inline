@@ -4,8 +4,9 @@ import stylesheet from "../styles/tailwind.css?url"
 import stylesheet2 from "../styles/stylex.css?url"
 import { type ReactNode } from "react"
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router"
-import { InlineClientProvider } from "@inline/client"
+import { InlineClientProvider, useInlineClientProvider } from "@inline/client"
 import { ClientRuntime } from "~/components/ClientRuntime"
+import { useImagePreload } from "~/lib/imageCache"
 
 export const Route = createRootRoute({
   head: () => ({
@@ -49,12 +50,20 @@ export const Route = createRootRoute({
 })
 
 function RootComponent() {
+  const { value: client, hasDbHydrated } = useInlineClientProvider()
+  const hasImagesPreloaded = useImagePreload(client.db, hasDbHydrated)
+  console.log("hasDbHydrated", hasDbHydrated)
+  console.log("hasImagesPreloaded", hasImagesPreloaded)
   return (
     <RootDocument>
-      <InlineClientProvider>
-        <ClientRuntime />
-        <Outlet />
-      </InlineClientProvider>
+      {hasDbHydrated && hasImagesPreloaded ? (
+        <InlineClientProvider value={client}>
+          <ClientRuntime />
+          <Outlet />
+        </InlineClientProvider>
+      ) : (
+        <div>Loading...</div>
+      )}
     </RootDocument>
   )
 }
