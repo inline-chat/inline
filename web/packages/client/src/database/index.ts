@@ -1,5 +1,15 @@
 import { DbModels, DbObjectKind } from "./models"
+import { CollectionStorage, createCollectionStorage } from "./storage"
 import { DbObjectRef, DbQueryPlan, DbQueryPlanType } from "./types"
+
+type DbStorageByKind = Partial<{
+  [K in DbObjectKind]: CollectionStorage<DbModels[K]> | null
+}>
+
+type DbOptions = {
+  storageByKind?: DbStorageByKind
+  autoHydrate?: boolean
+}
 
 export class Db {
   // node persistence layer
@@ -14,13 +24,26 @@ export class Db {
   // we need stable refs.
   // TODO: Maybe we need to insert a private symbol in refs to ensure they come from us and are stable.
 
-  collections: Partial<Record<DbObjectKind, Collection<DbObjectKind>>> = {}
+  collections: Partial<Record<DbObjectKind, Collection<DbObjectKind, any>>> = {}
   querySubscriptions = new Queries()
   objectSubscriptions = new ObjectSubscriptions()
+  ready: Promise<void>
+  hasHydrated = false
+  hydrationState: "pending" | "skipped" | "done" | "failed"
 
   // Batching
   private batchDepth = 0
   private pendingRefs: Set<DbObjectRef<DbObjectKind>> = new Set()
+  private hydrationPromise: Promise<void> | null = null
+  private storageByKind?: DbStorageByKind
+
+  constructor(options: DbOptions = {}) {
+    const autoHydrate = options.autoHydrate ?? true
+    this.storageByKind = options.storageByKind
+    this.hasHydrated = !autoHydrate
+    this.hydrationState = autoHydrate ? "pending" : "skipped"
+    this.ready = autoHydrate ? this.hydrate() : Promise.resolve()
+  }
 
   insert<K extends DbObjectKind, O extends DbModels[K]>(object: O) {
     this.collection(object.kind).insert(object)
@@ -92,10 +115,7 @@ export class Db {
     return this.collection(kind).ref(id)
   }
 
-  subscribeToObject<K extends DbObjectKind>(
-    ref: DbObjectRef<K>,
-    callback: () => void,
-  ): { unsubscribe: () => void } {
+  subscribeToObject<K extends DbObjectKind>(ref: DbObjectRef<K>, callback: () => void): { unsubscribe: () => void } {
     let { unsubscribe } = this.objectSubscriptions.subscribe(ref, callback)
     return { unsubscribe }
   }
@@ -163,10 +183,47 @@ export class Db {
     return result
   }
 
+  async hydrate(): Promise<void> {
+    if (this.hydrationPromise) return this.hydrationPromise
+
+    this.hydrationPromise = (async () => {
+      if (this.hydrationState === "skipped") {
+        this.hydrationState = "pending"
+      }
+      try {
+        const kinds = Object.values(DbObjectKind) as DbObjectKind[]
+        const results = await Promise.all(
+          kinds.map(async (kind) => {
+            const collection = this.collection(kind)
+            const objects = await collection.hydrate()
+            return { kind, objects }
+          }),
+        )
+
+        this.batch(() => {
+          for (const { kind, objects } of results) {
+            for (const object of objects) {
+              this.notify(this.ref(kind, object.id))
+            }
+          }
+        })
+        this.hydrationState = "done"
+      } catch {
+        this.hydrationState = "failed"
+        return
+      } finally {
+        this.hasHydrated = true
+      }
+    })()
+
+    return this.hydrationPromise
+  }
+
   // Private
   private collection<K extends DbObjectKind, O extends DbModels[K]>(kind: K): Collection<K, O> {
     if (!this.collections[kind]) {
-      this.collections[kind] = new Collection<K, O>(kind)
+      const storage = this.storageByKind?.[kind] ?? createCollectionStorage(kind)
+      this.collections[kind] = new Collection<K, O>(kind, storage)
     }
     return this.collections[kind] as Collection<K, O>
   }
@@ -178,9 +235,13 @@ class Collection<K extends DbObjectKind, O extends DbModels[K] = DbModels[K]> {
   objectsById: Map<number, O> = new Map()
   // stable refs by ID
   refs: Map<number, DbObjectRef<K>> = new Map()
+  hasHydrated = false
+  private hydrationPromise: Promise<O[]> | null = null
+  private storage: CollectionStorage<O> | null
 
-  constructor(kind: K) {
+  constructor(kind: K, storage: CollectionStorage<O> | null) {
     this.kind = kind
+    this.storage = storage
   }
 
   ref(id: number): DbObjectRef<K> {
@@ -193,6 +254,11 @@ class Collection<K extends DbObjectKind, O extends DbModels[K] = DbModels[K]> {
   }
 
   insert(object: O) {
+    this.insertLocal(object)
+    this.persistPut(object)
+  }
+
+  private insertLocal(object: O) {
     this.ids.add(object.id)
     // Insert is a replace if the object already exists.
     this.objectsById.set(object.id, object)
@@ -201,13 +267,20 @@ class Collection<K extends DbObjectKind, O extends DbModels[K] = DbModels[K]> {
   delete(id: number) {
     this.ids.delete(id)
     this.objectsById.delete(id)
+    this.persistDelete(id)
   }
 
-  update(object: O) {
+  update(object: O): O {
+    const merged = this.updateLocal(object)
+    this.persistPut(merged)
+    return merged
+  }
+
+  private updateLocal(object: O): O {
     const existing = this.objectsById.get(object.id)
     if (!existing) {
-      this.insert(object)
-      return
+      this.insertLocal(object)
+      return object
     }
 
     const merged = { ...existing }
@@ -218,6 +291,7 @@ class Collection<K extends DbObjectKind, O extends DbModels[K] = DbModels[K]> {
     }
 
     this.objectsById.set(object.id, merged)
+    return merged
   }
 
   get(id: number): O | undefined {
@@ -246,6 +320,45 @@ class Collection<K extends DbObjectKind, O extends DbModels[K] = DbModels[K]> {
     }
     return refs
   }
+
+  async hydrate(): Promise<O[]> {
+    if (!this.storage) {
+      console.error("No storage for collection", this.kind)
+      this.hasHydrated = true
+      return []
+    }
+    if (this.hydrationPromise) return this.hydrationPromise
+
+    this.hydrationPromise = (async () => {
+      try {
+        await this.storage!.init()
+        const objects = await this.storage!.getAll()
+        const inserted: O[] = []
+        for (const object of objects) {
+          if (this.objectsById.has(object.id)) continue
+          this.insertLocal(object)
+          inserted.push(object)
+        }
+        return inserted
+      } catch {
+        return []
+      } finally {
+        this.hasHydrated = true
+      }
+    })()
+
+    return this.hydrationPromise
+  }
+
+  private persistPut(object: O) {
+    if (!this.storage) return
+    void this.storage.put(object).catch(() => {})
+  }
+
+  private persistDelete(id: number) {
+    if (!this.storage) return
+    void this.storage.delete(id).catch(() => {})
+  }
 }
 
 type QueryKey = string
@@ -260,10 +373,7 @@ class Queries {
   private cachedResults: Map<QueryKey, unknown> = new Map()
   private dirtyQueries: Set<QueryKey> = new Set()
 
-  subscribe<K extends DbObjectKind, O extends DbModels[K]>(
-    query: DbQueryPlan<K, O>,
-    callback: () => void,
-  ) {
+  subscribe<K extends DbObjectKind, O extends DbModels[K]>(query: DbQueryPlan<K, O>, callback: () => void) {
     this.queries.set(query.key, query as unknown as DbQueryPlan<DbObjectKind, DbModels[DbObjectKind]>)
     this.queriesByKindSet(query.kind).add(query.key)
     this.subscriptionSet(query.key).add(callback)

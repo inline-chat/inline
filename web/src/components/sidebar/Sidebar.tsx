@@ -2,13 +2,13 @@ import { useEffect, useRef } from "react"
 import * as stylex from "@stylexjs/stylex"
 import { SidebarHeader } from "~/components/sidebar/SidebarHeader"
 import { SidebarChatItem } from "~/components/sidebar/SidebarChatItem"
-import { useCurrentUser, useDialogs } from "~/hooks/data"
+import { useCurrentUser, useDialogs, useHomeDialogs } from "~/hooks/data"
 import { getChats, getMe, useCurrentUserId, useIsLoggedIn, useRealtimeClient } from "@inline/client"
 import { useQuery } from "@inline/client/react/useQuery"
 
 export const Sidebar = () => {
   const currentUser = useCurrentUser()
-  const dialogs = useDialogs()
+  const dialogs = useHomeDialogs()
 
   useQuery(getChats())
   useQuery(getMe())
