@@ -1,6 +1,5 @@
 import { createFileRoute, Link, Outlet, useNavigate, useRouter } from "@tanstack/react-router"
 import * as stylex from "@stylexjs/stylex"
-import { useIsLoggedIn } from "~/store/auth"
 
 export const Route = createFileRoute("/app/login")({
   component: RouteComponent,
@@ -9,6 +8,7 @@ export const Route = createFileRoute("/app/login")({
 function RouteComponent() {
   return (
     <>
+      <div {...stylex.props(styles.topBar)}></div>
       <div {...stylex.props(styles.content)}>
         <Outlet />
       </div>
