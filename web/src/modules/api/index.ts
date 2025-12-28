@@ -2,6 +2,7 @@
 
 import type { TUserInfo } from "@in/server/api-types"
 import type { UploadFileResult } from "@in/server/modules/files/types"
+import { getApiBaseUrl } from "@inline/config"
 
 type ApiResponseSuccess<T> = { ok: true; result: T }
 type ApiResponseFailure = { ok: false; error: string; errorCode?: number; description?: string }
@@ -80,13 +81,7 @@ type ClientConfig = {
   clientInfo: Partial<AuthContext>
 }
 
-const DEFAULT_SERVER_URL = (() => {
-  const viteProd = typeof import.meta !== "undefined" ? import.meta.env.PROD : false
-  const nodeProd = typeof process !== "undefined" ? process.env.NODE_ENV === "production" : false
-  return viteProd || nodeProd ? "https://api.inline.chat" : "http://localhost:8000"
-})()
-
-const DEFAULT_BASE_URL = `${DEFAULT_SERVER_URL}/v1`
+const DEFAULT_BASE_URL = getApiBaseUrl()
 
 const clientConfig: ClientConfig = {
   baseUrl: DEFAULT_BASE_URL,
