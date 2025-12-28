@@ -11,6 +11,8 @@
     "baseUrl": ".",
     "paths": {
       "~/*": ["./src/*"],
+      "@in/protocol": ["./packages/protocol/src/index.ts"],
+      "@in/protocol/*": ["./packages/protocol/src/*"],
       "@in/server": ["../server/src"],
       "@in/server/*": ["../server/src/*"]
     },
