@@ -49,6 +49,14 @@ export const upsertUser = (db: Db, user: User) => {
     lastName: user.lastName ?? undefined,
     username: user.username ?? undefined,
     email: user.email ?? undefined,
+    min: user.min ?? undefined,
+    profilePhoto: user.profilePhoto
+      ? {
+          photoId: toNumber(user.profilePhoto.photoId),
+          fileUniqueId: user.profilePhoto.fileUniqueId ?? undefined,
+          cdnUrl: user.profilePhoto.cdnUrl ?? undefined,
+        }
+      : undefined,
   }
   upsert(db, model)
 }

@@ -1,4 +1,13 @@
-import { db, DbObjectKind, type Dialog, useCurrentUserId, useObject, useQueryObjects, User } from "@inline/client"
+import {
+  db,
+  DbObjectKind,
+  type Dialog,
+  Space,
+  useCurrentUserId,
+  useObject,
+  useQueryObjects,
+  User,
+} from "@inline/client"
 import { useMemo } from "react"
 
 /** Get the current user from the database. */
@@ -19,4 +28,28 @@ export const useDialogs = (): Dialog[] => {
       return b.id - a.id
     })
   }, [dialogs])
+}
+
+export const useHomeDialogs = (): Dialog[] => {
+  const dialogs = useQueryObjects(DbObjectKind.Dialog, (object) => {
+    return !object.archived && typeof object.peerUserId === "number"
+  })
+
+  return useMemo(() => {
+    return [...dialogs].sort((a, b) => {
+      const pinnedA = a.pinned ? 1 : 0
+      const pinnedB = b.pinned ? 1 : 0
+      if (pinnedA !== pinnedB) return pinnedB - pinnedA
+      return b.id - a.id
+    })
+  }, [dialogs])
+}
+
+export const useSpaces = (): Space[] => {
+  const spaces = useQueryObjects(DbObjectKind.Space)
+  return useMemo(() => {
+    return [...spaces].sort((a, b) => {
+      return b.id - a.id
+    })
+  }, [spaces])
 }
