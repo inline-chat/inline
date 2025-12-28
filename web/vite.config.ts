@@ -1,4 +1,4 @@
-import { defineConfig } from "vite"
+import { defineConfig, type PluginOption } from "vite"
 import { tanstackStart } from "@tanstack/react-start/plugin/vite"
 import viteReact from "@vitejs/plugin-react"
 import tsconfigPaths from "vite-tsconfig-paths"
@@ -8,46 +8,31 @@ import { nitro } from "nitro/vite"
 
 const host = process.env.TAURI_DEV_HOST
 
-const config = {
+const plugins = [
+  tailwindcss(),
+  // Enables Vite to resolve imports using path aliases.
+  tsconfigPaths(),
+  // @ts-ignore
+  stylex({
+    useCSSLayers: true,
+  }),
+  tanstackStart({
+    srcDirectory: "src", // This is the default
+    router: {
+      // Specifies the directory TanStack Router uses for your routes.
+      routesDirectory: "routes", // Defaults to "routes", relative to srcDirectory
+    },
+  }),
+  nitro(),
+  viteReact(),
+] as unknown as PluginOption[]
+
+const config = defineConfig({
   css: {
     postcss: "./postcss.config.cjs", // Vite will automatically pick this up
   },
 
-  plugins: [
-    tailwindcss(),
-    // Enables Vite to resolve imports using path aliases.
-    tsconfigPaths(),
-    stylex({
-      useCSSLayers: true,
-    }),
-    tanstackStart({
-      srcDirectory: "src", // This is the default
-      router: {
-        // Specifies the directory TanStack Router uses for your routes.
-        routesDirectory: "routes", // Defaults to "routes", relative to srcDirectory
-      },
-    }),
-    nitro(),
-    viteReact({
-      // babel: {
-      //   plugins: [
-      //     [
-      //       "@stylexjs/babel-plugin",
-      //       {
-      //         dev: process.env.NODE_ENV === "development",
-      //         runtimeInjection: false,
-      //         genConditionalClasses: true,
-      //         treeshakeCompensation: true,
-      //         useRemForFontSize: false,
-      //         // unstable_moduleResolution: {
-      //         //   type: "commonJS",
-      //         // },
-      //       },
-      //     ],
-      //   ],
-      // },
-    }),
-  ] as unknown as import("vite").PluginOption[],
+  plugins,
 
   envPrefix: ["VITE_", "TAURI_"],
 
@@ -70,9 +55,10 @@ const config = {
       : undefined,
   },
 
+  // @ts-ignore
   nitro: {
     preset: "bun",
   },
-} as unknown as import("vite").UserConfig
+})
 
-export default defineConfig(config)
+export default config
