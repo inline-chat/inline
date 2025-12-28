@@ -14,7 +14,9 @@ const build = async () => {
 const run = () => {
   console.log("Running...");
 
-  const proc = Bun.spawn(["bun", "electron", "build/index.js"]);
+  const proc = Bun.spawn(["bun", "electron", "build/index.js"], {
+    stdout: "inherit",
+  });
 
   return () => {
     console.log("Killing...");
