@@ -6,9 +6,12 @@
     "dev": "vite dev",
     "build": "vite build",
     "start": "bun run .output/server/index.mjs",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
+    "@inline/client": "workspace:*",
     "@stylexjs/babel-plugin": "^0.16.0",
     "@stylexjs/postcss-plugin": "^0.16.0",
     "@stylexjs/stylex": "^0.16.0",
@@ -20,7 +23,7 @@
     "framer-motion": "^11.18.1",
     "isbot": "^5.1.17",
     "motion": "^12.23.22",
-    "nitro": "^3.0.1-alpha.1",
+    "nitro": "latest",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-markdown": "^9.0.3",
@@ -36,6 +39,7 @@
     "typescript": "^5.7.2",
     "vite": "^7.1.7",
     "vite-plugin-stylex": "^0.13.0",
-    "vite-tsconfig-paths": "^5.1.4"
+    "vite-tsconfig-paths": "^5.1.4",
+    "vitest": "^4.0.16"
   }
 }
