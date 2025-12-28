@@ -1,0 +1,30 @@
+{
+  "name": "@inline/client",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@inline/auth": "workspace:*",
+    "react": "^19.1.1",
+    "@in/protocol": "workspace:*",
+    "@inline/config": "workspace:*",
+    "@inline/log": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.1",
+    "typescript": "^5.7.2",
+    "vitest": "^4.0.16"
+  }
+}
