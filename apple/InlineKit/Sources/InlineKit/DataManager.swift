@@ -423,10 +423,24 @@ public class DataManager: ObservableObject {
     peerId: Peer,
     pinned: Bool? = nil,
     draft: MessageDraft? = nil,
-    archived: Bool? = nil
+    archived: Bool? = nil,
+    spaceId: Int64? = nil
   ) async throws {
     try await database.dbWriter.write { db in
       var dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
+
+      if dialog == nil {
+        switch peerId {
+          case let .user(id):
+            var optimistic = Dialog(optimisticForUserId: id)
+            if let spaceId {
+              optimistic.spaceId = spaceId
+            }
+            dialog = optimistic
+          case .thread:
+            break
+        }
+      }
 
       if let pinned {
         dialog?.pinned = pinned
@@ -444,6 +458,9 @@ public class DataManager: ObservableObject {
       if let archived {
         dialog?.archived = archived
       }
+      if dialog?.spaceId == nil, let spaceId {
+        dialog?.spaceId = spaceId
+      }
 
       try dialog?.save(db, onConflict: .replace)
     }
@@ -451,15 +468,14 @@ public class DataManager: ObservableObject {
     let updatedDialog = try await database.reader.read { db in
       try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId))
     }
-    guard let updatedDialog else {
+    if updatedDialog == nil {
       log.error("Failed to update dialog")
-      return
     }
-
+    let archivedValue = archived ?? updatedDialog?.archived
     _ = try await ApiClient.shared.updateDialog(
       peerId: peerId,
       pinned: pinned,
-      archived: archived == nil ? updatedDialog.archived : archived
+      archived: archivedValue
     )
   }
 

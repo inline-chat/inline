@@ -1,4 +1,5 @@
 import AppKit
+import Foundation
 import Combine
 import InlineKit
 import Observation
@@ -19,6 +20,14 @@ class MainSidebarList: NSView {
     case homeChats
     case spaceThreads
     case spaceMembers
+    case archiveChats
+    case searchResults
+  }
+
+  enum Mode: Hashable {
+    case inbox
+    case archive
+    case search
   }
 
   enum Item: Hashable {
@@ -31,14 +40,32 @@ class MainSidebarList: NSView {
     case didEndLiveScroll
   }
 
+  private enum ActiveSourceKey: Equatable {
+    case home
+    case space(Int64)
+  }
+
+  private struct SnapshotContext: Equatable {
+    let mode: Mode
+    let searchQuery: String
+    let source: ActiveSourceKey
+  }
+
   private var dataSource: NSCollectionViewDiffableDataSource<Section, Item>!
   private var previousItemsByID: [Item: AnyHashable] = [:]
   private var currentSections: [Section] = []
   private var chatItemsByID: [ChatListItem.Identifier: ChatListItem] = [:]
+  private var selectedItemID: Item?
+  private var lastSnapshotContext: SnapshotContext?
   private var activeViewModelCancellables = Set<AnyCancellable>()
   private var scrollEventsSubject = PassthroughSubject<ScrollEvent, Never>()
 
   private var nav2: Nav2? { dependencies.nav2 }
+  private var mode: Mode = .inbox
+  private var searchQuery: String = ""
+
+  private(set) var lastChatItemCount: Int = 0
+  var onChatCountChanged: ((Mode, Int) -> Void)?
 
   lazy var collectionView: NSCollectionView = {
     let collectionView = NSCollectionView()
@@ -64,6 +91,24 @@ class MainSidebarList: NSView {
     return scrollView
   }()
 
+  private lazy var topSeparator: NSView = {
+    let view = NSView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.wantsLayer = true
+    view.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.05).cgColor
+    view.isHidden = true
+    return view
+  }()
+
+  private lazy var bottomSeparator: NSView = {
+    let view = NSView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.wantsLayer = true
+    view.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.05).cgColor
+    view.isHidden = true
+    return view
+  }()
+
   init(dependencies: AppDependencies) {
     self.dependencies = dependencies
     homeChatsViewModel = ChatsViewModel(
@@ -79,7 +124,7 @@ class MainSidebarList: NSView {
     setupDataSource()
     bindActiveChatsViewModel()
     observeNav()
-    applySnapshot(animated: false)
+    applySnapshot(animatingDifferences: false)
   }
 
   @available(*, unavailable)
@@ -93,13 +138,27 @@ class MainSidebarList: NSView {
 
   private func setupViews() {
     addSubview(scrollView)
+    addSubview(topSeparator)
+    addSubview(bottomSeparator)
+    collectionView.delegate = self
 
     NSLayoutConstraint.activate([
       scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
       scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
       scrollView.topAnchor.constraint(equalTo: topAnchor),
       scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+      topSeparator.leadingAnchor.constraint(equalTo: leadingAnchor),
+      topSeparator.trailingAnchor.constraint(equalTo: trailingAnchor),
+      topSeparator.topAnchor.constraint(equalTo: topAnchor),
+      topSeparator.heightAnchor.constraint(equalToConstant: 1),
+
+      bottomSeparator.leadingAnchor.constraint(equalTo: leadingAnchor),
+      bottomSeparator.trailingAnchor.constraint(equalTo: trailingAnchor),
+      bottomSeparator.bottomAnchor.constraint(equalTo: bottomAnchor),
+      bottomSeparator.heightAnchor.constraint(equalToConstant: 1),
     ])
+    updateScrollSeparators()
   }
 
   private func setupNotifications() {
@@ -119,10 +178,12 @@ class MainSidebarList: NSView {
 
   @objc private func didLiveScroll() {
     scrollEventsSubject.send(.didLiveScroll)
+    updateScrollSeparators()
   }
 
   @objc private func didEndLiveScroll() {
     scrollEventsSubject.send(.didEndLiveScroll)
+    updateScrollSeparators()
   }
 
   private func createLayout() -> NSCollectionViewLayout {
@@ -159,43 +220,61 @@ class MainSidebarList: NSView {
         cellItem?.configure(
           with: content,
           dependencies: dependencies,
-          events: scrollEventsSubject
+          events: scrollEventsSubject,
+          highlightNavSelection: mode != .search
         )
       }
 
       return cellItem
     }
 
-    applySnapshot(animated: false)
+    applySnapshot(animatingDifferences: false)
   }
 
   private func bindActiveChatsViewModel() {
     let viewModel = activeChatsViewModel()
     activeViewModelCancellables.removeAll()
 
-    viewModel.$threads
-      .combineLatest(viewModel.$contacts)
+    Publishers.CombineLatest4(
+      viewModel.$threads,
+      viewModel.$contacts,
+      viewModel.$archivedChats,
+      viewModel.$archivedContacts
+    )
       .receive(on: DispatchQueue.main)
-      .sink { [weak self] _ in
+      .sink { [weak self] _, _, _, _ in
         self?.applySnapshot()
       }
       .store(in: &activeViewModelCancellables)
   }
 
-  private func applySnapshot(animated: Bool = false) {
+  private func applySnapshot(animatingDifferences: Bool? = nil) {
+    let context = SnapshotContext(
+      mode: mode,
+      searchQuery: searchQuery,
+      source: activeSourceKey()
+    )
+    let contextChanged = context != lastSnapshotContext
+    let shouldAnimate = animatingDifferences ?? !contextChanged
+    lastSnapshotContext = context
+
     let data = makeSnapshotData()
     currentSections = data.sections
 
+    if contextChanged {
+      previousItemsByID = [:]
+    }
+
     var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
     var itemsToReload: [Item] = []
- 
+
     for section in data.sections {
       snapshot.appendSections([section])
       let sectionItems = data.items[section] ?? []
       snapshot.appendItems(sectionItems, toSection: section)
 
       let reloadCandidates = sectionItems.filter { item in
-        guard let newValue = value(for: item) else { return false }
+        guard let newValue = data.valuesByItem[item] else { return false }
         if let old = previousItemsByID[item] {
           return old != newValue
         }
@@ -204,25 +283,51 @@ class MainSidebarList: NSView {
       itemsToReload.append(contentsOf: reloadCandidates)
     }
 
+    if !itemsToReload.isEmpty {
+      snapshot.reloadItems(itemsToReload)
+    }
+
     chatItemsByID = data.chatItemsByID
+    lastChatItemCount = data.chatItemCount
+    onChatCountChanged?(mode, data.chatItemCount)
 
-    dataSource.apply(snapshot, animatingDifferences: animated) { [weak self] in
-      if !itemsToReload.isEmpty {
-        let indexPaths: [IndexPath] = itemsToReload.compactMap { item in
-          guard let self else { return nil }
-          guard let (sectionIndex, itemIndex) = self.indexPath(of: item, in: snapshot) else { return nil }
-          return IndexPath(item: itemIndex, section: sectionIndex)
-        }
-
-        if !indexPaths.isEmpty {
-          self?.collectionView.reloadItems(at: Set(indexPaths))
-        }
-      }
+    dataSource.apply(snapshot, animatingDifferences: shouldAnimate) { [weak self] in
+      self?.syncSelection(snapshot: snapshot)
+      self?.updateScrollSeparators()
     }
 
     previousItemsByID = data.valuesByItem
     if let layout = collectionView.collectionViewLayout {
       layout.invalidateLayout()
+    }
+    updateScrollSeparators()
+  }
+
+  private func updateScrollSeparators() {
+    let contentHeight = scrollView.documentView?.bounds.height ?? 0
+    let viewportHeight = scrollView.contentView.bounds.height
+    let maxOffset = max(0, contentHeight - viewportHeight)
+    if maxOffset <= 1 {
+      topSeparator.isHidden = true
+      bottomSeparator.isHidden = true
+      return
+    }
+
+    let yOffset = scrollView.contentView.bounds.origin.y
+    topSeparator.isHidden = yOffset <= 1
+    bottomSeparator.isHidden = yOffset >= maxOffset - 1
+  }
+
+  private func activeSourceKey() -> ActiveSourceKey {
+    guard let activeTab = nav2?.activeTab else {
+      return .home
+    }
+
+    switch activeTab {
+      case .home:
+        return .home
+      case let .space(id, _):
+        return .space(id)
     }
   }
 
@@ -244,6 +349,7 @@ class MainSidebarList: NSView {
     let items: [Section: [Item]]
     let chatItemsByID: [ChatListItem.Identifier: ChatListItem]
     let valuesByItem: [Item: AnyHashable]
+    let chatItemCount: Int
   }
 
   private func makeSnapshotData() -> SnapshotData {
@@ -251,63 +357,156 @@ class MainSidebarList: NSView {
 
     let threads = viewModel.threads
     let contacts = viewModel.contacts
-    let allItems = threads + contacts
-    let chatMap = Dictionary(uniqueKeysWithValues: allItems.map { ($0.id, $0) })
+    let archivedChats = viewModel.archivedChats
+    let archivedContacts = viewModel.archivedContacts
 
     let sections: [Section]
     var items: [Section: [Item]] = [:]
     var valuesByItem: [Item: AnyHashable] = [:]
+    let chatMap: [ChatListItem.Identifier: ChatListItem]
+    let chatItemCount: Int
 
-    if viewModel.isSpaceSource {
-      let threadItems: [Item] = [.header(.spaceThreads)] + threads.map { .chat($0.id) }
-      let contactItems: [Item] = [.header(.spaceMembers)] + contacts.map { .chat($0.id) }
-
-      sections = [.spaceThreads, .spaceMembers]
-      items[.spaceThreads] = threadItems
-      items[.spaceMembers] = contactItems
-
-      threadItems.forEach { item in
-        switch item {
-          case let .chat(id): valuesByItem[item] = chatMap[id]
-          case let .header(section): valuesByItem[item] = "header-\(section)" as AnyHashable
+    switch mode {
+      case .archive:
+        let archivedItems: [Item]
+        let combinedArchived = mergeUniqueItems(archivedChats + archivedContacts)
+        let filteredArchived = combinedArchived.filter { $0.dialog != nil }
+        let sortedArchived = viewModel.isSpaceSource ? sortSpaceItems(filteredArchived) : filteredArchived
+        if sortedArchived.isEmpty {
+          archivedItems = []
+          sections = []
+        } else {
+          archivedItems = [.header(.archiveChats)] + sortedArchived.map { .chat($0.id) }
+          sections = [.archiveChats]
+          items[.archiveChats] = archivedItems
         }
-      }
+        chatMap = Dictionary(uniqueKeysWithValues: sortedArchived.map { ($0.id, $0) })
+        archivedItems.forEach { item in
+          switch item {
+            case let .chat(id): valuesByItem[item] = chatMap[id]
+            case let .header(section): valuesByItem[item] = "header-\(section)" as AnyHashable
+          }
+        }
+        chatItemCount = sortedArchived.count
 
-      contactItems.forEach { item in
-        switch item {
-          case let .chat(id): valuesByItem[item] = chatMap[id]
-          case let .header(section): valuesByItem[item] = "header-\(section)" as AnyHashable
+      case .inbox:
+        if viewModel.isSpaceSource {
+          let combined = mergeUniqueItems(threads + contacts)
+          let filteredCombined = combined.filter { $0.dialog != nil }
+          let sortedCombined = sortSpaceItems(filteredCombined)
+
+          let spaceItems: [Item]
+          if sortedCombined.isEmpty {
+            spaceItems = []
+            sections = []
+          } else {
+            spaceItems = [.header(.spaceThreads)] + sortedCombined.map { .chat($0.id) }
+            sections = [.spaceThreads]
+            items[.spaceThreads] = spaceItems
+          }
+
+          chatMap = Dictionary(uniqueKeysWithValues: sortedCombined.map { ($0.id, $0) })
+          chatItemCount = sortedCombined.count
+
+          spaceItems.forEach { item in
+            switch item {
+              case let .chat(id): valuesByItem[item] = chatMap[id]
+              case let .header(section): valuesByItem[item] = "header-\(section)" as AnyHashable
+            }
+          }
+        } else {
+          chatMap = Dictionary(uniqueKeysWithValues: threads.map { ($0.id, $0) })
+          if threads.isEmpty {
+            sections = []
+          } else {
+            let chatItems: [Item] = [.header(.homeChats)] + threads.map { .chat($0.id) }
+            sections = [.homeChats]
+            items[.homeChats] = chatItems
+            chatItems.forEach { item in
+              switch item {
+                case let .chat(id): valuesByItem[item] = chatMap[id]
+                case let .header(section): valuesByItem[item] = "header-\(section)" as AnyHashable
+              }
+            }
+          }
+          chatItemCount = threads.count
         }
-      }
-    } else {
-      let chatItems: [Item] = threads.map { .chat($0.id) }
-      sections = [.homeChats]
-      items[.homeChats] = chatItems
-      chatItems.forEach { item in
-        if case let .chat(id) = item {
-          valuesByItem[item] = chatMap[id]
+
+      case .search:
+        let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmedQuery.isEmpty == false else {
+          return SnapshotData(
+            sections: [],
+            items: [:],
+            chatItemsByID: [:],
+            valuesByItem: [:],
+            chatItemCount: 0
+          )
         }
-      }
+
+        let allThreads = mergeUniqueItems(threads + archivedChats)
+        let allContacts = mergeUniqueItems(contacts + archivedContacts)
+        let filteredThreads = allThreads.filter { matchesSearch($0, query: trimmedQuery) }
+        let filteredContacts = allContacts.filter { matchesSearch($0, query: trimmedQuery) }
+
+        let combined = filteredThreads + filteredContacts
+        let filteredCombined = combined.filter { $0.dialog != nil }
+        let sortedCombined = viewModel.isSpaceSource ? sortSpaceItems(filteredCombined) : filteredCombined
+        let searchMap = Dictionary(uniqueKeysWithValues: sortedCombined.map { ($0.id, $0) })
+
+        if viewModel.isSpaceSource {
+          if sortedCombined.isEmpty {
+            sections = []
+          } else {
+            let chatItems: [Item] = [.header(.searchResults)] + sortedCombined.map { .chat($0.id) }
+            sections = [.searchResults]
+            items[.searchResults] = chatItems
+            chatItems.forEach { item in
+              switch item {
+                case let .chat(id): valuesByItem[item] = searchMap[id]
+                case let .header(section): valuesByItem[item] = "header-\(section)" as AnyHashable
+              }
+            }
+          }
+        } else {
+          if filteredThreads.isEmpty {
+            sections = []
+          } else {
+            let chatItems: [Item] = [.header(.searchResults)] + filteredThreads.map { .chat($0.id) }
+            sections = [.searchResults]
+            items[.searchResults] = chatItems
+            chatItems.forEach { item in
+              switch item {
+                case let .chat(id): valuesByItem[item] = searchMap[id]
+                case let .header(section): valuesByItem[item] = "header-\(section)" as AnyHashable
+              }
+            }
+          }
+        }
+
+        chatMap = searchMap
+        chatItemCount = sortedCombined.count
     }
 
     return SnapshotData(
       sections: sections,
       items: items,
       chatItemsByID: chatMap,
-      valuesByItem: valuesByItem
+      valuesByItem: valuesByItem,
+      chatItemCount: chatItemCount
     )
   }
 
   private func layout(for _: Section) -> NSCollectionLayoutSection {
     let itemSize = NSCollectionLayoutSize(
       widthDimension: .fractionalWidth(1.0),
-      heightDimension: .absolute(Self.itemHeight)
+      heightDimension: .estimated(Self.itemHeight)
     )
     let item = NSCollectionLayoutItem(layoutSize: itemSize)
 
     let groupSize = NSCollectionLayoutSize(
       widthDimension: .fractionalWidth(1.0),
-      heightDimension: .absolute(Self.itemHeight)
+      heightDimension: .estimated(Self.itemHeight)
     )
     let group = NSCollectionLayoutGroup.horizontal(
       layoutSize: groupSize,
@@ -342,15 +541,6 @@ class MainSidebarList: NSView {
     }
   }
 
-  private func value(for item: Item) -> AnyHashable? {
-    switch item {
-      case let .chat(id):
-        chatItemsByID[id]
-      case let .header(section):
-        "header-\(section)" as AnyHashable
-    }
-  }
-
   private func content(for item: Item) -> MainSidebarItemCollectionViewItem.Content? {
     switch item {
       case let .chat(id):
@@ -361,14 +551,20 @@ class MainSidebarList: NSView {
         let symbol: String
         switch section {
           case .spaceThreads:
-            title = "Threads"
+            title = "Chats"
             symbol = "text.bubble.fill"
           case .spaceMembers:
             title = "Members"
             symbol = "person.2.fill"
           case .homeChats:
-            title = "Chats"
-            symbol = "bubble.left.and.bubble.right.fill"
+            title = "Contacts"
+            symbol = "person.2.fill"
+          case .archiveChats:
+            title = "Archived Chats"
+            symbol = "archivebox.fill"
+          case .searchResults:
+            title = "Results"
+            symbol = "magnifyingglass"
         }
         return .init(kind: .header(title: title, symbol: symbol))
     }
@@ -390,5 +586,191 @@ class MainSidebarList: NSView {
         spaceChatsViewModels[id] = viewModel
         return viewModel
     }
+  }
+
+  func setMode(_ mode: Mode) {
+    guard self.mode != mode else { return }
+    self.mode = mode
+    if mode != .search {
+      selectedItemID = nil
+      collectionView.deselectAll(nil)
+    }
+    applySnapshot()
+  }
+
+  func setSearchQuery(_ query: String) {
+    let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard searchQuery != trimmed else { return }
+    searchQuery = trimmed
+    selectedItemID = nil
+    if mode == .search {
+      applySnapshot()
+    }
+  }
+
+  func clearSelection() {
+    selectedItemID = nil
+    collectionView.deselectAll(nil)
+  }
+
+  func selectNextResult() {
+    guard mode == .search else { return }
+    moveSelection(isForward: true)
+  }
+
+  func selectPreviousResult() {
+    guard mode == .search else { return }
+    moveSelection(isForward: false)
+  }
+
+  @discardableResult
+  func activateSelection() -> Bool {
+    guard mode == .search else { return false }
+    guard let nav2, let selectedItemID, case let .chat(id) = selectedItemID else { return false }
+    guard let item = chatItemsByID[id], let peer = item.peerId else { return false }
+    if item.dialog?.archived == true {
+      Task(priority: .userInitiated) {
+        try await DataManager.shared.updateDialog(peerId: peer, archived: false, spaceId: item.spaceId)
+      }
+    }
+    nav2.navigate(to: .chat(peer: peer))
+    return true
+  }
+
+  private func mergeUniqueItems(_ items: [ChatListItem]) -> [ChatListItem] {
+    var seen = Set<ChatListItem.Identifier>()
+    return items.filter { item in
+      seen.insert(item.id).inserted
+    }
+  }
+
+  private func matchesSearch(_ item: ChatListItem, query: String) -> Bool {
+    let combined = searchTokens(for: item).joined(separator: " ")
+    return combined.localizedCaseInsensitiveContains(query)
+  }
+
+  private func sortSpaceItems(_ items: [ChatListItem]) -> [ChatListItem] {
+    items.sorted { lhs, rhs in
+      let pinned1 = lhs.dialog?.pinned ?? false
+      let pinned2 = rhs.dialog?.pinned ?? false
+      if pinned1 != pinned2 { return pinned1 }
+      let date1 = lhs.lastMessage?.message.date ?? lhs.chat?.date ?? Date.distantPast
+      let date2 = rhs.lastMessage?.message.date ?? rhs.chat?.date ?? Date.distantPast
+      return date1 > date2
+    }
+  }
+
+  private func searchTokens(for item: ChatListItem) -> [String] {
+    var tokens: [String] = []
+
+    if let user = item.user?.user {
+      if let firstName = user.firstName { tokens.append(firstName) }
+      if let lastName = user.lastName { tokens.append(lastName) }
+      if let username = user.username { tokens.append(username) }
+      if let email = user.email { tokens.append(email) }
+      tokens.append(user.displayName)
+    }
+
+    if let chat = item.chat?.title {
+      tokens.append(chat)
+    }
+
+    tokens.append(item.displayTitle)
+    return tokens
+  }
+
+  private func syncSelection(snapshot: NSDiffableDataSourceSnapshot<Section, Item>) {
+    guard mode == .search else { return }
+    let selectable = selectableItems(in: snapshot)
+    guard selectable.isEmpty == false else {
+      selectedItemID = nil
+      collectionView.deselectAll(nil)
+      return
+    }
+
+    if let selectedItemID, selectable.contains(selectedItemID) == false {
+      self.selectedItemID = nil
+    }
+
+    if selectedItemID == nil {
+      selectedItemID = selectable.first
+    }
+
+    guard let selectedItemID,
+          let (sectionIndex, itemIndex) = indexPath(of: selectedItemID, in: snapshot)
+    else { return }
+
+    let indexPath = IndexPath(item: itemIndex, section: sectionIndex)
+    collectionView.deselectAll(nil)
+    collectionView.selectItems(at: [indexPath], scrollPosition: .centeredVertically)
+  }
+
+  private func moveSelection(isForward: Bool) {
+    let snapshot = dataSource.snapshot()
+    let selectable = selectableItems(in: snapshot)
+    guard selectable.isEmpty == false else { return }
+
+    let currentIndex: Int
+    if let selectedItemID, let index = selectable.firstIndex(of: selectedItemID) {
+      currentIndex = index
+    } else {
+      currentIndex = 0
+    }
+
+    let nextIndex: Int
+    if isForward {
+      nextIndex = min(currentIndex + 1, selectable.count - 1)
+    } else {
+      nextIndex = max(currentIndex - 1, 0)
+    }
+
+    collectionView.deselectAll(nil)
+    selectedItemID = selectable[nextIndex]
+    if let selectedItemID,
+       let (sectionIndex, itemIndex) = indexPath(of: selectedItemID, in: snapshot)
+    {
+      let indexPath = IndexPath(item: itemIndex, section: sectionIndex)
+      collectionView.selectItems(at: [indexPath], scrollPosition: .centeredVertically)
+    }
+  }
+
+  private func selectableItems(in snapshot: NSDiffableDataSourceSnapshot<Section, Item>) -> [Item] {
+    snapshot.sectionIdentifiers.flatMap { section in
+      snapshot.itemIdentifiers(inSection: section).filter { item in
+        if case .chat = item {
+          return true
+        }
+        return false
+      }
+    }
+  }
+}
+
+extension MainSidebarList: NSCollectionViewDelegate {
+  func collectionView(
+    _: NSCollectionView,
+    shouldSelectItemsAt indexPaths: Set<IndexPath>
+  ) -> Set<IndexPath> {
+    guard mode == .search else { return [] }
+    guard let dataSource else { return [] }
+    let allowed = indexPaths.filter { indexPath in
+      guard let itemID = dataSource.itemIdentifier(for: indexPath) else { return false }
+      if case .chat = itemID {
+        return true
+      }
+      return false
+    }
+    return Set(allowed)
+  }
+
+  func collectionView(
+    _: NSCollectionView,
+    didSelectItemsAt indexPaths: Set<IndexPath>
+  ) {
+    guard mode == .search else { return }
+    guard let indexPath = indexPaths.first,
+          let itemID = dataSource.itemIdentifier(for: indexPath)
+    else { return }
+    selectedItemID = itemID
   }
 }
