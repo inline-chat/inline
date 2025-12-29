@@ -54,9 +54,9 @@ struct ChatListItem: Hashable, Identifiable {
     id = Identifier(kind: .thread, rawValue: chatItem.id)
   }
 
-  init(member: Member, user: UserInfo?) {
+  init(member: Member, user: UserInfo?, dialog: Dialog? = nil) {
     kind = .contact
-    dialog = nil
+    self.dialog = dialog
     chat = nil
     self.user = user
     self.member = member
@@ -65,13 +65,44 @@ struct ChatListItem: Hashable, Identifiable {
     id = Identifier(kind: .contact, rawValue: member.id)
   }
 
+  init(spaceContactItem: SpaceChatItem) {
+    kind = .contact
+    dialog = spaceContactItem.dialog
+    chat = spaceContactItem.chat
+    user = spaceContactItem.userInfo
+    member = nil
+    if let message = spaceContactItem.message {
+      lastMessage = EmbeddedMessage(
+        message: message,
+        senderInfo: spaceContactItem.from,
+        translations: spaceContactItem.translations,
+        photoInfo: spaceContactItem.photoInfo,
+        videoInfo: nil
+      )
+    } else {
+      lastMessage = nil
+    }
+    spaceId = spaceContactItem.dialog.spaceId
+    id = Identifier(kind: .contact, rawValue: spaceContactItem.id)
+  }
+
   init(spaceChatItem: SpaceChatItem) {
     kind = .thread
     dialog = spaceChatItem.dialog
     chat = spaceChatItem.chat
     user = spaceChatItem.userInfo
     member = nil
-    lastMessage = nil
+    if let message = spaceChatItem.message {
+      lastMessage = EmbeddedMessage(
+        message: message,
+        senderInfo: spaceChatItem.from,
+        translations: spaceChatItem.translations,
+        photoInfo: spaceChatItem.photoInfo,
+        videoInfo: nil
+      )
+    } else {
+      lastMessage = nil
+    }
     spaceId = spaceChatItem.dialog.spaceId
     id = Identifier(kind: .thread, rawValue: spaceChatItem.id)
   }

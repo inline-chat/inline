@@ -7,6 +7,22 @@ class MainSidebarItemCollectionViewItem: NSCollectionViewItem {
     view as? MainSidebarItemCell
   }
 
+  private var isHeader: Bool = false
+
+  override var isSelected: Bool {
+    didSet {
+      cellView?.setListSelected(isSelected)
+    }
+  }
+
+  override func preferredLayoutAttributesFitting(
+    _ layoutAttributes: NSCollectionViewLayoutAttributes
+  ) -> NSCollectionViewLayoutAttributes {
+    let attributes = super.preferredLayoutAttributesFitting(layoutAttributes)
+    attributes.size.height = isHeader ? 20 : MainSidebar.itemHeight
+    return attributes
+  }
+
   override func loadView() {
     view = MainSidebarItemCell(frame: .zero)
   }
@@ -28,12 +44,19 @@ class MainSidebarItemCollectionViewItem: NSCollectionViewItem {
   func configure(
     with item: Content,
     dependencies: AppDependencies,
-    events: PassthroughSubject<MainSidebarList.ScrollEvent, Never>
+    events: PassthroughSubject<MainSidebarList.ScrollEvent, Never>,
+    highlightNavSelection: Bool
   ) {
+    if case .header = item.kind {
+      isHeader = true
+    } else {
+      isHeader = false
+    }
     cellView?.configure(
       with: item,
       dependencies: dependencies,
-      events: events
+      events: events,
+      highlightNavSelection: highlightNavSelection
     )
   }
 }
