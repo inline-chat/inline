@@ -46,6 +46,12 @@ extension MainSplitView {
           return InviteToSpaceViewController(spaceId: spaceId, dependencies: dependencies)
         }
         return PlaceholderContentViewController(message: "Open a space to invite members")
+
+      case let .members(spaceId):
+        return MemberManagementViewController(spaceId: spaceId, dependencies: dependencies)
+
+      case let .spaceIntegrations(spaceId):
+        return SpaceIntegrationsViewController(spaceId: spaceId, dependencies: dependencies)
     }
   }
 

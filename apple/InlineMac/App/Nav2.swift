@@ -13,6 +13,8 @@ enum Nav2Route: Equatable, Hashable, Codable {
   case createSpace
   case newChat
   case inviteToSpace
+  case members(spaceId: Int64)
+  case spaceIntegrations(spaceId: Int64)
 }
 
 enum TabId: Hashable, Codable {
