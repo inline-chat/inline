@@ -11,7 +11,7 @@ class TabCollectionViewItem: NSCollectionViewItem, TabBarItemHoverDelegate {
 
   private enum Style {
     // Selected tab background (extends beyond bounds with melting effect)
-    static let selectedTopRadius: CGFloat = 14
+    static let selectedTopRadius: CGFloat = 10
     static let selectedBottomCurveHeight: CGFloat = 10
     static let selectedBackgroundExtension: CGFloat = 10
 
@@ -24,7 +24,7 @@ class TabCollectionViewItem: NSCollectionViewItem, TabBarItemHoverDelegate {
 
     // Typography & sizing
     static let titleFontSize: CGFloat = 12
-    static let iconSize: CGFloat = 18
+    static let iconSize: CGFloat = MainTabBar.Layout.iconViewSize
     static let homeIconPointSize: CGFloat = 14
     static let iconCornerRadius: CGFloat = 6
     static let iconLeadingPadding: CGFloat = 10
@@ -34,6 +34,7 @@ class TabCollectionViewItem: NSCollectionViewItem, TabBarItemHoverDelegate {
     static let trailingInsetWithClose: CGFloat = 5
     static let closeOverlayWidth: CGFloat = 25
     static let extraFadePadding: CGFloat = 5
+    static let homeIconTintColor: NSColor = .secondaryLabelColor
   }
 
   static func preferredWidth(for tab: TabModel, iconSize: CGFloat) -> CGFloat {
@@ -66,6 +67,8 @@ class TabCollectionViewItem: NSCollectionViewItem, TabBarItemHoverDelegate {
   private var iconHeightConstraint: NSLayoutConstraint!
   private var titleTrailingConstraint: NSLayoutConstraint!
   private var iconCenterXForHome: NSLayoutConstraint!
+  private var iconCenterYConstraint: NSLayoutConstraint!
+  private var titleCenterYConstraint: NSLayoutConstraint!
 
   private let shadowView = NSView()
   private let backgroundView = TabSelectedBackgroundView()
@@ -94,6 +97,9 @@ class TabCollectionViewItem: NSCollectionViewItem, TabBarItemHoverDelegate {
       tabView.hoverDelegate = self
       tabView.onAppearanceChanged = { [weak self] in
         self?.updateAppearance(animated: false)
+      }
+      tabView.onCloseRequest = { [weak self] in
+        self?.onClose?()
       }
     }
     view.wantsLayer = true
@@ -149,6 +155,10 @@ class TabCollectionViewItem: NSCollectionViewItem, TabBarItemHoverDelegate {
     )
     iconWidthConstraint = iconImageView.widthAnchor.constraint(equalToConstant: Style.iconSize)
     iconHeightConstraint = iconImageView.heightAnchor.constraint(equalToConstant: Style.iconSize)
+    iconCenterYConstraint = iconImageView.centerYAnchor.constraint(
+      equalTo: view.centerYAnchor,
+      constant: MainTabBar.Layout.tabItemIconCenterYOffset
+    )
 
     titleLeadingConstraint = titleLabel.leadingAnchor.constraint(
       equalTo: iconImageView.trailingAnchor,
@@ -157,6 +167,10 @@ class TabCollectionViewItem: NSCollectionViewItem, TabBarItemHoverDelegate {
     titleTrailingConstraint = titleLabel.trailingAnchor.constraint(
       equalTo: view.trailingAnchor,
       constant: -Style.trailingInsetDefault
+    )
+    titleCenterYConstraint = titleLabel.centerYAnchor.constraint(
+      equalTo: view.centerYAnchor,
+      constant: MainTabBar.Layout.tabItemIconCenterYOffset
     )
     iconCenterXForHome = iconImageView.centerXAnchor.constraint(equalTo: view.centerXAnchor)
 
@@ -183,13 +197,13 @@ class TabCollectionViewItem: NSCollectionViewItem, TabBarItemHoverDelegate {
       hoverBackgroundView.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -Style.hoverInset),
 
       iconLeadingConstraint!,
-      iconImageView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+      iconCenterYConstraint!,
       iconWidthConstraint,
       iconHeightConstraint,
       iconCenterXForHome,
 
       titleLeadingConstraint!,
-      titleLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+      titleCenterYConstraint!,
       titleTrailingConstraint!,
 
       closeOverlay.topAnchor.constraint(equalTo: view.topAnchor),
@@ -219,6 +233,11 @@ class TabCollectionViewItem: NSCollectionViewItem, TabBarItemHoverDelegate {
     let isHome = tab.icon == "house"
     isHomeTab = isHome
 
+    // Update context menu availability
+    if let tabView = view as? TabBarItemView {
+      tabView.isClosable = closable && !isHome
+    }
+
     // Toggle layout constraints for home vs regular tabs
     titleLeadingConstraint.constant = isHome ? 0 : Style.iconTrailingPadding * paddingScale
     iconLeadingConstraint.constant = Style.iconLeadingPadding * paddingScale
@@ -240,7 +259,7 @@ class TabCollectionViewItem: NSCollectionViewItem, TabBarItemHoverDelegate {
       )
       iconImageView.image = NSImage(systemSymbolName: tab.icon, accessibilityDescription: nil)?
         .withSymbolConfiguration(config)
-      iconImageView.contentTintColor = .labelColor
+      iconImageView.contentTintColor = Style.homeIconTintColor
       titleLabel.stringValue = ""
       titleLabel.isHidden = true
       titleLeadingConstraint.isActive = false
@@ -253,7 +272,7 @@ class TabCollectionViewItem: NSCollectionViewItem, TabBarItemHoverDelegate {
       // Other tabs: square badge with soft corners
       iconWidthConstraint.constant = iconSize
       iconHeightConstraint.constant = iconSize
-      iconImageView.layer?.cornerRadius = Style.iconCornerRadius
+      iconImageView.layer?.cornerRadius = iconSize / 3
       iconImageView.layer?.backgroundColor = iconImage == nil
         ? NSColor.systemGray.withAlphaComponent(0.3).cgColor
         : NSColor.clear.cgColor
@@ -370,6 +389,9 @@ class TabCollectionViewItem: NSCollectionViewItem, TabBarItemHoverDelegate {
     isHovered = false
     isTabSelected = false
     isClosable = true
+    if let tabView = view as? TabBarItemView {
+      tabView.isClosable = true
+    }
     titleLabel.layer?.mask = titleMaskLayer
     titleLeadingConstraint.isActive = true
     titleTrailingConstraint.isActive = true
@@ -389,10 +411,10 @@ class TabCollectionViewItem: NSCollectionViewItem, TabBarItemHoverDelegate {
     updateBackgroundShape()
 
     let isDarkMode = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-     let activeBackgroundColor = resolvedColor(
-       Theme.windowContentBackgroundColor,
-       for: view.effectiveAppearance
-     )
+    let activeBackgroundColor = resolvedColor(
+      Theme.windowContentBackgroundColor,
+      for: view.effectiveAppearance
+    )
 
     let shadowAlpha: CGFloat
     let backgroundAlpha: CGFloat

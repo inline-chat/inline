@@ -5,10 +5,30 @@ import AppKit
 final class TabBarItemView: NSView {
   weak var hoverDelegate: TabBarItemHoverDelegate?
   var onAppearanceChanged: (() -> Void)?
+  var onCloseRequest: (() -> Void)?
+  var isClosable: Bool = true
 
   private var trackingArea: NSTrackingArea?
 
   override var mouseDownCanMoveWindow: Bool { false }
+
+  override func menu(for event: NSEvent) -> NSMenu? {
+    guard isClosable else { return nil }
+
+    let menu = NSMenu()
+    let closeItem = NSMenuItem(
+      title: "Close Tab",
+      action: #selector(closeTabAction),
+      keyEquivalent: "w"
+    )
+    closeItem.target = self
+    menu.addItem(closeItem)
+    return menu
+  }
+
+  @objc private func closeTabAction() {
+    onCloseRequest?()
+  }
 
   override func viewDidChangeEffectiveAppearance() {
     super.viewDidChangeEffectiveAppearance()
