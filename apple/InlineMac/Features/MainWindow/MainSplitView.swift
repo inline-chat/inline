@@ -36,6 +36,7 @@ class MainSplitView: NSViewController {
   private var contentRadius: CGFloat = Theme.mainSplitViewContentRadius
 
   private var lastRenderedRoute: Nav2Route?
+  private var escapeKeyUnsubscriber: (() -> Void)?
 
   // ....
 
@@ -138,23 +139,61 @@ class MainSplitView: NSViewController {
     super.viewDidLoad()
   }
 
+  deinit {
+    escapeKeyUnsubscriber?()
+    escapeKeyUnsubscriber = nil
+  }
+
   private func setupNav() {
     guard let nav2 = dependencies.nav2 else { return }
 
     // Render immediately so we have the right content on first load.
     updateContent(for: nav2.currentRoute)
+    updateEscapeHandler(for: nav2)
 
     // Re-register observation on every change (Observation doesn't keep watchers alive).
     withObservationTracking { [weak self] in
       guard let self else { return }
       _ = nav2.currentRoute
+      _ = nav2.activeTab
       // updateContent(for: nav2.currentRoute)
     } onChange: { [weak self] in
       Task { @MainActor [weak self] in
         guard let self, let nav2 = dependencies.nav2 else { return }
         updateContent(for: nav2.currentRoute)
+        updateEscapeHandler(for: nav2)
         setupNav()
       }
+    }
+  }
+
+  private func updateEscapeHandler(for nav2: Nav2) {
+    let shouldHandleEscape = escapeTargetRoute(for: nav2) != nil
+
+    if shouldHandleEscape {
+      guard escapeKeyUnsubscriber == nil else { return }
+      guard let keyMonitor = dependencies.keyMonitor else { return }
+      escapeKeyUnsubscriber = keyMonitor.addHandler(for: .escape, key: "nav2_escape") { [weak self] _ in
+        self?.handleEscape()
+      }
+    } else {
+      escapeKeyUnsubscriber?()
+      escapeKeyUnsubscriber = nil
+    }
+  }
+
+  private func handleEscape() {
+    guard let nav2 = dependencies.nav2 else { return }
+    guard let targetRoute = escapeTargetRoute(for: nav2) else { return }
+    nav2.navigate(to: targetRoute)
+  }
+
+  private func escapeTargetRoute(for nav2: Nav2) -> Nav2Route? {
+    switch nav2.activeTab {
+      case .home:
+        return nav2.currentRoute == .spaces ? nil : .spaces
+      case .space:
+        return nav2.currentRoute == .empty ? nil : .empty
     }
   }
 
