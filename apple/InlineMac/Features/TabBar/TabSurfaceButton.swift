@@ -10,6 +10,7 @@ final class TabSurfaceButton: NSControl {
   private var trackingArea: NSTrackingArea?
   private var isHovered = false
   private var isPressed = false
+  private var iconCenterYConstraint: NSLayoutConstraint!
 
   private let symbolName: String
   private let pointSize: CGFloat
@@ -45,13 +46,18 @@ final class TabSurfaceButton: NSControl {
     iconView.contentTintColor = tintColor
     addSubview(iconView)
 
+    iconCenterYConstraint = iconView.centerYAnchor.constraint(
+      equalTo: centerYAnchor,
+      constant: MainTabBar.Layout.surfaceButtonIconCenterYOffset
+    )
+
     NSLayoutConstraint.activate([
       iconView.centerXAnchor.constraint(equalTo: centerXAnchor),
-      iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+      iconCenterYConstraint!,
       iconView.widthAnchor.constraint(equalToConstant: pointSize),
       iconView.heightAnchor.constraint(equalToConstant: pointSize),
-      widthAnchor.constraint(equalToConstant: 40),
-      heightAnchor.constraint(equalToConstant: Theme.tabBarItemHeight - Theme.tabBarItemInset),
+      widthAnchor.constraint(equalToConstant: 36),
+      heightAnchor.constraint(equalToConstant: MainTabBar.Layout.surfaceButtonHeight),
     ])
 
     let config = NSImage.SymbolConfiguration(pointSize: pointSize, weight: weight, scale: .large)
@@ -65,7 +71,7 @@ final class TabSurfaceButton: NSControl {
   }
 
   override var intrinsicContentSize: NSSize {
-    NSSize(width: 40, height: Theme.tabBarItemHeight - Theme.tabBarItemInset)
+    NSSize(width: 36, height: MainTabBar.Layout.surfaceButtonHeight)
   }
 
   override func updateTrackingAreas() {

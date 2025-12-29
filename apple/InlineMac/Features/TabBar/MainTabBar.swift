@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import InlineKit
+import InlineMacUI
 
 private final class TabBarContainerView: NSView {
   // Allow window dragging when clicking outside tab controls.
@@ -28,11 +29,44 @@ struct TabModel: Hashable {
   let title: String
 }
 
+extension MainTabBar {
+  enum Layout {
+    static let iconViewSize: CGFloat = 18
+    static let iconTopInset: CGFloat = 13
+
+    static var tabBarTopInset: CGFloat {
+      Theme.tabBarHeight - Theme.tabBarItemHeight
+    }
+
+    static var surfaceButtonHeight: CGFloat {
+      Theme.tabBarItemHeight - Theme.tabBarItemInset
+    }
+
+    static var surfaceButtonTopInset: CGFloat {
+      tabBarTopInset
+    }
+
+    static func iconCenterYOffset(viewHeight: CGFloat, viewTopInset: CGFloat) -> CGFloat {
+      let iconCenterFromTop = iconTopInset + iconViewSize / 2
+      let viewCenterFromTop = viewTopInset + viewHeight / 2
+      return iconCenterFromTop - viewCenterFromTop
+    }
+
+    static var tabItemIconCenterYOffset: CGFloat {
+      iconCenterYOffset(viewHeight: Theme.tabBarItemHeight, viewTopInset: tabBarTopInset)
+    }
+
+    static var surfaceButtonIconCenterYOffset: CGFloat {
+      iconCenterYOffset(viewHeight: surfaceButtonHeight, viewTopInset: surfaceButtonTopInset)
+    }
+  }
+}
+
 class MainTabBar: NSViewController {
   private let tabHeight: CGFloat = Theme.tabBarItemHeight
-  private let homeTabWidth: CGFloat = 50
+  private let homeTabWidth: CGFloat = 36
   private let baseTabSpacing: CGFloat = Theme.tabBarItemInset
-  private let iconSize: CGFloat = 18
+  private let iconSize: CGFloat = Layout.iconViewSize
   private var currentScale: CGFloat = 1
 
   private var topGap: CGFloat {
@@ -90,14 +124,14 @@ class MainTabBar: NSViewController {
     pinnedStack = NSStackView()
     pinnedStack.orientation = .horizontal
     pinnedStack.spacing = 6
-    pinnedStack.alignment = .centerY
+    pinnedStack.alignment = .top
     pinnedStack.translatesAutoresizingMaskIntoConstraints = false
 
     let spacesButton = TabSurfaceButton(
       symbolName: "square.grid.2x2.fill",
       pointSize: 17,
       weight: .medium,
-      tintColor: .tertiaryLabelColor
+      tintColor: .secondaryLabelColor
     )
     spacesButton.toolTip = "Spaces"
     spacesButton.onTap = { [weak self] in
@@ -222,47 +256,6 @@ class MainTabBar: NSViewController {
     }
   }
 
-  private func spaceAvatar(for space: Space, size: CGFloat) -> NSImage? {
-    let initials = space.displayName
-      .split(separator: " ")
-      .compactMap(\.first)
-      .prefix(2)
-      .map(String.init)
-      .joined()
-      .uppercased()
-
-    let image = NSImage(size: NSSize(width: size, height: size))
-    image.lockFocus()
-
-    let rect = NSRect(x: 0, y: 0, width: size, height: size)
-    let path = NSBezierPath(ovalIn: rect)
-    NSColor.controlAccentColor.withAlphaComponent(0.18).setFill()
-    path.fill()
-
-    let paragraph = NSMutableParagraphStyle()
-    paragraph.alignment = .center
-
-    let attributes: [NSAttributedString.Key: Any] = [
-      .font: NSFont.systemFont(ofSize: size * 0.45, weight: .semibold),
-      .foregroundColor: NSColor.labelColor,
-      .paragraphStyle: paragraph,
-    ]
-
-    let string = initials.isEmpty ? "·" : initials
-    let attr = NSAttributedString(string: string, attributes: attributes)
-    let strSize = attr.size()
-    let strRect = NSRect(
-      x: (size - strSize.width) / 2,
-      y: (size - strSize.height) / 2,
-      width: strSize.width,
-      height: strSize.height
-    )
-    attr.draw(in: strRect)
-
-    image.unlockFocus()
-    return image
-  }
-
   private func isTabClosable(at index: Int) -> Bool {
     guard index < nav2.tabs.count else { return false }
     return nav2.tabs[index] != .home
@@ -379,7 +372,7 @@ extension MainTabBar: NSCollectionViewDataSource {
           return nil
         case let .space(id, _):
           if let space = space(for: tabId) {
-            return spaceAvatar(for: space, size: iconSize)
+            return SpaceAvatarView.image(for: space, size: iconSize)
           } else {
             // Start observing for updates
             ObjectCache.shared.observeSpace(id: id)
