@@ -16,6 +16,10 @@ final class ReactionChipButton: NSButton {
     didSet { updateColors() }
   }
 
+  var forceIncomingStyle: Bool = false {
+    didSet { updateColors() }
+  }
+
   var currentUserId: Int64? {
     didSet { updateColors() }
   }
@@ -176,6 +180,10 @@ final class ReactionChipButton: NSButton {
   }
 
   private var backgroundColor: NSColor {
+    if forceIncomingStyle {
+      let base: NSColor = isDarkMode ? .white : .controlAccentColor
+      return weReacted ? base.withAlphaComponent(0.9) : base.withAlphaComponent(0.2)
+    }
     let base: NSColor = if isDarkMode {
       .white
     } else {
@@ -186,6 +194,12 @@ final class ReactionChipButton: NSButton {
   }
 
   private var foregroundColor: NSColor {
+    if forceIncomingStyle {
+      if isDarkMode {
+        return weReacted ? .controlAccentColor : .white
+      }
+      return weReacted ? .white : .controlAccentColor
+    }
     if isDarkMode {
       return weReacted ? .controlAccentColor : .white
     }
