@@ -1079,7 +1079,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 15.2;
 				MARKETING_VERSION = 0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineMac.debug;
-				PRODUCT_NAME = Inline;
+				PRODUCT_NAME = "Inline Dev";
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -1296,7 +1296,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = InlineMac/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Inline;
+				INFOPLIST_KEY_CFBundleDisplayName = "Inline Dev";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Inline uses camera when you choose to capture and send in a chat.";
@@ -1309,7 +1309,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 15.2;
 				MARKETING_VERSION = 0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineMac.debug2;
-				PRODUCT_NAME = Inline;
+				PRODUCT_NAME = "Inline Dev";
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
