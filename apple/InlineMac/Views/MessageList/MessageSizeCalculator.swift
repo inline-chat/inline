@@ -145,6 +145,10 @@ class MessageSizeCalculator {
     /// layout for each reaction
     var reactionItems: [String: LayoutPlan]
 
+    /// reactions placement
+    var reactionsOutsideBubble: Bool
+    var reactionsOutsideBubbleTopInset: CGFloat
+
     /// time can be beside text or below it. it doesn't define vertical spacing.
     var time: LayoutPlan?
 
@@ -257,6 +261,9 @@ class MessageSizeCalculator {
     }
 
     var reactionsViewTop: CGFloat {
+      if reactionsOutsideBubble {
+        return reactionsOutsideBubbleTopInset
+      }
       var top: CGFloat = reactions?.spacing.top ?? 0
       if let reply {
         top += reply.spacing.top + reply.size.height + reply.spacing.bottom
@@ -577,6 +584,8 @@ class MessageSizeCalculator {
     var replyPlan: LayoutPlan?
     var reactionsPlan: LayoutPlan?
     var reactionItemsPlan: [String: LayoutPlan] = [:]
+    var reactionsOutsideBubble = false
+    let reactionsOutsideBubbleTopInset: CGFloat = 4.0
     var timePlan: LayoutPlan?
     var attachmentsPlan: LayoutPlan?
     var attachmentItemsPlans: [LayoutPlan] = []
@@ -741,14 +750,18 @@ class MessageSizeCalculator {
     // MARK: - Reactions
 
     if hasReactions {
-      reactionsPlan = LayoutPlan(
-        size: .zero,
-        spacing: NSEdgeInsets(
+      reactionsOutsideBubble = !hasText && (photoPlan != nil || videoPlan != nil)
+      let reactionsInsets: NSEdgeInsets = reactionsOutsideBubble
+        ? .zero
+        : NSEdgeInsets(
           top: 8.0,
           left: 8.0,
           bottom: 0.0,
           right: 8.0
         )
+      reactionsPlan = LayoutPlan(
+        size: .zero,
+        spacing: reactionsInsets
       )
 
       let reactionsSpacing = 6.0
@@ -795,7 +808,10 @@ class MessageSizeCalculator {
         currentLineWidth += reactionSize.width + reactionsSpacing
 
         // Update reactions container size
-        reactionsPlan!.size.width = max(reactionsPlan!.size.width, currentLineWidth)
+        let lineWidth = reactionsOutsideBubble
+          ? max(0, currentLineWidth - reactionsSpacing)
+          : currentLineWidth
+        reactionsPlan!.size.width = max(reactionsPlan!.size.width, lineWidth)
         reactionsPlan!.size.height = CGFloat(reactionsCurrentLine + 1) * (reactionSize.height + reactionsSpacing)
       }
     }
@@ -870,9 +886,11 @@ class MessageSizeCalculator {
       bubbleWidth = max(bubbleWidth, attachmentsPlan.size.width + attachmentsPlan.spacing.horizontalTotal)
     }
     if let reactionsPlan {
-      bubbleHeight += reactionsPlan.size.height
-      bubbleHeight += reactionsPlan.spacing.bottom
-      bubbleWidth = max(bubbleWidth, reactionsPlan.size.width + reactionsPlan.spacing.horizontalTotal)
+      if !reactionsOutsideBubble {
+        bubbleHeight += reactionsPlan.size.height
+        bubbleHeight += reactionsPlan.spacing.bottom
+        bubbleWidth = max(bubbleWidth, reactionsPlan.size.width + reactionsPlan.spacing.horizontalTotal)
+      }
     }
     if let timePlan {
       if !isSingleLine, hasText {
@@ -911,6 +929,17 @@ class MessageSizeCalculator {
     wrapperHeight += bubblePlan.spacing.top
     wrapperHeight += bubblePlan.spacing.bottom
 
+    if reactionsOutsideBubble, let reactionsPlan {
+      wrapperHeight += reactionsOutsideBubbleTopInset
+      wrapperHeight += reactionsPlan.size.height
+      wrapperHeight += reactionsPlan.spacing.bottom
+      let avatarWidth = (avatarPlan?.size.width ?? 0) + (avatarPlan?.spacing.horizontalTotal ?? 0)
+      wrapperWidth = max(
+        wrapperWidth,
+        avatarWidth + reactionsPlan.size.width + reactionsPlan.spacing.horizontalTotal
+      )
+    }
+
     wrapperPlan.size = CGSize(width: wrapperWidth, height: wrapperHeight)
     wrapperPlan.spacing = .init(
       top: wrapperTopSpacing + Theme.messageOuterVerticalPadding,
@@ -935,6 +964,8 @@ class MessageSizeCalculator {
       reply: replyPlan,
       reactions: reactionsPlan,
       reactionItems: reactionItemsPlan,
+      reactionsOutsideBubble: reactionsOutsideBubble,
+      reactionsOutsideBubbleTopInset: reactionsOutsideBubble ? reactionsOutsideBubbleTopInset : 0,
       time: timePlan,
       singleLine: isSingleLine,
       emojiMessage: emojiMessage,

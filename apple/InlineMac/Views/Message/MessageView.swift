@@ -100,6 +100,10 @@ class MessageViewAppKit: NSView {
     props.layout.hasText
   }
 
+  private var reactionsOutsideBubble: Bool {
+    props.layout.reactionsOutsideBubble
+  }
+
   private var textWidth: CGFloat {
     props.layout.text?.size.width ?? 1.0
   }
@@ -553,12 +557,16 @@ class MessageViewAppKit: NSView {
       reactionViewWidthConstraint,
       reactionViewHeightConstraint,
       reactionViewTopConstraint,
+      reactionViewLeadingConstraint,
+      reactionViewTrailingConstraint,
     ].compactMap(\.self)
     NSLayoutConstraint.deactivate(constraintsToDeactivate)
 
     reactionViewWidthConstraint = nil
     reactionViewHeightConstraint = nil
     reactionViewTopConstraint = nil
+    reactionViewLeadingConstraint = nil
+    reactionViewTrailingConstraint = nil
   }
 
   private func setupReactions(animate: Bool) {
@@ -573,6 +581,7 @@ class MessageViewAppKit: NSView {
       fullMessage: fullMessage,
       groups: fullMessage.groupedReactions,
       layoutItems: props.layout.reactionItems,
+      forceIncomingStyle: reactionsOutsideBubble,
       animate: animate
     )
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -586,9 +595,17 @@ class MessageViewAppKit: NSView {
 //    reactionsView = view
 
     if hasText, textView.superview != nil {
-      contentView.addSubview(reactionsView!, positioned: .below, relativeTo: textView)
+      if reactionsOutsideBubble {
+        addSubview(reactionsView!)
+      } else {
+        contentView.addSubview(reactionsView!, positioned: .below, relativeTo: textView)
+      }
     } else {
-      contentView.addSubview(reactionsView!)
+      if reactionsOutsideBubble {
+        addSubview(reactionsView!)
+      } else {
+        contentView.addSubview(reactionsView!)
+      }
     }
 
     // Reactions
@@ -599,21 +616,41 @@ class MessageViewAppKit: NSView {
       reactionViewWidthConstraint = reactionsView.widthAnchor.constraint(
         equalToConstant: reactionsPlan.size.width
       )
-      reactionViewTopConstraint = reactionsView.topAnchor.constraint(
-        equalTo: contentView.topAnchor,
-        constant: props.layout.reactionsViewTop
-      )
+      if reactionsOutsideBubble {
+        reactionViewTopConstraint = reactionsView.topAnchor.constraint(
+          equalTo: bubbleView.bottomAnchor,
+          constant: props.layout.reactionsOutsideBubbleTopInset
+        )
+        if outgoing {
+          reactionViewTrailingConstraint = reactionsView.trailingAnchor.constraint(
+            equalTo: bubbleView.trailingAnchor,
+            constant: -reactionsPlan.spacing.right
+          )
+        } else {
+          reactionViewLeadingConstraint = reactionsView.leadingAnchor.constraint(
+            equalTo: bubbleView.leadingAnchor,
+            constant: reactionsPlan.spacing.left
+          )
+        }
+      } else {
+        reactionViewTopConstraint = reactionsView.topAnchor.constraint(
+          equalTo: contentView.topAnchor,
+          constant: props.layout.reactionsViewTop
+        )
+        reactionViewLeadingConstraint = reactionsView.leadingAnchor.constraint(
+          equalTo: contentView.leadingAnchor,
+          constant: reactionsPlan.spacing.left
+        )
+      }
 
       NSLayoutConstraint.activate(
         [
           reactionViewHeightConstraint,
           reactionViewWidthConstraint,
           reactionViewTopConstraint,
-          reactionsView.leadingAnchor.constraint(
-            equalTo: contentView.leadingAnchor,
-            constant: reactionsPlan.spacing.left
-          ),
-        ]
+          reactionViewLeadingConstraint,
+          reactionViewTrailingConstraint,
+        ].compactMap(\.self)
       )
     }
   }
@@ -623,29 +660,43 @@ class MessageViewAppKit: NSView {
       fullMessage: fullMessage,
       groups: fullMessage.groupedReactions,
       layoutItems: props.layout.reactionItems,
+      forceIncomingStyle: reactionsOutsideBubble,
       animate: false
     )
   }
 
   private func updateReactions(prev _: FullMessage, next: FullMessage, props: MessageViewProps) {
+    if reactionsView != nil, next.reactions.count == 0 {
+      log.trace("Removing reactions view")
+      // Remove
+      reactionsView?.removeFromSuperview()
+      reactionsView = nil
+      clearReactionsConstraints()
+      return
+    }
+
+    let shouldPlaceOutside = props.layout.reactionsOutsideBubble
+    if let reactionsView, shouldPlaceOutside != (reactionsView.superview === self) {
+      log.trace("Rebuilding reactions view for placement change")
+      setupReactions(animate: false)
+      needsUpdateConstraints = true
+      layoutSubtreeIfNeeded()
+      return
+    }
+
     if reactionsView == nil, next.reactions.count > 0 {
       log.trace("Adding reactions view \(props.layout.reactions)")
       // Added
       setupReactions(animate: true)
       needsUpdateConstraints = true
       layoutSubtreeIfNeeded()
-    } else if reactionsView != nil, next.reactions.count == 0 {
-      log.trace("Removing reactions view")
-      // Remove
-      reactionsView?.removeFromSuperview()
-      reactionsView = nil
-      clearReactionsConstraints()
     } else {
       log.trace("Updating reactions view")
       reactionsView?.update(
         fullMessage: next,
         groups: next.groupedReactions,
         layoutItems: props.layout.reactionItems,
+        forceIncomingStyle: reactionsOutsideBubble,
         animate: true
       )
     }
@@ -888,21 +939,41 @@ class MessageViewAppKit: NSView {
       reactionViewWidthConstraint = reactionsView.widthAnchor.constraint(
         equalToConstant: reactionsPlan.size.width
       )
-      reactionViewTopConstraint = reactionsView.topAnchor.constraint(
-        equalTo: contentView.topAnchor,
-        constant: layout.reactionsViewTop
-      )
+      if layout.reactionsOutsideBubble {
+        reactionViewTopConstraint = reactionsView.topAnchor.constraint(
+          equalTo: bubbleView.bottomAnchor,
+          constant: layout.reactionsOutsideBubbleTopInset
+        )
+        if outgoing {
+          reactionViewTrailingConstraint = reactionsView.trailingAnchor.constraint(
+            equalTo: bubbleView.trailingAnchor,
+            constant: -reactionsPlan.spacing.right
+          )
+        } else {
+          reactionViewLeadingConstraint = reactionsView.leadingAnchor.constraint(
+            equalTo: bubbleView.leadingAnchor,
+            constant: reactionsPlan.spacing.left
+          )
+        }
+      } else {
+        reactionViewTopConstraint = reactionsView.topAnchor.constraint(
+          equalTo: contentView.topAnchor,
+          constant: layout.reactionsViewTop
+        )
+        reactionViewLeadingConstraint = reactionsView.leadingAnchor.constraint(
+          equalTo: contentView.leadingAnchor,
+          constant: reactionsPlan.spacing.left
+        )
+      }
 
       constraints.append(
         contentsOf: [
           reactionViewHeightConstraint,
           reactionViewWidthConstraint,
           reactionViewTopConstraint,
-          reactionsView.leadingAnchor.constraint(
-            equalTo: contentView.leadingAnchor,
-            constant: reactionsPlan.spacing.left
-          ),
-        ]
+          reactionViewLeadingConstraint,
+          reactionViewTrailingConstraint,
+        ].compactMap(\.self)
       )
     }
 
@@ -1041,6 +1112,8 @@ class MessageViewAppKit: NSView {
   private var reactionViewWidthConstraint: NSLayoutConstraint!
   private var reactionViewHeightConstraint: NSLayoutConstraint!
   private var reactionViewTopConstraint: NSLayoutConstraint!
+  private var reactionViewLeadingConstraint: NSLayoutConstraint?
+  private var reactionViewTrailingConstraint: NSLayoutConstraint?
 
   private var contentViewWidthConstraint: NSLayoutConstraint!
   private var contentViewHeightConstraint: NSLayoutConstraint!
@@ -1223,8 +1296,24 @@ class MessageViewAppKit: NSView {
         reactionViewHeightConstraint.constant = reactionsPlan.size.height
       }
 
-      if reactionViewTopConstraint.constant != props.layout.reactionsViewTop {
-        reactionViewTopConstraint.constant = props.layout.reactionsViewTop
+      let reactionTopConstant = props.layout.reactionsOutsideBubble
+        ? props.layout.reactionsOutsideBubbleTopInset
+        : props.layout.reactionsViewTop
+      if reactionViewTopConstraint.constant != reactionTopConstant {
+        reactionViewTopConstraint.constant = reactionTopConstant
+      }
+      if props.layout.reactionsOutsideBubble, outgoing {
+        if let reactionViewTrailingConstraint,
+           reactionViewTrailingConstraint.constant != -reactionsPlan.spacing.right
+        {
+          reactionViewTrailingConstraint.constant = -reactionsPlan.spacing.right
+        }
+      } else {
+        if let reactionViewLeadingConstraint,
+           reactionViewLeadingConstraint.constant != reactionsPlan.spacing.left
+        {
+          reactionViewLeadingConstraint.constant = reactionsPlan.spacing.left
+        }
       }
     } else if let reactionsView, let reactionsPlan = props.layout.reactions {
       // setup
@@ -1234,19 +1323,39 @@ class MessageViewAppKit: NSView {
       reactionViewWidthConstraint = reactionsView.widthAnchor.constraint(
         equalToConstant: reactionsPlan.size.width
       )
-      reactionViewTopConstraint = reactionsView.topAnchor.constraint(
-        equalTo: contentView.topAnchor,
-        constant: props.layout.reactionsViewTop
-      )
+      if props.layout.reactionsOutsideBubble {
+        reactionViewTopConstraint = reactionsView.topAnchor.constraint(
+          equalTo: bubbleView.bottomAnchor,
+          constant: props.layout.reactionsOutsideBubbleTopInset
+        )
+        if outgoing {
+          reactionViewTrailingConstraint = reactionsView.trailingAnchor.constraint(
+            equalTo: bubbleView.trailingAnchor,
+            constant: -reactionsPlan.spacing.right
+          )
+        } else {
+          reactionViewLeadingConstraint = reactionsView.leadingAnchor.constraint(
+            equalTo: bubbleView.leadingAnchor,
+            constant: reactionsPlan.spacing.left
+          )
+        }
+      } else {
+        reactionViewTopConstraint = reactionsView.topAnchor.constraint(
+          equalTo: contentView.topAnchor,
+          constant: props.layout.reactionsViewTop
+        )
+        reactionViewLeadingConstraint = reactionsView.leadingAnchor.constraint(
+          equalTo: contentView.leadingAnchor,
+          constant: reactionsPlan.spacing.left
+        )
+      }
       NSLayoutConstraint.activate([
         reactionViewHeightConstraint,
         reactionViewWidthConstraint,
         reactionViewTopConstraint,
-        reactionsView.leadingAnchor.constraint(
-          equalTo: contentView.leadingAnchor,
-          constant: reactionsPlan.spacing.left
-        ),
-      ])
+        reactionViewLeadingConstraint,
+        reactionViewTrailingConstraint,
+      ].compactMap(\.self))
     }
 //    if hasReactions {
 //      for (index, reaction) in reactionItems.enumerated() {
