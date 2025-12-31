@@ -312,6 +312,11 @@ class SidebarItemRow: NSTableCellView {
 
   /// Constraint for message label leading anchor
   private var messageLabelLeadingConstraint: NSLayoutConstraint?
+  private enum MessageLeadingMode {
+    case container
+    case sender
+  }
+  private var messageLabelLeadingMode: MessageLeadingMode = .container
 
   private func createSenderView() -> SidebarSenderView {
     let view = SidebarSenderView(
@@ -392,6 +397,20 @@ class SidebarItemRow: NSTableCellView {
     messageLabelLeadingConstraint?.isActive = true
   }
 
+  private func updateMessageLeadingConstraint(showsSender: Bool) {
+    let targetMode: MessageLeadingMode = showsSender ? .sender : .container
+    guard messageLabelLeadingMode != targetMode else { return }
+
+    messageLabelLeadingConstraint?.isActive = false
+    if showsSender, let senderView {
+      messageLabelLeadingConstraint = messageLabel.leadingAnchor.constraint(equalTo: senderView.trailingAnchor)
+    } else {
+      messageLabelLeadingConstraint = messageLabel.leadingAnchor.constraint(equalTo: messageContainerView.leadingAnchor)
+    }
+    messageLabelLeadingConstraint?.isActive = true
+    messageLabelLeadingMode = targetMode
+  }
+
   func configure(with item: HomeChatItem) {
     preparingForReuse = false
 
@@ -455,18 +474,13 @@ class SidebarItemRow: NSTableCellView {
           senderView!.bottomAnchor.constraint(equalTo: messageContainerView.bottomAnchor),
         ])
 
-        // Update message label constraints to account for sender view
-        messageLabelLeadingConstraint?.isActive = false
-        messageLabelLeadingConstraint = messageLabel.leadingAnchor.constraint(
-          equalTo: senderView!.trailingAnchor,
-          constant: 0
-        )
-        messageLabelLeadingConstraint?.isActive = true
       }
       senderView?.isHidden = false
       senderView?.configure(with: senderInfo, inlineWithMessage: isThreadItem)
+      updateMessageLeadingConstraint(showsSender: true)
     } else {
       senderView?.isHidden = true
+      updateMessageLeadingConstraint(showsSender: false)
     }
 
     // Configure badges (toggle visibility instead of add/remove)
@@ -490,6 +504,7 @@ class SidebarItemRow: NSTableCellView {
     previousSignature = nil  // Reset signature to force reconfigure on reuse
     isHovered = false
     isSelected = false
+    updateMessageLeadingConstraint(showsSender: false)
   }
 
   // MARK: - Context Menu
