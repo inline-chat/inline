@@ -12,6 +12,7 @@ export const getUpdates = async (input: GetUpdatesInput, handlerContext: Handler
     {
       bucket: input.bucket,
       startSeq: input.startSeq ?? 0n,
+      seqEnd: input.seqEnd ?? 0n,
       totalLimit: input.totalLimit ?? 0,
     },
     {

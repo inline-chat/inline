@@ -46,8 +46,9 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
   }
 
   let seqEnd: number | undefined
-  if (input.seqEnd !== undefined) {
-    const seqEndBigInt = input.seqEnd
+  // proto3 scalar defaults to 0 when omitted; treat 0 as unset.
+  const seqEndBigInt = input.seqEnd ?? 0n
+  if (seqEndBigInt !== 0n) {
     if (seqEndBigInt < 0n) {
       throw RealtimeRpcError.BadRequest
     }

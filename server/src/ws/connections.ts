@@ -38,13 +38,13 @@ interface Connection {
 }
 
 class ConnectionManager {
-  private server: Server | undefined
+  private server: Server<unknown> | undefined
   private connections: Map<string, Connection> = new Map()
   private authenticatedUsers: Map<number, Set<string>> = new Map()
   private usersBySpaceId: Map<number, Set<number>> = new Map()
   private userSpaceIds: Map<number, number[]> = new Map()
 
-  setServer(server: Server) {
+  setServer(server: Server<unknown>) {
     this.server = server
   }
 
