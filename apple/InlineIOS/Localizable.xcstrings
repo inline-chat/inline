@@ -169,6 +169,9 @@
         }
       }
     },
+    "Applies immediately. Use to sync new/edit/attachment updates via bucket fetches." : {
+
+    },
     "Archive" : {
 
     },
@@ -176,6 +179,30 @@
 
     },
     "Are you sure you want to remove %@ from the chat?" : {
+
+    },
+    "Bucket fetch failures" : {
+
+    },
+    "Bucket fetch follow-ups" : {
+
+    },
+    "Bucket fetch TOO_LONG" : {
+
+    },
+    "Bucket fetches" : {
+
+    },
+    "Bucket updates applied" : {
+
+    },
+    "Bucket updates skipped" : {
+
+    },
+    "Buckets" : {
+
+    },
+    "Buckets tracked" : {
 
     },
     "By continuing, you acknowledge that you understand and agree to the [Terms & Conditions](https://inline.chat/legal) and [Privacy Policy](https://inline.chat/legal)." : {
@@ -445,6 +472,9 @@
         }
       }
     },
+    "Direct updates applied" : {
+
+    },
     "Disconnect" : {
 
     },
@@ -479,6 +509,9 @@
         }
       }
     },
+    "Duplicate updates skipped" : {
+
+    },
     "Edit" : {
       "comment" : "Edit button",
       "localizations" : {
@@ -500,6 +533,9 @@
 
     },
     "Email" : {
+
+    },
+    "Enable sync message updates" : {
 
     },
     "Enter the code" : {
@@ -577,6 +613,9 @@
     "Everyone in %@" : {
 
     },
+    "Experimental" : {
+
+    },
     "Failed to load chat" : {
 
     },
@@ -646,6 +685,18 @@
         }
       }
     },
+    "Last bucket fetch" : {
+
+    },
+    "Last bucket fetch failure" : {
+
+    },
+    "Last direct apply" : {
+
+    },
+    "Last sync date" : {
+
+    },
     "Leave Space" : {
 
     },
@@ -708,6 +759,9 @@
 
     },
     "No Spaces Yet" : {
+
+    },
+    "No sync stats yet" : {
 
     },
     "Notifications" : {
@@ -861,6 +915,16 @@
         }
       }
     },
+    "seq %lld | date %lld | fetching %@ | pending %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "seq %1$lld | date %2$lld | fetching %3$@ | pending %4$@"
+          }
+        }
+      }
+    },
     "Set up profile" : {
 
     },
@@ -909,6 +973,9 @@
           }
         }
       }
+    },
+    "Sync" : {
+
     },
     "The document is not available for preview. Please try downloading it again." : {
 
