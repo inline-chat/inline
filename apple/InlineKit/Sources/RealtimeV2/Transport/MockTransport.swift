@@ -54,4 +54,8 @@ actor MockTransport: Transport {
     await channel.send(.connecting)
     await channel.send(.connected)
   }
+
+  func handleForegroundTransition() async {
+    await reconnect(skipDelay: true)
+  }
 }

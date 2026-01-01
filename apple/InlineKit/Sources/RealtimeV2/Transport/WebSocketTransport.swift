@@ -105,6 +105,12 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     }
   }
 
+  public func handleForegroundTransition() async {
+    // Reset backoff and immediately attempt to reconnect.
+    connectionAttemptNo = 0
+    await reconnect(skipDelay: true)
+  }
+
   private func getReconnectionDelay() -> TimeInterval {
     let attemptNo = connectionAttemptNo
 

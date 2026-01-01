@@ -4,6 +4,14 @@ import Foundation
 import InlineProtocol
 import Logger
 
+#if canImport(UIKit)
+import UIKit
+#endif
+
+#if canImport(AppKit)
+import AppKit
+#endif
+
 /// Communicate with the transport and handle auth, generating messages, sequencing, track ACKs, etc.
 actor ProtocolClient {
   private let log = Log.scoped("RealtimeV2.ProtocolClient")
@@ -42,6 +50,10 @@ actor ProtocolClient {
   /// Ping pong service to keep connection alive
   private let pingPong: PingPongService
 
+  #if canImport(UIKit) || canImport(AppKit)
+  private var lifecycleObserversInstalled = false
+  #endif
+
   init(transport: Transport, auth: Auth) {
     self.transport = transport
     self.auth = auth
@@ -51,17 +63,16 @@ actor ProtocolClient {
     Task {
       await self.startListeners()
     }
+
+    #if canImport(UIKit) || canImport(AppKit)
+    Task { await self.startLifecycleObservers() }
+    #endif
   }
 
   deinit {
-    // Cancel all listener tasks
-    for task in tasks {
-      task.cancel()
-    }
-    tasks.removeAll()
-    Task { [self] in
-      await reset()
-    }
+    #if canImport(UIKit) || canImport(AppKit)
+    NotificationCenter.default.removeObserver(self)
+    #endif
   }
 
   func reset() {
@@ -77,6 +88,19 @@ actor ProtocolClient {
   }
 
   // MARK: - State
+
+  private func handleForegroundTransition() async {
+    guard auth.getIsLoggedIn() == true else { return }
+    guard state != .open else { return }
+
+    log.debug("Foreground transition: resetting reconnection delay")
+    connectionAttemptNo = 0
+    reconnectionTask?.cancel()
+    reconnectionTask = nil
+    stopAuthenticationTimeout()
+
+    await transport.handleForegroundTransition()
+  }
 
   private func connectionOpen() async {
     state = .open
@@ -98,6 +122,33 @@ actor ProtocolClient {
 
   // MARK: - Listeners
 
+  #if canImport(UIKit) || canImport(AppKit)
+  private func startLifecycleObservers() {
+    guard !lifecycleObserversInstalled else { return }
+    lifecycleObserversInstalled = true
+
+    #if canImport(UIKit)
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleAppDidBecomeActive),
+      name: UIApplication.didBecomeActiveNotification,
+      object: nil
+    )
+    #elseif canImport(AppKit)
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleAppDidBecomeActive),
+      name: NSApplication.didBecomeActiveNotification,
+      object: nil
+    )
+    #endif
+  }
+
+  @objc private nonisolated func handleAppDidBecomeActive() {
+    Task { await self.handleForegroundTransition() }
+  }
+  #endif
+
   /// Start listening for transport events to handle protocol messages
   private func startListeners() async {
     // Transport events
@@ -107,26 +158,26 @@ actor ProtocolClient {
         guard !Task.isCancelled else { return }
 
         switch event {
-          case .connected:
-            self.log.trace("Protocol client: Transport connected")
-            Task {
-              await self.authenticate()
-            }
+        case .connected:
+          self.log.trace("Protocol client: Transport connected")
+          Task {
+            await self.authenticate()
+          }
 
-          case let .message(message):
-            self.log.trace("Protocol client received transport message: \(message)")
-            Task {
-              await self.handleTransportMessage(message)
-            }
+        case let .message(message):
+          self.log.trace("Protocol client received transport message: \(message)")
+          Task {
+            await self.handleTransportMessage(message)
+          }
 
-          case .connecting:
-            await self.connecting()
+        case .connecting:
+          await self.connecting()
 
-          case .stopping:
-            self.log.trace("Protocol client: Transport stopping. Resetting state and clearing RPC calls")
-            Task {
-              await self.reset()
-            }
+        case .stopping:
+          self.log.trace("Protocol client: Transport stopping. Resetting state and clearing RPC calls")
+          Task {
+            await self.reset()
+          }
         }
       }
     }.store(in: &tasks)
@@ -135,37 +186,37 @@ actor ProtocolClient {
   /// Handle incoming transport messages
   private func handleTransportMessage(_ message: ServerProtocolMessage) async {
     switch message.body {
-      case .connectionOpen:
-        await connectionOpen()
-        log.info("Protocol client: Connection established")
+    case .connectionOpen:
+      await connectionOpen()
+      log.info("Protocol client: Connection established")
 
-      case let .rpcResult(result):
-        completeRpcResult(msgId: result.reqMsgID, rpcResult: result.result)
-        Task { await events.send(.rpcResult(msgId: result.reqMsgID, rpcResult: result.result)) }
+    case let .rpcResult(result):
+      completeRpcResult(msgId: result.reqMsgID, rpcResult: result.result)
+      Task { await events.send(.rpcResult(msgId: result.reqMsgID, rpcResult: result.result)) }
 
-      case let .rpcError(error):
-        completeRpcError(msgId: error.reqMsgID, rpcError: error)
-        Task { await events.send(.rpcError(msgId: error.reqMsgID, rpcError: error)) }
+    case let .rpcError(error):
+      completeRpcError(msgId: error.reqMsgID, rpcError: error)
+      Task { await events.send(.rpcError(msgId: error.reqMsgID, rpcError: error)) }
 
-      case let .ack(ack):
-        log.trace("Received ack: \(ack.msgID)")
-        Task { await events.send(.ack(msgId: ack.msgID)) }
+    case let .ack(ack):
+      log.trace("Received ack: \(ack.msgID)")
+      Task { await events.send(.ack(msgId: ack.msgID)) }
 
-      case let .message(serverMessage):
-        log.trace("Received server message: \(serverMessage)")
-        switch serverMessage.payload {
-          case let .update(updatesPayload):
-            Task { await events.send(.updates(updates: updatesPayload)) }
-          default:
-            log.trace("Protocol client: Unhandled message type: \(String(describing: serverMessage.payload))")
-        }
-
-      case let .pong(pong):
-        log.trace("Received pong: \(pong.nonce)")
-        Task { await pingPong.pong(nonce: pong.nonce) }
-
+    case let .message(serverMessage):
+      log.trace("Received server message: \(serverMessage)")
+      switch serverMessage.payload {
+      case let .update(updatesPayload):
+        Task { await events.send(.updates(updates: updatesPayload)) }
       default:
-        log.trace("Protocol client: Unhandled message type: \(String(describing: message.body))")
+        log.trace("Protocol client: Unhandled message type: \(String(describing: serverMessage.payload))")
+      }
+
+    case let .pong(pong):
+      log.trace("Received pong: \(pong.nonce)")
+      Task { await pingPong.pong(nonce: pong.nonce) }
+
+    default:
+      log.trace("Protocol client: Unhandled message type: \(String(describing: message.body))")
     }
   }
 
