@@ -9,6 +9,11 @@ FROM base AS install
 RUN mkdir -p /temp/dev
 COPY package.json bun.lock /temp/dev/
 COPY web/package.json /temp/dev/web/
+COPY web/packages/auth/package.json /temp/dev/web/packages/auth/
+COPY web/packages/client/package.json /temp/dev/web/packages/client/
+COPY web/packages/config/package.json /temp/dev/web/packages/config/
+COPY web/packages/log/package.json /temp/dev/web/packages/log/
+COPY web/packages/protocol/package.json /temp/dev/web/packages/protocol/
 COPY desktop/package.json /temp/dev/desktop/
 COPY scripts/package.json /temp/dev/scripts/
 COPY server/package.json /temp/dev/server/
@@ -18,6 +23,11 @@ RUN cd /temp/dev && bun install --frozen-lockfile
 RUN mkdir -p /temp/prod
 COPY package.json bun.lock /temp/prod/
 COPY web/package.json /temp/prod/web/
+COPY web/packages/auth/package.json /temp/prod/web/packages/auth/
+COPY web/packages/client/package.json /temp/prod/web/packages/client/
+COPY web/packages/config/package.json /temp/prod/web/packages/config/
+COPY web/packages/log/package.json /temp/prod/web/packages/log/
+COPY web/packages/protocol/package.json /temp/prod/web/packages/protocol/
 COPY desktop/package.json /temp/prod/desktop/
 COPY scripts/package.json /temp/prod/scripts/
 COPY server/package.json /temp/prod/server/
@@ -50,6 +60,11 @@ COPY --from=prerelease /usr/src/app/server/package.json ./server/package.json
 COPY --from=prerelease /usr/src/app/package.json .
 COPY --from=prerelease /usr/src/app/bun.lock .
 COPY --from=prerelease /usr/src/app/web/package.json ./web/
+COPY --from=prerelease /usr/src/app/web/packages/auth/package.json ./web/packages/auth/
+COPY --from=prerelease /usr/src/app/web/packages/client/package.json ./web/packages/client/
+COPY --from=prerelease /usr/src/app/web/packages/config/package.json ./web/packages/config/
+COPY --from=prerelease /usr/src/app/web/packages/log/package.json ./web/packages/log/
+COPY --from=prerelease /usr/src/app/web/packages/protocol/package.json ./web/packages/protocol/
 COPY --from=prerelease /usr/src/app/desktop/package.json ./desktop/
 COPY --from=prerelease /usr/src/app/scripts/package.json ./scripts/
 COPY --from=prerelease /usr/src/app/server/package.json ./server/
