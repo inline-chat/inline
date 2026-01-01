@@ -49,9 +49,11 @@ struct SyncEngineStatsView: View {
         Section("Buckets") {
           ForEach(stats.buckets, id: \.key) { bucket in
             VStack(alignment: .leading, spacing: 4) {
+              let fetchingLabel = bucket.isFetching ? "yes" : "no"
+              let pendingLabel = bucket.needsFetch ? "yes" : "no"
               Text(bucketLabel(bucket.key))
                 .font(.body)
-              Text("seq \(bucket.seq) | date \(bucket.date) | fetching \(bucket.isFetching ? \"yes\" : \"no\") | pending \(bucket.needsFetch ? \"yes\" : \"no\")")
+              Text("seq \(bucket.seq) | date \(bucket.date) | fetching \(fetchingLabel) | pending \(pendingLabel)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
