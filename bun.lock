@@ -99,11 +99,23 @@
         "vitest": "^4.0.16",
       },
     },
+    "web/packages/auth": {
+      "name": "@inline/auth",
+      "version": "0.0.0",
+      "dependencies": {
+        "react": "^19.1.1",
+      },
+      "devDependencies": {
+        "@types/react": "^19.0.1",
+        "typescript": "^5.7.2",
+      },
+    },
     "web/packages/client": {
       "name": "@inline/client",
       "version": "0.0.0",
       "dependencies": {
         "@in/protocol": "workspace:*",
+        "@inline/auth": "workspace:*",
         "@inline/config": "workspace:*",
         "@inline/log": "workspace:*",
         "react": "^19.1.1",
@@ -413,6 +425,8 @@
     "@inline-chat/server": ["@inline-chat/server@workspace:server"],
 
     "@inline-chat/web": ["@inline-chat/web@workspace:web"],
+
+    "@inline/auth": ["@inline/auth@workspace:web/packages/auth"],
 
     "@inline/client": ["@inline/client@workspace:web/packages/client"],
 
