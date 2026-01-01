@@ -194,6 +194,39 @@ describe("Sync core flow", () => {
     expect(secondUpdate?.seq).toBe(2)
   })
 
+  it("respects seqEnd when fetching updates", async () => {
+    const { users } = await testUtils.createSpaceWithMembers("Seq End Sync", ["seqend@sync.com"])
+    const user = users[0]
+    if (!user) {
+      throw new Error("Failed to create seqEnd user")
+    }
+
+    for (let seq = 1; seq <= 5; seq += 1) {
+      await insertServerUpdate({
+        bucket: UpdateBucket.User,
+        entityId: user.id,
+        seq,
+        payload: {
+          oneofKind: "userChatParticipantDelete",
+          userChatParticipantDelete: {
+            chatId: BigInt(seq),
+          },
+        },
+      })
+    }
+
+    const { updates: dbUpdates, latestSeq } = await Sync.getUpdates({
+      bucket: { type: UpdateBucket.User, userId: user.id },
+      seqStart: 0,
+      seqEnd: 3,
+      limit: 10,
+    })
+
+    expect(dbUpdates).toHaveLength(3)
+    expect(dbUpdates[2]?.seq).toBe(3)
+    expect(latestSeq).toBe(3)
+  })
+
   it("returns metadata when fetching updates via Functions", async () => {
     const { users } = await testUtils.createSpaceWithMembers("Metadata Sync", ["meta@sync.com"])
     const user = users[0]

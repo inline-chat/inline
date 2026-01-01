@@ -26,7 +26,7 @@ struct SettingsSidebarView: View {
     }
 
     // more items
-    categories.append(contentsOf: [.general, .notifications, .experimental])
+    categories.append(contentsOf: [.general, .notifications, .experimental, .debug])
 
     return categories
   }

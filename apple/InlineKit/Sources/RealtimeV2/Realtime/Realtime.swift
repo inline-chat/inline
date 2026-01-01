@@ -43,11 +43,12 @@ public actor RealtimeV2 {
     auth: Auth,
     applyUpdates: ApplyUpdates,
     syncStorage: SyncStorage,
+    syncConfig: SyncConfig = .default,
     persistenceHandler: TransactionPersistenceHandler? = nil,
   ) {
     self.auth = auth
     client = ProtocolClient(transport: transport, auth: auth)
-    sync = Sync(applyUpdates: applyUpdates, syncStorage: syncStorage, client: client)
+    sync = Sync(applyUpdates: applyUpdates, syncStorage: syncStorage, client: client, config: syncConfig)
     transactions = Transactions(persistenceHandler: persistenceHandler)
     stateObject = RealtimeState()
 
@@ -311,6 +312,14 @@ public actor RealtimeV2 {
 
   public func cancelTransaction(where predicate: @escaping (TransactionWrapper) -> Bool) {
     Task { await transactions.cancel(where: predicate) }
+  }
+
+  public func updateSyncConfig(_ config: SyncConfig) {
+    Task { await sync.updateConfig(config) }
+  }
+
+  public func getSyncStats() async -> SyncStats {
+    await sync.getStats()
   }
 
   // MARK: - Helpers

@@ -23,6 +23,9 @@ type GetUpdatesInput = {
   /** pts to start from (exclusive) */
   seqStart: number
 
+  /** optional inclusive upper bound for slicing */
+  seqEnd?: number
+
   /** limit of updates to get */
   limit: number
 }
@@ -35,16 +38,16 @@ type GetUpdatesOutput = {
 
 // Get a list of updates from the database
 async function getUpdates(input: GetUpdatesInput): Promise<GetUpdatesOutput> {
-  const { bucket, seqStart } = input
+  const { bucket, seqStart, seqEnd } = input
   const entityId = getEntityId(bucket)
+
+  const seqFilter = seqEnd !== undefined ? { gt: seqStart, lte: seqEnd } : { gt: seqStart }
 
   const list = await db.query.updates.findMany({
     where: {
       bucket: bucket.type,
       entityId,
-      seq: {
-        gt: seqStart,
-      },
+      seq: seqFilter,
     },
     orderBy: {
       seq: "asc",
@@ -52,11 +55,12 @@ async function getUpdates(input: GetUpdatesInput): Promise<GetUpdatesOutput> {
     limit: input.limit,
   })
 
+  const latestWhere = seqEnd !== undefined
+    ? { bucket: bucket.type, entityId, seq: { lte: seqEnd } }
+    : { bucket: bucket.type, entityId }
+
   const latest = await db.query.updates.findFirst({
-    where: {
-      bucket: bucket.type,
-      entityId,
-    },
+    where: latestWhere,
     orderBy: {
       seq: "desc",
     },

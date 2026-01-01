@@ -2726,6 +2726,9 @@ public struct GetUpdatesInput: Sendable {
   /// contain "too long" result type
   public var totalLimit: Int32 = 0
 
+  /// optional inclusive upper bound for slicing
+  public var seqEnd: Int64 = 0
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -9364,6 +9367,7 @@ extension GetUpdatesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
     1: .same(proto: "bucket"),
     2: .standard(proto: "start_seq"),
     3: .standard(proto: "total_limit"),
+    4: .standard(proto: "seq_end"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -9375,6 +9379,7 @@ extension GetUpdatesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
       case 1: try { try decoder.decodeSingularMessageField(value: &self._bucket) }()
       case 2: try { try decoder.decodeSingularInt64Field(value: &self.startSeq) }()
       case 3: try { try decoder.decodeSingularInt32Field(value: &self.totalLimit) }()
+      case 4: try { try decoder.decodeSingularInt64Field(value: &self.seqEnd) }()
       default: break
       }
     }
@@ -9394,6 +9399,9 @@ extension GetUpdatesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
     if self.totalLimit != 0 {
       try visitor.visitSingularInt32Field(value: self.totalLimit, fieldNumber: 3)
     }
+    if self.seqEnd != 0 {
+      try visitor.visitSingularInt64Field(value: self.seqEnd, fieldNumber: 4)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -9401,6 +9409,7 @@ extension GetUpdatesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
     if lhs._bucket != rhs._bucket {return false}
     if lhs.startSeq != rhs.startSeq {return false}
     if lhs.totalLimit != rhs.totalLimit {return false}
+    if lhs.seqEnd != rhs.seqEnd {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

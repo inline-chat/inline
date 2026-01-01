@@ -669,6 +669,9 @@ message GetUpdatesInput {
   // if the difference with the start_seq is greater than this, the result will
   // contain "too long" result type
   int32 total_limit = 3;
+
+  // optional inclusive upper bound for slicing
+  int64 seq_end = 4;
 }
 
 message GetUpdatesResult {

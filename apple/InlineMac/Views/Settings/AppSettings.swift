@@ -47,6 +47,12 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  @Published var enableSyncMessageUpdates: Bool {
+    didSet {
+      UserDefaults.standard.set(enableSyncMessageUpdates, forKey: "enableSyncMessageUpdates")
+    }
+  }
+
   private init() {
     sendsWithCmdEnter = UserDefaults.standard.bool(forKey: "sendsWithCmdEnter")
     automaticSpellCorrection = UserDefaults.standard.object(forKey: "automaticSpellCorrection") as? Bool ?? true
@@ -54,6 +60,7 @@ final class AppSettings: ObservableObject {
     disableNotificationSound = UserDefaults.standard.bool(forKey: "disableNotificationSound")
     showDockBadgeUnreadDMs = UserDefaults.standard.object(forKey: "showDockBadgeUnreadDMs") as? Bool ?? true
     enableNewMacUI = UserDefaults.standard.bool(forKey: "enableNewMacUI")
+    enableSyncMessageUpdates = UserDefaults.standard.bool(forKey: "enableSyncMessageUpdates")
   }
 }
 

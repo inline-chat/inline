@@ -43,6 +43,8 @@ struct SettingsDetailView: View {
           NotificationsSettingsDetailView()
         case .experimental:
           ExperimentalSettingsDetailView()
+        case .debug:
+          DebugSettingsDetailView()
       }
     }
     .navigationTitle(category.title)
