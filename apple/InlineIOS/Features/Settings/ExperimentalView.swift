@@ -30,7 +30,7 @@ struct ExperimentalView: View {
       enableMessageUpdates: enableSyncMessageUpdates,
       lastSyncSafetyGapSeconds: SyncConfig.default.lastSyncSafetyGapSeconds
     )
-    realtimeV2.updateSyncConfig(config)
+    Task { await realtimeV2.updateSyncConfig(config) }
   }
 }
 

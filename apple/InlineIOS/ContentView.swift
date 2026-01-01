@@ -67,7 +67,7 @@ struct ContentView2: View {
       enableMessageUpdates: enableSyncMessageUpdates,
       lastSyncSafetyGapSeconds: SyncConfig.default.lastSyncSafetyGapSeconds
     )
-    Api.realtime.updateSyncConfig(config)
+    Task { await Api.realtime.updateSyncConfig(config) }
   }
 
   @ViewBuilder

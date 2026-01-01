@@ -225,7 +225,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       enableMessageUpdates: enableMessageUpdates,
       lastSyncSafetyGapSeconds: SyncConfig.default.lastSyncSafetyGapSeconds
     )
-    Api.realtime.updateSyncConfig(config)
+    Task { await Api.realtime.updateSyncConfig(config) }
   }
 }
 
