@@ -38,4 +38,6 @@ public protocol Transport: Sendable {
 
   func stopConnection() async
   func reconnect(skipDelay: Bool) async
+  /// Reset any reconnection backoff and attempt an immediate reconnect on foreground transitions.
+  func handleForegroundTransition() async
 }
