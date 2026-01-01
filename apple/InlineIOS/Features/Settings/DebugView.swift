@@ -1,5 +1,4 @@
 import SwiftUI
-import Logger
 
 struct DebugView: View {
   @State private var isClearing = false
@@ -9,6 +8,16 @@ struct DebugView: View {
   
   var body: some View {
     List {
+      Section("Sync") {
+        NavigationLink(destination: SyncEngineStatsView()) {
+          SettingsItem(
+            icon: "waveform.path.ecg",
+            iconColor: .blue,
+            title: "Sync Engine Stats"
+          )
+        }
+      }
+
       Section("Shared Data") {
         Button {
           showClearAlert = true
@@ -63,6 +72,7 @@ struct DebugView: View {
       }
     }
   }
+
 }
 
 #Preview("Debug") {

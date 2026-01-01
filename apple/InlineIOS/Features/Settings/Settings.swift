@@ -56,6 +56,14 @@ struct SettingsView: View {
         )
       }
 
+      NavigationLink(destination: ExperimentalView()) {
+        SettingsItem(
+          icon: "testtube.2",
+          iconColor: .orange,
+          title: "Experimental"
+        )
+      }
+
       Section {
         Button {
           showClearCacheAlert = true

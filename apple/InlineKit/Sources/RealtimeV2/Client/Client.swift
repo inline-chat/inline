@@ -13,7 +13,7 @@ import AppKit
 #endif
 
 /// Communicate with the transport and handle auth, generating messages, sequencing, track ACKs, etc.
-actor ProtocolClient {
+actor ProtocolClient: ProtocolClientType {
   private let log = Log.scoped("RealtimeV2.ProtocolClient")
   private let transport: Transport
   private let auth: Auth

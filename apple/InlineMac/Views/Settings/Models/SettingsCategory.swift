@@ -6,6 +6,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
   case appearance
   case notifications
   case experimental
+  case debug
   
   var id: String { rawValue }
   
@@ -21,6 +22,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
       return "Notifications"
     case .experimental:
       return "Experimental"
+    case .debug:
+      return "Debug"
     }
   }
   
@@ -36,6 +39,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
       return "bell"
     case .experimental:
       return "testtube.2"
+    case .debug:
+      return "ladybug.fill"
     }
   }
 }

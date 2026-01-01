@@ -1828,6 +1828,12 @@ export interface GetUpdatesInput {
      * @generated from protobuf field: int32 total_limit = 3;
      */
     totalLimit: number;
+    /**
+     * optional inclusive upper bound for slicing
+     *
+     * @generated from protobuf field: int64 seq_end = 4;
+     */
+    seqEnd: bigint;
 }
 /**
  * @generated from protobuf message GetUpdatesResult
@@ -7590,13 +7596,15 @@ class GetUpdatesInput$Type extends MessageType<GetUpdatesInput> {
         super("GetUpdatesInput", [
             { no: 1, name: "bucket", kind: "message", T: () => UpdateBucket },
             { no: 2, name: "start_seq", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 3, name: "total_limit", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+            { no: 3, name: "total_limit", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 4, name: "seq_end", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<GetUpdatesInput>): GetUpdatesInput {
         const message = globalThis.Object.create((this.messagePrototype!));
         message.startSeq = 0n;
         message.totalLimit = 0;
+        message.seqEnd = 0n;
         if (value !== undefined)
             reflectionMergePartial<GetUpdatesInput>(this, message, value);
         return message;
@@ -7614,6 +7622,9 @@ class GetUpdatesInput$Type extends MessageType<GetUpdatesInput> {
                     break;
                 case /* int32 total_limit */ 3:
                     message.totalLimit = reader.int32();
+                    break;
+                case /* int64 seq_end */ 4:
+                    message.seqEnd = reader.int64().toBigInt();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -7636,6 +7647,9 @@ class GetUpdatesInput$Type extends MessageType<GetUpdatesInput> {
         /* int32 total_limit = 3; */
         if (message.totalLimit !== 0)
             writer.tag(3, WireType.Varint).int32(message.totalLimit);
+        /* int64 seq_end = 4; */
+        if (message.seqEnd !== 0n)
+            writer.tag(4, WireType.Varint).int64(message.seqEnd);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

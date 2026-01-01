@@ -13,7 +13,7 @@ import { ModelError } from "@in/server/db/models/_errors"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 
 const MAX_UPDATES_PER_REQUEST = 50
-const DEFAULT_TOTAL_LIMIT = 1000
+const MAX_TOTAL_LIMIT = 1000
 
 type BucketDescriptor =
   | {
@@ -45,8 +45,25 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
     throw RealtimeRpcError.BadRequest
   }
 
-  const totalLimit =
-    input.totalLimit !== undefined && input.totalLimit > 0 ? Number(input.totalLimit) : DEFAULT_TOTAL_LIMIT
+  let seqEnd: number | undefined
+  if (input.seqEnd !== undefined) {
+    const seqEndBigInt = input.seqEnd
+    if (seqEndBigInt < 0n) {
+      throw RealtimeRpcError.BadRequest
+    }
+    const seqEndNumber = Number(seqEndBigInt)
+    if (!Number.isSafeInteger(seqEndNumber)) {
+      throw RealtimeRpcError.BadRequest
+    }
+    if (seqEndNumber < seqStart) {
+      throw RealtimeRpcError.BadRequest
+    }
+    seqEnd = seqEndNumber
+  }
+
+  const requestedLimit =
+    input.totalLimit !== undefined && input.totalLimit > 0 ? Number(input.totalLimit) : MAX_TOTAL_LIMIT
+  const totalLimit = Math.min(requestedLimit, MAX_TOTAL_LIMIT)
 
   const {
     updates: dbUpdates,
@@ -55,6 +72,7 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
   } = await Sync.getUpdates({
     bucket: descriptor.box,
     seqStart,
+    seqEnd,
     limit: MAX_UPDATES_PER_REQUEST,
   })
 

@@ -2,19 +2,116 @@ import Foundation
 import InlineProtocol
 import Logger
 
+public struct SyncConfig: Sendable {
+  public var enableMessageUpdates: Bool
+  public var lastSyncSafetyGapSeconds: Int64
+
+  public init(enableMessageUpdates: Bool, lastSyncSafetyGapSeconds: Int64) {
+    self.enableMessageUpdates = enableMessageUpdates
+    self.lastSyncSafetyGapSeconds = lastSyncSafetyGapSeconds
+  }
+
+  public static let `default` = SyncConfig(enableMessageUpdates: false, lastSyncSafetyGapSeconds: 15)
+}
+
+public struct SyncBucketSnapshot: Sendable {
+  public let key: BucketKey
+  public let seq: Int64
+  public let date: Int64
+  public let isFetching: Bool
+  public let needsFetch: Bool
+
+  public init(key: BucketKey, seq: Int64, date: Int64, isFetching: Bool, needsFetch: Bool) {
+    self.key = key
+    self.seq = seq
+    self.date = date
+    self.isFetching = isFetching
+    self.needsFetch = needsFetch
+  }
+}
+
+public struct SyncStats: Sendable {
+  public var directUpdatesApplied: Int64
+  public var bucketUpdatesApplied: Int64
+  public var bucketUpdatesSkipped: Int64
+  public var bucketUpdatesDuplicateSkipped: Int64
+  public var bucketFetchCount: Int64
+  public var bucketFetchFailures: Int64
+  public var bucketFetchTooLong: Int64
+  public var bucketFetchFollowups: Int64
+  public var bucketsTracked: Int
+  public var lastDirectApplyAt: Int64
+  public var lastBucketFetchAt: Int64
+  public var lastBucketFetchFailureAt: Int64
+  public var lastSyncDate: Int64
+  public var buckets: [SyncBucketSnapshot]
+
+  public init(
+    directUpdatesApplied: Int64,
+    bucketUpdatesApplied: Int64,
+    bucketUpdatesSkipped: Int64,
+    bucketUpdatesDuplicateSkipped: Int64,
+    bucketFetchCount: Int64,
+    bucketFetchFailures: Int64,
+    bucketFetchTooLong: Int64,
+    bucketFetchFollowups: Int64,
+    bucketsTracked: Int,
+    lastDirectApplyAt: Int64,
+    lastBucketFetchAt: Int64,
+    lastBucketFetchFailureAt: Int64,
+    lastSyncDate: Int64,
+    buckets: [SyncBucketSnapshot]
+  ) {
+    self.directUpdatesApplied = directUpdatesApplied
+    self.bucketUpdatesApplied = bucketUpdatesApplied
+    self.bucketUpdatesSkipped = bucketUpdatesSkipped
+    self.bucketUpdatesDuplicateSkipped = bucketUpdatesDuplicateSkipped
+    self.bucketFetchCount = bucketFetchCount
+    self.bucketFetchFailures = bucketFetchFailures
+    self.bucketFetchTooLong = bucketFetchTooLong
+    self.bucketFetchFollowups = bucketFetchFollowups
+    self.bucketsTracked = bucketsTracked
+    self.lastDirectApplyAt = lastDirectApplyAt
+    self.lastBucketFetchAt = lastBucketFetchAt
+    self.lastBucketFetchFailureAt = lastBucketFetchFailureAt
+    self.lastSyncDate = lastSyncDate
+    self.buckets = buckets
+  }
+
+  public static let empty = SyncStats(
+    directUpdatesApplied: 0,
+    bucketUpdatesApplied: 0,
+    bucketUpdatesSkipped: 0,
+    bucketUpdatesDuplicateSkipped: 0,
+    bucketFetchCount: 0,
+    bucketFetchFailures: 0,
+    bucketFetchTooLong: 0,
+    bucketFetchFollowups: 0,
+    bucketsTracked: 0,
+    lastDirectApplyAt: 0,
+    lastBucketFetchAt: 0,
+    lastBucketFetchFailureAt: 0,
+    lastSyncDate: 0,
+    buckets: []
+  )
+}
+
 actor Sync {
   private var log = Log.scoped("RealtimeV2.Sync", level: .trace)
 
   private var applyUpdates: ApplyUpdates
   private var syncStorage: SyncStorage
-  private weak var client: ProtocolClient?
+  private weak var client: ProtocolClientType?
+  private var config: SyncConfig
+  private var stats: SyncStats = .empty
 
   private var buckets: [BucketKey: BucketActor] = [:]
 
-  init(applyUpdates: ApplyUpdates, syncStorage: SyncStorage, client: ProtocolClient) {
+  init(applyUpdates: ApplyUpdates, syncStorage: SyncStorage, client: ProtocolClientType, config: SyncConfig) {
     self.applyUpdates = applyUpdates
     self.syncStorage = syncStorage
     self.client = client
+    self.config = config
   }
 
   // MARK: - Public API
@@ -48,6 +145,9 @@ actor Sync {
     // Apply the direct updates
     if !applyingUpdates.isEmpty {
       await applyUpdates.apply(updates: applyingUpdates)
+      recordDirectApply(count: applyingUpdates.count)
+      let maxAppliedDate = maxUpdateDate(in: applyingUpdates)
+      await updateLastSyncDate(maxAppliedDate: maxAppliedDate, source: "direct")
       // Update bucket states based on applied updates
       await updateBucketStates(for: applyingUpdates)
     }
@@ -82,6 +182,24 @@ actor Sync {
     await applyUpdates.apply(updates: updates)
   }
 
+  func updateConfig(_ config: SyncConfig) async {
+    self.config = config
+    for (_, actor) in buckets {
+      await actor.updateConfig(config)
+    }
+    log.debug("updated sync config: enableMessageUpdates=\(config.enableMessageUpdates), gap=\(config.lastSyncSafetyGapSeconds)s")
+  }
+
+  func getStats() async -> SyncStats {
+    var snapshot = stats
+    let state = await syncStorage.getState()
+    snapshot.lastSyncDate = state.lastSyncDate
+    let bucketSnapshots = await getBucketSnapshots()
+    snapshot.buckets = bucketSnapshots
+    snapshot.bucketsTracked = bucketSnapshots.count
+    return snapshot
+  }
+
   // MARK: - Private Helpers
 
   private func chatHasNewUpdates(_ payload: InlineProtocol.UpdateChatHasNewUpdates) {
@@ -113,7 +231,14 @@ actor Sync {
       return bucketActor
     }
     let bucketState = await syncStorage.getBucketState(for: key)
-    let bucketActor = BucketActor(key: key, seq: bucketState.seq, date: bucketState.date, client: client, sync: self)
+    let bucketActor = BucketActor(
+      key: key,
+      seq: bucketState.seq,
+      date: bucketState.date,
+      client: client,
+      sync: self,
+      enableMessageUpdates: config.enableMessageUpdates
+    )
     buckets[key] = bucketActor
     return bucketActor
   }
@@ -156,7 +281,7 @@ actor Sync {
         // events in response to this call (or as part of the result).
         let _ = try await client.callRpc(method: .getUpdatesState, input: .getUpdatesState(.with {
           $0.date = state.lastSyncDate
-        }))
+        }), timeout: nil)
         log.trace("sent get updates state request with date: \(state.lastSyncDate)")
       } catch {
         log.error("failed to get updates state: \(error)")
@@ -196,6 +321,79 @@ actor Sync {
       log.trace("saving batch bucket states: \(statesToSave.count)")
       await syncStorage.setBucketStates(states: statesToSave)
     }
+  }
+
+  private func maxUpdateDate(in updates: [InlineProtocol.Update]) -> Int64 {
+    var maxDate: Int64 = 0
+    for update in updates where update.date > 0 {
+      maxDate = max(maxDate, update.date)
+    }
+    return maxDate
+  }
+
+  private func getBucketSnapshots() async -> [SyncBucketSnapshot] {
+    var snapshots: [SyncBucketSnapshot] = []
+    snapshots.reserveCapacity(buckets.count)
+    for (_, actor) in buckets {
+      let snapshot = await actor.snapshot()
+      snapshots.append(snapshot)
+    }
+    return snapshots
+  }
+
+  private func recordDirectApply(count: Int) {
+    stats.directUpdatesApplied += Int64(count)
+    stats.lastDirectApplyAt = nowSeconds()
+  }
+
+  private func nowSeconds() -> Int64 {
+    Int64(Date().timeIntervalSince1970)
+  }
+
+  func recordBucketFetchStart() {
+    stats.bucketFetchCount += 1
+    stats.lastBucketFetchAt = nowSeconds()
+  }
+
+  func recordBucketFetchFailure() {
+    stats.bucketFetchFailures += 1
+    stats.lastBucketFetchFailureAt = nowSeconds()
+  }
+
+  func recordBucketFetchTooLong() {
+    stats.bucketFetchTooLong += 1
+  }
+
+  func recordBucketFetchFollowup() {
+    stats.bucketFetchFollowups += 1
+  }
+
+  func recordBucketUpdatesApplied(applied: Int, skipped: Int, duplicates: Int) {
+    stats.bucketUpdatesApplied += Int64(applied)
+    stats.bucketUpdatesSkipped += Int64(skipped)
+    stats.bucketUpdatesDuplicateSkipped += Int64(duplicates)
+  }
+
+  func updateLastSyncDate(maxAppliedDate: Int64, source: String) async {
+    guard maxAppliedDate > 0 else { return }
+
+    let gap = config.lastSyncSafetyGapSeconds
+    let proposed = max(0, maxAppliedDate - gap)
+    let currentState = await syncStorage.getState()
+
+    guard proposed > currentState.lastSyncDate else {
+      log.trace(
+        "skipping lastSyncDate update from \(source): current=\(currentState.lastSyncDate), proposed=\(proposed)"
+      )
+      return
+    }
+
+    let newState = SyncState(lastSyncDate: proposed)
+    await syncStorage.setState(newState)
+    stats.lastSyncDate = proposed
+    log.debug(
+      "updated lastSyncDate from \(currentState.lastSyncDate) to \(proposed) (maxAppliedDate=\(maxAppliedDate), gap=\(gap)s, source=\(source))"
+    )
   }
 
   private func getBucketKey(for update: InlineProtocol.Update) -> BucketKey? {
@@ -242,25 +440,37 @@ actor Sync {
 actor BucketActor {
   private var log = Log.scoped("RealtimeV2.Sync.BucketActor", level: .debug)
 
-  private weak var client: ProtocolClient?
+  private static let maxTotalUpdates: Int64 = 1000
+
+  private weak var client: ProtocolClientType?
   private weak var sync: Sync?
 
   var key: BucketKey
   var seq: Int64
   var date: Int64
+  private var enableMessageUpdates: Bool
 
   /// Prevents concurrent fetch operations
   private var isFetching: Bool = false
+  private var needsFetch: Bool = false
 
   /// Buffer to accumulate updates during fetch loop before applying them all at once
   private var pendingUpdates: [InlineProtocol.Update] = []
 
-  init(key: BucketKey, seq: Int64, date: Int64, client: ProtocolClient?, sync: Sync?) {
+  init(
+    key: BucketKey,
+    seq: Int64,
+    date: Int64,
+    client: ProtocolClientType?,
+    sync: Sync?,
+    enableMessageUpdates: Bool
+  ) {
     self.key = key
     self.seq = seq
     self.date = date
     self.client = client
     self.sync = sync
+    self.enableMessageUpdates = enableMessageUpdates
   }
 
   /// Determines if an update should be processed based on its type during sync catch-up.
@@ -282,6 +492,8 @@ actor BucketActor {
         true
       case .spaceMemberAdd:
         true
+      case .newMessage, .editMessage, .messageAttachment:
+        enableMessageUpdates
       default:
         // Note: We explicitly skip other updates (like messages) during catch-up for now
         // to keep the initial implementation focused on structural consistency.
@@ -293,11 +505,29 @@ actor BucketActor {
 
   func fetchNewUpdates() async {
     // Guard against concurrent fetch operations
-    guard !isFetching else {
-      log.trace("fetch already in progress for bucket \(key), skipping")
+    if isFetching {
+      needsFetch = true
+      log.trace("fetch already in progress for bucket \(key), scheduling follow-up")
+      if let sync {
+        await sync.recordBucketFetchFollowup()
+      }
       return
     }
 
+    isFetching = true
+    defer {
+      isFetching = false
+    }
+
+    while true {
+      needsFetch = false
+      await fetchNewUpdatesOnce()
+      guard needsFetch else { break }
+      log.trace("follow-up fetch requested for bucket \(key)")
+    }
+  }
+
+  private func fetchNewUpdatesOnce() async {
     guard let client else {
       log.error("client is nil, cannot fetch updates")
       return
@@ -308,7 +538,8 @@ actor BucketActor {
       return
     }
 
-    isFetching = true
+    await sync.recordBucketFetchStart()
+
     pendingUpdates.removeAll()
 
     // Local state tracking for the loop
@@ -316,7 +547,10 @@ actor BucketActor {
     var finalSeq: Int64 = seq
     var finalDate: Int64 = date
     var totalFetched = 0
+    var totalSkipped = 0
+    var totalDuplicateSkipped = 0
     var isFinal = false
+    var sliceEndSeq: Int64? = nil
 
     // On a cold start (no seq/date), attempt a small catch-up instead of immediately fast-forwarding.
     // We cap totalLimit to 50 to avoid pulling large history; if the server still reports TOO_LONG we
@@ -324,58 +558,88 @@ actor BucketActor {
     let isColdStart = seq == 0 || date == 0
     let coldStartTotalLimit: Int32 = 50
 
-    defer {
-      isFetching = false
-    }
-
     do {
       log.debug("starting fetch for bucket \(key) from seq \(seq)")
 
       // Fetch loop: accumulate all updates until final=true
       while !isFinal {
+        log.debug("getUpdates request bucket \(key) startSeq=\(currentSeq) coldStart=\(isColdStart)")
         let result = try await client.callRpc(method: .getUpdates, input: .getUpdates(.with {
           $0.bucket = key.toProtocolBucket()
           $0.startSeq = currentSeq
           if isColdStart {
             $0.totalLimit = coldStartTotalLimit
+          } else if sliceEndSeq != nil {
+            $0.totalLimit = Int32(Self.maxTotalUpdates)
           }
-        }))
+          if let sliceEndSeq {
+            $0.seqEnd = sliceEndSeq
+          }
+        }), timeout: nil)
 
         guard case let .getUpdates(payload) = result else {
           log.error("failed to parse getUpdates result")
           return
         }
 
+        let totalCount = payload.updates.count
+
         // Handle gaps (TOO_LONG)
         if payload.resultType == .tooLong {
-          log.warning("getUpdates returned TOO_LONG for bucket \(key). Resetting to server state.")
-          // We accept the gap and fast-forward.
-          // TODO: In the future, we might want to clear local data for this bucket or attempt a more robust recovery.
-          finalSeq = payload.seq
-          finalDate = payload.date
-          isFinal = true // Stop fetching
-          pendingUpdates.removeAll() // Discard pending
-          break
+          log.warning(
+            "getUpdates TOO_LONG for bucket \(key) (startSeq=\(currentSeq), seq=\(payload.seq), date=\(payload.date))"
+          )
+          await sync.recordBucketFetchTooLong()
+          let seqGap = Int64(payload.seq) - currentSeq
+          if seqGap > Self.maxTotalUpdates {
+            // We accept the gap and fast-forward.
+            // TODO: For chat buckets, clear cached history and refetch to avoid gaps.
+            finalSeq = payload.seq
+            finalDate = payload.date
+            isFinal = true // Stop fetching
+            pendingUpdates.removeAll() // Discard pending
+            break
+          }
+
+          // Slice within max total updates.
+          sliceEndSeq = payload.seq
+          continue
         }
 
         // Validate seq: if server seq is behind or equal to our local seq (and not TOO_LONG), something is wrong or
         // it's a dupe
         if payload.seq < currentSeq {
-          log.warning("server seq (\(payload.seq)) < local seq (\(currentSeq)), skipping fetch for bucket \(key)")
+          log.warning(
+            "server seq (\(payload.seq)) < local seq (\(currentSeq)), skipping fetch for bucket \(key)"
+          )
           return
         }
 
         // Filter and accumulate updates
+        var duplicateSkipped = 0
         let filteredUpdates = payload.updates.filter { update in
           // Skip duplicates
           if update.hasSeq, update.seq <= self.seq {
-            log.trace("skipping duplicate update with seq \(update.seq)")
+            log.trace("skipping duplicate update with seq \(update.seq) in bucket \(key)")
+            duplicateSkipped += 1
             return false
           }
 
-          // Filter by supported types
-          return shouldProcessUpdate(update)
+          let shouldProcess = shouldProcessUpdate(update)
+          if !shouldProcess {
+            log.trace("skipping update in bucket catch-up: \(update.update)")
+          }
+          return shouldProcess
         }
+
+        let skippedCount = totalCount - filteredUpdates.count
+        let nonDuplicateSkipped = max(0, skippedCount - duplicateSkipped)
+        totalSkipped += nonDuplicateSkipped
+        totalDuplicateSkipped += duplicateSkipped
+
+        log.debug(
+          "getUpdates response bucket \(key) seq=\(payload.seq) date=\(payload.date) final=\(payload.final) result=\(payload.resultType) total=\(totalCount) applied=\(filteredUpdates.count) skipped=\(skippedCount)"
+        )
 
         pendingUpdates.append(contentsOf: filteredUpdates)
         totalFetched += filteredUpdates.count
@@ -391,6 +655,15 @@ actor BucketActor {
       if !pendingUpdates.isEmpty {
         log.debug("applying \(pendingUpdates.count) updates for bucket \(key)")
         await sync.applyUpdatesFromBucket(pendingUpdates)
+        let maxAppliedDate = maxUpdateDate(in: pendingUpdates)
+        await sync.updateLastSyncDate(maxAppliedDate: maxAppliedDate, source: "bucket:\(key)")
+      }
+      if totalFetched > 0 || totalSkipped > 0 || totalDuplicateSkipped > 0 {
+        await sync.recordBucketUpdatesApplied(
+          applied: totalFetched,
+          skipped: totalSkipped,
+          duplicates: totalDuplicateSkipped
+        )
       }
 
       // Update bucket state
@@ -400,12 +673,23 @@ actor BucketActor {
       // Persist state to storage
       await sync.saveBucketState(for: key, seq: finalSeq, date: finalDate)
 
-      log.debug("completed fetch for bucket \(key): applied \(totalFetched) updates, new seq=\(finalSeq)")
+      log.debug(
+        "completed fetch for bucket \(key): applied \(totalFetched) updates, skipped \(totalSkipped), new seq=\(finalSeq)"
+      )
 
     } catch {
       log.error("failed to fetch updates for bucket \(key): \(error)")
+      await sync.recordBucketFetchFailure()
       // We exit; next sync attempt will retry from the last saved seq
     }
+  }
+
+  private func maxUpdateDate(in updates: [InlineProtocol.Update]) -> Int64 {
+    var maxDate: Int64 = 0
+    for update in updates where update.date > 0 {
+      maxDate = max(maxDate, update.date)
+    }
+    return maxDate
   }
 
   /// Update state from external source (e.g. realtime updates)
@@ -415,5 +699,19 @@ actor BucketActor {
       self.date = date
       log.trace("updated state for bucket \(key) to seq=\(seq), date=\(date)")
     }
+  }
+
+  func updateConfig(_ config: SyncConfig) {
+    enableMessageUpdates = config.enableMessageUpdates
+  }
+
+  func snapshot() -> SyncBucketSnapshot {
+    SyncBucketSnapshot(
+      key: key,
+      seq: seq,
+      date: date,
+      isFetching: isFetching,
+      needsFetch: needsFetch
+    )
   }
 }
