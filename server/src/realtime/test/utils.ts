@@ -1,6 +1,6 @@
 import type { Server } from "bun"
 
-export const newWebsocket = (server: Server, path = "/realtime") =>
+export const newWebsocket = (server: Server<unknown>, path = "/realtime") =>
   new WebSocket(`ws://${server.hostname}:${server.port}${path}`, undefined)
 
 export const wsOpen = (ws: WebSocket) =>

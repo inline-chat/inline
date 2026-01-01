@@ -70,6 +70,7 @@ describe("getUpdates", () => {
         }
       },
       startSeq: 0n,
+      seqEnd: 0n,
       totalLimit: 1
     }, { currentUserId: user.id } as any)
 
@@ -126,6 +127,7 @@ describe("getUpdates", () => {
     const result = await getUpdates({
       bucket: { type: { oneofKind: "user", user: {} } },
       startSeq: 0n,
+      seqEnd: 0n,
       totalLimit: 5000
     }, { currentUserId: user.id } as any)
 

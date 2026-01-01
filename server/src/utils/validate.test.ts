@@ -28,7 +28,7 @@ describe("validate timezones", () => {
     ["Pacific/Pago_Pago", true, "Valid timezone with underscore"],
     ["Europe", false, "Incomplete timezone"],
     ["Atlantis/Underwater", false, "Non-existent top-level category"],
-  ])("%s should return %s (%s)", (input, expected) => {
+  ])("%s should return %s (%s)", (input: string, expected: boolean, _label: string) => {
     expect(validateIanaTimezone(input)).toBe(expected)
   })
 })
@@ -43,7 +43,7 @@ describe("validate 1-4 segment semver", () => {
     ["1.0", true, "Valid semver with two segments"],
     ["1", true, "Valid semver with one segment"],
     ["1.0.0.0", true, "Invalid semver, but valid here with four segments"],
-  ])("%s should return %s (%s)", (input, expected) => {
+  ])("%s should return %s (%s)", (input: string, expected: boolean, _label: string) => {
     expect(validateUpToFourSegementSemver(input)).toBe(expected)
   })
 })
@@ -58,7 +58,7 @@ describe("validate 6 digit code", () => {
     ["12345", false, "Invalid 5 digit code"],
     ["1234567", false, "Invalid 7 digit code"],
     ["", false, "Empty string"],
-  ])("%s should return %s (%s)", (input, expected) => {
+  ])("%s should return %s (%s)", (input: string, expected: boolean, _label: string) => {
     expect(isValid6DigitCode(input)).toBe(expected)
   })
 })
@@ -74,7 +74,7 @@ describe("validate email", () => {
     ["test", false, "Invalid email"],
     ["test@test", false, "Invalid email"],
     ["", false, "Empty string"],
-  ])("%s should return %s (%s)", (input, expected) => {
+  ])("%s should return %s (%s)", (input: string, expected: boolean, _label: string) => {
     expect(isValidEmail(input)).toBe(expected)
   })
 })

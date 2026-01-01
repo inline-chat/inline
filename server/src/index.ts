@@ -71,7 +71,7 @@ export const app = new Elysia()
   )
 
 // Run
-app.listen(port, (server: Server) => {
+app.listen(port, (server: Server<unknown>) => {
   connectionManager.setServer(server)
   log.info(`Running on http://${server.hostname}:${server.port}`)
 })

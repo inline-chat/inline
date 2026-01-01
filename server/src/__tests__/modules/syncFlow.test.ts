@@ -250,6 +250,7 @@ describe("Sync core flow", () => {
       {
         bucket: { type: { oneofKind: "user", user: {} } },
         startSeq: 0n,
+        seqEnd: 0n,
         totalLimit: 10,
       },
       testUtils.functionContext({ userId: user.id }),
@@ -284,6 +285,7 @@ describe("Sync core flow", () => {
       {
         bucket: { type: { oneofKind: "user", user: {} } },
         startSeq: 0n,
+        seqEnd: 0n,
         totalLimit: 2,
       },
       testUtils.functionContext({ userId: user.id }),
