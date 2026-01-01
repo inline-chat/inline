@@ -176,6 +176,42 @@ class SyncTests {
     #expect(applied.isEmpty)
   }
 
+  @Test("catch-up applies updates in seq order")
+  func testCatchupOrdersUpdatesBySeq() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+
+    let update3 = makeNewMessageUpdate(seq: 3, date: 100)
+    let update1 = makeNewMessageUpdate(seq: 1, date: 80)
+    let update2 = makeNewMessageUpdate(seq: 2, date: 90)
+
+    let response = makeGetUpdatesResult(
+      seq: 3,
+      date: 100,
+      updates: [update3, update1, update2],
+      final: true,
+      resultType: .slice
+    )
+
+    let client = FakeProtocolClient(responses: [response])
+    let config = SyncConfig(enableMessageUpdates: true, lastSyncSafetyGapSeconds: 15)
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+
+    let peer = makeChatPeer(chatId: 1)
+    var payload = InlineProtocol.UpdateChatHasNewUpdates()
+    payload.peerID = peer
+
+    var update = InlineProtocol.Update()
+    update.update = .chatHasNewUpdates(payload)
+
+    await sync.process(updates: [update])
+    try await Task.sleep(for: .milliseconds(50))
+
+    let applied = await apply.appliedUpdates
+    let seqs = applied.map { Int($0.seq) }
+    #expect(seqs == [1, 2, 3])
+  }
+
   @Test("direct updates advance bucket state")
   func testDirectUpdateAdvancesBucketState() async throws {
     let storage = InMemorySyncStorage()

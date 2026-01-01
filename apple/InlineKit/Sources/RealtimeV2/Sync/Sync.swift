@@ -651,11 +651,13 @@ actor BucketActor {
         isFinal = payload.final
       }
 
-      // Apply all accumulated updates in one batch
+      // Apply all accumulated updates in one batch, ordered by seq
       if !pendingUpdates.isEmpty {
-        log.debug("applying \(pendingUpdates.count) updates for bucket \(key)")
-        await sync.applyUpdatesFromBucket(pendingUpdates)
-        let maxAppliedDate = maxUpdateDate(in: pendingUpdates)
+        // TODO: Ensure ordering between catch-up batches and realtime updates for the same bucket.
+        let orderedUpdates = orderUpdatesBySeq(pendingUpdates)
+        log.debug("applying \(orderedUpdates.count) updates for bucket \(key)")
+        await sync.applyUpdatesFromBucket(orderedUpdates)
+        let maxAppliedDate = maxUpdateDate(in: orderedUpdates)
         await sync.updateLastSyncDate(maxAppliedDate: maxAppliedDate, source: "bucket:\(key)")
       }
       if totalFetched > 0 || totalSkipped > 0 || totalDuplicateSkipped > 0 {
@@ -690,6 +692,37 @@ actor BucketActor {
       maxDate = max(maxDate, update.date)
     }
     return maxDate
+  }
+
+  private func orderUpdatesBySeq(_ updates: [InlineProtocol.Update]) -> [InlineProtocol.Update] {
+    guard updates.count > 1 else { return updates }
+
+    var lastSeq: Int64 = -1
+    var needsSort = false
+    for update in updates {
+      guard update.hasSeq else { continue }
+      let seq = Int64(update.seq)
+      if seq < lastSeq {
+        needsSort = true
+        break
+      }
+      lastSeq = seq
+    }
+
+    guard needsSort else { return updates }
+
+    log.debug("reordering \(updates.count) updates for bucket \(key) by seq")
+    return updates
+      .enumerated()
+      .sorted { lhs, rhs in
+        let lhsSeq = lhs.element.hasSeq ? Int64(lhs.element.seq) : Int64.max
+        let rhsSeq = rhs.element.hasSeq ? Int64(rhs.element.seq) : Int64.max
+        if lhsSeq == rhsSeq {
+          return lhs.offset < rhs.offset
+        }
+        return lhsSeq < rhsSeq
+      }
+      .map(\.element)
   }
 
   /// Update state from external source (e.g. realtime updates)
