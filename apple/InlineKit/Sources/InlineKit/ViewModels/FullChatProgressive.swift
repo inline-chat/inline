@@ -116,8 +116,8 @@ public class MessagesProgressiveViewModel {
             messages.append(contentsOf: newMessages)
           }
 
-          // FIXME: For now until we figured a stable sort
-          // sort again
+          // NOTE: Sorting after incremental inserts can desync the collection/table data source.
+          // We only sort for full reloads/batches to keep ordering stable.
           // sort()
 
           updateRange()
@@ -181,19 +181,55 @@ public class MessagesProgressiveViewModel {
   }
 
   private func sort() {
-    if reversed {
-      messages = messages.sorted(by: { $0.message.date > $1.message.date })
-    } else {
-      messages = messages.sorted(by: { $0.message.date < $1.message.date })
-    }
+    messages = stableSorted(messages)
   }
 
   private func sort(batch: [FullMessage]) -> [FullMessage] {
-    if reversed {
-      batch.sorted(by: { $0.message.date > $1.message.date })
-    } else {
-      batch.sorted(by: { $0.message.date < $1.message.date })
-    }
+    stableSorted(batch)
+  }
+
+  struct MessageSortKey: Hashable {
+    let date: Date
+    let globalId: Int64
+    let messageId: Int64
+  }
+
+  static func messageKey(for message: FullMessage) -> MessageSortKey {
+    MessageSortKey(
+      date: message.message.date,
+      globalId: message.message.globalId ?? 0,
+      messageId: Int64(message.message.messageId)
+    )
+  }
+
+  static func stableSortedMessages(_ batch: [FullMessage], reversed: Bool) -> [FullMessage] {
+    guard batch.count > 1 else { return batch }
+
+    return batch
+      .enumerated()
+      .sorted { lhs, rhs in
+        let lhsKey = messageKey(for: lhs.element)
+        let rhsKey = messageKey(for: rhs.element)
+
+        if lhsKey.date != rhsKey.date {
+          return reversed ? lhsKey.date > rhsKey.date : lhsKey.date < rhsKey.date
+        }
+
+        if lhsKey.globalId != rhsKey.globalId {
+          return reversed ? lhsKey.globalId > rhsKey.globalId : lhsKey.globalId < rhsKey.globalId
+        }
+
+        if lhsKey.messageId != rhsKey.messageId {
+          return reversed ? lhsKey.messageId > rhsKey.messageId : lhsKey.messageId < rhsKey.messageId
+        }
+
+        return lhs.offset < rhs.offset
+      }
+      .map(\.element)
+  }
+
+  private func stableSorted(_ batch: [FullMessage]) -> [FullMessage] {
+    Self.stableSortedMessages(batch, reversed: reversed)
   }
 
   // TODO: make it O(1) instead of O(n)
@@ -231,7 +267,7 @@ public class MessagesProgressiveViewModel {
       let messagesBatch: [FullMessage] = try db.reader.read { db in
         var query = baseQuery()
 
-        query = query.order(Column("date").desc)
+        query = query.order(Column("date").desc, Column("messageId").desc)
 
         switch loadMode {
           case let .limit(limit):
@@ -279,7 +315,7 @@ public class MessagesProgressiveViewModel {
         var query = baseQuery()
 
         // FIXME: we'll need to adjust it based on newest or oldest
-        query = query.order(Column("date").desc)
+        query = query.order(Column("date").desc, Column("messageId").desc)
         query = query.filter(Column("date") <= cursor)
 
         query = query.limit(limit)
@@ -291,7 +327,7 @@ public class MessagesProgressiveViewModel {
 
       messagesBatch = sort(batch: messagesBatch)
 
-      // dedup those with exact date as cursor as they might be included in both
+      // Dedup those with exact date as cursor as they might be included in both.
       let existingMessagesAtCursor = Set(
         messages.filter { $0.message.date == cursor }.map(\.id)
       )
