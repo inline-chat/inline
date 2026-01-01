@@ -835,7 +835,8 @@ private extension MessagesCollectionView {
     func updateUnreadIfNeeded() {
       // Only mark as read when the chat is actually on-screen and app is in foreground.
       guard let collectionView = currentCollectionView,
-            collectionView.window != nil,
+            let window = collectionView.window,
+            window.windowScene?.activationState == .foregroundActive,
             UIApplication.shared.applicationState == .active
       else {
         return
