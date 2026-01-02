@@ -1,0 +1,202 @@
+import { describe, expect, test } from "bun:test"
+import { searchMessages } from "../../functions/messages.searchMessages"
+import { testUtils, setupTestLifecycle } from "../setup"
+import { db } from "../../db"
+import * as schema from "../../db/schema"
+import { encrypt } from "../../modules/encryption/encryption"
+
+const makeFunctionContext = (userId: number): any => ({
+  currentUserId: userId,
+  currentSessionId: 1,
+})
+
+describe("searchMessages", () => {
+  setupTestLifecycle()
+
+  test("returns most-recent messages matching all keywords", async () => {
+    const userA = (await testUtils.createUser("search-a@example.com"))!
+    const userB = (await testUtils.createUser("search-b@example.com"))!
+    const chat = (await testUtils.createPrivateChat(userA, userB))!
+
+    await testUtils.createTestMessage({
+      messageId: 1,
+      chatId: chat.id,
+      fromId: userA.id,
+      text: "alpha beta",
+    })
+    await testUtils.createTestMessage({
+      messageId: 2,
+      chatId: chat.id,
+      fromId: userA.id,
+      text: "alpha only",
+    })
+    await testUtils.createTestMessage({
+      messageId: 3,
+      chatId: chat.id,
+      fromId: userA.id,
+      text: "beta Alpha",
+    })
+
+    const result = await searchMessages(
+      {
+        peerId: {
+          type: { oneofKind: "user", user: { userId: BigInt(userB.id) } },
+        },
+        keywords: ["ALPHA", "beta"],
+      },
+      makeFunctionContext(userA.id),
+    )
+
+    const ids = result.messages.map((message) => Number(message.id))
+    const texts = result.messages.map((message) => message.message)
+
+    expect(ids).toEqual([3, 1])
+    expect(texts).toEqual(["beta Alpha", "alpha beta"])
+  })
+
+  test("rejects empty keywords", async () => {
+    const userA = (await testUtils.createUser("search-c@example.com"))!
+    const userB = (await testUtils.createUser("search-d@example.com"))!
+    await testUtils.createPrivateChat(userA, userB)
+
+    await expect(
+      searchMessages(
+        {
+          peerId: {
+            type: { oneofKind: "user", user: { userId: BigInt(userB.id) } },
+          },
+          keywords: [],
+        },
+        makeFunctionContext(userA.id),
+      ),
+    ).rejects.toThrow()
+  })
+
+  test("matches keywords in attached document file name", async () => {
+    const userA = (await testUtils.createUser("search-file-a@example.com"))!
+    const userB = (await testUtils.createUser("search-file-b@example.com"))!
+    const chat = (await testUtils.createPrivateChat(userA, userB))!
+
+    const [file] = await db
+      .insert(schema.files)
+      .values({
+        fileUniqueId: "file-search-doc-1",
+        userId: userA.id,
+        mimeType: "application/pdf",
+        fileSize: 123,
+      })
+      .returning()
+
+    const encryptedFileName = encrypt("Quarterly_Report_2025.pdf")
+
+    const [document] = await db
+      .insert(schema.documents)
+      .values({
+        fileId: file!.id,
+        fileName: encryptedFileName.encrypted,
+        fileNameIv: encryptedFileName.iv,
+        fileNameTag: encryptedFileName.authTag,
+      })
+      .returning()
+
+    await db
+      .insert(schema.messages)
+      .values({
+        messageId: 1,
+        chatId: chat.id,
+        fromId: userA.id,
+        mediaType: "document",
+        documentId: document!.id,
+      })
+      .execute()
+
+    const result = await searchMessages(
+      {
+        peerId: {
+          type: { oneofKind: "user", user: { userId: BigInt(userB.id) } },
+        },
+        keywords: ["report", "2025"],
+      },
+      makeFunctionContext(userA.id),
+    )
+
+    expect(result.messages.length).toBe(1)
+
+    const media = result.messages[0]?.media?.media
+    expect(media?.oneofKind).toBe("document")
+    if (media?.oneofKind === "document") {
+      expect(media.document.document.fileName).toBe("Quarterly_Report_2025.pdf")
+    }
+  })
+
+  test("handles large datasets without excessive time or memory", async () => {
+    const userA = (await testUtils.createUser("search-big-a@example.com"))!
+    const userB = (await testUtils.createUser("search-big-b@example.com"))!
+    const chat = (await testUtils.createPrivateChat(userA, userB))!
+
+    const totalMessages = 12000
+    const matchEvery = 100
+    const limit = 25
+    const batchSize = 1000
+
+    const matchEncrypted = encrypt("alpha beta gamma")
+    const otherEncrypted = encrypt("lorem ipsum dolor sit amet")
+
+    for (let start = 1; start <= totalMessages; start += batchSize) {
+      const rows: Array<{
+        messageId: number
+        chatId: number
+        fromId: number
+        textEncrypted: Buffer
+        textIv: Buffer
+        textTag: Buffer
+      }> = []
+
+      const end = Math.min(totalMessages, start + batchSize - 1)
+      for (let messageId = start; messageId <= end; messageId += 1) {
+        const encrypted = messageId % matchEvery === 0 ? matchEncrypted : otherEncrypted
+        rows.push({
+          messageId,
+          chatId: chat.id,
+          fromId: userA.id,
+          textEncrypted: encrypted.encrypted,
+          textIv: encrypted.iv,
+          textTag: encrypted.authTag,
+        })
+      }
+
+      await db.insert(schema.messages).values(rows).execute()
+      rows.length = 0
+    }
+
+    const expectedIds: number[] = []
+    for (let messageId = totalMessages; messageId >= 1 && expectedIds.length < limit; messageId -= 1) {
+      if (messageId % matchEvery === 0) {
+        expectedIds.push(messageId)
+      }
+    }
+
+    const memoryBefore = process.memoryUsage().heapUsed
+    const startTime = performance.now()
+
+    const result = await searchMessages(
+      {
+        peerId: {
+          type: { oneofKind: "user", user: { userId: BigInt(userB.id) } },
+        },
+        keywords: ["alpha", "beta"],
+        limit,
+      },
+      makeFunctionContext(userA.id),
+    )
+
+    const durationMs = performance.now() - startTime
+    const memoryAfter = process.memoryUsage().heapUsed
+    const memoryDelta = Math.max(0, memoryAfter - memoryBefore)
+
+    expect(result.messages.length).toBe(limit)
+    expect(result.messages.map((message) => Number(message.id))).toEqual(expectedIds)
+    expect(durationMs).toBeLessThan(5000)
+    expect(memoryDelta).toBeLessThan(250 * 1024 * 1024)
+  })
+})
