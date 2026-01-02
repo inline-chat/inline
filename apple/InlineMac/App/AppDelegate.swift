@@ -4,7 +4,6 @@ import Combine
 import InlineConfig
 import InlineKit
 import Logger
-import RealtimeV2
 import Sentry
 import SwiftUI
 import UserNotifications
@@ -47,7 +46,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     setupMainWindow()
     setupMainMenu()
     setupNotificationsSoundSetting()
-    setupSyncSettings()
     Task { @MainActor in
       self.dockBadgeService.start()
     }
@@ -208,25 +206,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       .store(in: &cancellables)
   }
 
-  @MainActor private func setupSyncSettings() {
-    applySyncConfig(enableMessageUpdates: AppSettings.shared.enableSyncMessageUpdates)
-
-    AppSettings.shared.$enableSyncMessageUpdates
-      .sink { [weak self] value in
-        Task { @MainActor in
-          self?.applySyncConfig(enableMessageUpdates: value)
-        }
-      }
-      .store(in: &cancellables)
-  }
-
-  @MainActor private func applySyncConfig(enableMessageUpdates: Bool) {
-    let config = SyncConfig(
-      enableMessageUpdates: enableMessageUpdates,
-      lastSyncSafetyGapSeconds: SyncConfig.default.lastSyncSafetyGapSeconds
-    )
-    Task { await Api.realtime.updateSyncConfig(config) }
-  }
 }
 
 // MARK: - Notifications

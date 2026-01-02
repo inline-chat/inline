@@ -2,7 +2,6 @@ import InlineKit
 import InlineUI
 import Invite
 import Logger
-import RealtimeV2
 import SwiftUI
 
 struct ContentView2: View {
@@ -20,7 +19,6 @@ struct ContentView2: View {
   @StateObject var mainViewRouter = MainViewRouter()
   @StateObject private var fileUploadViewModel = FileUploadViewModel()
   @StateObject private var tabsManager = TabsManager()
-  @AppStorage("enableSyncMessageUpdates") private var enableSyncMessageUpdates = false
 
   @Environment(Router.self) private var router
 
@@ -54,20 +52,6 @@ struct ContentView2: View {
     .environmentObject(tabsManager)
     .environmentObject(compactSpaceList)
     .toastView()
-    .onAppear {
-      applySyncConfig()
-    }
-    .onChange(of: enableSyncMessageUpdates) { _, _ in
-      applySyncConfig()
-    }
-  }
-
-  private func applySyncConfig() {
-    let config = SyncConfig(
-      enableMessageUpdates: enableSyncMessageUpdates,
-      lastSyncSafetyGapSeconds: SyncConfig.default.lastSyncSafetyGapSeconds
-    )
-    Task { await Api.realtime.updateSyncConfig(config) }
   }
 
   @ViewBuilder

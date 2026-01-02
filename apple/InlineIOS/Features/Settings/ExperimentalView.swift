@@ -1,9 +1,10 @@
+import InlineKit
 import RealtimeV2
 import SwiftUI
 
 struct ExperimentalView: View {
   @Environment(\.realtimeV2) private var realtimeV2
-  @AppStorage("enableSyncMessageUpdates") private var enableSyncMessageUpdates = false
+  @State private var enableSyncMessageUpdates = Api.realtime.getEnableSyncMessageUpdates()
 
   var body: some View {
     List {
@@ -18,19 +19,11 @@ struct ExperimentalView: View {
     .navigationTitle("Experimental")
     .navigationBarTitleDisplayMode(.inline)
     .onAppear {
-      applySyncConfig()
+      enableSyncMessageUpdates = Api.realtime.getEnableSyncMessageUpdates()
     }
     .onChange(of: enableSyncMessageUpdates) { _, _ in
-      applySyncConfig()
+      Task { await realtimeV2.setEnableSyncMessageUpdates(enableSyncMessageUpdates) }
     }
-  }
-
-  private func applySyncConfig() {
-    let config = SyncConfig(
-      enableMessageUpdates: enableSyncMessageUpdates,
-      lastSyncSafetyGapSeconds: SyncConfig.default.lastSyncSafetyGapSeconds
-    )
-    Task { await realtimeV2.updateSyncConfig(config) }
   }
 }
 
