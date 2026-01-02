@@ -43,11 +43,11 @@ public actor RealtimeV2 {
     auth: Auth,
     applyUpdates: ApplyUpdates,
     syncStorage: SyncStorage,
-    syncConfig: SyncConfig = .default,
     persistenceHandler: TransactionPersistenceHandler? = nil,
   ) {
     self.auth = auth
     client = ProtocolClient(transport: transport, auth: auth)
+    let syncConfig = RealtimeConfigStore.initialSyncConfig()
     sync = Sync(applyUpdates: applyUpdates, syncStorage: syncStorage, client: client, config: syncConfig)
     transactions = Transactions(persistenceHandler: persistenceHandler)
     stateObject = RealtimeState()
@@ -318,6 +318,15 @@ public actor RealtimeV2 {
     Task { await sync.updateConfig(config) }
   }
 
+  public nonisolated func getEnableSyncMessageUpdates() -> Bool {
+    RealtimeConfigStore.getEnableSyncMessageUpdates()
+  }
+
+  public func setEnableSyncMessageUpdates(_ enabled: Bool) {
+    RealtimeConfigStore.setEnableSyncMessageUpdates(enabled)
+    Task { await sync.updateConfig(syncConfig(for: enabled)) }
+  }
+
   public func getSyncStats() async -> SyncStats {
     await sync.getStats()
   }
@@ -329,5 +338,12 @@ public actor RealtimeV2 {
     currentConnectionState = newState
     Task { await connectionStateChannel.send(newState) }
     Task { await sync.connectionStateChanged(state: newState) }
+  }
+
+  private func syncConfig(for enableMessageUpdates: Bool) -> SyncConfig {
+    SyncConfig(
+      enableMessageUpdates: enableMessageUpdates,
+      lastSyncSafetyGapSeconds: SyncConfig.default.lastSyncSafetyGapSeconds
+    )
   }
 }
