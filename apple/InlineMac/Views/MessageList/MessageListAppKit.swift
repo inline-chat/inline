@@ -58,6 +58,8 @@ class MessageListAppKit: NSViewController {
   private var hasAnalyzedInitialMessages = false
   private var deferredTranslationTask: Task<Void, Never>?
   private var hasDeferredInitialTranslation = false
+  private var needsUnreadUpdateOnActive = false
+  private var appActivityObserverId: UUID?
 
   init(dependencies: AppDependencies, peerId: Peer, chat: Chat) {
     self.dependencies = dependencies
@@ -72,6 +74,14 @@ class MessageListAppKit: NSViewController {
     translationViewModel = TranslationViewModel(peerId: peerId)
 
     super.init(nibName: nil, bundle: nil)
+
+    appActivityObserverId = AppActivityMonitor.shared.addObserver { [weak self] state in
+      guard let self else { return }
+      guard state == .active else { return }
+      guard needsUnreadUpdateOnActive else { return }
+      needsUnreadUpdateOnActive = false
+      updateUnreadIfNeeded()
+    }
 
     sizeCalculator.prepareForUse()
     rebuildRowItems()
@@ -1512,6 +1522,11 @@ class MessageListAppKit: NSViewController {
   }
 
   func updateUnreadIfNeeded() {
+    guard AppActivityMonitor.shared.isActive else {
+      needsUnreadUpdateOnActive = true
+      return
+    }
+
     // Quicker check
     if isAtBottom {
       readAll()
@@ -1977,6 +1992,10 @@ extension MessageListAppKit {
 
     // Remove all observers
     NotificationCenter.default.removeObserver(self)
+    if let appActivityObserverId {
+      AppActivityMonitor.shared.removeObserver(appActivityObserverId)
+      self.appActivityObserverId = nil
+    }
 
     // Clear all callbacks
     scrollToBottomButton.onClick = nil
