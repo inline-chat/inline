@@ -11,14 +11,15 @@ export const searchMessages = async (
     throw RealtimeRpcError.PeerIdInvalid
   }
 
-  if (!input.keywords.length) {
+  const queries = input.queries ?? []
+  if (!queries.some((query) => query.trim().length > 0)) {
     throw RealtimeRpcError.BadRequest
   }
 
   const result = await Functions.messages.searchMessages(
     {
       peerId: input.peerId,
-      keywords: input.keywords,
+      queries,
       limit: input.limit,
     },
     {

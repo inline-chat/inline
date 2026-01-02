@@ -3852,8 +3852,8 @@ public struct SearchMessagesInput: Sendable {
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
-  /// Keywords to match in message text (ANDed together)
-  public var keywords: [String] = []
+  /// Queries to match in message text (space-separated terms ANDed within a query, ORed across queries)
+  public var queries: [String] = []
 
   /// Max number of results to return
   public var limit: Int32 {
@@ -11317,7 +11317,7 @@ extension SearchMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
   public static let protoMessageName: String = "SearchMessagesInput"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .standard(proto: "peer_id"),
-    2: .same(proto: "keywords"),
+    2: .same(proto: "queries"),
     3: .same(proto: "limit"),
   ]
 
@@ -11328,7 +11328,7 @@ extension SearchMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
-      case 2: try { try decoder.decodeRepeatedStringField(value: &self.keywords) }()
+      case 2: try { try decoder.decodeRepeatedStringField(value: &self.queries) }()
       case 3: try { try decoder.decodeSingularInt32Field(value: &self._limit) }()
       default: break
       }
@@ -11343,8 +11343,8 @@ extension SearchMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
     try { if let v = self._peerID {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
     } }()
-    if !self.keywords.isEmpty {
-      try visitor.visitRepeatedStringField(value: self.keywords, fieldNumber: 2)
+    if !self.queries.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.queries, fieldNumber: 2)
     }
     try { if let v = self._limit {
       try visitor.visitSingularInt32Field(value: v, fieldNumber: 3)
@@ -11354,7 +11354,7 @@ extension SearchMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
 
   public static func ==(lhs: SearchMessagesInput, rhs: SearchMessagesInput) -> Bool {
     if lhs._peerID != rhs._peerID {return false}
-    if lhs.keywords != rhs.keywords {return false}
+    if lhs.queries != rhs.queries {return false}
     if lhs._limit != rhs._limit {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
