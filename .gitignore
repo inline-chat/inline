@@ -116,3 +116,6 @@ dist/
 
 # Swift
 .swift-module-cache
+
+# AI
+test_write_permission
