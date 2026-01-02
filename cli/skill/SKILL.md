@@ -128,6 +128,56 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
   - `inline spaces invite --space-id 31 --email you@example.com`
   - `inline spaces update-member-access --space-id 31 --user-id 42 --admin`
 
+## Agent Tips
+
+### Finding users quickly
+
+```bash
+inline users list | grep -i "partial_name"
+```
+
+Faster than parsing JSON when you just need user ID.
+
+### Filtering messages with jq
+
+```bash
+# Get last N outgoing messages (your messages)
+inline messages list --user-id ID --json | jq '[.messages[] | select(.out == true)] | .[0:3]'
+
+# Get last N incoming messages (their messages)
+inline messages list --user-id ID --json | jq '[.messages[] | select(.out == false)] | .[0:3]'
+```
+
+### Multi-term search for feedback/bugs
+
+```bash
+inline messages search --user-id ID --query "bug" --query "issue" --query "loom" --query "broken" --limit 30 --json
+```
+
+Each --query is ORed together - useful for finding feedback items.
+
+### Common patterns
+
+- Use --user-id for DMs instead of looking up chat IDs
+- Use --json + jq for programmatic filtering
+- Use default (non-JSON) mode for quick human-readable output
+
+### More quick tips
+
+```bash
+# Page back with offset-id
+inline messages list --chat-id ID --limit 50 --offset-id 1234
+
+# Get the latest message id
+inline messages list --chat-id ID --limit 1 --json | jq '.messages[0].id'
+
+# Export a batch for offline review
+inline messages export --chat-id ID --limit 500 --output ./chat.json
+
+# Compact JSON for pipelines
+inline messages list --chat-id ID --json --compact | jq '.messages | length'
+```
+
 ## JSON samples
 
 Chat list (GetChatsResult, truncated to essential fields):
