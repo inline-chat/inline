@@ -119,3 +119,9 @@ dist/
 
 # AI
 test_write_permission
+
+# Rust 
+cli/target
+
+# Release temp assets
+scripts/.release-tmp/
