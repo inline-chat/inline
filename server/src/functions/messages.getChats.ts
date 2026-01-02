@@ -371,9 +371,19 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
     return Encoders.dialog(dialog, { unreadCount })
   })
 
+  const usersById = new Map<number, DbUser & { photoFile?: DbFile | null }>()
+  for (const user of usersList) {
+    const existing = usersById.get(user.id)
+    if (!existing || (!existing.photoFile && user.photoFile)) {
+      usersById.set(user.id, user)
+    }
+  }
+
   const encodedChats = chatsList.map((chat) => Encoders.chat(chat, { encodingForUserId: currentUserId }))
   const encodedSpaces = spacesList.map((space) => Encoders.space(space, { encodingForUserId: currentUserId }))
-  const encodedUsers = usersList.map((user) => Encoders.user({ user, photoFile: user.photoFile ?? undefined }))
+  const encodedUsers = Array.from(usersById.values()).map((user) =>
+    Encoders.user({ user, photoFile: user.photoFile ?? undefined }),
+  )
 
   return {
     chats: encodedChats,
