@@ -1,0 +1,1 @@
+export { MessageSearchModule } from "./messagesSearch"

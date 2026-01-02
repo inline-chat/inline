@@ -575,6 +575,7 @@ enum Method {
   GET_CHAT = 25;
   GET_UPDATES = 26;
   UPDATE_MEMBER_ACCESS = 27;
+  SEARCH_MESSAGES = 28;
 }
 
 message RpcCall {
@@ -607,6 +608,7 @@ message RpcCall {
     GetChatInput getChat = 26;
     GetUpdatesInput getUpdates = 27;
     UpdateMemberAccessInput updateMemberAccess = 28;
+    SearchMessagesInput searchMessages = 29;
   }
 }
 
@@ -641,6 +643,7 @@ message RpcResult {
     GetChatResult getChat = 26;
     GetUpdatesResult getUpdates = 27;
     UpdateMemberAccessResult updateMemberAccess = 28;
+    SearchMessagesResult searchMessages = 29;
   }
 }
 
@@ -948,6 +951,9 @@ message SendMessageInput {
 
   // Entities in the message (bold, italic, mention, etc)
   optional MessageEntities entities = 7;
+
+  // Parse markdown in message text and derive entities.
+  optional bool parse_markdown = 8;
 }
 
 message SendMessageResult { repeated Update updates = 2; }
@@ -963,6 +969,18 @@ message GetChatHistoryInput {
 }
 
 message GetChatHistoryResult { repeated Message messages = 1; }
+
+message SearchMessagesInput {
+  InputPeer peer_id = 1;
+
+  // Keywords to match in message text (ANDed together)
+  repeated string keywords = 2;
+
+  // Max number of results to return
+  optional int32 limit = 3;
+}
+
+message SearchMessagesResult { repeated Message messages = 1; }
 
 message InputChatParticipant { int64 user_id = 1; }
 

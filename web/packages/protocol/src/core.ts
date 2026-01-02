@@ -1574,6 +1574,12 @@ export interface RpcCall {
          */
         updateMemberAccess: UpdateMemberAccessInput;
     } | {
+        oneofKind: "searchMessages";
+        /**
+         * @generated from protobuf field: SearchMessagesInput searchMessages = 29;
+         */
+        searchMessages: SearchMessagesInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1750,6 +1756,12 @@ export interface RpcResult {
          * @generated from protobuf field: UpdateMemberAccessResult updateMemberAccess = 28;
          */
         updateMemberAccess: UpdateMemberAccessResult;
+    } | {
+        oneofKind: "searchMessages";
+        /**
+         * @generated from protobuf field: SearchMessagesResult searchMessages = 29;
+         */
+        searchMessages: SearchMessagesResult;
     } | {
         oneofKind: undefined;
     };
@@ -2498,6 +2510,12 @@ export interface SendMessageInput {
      * @generated from protobuf field: optional MessageEntities entities = 7;
      */
     entities?: MessageEntities;
+    /**
+     * Parse markdown in message text and derive entities.
+     *
+     * @generated from protobuf field: optional bool parse_markdown = 8;
+     */
+    parseMarkdown?: boolean;
 }
 /**
  * @generated from protobuf message SendMessageResult
@@ -2533,6 +2551,36 @@ export interface GetChatHistoryInput {
  * @generated from protobuf message GetChatHistoryResult
  */
 export interface GetChatHistoryResult {
+    /**
+     * @generated from protobuf field: repeated Message messages = 1;
+     */
+    messages: Message[];
+}
+/**
+ * @generated from protobuf message SearchMessagesInput
+ */
+export interface SearchMessagesInput {
+    /**
+     * @generated from protobuf field: InputPeer peer_id = 1;
+     */
+    peerId?: InputPeer;
+    /**
+     * Keywords to match in message text (ANDed together)
+     *
+     * @generated from protobuf field: repeated string keywords = 2;
+     */
+    keywords: string[];
+    /**
+     * Max number of results to return
+     *
+     * @generated from protobuf field: optional int32 limit = 3;
+     */
+    limit?: number;
+}
+/**
+ * @generated from protobuf message SearchMessagesResult
+ */
+export interface SearchMessagesResult {
     /**
      * @generated from protobuf field: repeated Message messages = 1;
      */
@@ -3585,7 +3633,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: UPDATE_MEMBER_ACCESS = 27;
      */
-    UPDATE_MEMBER_ACCESS = 27
+    UPDATE_MEMBER_ACCESS = 27,
+    /**
+     * @generated from protobuf enum value: SEARCH_MESSAGES = 28;
+     */
+    SEARCH_MESSAGES = 28
 }
 // @generated message type with reflection information, may provide speed optimized methods
 class ClientMessage$Type extends MessageType<ClientMessage> {
@@ -6797,7 +6849,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 25, name: "getUpdatesState", kind: "message", oneof: "input", T: () => GetUpdatesStateInput },
             { no: 26, name: "getChat", kind: "message", oneof: "input", T: () => GetChatInput },
             { no: 27, name: "getUpdates", kind: "message", oneof: "input", T: () => GetUpdatesInput },
-            { no: 28, name: "updateMemberAccess", kind: "message", oneof: "input", T: () => UpdateMemberAccessInput }
+            { no: 28, name: "updateMemberAccess", kind: "message", oneof: "input", T: () => UpdateMemberAccessInput },
+            { no: 29, name: "searchMessages", kind: "message", oneof: "input", T: () => SearchMessagesInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -6978,6 +7031,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         updateMemberAccess: UpdateMemberAccessInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).updateMemberAccess)
                     };
                     break;
+                case /* SearchMessagesInput searchMessages */ 29:
+                    message.input = {
+                        oneofKind: "searchMessages",
+                        searchMessages: SearchMessagesInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).searchMessages)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -7074,6 +7133,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* UpdateMemberAccessInput updateMemberAccess = 28; */
         if (message.input.oneofKind === "updateMemberAccess")
             UpdateMemberAccessInput.internalBinaryWrite(message.input.updateMemberAccess, writer.tag(28, WireType.LengthDelimited).fork(), options).join();
+        /* SearchMessagesInput searchMessages = 29; */
+        if (message.input.oneofKind === "searchMessages")
+            SearchMessagesInput.internalBinaryWrite(message.input.searchMessages, writer.tag(29, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -7115,7 +7177,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 25, name: "getUpdatesState", kind: "message", oneof: "result", T: () => GetUpdatesStateResult },
             { no: 26, name: "getChat", kind: "message", oneof: "result", T: () => GetChatResult },
             { no: 27, name: "getUpdates", kind: "message", oneof: "result", T: () => GetUpdatesResult },
-            { no: 28, name: "updateMemberAccess", kind: "message", oneof: "result", T: () => UpdateMemberAccessResult }
+            { no: 28, name: "updateMemberAccess", kind: "message", oneof: "result", T: () => UpdateMemberAccessResult },
+            { no: 29, name: "searchMessages", kind: "message", oneof: "result", T: () => SearchMessagesResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -7296,6 +7359,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         updateMemberAccess: UpdateMemberAccessResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).updateMemberAccess)
                     };
                     break;
+                case /* SearchMessagesResult searchMessages */ 29:
+                    message.result = {
+                        oneofKind: "searchMessages",
+                        searchMessages: SearchMessagesResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).searchMessages)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -7392,6 +7461,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* UpdateMemberAccessResult updateMemberAccess = 28; */
         if (message.result.oneofKind === "updateMemberAccess")
             UpdateMemberAccessResult.internalBinaryWrite(message.result.updateMemberAccess, writer.tag(28, WireType.LengthDelimited).fork(), options).join();
+        /* SearchMessagesResult searchMessages = 29; */
+        if (message.result.oneofKind === "searchMessages")
+            SearchMessagesResult.internalBinaryWrite(message.result.searchMessages, writer.tag(29, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9630,7 +9702,8 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
             { no: 5, name: "media", kind: "message", T: () => InputMedia },
             { no: 1000, name: "temporary_send_date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 6, name: "is_sticker", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 7, name: "entities", kind: "message", T: () => MessageEntities }
+            { no: 7, name: "entities", kind: "message", T: () => MessageEntities },
+            { no: 8, name: "parse_markdown", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<SendMessageInput>): SendMessageInput {
@@ -9668,6 +9741,9 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
                 case /* optional MessageEntities entities */ 7:
                     message.entities = MessageEntities.internalBinaryRead(reader, reader.uint32(), options, message.entities);
                     break;
+                case /* optional bool parse_markdown */ 8:
+                    message.parseMarkdown = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -9704,6 +9780,9 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
         /* optional MessageEntities entities = 7; */
         if (message.entities)
             MessageEntities.internalBinaryWrite(message.entities, writer.tag(7, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool parse_markdown = 8; */
+        if (message.parseMarkdown !== undefined)
+            writer.tag(8, WireType.Varint).bool(message.parseMarkdown);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9868,6 +9947,114 @@ class GetChatHistoryResult$Type extends MessageType<GetChatHistoryResult> {
  * @generated MessageType for protobuf message GetChatHistoryResult
  */
 export const GetChatHistoryResult = new GetChatHistoryResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SearchMessagesInput$Type extends MessageType<SearchMessagesInput> {
+    constructor() {
+        super("SearchMessagesInput", [
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 2, name: "keywords", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<SearchMessagesInput>): SearchMessagesInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.keywords = [];
+        if (value !== undefined)
+            reflectionMergePartial<SearchMessagesInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SearchMessagesInput): SearchMessagesInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* repeated string keywords */ 2:
+                    message.keywords.push(reader.string());
+                    break;
+                case /* optional int32 limit */ 3:
+                    message.limit = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SearchMessagesInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated string keywords = 2; */
+        for (let i = 0; i < message.keywords.length; i++)
+            writer.tag(2, WireType.LengthDelimited).string(message.keywords[i]);
+        /* optional int32 limit = 3; */
+        if (message.limit !== undefined)
+            writer.tag(3, WireType.Varint).int32(message.limit);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SearchMessagesInput
+ */
+export const SearchMessagesInput = new SearchMessagesInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class SearchMessagesResult$Type extends MessageType<SearchMessagesResult> {
+    constructor() {
+        super("SearchMessagesResult", [
+            { no: 1, name: "messages", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Message }
+        ]);
+    }
+    create(value?: PartialMessage<SearchMessagesResult>): SearchMessagesResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.messages = [];
+        if (value !== undefined)
+            reflectionMergePartial<SearchMessagesResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: SearchMessagesResult): SearchMessagesResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Message messages */ 1:
+                    message.messages.push(Message.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: SearchMessagesResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Message messages = 1; */
+        for (let i = 0; i < message.messages.length; i++)
+            Message.internalBinaryWrite(message.messages[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message SearchMessagesResult
+ */
+export const SearchMessagesResult = new SearchMessagesResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class InputChatParticipant$Type extends MessageType<InputChatParticipant> {
     constructor() {

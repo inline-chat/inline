@@ -51,6 +51,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case getChat // = 25
   case getUpdates // = 26
   case updateMemberAccess // = 27
+  case searchMessages // = 28
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -87,6 +88,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 25: self = .getChat
     case 26: self = .getUpdates
     case 27: self = .updateMemberAccess
+    case 28: self = .searchMessages
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -121,6 +123,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .getChat: return 25
     case .getUpdates: return 26
     case .updateMemberAccess: return 27
+    case .searchMessages: return 28
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -155,6 +158,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .getChat,
     .getUpdates,
     .updateMemberAccess,
+    .searchMessages,
   ]
 
 }
@@ -2315,6 +2319,14 @@ public struct RpcCall: Sendable {
     set {input = .updateMemberAccess(newValue)}
   }
 
+  public var searchMessages: SearchMessagesInput {
+    get {
+      if case .searchMessages(let v)? = input {return v}
+      return SearchMessagesInput()
+    }
+    set {input = .searchMessages(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Input: Equatable, Sendable {
@@ -2345,6 +2357,7 @@ public struct RpcCall: Sendable {
     case getChat(GetChatInput)
     case getUpdates(GetUpdatesInput)
     case updateMemberAccess(UpdateMemberAccessInput)
+    case searchMessages(SearchMessagesInput)
 
   }
 
@@ -2582,6 +2595,14 @@ public struct RpcResult: @unchecked Sendable {
     set {_uniqueStorage()._result = .updateMemberAccess(newValue)}
   }
 
+  public var searchMessages: SearchMessagesResult {
+    get {
+      if case .searchMessages(let v)? = _storage._result {return v}
+      return SearchMessagesResult()
+    }
+    set {_uniqueStorage()._result = .searchMessages(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Result: Equatable, Sendable {
@@ -2612,6 +2633,7 @@ public struct RpcResult: @unchecked Sendable {
     case getChat(GetChatResult)
     case getUpdates(GetUpdatesResult)
     case updateMemberAccess(UpdateMemberAccessResult)
+    case searchMessages(SearchMessagesResult)
 
   }
 
@@ -3724,6 +3746,16 @@ public struct SendMessageInput: Sendable {
   /// Clears the value of `entities`. Subsequent reads from it will return its default value.
   public mutating func clearEntities() {self._entities = nil}
 
+  /// Parse markdown in message text and derive entities.
+  public var parseMarkdown: Bool {
+    get {return _parseMarkdown ?? false}
+    set {_parseMarkdown = newValue}
+  }
+  /// Returns true if `parseMarkdown` has been explicitly set.
+  public var hasParseMarkdown: Bool {return self._parseMarkdown != nil}
+  /// Clears the value of `parseMarkdown`. Subsequent reads from it will return its default value.
+  public mutating func clearParseMarkdown() {self._parseMarkdown = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -3736,6 +3768,7 @@ public struct SendMessageInput: Sendable {
   fileprivate var _temporarySendDate: Int64? = nil
   fileprivate var _isSticker: Bool? = nil
   fileprivate var _entities: MessageEntities? = nil
+  fileprivate var _parseMarkdown: Bool? = nil
 }
 
 public struct SendMessageResult: Sendable {
@@ -3794,6 +3827,53 @@ public struct GetChatHistoryInput: Sendable {
 }
 
 public struct GetChatHistoryResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var messages: [Message] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct SearchMessagesInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var peerID: InputPeer {
+    get {return _peerID ?? InputPeer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {return self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  /// Keywords to match in message text (ANDed together)
+  public var keywords: [String] = []
+
+  /// Max number of results to return
+  public var limit: Int32 {
+    get {return _limit ?? 0}
+    set {_limit = newValue}
+  }
+  /// Returns true if `limit` has been explicitly set.
+  public var hasLimit: Bool {return self._limit != nil}
+  /// Clears the value of `limit`. Subsequent reads from it will return its default value.
+  public mutating func clearLimit() {self._limit = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: InputPeer? = nil
+  fileprivate var _limit: Int32? = nil
+}
+
+public struct SearchMessagesResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -5288,6 +5368,7 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     25: .same(proto: "GET_CHAT"),
     26: .same(proto: "GET_UPDATES"),
     27: .same(proto: "UPDATE_MEMBER_ACCESS"),
+    28: .same(proto: "SEARCH_MESSAGES"),
   ]
 }
 
@@ -8123,6 +8204,7 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     26: .same(proto: "getChat"),
     27: .same(proto: "getUpdates"),
     28: .same(proto: "updateMemberAccess"),
+    29: .same(proto: "searchMessages"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -8483,6 +8565,19 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
           self.input = .updateMemberAccess(v)
         }
       }()
+      case 29: try {
+        var v: SearchMessagesInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .searchMessages(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .searchMessages(v)
+        }
+      }()
       default: break
       }
     }
@@ -8605,6 +8700,10 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       guard case .updateMemberAccess(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 28)
     }()
+    case .searchMessages?: try {
+      guard case .searchMessages(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 29)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -8649,6 +8748,7 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     26: .same(proto: "getChat"),
     27: .same(proto: "getUpdates"),
     28: .same(proto: "updateMemberAccess"),
+    29: .same(proto: "searchMessages"),
   ]
 
   fileprivate class _StorageClass {
@@ -9040,6 +9140,19 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
             _storage._result = .updateMemberAccess(v)
           }
         }()
+        case 29: try {
+          var v: SearchMessagesResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .searchMessages(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .searchMessages(v)
+          }
+        }()
         default: break
         }
       }
@@ -9163,6 +9276,10 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
       case .updateMemberAccess?: try {
         guard case .updateMemberAccess(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 28)
+      }()
+      case .searchMessages?: try {
+        guard case .searchMessages(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 29)
       }()
       case nil: break
       }
@@ -11011,6 +11128,7 @@ extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     1000: .standard(proto: "temporary_send_date"),
     6: .standard(proto: "is_sticker"),
     7: .same(proto: "entities"),
+    8: .standard(proto: "parse_markdown"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -11026,6 +11144,7 @@ extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
       case 5: try { try decoder.decodeSingularMessageField(value: &self._media) }()
       case 6: try { try decoder.decodeSingularBoolField(value: &self._isSticker) }()
       case 7: try { try decoder.decodeSingularMessageField(value: &self._entities) }()
+      case 8: try { try decoder.decodeSingularBoolField(value: &self._parseMarkdown) }()
       case 1000: try { try decoder.decodeSingularInt64Field(value: &self._temporarySendDate) }()
       default: break
       }
@@ -11058,6 +11177,9 @@ extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     try { if let v = self._entities {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
     } }()
+    try { if let v = self._parseMarkdown {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 8)
+    } }()
     try { if let v = self._temporarySendDate {
       try visitor.visitSingularInt64Field(value: v, fieldNumber: 1000)
     } }()
@@ -11073,6 +11195,7 @@ extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     if lhs._temporarySendDate != rhs._temporarySendDate {return false}
     if lhs._isSticker != rhs._isSticker {return false}
     if lhs._entities != rhs._entities {return false}
+    if lhs._parseMarkdown != rhs._parseMarkdown {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -11184,6 +11307,86 @@ extension GetChatHistoryResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   }
 
   public static func ==(lhs: GetChatHistoryResult, rhs: GetChatHistoryResult) -> Bool {
+    if lhs.messages != rhs.messages {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension SearchMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "SearchMessagesInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "peer_id"),
+    2: .same(proto: "keywords"),
+    3: .same(proto: "limit"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 2: try { try decoder.decodeRepeatedStringField(value: &self.keywords) }()
+      case 3: try { try decoder.decodeSingularInt32Field(value: &self._limit) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if !self.keywords.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.keywords, fieldNumber: 2)
+    }
+    try { if let v = self._limit {
+      try visitor.visitSingularInt32Field(value: v, fieldNumber: 3)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: SearchMessagesInput, rhs: SearchMessagesInput) -> Bool {
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs.keywords != rhs.keywords {return false}
+    if lhs._limit != rhs._limit {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension SearchMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "SearchMessagesResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "messages"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.messages) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.messages.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.messages, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: SearchMessagesResult, rhs: SearchMessagesResult) -> Bool {
     if lhs.messages != rhs.messages {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true

@@ -34,6 +34,7 @@ export const sendMessage = async (
       sendDate: input.temporarySendDate ? Number(input.temporarySendDate) : undefined,
       isSticker: input.isSticker ?? false,
       entities: input.entities,
+      parseMarkdown: input.parseMarkdown ?? undefined,
     },
     {
       currentSessionId: handlerContext.sessionId,
