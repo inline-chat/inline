@@ -162,7 +162,7 @@ describe("searchMessages", () => {
     const media = result.messages[0]?.media?.media
     expect(media?.oneofKind).toBe("document")
     if (media?.oneofKind === "document") {
-      expect(media.document.document.fileName).toBe("Quarterly_Report_2025.pdf")
+      expect(media.document.document!.fileName).toBe("Quarterly_Report_2025.pdf")
     }
   })
 
