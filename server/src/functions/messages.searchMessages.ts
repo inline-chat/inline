@@ -13,7 +13,7 @@ import { MessageSearchModule } from "@in/server/modules/search/messagesSearch"
 
 type Input = {
   peerId: InputPeer
-  keywords: string[]
+  queries: string[]
   limit?: number
 }
 
@@ -26,8 +26,8 @@ const log = new Log("functions.searchMessages")
 const DEFAULT_LIMIT = 50
 
 export const searchMessages = async (input: Input, context: FunctionContext): Promise<Output> => {
-  const keywords = normalizeKeywords(input.keywords)
-  if (keywords.length === 0) {
+  const keywordGroups = normalizeQueries(input.queries)
+  if (keywordGroups.length === 0) {
     throw RealtimeRpcError.BadRequest
   }
 
@@ -37,13 +37,14 @@ export const searchMessages = async (input: Input, context: FunctionContext): Pr
 
   log.debug("searchMessages start", {
     chatId: chat.id,
-    keywordCount: keywords.length,
+    queryCount: keywordGroups.length,
+    keywordCount: keywordGroups.reduce((total, keywords) => total + keywords.length, 0),
     maxResults,
   })
 
   const messageIds = await MessageSearchModule.searchMessagesInChat({
     chatId: chat.id,
-    keywords,
+    keywordGroups,
     maxResults,
   })
 
@@ -127,16 +128,22 @@ async function getChatWithAccess(inputPeer: InputPeer, currentUserId: number): P
   return chat
 }
 
-function normalizeKeywords(keywords: string[] | undefined): string[] {
-  if (!keywords) {
+function normalizeQueries(queries: string[] | undefined): string[][] {
+  if (!queries) {
     return []
   }
 
-  const normalized = keywords
-    .map((keyword) => keyword.trim().toLowerCase())
-    .filter((keyword) => keyword.length > 0)
+  const normalized = queries
+    .map((query) =>
+      query
+        .split(/\s+/)
+        .map((keyword) => keyword.trim().toLowerCase())
+        .filter((keyword) => keyword.length > 0),
+    )
+    .map((keywords) => [...new Set(keywords)])
+    .filter((keywords) => keywords.length > 0)
 
-  return [...new Set(normalized)]
+  return normalized
 }
 
 function normalizeLimit(limit: number | undefined): number {

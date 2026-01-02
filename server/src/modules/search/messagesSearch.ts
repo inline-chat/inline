@@ -23,7 +23,7 @@ type SearchRow = {
 
 type SearchMessagesInput = {
   chatId: number
-  keywords: string[]
+  keywordGroups: string[][]
   maxResults: number
   batchSize?: number
 }
@@ -33,7 +33,7 @@ export const MessageSearchModule = {
 }
 
 async function searchMessagesInChat(input: SearchMessagesInput): Promise<bigint[]> {
-  if (input.maxResults <= 0 || input.keywords.length === 0) {
+  if (input.maxResults <= 0 || input.keywordGroups.length === 0) {
     return []
   }
 
@@ -58,7 +58,7 @@ async function searchMessagesInChat(input: SearchMessagesInput): Promise<bigint[
         continue
       }
 
-      if (matchesKeywords(searchText, input.keywords)) {
+      if (matchesQueryGroups(searchText, input.keywordGroups)) {
         matchedMessageIds.push(BigInt(row.messageId))
       }
     }
@@ -146,7 +146,7 @@ function getSearchText(row: SearchRow): string | null {
   return text ?? fileName
 }
 
-function matchesKeywords(text: string, keywords: string[]): boolean {
+function matchesQueryGroups(text: string, keywordGroups: string[][]): boolean {
   const haystack = text.toLowerCase()
-  return keywords.every((keyword) => haystack.includes(keyword))
+  return keywordGroups.some((keywords) => keywords.every((keyword) => haystack.includes(keyword)))
 }

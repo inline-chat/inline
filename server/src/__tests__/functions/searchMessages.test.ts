@@ -42,7 +42,7 @@ describe("searchMessages", () => {
         peerId: {
           type: { oneofKind: "user", user: { userId: BigInt(userB.id) } },
         },
-        keywords: ["ALPHA", "beta"],
+        queries: ["ALPHA beta"],
       },
       makeFunctionContext(userA.id),
     )
@@ -54,7 +54,44 @@ describe("searchMessages", () => {
     expect(texts).toEqual(["beta Alpha", "alpha beta"])
   })
 
-  test("rejects empty keywords", async () => {
+  test("matches any query group", async () => {
+    const userA = (await testUtils.createUser("search-or-a@example.com"))!
+    const userB = (await testUtils.createUser("search-or-b@example.com"))!
+    const chat = (await testUtils.createPrivateChat(userA, userB))!
+
+    await testUtils.createTestMessage({
+      messageId: 1,
+      chatId: chat.id,
+      fromId: userA.id,
+      text: "alpha beta",
+    })
+    await testUtils.createTestMessage({
+      messageId: 2,
+      chatId: chat.id,
+      fromId: userA.id,
+      text: "gamma delta",
+    })
+    await testUtils.createTestMessage({
+      messageId: 3,
+      chatId: chat.id,
+      fromId: userA.id,
+      text: "epsilon zeta",
+    })
+
+    const result = await searchMessages(
+      {
+        peerId: {
+          type: { oneofKind: "user", user: { userId: BigInt(userB.id) } },
+        },
+        queries: ["alpha beta", "delta"],
+      },
+      makeFunctionContext(userA.id),
+    )
+
+    expect(result.messages.map((message) => Number(message.id))).toEqual([2, 1])
+  })
+
+  test("rejects empty queries", async () => {
     const userA = (await testUtils.createUser("search-c@example.com"))!
     const userB = (await testUtils.createUser("search-d@example.com"))!
     await testUtils.createPrivateChat(userA, userB)
@@ -65,7 +102,7 @@ describe("searchMessages", () => {
           peerId: {
             type: { oneofKind: "user", user: { userId: BigInt(userB.id) } },
           },
-          keywords: [],
+          queries: ["   "],
         },
         makeFunctionContext(userA.id),
       ),
@@ -115,7 +152,7 @@ describe("searchMessages", () => {
         peerId: {
           type: { oneofKind: "user", user: { userId: BigInt(userB.id) } },
         },
-        keywords: ["report", "2025"],
+        queries: ["report 2025"],
       },
       makeFunctionContext(userA.id),
     )
@@ -184,7 +221,7 @@ describe("searchMessages", () => {
         peerId: {
           type: { oneofKind: "user", user: { userId: BigInt(userB.id) } },
         },
-        keywords: ["alpha", "beta"],
+        queries: ["alpha beta"],
         limit,
       },
       makeFunctionContext(userA.id),

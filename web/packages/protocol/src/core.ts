@@ -2565,11 +2565,11 @@ export interface SearchMessagesInput {
      */
     peerId?: InputPeer;
     /**
-     * Keywords to match in message text (ANDed together)
+     * Queries to match in message text (space-separated terms ANDed within a query, ORed across queries)
      *
-     * @generated from protobuf field: repeated string keywords = 2;
+     * @generated from protobuf field: repeated string queries = 2;
      */
-    keywords: string[];
+    queries: string[];
     /**
      * Max number of results to return
      *
@@ -9952,13 +9952,13 @@ class SearchMessagesInput$Type extends MessageType<SearchMessagesInput> {
     constructor() {
         super("SearchMessagesInput", [
             { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
-            { no: 2, name: "keywords", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "queries", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
         ]);
     }
     create(value?: PartialMessage<SearchMessagesInput>): SearchMessagesInput {
         const message = globalThis.Object.create((this.messagePrototype!));
-        message.keywords = [];
+        message.queries = [];
         if (value !== undefined)
             reflectionMergePartial<SearchMessagesInput>(this, message, value);
         return message;
@@ -9971,8 +9971,8 @@ class SearchMessagesInput$Type extends MessageType<SearchMessagesInput> {
                 case /* InputPeer peer_id */ 1:
                     message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
                     break;
-                case /* repeated string keywords */ 2:
-                    message.keywords.push(reader.string());
+                case /* repeated string queries */ 2:
+                    message.queries.push(reader.string());
                     break;
                 case /* optional int32 limit */ 3:
                     message.limit = reader.int32();
@@ -9992,9 +9992,9 @@ class SearchMessagesInput$Type extends MessageType<SearchMessagesInput> {
         /* InputPeer peer_id = 1; */
         if (message.peerId)
             InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
-        /* repeated string keywords = 2; */
-        for (let i = 0; i < message.keywords.length; i++)
-            writer.tag(2, WireType.LengthDelimited).string(message.keywords[i]);
+        /* repeated string queries = 2; */
+        for (let i = 0; i < message.queries.length; i++)
+            writer.tag(2, WireType.LengthDelimited).string(message.queries[i]);
         /* optional int32 limit = 3; */
         if (message.limit !== undefined)
             writer.tag(3, WireType.Varint).int32(message.limit);

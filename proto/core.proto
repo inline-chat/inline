@@ -973,8 +973,8 @@ message GetChatHistoryResult { repeated Message messages = 1; }
 message SearchMessagesInput {
   InputPeer peer_id = 1;
 
-  // Keywords to match in message text (ANDed together)
-  repeated string keywords = 2;
+  // Queries to match in message text (space-separated terms ANDed within a query, ORed across queries)
+  repeated string queries = 2;
 
   // Max number of results to return
   optional int32 limit = 3;
