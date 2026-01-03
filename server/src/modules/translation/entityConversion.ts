@@ -19,12 +19,18 @@ const BatchEntityConversionResultSchema = z.object({
 })
 
 /**
- * Create indexed text showing character positions like "Hi" -> "0H1i"
+ * Create indexed text showing UTF-16 character positions like "Hi" -> "0H1i"
  */
-function createIndexedText(text: string): string {
-  return Array.from(text)
-    .map((char, index) => `${index}${char}`)
-    .join("")
+export function createIndexedText(text: string): string {
+  let out = ""
+  let index = 0
+
+  for (const char of text) {
+    out += `${index}${char}`
+    index += char.length
+  }
+
+  return out
 }
 
 const formatEntitiesJson = (entities: MessageEntities): string => {
