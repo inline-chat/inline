@@ -1,0 +1,5 @@
+name = "inline-cli-install-redirect"
+main = "src/index.ts"
+compatibility_date = "2026-01-03"
+
+routes = ["inline.chat/cli/install.sh"]
