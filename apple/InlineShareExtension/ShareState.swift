@@ -1,50 +1,117 @@
 import Logger
 import MultipartFormDataKit
+import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Represents different types of content that can be shared through the extension
-enum SharedContentType {
-  /// Multiple images (up to 5) to be shared
-  case images([UIImage])
-  /// Plain text content
-  case text(String)
-  /// URL to be shared
-  case url(URL)
-  /// File with its filename
-  case file(URL, String)
+/// Represents a file that was shared through the extension.
+struct SharedFile: Identifiable {
+  let id = UUID()
+  let url: URL
+  let fileName: String
+  let mimeType: MIMEType
 }
 
-// Helper functions for SharedContentType pattern matching
-private func isFileContent(_ content: SharedContentType) -> Bool {
-  if case .file = content { return true }
-  return false
+/// Aggregated shared content from the extension.
+struct SharedContent {
+  var images: [UIImage] = []
+  var files: [SharedFile] = []
+  var urls: [URL] = []
+  var textParts: [String] = []
+
+  var hasMedia: Bool { !images.isEmpty || !files.isEmpty }
+  var hasText: Bool { textParts.contains { !$0.isEmpty } }
+  var hasUrls: Bool { !urls.isEmpty }
+  var mediaCount: Int { images.count + files.count }
+
+  var totalItemCount: Int {
+    var count = mediaCount + urls.count
+    if hasText { count += 1 }
+    return count
+  }
+
+  var combinedText: String? {
+    let parts = textParts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .filter { !$0.isEmpty }
+    guard !parts.isEmpty else { return nil }
+    return parts.joined(separator: "\n\n")
+  }
 }
 
-private func isImagesContent(_ content: SharedContentType) -> Bool {
-  if case .images = content { return true }
-  return false
+private final class SharedContentAccumulator {
+  private let lock = NSLock()
+  private let maxImages: Int
+  private let maxFiles: Int
+  private let maxUrls: Int
+
+  private(set) var images: [UIImage] = []
+  private(set) var files: [SharedFile] = []
+  private(set) var urls: [URL] = []
+  private(set) var textParts: [String] = []
+
+  init(maxImages: Int, maxFiles: Int, maxUrls: Int) {
+    self.maxImages = maxImages
+    self.maxFiles = maxFiles
+    self.maxUrls = maxUrls
+  }
+
+  func addImage(_ image: UIImage) {
+    lock.lock()
+    defer { lock.unlock() }
+    guard images.count < maxImages else { return }
+    images.append(image)
+  }
+
+  func addFile(_ file: SharedFile) {
+    lock.lock()
+    defer { lock.unlock() }
+    guard files.count < maxFiles else { return }
+    files.append(file)
+  }
+
+  func addURL(_ url: URL) {
+    lock.lock()
+    defer { lock.unlock() }
+    guard urls.count < maxUrls else { return }
+    guard !urls.contains(where: { $0.absoluteString == url.absoluteString }) else { return }
+    urls.append(url)
+  }
+
+  func addText(_ text: String) {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return }
+    lock.lock()
+    defer { lock.unlock() }
+    guard !textParts.contains(trimmed) else { return }
+    textParts.append(trimmed)
+  }
+
+  func finalize() -> SharedContent {
+    SharedContent(images: images, files: files, urls: urls, textParts: textParts)
+  }
 }
 
 /// Manages the state and operations for the share extension
 /// Handles loading shared content, uploading files, and sending messages
 @MainActor
 class ShareState: ObservableObject {
-  private nonisolated static let maxImages = 5
+  private nonisolated static let maxImages = 10
+  private nonisolated static let maxFiles = 10
+  private nonisolated static let maxUrls = 10
   private static let imageCompressionQuality: CGFloat = 0.7
   private static let progressCompletionValue = 1.0
   private static let maxFileSizeBytes: Int64 = 100 * 1024 * 1024 // 100MB
 
-  @Published var sharedContent: SharedContentType? = nil
+  @Published var sharedContent: SharedContent? = nil
   @Published var sharedData: SharedData?
   @Published var isSending: Bool = false
   @Published var isSent: Bool = false
   @Published var uploadProgress: Double = 0
   @Published var errorState: ErrorState?
 
-  private let log = Log.scoped("ShareState")
+  private nonisolated let log = Log.scoped("ShareState")
   
-  private func detectMIMEType(for fileName: String) -> MIMEType {
+  private nonisolated func detectMIMEType(for fileName: String) -> MIMEType {
     let fileExtension = (fileName as NSString).pathExtension.lowercased()
     
     switch fileExtension {
@@ -83,6 +150,100 @@ class ShareState: ObservableObject {
     }
   }
 
+  private nonisolated func preferredFileTypeIdentifier(
+    for provider: NSItemProvider,
+    hasImage: Bool,
+    hasText: Bool
+  ) -> String? {
+    if hasImage { return nil }
+    if provider.hasItemConformingToTypeIdentifier(UTType.movie.identifier) {
+      return UTType.movie.identifier
+    }
+    if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+      return UTType.fileURL.identifier
+    }
+    if !hasText, provider.hasItemConformingToTypeIdentifier(UTType.data.identifier) {
+      return UTType.data.identifier
+    }
+    return nil
+  }
+
+  private nonisolated func sanitizedFileName(
+    suggestedName: String?,
+    fallbackURL: URL?
+  ) -> String {
+    let suggested = suggestedName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if !suggested.isEmpty { return suggested }
+    let fallback = fallbackURL?.lastPathComponent ?? ""
+    return fallback.isEmpty ? UUID().uuidString : fallback
+  }
+
+  private nonisolated func copyToTemporaryLocation(
+    from sourceURL: URL,
+    suggestedName: String?
+  ) throws -> URL {
+    let fileManager = FileManager.default
+    let fileName = sanitizedFileName(suggestedName: suggestedName, fallbackURL: sourceURL)
+    let destinationURL = fileManager.temporaryDirectory
+      .appendingPathComponent("\(UUID().uuidString)_\(fileName)")
+    let needsAccess = sourceURL.startAccessingSecurityScopedResource()
+    defer {
+      if needsAccess { sourceURL.stopAccessingSecurityScopedResource() }
+    }
+    try fileManager.copyItem(at: sourceURL, to: destinationURL)
+    return destinationURL
+  }
+
+  private nonisolated func writeDataToTemporaryLocation(
+    _ data: Data,
+    suggestedName: String?
+  ) throws -> URL {
+    let fileManager = FileManager.default
+    let fileName = sanitizedFileName(suggestedName: suggestedName, fallbackURL: nil)
+    let destinationURL = fileManager.temporaryDirectory
+      .appendingPathComponent("\(UUID().uuidString)_\(fileName)")
+    try data.write(to: destinationURL, options: .atomic)
+    return destinationURL
+  }
+
+  private nonisolated func loadData(from url: URL) -> Data? {
+    let needsAccess = url.startAccessingSecurityScopedResource()
+    defer {
+      if needsAccess { url.stopAccessingSecurityScopedResource() }
+    }
+    return try? Data(contentsOf: url)
+  }
+
+  private nonisolated func addFile(
+    from url: URL,
+    suggestedName: String?,
+    accumulator: SharedContentAccumulator
+  ) {
+    do {
+      let tempURL = try copyToTemporaryLocation(from: url, suggestedName: suggestedName)
+      let fileName = sanitizedFileName(suggestedName: suggestedName, fallbackURL: url)
+      let mimeType = detectMIMEType(for: fileName)
+      accumulator.addFile(SharedFile(url: tempURL, fileName: fileName, mimeType: mimeType))
+    } catch {
+      log.error("Failed to prepare shared file", error: error)
+    }
+  }
+
+  private nonisolated func addFile(
+    from data: Data,
+    suggestedName: String?,
+    accumulator: SharedContentAccumulator
+  ) {
+    do {
+      let tempURL = try writeDataToTemporaryLocation(data, suggestedName: suggestedName)
+      let fileName = sanitizedFileName(suggestedName: suggestedName, fallbackURL: tempURL)
+      let mimeType = detectMIMEType(for: fileName)
+      accumulator.addFile(SharedFile(url: tempURL, fileName: fileName, mimeType: mimeType))
+    } catch {
+      log.error("Failed to write shared file", error: error)
+    }
+  }
+
   private func sendMessageToChat(
     _ selectedChat: SharedChat,
     text: String?,
@@ -96,6 +257,28 @@ class ShareState: ObservableObject {
       photoId: photoId,
       documentId: documentId
     )
+  }
+
+  private func combinedMessageText(
+    caption: String,
+    content: SharedContent
+  ) -> String? {
+    var parts: [String] = []
+    let trimmedCaption = caption.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !trimmedCaption.isEmpty {
+      parts.append(trimmedCaption)
+    }
+    if let contentText = content.combinedText {
+      parts.append(contentText)
+    }
+    if !content.urls.isEmpty {
+      let urlText = content.urls.map(\.absoluteString).joined(separator: "\n")
+      if !urlText.isEmpty {
+        parts.append(urlText)
+      }
+    }
+    guard !parts.isEmpty else { return nil }
+    return parts.joined(separator: "\n\n")
   }
 
   struct ErrorState: Identifiable {
@@ -122,88 +305,132 @@ class ShareState: ObservableObject {
 
   func loadSharedContent(from extensionItems: [NSExtensionItem]) {
     let group = DispatchGroup()
-    var loadedImages: [UIImage] = []
-    let imageQueue = DispatchQueue(label: "com.inline.shareext.images", attributes: .concurrent)
+    let accumulator = SharedContentAccumulator(
+      maxImages: Self.maxImages,
+      maxFiles: Self.maxFiles,
+      maxUrls: Self.maxUrls
+    )
+    var totalImageAttachments = 0
+    var totalFileAttachments = 0
+    var totalUrlAttachments = 0
 
     for extensionItem in extensionItems {
+      if let attributedText = extensionItem.attributedContentText?.string {
+        accumulator.addText(attributedText)
+      }
       guard let attachments = extensionItem.attachments else { continue }
 
       for attachment in attachments {
-        // Check for images
-        if attachment.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+        let hasImage = attachment.hasItemConformingToTypeIdentifier(UTType.image.identifier)
+        let hasText = attachment.hasItemConformingToTypeIdentifier(UTType.text.identifier) ||
+          attachment.hasItemConformingToTypeIdentifier(UTType.plainText.identifier)
+        let fileTypeIdentifier = preferredFileTypeIdentifier(
+          for: attachment,
+          hasImage: hasImage,
+          hasText: hasText
+        )
+        if hasImage {
+          totalImageAttachments += 1
           group.enter()
-          attachment.loadItem(forTypeIdentifier: UTType.image.identifier, options: nil) { data, _ in
+          attachment.loadItem(forTypeIdentifier: UTType.image.identifier, options: nil) { [weak self] data, _ in
             defer { group.leave() }
+            guard let self else { return }
 
-            var image: UIImage?
-            if let imageURL = data as? URL,
-               let imageData = try? Data(contentsOf: imageURL)
-            {
-              image = UIImage(data: imageData)
-            } else if let loadedImage = data as? UIImage {
-              image = loadedImage
+            if let image = data as? UIImage {
+              accumulator.addImage(image)
+              return
+            }
+            if let imageURL = data as? URL, let imageData = self.loadData(from: imageURL) {
+              if let image = UIImage(data: imageData) {
+                accumulator.addImage(image)
+              }
+              return
+            }
+            if let imageData = data as? Data, let image = UIImage(data: imageData) {
+              accumulator.addImage(image)
+            }
+          }
+        }
+
+        if let fileTypeIdentifier {
+          totalFileAttachments += 1
+          group.enter()
+          attachment.loadFileRepresentation(forTypeIdentifier: fileTypeIdentifier) { [weak self] url, _ in
+            guard let self else {
+              group.leave()
+              return
+            }
+            if let url {
+              self.addFile(from: url, suggestedName: attachment.suggestedName, accumulator: accumulator)
+              group.leave()
+              return
             }
 
-            if let image {
-              imageQueue.async(flags: .barrier) {
-                if loadedImages.count < Self.maxImages {
-                  loadedImages.append(image)
+            attachment.loadItem(forTypeIdentifier: fileTypeIdentifier, options: nil) { [weak self] item, _ in
+              defer { group.leave() }
+              guard let self else { return }
+              if let url = item as? URL {
+                self.addFile(from: url, suggestedName: attachment.suggestedName, accumulator: accumulator)
+              } else if let data = item as? Data {
+                self.addFile(from: data, suggestedName: attachment.suggestedName, accumulator: accumulator)
+              }
+            }
+          }
+        }
+
+        if attachment.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
+          totalUrlAttachments += 1
+          let allowFileURL = fileTypeIdentifier == nil
+          group.enter()
+          attachment.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) { [weak self] item, _ in
+            defer { group.leave() }
+            guard let self else { return }
+
+            if let url = item as? URL {
+              if url.isFileURL {
+                if allowFileURL {
+                  self.addFile(from: url, suggestedName: attachment.suggestedName, accumulator: accumulator)
                 }
+              } else {
+                accumulator.addURL(url)
+              }
+              return
+            }
+            if let string = item as? String, let url = URL(string: string) {
+              if url.isFileURL {
+                if allowFileURL {
+                  self.addFile(from: url, suggestedName: attachment.suggestedName, accumulator: accumulator)
+                }
+              } else {
+                accumulator.addURL(url)
+              }
+              return
+            }
+            if let data = item as? Data, let string = String(data: data, encoding: .utf8), let url = URL(string: string) {
+              if url.isFileURL {
+                if allowFileURL {
+                  self.addFile(from: url, suggestedName: attachment.suggestedName, accumulator: accumulator)
+                }
+              } else {
+                accumulator.addURL(url)
               }
             }
           }
         }
-        // Check for URLs
-        else if attachment.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
-          group.enter()
-          attachment.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) { [weak self] data, _ in
-            defer { group.leave() }
 
-            if let url = data as? URL {
-              Task { @MainActor in
-                self?.sharedContent = .url(url)
-              }
-            }
-          }
-        }
-        // Check for plain text
-        else if attachment.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) {
+        if hasText {
+          let typeIdentifier = attachment.hasItemConformingToTypeIdentifier(UTType.text.identifier)
+            ? UTType.text.identifier
+            : UTType.plainText.identifier
           group.enter()
-          attachment.loadItem(forTypeIdentifier: UTType.plainText.identifier, options: nil) { [weak self] data, _ in
+          attachment.loadItem(forTypeIdentifier: typeIdentifier, options: nil) { item, _ in
             defer { group.leave() }
-
-            if let text = data as? String {
-              Task { @MainActor in
-                self?.sharedContent = .text(text)
-              }
-            }
-          }
-        }
-        // Check for videos (movies)
-        else if attachment.hasItemConformingToTypeIdentifier(UTType.movie.identifier) {
-          group.enter()
-          attachment.loadItem(forTypeIdentifier: UTType.movie.identifier, options: nil) { [weak self] data, _ in
-            defer { group.leave() }
-
-            if let videoURL = data as? URL {
-              let fileName = videoURL.lastPathComponent
-              Task { @MainActor in
-                self?.sharedContent = .file(videoURL, fileName)
-              }
-            }
-          }
-        }
-        // Check for files (documents)
-        else if attachment.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-          group.enter()
-          attachment.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { [weak self] data, _ in
-            defer { group.leave() }
-
-            if let fileURL = data as? URL {
-              let fileName = fileURL.lastPathComponent
-              Task { @MainActor in
-                self?.sharedContent = .file(fileURL, fileName)
-              }
+            if let text = item as? String {
+              accumulator.addText(text)
+            } else if let attributed = item as? NSAttributedString {
+              accumulator.addText(attributed.string)
+            } else if let data = item as? Data, let text = String(data: data, encoding: .utf8) {
+              accumulator.addText(text)
             }
           }
         }
@@ -212,25 +439,22 @@ class ShareState: ObservableObject {
 
     // Wait for all items to load and then process the results
     group.notify(queue: .main) { [weak self] in
-      imageQueue.sync {
-        if !loadedImages.isEmpty {
-          self?.sharedContent = .images(loadedImages)
-          if loadedImages.count == Self.maxImages {
-            self?.log.info("Loaded maximum \(Self.maxImages) images")
-          } else {
-            self?.log.info("Loaded \(loadedImages.count) images")
-          }
+      guard let self else { return }
+      let content = accumulator.finalize()
+      if content.totalItemCount > 0 {
+        self.sharedContent = content
+      } else {
+        self.sharedContent = nil
+      }
 
-          // Check if we had to limit the images
-          let totalImageAttachments = extensionItems.compactMap(\.attachments).joined().filter {
-            $0.hasItemConformingToTypeIdentifier(UTType.image.identifier)
-          }.count
-
-          if totalImageAttachments > Self.maxImages {
-            self?.log.warning("Limited to \(Self.maxImages) images out of \(totalImageAttachments) provided")
-            // Note: We could show a user-facing warning here in the future
-          }
-        }
+      if totalImageAttachments > Self.maxImages {
+        self.log.warning("Limited to \(Self.maxImages) images out of \(totalImageAttachments) provided")
+      }
+      if totalFileAttachments > Self.maxFiles {
+        self.log.warning("Limited to \(Self.maxFiles) files out of \(totalFileAttachments) provided")
+      }
+      if totalUrlAttachments > Self.maxUrls {
+        self.log.warning("Limited to \(Self.maxUrls) URLs out of \(totalUrlAttachments) provided")
       }
     }
   }
@@ -252,141 +476,116 @@ class ShareState: ObservableObject {
     Task {
       do {
         let apiClient = SharedApiClient.shared
-        let messageText = caption
-
-        // Handle different content types
+        let messageText = combinedMessageText(caption: caption, content: sharedContent)
+        let totalMediaItems = sharedContent.mediaCount
+        let totalItems = max(totalMediaItems, 1)
         var processedItems = 0
-        var totalItems = 1 // Default to 1 for simple progress
-        
-        switch sharedContent {
-          case let .images(images):
-            totalItems = images.count
-          case .text, .url, .file:
-            totalItems = 1
+        var didSendText = false
+
+        if !sharedContent.images.isEmpty {
+          log.info("Sending \(sharedContent.images.count) images")
         }
 
-        switch sharedContent {
-          case let .images(images):
-            // Validate image count
-            guard images.count <= Self.maxImages else {
-              throw NSError(
-                domain: "ShareError",
-                code: 2,
-                userInfo: [
-                  NSLocalizedDescriptionKey: "Too many images. Maximum \(Self.maxImages) images are supported.",
-                ]
-              )
-            }
+        for (index, image) in sharedContent.images.enumerated() {
+          guard let imageData = image.jpegData(compressionQuality: Self.imageCompressionQuality) else {
+            throw NSError(
+              domain: "ShareError",
+              code: 1,
+              userInfo: [NSLocalizedDescriptionKey: "Failed to prepare image \(index + 1)"]
+            )
+          }
 
-            log.info("Sending \(images.count) images")
+          guard imageData.count <= Self.maxFileSizeBytes else {
+            throw NSError(
+              domain: "ShareError",
+              code: 4,
+              userInfo: [
+                NSLocalizedDescriptionKey: "Image \(index + 1) is too large. Maximum size is 100MB."
+              ]
+            )
+          }
 
-            // Send each image as a separate message
-            for (index, image) in images.enumerated() {
-              guard let imageData = image.jpegData(compressionQuality: Self.imageCompressionQuality) else {
-                throw NSError(
-                  domain: "ShareError",
-                  code: 1,
-                  userInfo: [NSLocalizedDescriptionKey: "Failed to prepare image \(index + 1)"]
-                )
+          let fileName = "shared_image_\(Date().timeIntervalSince1970)_\(index + 1).jpg"
+          let uploadResult = try await apiClient.uploadFile(
+            data: imageData,
+            filename: fileName,
+            mimeType: MIMEType(text: "image/jpeg"),
+            progress: { progress in
+              Task { @MainActor in
+                let itemProgress = (Double(processedItems) + progress) / Double(totalItems)
+                self.uploadProgress = itemProgress * 0.9
               }
-              
-              // Validate image size
-              guard imageData.count <= Self.maxFileSizeBytes else {
-                throw NSError(
-                  domain: "ShareError",
-                  code: 4,
-                  userInfo: [
-                    NSLocalizedDescriptionKey: "Image \(index + 1) is too large. Maximum size is 100MB."
-                  ]
-                )
-              }
-
-              let fileName = "shared_image_\(Date().timeIntervalSince1970)_\(index + 1).jpg"
-              let uploadResult = try await apiClient.uploadFile(
-                data: imageData,
-                filename: fileName,
-                mimeType: MIMEType(text: "image/jpeg"),
-                progress: { progress in
-                  Task { @MainActor in
-                    let itemProgress = (Double(processedItems) + progress) / Double(totalItems)
-                    self.uploadProgress = itemProgress * 0.9 // Reserve 10% for sending
-                  }
-                }
-              )
-
-              // Send message with this image
-              let imageText = index == 0 && !messageText.isEmpty ? messageText : nil
-              try await sendMessageToChat(
-                selectedChat,
-                text: imageText,
-                photoId: uploadResult.photoId,
-                documentId: nil
-              )
-
-              processedItems += 1
-              self.uploadProgress = Double(processedItems) / Double(totalItems) * 0.9
             }
+          )
 
-          case let .text(text):
-            // Send text as separate message
-            let combinedText = messageText.isEmpty ? text : messageText + "\n\n" + text
-            try await sendMessageToChat(selectedChat, text: combinedText, photoId: nil, documentId: nil)
+          let imageText = (!didSendText && messageText != nil) ? messageText : nil
+          try await sendMessageToChat(
+            selectedChat,
+            text: imageText,
+            photoId: uploadResult.photoId,
+            documentId: nil
+          )
 
-            self.uploadProgress = 0.9
+          didSendText = didSendText || (messageText != nil)
+          processedItems += 1
+          self.uploadProgress = Double(processedItems) / Double(totalItems) * 0.9
+        }
 
-          case let .url(url):
-            // Send URL as separate message
-            let urlText = url.absoluteString
-            let combinedText = messageText.isEmpty ? urlText : messageText + "\n\n" + urlText
-            try await sendMessageToChat(selectedChat, text: combinedText, photoId: nil, documentId: nil)
-
-            self.uploadProgress = 0.9
-
-          case let .file(fileURL, fileName):
-            // Upload and send file
-            let fileData = try Data(contentsOf: fileURL)
-            
-            // Validate file size
-            guard fileData.count <= Self.maxFileSizeBytes else {
+        for (index, file) in sharedContent.files.enumerated() {
+          if let fileSize = try? file.url.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+            if Int64(fileSize) > Self.maxFileSizeBytes {
               throw NSError(
                 domain: "ShareError",
                 code: 3,
                 userInfo: [
-                  NSLocalizedDescriptionKey: "File is too large. Maximum size is 100MB."
+                  NSLocalizedDescriptionKey: "File \(index + 1) is too large. Maximum size is 100MB."
                 ]
               )
             }
-            let mimeType = self.detectMIMEType(for: fileName)
-            let uploadResult = try await apiClient.uploadFile(
-              type: .document,
-              data: fileData,
-              filename: fileName,
-              mimeType: mimeType,
-              progress: { progress in
-                Task { @MainActor in
-                  self.uploadProgress = progress * 0.9 // Reserve 10% for sending
-                }
+          }
+
+          let fileData = try Data(contentsOf: file.url, options: .mappedIfSafe)
+          guard fileData.count <= Self.maxFileSizeBytes else {
+            throw NSError(
+              domain: "ShareError",
+              code: 3,
+              userInfo: [
+                NSLocalizedDescriptionKey: "File \(index + 1) is too large. Maximum size is 100MB."
+              ]
+            )
+          }
+
+          let uploadResult = try await apiClient.uploadFile(
+            type: .document,
+            data: fileData,
+            filename: file.fileName,
+            mimeType: file.mimeType,
+            progress: { progress in
+              Task { @MainActor in
+                let itemProgress = (Double(processedItems) + progress) / Double(totalItems)
+                self.uploadProgress = itemProgress * 0.9
               }
-            )
+            }
+          )
 
-            try await sendMessageToChat(
-              selectedChat,
-              text: messageText.isEmpty ? nil : messageText,
-              photoId: nil,
-              documentId: uploadResult.documentId
-            )
+          let fileText = (!didSendText && messageText != nil) ? messageText : nil
+          try await sendMessageToChat(
+            selectedChat,
+            text: fileText,
+            photoId: nil,
+            documentId: uploadResult.documentId
+          )
 
-            self.uploadProgress = 0.9
+          didSendText = didSendText || (messageText != nil)
+          processedItems += 1
+          self.uploadProgress = Double(processedItems) / Double(totalItems) * 0.9
         }
 
-        // Send caption-only message if no media was shared and we have text
-        if case .text = sharedContent, messageText.isEmpty {
-          // Text content was already sent above
-        } else if case .url = sharedContent, messageText.isEmpty {
-          // URL content was already sent above  
-        } else if !messageText.isEmpty && !isFileContent(sharedContent) && !isImagesContent(sharedContent) {
-          // Send standalone caption if no media was shared
+        if totalMediaItems == 0, let messageText {
           try await sendMessageToChat(selectedChat, text: messageText, photoId: nil, documentId: nil)
+          self.uploadProgress = 0.9
+        } else if totalMediaItems > 0, messageText == nil {
+          self.uploadProgress = 0.9
         }
 
         await MainActor.run {

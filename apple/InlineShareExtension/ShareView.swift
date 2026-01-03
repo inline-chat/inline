@@ -63,18 +63,21 @@ struct ShareView: View {
   }
 
   private var navigationTitle: String {
-    switch state.sharedContent {
-      case let .images(images):
-        "Sharing \(images.count) image\(images.count == 1 ? "" : "s")"
-      case .text:
-        "Sharing message"
-      case .url:
-        "Sharing link"
-      case .file:
-        "Sharing file"
-      case .none:
-        "Share"
+    guard let content = state.sharedContent else { return "Share" }
+    if !content.images.isEmpty && content.files.isEmpty && !content.hasText && !content.hasUrls {
+      return "Sharing \(content.images.count) image\(content.images.count == 1 ? "" : "s")"
     }
+    if !content.files.isEmpty && content.images.isEmpty && !content.hasText && !content.hasUrls {
+      return "Sharing \(content.files.count) file\(content.files.count == 1 ? "" : "s")"
+    }
+    if content.hasUrls && !content.hasMedia && !content.hasText {
+      return "Sharing \(content.urls.count) link\(content.urls.count == 1 ? "" : "s")"
+    }
+    if content.hasText && !content.hasMedia && !content.hasUrls {
+      return "Sharing message"
+    }
+    let totalCount = content.totalItemCount
+    return totalCount > 1 ? "Sharing \(totalCount) items" : "Share"
   }
 
   var body: some View {
@@ -129,8 +132,8 @@ struct ShareView: View {
         .fontWeight(.semibold)
         .foregroundStyle(.primary)
       
-      if case let .images(images) = state.sharedContent, images.count > 1 {
-        Text("\(images.count) items selected")
+      if let content = state.sharedContent, content.totalItemCount > 1 {
+        Text("\(content.totalItemCount) items selected")
           .font(.caption)
           .foregroundStyle(.secondary)
       }
