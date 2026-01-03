@@ -45,7 +45,44 @@ const MAX_ATTACHMENT_BYTES: u64 = 200 * 1024 * 1024;
     about = "Inline CLI",
     disable_version_flag = true,
     propagate_version = true,
-    after_help = "Docs:\n  https://github.com/inline-chat/inline/blob/main/cli/README.md\n  https://github.com/inline-chat/inline/blob/main/cli/skill/SKILL.md\n\nExamples:\n  inline auth login --email you@example.com\n  inline auth me\n  inline doctor\n  inline chats list\n  inline chats participants --chat-id 123\n  inline chats create --title \"Launch\" --space-id 31 --participant 42\n  inline chats mark-unread --chat-id 123\n  inline spaces list\n  inline spaces members --space-id 31\n  inline spaces invite --space-id 31 --email you@example.com\n  inline users list --json\n  inline messages list --chat-id 123\n  inline messages list --chat-id 123 --translate en\n  inline messages export --chat-id 123 --output ./messages.json\n  inline messages search --chat-id 123 --query \"onboarding\"\n  inline messages get --chat-id 123 --message-id 456\n  inline messages send --chat-id 123 --text \"hello\"\n  inline messages send --chat-id 123 --reply-to 456 --text \"on it\"\n  inline messages send --chat-id 123 --text \"@Sam hello\" --mention 42:0:4\n  inline messages edit --chat-id 123 --message-id 456 --text \"updated\"\n  inline messages delete --chat-id 123 --message-id 456\n  inline messages add-reaction --chat-id 123 --message-id 456 --emoji \"👍\"\n  inline messages send --chat-id 123 --attach ./photo.jpg --attach ./spec.pdf --text \"FYI\"\n  inline messages download --chat-id 123 --message-id 456\n  inline messages send --user-id 42 --stdin"
+    after_help = r#"Docs:
+  https://github.com/inline-chat/inline/blob/main/cli/README.md
+  https://github.com/inline-chat/inline/blob/main/cli/skill/SKILL.md
+
+Examples:
+  inline auth login --email you@example.com
+  inline auth me
+  inline doctor
+  inline chats list
+  inline chats participants --chat-id 123
+  inline chats create --title "Launch" --space-id 31 --participant 42
+  inline chats mark-unread --chat-id 123
+  inline spaces list
+  inline spaces members --space-id 31
+  inline spaces invite --space-id 31 --email you@example.com
+  inline users list --json
+  inline messages list --chat-id 123
+  inline messages list --chat-id 123 --translate en
+  inline messages export --chat-id 123 --output ./messages.json
+  inline messages search --chat-id 123 --query "onboarding"
+  inline messages get --chat-id 123 --message-id 456
+  inline messages send --chat-id 123 --text "hello"
+  inline messages send --chat-id 123 --reply-to 456 --text "on it"
+  inline messages send --chat-id 123 --text "@Sam hello" --mention 42:0:4
+  inline messages edit --chat-id 123 --message-id 456 --text "updated"
+  inline messages delete --chat-id 123 --message-id 456
+  inline messages add-reaction --chat-id 123 --message-id 456 --emoji "👍"
+  inline messages send --chat-id 123 --attach ./photo.jpg --attach ./spec.pdf --text "FYI"
+  inline messages download --chat-id 123 --message-id 456
+  inline messages send --user-id 42 --stdin
+
+JQ examples:
+  inline users list --json | jq -r '.users[] | "\(.id)\t\(.first_name) \(.last_name)\t@\(.username // "")\t\(.email // "")"'
+  inline users list --json | jq -r '.users[] | select((.first_name + " " + (.last_name // "") + " " + (.username // "") + " " + (.email // "")) | ascii_downcase | contains("mo")) | "\(.id)\t\(.first_name) \(.last_name)"'
+  inline chats list --json | jq -r '.chats[] | "\(.id)\t\(.title // "")\tspace:\(if .space_id == null then "dm" else (.space_id | tostring) end)"'
+  inline chats list --json | jq -r '.dialogs[] | select(.unread_count > 0) | "\(.chat_id)\tunread:\(.unread_count)"'
+  inline messages list --chat-id 123 --json | jq -r '.messages[] | "\(.id)\t\(.from_id)\t\((.message // "") | gsub("\n"; " ") | .[0:80])"'
+"#
 )]
 struct Cli {
     #[command(subcommand)]
