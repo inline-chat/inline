@@ -45,7 +45,7 @@ const MAX_ATTACHMENT_BYTES: u64 = 200 * 1024 * 1024;
     about = "Inline CLI",
     disable_version_flag = true,
     propagate_version = true,
-    after_help = "Examples:\n  inline auth login --email you@example.com\n  inline auth me\n  inline doctor\n  inline chats list\n  inline chats participants --chat-id 123\n  inline chats create --title \"Launch\" --space-id 31 --participant 42\n  inline chats mark-unread --chat-id 123\n  inline spaces list\n  inline spaces members --space-id 31\n  inline spaces invite --space-id 31 --email you@example.com\n  inline users list --json\n  inline messages list --chat-id 123\n  inline messages list --chat-id 123 --translate en\n  inline messages export --chat-id 123 --output ./messages.json\n  inline messages search --chat-id 123 --query \"onboarding\"\n  inline messages get --chat-id 123 --message-id 456\n  inline messages send --chat-id 123 --text \"hello\"\n  inline messages send --chat-id 123 --reply-to 456 --text \"on it\"\n  inline messages send --chat-id 123 --text \"@Sam hello\" --mention 42:0:4\n  inline messages edit --chat-id 123 --message-id 456 --text \"updated\"\n  inline messages delete --chat-id 123 --message-id 456\n  inline messages add-reaction --chat-id 123 --message-id 456 --emoji \"👍\"\n  inline messages send --chat-id 123 --attach ./photo.jpg --attach ./spec.pdf --text \"FYI\"\n  inline messages download --chat-id 123 --message-id 456\n  inline messages send --user-id 42 --stdin"
+    after_help = "Docs:\n  https://github.com/inline-chat/inline/blob/main/cli/README.md\n  https://github.com/inline-chat/inline/blob/main/cli/skill/SKILL.md\n\nExamples:\n  inline auth login --email you@example.com\n  inline auth me\n  inline doctor\n  inline chats list\n  inline chats participants --chat-id 123\n  inline chats create --title \"Launch\" --space-id 31 --participant 42\n  inline chats mark-unread --chat-id 123\n  inline spaces list\n  inline spaces members --space-id 31\n  inline spaces invite --space-id 31 --email you@example.com\n  inline users list --json\n  inline messages list --chat-id 123\n  inline messages list --chat-id 123 --translate en\n  inline messages export --chat-id 123 --output ./messages.json\n  inline messages search --chat-id 123 --query \"onboarding\"\n  inline messages get --chat-id 123 --message-id 456\n  inline messages send --chat-id 123 --text \"hello\"\n  inline messages send --chat-id 123 --reply-to 456 --text \"on it\"\n  inline messages send --chat-id 123 --text \"@Sam hello\" --mention 42:0:4\n  inline messages edit --chat-id 123 --message-id 456 --text \"updated\"\n  inline messages delete --chat-id 123 --message-id 456\n  inline messages add-reaction --chat-id 123 --message-id 456 --emoji \"👍\"\n  inline messages send --chat-id 123 --attach ./photo.jpg --attach ./spec.pdf --text \"FYI\"\n  inline messages download --chat-id 123 --message-id 456\n  inline messages send --user-id 42 --stdin"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -209,9 +209,15 @@ struct ChatsMarkUnreadArgs {
 #[derive(Subcommand)]
 enum UsersCommand {
     #[command(about = "List users that appear in your chats")]
-    List,
+    List(UsersListArgs),
     #[command(about = "Fetch a user by id from the chat list payload")]
     Get(UserGetArgs),
+}
+
+#[derive(Args)]
+struct UsersListArgs {
+    #[arg(long, help = "Filter users by name, username, email, or phone")]
+    filter: Option<String>,
 }
 
 #[derive(Args)]
@@ -832,7 +838,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             },
             Command::Users { command } => match command {
-                UsersCommand::List => {
+                UsersCommand::List(args) => {
                     let token = require_token(&auth_store)?;
                     let mut realtime =
                         RealtimeClient::connect(&config.realtime_url, &token).await?;
@@ -845,10 +851,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                     match result {
                         proto::rpc_result::Result::GetChats(payload) => {
+                            let mut output = build_user_list(&payload);
+                            filter_users_output(&mut output, args.filter.as_deref());
                             if cli.json {
-                                output::print_json(&payload, json_format)?;
+                                output::print_json(&output, json_format)?;
                             } else {
-                                let output = build_user_list(&payload);
                                 output::print_users(&output, false, json_format)?;
                             }
                         }
@@ -2745,6 +2752,46 @@ fn user_summary(user: &proto::User) -> UserSummary {
         display_name: user_display_name(user),
         user: user.clone(),
     }
+}
+
+fn filter_users_output(output: &mut UserListOutput, filter: Option<&str>) {
+    let Some(filter) = filter.map(str::trim).filter(|filter| !filter.is_empty()) else {
+        return;
+    };
+    let needle = filter.to_lowercase();
+    output.users.retain(|user| user_matches_filter(user, &needle));
+}
+
+fn user_matches_filter(user: &UserSummary, needle: &str) -> bool {
+    if user.display_name.to_lowercase().contains(needle) {
+        return true;
+    }
+    if let Some(first) = user.user.first_name.as_deref() {
+        if first.to_lowercase().contains(needle) {
+            return true;
+        }
+    }
+    if let Some(last) = user.user.last_name.as_deref() {
+        if last.to_lowercase().contains(needle) {
+            return true;
+        }
+    }
+    if let Some(username) = user.user.username.as_deref() {
+        if username.to_lowercase().contains(needle) {
+            return true;
+        }
+    }
+    if let Some(email) = user.user.email.as_deref() {
+        if email.to_lowercase().contains(needle) {
+            return true;
+        }
+    }
+    if let Some(phone) = user.user.phone_number.as_deref() {
+        if phone.to_lowercase().contains(needle) {
+            return true;
+        }
+    }
+    false
 }
 
 fn space_summary(space: &proto::Space) -> SpaceSummary {
