@@ -11,18 +11,18 @@
 		<key>NSExtensionAttributes</key>
 		<dict>
 			<key>NSExtensionActivationRule</key>
-			<dict>
-				<key>NSExtensionActivationSupportsImageWithMaxCount</key>
-				<integer>5</integer>
+		<dict>
+			<key>NSExtensionActivationSupportsImageWithMaxCount</key>
+			<integer>10</integer>
 				<key>NSExtensionActivationSupportsText</key>
 				<true/>
-				<key>NSExtensionActivationSupportsWebURLWithMaxCount</key>
-				<integer>1</integer>
-				<key>NSExtensionActivationSupportsFileWithMaxCount</key>
-				<integer>1</integer>
-				<key>NSExtensionActivationSupportsMovieWithMaxCount</key>
-				<integer>1</integer>
-			</dict>
+			<key>NSExtensionActivationSupportsWebURLWithMaxCount</key>
+			<integer>1</integer>
+			<key>NSExtensionActivationSupportsFileWithMaxCount</key>
+			<integer>10</integer>
+			<key>NSExtensionActivationSupportsMovieWithMaxCount</key>
+			<integer>10</integer>
+		</dict>
 		</dict>
 		<key>NSExtensionPrincipalClass</key>
 		<string>$(PRODUCT_MODULE_NAME).ShareViewController</string>
