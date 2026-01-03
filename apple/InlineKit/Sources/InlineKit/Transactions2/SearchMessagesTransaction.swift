@@ -19,6 +19,49 @@ public struct SearchMessagesTransaction: Transaction2 {
     public var offsetID: Int64?
     public var limit: Int32?
     public var filter: InlineProtocol.SearchMessagesFilter?
+
+    enum CodingKeys: String, CodingKey {
+      case peer
+      case queries
+      case offsetID
+      case limit
+      case filterRawValue
+    }
+
+    public init(
+      peer: Peer,
+      queries: [String],
+      offsetID: Int64? = nil,
+      limit: Int32? = nil,
+      filter: InlineProtocol.SearchMessagesFilter? = nil
+    ) {
+      self.peer = peer
+      self.queries = queries
+      self.offsetID = offsetID
+      self.limit = limit
+      self.filter = filter
+    }
+
+    public init(from decoder: Decoder) throws {
+      let container = try decoder.container(keyedBy: CodingKeys.self)
+      peer = try container.decode(Peer.self, forKey: .peer)
+      queries = try container.decode([String].self, forKey: .queries)
+      offsetID = try container.decodeIfPresent(Int64.self, forKey: .offsetID)
+      limit = try container.decodeIfPresent(Int32.self, forKey: .limit)
+      let rawValue = try container.decodeIfPresent(Int.self, forKey: .filterRawValue)
+      filter = rawValue.flatMap { InlineProtocol.SearchMessagesFilter(rawValue: $0) }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+      var container = encoder.container(keyedBy: CodingKeys.self)
+      try container.encode(peer, forKey: .peer)
+      try container.encode(queries, forKey: .queries)
+      try container.encodeIfPresent(offsetID, forKey: .offsetID)
+      try container.encodeIfPresent(limit, forKey: .limit)
+      if let filter {
+        try container.encode(filter.rawValue, forKey: .filterRawValue)
+      }
+    }
   }
 
   public init(
