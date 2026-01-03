@@ -56,8 +56,16 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   var onHeightChange: ((CGFloat) -> Void)?
-  var peerId: InlineKit.Peer?
-  var chatId: Int64?
+  var peerId: InlineKit.Peer? {
+    didSet {
+      updateEmbedState(animated: false)
+    }
+  }
+  var chatId: Int64? {
+    didSet {
+      updateEmbedState(animated: false)
+    }
+  }
   var mentionManager: MentionManager?
   var draftSaveTimer: Timer?
   var originalDraftEntities: MessageEntities?
@@ -73,6 +81,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   lazy var sendButton = makeSendButton()
   lazy var plusButton = makePlusButton()
   lazy var composeAndButtonContainer = makeComposeAndButtonContainer()
+  private lazy var embedContainerView = makeEmbedContainerView()
+  var embedContainerHeightConstraint: NSLayoutConstraint?
+  private var embedView: ComposeEmbedView?
+  private var currentEmbedMessageId: Int64?
 
   // MARK: - Initialization
 
@@ -113,14 +125,21 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     super.didMoveToWindow()
     if window != nil {
       setupMentionManager()
+      layoutIfNeeded()
+      let hasEmbed = (embedContainerHeightConstraint?.constant ?? 0) > 0
+      if hasEmbed || !(textView.text?.isEmpty ?? true) {
+        updateHeight()
+      }
     }
   }
 
   override func layoutSubviews() {
     super.layoutSubviews()
 
-    // Update height after layout if text view now has proper bounds and there's text
-    if textView.bounds.width > 0, !(textView.text?.isEmpty ?? true) {
+    let hasEmbed = (embedContainerHeightConstraint?.constant ?? 0) > 0
+
+    // Update height after layout if text view now has proper bounds and there's text or an embed
+    if textView.bounds.width > 0, hasEmbed || !(textView.text?.isEmpty ?? true) {
       updateHeight()
     }
   }
@@ -194,7 +213,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     addSubview(plusButton)
     addSubview(composeAndButtonContainer)
 
-    // Add textView and sendButton to the container
+    // Add embed container, textView, and sendButton to the container
+    composeAndButtonContainer.addSubview(embedContainerView)
     composeAndButtonContainer.addSubview(textView)
     composeAndButtonContainer.addSubview(sendButton)
 
@@ -217,6 +237,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   func setupConstraints() {
+    let embedHeightConstraint = embedContainerView.heightAnchor
+      .constraint(equalToConstant: 0)
+    embedContainerHeightConstraint = embedHeightConstraint
+
     NSLayoutConstraint.activate([
       composeHeightConstraint,
 
@@ -237,9 +261,15 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
         constant: buttonBottomPadding
       ),
 
+      // Embed constraints within container
+      embedContainerView.leadingAnchor.constraint(equalTo: composeAndButtonContainer.leadingAnchor, constant: 8),
+      embedContainerView.trailingAnchor.constraint(equalTo: composeAndButtonContainer.trailingAnchor, constant: -8),
+      embedContainerView.topAnchor.constraint(equalTo: composeAndButtonContainer.topAnchor),
+      embedHeightConstraint,
+
       // TextView constraints within container
       textView.leadingAnchor.constraint(equalTo: composeAndButtonContainer.leadingAnchor, constant: 8),
-      textView.topAnchor.constraint(equalTo: composeAndButtonContainer.topAnchor, constant: 3),
+      textView.topAnchor.constraint(equalTo: embedContainerView.bottomAnchor, constant: 3),
       textView.bottomAnchor.constraint(equalTo: composeAndButtonContainer.bottomAnchor),
       textView.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor, constant: -12),
 
@@ -425,6 +455,18 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       name: .init("ChatStateClearEditingCalled"),
       object: nil
     )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleReplyStateChange),
+      name: .init("ChatStateSetReplyCalled"),
+      object: nil
+    )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleReplyStateChange),
+      name: .init("ChatStateClearReplyCalled"),
+      object: nil
+    )
   }
 
   func setupStickerObserver() {
@@ -480,8 +522,83 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
         startDraftSaveTimer()
       }
     }
+    updateEmbedState(animated: true)
+  }
 
-    updateHeight()
+  @objc private func handleReplyStateChange() {
+    updateEmbedState(animated: true)
+  }
+
+  private func updateEmbedState(animated: Bool) {
+    guard let peerId, let chatId else { return }
+
+    let state = ChatState.shared.getState(peer: peerId)
+    let messageId = state.replyingMessageId ?? state.editingMessageId
+
+    if let messageId {
+      showEmbedView(peerId: peerId, messageId: messageId, chatId: chatId, animated: animated)
+      becomeFirstResponder()
+      textView.becomeFirstResponder()
+    } else {
+      hideEmbedView(animated: animated)
+    }
+  }
+
+  private func showEmbedView(peerId: InlineKit.Peer, messageId: Int64, chatId: Int64, animated: Bool) {
+    let needsNewView = embedView == nil || currentEmbedMessageId != messageId
+    if needsNewView {
+      embedView?.removeFromSuperview()
+      let newEmbedView = ComposeEmbedView(peerId: peerId, chatId: chatId, messageId: messageId)
+      newEmbedView.translatesAutoresizingMaskIntoConstraints = false
+      UIView.performWithoutAnimation {
+        embedContainerView.addSubview(newEmbedView)
+        NSLayoutConstraint.activate([
+          newEmbedView.leadingAnchor.constraint(equalTo: embedContainerView.leadingAnchor),
+          newEmbedView.trailingAnchor.constraint(equalTo: embedContainerView.trailingAnchor),
+          newEmbedView.bottomAnchor.constraint(equalTo: embedContainerView.bottomAnchor),
+          newEmbedView.heightAnchor.constraint(equalToConstant: ComposeEmbedView.height),
+        ])
+        embedContainerView.layoutIfNeeded()
+      }
+      embedView = newEmbedView
+      currentEmbedMessageId = messageId
+    }
+
+    if embedContainerView.isHidden {
+      UIView.performWithoutAnimation {
+        embedContainerView.isHidden = false
+        embedContainerView.layoutIfNeeded()
+      }
+    }
+
+    let targetHeight = ComposeEmbedView.height
+    let shouldUpdateHeight = embedContainerHeightConstraint?.constant != targetHeight
+    embedContainerHeightConstraint?.constant = targetHeight
+
+    if shouldUpdateHeight {
+      updateHeight(animated: animated)
+    }
+  }
+
+  private func hideEmbedView(animated: Bool) {
+    guard embedView != nil else { return }
+
+    let shouldUpdateHeight = embedContainerHeightConstraint?.constant != 0
+    embedContainerHeightConstraint?.constant = 0
+
+    let finish: () -> Void = { [weak self] in
+      guard let self else { return }
+      self.embedView?.removeFromSuperview()
+      self.embedView = nil
+      self.currentEmbedMessageId = nil
+      self.embedContainerView.isHidden = true
+    }
+
+    if shouldUpdateHeight {
+      updateHeight(animated: animated, completion: finish)
+    } else {
+      finish()
+    }
   }
 
   func removeObservers() {

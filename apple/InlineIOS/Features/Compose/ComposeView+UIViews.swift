@@ -142,4 +142,14 @@ extension ComposeView {
 
     return view
   }
+
+  func makeEmbedContainerView() -> UIView {
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.isUserInteractionEnabled = true
+    view.backgroundColor = .clear
+    view.clipsToBounds = true
+    view.isHidden = true
+    return view
+  }
 }

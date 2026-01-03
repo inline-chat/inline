@@ -50,7 +50,8 @@ class ComposeEmbedView: UIView {
     NSLayoutConstraint.activate([
       content.trailingAnchor.constraint(equalTo: trailingAnchor),
       content.leadingAnchor.constraint(equalTo: leadingAnchor),
-      content.heightAnchor.constraint(equalToConstant: Self.height)
+      content.topAnchor.constraint(equalTo: topAnchor),
+      content.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
   }
 

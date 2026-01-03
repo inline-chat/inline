@@ -26,15 +26,6 @@ public class ChatContainerView: UIView {
     return view
   }()
 
-  var composeEmbedView: ComposeEmbedView?
-
-  lazy var composeEmbedViewWrapper: UIView = {
-    let view = UIView()
-
-    view.translatesAutoresizingMaskIntoConstraints = false
-    return view
-  }()
-
   var mentionCompletionView: MentionCompletionView?
 
   lazy var mentionCompletionViewWrapper: UIView = {
@@ -115,8 +106,6 @@ public class ChatContainerView: UIView {
     attachEdgePanHandlerIfNeeded()
   }
 
-  private var composeEmbedHeightConstraint: NSLayoutConstraint!
-  private var composeEmbedBottomConstraint: NSLayoutConstraint?
   private var mentionCompletionHeightConstraint: NSLayoutConstraint!
 
   private func setupViews() {
@@ -126,7 +115,6 @@ public class ChatContainerView: UIView {
     addSubview(composeBlurBackgroundView)
     addSubview(composeContainerView)
     composeContainerView.addSubview(borderView)
-    addSubview(composeEmbedViewWrapper)
     addSubview(mentionCompletionViewWrapper)
     addSubview(composeView)
     addSubview(scrollButton)
@@ -135,17 +123,9 @@ public class ChatContainerView: UIView {
 
     keyboardLayoutGuide.followsUndockedKeyboard = true
 
-    // initialize the height constraint
-    composeEmbedHeightConstraint = composeEmbedViewWrapper.heightAnchor
-      .constraint(equalToConstant: hasEmbed ? ComposeEmbedView.height : 0)
-
     // initialize mention completion height constraint
     mentionCompletionHeightConstraint = mentionCompletionViewWrapper.heightAnchor
       .constraint(equalToConstant: 0)
-
-    if hasEmbed {
-      addReplyView()
-    }
 
     NSLayoutConstraint.activate(
       [
@@ -165,25 +145,12 @@ public class ChatContainerView: UIView {
         composeContainerView.leadingAnchor.constraint(equalTo: leadingAnchor),
         composeContainerView.trailingAnchor.constraint(equalTo: trailingAnchor),
         composeContainerView.topAnchor.constraint(
-          equalTo: composeEmbedViewWrapper.topAnchor,
+          equalTo: composeView.topAnchor,
           constant: -ComposeView.textViewVerticalMargin
         ),
         composeContainerViewBottomConstraint!,
 
-        composeEmbedViewWrapper.bottomAnchor.constraint(equalTo: composeView.topAnchor),
-        composeEmbedViewWrapper.leadingAnchor.constraint(
-          equalTo: leadingAnchor,
-          constant: ComposeView.textViewHorizantalMargin
-        ),
-        composeEmbedViewWrapper.trailingAnchor.constraint(
-          equalTo: trailingAnchor,
-          constant: -ComposeView.textViewHorizantalMargin
-        ),
-        composeEmbedHeightConstraint,
-        composeEmbedViewWrapper.heightAnchor.constraint(
-          greaterThanOrEqualToConstant: ComposeEmbedView.height
-        ),
-        mentionCompletionViewWrapper.bottomAnchor.constraint(equalTo: composeEmbedViewWrapper.topAnchor),
+        mentionCompletionViewWrapper.bottomAnchor.constraint(equalTo: composeView.topAnchor),
         mentionCompletionViewWrapper.leadingAnchor.constraint(
           equalTo: leadingAnchor,
           constant: ComposeView.textViewHorizantalMargin
@@ -213,18 +180,6 @@ public class ChatContainerView: UIView {
   private func setupObservers() {
     NotificationCenter.default.addObserver(
       self,
-      selector: #selector(setReply),
-      name: .init("ChatStateSetReplyCalled"),
-      object: nil
-    )
-    NotificationCenter.default.addObserver(
-      self,
-      selector: #selector(clearReply),
-      name: .init("ChatStateClearReplyCalled"),
-      object: nil
-    )
-    NotificationCenter.default.addObserver(
-      self,
       selector: #selector(keyboardWillShow),
       name: UIResponder.keyboardWillShowNotification,
       object: nil
@@ -240,18 +195,6 @@ public class ChatContainerView: UIView {
       self,
       selector: #selector(handleScrollToBottomChanged),
       name: .scrollToBottomChanged,
-      object: nil
-    )
-    NotificationCenter.default.addObserver(
-      self,
-      selector: #selector(setReply),
-      name: .init("ChatStateSetEditingCalled"),
-      object: nil
-    )
-    NotificationCenter.default.addObserver(
-      self,
-      selector: #selector(clearReply),
-      name: .init("ChatStateClearEditingCalled"),
       object: nil
     )
   }
@@ -319,36 +262,6 @@ public class ChatContainerView: UIView {
       self.composeContainerViewBottomConstraint?.isActive = true
       self.layoutIfNeeded()
     }
-  }
-
-  var hasReply: Bool { ChatState.shared.getState(peer: peerId).replyingMessageId != nil }
-
-  private var hasEmbed: Bool {
-    let state = ChatState.shared.getState(peer: peerId)
-    return state.replyingMessageId != nil || state.editingMessageId != nil
-  }
-
-  private func addReplyView() {
-    let state = ChatState.shared.getState(peer: peerId)
-    guard let messageId = state.replyingMessageId ?? state.editingMessageId else { return }
-
-    let newComposeEmbedView = ComposeEmbedView(
-      peerId: peerId,
-      chatId: chatId ?? 0,
-      messageId: messageId
-    )
-    newComposeEmbedView.translatesAutoresizingMaskIntoConstraints = false
-    composeEmbedViewWrapper.clipsToBounds = true
-    composeEmbedViewWrapper.addSubview(newComposeEmbedView)
-
-    NSLayoutConstraint.activate([
-      newComposeEmbedView.leadingAnchor.constraint(equalTo: composeEmbedViewWrapper.leadingAnchor, constant: 6),
-      newComposeEmbedView.trailingAnchor.constraint(equalTo: composeEmbedViewWrapper.trailingAnchor, constant: -6),
-      newComposeEmbedView.bottomAnchor.constraint(equalTo: composeEmbedViewWrapper.bottomAnchor, constant: -4),
-      newComposeEmbedView.heightAnchor.constraint(equalToConstant: ComposeEmbedView.height),
-    ])
-
-    composeEmbedView = newComposeEmbedView
   }
 
   private func addMentionCompletionView() {
@@ -432,40 +345,6 @@ public class ChatContainerView: UIView {
     } completion: { _ in
       self.mentionCompletionView?.removeFromSuperview()
       self.mentionCompletionView = nil
-    }
-  }
-
-  @objc private func setReply() {
-    composeEmbedView?.removeFromSuperview()
-    addReplyView()
-    layoutIfNeeded()
-
-    composeEmbedHeightConstraint.constant = ComposeEmbedView.height
-
-    UIView.animate(
-      withDuration: 0.2,
-      delay: 0.1
-    ) {
-      self.layoutIfNeeded()
-      self.becomeFirstResponder()
-      self.composeView.textView.becomeFirstResponder()
-    }
-  }
-
-  @objc private func clearReply() {
-    composeEmbedHeightConstraint.constant = 0
-
-    UIView.animate(withDuration: 0.2) {
-      self.layoutIfNeeded()
-    } completion: { _ in
-      self.composeEmbedView?.isHidden = true
-      self.composeEmbedView?.removeFromSuperview()
-
-      // Clear compose text if we were editing
-      if ChatState.shared.getState(peer: self.peerId).editingMessageId != nil {
-        self.composeView.textView.text = ""
-        self.composeView.textView.becomeFirstResponder()
-      }
     }
   }
 
