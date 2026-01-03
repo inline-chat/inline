@@ -81,7 +81,8 @@ struct ChatInfoView: View {
     _documentsViewModel = EnvironmentStateObject { env in
       ChatDocumentsViewModel(
         db: env.appDatabase,
-        chatId: chatItem.chat?.id ?? 0
+        chatId: chatItem.chat?.id ?? 0,
+        peer: chatItem.peerId
       )
     }
 
