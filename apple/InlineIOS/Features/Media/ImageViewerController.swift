@@ -1,15 +1,32 @@
+import AVFoundation
+import AVKit
+import Logger
 import Nuke
 import NukeUI
 import UIKit
 
 final class ImageViewerController: UIViewController {
   // MARK: - Properties
-    
-  private let imageURL: URL
+
+  private let imageURL: URL?
+  private let videoURL: URL?
   private weak var sourceView: UIView?
   private let sourceImage: UIImage?
   private let sourceFrame: CGRect
   private let showInChatAction: (() -> Void)?
+  var onDismiss: (() -> Void)?
+
+  private let isVideo: Bool
+  private var didNotifyDismiss = false
+  private var audioSessionSnapshot: AudioSessionSnapshot?
+  private var playerViewController: AVPlayerViewController?
+  private var didRestoreAudioSession = false
+
+  private struct AudioSessionSnapshot {
+    let category: AVAudioSession.Category
+    let mode: AVAudioSession.Mode
+    let options: AVAudioSession.CategoryOptions
+  }
     
   private lazy var scrollView: UIScrollView = {
     let scrollView = UIScrollView()
@@ -20,12 +37,12 @@ final class ImageViewerController: UIViewController {
     scrollView.translatesAutoresizingMaskIntoConstraints = false
     scrollView.backgroundColor = .clear
     scrollView.minimumZoomScale = 1.0
-    scrollView.maximumZoomScale = 4.0
+    scrollView.maximumZoomScale = isVideo ? 1.0 : 4.0
     
     return scrollView
   }()
 
-  private lazy var imageContainerView: UIView = {
+  private lazy var mediaContainerView: UIView = {
     let view = UIView()
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
@@ -44,10 +61,19 @@ final class ImageViewerController: UIViewController {
       
     return imageView
   }()
+    
+  private lazy var videoContainerView: UIView = {
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.backgroundColor = .clear
+    view.isHidden = true
+    return view
+  }()
 
   private var imageViewConstraints: [NSLayoutConstraint] = []
   private var transitionImageView: UIImageView?
   private var isControlsVisible = true
+  private var player: AVPlayer?
     
   private lazy var controlsContainerView: UIView = {
     let view = UIView()
@@ -94,16 +120,33 @@ final class ImageViewerController: UIViewController {
     button.isHidden = showInChatAction == nil
     return button
   }()
+
     
   // MARK: - Initialization
     
   init(imageURL: URL, sourceView: UIView, sourceImage: UIImage? = nil, showInChatAction: (() -> Void)? = nil) {
     self.imageURL = imageURL
+    self.videoURL = nil
     self.sourceView = sourceView
     self.sourceImage = sourceImage
     self.showInChatAction = showInChatAction
+    self.isVideo = false
     self.sourceFrame = sourceView.convert(sourceView.bounds, to: nil)
       
+    super.init(nibName: nil, bundle: nil)
+    modalPresentationStyle = .overFullScreen
+    modalTransitionStyle = .crossDissolve
+  }
+
+  init(videoURL: URL, sourceView: UIView, sourceImage: UIImage? = nil, showInChatAction: (() -> Void)? = nil) {
+    self.imageURL = nil
+    self.videoURL = videoURL
+    self.sourceView = sourceView
+    self.sourceImage = sourceImage
+    self.showInChatAction = showInChatAction
+    self.isVideo = true
+    self.sourceFrame = sourceView.convert(sourceView.bounds, to: nil)
+
     super.init(nibName: nil, bundle: nil)
     modalPresentationStyle = .overFullScreen
     modalTransitionStyle = .crossDissolve
@@ -120,6 +163,11 @@ final class ImageViewerController: UIViewController {
     super.viewDidLoad()
     setupViews()
     setupGestures()
+
+    if let sourceImage {
+      imageView.imageView.image = sourceImage
+      updateImageViewConstraints()
+    }
         
     // Hide the main content initially
     scrollView.alpha = 0
@@ -128,10 +176,20 @@ final class ImageViewerController: UIViewController {
     
   override func viewDidAppear(_ animated: Bool) {
     super.viewDidAppear(animated)
-    animateImageIn()
-    loadImage()
+    animateImageIn { [weak self] in
+      self?.loadMedia()
+    }
   }
-    
+
+  override func viewDidDisappear(_ animated: Bool) {
+    super.viewDidDisappear(animated)
+
+    if isBeingDismissed || navigationController?.isBeingDismissed == true {
+      stopVideoPlaybackIfNeeded()
+      notifyDidDismiss()
+    }
+  }
+
   override var prefersStatusBarHidden: Bool {
     return true
   }
@@ -142,8 +200,9 @@ final class ImageViewerController: UIViewController {
     view.backgroundColor = .clear
         
     view.addSubview(scrollView)
-    scrollView.addSubview(imageContainerView)
-    imageContainerView.addSubview(imageView)
+    scrollView.addSubview(mediaContainerView)
+    mediaContainerView.addSubview(videoContainerView)
+    mediaContainerView.addSubview(imageView)
         
     view.addSubview(controlsContainerView)
     controlsContainerView.addSubview(closeButton)
@@ -156,10 +215,15 @@ final class ImageViewerController: UIViewController {
       scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
       scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             
-      imageContainerView.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
-      imageContainerView.heightAnchor.constraint(equalTo: scrollView.heightAnchor),
-      imageContainerView.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
-      imageContainerView.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
+      mediaContainerView.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
+      mediaContainerView.heightAnchor.constraint(equalTo: scrollView.heightAnchor),
+      mediaContainerView.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
+      mediaContainerView.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
+
+      videoContainerView.topAnchor.constraint(equalTo: mediaContainerView.topAnchor),
+      videoContainerView.leadingAnchor.constraint(equalTo: mediaContainerView.leadingAnchor),
+      videoContainerView.trailingAnchor.constraint(equalTo: mediaContainerView.trailingAnchor),
+      videoContainerView.bottomAnchor.constraint(equalTo: mediaContainerView.bottomAnchor),
             
       controlsContainerView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
       controlsContainerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -184,6 +248,8 @@ final class ImageViewerController: UIViewController {
     ])
         
     setupImageViewConstraints()
+
+    // No extra setup required here.
   }
 
   private func setupImageViewConstraints() {
@@ -193,10 +259,10 @@ final class ImageViewerController: UIViewController {
     }
      
     imageViewConstraints = [
-      imageView.centerXAnchor.constraint(equalTo: imageContainerView.centerXAnchor),
-      imageView.centerYAnchor.constraint(equalTo: imageContainerView.centerYAnchor),
-      imageView.widthAnchor.constraint(equalTo: imageContainerView.widthAnchor),
-      imageView.heightAnchor.constraint(equalTo: imageContainerView.heightAnchor)
+      imageView.centerXAnchor.constraint(equalTo: mediaContainerView.centerXAnchor),
+      imageView.centerYAnchor.constraint(equalTo: mediaContainerView.centerYAnchor),
+      imageView.widthAnchor.constraint(equalTo: mediaContainerView.widthAnchor),
+      imageView.heightAnchor.constraint(equalTo: mediaContainerView.heightAnchor)
     ]
      
     NSLayoutConstraint.activate(imageViewConstraints)
@@ -224,8 +290,8 @@ final class ImageViewerController: UIViewController {
     let scaledHeight = imageHeight * minRatio
         
     imageViewConstraints = [
-      imageView.centerXAnchor.constraint(equalTo: imageContainerView.centerXAnchor),
-      imageView.centerYAnchor.constraint(equalTo: imageContainerView.centerYAnchor),
+      imageView.centerXAnchor.constraint(equalTo: mediaContainerView.centerXAnchor),
+      imageView.centerYAnchor.constraint(equalTo: mediaContainerView.centerYAnchor),
       imageView.widthAnchor.constraint(equalToConstant: scaledWidth),
       imageView.heightAnchor.constraint(equalToConstant: scaledHeight)
     ]
@@ -251,7 +317,18 @@ final class ImageViewerController: UIViewController {
     view.addGestureRecognizer(panGesture)
   }
 
+  private func loadMedia() {
+    if isVideo {
+      loadVideo()
+      return
+    }
+
+    loadImage()
+  }
+
   private func loadImage() {
+    guard let imageURL else { return }
+
     if let sourceImage = sourceImage {
       imageView.imageView.image = sourceImage
       updateImageViewConstraints()
@@ -265,6 +342,51 @@ final class ImageViewerController: UIViewController {
       name: .imageLoadingDidFinish,
       object: nil
     )
+  }
+
+  private func loadVideo() {
+    guard let videoURL else { return }
+
+    imageView.placeholderView = nil
+
+    imageView.isHidden = false
+    imageView.alpha = 1
+    videoContainerView.isHidden = false
+    videoContainerView.backgroundColor = .clear
+    videoContainerView.isOpaque = false
+    mediaContainerView.bringSubviewToFront(imageView)
+
+    let asset = AVURLAsset(url: videoURL)
+    let playerItem = AVPlayerItem(asset: asset)
+    let player = AVPlayer(playerItem: playerItem)
+    let playerController = AVPlayerViewController()
+    playerController.player = player
+    playerController.showsPlaybackControls = true
+    playerController.updatesNowPlayingInfoCenter = false
+    playerController.view.backgroundColor = .clear
+    playerController.view.isOpaque = false
+    playerController.view.isHidden = false
+    playerController.view.alpha = 1
+    playerController.view.translatesAutoresizingMaskIntoConstraints = false
+
+    addChild(playerController)
+    videoContainerView.addSubview(playerController.view)
+
+    NSLayoutConstraint.activate([
+      playerController.view.topAnchor.constraint(equalTo: videoContainerView.topAnchor),
+      playerController.view.leadingAnchor.constraint(equalTo: videoContainerView.leadingAnchor),
+      playerController.view.trailingAnchor.constraint(equalTo: videoContainerView.trailingAnchor),
+      playerController.view.bottomAnchor.constraint(equalTo: videoContainerView.bottomAnchor)
+    ])
+
+    playerController.didMove(toParent: self)
+    self.playerViewController = playerController
+    self.player = player
+
+    configureAudioSessionForVideo()
+    player.play()
+    imageView.alpha = 0
+    imageView.isHidden = true
   }
 
   @objc private func imageDidLoad(_ notification: Notification) {
@@ -285,7 +407,7 @@ final class ImageViewerController: UIViewController {
 
   // MARK: - Animations
     
-  private func animateImageIn() {
+  private func animateImageIn(completion: (() -> Void)? = nil) {
     // Create a temporary image view for the transition
     let tempImageView = UIImageView(frame: sourceFrame)
     tempImageView.contentMode = .scaleAspectFit
@@ -333,6 +455,7 @@ final class ImageViewerController: UIViewController {
                 
       tempImageView.removeFromSuperview()
       self.transitionImageView = nil
+      completion?()
     })
   }
     
@@ -405,7 +528,7 @@ final class ImageViewerController: UIViewController {
       scrollView.setZoomScale(scrollView.minimumZoomScale, animated: true)
     } else {
       // Calculate the point to zoom to
-      let pointInView = gesture.location(in: imageContainerView)
+      let pointInView = gesture.location(in: mediaContainerView)
           
       // Calculate a zoom rect around the tap point
       let zoomScale = min(scrollView.maximumZoomScale, 2.5)
@@ -431,13 +554,13 @@ final class ImageViewerController: UIViewController {
         
     switch gesture.state {
     case .changed:
-      imageView.transform = CGAffineTransform(translationX: 0, y: translation.y)
+      mediaContentView.transform = CGAffineTransform(translationX: 0, y: translation.y)
       let progress = min(1.0, abs(translation.y) / 200)
       view.backgroundColor = UIColor.black.withAlphaComponent(1.0 - progress * 0.8)
             
     case .ended, .cancelled:
       if abs(translation.y) > 100 || abs(velocity.y) > 500 {
-        let currentFrame = imageView.convert(imageView.bounds, to: view)
+        let currentFrame = mediaContentView.convert(mediaContentView.bounds, to: view)
         
         scrollView.alpha = 0
         controlsContainerView.alpha = 0
@@ -461,14 +584,17 @@ final class ImageViewerController: UIViewController {
           tempImageView.frame = finalFrame
           tempImageView.layer.cornerRadius = 16
           self.view.backgroundColor = .clear
-          self.imageView.alpha = 0
+          self.mediaContentView.alpha = 0
         }, completion: { _ in
           tempImageView.removeFromSuperview()
-          self.dismiss(animated: false)
+          self.stopVideoPlaybackIfNeeded()
+          self.dismiss(animated: false) {
+            self.notifyDidDismiss()
+          }
         })
       } else {
         UIView.animate(withDuration: 0.3) {
-          self.imageView.transform = .identity
+          self.mediaContentView.transform = .identity
           self.view.backgroundColor = .black
         }
       }
@@ -487,9 +613,13 @@ final class ImageViewerController: UIViewController {
     
   @objc private func closeButtonTapped() {
     animateImageOut {
-      self.dismiss(animated: false)
+      self.stopVideoPlaybackIfNeeded()
+      self.dismiss(animated: false) {
+        self.notifyDidDismiss()
+      }
     }
   }
+
     
   @objc private func saveButtonTapped() {
     guard let image = imageView.imageView.image else { return }
@@ -497,6 +627,21 @@ final class ImageViewerController: UIViewController {
   }
     
   @objc private func shareButtonTapped() {
+    if isVideo, let videoURL {
+      let activityViewController = UIActivityViewController(
+        activityItems: [videoURL],
+        applicationActivities: nil
+      )
+
+      if let popoverController = activityViewController.popoverPresentationController {
+        popoverController.sourceView = shareButton
+        popoverController.sourceRect = shareButton.bounds
+      }
+
+      present(activityViewController, animated: true)
+      return
+    }
+
     guard let image = imageView.imageView.image else { return }
         
     let activityViewController = UIActivityViewController(
@@ -521,7 +666,9 @@ final class ImageViewerController: UIViewController {
         return
       }
 
+      self.stopVideoPlaybackIfNeeded()
       self.dismiss(animated: false) {
+        self.notifyDidDismiss()
         showInChatAction()
       }
     }
@@ -552,13 +699,79 @@ final class ImageViewerController: UIViewController {
   deinit {
     NotificationCenter.default.removeObserver(self)
   }
+
+  // MARK: - Helpers
+
+  private var mediaContentView: UIView {
+    mediaContainerView
+  }
+
+  private func notifyDidDismiss() {
+    guard !didNotifyDismiss else { return }
+    didNotifyDismiss = true
+    onDismiss?()
+  }
+
+  private func stopVideoPlaybackIfNeeded() {
+    guard isVideo else { return }
+    player?.pause()
+    player?.replaceCurrentItem(with: nil)
+    if let playerViewController {
+      playerViewController.player = nil
+      playerViewController.willMove(toParent: nil)
+      playerViewController.view.removeFromSuperview()
+      playerViewController.removeFromParent()
+    }
+    player = nil
+    playerViewController = nil
+    restoreAudioSessionAfterVideo()
+  }
+
+  private func configureAudioSessionForVideo() {
+    let session = AVAudioSession.sharedInstance()
+    if audioSessionSnapshot == nil {
+      audioSessionSnapshot = AudioSessionSnapshot(
+        category: session.category,
+        mode: session.mode,
+        options: session.categoryOptions
+      )
+    }
+
+    do {
+      try session.setCategory(.playback, mode: .moviePlayback, options: [])
+      try session.setActive(true)
+    } catch {
+      Log.shared.warning("Failed to configure audio session for video: \(error.localizedDescription)")
+    }
+  }
+
+  private func restoreAudioSessionAfterVideo() {
+    guard !didRestoreAudioSession else { return }
+    didRestoreAudioSession = true
+    let session = AVAudioSession.sharedInstance()
+    do {
+      try session.setActive(false, options: [.notifyOthersOnDeactivation])
+    } catch {
+      Log.shared.warning("Failed to deactivate audio session after video: \(error.localizedDescription)")
+    }
+
+    if let snapshot = audioSessionSnapshot {
+      do {
+        try session.setCategory(snapshot.category, mode: snapshot.mode, options: snapshot.options)
+      } catch {
+        Log.shared.warning("Failed to restore audio session category after video: \(error.localizedDescription)")
+      }
+    }
+
+    audioSessionSnapshot = nil
+  }
 }
 
 // MARK: - UIScrollViewDelegate
 
 extension ImageViewerController: UIScrollViewDelegate {
   func viewForZooming(in scrollView: UIScrollView) -> UIView? {
-    return imageContainerView
+    return mediaContainerView
   }
     
   func scrollViewDidZoom(_ scrollView: UIScrollView) {
@@ -589,7 +802,7 @@ extension ImageViewerController: UIGestureRecognizerDelegate {
     
   func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
     // Prevent gesture recognizers from triggering when tapping on buttons
-    if touch.view is UIButton {
+    if touch.view is UIControl {
       return false
     }
     return true

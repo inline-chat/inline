@@ -70,11 +70,23 @@ class UIMessageView: UIView {
   }
 
   var shouldShowFloatingMetadata: Bool {
-    message.hasPhoto && !message.hasText && fullMessage.reactions.count == 0
+    (message.hasPhoto || message.hasVideo) && !message.hasText && !shouldShowReactionsInsideBubble
   }
 
   var isSticker: Bool {
     fullMessage.message.isSticker == true
+  }
+
+  private var hasMedia: Bool {
+    message.hasPhoto || message.hasVideo
+  }
+
+  private var shouldShowReactionsOutsideBubble: Bool {
+    (hasMedia || isSticker) && !message.hasText && !fullMessage.reactions.isEmpty
+  }
+
+  private var shouldShowReactionsInsideBubble: Bool {
+    !fullMessage.reactions.isEmpty && !shouldShowReactionsOutsideBubble
   }
 
   var isEmojiOnlyMessage: Bool {
@@ -114,6 +126,9 @@ class UIMessageView: UIView {
     if fullMessage.photoInfo != nil {
       return true
     }
+    if fullMessage.videoInfo != nil {
+      return true
+    }
 
     if !fullMessage.attachments.isEmpty {
       return true
@@ -144,6 +159,7 @@ class UIMessageView: UIView {
   lazy var embedView = createEmbedView()
   lazy var photoView = createPhotoView()
   lazy var newPhotoView = createNewPhotoView()
+  lazy var videoView = createVideoView()
   lazy var floatingMetadataView = createFloatingMetadataView()
   lazy var documentView = createDocumentView()
   lazy var messageAttachmentEmbed = createMessageAttachmentEmbed()
@@ -216,8 +232,10 @@ class UIMessageView: UIView {
     setupReplyViewIfNeeded()
     setupFileViewIfNeeded()
     setupPhotoViewIfNeeded()
+    setupVideoViewIfNeeded()
     setupDocumentViewIfNeeded()
     setupMessageContainer()
+    setupExternalReactionsIfNeeded()
 
     addGestureRecognizer()
     setupDoubleTapGestureRecognizer()
@@ -297,14 +315,14 @@ class UIMessageView: UIView {
     return previewView
   }
 
-  func addFloatingMetadata() {
+  func addFloatingMetadata(relativeTo mediaView: UIView) {
     bubbleView.addSubview(floatingMetadataView)
 
     let padding: CGFloat = 12
 
     NSLayoutConstraint.activate([
       floatingMetadataView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -padding),
-      floatingMetadataView.bottomAnchor.constraint(equalTo: newPhotoView.bottomAnchor, constant: -10),
+      floatingMetadataView.bottomAnchor.constraint(equalTo: mediaView.bottomAnchor, constant: -10),
     ])
   }
 
@@ -316,6 +334,34 @@ class UIMessageView: UIView {
       with: fullMessage.groupedReactions,
       animatedEmoji: animatedEmoji
     )
+  }
+
+  private func setupExternalReactionsIfNeeded() {
+    guard shouldShowReactionsOutsideBubble else { return }
+    addSubview(reactionsFlowView)
+    setupReactionsIfNeeded()
+    reactionsFlowView.setContentHuggingPriority(.required, for: .horizontal)
+    reactionsFlowView.setContentCompressionResistancePriority(.required, for: .horizontal)
+  }
+
+  private func setupExternalReactionsConstraints() {
+    let spacing: CGFloat = 3
+    let bottomPadding: CGFloat = spacing + 2
+    var constraints: [NSLayoutConstraint] = [
+      reactionsFlowView.topAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: spacing),
+      reactionsFlowView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -bottomPadding),
+      reactionsFlowView.widthAnchor.constraint(lessThanOrEqualTo: bubbleView.widthAnchor),
+    ]
+
+    if outgoing {
+      constraints.append(reactionsFlowView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor))
+      constraints.append(reactionsFlowView.leadingAnchor.constraint(greaterThanOrEqualTo: bubbleView.leadingAnchor))
+    } else {
+      constraints.append(reactionsFlowView.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor))
+      constraints.append(reactionsFlowView.trailingAnchor.constraint(lessThanOrEqualTo: bubbleView.trailingAnchor))
+    }
+
+    NSLayoutConstraint.activate(constraints)
   }
 
   func setupReplyViewIfNeeded() {
@@ -361,7 +407,17 @@ class UIMessageView: UIView {
     containerStack.addArrangedSubview(newPhotoView)
 
     if shouldShowFloatingMetadata {
-      addFloatingMetadata()
+      addFloatingMetadata(relativeTo: newPhotoView)
+    }
+  }
+
+  func setupVideoViewIfNeeded() {
+    guard fullMessage.videoInfo != nil else { return }
+
+    containerStack.addArrangedSubview(videoView)
+
+    if shouldShowFloatingMetadata {
+      addFloatingMetadata(relativeTo: videoView)
     }
   }
 
@@ -392,7 +448,7 @@ class UIMessageView: UIView {
   }
 
   func setupMultilineMessage() {
-    if message.hasPhoto, message.hasText || fullMessage.reactions.count > 0 {
+    if hasMedia && (message.hasText || shouldShowReactionsInsideBubble) {
       let innerContainer = UIStackView()
       innerContainer.axis = .vertical
       innerContainer.isUserInteractionEnabled = true
@@ -433,7 +489,7 @@ class UIMessageView: UIView {
         }
       }
 
-      if fullMessage.reactions.count > 0 {
+      if shouldShowReactionsInsideBubble {
         setupReactionsIfNeeded()
         innerContainer.addArrangedSubview(reactionsFlowView)
       }
@@ -471,7 +527,7 @@ class UIMessageView: UIView {
           multiLineContainer.addArrangedSubview(previewView)
         }
       }
-      if fullMessage.reactions.count > 0 {
+      if shouldShowReactionsInsideBubble {
         setupReactionsIfNeeded()
         multiLineContainer.addArrangedSubview(reactionsFlowView)
       }
@@ -647,7 +703,6 @@ class UIMessageView: UIView {
 
     let baseConstraints: [NSLayoutConstraint] = [
       bubbleView.topAnchor.constraint(equalTo: topAnchor),
-      bubbleView.bottomAnchor.constraint(equalTo: bottomAnchor),
       bubbleView.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, multiplier: 0.9),
     ]
 
@@ -708,10 +763,9 @@ class UIMessageView: UIView {
       ).withPriority(.defaultHigh),
     ]
 
-    let constraints: [NSLayoutConstraint] = switch (
-      message.hasPhoto,
-      message.hasText || fullMessage.reactions.count > 0
-    ) {
+    let hasTextOrReactions = message.hasText || shouldShowReactionsInsideBubble
+
+    let constraints: [NSLayoutConstraint] = switch (hasMedia, hasTextOrReactions) {
       case (true, false):
         // Photo only (no text, no reactions)
         withFileConstraints
@@ -724,6 +778,12 @@ class UIMessageView: UIView {
     }
 
     NSLayoutConstraint.activate(baseConstraints + constraints)
+
+    if shouldShowReactionsOutsideBubble {
+      setupExternalReactionsConstraints()
+    } else {
+      bubbleView.bottomAnchor.constraint(equalTo: bottomAnchor).isActive = true
+    }
 
     if outgoing {
       bubbleView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2).isActive = true

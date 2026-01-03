@@ -240,13 +240,13 @@ final class NewPhotoView: UIView {
     let height = bounds.height
 
     // Determine which corners to round based on message properties
-    let hasReactions = !fullMessage.reactions.isEmpty
+    let hasReactionsInBubble = !fullMessage.reactions.isEmpty && hasText
 
-    let roundingCorners: UIRectCorner = if !hasText, !hasReply, !hasReactions {
+    let roundingCorners: UIRectCorner = if !hasText, !hasReply, !hasReactionsInBubble {
       // No text and no reply - round all corners
       .allCorners
-    } else if hasReactions {
-      // No text but has reactions - round top corners only
+    } else if hasReactionsInBubble {
+      // Reactions inside bubble - round top corners only
       [.topLeft, .topRight]
     } else if hasText, !hasReply {
       // Has text but no reply - round top corners
