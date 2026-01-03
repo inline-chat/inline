@@ -42,6 +42,8 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 
 - `inline users list`
   - List users that appear in your chats (derived from getChats).
+- `inline users list --filter "name"`
+  - Filter users by name, username, email, or phone.
 - `inline users get --id 42`
   - Fetch one user by id (from the same getChats payload).
 
