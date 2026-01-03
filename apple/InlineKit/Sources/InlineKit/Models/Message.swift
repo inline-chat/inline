@@ -632,21 +632,25 @@ public extension Message {
 }
 
 public extension Message {
-  var isEdited: Bool {
+  public var isEdited: Bool {
     editDate != nil
   }
 
-  var hasPhoto: Bool {
+  public var hasPhoto: Bool {
     fileId != nil || photoId != nil
   }
 
-  var hasText: Bool {
+  public var hasVideo: Bool {
+    videoId != nil
+  }
+
+  public var hasText: Bool {
     guard let text else { return false }
     return !text.isEmpty
   }
 
-  var hasUnsupportedTypes: Bool {
-    videoId != nil
+  public var hasUnsupportedTypes: Bool {
+    false
   }
 }
 

@@ -217,6 +217,22 @@ struct ChatItemView: View {
         .truncationMode(.tail)
       }
 
+    } else if message?.message.hasVideo == true {
+      HStack(spacing: 4) {
+        Image(systemName: "video.fill")
+          .font(.caption)
+          .foregroundColor(.secondary)
+
+        Text(
+          (message?.message.hasText == true ? message?.displayText ?? "" : "Video")
+            .replacingOccurrences(of: "\n", with: " ")
+        )
+        .font(.callout)
+        .foregroundColor(.secondary)
+        .lineLimit(2)
+        .truncationMode(.tail)
+      }
+
     } else if message?.message.photoId != nil || message?.message.fileId != nil {
       HStack(spacing: 4) {
         Image(systemName: "photo.fill")

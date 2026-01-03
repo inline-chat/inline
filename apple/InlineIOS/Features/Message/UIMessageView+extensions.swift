@@ -94,6 +94,12 @@ extension UIMessageView {
     return view
   }
 
+  func createVideoView() -> NewVideoView {
+    let view = NewVideoView(fullMessage)
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }
+
   func createFloatingMetadataView() -> FloatingMetadataView {
     let view = FloatingMetadataView(fullMessage: fullMessage)
     view.translatesAutoresizingMaskIntoConstraints = false
