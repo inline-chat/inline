@@ -1041,6 +1041,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         peer_id: Some(peer.clone()),
                         queries,
                         limit: args.limit,
+                        offset_id: None,
+                        filter: None,
                     };
 
                     let result = realtime
