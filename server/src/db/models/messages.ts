@@ -25,7 +25,7 @@ import { type DbMessageAttachment } from "@in/server/db/schema/attachments"
 import { decryptMessage, encryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { Log, LogLevel } from "@in/server/utils/log"
-import { and, asc, desc, eq, gt, inArray, lt, or } from "drizzle-orm"
+import { and, asc, desc, eq, gt, inArray, isNull, lt, not, or } from "drizzle-orm"
 import { decrypt, decryptBinary, encryptBinary } from "@in/server/modules/encryption/encryption"
 import type { DbExternalTask, DbLinkEmbed } from "@in/server/db/schema/attachments"
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"
@@ -40,6 +40,7 @@ export const MessageModel = {
   deleteMessages: deleteMessages,
   insertMessage: insertMessage,
   getMessages: getMessages,
+  getMessagesWithMediaFilter: getMessagesWithMediaFilter,
   getMessage: getMessage, // 1 msg
   getMessageByRandomId: getMessageByRandomId,
   getMessagesByIds: getMessagesByIds,
@@ -65,6 +66,8 @@ export type DbInputFullMessage = DbMessage & {
   document: InputDbFullDocument | null
   messageAttachments?: DbInputFullAttachment[]
 }
+
+export type MessageMediaFilter = "photos" | "videos" | "photo_video" | "documents"
 
 export type ProcessedMessage = Omit<
   DbMessage,
@@ -196,6 +199,91 @@ async function getMessages(
   })
 
   return result.map(processMessage)
+}
+
+async function getMessagesWithMediaFilter(input: {
+  chatId: number
+  offsetId?: bigint
+  limit: number
+  filter: MessageMediaFilter
+}): Promise<DbFullMessage[]> {
+  const offsetIdNumber = input.offsetId ? Number(input.offsetId) : undefined
+  const baseWhereClause = offsetIdNumber
+    ? and(eq(messages.chatId, input.chatId), lt(messages.messageId, offsetIdNumber))
+    : eq(messages.chatId, input.chatId)
+  const mediaClause = buildMediaFilterClause(input.filter)
+  const whereClause = and(baseWhereClause, mediaClause)
+
+  const result = await db._query.messages.findMany({
+    where: whereClause,
+    orderBy: desc(messages.messageId),
+    limit: input.limit,
+    with: {
+      from: true,
+      reactions: true,
+      photo: {
+        with: {
+          photoSizes: {
+            with: {
+              file: true,
+            },
+          },
+        },
+      },
+      video: {
+        with: {
+          file: true,
+          photo: {
+            with: {
+              photoSizes: {
+                with: {
+                  file: true,
+                },
+              },
+            },
+          },
+        },
+      },
+      document: {
+        with: {
+          file: true,
+        },
+      },
+      messageAttachments: {
+        with: {
+          externalTask: true,
+          linkEmbed: {
+            with: {
+              photo: {
+                with: {
+                  photoSizes: {
+                    with: {
+                      file: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  })
+
+  return result.map(processMessage)
+}
+
+function buildMediaFilterClause(filter: MessageMediaFilter) {
+  switch (filter) {
+    case "photos":
+      return not(isNull(messages.photoId))
+    case "videos":
+      return not(isNull(messages.videoId))
+    case "photo_video":
+      return or(not(isNull(messages.photoId)), not(isNull(messages.videoId)))
+    case "documents":
+      return not(isNull(messages.documentId))
+  }
 }
 
 function processMessage(message: DbInputFullMessage): DbFullMessage {

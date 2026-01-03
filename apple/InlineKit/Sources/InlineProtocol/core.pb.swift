@@ -163,6 +163,52 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
 
 }
 
+public enum SearchMessagesFilter: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case filterUnspecified // = 0
+  case filterPhotos // = 1
+  case filterVideos // = 2
+  case filterPhotoVideo // = 3
+  case filterDocuments // = 4
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .filterUnspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .filterUnspecified
+    case 1: self = .filterPhotos
+    case 2: self = .filterVideos
+    case 3: self = .filterPhotoVideo
+    case 4: self = .filterDocuments
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .filterUnspecified: return 0
+    case .filterPhotos: return 1
+    case .filterVideos: return 2
+    case .filterPhotoVideo: return 3
+    case .filterDocuments: return 4
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [SearchMessagesFilter] = [
+    .filterUnspecified,
+    .filterPhotos,
+    .filterVideos,
+    .filterPhotoVideo,
+    .filterDocuments,
+  ]
+
+}
+
 public struct ClientMessage: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -3865,12 +3911,34 @@ public struct SearchMessagesInput: Sendable {
   /// Clears the value of `limit`. Subsequent reads from it will return its default value.
   public mutating func clearLimit() {self._limit = nil}
 
+  /// ID of the message to start from
+  public var offsetID: Int64 {
+    get {return _offsetID ?? 0}
+    set {_offsetID = newValue}
+  }
+  /// Returns true if `offsetID` has been explicitly set.
+  public var hasOffsetID: Bool {return self._offsetID != nil}
+  /// Clears the value of `offsetID`. Subsequent reads from it will return its default value.
+  public mutating func clearOffsetID() {self._offsetID = nil}
+
+  /// Optional filter for media/doc messages
+  public var filter: SearchMessagesFilter {
+    get {return _filter ?? .filterUnspecified}
+    set {_filter = newValue}
+  }
+  /// Returns true if `filter` has been explicitly set.
+  public var hasFilter: Bool {return self._filter != nil}
+  /// Clears the value of `filter`. Subsequent reads from it will return its default value.
+  public mutating func clearFilter() {self._filter = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _peerID: InputPeer? = nil
   fileprivate var _limit: Int32? = nil
+  fileprivate var _offsetID: Int64? = nil
+  fileprivate var _filter: SearchMessagesFilter? = nil
 }
 
 public struct SearchMessagesResult: Sendable {
@@ -5369,6 +5437,16 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     26: .same(proto: "GET_UPDATES"),
     27: .same(proto: "UPDATE_MEMBER_ACCESS"),
     28: .same(proto: "SEARCH_MESSAGES"),
+  ]
+}
+
+extension SearchMessagesFilter: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    0: .same(proto: "FILTER_UNSPECIFIED"),
+    1: .same(proto: "FILTER_PHOTOS"),
+    2: .same(proto: "FILTER_VIDEOS"),
+    3: .same(proto: "FILTER_PHOTO_VIDEO"),
+    4: .same(proto: "FILTER_DOCUMENTS"),
   ]
 }
 
@@ -11319,6 +11397,8 @@ extension SearchMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
     1: .standard(proto: "peer_id"),
     2: .same(proto: "queries"),
     3: .same(proto: "limit"),
+    4: .standard(proto: "offset_id"),
+    5: .same(proto: "filter"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -11330,6 +11410,8 @@ extension SearchMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
       case 2: try { try decoder.decodeRepeatedStringField(value: &self.queries) }()
       case 3: try { try decoder.decodeSingularInt32Field(value: &self._limit) }()
+      case 4: try { try decoder.decodeSingularInt64Field(value: &self._offsetID) }()
+      case 5: try { try decoder.decodeSingularEnumField(value: &self._filter) }()
       default: break
       }
     }
@@ -11349,6 +11431,12 @@ extension SearchMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
     try { if let v = self._limit {
       try visitor.visitSingularInt32Field(value: v, fieldNumber: 3)
     } }()
+    try { if let v = self._offsetID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 4)
+    } }()
+    try { if let v = self._filter {
+      try visitor.visitSingularEnumField(value: v, fieldNumber: 5)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -11356,6 +11444,8 @@ extension SearchMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
     if lhs._peerID != rhs._peerID {return false}
     if lhs.queries != rhs.queries {return false}
     if lhs._limit != rhs._limit {return false}
+    if lhs._offsetID != rhs._offsetID {return false}
+    if lhs._filter != rhs._filter {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

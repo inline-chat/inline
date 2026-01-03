@@ -2576,6 +2576,18 @@ export interface SearchMessagesInput {
      * @generated from protobuf field: optional int32 limit = 3;
      */
     limit?: number;
+    /**
+     * ID of the message to start from
+     *
+     * @generated from protobuf field: optional int64 offset_id = 4;
+     */
+    offsetId?: bigint;
+    /**
+     * Optional filter for media/doc messages
+     *
+     * @generated from protobuf field: optional SearchMessagesFilter filter = 5;
+     */
+    filter?: SearchMessagesFilter;
 }
 /**
  * @generated from protobuf message SearchMessagesResult
@@ -3638,6 +3650,31 @@ export enum Method {
      * @generated from protobuf enum value: SEARCH_MESSAGES = 28;
      */
     SEARCH_MESSAGES = 28
+}
+/**
+ * @generated from protobuf enum SearchMessagesFilter
+ */
+export enum SearchMessagesFilter {
+    /**
+     * @generated from protobuf enum value: FILTER_UNSPECIFIED = 0;
+     */
+    FILTER_UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: FILTER_PHOTOS = 1;
+     */
+    FILTER_PHOTOS = 1,
+    /**
+     * @generated from protobuf enum value: FILTER_VIDEOS = 2;
+     */
+    FILTER_VIDEOS = 2,
+    /**
+     * @generated from protobuf enum value: FILTER_PHOTO_VIDEO = 3;
+     */
+    FILTER_PHOTO_VIDEO = 3,
+    /**
+     * @generated from protobuf enum value: FILTER_DOCUMENTS = 4;
+     */
+    FILTER_DOCUMENTS = 4
 }
 // @generated message type with reflection information, may provide speed optimized methods
 class ClientMessage$Type extends MessageType<ClientMessage> {
@@ -9953,7 +9990,9 @@ class SearchMessagesInput$Type extends MessageType<SearchMessagesInput> {
         super("SearchMessagesInput", [
             { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
             { no: 2, name: "queries", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ },
-            { no: 3, name: "limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 3, name: "limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 4, name: "offset_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 5, name: "filter", kind: "enum", opt: true, T: () => ["SearchMessagesFilter", SearchMessagesFilter] }
         ]);
     }
     create(value?: PartialMessage<SearchMessagesInput>): SearchMessagesInput {
@@ -9977,6 +10016,12 @@ class SearchMessagesInput$Type extends MessageType<SearchMessagesInput> {
                 case /* optional int32 limit */ 3:
                     message.limit = reader.int32();
                     break;
+                case /* optional int64 offset_id */ 4:
+                    message.offsetId = reader.int64().toBigInt();
+                    break;
+                case /* optional SearchMessagesFilter filter */ 5:
+                    message.filter = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -9998,6 +10043,12 @@ class SearchMessagesInput$Type extends MessageType<SearchMessagesInput> {
         /* optional int32 limit = 3; */
         if (message.limit !== undefined)
             writer.tag(3, WireType.Varint).int32(message.limit);
+        /* optional int64 offset_id = 4; */
+        if (message.offsetId !== undefined)
+            writer.tag(4, WireType.Varint).int64(message.offsetId);
+        /* optional SearchMessagesFilter filter = 5; */
+        if (message.filter !== undefined)
+            writer.tag(5, WireType.Varint).int32(message.filter);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

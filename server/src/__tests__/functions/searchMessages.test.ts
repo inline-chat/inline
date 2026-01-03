@@ -4,6 +4,7 @@ import { testUtils, setupTestLifecycle } from "../setup"
 import { db } from "../../db"
 import * as schema from "../../db/schema"
 import { encrypt } from "../../modules/encryption/encryption"
+import { SearchMessagesFilter } from "@in/protocol/core"
 
 const makeFunctionContext = (userId: number): any => ({
   currentUserId: userId,
@@ -107,6 +108,168 @@ describe("searchMessages", () => {
         makeFunctionContext(userA.id),
       ),
     ).rejects.toThrow()
+  })
+
+  test("allows empty queries with document filter", async () => {
+    const userA = (await testUtils.createUser("search-doc-filter-a@example.com"))!
+    const userB = (await testUtils.createUser("search-doc-filter-b@example.com"))!
+    const chat = (await testUtils.createPrivateChat(userA, userB))!
+
+    const [file] = await db
+      .insert(schema.files)
+      .values({
+        fileUniqueId: "file-search-doc-filter-1",
+        userId: userA.id,
+        mimeType: "application/pdf",
+        fileSize: 10,
+      })
+      .returning()
+
+    const [document] = await db
+      .insert(schema.documents)
+      .values({
+        fileId: file!.id,
+      })
+      .returning()
+
+    await db
+      .insert(schema.messages)
+      .values({
+        messageId: 1,
+        chatId: chat.id,
+        fromId: userA.id,
+        mediaType: "document",
+        documentId: document!.id,
+      })
+      .execute()
+
+    const result = await searchMessages(
+      {
+        peerId: {
+          type: { oneofKind: "user", user: { userId: BigInt(userB.id) } },
+        },
+        queries: [],
+        filter: SearchMessagesFilter.FILTER_DOCUMENTS,
+      },
+      makeFunctionContext(userA.id),
+    )
+
+    expect(result.messages.map((message) => Number(message.id))).toEqual([1])
+  })
+
+  test("applies media filters when searching text", async () => {
+    const userA = (await testUtils.createUser("search-media-filter-a@example.com"))!
+    const userB = (await testUtils.createUser("search-media-filter-b@example.com"))!
+    const chat = (await testUtils.createPrivateChat(userA, userB))!
+
+    await testUtils.createTestMessage({
+      messageId: 1,
+      chatId: chat.id,
+      fromId: userA.id,
+      text: "alpha",
+    })
+
+    const [photo] = await db
+      .insert(schema.photos)
+      .values({
+        format: "jpeg",
+      })
+      .returning()
+
+    const encrypted = encrypt("alpha")
+
+    await db
+      .insert(schema.messages)
+      .values({
+        messageId: 2,
+        chatId: chat.id,
+        fromId: userA.id,
+        mediaType: "photo",
+        photoId: photo!.id,
+        textEncrypted: encrypted.encrypted,
+        textIv: encrypted.iv,
+        textTag: encrypted.authTag,
+      })
+      .execute()
+
+    const result = await searchMessages(
+      {
+        peerId: {
+          type: { oneofKind: "user", user: { userId: BigInt(userB.id) } },
+        },
+        queries: ["alpha"],
+        filter: SearchMessagesFilter.FILTER_PHOTOS,
+      },
+      makeFunctionContext(userA.id),
+    )
+
+    expect(result.messages.map((message) => Number(message.id))).toEqual([2])
+  })
+
+  test("respects offset_id with media filters", async () => {
+    const userA = (await testUtils.createUser("search-offset-a@example.com"))!
+    const userB = (await testUtils.createUser("search-offset-b@example.com"))!
+    const chat = (await testUtils.createPrivateChat(userA, userB))!
+
+    const [photo] = await db
+      .insert(schema.photos)
+      .values({
+        format: "jpeg",
+      })
+      .returning()
+
+    await db
+      .insert(schema.messages)
+      .values({
+        messageId: 1,
+        chatId: chat.id,
+        fromId: userA.id,
+        mediaType: "photo",
+        photoId: photo!.id,
+      })
+      .execute()
+
+    const [videoFile] = await db
+      .insert(schema.files)
+      .values({
+        fileUniqueId: "file-search-video-1",
+        userId: userA.id,
+        mimeType: "video/mp4",
+        fileSize: 120,
+      })
+      .returning()
+
+    const [video] = await db
+      .insert(schema.videos)
+      .values({
+        fileId: videoFile!.id,
+      })
+      .returning()
+
+    await db
+      .insert(schema.messages)
+      .values({
+        messageId: 2,
+        chatId: chat.id,
+        fromId: userA.id,
+        mediaType: "video",
+        videoId: video!.id,
+      })
+      .execute()
+
+    const result = await searchMessages(
+      {
+        peerId: {
+          type: { oneofKind: "user", user: { userId: BigInt(userB.id) } },
+        },
+        queries: [],
+        filter: SearchMessagesFilter.FILTER_PHOTO_VIDEO,
+        offsetId: 2n,
+      },
+      makeFunctionContext(userA.id),
+    )
+
+    expect(result.messages.map((message) => Number(message.id))).toEqual([1])
   })
 
   test("matches keywords in attached document file name", async () => {

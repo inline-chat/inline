@@ -1,4 +1,4 @@
-import { SearchMessagesInput, SearchMessagesResult } from "@in/protocol/core"
+import { SearchMessagesFilter, SearchMessagesInput, SearchMessagesResult } from "@in/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { Functions } from "@in/server/functions"
@@ -12,7 +12,10 @@ export const searchMessages = async (
   }
 
   const queries = input.queries ?? []
-  if (!queries.some((query) => query.trim().length > 0)) {
+  const hasQueries = queries.some((query) => query.trim().length > 0)
+  const hasFilter =
+    input.filter !== undefined && input.filter !== SearchMessagesFilter.FILTER_UNSPECIFIED
+  if (!hasQueries && !hasFilter) {
     throw RealtimeRpcError.BadRequest
   }
 
@@ -21,6 +24,8 @@ export const searchMessages = async (
       peerId: input.peerId,
       queries,
       limit: input.limit,
+      offsetId: input.offsetId,
+      filter: input.filter,
     },
     {
       currentSessionId: handlerContext.sessionId,

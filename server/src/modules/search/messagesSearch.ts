@@ -4,7 +4,7 @@ import { documents } from "@in/server/db/schema/media"
 import { decryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { decrypt } from "@in/server/modules/encryption/encryption"
 import { Log } from "@in/server/utils/log"
-import { and, desc, eq, lt } from "drizzle-orm"
+import { and, desc, eq, isNull, lt, not, or } from "drizzle-orm"
 
 const log = new Log("modules/search/messages")
 
@@ -26,11 +26,15 @@ type SearchMessagesInput = {
   keywordGroups: string[][]
   maxResults: number
   batchSize?: number
+  beforeMessageId?: number
+  mediaFilter?: MessageMediaFilter
 }
 
 export const MessageSearchModule = {
   searchMessagesInChat,
 }
+
+export type MessageMediaFilter = "photos" | "videos" | "photo_video" | "documents"
 
 async function searchMessagesInChat(input: SearchMessagesInput): Promise<bigint[]> {
   if (input.maxResults <= 0 || input.keywordGroups.length === 0) {
@@ -39,10 +43,10 @@ async function searchMessagesInChat(input: SearchMessagesInput): Promise<bigint[
 
   const batchSize = input.batchSize && input.batchSize > 0 ? input.batchSize : DEFAULT_BATCH_SIZE
   const matchedMessageIds: bigint[] = []
-  let cursor: number | undefined = undefined
+  let cursor: number | undefined = input.beforeMessageId
 
   while (matchedMessageIds.length < input.maxResults) {
-    let batch = await fetchSearchBatch(input.chatId, cursor, batchSize)
+    let batch = await fetchSearchBatch(input.chatId, cursor, batchSize, input.mediaFilter)
 
     if (batch.length === 0) {
       break
@@ -74,10 +78,13 @@ async function fetchSearchBatch(
   chatId: number,
   beforeMessageId: number | undefined,
   limit: number,
+  mediaFilter: MessageMediaFilter | undefined,
 ): Promise<SearchRow[]> {
-  const whereClause = beforeMessageId
+  const baseWhereClause = beforeMessageId
     ? and(eq(messages.chatId, chatId), lt(messages.messageId, beforeMessageId))
     : eq(messages.chatId, chatId)
+  const mediaClause = buildMediaFilterClause(mediaFilter)
+  const whereClause = mediaClause ? and(baseWhereClause, mediaClause) : baseWhereClause
 
   return db
     .select({
@@ -95,6 +102,21 @@ async function fetchSearchBatch(
     .where(whereClause)
     .orderBy(desc(messages.messageId))
     .limit(limit)
+}
+
+function buildMediaFilterClause(filter: MessageMediaFilter | undefined) {
+  switch (filter) {
+    case "photos":
+      return not(isNull(messages.photoId))
+    case "videos":
+      return not(isNull(messages.videoId))
+    case "photo_video":
+      return or(not(isNull(messages.photoId)), not(isNull(messages.videoId)))
+    case "documents":
+      return not(isNull(messages.documentId))
+    default:
+      return undefined
+  }
 }
 
 function getMessageText(row: SearchRow): string | null {
