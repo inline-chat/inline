@@ -98,6 +98,10 @@ bun run db:migrate
 bun run dev
 ```
 
+### CLI
+
+Install and use the Inline CLI: see `cli/README.md`.
+
 ### Contributing
 
 - We <3 contributions.
