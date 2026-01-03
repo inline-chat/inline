@@ -57,11 +57,9 @@ public class AttributedStringHelpers {
 
   public static func extractMentionEntities(from attributedString: NSAttributedString) -> [MessageEntity] {
     var entities: [MessageEntity] = []
-    let text = attributedString.string
-
     attributedString.enumerateAttribute(
       .mentionUserId,
-      in: NSRange(location: 0, length: text.count),
+      in: NSRange(location: 0, length: attributedString.length),
       options: []
     ) { value, range, _ in
       if let userId = value as? Int64 {

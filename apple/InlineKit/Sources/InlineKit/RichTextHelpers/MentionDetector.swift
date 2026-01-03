@@ -23,8 +23,9 @@ public class MentionDetector {
   /// Returns the mention range and query if found, nil otherwise
   public func detectMentionAt(cursorPosition: Int, in attributedText: NSAttributedString) -> MentionRange? {
     let text = attributedText.string
-    guard cursorPosition <= text.count else {
-      log.trace("Cursor position \(cursorPosition) is beyond text length \(text.count)")
+    let utf16Length = text.utf16.count
+    guard cursorPosition <= utf16Length else {
+      log.trace("Cursor position \(cursorPosition) is beyond text length \(utf16Length)")
       return nil
     }
 
