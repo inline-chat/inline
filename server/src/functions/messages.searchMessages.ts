@@ -1,6 +1,6 @@
-import type { InputPeer, Message } from "@in/protocol/core"
+import { SearchMessagesFilter, type InputPeer, type Message } from "@in/protocol/core"
 import { ModelError } from "@in/server/db/models/_errors"
-import { MessageModel, type DbFullMessage } from "@in/server/db/models/messages"
+import { MessageModel, type DbFullMessage, type MessageMediaFilter } from "@in/server/db/models/messages"
 import { ChatModel } from "@in/server/db/models/chats"
 import { UsersModel } from "@in/server/db/models/users"
 import type { FunctionContext } from "@in/server/functions/_types"
@@ -15,6 +15,8 @@ type Input = {
   peerId: InputPeer
   queries: string[]
   limit?: number
+  offsetId?: bigint
+  filter?: SearchMessagesFilter
 }
 
 type Output = {
@@ -27,7 +29,10 @@ const DEFAULT_LIMIT = 50
 
 export const searchMessages = async (input: Input, context: FunctionContext): Promise<Output> => {
   const keywordGroups = normalizeQueries(input.queries)
-  if (keywordGroups.length === 0) {
+  const mediaFilter = normalizeMediaFilter(input.filter)
+  const hasQueries = keywordGroups.length > 0
+  const hasFilter = mediaFilter !== undefined
+  if (!hasQueries && !hasFilter) {
     throw RealtimeRpcError.BadRequest
   }
 
@@ -40,12 +45,35 @@ export const searchMessages = async (input: Input, context: FunctionContext): Pr
     queryCount: keywordGroups.length,
     keywordCount: keywordGroups.reduce((total, keywords) => total + keywords.length, 0),
     maxResults,
+    offsetId: input.offsetId ? Number(input.offsetId) : undefined,
+    mediaFilter,
   })
+
+  if (!hasQueries && mediaFilter) {
+    const fullMessages = await MessageModel.getMessagesWithMediaFilter({
+      chatId: chat.id,
+      offsetId: input.offsetId,
+      limit: maxResults,
+      filter: mediaFilter,
+    })
+
+    return {
+      messages: fullMessages.map((message) =>
+        Encoders.fullMessage({
+          message,
+          encodingForUserId: context.currentUserId,
+          encodingForPeer: { inputPeer: input.peerId },
+        }),
+      ),
+    }
+  }
 
   const messageIds = await MessageSearchModule.searchMessagesInChat({
     chatId: chat.id,
     keywordGroups,
     maxResults,
+    beforeMessageId: input.offsetId ? Number(input.offsetId) : undefined,
+    mediaFilter,
   })
 
   if (messageIds.length === 0) {
@@ -162,6 +190,22 @@ function normalizeLimit(limit: number | undefined): number {
   }
 
   return normalized
+}
+
+function normalizeMediaFilter(filter: SearchMessagesFilter | undefined): MessageMediaFilter | undefined {
+  switch (filter) {
+    case SearchMessagesFilter.FILTER_PHOTOS:
+      return "photos"
+    case SearchMessagesFilter.FILTER_VIDEOS:
+      return "videos"
+    case SearchMessagesFilter.FILTER_PHOTO_VIDEO:
+      return "photo_video"
+    case SearchMessagesFilter.FILTER_DOCUMENTS:
+      return "documents"
+    case SearchMessagesFilter.FILTER_UNSPECIFIED:
+    case undefined:
+      return undefined
+  }
 }
 
 function orderMessagesById(messageIds: bigint[], messages: DbFullMessage[]): DbFullMessage[] {

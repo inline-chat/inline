@@ -970,6 +970,14 @@ message GetChatHistoryInput {
 
 message GetChatHistoryResult { repeated Message messages = 1; }
 
+enum SearchMessagesFilter {
+  FILTER_UNSPECIFIED = 0;
+  FILTER_PHOTOS = 1;
+  FILTER_VIDEOS = 2;
+  FILTER_PHOTO_VIDEO = 3;
+  FILTER_DOCUMENTS = 4;
+}
+
 message SearchMessagesInput {
   InputPeer peer_id = 1;
 
@@ -978,6 +986,12 @@ message SearchMessagesInput {
 
   // Max number of results to return
   optional int32 limit = 3;
+
+  // ID of the message to start from
+  optional int64 offset_id = 4;
+
+  // Optional filter for media/doc messages
+  optional SearchMessagesFilter filter = 5;
 }
 
 message SearchMessagesResult { repeated Message messages = 1; }
