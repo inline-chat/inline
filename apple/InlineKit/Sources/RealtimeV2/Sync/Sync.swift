@@ -279,10 +279,13 @@ actor Sync {
         // Note: We use callRpc to ensure we wait for the server's acknowledgement,
         // but the primary mechanism for sync is the server pushing 'hasNewUpdates'
         // events in response to this call (or as part of the result).
-        let _ = try await client.callRpc(method: .getUpdatesState, input: .getUpdatesState(.with {
+        let result = try await client.callRpc(method: .getUpdatesState, input: .getUpdatesState(.with {
           $0.date = state.lastSyncDate
         }), timeout: nil)
         log.trace("sent get updates state request with date: \(state.lastSyncDate)")
+        if case let .getUpdatesState(payload) = result {
+          await updateLastSyncDate(maxAppliedDate: payload.date, source: "getUpdatesState")
+        }
       } catch {
         log.error("failed to get updates state: \(error)")
       }
@@ -591,6 +594,14 @@ actor BucketActor {
           )
           await sync.recordBucketFetchTooLong()
           let seqGap = Int64(payload.seq) - currentSeq
+          if isColdStart {
+            // On cold start, fast-forward immediately to avoid a TOO_LONG loop.
+            finalSeq = payload.seq
+            finalDate = payload.date
+            isFinal = true // Stop fetching
+            pendingUpdates.removeAll() // Discard pending
+            break
+          }
           if seqGap > Self.maxTotalUpdates {
             // We accept the gap and fast-forward.
             // TODO: For chat buckets, clear cached history and refetch to avoid gaps.
