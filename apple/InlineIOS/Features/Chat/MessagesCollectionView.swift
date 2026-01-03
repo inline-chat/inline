@@ -96,7 +96,6 @@ final class MessagesCollectionView: UICollectionView {
   }
 
   private var composeHeight: CGFloat = ComposeView.minHeight
-  private var composeEmbedViewHeight: CGFloat = ComposeEmbedView.height
 
   func updateComposeInset(composeHeight: CGFloat) {
     self.composeHeight = composeHeight
@@ -139,15 +138,8 @@ final class MessagesCollectionView: UICollectionView {
 
     var bottomInset: CGFloat = 0.0
 
-    let chatState = ChatState.shared.getState(peer: peerId)
-    let hasEmbed = chatState.replyingMessageId != nil || chatState.editingMessageId != nil
-
     bottomInset += composeHeight + (ComposeView.textViewVerticalMargin * 2)
     bottomInset += Self.messagesBottomPadding
-
-    if hasEmbed {
-      bottomInset += composeEmbedViewHeight
-    }
     if isKeyboardVisible {
       bottomInset += keyboardHeight
     } else {

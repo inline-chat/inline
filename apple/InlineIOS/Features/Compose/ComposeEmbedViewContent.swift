@@ -6,7 +6,7 @@ import UIKit
 // TODO: extract the content into another view
 // TODO: make ComposeEmbedView a skelton for all the embeds
 
-class ComposeEmbedViewContent: UIView {
+class ComposeEmbedViewContent: UIView, UIGestureRecognizerDelegate {
   static let height: CGFloat = 56
 
   enum Mode {
@@ -19,6 +19,15 @@ class ComposeEmbedViewContent: UIView {
   private var chatId: Int64
   private var messageId: Int64
   private var viewModel: FullMessageViewModel
+
+  private lazy var replyIndicatorView: UIView = {
+    let view = UIView()
+    view.backgroundColor = ThemeManager.shared.selected.accent
+    view.layer.cornerRadius = 1
+    view.layer.masksToBounds = true
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
 
   private lazy var nameLabel: UILabel = {
     let label = UILabel()
@@ -106,6 +115,7 @@ class ComposeEmbedViewContent: UIView {
     backgroundColor = .clear
     clipsToBounds = true
     translatesAutoresizingMaskIntoConstraints = false
+    isUserInteractionEnabled = true
 
     messageStackView.addArrangedSubview(imageIconView)
     messageStackView.addArrangedSubview(messageLabel)
@@ -116,7 +126,12 @@ class ComposeEmbedViewContent: UIView {
     containerStackView.addArrangedSubview(labelsStackView)
     containerStackView.addArrangedSubview(closeButton)
 
+    addSubview(replyIndicatorView)
     addSubview(containerStackView)
+
+    let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleEmbedTapped))
+    tapGesture.delegate = self
+    addGestureRecognizer(tapGesture)
   }
 
   private func setupConstraints() {
@@ -127,9 +142,14 @@ class ComposeEmbedViewContent: UIView {
       imageIconView.widthAnchor.constraint(equalToConstant: 20),
       imageIconView.heightAnchor.constraint(equalToConstant: 20),
 
-      containerStackView.heightAnchor.constraint(equalToConstant: Self.height),
+      replyIndicatorView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      replyIndicatorView.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+      replyIndicatorView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
+      replyIndicatorView.widthAnchor.constraint(equalToConstant: 2),
+
+      containerStackView.topAnchor.constraint(equalTo: topAnchor),
       containerStackView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      containerStackView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      containerStackView.leadingAnchor.constraint(equalTo: replyIndicatorView.trailingAnchor, constant: 6),
       containerStackView.trailingAnchor.constraint(equalTo: trailingAnchor),
 
       closeButton.widthAnchor.constraint(equalToConstant: 24),
@@ -169,9 +189,11 @@ class ComposeEmbedViewContent: UIView {
       case .reply:
         nameLabel.text = "Replying to \(name)"
         imageIconView.image = UIImage(systemName: "photo.fill")
+        replyIndicatorView.isHidden = false
       case .edit:
         nameLabel.text = "Editing message"
         imageIconView.image = UIImage(systemName: "pencil")
+        replyIndicatorView.isHidden = true
     }
 
     if let message = viewModel.fullMessage?.message {
@@ -185,6 +207,16 @@ class ComposeEmbedViewContent: UIView {
         imageIconView.image = UIImage(systemName: "face.smiling", withConfiguration: config)
         imageIconView.isHidden = false
         messageLabel.text = "Sticker"
+      } else if message.hasVideo, message.hasText {
+        let config = UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+        imageIconView.image = UIImage(systemName: "video.fill", withConfiguration: config)
+        imageIconView.isHidden = false
+        messageLabel.text = text
+      } else if message.hasVideo, !message.hasText {
+        let config = UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+        imageIconView.image = UIImage(systemName: "video.fill", withConfiguration: config)
+        imageIconView.isHidden = false
+        messageLabel.text = "Video"
       } else if message.documentId != nil, !message.hasText {
         let config = UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
         imageIconView.image = UIImage(systemName: "document.fill", withConfiguration: config)
@@ -226,6 +258,26 @@ class ComposeEmbedViewContent: UIView {
           composeView.updateHeight()
         }
     }
+  }
+
+  @objc private func handleEmbedTapped() {
+    guard mode == .reply else { return }
+
+    NotificationCenter.default.post(
+      name: Notification.Name("ScrollToRepliedMessage"),
+      object: nil,
+      userInfo: [
+        "repliedToMessageId": messageId,
+        "chatId": chatId,
+      ]
+    )
+  }
+
+  func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+    if let touchedView = touch.view, touchedView.isDescendant(of: closeButton) {
+      return false
+    }
+    return true
   }
 
   private func findComposeView() -> ComposeView? {

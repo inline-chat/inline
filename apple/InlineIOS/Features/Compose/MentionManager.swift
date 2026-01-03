@@ -299,8 +299,8 @@ class MentionManager: NSObject {
     NSLayoutConstraint.deactivate(mentionCompletionConstraints)
     mentionCompletionConstraints.removeAll()
 
-    // Position like composeEmbedViewWrapper - same horizontal margins and positioning above compose view
-    let horizontalMargin: CGFloat = 7.0 // ComposeView.textViewHorizantalMargin (same as composeEmbedViewWrapper)
+    // Position using compose view margins and spacing above the input
+    let horizontalMargin: CGFloat = 7.0 // ComposeView.textViewHorizantalMargin
     let verticalSpacing: CGFloat = 12.0 // Add spacing above compose view
     mentionCompletionConstraints = [
       mentionCompletionView.leadingAnchor.constraint(equalTo: parentView.leadingAnchor, constant: horizontalMargin),
