@@ -1,6 +1,6 @@
 [package]
 name = "inline-cli"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 build = "build.rs"
 default-run = "inline"
