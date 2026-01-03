@@ -129,6 +129,12 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 - Invite and manage members:
   - `inline spaces invite --space-id 31 --email you@example.com`
   - `inline spaces update-member-access --space-id 31 --user-id 42 --admin`
+- JQ pipelines for lists:
+  - `inline users list --json | jq -r '.users[] | "\(.id)\t\(.first_name) \(.last_name)\t@\(.username // "")\t\(.email // "")"'`
+  - `inline users list --json | jq -r '.users[] | select((.first_name + " " + (.last_name // "") + " " + (.username // "") + " " + (.email // "")) | ascii_downcase | contains("mo")) | "\(.id)\t\(.first_name) \(.last_name)"'`
+  - `inline chats list --json | jq -r '.chats[] | "\(.id)\t\(.title // "")\tspace:\(if .space_id == null then "dm" else (.space_id | tostring) end)"'`
+  - `inline chats list --json | jq -r '.dialogs[] | select(.unread_count > 0) | "\(.chat_id)\tunread:\(.unread_count)"'`
+  - `inline messages list --chat-id 123 --json | jq -r '.messages[] | "\(.id)\t\(.from_id)\t\((.message // "") | gsub("\n"; " ") | .[0:80])"'`
 
 ## Agent Tips
 
