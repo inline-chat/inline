@@ -1,5 +1,6 @@
 import Combine
 import GRDB
+import InlineProtocol
 import Logger
 import SwiftUI
 
@@ -48,6 +49,7 @@ public struct DocumentMessage: Codable, Equatable, Hashable, FetchableRecord, Pe
 @MainActor
 public final class ChatDocumentsViewModel: ObservableObject, @unchecked Sendable {
   private let chatId: Int64
+  private let peer: Peer
   private let db: AppDatabase
 
   @Published public private(set) var documents: [DocumentInfo] = []
@@ -55,12 +57,19 @@ public final class ChatDocumentsViewModel: ObservableObject, @unchecked Sendable
 
   private var cancellable: AnyCancellable?
   private var messagesCancellable: AnyCancellable?
+  private var isLoading = false
+  private var hasMore = true
+  private var nextOffsetId: Int64?
+  private var hasStarted = false
+
+  private let pageSize: Int32 = 50
 
   // MARK: – Initialization
 
-  public init(db: AppDatabase, chatId: Int64) {
+  public init(db: AppDatabase, chatId: Int64, peer: Peer) {
     self.db = db
     self.chatId = chatId
+    self.peer = peer
     fetchDocuments()
     fetchDocumentMessages()
   }
@@ -161,6 +170,65 @@ public final class ChatDocumentsViewModel: ObservableObject, @unchecked Sendable
   /// Get all document messages from a specific sender
   public func documentMessages(from senderId: Int64) -> [DocumentMessage] {
     documentMessages.filter { $0.message.fromId == senderId }
+  }
+
+  // MARK: - Remote Fetching
+
+  public func loadInitial() async {
+    guard !hasStarted else { return }
+    hasStarted = true
+    await loadMore(reset: true)
+  }
+
+  public func loadMoreIfNeeded(currentMessageId: Int64) async {
+    guard let lastMessageId = documentMessages.last?.message.id else { return }
+    guard currentMessageId == lastMessageId else { return }
+    await loadMore(reset: false)
+  }
+
+  private func loadMore(reset: Bool) async {
+    guard !isLoading else { return }
+
+    if reset {
+      nextOffsetId = nil
+      hasMore = true
+    }
+
+    guard hasMore else { return }
+
+    isLoading = true
+    defer { isLoading = false }
+
+    do {
+      let result = try await Api.realtime.send(
+        .searchMessages(
+          peer: peer,
+          queries: [],
+          offsetID: nextOffsetId,
+          limit: pageSize,
+          filter: .filterDocuments
+        )
+      )
+
+      guard case let .searchMessages(response) = result else {
+        return
+      }
+
+      guard !response.messages.isEmpty else {
+        hasMore = false
+        return
+      }
+
+      if let lastMessageId = response.messages.last?.id {
+        nextOffsetId = lastMessageId
+      }
+
+      if response.messages.count < pageSize {
+        hasMore = false
+      }
+    } catch {
+      Log.shared.error("Failed to load document messages", error: error)
+    }
   }
 }
 

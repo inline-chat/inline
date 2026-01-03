@@ -30,6 +30,11 @@ struct DocumentsTabView: View {
                   chatId: peerThreadId
                 )
                 .padding(.bottom, 4)
+                .onAppear {
+                  Task {
+                    await documentsViewModel.loadMoreIfNeeded(currentMessageId: documentMessage.message.id)
+                  }
+                }
               }
             } header: {
               HStack {
@@ -54,6 +59,9 @@ struct DocumentsTabView: View {
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .task {
+      await documentsViewModel.loadInitial()
+    }
   }
 
   // Format date for display
