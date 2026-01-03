@@ -132,7 +132,7 @@ class SyncTests {
   }
 
   @Test("TOO_LONG slices within max total and updates bucket state")
-  func testTooLongFastForward() async throws {
+  func testTooLongSlicesWhenWarm() async throws {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
@@ -156,6 +156,7 @@ class SyncTests {
     let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
 
     let peer = makeChatPeer(chatId: 1)
+    await storage.setBucketState(for: .chat(peer: peer), state: BucketState(date: 150, seq: 5))
     var payload = InlineProtocol.UpdateChatHasNewUpdates()
     payload.peerID = peer
 
@@ -172,8 +173,84 @@ class SyncTests {
     let stats = await sync.getStats()
     #expect(stats.bucketFetchTooLong == 1)
 
+    let callCount = await client.getCallCount()
+    #expect(callCount == 2)
+
     let applied = await apply.appliedUpdates
     #expect(applied.isEmpty)
+  }
+
+  @Test("cold start TOO_LONG fast-forwards without looping")
+  func testTooLongFastForwardsWhenCold() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+
+    let tooLong = makeGetUpdatesResult(
+      seq: 10,
+      date: 200,
+      updates: [],
+      final: false,
+      resultType: .tooLong
+    )
+
+    let client = FakeProtocolClient(responses: [tooLong])
+    let config = SyncConfig(enableMessageUpdates: false, lastSyncSafetyGapSeconds: 15)
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+
+    let peer = makeChatPeer(chatId: 1)
+    var payload = InlineProtocol.UpdateChatHasNewUpdates()
+    payload.peerID = peer
+
+    var update = InlineProtocol.Update()
+    update.update = .chatHasNewUpdates(payload)
+
+    await sync.process(updates: [update])
+    try await Task.sleep(for: .milliseconds(50))
+
+    let bucketState = await storage.getBucketState(for: .chat(peer: peer))
+    #expect(bucketState.seq == 10)
+    #expect(bucketState.date == 200)
+
+    let stats = await sync.getStats()
+    #expect(stats.bucketFetchTooLong == 1)
+
+    let callCount = await client.getCallCount()
+    #expect(callCount == 1)
+
+    let applied = await apply.appliedUpdates
+    #expect(applied.isEmpty)
+  }
+
+  @Test("getUpdatesState response advances lastSyncDate")
+  func testGetUpdatesStateAdvancesLastSyncDate() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+
+    let now = Int64(Date().timeIntervalSince1970)
+    let getUpdatesState = makeGetUpdatesStateResult(date: now)
+    let getUpdates = makeGetUpdatesResult(
+      seq: 0,
+      date: now,
+      updates: [],
+      final: true,
+      resultType: .empty
+    )
+
+    let client = FakeProtocolClient(
+      responses: [],
+      methodResponses: [
+        .getUpdatesState: [getUpdatesState],
+        .getUpdates: [getUpdates],
+      ]
+    )
+    let config = SyncConfig(enableMessageUpdates: false, lastSyncSafetyGapSeconds: 15)
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+
+    await sync.connectionStateChanged(state: .connected)
+    try await Task.sleep(for: .milliseconds(50))
+
+    let state = await storage.getState()
+    #expect(state.lastSyncDate == max(0, now - 15))
   }
 
   @Test("catch-up applies updates in seq order")
@@ -302,6 +379,7 @@ class SyncTests {
 
 final actor FakeProtocolClient: ProtocolClientType {
   private var responses: [InlineProtocol.RpcResult.OneOf_Result?]
+  private var methodResponses: [InlineProtocol.Method: [InlineProtocol.RpcResult.OneOf_Result?]]?
   private var callCount = 0
   private var methods: [InlineProtocol.Method] = []
 
@@ -310,9 +388,14 @@ final actor FakeProtocolClient: ProtocolClientType {
   private var firstCallGate: CheckedContinuation<Void, Never>?
   private let gateFirstCall: Bool
 
-  init(responses: [InlineProtocol.RpcResult.OneOf_Result?], gateFirstCall: Bool = false) {
+  init(
+    responses: [InlineProtocol.RpcResult.OneOf_Result?],
+    gateFirstCall: Bool = false,
+    methodResponses: [InlineProtocol.Method: [InlineProtocol.RpcResult.OneOf_Result?]]? = nil
+  ) {
     self.responses = responses
     self.gateFirstCall = gateFirstCall
+    self.methodResponses = methodResponses
   }
 
   func callRpc(
@@ -327,6 +410,13 @@ final actor FakeProtocolClient: ProtocolClientType {
       await withCheckedContinuation { continuation in
         firstCallGate = continuation
       }
+    }
+
+    if let responsesForMethod = methodResponses?[method], !responsesForMethod.isEmpty {
+      var updated = responsesForMethod
+      let value = updated.removeFirst()
+      methodResponses?[method] = updated
+      return value
     }
 
     if responses.isEmpty {
@@ -424,6 +514,12 @@ private func makeGetUpdatesResult(
   result.final = final
   result.resultType = resultType
   return .getUpdates(result)
+}
+
+private func makeGetUpdatesStateResult(date: Int64) -> InlineProtocol.RpcResult.OneOf_Result {
+  var result = InlineProtocol.GetUpdatesStateResult()
+  result.date = date
+  return .getUpdatesState(result)
 }
 
 private func makeNewMessageUpdate(seq: Int64, date: Int64) -> InlineProtocol.Update {
