@@ -222,7 +222,9 @@ export class Db {
   // Private
   private collection<K extends DbObjectKind, O extends DbModels[K]>(kind: K): Collection<K, O> {
     if (!this.collections[kind]) {
-      const storage = this.storageByKind?.[kind] ?? createCollectionStorage(kind)
+      const storage =
+        (this.storageByKind?.[kind] as CollectionStorage<O> | null) ??
+        (createCollectionStorage(kind) as CollectionStorage<O> | null)
       this.collections[kind] = new Collection<K, O>(kind, storage)
     }
     return this.collections[kind] as Collection<K, O>

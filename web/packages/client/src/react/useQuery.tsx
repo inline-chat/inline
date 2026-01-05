@@ -1,7 +1,6 @@
-import { RpcResult } from "@in/protocol/core"
 import { useEffect, useRef } from "react"
-import { useInlineClient } from "src/react"
-import { Transaction } from "src/realtime"
+import { useInlineClient } from "./index"
+import { Transaction } from "../realtime"
 
 type UseQueryOptions = {
   dependencies?: unknown[]
@@ -34,7 +33,7 @@ export const useQuery = (query: Transaction, options: UseQueryOptions = {}) => {
     console.log("querying", query.method)
     client.realtime
       .query(query)
-      .catch((error) => {
+      .catch((error: unknown) => {
         console.log("failed to query", error)
       })
       .finally(() => {
