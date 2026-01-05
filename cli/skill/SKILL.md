@@ -27,6 +27,8 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 
 - `inline chats list`
   - List chats with human-readable names, unread count, and last message preview (sender + text in one column).
+- `inline chats get [--chat-id 123 | --user-id 42]`
+  - Fetch a chat (thread or DM) by id.
 - `inline chats participants --chat-id 123`
   - List participants for a chat, including join date.
 - `inline chats add-participant --chat-id 123 --user-id 42`
@@ -35,8 +37,14 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
   - Remove a user from a chat.
 - `inline chats create --title "Project" [--space-id 31] [--description "Spec"] [--emoji ":rocket:"] [--public] [--participant 42]`
   - Create a new chat or thread. If `--public` is set, participants must be empty.
+- `inline chats create-dm --user-id 42`
+  - Create a private chat (DM).
 - `inline chats mark-unread [--chat-id 123 | --user-id 42]`
   - Mark a chat or DM as unread.
+- `inline chats mark-read [--chat-id 123 | --user-id 42] [--max-id 456]`
+  - Mark a chat or DM as read. If `--max-id` is omitted, marks through the latest message.
+- `inline chats delete --chat-id 123`
+  - Delete a chat (space thread). Prompts for confirmation unless `--yes` is provided.
 
 ### users
 
@@ -59,6 +67,13 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
   - Remove a member from a space (prompts for confirmation; use `--yes` to skip).
 - `inline spaces update-member-access --space-id 31 --user-id 42 [--admin | --member] [--public-chats]`
   - Update a member's access/role. Provide `--admin` or `--member` (and optional `--public-chats`).
+
+### notifications
+
+- `inline notifications get`
+  - Show current notification settings.
+- `inline notifications set [--mode all|none|mentions|important] [--silent | --sound]`
+  - Update notification settings.
 
 ### update
 
@@ -132,9 +147,9 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 - JQ pipelines for lists:
   - `inline users list --json | jq -r '.users[] | "\(.id)\t\(.first_name) \(.last_name)\t@\(.username // "")\t\(.email // "")"'`
   - `inline users list --json | jq -r '.users[] | select((.first_name + " " + (.last_name // "") + " " + (.username // "") + " " + (.email // "")) | ascii_downcase | contains("mo")) | "\(.id)\t\(.first_name) \(.last_name)"'`
-  - `inline chats list --json | jq -r '.chats[] | "\(.id)\t\(.title // "")\tspace:\(if .space_id == null then "dm" else (.space_id | tostring) end)"'`
-  - `inline chats list --json | jq -r '.dialogs[] | select(.unread_count > 0) | "\(.chat_id)\tunread:\(.unread_count)"'`
-  - `inline messages list --chat-id 123 --json | jq -r '.messages[] | "\(.id)\t\(.from_id)\t\((.message // "") | gsub("\n"; " ") | .[0:80])"'`
+- `inline chats list --json | jq -r '.chats[] | "\(.id)\t\(.title // "")\tspace:\(if .space_id == null then "dm" else (.space_id | tostring) end)"'`
+- `inline chats list --json | jq -r '.dialogs[] | select(.unread_count > 0) | "\(.chat_id)\tunread:\(.unread_count)"'`
+- `inline messages list --chat-id 123 --json | jq -r '.messages[] | "\(.id)\t\(.from_id)\t\((.message // "") | gsub("\n"; " ") | .[0:80])"'`
 
 ## Agent Tips
 

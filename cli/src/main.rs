@@ -7,7 +7,7 @@ mod realtime;
 mod state;
 mod update;
 
-use clap::{ArgAction, Args, Parser, Subcommand};
+use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use dialoguer::{Confirm, Input, Select};
 use futures_util::StreamExt;
 use rand::{RngCore, rngs::OsRng};
@@ -56,7 +56,11 @@ Examples:
   inline chats list
   inline chats participants --chat-id 123
   inline chats create --title "Launch" --space-id 31 --participant 42
+  inline chats create-dm --user-id 42
   inline chats mark-unread --chat-id 123
+  inline chats mark-read --chat-id 123
+  inline notifications get
+  inline notifications set --mode mentions
   inline spaces list
   inline spaces members --space-id 31
   inline spaces invite --space-id 31 --email you@example.com
@@ -146,6 +150,11 @@ enum Command {
         #[command(subcommand)]
         command: SpacesCommand,
     },
+    #[command(about = "View or update notification settings")]
+    Notifications {
+        #[command(subcommand)]
+        command: NotificationsCommand,
+    },
 }
 
 #[derive(Subcommand)]
@@ -171,6 +180,8 @@ struct AuthLoginArgs {
 enum ChatsCommand {
     #[command(about = "List chats with last message and unread count")]
     List(ChatsListArgs),
+    #[command(about = "Fetch a chat by id or user")]
+    Get(ChatsGetArgs),
     #[command(about = "List participants in a chat")]
     Participants(ChatsParticipantsArgs),
     #[command(about = "Add a participant to a chat")]
@@ -179,8 +190,14 @@ enum ChatsCommand {
     RemoveParticipant(ChatsParticipantArgs),
     #[command(about = "Create a new chat or thread")]
     Create(ChatsCreateArgs),
+    #[command(about = "Create a private chat (DM)")]
+    CreateDm(ChatsCreateDmArgs),
     #[command(about = "Mark a chat or DM as unread")]
     MarkUnread(ChatsMarkUnreadArgs),
+    #[command(about = "Mark a chat or DM as read")]
+    MarkRead(ChatsMarkReadArgs),
+    #[command(about = "Delete a chat (space thread)")]
+    Delete(ChatsDeleteArgs),
 }
 
 #[derive(Args)]
@@ -190,6 +207,15 @@ struct ChatsListArgs {
 
     #[arg(long, help = "Offset into the chat list")]
     offset: Option<usize>,
+}
+
+#[derive(Args)]
+struct ChatsGetArgs {
+    #[arg(long, help = "Chat id")]
+    chat_id: Option<i64>,
+
+    #[arg(long, help = "User id (for DMs)")]
+    user_id: Option<i64>,
 }
 
 #[derive(Args)]
@@ -235,12 +261,39 @@ struct ChatsCreateArgs {
 }
 
 #[derive(Args)]
+struct ChatsCreateDmArgs {
+    #[arg(long, help = "User id to start a DM with")]
+    user_id: i64,
+}
+
+#[derive(Args)]
 struct ChatsMarkUnreadArgs {
     #[arg(long, help = "Chat id")]
     chat_id: Option<i64>,
 
     #[arg(long, help = "User id (for DMs)")]
     user_id: Option<i64>,
+}
+
+#[derive(Args)]
+struct ChatsMarkReadArgs {
+    #[arg(long, help = "Chat id")]
+    chat_id: Option<i64>,
+
+    #[arg(long, help = "User id (for DMs)")]
+    user_id: Option<i64>,
+
+    #[arg(long, help = "Max message id to mark as read")]
+    max_id: Option<i64>,
+}
+
+#[derive(Args)]
+struct ChatsDeleteArgs {
+    #[arg(long, help = "Chat id (space thread)")]
+    chat_id: i64,
+
+    #[arg(long, help = "Skip confirmation prompt")]
+    yes: bool,
 }
 
 #[derive(Subcommand)]
@@ -549,6 +602,40 @@ enum SpacesCommand {
     UpdateMemberAccess(SpacesUpdateMemberAccessArgs),
 }
 
+#[derive(Subcommand)]
+enum NotificationsCommand {
+    #[command(about = "Show current notification settings")]
+    Get,
+    #[command(about = "Update notification settings")]
+    Set(NotificationsSetArgs),
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum NotificationModeArg {
+    All,
+    None,
+    Mentions,
+    #[value(name = "important", alias = "important-only")]
+    ImportantOnly,
+}
+
+#[derive(Args)]
+struct NotificationsSetArgs {
+    #[arg(
+        long,
+        value_name = "MODE",
+        value_enum,
+        help = "Notification mode: all, none, mentions, important"
+    )]
+    mode: Option<NotificationModeArg>,
+
+    #[arg(long, help = "Mute notification sounds")]
+    silent: bool,
+
+    #[arg(long, help = "Enable notification sounds", conflicts_with = "silent")]
+    sound: bool,
+}
+
 #[derive(Args)]
 struct SpacesMembersArgs {
     #[arg(long, help = "Space id")]
@@ -709,6 +796,33 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
+                ChatsCommand::Get(args) => {
+                    let token = require_token(&auth_store)?;
+                    let peer = input_peer_from_args(args.chat_id, args.user_id)?;
+                    let mut realtime =
+                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                    let input = proto::GetChatInput {
+                        peer_id: Some(peer),
+                    };
+                    let result = realtime
+                        .call_rpc(
+                            proto::Method::GetChat,
+                            proto::rpc_call::Input::GetChat(input),
+                        )
+                        .await?;
+                    match result {
+                        proto::rpc_result::Result::GetChat(payload) => {
+                            if cli.json {
+                                output::print_json(&payload, json_format)?;
+                            } else if let Some(chat) = payload.chat.as_ref() {
+                                print_chat_details(chat, payload.dialog.as_ref());
+                            } else {
+                                println!("Chat not found.");
+                            }
+                        }
+                        _ => return Err("Unexpected RPC result for getChat".into()),
+                    }
+                }
                 ChatsCommand::Participants(args) => {
                     let token = require_token(&auth_store)?;
                     let mut realtime =
@@ -792,6 +906,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if title.is_empty() {
                         return Err("Chat title cannot be empty".into());
                     }
+                    if args.space_id.is_none() {
+                        return Err("Provide --space-id to create a thread.".into());
+                    }
                     if args.public && !args.participants.is_empty() {
                         return Err("Public chats cannot include explicit participants".into());
                     }
@@ -848,6 +965,20 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         _ => return Err("Unexpected RPC result for createChat".into()),
                     }
                 }
+                ChatsCommand::CreateDm(args) => {
+                    let token = require_token(&auth_store)?;
+                    let payload = api.create_private_chat(&token, args.user_id).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else {
+                        let chat_id = payload.chat.get("id").and_then(|value| value.as_i64());
+                        if let Some(chat_id) = chat_id {
+                            println!("Created DM chat {} with user {}.", chat_id, args.user_id);
+                        } else {
+                            println!("Created DM with user {}.", args.user_id);
+                        }
+                    }
+                }
                 ChatsCommand::MarkUnread(args) => {
                     let token = require_token(&auth_store)?;
                     let peer = input_peer_from_args(args.chat_id, args.user_id)?;
@@ -871,6 +1002,54 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                         _ => return Err("Unexpected RPC result for markAsUnread".into()),
+                    }
+                }
+                ChatsCommand::MarkRead(args) => {
+                    let token = require_token(&auth_store)?;
+                    let peer = input_peer_from_args(args.chat_id, args.user_id)?;
+                    let label = peer_label_from_input(&peer);
+                    let input = api::ReadMessagesInput {
+                        peer_user_id: args.user_id,
+                        peer_thread_id: args.chat_id,
+                        max_id: args.max_id,
+                    };
+                    let payload = api.read_messages(&token, input).await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else if let Some(max_id) = args.max_id {
+                        println!("Marked {label} as read (max id {max_id}).");
+                    } else {
+                        println!("Marked {label} as read.");
+                    }
+                }
+                ChatsCommand::Delete(args) => {
+                    let prompt = format!("Delete chat {}? This cannot be undone.", args.chat_id);
+                    if !confirm_action(&prompt, args.yes)? {
+                        println!("Cancelled.");
+                        return Ok(());
+                    }
+                    let token = require_token(&auth_store)?;
+                    let mut realtime =
+                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                    let peer = input_peer_from_args(Some(args.chat_id), None)?;
+                    let input = proto::DeleteChatInput {
+                        peer_id: Some(peer),
+                    };
+                    let result = realtime
+                        .call_rpc(
+                            proto::Method::DeleteChat,
+                            proto::rpc_call::Input::DeleteChat(input),
+                        )
+                        .await?;
+                    match result {
+                        proto::rpc_result::Result::DeleteChat(payload) => {
+                            if cli.json {
+                                output::print_json(&payload, json_format)?;
+                            } else {
+                                println!("Deleted chat {}.", args.chat_id);
+                            }
+                        }
+                        _ => return Err("Unexpected RPC result for deleteChat".into()),
                     }
                 }
             },
@@ -1549,6 +1728,88 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                         _ => return Err("Unexpected RPC result for updateMemberAccess".into()),
+                    }
+                }
+            },
+            Command::Notifications { command } => match command {
+                NotificationsCommand::Get => {
+                    let token = require_token(&auth_store)?;
+                    let mut realtime =
+                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                    let result = realtime
+                        .call_rpc(
+                            proto::Method::GetUserSettings,
+                            proto::rpc_call::Input::GetUserSettings(
+                                proto::GetUserSettingsInput {},
+                            ),
+                        )
+                        .await?;
+                    match result {
+                        proto::rpc_result::Result::GetUserSettings(payload) => {
+                            if cli.json {
+                                output::print_json(&payload, json_format)?;
+                            } else {
+                                print_notification_settings(payload.user_settings.as_ref());
+                            }
+                        }
+                        _ => return Err("Unexpected RPC result for getUserSettings".into()),
+                    }
+                }
+                NotificationsCommand::Set(args) => {
+                    if args.mode.is_none() && !args.silent && !args.sound {
+                        return Err(
+                            "Provide at least one of --mode, --silent, or --sound".into(),
+                        );
+                    }
+                    let token = require_token(&auth_store)?;
+                    let mut realtime =
+                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                    let current = fetch_user_settings(&mut realtime).await?;
+                    let mut values = notification_settings_values(
+                        current
+                            .as_ref()
+                            .and_then(|settings| settings.notification_settings.as_ref()),
+                    );
+                    if let Some(mode) = args.mode {
+                        values.mode = notification_mode_from_arg(mode);
+                    }
+                    if args.silent {
+                        values.silent = true;
+                    } else if args.sound {
+                        values.silent = false;
+                    }
+
+                    let notification_settings = proto::NotificationSettings {
+                        mode: Some(values.mode as i32),
+                        silent: Some(values.silent),
+                        zen_mode_requires_mention: Some(values.zen_requires_mention),
+                        zen_mode_uses_default_rules: Some(values.zen_uses_default_rules),
+                        zen_mode_custom_rules: Some(values.zen_custom_rules),
+                    };
+                    let user_settings = proto::UserSettings {
+                        notification_settings: Some(notification_settings),
+                    };
+                    let input = proto::UpdateUserSettingsInput {
+                        user_settings: Some(user_settings),
+                    };
+                    let result = realtime
+                        .call_rpc(
+                            proto::Method::UpdateUserSettings,
+                            proto::rpc_call::Input::UpdateUserSettings(input),
+                        )
+                        .await?;
+                    match result {
+                        proto::rpc_result::Result::UpdateUserSettings(payload) => {
+                            if cli.json {
+                                output::print_json(&payload, json_format)?;
+                            } else {
+                                println!(
+                                    "Notification settings updated (updates: {}).",
+                                    payload.updates.len()
+                                );
+                            }
+                        }
+                        _ => return Err("Unexpected RPC result for updateUserSettings".into()),
                     }
                 }
             },
@@ -2245,6 +2506,111 @@ async fn fetch_me(
     }
 }
 
+async fn fetch_user_settings(
+    realtime: &mut RealtimeClient,
+) -> Result<Option<proto::UserSettings>, Box<dyn std::error::Error>> {
+    let result = realtime
+        .call_rpc(
+            proto::Method::GetUserSettings,
+            proto::rpc_call::Input::GetUserSettings(proto::GetUserSettingsInput {}),
+        )
+        .await?;
+    match result {
+        proto::rpc_result::Result::GetUserSettings(payload) => Ok(payload.user_settings),
+        _ => Err("Unexpected RPC result for getUserSettings".into()),
+    }
+}
+
+struct NotificationSettingsValues {
+    mode: proto::notification_settings::Mode,
+    silent: bool,
+    zen_requires_mention: bool,
+    zen_uses_default_rules: bool,
+    zen_custom_rules: String,
+}
+
+fn notification_settings_values(
+    settings: Option<&proto::NotificationSettings>,
+) -> NotificationSettingsValues {
+    let mode = match settings
+        .and_then(|value| value.mode)
+        .and_then(proto::notification_settings::Mode::from_i32)
+    {
+        Some(proto::notification_settings::Mode::All) => proto::notification_settings::Mode::All,
+        Some(proto::notification_settings::Mode::None) => proto::notification_settings::Mode::None,
+        Some(proto::notification_settings::Mode::Mentions) => {
+            proto::notification_settings::Mode::Mentions
+        }
+        Some(proto::notification_settings::Mode::ImportantOnly) => {
+            proto::notification_settings::Mode::ImportantOnly
+        }
+        _ => proto::notification_settings::Mode::All,
+    };
+    let silent = settings.and_then(|value| value.silent).unwrap_or(false);
+    let zen_requires_mention = settings
+        .and_then(|value| value.zen_mode_requires_mention)
+        .unwrap_or(true);
+    let zen_uses_default_rules = settings
+        .and_then(|value| value.zen_mode_uses_default_rules)
+        .unwrap_or(true);
+    let zen_custom_rules = settings
+        .and_then(|value| value.zen_mode_custom_rules.clone())
+        .unwrap_or_default();
+
+    NotificationSettingsValues {
+        mode,
+        silent,
+        zen_requires_mention,
+        zen_uses_default_rules,
+        zen_custom_rules,
+    }
+}
+
+fn notification_mode_from_arg(
+    mode: NotificationModeArg,
+) -> proto::notification_settings::Mode {
+    match mode {
+        NotificationModeArg::All => proto::notification_settings::Mode::All,
+        NotificationModeArg::None => proto::notification_settings::Mode::None,
+        NotificationModeArg::Mentions => proto::notification_settings::Mode::Mentions,
+        NotificationModeArg::ImportantOnly => {
+            proto::notification_settings::Mode::ImportantOnly
+        }
+    }
+}
+
+fn notification_mode_label(mode: proto::notification_settings::Mode) -> &'static str {
+    match mode {
+        proto::notification_settings::Mode::All => "all",
+        proto::notification_settings::Mode::None => "none",
+        proto::notification_settings::Mode::Mentions => "mentions",
+        proto::notification_settings::Mode::ImportantOnly => "important",
+        _ => "all",
+    }
+}
+
+fn print_notification_settings(settings: Option<&proto::UserSettings>) {
+    let values = notification_settings_values(
+        settings.and_then(|value| value.notification_settings.as_ref()),
+    );
+    println!("Notification settings");
+    println!("  mode: {}", notification_mode_label(values.mode));
+    println!("  silent: {}", if values.silent { "yes" } else { "no" });
+    println!(
+        "  zen requires mention: {}",
+        if values.zen_requires_mention { "yes" } else { "no" }
+    );
+    println!(
+        "  zen uses default rules: {}",
+        if values.zen_uses_default_rules { "yes" } else { "no" }
+    );
+    if values.zen_custom_rules.is_empty() {
+        println!("  zen custom rules: -");
+    } else {
+        println!("  zen custom rules: {}", values.zen_custom_rules);
+    }
+}
+
 fn apply_chat_list_limits(
     mut payload: proto::GetChatsResult,
     limit: Option<usize>,
@@ -2914,6 +3280,58 @@ fn chat_display_name(chat: &proto::Chat, users_by_id: &HashMap<i64, proto::User>
     }
 
     format!("Chat {}", chat.id)
+}
+
+fn print_chat_details(chat: &proto::Chat, dialog: Option<&proto::Dialog>) {
+    let title = chat.title.trim();
+    let name = if !title.is_empty() {
+        if let Some(emoji) = chat.emoji.as_deref() {
+            if !emoji.trim().is_empty() {
+                format!("{} {}", emoji.trim(), title)
+            } else {
+                title.to_string()
+            }
+        } else {
+            title.to_string()
+        }
+    } else if let Some(peer) = chat.peer_id.as_ref() {
+        match &peer.r#type {
+            Some(proto::peer::Type::User(user)) => format!("DM with user {}", user.user_id),
+            Some(proto::peer::Type::Chat(chat_peer)) => format!("Chat {}", chat_peer.chat_id),
+            Some(proto::peer::Type::Self_(_)) => "Saved messages".to_string(),
+            None => format!("Chat {}", chat.id),
+        }
+    } else {
+        format!("Chat {}", chat.id)
+    };
+
+    println!("Chat {}: {}", chat.id, name);
+    if let Some(space_id) = chat.space_id {
+        println!("  space: {}", space_id);
+    }
+    if let Some(is_public) = chat.is_public {
+        println!("  public: {}", if is_public { "yes" } else { "no" });
+    }
+    if let Some(description) = chat.description.as_deref() {
+        let trimmed = description.trim();
+        if !trimmed.is_empty() {
+            println!("  description: {}", trimmed);
+        }
+    }
+    if let Some(dialog) = dialog {
+        if let Some(unread_count) = dialog.unread_count {
+            println!("  unread: {}", unread_count);
+        }
+        if let Some(read_max_id) = dialog.read_max_id {
+            println!("  read max id: {}", read_max_id);
+        }
+        if let Some(unread_mark) = dialog.unread_mark {
+            println!(
+                "  unread mark: {}",
+                if unread_mark { "yes" } else { "no" }
+            );
+        }
+    }
 }
 
 fn message_preview(

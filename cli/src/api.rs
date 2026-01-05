@@ -1,6 +1,6 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use thiserror::Error;
 use std::fs;
 use std::path::PathBuf;
@@ -128,12 +128,73 @@ impl ApiClient {
         }
     }
 
+    pub async fn read_messages(
+        &self,
+        token: &str,
+        input: ReadMessagesInput,
+    ) -> Result<ReadMessagesResult, ApiError> {
+        let url = format!("{}/readMessages", self.base_url);
+        let mut payload = serde_json::Map::new();
+        if let Some(peer_user_id) = input.peer_user_id {
+            payload.insert("peerUserId".to_string(), json!(peer_user_id));
+        }
+        if let Some(peer_thread_id) = input.peer_thread_id {
+            payload.insert("peerThreadId".to_string(), json!(peer_thread_id));
+        }
+        if let Some(max_id) = input.max_id {
+            payload.insert("maxId".to_string(), json!(max_id));
+        }
+        self.post_with_token(url, token, payload).await
+    }
+
+    pub async fn create_private_chat(
+        &self,
+        token: &str,
+        user_id: i64,
+    ) -> Result<CreatePrivateChatResult, ApiError> {
+        let url = format!("{}/createPrivateChat", self.base_url);
+        let mut payload = serde_json::Map::new();
+        payload.insert("userId".to_string(), json!(user_id));
+        self.post_with_token(url, token, payload).await
+    }
+
     async fn post<T: for<'de> Deserialize<'de>>(
         &self,
         url: String,
         payload: serde_json::Map<String, serde_json::Value>,
     ) -> Result<T, ApiError> {
         let response = self.http.post(url).json(&payload).send().await?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(ApiError::Status(status.as_u16()));
+        }
+        let api_response: ApiResponse<T> = response.json().await?;
+        match api_response {
+            ApiResponse::Ok { result, .. } => Ok(result),
+            ApiResponse::Err {
+                error,
+                description,
+                ..
+            } => Err(ApiError::Api {
+                error,
+                description: description.unwrap_or_else(|| "Unknown error".to_string()),
+            }),
+        }
+    }
+
+    async fn post_with_token<T: for<'de> Deserialize<'de>>(
+        &self,
+        url: String,
+        token: &str,
+        payload: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<T, ApiError> {
+        let response = self
+            .http
+            .post(url)
+            .bearer_auth(token)
+            .json(&payload)
+            .send()
+            .await?;
         let status = response.status();
         if !status.is_success() {
             return Err(ApiError::Status(status.as_u16()));
@@ -206,6 +267,25 @@ pub struct UploadFileResult {
     pub photo_id: Option<i64>,
     pub video_id: Option<i64>,
     pub document_id: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReadMessagesInput {
+    pub peer_user_id: Option<i64>,
+    pub peer_thread_id: Option<i64>,
+    pub max_id: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadMessagesResult {}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatePrivateChatResult {
+    pub chat: Value,
+    pub dialog: Value,
+    pub user: Value,
 }
 
 #[derive(Debug, Deserialize)]
