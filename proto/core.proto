@@ -216,6 +216,14 @@ message Message {
 
   // Rich text entities
   optional MessageEntities entities = 16;
+
+  // Send mode for this message, if any
+  optional MessageSendMode send_mode = 17;
+}
+
+enum MessageSendMode {
+  MODE_UNSPECIFIED = 0;
+  MODE_SILENT = 1;
 }
 
 message MessageEntities { repeated MessageEntity entities = 1; }
@@ -954,6 +962,9 @@ message SendMessageInput {
 
   // Parse markdown in message text and derive entities.
   optional bool parse_markdown = 8;
+
+  // Special send mode for this message
+  optional MessageSendMode send_mode = 9;
 }
 
 message SendMessageResult { repeated Update updates = 2; }

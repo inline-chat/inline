@@ -574,6 +574,12 @@ export interface Message {
      * @generated from protobuf field: optional MessageEntities entities = 16;
      */
     entities?: MessageEntities;
+    /**
+     * Send mode for this message, if any
+     *
+     * @generated from protobuf field: optional MessageSendMode send_mode = 17;
+     */
+    sendMode?: MessageSendMode;
 }
 /**
  * @generated from protobuf message MessageEntities
@@ -2516,6 +2522,12 @@ export interface SendMessageInput {
      * @generated from protobuf field: optional bool parse_markdown = 8;
      */
     parseMarkdown?: boolean;
+    /**
+     * Special send mode for this message
+     *
+     * @generated from protobuf field: optional MessageSendMode send_mode = 9;
+     */
+    sendMode?: MessageSendMode;
 }
 /**
  * @generated from protobuf message SendMessageResult
@@ -3529,6 +3541,19 @@ export interface DraftMessage {
      * @generated from protobuf field: optional MessageEntities entities = 2;
      */
     entities?: MessageEntities;
+}
+/**
+ * @generated from protobuf enum MessageSendMode
+ */
+export enum MessageSendMode {
+    /**
+     * @generated from protobuf enum value: MODE_UNSPECIFIED = 0;
+     */
+    MODE_UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: MODE_SILENT = 1;
+     */
+    MODE_SILENT = 1
 }
 /**
  * @generated from protobuf enum Method
@@ -4991,7 +5016,8 @@ class Message$Type extends MessageType<Message> {
             { no: 13, name: "attachments", kind: "message", T: () => MessageAttachments },
             { no: 14, name: "reactions", kind: "message", T: () => MessageReactions },
             { no: 15, name: "is_sticker", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 16, name: "entities", kind: "message", T: () => MessageEntities }
+            { no: 16, name: "entities", kind: "message", T: () => MessageEntities },
+            { no: 17, name: "send_mode", kind: "enum", opt: true, T: () => ["MessageSendMode", MessageSendMode] }
         ]);
     }
     create(value?: PartialMessage<Message>): Message {
@@ -5058,6 +5084,9 @@ class Message$Type extends MessageType<Message> {
                 case /* optional MessageEntities entities */ 16:
                     message.entities = MessageEntities.internalBinaryRead(reader, reader.uint32(), options, message.entities);
                     break;
+                case /* optional MessageSendMode send_mode */ 17:
+                    message.sendMode = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -5118,6 +5147,9 @@ class Message$Type extends MessageType<Message> {
         /* optional MessageEntities entities = 16; */
         if (message.entities)
             MessageEntities.internalBinaryWrite(message.entities, writer.tag(16, WireType.LengthDelimited).fork(), options).join();
+        /* optional MessageSendMode send_mode = 17; */
+        if (message.sendMode !== undefined)
+            writer.tag(17, WireType.Varint).int32(message.sendMode);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9740,7 +9772,8 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
             { no: 1000, name: "temporary_send_date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 6, name: "is_sticker", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 7, name: "entities", kind: "message", T: () => MessageEntities },
-            { no: 8, name: "parse_markdown", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 8, name: "parse_markdown", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 9, name: "send_mode", kind: "enum", opt: true, T: () => ["MessageSendMode", MessageSendMode] }
         ]);
     }
     create(value?: PartialMessage<SendMessageInput>): SendMessageInput {
@@ -9781,6 +9814,9 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
                 case /* optional bool parse_markdown */ 8:
                     message.parseMarkdown = reader.bool();
                     break;
+                case /* optional MessageSendMode send_mode */ 9:
+                    message.sendMode = reader.int32();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -9820,6 +9856,9 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
         /* optional bool parse_markdown = 8; */
         if (message.parseMarkdown !== undefined)
             writer.tag(8, WireType.Varint).bool(message.parseMarkdown);
+        /* optional MessageSendMode send_mode = 9; */
+        if (message.sendMode !== undefined)
+            writer.tag(9, WireType.Varint).int32(message.sendMode);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

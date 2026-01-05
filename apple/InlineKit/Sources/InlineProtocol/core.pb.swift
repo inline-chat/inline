@@ -21,6 +21,40 @@ fileprivate struct _GeneratedWithProtocGenSwiftVersion: SwiftProtobuf.ProtobufAP
   typealias Version = _2
 }
 
+public enum MessageSendMode: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case modeUnspecified // = 0
+  case modeSilent // = 1
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .modeUnspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .modeUnspecified
+    case 1: self = .modeSilent
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .modeUnspecified: return 0
+    case .modeSilent: return 1
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [MessageSendMode] = [
+    .modeUnspecified,
+    .modeSilent,
+  ]
+
+}
+
 public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
   case unspecified // = 0
@@ -1117,6 +1151,16 @@ public struct Message: @unchecked Sendable {
   public var hasEntities: Bool {return _storage._entities != nil}
   /// Clears the value of `entities`. Subsequent reads from it will return its default value.
   public mutating func clearEntities() {_uniqueStorage()._entities = nil}
+
+  /// Send mode for this message, if any
+  public var sendMode: MessageSendMode {
+    get {return _storage._sendMode ?? .modeUnspecified}
+    set {_uniqueStorage()._sendMode = newValue}
+  }
+  /// Returns true if `sendMode` has been explicitly set.
+  public var hasSendMode: Bool {return _storage._sendMode != nil}
+  /// Clears the value of `sendMode`. Subsequent reads from it will return its default value.
+  public mutating func clearSendMode() {_uniqueStorage()._sendMode = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -3802,6 +3846,16 @@ public struct SendMessageInput: Sendable {
   /// Clears the value of `parseMarkdown`. Subsequent reads from it will return its default value.
   public mutating func clearParseMarkdown() {self._parseMarkdown = nil}
 
+  /// Special send mode for this message
+  public var sendMode: MessageSendMode {
+    get {return _sendMode ?? .modeUnspecified}
+    set {_sendMode = newValue}
+  }
+  /// Returns true if `sendMode` has been explicitly set.
+  public var hasSendMode: Bool {return self._sendMode != nil}
+  /// Clears the value of `sendMode`. Subsequent reads from it will return its default value.
+  public mutating func clearSendMode() {self._sendMode = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -3815,6 +3869,7 @@ public struct SendMessageInput: Sendable {
   fileprivate var _isSticker: Bool? = nil
   fileprivate var _entities: MessageEntities? = nil
   fileprivate var _parseMarkdown: Bool? = nil
+  fileprivate var _sendMode: MessageSendMode? = nil
 }
 
 public struct SendMessageResult: Sendable {
@@ -5406,6 +5461,13 @@ public struct DraftMessage: Sendable {
 
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
+extension MessageSendMode: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    0: .same(proto: "MODE_UNSPECIFIED"),
+    1: .same(proto: "MODE_SILENT"),
+  ]
+}
+
 extension Method: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     0: .same(proto: "UNSPECIFIED"),
@@ -6638,6 +6700,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     14: .same(proto: "reactions"),
     15: .standard(proto: "is_sticker"),
     16: .same(proto: "entities"),
+    17: .standard(proto: "send_mode"),
   ]
 
   fileprivate class _StorageClass {
@@ -6657,6 +6720,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     var _reactions: MessageReactions? = nil
     var _isSticker: Bool? = nil
     var _entities: MessageEntities? = nil
+    var _sendMode: MessageSendMode? = nil
 
     #if swift(>=5.10)
       // This property is used as the initial default value for new instances of the type.
@@ -6687,6 +6751,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       _reactions = source._reactions
       _isSticker = source._isSticker
       _entities = source._entities
+      _sendMode = source._sendMode
     }
   }
 
@@ -6721,6 +6786,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
         case 14: try { try decoder.decodeSingularMessageField(value: &_storage._reactions) }()
         case 15: try { try decoder.decodeSingularBoolField(value: &_storage._isSticker) }()
         case 16: try { try decoder.decodeSingularMessageField(value: &_storage._entities) }()
+        case 17: try { try decoder.decodeSingularEnumField(value: &_storage._sendMode) }()
         default: break
         }
       }
@@ -6781,6 +6847,9 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       try { if let v = _storage._entities {
         try visitor.visitSingularMessageField(value: v, fieldNumber: 16)
       } }()
+      try { if let v = _storage._sendMode {
+        try visitor.visitSingularEnumField(value: v, fieldNumber: 17)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -6806,6 +6875,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
         if _storage._reactions != rhs_storage._reactions {return false}
         if _storage._isSticker != rhs_storage._isSticker {return false}
         if _storage._entities != rhs_storage._entities {return false}
+        if _storage._sendMode != rhs_storage._sendMode {return false}
         return true
       }
       if !storagesAreEqual {return false}
@@ -11207,6 +11277,7 @@ extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     6: .standard(proto: "is_sticker"),
     7: .same(proto: "entities"),
     8: .standard(proto: "parse_markdown"),
+    9: .standard(proto: "send_mode"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -11223,6 +11294,7 @@ extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
       case 6: try { try decoder.decodeSingularBoolField(value: &self._isSticker) }()
       case 7: try { try decoder.decodeSingularMessageField(value: &self._entities) }()
       case 8: try { try decoder.decodeSingularBoolField(value: &self._parseMarkdown) }()
+      case 9: try { try decoder.decodeSingularEnumField(value: &self._sendMode) }()
       case 1000: try { try decoder.decodeSingularInt64Field(value: &self._temporarySendDate) }()
       default: break
       }
@@ -11258,6 +11330,9 @@ extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     try { if let v = self._parseMarkdown {
       try visitor.visitSingularBoolField(value: v, fieldNumber: 8)
     } }()
+    try { if let v = self._sendMode {
+      try visitor.visitSingularEnumField(value: v, fieldNumber: 9)
+    } }()
     try { if let v = self._temporarySendDate {
       try visitor.visitSingularInt64Field(value: v, fieldNumber: 1000)
     } }()
@@ -11274,6 +11349,7 @@ extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     if lhs._isSticker != rhs._isSticker {return false}
     if lhs._entities != rhs._entities {return false}
     if lhs._parseMarkdown != rhs._parseMarkdown {return false}
+    if lhs._sendMode != rhs._sendMode {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

@@ -25,6 +25,7 @@ public struct SendMessageTransaction: Transaction2 {
     public var replyToMsgId: Int64?
     public var isSticker: Bool?
     public var entities: MessageEntities?
+    public var sendMode: MessageSendMode?
     public var randomId: Int64
     public var temporaryMessageId: Int64
   }
@@ -35,7 +36,8 @@ public struct SendMessageTransaction: Transaction2 {
     chatId: Int64,
     replyToMsgId: Int64? = nil,
     isSticker: Bool? = nil,
-    entities: MessageEntities? = nil
+    entities: MessageEntities? = nil,
+    sendMode: MessageSendMode? = nil
   ) {
     let randomId = Int64.random(in: 0 ... Int64.max)
     context = Context(
@@ -45,6 +47,7 @@ public struct SendMessageTransaction: Transaction2 {
       replyToMsgId: replyToMsgId,
       isSticker: isSticker,
       entities: entities,
+      sendMode: sendMode,
       randomId: randomId,
       temporaryMessageId: -1 * randomId
     )
@@ -60,6 +63,7 @@ public struct SendMessageTransaction: Transaction2 {
       if let text = context.text { $0.message = text }
       if let replyToMsgId = context.replyToMsgId { $0.replyToMsgID = replyToMsgId }
       if let entities = context.entities { $0.entities = entities }
+      if let sendMode = context.sendMode { $0.sendMode = sendMode }
     })
   }
 
@@ -224,7 +228,8 @@ public extension Transaction2 where Self == SendMessageTransaction {
     chatId: Int64,
     replyToMsgId: Int64? = nil,
     isSticker: Bool? = nil,
-    entities: MessageEntities? = nil
+    entities: MessageEntities? = nil,
+    sendMode: MessageSendMode? = nil
   ) -> SendMessageTransaction {
     SendMessageTransaction(
       text: text,
@@ -232,7 +237,8 @@ public extension Transaction2 where Self == SendMessageTransaction {
       chatId: chatId,
       replyToMsgId: replyToMsgId,
       isSticker: isSticker,
-      entities: entities
+      entities: entities,
+      sendMode: sendMode
     )
   }
 }

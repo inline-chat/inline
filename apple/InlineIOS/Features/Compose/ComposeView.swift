@@ -319,7 +319,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     sendMessage()
   }
 
-  func sendMessage() {
+  func sendMessage(sendMode: MessageSendMode? = nil) {
     guard let peerId else { return }
     let state = ChatState.shared.getState(peer: peerId)
     let isEditing = state.editingMessageId != nil
@@ -373,7 +373,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
               chatId: chatId,
               replyToMsgId: replyToMessageId,
               isSticker: nil,
-              entities: entities
+              entities: entities,
+              sendMode: sendMode
             )
           )
         }
@@ -395,7 +396,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
             mediaItems: [attachment],
             replyToMsgId: isFirst ? replyToMessageId : nil,
             isSticker: nil,
-            entities: isFirst ? entities : nil
+            entities: isFirst ? entities : nil,
+            sendMode: sendMode
           )))
         }
       }

@@ -6,13 +6,20 @@ class ComposeSendButton: NSView {
   var state = ComposeSendButtonState()
 
   var onSend: (() -> Void)?
+  var onSendWithoutNotification: (() -> Void)?
 
   // MARK: - Views
 
   private lazy var view: NSHostingView<ComposeSendButtonSwiftUI> = {
-    let sendButton = ComposeSendButtonSwiftUI(state: state) { [weak self] in
-      self?.onSend?()
-    }
+    let sendButton = ComposeSendButtonSwiftUI(
+      state: state,
+      action: { [weak self] in
+        self?.onSend?()
+      },
+      sendWithoutNotification: { [weak self] in
+        self?.onSendWithoutNotification?()
+      }
+    )
     let hostingView = NSHostingView(rootView: sendButton)
     hostingView.translatesAutoresizingMaskIntoConstraints = false
     hostingView.setContentHuggingPriority(.required, for: .horizontal)
@@ -22,8 +29,9 @@ class ComposeSendButton: NSView {
 
   // MARK: - Initialization
 
-  init(frame: NSRect = .zero, onSend: (() -> Void)? = nil) {
+  init(frame: NSRect = .zero, onSend: (() -> Void)? = nil, onSendWithoutNotification: (() -> Void)? = nil) {
     self.onSend = onSend
+    self.onSendWithoutNotification = onSendWithoutNotification
     super.init(frame: frame)
     setupView()
   }

@@ -1,3 +1,4 @@
+import InlineProtocol
 import UIKit
 
 extension ComposeView {
@@ -22,6 +23,16 @@ extension ComposeView {
     config.cornerStyle = .capsule
 
     button.addTarget(self, action: #selector(sendTapped), for: .touchUpInside)
+
+    let silentAction = UIAction(
+      title: "Send without notification",
+      image: UIImage(systemName: "bell.slash"),
+      handler: { [weak self] _ in
+        self?.sendMessage(sendMode: .modeSilent)
+      }
+    )
+    button.menu = UIMenu(children: [silentAction])
+    button.showsMenuAsPrimaryAction = false
 
     button.configurationUpdateHandler = { [weak button] _ in
       guard let button else { return }
