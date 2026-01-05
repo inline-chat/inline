@@ -2011,6 +2011,7 @@ async fn send_message(
         is_sticker: None,
         entities,
         parse_markdown: Some(parse_markdown),
+        send_mode: None,
     };
 
     let result = realtime
@@ -2534,7 +2535,7 @@ fn notification_settings_values(
 ) -> NotificationSettingsValues {
     let mode = match settings
         .and_then(|value| value.mode)
-        .and_then(proto::notification_settings::Mode::from_i32)
+        .and_then(|value| proto::notification_settings::Mode::try_from(value).ok())
     {
         Some(proto::notification_settings::Mode::All) => proto::notification_settings::Mode::All,
         Some(proto::notification_settings::Mode::None) => proto::notification_settings::Mode::None,
@@ -3298,7 +3299,6 @@ fn print_chat_details(chat: &proto::Chat, dialog: Option<&proto::Dialog>) {
         match &peer.r#type {
             Some(proto::peer::Type::User(user)) => format!("DM with user {}", user.user_id),
             Some(proto::peer::Type::Chat(chat_peer)) => format!("Chat {}", chat_peer.chat_id),
-            Some(proto::peer::Type::Self_(_)) => "Saved messages".to_string(),
             None => format!("Chat {}", chat.id),
         }
     } else {
