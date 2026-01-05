@@ -168,6 +168,7 @@ extension InlineProtocol.UpdateNewMessage {
         let mode = INUserSettings.current.notification.mode
         // Only show notification if mode is all
         guard mode == .all else { return }
+        guard message.sendMode != .modeSilent else { return }
         Task.detached {
           // Handle notification
           await MacNotifications.shared.handleNewMessage(protocolMsg: message)
@@ -187,6 +188,7 @@ extension InlineProtocol.UpdateNewMessageNotification {
         let mode = INUserSettings.current.notification.mode
         // Only show notification if mode is all
         guard mode != .all else { return }
+        guard message.sendMode != .modeSilent else { return }
         Task.detached {
           // Handle notification
           await MacNotifications.shared.handleNewMessage(protocolMsg: message)

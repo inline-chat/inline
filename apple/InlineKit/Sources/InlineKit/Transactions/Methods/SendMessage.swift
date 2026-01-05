@@ -26,6 +26,7 @@ public struct TransactionSendMessage: Transaction {
   public var replyToMsgId: Int64? = nil
   public var isSticker: Bool? = nil
   public var entities: MessageEntities? = nil
+  public var sendMode: MessageSendMode? = nil
 
   // Config
   public var id = UUID().uuidString
@@ -45,13 +46,15 @@ public struct TransactionSendMessage: Transaction {
     mediaItems: [FileMediaItem] = [],
     replyToMsgId: Int64? = nil,
     isSticker: Bool? = nil,
-    entities: MessageEntities? = nil
+    entities: MessageEntities? = nil,
+    sendMode: MessageSendMode? = nil
   ) {
     self.text = text
     self.peerId = peerId
     self.chatId = chatId
     self.isSticker = isSticker
     self.entities = entities
+    self.sendMode = sendMode
     attachments = mediaItems.map { SendMessageAttachment(media: $0) }
     self.replyToMsgId = replyToMsgId
     randomId = Int64.random(in: 0 ... Int64.max)
@@ -234,6 +237,7 @@ public struct TransactionSendMessage: Transaction {
       if let replyToMsgId { $0.replyToMsgID = replyToMsgId }
       if let inputMedia { $0.media = inputMedia }
       if let entities { $0.entities = entities }
+      if let sendMode { $0.sendMode = sendMode }
     }
 
     let result_ = try await Realtime.shared.invoke(

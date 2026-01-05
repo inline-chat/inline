@@ -1,4 +1,10 @@
-import { InputPeer, MessageEntities, Update, UpdateNewMessageNotification_Reason } from "@in/protocol/core"
+import {
+  InputPeer,
+  MessageEntities,
+  MessageSendMode,
+  Update,
+  UpdateNewMessageNotification_Reason,
+} from "@in/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { FileModel, type DbFullPhoto, type DbFullVideo } from "@in/server/db/models/files"
 import type { DbFullDocument } from "@in/server/db/models/files"
@@ -39,6 +45,7 @@ type Input = {
   sendDate?: number
   isSticker?: boolean
   entities?: MessageEntities
+  sendMode?: MessageSendMode
 
   /** whether to process markdown string */
   parseMarkdown?: boolean
@@ -150,6 +157,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     photo: dbFullPhoto,
     video: dbFullVideo,
     document: dbFullDocument,
+    sendMode: input.sendMode,
   }
 
   //await debugDelay(5000)
@@ -182,6 +190,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     unencryptedEntities: entities,
     unencryptedText: text,
     inputPeer,
+    sendMode: input.sendMode,
   })
 
   // return new updates
@@ -387,10 +396,15 @@ type SendPushForMsgInput = {
   unencryptedText: string | undefined
   unencryptedEntities: MessageEntities | undefined
   inputPeer: InputPeer
+  sendMode?: MessageSendMode
 }
 
 /** Send push notifications for this message */
 async function sendNotifications(input: SendPushForMsgInput) {
+  if (input.sendMode === MessageSendMode.MODE_SILENT) {
+    return
+  }
+
   const { updateGroup, messageInfo, currentUserId, chat, unencryptedText, unencryptedEntities, inputPeer } = input
 
   // get sender of replied message ID if any

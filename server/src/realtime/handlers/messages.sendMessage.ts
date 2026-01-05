@@ -35,6 +35,7 @@ export const sendMessage = async (
       isSticker: input.isSticker ?? false,
       entities: input.entities,
       parseMarkdown: input.parseMarkdown ?? undefined,
+      sendMode: input.sendMode ?? undefined,
     },
     {
       currentSessionId: handlerContext.sessionId,

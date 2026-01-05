@@ -90,6 +90,9 @@ class ComposeAppKit: NSView {
       frame: .zero,
       onSend: { [weak self] in
         self?.send()
+      },
+      onSendWithoutNotification: { [weak self] in
+        self?.send(sendMode: .modeSilent)
       }
     )
     return view
@@ -791,7 +794,7 @@ class ComposeAppKit: NSView {
   }
 
   // Send the message
-  func send() {
+  func send(sendMode: MessageSendMode? = nil) {
     // DispatchQueue.main.async(qos: .userInteractive) {
     ignoreNextHeightChange = true
     let attributedString = textEditor.attributedString
@@ -839,7 +842,8 @@ class ComposeAppKit: NSView {
             chatId: self.chatId ?? 0, // FIXME: chatId fallback
             replyToMsgId: replyToMsgId,
             isSticker: nil,
-            entities: entities
+            entities: entities,
+            sendMode: sendMode
           )
         )
       }
@@ -873,7 +877,8 @@ class ComposeAppKit: NSView {
               mediaItems: [attachment],
               replyToMsgId: isFirst ? replyToMsgId : nil,
               isSticker: nil,
-              entities: isFirst ? entities : nil
+              entities: isFirst ? entities : nil,
+              sendMode: sendMode
             )
           )
         )

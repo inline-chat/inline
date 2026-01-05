@@ -9,6 +9,7 @@ import {
   type MessageAttachments,
   type Peer,
   MessageEntities,
+  MessageSendMode,
 } from "@in/protocol/core"
 import { encodePeer, encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer"
 import { encodePhoto, encodePhotoLegacy } from "@in/server/realtime/encoders/encodePhoto"
@@ -28,6 +29,7 @@ export const encodeMessage = ({
   document,
   encodingForUserId,
   encodingForPeer,
+  sendMode,
 }: {
   message: DbMessage
   encodingForUserId: number
@@ -36,6 +38,7 @@ export const encodeMessage = ({
   photo?: DbFullPhoto | undefined
   video?: DbFullVideo | undefined
   document?: DbFullDocument | undefined
+  sendMode?: MessageSendMode
 }): Message => {
   // Decrypt
   let text = message.text ? message.text : undefined
@@ -117,6 +120,7 @@ export const encodeMessage = ({
     media: media,
     isSticker: message.isSticker || undefined,
     entities: entities,
+    sendMode: sendMode ?? undefined,
   }
 
   return messageProto

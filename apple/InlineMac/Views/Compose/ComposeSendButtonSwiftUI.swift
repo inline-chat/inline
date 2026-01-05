@@ -3,6 +3,7 @@ import SwiftUI
 struct ComposeSendButtonSwiftUI: View {
   @ObservedObject var state: ComposeSendButtonState
   var action: () -> Void
+  var sendWithoutNotification: () -> Void
   @State private var isHovering = false
 
   private let size: CGFloat = Theme.composeButtonSize
@@ -26,6 +27,11 @@ struct ComposeSendButtonSwiftUI: View {
             .animation(.easeInOut(duration: 0.1), value: isHovering)
         }
         .buttonStyle(.plain)
+        .contextMenu {
+          Button("Send without notification") {
+            sendWithoutNotification()
+          }
+        }
         .onHover { hovering in
           withAnimation(.easeInOut(duration: 0.2)) {
             isHovering = hovering
