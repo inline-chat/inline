@@ -39,6 +39,76 @@ public struct TransactionSendMessage: Transaction {
   public var peerThreadId: Int64? = nil
   public var temporaryMessageId: Int64
 
+  enum CodingKeys: String, CodingKey {
+    case text
+    case peerId
+    case chatId
+    case attachments
+    case replyToMsgId
+    case isSticker
+    case entities
+    case sendMode
+    case id
+    case config
+    case date
+    case randomId
+    case peerUserId
+    case peerThreadId
+    case temporaryMessageId
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    text = try container.decodeIfPresent(String.self, forKey: .text)
+    peerId = try container.decode(Peer.self, forKey: .peerId)
+    chatId = try container.decode(Int64.self, forKey: .chatId)
+    attachments = try container.decodeIfPresent([SendMessageAttachment].self, forKey: .attachments) ?? []
+    replyToMsgId = try container.decodeIfPresent(Int64.self, forKey: .replyToMsgId)
+    isSticker = try container.decodeIfPresent(Bool.self, forKey: .isSticker)
+    entities = try container.decodeIfPresent(MessageEntities.self, forKey: .entities)
+    if let rawValue = try container.decodeIfPresent(Int.self, forKey: .sendMode) {
+      sendMode = MessageSendMode(rawValue: rawValue) ?? .modeUnspecified
+    } else {
+      sendMode = nil
+    }
+    id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+    config = try container.decodeIfPresent(TransactionConfig.self, forKey: .config)
+      ?? TransactionConfig(maxRetries: 30, retryDelay: 4, executionTimeout: 600)
+    date = try container.decodeIfPresent(Date.self, forKey: .date) ?? Date()
+    randomId = try container.decode(Int64.self, forKey: .randomId)
+    peerUserId = try container.decodeIfPresent(Int64.self, forKey: .peerUserId)
+    peerThreadId = try container.decodeIfPresent(Int64.self, forKey: .peerThreadId)
+    temporaryMessageId = try container.decode(Int64.self, forKey: .temporaryMessageId)
+
+    if peerUserId == nil, case let .user(id) = peerId {
+      peerUserId = id
+    }
+    if peerThreadId == nil, case let .thread(id) = peerId {
+      peerThreadId = id
+    }
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encodeIfPresent(text, forKey: .text)
+    try container.encode(peerId, forKey: .peerId)
+    try container.encode(chatId, forKey: .chatId)
+    try container.encode(attachments, forKey: .attachments)
+    try container.encodeIfPresent(replyToMsgId, forKey: .replyToMsgId)
+    try container.encodeIfPresent(isSticker, forKey: .isSticker)
+    try container.encodeIfPresent(entities, forKey: .entities)
+    if let sendMode = sendMode {
+      try container.encode(sendMode.rawValue, forKey: .sendMode)
+    }
+    try container.encode(id, forKey: .id)
+    try container.encode(config, forKey: .config)
+    try container.encode(date, forKey: .date)
+    try container.encode(randomId, forKey: .randomId)
+    try container.encodeIfPresent(peerUserId, forKey: .peerUserId)
+    try container.encodeIfPresent(peerThreadId, forKey: .peerThreadId)
+    try container.encode(temporaryMessageId, forKey: .temporaryMessageId)
+  }
+
   public init(
     text: String?,
     peerId: Peer,

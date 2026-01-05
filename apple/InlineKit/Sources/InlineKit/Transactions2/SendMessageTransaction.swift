@@ -28,6 +28,72 @@ public struct SendMessageTransaction: Transaction2 {
     public var sendMode: MessageSendMode?
     public var randomId: Int64
     public var temporaryMessageId: Int64
+
+    enum CodingKeys: String, CodingKey {
+      case text
+      case peerId
+      case chatId
+      case replyToMsgId
+      case isSticker
+      case entities
+      case sendMode
+      case randomId
+      case temporaryMessageId
+    }
+
+    public init(
+      text: String?,
+      peerId: Peer,
+      chatId: Int64,
+      replyToMsgId: Int64?,
+      isSticker: Bool?,
+      entities: MessageEntities?,
+      sendMode: MessageSendMode?,
+      randomId: Int64,
+      temporaryMessageId: Int64
+    ) {
+      self.text = text
+      self.peerId = peerId
+      self.chatId = chatId
+      self.replyToMsgId = replyToMsgId
+      self.isSticker = isSticker
+      self.entities = entities
+      self.sendMode = sendMode
+      self.randomId = randomId
+      self.temporaryMessageId = temporaryMessageId
+    }
+
+    public init(from decoder: Decoder) throws {
+      let container = try decoder.container(keyedBy: CodingKeys.self)
+      text = try container.decodeIfPresent(String.self, forKey: .text)
+      peerId = try container.decode(Peer.self, forKey: .peerId)
+      chatId = try container.decode(Int64.self, forKey: .chatId)
+      replyToMsgId = try container.decodeIfPresent(Int64.self, forKey: .replyToMsgId)
+      isSticker = try container.decodeIfPresent(Bool.self, forKey: .isSticker)
+      entities = try container.decodeIfPresent(MessageEntities.self, forKey: .entities)
+      if let rawValue = try container.decodeIfPresent(Int.self, forKey: .sendMode) {
+        sendMode = MessageSendMode(rawValue: rawValue) ?? .modeUnspecified
+      } else {
+        sendMode = nil
+      }
+      randomId = try container.decode(Int64.self, forKey: .randomId)
+      temporaryMessageId = try container.decode(Int64.self, forKey: .temporaryMessageId)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+      var container = encoder.container(keyedBy: CodingKeys.self)
+      try container.encodeIfPresent(text, forKey: .text)
+      try container.encode(peerId, forKey: .peerId)
+      try container.encode(chatId, forKey: .chatId)
+      try container.encodeIfPresent(replyToMsgId, forKey: .replyToMsgId)
+      try container.encodeIfPresent(isSticker, forKey: .isSticker)
+      try container.encodeIfPresent(entities, forKey: .entities)
+      if let sendMode = sendMode {
+        try container.encode(sendMode.rawValue, forKey: .sendMode)
+      }
+      try container.encode(randomId, forKey: .randomId)
+      try container.encode(temporaryMessageId, forKey: .temporaryMessageId)
+    }
   }
 
   public init(
