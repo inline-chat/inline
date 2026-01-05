@@ -64,11 +64,18 @@ struct ShareView: View {
 
   private var navigationTitle: String {
     guard let content = state.sharedContent else { return "Share" }
-    if !content.images.isEmpty && content.files.isEmpty && !content.hasText && !content.hasUrls {
-      return "Sharing \(content.images.count) image\(content.images.count == 1 ? "" : "s")"
+    let photoCount = content.photoCount
+    let videoCount = content.videoCount
+    let documentCount = content.documentCount
+
+    if photoCount > 0 && videoCount == 0 && documentCount == 0 && !content.hasText && !content.hasUrls {
+      return "Sharing \(photoCount) photo\(photoCount == 1 ? "" : "s")"
     }
-    if !content.files.isEmpty && content.images.isEmpty && !content.hasText && !content.hasUrls {
-      return "Sharing \(content.files.count) file\(content.files.count == 1 ? "" : "s")"
+    if videoCount > 0 && photoCount == 0 && documentCount == 0 && !content.hasText && !content.hasUrls {
+      return "Sharing \(videoCount) video\(videoCount == 1 ? "" : "s")"
+    }
+    if documentCount > 0 && photoCount == 0 && videoCount == 0 && !content.hasText && !content.hasUrls {
+      return "Sharing \(documentCount) file\(documentCount == 1 ? "" : "s")"
     }
     if content.hasUrls && !content.hasMedia && !content.hasText {
       return "Sharing \(content.urls.count) link\(content.urls.count == 1 ? "" : "s")"
