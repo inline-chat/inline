@@ -16,6 +16,7 @@ final class MessagesCollectionView: UICollectionView {
   private var spaceId: Int64
   private var coordinator: Coordinator
   static var contextMenuOpen: Bool = false
+  private var lastKnownNavBarHeight: CGFloat = 0
 
   init(peerId: Peer, chatId: Int64, spaceId: Int64) {
     self.peerId = peerId
@@ -119,6 +120,10 @@ final class MessagesCollectionView: UICollectionView {
     // let topContentPadding: CGFloat = 10
     let topContentPadding: CGFloat = -10
     let navBarHeight = (findViewController()?.navigationController?.navigationBar.frame.height ?? 0)
+    if navBarHeight > 0 {
+      lastKnownNavBarHeight = navBarHeight
+    }
+    let effectiveNavBarHeight = navBarHeight > 0 ? navBarHeight : lastKnownNavBarHeight
 
     let isLandscape = UIDevice.current.orientation.isLandscape
 
@@ -126,7 +131,7 @@ final class MessagesCollectionView: UICollectionView {
     let topSafeArea = isLandscape ? window.safeAreaInsets.top : window.safeAreaInsets.top
 //    let bottomSafeArea = isLandscape ? window.safeAreaInsets.right : window.safeAreaInsets.bottom
     let bottomSafeArea = isLandscape ? window.safeAreaInsets.bottom : window.safeAreaInsets.bottom
-    let totalTopInset = topSafeArea + navBarHeight
+    let totalTopInset = topSafeArea + effectiveNavBarHeight
 
     NotificationCenter.default.post(
       name: Notification.Name("NavigationBarHeight"),
@@ -453,8 +458,12 @@ extension MessagesCollectionView: UICollectionViewDataSourcePrefetching {
     guard let window else { return nil }
 
     let navBarHeight = (findViewController()?.navigationController?.navigationBar.frame.height ?? 0)
+    if navBarHeight > 0 {
+      lastKnownNavBarHeight = navBarHeight
+    }
+    let effectiveNavBarHeight = navBarHeight > 0 ? navBarHeight : lastKnownNavBarHeight
     let topSafeArea = window.safeAreaInsets.top
-    let totalTopInset = topSafeArea + navBarHeight
+    let totalTopInset = topSafeArea + effectiveNavBarHeight
 
     let styleClass = NSClassFromString("_UIContextMenuStyle") as? NSObject.Type
     guard let style = styleClass?.perform(NSSelectorFromString("defaultStyle"))?.takeUnretainedValue() as? NSObject
