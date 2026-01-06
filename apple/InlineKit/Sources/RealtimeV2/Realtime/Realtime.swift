@@ -331,6 +331,10 @@ public actor RealtimeV2 {
     await sync.getStats()
   }
 
+  public func clearSyncState() async {
+    await sync.clearSyncState()
+  }
+
   // MARK: - Helpers
 
   private func updateConnectionState(_ newState: RealtimeConnectionState) async {

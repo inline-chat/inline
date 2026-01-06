@@ -23,6 +23,10 @@ struct StubSyncStorage: SyncStorage {
   func setBucketStates(states: [BucketKey: BucketState]) async {
     // TODO: Persist to database in single transaction
   }
+
+  func clearSyncState() async {
+    // TODO: Persist to database
+  }
 }
 
 /// Wrapper

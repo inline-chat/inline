@@ -118,4 +118,15 @@ public struct GRDBSyncStorage: SyncStorage {
       AppDatabase.log.error("Failed to save bucket states batch: \(error)")
     }
   }
+
+  public func clearSyncState() async {
+    do {
+      try await db.dbWriter.write { db in
+        _ = try DbBucketState.deleteAll(db)
+        _ = try DbGlobalSyncState.deleteAll(db)
+      }
+    } catch {
+      AppDatabase.log.error("Failed to clear sync state: \(error)")
+    }
+  }
 }
