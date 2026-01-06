@@ -785,7 +785,7 @@ class ShareState: ObservableObject {
             )
           }
 
-          let uploadResult: UploadFileResult
+          let uploadResult: InlineKit.UploadFileResult
           switch file.fileType {
             case .photo:
               uploadResult = try await apiClient.uploadFile(
