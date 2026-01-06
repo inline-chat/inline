@@ -187,6 +187,7 @@ struct SettingsView: View {
       do {
         try await FileCache.shared.clearCache()
         Transactions.shared.clearAll()
+        await Api.realtime.clearSyncState()
         try? AppDatabase.clearDB()
         await MainActor.run {
           isClearing = false

@@ -190,6 +190,13 @@ actor Sync {
     log.debug("updated sync config: enableMessageUpdates=\(config.enableMessageUpdates), gap=\(config.lastSyncSafetyGapSeconds)s")
   }
 
+  func clearSyncState() async {
+    log.debug("clearing sync state and bucket cache")
+    stats = .empty
+    buckets.removeAll()
+    await syncStorage.clearSyncState()
+  }
+
   func getStats() async -> SyncStats {
     var snapshot = stats
     let state = await syncStorage.getState()

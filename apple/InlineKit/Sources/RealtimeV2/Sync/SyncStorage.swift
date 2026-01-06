@@ -78,4 +78,7 @@ public protocol SyncStorage: Sendable {
 
   /// Uses a single transaction
   func setBucketStates(states: [BucketKey: BucketState]) async
+
+  /// Clears global sync state and all bucket states.
+  func clearSyncState() async
 }

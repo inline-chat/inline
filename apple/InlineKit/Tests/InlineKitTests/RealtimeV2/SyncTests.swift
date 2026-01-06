@@ -490,6 +490,11 @@ actor InMemorySyncStorage: SyncStorage {
       bucketStates[key] = state
     }
   }
+
+  func clearSyncState() async {
+    state = SyncState(lastSyncDate: 0)
+    bucketStates.removeAll()
+  }
 }
 
 private func makeChatPeer(chatId: Int64) -> InlineProtocol.Peer {

@@ -141,7 +141,7 @@ struct MainWindowCommands: Commands {
   }
 
   func clearCache() {
-    // Clear database
+    Task { await Api.realtime.clearSyncState() }
     try? AppDatabase.clearDB()
 
     // Close main window

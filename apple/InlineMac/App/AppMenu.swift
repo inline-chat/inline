@@ -489,9 +489,8 @@ final class AppMenu: NSObject {
   }
 
   @objc private func clearCache(_ sender: Any?) {
+    Task { await Api.realtime.clearSyncState() }
     Transactions.shared.clearAll()
-
-    // Clear database
     try? AppDatabase.clearDB()
 
     // TODO: re-open windows?
