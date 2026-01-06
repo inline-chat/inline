@@ -2005,6 +2005,7 @@ class MessageViewAppKit: NSView {
             didReachThreshold = false
             return
           }
+          focusWindowIfNeeded()
           Task(priority: .userInitiated) { @MainActor in self.reply() }
 
           // Animate back with spring effect
@@ -2033,6 +2034,16 @@ class MessageViewAppKit: NSView {
     } else {
       // Pass the event to super if we're not handling it
       super.scrollWheel(with: event)
+    }
+  }
+
+  private func focusWindowIfNeeded() {
+    guard let window else { return }
+    if !NSApplication.shared.isActive {
+      NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+    if !window.isKeyWindow {
+      window.makeKeyAndOrderFront(nil)
     }
   }
 

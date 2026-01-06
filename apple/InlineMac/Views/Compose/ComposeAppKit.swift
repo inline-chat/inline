@@ -969,6 +969,16 @@ class ComposeAppKit: NSView {
     textEditor.focus()
   }
 
+  private func focusWindowIfNeeded() {
+    guard let window else { return }
+    if !NSApplication.shared.isActive {
+      NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+    if !window.isKeyWindow {
+      window.makeKeyAndOrderFront(nil)
+    }
+  }
+
   // TODO: Abstract setAttributedString out of this
   func setText(_ text: String, animate: Bool = false, shouldUpdateHeight: Bool = true) {
     let attributedString = textEditor.createAttributedString(text)
@@ -1079,10 +1089,14 @@ extension ComposeAppKit {
 
   func handleTextDropOrPaste(_ text: String) {
     textEditor.insertText(text)
+    focusWindowIfNeeded()
+    focus()
   }
 
   func handleImageDropOrPaste(_ image: NSImage, _ url: URL? = nil) {
     addImage(image, url)
+    focusWindowIfNeeded()
+    focus()
   }
 }
 
