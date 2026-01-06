@@ -23,6 +23,7 @@
 - Default test timeout 25s; run focused tests from relevant package roots; avoid heavy/unapproved tooling (e.g., do not run `xcodebuild` full apps).
 - NEVER revert, discard, reset unrelated changes to the work you are doing or files you are touching. User may be working on other files simultaneously. NEVER clean files you have not edited, created or moved. When asked to commit, just commit your changes.
 - For larger tasks, write a comprehensive plan first; if there are multiple design choices or any room for ambiguity, ask clarifying questions; when implementing a large plan (more than a few tasks) save the plan in a markdown file in .agent-docs/ and update it after each task before starting next one.
+- When adding markdown files in `.agent-docs/`, prefix the filename with the date in `YYYY-MM-DD-title-kebab-case.md` format (example: `2026-01-02-title-kebab-case.md`).
 
 ## Common Commands
 
