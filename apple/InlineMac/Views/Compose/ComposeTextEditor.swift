@@ -148,7 +148,7 @@ class ComposeTextEditor: NSView {
     textView.isContinuousSpellCheckingEnabled = true
     textView.isGrammarCheckingEnabled = true
     textView.isAutomaticQuoteSubstitutionEnabled = true
-    textView.isAutomaticDashSubstitutionEnabled = true
+    textView.isAutomaticDashSubstitutionEnabled = false
 
     textView.typingAttributes = [
       .paragraphStyle: paragraphStyle,
