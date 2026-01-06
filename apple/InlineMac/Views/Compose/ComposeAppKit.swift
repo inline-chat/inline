@@ -76,6 +76,9 @@ class ComposeAppKit: NSView {
 
   // Features
   private var feature_animateHeightChanges = false // for now until fixing how to update list view smoothly
+  private var isHandlingStickerInsertion = false
+  private let stickerDetector = ComposeStickerDetector()
+  private let rightButtonSpacing: CGFloat = 6
 
   // MARK: Views
 
@@ -95,6 +98,14 @@ class ComposeAppKit: NSView {
         self?.send(sendMode: .modeSilent)
       }
     )
+    return view
+  }()
+
+  private lazy var emojiButton: ComposeEmojiButton = {
+    let view = ComposeEmojiButton { [weak self] in
+      self?.openEmojiPicker()
+    }
+    view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
 
@@ -205,6 +216,7 @@ class ComposeAppKit: NSView {
 
     // to bottom
     addSubview(sendButton)
+    addSubview(emojiButton)
     addSubview(menuButton)
     addSubview(textEditor)
 
@@ -251,6 +263,10 @@ class ComposeAppKit: NSView {
       ),
       sendButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -buttonsBottomSpacing),
 
+      // emoji
+      emojiButton.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor, constant: -rightButtonSpacing),
+      emojiButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -buttonsBottomSpacing),
+
       // menu
       menuButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalOuterSpacing),
       menuButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -buttonsBottomSpacing),
@@ -266,7 +282,7 @@ class ComposeAppKit: NSView {
 
       // text editor
       textEditor.leadingAnchor.constraint(equalTo: menuButton.trailingAnchor),
-      textEditor.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor),
+      textEditor.trailingAnchor.constraint(equalTo: emojiButton.leadingAnchor),
       textHeightConstraint,
       textEditor.bottomAnchor.constraint(equalTo: bottomAnchor),
 
@@ -917,6 +933,38 @@ class ComposeAppKit: NSView {
     return attributedString.attributedSubstring(from: trimmedRange)
   }
 
+  func sendSticker(_ image: NSImage) {
+    let replyToMsgId = state.replyingToMsgId
+
+    Task.detached(priority: .userInitiated) { [weak self] in
+      guard let self else { return }
+      do {
+        let photoInfo = try FileCache.savePhoto(image: image, optimize: true)
+        let mediaItem = FileMediaItem.photo(photoInfo)
+
+        Transactions.shared.mutate(
+          transaction: .sendMessage(
+            TransactionSendMessage(
+              text: nil,
+              peerId: self.peerId,
+              chatId: self.chatId ?? 0,
+              mediaItems: [mediaItem],
+              replyToMsgId: replyToMsgId,
+              isSticker: true,
+              entities: nil
+            )
+          )
+        )
+      } catch {
+        self.log.error("Failed to send sticker", error: error)
+      }
+    }
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+      self.state.scrollToBottom()
+    }
+  }
+
   func focus() {
     textEditor.focus()
   }
@@ -1147,6 +1195,8 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     // Detect mentions
     detectMentionAtCursor()
 
+    handleStickerDetectionIfNeeded(for: textView)
+
     if textEditor.isAttributedTextEmpty {
       // Handle empty text
       textEditor.showPlaceholder(true)
@@ -1167,6 +1217,36 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
 
     updateSendButtonIfNeeded()
     saveDraftWithDebounce()
+  }
+
+  private func handleStickerDetectionIfNeeded(for textView: NSTextView) {
+    guard #available(macOS 15.0, *) else { return }
+    guard isHandlingStickerInsertion == false else { return }
+
+    let stickers = stickerDetector.detectStickers(in: textView.attributedString())
+    guard stickers.isEmpty == false else { return }
+    guard let textStorage = textView.textStorage else { return }
+
+    isHandlingStickerInsertion = true
+    let sorted = stickers.sorted { $0.range.location > $1.range.location }
+    for sticker in sorted {
+      sendSticker(sticker.image)
+      let range = sticker.range
+      if range.location != NSNotFound, NSMaxRange(range) <= textStorage.length {
+        textStorage.replaceCharacters(in: range, with: "")
+      }
+    }
+    textView.resetTypingAttributesToDefault()
+    isHandlingStickerInsertion = false
+
+  }
+
+  private func openEmojiPicker() {
+    focus()
+    let showSelector = Selector(("showEmojiAndSymbols:"))
+    if NSApplication.shared.sendAction(showSelector, to: nil, from: emojiButton) == false {
+      NSApplication.shared.orderFrontCharacterPalette(nil)
+    }
   }
 
   /// Reflect state changes in send button
