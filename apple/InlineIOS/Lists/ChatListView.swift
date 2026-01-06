@@ -36,7 +36,8 @@ struct ChatListView: View {
   }
 
   @Environment(Router.self) private var router
-  @State private var previousItems: [HomeChatItem] = []
+  @ObservedObject private var visibilityGate = ChatListVisibilityGate.shared
+  @StateObject private var translationCoordinator = ChatListTranslationCoordinator()
 
   var body: some View {
     if items.isEmpty {
@@ -54,10 +55,23 @@ struct ChatListView: View {
         }
       }
       .listStyle(.plain)
-      .animation(.default, value: items)
+      // Experimental: gating list animations while off-screen can change UX.
+      .animation(visibilityGate.isVisible ? .default : nil, value: items)
       .onChange(of: items) { _, newItems in
-        processForTranslation(items: newItems)
-        previousItems = newItems
+        if visibilityGate.isVisible {
+          translationCoordinator.process(
+            items: newItems,
+            currentPeers: currentPeers
+          )
+        }
+      }
+      .onAppear {
+        visibilityGate.isVisible = true
+        translationCoordinator.prime(items: items)
+      }
+      .onDisappear {
+        visibilityGate.isVisible = false
+        translationCoordinator.cancel()
       }
     }
   }
@@ -147,30 +161,13 @@ struct ChatListView: View {
     .tint(.blue)
   }
 
-  private func processForTranslation(items: [HomeChatItem]) {
-    let currentPath = router.selectedTabPath
-
-    let itemsToProcess = items.filter { newItem in
-      if let oldItem = previousItems.first(where: { $0.id == newItem.id }) {
-        return oldItem != newItem
+  private var currentPeers: Set<Peer> {
+    Set(router.selectedTabPath.compactMap { destination in
+      if case let .chat(peer) = destination {
+        return peer
       }
-      return true
-    }
-
-    Task.detached {
-      for item in itemsToProcess {
-        let isCurrentChat = currentPath.contains { destination in
-          if case let .chat(peer) = destination {
-            return peer == item.peerId
-          }
-          return false
-        }
-        guard !isCurrentChat else { return }
-
-        guard let lastMessage = item.lastMessage else { return }
-        TranslationViewModel.translateMessages(for: item.peerId, messages: [FullMessage(from: lastMessage)])
-      }
-    }
+      return nil
+    })
   }
 
   private func rowBackground(isPinned: Bool) -> Color {
@@ -178,5 +175,71 @@ struct ChatListView: View {
       return Color(.systemBackground)
     }
     return isPinned ? Color(.systemGray6).opacity(0.5) : Color(.systemBackground)
+  }
+}
+
+final class ChatListTranslationCoordinator: ObservableObject {
+  private let core = Core()
+  private var task: Task<Void, Never>?
+
+  func prime(items: [HomeChatItem]) {
+    task?.cancel()
+    task = Task(priority: .utility) { [core] in
+      await core.setPrevious(items: items)
+    }
+  }
+
+  func process(items: [HomeChatItem], currentPeers: Set<Peer>) {
+    task?.cancel()
+    task = Task(priority: .utility) { [core] in
+      let itemsToProcess = await core.itemsNeedingTranslation(
+        items: items,
+        currentPeers: currentPeers
+      )
+
+      for item in itemsToProcess {
+        if Task.isCancelled { return }
+        guard let lastMessage = item.lastMessage else { continue }
+        TranslationViewModel.translateMessages(
+          for: item.peerId,
+          messages: [FullMessage(from: lastMessage)]
+        )
+      }
+    }
+  }
+
+  func cancel() {
+    task?.cancel()
+    task = nil
+  }
+
+  deinit {
+    task?.cancel()
+  }
+
+  actor Core {
+    private var previousById: [Int64: HomeChatItem] = [:]
+
+    func setPrevious(items: [HomeChatItem]) async {
+      previousById = await Self.makeDictionary(items: items)
+    }
+
+    func itemsNeedingTranslation(
+      items: [HomeChatItem],
+      currentPeers: Set<Peer>
+    ) async -> [HomeChatItem] {
+      let previous = previousById
+      let newDict = await Self.makeDictionary(items: items)
+      previousById = newDict
+
+      return items.filter { item in
+        previous[item.id] != item && !currentPeers.contains(item.peerId)
+      }
+    }
+
+    @concurrent
+    static func makeDictionary(items: [HomeChatItem]) async -> [Int64: HomeChatItem] {
+      Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+    }
   }
 }
