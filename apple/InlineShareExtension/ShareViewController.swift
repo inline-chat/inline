@@ -28,6 +28,7 @@ class ShareViewController: UIViewController {
       hostingController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
     ])
 
+    Task { await state.prepareConnection() }
     loadSharedContent()
   }
 
