@@ -797,7 +797,7 @@ class ComposeAppKit: NSView {
   func send(sendMode: MessageSendMode? = nil) {
     // DispatchQueue.main.async(qos: .userInteractive) {
     ignoreNextHeightChange = true
-    let attributedString = textEditor.attributedString
+    let attributedString = trimmedAttributedString(textEditor.attributedString)
     let replyToMsgId = state.replyingToMsgId
     let attachmentItems = attachmentItems
     // keep a copy of editingMessageId before we clear it
@@ -900,6 +900,21 @@ class ComposeAppKit: NSView {
 
     ignoreNextHeightChange = false
     // }
+  }
+
+  private func trimmedAttributedString(_ attributedString: NSAttributedString) -> NSAttributedString {
+    let whitespaceSet = CharacterSet.whitespacesAndNewlines
+    let fullString = attributedString.string as NSString
+    let startRange = fullString.rangeOfCharacter(from: whitespaceSet.inverted)
+    if startRange.location == NSNotFound {
+      return NSAttributedString()
+    }
+    let endRange = fullString.rangeOfCharacter(from: whitespaceSet.inverted, options: .backwards)
+    let trimmedRange = NSRange(
+      location: startRange.location,
+      length: endRange.location - startRange.location + 1
+    )
+    return attributedString.attributedSubstring(from: trimmedRange)
   }
 
   func focus() {
