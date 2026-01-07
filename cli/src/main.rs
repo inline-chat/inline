@@ -19,7 +19,8 @@ use std::{env, fs, io};
 use tokio::io::AsyncWriteExt;
 
 use crate::api::{
-    ApiClient, ApiError, UploadFileInput, UploadFileResult, UploadFileType, UploadVideoMetadata,
+    ApiClient, ApiError, CreateLinearIssueInput, CreateNotionTaskInput, UploadFileInput,
+    UploadFileResult, UploadFileType, UploadVideoMetadata,
 };
 use crate::auth::AuthStore;
 use crate::config::Config;
@@ -79,6 +80,8 @@ Examples:
   inline messages send --chat-id 123 --attach ./photo.jpg --attach ./spec.pdf --text "FYI"
   inline messages download --chat-id 123 --message-id 456
   inline messages send --user-id 42 --stdin
+  inline tasks create-linear --chat-id 123 --message-id 456
+  inline tasks create-notion --chat-id 123 --message-id 456 --space-id 31
 
 JQ examples:
   inline users list --json | jq -r '.users[] | "\(.id)\t\(.first_name) \(.last_name)\t@\(.username // "")\t\(.email // "")"'
@@ -154,6 +157,11 @@ enum Command {
     Notifications {
         #[command(subcommand)]
         command: NotificationsCommand,
+    },
+    #[command(about = "Create tasks from messages (Linear, Notion)")]
+    Tasks {
+        #[command(subcommand)]
+        command: TasksCommand,
     },
 }
 
@@ -691,6 +699,38 @@ struct SpacesUpdateMemberAccessArgs {
 
     #[arg(long, help = "Allow access to public chats (member role only)")]
     public_chats: bool,
+}
+
+#[derive(Subcommand)]
+enum TasksCommand {
+    #[command(about = "Create a Linear issue from a message")]
+    CreateLinear(TasksCreateLinearArgs),
+    #[command(about = "Create a Notion task from a message")]
+    CreateNotion(TasksCreateNotionArgs),
+}
+
+#[derive(Args)]
+struct TasksCreateLinearArgs {
+    #[arg(long, help = "Chat id containing the message")]
+    chat_id: i64,
+
+    #[arg(long, help = "Message id to create the task from")]
+    message_id: i64,
+
+    #[arg(long, help = "Space id (optional, inferred from chat if not provided)")]
+    space_id: Option<i64>,
+}
+
+#[derive(Args)]
+struct TasksCreateNotionArgs {
+    #[arg(long, help = "Chat id containing the message")]
+    chat_id: i64,
+
+    #[arg(long, help = "Message id to create the task from")]
+    message_id: i64,
+
+    #[arg(long, help = "Space id (required for Notion tasks)")]
+    space_id: i64,
 }
 
 #[tokio::main]
@@ -1810,6 +1850,89 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                         _ => return Err("Unexpected RPC result for updateUserSettings".into()),
+                    }
+                }
+            },
+            Command::Tasks { command } => match command {
+                TasksCommand::CreateLinear(args) => {
+                    let token = require_token(&auth_store)?;
+                    let mut realtime =
+                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+
+                    // Get current user id
+                    let me = fetch_me(&mut realtime).await?;
+                    let from_id = me.id;
+
+                    // Get message to extract text
+                    let peer = proto::InputPeer {
+                        id: Some(proto::input_peer::Id::ThreadId(args.chat_id)),
+                    };
+                    let input = proto::GetMessagesInput {
+                        peer_id: Some(peer.clone()),
+                        message_ids: vec![args.message_id],
+                    };
+                    let result = realtime
+                        .call_rpc(
+                            proto::Method::GetMessages,
+                            proto::rpc_call::Input::GetMessages(input),
+                        )
+                        .await?;
+
+                    let message = match result {
+                        proto::rpc_result::Result::GetMessages(payload) => payload
+                            .messages
+                            .into_iter()
+                            .next()
+                            .ok_or("Message not found")?,
+                        _ => return Err("Unexpected RPC result for getMessages".into()),
+                    };
+
+                    let text = message.text.unwrap_or_default();
+                    if text.trim().is_empty() {
+                        return Err("Message has no text content".into());
+                    }
+
+                    let api_input = CreateLinearIssueInput {
+                        text,
+                        message_id: args.message_id,
+                        chat_id: args.chat_id,
+                        from_id,
+                        peer_user_id: None,
+                        peer_thread_id: Some(args.chat_id),
+                        space_id: args.space_id,
+                    };
+
+                    let result = api.create_linear_issue(&token, api_input).await?;
+
+                    if cli.json {
+                        output::print_json(&result, json_format)?;
+                    } else if let Some(link) = result.link {
+                        println!("Created Linear issue: {}", link);
+                    } else {
+                        println!("Linear issue created.");
+                    }
+                }
+                TasksCommand::CreateNotion(args) => {
+                    let token = require_token(&auth_store)?;
+
+                    let api_input = CreateNotionTaskInput {
+                        space_id: args.space_id,
+                        message_id: args.message_id,
+                        chat_id: args.chat_id,
+                        peer_user_id: None,
+                        peer_thread_id: Some(args.chat_id),
+                    };
+
+                    let result = api.create_notion_task(&token, api_input).await?;
+
+                    if cli.json {
+                        output::print_json(&result, json_format)?;
+                    } else {
+                        let title_display = result
+                            .task_title
+                            .map(|t| format!(" \"{}\"", t))
+                            .unwrap_or_default();
+                        println!("Created Notion task{}: {}", title_display, result.url);
                     }
                 }
             },

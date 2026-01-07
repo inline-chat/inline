@@ -158,6 +158,55 @@ impl ApiClient {
         self.post_with_token(url, token, payload).await
     }
 
+    pub async fn create_linear_issue(
+        &self,
+        token: &str,
+        input: CreateLinearIssueInput,
+    ) -> Result<CreateLinearIssueResult, ApiError> {
+        let url = format!("{}/createLinearIssue", self.base_url);
+        let mut payload = serde_json::Map::new();
+        payload.insert("text".to_string(), json!(input.text));
+        payload.insert("messageId".to_string(), json!(input.message_id));
+        payload.insert("chatId".to_string(), json!(input.chat_id));
+        payload.insert("fromId".to_string(), json!(input.from_id));
+
+        let mut peer_id = serde_json::Map::new();
+        if let Some(user_id) = input.peer_user_id {
+            peer_id.insert("userId".to_string(), json!(user_id));
+        } else if let Some(thread_id) = input.peer_thread_id {
+            peer_id.insert("threadId".to_string(), json!(thread_id));
+        }
+        payload.insert("peerId".to_string(), json!(peer_id));
+
+        if let Some(space_id) = input.space_id {
+            payload.insert("spaceId".to_string(), json!(space_id));
+        }
+
+        self.post_with_token(url, token, payload).await
+    }
+
+    pub async fn create_notion_task(
+        &self,
+        token: &str,
+        input: CreateNotionTaskInput,
+    ) -> Result<CreateNotionTaskResult, ApiError> {
+        let url = format!("{}/createNotionTask", self.base_url);
+        let mut payload = serde_json::Map::new();
+        payload.insert("spaceId".to_string(), json!(input.space_id));
+        payload.insert("messageId".to_string(), json!(input.message_id));
+        payload.insert("chatId".to_string(), json!(input.chat_id));
+
+        let mut peer_id = serde_json::Map::new();
+        if let Some(user_id) = input.peer_user_id {
+            peer_id.insert("userId".to_string(), json!(user_id));
+        } else if let Some(thread_id) = input.peer_thread_id {
+            peer_id.insert("threadId".to_string(), json!(thread_id));
+        }
+        payload.insert("peerId".to_string(), json!(peer_id));
+
+        self.post_with_token(url, token, payload).await
+    }
+
     async fn post<T: for<'de> Deserialize<'de>>(
         &self,
         url: String,
@@ -286,6 +335,39 @@ pub struct CreatePrivateChatResult {
     pub chat: Value,
     pub dialog: Value,
     pub user: Value,
+}
+
+#[derive(Debug, Clone)]
+pub struct CreateLinearIssueInput {
+    pub text: String,
+    pub message_id: i64,
+    pub chat_id: i64,
+    pub from_id: i64,
+    pub peer_user_id: Option<i64>,
+    pub peer_thread_id: Option<i64>,
+    pub space_id: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateLinearIssueResult {
+    pub link: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CreateNotionTaskInput {
+    pub space_id: i64,
+    pub message_id: i64,
+    pub chat_id: i64,
+    pub peer_user_id: Option<i64>,
+    pub peer_thread_id: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateNotionTaskResult {
+    pub url: String,
+    pub task_title: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
