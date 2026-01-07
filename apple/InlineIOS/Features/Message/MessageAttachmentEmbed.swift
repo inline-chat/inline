@@ -49,7 +49,8 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
     let label = UILabel()
     label.translatesAutoresizingMaskIntoConstraints = false
     label.font = .systemFont(ofSize: 14)
-    label.numberOfLines = 0
+    label.numberOfLines = 2
+    label.lineBreakMode = .byTruncatingTail
     return label
   }()
 
@@ -292,6 +293,7 @@ private extension MessageAttachmentEmbed {
     addSubview(checkboxView)
     addSubview(taskTitleLabel)
 
+    let maxTitleHeight = taskTitleLabel.font.lineHeight * 2
     NSLayoutConstraint.activate([
       // First line - Avatar and username
       avatarView.leadingAnchor.constraint(
@@ -330,11 +332,12 @@ private extension MessageAttachmentEmbed {
         equalTo: checkboxView.trailingAnchor,
         constant: Constants.contentSpacing
       ),
-      taskTitleLabel.centerYAnchor.constraint(equalTo: checkboxView.centerYAnchor),
+      taskTitleLabel.topAnchor.constraint(equalTo: checkboxView.topAnchor),
       taskTitleLabel.trailingAnchor.constraint(
         lessThanOrEqualTo: trailingAnchor,
         constant: -Constants.horizontalPadding
       ),
+      taskTitleLabel.heightAnchor.constraint(lessThanOrEqualToConstant: maxTitleHeight),
 
       taskTitleLabel.bottomAnchor.constraint(
         lessThanOrEqualTo: bottomAnchor,
