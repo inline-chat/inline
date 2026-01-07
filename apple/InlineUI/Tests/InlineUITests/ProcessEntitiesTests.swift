@@ -189,6 +189,29 @@ struct ProcessEntitiesTests {
     #expect((textUrlAttributes[.link] as? URL)?.absoluteString == "https://docs.example.com")
   }
 
+  @Test("Email entities apply email attributes without link")
+  func testEmailEntities() {
+    let text = "Contact test@example.com for details"
+    let emailRange = rangeOfSubstring("test@example.com", in: text)
+    var emailEntity = MessageEntity()
+    emailEntity.type = .email
+    emailEntity.offset = Int64(emailRange.location)
+    emailEntity.length = Int64(emailRange.length)
+
+    let entities = createMessageEntities([emailEntity])
+
+    let result = ProcessEntities.toAttributedString(
+      text: text,
+      entities: entities,
+      configuration: testConfiguration
+    )
+
+    let emailAttributes = result.attributes(at: emailRange.location, effectiveRange: nil)
+    #expect(emailAttributes[.foregroundColor] as? PlatformColor == testConfiguration.linkColor)
+    #expect(emailAttributes[.emailAddress] as? String == "test@example.com")
+    #expect(emailAttributes[.link] == nil)
+  }
+
   @Test("Italic text")
   func testItalicText() {
     let text = "This is italic text"
@@ -518,6 +541,45 @@ struct ProcessEntitiesTests {
     #expect(entity.type == .url)
     #expect(entity.offset == 0)
     #expect(entity.length == Int64(range.length))
+  }
+
+  @Test("Extract email from mailto link attributes")
+  func testExtractEmailFromMailtoLinkAttributes() {
+    let text = "reach me"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let range = NSRange(location: 0, length: (text as NSString).length)
+    attributedString.addAttribute(.link, value: "mailto:test@example.com", range: range)
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+
+    #expect(result.text == text)
+    #expect(result.entities.entities.count == 1)
+
+    let entity = result.entities.entities[0]
+    #expect(entity.type == .email)
+    #expect(entity.offset == 0)
+    #expect(entity.length == Int64(range.length))
+  }
+
+  @Test("Detect email entity from plain text")
+  func testDetectEmailFromPlainText() {
+    let text = "Email test@example.com for updates"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+
+    let emailRange = rangeOfSubstring("test@example.com", in: text)
+    let emailEntity = result.entities.entities.first { $0.type == .email }
+    #expect(emailEntity != nil)
+    #expect(emailEntity?.offset == Int64(emailRange.location))
+    #expect(emailEntity?.length == Int64(emailRange.length))
   }
 
   @Test("Extract bold from attributed string")
