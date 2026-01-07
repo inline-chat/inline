@@ -74,6 +74,17 @@ describe("parseMarkdown", () => {
         textUrl: { url: "https://example.com" },
       })
     })
+
+    test("email", () => {
+      const result = parseMarkdown("Reach me at test@example.com")
+      expect(result.text).toBe("Reach me at test@example.com")
+      expect(result.entities).toHaveLength(1)
+      expect(result.entities[0]).toMatchObject({
+        offset: BigInt(12),
+        length: BigInt(16),
+        type: MessageEntity_Type.EMAIL,
+      })
+    })
   })
 
   describe("code blocks", () => {
