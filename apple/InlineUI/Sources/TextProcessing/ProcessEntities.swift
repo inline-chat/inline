@@ -112,6 +112,20 @@ public class ProcessEntities {
             attributedString.addAttributes(attributes, range: range)
           }
 
+        case .email:
+          let emailText = (text as NSString).substring(with: range)
+          var attributes: [NSAttributedString.Key: Any] = [
+            .foregroundColor: configuration.linkColor,
+            .underlineStyle: 0,
+            .emailAddress: emailText,
+          ]
+
+          #if os(macOS)
+          attributes[.cursor] = NSCursor.pointingHand
+          #endif
+
+          attributedString.addAttributes(attributes, range: range)
+
         case .mention:
           if case let .mention(mention) = entity.entity {
             if configuration.convertMentionsToLink {
@@ -202,6 +216,20 @@ public class ProcessEntities {
       }
     }
 
+    attributedString.enumerateAttribute(
+      .emailAddress,
+      in: fullRange,
+      options: []
+    ) { value, range, _ in
+      if let emailAddress = value as? String, !emailAddress.isEmpty {
+        var entity = MessageEntity()
+        entity.type = .email
+        entity.offset = Int64(range.location)
+        entity.length = Int64(range.length)
+        entities.append(entity)
+      }
+    }
+
     // Extract link entities (excluding mention links).
     attributedString.enumerateAttribute(
       .link,
@@ -223,6 +251,15 @@ public class ProcessEntities {
       }()
 
       guard let urlString, !urlString.isEmpty else { return }
+
+      if emailAddress(from: urlString) != nil {
+        var entity = MessageEntity()
+        entity.type = .email
+        entity.offset = Int64(range.location)
+        entity.length = Int64(range.length)
+        entities.append(entity)
+        return
+      }
 
       // Ignore data-detector / non-web link targets (we only support actual URLs as entities).
       guard isAllowedExternalLink(urlString) else { return }
@@ -360,6 +397,8 @@ public class ProcessEntities {
     // NOTE: Only extract if not within code blocks
     entities = extractItalicFromMarkdown(text: &text, existingEntities: entities)
 
+    entities = extractEmailEntities(text: text, existingEntities: entities)
+
     // Sort entities by offset
     entities.sort { $0.offset < $1.offset }
 
@@ -369,13 +408,20 @@ public class ProcessEntities {
     return (text: text, entities: messageEntities)
   }
 
-  private static let allowedExternalLinkSchemes: Set<String> = ["http", "https", "mailto"]
+  private static let allowedExternalLinkSchemes: Set<String> = ["http", "https"]
 
   private static func isAllowedExternalLink(_ urlString: String) -> Bool {
     guard let url = URL(string: urlString),
           let scheme = url.scheme?.lowercased()
     else { return false }
     return allowedExternalLinkSchemes.contains(scheme)
+  }
+
+  private static func emailAddress(from urlString: String) -> String? {
+    guard let url = URL(string: urlString),
+          url.scheme?.lowercased() == "mailto"
+    else { return nil }
+    return url.resourceSpecifier
   }
 
   // MARK: - Helper Methods
@@ -492,6 +538,49 @@ public class ProcessEntities {
   private struct OffsetRemoval {
     let position: Int
     let length: Int
+  }
+
+  private static let emailRegex: NSRegularExpression = {
+    let pattern = "\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}\\b"
+    return try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
+  }()
+
+  private static func extractEmailEntities(
+    text: String,
+    existingEntities: [MessageEntity]
+  ) -> [MessageEntity] {
+    guard !text.isEmpty else { return existingEntities }
+
+    var entities = existingEntities
+    let range = NSRange(location: 0, length: text.utf16.count)
+    let matches = emailRegex.matches(in: text, options: [], range: range)
+
+    for match in matches {
+      guard match.range.length > 0 else { continue }
+
+      if isPositionWithinCodeBlock(position: match.range.location, entities: entities) {
+        continue
+      }
+
+      if entities.contains(where: { rangesOverlap(lhs: $0, rhs: match.range) }) {
+        continue
+      }
+
+      var entity = MessageEntity()
+      entity.type = .email
+      entity.offset = Int64(match.range.location)
+      entity.length = Int64(match.range.length)
+      entities.append(entity)
+    }
+
+    return entities
+  }
+
+  private static func rangesOverlap(lhs: MessageEntity, rhs: NSRange) -> Bool {
+    let start = Int(lhs.offset)
+    let end = start + Int(lhs.length)
+    let lhsRange = NSRange(location: start, length: end - start)
+    return NSIntersectionRange(lhsRange, rhs).length > 0
   }
 
   private static func totalRemovedCharacters(before offset: Int, removals: [OffsetRemoval]) -> Int {
