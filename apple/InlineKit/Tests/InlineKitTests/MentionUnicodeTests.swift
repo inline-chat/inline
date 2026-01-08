@@ -26,7 +26,8 @@ struct MentionUnicodeOffsetTests {
     let text = "🛍️ @john "
     let attributed = NSMutableAttributedString(string: text)
     let nsText = text as NSString
-    let mentionRange = nsText.range(of: "@john ")
+    // Only the mention itself gets the attribute, not the trailing space
+    let mentionRange = nsText.range(of: "@john")
 
     attributed.addAttribute(.mentionUserId, value: Int64(123), range: mentionRange)
 
@@ -34,6 +35,6 @@ struct MentionUnicodeOffsetTests {
 
     #expect(entities.count == 1)
     #expect(entities[0].offset == Int64(mentionRange.location))
-    #expect(entities[0].length == Int64(max(0, mentionRange.length - 1)))
+    #expect(entities[0].length == Int64(mentionRange.length))
   }
 }

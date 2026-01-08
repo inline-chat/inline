@@ -178,6 +178,10 @@ class MentionManager: NSObject {
 
     textView.attributedText = result.newAttributedText
     textView.selectedRange = NSRange(location: result.newCursorPosition, length: 0)
+
+    // Reset typing attributes to prevent any style leakage
+    textView.resetTypingAttributesToDefault()
+
     hideMentionCompletion()
     delegate?.mentionManager(self, didSelectMention: mentionText, userId: user.user.id, for: mentionRange.range)
     return true
@@ -328,6 +332,9 @@ class MentionManager: NSObject {
     // Update attributed text and cursor position
     textView.attributedText = result.newAttributedText
     textView.selectedRange = NSRange(location: result.newCursorPosition, length: 0)
+
+    // Reset typing attributes to prevent any style leakage
+    textView.resetTypingAttributesToDefault()
 
     // Hide the menu
     hideMentionCompletion()
