@@ -47,11 +47,32 @@ public class AttributedStringHelpers {
     _ attributedString: NSAttributedString,
     range: NSRange,
     with mentionText: String,
-    userId: Int64
+    userId: Int64,
+    trailingText: String = ""
   ) -> NSAttributedString {
     let mutableAttributedString = attributedString.mutableCopy() as! NSMutableAttributedString
+
+    // Create the mention part with mention attributes
     let mentionAttributedString = createMentionAttributedString(mentionText, userId: userId)
-    mutableAttributedString.replaceCharacters(in: range, with: mentionAttributedString)
+
+    // Combine mention with trailing text (trailing text does NOT get mention attributes)
+    let combined = NSMutableAttributedString(attributedString: mentionAttributedString)
+    if !trailingText.isEmpty {
+      // Get default attributes from the original string or use system defaults
+      let defaultFont: AnyObject
+      #if os(macOS)
+      defaultFont = NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+      #elseif os(iOS)
+      defaultFont = UIFont.systemFont(ofSize: 17, weight: .regular)
+      #endif
+      let defaultAttributes: [NSAttributedString.Key: Any] = [
+        .font: defaultFont,
+      ]
+      let trailingAttributedString = NSAttributedString(string: trailingText, attributes: defaultAttributes)
+      combined.append(trailingAttributedString)
+    }
+
+    mutableAttributedString.replaceCharacters(in: range, with: combined)
     return mutableAttributedString.copy() as! NSAttributedString
   }
 
@@ -66,7 +87,7 @@ public class AttributedStringHelpers {
         var entity = MessageEntity()
         entity.type = .mention
         entity.offset = Int64(range.location)
-        entity.length = Int64(range.length - 1) // Subtract 1 for trailing space
+        entity.length = Int64(range.length) // No longer subtract 1 since trailing space doesn't have mention attribute
         entity.mention = MessageEntity.MessageEntityMention.with {
           $0.userID = userId
         }

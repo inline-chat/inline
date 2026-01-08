@@ -118,15 +118,16 @@ public class MentionDetector {
     userId: Int64,
     trailingText: String = " "
   ) -> (newAttributedText: NSAttributedString, newCursorPosition: Int) {
-    let mentionString = mentionText + trailingText
+    // Pass trailingText separately so it doesn't get mention attributes
     let newAttributedText = AttributedStringHelpers.replaceMentionInAttributedString(
       attributedText,
       range: range,
-      with: mentionString,
-      userId: userId
+      with: mentionText,
+      userId: userId,
+      trailingText: trailingText
     )
 
-    let newCursorPosition = range.location + mentionString.count
+    let newCursorPosition = range.location + mentionText.count + trailingText.count
 
     log.trace("Replaced mention at \(range) with '\(mentionText)' for user \(userId), new cursor: \(newCursorPosition)")
 
