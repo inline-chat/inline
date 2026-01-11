@@ -676,7 +676,7 @@ final class ImageViewerController: UIViewController {
     
   @objc func image(_ image: UIImage, didFinishSavingWithError error: Error?, contextInfo: UnsafeRawPointer) {
     if let error = error {
-      print("Error saving image: \(error.localizedDescription)")
+      Log.shared.error("Failed to save image", error: error)
             
       let alert = UIAlertController(
         title: "Save Error",

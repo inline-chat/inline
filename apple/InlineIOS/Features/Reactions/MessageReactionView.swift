@@ -60,6 +60,7 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
   private lazy var emojiLabel: UILabel = {
     let label = UILabel()
     label.font = UIFont.systemFont(ofSize: Constants.emojiSize, weight: .medium)
+    label.translatesAutoresizingMaskIntoConstraints = false
     configureEmojiLabel(label)
     return label
   }()
@@ -122,10 +123,6 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
 
   private func setupView() {
     configureContainerAppearance()
-
-    // Center the emoji and count labels
-    stackView.distribution = .equalSpacing
-    stackView.alignment = .center
 
     // Add subviews
     addSubview(containerView)

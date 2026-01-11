@@ -150,6 +150,24 @@ final class PhotoView: UIView, QLPreviewControllerDataSource, QLPreviewControlle
     }
   }
 
+  func update(with fullMessage: FullMessage) {
+    let previousFileId = self.fullMessage.file?.id
+    let previousLocalPath = self.fullMessage.file?.localPath
+    self.fullMessage = fullMessage
+
+    if previousFileId == fullMessage.file?.id,
+       previousLocalPath == fullMessage.file?.localPath
+    {
+      return
+    }
+
+    NSLayoutConstraint.deactivate(imageConstraints)
+    imageConstraints.removeAll()
+    imageView.removeFromSuperview()
+    setupImage()
+    setNeedsLayout()
+  }
+
   private func triggerMessageReload() {
     Task { @MainActor in
       await MessagesPublisher.shared

@@ -17,6 +17,7 @@ final class NewVideoView: UIView {
   private var isDownloading = false
   private var isPresentingViewer = false
   private var pendingViewerURL: URL?
+  private var downloadProgress: Double = 0
 
   private var hasText: Bool {
     fullMessage.message.text?.isEmpty == false
@@ -65,6 +66,24 @@ final class NewVideoView: UIView {
     view.color = .white
     view.hidesWhenStopped = true
     return view
+  }()
+
+  private let downloadProgressView: CircularProgressHostingView = {
+    let view = CircularProgressHostingView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.isHidden = true
+    return view
+  }()
+
+  private let cancelDownloadButton: UIButton = {
+    let config = UIImage.SymbolConfiguration(pointSize: 14, weight: .bold)
+    let button = UIButton(type: .system)
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.setImage(UIImage(systemName: "xmark", withConfiguration: config), for: .normal)
+    button.tintColor = .white
+    button.isHidden = true
+    button.accessibilityLabel = "Cancel download"
+    return button
   }()
 
   private let durationBadge: PillLabel = {
@@ -198,6 +217,8 @@ final class NewVideoView: UIView {
     addSubview(overlayBackground)
     overlayBackground.addSubview(overlayIconView)
     overlayBackground.addSubview(overlaySpinner)
+    overlayBackground.addSubview(downloadProgressView)
+    overlayBackground.addSubview(cancelDownloadButton)
     addSubview(durationBadge)
 
     NSLayoutConstraint.activate([
@@ -211,6 +232,14 @@ final class NewVideoView: UIView {
 
       overlaySpinner.centerXAnchor.constraint(equalTo: overlayBackground.centerXAnchor),
       overlaySpinner.centerYAnchor.constraint(equalTo: overlayBackground.centerYAnchor),
+
+      downloadProgressView.topAnchor.constraint(equalTo: overlayBackground.topAnchor, constant: 3),
+      downloadProgressView.leadingAnchor.constraint(equalTo: overlayBackground.leadingAnchor, constant: 3),
+      downloadProgressView.trailingAnchor.constraint(equalTo: overlayBackground.trailingAnchor, constant: -3),
+      downloadProgressView.bottomAnchor.constraint(equalTo: overlayBackground.bottomAnchor, constant: -3),
+
+      cancelDownloadButton.centerXAnchor.constraint(equalTo: overlayBackground.centerXAnchor),
+      cancelDownloadButton.centerYAnchor.constraint(equalTo: overlayBackground.centerYAnchor),
 
       durationBadge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
       durationBadge.topAnchor.constraint(equalTo: topAnchor, constant: 6),
@@ -229,7 +258,9 @@ final class NewVideoView: UIView {
 
   private func setupGestures() {
     let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+    tapGesture.delegate = self
     addGestureRecognizer(tapGesture)
+    cancelDownloadButton.addTarget(self, action: #selector(handleCancelDownload), for: .touchUpInside)
   }
 
   private func setupMask() {
@@ -282,6 +313,12 @@ final class NewVideoView: UIView {
       return
     }
 
+    progressCancellable?.cancel()
+    progressCancellable = nil
+    isDownloading = false
+    downloadProgress = 0
+    downloadProgressView.setProgress(0)
+
     setupVideoConstraints()
     updateImage()
     updateDurationLabel()
@@ -303,12 +340,25 @@ final class NewVideoView: UIView {
       .map { FileDownloader.shared.isVideoDownloadActive(videoId: $0.id) } ?? false
     let downloading = !isVideoDownloaded && (isDownloading || globalDownloadActive)
 
-    if isUploading || downloading {
+    if isUploading {
       overlayIconView.isHidden = true
       overlaySpinner.startAnimating()
+      downloadProgressView.isHidden = true
+      cancelDownloadButton.isHidden = true
+    } else if downloading {
+      overlaySpinner.stopAnimating()
+      overlayIconView.isHidden = true
+      downloadProgressView.isHidden = false
+      cancelDownloadButton.isHidden = false
+      downloadProgressView.setProgress(downloadProgress)
+      if let videoId = fullMessage.videoInfo?.id {
+        bindProgressIfNeeded(videoId: videoId)
+      }
     } else {
       overlaySpinner.stopAnimating()
       overlayIconView.isHidden = false
+      downloadProgressView.isHidden = true
+      cancelDownloadButton.isHidden = true
       overlayIconView.image = UIImage(
         systemName: isVideoDownloaded ? "play.fill" : "arrow.down",
         withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .semibold)
@@ -388,11 +438,14 @@ final class NewVideoView: UIView {
     }
 
     isDownloading = true
+    downloadProgress = 0
+    downloadProgressView.setProgress(0)
     updateOverlay()
     FileDownloader.shared.downloadVideo(video: videoInfo, for: fullMessage.message) { [weak self] _ in
       DispatchQueue.main.async { [weak self] in
         guard let self else { return }
         self.isDownloading = false
+        self.downloadProgress = 0
         self.updateOverlay()
       }
     }
@@ -411,16 +464,34 @@ final class NewVideoView: UIView {
         if let local = self.videoLocalUrl(), FileManager.default.fileExists(atPath: local.path) {
           self.progressCancellable = nil
           self.isDownloading = false
+          self.downloadProgress = 0
           self.updateOverlay()
           return
+        }
+
+        if progress.error == nil, !progress.isComplete {
+          self.downloadProgress = progress.progress
+          self.downloadProgressView.setProgress(progress.progress)
         }
 
         if progress.error != nil || progress.isComplete {
           self.progressCancellable = nil
           self.isDownloading = false
+          self.downloadProgress = 0
           self.updateOverlay()
         }
       }
+  }
+
+  @objc private func handleCancelDownload() {
+    guard let videoId = fullMessage.videoInfo?.id else { return }
+    FileDownloader.shared.cancelVideoDownload(videoId: videoId)
+    progressCancellable?.cancel()
+    progressCancellable = nil
+    isDownloading = false
+    downloadProgress = 0
+    downloadProgressView.setProgress(0)
+    updateOverlay()
   }
 
   private func videoLocalUrl() -> URL? {
@@ -454,5 +525,14 @@ final class NewVideoView: UIView {
     return renderer.image { context in
       thumbnailView.layer.render(in: context.cgContext)
     }
+  }
+}
+
+extension NewVideoView: UIGestureRecognizerDelegate {
+  func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+    if let touchedView = touch.view, touchedView.isDescendant(of: cancelDownloadButton) {
+      return false
+    }
+    return true
   }
 }
