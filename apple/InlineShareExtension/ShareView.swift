@@ -157,6 +157,10 @@ struct ShareView: View {
         successView
       } else if state.isSending {
         sendingView
+      } else if state.isLoadingContent {
+        loadingView
+      } else if state.sharedContent == nil {
+        noContentView
       } else {
         chatSelectionView
       }
@@ -203,6 +207,41 @@ struct ShareView: View {
       insertion: .scale.combined(with: .opacity),
       removal: .opacity
     ))
+  }
+
+  @ViewBuilder
+  private var loadingView: some View {
+    VStack(spacing: 16) {
+      ProgressView()
+        .scaleEffect(1.2)
+      Text("Preparing your share...")
+        .font(.headline)
+        .foregroundStyle(.primary)
+      Text("This can take a moment for large files.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .transition(.opacity)
+  }
+
+  @ViewBuilder
+  private var noContentView: some View {
+    VStack(spacing: 16) {
+      Image(systemName: "tray")
+        .font(.system(size: 40))
+        .foregroundStyle(.secondary)
+      Text("Nothing to share")
+        .font(.headline)
+        .foregroundStyle(.secondary)
+      Text("Go back and select something to share, then try again.")
+        .font(.caption)
+        .foregroundStyle(.tertiary)
+        .multilineTextAlignment(.center)
+        .padding(.horizontal, 32)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .transition(.opacity)
   }
   
   @ViewBuilder
