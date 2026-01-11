@@ -5,6 +5,14 @@ import Foundation
 import InlineProtocol
 import Logger
 
+public enum RealtimeDirectRpcError: Error {
+  case notAuthorized
+  case notConnected
+  case timeout
+  case rpcError(message: String?, code: Int)
+  case unknown(Error)
+}
+
 /// This root actor manages the connection, sync, transactions, queries, etc.
 ///
 /// later we will rename the main module to `Realtime`
@@ -175,6 +183,14 @@ public actor RealtimeV2 {
     await client.stopTransport()
   }
 
+  /// Ensure the transport is started when credentials are available.
+  /// This is intentionally light-weight so callers can pre-warm the connection without using transactions.
+  public func connectIfNeeded() async {
+    if auth.isLoggedIn || auth.getToken() != nil {
+      await startTransport()
+    }
+  }
+
   private func runTransaction(_ transactionWrapper: TransactionWrapper) async {
     log.trace("Running transaction \(transactionWrapper.id) with method \(transactionWrapper.transaction.method)")
     let transaction = transactionWrapper.transaction
@@ -308,6 +324,33 @@ public actor RealtimeV2 {
 
   public func applyUpdates(_ updates: [InlineProtocol.Update]) {
     Task { await sync.process(updates: updates) }
+  }
+
+  /// Low-level RPC call that bypasses the transaction system.
+  /// Used by short-lived contexts (e.g. share extension) that must send media before full transaction support.
+  public func callRpcDirect(
+    method: InlineProtocol.Method,
+    input: RpcCall.OneOf_Input?,
+    timeout: Duration? = .seconds(15)
+  ) async throws -> InlineProtocol.RpcResult.OneOf_Result? {
+    do {
+      return try await client.callRpc(method: method, input: input, timeout: timeout)
+    } catch let error as ProtocolClientError {
+      switch error {
+        case .notAuthorized:
+          throw RealtimeDirectRpcError.notAuthorized
+        case .notConnected:
+          throw RealtimeDirectRpcError.notConnected
+        case .timeout:
+          throw RealtimeDirectRpcError.timeout
+        case let .rpcError(_, message, code):
+          throw RealtimeDirectRpcError.rpcError(message: message, code: code)
+        case .stopped:
+          throw RealtimeDirectRpcError.notConnected
+      }
+    } catch {
+      throw RealtimeDirectRpcError.unknown(error)
+    }
   }
 
   public func cancelTransaction(where predicate: @escaping (TransactionWrapper) -> Bool) {
