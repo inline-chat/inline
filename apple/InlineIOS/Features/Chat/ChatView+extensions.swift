@@ -4,12 +4,40 @@ import InlineUI
 import RealtimeV2
 import SwiftUI
 
-extension ChatView {
-  var isCurrentUser: Bool {
+struct ChatToolbarLeadingView: View {
+  let peerId: Peer
+  @Binding private var isChatHeaderPressed: Bool
+
+  @EnvironmentObject private var fullChatViewModel: FullChatViewModel
+  @EnvironmentObject private var realtimeState: RealtimeState
+  @Environment(Router.self) private var router
+  @Environment(\.colorScheme) private var colorScheme
+
+  @ObservedObject private var composeActions: ComposeActions
+
+  init(
+    peerId: Peer,
+    isChatHeaderPressed: Binding<Bool>,
+    composeActions: ComposeActions = .shared
+  ) {
+    self.peerId = peerId
+    _isChatHeaderPressed = isChatHeaderPressed
+    _composeActions = ObservedObject(initialValue: composeActions)
+  }
+
+  private var toolbarAvatarSize: CGFloat {
+    if #available(iOS 26.0, *) {
+      44
+    } else {
+      32
+    }
+  }
+
+  private var isCurrentUser: Bool {
     fullChatViewModel.peerUser?.id == Auth.shared.getCurrentUserId()
   }
 
-  var title: String {
+  private var title: String {
     if case .user = peerId {
       isCurrentUser ? "Saved Message" : fullChatViewModel.peerUser?.firstName ?? fullChatViewModel.peerUser?
         .username ?? fullChatViewModel.peerUser?.email ?? fullChatViewModel.peerUser?.phoneNumber ?? "Invited User"
@@ -18,64 +46,27 @@ extension ChatView {
     }
   }
 
-  func currentComposeAction() -> ApiComposeAction? {
+  private var isPrivateChat: Bool {
+    fullChatViewModel.peer.isPrivate
+  }
+
+  private var isThreadChat: Bool {
+    fullChatViewModel.peer.isThread
+  }
+
+  private var chatProfileColors: [Color] {
+    let _ = colorScheme
+    return [
+      Color(.systemGray3).adjustLuminosity(by: 0.2),
+      Color(.systemGray5).adjustLuminosity(by: 0),
+    ]
+  }
+
+  private func currentComposeAction() -> ApiComposeAction? {
     composeActions.getComposeAction(for: peerId)?.action
   }
 
-  enum ChatSubtitle {
-    case connectionState(RealtimeConnectionState)
-    case typing(String)
-    case composeAction(ApiComposeAction)
-    case timezone(String)
-    case empty
-
-    var text: String {
-      switch self {
-        case let .connectionState(state):
-          state.title.lowercased()
-        case let .typing(text):
-          text
-        case let .composeAction(action):
-          action.toHumanReadableForIOS()
-        case let .timezone(timezone):
-          TimeZoneFormatter.shared.formatTimeZoneInfo(userTimeZoneId: timezone) ?? ""
-        case .empty:
-          ""
-      }
-    }
-
-    var shouldKeepOriginalCase: Bool {
-      switch self {
-        case .typing:
-          true
-        default:
-          false
-      }
-    }
-
-    @ViewBuilder
-    var animatedIndicator: some View {
-      switch self {
-        case .typing:
-          AnimatedDots(dotSize: 3, dotColor: .secondary)
-        case let .composeAction(action):
-          switch action {
-            case .uploadingPhoto:
-              AnimatedPhotoUpload()
-            case .uploadingDocument:
-              AnimatedDocumentUpload()
-            case .uploadingVideo:
-              AnimatedVideoUpload()
-            default:
-              EmptyView()
-          }
-        default:
-          EmptyView()
-      }
-    }
-  }
-
-  func getCurrentSubtitle() -> ChatSubtitle {
+  private func getCurrentSubtitle() -> ChatSubtitle {
     if realtimeState.connectionState != .connected {
       return .connectionState(realtimeState.connectionState)
     } else if isPrivateChat {
@@ -112,16 +103,14 @@ extension ChatView {
   }
 
   @ViewBuilder
-  var subtitleView: some View {
+  private var subtitleView: some View {
     let subtitle = getCurrentSubtitle()
     if !subtitle.text.isEmpty {
       HStack(alignment: .center, spacing: 4) {
         subtitle.animatedIndicator.padding(.top, 2)
 
-        // Text(subtitle.text.lowercased())
         Text(subtitle.shouldKeepOriginalCase ? subtitle.text : subtitle.text.lowercased())
           .font(.caption)
-//          .foregroundStyle(subtitle.isComposeAction ? Color(ThemeManager.shared.selected.accent) : .secondary)
           .foregroundStyle(.secondary)
       }
       .padding(.top, -2)
@@ -129,8 +118,7 @@ extension ChatView {
     }
   }
 
-  @ViewBuilder
-  var toolbarLeadingView: some View {
+  var body: some View {
     HStack(spacing: 8) {
       if isThreadChat {
         Circle()
@@ -189,6 +177,59 @@ extension ChatView {
   }
 }
 
+enum ChatSubtitle {
+  case connectionState(RealtimeConnectionState)
+  case typing(String)
+  case composeAction(ApiComposeAction)
+  case timezone(String)
+  case empty
+
+  var text: String {
+    switch self {
+      case let .connectionState(state):
+        state.title.lowercased()
+      case let .typing(text):
+        text
+      case let .composeAction(action):
+        action.toHumanReadableForIOS()
+      case let .timezone(timezone):
+        TimeZoneFormatter.shared.formatTimeZoneInfo(userTimeZoneId: timezone) ?? ""
+      case .empty:
+        ""
+    }
+  }
+
+  var shouldKeepOriginalCase: Bool {
+    switch self {
+      case .typing:
+        true
+      default:
+        false
+    }
+  }
+
+  @ViewBuilder
+  var animatedIndicator: some View {
+    switch self {
+      case .typing:
+        AnimatedDots(dotSize: 3, dotColor: .secondary)
+      case let .composeAction(action):
+        switch action {
+          case .uploadingPhoto:
+            AnimatedPhotoUpload()
+          case .uploadingDocument:
+            AnimatedDocumentUpload()
+          case .uploadingVideo:
+            AnimatedVideoUpload()
+          default:
+            EmptyView()
+        }
+      default:
+        EmptyView()
+    }
+  }
+}
+
 // MARK: - Animated Indicators
 
 private struct AnimatedPhotoUpload: View {
@@ -215,7 +256,7 @@ private struct AnimatedVideoUpload: View {
 // MARK: - Preview Provider
 
 struct ChatSubtitlePreview: View {
-  let subtitle: ChatView.ChatSubtitle
+  let subtitle: ChatSubtitle
 
   var body: some View {
     VStack(spacing: 0) {

@@ -351,7 +351,7 @@ public class ChatContainerView: UIView {
   private func handleComposeViewHeightChange(_ newHeight: CGFloat) {
     messagesCollectionView.updateComposeInset(composeHeight: newHeight)
 
-    layoutIfNeeded()
+    setNeedsLayout()
   }
 
   override public func layoutSubviews() {
