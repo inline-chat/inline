@@ -1059,12 +1059,6 @@ class MessageListAppKit: NSViewController {
         }
 
       case let .deleted(deletedIds, _):
-        // NOTE: indexSet refers to message indices (not row indices) and is not reliable for table updates.
-        // Prefer stable IDs for cache eviction and safe structural diffs based on old/new rowItems.
-        for deletedId in deletedIds {
-          cellCache.removeCell(withType: "MessageCell", messageId: deletedId)
-        }
-
         if newRowCount < oldRowCount, oldRowItems.starts(with: newRowItems) {
           let removed = IndexSet(integersIn: newRowCount ..< oldRowCount)
           applyStructuralRemove(animated: true, removed: removed)
@@ -1127,9 +1121,7 @@ class MessageListAppKit: NSViewController {
         reloadAll(animated: true)
 
       case let .updated(updatedMessages, indexSet, animated):
-        for message in updatedMessages {
-          cellCache.removeCell(withType: "MessageCell", messageId: message.id)
-        }
+        _ = updatedMessages // silence unused warning
 
         // Only do row-level reloads when structure is unchanged.
         guard oldRowItems == newRowItems else {
@@ -1170,7 +1162,6 @@ class MessageListAppKit: NSViewController {
         }
 
       case .reload:
-        cellCache.clearCache()
         log.trace("reloading data")
         reloadAll(animated: false)
     }
@@ -1543,7 +1534,6 @@ class MessageListAppKit: NSViewController {
     }
   }
 
-  private let cellCache = TableViewCellCache<MessageTableCell>(maxCacheSize: 200)
 }
 
 final class DateSeparatorTableCell: NSView {
@@ -1698,9 +1688,6 @@ extension MessageListAppKit: NSTableViewDelegate {
 
         cell.setScrollState(scrollState)
         cell.configure(with: message, props: props, animate: animateUpdates)
-
-        // Store the configured cell in cache
-        // cellCache.cacheCell(cell, withType: "MessageCell", messageId: message.id)
 
         return cell
     }
@@ -2006,9 +1993,6 @@ extension MessageListAppKit {
     // Clear table view delegates
     tableView.delegate = nil
     tableView.dataSource = nil
-
-    // Clear cell cache
-    cellCache.clearCache()
 
     // Remove from parent if still attached
     view.removeFromSuperview()
