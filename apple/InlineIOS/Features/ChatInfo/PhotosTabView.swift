@@ -135,8 +135,8 @@ struct MediaTabView: View {
         let imageViewer = ImageViewerController(
           imageURL: url,
           sourceView: sourceView,
-          sourceImage: (sourceView as? LazyImageView)?.imageView.image,
-          showInChatAction: { onShowInChat(mediaMessage.message) }
+          sourceImage: (sourceView as? LazyImageView)?.imageView.image
+//          showInChatAction: { onShowInChat(mediaMessage.message) }
         )
         topViewController()?.present(imageViewer, animated: false)
       case let .video(videoInfo):
@@ -144,8 +144,8 @@ struct MediaTabView: View {
         let imageViewer = ImageViewerController(
           videoURL: url,
           sourceView: sourceView,
-          sourceImage: (sourceView as? LazyImageView)?.imageView.image,
-          showInChatAction: { onShowInChat(mediaMessage.message) }
+          sourceImage: (sourceView as? LazyImageView)?.imageView.image
+//          showInChatAction: { onShowInChat(mediaMessage.message) }
         )
         topViewController()?.present(imageViewer, animated: false)
       case .none:
@@ -200,7 +200,7 @@ struct MediaTabView: View {
 
     Task {
       do {
-        let image = try await ImagePipeline.shared.image(for: url).image
+        let image = try await ImagePipeline.shared.image(for: url)
         UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
       } catch {
         Log.shared.error("MediaTabView: failed to load photo for saving", error: error)
