@@ -12,6 +12,7 @@ actor PingPongService {
 
   private var pings: [UInt64: Date] = [:] // nonce -> timestamp
   private var recentLatenciesMs: [UInt32] = []
+  private var pongWaiters: [UInt64: CheckedContinuation<Bool, Never>] = [:]
 
   /// Call when starting the client/transport
   func start() {
@@ -53,6 +54,7 @@ actor PingPongService {
   private func reset() {
     pings.removeAll()
     recentLatenciesMs.removeAll()
+    cancelOutstandingProbes()
   }
 
   func ping() async {
@@ -81,9 +83,35 @@ actor PingPongService {
     recordLatency(pingDate: pingDate)
 
     log.debug("avg latency: \(avgLatencyMs()) ms")
+
+    if let continuation = pongWaiters.removeValue(forKey: nonce) {
+      continuation.resume(returning: true)
+    }
   }
 
   // MARK: - Helpers
+
+  func probeConnection(timeout: Duration) async -> Bool {
+    guard let client else { return false }
+    guard await client.state == .open else { return false }
+
+    let nonce = UInt64.random(in: 0 ... UInt64.max)
+    log.debug("foreground probe ping nonce: \(nonce)")
+    pings[nonce] = Date()
+
+    let result = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+      pongWaiters[nonce] = continuation
+      Task { await client.sendPing(nonce: nonce) }
+
+      Task.detached { [weak self] in
+        try? await Task.sleep(for: timeout)
+        guard let self else { return }
+        await self.timeoutProbe(nonce: nonce)
+      }
+    }
+
+    return result
+  }
 
   private func getNextPingDelay() -> Duration {
     // TODO: Detect cellular network/bad network conditions and use a higher interval
@@ -107,6 +135,19 @@ actor PingPongService {
 
     // Trigger a reconnect
     await client.reconnect()
+  }
+
+  private func timeoutProbe(nonce: UInt64) {
+    guard let continuation = pongWaiters.removeValue(forKey: nonce) else { return }
+    pings.removeValue(forKey: nonce)
+    continuation.resume(returning: false)
+  }
+
+  private func cancelOutstandingProbes() {
+    for (_, continuation) in pongWaiters {
+      continuation.resume(returning: false)
+    }
+    pongWaiters.removeAll()
   }
 
   private func recordLatency(pingDate: Date) {

@@ -28,9 +28,20 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
   private var reconnectionTask: Task<Void, Never>?
   private var connectionTimeoutTask: Task<Void, Never>?
   private var watchdogTask: Task<Void, Never>?
+  private var pathMonitor: NWPathMonitor?
+  private var networkAvailable = true
 
   private lazy var session: URLSession = { [unowned self] in
     let configuration = URLSessionConfiguration.default
+    configuration.shouldUseExtendedBackgroundIdleMode = true
+    configuration.timeoutIntervalForResource = 300
+    configuration.timeoutIntervalForRequest = 30
+    configuration.waitsForConnectivity = false
+    configuration.httpMaximumConnectionsPerHost = 1
+    configuration.allowsCellularAccess = true
+    configuration.isDiscretionary = false
+    configuration.networkServiceType = .responsiveData
+    configuration.tlsMinimumSupportedProtocolVersion = .TLSv12
     // Use a serial queue to ensure delegate callbacks are serialized and predictable
     let delegateQueue = OperationQueue()
     delegateQueue.maxConcurrentOperationCount = 1
@@ -154,12 +165,19 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     let hasNoActiveTasks = reconnectionTask == nil && connectionTimeoutTask == nil
 
     // Check if we've been connecting for too long (covers client-layer issues too)
-    let hasBeenConnectingTooLong = connectingStartTime?.timeIntervalSinceNow.magnitude ?? 0 > 60
+    let connectingSeconds = max(0, connectingStartTime.map { Date().timeIntervalSince($0) } ?? 0)
+    let hasBeenConnectingTooLong = connectingSeconds > 60
 
     // Consider stuck if either condition is true:
     // 1. No active tasks (immediate stuck detection)
     // 2. Been connecting for over 60 seconds (covers auth/protocol issues)
-    return hasNoActiveTasks || hasBeenConnectingTooLong
+    let isStuck = hasNoActiveTasks || hasBeenConnectingTooLong
+    if isStuck {
+      log.warning(
+        "Watchdog: stuck connecting detected noRecoveryTasks=\(hasNoActiveTasks ? 1 : 0) connectingSeconds=\(Int(connectingSeconds)) attempt=\(connectionAttemptNo)"
+      )
+    }
+    return isStuck
   }
 
   private func handleStuckConnection() async {
@@ -170,6 +188,43 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
       code: -2_001,
       userInfo: [NSLocalizedDescriptionKey: "Watchdog detected stuck connection"]
     ))
+  }
+
+  // MARK: Network monitoring -------------------------------------------------
+
+  private func startNetworkMonitoring() {
+    guard pathMonitor == nil else { return }
+    log.trace("Setting up network monitoring")
+    let monitor = NWPathMonitor()
+    monitor.pathUpdateHandler = { [weak self] path in
+      Task { await self?.handlePathUpdate(path) }
+    }
+    monitor.start(queue: DispatchQueue(label: "RealtimeV2.WebSocketTransport.path"))
+    pathMonitor = monitor
+  }
+
+  private func stopNetworkMonitoring() {
+    pathMonitor?.cancel()
+    pathMonitor = nil
+  }
+
+  private func handlePathUpdate(_ path: NWPath) async {
+    let isSatisfied = path.status == .satisfied
+    guard networkAvailable != isSatisfied else { return }
+    networkAvailable = isSatisfied
+
+    guard state != .idle else { return }
+
+    if isSatisfied {
+      log.debug("Network became available; reconnecting")
+      connectionAttemptNo = 0
+      await reconnect(skipDelay: true)
+    } else {
+      log.debug("Network became unavailable; stopping connection")
+      await connecting()
+      await stopConnection()
+      stopWatchdog()
+    }
   }
 
   // MARK: Connection timeout helpers -----------------------------------------
@@ -197,7 +252,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
         return
       }
 
-      log.debug("Connection attempt timed out after 10 seconds")
+      log.warning("Connection attempt timed out after 10 seconds")
 
       // Cancel the WebSocket task and trigger error handling
       wsTask.cancel(with: .abnormalClosure, reason: "Connection timeout".data(using: .utf8))
@@ -227,6 +282,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     log.debug("starting transport and opening connection to \(url)")
 
     await connecting()
+    startNetworkMonitoring()
     startWatchdog()
     await openConnection()
   }
@@ -238,6 +294,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     log.debug("stopping connection")
 
     stopWatchdog()
+    stopNetworkMonitoring()
     await idle()
     await stopConnection()
   }

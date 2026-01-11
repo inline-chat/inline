@@ -91,13 +91,21 @@ actor ProtocolClient: ProtocolClientType {
 
   private func handleForegroundTransition() async {
     guard auth.getIsLoggedIn() == true else { return }
-    guard state != .open else { return }
-
     log.debug("Foreground transition: resetting reconnection delay")
     connectionAttemptNo = 0
     reconnectionTask?.cancel()
     reconnectionTask = nil
     stopAuthenticationTimeout()
+
+    if state == .open {
+      let probeSucceeded = await pingPong.probeConnection(timeout: .seconds(3))
+      if probeSucceeded {
+        log.debug("Foreground probe succeeded; keeping existing connection")
+        return
+      }
+
+      log.warning("Foreground probe timed out; reconnecting")
+    }
 
     await transport.handleForegroundTransition()
   }
