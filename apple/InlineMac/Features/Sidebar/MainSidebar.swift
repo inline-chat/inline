@@ -7,7 +7,7 @@ class MainSidebar: NSViewController {
   private let listView: MainSidebarList
 
   private var nav2: Nav2? { dependencies.nav2 }
-  private var activeTab: MainSidebarTopTab = .inbox
+  private var activeMode: MainSidebarMode = .inbox
   private var focusSearchObserver: NSObjectProtocol?
 
   // MARK: - Sizes
@@ -44,12 +44,6 @@ class MainSidebar: NSViewController {
     return view
   }()
 
-  private lazy var tabsView: MainSidebarTopTabsView = {
-    let view = MainSidebarTopTabsView()
-    view.translatesAutoresizingMaskIntoConstraints = false
-    return view
-  }()
-
   private lazy var searchFieldView: MainSidebarSearchFieldView = {
     let view = MainSidebarSearchFieldView()
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -60,6 +54,23 @@ class MainSidebar: NSViewController {
     let view = NSView()
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
+  }()
+
+  private lazy var archiveSummaryLabel: NSTextField = {
+    let label = NSTextField(labelWithString: "0 archives")
+    label.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+    label.textColor = .tertiaryLabelColor
+    label.lineBreakMode = .byTruncatingTail
+    label.translatesAutoresizingMaskIntoConstraints = false
+    return label
+  }()
+
+  private lazy var archiveButton: MainSidebarArchiveButton = {
+    let button = MainSidebarArchiveButton()
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.target = self
+    button.action = #selector(handleArchiveButton)
+    return button
   }()
 
   private lazy var archiveEmptyView: NSStackView = {
@@ -90,10 +101,11 @@ class MainSidebar: NSViewController {
 
   private func setupViews() {
     view.addSubview(headerView)
-    view.addSubview(listView)
     view.addSubview(searchFieldView)
+    view.addSubview(listView)
+    view.addSubview(archiveSummaryLabel)
     view.addSubview(footerView)
-    footerView.addSubview(tabsView)
+    footerView.addSubview(archiveButton)
     view.addSubview(archiveEmptyView)
 
     headerTopConstraint = headerView.topAnchor.constraint(equalTo: view.topAnchor, constant: headerTopInset())
@@ -111,17 +123,22 @@ class MainSidebar: NSViewController {
       listView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
       listView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
       listView.topAnchor.constraint(equalTo: searchFieldView.bottomAnchor, constant: 10),
-      listView.bottomAnchor.constraint(equalTo: footerView.topAnchor),
+      listView.bottomAnchor.constraint(equalTo: archiveSummaryLabel.topAnchor, constant: -8),
+
+      archiveSummaryLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Self.edgeInsets),
+      archiveSummaryLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Self.edgeInsets),
+      archiveSummaryLabel.bottomAnchor.constraint(equalTo: footerView.topAnchor, constant: -8),
+      archiveSummaryLabel.heightAnchor.constraint(equalToConstant: 18),
 
       footerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
       footerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
       footerView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
       footerView.heightAnchor.constraint(equalToConstant: 40),
 
-      tabsView.centerXAnchor.constraint(equalTo: footerView.centerXAnchor),
-      tabsView.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
-      tabsView.leadingAnchor.constraint(greaterThanOrEqualTo: footerView.leadingAnchor, constant: Self.edgeInsets),
-      tabsView.trailingAnchor.constraint(lessThanOrEqualTo: footerView.trailingAnchor, constant: -Self.edgeInsets),
+      archiveButton.leadingAnchor.constraint(equalTo: footerView.leadingAnchor, constant: Self.edgeInsets),
+      archiveButton.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
+      archiveButton.widthAnchor.constraint(equalToConstant: 28),
+      archiveButton.heightAnchor.constraint(equalToConstant: 28),
 
       archiveEmptyView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
       archiveEmptyView.centerYAnchor.constraint(equalTo: listView.centerYAnchor),
@@ -131,15 +148,16 @@ class MainSidebar: NSViewController {
 
     archiveEmptyView.isHidden = true
 
-    tabsView.onSelect = { [weak self] tab in
-      self?.setContent(for: tab)
-    }
-    setContent(for: .inbox)
-
     listView.onChatCountChanged = { [weak self] mode, count in
       guard let self else { return }
       self.archiveEmptyView.isHidden = !(mode == .archive && count == 0)
     }
+
+    listView.onArchiveCountChanged = { [weak self] count in
+      self?.updateArchiveSummary(count: count)
+    }
+
+    setContent(for: .inbox)
   }
 
   override func viewDidLoad() {
@@ -169,11 +187,11 @@ class MainSidebar: NSViewController {
     }
   }
 
-  private func setContent(for tab: MainSidebarTopTab) {
-    activeTab = tab
-    tabsView.selectTab(tab)
+  private func setContent(for mode: MainSidebarMode) {
+    activeMode = mode
+    updateArchiveButton()
 
-    switch tab {
+    switch mode {
       case .archive:
         listView.setMode(.archive)
         archiveEmptyView.isHidden = listView.lastChatItemCount != 0
@@ -181,6 +199,21 @@ class MainSidebar: NSViewController {
         listView.setMode(.inbox)
         archiveEmptyView.isHidden = true
     }
+  }
+
+  private func updateArchiveSummary(count: Int) {
+    let label = count == 1 ? "1 archive" : "\(count) archives"
+    archiveSummaryLabel.stringValue = label
+  }
+
+  private func updateArchiveButton() {
+    archiveButton.isActive = activeMode == .archive
+    archiveButton.toolTip = activeMode == .archive ? "Show inbox" : "Show archives"
+  }
+
+  @objc private func handleArchiveButton() {
+    let nextMode: MainSidebarMode = activeMode == .archive ? .inbox : .archive
+    setContent(for: nextMode)
   }
 
   private func handleFocusSearch() {
@@ -202,171 +235,36 @@ class MainSidebar: NSViewController {
   }
 }
 
-private enum MainSidebarTopTab: Int, CaseIterable {
+private enum MainSidebarMode {
   case archive
   case inbox
-
-  var symbolName: String {
-    switch self {
-      case .archive:
-        return "archivebox.fill"
-      case .inbox:
-        return "tray.fill"
-    }
-  }
-
-  var accessibilityLabel: String {
-    switch self {
-      case .archive:
-        return "Archive"
-      case .inbox:
-        return "Inbox"
-    }
-  }
 }
 
-final class MainSidebarTopTabsView: NSView {
-  private static let height: CGFloat = 30
-  private static let cornerRadius: CGFloat = 12
-  private static let iconSize: CGFloat = 15
-  private static let backgroundColor = NSColor.clear
+private final class MainSidebarArchiveButton: NSButton {
+  private static let cornerRadius: CGFloat = 8
+  private static let iconSize: CGFloat = 14
   private static let hoverColor = NSColor.black.withAlphaComponent(0.08)
   private static let pressedColor = NSColor.black.withAlphaComponent(0.12)
-  private static let minButtonWidth: CGFloat = 44
+  private static let activeTint = NSColor.controlAccentColor
+  private static let inactiveTint = NSColor.secondaryLabelColor
 
-  private var selectedTab: MainSidebarTopTab = .inbox {
-    didSet { updateSelection() }
-  }
-
-  fileprivate var onSelect: ((MainSidebarTopTab) -> Void)?
-
-  private lazy var stackView: NSStackView = {
-    let stack = NSStackView()
-    stack.orientation = .horizontal
-    stack.alignment = .centerY
-    stack.distribution = .fillEqually
-    stack.spacing = 8
-    stack.translatesAutoresizingMaskIntoConstraints = false
-    return stack
-  }()
-
-  private var buttons: [MainSidebarTopTab: NSButton] = [:]
-
-  override init(frame: NSRect) {
-    super.init(frame: frame)
-    translatesAutoresizingMaskIntoConstraints = false
-    setupViews()
-  }
-
-  @available(*, unavailable)
-  required init?(coder _: NSCoder) {
-    fatalError("init(coder:) has not been implemented")
-  }
-
-  private func setupViews() {
-    addSubview(stackView)
-
-    NSLayoutConstraint.activate([
-      heightAnchor.constraint(equalToConstant: Self.height),
-      stackView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      stackView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      stackView.topAnchor.constraint(equalTo: topAnchor),
-      stackView.bottomAnchor.constraint(equalTo: bottomAnchor),
-    ])
-
-    MainSidebarTopTab.allCases.forEach { tab in
-      let button = makeButton(for: tab)
-      buttons[tab] = button
-      stackView.addArrangedSubview(button)
-    }
-
-    updateSelection()
-  }
-
-  private func makeButton(for tab: MainSidebarTopTab) -> NSButton {
-    let button = MainSidebarTopTabButton(
-      tab: tab,
-      baseColor: Self.backgroundColor,
-      hoverColor: Self.hoverColor,
-      pressedColor: Self.pressedColor
-    )
-    button.target = self
-    button.action = #selector(didPressTab(_:))
-    button.translatesAutoresizingMaskIntoConstraints = false
-    button.setButtonType(.momentaryChange)
-    button.isBordered = false
-    button.bezelStyle = .regularSquare
-    button.imagePosition = .imageOnly
-    button.tag = tab.rawValue
-    button.toolTip = tab.accessibilityLabel
-    button.focusRingType = .none
-
-    if let image = NSImage(systemSymbolName: tab.symbolName, accessibilityDescription: tab.accessibilityLabel) {
-      let config = NSImage.SymbolConfiguration(pointSize: Self.iconSize, weight: .regular)
-      button.image = image.withSymbolConfiguration(config)
-    }
-
-    button.layer?.cornerRadius = Self.cornerRadius
-    button.layer?.cornerCurve = .continuous
-
-    NSLayoutConstraint.activate([
-      button.heightAnchor.constraint(equalToConstant: Self.height),
-      button.widthAnchor.constraint(greaterThanOrEqualToConstant: Self.minButtonWidth),
-    ])
-
-    return button
-  }
-
-  private func updateSelection() {
-    for (tab, button) in buttons {
-      let isSelected = tab == selectedTab
-      button.contentTintColor = isSelected ? .controlAccentColor : .tertiaryLabelColor
-    }
-  }
-
-  fileprivate func selectTab(_ tab: MainSidebarTopTab, notify: Bool = false) {
-    if tab == selectedTab {
-      if notify {
-        onSelect?(tab)
-      }
-      return
-    }
-
-    selectedTab = tab
-    if notify {
-      onSelect?(tab)
-    }
-  }
-
-  @objc private func didPressTab(_ sender: NSButton) {
-    guard let tab = MainSidebarTopTab(rawValue: sender.tag) else { return }
-    selectTab(tab, notify: true)
-  }
-}
-
-private final class MainSidebarTopTabButton: NSButton {
-  private let baseColor: NSColor
-  private let hoverColor: NSColor
-  private let pressedColor: NSColor
   private var trackingArea: NSTrackingArea?
 
   private var isHovering = false {
     didSet { updateBackground() }
   }
 
-  init(tab: MainSidebarTopTab, baseColor: NSColor, hoverColor: NSColor, pressedColor: NSColor) {
-    self.baseColor = baseColor
-    self.hoverColor = hoverColor
-    self.pressedColor = pressedColor
-    super.init(frame: .zero)
-    wantsLayer = true
-    layer?.backgroundColor = baseColor.cgColor
-    setButtonType(.momentaryChange)
-    isBordered = false
-    bezelStyle = .regularSquare
-    imagePosition = .imageOnly
-    focusRingType = .none
-    toolTip = tab.accessibilityLabel
+  var isActive: Bool = false {
+    didSet { updateAppearance() }
+  }
+
+  override init(frame: NSRect) {
+    super.init(frame: frame)
+    setup()
+  }
+
+  convenience init() {
+    self.init(frame: .zero)
   }
 
   @available(*, unavailable)
@@ -399,14 +297,35 @@ private final class MainSidebarTopTabButton: NSButton {
     isHovering = false
   }
 
+  private func setup() {
+    wantsLayer = true
+    layer?.cornerRadius = Self.cornerRadius
+    layer?.cornerCurve = .continuous
+    setButtonType(.momentaryChange)
+    isBordered = false
+    bezelStyle = .regularSquare
+    imagePosition = .imageOnly
+    focusRingType = .none
+    updateAppearance()
+  }
+
+  private func updateAppearance() {
+    let symbolName = isActive ? "archivebox.fill" : "archivebox"
+    let config = NSImage.SymbolConfiguration(pointSize: Self.iconSize, weight: .semibold)
+    image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Archive")?
+      .withSymbolConfiguration(config)
+    contentTintColor = isActive ? Self.activeTint : Self.inactiveTint
+    updateBackground()
+  }
+
   private func updateBackground() {
     let color: NSColor
     if isHighlighted {
-      color = pressedColor
+      color = Self.pressedColor
     } else if isHovering {
-      color = hoverColor
+      color = Self.hoverColor
     } else {
-      color = baseColor
+      color = .clear
     }
     layer?.backgroundColor = color.cgColor
   }
