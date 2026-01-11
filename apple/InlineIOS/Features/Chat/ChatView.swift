@@ -17,15 +17,12 @@ struct ChatView: View {
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
 
   @EnvironmentObject var data: DataManager
-  @EnvironmentObject var realtimeState: RealtimeState
 
   @Environment(Router.self) var router
   @Environment(\.appDatabase) var database
   @Environment(\.scenePhase) var scenePhase
   @Environment(\.realtime) var realtime
   @Environment(\.colorScheme) var colorScheme
-
-  @ObservedObject var composeActions: ComposeActions = .shared
 
   static let formatter = RelativeDateTimeFormatter()
 
@@ -34,30 +31,6 @@ struct ChatView: View {
     case loading
     case loaded
     case error(Error)
-  }
-
-  var toolbarAvatarSize: CGFloat {
-    if #available(iOS 26.0, *) {
-      44
-    } else {
-      32
-    }
-  }
-
-  var isPrivateChat: Bool {
-    fullChatViewModel.peer.isPrivate
-  }
-
-  var isThreadChat: Bool {
-    fullChatViewModel.peer.isThread
-  }
-
-  var chatProfileColors: [Color] {
-    let _ = colorScheme
-    return [
-      Color(.systemGray3).adjustLuminosity(by: 0.2),
-      Color(.systemGray5).adjustLuminosity(by: 0),
-    ]
   }
 
   init(peer: Peer, preview: Bool = false) {
@@ -102,12 +75,12 @@ struct ChatView: View {
 
       if #available(iOS 26.0, *) {
         ToolbarItem(placement: .principal) {
-          toolbarLeadingView
+          ChatToolbarLeadingView(peerId: peerId, isChatHeaderPressed: $isChatHeaderPressed)
         }
         .sharedBackgroundVisibility(.hidden)
       } else {
         ToolbarItem(placement: .topBarLeading) {
-          toolbarLeadingView
+          ChatToolbarLeadingView(peerId: peerId, isChatHeaderPressed: $isChatHeaderPressed)
         }
       }
     }
