@@ -15,7 +15,8 @@ public final class Auth: ObservableObject, @unchecked Sendable {
   private let lock = NSLock()
 
   /// True when the current process has observed a token (or determined none is available) at least once after launch.
-  /// Used to distinguish "no token yet" vs "definitely logged out" in callers that want to wait for credential hydration.
+  /// Used to distinguish "no token yet" vs "definitely logged out" in callers that want to wait for credential
+  /// hydration.
   @Published public private(set) var didHydrateCredentials: Bool = false
 
   // state
@@ -114,11 +115,13 @@ public final class Auth: ObservableObject, @unchecked Sendable {
   }
 
   public func saveCredentials(token: String, userId: Int64) async {
+    log.info("AUTH_SAVE_CREDENTIALS called userId=\(userId)")
     await authManager.saveCredentials(token: token, userId: userId)
     await update()
   }
 
   public func logOut() async {
+    log.info("AUTH_LOGOUT called")
     Task { @MainActor in
       isLoggedIn = false
       currentUserId = nil
@@ -226,7 +229,10 @@ actor AuthManager: Sendable {
 
     mocked = false
     keychain = KeychainSwift(keyPrefix: keyChainPrefix)
+
+    #if os(iOS)
     keychain.accessGroup = accessGroup
+    #endif
 
     userDefaultsKey = "\(userDefaultsPrefix)userId"
     // load
@@ -288,8 +294,9 @@ actor AuthManager: Sendable {
     // persist
     // Use after-first-unlock so background launches (e.g. notification taps / background fetch) can read the token.
     // Without this, keychain reads may return `nil` in those launches, leaving the app "logged in" without a token.
-    keychain.set(token, forKey: "token", withAccess: .accessibleAfterFirstUnlock)
+    let didSaveToken = keychain.set(token, forKey: "token", withAccess: .accessibleAfterFirstUnlock)
     Self.writeUserId(userId, key: userDefaultsKey)
+    log.info("AUTH_SAVE_CREDENTIALS persisted userId=\(userId) tokenSaved=\(didSaveToken ? 1 : 0)")
 
     // cache
     cachedToken = token
@@ -315,7 +322,7 @@ actor AuthManager: Sendable {
 
   func logOut() async {
     // persist
-    keychain.delete("token")
+    let didDeleteToken = keychain.delete("token")
     UserDefaults.standard.removeObject(forKey: userDefaultsKey)
 
     // cache
@@ -323,6 +330,8 @@ actor AuthManager: Sendable {
     cachedUserId = nil
     didHydrateCredentials = true
     didLogMissingTokenForLoggedInUser = false
+
+    log.info("AUTH_LOGOUT persisted tokenDeleted=\(didDeleteToken ? 1 : 0)")
 
     // publish
     await updateLoginStatus()
