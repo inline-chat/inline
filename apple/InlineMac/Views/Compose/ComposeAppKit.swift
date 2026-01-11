@@ -1256,10 +1256,16 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   private func openEmojiPicker() {
+    focusWindowIfNeeded()
     focus()
-    let showSelector = Selector(("showEmojiAndSymbols:"))
-    if NSApplication.shared.sendAction(showSelector, to: nil, from: emojiButton) == false {
-      NSApplication.shared.orderFrontCharacterPalette(nil)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+      guard let self else { return }
+      let textView = self.textEditor.textView
+      _ = self.window?.makeFirstResponder(textView)
+      let showSelector = Selector(("showEmojiAndSymbols:"))
+      if NSApplication.shared.sendAction(showSelector, to: nil, from: textView) == false {
+        NSApplication.shared.orderFrontCharacterPalette(nil)
+      }
     }
   }
 
