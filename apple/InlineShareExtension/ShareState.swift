@@ -159,6 +159,56 @@ class ShareState: ObservableObject {
     return MIMEType(text: "application/octet-stream")
   }
 
+  private nonisolated func shouldTranscodePhotoToJpeg(
+    suggestedName: String?,
+    typeIdentifier: String?,
+    mimeType: MIMEType?
+  ) -> Bool {
+    if let typeIdentifier,
+       let utType = UTType(typeIdentifier),
+       utType.conforms(to: .heic) || utType.conforms(to: .heif)
+    {
+      return true
+    }
+
+    if let suggestedName {
+      let ext = (suggestedName as NSString).pathExtension.lowercased()
+      if ext == "heic" || ext == "heif" {
+        return true
+      }
+    }
+
+    if let mimeType {
+      let lowercased = mimeType.text.lowercased()
+      if lowercased == "image/heic" ||
+         lowercased == "image/heif" ||
+         lowercased == "image/heic-sequence" ||
+         lowercased == "image/heif-sequence"
+      {
+        return true
+      }
+    }
+
+    return false
+  }
+
+  private nonisolated func jpegFileName(from fileName: String?) -> String {
+    let baseName = (fileName ?? "shared_image") as NSString
+    let stem = baseName.deletingPathExtension
+    let safeStem = stem.isEmpty ? "shared_image" : stem
+    return "\(safeStem).jpg"
+  }
+
+  private nonisolated func transcodePhotoToJpeg(_ data: Data) -> Data? {
+    guard let image = UIImage(data: data) else { return nil }
+    return image.jpegData(compressionQuality: Self.imageCompressionQuality)
+  }
+
+  private nonisolated func isSupportedPhotoMimeType(_ mimeType: MIMEType) -> Bool {
+    let lowercased = mimeType.text.lowercased()
+    return lowercased == "image/jpeg" || lowercased == "image/png" || lowercased == "image/gif"
+  }
+
   private nonisolated func preferredFileType(
     for provider: NSItemProvider,
     suggestedName: String?
@@ -372,12 +422,50 @@ class ShareState: ObservableObject {
         suggestedName: fileName,
         typeIdentifier: typeIdentifier
       )
+      var resolvedFileType = fileType
+      if fileType == .photo &&
+          (shouldTranscodePhotoToJpeg(
+            suggestedName: fileName,
+            typeIdentifier: typeIdentifier,
+            mimeType: mimeType
+          ) || !isSupportedPhotoMimeType(mimeType))
+      {
+        do {
+          let data = try Data(contentsOf: tempURL)
+          if let jpegData = transcodePhotoToJpeg(data) {
+            addFile(
+              from: jpegData,
+              suggestedName: jpegFileName(from: fileName),
+              typeIdentifier: UTType.jpeg.identifier,
+              fileType: .photo,
+              mimeTypeOverride: MIMEType(text: "image/jpeg"),
+              accumulator: accumulator
+            )
+            return
+          }
+          let shouldFallback = shouldTranscodePhotoToJpeg(
+            suggestedName: fileName,
+            typeIdentifier: typeIdentifier,
+            mimeType: mimeType
+          )
+          if shouldFallback {
+            resolvedFileType = .document
+            log.warning(tagged("Failed to transcode HEIC photo; falling back to document"))
+          } else {
+            resolvedFileType = .document
+            log.warning(tagged("Unsupported photo MIME type; falling back to document (\(mimeType.text))"))
+          }
+        } catch {
+          resolvedFileType = .document
+          log.error(tagged("Failed to read shared photo data; falling back to document"), error: error)
+        }
+      }
       let fileSize = try? tempURL.resourceValues(forKeys: [.fileSizeKey]).fileSize
       accumulator.addFile(SharedFile(
         url: tempURL,
         fileName: fileName,
         mimeType: mimeType,
-        fileType: fileType,
+        fileType: resolvedFileType,
         fileSize: fileSize.map { Int64($0) }
       ))
     } catch {
@@ -394,14 +482,51 @@ class ShareState: ObservableObject {
     accumulator: SharedContentAccumulator
   ) {
     do {
-      let tempURL = try writeDataToTemporaryLocation(
-        data,
-        suggestedName: suggestedName,
-        typeIdentifier: typeIdentifier
-      )
       let fileName = sanitizedFileName(
         suggestedName: suggestedName,
-        fallbackURL: tempURL,
+        fallbackURL: nil,
+        typeIdentifier: typeIdentifier
+      )
+      let resolvedMimeType = mimeTypeOverride ?? resolveMimeType(
+        fileURL: nil,
+        suggestedName: fileName,
+        typeIdentifier: typeIdentifier
+      )
+      var resolvedFileType = fileType
+      if fileType == .photo && mimeTypeOverride == nil &&
+          (shouldTranscodePhotoToJpeg(
+            suggestedName: fileName,
+            typeIdentifier: typeIdentifier,
+            mimeType: resolvedMimeType
+          ) || !isSupportedPhotoMimeType(resolvedMimeType))
+      {
+        if let jpegData = transcodePhotoToJpeg(data) {
+          addFile(
+            from: jpegData,
+            suggestedName: jpegFileName(from: fileName),
+            typeIdentifier: UTType.jpeg.identifier,
+            fileType: .photo,
+            mimeTypeOverride: MIMEType(text: "image/jpeg"),
+            accumulator: accumulator
+          )
+          return
+        }
+        let shouldFallback = shouldTranscodePhotoToJpeg(
+          suggestedName: fileName,
+          typeIdentifier: typeIdentifier,
+          mimeType: resolvedMimeType
+        )
+        if shouldFallback {
+          resolvedFileType = .document
+          log.warning(tagged("Failed to transcode HEIC photo; falling back to document"))
+        } else {
+          resolvedFileType = .document
+          log.warning(tagged("Unsupported photo MIME type; falling back to document (\(resolvedMimeType.text))"))
+        }
+      }
+      let tempURL = try writeDataToTemporaryLocation(
+        data,
+        suggestedName: fileName,
         typeIdentifier: typeIdentifier
       )
       let mimeType = mimeTypeOverride ?? resolveMimeType(
@@ -413,7 +538,7 @@ class ShareState: ObservableObject {
         url: tempURL,
         fileName: fileName,
         mimeType: mimeType,
-        fileType: fileType,
+        fileType: resolvedFileType,
         fileSize: Int64(data.count)
       ))
     } catch {
