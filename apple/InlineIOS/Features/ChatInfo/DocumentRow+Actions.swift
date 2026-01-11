@@ -4,6 +4,7 @@ import InlineKit
 import Logger
 import QuickLook
 import SwiftUI
+import UIKit
 
 extension DocumentRow {
   func fileIconButtonTapped() {
@@ -134,6 +135,34 @@ extension DocumentRow {
     if !controller.presentOptionsMenu(from: rect, in: rootViewController.view, animated: true) {
       Log.shared.error("📄 Failed to present share menu")
     }
+  }
+
+  func shareDocument() {
+    guard let fileURL = documentURL else {
+      Log.shared.error("📄 Cannot share document: No valid file URL")
+      showDocumentError("File is not available for sharing")
+      return
+    }
+
+    guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+          let window = windowScene.windows.first,
+          let rootViewController = window.rootViewController
+    else {
+      Log.shared.error("📄 Cannot find root view controller for share sheet")
+      return
+    }
+
+    let activityViewController = UIActivityViewController(activityItems: [fileURL], applicationActivities: nil)
+    if let popoverController = activityViewController.popoverPresentationController {
+      popoverController.sourceView = rootViewController.view
+      popoverController.sourceRect = CGRect(
+        x: rootViewController.view.bounds.midX,
+        y: rootViewController.view.bounds.midY,
+        width: 1,
+        height: 1
+      )
+    }
+    rootViewController.present(activityViewController, animated: true)
   }
 
   func showDocumentError(_ message: String) {

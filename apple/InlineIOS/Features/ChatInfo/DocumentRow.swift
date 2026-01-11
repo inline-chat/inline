@@ -74,6 +74,28 @@ struct DocumentRow: View {
       fileBackgroundRect
     }
     .padding(.horizontal, contentHMargin)
+    .contextMenu {
+      switch documentState {
+        case .needsDownload:
+          Button {
+            downloadFile()
+          } label: {
+            Label("Download", systemImage: "arrow.down.circle")
+          }
+        case .downloading:
+          Button {
+            cancelDownload()
+          } label: {
+            Label("Cancel Download", systemImage: "xmark.circle")
+          }
+        case .locallyAvailable:
+          Button {
+            shareDocument()
+          } label: {
+            Label("Share", systemImage: "square.and.arrow.up")
+          }
+      }
+    }
     .onTapGesture {
       viewTapped()
     }

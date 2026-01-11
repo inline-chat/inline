@@ -10,7 +10,7 @@ struct ChatInfoView: View {
   let chatItem: SpaceChatItem
   @StateObject var participantsWithMembersViewModel: ChatParticipantsWithMembersViewModel
   @EnvironmentStateObject var documentsViewModel: ChatDocumentsViewModel
-  @EnvironmentStateObject var photosViewModel: ChatPhotosViewModel
+  @EnvironmentStateObject var mediaViewModel: ChatMediaViewModel
   @EnvironmentStateObject var spaceMembersViewModel: SpaceMembersViewModel
   @State private var space: Space?
   @State var isSearching = false
@@ -29,12 +29,12 @@ struct ChatInfoView: View {
 
   enum ChatInfoTab: String, CaseIterable {
     case info = "Info"
-    // case photos = "Photos"
+    case media = "Media"
     case files = "Files"
   }
 
   var availableTabs: [ChatInfoTab] {
-    isDM ? [.files] : [.info, .files]
+    isDM ? [.media, .files] : [.info, .media, .files]
   }
 
   var isPrivate: Bool {
@@ -86,10 +86,11 @@ struct ChatInfoView: View {
       )
     }
 
-    _photosViewModel = EnvironmentStateObject { env in
-      ChatPhotosViewModel(
+    _mediaViewModel = EnvironmentStateObject { env in
+      ChatMediaViewModel(
         db: env.appDatabase,
-        chatId: chatItem.chat?.id ?? 0
+        chatId: chatItem.chat?.id ?? 0,
+        peer: chatItem.peerId
       )
     }
 
@@ -190,6 +191,11 @@ struct ChatInfoView: View {
                 peerUserId: chatItem.dialog.peerUserId,
                 peerThreadId: chatItem.dialog.peerThreadId
               )
+            case .media:
+              MediaTabView(
+                mediaViewModel: mediaViewModel,
+                onShowInChat: showMessageInChat
+              )
           }
         }
         .animation(.easeInOut(duration: 0.3), value: selectedTab)
@@ -212,8 +218,8 @@ struct ChatInfoView: View {
         await participantsWithMembersViewModel.refetchParticipants()
 
         // Set default tab based on chat type
-        if isDM, selectedTab == .info {
-          //  selectedTab = .photos
+        if !availableTabs.contains(selectedTab) {
+          selectedTab = availableTabs.first ?? .files
         }
       }
     }
