@@ -9,9 +9,10 @@ import UIKit
 class DocumentView: UIView {
   // MARK: - Properties
 
-  let fullMessage: FullMessage?
-  let outgoing: Bool
+  private var fullMessage: FullMessage?
+  private var outgoing: Bool
   private var isBeingRemoved = false
+
 
   enum DocumentState: Equatable {
     case locallyAvailable
@@ -147,7 +148,23 @@ class DocumentView: UIView {
 
   // MARK: - Setup & helpers
 
+  override var intrinsicContentSize: CGSize {
+    let targetSize = CGSize(
+      width: UIView.layoutFittingCompressedSize.width,
+      height: UIView.layoutFittingCompressedSize.height
+    )
+    let stackSize = horizantalStackView.systemLayoutSizeFitting(
+      targetSize,
+      withHorizontalFittingPriority: .fittingSizeLevel,
+      verticalFittingPriority: .fittingSizeLevel
+    )
+    return CGSize(width: ceil(stackSize.width + 4), height: ceil(stackSize.height + 2))
+  }
+
   func setupViews() {
+    setContentHuggingPriority(.required, for: .horizontal)
+    setContentCompressionResistancePriority(.required, for: .horizontal)
+
     addSubview(horizantalStackView)
     horizantalStackView.addArrangedSubview(fileIconButton)
     fileIconButton.addSubview(iconView)
@@ -256,6 +273,8 @@ class DocumentView: UIView {
     progressLayer.path = UIBezierPath().cgPath
   }
 
+  private var fileSizeMinWidthConstraint: NSLayoutConstraint?
+
   func setupContent() {
     // Colors
     fileNameLabel.textColor = textColor
@@ -268,9 +287,42 @@ class DocumentView: UIView {
 
     // Set fixed width for fileSizeLabel to prevent layout shifts
     let maxSizeTextWidth = fileSizeLabel.intrinsicContentSize.width * 1.5
-    fileSizeLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: maxSizeTextWidth).isActive = true
+    if let fileSizeMinWidthConstraint {
+      fileSizeMinWidthConstraint.constant = maxSizeTextWidth
+    } else {
+      let constraint = fileSizeLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: maxSizeTextWidth)
+      constraint.isActive = true
+      fileSizeMinWidthConstraint = constraint
+    }
 
     updateFileIcon()
+    invalidateIntrinsicContentSize()
+  }
+
+  func update(with fullMessage: FullMessage, outgoing: Bool) {
+    self.fullMessage = fullMessage
+    self.outgoing = outgoing
+    isBeingRemoved = false
+    progressSubscription?.cancel()
+    progressSubscription = nil
+
+    setupContent()
+
+    if let document {
+      documentState = determineDocumentState(document)
+    } else {
+      documentState = .needsDownload
+    }
+
+    if fullMessage.message.status == .sending,
+       fullMessage.message.documentId != nil,
+       let document
+    {
+      documentState = .uploading(bytesSent: 0, totalBytes: Int64(document.size ?? 0))
+    }
+
+    updateUIForDocumentState()
+    invalidateIntrinsicContentSize()
   }
 
   @objc func fileIconButtonTapped() {
@@ -491,6 +543,7 @@ class DocumentView: UIView {
 
     updateFileIcon()
     updateProgressLayerColor()
+    invalidateIntrinsicContentSize()
   }
 
   private func updateProgressLayerColor() {

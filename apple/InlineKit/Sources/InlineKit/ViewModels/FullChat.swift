@@ -4,6 +4,7 @@ import GRDB
 import InlineProtocol
 import Logger
 import SwiftUI
+import QuartzCore
 
 public struct FullAttachment: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord,
   TableRecord,
@@ -280,6 +281,9 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
   }
 
   private var chatCancellable: AnyCancellable?
+  private var historyRefetchTask: Task<Void, Never>?
+  private var lastHistoryRefetchTime: CFTimeInterval = 0
+  private let historyRefetchCooldown: CFTimeInterval = 1.0
 
   private var db: AppDatabase
   public var peer: Peer
@@ -382,10 +386,20 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
     }
   }
 
+  @MainActor
   public func refetchHistoryOnly() {
     Log.shared.debug("Refetching history only for peer \(peer)")
-    Task {
-      await refetchHistoryOnlyAsync()
+    let now = CACurrentMediaTime()
+    if historyRefetchTask != nil || now - lastHistoryRefetchTime < historyRefetchCooldown {
+      return
+    }
+    lastHistoryRefetchTime = now
+    historyRefetchTask?.cancel()
+    historyRefetchTask = Task { [weak self] in
+      await self?.refetchHistoryOnlyAsync()
+      await MainActor.run { [weak self] in
+        self?.historyRefetchTask = nil
+      }
     }
   }
 
