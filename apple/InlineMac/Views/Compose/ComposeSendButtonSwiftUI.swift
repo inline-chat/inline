@@ -9,38 +9,43 @@ struct ComposeSendButtonSwiftUI: View {
   private let size: CGFloat = Theme.composeButtonSize
   private let backgroundColor: Color = .accent
   private let hoveredBackgroundColor: Color = .accent.opacity(0.8)
+  private let disabledBackgroundColor: Color = Color(nsColor: .quinaryLabel)
 
   var body: some View {
-    Group {
-      if state.canSend {
-        Button(action: action) {
-          Image(systemName: "arrow.up")
-            .font(.system(size: 16, weight: .semibold))
-            .foregroundStyle(.white)
-            .padding(5)
-            .frame(width: size, height: size)
-            .background(
-              Circle()
-                .fill(isHovering ? hoveredBackgroundColor : backgroundColor)
-            )
-            .scaleEffect(isHovering ? 0.95 : 1.0)
-            .animation(.easeInOut(duration: 0.1), value: isHovering)
+    let isEnabled = state.canSend
+    let targetSize = isEnabled ? size : size * 0.9
+    let iconSize = isEnabled ? 16.0 : 14.0
+    let padding = isEnabled ? 5.0 : 4.0
+    Button(action: action) {
+      Image(systemName: "arrow.up")
+        .font(.system(size: iconSize, weight: .semibold))
+        .foregroundStyle(.white)
+        .padding(padding)
+        .frame(width: targetSize, height: targetSize)
+        .background(
+          Circle()
+            .fill(isEnabled ? (isHovering ? hoveredBackgroundColor : backgroundColor) : disabledBackgroundColor)
+        )
+        .scaleEffect(isEnabled && isHovering ? 0.95 : 1.0)
+        .animation(.easeInOut(duration: 0.1), value: isHovering)
+    }
+    .buttonStyle(.plain)
+    .allowsHitTesting(isEnabled)
+    .opacity(1.0)
+    .contextMenu {
+      if isEnabled {
+        Button("Send without notification") {
+          sendWithoutNotification()
         }
-        .buttonStyle(.plain)
-        .contextMenu {
-          Button("Send without notification") {
-            sendWithoutNotification()
-          }
-        }
-        .onHover { hovering in
-          withAnimation(.easeInOut(duration: 0.2)) {
-            isHovering = hovering
-          }
-        }
-        .transition(.scale(scale: 0.9).combined(with: .opacity))
       }
     }
-    .animation(.easeInOut(duration: 0.15), value: state.canSend)
+    .onHover { hovering in
+      guard isEnabled else { return }
+      withAnimation(.easeInOut(duration: 0.2)) {
+        isHovering = hovering
+      }
+    }
+    .animation(.easeInOut(duration: 0.15), value: isEnabled)
   }
 }
 
