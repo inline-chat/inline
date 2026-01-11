@@ -46,7 +46,6 @@ struct MediaTabView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 6)
                 .padding(.bottom, 4)
-                .background(.thinMaterial)
             }
           }
         }
