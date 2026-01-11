@@ -330,6 +330,13 @@
       "when": 1767396370721,
       "tag": "0046_add_cli_client_type",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1767730371729,
+      "tag": "0047_add_message_fwd_header",
+      "breakpoints": true
     }
   ]
 }

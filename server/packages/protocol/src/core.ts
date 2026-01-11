@@ -580,6 +580,35 @@ export interface Message {
      * @generated from protobuf field: optional MessageSendMode send_mode = 17;
      */
     sendMode?: MessageSendMode;
+    /**
+     * Forward header info
+     *
+     * @generated from protobuf field: optional MessageFwdHeader fwd_from = 18;
+     */
+    fwdFrom?: MessageFwdHeader;
+}
+/**
+ * @generated from protobuf message MessageFwdHeader
+ */
+export interface MessageFwdHeader {
+    /**
+     * Original chat or user peer
+     *
+     * @generated from protobuf field: Peer from_peer_id = 1;
+     */
+    fromPeerId?: Peer;
+    /**
+     * Original sender user ID
+     *
+     * @generated from protobuf field: int64 from_id = 2;
+     */
+    fromId: bigint;
+    /**
+     * Original message ID
+     *
+     * @generated from protobuf field: int64 from_message_id = 3;
+     */
+    fromMessageId: bigint;
 }
 /**
  * @generated from protobuf message MessageEntities
@@ -1586,6 +1615,12 @@ export interface RpcCall {
          */
         searchMessages: SearchMessagesInput;
     } | {
+        oneofKind: "forwardMessages";
+        /**
+         * @generated from protobuf field: ForwardMessagesInput forwardMessages = 30;
+         */
+        forwardMessages: ForwardMessagesInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1768,6 +1803,12 @@ export interface RpcResult {
          * @generated from protobuf field: SearchMessagesResult searchMessages = 29;
          */
         searchMessages: SearchMessagesResult;
+    } | {
+        oneofKind: "forwardMessages";
+        /**
+         * @generated from protobuf field: ForwardMessagesResult forwardMessages = 30;
+         */
+        forwardMessages: ForwardMessagesResult;
     } | {
         oneofKind: undefined;
     };
@@ -2535,6 +2576,44 @@ export interface SendMessageInput {
 export interface SendMessageResult {
     /**
      * @generated from protobuf field: repeated Update updates = 2;
+     */
+    updates: Update[];
+}
+/**
+ * @generated from protobuf message ForwardMessagesInput
+ */
+export interface ForwardMessagesInput {
+    /**
+     * Source chat/user peer
+     *
+     * @generated from protobuf field: InputPeer from_peer_id = 1;
+     */
+    fromPeerId?: InputPeer;
+    /**
+     * Message IDs to forward from the source peer
+     *
+     * @generated from protobuf field: repeated int64 message_ids = 2;
+     */
+    messageIds: bigint[];
+    /**
+     * Destination chat/user peer
+     *
+     * @generated from protobuf field: InputPeer to_peer_id = 3;
+     */
+    toPeerId?: InputPeer;
+    /**
+     * Whether to include forward header (defaults to true on server)
+     *
+     * @generated from protobuf field: optional bool share_forward_header = 4;
+     */
+    shareForwardHeader?: boolean;
+}
+/**
+ * @generated from protobuf message ForwardMessagesResult
+ */
+export interface ForwardMessagesResult {
+    /**
+     * @generated from protobuf field: repeated Update updates = 1;
      */
     updates: Update[];
 }
@@ -3674,7 +3753,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: SEARCH_MESSAGES = 28;
      */
-    SEARCH_MESSAGES = 28
+    SEARCH_MESSAGES = 28,
+    /**
+     * @generated from protobuf enum value: FORWARD_MESSAGES = 29;
+     */
+    FORWARD_MESSAGES = 29
 }
 /**
  * @generated from protobuf enum SearchMessagesFilter
@@ -5017,7 +5100,8 @@ class Message$Type extends MessageType<Message> {
             { no: 14, name: "reactions", kind: "message", T: () => MessageReactions },
             { no: 15, name: "is_sticker", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 16, name: "entities", kind: "message", T: () => MessageEntities },
-            { no: 17, name: "send_mode", kind: "enum", opt: true, T: () => ["MessageSendMode", MessageSendMode] }
+            { no: 17, name: "send_mode", kind: "enum", opt: true, T: () => ["MessageSendMode", MessageSendMode] },
+            { no: 18, name: "fwd_from", kind: "message", T: () => MessageFwdHeader }
         ]);
     }
     create(value?: PartialMessage<Message>): Message {
@@ -5087,6 +5171,9 @@ class Message$Type extends MessageType<Message> {
                 case /* optional MessageSendMode send_mode */ 17:
                     message.sendMode = reader.int32();
                     break;
+                case /* optional MessageFwdHeader fwd_from */ 18:
+                    message.fwdFrom = MessageFwdHeader.internalBinaryRead(reader, reader.uint32(), options, message.fwdFrom);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -5150,6 +5237,9 @@ class Message$Type extends MessageType<Message> {
         /* optional MessageSendMode send_mode = 17; */
         if (message.sendMode !== undefined)
             writer.tag(17, WireType.Varint).int32(message.sendMode);
+        /* optional MessageFwdHeader fwd_from = 18; */
+        if (message.fwdFrom)
+            MessageFwdHeader.internalBinaryWrite(message.fwdFrom, writer.tag(18, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -5160,6 +5250,68 @@ class Message$Type extends MessageType<Message> {
  * @generated MessageType for protobuf message Message
  */
 export const Message = new Message$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageFwdHeader$Type extends MessageType<MessageFwdHeader> {
+    constructor() {
+        super("MessageFwdHeader", [
+            { no: 1, name: "from_peer_id", kind: "message", T: () => Peer },
+            { no: 2, name: "from_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "from_message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MessageFwdHeader>): MessageFwdHeader {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.fromId = 0n;
+        message.fromMessageId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<MessageFwdHeader>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageFwdHeader): MessageFwdHeader {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Peer from_peer_id */ 1:
+                    message.fromPeerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.fromPeerId);
+                    break;
+                case /* int64 from_id */ 2:
+                    message.fromId = reader.int64().toBigInt();
+                    break;
+                case /* int64 from_message_id */ 3:
+                    message.fromMessageId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageFwdHeader, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Peer from_peer_id = 1; */
+        if (message.fromPeerId)
+            Peer.internalBinaryWrite(message.fromPeerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* int64 from_id = 2; */
+        if (message.fromId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.fromId);
+        /* int64 from_message_id = 3; */
+        if (message.fromMessageId !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.fromMessageId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageFwdHeader
+ */
+export const MessageFwdHeader = new MessageFwdHeader$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class MessageEntities$Type extends MessageType<MessageEntities> {
     constructor() {
@@ -6919,7 +7071,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 26, name: "getChat", kind: "message", oneof: "input", T: () => GetChatInput },
             { no: 27, name: "getUpdates", kind: "message", oneof: "input", T: () => GetUpdatesInput },
             { no: 28, name: "updateMemberAccess", kind: "message", oneof: "input", T: () => UpdateMemberAccessInput },
-            { no: 29, name: "searchMessages", kind: "message", oneof: "input", T: () => SearchMessagesInput }
+            { no: 29, name: "searchMessages", kind: "message", oneof: "input", T: () => SearchMessagesInput },
+            { no: 30, name: "forwardMessages", kind: "message", oneof: "input", T: () => ForwardMessagesInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -7106,6 +7259,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         searchMessages: SearchMessagesInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).searchMessages)
                     };
                     break;
+                case /* ForwardMessagesInput forwardMessages */ 30:
+                    message.input = {
+                        oneofKind: "forwardMessages",
+                        forwardMessages: ForwardMessagesInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).forwardMessages)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -7205,6 +7364,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* SearchMessagesInput searchMessages = 29; */
         if (message.input.oneofKind === "searchMessages")
             SearchMessagesInput.internalBinaryWrite(message.input.searchMessages, writer.tag(29, WireType.LengthDelimited).fork(), options).join();
+        /* ForwardMessagesInput forwardMessages = 30; */
+        if (message.input.oneofKind === "forwardMessages")
+            ForwardMessagesInput.internalBinaryWrite(message.input.forwardMessages, writer.tag(30, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -7247,7 +7409,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 26, name: "getChat", kind: "message", oneof: "result", T: () => GetChatResult },
             { no: 27, name: "getUpdates", kind: "message", oneof: "result", T: () => GetUpdatesResult },
             { no: 28, name: "updateMemberAccess", kind: "message", oneof: "result", T: () => UpdateMemberAccessResult },
-            { no: 29, name: "searchMessages", kind: "message", oneof: "result", T: () => SearchMessagesResult }
+            { no: 29, name: "searchMessages", kind: "message", oneof: "result", T: () => SearchMessagesResult },
+            { no: 30, name: "forwardMessages", kind: "message", oneof: "result", T: () => ForwardMessagesResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -7434,6 +7597,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         searchMessages: SearchMessagesResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).searchMessages)
                     };
                     break;
+                case /* ForwardMessagesResult forwardMessages */ 30:
+                    message.result = {
+                        oneofKind: "forwardMessages",
+                        forwardMessages: ForwardMessagesResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).forwardMessages)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -7533,6 +7702,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* SearchMessagesResult searchMessages = 29; */
         if (message.result.oneofKind === "searchMessages")
             SearchMessagesResult.internalBinaryWrite(message.result.searchMessages, writer.tag(29, WireType.LengthDelimited).fork(), options).join();
+        /* ForwardMessagesResult forwardMessages = 30; */
+        if (message.result.oneofKind === "forwardMessages")
+            ForwardMessagesResult.internalBinaryWrite(message.result.forwardMessages, writer.tag(30, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9916,6 +10088,129 @@ class SendMessageResult$Type extends MessageType<SendMessageResult> {
  * @generated MessageType for protobuf message SendMessageResult
  */
 export const SendMessageResult = new SendMessageResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ForwardMessagesInput$Type extends MessageType<ForwardMessagesInput> {
+    constructor() {
+        super("ForwardMessagesInput", [
+            { no: 1, name: "from_peer_id", kind: "message", T: () => InputPeer },
+            { no: 2, name: "message_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "to_peer_id", kind: "message", T: () => InputPeer },
+            { no: 4, name: "share_forward_header", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ForwardMessagesInput>): ForwardMessagesInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.messageIds = [];
+        if (value !== undefined)
+            reflectionMergePartial<ForwardMessagesInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ForwardMessagesInput): ForwardMessagesInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer from_peer_id */ 1:
+                    message.fromPeerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.fromPeerId);
+                    break;
+                case /* repeated int64 message_ids */ 2:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.messageIds.push(reader.int64().toBigInt());
+                    else
+                        message.messageIds.push(reader.int64().toBigInt());
+                    break;
+                case /* InputPeer to_peer_id */ 3:
+                    message.toPeerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.toPeerId);
+                    break;
+                case /* optional bool share_forward_header */ 4:
+                    message.shareForwardHeader = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ForwardMessagesInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer from_peer_id = 1; */
+        if (message.fromPeerId)
+            InputPeer.internalBinaryWrite(message.fromPeerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated int64 message_ids = 2; */
+        if (message.messageIds.length) {
+            writer.tag(2, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.messageIds.length; i++)
+                writer.int64(message.messageIds[i]);
+            writer.join();
+        }
+        /* InputPeer to_peer_id = 3; */
+        if (message.toPeerId)
+            InputPeer.internalBinaryWrite(message.toPeerId, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool share_forward_header = 4; */
+        if (message.shareForwardHeader !== undefined)
+            writer.tag(4, WireType.Varint).bool(message.shareForwardHeader);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ForwardMessagesInput
+ */
+export const ForwardMessagesInput = new ForwardMessagesInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ForwardMessagesResult$Type extends MessageType<ForwardMessagesResult> {
+    constructor() {
+        super("ForwardMessagesResult", [
+            { no: 1, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update }
+        ]);
+    }
+    create(value?: PartialMessage<ForwardMessagesResult>): ForwardMessagesResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.updates = [];
+        if (value !== undefined)
+            reflectionMergePartial<ForwardMessagesResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ForwardMessagesResult): ForwardMessagesResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Update updates */ 1:
+                    message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ForwardMessagesResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Update updates = 1; */
+        for (let i = 0; i < message.updates.length; i++)
+            Update.internalBinaryWrite(message.updates[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ForwardMessagesResult
+ */
+export const ForwardMessagesResult = new ForwardMessagesResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class GetChatHistoryInput$Type extends MessageType<GetChatHistoryInput> {
     constructor() {

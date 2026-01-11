@@ -4,6 +4,7 @@ import { decryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import {
   type InputPeer,
   type Message,
+  type MessageFwdHeader,
   type MessageMedia,
   type MessageAttachment,
   type MessageAttachments,
@@ -107,6 +108,27 @@ export const encodeMessage = ({
       },
     }
   }
+  let fwdFrom: MessageFwdHeader | undefined = undefined
+  let fwdFromPeer: Peer | undefined = undefined
+
+  if (message.fwdFromPeerChatId) {
+    fwdFromPeer = {
+      type: { oneofKind: "chat", chat: { chatId: BigInt(message.fwdFromPeerChatId) } },
+    }
+  } else if (message.fwdFromPeerUserId) {
+    fwdFromPeer = {
+      type: { oneofKind: "user", user: { userId: BigInt(message.fwdFromPeerUserId) } },
+    }
+  }
+
+  if (fwdFromPeer && message.fwdFromSenderId && message.fwdFromMessageId) {
+    fwdFrom = {
+      fromPeerId: fwdFromPeer,
+      fromId: BigInt(message.fwdFromSenderId),
+      fromMessageId: BigInt(message.fwdFromMessageId),
+    }
+  }
+
   let messageProto: Message = {
     id: BigInt(message.messageId),
     fromId: BigInt(message.fromId),
@@ -121,6 +143,7 @@ export const encodeMessage = ({
     isSticker: message.isSticker || undefined,
     entities: entities,
     sendMode: sendMode ?? undefined,
+    fwdFrom: fwdFrom,
   }
 
   return messageProto
@@ -232,6 +255,27 @@ export const encodeFullMessage = ({
 
   const hasReactions = message.reactions.length > 0
 
+  let fwdFrom: MessageFwdHeader | undefined = undefined
+  let fwdFromPeer: Peer | undefined = undefined
+
+  if (message.fwdFromPeerChatId) {
+    fwdFromPeer = {
+      type: { oneofKind: "chat", chat: { chatId: BigInt(message.fwdFromPeerChatId) } },
+    }
+  } else if (message.fwdFromPeerUserId) {
+    fwdFromPeer = {
+      type: { oneofKind: "user", user: { userId: BigInt(message.fwdFromPeerUserId) } },
+    }
+  }
+
+  if (fwdFromPeer && message.fwdFromSenderId && message.fwdFromMessageId) {
+    fwdFrom = {
+      fromPeerId: fwdFromPeer,
+      fromId: BigInt(message.fwdFromSenderId),
+      fromMessageId: BigInt(message.fwdFromMessageId),
+    }
+  }
+
   let messageProto: Message = {
     id: BigInt(message.messageId),
     fromId: BigInt(message.fromId),
@@ -251,6 +295,7 @@ export const encodeFullMessage = ({
         }
       : undefined,
     entities: message.entities ?? undefined,
+    fwdFrom: fwdFrom,
   }
 
   return messageProto

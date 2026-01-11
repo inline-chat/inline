@@ -31,6 +31,7 @@ import { updateMemberAccessHandler } from "@in/server/realtime/handlers/space.up
 import { markAsUnread } from "./messages.markAsUnread"
 import { getUpdatesState } from "@in/server/realtime/handlers/updates.getUpdatesState"
 import { getUpdates } from "@in/server/realtime/handlers/updates.getUpdates"
+import { forwardMessagesHandler } from "@in/server/realtime/handlers/messages.forwardMessages"
 
 const log = new Log("rpc")
 
@@ -256,6 +257,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await getUpdates(call.input.getUpdates, handlerContext)
       return { oneofKind: "getUpdates", getUpdates: result }
+    }
+
+    case Method.FORWARD_MESSAGES: {
+      if (call.input.oneofKind !== "forwardMessages") {
+        throw RealtimeRpcError.BadRequest
+      }
+      let result = await forwardMessagesHandler(call.input.forwardMessages, handlerContext)
+      return { oneofKind: "forwardMessages", forwardMessages: result }
     }
 
     default:

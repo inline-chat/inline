@@ -21,6 +21,7 @@ import { deleteMember } from "@in/server/functions/space.deleteMember"
 import { markAsUnread } from "./messages.markAsUnread"
 import { getUpdatesState } from "./updates.getUpdatesState"
 import { getUpdates } from "./updates.getUpdates"
+import { forwardMessages } from "./messages.forwardMessages"
 
 export const Functions = {
   messages: {
@@ -37,6 +38,7 @@ export const Functions = {
     getChatParticipants: getChatParticipants,
     addChatParticipant: addChatParticipant,
     removeChatParticipant: removeChatParticipant,
+    forwardMessages: forwardMessages,
     // until we make tests pass
     //markAsUnread: markAsUnread,
   },

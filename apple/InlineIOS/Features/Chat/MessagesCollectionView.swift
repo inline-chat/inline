@@ -3,10 +3,12 @@ import Combine
 import ContextMenuAccessoryStructs
 import GRDB
 import InlineKit
+import InlineUI
 import Logger
 import Nuke
 import NukeUI
 import Photos
+import SwiftUI
 import Translation
 import UIKit
 
@@ -1280,6 +1282,13 @@ private extension MessagesCollectionView {
         }
         actions.append(replyAction)
 
+        let forwardAction = UIAction(title: "Forward", image: UIImage(systemName: "arrowshape.turn.up.right")) {
+          [weak self] _ in
+          guard let self else { return }
+          self.presentForwardSheet(fullMessage)
+        }
+        actions.append(forwardAction)
+
         var editAction: UIAction?
         if message.fromId == Auth.shared.getCurrentUserId() ?? 0, message.hasText {
           editAction = UIAction(title: "Edit", image: UIImage(systemName: "bubble.and.pencil")) { _ in
@@ -1368,6 +1377,54 @@ private extension MessagesCollectionView {
       })
 
       viewController.present(alert, animated: true)
+    }
+
+    func presentForwardSheet(_ fullMessage: FullMessage) {
+      func findViewController(from view: UIView?) -> UIViewController? {
+        guard let view else { return nil }
+
+        var responder: UIResponder? = view
+        while let nextResponder = responder?.next {
+          if let viewController = nextResponder as? UIViewController {
+            return viewController
+          }
+          responder = nextResponder
+        }
+        return nil
+      }
+
+      guard let viewController = findViewController(from: currentCollectionView) else { return }
+
+      let rootView = InlineUI.ForwardMessagesSheet(messages: [fullMessage]) { count, singleTitle in
+        let message = count == 1
+          ? "Forwarded to \(singleTitle ?? "chat")"
+          : "Forwarded to \(count) chats"
+        ToastManager.shared.showToast(
+          message,
+          type: .success,
+          systemImage: "checkmark.circle"
+        )
+
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.prepare()
+        generator.impactOccurred(intensity: 1.0)
+      } onForwardFailure: { forwardedCount, totalCount in
+        let message = forwardedCount > 0
+          ? "Forwarded to \(forwardedCount) chats, some failed"
+          : "Failed to forward"
+        ToastManager.shared.showToast(
+          message,
+          type: .error,
+          systemImage: "exclamationmark.triangle"
+        )
+      }
+        .appDatabase(AppDatabase.shared)
+        .environment(\.realtimeV2, Api.realtime)
+
+      let hostingController = UIHostingController(rootView: rootView)
+      hostingController.modalPresentationStyle = UIModalPresentationStyle.pageSheet
+
+      viewController.present(hostingController, animated: true)
     }
 
     func showDeleteConfirmationForFailed(messageId: Int64, peerId: Peer, chatId: Int64) {

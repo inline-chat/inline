@@ -56,6 +56,12 @@ export const messages = pgTable(
     /** optional, message it is replying to */
     replyToMsgId: integer("reply_to_msg_id"),
 
+    /** forward header */
+    fwdFromPeerUserId: integer("fwd_from_peer_user_id"),
+    fwdFromPeerChatId: integer("fwd_from_peer_chat_id"),
+    fwdFromMessageId: integer("fwd_from_message_id"),
+    fwdFromSenderId: integer("fwd_from_sender_id"),
+
     /** if this message is part of a grouped message */
     groupedId: bigint("grouped_id", { mode: "bigint" }),
 
