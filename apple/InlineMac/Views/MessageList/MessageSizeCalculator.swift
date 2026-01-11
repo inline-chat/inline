@@ -877,6 +877,9 @@ class MessageSizeCalculator {
     if let documentPlan {
       bubbleHeight += documentPlan.size.height
       bubbleHeight += documentPlan.spacing.bottom
+      if replyPlan != nil {
+        bubbleHeight += documentPlan.spacing.top
+      }
       bubbleWidth = max(bubbleWidth, documentPlan.size.width + documentPlan.spacing.horizontalTotal)
     }
     if let attachmentsPlan {

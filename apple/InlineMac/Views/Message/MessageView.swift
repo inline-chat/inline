@@ -1253,8 +1253,9 @@ class MessageViewAppKit: NSView {
        let documentViewTopConstraint
     {
       log.trace("Updating document view constraints for message \(document.size)")
-      if documentViewTopConstraint.constant != document.spacing.top {
-        documentViewTopConstraint.constant = document.spacing.top
+      let documentTop = props.layout.documentContentViewTop
+      if documentViewTopConstraint.constant != documentTop {
+        documentViewTopConstraint.constant = documentTop
       }
     }
 
