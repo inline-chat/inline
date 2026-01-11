@@ -593,6 +593,15 @@ public extension AppDatabase {
       try db.execute(sql: "PRAGMA optimize")
     }
 
+    migrator.registerMigration("message forward header") { db in
+      try db.alter(table: "message") { t in
+        t.add(column: "forwardFromPeerUserId", .integer)
+        t.add(column: "forwardFromPeerThreadId", .integer)
+        t.add(column: "forwardFromMessageId", .integer)
+        t.add(column: "forwardFromUserId", .integer)
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

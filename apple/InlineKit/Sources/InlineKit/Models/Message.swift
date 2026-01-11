@@ -78,6 +78,10 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   public var fileId: String?
   public var status: MessageSendingStatus?
   public var repliedToMessageId: Int64?
+  public var forwardFromPeerUserId: Int64?
+  public var forwardFromPeerThreadId: Int64?
+  public var forwardFromMessageId: Int64?
+  public var forwardFromUserId: Int64?
   public var photoId: Int64?
   public var videoId: Int64?
   public var documentId: Int64?
@@ -101,6 +105,10 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     public static let editDate = Column(CodingKeys.editDate)
     public static let status = Column(CodingKeys.status)
     public static let repliedToMessageId = Column(CodingKeys.repliedToMessageId)
+    public static let forwardFromPeerUserId = Column(CodingKeys.forwardFromPeerUserId)
+    public static let forwardFromPeerThreadId = Column(CodingKeys.forwardFromPeerThreadId)
+    public static let forwardFromMessageId = Column(CodingKeys.forwardFromMessageId)
+    public static let forwardFromUserId = Column(CodingKeys.forwardFromUserId)
     public static let isSticker = Column(CodingKeys.isSticker)
     public static let photoId = Column(CodingKeys.photoId)
     public static let videoId = Column(CodingKeys.videoId)
@@ -205,6 +213,10 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     editDate: Date? = nil,
     status: MessageSendingStatus? = nil,
     repliedToMessageId: Int64? = nil,
+    forwardFromPeerUserId: Int64? = nil,
+    forwardFromPeerThreadId: Int64? = nil,
+    forwardFromMessageId: Int64? = nil,
+    forwardFromUserId: Int64? = nil,
     fileId: String? = nil,
     photoId: Int64? = nil,
     videoId: Int64? = nil,
@@ -227,6 +239,10 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     self.pinned = pinned
     self.status = status
     self.repliedToMessageId = repliedToMessageId
+    self.forwardFromPeerUserId = forwardFromPeerUserId
+    self.forwardFromPeerThreadId = forwardFromPeerThreadId
+    self.forwardFromMessageId = forwardFromMessageId
+    self.forwardFromUserId = forwardFromUserId
     self.fileId = fileId
     self.photoId = photoId
     self.videoId = videoId
@@ -263,6 +279,9 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   }
 
   public init(from: InlineProtocol.Message) {
+    let forwardHeader = from.hasFwdFrom ? from.fwdFrom : nil
+    let forwardPeer = forwardHeader?.hasFromPeerID == true ? forwardHeader?.fromPeerID.toPeer() : nil
+
     self.init(
       messageId: from.id,
       randomId: nil,
@@ -278,6 +297,10 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       editDate: from.hasEditDate ? Date(timeIntervalSince1970: TimeInterval(from.editDate)) : nil,
       status: from.out == true ? MessageSendingStatus.sent : nil,
       repliedToMessageId: from.hasReplyToMsgID ? from.replyToMsgID : nil,
+      forwardFromPeerUserId: forwardPeer?.asUserId(),
+      forwardFromPeerThreadId: forwardPeer?.asThreadId(),
+      forwardFromMessageId: forwardHeader?.fromMessageID,
+      forwardFromUserId: forwardHeader?.fromID,
       fileId: nil,
       photoId: from.media.photo.hasPhoto ? from.media.photo.photo.id : nil,
       videoId: from.media.video.hasVideo ? from.media.video.video.id : nil,
@@ -504,6 +527,10 @@ public extension Message {
       message.isSticker = message.isSticker ?? existing.isSticker
       message.editDate = message.editDate ?? existing.editDate
       message.repliedToMessageId = message.repliedToMessageId ?? existing.repliedToMessageId
+      message.forwardFromPeerUserId = message.forwardFromPeerUserId ?? existing.forwardFromPeerUserId
+      message.forwardFromPeerThreadId = message.forwardFromPeerThreadId ?? existing.forwardFromPeerThreadId
+      message.forwardFromMessageId = message.forwardFromMessageId ?? existing.forwardFromMessageId
+      message.forwardFromUserId = message.forwardFromUserId ?? existing.forwardFromUserId
 
       if protocolMessage.hasReactions {
         for reaction in protocolMessage.reactions.reactions {
