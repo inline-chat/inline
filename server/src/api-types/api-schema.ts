@@ -23,7 +23,7 @@ import { getSignedUrl } from "@in/server/modules/files/path"
 
 export const TimestampMs = Type.Transform(Type.Integer())
   .Decode((value: number) => new Date(value * 1000))
-  .Encode((date: Date) => Math.floor(date.getTime() / 1000))
+  .Encode((date: Date | number) => encodeDate(date))
 
 export const Optional = <T extends TSchema>(schema: T) =>
   Type.Optional(Type.Union([Type.Null(), Type.Undefined(), schema]))
@@ -132,10 +132,12 @@ export const encodeUserInfo = (user: DbUser | TUserInfo, context?: { photoFile?:
     photo = [encodePhotoInfo(context.photoFile)]
   }
 
-  return Value.Encode(TUserInfo, {
+  const payload = {
     ...user,
-    photo,
-  })
+    ...(photo ? { photo } : {}),
+  }
+
+  return Value.Encode(TUserInfo, payload)
 }
 
 export const encodeFullUserInfo = (user: DbUserWithPhoto): TUserInfo => {
@@ -148,10 +150,12 @@ export const encodeFullUserInfo = (user: DbUserWithPhoto): TUserInfo => {
     photo?.push(encodePhotoInfo(thumb))
   })
 
-  return Value.Encode(TUserInfo, {
+  const payload = {
     ...user,
-    photo,
-  })
+    ...(photo ? { photo } : {}),
+  }
+
+  return Value.Encode(TUserInfo, payload)
 }
 
 // No email or phone number, just public info. used in search results
@@ -164,7 +168,7 @@ export const encodeMinUserInfo = (
     photo = [encodePhotoInfo(context.photoFile)]
   }
 
-  return Value.Encode(TMinUserInfo, {
+  const payload = {
     id: user.id,
     firstName: user.firstName,
     lastName: user.lastName,
@@ -172,8 +176,10 @@ export const encodeMinUserInfo = (
     online: user.online,
     lastOnline: user.lastOnline,
     date: user.date,
-    photo,
-  })
+    ...(photo ? { photo } : {}),
+  }
+
+  return Value.Encode(TMinUserInfo, payload)
 }
 
 // Member -------------
