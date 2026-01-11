@@ -9,6 +9,7 @@ import InlineUI
 import Logger
 import Nuke
 import NukeUI
+import SwiftUI
 import TextProcessing
 import Throttler
 import Translation
@@ -1605,6 +1606,41 @@ class MessageViewAppKit: NSView {
     state.setReplyingToMsgId(fullMessage.message.messageId)
   }
 
+  @objc private func forwardMessage() {
+    guard let window, let presentingController = window.contentViewController else { return }
+
+    weak var weakHostingController: NSViewController?
+    let rootView = ForwardMessagesSheet(messages: [fullMessage]) { count, singleTitle in
+      let message = count == 1
+        ? "Forwarded to \(singleTitle ?? "chat")"
+        : "Forwarded to \(count) chats"
+      ToastCenter.shared.showSuccess(message)
+      NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
+    } onForwardFailure: { forwardedCount, totalCount in
+      let message = forwardedCount > 0
+        ? "Forwarded to \(forwardedCount) chats, some failed"
+        : "Failed to forward"
+      ToastCenter.shared.showError(message)
+    } onClose: { [weak presentingController] in
+      guard let hostingController = weakHostingController else { return }
+      presentingController?.dismiss(hostingController)
+    }
+      .appDatabase(AppDatabase.shared)
+      .environment(\.realtimeV2, Api.realtime)
+
+    let hostingController = NSHostingController(rootView: AnyView(rootView))
+    weakHostingController = hostingController
+    hostingController.title = "Forward"
+    hostingController.preferredContentSize = NSSize(width: 480, height: 560)
+    presentingController.presentAsSheet(hostingController)
+    DispatchQueue.main.async { [weak hostingController] in
+      guard let window = hostingController?.view.window else { return }
+      window.title = "Forward"
+      window.styleMask.insert(.closable)
+      window.standardWindowButton(.closeButton)?.isHidden = false
+    }
+  }
+
   @objc private func editMessage() {
     let state = ChatsManager
       .get(
@@ -2260,6 +2296,10 @@ extension MessageViewAppKit: NSMenuDelegate {
       let replyItem = NSMenuItem(title: "Reply", action: #selector(reply), keyEquivalent: "r")
       replyItem.image = NSImage(systemSymbolName: "arrowshape.turn.up.left", accessibilityDescription: "Reply")
       menu.addItem(replyItem)
+
+      let forwardItem = NSMenuItem(title: "Forward", action: #selector(forwardMessage), keyEquivalent: "")
+      forwardItem.image = NSImage(systemSymbolName: "arrowshape.turn.up.right", accessibilityDescription: "Forward")
+      menu.addItem(forwardItem)
     }
 
     // Edit

@@ -1,5 +1,6 @@
 import {
   InputPeer,
+  MessageAttachment,
   MessageEntities,
   MessageSendMode,
   Update,
@@ -9,13 +10,15 @@ import { ChatModel } from "@in/server/db/models/chats"
 import { FileModel, type DbFullPhoto, type DbFullVideo } from "@in/server/db/models/files"
 import type { DbFullDocument } from "@in/server/db/models/files"
 import { MessageModel } from "@in/server/db/models/messages"
-import { type DbChat, type DbMessage } from "@in/server/db/schema"
+import { db } from "@in/server/db"
+import { messageAttachments, type DbChat, type DbMessage } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { getCachedUserName, UserNamesCache, type UserName } from "@in/server/modules/cache/userNames"
 import { decryptMessage, encryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { Notifications } from "@in/server/modules/notifications/notifications"
 import { getUpdateGroupFromInputPeer, type UpdateGroup } from "@in/server/modules/updates"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
+import { encodeMessageAttachmentUpdate } from "@in/server/realtime/encoders/encodeMessageAttachment"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Log } from "@in/server/utils/log"
 import { processLoomLink } from "@in/server/modules/loom/processLoomLink"
@@ -33,6 +36,8 @@ import { debugDelay } from "@in/server/utils/helpers/time"
 import { connectionManager } from "@in/server/ws/connections"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { getCachedUserProfilePhotoUrl } from "@in/server/modules/cache/userPhotos"
+import { processAttachments } from "@in/server/db/models/messages"
+import { eq } from "drizzle-orm"
 
 type Input = {
   peerId: InputPeer
@@ -46,9 +51,18 @@ type Input = {
   isSticker?: boolean
   entities?: MessageEntities
   sendMode?: MessageSendMode
+  forwardHeader?: {
+    fromPeerId: InputPeer
+    fromId: number
+    fromMessageId: number
+  }
+  messageAttachments?: { externalTaskId?: bigint; urlPreviewId?: bigint }[]
 
   /** whether to process markdown string */
   parseMarkdown?: boolean
+
+  /** skip processing links into attachments */
+  skipLinkProcessing?: boolean
 }
 
 type Output = {
@@ -111,6 +125,31 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   const binaryEntities = entities ? MessageEntities.toBinary(entities) : undefined
   const encryptedEntities = binaryEntities && binaryEntities.length > 0 ? encryptBinary(binaryEntities) : undefined
 
+  let fwdFromPeerUserId: number | null = null
+  let fwdFromPeerChatId: number | null = null
+  let fwdFromMessageId: number | null = null
+  let fwdFromSenderId: number | null = null
+
+  if (input.forwardHeader) {
+    const forwardPeer = input.forwardHeader.fromPeerId.type
+    switch (forwardPeer.oneofKind) {
+      case "user":
+        fwdFromPeerUserId = Number(forwardPeer.user.userId)
+        break
+      case "chat":
+        fwdFromPeerChatId = Number(forwardPeer.chat.chatId)
+        break
+      case "self":
+        fwdFromPeerUserId = currentUserId
+        break
+      default:
+        break
+    }
+
+    fwdFromMessageId = Number(input.forwardHeader.fromMessageId)
+    fwdFromSenderId = Number(input.forwardHeader.fromId)
+  }
+
   let newMessage: DbMessage
   let update: UpdateSeqAndDate
   try {
@@ -122,6 +161,10 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       textIv: encryptedMessage?.iv ?? null,
       textTag: encryptedMessage?.authTag ?? null,
       replyToMsgId: replyToMsgIdNumber,
+      fwdFromPeerUserId: fwdFromPeerUserId,
+      fwdFromPeerChatId: fwdFromPeerChatId,
+      fwdFromMessageId: fwdFromMessageId,
+      fwdFromSenderId: fwdFromSenderId,
       randomId: input.randomId,
       date: date,
       mediaType: mediaType,
@@ -145,8 +188,22 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     }
   }
 
+  if (input.messageAttachments && input.messageAttachments.length > 0) {
+    const attachmentRows = input.messageAttachments
+      .map((attachment) => ({
+        messageId: newMessage.globalId,
+        externalTaskId: attachment.externalTaskId ?? null,
+        urlPreviewId: attachment.urlPreviewId ?? null,
+      }))
+      .filter((attachment) => attachment.externalTaskId !== null || attachment.urlPreviewId !== null)
+
+    if (attachmentRows.length > 0) {
+      await db.insert(messageAttachments).values(attachmentRows)
+    }
+  }
+
   // Process Loom links in the message if any
-  if (text) {
+  if (text && !input.skipLinkProcessing) {
     // Process Loom links in parallel with message sending
     processLoomLink(newMessage, text, BigInt(chatId), currentUserId, inputPeer)
   }
@@ -192,6 +249,27 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     inputPeer,
     sendMode: input.sendMode,
   })
+
+  if (input.messageAttachments && input.messageAttachments.length > 0) {
+    try {
+      const attachmentUpdates = await buildAttachmentUpdates({
+        message: newMessage,
+        chatId,
+        inputPeer,
+        currentUserId,
+        updateGroup,
+      })
+      if (attachmentUpdates.length > 0) {
+        selfUpdates.push(...attachmentUpdates)
+      }
+    } catch (error) {
+      log.error("Failed to push message attachment updates", {
+        error,
+        chatId,
+        messageId: newMessage.messageId,
+      })
+    }
+  }
 
   // return new updates
   return { updates: selfUpdates }
@@ -363,6 +441,125 @@ const pushUpdates = async ({
   }
 
   return { selfUpdates, updateGroup }
+}
+
+const buildAttachmentUpdates = async ({
+  message,
+  chatId,
+  inputPeer,
+  currentUserId,
+  updateGroup,
+}: {
+  message: DbMessage
+  chatId: number
+  inputPeer: InputPeer
+  currentUserId: number
+  updateGroup: UpdateGroup
+}): Promise<Update[]> => {
+  const attachments = await db._query.messageAttachments.findMany({
+    where: eq(messageAttachments.messageId, message.globalId),
+    with: {
+      externalTask: true,
+      linkEmbed: {
+        with: {
+          photo: {
+            with: {
+              photoSizes: {
+                with: {
+                  file: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  })
+
+  if (attachments.length === 0) {
+    return []
+  }
+
+  const processed = processAttachments(attachments)
+  const selfUpdates: Update[] = []
+
+  const updateForUser = (userId: number, attachment: MessageAttachment): Update => {
+    const encodingForInputPeer: InputPeer =
+      updateGroup.type === "dmUsers" && userId !== currentUserId
+        ? { type: { oneofKind: "user", user: { userId: BigInt(currentUserId) } } }
+        : inputPeer
+
+    return encodeMessageAttachmentUpdate({
+      messageId: BigInt(message.messageId),
+      chatId: BigInt(chatId),
+      encodingForUserId: userId,
+      encodingForPeer: { inputPeer: encodingForInputPeer },
+      attachment,
+    })
+  }
+
+  const buildAttachment = (attachment: ReturnType<typeof processAttachments>[number]): MessageAttachment | null => {
+    if (!attachment.linkEmbed) {
+      return null
+    }
+
+    const photo = attachment.linkEmbed.photo ? Encoders.photo({ photo: attachment.linkEmbed.photo }) : undefined
+
+    return {
+      id: BigInt(attachment.id ?? 0),
+      attachment: {
+        oneofKind: "urlPreview",
+        urlPreview: {
+          id: BigInt(attachment.linkEmbed.id),
+          url: attachment.linkEmbed.url ?? undefined,
+          siteName: attachment.linkEmbed.siteName ?? undefined,
+          title: attachment.linkEmbed.title ?? undefined,
+          description: attachment.linkEmbed.description ?? undefined,
+          photo,
+          duration: attachment.linkEmbed.duration == null ? undefined : BigInt(attachment.linkEmbed.duration),
+        },
+      },
+    }
+  }
+
+  const attachmentUpdates = processed
+    .map(buildAttachment)
+    .filter((attachment): attachment is MessageAttachment => attachment !== null)
+
+  if (attachmentUpdates.length === 0) {
+    return []
+  }
+
+  const publishUpdate = (userId: number, update: Update) => {
+    if (userId === currentUserId) {
+      selfUpdates.push(update)
+    } else {
+      RealtimeUpdates.pushToUser(userId, [update])
+    }
+  }
+
+  if (updateGroup.type === "dmUsers") {
+    updateGroup.userIds.forEach((userId) => {
+      attachmentUpdates.forEach((attachment) => {
+        publishUpdate(userId, updateForUser(userId, attachment))
+      })
+    })
+  } else if (updateGroup.type === "threadUsers") {
+    updateGroup.userIds.forEach((userId) => {
+      attachmentUpdates.forEach((attachment) => {
+        publishUpdate(userId, updateForUser(userId, attachment))
+      })
+    })
+  } else if (updateGroup.type === "spaceUsers") {
+    const userIds = connectionManager.getSpaceUserIds(updateGroup.spaceId)
+    userIds.forEach((userId) => {
+      attachmentUpdates.forEach((attachment) => {
+        publishUpdate(userId, updateForUser(userId, attachment))
+      })
+    })
+  }
+
+  return selfUpdates
 }
 
 async function selfUpdatesFromExistingMessage(randomId: bigint, currentUserId: number): Promise<Update[]> {

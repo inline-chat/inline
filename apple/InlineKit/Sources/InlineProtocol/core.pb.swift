@@ -86,6 +86,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case getUpdates // = 26
   case updateMemberAccess // = 27
   case searchMessages // = 28
+  case forwardMessages // = 29
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -123,6 +124,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 26: self = .getUpdates
     case 27: self = .updateMemberAccess
     case 28: self = .searchMessages
+    case 29: self = .forwardMessages
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -158,6 +160,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .getUpdates: return 26
     case .updateMemberAccess: return 27
     case .searchMessages: return 28
+    case .forwardMessages: return 29
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -193,6 +196,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .getUpdates,
     .updateMemberAccess,
     .searchMessages,
+    .forwardMessages,
   ]
 
 }
@@ -1162,11 +1166,49 @@ public struct Message: @unchecked Sendable {
   /// Clears the value of `sendMode`. Subsequent reads from it will return its default value.
   public mutating func clearSendMode() {_uniqueStorage()._sendMode = nil}
 
+  /// Forward header info
+  public var fwdFrom: MessageFwdHeader {
+    get {return _storage._fwdFrom ?? MessageFwdHeader()}
+    set {_uniqueStorage()._fwdFrom = newValue}
+  }
+  /// Returns true if `fwdFrom` has been explicitly set.
+  public var hasFwdFrom: Bool {return _storage._fwdFrom != nil}
+  /// Clears the value of `fwdFrom`. Subsequent reads from it will return its default value.
+  public mutating func clearFwdFrom() {_uniqueStorage()._fwdFrom = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+public struct MessageFwdHeader: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Original chat or user peer
+  public var fromPeerID: Peer {
+    get {return _fromPeerID ?? Peer()}
+    set {_fromPeerID = newValue}
+  }
+  /// Returns true if `fromPeerID` has been explicitly set.
+  public var hasFromPeerID: Bool {return self._fromPeerID != nil}
+  /// Clears the value of `fromPeerID`. Subsequent reads from it will return its default value.
+  public mutating func clearFromPeerID() {self._fromPeerID = nil}
+
+  /// Original sender user ID
+  public var fromID: Int64 = 0
+
+  /// Original message ID
+  public var fromMessageID: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _fromPeerID: Peer? = nil
 }
 
 public struct MessageEntities: Sendable {
@@ -2417,6 +2459,14 @@ public struct RpcCall: Sendable {
     set {input = .searchMessages(newValue)}
   }
 
+  public var forwardMessages: ForwardMessagesInput {
+    get {
+      if case .forwardMessages(let v)? = input {return v}
+      return ForwardMessagesInput()
+    }
+    set {input = .forwardMessages(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Input: Equatable, Sendable {
@@ -2448,6 +2498,7 @@ public struct RpcCall: Sendable {
     case getUpdates(GetUpdatesInput)
     case updateMemberAccess(UpdateMemberAccessInput)
     case searchMessages(SearchMessagesInput)
+    case forwardMessages(ForwardMessagesInput)
 
   }
 
@@ -2693,6 +2744,14 @@ public struct RpcResult: @unchecked Sendable {
     set {_uniqueStorage()._result = .searchMessages(newValue)}
   }
 
+  public var forwardMessages: ForwardMessagesResult {
+    get {
+      if case .forwardMessages(let v)? = _storage._result {return v}
+      return ForwardMessagesResult()
+    }
+    set {_uniqueStorage()._result = .forwardMessages(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Result: Equatable, Sendable {
@@ -2724,6 +2783,7 @@ public struct RpcResult: @unchecked Sendable {
     case getUpdates(GetUpdatesResult)
     case updateMemberAccess(UpdateMemberAccessResult)
     case searchMessages(SearchMessagesResult)
+    case forwardMessages(ForwardMessagesResult)
 
   }
 
@@ -3873,6 +3933,65 @@ public struct SendMessageInput: Sendable {
 }
 
 public struct SendMessageResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var updates: [Update] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct ForwardMessagesInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Source chat/user peer
+  public var fromPeerID: InputPeer {
+    get {return _fromPeerID ?? InputPeer()}
+    set {_fromPeerID = newValue}
+  }
+  /// Returns true if `fromPeerID` has been explicitly set.
+  public var hasFromPeerID: Bool {return self._fromPeerID != nil}
+  /// Clears the value of `fromPeerID`. Subsequent reads from it will return its default value.
+  public mutating func clearFromPeerID() {self._fromPeerID = nil}
+
+  /// Message IDs to forward from the source peer
+  public var messageIds: [Int64] = []
+
+  /// Destination chat/user peer
+  public var toPeerID: InputPeer {
+    get {return _toPeerID ?? InputPeer()}
+    set {_toPeerID = newValue}
+  }
+  /// Returns true if `toPeerID` has been explicitly set.
+  public var hasToPeerID: Bool {return self._toPeerID != nil}
+  /// Clears the value of `toPeerID`. Subsequent reads from it will return its default value.
+  public mutating func clearToPeerID() {self._toPeerID = nil}
+
+  /// Whether to include forward header (defaults to true on server)
+  public var shareForwardHeader: Bool {
+    get {return _shareForwardHeader ?? false}
+    set {_shareForwardHeader = newValue}
+  }
+  /// Returns true if `shareForwardHeader` has been explicitly set.
+  public var hasShareForwardHeader: Bool {return self._shareForwardHeader != nil}
+  /// Clears the value of `shareForwardHeader`. Subsequent reads from it will return its default value.
+  public mutating func clearShareForwardHeader() {self._shareForwardHeader = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _fromPeerID: InputPeer? = nil
+  fileprivate var _toPeerID: InputPeer? = nil
+  fileprivate var _shareForwardHeader: Bool? = nil
+}
+
+public struct ForwardMessagesResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -5499,6 +5618,7 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     26: .same(proto: "GET_UPDATES"),
     27: .same(proto: "UPDATE_MEMBER_ACCESS"),
     28: .same(proto: "SEARCH_MESSAGES"),
+    29: .same(proto: "FORWARD_MESSAGES"),
   ]
 }
 
@@ -6701,6 +6821,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     15: .standard(proto: "is_sticker"),
     16: .same(proto: "entities"),
     17: .standard(proto: "send_mode"),
+    18: .standard(proto: "fwd_from"),
   ]
 
   fileprivate class _StorageClass {
@@ -6721,6 +6842,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     var _isSticker: Bool? = nil
     var _entities: MessageEntities? = nil
     var _sendMode: MessageSendMode? = nil
+    var _fwdFrom: MessageFwdHeader? = nil
 
     #if swift(>=5.10)
       // This property is used as the initial default value for new instances of the type.
@@ -6752,6 +6874,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       _isSticker = source._isSticker
       _entities = source._entities
       _sendMode = source._sendMode
+      _fwdFrom = source._fwdFrom
     }
   }
 
@@ -6787,6 +6910,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
         case 15: try { try decoder.decodeSingularBoolField(value: &_storage._isSticker) }()
         case 16: try { try decoder.decodeSingularMessageField(value: &_storage._entities) }()
         case 17: try { try decoder.decodeSingularEnumField(value: &_storage._sendMode) }()
+        case 18: try { try decoder.decodeSingularMessageField(value: &_storage._fwdFrom) }()
         default: break
         }
       }
@@ -6850,6 +6974,9 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       try { if let v = _storage._sendMode {
         try visitor.visitSingularEnumField(value: v, fieldNumber: 17)
       } }()
+      try { if let v = _storage._fwdFrom {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 18)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -6876,10 +7003,59 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
         if _storage._isSticker != rhs_storage._isSticker {return false}
         if _storage._entities != rhs_storage._entities {return false}
         if _storage._sendMode != rhs_storage._sendMode {return false}
+        if _storage._fwdFrom != rhs_storage._fwdFrom {return false}
         return true
       }
       if !storagesAreEqual {return false}
     }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension MessageFwdHeader: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "MessageFwdHeader"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "from_peer_id"),
+    2: .standard(proto: "from_id"),
+    3: .standard(proto: "from_message_id"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._fromPeerID) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.fromID) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self.fromMessageID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._fromPeerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if self.fromID != 0 {
+      try visitor.visitSingularInt64Field(value: self.fromID, fieldNumber: 2)
+    }
+    if self.fromMessageID != 0 {
+      try visitor.visitSingularInt64Field(value: self.fromMessageID, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: MessageFwdHeader, rhs: MessageFwdHeader) -> Bool {
+    if lhs._fromPeerID != rhs._fromPeerID {return false}
+    if lhs.fromID != rhs.fromID {return false}
+    if lhs.fromMessageID != rhs.fromMessageID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -8353,6 +8529,7 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     27: .same(proto: "getUpdates"),
     28: .same(proto: "updateMemberAccess"),
     29: .same(proto: "searchMessages"),
+    30: .same(proto: "forwardMessages"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -8726,6 +8903,19 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
           self.input = .searchMessages(v)
         }
       }()
+      case 30: try {
+        var v: ForwardMessagesInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .forwardMessages(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .forwardMessages(v)
+        }
+      }()
       default: break
       }
     }
@@ -8852,6 +9042,10 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       guard case .searchMessages(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 29)
     }()
+    case .forwardMessages?: try {
+      guard case .forwardMessages(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 30)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -8897,6 +9091,7 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     27: .same(proto: "getUpdates"),
     28: .same(proto: "updateMemberAccess"),
     29: .same(proto: "searchMessages"),
+    30: .same(proto: "forwardMessages"),
   ]
 
   fileprivate class _StorageClass {
@@ -9301,6 +9496,19 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
             _storage._result = .searchMessages(v)
           }
         }()
+        case 30: try {
+          var v: ForwardMessagesResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .forwardMessages(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .forwardMessages(v)
+          }
+        }()
         default: break
         }
       }
@@ -9428,6 +9636,10 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
       case .searchMessages?: try {
         guard case .searchMessages(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 29)
+      }()
+      case .forwardMessages?: try {
+        guard case .forwardMessages(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 30)
       }()
       case nil: break
       }
@@ -11381,6 +11593,92 @@ extension SendMessageResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
   }
 
   public static func ==(lhs: SendMessageResult, rhs: SendMessageResult) -> Bool {
+    if lhs.updates != rhs.updates {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension ForwardMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ForwardMessagesInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "from_peer_id"),
+    2: .standard(proto: "message_ids"),
+    3: .standard(proto: "to_peer_id"),
+    4: .standard(proto: "share_forward_header"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._fromPeerID) }()
+      case 2: try { try decoder.decodeRepeatedInt64Field(value: &self.messageIds) }()
+      case 3: try { try decoder.decodeSingularMessageField(value: &self._toPeerID) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self._shareForwardHeader) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._fromPeerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if !self.messageIds.isEmpty {
+      try visitor.visitPackedInt64Field(value: self.messageIds, fieldNumber: 2)
+    }
+    try { if let v = self._toPeerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    } }()
+    try { if let v = self._shareForwardHeader {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 4)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: ForwardMessagesInput, rhs: ForwardMessagesInput) -> Bool {
+    if lhs._fromPeerID != rhs._fromPeerID {return false}
+    if lhs.messageIds != rhs.messageIds {return false}
+    if lhs._toPeerID != rhs._toPeerID {return false}
+    if lhs._shareForwardHeader != rhs._shareForwardHeader {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension ForwardMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ForwardMessagesResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "updates"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.updates) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.updates.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.updates, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: ForwardMessagesResult, rhs: ForwardMessagesResult) -> Bool {
     if lhs.updates != rhs.updates {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true

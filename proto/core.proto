@@ -219,11 +219,25 @@ message Message {
 
   // Send mode for this message, if any
   optional MessageSendMode send_mode = 17;
+
+  // Forward header info
+  optional MessageFwdHeader fwd_from = 18;
 }
 
 enum MessageSendMode {
   MODE_UNSPECIFIED = 0;
   MODE_SILENT = 1;
+}
+
+message MessageFwdHeader {
+  // Original chat or user peer
+  Peer from_peer_id = 1;
+
+  // Original sender user ID
+  int64 from_id = 2;
+
+  // Original message ID
+  int64 from_message_id = 3;
 }
 
 message MessageEntities { repeated MessageEntity entities = 1; }
@@ -584,6 +598,7 @@ enum Method {
   GET_UPDATES = 26;
   UPDATE_MEMBER_ACCESS = 27;
   SEARCH_MESSAGES = 28;
+  FORWARD_MESSAGES = 29;
 }
 
 message RpcCall {
@@ -617,6 +632,7 @@ message RpcCall {
     GetUpdatesInput getUpdates = 27;
     UpdateMemberAccessInput updateMemberAccess = 28;
     SearchMessagesInput searchMessages = 29;
+    ForwardMessagesInput forwardMessages = 30;
   }
 }
 
@@ -652,6 +668,7 @@ message RpcResult {
     GetUpdatesResult getUpdates = 27;
     UpdateMemberAccessResult updateMemberAccess = 28;
     SearchMessagesResult searchMessages = 29;
+    ForwardMessagesResult forwardMessages = 30;
   }
 }
 
@@ -968,6 +985,22 @@ message SendMessageInput {
 }
 
 message SendMessageResult { repeated Update updates = 2; }
+
+message ForwardMessagesInput {
+  // Source chat/user peer
+  InputPeer from_peer_id = 1;
+
+  // Message IDs to forward from the source peer
+  repeated int64 message_ids = 2;
+
+  // Destination chat/user peer
+  InputPeer to_peer_id = 3;
+
+  // Whether to include forward header (defaults to true on server)
+  optional bool share_forward_header = 4;
+}
+
+message ForwardMessagesResult { repeated Update updates = 1; }
 
 message GetChatHistoryInput {
   InputPeer peer_id = 1;
