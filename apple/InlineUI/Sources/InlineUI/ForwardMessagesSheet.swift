@@ -93,11 +93,6 @@ public struct ForwardMessagesSheet: View {
             closeButton
           }
 
-          ToolbarItem(placement: .principal) {
-            Text("Forward")
-              .font(.headline)
-          }
-
           ToolbarItem(placement: .confirmationAction) {
             sendButton
           }
@@ -138,14 +133,24 @@ public struct ForwardMessagesSheet: View {
     #endif
   }
 
+  @ViewBuilder
   private var sendButton: some View {
-    Button("Done") {
+    let button = Button("Done") {
       send()
     }
     .disabled(sendDisabled)
-    .buttonStyle(.borderedProminent)
+
     #if os(macOS)
-    .keyboardShortcut(.defaultAction)
+    button
+      .keyboardShortcut(.defaultAction)
+    #else
+    if #available(iOS 26, *) {
+      button
+        .buttonStyle(.glassProminent)
+    } else {
+      button
+        .buttonStyle(.borderedProminent)
+    }
     #endif
   }
 

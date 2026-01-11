@@ -224,6 +224,9 @@
         }
       }
     },
+    "Cancel Download" : {
+
+    },
     "Cannot Open Document" : {
 
     },
@@ -508,6 +511,9 @@
           }
         }
       }
+    },
+    "Download" : {
+
     },
     "Duplicate updates skipped" : {
 
@@ -858,6 +864,12 @@
     "Retry" : {
 
     },
+    "Save Photo" : {
+
+    },
+    "Save Video" : {
+
+    },
     "Search countries..." : {
 
     },
@@ -934,10 +946,10 @@
     "Setup your profile" : {
       "comment" : "Profile setup title"
     },
-    "Shared Data" : {
+    "Share" : {
 
     },
-    "Show in Chat" : {
+    "Shared Data" : {
 
     },
     "Sign in with email" : {
