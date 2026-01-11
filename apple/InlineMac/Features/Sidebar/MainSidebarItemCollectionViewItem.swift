@@ -35,7 +35,13 @@ class MainSidebarItemCollectionViewItem: NSCollectionViewItem {
   struct Content {
     enum Kind {
       case item(ChatListItem)
-      case header(title: String, symbol: String)
+      case header(
+        section: MainSidebarList.Section,
+        title: String,
+        symbol: String,
+        showsDisclosure: Bool,
+        isCollapsed: Bool
+      )
     }
 
     let kind: Kind
@@ -45,7 +51,8 @@ class MainSidebarItemCollectionViewItem: NSCollectionViewItem {
     with item: Content,
     dependencies: AppDependencies,
     events: PassthroughSubject<MainSidebarList.ScrollEvent, Never>,
-    highlightNavSelection: Bool
+    highlightNavSelection: Bool,
+    onHeaderTap: ((MainSidebarList.Section) -> Void)?
   ) {
     if case .header = item.kind {
       isHeader = true
@@ -56,7 +63,8 @@ class MainSidebarItemCollectionViewItem: NSCollectionViewItem {
       with: item,
       dependencies: dependencies,
       events: events,
-      highlightNavSelection: highlightNavSelection
+      highlightNavSelection: highlightNavSelection,
+      onHeaderTap: onHeaderTap
     )
   }
 }

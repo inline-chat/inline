@@ -12,6 +12,7 @@ class MainSidebarItemCell: NSView {
   private weak var events: PassthroughSubject<ScrollEvent, Never>?
 
   private var item: ChatListItem?
+  private var onHeaderTap: ((MainSidebarList.Section) -> Void)?
 
   private static let avatarSize: CGFloat = MainSidebar.iconSize
   private static let avatarSpacing: CGFloat = MainSidebar.iconTrailingPadding
@@ -19,6 +20,7 @@ class MainSidebarItemCell: NSView {
   private static let font: NSFont = MainSidebar.font
   private static let headerFont: NSFont = .systemFont(ofSize: 11, weight: .semibold)
   private static let headerTextColor: NSColor = .tertiaryLabelColor
+  private static let headerDisclosureSize: CGFloat = 10
 
   private static let cornerRadius: CGFloat = 10
   private static let unreadBadgeSize: CGFloat = 5
@@ -147,6 +149,20 @@ class MainSidebarItemCell: NSView {
     return view
   }()
 
+  private lazy var headerDisclosureView: NSImageView = {
+    let view = NSImageView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    let config = NSImage.SymbolConfiguration(
+      pointSize: Self.headerDisclosureSize,
+      weight: .semibold,
+      scale: .small
+    )
+    view.image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)?
+      .withSymbolConfiguration(config)
+    view.contentTintColor = .tertiaryLabelColor
+    return view
+  }()
+
   private lazy var actionButton: NSButton = {
     let button = NSButton()
     button.translatesAutoresizingMaskIntoConstraints = false
@@ -245,7 +261,8 @@ class MainSidebarItemCell: NSView {
     with content: MainSidebarItemCollectionViewItem.Content,
     dependencies: AppDependencies,
     events: PassthroughSubject<ScrollEvent, Never>,
-    highlightNavSelection: Bool
+    highlightNavSelection: Bool,
+    onHeaderTap: ((MainSidebarList.Section) -> Void)?
   ) {
     preparingForReuse = false
     item = nil
@@ -260,6 +277,7 @@ class MainSidebarItemCell: NSView {
     nav2 = dependencies.nav2
     self.events = events
     self.highlightNavSelection = highlightNavSelection
+    self.onHeaderTap = onHeaderTap
 
     cancellables.removeAll()
 
@@ -289,6 +307,7 @@ class MainSidebarItemCell: NSView {
     isHovered = false
     isNavSelected = false
     isKeyboardSelected = false
+    onHeaderTap = nil
     clearBadges()
     cancellables.removeAll()
   }
@@ -506,7 +525,7 @@ class MainSidebarItemCell: NSView {
     switch kind {
       case let .item(chatItem):
         title(for: chatItem)
-      case let .header(title, _):
+      case let .header(_, title, _, _, _):
         title
     }
   }
@@ -545,13 +564,26 @@ class MainSidebarItemCell: NSView {
 
   private func configureBadges(for kind: MainSidebarItemCollectionViewItem.Content.Kind) {
     clearBadges()
-
-    guard case .item = kind, item?.kind == .thread else { return }
-
-    if hasUnread {
-      badgeContainerView.addArrangedSubview(createUnreadBadge())
-    } else if isPinned {
-      badgeContainerView.addArrangedSubview(createPinnedBadge())
+    switch kind {
+      case .item:
+        guard item?.kind == .thread else { return }
+        if hasUnread {
+          badgeContainerView.addArrangedSubview(createUnreadBadge())
+        } else if isPinned {
+          badgeContainerView.addArrangedSubview(createPinnedBadge())
+        }
+      case let .header(_, _, _, showsDisclosure, isCollapsed):
+        if showsDisclosure {
+          let symbolName = isCollapsed ? "chevron.right" : "chevron.down"
+          let config = NSImage.SymbolConfiguration(
+            pointSize: Self.headerDisclosureSize,
+            weight: .semibold,
+            scale: .small
+          )
+          headerDisclosureView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
+            .withSymbolConfiguration(config)
+          badgeContainerView.addArrangedSubview(headerDisclosureView)
+        }
     }
   }
 
@@ -620,14 +652,15 @@ class MainSidebarItemCell: NSView {
       return
     }
 
-    guard let nav2, let content else { return }
+    guard let content else { return }
 
     switch content.kind {
       case let .item(item):
-        guard let peer = item.peerId else { return }
+        guard let nav2, let peer = item.peerId else { return }
         nav2.navigate(to: .chat(peer: peer))
-      case .header:
-        return
+      case let .header(section, _, _, showsDisclosure, _):
+        guard showsDisclosure else { return }
+        onHeaderTap?(section)
     }
   }
 
