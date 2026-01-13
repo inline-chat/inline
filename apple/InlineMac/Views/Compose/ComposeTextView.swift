@@ -21,6 +21,8 @@ protocol ComposeTextViewDelegate: NSTextViewDelegate {
 }
 
 class ComposeNSTextView: NSTextView {
+  private var isStrippingEmailLinks = false
+
   override func keyDown(with event: NSEvent) {
     // Handle return key
     if event.keyCode == 36 {
@@ -81,6 +83,11 @@ class ComposeNSTextView: NSTextView {
     super.keyDown(with: event)
   }
 
+  override func didChangeText() {
+    super.didChangeText()
+    stripEmailLinkAttributes()
+  }
+
   @discardableResult
   override func becomeFirstResponder() -> Bool {
     let result = super.becomeFirstResponder()
@@ -116,6 +123,27 @@ class ComposeNSTextView: NSTextView {
     }
 
     return !attachments.isEmpty
+  }
+
+  private func stripEmailLinkAttributes() {
+    guard !isStrippingEmailLinks else { return }
+    guard let textStorage else { return }
+
+    isStrippingEmailLinks = true
+    let fullRange = NSRange(location: 0, length: textStorage.length)
+    textStorage.enumerateAttribute(.link, in: fullRange, options: []) { value, range, _ in
+      let urlString: String? = {
+        if let url = value as? URL { return url.absoluteString }
+        if let string = value as? String { return string }
+        return nil
+      }()
+
+      guard let urlString, let url = URL(string: urlString) else { return }
+      if url.scheme?.lowercased() == "mailto" {
+        textStorage.removeAttribute(.link, range: range)
+      }
+    }
+    isStrippingEmailLinks = false
   }
 
   private func notifyDelegateAboutImage(_ image: NSImage, _ url: URL? = nil) {

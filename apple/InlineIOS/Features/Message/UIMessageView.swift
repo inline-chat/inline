@@ -625,6 +625,16 @@ class UIMessageView: UIView {
 
       // If not a mention, check for links
       if !foundMention {
+        if let email = attributedText.attribute(.emailAddress, at: characterIndex, effectiveRange: nil) as? String {
+          UIPasteboard.general.string = email
+          ToastManager.shared.showToast(
+            "Copied email",
+            type: .success,
+            systemImage: "doc.on.doc"
+          )
+          return
+        }
+
         attributedText.enumerateAttribute(.link, in: NSRange(
           location: 0,
           length: attributedText.length

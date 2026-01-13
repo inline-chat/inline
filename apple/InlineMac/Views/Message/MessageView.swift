@@ -376,6 +376,7 @@ class MessageViewAppKit: NSView {
   }()
 
   private var reactionsView: MessageReactionsView?
+  private var emailClickGesture: NSClickGestureRecognizer?
 
   // MARK: - Link Detection
 
@@ -491,6 +492,7 @@ class MessageViewAppKit: NSView {
 
     if hasText {
       contentView.addSubview(textView)
+      setupEmailClickHandling()
     }
 
     if hasReactions {
@@ -525,6 +527,40 @@ class MessageViewAppKit: NSView {
         )
         updateShineEffect(isTranslating: isTranslating)
       }
+  }
+
+  private func setupEmailClickHandling() {
+    let gesture = NSClickGestureRecognizer(target: self, action: #selector(handleEmailClick(_:)))
+    gesture.numberOfClicksRequired = 1
+    gesture.delaysPrimaryMouseButtonEvents = false
+    gesture.delegate = self
+    textView.addGestureRecognizer(gesture)
+    emailClickGesture = gesture
+  }
+
+  @objc private func handleEmailClick(_ gesture: NSClickGestureRecognizer) {
+    guard gesture.state == .ended else { return }
+    guard let layoutManager = textView.layoutManager,
+          let textContainer = textView.textContainer
+    else { return }
+
+    let location = gesture.location(in: textView)
+    let characterIndex = layoutManager.characterIndex(
+      for: location,
+      in: textContainer,
+      fractionOfDistanceBetweenInsertionPoints: nil
+    )
+
+    guard characterIndex != NSNotFound,
+          let textStorage = textView.textStorage,
+          characterIndex < textStorage.length
+    else { return }
+
+    if let email = textStorage.attribute(.emailAddress, at: characterIndex, effectiveRange: nil) as? String {
+      NSPasteboard.general.clearContents()
+      NSPasteboard.general.setString(email, forType: .string)
+      ToastCenter.shared.showSuccess("Copied email")
+    }
   }
 
   private func updateShineEffect(isTranslating: Bool) {
