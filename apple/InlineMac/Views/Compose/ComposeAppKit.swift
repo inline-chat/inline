@@ -928,7 +928,7 @@ class ComposeAppKit: NSView {
     let endRange = fullString.rangeOfCharacter(from: whitespaceSet.inverted, options: .backwards)
     let trimmedRange = NSRange(
       location: startRange.location,
-      length: endRange.location - startRange.location + 1
+      length: NSMaxRange(endRange) - startRange.location
     )
     return attributedString.attributedSubstring(from: trimmedRange)
   }
@@ -1242,13 +1242,15 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     guard let textStorage = textView.textStorage else { return }
 
     isHandlingStickerInsertion = true
+    let fullString = textStorage.string as NSString
     let sorted = stickers.sorted { $0.range.location > $1.range.location }
     for sticker in sorted {
       sendSticker(sticker.image)
       let range = sticker.range
-      if range.location != NSNotFound, NSMaxRange(range) <= textStorage.length {
-        textStorage.replaceCharacters(in: range, with: "")
-      }
+      guard range.location != NSNotFound, NSMaxRange(range) <= textStorage.length else { continue }
+      let composedRange = fullString.rangeOfComposedCharacterSequences(for: range)
+      let safeRange = NSMaxRange(composedRange) <= textStorage.length ? composedRange : range
+      textStorage.replaceCharacters(in: safeRange, with: "")
     }
     textView.resetTypingAttributesToDefault()
     isHandlingStickerInsertion = false
