@@ -35,10 +35,13 @@ export function parseMarkdown(input: string): ParsedMarkdown {
   // 3. Links: [text](url)
   findLinks(input, matches)
 
-  // 4. Bold: **text** or __text__
+  // 4. Emails: example@domain.com
+  findEmails(input, matches)
+
+  // 5. Bold: **text** or __text__
   findBold(input, matches)
 
-  // 5. Italic: *text* or _text_
+  // 6. Italic: *text* or _text_
   findItalic(input, matches)
 
   // Remove overlapping matches (earlier patterns win)
@@ -171,6 +174,24 @@ function findLinks(text: string, matches: Match[]): void {
         content: linkText,
         type: MessageEntity_Type.TEXT_URL,
         url,
+      })
+    }
+  }
+}
+
+function findEmails(text: string, matches: Match[]): void {
+  const regex = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi
+  let match: RegExpExecArray | null
+
+  while ((match = regex.exec(text)) !== null) {
+    const email = match[0] ?? ""
+
+    if (email.length > 0) {
+      matches.push({
+        start: match.index,
+        end: match.index + email.length,
+        content: email,
+        type: MessageEntity_Type.EMAIL,
       })
     }
   }
