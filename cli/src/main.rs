@@ -1864,30 +1864,33 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let from_id = me.id;
 
                     // Get message to extract text
-                    let peer = proto::InputPeer {
-                        id: Some(proto::input_peer::Id::ThreadId(args.chat_id)),
-                    };
-                    let input = proto::GetMessagesInput {
+                    let peer = input_peer_from_args(Some(args.chat_id), None)?;
+                    let offset_id = args
+                        .message_id
+                        .checked_add(1)
+                        .ok_or("Message id is too large")?;
+                    let input = proto::GetChatHistoryInput {
                         peer_id: Some(peer.clone()),
-                        message_ids: vec![args.message_id],
+                        offset_id: Some(offset_id),
+                        limit: Some(1),
                     };
                     let result = realtime
                         .call_rpc(
-                            proto::Method::GetMessages,
-                            proto::rpc_call::Input::GetMessages(input),
+                            proto::Method::GetChatHistory,
+                            proto::rpc_call::Input::GetChatHistory(input),
                         )
                         .await?;
 
                     let message = match result {
-                        proto::rpc_result::Result::GetMessages(payload) => payload
+                        proto::rpc_result::Result::GetChatHistory(payload) => payload
                             .messages
                             .into_iter()
-                            .next()
+                            .find(|message| message.id == args.message_id)
                             .ok_or("Message not found")?,
-                        _ => return Err("Unexpected RPC result for getMessages".into()),
+                        _ => return Err("Unexpected RPC result for getChatHistory".into()),
                     };
 
-                    let text = message.text.unwrap_or_default();
+                    let text = message.message.unwrap_or_default();
                     if text.trim().is_empty() {
                         return Err("Message has no text content".into());
                     }
