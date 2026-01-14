@@ -2384,16 +2384,23 @@ extension MessageViewAppKit: NSMenuDelegate {
           }
         }
       } else {
-        let createLinearIssueItem = NSMenuItem(
-          title: "Create Linear Issue",
-          action: #selector(handleCreateLinearIssue),
-          keyEquivalent: ""
-        )
-        createLinearIssueItem.image = NSImage(
-          systemSymbolName: "circle.badge.plus",
-          accessibilityDescription: "Create Linear Issue"
-        )
-        integrationItems.append(createLinearIssueItem)
+        if LinearIntegrationService.shared.isConnectedAnySpace() == nil {
+          // Warm the cache for future menus. We'll only show the action once we know Linear is connected.
+          LinearIntegrationService.shared.refreshAnySpace()
+        }
+
+        if LinearIntegrationService.shared.isConnectedAnySpace() == true {
+          let createLinearIssueItem = NSMenuItem(
+            title: "Create Linear Issue",
+            action: #selector(handleCreateLinearIssue),
+            keyEquivalent: ""
+          )
+          createLinearIssueItem.image = NSImage(
+            systemSymbolName: "circle.badge.plus",
+            accessibilityDescription: "Create Linear Issue"
+          )
+          integrationItems.append(createLinearIssueItem)
+        }
       }
     }
 

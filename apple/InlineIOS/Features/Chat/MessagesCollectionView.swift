@@ -597,8 +597,12 @@ private extension MessagesCollectionView {
           )
 
           DispatchQueue.main.async { [weak self] in
-            self?.hasLinearConnected = integrations.hasLinearConnected
-            self?.linearTeamId = integrations.linearTeamId
+            guard let self else { return }
+            let hasLinearConnected = self.peerId.isThread
+              ? integrations.hasLinearConnected
+              : (integrations.linearSpaces?.isEmpty == false)
+            self.hasLinearConnected = hasLinearConnected
+            self.linearTeamId = integrations.linearTeamId
           }
         } catch {
           await NotionTaskManager.shared.checkIntegrationAccess(peerId: peerId, spaceId: spaceId, integrations: nil)
