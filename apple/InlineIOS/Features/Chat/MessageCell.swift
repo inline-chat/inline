@@ -152,14 +152,16 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   }
 
   func highlightBubble() {
-    guard let bubble = messageView?.bubbleView else { return }
+    guard let messageView else { return }
+    let bubble = messageView.bubbleView
     let originalColor = bubble.backgroundColor ?? .systemGray6
-    let isEmojiOrSticker = messageView?.isEmojiOnlyMessage == true || messageView?.isSticker == true
+    let isEmojiOrSticker = messageView.isEmojiOnlyMessage || messageView.isSticker
     // let highlightColor = isEmojiOrSticker ? ThemeManager.shared.selected.accent.withAlphaComponent(0.3) :
     // originalColor
-    let highlightColor = messageView?.outgoing == true ? ThemeManager.shared.selected.bubbleBackground
+    let highlightColor = messageView.outgoing ? ThemeManager.shared.selected.bubbleBackground
       .lighten(by: 0.3)
       : ThemeManager.shared.selected.accent.withAlphaComponent(0.4)
+    messageView.highlightMediaOverlay()
     UIView.animate(withDuration: 0.18, animations: {
       bubble.backgroundColor = highlightColor
     }) { _ in
@@ -170,9 +172,11 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   }
 
   func clearHighlight() {
-    guard let bubble = messageView?.bubbleView else { return }
+    guard let messageView else { return }
+    let bubble = messageView.bubbleView
     bubble.layer.removeAllAnimations()
-    bubble.backgroundColor = messageView?.bubbleColor
+    bubble.backgroundColor = messageView.bubbleColor
+    messageView.clearMediaHighlight()
   }
 }
 

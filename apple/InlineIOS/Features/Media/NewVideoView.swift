@@ -43,6 +43,15 @@ final class NewVideoView: UIView {
     return view
   }()
 
+  private let highlightOverlay: UIView = {
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.backgroundColor = UIColor.white.withAlphaComponent(0.1)
+    view.alpha = 0
+    view.isUserInteractionEnabled = false
+    return view
+  }()
+
   private let overlayBackground: UIView = {
     let view = UIView()
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -214,6 +223,7 @@ final class NewVideoView: UIView {
 
   private func setupViews() {
     addSubview(thumbnailView)
+    addSubview(highlightOverlay)
     addSubview(overlayBackground)
     overlayBackground.addSubview(overlayIconView)
     overlayBackground.addSubview(overlaySpinner)
@@ -243,6 +253,11 @@ final class NewVideoView: UIView {
 
       durationBadge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
       durationBadge.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+
+      highlightOverlay.topAnchor.constraint(equalTo: topAnchor),
+      highlightOverlay.leadingAnchor.constraint(equalTo: leadingAnchor),
+      highlightOverlay.trailingAnchor.constraint(equalTo: trailingAnchor),
+      highlightOverlay.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
 
     durationBadge.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -515,6 +530,26 @@ final class NewVideoView: UIView {
       responder = nextResponder
     }
     return nil
+  }
+
+  // MARK: - Highlight
+
+  func showHighlight() {
+    highlightOverlay.layer.removeAllAnimations()
+    highlightOverlay.alpha = 0
+    UIView.animate(withDuration: 0.18, animations: { [weak self] in
+      self?.highlightOverlay.alpha = 1
+    }) { [weak self] _ in
+      guard let self else { return }
+      UIView.animate(withDuration: 0.5, delay: 0.2, options: [], animations: {
+        self.highlightOverlay.alpha = 0
+      }, completion: nil)
+    }
+  }
+
+  func clearHighlight() {
+    highlightOverlay.layer.removeAllAnimations()
+    highlightOverlay.alpha = 0
   }
 
   // MARK: - Snapshot
