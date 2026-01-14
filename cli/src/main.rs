@@ -58,6 +58,8 @@ Examples:
   inline chats participants --chat-id 123
   inline chats create --title "Launch" --space-id 31 --participant 42
   inline chats create-dm --user-id 42
+  inline chats update-visibility --chat-id 123 --public
+  inline chats update-visibility --chat-id 123 --private --participant 42 --participant 99
   inline chats mark-unread --chat-id 123
   inline chats mark-read --chat-id 123
   inline notifications get
@@ -200,6 +202,8 @@ enum ChatsCommand {
     Create(ChatsCreateArgs),
     #[command(about = "Create a private chat (DM)")]
     CreateDm(ChatsCreateDmArgs),
+    #[command(about = "Update chat visibility (public/private)")]
+    UpdateVisibility(ChatsUpdateVisibilityArgs),
     #[command(about = "Mark a chat or DM as unread")]
     MarkUnread(ChatsMarkUnreadArgs),
     #[command(about = "Mark a chat or DM as read")]
@@ -272,6 +276,27 @@ struct ChatsCreateArgs {
 struct ChatsCreateDmArgs {
     #[arg(long, help = "User id to start a DM with")]
     user_id: i64,
+}
+
+#[derive(Args)]
+struct ChatsUpdateVisibilityArgs {
+    #[arg(long, help = "Chat id (space thread)")]
+    chat_id: i64,
+
+    #[arg(long, help = "Make the chat public", conflicts_with = "private")]
+    public: bool,
+
+    #[arg(long, help = "Make the chat private", conflicts_with = "public")]
+    private: bool,
+
+    #[arg(
+        long = "participant",
+        value_name = "USER_ID",
+        num_args = 1..,
+        action = ArgAction::Append,
+        help = "Participant user id (repeatable, required for private chats)"
+    )]
+    participants: Vec<i64>,
 }
 
 #[derive(Args)]
@@ -735,10 +760,27 @@ struct TasksCreateNotionArgs {
 
 #[tokio::main]
 async fn main() {
+    install_broken_pipe_handler();
     if let Err(error) = run().await {
         eprintln!("{error}");
         std::process::exit(1);
     }
+}
+
+fn install_broken_pipe_handler() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if is_broken_pipe_panic(info) {
+            std::process::exit(0);
+        }
+        default_hook(info);
+    }));
+}
+
+fn is_broken_pipe_panic(info: &std::panic::PanicInfo<'_>) -> bool {
+    let message = info.to_string();
+    message.contains("failed printing to stdout")
+        && (message.contains("Broken pipe") || message.contains("broken pipe"))
 }
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -1017,6 +1059,52 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         } else {
                             println!("Created DM with user {}.", args.user_id);
                         }
+                    }
+                }
+                ChatsCommand::UpdateVisibility(args) => {
+                    if args.public == args.private {
+                        return Err("Provide --public or --private".into());
+                    }
+                    if args.public && !args.participants.is_empty() {
+                        return Err("Public chats cannot include explicit participants".into());
+                    }
+                    if args.private && args.participants.is_empty() {
+                        return Err("Private chats require at least one participant.".into());
+                    }
+
+                    let token = require_token(&auth_store)?;
+                    let mut realtime =
+                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                    let participants = args
+                        .participants
+                        .iter()
+                        .map(|user_id| proto::InputChatParticipant { user_id: *user_id })
+                        .collect();
+                    let input = proto::UpdateChatVisibilityInput {
+                        chat_id: args.chat_id,
+                        is_public: args.public,
+                        participants,
+                    };
+                    let result = realtime
+                        .call_rpc(
+                            proto::Method::UpdateChatVisibility,
+                            proto::rpc_call::Input::UpdateChatVisibility(input),
+                        )
+                        .await?;
+                    match result {
+                        proto::rpc_result::Result::UpdateChatVisibility(payload) => {
+                            if cli.json {
+                                output::print_json(&payload, json_format)?;
+                            } else {
+                                let label = if args.public { "public" } else { "private" };
+                                if let Some(chat) = payload.chat.as_ref() {
+                                    println!("Updated chat {} to {}.", chat.id, label);
+                                } else {
+                                    println!("Updated chat {} to {}.", args.chat_id, label);
+                                }
+                            }
+                        }
+                        _ => return Err("Unexpected RPC result for updateChatVisibility".into()),
                     }
                 }
                 ChatsCommand::MarkUnread(args) => {
