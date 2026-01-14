@@ -643,6 +643,22 @@ class UIMessageView: UIView {
 
       // If not a mention, check for links
       if !foundMention {
+        var inlineCodeRange = NSRange(location: 0, length: 0)
+        if let isInlineCode = attributedText.attribute(
+          .inlineCode,
+          at: characterIndex,
+          effectiveRange: &inlineCodeRange
+        ) as? Bool, isInlineCode {
+          let inlineCodeText = (attributedText.string as NSString).substring(with: inlineCodeRange)
+          UIPasteboard.general.string = inlineCodeText
+          ToastManager.shared.showToast(
+            "Copied code",
+            type: .success,
+            systemImage: "doc.on.doc"
+          )
+          return
+        }
+
         if let email = attributedText.attribute(.emailAddress, at: characterIndex, effectiveRange: nil) as? String {
           UIPasteboard.general.string = email
           ToastManager.shared.showToast(
