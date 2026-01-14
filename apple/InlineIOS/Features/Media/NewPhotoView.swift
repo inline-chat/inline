@@ -48,6 +48,15 @@ final class NewPhotoView: UIView {
     return view
   }()
 
+  private let highlightOverlay: UIView = {
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.backgroundColor = UIColor.white.withAlphaComponent(0.1)
+    view.alpha = 0
+    view.isUserInteractionEnabled = false
+    return view
+  }()
+
   private var imageConstraints: [NSLayoutConstraint] = []
 
   // MARK: - Initialization
@@ -218,6 +227,14 @@ final class NewPhotoView: UIView {
 
   private func setupViews() {
     addSubview(imageView)
+    addSubview(highlightOverlay)
+
+    NSLayoutConstraint.activate([
+      highlightOverlay.topAnchor.constraint(equalTo: topAnchor),
+      highlightOverlay.leadingAnchor.constraint(equalTo: leadingAnchor),
+      highlightOverlay.trailingAnchor.constraint(equalTo: trailingAnchor),
+      highlightOverlay.bottomAnchor.constraint(equalTo: bottomAnchor),
+    ])
 
     setupImageConstraints()
     setupGestures()
@@ -377,6 +394,26 @@ final class NewPhotoView: UIView {
 
   override var canBecomeFirstResponder: Bool {
     true
+  }
+
+  // MARK: - Highlight
+
+  func showHighlight() {
+    highlightOverlay.layer.removeAllAnimations()
+    highlightOverlay.alpha = 0
+    UIView.animate(withDuration: 0.18, animations: { [weak self] in
+      self?.highlightOverlay.alpha = 1
+    }) { [weak self] _ in
+      guard let self else { return }
+      UIView.animate(withDuration: 0.5, delay: 0.2, options: [], animations: {
+        self.highlightOverlay.alpha = 0
+      }, completion: nil)
+    }
+  }
+
+  func clearHighlight() {
+    highlightOverlay.layer.removeAllAnimations()
+    highlightOverlay.alpha = 0
   }
 }
 

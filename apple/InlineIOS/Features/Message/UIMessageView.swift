@@ -303,6 +303,24 @@ class UIMessageView: UIView {
     setupTranslationObserver()
   }
 
+  func highlightMediaOverlay() {
+    if fullMessage.photoInfo != nil {
+      newPhotoView.showHighlight()
+    }
+    if fullMessage.videoInfo != nil {
+      videoView.showHighlight()
+    }
+  }
+
+  func clearMediaHighlight() {
+    if fullMessage.photoInfo != nil {
+      newPhotoView.clearHighlight()
+    }
+    if fullMessage.videoInfo != nil {
+      videoView.clearHighlight()
+    }
+  }
+
   private func createURLPreviewView(for attachment: FullAttachment) -> URLPreviewView {
     let previewView = URLPreviewView()
     previewView.translatesAutoresizingMaskIntoConstraints = false
