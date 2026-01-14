@@ -2439,7 +2439,7 @@ extension MessageViewAppKit: NSMenuDelegate {
 
     // Add copy message action for text
     if hasText {
-      let copyItem = NSMenuItem(title: "Copy Message", action: #selector(copyMessage), keyEquivalent: "c")
+      let copyItem = NSMenuItem(title: "Copy Text", action: #selector(copyMessage), keyEquivalent: "c")
       if !rendersCopyText {
         copyItem.image = NSImage(systemSymbolName: "document.on.document", accessibilityDescription: "Copy")
         rendersCopyText = true
@@ -2461,9 +2461,7 @@ extension MessageViewAppKit: NSMenuDelegate {
       let copyItem = NSMenuItem(title: "Copy Image", action: #selector(photoView.copyImage), keyEquivalent: "i")
       copyItem.target = photoView
       copyItem.isEnabled = true
-      if !rendersCopyText {
-        copyItem.image = NSImage(systemSymbolName: "document.on.document", accessibilityDescription: "Copy")
-      }
+      copyItem.image = NSImage(systemSymbolName: "photo.on.rectangle", accessibilityDescription: "Copy Image")
       menu.addItem(copyItem)
     }
 
