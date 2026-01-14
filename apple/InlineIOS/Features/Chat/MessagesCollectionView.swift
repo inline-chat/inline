@@ -788,6 +788,7 @@ private extension MessagesCollectionView {
 
           // Check if this is the first section (most recent)
           let shouldScroll = sectionIndex == 0
+          let wasAtBottom = (currentCollectionView as? MessagesCollectionView)?.shouldScrollToBottom ?? false
 
           // Convert section index to date
           guard let section = viewModel.section(at: sectionIndex) else {
@@ -808,10 +809,9 @@ private extension MessagesCollectionView {
           }
 
           safeApplySnapshot(snapshot, animatingDifferences: true, withCustomTiming: true) { [weak self] in
-            if shouldScroll {
-              if let collectionView = self?.currentCollectionView as? MessagesCollectionView {
-                collectionView.safeScrollToTop(animated: true)
-              }
+            if shouldScroll, wasAtBottom,
+               let collectionView = self?.currentCollectionView as? MessagesCollectionView {
+              collectionView.safeScrollToTop(animated: true)
             }
           }
 
