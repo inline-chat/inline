@@ -30,6 +30,8 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
   private var watchdogTask: Task<Void, Never>?
   private var pathMonitor: NWPathMonitor?
   private var networkAvailable = true
+  private var reconnectionInProgress = false
+  private var reconnectionToken: UInt64 = 0
 
   private lazy var session: URLSession = { [unowned self] in
     let configuration = URLSessionConfiguration.default
@@ -89,15 +91,50 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
 
   /// Reconnect after a delay
   public func reconnect(skipDelay: Bool = false) async {
+    await scheduleReconnect(skipDelay: skipDelay, reason: .manual)
+  }
+
+  public func handleForegroundTransition() async {
+    // Reset backoff and immediately attempt to reconnect.
+    connectionAttemptNo = 0
+    await scheduleReconnect(skipDelay: true, reason: .foreground)
+  }
+
+  private enum ReconnectReason: String {
+    case manual
+    case foreground
+    case networkAvailable
+    case error
+  }
+
+  private func scheduleReconnect(skipDelay: Bool, reason: ReconnectReason) async {
+    guard state != .idle else {
+      log.debug("Skipping reconnect because state is idle reason=\(reason.rawValue)")
+      return
+    }
+
+    if reconnectionInProgress {
+      log.trace("Coalescing reconnect request skipDelay=\(skipDelay ? 1 : 0) reason=\(reason.rawValue)")
+    }
+
+    reconnectionToken = reconnectionToken &+ 1
+    let token = reconnectionToken
+    reconnectionInProgress = true
+
+    reconnectionTask?.cancel()
+
     await connecting()
     await stopConnection()
+
     // Increment connection attempt number. It also invalidates connection timeout task.
     connectionAttemptNo = connectionAttemptNo &+ 1
 
-    reconnectionTask?.cancel()
-    reconnectionTask = Task {
-      let delay = getReconnectionDelay()
-      log.trace("Reconnection attempt #\(connectionAttemptNo) with \(delay)s delay")
+    let delay = getReconnectionDelay()
+    log.trace("Reconnection attempt #\(connectionAttemptNo) delay=\(delay)s skipDelay=\(skipDelay ? 1 : 0) reason=\(reason.rawValue)")
+
+    reconnectionTask = Task { [weak self] in
+      guard let self else { return }
+      defer { Task { await self.finishReconnect(token: token) } }
 
       if !skipDelay {
         // Wait for timeout or a signal to reconnect
@@ -106,20 +143,20 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
 
       // Check if we're still trying to reconnect
       guard !Task.isCancelled else { return }
-      guard state != .idle, state != .connected else {
-        log.debug("Not reconnecting because state is idle or connected")
+      guard await self.state != .idle else {
+        self.log.debug("Not reconnecting because state is idle reason=\(reason.rawValue)")
         return
       }
 
       // Open a new connection
-      await openConnection()
+      await self.openConnection()
     }
   }
 
-  public func handleForegroundTransition() async {
-    // Reset backoff and immediately attempt to reconnect.
-    connectionAttemptNo = 0
-    await reconnect(skipDelay: true)
+  private func finishReconnect(token: UInt64) async {
+    guard token == reconnectionToken else { return }
+    reconnectionInProgress = false
+    reconnectionTask = nil
   }
 
   private func getReconnectionDelay() -> TimeInterval {
@@ -218,7 +255,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     if isSatisfied {
       log.debug("Network became available; reconnecting")
       connectionAttemptNo = 0
-      await reconnect(skipDelay: true)
+      await scheduleReconnect(skipDelay: true, reason: .networkAvailable)
     } else {
       log.debug("Network became unavailable; stopping connection")
       await connecting()
@@ -295,6 +332,9 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
 
     stopWatchdog()
     stopNetworkMonitoring()
+    reconnectionTask?.cancel()
+    reconnectionTask = nil
+    reconnectionInProgress = false
     await idle()
     await stopConnection()
   }
@@ -387,8 +427,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
       return
     }
 
-    await connecting()
-    await reconnect()
+    await scheduleReconnect(skipDelay: false, reason: .error)
   }
 
   // MARK: State transitions --------------------------------------------------
