@@ -1167,6 +1167,20 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     Task { [weak self] in await self?.addVideo(url) }
   }
 
+  func textView(_ textView: NSTextView, didFailToPasteAttachment failure: PasteboardAttachmentFailure) {
+    if failure.isTelegramSource {
+      ToastCenter.shared.showError("Telegram copies images as private files. Drag the image or use Save Media.")
+      return
+    }
+
+    if failure.isSymlink {
+      ToastCenter.shared.showError("That clipboard file is a private symlink and can't be read.")
+      return
+    }
+
+    ToastCenter.shared.showError("Couldn't read the file from the clipboard.")
+  }
+
   /// Note(@mo): User reported Chinese users still see the placeholder when they start typing in Chinese characters.
   /// So apparently there is a feature in macOS for these languages called Chinese IME (Input Method Editor) which lays
   /// out text temporarily without committing it. This method can detect this and hide the placeholder. And show it back

@@ -12,6 +12,7 @@ protocol ComposeTextViewDelegate: NSTextViewDelegate {
   func textView(_ textView: NSTextView, didReceiveImage image: NSImage, url: URL?)
   func textView(_ textView: NSTextView, didReceiveFile url: URL)
   func textView(_ textView: NSTextView, didReceiveVideo url: URL)
+  func textView(_ textView: NSTextView, didFailToPasteAttachment failure: PasteboardAttachmentFailure)
   // Mention handling
   func textView(_ textView: NSTextView, didDetectMentionWith query: String, at location: Int)
   func textViewDidCancelMention(_ textView: NSTextView)
@@ -107,7 +108,12 @@ class ComposeNSTextView: NSTextView {
   }
 
   public func handleAttachments(from pasteboard: NSPasteboard, includeText: Bool = true) -> Bool {
-    let attachments = InlinePasteboard.findAttachments(from: pasteboard, includeText: includeText)
+    let result = InlinePasteboard.findAttachmentsResult(from: pasteboard, includeText: includeText)
+    let attachments = result.attachments
+
+    if attachments.isEmpty, let failure = preferredFailure(from: result.failures) {
+      (delegate as? ComposeTextViewDelegate)?.textView(self, didFailToPasteAttachment: failure)
+    }
 
     for attachment in attachments {
       switch attachment {
@@ -123,6 +129,10 @@ class ComposeNSTextView: NSTextView {
     }
 
     return !attachments.isEmpty
+  }
+
+  private func preferredFailure(from failures: [PasteboardAttachmentFailure]) -> PasteboardAttachmentFailure? {
+    failures.first(where: { $0.isTelegramSource }) ?? failures.first
   }
 
   private func stripEmailLinkAttributes() {
