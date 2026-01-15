@@ -1,13 +1,16 @@
-import Auth
 import InlineKit
-import Translation
 import UIKit
 
 // TODO: extract the content into another view
 // TODO: make ComposeEmbedView a skelton for all the embeds
 
 class ComposeEmbedViewContent: UIView, UIGestureRecognizerDelegate {
-  static let height: CGFloat = 56
+  private enum Constants {
+    static let topPadding: CGFloat = 8
+    static let closeButtonSize: CGFloat = 24
+  }
+
+  static let height: CGFloat = EmbedMessageView.height + Constants.topPadding
 
   enum Mode {
     case reply
@@ -20,41 +23,11 @@ class ComposeEmbedViewContent: UIView, UIGestureRecognizerDelegate {
   private var messageId: Int64
   private var viewModel: FullMessageViewModel
 
-  private lazy var replyIndicatorView: UIView = {
-    let view = UIView()
-    view.backgroundColor = ThemeManager.shared.selected.accent
-    view.layer.cornerRadius = 1
-    view.layer.masksToBounds = true
+  private lazy var embedView: EmbedMessageView = {
+    let view = EmbedMessageView()
     view.translatesAutoresizingMaskIntoConstraints = false
+    view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     return view
-  }()
-
-  private lazy var nameLabel: UILabel = {
-    let label = UILabel()
-    label.font = .systemFont(ofSize: 17, weight: .medium)
-    label.textColor = ThemeManager.shared.selected.accent
-    label.numberOfLines = 1
-
-    return label
-  }()
-
-  private lazy var messageLabel: UILabel = {
-    let label = UILabel()
-    label.font = .systemFont(ofSize: 17, weight: .regular)
-    label.textColor = .secondaryLabel
-    label.numberOfLines = 1
-
-    return label
-  }()
-
-  private lazy var imageIconView: UIImageView = {
-    let imageView = UIImageView()
-    let config = UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)
-    imageView.image = UIImage(systemName: "photo.fill", withConfiguration: config)
-    imageView.tintColor = .secondaryLabel
-    imageView.contentMode = .scaleAspectFit
-
-    return imageView
   }()
 
   private lazy var closeButton: UIButton = {
@@ -63,31 +36,8 @@ class ComposeEmbedViewContent: UIView, UIGestureRecognizerDelegate {
     button.setImage(UIImage(systemName: "xmark", withConfiguration: config), for: .normal)
     button.tintColor = .secondaryLabel
     button.addTarget(self, action: #selector(closeButtonTapped), for: .touchUpInside)
+    button.translatesAutoresizingMaskIntoConstraints = false
     return button
-  }()
-
-  private lazy var messageStackView: UIStackView = {
-    let stackView = UIStackView(arrangedSubviews: [imageIconView, messageLabel])
-    stackView.axis = .horizontal
-    stackView.spacing = 6
-    stackView.alignment = .center
-    return stackView
-  }()
-
-  private lazy var labelsStackView: UIStackView = {
-    let stackView = UIStackView(arrangedSubviews: [nameLabel, messageStackView])
-    stackView.axis = .vertical
-    stackView.spacing = 4
-    stackView.alignment = .leading
-    return stackView
-  }()
-
-  private lazy var containerStackView: UIStackView = {
-    let stackView = UIStackView(arrangedSubviews: [labelsStackView, closeButton])
-    stackView.axis = .horizontal
-    stackView.alignment = .center
-
-    return stackView
   }()
 
   init(peerId: Peer, chatId: Int64, messageId: Int64) {
@@ -117,17 +67,8 @@ class ComposeEmbedViewContent: UIView, UIGestureRecognizerDelegate {
     translatesAutoresizingMaskIntoConstraints = false
     isUserInteractionEnabled = true
 
-    messageStackView.addArrangedSubview(imageIconView)
-    messageStackView.addArrangedSubview(messageLabel)
-
-    labelsStackView.addArrangedSubview(nameLabel)
-    labelsStackView.addArrangedSubview(messageStackView)
-
-    containerStackView.addArrangedSubview(labelsStackView)
-    containerStackView.addArrangedSubview(closeButton)
-
-    addSubview(replyIndicatorView)
-    addSubview(containerStackView)
+    addSubview(embedView)
+    addSubview(closeButton)
 
     let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleEmbedTapped))
     tapGesture.delegate = self
@@ -135,25 +76,16 @@ class ComposeEmbedViewContent: UIView, UIGestureRecognizerDelegate {
   }
 
   private func setupConstraints() {
-    containerStackView.translatesAutoresizingMaskIntoConstraints = false
-    imageIconView.translatesAutoresizingMaskIntoConstraints = false
-
     NSLayoutConstraint.activate([
-      imageIconView.widthAnchor.constraint(equalToConstant: 20),
-      imageIconView.heightAnchor.constraint(equalToConstant: 20),
+      embedView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      embedView.topAnchor.constraint(equalTo: topAnchor, constant: Constants.topPadding),
+      embedView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      embedView.heightAnchor.constraint(equalToConstant: EmbedMessageView.height),
 
-      replyIndicatorView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      replyIndicatorView.topAnchor.constraint(equalTo: topAnchor, constant: 10),
-      replyIndicatorView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
-      replyIndicatorView.widthAnchor.constraint(equalToConstant: 2),
-
-      containerStackView.topAnchor.constraint(equalTo: topAnchor),
-      containerStackView.bottomAnchor.constraint(equalTo: bottomAnchor),
-      containerStackView.leadingAnchor.constraint(equalTo: replyIndicatorView.trailingAnchor, constant: 6),
-      containerStackView.trailingAnchor.constraint(equalTo: trailingAnchor),
-
-      closeButton.widthAnchor.constraint(equalToConstant: 24),
-      closeButton.heightAnchor.constraint(equalToConstant: 24),
+      closeButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+      closeButton.centerYAnchor.constraint(equalTo: embedView.centerYAnchor),
+      closeButton.widthAnchor.constraint(equalToConstant: Constants.closeButtonSize),
+      closeButton.heightAnchor.constraint(equalToConstant: Constants.closeButtonSize),
     ])
   }
 
@@ -183,80 +115,43 @@ class ComposeEmbedViewContent: UIView, UIGestureRecognizerDelegate {
   }
 
   func updateContent() {
-    let name = viewModel.fullMessage?.from?.firstName ?? "User"
+    let kind: EmbedMessageView.Kind = mode == .reply ? .replyingInCompose : .editingInCompose
+    let style: EmbedMessageView.Style = mode == .reply ? .replyBubble : .compose
+    let senderName = viewModel.fullMessage?.from?.shortDisplayName ?? "User"
 
-    switch mode {
-      case .reply:
-        nameLabel.text = "Replying to \(name)"
-        imageIconView.image = UIImage(systemName: "photo.fill")
-        replyIndicatorView.isHidden = false
-      case .edit:
-        nameLabel.text = "Editing message"
-        imageIconView.image = UIImage(systemName: "pencil")
-        replyIndicatorView.isHidden = true
-    }
-
-    if let message = viewModel.fullMessage?.message {
-      let text = (viewModel.fullMessage?.displayText ?? message.text)?.replacingOccurrences(of: "\n", with: " ")
-
-      if message.hasUnsupportedTypes {
-        imageIconView.isHidden = true
-        messageLabel.text = "Unsupported message"
-      } else if message.isSticker == true {
-        let config = UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)
-        imageIconView.image = UIImage(systemName: "face.smiling", withConfiguration: config)
-        imageIconView.isHidden = false
-        messageLabel.text = "Sticker"
-      } else if message.hasVideo, message.hasText {
-        let config = UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
-        imageIconView.image = UIImage(systemName: "video.fill", withConfiguration: config)
-        imageIconView.isHidden = false
-        messageLabel.text = text
-      } else if message.hasVideo, !message.hasText {
-        let config = UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
-        imageIconView.image = UIImage(systemName: "video.fill", withConfiguration: config)
-        imageIconView.isHidden = false
-        messageLabel.text = "Video"
-      } else if message.documentId != nil, !message.hasText {
-        let config = UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
-        imageIconView.image = UIImage(systemName: "document.fill", withConfiguration: config)
-        imageIconView.isHidden = false
-        messageLabel.text = "Document"
-      } else if message.documentId != nil, message.hasText {
-        let config = UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
-        imageIconView.image = UIImage(systemName: "document.fill", withConfiguration: config)
-        imageIconView.isHidden = false
-        messageLabel.text = text
-      } else if message.hasPhoto, message.hasText {
-        imageIconView.isHidden = false
-        messageLabel.text = text
-      } else if message.hasPhoto, !message.hasText {
-        imageIconView.isHidden = false
-        messageLabel.text = "Photo"
-      } else if !message.hasPhoto, message.hasText {
-        imageIconView.isHidden = true
-        messageLabel.text = text
-      } else {
-        imageIconView.isHidden = true
-        messageLabel.text = "Not loaded"
-      }
+    if let fullMessage = viewModel.fullMessage {
+      embedView.configure(
+        fullMessage: fullMessage,
+        kind: kind,
+        outgoing: false,
+        isOnlyEmoji: false,
+        style: style
+      )
+    } else {
+      embedView.showNotLoaded(
+        kind: kind,
+        senderName: senderName,
+        outgoing: false,
+        isOnlyEmoji: false,
+        style: style
+      )
     }
   }
 
   @objc private func closeButtonTapped() {
     switch mode {
-      case .reply:
-        ChatState.shared.clearReplyingMessageId(peer: peerId)
-      case .edit:
-        ChatState.shared.clearEditingMessageId(peer: peerId)
-        if let composeView = findComposeView() {
-          composeView.textView.text = ""
-          composeView.textView.showPlaceholder(true)
-          composeView.buttonDisappear()
+    case .reply:
+      ChatState.shared.clearReplyingMessageId(peer: peerId)
+    case .edit:
+      ChatState.shared.clearEditingMessageId(peer: peerId)
+      if let composeView = findComposeView() {
+        composeView.textView.text = ""
+        composeView.textView.showPlaceholder(true)
+        composeView.buttonDisappear()
 
-          composeView.clearDraft()
-          composeView.updateHeight()
-        }
+        composeView.clearDraft()
+        composeView.updateHeight()
+      }
     }
   }
 

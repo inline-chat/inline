@@ -392,15 +392,14 @@ class UIMessageView: UIView {
     embedView.addGestureRecognizer(tapGesture)
 
     if let embeddedMessage = fullMessage.repliedToMessage {
-      let senderName = embeddedMessage.from?.firstName ?? "User"
       embedView.configure(
         embeddedMessage: embeddedMessage,
-        senderName: senderName,
+        kind: .replyInMessage,
         outgoing: outgoing,
         isOnlyEmoji: isEmojiOnlyMessage
       )
     } else {
-      embedView.showNotLoaded(outgoing: outgoing, isOnlyEmoji: isEmojiOnlyMessage)
+      embedView.showNotLoaded(kind: .replyInMessage, outgoing: outgoing, isOnlyEmoji: isEmojiOnlyMessage)
     }
   }
 
