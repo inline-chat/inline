@@ -51,14 +51,14 @@ extension ChatInfoView {
   }
 
   func addParticipant(_ userInfo: UserInfo) {
-    guard let chatId = chatItem.chat?.id else {
+    guard currentChatId != 0 else {
       Log.shared.error("No chat ID found when trying to add participant")
       return
     }
     Task {
       do {
         try await Api.realtime.send(.addChatParticipant(
-          chatID: chatId,
+          chatID: currentChatId,
           userID: userInfo.user.id
         ))
         isSearching = false
@@ -142,7 +142,7 @@ extension ChatInfoView {
           )
           .overlay {
             Group {
-              if let emoji = chatItem.chat?.emoji {
+              if let emoji = currentChat?.emoji {
                 Text(
                   String(describing: emoji).replacingOccurrences(of: "Optional(\"", with: "")
                     .replacingOccurrences(of: "\")", with: "")
@@ -189,14 +189,14 @@ extension ChatInfoView {
   @ViewBuilder
   var publicChatSection: some View {
     Section {
-      Label("Type", systemImage: chatItem.chat?.isPublic != true ? "lock.fill" : "person.2.fill")
+      Label("Type", systemImage: currentChat?.isPublic != true ? "lock.fill" : "person.2.fill")
 
       Spacer()
 
-      Text(chatItem.chat?.isPublic != true ? "Private" : "Public")
+      Text(currentChat?.isPublic != true ? "Private" : "Public")
     }
 
-    if chatItem.chat?.isPublic != true {
+    if currentChat?.isPublic != true {
       participantsSection
     }
   }
@@ -216,14 +216,14 @@ extension ChatInfoView {
           .swipeActions {
             if isOwnerOrAdmin, isPrivate {
               Button(role: .destructive, action: {
-                guard let chatId = chatItem.chat?.id else {
+                guard currentChatId != 0 else {
                   Log.shared.error("No chat ID found when trying to remove participant")
                   return
                 }
                 Task {
                   do {
                     try await Api.realtime.send(.removeChatParticipant(
-                      chatID: chatId,
+                      chatID: currentChatId,
                       userID: userInfo.user.id
                     ))
                   } catch {
@@ -244,7 +244,7 @@ extension ChatInfoView {
     ForEach(documentsViewModel.documentMessages, id: \.id) { documentMessage in
       DocumentRow(
         documentMessage: documentMessage,
-        chatId: chatItem.chat?.id
+        chatId: currentChatId == 0 ? nil : currentChatId
       )
     }
   }
@@ -256,8 +256,8 @@ extension ChatInfoView {
       date: documentInfo.document.date,
       text: nil,
       peerUserId: nil,
-      peerThreadId: chatItem.chat?.id,
-      chatId: chatItem.chat?.id ?? 0,
+      peerThreadId: currentChatId == 0 ? nil : currentChatId,
+      chatId: currentChatId,
       documentId: documentInfo.document.id
     )
 

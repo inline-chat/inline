@@ -18,6 +18,7 @@ public class ObjectCache {
   private var spaces: [Int64: Space] = [:]
   private var cancellables: Set<AnyCancellable> = []
   private var userPublishers: [Int64: PassthroughSubject<UserInfo?, Never>] = [:]
+  private var chatPublishers: [Int64: PassthroughSubject<Chat?, Never>] = [:]
 
   public func getUser(id userId: Int64) -> UserInfo? {
     if observingUsers.contains(userId) == false {
@@ -48,6 +49,15 @@ public class ObjectCache {
     }
 
     return chats[id]
+  }
+
+  public func getChatPublisher(id chatId: Int64) -> PassthroughSubject<Chat?, Never> {
+    if chatPublishers[chatId] == nil {
+      chatPublishers[chatId] = PassthroughSubject<Chat?, Never>()
+      let _ = getChat(id: chatId)
+    }
+
+    return chatPublishers[chatId]!
   }
 
   public func getSpace(id: Int64) -> Space? {
@@ -111,14 +121,16 @@ public extension ObjectCache {
           Log.shared.error("Failed to observe chat \(chatId): \(error)")
         }
       },
-      receiveValue: { [weak self] user in
-        if let user {
+      receiveValue: { [weak self] chat in
+        if let chat {
           self?.log.trace("Chat \(chatId) updated")
-          self?.chats[chatId] = user
+          self?.chats[chatId] = chat
         } else {
           self?.log.trace("Chat \(chatId) not found")
           self?.chats[chatId] = nil
         }
+
+        self?.chatPublishers[chatId]?.send(chat)
       }
     ).store(in: &cancellables)
   }

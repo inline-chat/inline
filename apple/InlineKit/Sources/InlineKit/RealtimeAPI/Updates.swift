@@ -69,6 +69,9 @@ public actor UpdatesEngine: Sendable {
         case let .participantDelete(participantDelete):
           try participantDelete.apply(db)
 
+        case let .chatVisibility(chatVisibility):
+          try chatVisibility.apply(db)
+
         case let .newMessageNotification(newMessageNotification):
           try newMessageNotification.apply(db)
 
@@ -696,6 +699,22 @@ extension InlineProtocol.UpdateChatParticipantDelete {
         )
       }
     }
+  }
+}
+
+extension InlineProtocol.UpdateChatVisibility {
+  func apply(_ db: Database) throws {
+    Log.shared.debug("update chat visibility \(chatID) public=\(isPublic)")
+
+    do {
+      if var chat = try Chat.fetchOne(db, id: chatID) {
+        chat.isPublic = isPublic
+        try chat.save(db)
+      }
+    } catch {
+      Log.shared.error("Failed to update chat visibility", error: error)
+    }
+
   }
 }
 

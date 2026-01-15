@@ -363,6 +363,12 @@ public extension Realtime {
     }
 
     try await db.dbWriter.write { db in
+      do {
+        try ChatParticipant.filter(Column("chatId") == getChatParticipantsInput.chatID).deleteAll(db)
+      } catch {
+        Log.shared.error("Failed to clear chat participants before refresh", error: error)
+      }
+
       // Save users
       for user in result.users {
         do {

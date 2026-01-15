@@ -1,3 +1,4 @@
+import Combine
 import GRDB
 import InlineKit
 import InlineUI
@@ -13,6 +14,11 @@ public struct ParticipantsPopoverView: View {
   @Binding var isPresented: Bool
   @State private var searchText = ""
   @State private var chat: Chat?
+  @State private var isOwnerOrAdmin = false
+  @State private var showVisibilityPicker = false
+  @State private var showMakePublicConfirm = false
+  @State private var selectedParticipantIds: Set<Int64> = []
+  @State private var chatSubscription: AnyCancellable?
 
   public init(
     participants: [UserInfo],
@@ -47,7 +53,7 @@ public struct ParticipantsPopoverView: View {
   }
 
   private var shouldShowSearch: Bool {
-    participants.count >= 10
+    participants.count >= 5
   }
 
   private var canAddParticipants: Bool {
@@ -55,6 +61,17 @@ public struct ParticipantsPopoverView: View {
           let chat,
           chat.isPublic == false,
           chat.spaceId != nil
+    else {
+      return false
+    }
+    return true
+  }
+
+  private var canToggleVisibility: Bool {
+    guard case .thread = peer,
+          let chat,
+          chat.spaceId != nil,
+          isOwnerOrAdmin
     else {
       return false
     }
@@ -85,6 +102,27 @@ public struct ParticipantsPopoverView: View {
       .padding(.top, 10)
       .padding(.bottom, 4)
 
+      if canToggleVisibility, let chat {
+        Button(action: {
+          if chat.isPublic == true {
+            let currentUserId = dependencies.auth.currentUserId
+            selectedParticipantIds = currentUserId.map { [$0] } ?? []
+            showVisibilityPicker = true
+          } else {
+            showMakePublicConfirm = true
+          }
+        }) {
+          HStack(spacing: 6) {
+            Image(systemName: chat.isPublic == true ? "lock.fill" : "globe")
+              .font(.system(size: 12))
+            Text(chat.isPublic == true ? "Make Private" : "Make Public")
+              .font(.system(size: 12, weight: .medium))
+          }
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 12)
+      }
+
       // Search (for 10+ participants)
       if shouldShowSearch {
         SearchField(text: $searchText, placeholder: "Search participants...")
@@ -108,7 +146,29 @@ public struct ParticipantsPopoverView: View {
     }
     .padding(.bottom, 4)
     .task {
+      subscribeToChatUpdates()
       await loadChat()
+    }
+    .sheet(isPresented: $showVisibilityPicker) {
+      if let chat, let spaceId = chat.spaceId {
+        ChatVisibilityParticipantsSheet(
+          spaceId: spaceId,
+          selectedUserIds: $selectedParticipantIds,
+          db: dependencies.database,
+          isPresented: $showVisibilityPicker,
+          onConfirm: { participantIds in
+            updateVisibility(isPublic: false, participantIds: Array(participantIds))
+          }
+        )
+      }
+    }
+    .alert("Make Public", isPresented: $showMakePublicConfirm) {
+      Button("Cancel", role: .cancel) {}
+      Button("Make Public", role: .destructive) {
+        updateVisibility(isPublic: true, participantIds: [])
+      }
+    } message: {
+      Text("People without public chat access will lose access to this chat.")
     }
   }
 
@@ -116,11 +176,61 @@ public struct ParticipantsPopoverView: View {
     guard case let .thread(chatId) = peer else { return }
 
     do {
-      chat = try await dependencies.database.dbWriter.read { db in
+      let loadedChat = try await dependencies.database.dbWriter.read { db in
         try Chat.fetchOne(db, id: chatId)
+      }
+      chat = loadedChat
+
+      if let loadedChat,
+         let spaceId = loadedChat.spaceId,
+         let currentUserId = dependencies.auth.currentUserId
+      {
+        let member = try await dependencies.database.dbWriter.read { db in
+          try Member
+            .filter(Column("spaceId") == spaceId)
+            .filter(Column("userId") == currentUserId)
+            .fetchOne(db)
+        }
+        isOwnerOrAdmin = member?.role == .owner || member?.role == .admin
+      } else {
+        isOwnerOrAdmin = false
       }
     } catch {
       Log.shared.error("Failed to load chat for participants", error: error)
+    }
+  }
+
+  @MainActor
+  private func subscribeToChatUpdates() {
+    guard chatSubscription == nil else { return }
+    guard case let .thread(chatId) = peer else { return }
+
+    chatSubscription = ObjectCache.shared.getChatPublisher(id: chatId)
+      .sink { updatedChat in
+        DispatchQueue.main.async {
+          self.chat = updatedChat
+        }
+      }
+  }
+
+  private func updateVisibility(isPublic: Bool, participantIds: [Int64]) {
+    guard case let .thread(chatId) = peer else { return }
+
+    Task {
+      do {
+        _ = try await Api.realtime.send(.updateChatVisibility(
+          chatID: chatId,
+          isPublic: isPublic,
+          participantIDs: participantIds
+        ))
+        do {
+          try await Api.realtime.send(.getChatParticipants(chatID: chatId))
+        } catch {
+          Log.shared.error("Failed to refetch chat participants after visibility update", error: error)
+        }
+      } catch {
+        Log.shared.error("Failed to update chat visibility", error: error)
+      }
     }
   }
 }

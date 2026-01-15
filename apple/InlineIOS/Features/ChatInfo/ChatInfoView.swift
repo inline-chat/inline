@@ -1,4 +1,5 @@
 import Auth
+import Combine
 import Foundation
 import GRDB
 import InlineKit
@@ -12,6 +13,7 @@ struct ChatInfoView: View {
   @EnvironmentStateObject var documentsViewModel: ChatDocumentsViewModel
   @EnvironmentStateObject var mediaViewModel: ChatMediaViewModel
   @EnvironmentStateObject var spaceMembersViewModel: SpaceMembersViewModel
+  @StateObject var spaceFullMembersViewModel: SpaceFullMembersViewModel
   @State private var space: Space?
   @State var isSearching = false
   @State var searchText = ""
@@ -23,6 +25,11 @@ struct ChatInfoView: View {
   @Environment(Router.self) var router
   @State var selectedTab: ChatInfoTab
   @Namespace var tabSelection
+  @State private var showMakePublicAlert = false
+  @State private var showMakePrivateSheet = false
+  @State private var selectedVisibilityParticipants: Set<Int64> = []
+  @State private var chat: Chat?
+  @State private var chatSubscription: AnyCancellable?
 
   @Environment(\.appDatabase) var database
   @Environment(\.colorScheme) var colorScheme
@@ -37,8 +44,16 @@ struct ChatInfoView: View {
     isDM ? [.media, .files] : [.info, .media, .files]
   }
 
+  var currentChat: Chat? {
+    chat ?? chatItem.chat
+  }
+
+  var currentChatId: Int64 {
+    currentChat?.id ?? chatItem.chat?.id ?? 0
+  }
+
   var isPrivate: Bool {
-    chatItem.chat?.isPublic == false
+    currentChat?.isPublic == false
   }
 
   var isDM: Bool {
@@ -60,7 +75,7 @@ struct ChatInfoView: View {
   }
 
   var chatTitle: String {
-    chatItem.chat?.title ?? "Chat"
+    currentChat?.title ?? chatItem.chat?.title ?? "Chat"
   }
 
   var chatProfileColors: [Color] {
@@ -97,6 +112,11 @@ struct ChatInfoView: View {
     _spaceMembersViewModel = EnvironmentStateObject { env in
       SpaceMembersViewModel(db: env.appDatabase, spaceId: chatItem.chat?.spaceId ?? 0)
     }
+
+    _spaceFullMembersViewModel = StateObject(wrappedValue: SpaceFullMembersViewModel(
+      db: AppDatabase.shared,
+      spaceId: chatItem.chat?.spaceId ?? 0
+    ))
 
     // Default tab based on chat type
     // DMs have no info tab
@@ -159,19 +179,19 @@ struct ChatInfoView: View {
                     isDM: isDM,
                     isOwnerOrAdmin: isOwnerOrAdmin,
                     participants: participantsWithMembersViewModel.participants,
-                    chatId: chatItem.chat?.id ?? 0,
+                    chatId: currentChatId,
                     chatItem: chatItem,
                     spaceMembersViewModel: spaceMembersViewModel,
                     space: space,
                     removeParticipant: { userInfo in
-                      guard let chatId = chatItem.chat?.id else {
+                      guard currentChatId != 0 else {
                         Log.shared.error("No chat ID found when trying to remove participant")
                         return
                       }
                       Task {
                         do {
                           try await Api.realtime.send(.removeChatParticipant(
-                            chatID: chatId,
+                            chatID: currentChatId,
                             userID: userInfo.user.id
                           ))
                         } catch {
@@ -182,6 +202,18 @@ struct ChatInfoView: View {
                     openParticipantChat: { userInfo in
                       UIImpactFeedbackGenerator(style: .light).impactOccurred()
                       nav.push(.chat(peer: Peer.user(id: userInfo.user.id)))
+                    },
+                    requestMakePublic: {
+                      showMakePublicAlert = true
+                    },
+                    requestMakePrivate: {
+                      guard !isDM else { return }
+                      if let currentUserId = Auth.shared.getCurrentUserId() {
+                        selectedVisibilityParticipants = [currentUserId]
+                      } else {
+                        selectedVisibilityParticipants = []
+                      }
+                      showMakePrivateSheet = true
                     }
                   ))
               }
@@ -203,6 +235,7 @@ struct ChatInfoView: View {
       .coordinateSpace(name: "mainScroll")
     }
     .onAppear {
+      subscribeToChatUpdates()
       Task {
         if let spaceId = chatItem.chat?.spaceId {
           await spaceMembersViewModel.refetchMembers()
@@ -228,7 +261,7 @@ struct ChatInfoView: View {
         .publisher(for: Notification.Name("chatDeletedNotification"))
     ) { notification in
       if let chatId = notification.userInfo?["chatId"] as? Int64,
-         chatId == chatItem.chat?.id
+         chatId == currentChatId
       {
         nav.pop()
       }
@@ -236,6 +269,69 @@ struct ChatInfoView: View {
     .sheet(isPresented: $isSearching) {
       searchSheet
     }
+    .sheet(isPresented: $showMakePrivateSheet) {
+      ChatVisibilityParticipantsSheet(
+        spaceViewModel: spaceFullMembersViewModel,
+        selectedParticipants: $selectedVisibilityParticipants,
+        currentUserId: Auth.shared.getCurrentUserId(),
+        onConfirm: {
+          guard currentChatId != 0 else { return }
+          var participantIds = selectedVisibilityParticipants
+          if let currentUserId = Auth.shared.getCurrentUserId() {
+            participantIds.insert(currentUserId)
+          }
+          Task {
+            do {
+              _ = try await Api.realtime.send(.updateChatVisibility(
+                chatID: currentChatId,
+                isPublic: false,
+                participantIDs: participantIds.map(\.self)
+              ))
+              await participantsWithMembersViewModel.refetchParticipants()
+              showMakePrivateSheet = false
+            } catch {
+              Log.shared.error("Failed to make chat private", error: error)
+            }
+          }
+        },
+        onCancel: {
+          showMakePrivateSheet = false
+        }
+      )
+    }
+    .alert("Make Chat Public", isPresented: $showMakePublicAlert) {
+      Button("Cancel", role: .cancel) {}
+      Button("Make Public", role: .destructive) {
+        guard currentChatId != 0 else { return }
+        Task {
+          do {
+            _ = try await Api.realtime.send(.updateChatVisibility(
+              chatID: currentChatId,
+              isPublic: true,
+              participantIDs: []
+            ))
+            await participantsWithMembersViewModel.refetchParticipants()
+          } catch {
+            Log.shared.error("Failed to make chat public", error: error)
+          }
+        }
+      }
+    } message: {
+      Text("People without access to public chats will lose access to this thread.")
+    }
+  }
+
+  @MainActor
+  private func subscribeToChatUpdates() {
+    guard chatSubscription == nil else { return }
+    guard case let .thread(chatId) = chatItem.peerId else { return }
+
+    chatSubscription = ObjectCache.shared.getChatPublisher(id: chatId)
+      .sink { updatedChat in
+        DispatchQueue.main.async {
+          self.chat = updatedChat
+        }
+      }
   }
 }
 
@@ -259,6 +355,30 @@ struct InfoTabView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+
+        if chatInfoView.isOwnerOrAdmin, !chatInfoView.isDM {
+          Divider()
+            .padding(.horizontal, 16)
+
+          Button(action: {
+            if chatInfoView.isPrivate {
+              chatInfoView.requestMakePublic()
+            } else {
+              chatInfoView.requestMakePrivate()
+            }
+          }) {
+            HStack {
+              Image(systemName: chatInfoView.isPrivate ? "person.2.fill" : "lock.fill")
+              Text(chatInfoView.isPrivate ? "Make Public" : "Make Private")
+                .font(.callout)
+              Spacer()
+            }
+            .foregroundColor(Color(ThemeManager.shared.selected.accent))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+          }
+          .buttonStyle(.plain)
+        }
       }
       .background(Color(UIColor { traitCollection in
         if traitCollection.userInterfaceStyle == .dark {
