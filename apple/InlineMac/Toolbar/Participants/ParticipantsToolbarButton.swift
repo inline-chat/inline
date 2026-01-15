@@ -11,7 +11,7 @@ public struct ParticipantsToolbarButton: View {
   @State private var isPopoverPresented = false
   @State private var showAddParticipants = false
   @State private var chat: Chat?
-  @StateObject private var participantsViewModel: ChatParticipantsViewModel
+  @StateObject private var participantsViewModel: ChatParticipantsWithMembersViewModel
   
   public init(peer: Peer, dependencies: AppDependencies) {
     self.peer = peer
@@ -19,10 +19,14 @@ public struct ParticipantsToolbarButton: View {
     
     switch peer {
     case .thread(let chatId):
-      _participantsViewModel = StateObject(wrappedValue: ChatParticipantsViewModel(db: dependencies.database, chatId: chatId))
+      _participantsViewModel = StateObject(
+        wrappedValue: ChatParticipantsWithMembersViewModel(db: dependencies.database, chatId: chatId)
+      )
     default:
       // For non-thread peers, create empty view model
-      _participantsViewModel = StateObject(wrappedValue: ChatParticipantsViewModel(db: dependencies.database, chatId: -1))
+      _participantsViewModel = StateObject(
+        wrappedValue: ChatParticipantsWithMembersViewModel(db: dependencies.database, chatId: -1)
+      )
     }
   }
   
@@ -63,8 +67,8 @@ public struct ParticipantsToolbarButton: View {
       }
     }
     .task {
-      // Refetch participants for private thread chats to ensure data is available locally
-      if case .thread = peer, peer.isPrivate {
+      // Refetch participants for thread chats to ensure data is available locally
+      if case .thread = peer {
         await participantsViewModel.refetchParticipants()
       }
       await loadChat()
