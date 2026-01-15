@@ -13,6 +13,8 @@ class ChatInfoViewEnvironment: ObservableObject {
   let space: Space?
   let removeParticipant: (UserInfo) -> Void
   let openParticipantChat: (UserInfo) -> Void
+  let requestMakePublic: () -> Void
+  let requestMakePrivate: () -> Void
 
   init(
     isSearching: Binding<Bool>,
@@ -25,7 +27,9 @@ class ChatInfoViewEnvironment: ObservableObject {
     spaceMembersViewModel: SpaceMembersViewModel,
     space: Space?,
     removeParticipant: @escaping (UserInfo) -> Void,
-    openParticipantChat: @escaping (UserInfo) -> Void
+    openParticipantChat: @escaping (UserInfo) -> Void,
+    requestMakePublic: @escaping () -> Void,
+    requestMakePrivate: @escaping () -> Void
   ) {
     _isSearching = isSearching
     self.isPrivate = isPrivate
@@ -38,5 +42,7 @@ class ChatInfoViewEnvironment: ObservableObject {
     self.space = space
     self.removeParticipant = removeParticipant
     self.openParticipantChat = openParticipantChat
+    self.requestMakePublic = requestMakePublic
+    self.requestMakePrivate = requestMakePrivate
   }
 }

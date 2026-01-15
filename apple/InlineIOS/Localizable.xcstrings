@@ -7,6 +7,9 @@
     " " : {
 
     },
+    "(You)" : {
+
+    },
     "@%@" : {
 
     },
@@ -709,6 +712,15 @@
     "Logout" : {
 
     },
+    "Make Chat Public" : {
+
+    },
+    "Make Private" : {
+
+    },
+    "Make Public" : {
+
+    },
     "Mark Read" : {
 
     },
@@ -791,6 +803,9 @@
     "Only selected members" : {
 
     },
+    "Only selected participants can access this private chat." : {
+
+    },
     "Only space admins and owners can connect and manage integrations." : {
 
     },
@@ -801,6 +816,9 @@
 
     },
     "Participants" : {
+
+    },
+    "People without access to public chats will lose access to this thread." : {
 
     },
     "Phone number" : {
@@ -895,6 +913,9 @@
     "Search in users by username, first name, last name" : {
 
     },
+    "Search members" : {
+
+    },
     "Select a database" : {
 
     },
@@ -905,6 +926,9 @@
 
     },
     "Select Country" : {
+
+    },
+    "Select Participants" : {
 
     },
     "Select Space" : {

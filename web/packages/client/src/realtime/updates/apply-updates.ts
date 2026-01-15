@@ -97,6 +97,19 @@ export const applyUpdates = (db: Db, updates: Update[]) => {
         // TODO: create or update dialog entries when server sends dialog payloads.
         break
 
+      case "chatVisibility": {
+        const chatId = toNumber(update.update.chatVisibility.chatId)
+        if (chatId == null) break
+        const ref = db.ref(DbObjectKind.Chat, chatId)
+        const existing = db.get(ref)
+        if (!existing) break
+        db.update({
+          ...existing,
+          isPublic: update.update.chatVisibility.isPublic,
+        })
+        break
+      }
+
       case "deleteChat": {
         const chatId = getPeerChatId(update.update.deleteChat.peerId)
         if (chatId == null) break
