@@ -31,6 +31,18 @@ const log = new Log("server", LogLevel.INFO)
 // To fix a bug where 11 max listeners trigger a warning in production console
 EventEmitter.defaultMaxListeners = 20
 
+if (process.env.NODE_ENV === "production") {
+  process.on("warning", (warning) => {
+    if (
+      warning?.name === "MaxListenersExceededWarning" &&
+      warning.message.includes("wakeup listeners added to [Connection2]")
+    ) {
+      return
+    }
+    console.warn(warning)
+  })
+}
+
 if (process.env.NODE_ENV !== "development") {
   Log.shared.info(`🚧 Starting server • ${process.env.NODE_ENV} • ${version} • ${gitCommitHash}`)
 }
