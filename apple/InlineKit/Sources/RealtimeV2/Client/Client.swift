@@ -53,6 +53,7 @@ actor ProtocolClient: ProtocolClientType {
   #if canImport(UIKit) || canImport(AppKit)
   private var lifecycleObserversInstalled = false
   #endif
+  private var isHandlingForegroundTransition = false
 
   init(transport: Transport, auth: Auth) {
     self.transport = transport
@@ -89,8 +90,11 @@ actor ProtocolClient: ProtocolClientType {
 
   // MARK: - State
 
-  private func handleForegroundTransition() async {
+  func handleForegroundTransition() async {
     guard auth.getIsLoggedIn() == true else { return }
+    guard !isHandlingForegroundTransition else { return }
+    isHandlingForegroundTransition = true
+    defer { isHandlingForegroundTransition = false }
     log.debug("Foreground transition: resetting reconnection delay")
     connectionAttemptNo = 0
     reconnectionTask?.cancel()
