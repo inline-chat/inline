@@ -599,6 +599,7 @@ enum Method {
   UPDATE_MEMBER_ACCESS = 27;
   SEARCH_MESSAGES = 28;
   FORWARD_MESSAGES = 29;
+  UPDATE_CHAT_VISIBILITY = 30;
 }
 
 message RpcCall {
@@ -633,6 +634,7 @@ message RpcCall {
     UpdateMemberAccessInput updateMemberAccess = 28;
     SearchMessagesInput searchMessages = 29;
     ForwardMessagesInput forwardMessages = 30;
+    UpdateChatVisibilityInput updateChatVisibility = 31;
   }
 }
 
@@ -669,6 +671,7 @@ message RpcResult {
     UpdateMemberAccessResult updateMemberAccess = 28;
     SearchMessagesResult searchMessages = 29;
     ForwardMessagesResult forwardMessages = 30;
+    UpdateChatVisibilityResult updateChatVisibility = 31;
   }
 }
 
@@ -1107,6 +1110,7 @@ message Update {
     UpdateChatHasNewUpdates chat_has_new_updates = 25;
     UpdateSpaceHasNewUpdates space_has_new_updates = 26;
     UpdateSpaceMemberUpdate space_member_update = 27;
+    UpdateChatVisibility chat_visibility = 28;
   }
 }
 
@@ -1131,6 +1135,12 @@ message UpdateChatHasNewUpdates {
 }
 
 message UpdateChatSkipPts { int64 chat_id = 1; }
+
+// Update when chat visibility changes (public/private)
+message UpdateChatVisibility {
+  int64 chat_id = 1;
+  bool is_public = 2;
+}
 
 message UpdateNewMessageNotification {
   enum Reason {
@@ -1371,6 +1381,16 @@ message RemoveChatParticipantInput {
 }
 
 message RemoveChatParticipantResult {}
+
+message UpdateChatVisibilityInput {
+  int64 chat_id = 1;
+  bool is_public = 2;
+  repeated InputChatParticipant participants = 3;
+}
+
+message UpdateChatVisibilityResult {
+  Chat chat = 1;
+}
 
 // Apple only types
 message DraftMessage {

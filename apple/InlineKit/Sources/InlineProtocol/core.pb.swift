@@ -87,6 +87,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case updateMemberAccess // = 27
   case searchMessages // = 28
   case forwardMessages // = 29
+  case updateChatVisibility // = 30
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -125,6 +126,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 27: self = .updateMemberAccess
     case 28: self = .searchMessages
     case 29: self = .forwardMessages
+    case 30: self = .updateChatVisibility
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -161,6 +163,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .updateMemberAccess: return 27
     case .searchMessages: return 28
     case .forwardMessages: return 29
+    case .updateChatVisibility: return 30
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -197,6 +200,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .updateMemberAccess,
     .searchMessages,
     .forwardMessages,
+    .updateChatVisibility,
   ]
 
 }
@@ -2467,6 +2471,14 @@ public struct RpcCall: Sendable {
     set {input = .forwardMessages(newValue)}
   }
 
+  public var updateChatVisibility: UpdateChatVisibilityInput {
+    get {
+      if case .updateChatVisibility(let v)? = input {return v}
+      return UpdateChatVisibilityInput()
+    }
+    set {input = .updateChatVisibility(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Input: Equatable, Sendable {
@@ -2499,6 +2511,7 @@ public struct RpcCall: Sendable {
     case updateMemberAccess(UpdateMemberAccessInput)
     case searchMessages(SearchMessagesInput)
     case forwardMessages(ForwardMessagesInput)
+    case updateChatVisibility(UpdateChatVisibilityInput)
 
   }
 
@@ -2752,6 +2765,14 @@ public struct RpcResult: @unchecked Sendable {
     set {_uniqueStorage()._result = .forwardMessages(newValue)}
   }
 
+  public var updateChatVisibility: UpdateChatVisibilityResult {
+    get {
+      if case .updateChatVisibility(let v)? = _storage._result {return v}
+      return UpdateChatVisibilityResult()
+    }
+    set {_uniqueStorage()._result = .updateChatVisibility(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Result: Equatable, Sendable {
@@ -2784,6 +2805,7 @@ public struct RpcResult: @unchecked Sendable {
     case updateMemberAccess(UpdateMemberAccessResult)
     case searchMessages(SearchMessagesResult)
     case forwardMessages(ForwardMessagesResult)
+    case updateChatVisibility(UpdateChatVisibilityResult)
 
   }
 
@@ -4480,6 +4502,14 @@ public struct Update: @unchecked Sendable {
     set {_uniqueStorage()._update = .spaceMemberUpdate(newValue)}
   }
 
+  public var chatVisibility: UpdateChatVisibility {
+    get {
+      if case .chatVisibility(let v)? = _storage._update {return v}
+      return UpdateChatVisibility()
+    }
+    set {_uniqueStorage()._update = .chatVisibility(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Update: Equatable, Sendable {
@@ -4517,6 +4547,7 @@ public struct Update: @unchecked Sendable {
     case chatHasNewUpdates(UpdateChatHasNewUpdates)
     case spaceHasNewUpdates(UpdateSpaceHasNewUpdates)
     case spaceMemberUpdate(UpdateSpaceMemberUpdate)
+    case chatVisibility(UpdateChatVisibility)
 
   }
 
@@ -4576,6 +4607,21 @@ public struct UpdateChatSkipPts: Sendable {
   // methods supported on all messages.
 
   public var chatID: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Update when chat visibility changes (public/private)
+public struct UpdateChatVisibility: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var chatID: Int64 = 0
+
+  public var isPublic: Bool = false
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -5554,6 +5600,43 @@ public struct RemoveChatParticipantResult: Sendable {
   public init() {}
 }
 
+public struct UpdateChatVisibilityInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var chatID: Int64 = 0
+
+  public var isPublic: Bool = false
+
+  public var participants: [InputChatParticipant] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct UpdateChatVisibilityResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var chat: Chat {
+    get {return _chat ?? Chat()}
+    set {_chat = newValue}
+  }
+  /// Returns true if `chat` has been explicitly set.
+  public var hasChat: Bool {return self._chat != nil}
+  /// Clears the value of `chat`. Subsequent reads from it will return its default value.
+  public mutating func clearChat() {self._chat = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _chat: Chat? = nil
+}
+
 /// Apple only types
 public struct DraftMessage: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
@@ -5619,6 +5702,7 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     27: .same(proto: "UPDATE_MEMBER_ACCESS"),
     28: .same(proto: "SEARCH_MESSAGES"),
     29: .same(proto: "FORWARD_MESSAGES"),
+    30: .same(proto: "UPDATE_CHAT_VISIBILITY"),
   ]
 }
 
@@ -8530,6 +8614,7 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     28: .same(proto: "updateMemberAccess"),
     29: .same(proto: "searchMessages"),
     30: .same(proto: "forwardMessages"),
+    31: .same(proto: "updateChatVisibility"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -8916,6 +9001,19 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
           self.input = .forwardMessages(v)
         }
       }()
+      case 31: try {
+        var v: UpdateChatVisibilityInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .updateChatVisibility(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .updateChatVisibility(v)
+        }
+      }()
       default: break
       }
     }
@@ -9046,6 +9144,10 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       guard case .forwardMessages(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 30)
     }()
+    case .updateChatVisibility?: try {
+      guard case .updateChatVisibility(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 31)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -9092,6 +9194,7 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     28: .same(proto: "updateMemberAccess"),
     29: .same(proto: "searchMessages"),
     30: .same(proto: "forwardMessages"),
+    31: .same(proto: "updateChatVisibility"),
   ]
 
   fileprivate class _StorageClass {
@@ -9509,6 +9612,19 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
             _storage._result = .forwardMessages(v)
           }
         }()
+        case 31: try {
+          var v: UpdateChatVisibilityResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .updateChatVisibility(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .updateChatVisibility(v)
+          }
+        }()
         default: break
         }
       }
@@ -9640,6 +9756,10 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
       case .forwardMessages?: try {
         guard case .forwardMessages(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 30)
+      }()
+      case .updateChatVisibility?: try {
+        guard case .updateChatVisibility(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 31)
       }()
       case nil: break
       }
@@ -12138,6 +12258,7 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     25: .standard(proto: "chat_has_new_updates"),
     26: .standard(proto: "space_has_new_updates"),
     27: .standard(proto: "space_member_update"),
+    28: .standard(proto: "chat_visibility"),
   ]
 
   fileprivate class _StorageClass {
@@ -12493,6 +12614,19 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
             _storage._update = .spaceMemberUpdate(v)
           }
         }()
+        case 28: try {
+          var v: UpdateChatVisibility?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .chatVisibility(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .chatVisibility(v)
+          }
+        }()
         default: break
         }
       }
@@ -12607,6 +12741,10 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
       case .spaceMemberUpdate?: try {
         guard case .spaceMemberUpdate(let v)? = _storage._update else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 27)
+      }()
+      case .chatVisibility?: try {
+        guard case .chatVisibility(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 28)
       }()
       case nil: break
       }
@@ -12744,6 +12882,44 @@ extension UpdateChatSkipPts: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
 
   public static func ==(lhs: UpdateChatSkipPts, rhs: UpdateChatSkipPts) -> Bool {
     if lhs.chatID != rhs.chatID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateChatVisibility: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateChatVisibility"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "chat_id"),
+    2: .standard(proto: "is_public"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.chatID) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self.isPublic) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.chatID != 0 {
+      try visitor.visitSingularInt64Field(value: self.chatID, fieldNumber: 1)
+    }
+    if self.isPublic != false {
+      try visitor.visitSingularBoolField(value: self.isPublic, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateChatVisibility, rhs: UpdateChatVisibility) -> Bool {
+    if lhs.chatID != rhs.chatID {return false}
+    if lhs.isPublic != rhs.isPublic {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -14398,6 +14574,86 @@ extension RemoveChatParticipantResult: SwiftProtobuf.Message, SwiftProtobuf._Mes
   }
 
   public static func ==(lhs: RemoveChatParticipantResult, rhs: RemoveChatParticipantResult) -> Bool {
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateChatVisibilityInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateChatVisibilityInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "chat_id"),
+    2: .standard(proto: "is_public"),
+    3: .same(proto: "participants"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.chatID) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self.isPublic) }()
+      case 3: try { try decoder.decodeRepeatedMessageField(value: &self.participants) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.chatID != 0 {
+      try visitor.visitSingularInt64Field(value: self.chatID, fieldNumber: 1)
+    }
+    if self.isPublic != false {
+      try visitor.visitSingularBoolField(value: self.isPublic, fieldNumber: 2)
+    }
+    if !self.participants.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.participants, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateChatVisibilityInput, rhs: UpdateChatVisibilityInput) -> Bool {
+    if lhs.chatID != rhs.chatID {return false}
+    if lhs.isPublic != rhs.isPublic {return false}
+    if lhs.participants != rhs.participants {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateChatVisibilityResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateChatVisibilityResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "chat"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._chat) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._chat {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateChatVisibilityResult, rhs: UpdateChatVisibilityResult) -> Bool {
+    if lhs._chat != rhs._chat {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

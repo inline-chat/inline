@@ -438,6 +438,8 @@ actor Sync {
         .chat(peer: .with { $0.chat = .with { $0.chatID = payload.chatID } })
       case let .participantDelete(payload):
         .chat(peer: .with { $0.chat = .with { $0.chatID = payload.chatID } })
+      case let .chatVisibility(payload):
+        .chat(peer: .with { $0.chat = .with { $0.chatID = payload.chatID } })
       default:
         nil
     }
@@ -493,6 +495,8 @@ actor BucketActor {
       case .spaceMemberDelete:
         true
       case .participantDelete:
+        true
+      case .chatVisibility:
         true
       case .deleteChat:
         true
