@@ -47,6 +47,11 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   var showingPhotoPreview: Bool = false
   var imageCaption: String = ""
 
+  enum MediaPickerMode {
+    case photos
+    case videos
+  }
+
   var attachmentItems: [String: FileMediaItem] = [:]
 
   var canSend: Bool {
@@ -74,6 +79,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   let multiPhotoPreviewViewModel = SwiftUIPhotoPreviewViewModel()
   let draftSaveInterval: TimeInterval = 2.0 // Save every 2 seconds
   var isPickerPresented = false
+  var activePickerMode: MediaPickerMode = .photos
 
   // MARK: - UI Components
 

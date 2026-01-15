@@ -619,12 +619,9 @@ extension LegacyMainWindowController {
         items.append(.chatTitle)
         items.append(.flexibleSpace)
 
-        // Only show participants for private thread chats (not DMs, not public threads)
-        if case let .thread(chatId) = peer {
-          // Check if thread is private (not public)
-          if let chat = ObjectCache.shared.getChat(id: chatId), chat.isPublic != true {
-            items.append(.participants)
-          }
+        // Show participants for thread chats (not DMs)
+        if case .thread = peer {
+          items.append(.participants)
         }
 
         // Add space between participants and translate
