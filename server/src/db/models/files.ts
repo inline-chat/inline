@@ -279,7 +279,7 @@ export async function cloneVideoById(videoId: number, newOwnerId: number): Promi
     fileType: FileTypes.VIDEO,
   })
 
-  const newPhotoId = video.photo ? await clonePhotoById(video.photo.id, newOwnerId) : null
+  const newPhotoId = video.photo ? BigInt(await clonePhotoById(video.photo.id, newOwnerId)) : null
 
   const [newVideo] = await db
     .insert(videos)
@@ -368,7 +368,7 @@ export async function cloneDocumentById(documentId: number, newOwnerId: number):
     fileType: FileTypes.DOCUMENT,
   })
 
-  const newPhotoId = document.photo ? await clonePhotoById(document.photo.id, newOwnerId) : null
+  const newPhotoId = document.photo ? BigInt(await clonePhotoById(document.photo.id, newOwnerId)) : null
 
   const [newDocument] = await db
     .insert(documents)
