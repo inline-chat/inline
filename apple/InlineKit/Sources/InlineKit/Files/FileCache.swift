@@ -368,14 +368,19 @@ public actor FileCache: Sendable {
     guard durationTime.isValid else { throw FileCacheError.failedToSave }
     let durationSeconds = Int(CMTimeGetSeconds(durationTime).rounded())
 
-    // Persist the video to app cache
+    // Persist the video to app cache (transcode non-mp4 videos to mp4)
     let directory = FileHelpers.getLocalCacheDirectory(for: .videos)
     let fileManager = FileManager.default
-    let fileExtension = url.pathExtension.isEmpty ? "mp4" : url.pathExtension
-    let localPath = UUID().uuidString + "." + fileExtension
+    let sourceExtension = url.pathExtension.lowercased()
+    let needsMp4Transcode = sourceExtension != "mp4"
+    let localPath = UUID().uuidString + ".mp4"
     let localUrl = directory.appendingPathComponent(localPath)
 
-    try fileManager.copyItem(at: url, to: localUrl)
+    if needsMp4Transcode {
+      try await exportVideoToMp4(asset: asset, destinationURL: localUrl)
+    } else {
+      try fileManager.copyItem(at: url, to: localUrl)
+    }
     let fileSize = FileHelpers.getFileSize(at: localUrl)
 
     // Generate or reuse thumbnail
@@ -454,6 +459,36 @@ private func generateThumbnailImage(from asset: AVAsset) throws -> PlatformImage
   #else
   return NSImage(cgImage: cgImage, size: .zero)
   #endif
+}
+
+private func exportVideoToMp4(asset: AVAsset, destinationURL: URL) async throws {
+  if FileManager.default.fileExists(atPath: destinationURL.path) {
+    try FileManager.default.removeItem(at: destinationURL)
+  }
+
+  guard let exportSession = AVAssetExportSession(
+    asset: asset,
+    presetName: AVAssetExportPresetHighestQuality
+  ) else {
+    throw FileCacheError.failedToSave
+  }
+
+  exportSession.outputURL = destinationURL
+  exportSession.outputFileType = .mp4
+  exportSession.shouldOptimizeForNetworkUse = true
+
+  try await withCheckedThrowingContinuation { continuation in
+    exportSession.exportAsynchronously {
+      switch exportSession.status {
+      case .completed:
+        continuation.resume()
+      case .failed, .cancelled:
+        continuation.resume(throwing: exportSession.error ?? FileCacheError.failedToSave)
+      default:
+        continuation.resume(throwing: FileCacheError.failedToSave)
+      }
+    }
+  }
 }
 
 // MARK: - Clear Cache

@@ -11,9 +11,29 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
   func presentPicker() {
     guard let windowScene = window?.windowScene, !isPickerPresented else { return }
 
+    activePickerMode = .photos
+
     var configuration = PHPickerConfiguration(photoLibrary: .shared())
     configuration.filter = .images
     configuration.selectionLimit = 30
+
+    let picker = PHPickerViewController(configuration: configuration)
+    picker.delegate = self
+    isPickerPresented = true
+
+    let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow })
+    let rootVC = keyWindow?.rootViewController
+    rootVC?.present(picker, animated: true)
+  }
+
+  func presentVideoPicker() {
+    guard let windowScene = window?.windowScene, !isPickerPresented else { return }
+
+    activePickerMode = .videos
+
+    var configuration = PHPickerConfiguration(photoLibrary: .shared())
+    configuration.filter = .videos
+    configuration.selectionLimit = 10
 
     let picker = PHPickerViewController(configuration: configuration)
     picker.delegate = self
@@ -46,6 +66,7 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
   func showCameraPicker() {
     let picker = UIImagePickerController()
     picker.sourceType = .camera
+    picker.mediaTypes = [UTType.image.identifier, UTType.movie.identifier]
     picker.delegate = self
     picker.allowsEditing = false
 
@@ -341,6 +362,48 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
       Log.shared.error("Failed to save photo in attachments", error: error)
     }
   }
+
+  func addVideo(_ url: URL) {
+    sendButton.configuration?.showsActivityIndicator = true
+
+    Task { [weak self] in
+      do {
+        let videoInfo = try await FileCache.saveVideo(url: url)
+        let mediaItem = FileMediaItem.video(videoInfo)
+        let uniqueId = mediaItem.getItemUniqueId()
+
+        await MainActor.run { [weak self] in
+          guard let self else { return }
+          attachmentItems[uniqueId] = mediaItem
+          updateSendButtonVisibility()
+          sendButton.configuration?.showsActivityIndicator = false
+          sendMessage()
+        }
+      } catch {
+        Log.shared.error("Failed to save video", error: error)
+        await MainActor.run { [weak self] in
+          self?.sendButton.configuration?.showsActivityIndicator = false
+          self?.showVideoError(error)
+        }
+      }
+    }
+  }
+
+  private func showVideoError(_ error: Error) {
+    let alert = UIAlertController(
+      title: "Video Error",
+      message: "Failed to add video: \(error.localizedDescription)",
+      preferredStyle: .alert
+    )
+    alert.addAction(UIAlertAction(title: "OK", style: .default))
+
+    if let windowScene = window?.windowScene,
+       let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow }),
+       let rootVC = keyWindow.rootViewController
+    {
+      rootVC.present(alert, animated: true)
+    }
+  }
 }
 
 // MARK: - PHPickerViewControllerDelegate
@@ -355,6 +418,11 @@ extension ComposeView: PHPickerViewControllerDelegate {
     }
     
     isPickerPresented = false
+
+    if activePickerMode == .videos {
+      handleVideoPickerResults(results, picker: picker)
+      return
+    }
 
     // If only one photo selected, use the original single preview
     if results.count == 1 {
@@ -418,6 +486,101 @@ extension ComposeView: PHPickerViewControllerDelegate {
     } else {
       // Multiple photos selected, use multi-photo preview
       loadMultipleImages(from: results, picker: picker)
+    }
+  }
+
+  private func handleVideoPickerResults(_ results: [PHPickerResult], picker: PHPickerViewController) {
+    Task { [weak self, weak picker] in
+      guard let self, let picker else { return }
+
+      var loadedItems: [(index: Int, item: FileMediaItem)] = []
+
+      await withTaskGroup(of: (Int, FileMediaItem?).self) { group in
+        for (index, result) in results.enumerated() {
+          group.addTask { [weak self] in
+            guard let self else { return (index, nil) }
+            let item = await self.loadVideoItem(from: result)
+            return (index, item)
+          }
+        }
+
+        for await (index, item) in group {
+          if let item {
+            loadedItems.append((index: index, item: item))
+          }
+        }
+      }
+
+      await MainActor.run { [weak self, weak picker] in
+        guard let self, let picker else { return }
+
+        let sortedItems = loadedItems.sorted { $0.index < $1.index }.map(\.item)
+        guard !sortedItems.isEmpty else {
+          picker.dismiss(animated: true) { [weak self] in
+            self?.isPickerPresented = false
+          }
+          return
+        }
+
+        for item in sortedItems {
+          let uniqueId = item.getItemUniqueId()
+          attachmentItems[uniqueId] = item
+        }
+
+        updateSendButtonVisibility()
+
+        picker.dismiss(animated: true) { [weak self] in
+          guard let self else { return }
+          isPickerPresented = false
+          sendMessage()
+        }
+      }
+    }
+  }
+
+  private func loadVideoItem(from result: PHPickerResult) async -> FileMediaItem? {
+    let provider = result.itemProvider
+    let typeIdentifier = [UTType.movie.identifier, UTType.video.identifier]
+      .first(where: { provider.hasItemConformingToTypeIdentifier($0) })
+
+    guard let typeIdentifier else { return nil }
+
+    return await withCheckedContinuation { continuation in
+      provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { url, error in
+        if let error {
+          Log.shared.error("Failed to load video file from picker", error: error)
+          continuation.resume(returning: nil)
+          return
+        }
+
+        guard let url else {
+          continuation.resume(returning: nil)
+          return
+        }
+
+        let tempDirectory = FileManager.default.temporaryDirectory
+        let fileExtension = url.pathExtension.isEmpty ? "mp4" : url.pathExtension
+        let tempUrl = tempDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension(fileExtension)
+
+        do {
+          try FileManager.default.copyItem(at: url, to: tempUrl)
+        } catch {
+          Log.shared.error("Failed to copy video file from picker", error: error)
+          continuation.resume(returning: nil)
+          return
+        }
+
+        Task {
+          defer { try? FileManager.default.removeItem(at: tempUrl) }
+          do {
+            let videoInfo = try await FileCache.saveVideo(url: tempUrl)
+            continuation.resume(returning: .video(videoInfo))
+          } catch {
+            Log.shared.error("Failed to save video from picker", error: error)
+            continuation.resume(returning: nil)
+          }
+        }
+      }
     }
   }
 
@@ -500,18 +663,37 @@ extension ComposeView {
     _ picker: UIImagePickerController,
     didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
   ) {
-    guard let image = info[.originalImage] as? UIImage else {
+    let mediaType = info[.mediaType] as? String
+
+    if mediaType == UTType.image.identifier {
+      guard let image = info[.originalImage] as? UIImage else {
+        picker.dismiss(animated: true)
+        return
+      }
+
+      // Save the captured photo to the photo library
+      if picker.sourceType == .camera {
+        UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+      }
+
+      picker.dismiss(animated: true) { [weak self] in
+        self?.handleDroppedImage(image)
+      }
+    } else if mediaType == UTType.movie.identifier {
+      guard let url = info[.mediaURL] as? URL else {
+        picker.dismiss(animated: true)
+        return
+      }
+
+      if picker.sourceType == .camera {
+        UISaveVideoAtPathToSavedPhotosAlbum(url.path, nil, nil, nil)
+      }
+
+      picker.dismiss(animated: true) { [weak self] in
+        self?.addVideo(url)
+      }
+    } else {
       picker.dismiss(animated: true)
-      return
-    }
-
-    // Save the captured photo to the photo library
-    if picker.sourceType == .camera {
-      UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
-    }
-
-    picker.dismiss(animated: true) { [weak self] in
-      self?.handleDroppedImage(image)
     }
   }
 

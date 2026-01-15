@@ -99,6 +99,14 @@ extension ComposeView {
       }
     )
 
+    let videoAction = UIAction(
+      title: "Video",
+      image: UIImage(systemName: "video"),
+      handler: { [weak self] _ in
+        self?.presentVideoPicker()
+      }
+    )
+
     let cameraAction = UIAction(
       title: "Camera",
       image: UIImage(systemName: "camera"),
@@ -114,7 +122,7 @@ extension ComposeView {
         self?.presentFileManager()
       }
     )
-    button.menu = UIMenu(children: [libraryAction, cameraAction, fileAction])
+    button.menu = UIMenu(children: [libraryAction, videoAction, cameraAction, fileAction])
     button.showsMenuAsPrimaryAction = true
 
     return button
