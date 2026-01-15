@@ -10,6 +10,29 @@ enum PasteboardAttachment {
   case text(String)
 }
 
+enum PasteboardAttachmentFailure: Equatable {
+  case unreadableFile(url: URL, isSymlink: Bool, isTelegram: Bool)
+
+  var isTelegramSource: Bool {
+    switch self {
+      case let .unreadableFile(_, _, isTelegram):
+        return isTelegram
+    }
+  }
+
+  var isSymlink: Bool {
+    switch self {
+      case let .unreadableFile(_, isSymlink, _):
+        return isSymlink
+    }
+  }
+}
+
+struct PasteboardAttachmentResult {
+  let attachments: [PasteboardAttachment]
+  let failures: [PasteboardAttachmentFailure]
+}
+
 class InlinePasteboard {
   private static let preferredImageTypes: [NSPasteboard.PasteboardType] = [
     .png,
@@ -34,20 +57,36 @@ class InlinePasteboard {
     NSPasteboard.PasteboardType("public.video"),
   ]
 
-  static func findAttachments(from pasteboard: NSPasteboard, includeText: Bool = true) -> [PasteboardAttachment] {
+  static func findAttachmentsResult(
+    from pasteboard: NSPasteboard,
+    includeText: Bool = true
+  ) -> PasteboardAttachmentResult {
     var attachments: [PasteboardAttachment] = []
+    var failures: [PasteboardAttachmentFailure] = []
 
     for item in pasteboard.pasteboardItems ?? [] {
-      if let attachment = findBestAttachment(for: item, includeText: includeText) {
+      let result = findBestAttachment(for: item, includeText: includeText)
+      if let attachment = result.attachment {
         attachments.append(attachment)
       }
+      failures.append(contentsOf: result.failures)
     }
 
-    return attachments
+    return PasteboardAttachmentResult(attachments: attachments, failures: failures)
   }
 
-  private static func findBestAttachment(for item: NSPasteboardItem, includeText: Bool) -> PasteboardAttachment? {
+  static func findAttachments(from pasteboard: NSPasteboard, includeText: Bool = true) -> [PasteboardAttachment] {
+    findAttachmentsResult(from: pasteboard, includeText: includeText).attachments
+  }
+
+  private struct ItemAttachmentResult {
+    let attachment: PasteboardAttachment?
+    let failures: [PasteboardAttachmentFailure]
+  }
+
+  private static func findBestAttachment(for item: NSPasteboardItem, includeText: Bool) -> ItemAttachmentResult {
     let types = item.types
+    var failures: [PasteboardAttachmentFailure] = []
 
     // Priority order: file URLs > specific content types > raw data > text
 
@@ -56,7 +95,11 @@ class InlinePasteboard {
       if let urlString = item.string(forType: .fileURL),
          let url = parseFileURL(urlString)
       {
-        return handleFileURL(url)
+        let result = handleFileURL(url)
+        if result.attachment != nil {
+          return result
+        }
+        failures.append(contentsOf: result.failures)
       }
     }
 
@@ -71,10 +114,10 @@ class InlinePasteboard {
         // Try to get URL if available, otherwise create temp file
         do {
           let url = try createTempFileURL(data: pdfData, extension: "pdf")
-          return .file(url, thumbnail: thumbnail)
+          return ItemAttachmentResult(attachment: .file(url, thumbnail: thumbnail), failures: failures)
         } catch {
           Log.shared.error("Failed to write temp PDF for pasteboard", error: error)
-          return nil
+          return ItemAttachmentResult(attachment: nil, failures: failures)
         }
       }
     }
@@ -87,10 +130,10 @@ class InlinePasteboard {
         do {
           let url = try createTempFileURL(data: videoData, extension: getFileExtension(for: videoType))
           // Thumbnail generation can be expensive; defer to later pipeline.
-          return .video(url, thumbnail: nil)
+          return ItemAttachmentResult(attachment: .video(url, thumbnail: nil), failures: failures)
         } catch {
           Log.shared.error("Failed to write temp video for pasteboard", error: error)
-          return nil
+          return ItemAttachmentResult(attachment: nil, failures: failures)
         }
       }
     }
@@ -111,26 +154,39 @@ class InlinePasteboard {
           sourceURL = url
         }
 
-        return .image(image, sourceURL)
+        return ItemAttachmentResult(attachment: .image(image, sourceURL), failures: failures)
       }
     }
 
     // 5. Check for text
     if includeText, types.contains(.string) {
       if let text = item.string(forType: .string) {
-        return .text(text)
+        return ItemAttachmentResult(attachment: .text(text), failures: failures)
       }
     }
 
-    return nil
+    return ItemAttachmentResult(attachment: nil, failures: failures)
   }
 
-  private static func handleFileURL(_ url: URL) -> PasteboardAttachment? {
+  private static func handleFileURL(_ url: URL) -> ItemAttachmentResult {
     let fileExtension = url.pathExtension.lowercased()
+    let path = url.path
+    let fileManager = FileManager.default
+    let exists = fileManager.fileExists(atPath: path)
+    let isReadable = fileManager.isReadableFile(atPath: path)
+
+    if !exists || !isReadable {
+      let isSymlink = isSymbolicLink(url)
+      let isTelegram = isLikelyTelegramContainerURL(url)
+      return ItemAttachmentResult(
+        attachment: nil,
+        failures: [.unreadableFile(url: url, isSymlink: isSymlink, isTelegram: isTelegram)]
+      )
+    }
 
     // Check if it's a video file
     if isVideoFileExtension(fileExtension) {
-      return .video(url, thumbnail: nil)
+      return ItemAttachmentResult(attachment: .video(url, thumbnail: nil), failures: [])
       // Until we encode video to our custom mp4 format, we won't generate thumbnails
 //      if let thumbnail = generateVideoThumbnail(from: url) {
 //        return .video(url, thumbnail: thumbnail)
@@ -140,18 +196,18 @@ class InlinePasteboard {
     // Check if it's an image file
     if isImageFileExtension(fileExtension) {
       if let image = NSImage(contentsOf: url) {
-        return .image(image, url)
+        return ItemAttachmentResult(attachment: .image(image, url), failures: [])
       }
     }
 
     // Check if it's a PDF
     if fileExtension == "pdf" {
       if let thumbnail = generatePDFThumbnail(from: url) {
-        return .file(url, thumbnail: thumbnail)
+        return ItemAttachmentResult(attachment: .file(url, thumbnail: thumbnail), failures: [])
       }
     }
 
-    return .file(url, thumbnail: nil)
+    return ItemAttachmentResult(attachment: .file(url, thumbnail: nil), failures: [])
   }
 
   private static func isVideoType(_ type: NSPasteboard.PasteboardType) -> Bool {
@@ -214,6 +270,21 @@ class InlinePasteboard {
 
     // Some producers provide a path-like string instead of a file URL.
     return URL(fileURLWithPath: urlString)
+  }
+
+  private static func isSymbolicLink(_ url: URL) -> Bool {
+    do {
+      let values = try url.resourceValues(forKeys: [.isSymbolicLinkKey])
+      return values.isSymbolicLink ?? false
+    } catch {
+      return false
+    }
+  }
+
+  private static func isLikelyTelegramContainerURL(_ url: URL) -> Bool {
+    let path = url.path.lowercased()
+    guard path.contains("telegram") else { return false }
+    return path.contains("/library/group containers/") || path.contains("/library/containers/")
   }
 
   private static func generateVideoThumbnail(from url: URL) -> NSImage? {
