@@ -7,6 +7,7 @@ class ChatTitleToolbar: NSToolbarItem {
   private var peer: Peer
   private var dependencies: AppDependencies
   private var iconSize: CGFloat = Theme.chatToolbarIconSize
+  private var chatSubscription: AnyCancellable?
 
   private lazy var iconView = ChatIconView(peer: peer, iconSize: iconSize)
   private lazy var statusView = ChatStatusView(peer: peer, dependencies: self.dependencies)
@@ -57,6 +58,7 @@ class ChatTitleToolbar: NSToolbarItem {
     setupConstraints()
     setupInteraction()
     configure()
+    subscribeToChatUpdates()
   }
 
   private let containerView: NSView = {
@@ -109,6 +111,16 @@ class ChatTitleToolbar: NSToolbarItem {
   func configure() {
     nameLabel.stringValue = chatTitle
     iconView.configure()
+  }
+
+  private func subscribeToChatUpdates() {
+    guard case let .thread(chatId) = peer else { return }
+    chatSubscription = ObjectCache.shared.getChatPublisher(id: chatId)
+      .sink { [weak self] _ in
+        DispatchQueue.main.async {
+          self?.configure()
+        }
+      }
   }
 }
 
@@ -170,6 +182,14 @@ final class ChatStatusView: NSView {
     // user online updates
     if let user {
       ObjectCache.shared.getUserPublisher(id: user.id).sink { [weak self] _ in
+        DispatchQueue.main.async {
+          self?.updateLabel()
+        }
+      }.store(in: &cancellables)
+    }
+
+    if case let .thread(chatId) = peer {
+      ObjectCache.shared.getChatPublisher(id: chatId).sink { [weak self] _ in
         DispatchQueue.main.async {
           self?.updateLabel()
         }

@@ -40,6 +40,12 @@ public struct GetChatParticipantsTransaction: Transaction2 {
 
     do {
       try await AppDatabase.shared.dbWriter.write { db in
+        do {
+          try ChatParticipant.filter(Column("chatId") == context.chatID).deleteAll(db)
+        } catch {
+          log.error("Failed to clear chat participants before refresh", error: error)
+        }
+
         // Save users
         for user in response.users {
           do {

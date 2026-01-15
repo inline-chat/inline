@@ -325,6 +325,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
 
                fullChat.dialog != self.chatItem?.dialog ||
                fullChat.chat?.title != self.chatItem?.chat?.title ||
+               fullChat.chat?.isPublic != self.chatItem?.chat?.isPublic ||
                fullChat.user != self.chatItem?.user
             {
               // Important Note
