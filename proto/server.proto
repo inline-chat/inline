@@ -17,6 +17,7 @@ message ServerUpdate {
     ServerChatUpdateDeleteMessages delete_messages = 6;
     ServerChatUpdateDeleteChat delete_chat = 7;
     ServerChatUpdateParticipantDelete participant_delete = 8;
+    ServerChatUpdateVisibility chat_visibility = 13;
 
     // Space updates
     ServerSpaceUpdateRemoveMember space_remove_member = 9;
@@ -57,6 +58,12 @@ message ServerChatUpdateDeleteChat { int64 chat_id = 1; }
 message ServerChatUpdateParticipantDelete {
   int64 chat_id = 1;
   int64 user_id = 2;
+}
+
+// Update for a chat when visibility changes
+message ServerChatUpdateVisibility {
+  int64 chat_id = 1;
+  bool is_public = 2;
 }
 
 // ------------------------------------------------------------

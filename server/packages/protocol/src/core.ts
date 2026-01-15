@@ -1621,6 +1621,12 @@ export interface RpcCall {
          */
         forwardMessages: ForwardMessagesInput;
     } | {
+        oneofKind: "updateChatVisibility";
+        /**
+         * @generated from protobuf field: UpdateChatVisibilityInput updateChatVisibility = 31;
+         */
+        updateChatVisibility: UpdateChatVisibilityInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1809,6 +1815,12 @@ export interface RpcResult {
          * @generated from protobuf field: ForwardMessagesResult forwardMessages = 30;
          */
         forwardMessages: ForwardMessagesResult;
+    } | {
+        oneofKind: "updateChatVisibility";
+        /**
+         * @generated from protobuf field: UpdateChatVisibilityResult updateChatVisibility = 31;
+         */
+        updateChatVisibility: UpdateChatVisibilityResult;
     } | {
         oneofKind: undefined;
     };
@@ -2937,6 +2949,12 @@ export interface Update {
          */
         spaceMemberUpdate: UpdateSpaceMemberUpdate;
     } | {
+        oneofKind: "chatVisibility";
+        /**
+         * @generated from protobuf field: UpdateChatVisibility chat_visibility = 28;
+         */
+        chatVisibility: UpdateChatVisibility;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -2990,6 +3008,21 @@ export interface UpdateChatSkipPts {
      * @generated from protobuf field: int64 chat_id = 1;
      */
     chatId: bigint;
+}
+/**
+ * Update when chat visibility changes (public/private)
+ *
+ * @generated from protobuf message UpdateChatVisibility
+ */
+export interface UpdateChatVisibility {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: bool is_public = 2;
+     */
+    isPublic: boolean;
 }
 /**
  * @generated from protobuf message UpdateNewMessageNotification
@@ -3607,6 +3640,32 @@ export interface RemoveChatParticipantInput {
 export interface RemoveChatParticipantResult {
 }
 /**
+ * @generated from protobuf message UpdateChatVisibilityInput
+ */
+export interface UpdateChatVisibilityInput {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: bool is_public = 2;
+     */
+    isPublic: boolean;
+    /**
+     * @generated from protobuf field: repeated InputChatParticipant participants = 3;
+     */
+    participants: InputChatParticipant[];
+}
+/**
+ * @generated from protobuf message UpdateChatVisibilityResult
+ */
+export interface UpdateChatVisibilityResult {
+    /**
+     * @generated from protobuf field: Chat chat = 1;
+     */
+    chat?: Chat;
+}
+/**
  * Apple only types
  *
  * @generated from protobuf message DraftMessage
@@ -3757,7 +3816,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: FORWARD_MESSAGES = 29;
      */
-    FORWARD_MESSAGES = 29
+    FORWARD_MESSAGES = 29,
+    /**
+     * @generated from protobuf enum value: UPDATE_CHAT_VISIBILITY = 30;
+     */
+    UPDATE_CHAT_VISIBILITY = 30
 }
 /**
  * @generated from protobuf enum SearchMessagesFilter
@@ -7072,7 +7135,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 27, name: "getUpdates", kind: "message", oneof: "input", T: () => GetUpdatesInput },
             { no: 28, name: "updateMemberAccess", kind: "message", oneof: "input", T: () => UpdateMemberAccessInput },
             { no: 29, name: "searchMessages", kind: "message", oneof: "input", T: () => SearchMessagesInput },
-            { no: 30, name: "forwardMessages", kind: "message", oneof: "input", T: () => ForwardMessagesInput }
+            { no: 30, name: "forwardMessages", kind: "message", oneof: "input", T: () => ForwardMessagesInput },
+            { no: 31, name: "updateChatVisibility", kind: "message", oneof: "input", T: () => UpdateChatVisibilityInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -7265,6 +7329,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         forwardMessages: ForwardMessagesInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).forwardMessages)
                     };
                     break;
+                case /* UpdateChatVisibilityInput updateChatVisibility */ 31:
+                    message.input = {
+                        oneofKind: "updateChatVisibility",
+                        updateChatVisibility: UpdateChatVisibilityInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).updateChatVisibility)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -7367,6 +7437,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* ForwardMessagesInput forwardMessages = 30; */
         if (message.input.oneofKind === "forwardMessages")
             ForwardMessagesInput.internalBinaryWrite(message.input.forwardMessages, writer.tag(30, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateChatVisibilityInput updateChatVisibility = 31; */
+        if (message.input.oneofKind === "updateChatVisibility")
+            UpdateChatVisibilityInput.internalBinaryWrite(message.input.updateChatVisibility, writer.tag(31, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -7410,7 +7483,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 27, name: "getUpdates", kind: "message", oneof: "result", T: () => GetUpdatesResult },
             { no: 28, name: "updateMemberAccess", kind: "message", oneof: "result", T: () => UpdateMemberAccessResult },
             { no: 29, name: "searchMessages", kind: "message", oneof: "result", T: () => SearchMessagesResult },
-            { no: 30, name: "forwardMessages", kind: "message", oneof: "result", T: () => ForwardMessagesResult }
+            { no: 30, name: "forwardMessages", kind: "message", oneof: "result", T: () => ForwardMessagesResult },
+            { no: 31, name: "updateChatVisibility", kind: "message", oneof: "result", T: () => UpdateChatVisibilityResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -7603,6 +7677,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         forwardMessages: ForwardMessagesResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).forwardMessages)
                     };
                     break;
+                case /* UpdateChatVisibilityResult updateChatVisibility */ 31:
+                    message.result = {
+                        oneofKind: "updateChatVisibility",
+                        updateChatVisibility: UpdateChatVisibilityResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).updateChatVisibility)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -7705,6 +7785,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* ForwardMessagesResult forwardMessages = 30; */
         if (message.result.oneofKind === "forwardMessages")
             ForwardMessagesResult.internalBinaryWrite(message.result.forwardMessages, writer.tag(30, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateChatVisibilityResult updateChatVisibility = 31; */
+        if (message.result.oneofKind === "updateChatVisibility")
+            UpdateChatVisibilityResult.internalBinaryWrite(message.result.updateChatVisibility, writer.tag(31, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -10755,7 +10838,8 @@ class Update$Type extends MessageType<Update> {
             { no: 24, name: "chat_skip_pts", kind: "message", oneof: "update", T: () => UpdateChatSkipPts },
             { no: 25, name: "chat_has_new_updates", kind: "message", oneof: "update", T: () => UpdateChatHasNewUpdates },
             { no: 26, name: "space_has_new_updates", kind: "message", oneof: "update", T: () => UpdateSpaceHasNewUpdates },
-            { no: 27, name: "space_member_update", kind: "message", oneof: "update", T: () => UpdateSpaceMemberUpdate }
+            { no: 27, name: "space_member_update", kind: "message", oneof: "update", T: () => UpdateSpaceMemberUpdate },
+            { no: 28, name: "chat_visibility", kind: "message", oneof: "update", T: () => UpdateChatVisibility }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -10920,6 +11004,12 @@ class Update$Type extends MessageType<Update> {
                         spaceMemberUpdate: UpdateSpaceMemberUpdate.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).spaceMemberUpdate)
                     };
                     break;
+                case /* UpdateChatVisibility chat_visibility */ 28:
+                    message.update = {
+                        oneofKind: "chatVisibility",
+                        chatVisibility: UpdateChatVisibility.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).chatVisibility)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -11010,6 +11100,9 @@ class Update$Type extends MessageType<Update> {
         /* UpdateSpaceMemberUpdate space_member_update = 27; */
         if (message.update.oneofKind === "spaceMemberUpdate")
             UpdateSpaceMemberUpdate.internalBinaryWrite(message.update.spaceMemberUpdate, writer.tag(27, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateChatVisibility chat_visibility = 28; */
+        if (message.update.oneofKind === "chatVisibility")
+            UpdateChatVisibility.internalBinaryWrite(message.update.chatVisibility, writer.tag(28, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -11184,6 +11277,61 @@ class UpdateChatSkipPts$Type extends MessageType<UpdateChatSkipPts> {
  * @generated MessageType for protobuf message UpdateChatSkipPts
  */
 export const UpdateChatSkipPts = new UpdateChatSkipPts$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateChatVisibility$Type extends MessageType<UpdateChatVisibility> {
+    constructor() {
+        super("UpdateChatVisibility", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "is_public", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateChatVisibility>): UpdateChatVisibility {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        message.isPublic = false;
+        if (value !== undefined)
+            reflectionMergePartial<UpdateChatVisibility>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateChatVisibility): UpdateChatVisibility {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* bool is_public */ 2:
+                    message.isPublic = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateChatVisibility, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* bool is_public = 2; */
+        if (message.isPublic !== false)
+            writer.tag(2, WireType.Varint).bool(message.isPublic);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateChatVisibility
+ */
+export const UpdateChatVisibility = new UpdateChatVisibility$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class UpdateNewMessageNotification$Type extends MessageType<UpdateNewMessageNotification> {
     constructor() {
@@ -13119,6 +13267,115 @@ class RemoveChatParticipantResult$Type extends MessageType<RemoveChatParticipant
  * @generated MessageType for protobuf message RemoveChatParticipantResult
  */
 export const RemoveChatParticipantResult = new RemoveChatParticipantResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateChatVisibilityInput$Type extends MessageType<UpdateChatVisibilityInput> {
+    constructor() {
+        super("UpdateChatVisibilityInput", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "is_public", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 3, name: "participants", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => InputChatParticipant }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateChatVisibilityInput>): UpdateChatVisibilityInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        message.isPublic = false;
+        message.participants = [];
+        if (value !== undefined)
+            reflectionMergePartial<UpdateChatVisibilityInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateChatVisibilityInput): UpdateChatVisibilityInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* bool is_public */ 2:
+                    message.isPublic = reader.bool();
+                    break;
+                case /* repeated InputChatParticipant participants */ 3:
+                    message.participants.push(InputChatParticipant.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateChatVisibilityInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* bool is_public = 2; */
+        if (message.isPublic !== false)
+            writer.tag(2, WireType.Varint).bool(message.isPublic);
+        /* repeated InputChatParticipant participants = 3; */
+        for (let i = 0; i < message.participants.length; i++)
+            InputChatParticipant.internalBinaryWrite(message.participants[i], writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateChatVisibilityInput
+ */
+export const UpdateChatVisibilityInput = new UpdateChatVisibilityInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateChatVisibilityResult$Type extends MessageType<UpdateChatVisibilityResult> {
+    constructor() {
+        super("UpdateChatVisibilityResult", [
+            { no: 1, name: "chat", kind: "message", T: () => Chat }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateChatVisibilityResult>): UpdateChatVisibilityResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<UpdateChatVisibilityResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateChatVisibilityResult): UpdateChatVisibilityResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Chat chat */ 1:
+                    message.chat = Chat.internalBinaryRead(reader, reader.uint32(), options, message.chat);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateChatVisibilityResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Chat chat = 1; */
+        if (message.chat)
+            Chat.internalBinaryWrite(message.chat, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateChatVisibilityResult
+ */
+export const UpdateChatVisibilityResult = new UpdateChatVisibilityResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class DraftMessage$Type extends MessageType<DraftMessage> {
     constructor() {

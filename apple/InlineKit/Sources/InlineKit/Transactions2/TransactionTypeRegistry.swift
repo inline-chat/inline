@@ -21,6 +21,7 @@ public enum TransactionTypeRegistry {
       case is GetChatParticipantsTransaction: "get_chat_participants"
       case is AddChatParticipantTransaction: "add_chat_participant"
       case is RemoveChatParticipantTransaction: "remove_chat_participant"
+      case is UpdateChatVisibilityTransaction: "update_chat_visibility"
       case is TranslateMessagesTransaction: "translate_messages"
       case is UpdateUserSettingsTransaction: "update_user_settings"
       case is MarkAsUnreadTransaction: "mark_as_unread"
@@ -49,6 +50,7 @@ public enum TransactionTypeRegistry {
       case "get_chat_participants": return try decoder.decode(GetChatParticipantsTransaction.self, from: data)
       case "add_chat_participant": return try decoder.decode(AddChatParticipantTransaction.self, from: data)
       case "remove_chat_participant": return try decoder.decode(RemoveChatParticipantTransaction.self, from: data)
+      case "update_chat_visibility": return try decoder.decode(UpdateChatVisibilityTransaction.self, from: data)
       case "translate_messages": return try decoder.decode(TranslateMessagesTransaction.self, from: data)
       case "update_user_settings": return try decoder.decode(UpdateUserSettingsTransaction.self, from: data)
       case "mark_as_unread": return try decoder.decode(MarkAsUnreadTransaction.self, from: data)

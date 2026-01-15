@@ -196,6 +196,19 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
           },
         }
 
+      case "chatVisibility":
+        return {
+          seq: update.seq,
+          date: encodeDateStrict(update.date),
+          update: {
+            oneofKind: "chatVisibility",
+            chatVisibility: {
+              chatId: serverUpdate.update.chatVisibility.chatId,
+              isPublic: serverUpdate.update.chatVisibility.isPublic,
+            },
+          },
+        }
+
       default:
         throw new Error(`Unknown update type: ${serverUpdate.update.oneofKind}`)
     }

@@ -14,6 +14,7 @@ import { updateMemberAccess } from "./space.updateMemberAccess"
 import { getChatParticipants } from "./messages.getChatParticipants"
 import { removeChatParticipant } from "./messages.removeChatParticipant"
 import { addChatParticipant } from "./messages.addChatParticipant"
+import { updateChatVisibility } from "./messages.updateChatVisibility"
 import { getUserSettings } from "./user.getUserSettings"
 import { updateUserSettings } from "./user.updateUserSettings"
 import { createBot } from "./createBot"
@@ -38,6 +39,7 @@ export const Functions = {
     getChatParticipants: getChatParticipants,
     addChatParticipant: addChatParticipant,
     removeChatParticipant: removeChatParticipant,
+    updateChatVisibility: updateChatVisibility,
     forwardMessages: forwardMessages,
     // until we make tests pass
     //markAsUnread: markAsUnread,

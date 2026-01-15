@@ -32,6 +32,7 @@ import { markAsUnread } from "./messages.markAsUnread"
 import { getUpdatesState } from "@in/server/realtime/handlers/updates.getUpdatesState"
 import { getUpdates } from "@in/server/realtime/handlers/updates.getUpdates"
 import { forwardMessagesHandler } from "@in/server/realtime/handlers/messages.forwardMessages"
+import { updateChatVisibilityHandler } from "@in/server/realtime/handlers/messages.updateChatVisibility"
 
 const log = new Log("rpc")
 
@@ -265,6 +266,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await forwardMessagesHandler(call.input.forwardMessages, handlerContext)
       return { oneofKind: "forwardMessages", forwardMessages: result }
+    }
+
+    case Method.UPDATE_CHAT_VISIBILITY: {
+      if (call.input.oneofKind !== "updateChatVisibility") {
+        throw RealtimeRpcError.BadRequest
+      }
+      let result = await updateChatVisibilityHandler(call.input.updateChatVisibility, handlerContext)
+      return { oneofKind: "updateChatVisibility", updateChatVisibility: result }
     }
 
     default:
