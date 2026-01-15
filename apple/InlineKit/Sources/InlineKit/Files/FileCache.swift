@@ -347,6 +347,7 @@ public actor FileCache: Sendable {
     return photoInfo
   }
 
+  // Note: this does synchronous disk/thumbnail/DB work; avoid calling on MainActor for large assets.
   public static func saveVideo(url: URL, thumbnail: PlatformImage? = nil) async throws -> InlineKit.VideoInfo {
     // Handle security scoped URL before any reads
     let hasAccess = url.startAccessingSecurityScopedResource()
