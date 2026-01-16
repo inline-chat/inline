@@ -481,22 +481,24 @@ const createIssueFunc = async (props: CreateIssueProps): Promise<CreateIssueResu
     let assigneeIdToUse = props.assigneeId || undefined
     let labelIdsToUse = props.labelIds
 
-    let result: LinearIssue
+    let result: LinearIssue | undefined
+    let lastError: unknown
     try {
       result = await createIssueAttempt({ assigneeId: assigneeIdToUse, labelIds: labelIdsToUse })
     } catch (error) {
+      lastError = error
       if (assigneeIdToUse) {
         Log.shared.warn("Linear issue create failed; retrying without assignee", {
           spaceId: props.spaceId,
           teamId,
           chatId: chatId ?? 0,
-          error,
+          error: lastError,
         })
         assigneeIdToUse = undefined
         try {
           result = await createIssueAttempt({ assigneeId: assigneeIdToUse, labelIds: labelIdsToUse })
         } catch (retryError) {
-          error = retryError
+          lastError = retryError
         }
       }
 
@@ -505,7 +507,7 @@ const createIssueFunc = async (props: CreateIssueProps): Promise<CreateIssueResu
           spaceId: props.spaceId,
           teamId,
           chatId: chatId ?? 0,
-          error,
+          error: lastError,
         })
         labelIdsToUse = []
         result = await createIssueAttempt({ assigneeId: assigneeIdToUse, labelIds: labelIdsToUse })

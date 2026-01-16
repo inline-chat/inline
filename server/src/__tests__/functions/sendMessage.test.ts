@@ -13,7 +13,11 @@ let context: FunctionContext
 
 // Helpers
 function extractMessage(result: SendMessageResult): Message | null {
-  return result.updates[1]?.update.oneofKind === "newMessage" ? result.updates[1]?.update.newMessage?.message! : null
+  const update = result.updates[1]
+  if (update?.update.oneofKind !== "newMessage") {
+    return null
+  }
+  return update.update.newMessage?.message ?? null
 }
 
 describe("sendMessage", () => {

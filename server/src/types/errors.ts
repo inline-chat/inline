@@ -108,9 +108,11 @@ export class InlineError extends Error {
 }
 
 /** @deprecated */
-export enum ErrorCodes {
-  INAVLID_ARGS = 400,
-  UNAUTHORIZED = 403,
-  SERVER_ERROR = 500,
-  INVALID_INPUT = 400,
-}
+export const ErrorCodes = {
+  INAVLID_ARGS: 400,
+  UNAUTHORIZED: 403,
+  SERVER_ERROR: 500,
+  INVALID_INPUT: 400,
+} as const
+
+export type ErrorCodes = (typeof ErrorCodes)[keyof typeof ErrorCodes]
