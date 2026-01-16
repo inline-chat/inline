@@ -13,9 +13,9 @@ final class ForegroundReconnectTests {
     let auth = Auth(mockAuthenticated: true)
     let client = ProtocolClient(transport: transport, auth: auth)
 
-    async let first = client.handleForegroundTransition()
-    async let second = client.handleForegroundTransition()
-    async let third = client.handleForegroundTransition()
+    async let first: Void = client.handleForegroundTransition()
+    async let second: Void = client.handleForegroundTransition()
+    async let third: Void = client.handleForegroundTransition()
 
     _ = await (first, second, third)
 
