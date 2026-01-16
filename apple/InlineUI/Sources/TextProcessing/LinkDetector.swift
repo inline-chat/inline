@@ -293,10 +293,6 @@ public final class LinkDetector: Sendable {
   private func trimTrailingPunctuation(from urlString: String) -> String {
     var result = urlString
 
-    // Count opening and closing parentheses to determine balance
-    let openParens = result.count(where: { $0 == "(" })
-    let closeParens = result.count(where: { $0 == ")" })
-
     // Basic punctuation that should always be trimmed
     let basicPunctuation = CharacterSet(charactersIn: ",.!?:;'\"")
 

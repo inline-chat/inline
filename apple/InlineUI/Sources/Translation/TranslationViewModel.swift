@@ -438,7 +438,7 @@ public final class TranslatingStatePublisher {
       await state.addBatch(messageIds: messageIds, peerId: peerId)
       let currentState = await state.translating
       log.debug("Added batch of \(messageIds.count) messages to translating state")
-      await publisher.send(currentState)
+      publisher.send(currentState)
     }
   }
 

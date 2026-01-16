@@ -1,6 +1,5 @@
 import Foundation
 import GRDB
-import InlineKit
 import InlineProtocol
 import Logger
 
@@ -47,13 +46,9 @@ public struct TransactionCreateChat: Transaction {
       )
     )
 
-    print("transaction result   = \(result)")
-
     guard case let .createChat(response) = result else {
       throw CreateChatError.failed
     }
-    print("transaction response = \(response)")
-
     return response
   }
 

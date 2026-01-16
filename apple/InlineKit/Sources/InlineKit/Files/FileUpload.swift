@@ -128,8 +128,7 @@ public actor FileUploader {
     let localUrl = FileHelpers.getLocalCacheDirectory(for: .photos).appendingPathComponent(
       localPath
     )
-    let format = photoInfo.photo.format ?? .jpeg
-    let size = FileHelpers.getFileSize(at: localUrl)
+    let format = photoInfo.photo.format
     let ext = format.toExt()
     let fileName = localPath.components(separatedBy: "/").last ?? "" + ext
     let mimeType = format.toMimeType()
@@ -348,7 +347,7 @@ public actor FileUploader {
       Log.shared.debug("[FileUploader] Successfully updated database for \(uploadId)")
 
       // Store result after successful database update
-      await storeUploadResult(uploadId: uploadId, result: result_)
+      storeUploadResult(uploadId: uploadId, result: result_)
     } catch {
       Log.shared.error(
         "[FileUploader] Failed to update database with new server ID for \(uploadId)",
@@ -384,7 +383,7 @@ public actor FileUploader {
   public func cancelAll() {
     Log.shared.debug("[FileUploader] Cancelling all uploads")
 
-    for (uploadId, taskInfo) in uploadTasks {
+    for (_, taskInfo) in uploadTasks {
       taskInfo.task.cancel()
     }
 
