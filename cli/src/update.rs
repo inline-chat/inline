@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use flate2::read::GzDecoder;
@@ -58,11 +59,27 @@ struct UpdateTarget {
 }
 
 pub async fn run_update(config: &Config, json: bool) -> Result<(), UpdateError> {
+    let mut install_url_hint = config.release_install_url.clone();
+    let result = run_update_inner(config, json, &mut install_url_hint).await;
+    if result.is_err() && !json {
+        print_reinstall_instructions(install_url_hint.as_deref());
+    }
+    result
+}
+
+async fn run_update_inner(
+    config: &Config,
+    json: bool,
+    install_url_hint: &mut Option<String>,
+) -> Result<(), UpdateError> {
     let manifest_url = config
         .release_manifest_url
         .clone()
         .ok_or(UpdateError::MissingManifestUrl)?;
     let manifest = fetch_manifest(&manifest_url).await?;
+    if manifest.install_url.is_some() {
+        *install_url_hint = manifest.install_url.clone();
+    }
     let target = current_target();
     if target == "unknown" {
         return Ok(());
@@ -104,11 +121,26 @@ pub async fn run_update(config: &Config, json: bool) -> Result<(), UpdateError> 
     }
 
     let current_exe = std::env::current_exe()?;
-    let staged_path = stage_binary(&extracted_binary, &current_exe)?;
-    install_binary(&staged_path, &current_exe)?;
+    let staged_path = stage_binary(&extracted_binary, &temp_dir)?;
+    let install_outcome = install_binary(&staged_path, &current_exe)?;
 
     if !json {
-        println!("Updated inline to v{latest}.");
+        if install_outcome.used_fallback {
+            println!(
+                "Updated inline to v{latest} (installed to {}).",
+                install_outcome.install_path.display()
+            );
+            if !install_outcome.path_on_env {
+                if let Some(parent) = install_outcome.install_path.parent() {
+                    eprintln!(
+                        "{} is not on your PATH. Add it to run the updated inline.",
+                        parent.display()
+                    );
+                }
+            }
+        } else {
+            println!("Updated inline to v{latest}.");
+        }
     }
     Ok(())
 }
@@ -210,6 +242,15 @@ fn print_update_notice(current: &str, latest: &str, install_url: Option<&str>, j
     }
 }
 
+fn print_reinstall_instructions(install_url: Option<&str>) {
+    eprintln!("Update failed. Reinstall with:");
+    if let Some(url) = install_url {
+        eprintln!("  curl -fsSL {url} | sh");
+    } else {
+        eprintln!("  curl -fsSL https://public-assets.inline.chat/cli/install.sh | sh");
+    }
+}
+
 fn current_target() -> &'static str {
     if cfg!(target_arch = "aarch64") {
         "aarch64-apple-darwin"
@@ -283,11 +324,8 @@ fn extract_archive(archive_path: &Path, output_dir: &Path) -> Result<(), UpdateE
     Ok(())
 }
 
-fn stage_binary(extracted_binary: &Path, install_path: &Path) -> Result<PathBuf, UpdateError> {
-    let install_dir = install_path
-        .parent()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "missing install directory"))?;
-    let staged_path = install_dir.join("inline.new");
+fn stage_binary(extracted_binary: &Path, stage_dir: &Path) -> Result<PathBuf, UpdateError> {
+    let staged_path = stage_dir.join("inline.new");
     fs::copy(extracted_binary, &staged_path)?;
     #[cfg(unix)]
     {
@@ -299,7 +337,154 @@ fn stage_binary(extracted_binary: &Path, install_path: &Path) -> Result<PathBuf,
     Ok(staged_path)
 }
 
-fn install_binary(staged_path: &Path, install_path: &Path) -> Result<(), UpdateError> {
-    fs::rename(staged_path, install_path)?;
+struct InstallOutcome {
+    install_path: PathBuf,
+    used_fallback: bool,
+    path_on_env: bool,
+}
+
+fn install_binary(staged_path: &Path, install_path: &Path) -> Result<InstallOutcome, UpdateError> {
+    match install_binary_direct(staged_path, install_path) {
+        Ok(()) => Ok(InstallOutcome {
+            install_path: install_path.to_path_buf(),
+            used_fallback: false,
+            path_on_env: path_contains_dir(install_path),
+        }),
+        Err(error) => {
+            if error.kind() == io::ErrorKind::PermissionDenied {
+                if command_exists("sudo") {
+                    if let Err(sudo_error) = install_binary_with_sudo(staged_path, install_path) {
+                        let combined = io::Error::new(
+                            io::ErrorKind::PermissionDenied,
+                            format!(
+                                "install failed: {error}; sudo install failed: {sudo_error}"
+                            ),
+                        );
+                        return Err(UpdateError::Io(combined));
+                    }
+                    return Ok(InstallOutcome {
+                        install_path: install_path.to_path_buf(),
+                        used_fallback: false,
+                        path_on_env: path_contains_dir(install_path),
+                    });
+                }
+
+                let fallback_path = user_fallback_path(install_path)?;
+                install_binary_direct(staged_path, &fallback_path)?;
+                return Ok(InstallOutcome {
+                    install_path: fallback_path.clone(),
+                    used_fallback: true,
+                    path_on_env: path_contains_dir(&fallback_path),
+                });
+            }
+            Err(UpdateError::Io(error))
+        }
+    }
+}
+
+fn install_binary_direct(staged_path: &Path, install_path: &Path) -> Result<(), io::Error> {
+    match fs::rename(staged_path, install_path) {
+        Ok(()) => Ok(()),
+        Err(error) if is_cross_device_link(&error) => {
+            fs::copy(staged_path, install_path)?;
+            let _ = fs::remove_file(staged_path);
+            Ok(())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn install_binary_with_sudo(staged_path: &Path, install_path: &Path) -> Result<(), io::Error> {
+    if !command_exists("sudo") {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "sudo not available",
+        ));
+    }
+    if command_exists("install") {
+        let status = Command::new("sudo")
+            .arg("install")
+            .arg("-m")
+            .arg("0755")
+            .arg(staged_path)
+            .arg(install_path)
+            .status()?;
+        if status.success() {
+            return Ok(());
+        }
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            "sudo install failed",
+        ));
+    }
+
+    let status = Command::new("sudo")
+        .arg("cp")
+        .arg(staged_path)
+        .arg(install_path)
+        .status()?;
+    if !status.success() {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            "sudo copy failed",
+        ));
+    }
+    let status = Command::new("sudo")
+        .arg("chmod")
+        .arg("755")
+        .arg(install_path)
+        .status()?;
+    if !status.success() {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            "sudo chmod failed",
+        ));
+    }
     Ok(())
+}
+
+fn user_fallback_path(install_path: &Path) -> Result<PathBuf, UpdateError> {
+    let home = std::env::var_os("HOME")
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "HOME not set"))?;
+    let file_name = install_path
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new("inline"));
+    let dir = PathBuf::from(home).join(".local").join("bin");
+    fs::create_dir_all(&dir)?;
+    Ok(dir.join(file_name))
+}
+
+fn command_exists(command: &str) -> bool {
+    std::env::var_os("PATH")
+        .and_then(|paths| {
+            for path in std::env::split_paths(&paths) {
+                let full_path = path.join(command);
+                if full_path.exists() {
+                    return Some(());
+                }
+            }
+            None
+        })
+        .is_some()
+}
+
+fn path_contains_dir(path: &Path) -> bool {
+    let Some(dir) = path.parent() else {
+        return false;
+    };
+    std::env::var_os("PATH")
+        .map(|paths| std::env::split_paths(&paths).any(|entry| entry == dir))
+        .unwrap_or(false)
+}
+
+fn is_cross_device_link(error: &io::Error) -> bool {
+    #[cfg(unix)]
+    {
+        error.raw_os_error() == Some(18)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = error;
+        false
+    }
 }
