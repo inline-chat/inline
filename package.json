@@ -15,7 +15,9 @@
     "typecheck": "cd server && bun run typecheck",
     "dev": "cd server && bun run dev",
     "test": "cd server && bun test",
-    "lint": "bunx oxlint@latest"
+    "lint": "bunx oxlint@latest",
+    "release:cli": "cd scripts && bun run release:cli",
+    "release:cli:install": "cd scripts && bun run release:cli:install"
   },
   "devDependencies": {
     "@types/bun": "^1.3.5",
