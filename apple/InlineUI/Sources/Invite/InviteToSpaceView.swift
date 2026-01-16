@@ -230,7 +230,7 @@ public struct InviteToSpaceView: View {
       )
       .textFieldStyle(.automatic)
       .font(.body)
-      .onChange(of: searchQuery) { newValue in
+      .onChange(of: searchQuery) { _, newValue in
         Task {
           await search.search(query: newValue)
         }

@@ -270,7 +270,7 @@ public extension AppDatabase {
 }
 
 public extension HomeViewModel {
-  nonisolated public static func sortChats(_ chats: [HomeChatItem]) -> [HomeChatItem] {
+  nonisolated static func sortChats(_ chats: [HomeChatItem]) -> [HomeChatItem] {
     chats.sorted { item1, item2 in
       // First sort by pinned status
       let pinned1 = item1.dialog.pinned ?? false
@@ -284,11 +284,11 @@ public extension HomeViewModel {
     }
   }
 
-  nonisolated public static func filterArchived(_ chats: [HomeChatItem], archived: Bool) -> [HomeChatItem] {
+  nonisolated static func filterArchived(_ chats: [HomeChatItem], archived: Bool) -> [HomeChatItem] {
     chats.filter { $0.dialog.archived == archived }
   }
 
-  nonisolated public static func filterEmptyChats(_ chats: [HomeChatItem]) -> [HomeChatItem] {
+  nonisolated static func filterEmptyChats(_ chats: [HomeChatItem]) -> [HomeChatItem] {
     chats.filter { $0.chat != nil }
   }
 }

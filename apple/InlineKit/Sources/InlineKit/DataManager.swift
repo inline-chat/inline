@@ -560,7 +560,7 @@ public class DataManager: ObservableObject {
       )
 
       // Update local database
-      try await database.dbWriter.write { db in
+      _ = try await database.dbWriter.write { db in
         try result.user.saveFull(db)
       }
     } catch {

@@ -330,7 +330,7 @@ public extension Message {
       text
     } else if isSticker == true {
       "🖼️ Sticker"
-    } else if let fileId {
+    } else if fileId != nil {
       "📄 File"
     } else if let _ = photoId {
       "🖼️ Photo"
@@ -659,24 +659,24 @@ public extension Message {
 }
 
 public extension Message {
-  public var isEdited: Bool {
+  var isEdited: Bool {
     editDate != nil
   }
 
-  public var hasPhoto: Bool {
+  var hasPhoto: Bool {
     fileId != nil || photoId != nil
   }
 
-  public var hasVideo: Bool {
+  var hasVideo: Bool {
     videoId != nil
   }
 
-  public var hasText: Bool {
+  var hasText: Bool {
     guard let text else { return false }
     return !text.isEmpty
   }
 
-  public var hasUnsupportedTypes: Bool {
+  var hasUnsupportedTypes: Bool {
     false
   }
 }

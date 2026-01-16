@@ -74,9 +74,9 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
 
   private let log = Log.scoped("ApiClient")
   private final class UploadTaskDelegate: NSObject, URLSessionTaskDelegate {
-    private let progressHandler: (Double) -> Void
+    private let progressHandler: @Sendable (Double) -> Void
 
-    init(progressHandler: @escaping (Double) -> Void) {
+    init(progressHandler: @escaping @Sendable (Double) -> Void) {
       self.progressHandler = progressHandler
     }
 
@@ -323,7 +323,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       queryItems: [
         URLQueryItem(name: "title", value: title),
         URLQueryItem(name: "spaceId", value: "\(spaceId)"),
-        URLQueryItem(name: "emoji", value: "\(emoji)"),
+        URLQueryItem(name: "emoji", value: emoji),
       ], includeToken: true
     )
   }
@@ -662,7 +662,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     filename: String,
     mimeType: MIMEType,
     videoMetadata: VideoUploadMetadata? = nil,
-    progress: @escaping (Double) -> Void
+    progress: @escaping @Sendable (Double) -> Void
   ) async throws -> UploadFileResult {
     guard let url = URL(string: "\(baseURL)/uploadFile") else {
       throw APIError.invalidURL
