@@ -362,16 +362,14 @@ async function insertMessage(message: Omit<DbNewMessage, "messageId">): Promise<
     })
 
     // Update chat's PTS and lastMsgId
-    await Promise.all([
-      tx
-        .update(chats)
-        .set({
-          lastMsgId: nextId,
-          updateSeq: update.seq,
-          lastUpdateDate: update.date,
-        })
-        .where(eq(chats.id, chatId)),
-    ])
+    await tx
+      .update(chats)
+      .set({
+        lastMsgId: nextId,
+        updateSeq: update.seq,
+        lastUpdateDate: update.date,
+      })
+      .where(eq(chats.id, chatId))
 
     return {
       message: newDbMessage,
@@ -530,7 +528,7 @@ async function editMessage(input: EditMessageInput): Promise<{
 
     let [msgs] = await Promise.all([
       // Edit message
-      await db
+      db
         .update(messages)
         .set({
           editDate: new Date(),
