@@ -32,6 +32,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
   private var networkAvailable = true
   private var reconnectionInProgress = false
   private var reconnectionToken: UInt64 = 0
+  private var connectionToken: UInt64 = 0
 
   private lazy var session: URLSession = { [unowned self] in
     let configuration = URLSessionConfiguration.default
@@ -119,6 +120,8 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
 
     reconnectionToken = reconnectionToken &+ 1
     let token = reconnectionToken
+    connectionToken = connectionToken &+ 1
+    let connectionTokenSnapshot = connectionToken
     reconnectionInProgress = true
 
     reconnectionTask?.cancel()
@@ -149,7 +152,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
       }
 
       // Open a new connection
-      await self.openConnection()
+      await self.openConnection(expectedToken: connectionTokenSnapshot)
     }
   }
 
@@ -258,6 +261,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
       await scheduleReconnect(skipDelay: true, reason: .networkAvailable)
     } else {
       log.debug("Network became unavailable; stopping connection")
+      connectionToken = connectionToken &+ 1
       await connecting()
       await stopConnection()
       stopWatchdog()
@@ -321,7 +325,9 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     await connecting()
     startNetworkMonitoring()
     startWatchdog()
-    await openConnection()
+    connectionToken = connectionToken &+ 1
+    let connectionTokenSnapshot = connectionToken
+    await openConnection(expectedToken: connectionTokenSnapshot)
   }
 
   /// Should be called on logout. Destructive. Do not call for a simple connection restart. Use `stopConnection`
@@ -335,6 +341,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     reconnectionTask?.cancel()
     reconnectionTask = nil
     reconnectionInProgress = false
+    connectionToken = connectionToken &+ 1
     await idle()
     await stopConnection()
   }
@@ -354,7 +361,11 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     cleanUpPreviousConnection()
   }
 
-  private func openConnection() async {
+  private func openConnection(expectedToken: UInt64) async {
+    guard expectedToken == connectionToken else {
+      log.trace("Skipping openConnection for stale token")
+      return
+    }
     log.trace("Opening connection")
     // Guard against starting a connection when we shouldn't
     guard state != .idle else {
@@ -366,6 +377,10 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     cleanUpPreviousConnection()
 
     await connecting()
+    guard expectedToken == connectionToken else {
+      log.trace("Skipping openConnection for stale token after connecting")
+      return
+    }
 
     let wsTask = session.webSocketTask(with: url)
     task = wsTask
