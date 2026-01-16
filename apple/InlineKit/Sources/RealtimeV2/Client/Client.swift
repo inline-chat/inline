@@ -54,6 +54,9 @@ actor ProtocolClient: ProtocolClientType {
   private var lifecycleObserversInstalled = false
   #endif
   private var isHandlingForegroundTransition = false
+  private let foregroundTransitionClock = ContinuousClock()
+  private var lastForegroundTransitionAt: ContinuousClock.Instant?
+  private let foregroundTransitionCoalesceWindow: Duration = .seconds(1)
 
   init(transport: Transport, auth: Auth) {
     self.transport = transport
@@ -84,6 +87,7 @@ actor ProtocolClient: ProtocolClientType {
     stopAuthenticationTimeout()
     reconnectionTask?.cancel()
     reconnectionTask = nil
+    lastForegroundTransitionAt = nil
     Task { await pingPong.stop() }
     cancelAllRpcContinuations(with: ProtocolClientError.stopped)
   }
@@ -92,7 +96,13 @@ actor ProtocolClient: ProtocolClientType {
 
   func handleForegroundTransition() async {
     guard auth.getIsLoggedIn() == true else { return }
+    let now = foregroundTransitionClock.now
+    if let last = lastForegroundTransitionAt, now - last < foregroundTransitionCoalesceWindow {
+      log.trace("Foreground transition ignored (coalesced)")
+      return
+    }
     guard !isHandlingForegroundTransition else { return }
+    lastForegroundTransitionAt = now
     isHandlingForegroundTransition = true
     defer { isHandlingForegroundTransition = false }
     log.debug("Foreground transition: resetting reconnection delay")
