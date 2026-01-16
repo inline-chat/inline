@@ -143,7 +143,7 @@ actor LanguageDetector {
     // Method 1: Using CFStringTransform for script detection
     let char = String(scalar)
     let cfStr = char as CFString
-    var scriptCode: CFStringEncoding = CFStringGetSmallestEncoding(cfStr)
+    let scriptCode: CFStringEncoding = CFStringGetSmallestEncoding(cfStr)
 
     if let scriptName = CFStringGetNameOfEncoding(scriptCode) as String? {
       return scriptName

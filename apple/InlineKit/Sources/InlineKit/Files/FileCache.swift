@@ -388,7 +388,7 @@ public actor FileCache: Sendable {
     let thumbImage: PlatformImage? = if let thumbnail {
       thumbnail
     } else {
-      try? generateThumbnailImage(from: asset)
+      try? await generateThumbnailImage(from: asset)
     }
 
     let thumbnailInfo: PhotoInfo? = if let image = thumbImage {
@@ -449,10 +449,11 @@ enum FileCacheError: Error {
 
 // MARK: - Video helpers
 
-private func generateThumbnailImage(from asset: AVAsset) throws -> PlatformImage {
+private func generateThumbnailImage(from asset: AVAsset) async throws -> PlatformImage {
   let imageGenerator = AVAssetImageGenerator(asset: asset)
   imageGenerator.appliesPreferredTrackTransform = true
-  let time = CMTime(seconds: min(1.0, CMTimeGetSeconds(asset.duration)), preferredTimescale: 600)
+  let duration = try await asset.load(.duration)
+  let time = CMTime(seconds: min(1.0, CMTimeGetSeconds(duration)), preferredTimescale: 600)
   let cgImage = try imageGenerator.copyCGImage(at: time, actualTime: nil)
 
   #if os(iOS)
@@ -478,17 +479,26 @@ private func exportVideoToMp4(asset: AVAsset, destinationURL: URL) async throws 
   exportSession.outputFileType = .mp4
   exportSession.shouldOptimizeForNetworkUse = true
 
+  let sessionBox = ExportSessionBox(exportSession)
   try await withCheckedThrowingContinuation { continuation in
-    exportSession.exportAsynchronously {
-      switch exportSession.status {
+    sessionBox.session.exportAsynchronously {
+      switch sessionBox.session.status {
       case .completed:
         continuation.resume()
       case .failed, .cancelled:
-        continuation.resume(throwing: exportSession.error ?? FileCacheError.failedToSave)
+        continuation.resume(throwing: sessionBox.session.error ?? FileCacheError.failedToSave)
       default:
         continuation.resume(throwing: FileCacheError.failedToSave)
       }
     }
+  }
+}
+
+private final class ExportSessionBox: @unchecked Sendable {
+  let session: AVAssetExportSession
+
+  init(_ session: AVAssetExportSession) {
+    self.session = session
   }
 }
 

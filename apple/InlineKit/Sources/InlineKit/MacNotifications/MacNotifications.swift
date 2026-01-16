@@ -152,7 +152,7 @@ extension MacNotifications {
           // sender user ID
           "userId": protocolMsg.fromID,
           "isThread": chat?.type == .thread,
-          "threadId": chat?.id,
+          "threadId": chat?.id as Any,
         ],
         imageURL: imageURL
         // userInfo: ["chatId": message.chatID],

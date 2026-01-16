@@ -117,7 +117,7 @@ public struct InitialsCircle: View, Equatable {
 
 // MARK: - Color Extensions
 
-private extension Color {
+extension Color {
   init(hex: String) {
     let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
     var int: UInt64 = 0
@@ -184,7 +184,7 @@ private extension Color {
   }
 }
 
-private extension Color {
+extension Color {
   // Use a proper cache key that includes all relevant components
   private struct ColorAdjustmentKey: Hashable {
     let colorHash: Int
@@ -212,7 +212,7 @@ private extension Color {
     return cache
   }()
 
-  @MainActor public func adjustLuminosity(by amount: Double, colorScheme: ColorScheme? = nil) -> Color {
+  @MainActor func adjustLuminosity(by amount: Double, colorScheme: ColorScheme? = nil) -> Color {
     // Get the current color scheme from the environment or parameter
     let currentColorScheme: ColorScheme
     if let providedColorScheme = colorScheme {

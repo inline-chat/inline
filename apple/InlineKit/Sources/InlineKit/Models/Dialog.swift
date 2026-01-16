@@ -376,7 +376,6 @@ public extension Dialog {
 public extension Dialog {
   /// Deletes this dialog and its associated chat (and all messages) from the local database.
   /// - Throws: Any database error.
-  @discardableResult
   func deleteFromLocalDatabase() async throws {
     try await AppDatabase.shared.dbWriter.write { db in
       // Use peerId to fetch the associated chat

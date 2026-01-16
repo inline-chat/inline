@@ -129,6 +129,9 @@ let package = Package(
         "InlineProtocol",
         "InlineConfig",
         "Auth",
+      ],
+      exclude: [
+        "README.md",
       ]
     ),
 

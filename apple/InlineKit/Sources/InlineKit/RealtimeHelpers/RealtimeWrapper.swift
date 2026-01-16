@@ -379,11 +379,7 @@ public extension Realtime {
       }
 
       for participant in result.participants {
-        do {
-          ChatParticipant.save(db, from: participant, chatId: getChatParticipantsInput.chatID)
-        } catch {
-          Log.shared.error("Failed to save chat participant", error: error)
-        }
+        ChatParticipant.save(db, from: participant, chatId: getChatParticipantsInput.chatID)
       }
     }
     log.trace("getChatParticipants saved")
@@ -401,7 +397,7 @@ public extension Realtime {
     }
 
     try await db.dbWriter.write { db in
-      try ChatParticipant.save(db, from: result.participant, chatId: addInput.chatID)
+      ChatParticipant.save(db, from: result.participant, chatId: addInput.chatID)
     }
   }
 
@@ -417,7 +413,7 @@ public extension Realtime {
     }
 
     try await db.dbWriter.write { db in
-      let participant = try ChatParticipant
+      _ = try ChatParticipant
         .filter(Column("chatId") == removeInput.chatID)
         .filter(Column("userId") == removeInput.userID)
         .deleteAll(db)

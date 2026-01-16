@@ -101,7 +101,6 @@ public final class FileDownloader: NSObject, Sendable {
     }
 
     let downloadId = "doc_\(document.id)"
-    let fileExtension = URL(fileURLWithPath: document.document.fileName ?? "Unknown").pathExtension
     let localPath = "\(UUID().uuidString)_\(document.document.fileName ?? "Unknown")"
     let localUrl = FileCache.getUrl(for: .documents, localPath: localPath)
 
@@ -155,7 +154,6 @@ public final class FileDownloader: NSObject, Sendable {
     }
 
     let downloadId = "video_\(video.id)"
-    let fileName = "VIDEO_\(video.id)"
     let fileExtension = "mp4"
     let localPath = "\(UUID().uuidString).\(fileExtension)"
     let localUrl = FileCache.getUrl(for: .videos, localPath: localPath)
