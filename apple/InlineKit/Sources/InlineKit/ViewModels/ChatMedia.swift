@@ -49,9 +49,15 @@ public struct MediaMessage: Codable, Equatable, Hashable, FetchableRecord, Persi
     return nil
   }
 
-  public static func queryRequest() -> QueryInterfaceRequest<MediaMessage> {
-    Message
+  public static func queryRequest(excludingStickers: Bool = false) -> QueryInterfaceRequest<MediaMessage> {
+    var request = Message
       .filter(Message.Columns.photoId != nil || Message.Columns.videoId != nil)
+
+    if excludingStickers {
+      request = request.filter(Message.Columns.isSticker == false || Message.Columns.isSticker == nil)
+    }
+
+    return request
       .including(
         optional: Message.photo
           .including(all: Photo.sizes.forKey(PhotoInfo.CodingKeys.sizes))
@@ -80,6 +86,7 @@ public final class ChatMediaViewModel: ObservableObject, @unchecked Sendable {
   private let chatId: Int64
   private let peer: Peer
   private let db: AppDatabase
+  private let excludeStickerMedia: Bool
 
   @Published public private(set) var mediaMessages: [MediaMessage] = []
 
@@ -93,17 +100,19 @@ public final class ChatMediaViewModel: ObservableObject, @unchecked Sendable {
 
   private let pageSize: Int32 = 50
 
-  public init(db: AppDatabase, chatId: Int64, peer: Peer) {
+  public init(db: AppDatabase, chatId: Int64, peer: Peer, excludeStickerMedia: Bool = false) {
     self.db = db
     self.chatId = chatId
     self.peer = peer
+    self.excludeStickerMedia = excludeStickerMedia
     fetchMediaMessages()
   }
 
   private func fetchMediaMessages() {
     messagesCancellable = ValueObservation
       .tracking { [chatId] db in
-        try MediaMessage.queryRequest()
+        try MediaMessage
+          .queryRequest(excludingStickers: self.excludeStickerMedia)
           .filter(Column("chatId") == chatId)
           .order(Column("date").desc)
           .fetchAll(db)
