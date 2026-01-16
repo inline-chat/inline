@@ -14,7 +14,7 @@ export async function deleteChatHandler(
     if (!input.peerId) {
       throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "peerId is required", 400)
     }
-    const {} = await deleteChat(
+    await deleteChat(
       { peer: input.peerId },
       {
         currentUserId: handlerContext.userId,
