@@ -445,7 +445,7 @@ extension InlineProtocol.UpdateEditMessage {
       .filter(Column("chatId") == message.chatID)
       .deleteAll(db)
 
-    let savedMessage = try Message.save(db, protocolMessage: message, publishChanges: true)
+    _ = try Message.save(db, protocolMessage: message, publishChanges: true)
 
     db.afterNextTransaction { _ in
       Task { @MainActor in

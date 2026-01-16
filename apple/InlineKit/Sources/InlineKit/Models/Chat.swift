@@ -214,7 +214,6 @@ public extension Chat {
 public extension Chat {
   /// Deletes this chat and its dialog from the local database.
   /// - Throws: Any database error.
-  @discardableResult
   func deleteFromLocalDatabase() async throws {
     try await AppDatabase.shared.dbWriter.write { db in
 
@@ -257,7 +256,9 @@ public extension Chat {
       .fetchOne(db)
 
     if let chat, chat.lastMsgDate == nil || chat.lastMsgDate! <= date {
-      Log.shared.debug("Updating lastMsgId for chat \(chatId) to \(lastMsgId) with date \(chat.lastMsgDate)")
+      Log.shared.debug(
+        "Updating lastMsgId for chat \(chatId) to \(lastMsgId) with date \(String(describing: chat.lastMsgDate))"
+      )
       _ = try Chat
         .filter(Column("id") == chatId)
         .updateAll(db, [

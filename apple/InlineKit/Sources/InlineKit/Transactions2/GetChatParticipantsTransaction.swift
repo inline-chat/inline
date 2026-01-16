@@ -57,11 +57,7 @@ public struct GetChatParticipantsTransaction: Transaction2 {
 
         // Save participants
         for participant in response.participants {
-          do {
-            ChatParticipant.save(db, from: participant, chatId: context.chatID)
-          } catch {
-            log.error("Failed to save chat participant", error: error)
-          }
+          ChatParticipant.save(db, from: participant, chatId: context.chatID)
         }
       }
       log.trace("getChatParticipants saved")
