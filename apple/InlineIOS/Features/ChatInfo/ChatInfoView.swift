@@ -105,7 +105,8 @@ struct ChatInfoView: View {
       ChatMediaViewModel(
         db: env.appDatabase,
         chatId: chatItem.chat?.id ?? 0,
-        peer: chatItem.peerId
+        peer: chatItem.peerId,
+        excludeStickerMedia: true
       )
     }
 
