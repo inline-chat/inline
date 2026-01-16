@@ -373,7 +373,6 @@ export const handler = async (
   chats = dedupeById(chats)
   // IDs are local to the thread, so we don't need to deduplicate
   //messages = dedupeById(messages)
-  messages = messages
   users = dedupeById(users)
 
   // --- 5. Unread Counts ---
