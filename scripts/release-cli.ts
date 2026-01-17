@@ -115,21 +115,6 @@ async function runCommandCapture(
   return { stdout, stderr, exitCode };
 }
 
-async function runCommandOptional(
-  command: string,
-  args: string[],
-  options: { cwd?: string } = {},
-) {
-  const { stdout, stderr, exitCode } = await runCommandCapture(command, args, options);
-  if (exitCode !== 0) {
-    const details = [stdout.trim(), stderr.trim()].filter(Boolean).join("\n");
-    console.warn(
-      `Warning: ${command} ${args.join(" ")} failed with exit code ${exitCode}.` +
-        (details ? `\n${details}` : ""),
-    );
-  }
-}
-
 async function uploadFile(
   r2: S3Client,
   key: string,
@@ -292,11 +277,6 @@ async function signAndNotarize(context: ReleaseContext) {
     );
 
     await runCommand("codesign", ["--verify", "--strict", "--verbose=2", binaryPath], {
-      cwd: cliDir,
-    });
-
-    await runCommandOptional("xcrun", ["stapler", "staple", binaryPath], { cwd: cliDir });
-    await runCommandOptional("spctl", ["--assess", "--type", "execute", "--verbose=4", binaryPath], {
       cwd: cliDir,
     });
   }
