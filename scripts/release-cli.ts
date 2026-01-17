@@ -10,32 +10,34 @@ const tempAssetsDir = join(rootDir, "scripts", ".release-tmp");
 const githubRepo = process.env.INLINE_CLI_GITHUB_REPO ?? "inline-chat/inline";
 const githubTagPrefix = process.env.INLINE_CLI_GITHUB_TAG_PREFIX ?? "cli-v";
 const githubRemote = process.env.INLINE_CLI_GIT_REMOTE ?? "origin";
-
-const accessKeyId = requireEnv("PUBLIC_RELEASES_R2_ACCESS_KEY_ID");
-const secretAccessKey = requireEnv("PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY");
-const bucket = requireEnv("PUBLIC_RELEASES_R2_BUCKET");
-const endpoint = requireEnv("PUBLIC_RELEASES_R2_ENDPOINT");
-const publicBaseUrl = trimSlash(requireEnv("PUBLIC_RELEASES_R2_PUBLIC_BASE_URL"));
-const prefix = trimSlash(process.env.PUBLIC_RELEASES_R2_PREFIX || "inline-cli");
-
-const r2 = new S3Client({
-  accessKeyId,
-  secretAccessKey,
-  bucket,
-  endpoint,
-});
+const signingIdentity = process.env.APPLE_SIGNING_IDENTITY;
+const appleId = process.env.APPLE_ID;
+const applePassword = process.env.APPLE_PASSWORD;
+const appleTeamId = process.env.APPLE_TEAM_ID;
 
 const command = process.argv[2] ?? "release";
 
 if (command === "upload-install") {
+  const { r2, publicBaseUrl, prefix } = getR2Context();
   const installPath = join(cliDir, "install.sh");
   await uploadFile(r2, `${prefix}/install.sh`, installPath, "text/x-shellscript");
   console.log(`Uploaded install.sh to ${publicBaseUrl}/${prefix}/install.sh`);
 } else if (command === "build") {
   await runBuild();
+} else if (command === "sign-notarize") {
+  const context = await getReleaseContext();
+  await runBuild(context);
+  await signAndNotarize(context);
+} else if (command === "release-dry-run") {
+  const context = await getReleaseContext();
+  await runBuild(context);
+  await signAndNotarize(context);
+  console.log("Dry run complete (build + sign + notarize + verify).");
 } else if (command === "package-manifest") {
+  const { r2, publicBaseUrl, prefix } = getR2Context();
   await runPackageManifest(r2, publicBaseUrl, prefix);
 } else if (command === "release") {
+  const { r2, publicBaseUrl, prefix } = getR2Context();
   await runRelease(r2, publicBaseUrl, prefix);
 } else {
   throw new Error(`Unknown command: ${command}`);
@@ -51,6 +53,24 @@ function requireEnv(name: string): string {
 
 function trimSlash(value: string): string {
   return value.replace(/^\/+|\/+$/g, "");
+}
+
+function getR2Context() {
+  const accessKeyId = requireEnv("PUBLIC_RELEASES_R2_ACCESS_KEY_ID");
+  const secretAccessKey = requireEnv("PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY");
+  const bucket = requireEnv("PUBLIC_RELEASES_R2_BUCKET");
+  const endpoint = requireEnv("PUBLIC_RELEASES_R2_ENDPOINT");
+  const publicBaseUrl = trimSlash(requireEnv("PUBLIC_RELEASES_R2_PUBLIC_BASE_URL"));
+  const prefix = trimSlash(process.env.PUBLIC_RELEASES_R2_PREFIX || "inline-cli");
+
+  const r2 = new S3Client({
+    accessKeyId,
+    secretAccessKey,
+    bucket,
+    endpoint,
+  });
+
+  return { r2, publicBaseUrl, prefix };
 }
 
 async function readCargoVersion(path: string): Promise<string> {
@@ -95,6 +115,21 @@ async function runCommandCapture(
   return { stdout, stderr, exitCode };
 }
 
+async function runCommandOptional(
+  command: string,
+  args: string[],
+  options: { cwd?: string } = {},
+) {
+  const { stdout, stderr, exitCode } = await runCommandCapture(command, args, options);
+  if (exitCode !== 0) {
+    const details = [stdout.trim(), stderr.trim()].filter(Boolean).join("\n");
+    console.warn(
+      `Warning: ${command} ${args.join(" ")} failed with exit code ${exitCode}.` +
+        (details ? `\n${details}` : ""),
+    );
+  }
+}
+
 async function uploadFile(
   r2: S3Client,
   key: string,
@@ -115,8 +150,9 @@ async function runRelease(r2: S3Client, publicBaseUrl: string, prefix: string) {
   const context = await getReleaseContext();
   await assertNoDuplicateVersion(context);
   await runBuild(context);
+  await signAndNotarize(context);
   await runPackageManifest(r2, publicBaseUrl, prefix, context);
-  await uploadInstall(r2);
+  await uploadInstall(r2, prefix);
   await createBundle(context);
   await publishGitHubRelease(context);
 
@@ -145,7 +181,7 @@ async function runPackageManifest(
   context?: ReleaseContext,
 ) {
   const resolvedContext = context ?? (await getReleaseContext());
-  const manifest = await buildManifest(resolvedContext, publicBaseUrl, prefix);
+  const manifest = await buildManifest(resolvedContext, publicBaseUrl, prefix, r2);
   const manifestPath = join(distDir, "manifest.json");
   await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
   await uploadFile(r2, `${prefix}/manifest.json`, manifestPath, "application/json");
@@ -155,7 +191,7 @@ async function runPackageManifest(
   }
 }
 
-async function uploadInstall(r2: S3Client) {
+async function uploadInstall(r2: S3Client, prefix: string) {
   const installPath = join(cliDir, "install.sh");
   await uploadFile(r2, `${prefix}/install.sh`, installPath, "text/x-shellscript");
 }
@@ -164,6 +200,7 @@ async function buildManifest(
   context: ReleaseContext,
   publicBaseUrl: string,
   prefix: string,
+  r2: S3Client,
 ): Promise<UpdateManifest> {
   const manifest: UpdateManifest = {
     version: context.version,
@@ -207,6 +244,62 @@ async function buildManifest(
   }
 
   return manifest;
+}
+
+async function signAndNotarize(context: ReleaseContext) {
+  if (!signingIdentity || !appleId || !applePassword || !appleTeamId) {
+    throw new Error(
+      "Missing signing/notarization env vars: APPLE_SIGNING_IDENTITY, APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID",
+    );
+  }
+
+  for (const target of context.targets) {
+    const binaryPath = join(cliDir, "target", target, "release", "inline");
+    const zipName = `inline-cli-${context.version}-${target}-notarize.zip`;
+    const zipPath = join(context.releaseDir, zipName);
+
+    await runCommand(
+      "codesign",
+      [
+        "--force",
+        "--options",
+        "runtime",
+        "--timestamp",
+        "--sign",
+        signingIdentity,
+        binaryPath,
+      ],
+      { cwd: cliDir },
+    );
+
+    await runCommand("zip", ["-j", "-X", zipPath, binaryPath], { cwd: cliDir });
+
+    await runCommand(
+      "xcrun",
+      [
+        "notarytool",
+        "submit",
+        zipPath,
+        "--apple-id",
+        appleId,
+        "--password",
+        applePassword,
+        "--team-id",
+        appleTeamId,
+        "--wait",
+      ],
+      { cwd: cliDir },
+    );
+
+    await runCommand("codesign", ["--verify", "--strict", "--verbose=2", binaryPath], {
+      cwd: cliDir,
+    });
+
+    await runCommandOptional("xcrun", ["stapler", "staple", binaryPath], { cwd: cliDir });
+    await runCommandOptional("spctl", ["--assess", "--type", "execute", "--verbose=4", binaryPath], {
+      cwd: cliDir,
+    });
+  }
 }
 
 async function createBundle(context: ReleaseContext) {
@@ -311,8 +404,10 @@ async function getReleaseContext(): Promise<ReleaseContext> {
 function printManualSteps() {
   console.log("Manual steps (run individually if you need to repeat only one):");
   console.log("  bun tsx scripts/release-cli.ts build");
+  console.log("  bun tsx scripts/release-cli.ts sign-notarize");
   console.log("  bun tsx scripts/release-cli.ts package-manifest");
   console.log("  bun tsx scripts/release-cli.ts upload-install");
+  console.log("  bun tsx scripts/release-cli.ts release-dry-run");
 }
 
 type UpdateManifest = {

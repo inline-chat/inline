@@ -7,7 +7,7 @@ Install the Inline CLI and have Claude/Codex interact with it.
 ### Homebrew (cask)
 
 ```bash
-brew tap inline-chat/brew
+brew tap inline-chat/homebrew-inline
 brew install --cask inline
 ```
 

@@ -7,7 +7,9 @@
     "proto:generate-swift": "npx protoc --swift_opt=Visibility=Public --swift_out ../apple/InlineKit/Sources/InlineProtocol/ --proto_path ../proto/ ../proto/core.proto ../proto/client.proto",
     "generate": "bun run proto:generate-ts && bun run proto:generate-web && bun run proto:generate-swift",
     "release:cli": "bun run release-cli.ts",
-    "release:cli:install": "bun run release-cli.ts upload-install"
+    "release:cli:install": "bun run release-cli.ts upload-install",
+    "release:cli:sign-notarize": "bun run release-cli.ts sign-notarize",
+    "release:cli:dry-run": "bun run release-cli.ts release-dry-run"
   },
   "dependencies": {},
   "devDependencies": {
