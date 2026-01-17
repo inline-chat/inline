@@ -34,6 +34,13 @@
 - Targeted backend tests: `cd server && bun test src/__tests__/modules/...`; enable debug via `DEBUG=1`.
 - Keep commands inside package dirs when running Swift or Bun tooling to avoid path issues.
 
+## CLI
+
+- Source lives in `cli/` (Rust); binary name is `inline`, release artifacts are `inline-cli-<version>-<target>.tar.gz`.
+- Release flow: `cd scripts && bun run release:cli -- release` (builds, packages, uploads, tags `cli-v<version>`, creates GitHub release).
+- Requires `gh` authenticated and release env vars for R2 uploads; release script checks for duplicate tags before starting.
+- Homebrew cask lives in `inline-chat/brew` (repo) and pulls from GitHub Releases.
+
 ## Apple (iOS/macOS)
 
 - Swift 6 targets in `apple/InlineKit` (shared logic/DB/networking), `InlineUI` (shared UI), app targets `InlineIOS` (SwiftUI+UIKit) and `InlineMac` (AppKit+SwiftUI); share protocol via generated `InlineProtocol`.
