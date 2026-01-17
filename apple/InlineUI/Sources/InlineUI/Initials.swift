@@ -212,7 +212,7 @@ extension Color {
     return cache
   }()
 
-  @MainActor func adjustLuminosity(by amount: Double, colorScheme: ColorScheme? = nil) -> Color {
+   @MainActor  public func adjustLuminosity(by amount: Double, colorScheme: ColorScheme? = nil) -> Color {
     // Get the current color scheme from the environment or parameter
     let currentColorScheme: ColorScheme
     if let providedColorScheme = colorScheme {
