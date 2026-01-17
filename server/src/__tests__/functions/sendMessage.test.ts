@@ -4,12 +4,21 @@ import { setupTestDatabase, testUtils } from "../setup"
 import { sendMessage } from "@in/server/functions/messages.sendMessage"
 import type { DbChat, DbUser } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
+import { db } from "@in/server/db"
+import { dialogs } from "@in/server/db/schema"
+import { and, eq } from "drizzle-orm"
+import { UpdateBucket } from "@in/server/db/schema/updates"
+import { UpdatesModel } from "@in/server/db/models/updates"
 
 // Test state
 let currentUser: DbUser
 let privateChat: DbChat
 let privateChatPeerId: InputPeer
 let context: FunctionContext
+let userIndex = 0
+
+const runId = Date.now()
+const nextEmail = (label: string) => `${label}-${runId}-${userIndex++}@example.com`
 
 // Helpers
 function extractMessage(result: SendMessageResult): Message | null {
@@ -23,7 +32,7 @@ function extractMessage(result: SendMessageResult): Message | null {
 describe("sendMessage", () => {
   beforeAll(async () => {
     await setupTestDatabase()
-    currentUser = (await testUtils.createUser("test@example.com"))!
+    currentUser = (await testUtils.createUser(nextEmail("test-user")))!
     privateChat = (await testUtils.createPrivateChat(currentUser, currentUser))!
     privateChatPeerId = {
       type: { oneofKind: "chat" as const, chat: { chatId: BigInt(privateChat.id) } },
@@ -103,5 +112,54 @@ describe("sendMessage", () => {
     expect(message!.entities!.entities[0]!.type).toBe(MessageEntity_Type.MENTION)
     expect(message!.entities!.entities[0]!.offset).toBe(0n)
     expect(message!.entities!.entities[0]!.length).toBe(3n)
+  })
+
+  test("unarchives recipient dialog and enqueues a user update", async () => {
+    const sender = (await testUtils.createUser(nextEmail("sender")))!
+    const recipient = (await testUtils.createUser(nextEmail("recipient")))!
+    const { chat } = await testUtils.createPrivateChatWithOptionalDialog({
+      userA: sender,
+      userB: recipient,
+      createDialogForUserA: true,
+      createDialogForUserB: true,
+    })
+
+    await db
+      .update(dialogs)
+      .set({ archived: true })
+      .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, recipient.id)))
+      .execute()
+
+    const peerId: InputPeer = {
+      type: { oneofKind: "chat" as const, chat: { chatId: BigInt(chat.id) } },
+    }
+    const senderContext = testUtils.functionContext({ userId: sender.id, sessionId: 1 })
+
+    await sendMessage({ peerId, message: "hello" }, senderContext)
+
+    const [updatedDialog] = await db
+      .select()
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, recipient.id)))
+      .limit(1)
+
+    expect(updatedDialog?.archived).toBe(false)
+
+    const userUpdates = await db.query.updates.findMany({
+      where: {
+        bucket: UpdateBucket.User,
+        entityId: recipient.id,
+      },
+    })
+
+    const hasDialogArchivedUpdate = userUpdates
+      .map((update) => UpdatesModel.decrypt(update))
+      .some(
+        (update) =>
+          update.payload.update.oneofKind === "userDialogArchived" &&
+          update.payload.update.userDialogArchived.archived === false,
+      )
+
+    expect(hasDialogArchivedUpdate).toBe(true)
   })
 })
