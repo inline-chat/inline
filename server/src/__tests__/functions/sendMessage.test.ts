@@ -17,7 +17,8 @@ let privateChatPeerId: InputPeer
 let context: FunctionContext
 let userIndex = 0
 
-const nextEmail = (label: string) => `${label}-${userIndex++}@example.com`
+const runId = Date.now()
+const nextEmail = (label: string) => `${label}-${runId}-${userIndex++}@example.com`
 
 // Helpers
 function extractMessage(result: SendMessageResult): Message | null {
@@ -31,7 +32,7 @@ function extractMessage(result: SendMessageResult): Message | null {
 describe("sendMessage", () => {
   beforeAll(async () => {
     await setupTestDatabase()
-    currentUser = (await testUtils.createUser("test@example.com"))!
+    currentUser = (await testUtils.createUser(nextEmail("test-user")))!
     privateChat = (await testUtils.createPrivateChat(currentUser, currentUser))!
     privateChatPeerId = {
       type: { oneofKind: "chat" as const, chat: { chatId: BigInt(privateChat.id) } },
