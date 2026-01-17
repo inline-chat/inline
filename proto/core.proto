@@ -1111,6 +1111,7 @@ message Update {
     UpdateSpaceHasNewUpdates space_has_new_updates = 26;
     UpdateSpaceMemberUpdate space_member_update = 27;
     UpdateChatVisibility chat_visibility = 28;
+    UpdateDialogArchived dialog_archived = 29;
   }
 }
 
@@ -1204,6 +1205,15 @@ message UpdateMarkAsUnread {
 
   // Whether it's marked as unread (true) or not (false)
   bool unread_mark = 2;
+}
+
+// Update when a dialog is archived or unarchived
+message UpdateDialogArchived {
+  // Peer ID of the dialog that changed
+  Peer peer_id = 1;
+
+  // Whether it's archived (true) or unarchived (false)
+  bool archived = 2;
 }
 
 // Update when a new chat is created either in space or a private chat

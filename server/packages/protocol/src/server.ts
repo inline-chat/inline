@@ -10,6 +10,7 @@ import { UnknownFieldHandler } from "@protobuf-ts/runtime";
 import type { PartialMessage } from "@protobuf-ts/runtime";
 import { reflectionMergePartial } from "@protobuf-ts/runtime";
 import { MessageType } from "@protobuf-ts/runtime";
+import { Peer } from "./core";
 import { Member } from "./core";
 /**
  * @generated from protobuf message server.ServerUpdate
@@ -90,6 +91,12 @@ export interface ServerUpdate {
          * @generated from protobuf field: server.ServerUserUpdateChatParticipantDelete user_chat_participant_delete = 11;
          */
         userChatParticipantDelete: ServerUserUpdateChatParticipantDelete;
+    } | {
+        oneofKind: "userDialogArchived";
+        /**
+         * @generated from protobuf field: server.ServerUserUpdateDialogArchived user_dialog_archived = 14;
+         */
+        userDialogArchived: ServerUserUpdateDialogArchived;
     } | {
         oneofKind: undefined;
     };
@@ -240,6 +247,21 @@ export interface ServerUserUpdateChatParticipantDelete {
      */
     chatId: bigint;
 }
+/**
+ * Update for a user when a dialog is archived or unarchived
+ *
+ * @generated from protobuf message server.ServerUserUpdateDialogArchived
+ */
+export interface ServerUserUpdateDialogArchived {
+    /**
+     * @generated from protobuf field: Peer peer_id = 1;
+     */
+    peerId?: Peer;
+    /**
+     * @generated from protobuf field: bool archived = 2;
+     */
+    archived: boolean;
+}
 // @generated message type with reflection information, may provide speed optimized methods
 class ServerUpdate$Type extends MessageType<ServerUpdate> {
     constructor() {
@@ -255,7 +277,8 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
             { no: 9, name: "space_remove_member", kind: "message", oneof: "update", T: () => ServerSpaceUpdateRemoveMember },
             { no: 12, name: "space_member_update", kind: "message", oneof: "update", T: () => ServerSpaceUpdateMemberUpdate },
             { no: 10, name: "user_space_member_delete", kind: "message", oneof: "update", T: () => ServerUserUpdateSpaceMemberDelete },
-            { no: 11, name: "user_chat_participant_delete", kind: "message", oneof: "update", T: () => ServerUserUpdateChatParticipantDelete }
+            { no: 11, name: "user_chat_participant_delete", kind: "message", oneof: "update", T: () => ServerUserUpdateChatParticipantDelete },
+            { no: 14, name: "user_dialog_archived", kind: "message", oneof: "update", T: () => ServerUserUpdateDialogArchived }
         ]);
     }
     create(value?: PartialMessage<ServerUpdate>): ServerUpdate {
@@ -338,6 +361,12 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
                         userChatParticipantDelete: ServerUserUpdateChatParticipantDelete.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userChatParticipantDelete)
                     };
                     break;
+                case /* server.ServerUserUpdateDialogArchived user_dialog_archived */ 14:
+                    message.update = {
+                        oneofKind: "userDialogArchived",
+                        userDialogArchived: ServerUserUpdateDialogArchived.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userDialogArchived)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -386,6 +415,9 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* server.ServerUserUpdateChatParticipantDelete user_chat_participant_delete = 11; */
         if (message.update.oneofKind === "userChatParticipantDelete")
             ServerUserUpdateChatParticipantDelete.internalBinaryWrite(message.update.userChatParticipantDelete, writer.tag(11, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerUserUpdateDialogArchived user_dialog_archived = 14; */
+        if (message.update.oneofKind === "userDialogArchived")
+            ServerUserUpdateDialogArchived.internalBinaryWrite(message.update.userDialogArchived, writer.tag(14, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -921,3 +953,57 @@ class ServerUserUpdateChatParticipantDelete$Type extends MessageType<ServerUserU
  * @generated MessageType for protobuf message server.ServerUserUpdateChatParticipantDelete
  */
 export const ServerUserUpdateChatParticipantDelete = new ServerUserUpdateChatParticipantDelete$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerUserUpdateDialogArchived$Type extends MessageType<ServerUserUpdateDialogArchived> {
+    constructor() {
+        super("server.ServerUserUpdateDialogArchived", [
+            { no: 1, name: "peer_id", kind: "message", T: () => Peer },
+            { no: 2, name: "archived", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ServerUserUpdateDialogArchived>): ServerUserUpdateDialogArchived {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.archived = false;
+        if (value !== undefined)
+            reflectionMergePartial<ServerUserUpdateDialogArchived>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerUserUpdateDialogArchived): ServerUserUpdateDialogArchived {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Peer peer_id */ 1:
+                    message.peerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* bool archived */ 2:
+                    message.archived = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerUserUpdateDialogArchived, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Peer peer_id = 1; */
+        if (message.peerId)
+            Peer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* bool archived = 2; */
+        if (message.archived !== false)
+            writer.tag(2, WireType.Varint).bool(message.archived);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerUserUpdateDialogArchived
+ */
+export const ServerUserUpdateDialogArchived = new ServerUserUpdateDialogArchived$Type();

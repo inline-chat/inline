@@ -38,6 +38,7 @@ import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { getCachedUserProfilePhotoUrl } from "@in/server/modules/cache/userPhotos"
 import { processAttachments } from "@in/server/db/models/messages"
 import { eq } from "drizzle-orm"
+import { unarchiveIfNeeded } from "@in/server/modules/message/unarchiveIfNeeded"
 
 type Input = {
   peerId: InputPeer
@@ -229,13 +230,25 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   // we can also separate the sequence caching. this will speed up and
   // remove the need to lock the chat row. then we should deliver the update
   // with sequence number so we can ensure gap-free delivery.
-  let { selfUpdates, updateGroup } = await pushUpdates({
+  const updateGroup = await getUpdateGroupFromInputPeer(inputPeer, { currentUserId })
+  const { updates: unarchiveUpdates } = await unarchiveIfNeeded({
+    chat,
+    updateGroup,
+    senderUserId: currentUserId,
+  })
+
+  unarchiveUpdates.forEach(({ userId, update }) => {
+    RealtimeUpdates.pushToUser(userId, [update])
+  })
+
+  let { selfUpdates } = await pushUpdates({
     inputPeer,
     messageInfo,
     currentUserId,
     update,
     currentSessionId: context.currentSessionId,
     publishToSelfSession: currentUserLayer < 2 || hasAttachments,
+    updateGroup,
   })
 
   // send notification
@@ -328,6 +341,7 @@ const pushUpdates = async ({
   update,
   publishToSelfSession,
   currentSessionId,
+  updateGroup,
 }: {
   inputPeer: InputPeer
   messageInfo: MessageInfo
@@ -335,8 +349,9 @@ const pushUpdates = async ({
   update: UpdateSeqAndDate
   currentSessionId: number
   publishToSelfSession: boolean
+  updateGroup?: UpdateGroup
 }): Promise<{ selfUpdates: Update[]; updateGroup: UpdateGroup }> => {
-  const updateGroup = await getUpdateGroupFromInputPeer(inputPeer, { currentUserId })
+  const resolvedUpdateGroup = updateGroup ?? (await getUpdateGroupFromInputPeer(inputPeer, { currentUserId }))
   const skipSessionId = publishToSelfSession ? undefined : currentSessionId
 
   let messageIdUpdate: Update = {
@@ -351,8 +366,8 @@ const pushUpdates = async ({
 
   let selfUpdates: Update[] = []
 
-  if (updateGroup.type === "dmUsers") {
-    updateGroup.userIds.forEach((userId) => {
+  if (resolvedUpdateGroup.type === "dmUsers") {
+    resolvedUpdateGroup.userIds.forEach((userId) => {
       const encodingForUserId = userId
       const encodingForInputPeer: InputPeer =
         userId === currentUserId ? inputPeer : { type: { oneofKind: "user", user: { userId: BigInt(currentUserId) } } }
@@ -363,7 +378,7 @@ const pushUpdates = async ({
           newMessage: {
             message: encodeMessageForUser({
               messageInfo,
-              updateGroup,
+              updateGroup: resolvedUpdateGroup,
               inputPeer,
               currentUserId,
               targetUserId: userId,
@@ -396,8 +411,8 @@ const pushUpdates = async ({
         RealtimeUpdates.pushToUser(userId, [newMessageUpdate])
       }
     })
-  } else if (updateGroup.type === "threadUsers") {
-    updateGroup.userIds.forEach((userId) => {
+  } else if (resolvedUpdateGroup.type === "threadUsers") {
+    resolvedUpdateGroup.userIds.forEach((userId) => {
       // New updates
       let newMessageUpdate: Update = {
         update: {
@@ -405,7 +420,7 @@ const pushUpdates = async ({
           newMessage: {
             message: encodeMessageForUser({
               messageInfo,
-              updateGroup,
+              updateGroup: resolvedUpdateGroup,
               inputPeer,
               currentUserId,
               targetUserId: userId,
@@ -440,7 +455,7 @@ const pushUpdates = async ({
     })
   }
 
-  return { selfUpdates, updateGroup }
+  return { selfUpdates, updateGroup: resolvedUpdateGroup }
 }
 
 const buildAttachmentUpdates = async ({
