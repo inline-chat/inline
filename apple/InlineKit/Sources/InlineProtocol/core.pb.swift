@@ -1150,6 +1150,15 @@ public struct Message: @unchecked Sendable {
   /// Clears the value of `isSticker`. Subsequent reads from it will return its default value.
   public mutating func clearIsSticker() {_uniqueStorage()._isSticker = nil}
 
+  public var hasLink_p: Bool {
+    get {return _storage._hasLink_p ?? false}
+    set {_uniqueStorage()._hasLink_p = newValue}
+  }
+  /// Returns true if `hasLink_p` has been explicitly set.
+  public var hasHasLink_p: Bool {return _storage._hasLink_p != nil}
+  /// Clears the value of `hasLink_p`. Subsequent reads from it will return its default value.
+  public mutating func clearHasLink_p() {_uniqueStorage()._hasLink_p = nil}
+
   /// Rich text entities
   public var entities: MessageEntities {
     get {return _storage._entities ?? MessageEntities()}
@@ -3908,6 +3917,15 @@ public struct SendMessageInput: Sendable {
   /// Clears the value of `isSticker`. Subsequent reads from it will return its default value.
   public mutating func clearIsSticker() {self._isSticker = nil}
 
+  public var hasLink_p: Bool {
+    get {return _hasLink_p ?? false}
+    set {_hasLink_p = newValue}
+  }
+  /// Returns true if `hasLink_p` has been explicitly set.
+  public var hasHasLink_p: Bool {return self._hasLink_p != nil}
+  /// Clears the value of `hasLink_p`. Subsequent reads from it will return its default value.
+  public mutating func clearHasLink_p() {self._hasLink_p = nil}
+
   /// Entities in the message (bold, italic, mention, etc)
   public var entities: MessageEntities {
     get {return _entities ?? MessageEntities()}
@@ -3949,6 +3967,7 @@ public struct SendMessageInput: Sendable {
   fileprivate var _media: InputMedia? = nil
   fileprivate var _temporarySendDate: Int64? = nil
   fileprivate var _isSticker: Bool? = nil
+  fileprivate var _hasLink_p: Bool? = nil
   fileprivate var _entities: MessageEntities? = nil
   fileprivate var _parseMarkdown: Bool? = nil
   fileprivate var _sendMode: MessageSendMode? = nil
@@ -4094,7 +4113,8 @@ public struct SearchMessagesInput: Sendable {
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
-  /// Queries to match in message text (space-separated terms ANDed within a query, ORed across queries)
+  /// Queries to match in message text (space-separated terms ANDed within a
+  /// query, ORed across queries)
   public var queries: [String] = []
 
   /// Max number of results to return
@@ -6903,6 +6923,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     13: .same(proto: "attachments"),
     14: .same(proto: "reactions"),
     15: .standard(proto: "is_sticker"),
+    6000: .standard(proto: "has_link"),
     16: .same(proto: "entities"),
     17: .standard(proto: "send_mode"),
     18: .standard(proto: "fwd_from"),
@@ -6924,6 +6945,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     var _attachments: MessageAttachments? = nil
     var _reactions: MessageReactions? = nil
     var _isSticker: Bool? = nil
+    var _hasLink_p: Bool? = nil
     var _entities: MessageEntities? = nil
     var _sendMode: MessageSendMode? = nil
     var _fwdFrom: MessageFwdHeader? = nil
@@ -6956,6 +6978,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       _attachments = source._attachments
       _reactions = source._reactions
       _isSticker = source._isSticker
+      _hasLink_p = source._hasLink_p
       _entities = source._entities
       _sendMode = source._sendMode
       _fwdFrom = source._fwdFrom
@@ -6995,6 +7018,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
         case 16: try { try decoder.decodeSingularMessageField(value: &_storage._entities) }()
         case 17: try { try decoder.decodeSingularEnumField(value: &_storage._sendMode) }()
         case 18: try { try decoder.decodeSingularMessageField(value: &_storage._fwdFrom) }()
+        case 6000: try { try decoder.decodeSingularBoolField(value: &_storage._hasLink_p) }()
         default: break
         }
       }
@@ -7061,6 +7085,9 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       try { if let v = _storage._fwdFrom {
         try visitor.visitSingularMessageField(value: v, fieldNumber: 18)
       } }()
+      try { if let v = _storage._hasLink_p {
+        try visitor.visitSingularBoolField(value: v, fieldNumber: 6000)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -7085,6 +7112,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
         if _storage._attachments != rhs_storage._attachments {return false}
         if _storage._reactions != rhs_storage._reactions {return false}
         if _storage._isSticker != rhs_storage._isSticker {return false}
+        if _storage._hasLink_p != rhs_storage._hasLink_p {return false}
         if _storage._entities != rhs_storage._entities {return false}
         if _storage._sendMode != rhs_storage._sendMode {return false}
         if _storage._fwdFrom != rhs_storage._fwdFrom {return false}
@@ -11607,6 +11635,7 @@ extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     5: .same(proto: "media"),
     1000: .standard(proto: "temporary_send_date"),
     6: .standard(proto: "is_sticker"),
+    6000: .standard(proto: "has_link"),
     7: .same(proto: "entities"),
     8: .standard(proto: "parse_markdown"),
     9: .standard(proto: "send_mode"),
@@ -11628,6 +11657,7 @@ extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
       case 8: try { try decoder.decodeSingularBoolField(value: &self._parseMarkdown) }()
       case 9: try { try decoder.decodeSingularEnumField(value: &self._sendMode) }()
       case 1000: try { try decoder.decodeSingularInt64Field(value: &self._temporarySendDate) }()
+      case 6000: try { try decoder.decodeSingularBoolField(value: &self._hasLink_p) }()
       default: break
       }
     }
@@ -11668,6 +11698,9 @@ extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     try { if let v = self._temporarySendDate {
       try visitor.visitSingularInt64Field(value: v, fieldNumber: 1000)
     } }()
+    try { if let v = self._hasLink_p {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 6000)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -11679,6 +11712,7 @@ extension SendMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     if lhs._media != rhs._media {return false}
     if lhs._temporarySendDate != rhs._temporarySendDate {return false}
     if lhs._isSticker != rhs._isSticker {return false}
+    if lhs._hasLink_p != rhs._hasLink_p {return false}
     if lhs._entities != rhs._entities {return false}
     if lhs._parseMarkdown != rhs._parseMarkdown {return false}
     if lhs._sendMode != rhs._sendMode {return false}

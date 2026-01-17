@@ -1,0 +1,1 @@
+ALTER TABLE "messages" ADD COLUMN "has_link" boolean;
