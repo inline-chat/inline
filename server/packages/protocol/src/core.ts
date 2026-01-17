@@ -569,6 +569,10 @@ export interface Message {
      */
     isSticker?: boolean;
     /**
+     * @generated from protobuf field: optional bool has_link = 6000;
+     */
+    hasLink?: boolean;
+    /**
      * Rich text entities
      *
      * @generated from protobuf field: optional MessageEntities entities = 16;
@@ -2564,6 +2568,10 @@ export interface SendMessageInput {
      */
     isSticker?: boolean;
     /**
+     * @generated from protobuf field: optional bool has_link = 6000;
+     */
+    hasLink?: boolean;
+    /**
      * Entities in the message (bold, italic, mention, etc)
      *
      * @generated from protobuf field: optional MessageEntities entities = 7;
@@ -2668,7 +2676,8 @@ export interface SearchMessagesInput {
      */
     peerId?: InputPeer;
     /**
-     * Queries to match in message text (space-separated terms ANDed within a query, ORed across queries)
+     * Queries to match in message text (space-separated terms ANDed within a
+     * query, ORed across queries)
      *
      * @generated from protobuf field: repeated string queries = 2;
      */
@@ -5162,6 +5171,7 @@ class Message$Type extends MessageType<Message> {
             { no: 13, name: "attachments", kind: "message", T: () => MessageAttachments },
             { no: 14, name: "reactions", kind: "message", T: () => MessageReactions },
             { no: 15, name: "is_sticker", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 6000, name: "has_link", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 16, name: "entities", kind: "message", T: () => MessageEntities },
             { no: 17, name: "send_mode", kind: "enum", opt: true, T: () => ["MessageSendMode", MessageSendMode] },
             { no: 18, name: "fwd_from", kind: "message", T: () => MessageFwdHeader }
@@ -5227,6 +5237,9 @@ class Message$Type extends MessageType<Message> {
                     break;
                 case /* optional bool is_sticker */ 15:
                     message.isSticker = reader.bool();
+                    break;
+                case /* optional bool has_link */ 6000:
+                    message.hasLink = reader.bool();
                     break;
                 case /* optional MessageEntities entities */ 16:
                     message.entities = MessageEntities.internalBinaryRead(reader, reader.uint32(), options, message.entities);
@@ -5294,6 +5307,9 @@ class Message$Type extends MessageType<Message> {
         /* optional bool is_sticker = 15; */
         if (message.isSticker !== undefined)
             writer.tag(15, WireType.Varint).bool(message.isSticker);
+        /* optional bool has_link = 6000; */
+        if (message.hasLink !== undefined)
+            writer.tag(6000, WireType.Varint).bool(message.hasLink);
         /* optional MessageEntities entities = 16; */
         if (message.entities)
             MessageEntities.internalBinaryWrite(message.entities, writer.tag(16, WireType.LengthDelimited).fork(), options).join();
@@ -10026,6 +10042,7 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
             { no: 5, name: "media", kind: "message", T: () => InputMedia },
             { no: 1000, name: "temporary_send_date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 6, name: "is_sticker", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 6000, name: "has_link", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 7, name: "entities", kind: "message", T: () => MessageEntities },
             { no: 8, name: "parse_markdown", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 9, name: "send_mode", kind: "enum", opt: true, T: () => ["MessageSendMode", MessageSendMode] }
@@ -10062,6 +10079,9 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
                     break;
                 case /* optional bool is_sticker */ 6:
                     message.isSticker = reader.bool();
+                    break;
+                case /* optional bool has_link */ 6000:
+                    message.hasLink = reader.bool();
                     break;
                 case /* optional MessageEntities entities */ 7:
                     message.entities = MessageEntities.internalBinaryRead(reader, reader.uint32(), options, message.entities);
@@ -10105,6 +10125,9 @@ class SendMessageInput$Type extends MessageType<SendMessageInput> {
         /* optional bool is_sticker = 6; */
         if (message.isSticker !== undefined)
             writer.tag(6, WireType.Varint).bool(message.isSticker);
+        /* optional bool has_link = 6000; */
+        if (message.hasLink !== undefined)
+            writer.tag(6000, WireType.Varint).bool(message.hasLink);
         /* optional MessageEntities entities = 7; */
         if (message.entities)
             MessageEntities.internalBinaryWrite(message.entities, writer.tag(7, WireType.LengthDelimited).fork(), options).join();

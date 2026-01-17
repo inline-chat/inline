@@ -773,6 +773,9 @@
     "No files found in this chat." : {
 
     },
+    "No links found in this chat." : {
+
+    },
     "No media found in this chat." : {
 
     },
@@ -798,6 +801,9 @@
 
     },
     "Older files may not appear, will be fixed in an update." : {
+
+    },
+    "Older links may not appear, will be fixed in an update." : {
 
     },
     "Only selected members" : {
