@@ -19,11 +19,16 @@ const getPeerUserId = (peer: Peer | undefined) => {
   return toNumber(peer.type.user.userId)
 }
 
-const updateDialogForPeer = (db: Db, peer: Peer | undefined, changes: {
-  unreadCount?: number
-  unreadMark?: boolean
-  readMaxId?: number
-}) => {
+const updateDialogForPeer = (
+  db: Db,
+  peer: Peer | undefined,
+  changes: {
+    unreadCount?: number
+    unreadMark?: boolean
+    readMaxId?: number
+    archived?: boolean
+  },
+) => {
   if (!peer || peer.type.oneofKind === undefined) return
   const dialogId = peer.type.oneofKind === "chat" ? getPeerChatId(peer) : getPeerUserId(peer)
   if (dialogId == null) return
@@ -37,6 +42,7 @@ const updateDialogForPeer = (db: Db, peer: Peer | undefined, changes: {
     unreadCount: changes.unreadCount ?? existing.unreadCount,
     unreadMark: changes.unreadMark ?? existing.unreadMark,
     readMaxId: changes.readMaxId ?? existing.readMaxId,
+    archived: changes.archived ?? existing.archived,
   })
 }
 
@@ -128,6 +134,12 @@ export const applyUpdates = (db: Db, updates: Update[]) => {
       case "markAsUnread":
         updateDialogForPeer(db, update.update.markAsUnread.peerId, {
           unreadMark: update.update.markAsUnread.unreadMark,
+        })
+        break
+
+      case "dialogArchived":
+        updateDialogForPeer(db, update.update.dialogArchived.peerId, {
+          archived: update.update.dialogArchived.archived,
         })
         break
 
