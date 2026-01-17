@@ -560,6 +560,10 @@ class MessageViewAppKit: NSView {
       NSPasteboard.general.clearContents()
       NSPasteboard.general.setString(email, forType: .string)
       ToastCenter.shared.showSuccess("Copied email")
+    } else if let phoneNumber = textStorage.attribute(.phoneNumber, at: characterIndex, effectiveRange: nil) as? String {
+      NSPasteboard.general.clearContents()
+      NSPasteboard.general.setString(phoneNumber, forType: .string)
+      ToastCenter.shared.showSuccess("Copied number")
     }
   }
 
