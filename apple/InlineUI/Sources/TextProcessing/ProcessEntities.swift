@@ -77,21 +77,35 @@ public class ProcessEntities {
         case .url:
           // URL is the text itself
           let urlText = (text as NSString).substring(with: range)
-          var attributes: [NSAttributedString.Key: Any] = [
-            .foregroundColor: configuration.linkColor,
-            .underlineStyle: 0,
-          ]
-          if let url = URL(string: urlText) {
-            attributes[.link] = url
+          if phoneNumber(from: urlText) != nil {
+            var attributes: [NSAttributedString.Key: Any] = [
+              .foregroundColor: configuration.linkColor,
+              .underlineStyle: 0,
+              .phoneNumber: urlText,
+            ]
+
+            #if os(macOS)
+            attributes[.cursor] = NSCursor.pointingHand
+            #endif
+
+            attributedString.addAttributes(attributes, range: range)
           } else {
-            attributes[.link] = urlText
+            var attributes: [NSAttributedString.Key: Any] = [
+              .foregroundColor: configuration.linkColor,
+              .underlineStyle: 0,
+            ]
+            if let url = URL(string: urlText) {
+              attributes[.link] = url
+            } else {
+              attributes[.link] = urlText
+            }
+
+            #if os(macOS)
+            attributes[.cursor] = NSCursor.pointingHand
+            #endif
+
+            attributedString.addAttributes(attributes, range: range)
           }
-
-          #if os(macOS)
-          attributes[.cursor] = NSCursor.pointingHand
-          #endif
-
-          attributedString.addAttributes(attributes, range: range)
 
         case .textURL:
           if case let .textURL(textURL) = entity.entity {
@@ -100,6 +114,19 @@ public class ProcessEntities {
                 .foregroundColor: configuration.linkColor,
                 .underlineStyle: 0,
                 .emailAddress: emailAddress,
+              ]
+
+              #if os(macOS)
+              attributes[.cursor] = NSCursor.pointingHand
+              #endif
+
+              attributedString.addAttributes(attributes, range: range)
+            } else if phoneNumber(from: textURL.url) != nil {
+              let phoneText = (text as NSString).substring(with: range)
+              var attributes: [NSAttributedString.Key: Any] = [
+                .foregroundColor: configuration.linkColor,
+                .underlineStyle: 0,
+                .phoneNumber: phoneText,
               ]
 
               #if os(macOS)
@@ -244,6 +271,25 @@ public class ProcessEntities {
       }
     }
 
+    attributedString.enumerateAttribute(
+      .phoneNumber,
+      in: fullRange,
+      options: []
+    ) { value, range, _ in
+      if let phoneNumber = value as? String,
+         let normalized = normalizePhoneNumber(phoneNumber)
+      {
+        var entity = MessageEntity()
+        entity.type = .textURL
+        entity.offset = Int64(range.location)
+        entity.length = Int64(range.length)
+        entity.textURL = MessageEntity.MessageEntityTextUrl.with {
+          $0.url = "tel:\(normalized)"
+        }
+        entities.append(entity)
+      }
+    }
+
     // Extract link entities (excluding mention links).
     attributedString.enumerateAttribute(
       .link,
@@ -262,6 +308,10 @@ public class ProcessEntities {
         return
       }
 
+      if attributesAtLocation[.phoneNumber] != nil {
+        return
+      }
+
       let urlString: String? = {
         if let url = value as? URL { return url.absoluteString }
         if let str = value as? String { return str }
@@ -275,6 +325,20 @@ public class ProcessEntities {
         entity.type = .email
         entity.offset = Int64(range.location)
         entity.length = Int64(range.length)
+        entities.append(entity)
+        return
+      }
+
+      if let phoneNumber = phoneNumber(from: urlString),
+         let normalized = normalizePhoneNumber(phoneNumber)
+      {
+        var entity = MessageEntity()
+        entity.type = .textURL
+        entity.offset = Int64(range.location)
+        entity.length = Int64(range.length)
+        entity.textURL = MessageEntity.MessageEntityTextUrl.with {
+          $0.url = "tel:\(normalized)"
+        }
         entities.append(entity)
         return
       }
@@ -416,6 +480,7 @@ public class ProcessEntities {
     entities = extractItalicFromMarkdown(text: &text, existingEntities: entities)
 
     entities = extractEmailEntities(text: text, existingEntities: entities)
+    entities = extractPhoneNumberEntities(text: text, existingEntities: entities)
 
     // Sort entities by offset
     entities.sort { $0.offset < $1.offset }
@@ -441,6 +506,61 @@ public class ProcessEntities {
     let remainder = String(urlString[startIndex...])
     let address = remainder.split(separator: "?").first.map(String.init)
     return address?.isEmpty == false ? address : nil
+  }
+
+  private static func phoneNumber(from urlString: String) -> String? {
+    guard urlString.lowercased().hasPrefix("tel:") else { return nil }
+    let startIndex = urlString.index(urlString.startIndex, offsetBy: "tel:".count)
+    let remainder = String(urlString[startIndex...])
+    let number = remainder.split(separator: "?").first.map(String.init)
+    return number?.isEmpty == false ? number : nil
+  }
+
+  private static func normalizePhoneNumber(_ phoneNumber: String) -> String? {
+    let trimmed = phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+
+    if trimmed.rangeOfCharacter(from: .whitespacesAndNewlines) != nil {
+      return nil
+    }
+
+    let allowedCharacters = CharacterSet(charactersIn: "+-()0123456789")
+    if trimmed.rangeOfCharacter(from: allowedCharacters.inverted) != nil {
+      return nil
+    }
+
+    let hasLeadingPlus = trimmed.first == "+"
+    if hasLeadingPlus, trimmed.dropFirst().contains("+") {
+      return nil
+    }
+    if !hasLeadingPlus, trimmed.contains("+") {
+      return nil
+    }
+
+    var parenDepth = 0
+    for character in trimmed {
+      if character == "(" {
+        parenDepth += 1
+      } else if character == ")" {
+        parenDepth -= 1
+        if parenDepth < 0 {
+          return nil
+        }
+      }
+    }
+    if parenDepth != 0 {
+      return nil
+    }
+
+    let digits = trimmed.filter { $0.isNumber }
+    guard digits.count >= 7, digits.count <= 15 else { return nil }
+
+    let hasStrongIndicator = trimmed.contains("+") || trimmed.contains("(") || trimmed.contains(")")
+    if digits.count < 10 && !hasStrongIndicator {
+      return nil
+    }
+
+    return (hasLeadingPlus ? "+" : "") + digits
   }
 
   // MARK: - Helper Methods
@@ -564,6 +684,11 @@ public class ProcessEntities {
     return try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
   }()
 
+  private static let phoneNumberRegex: NSRegularExpression = {
+    let pattern = "(?<!\\w)(\\+?[0-9(][0-9()\\-]{5,}[0-9])(?!\\w)"
+    return try! NSRegularExpression(pattern: pattern, options: [])
+  }()
+
   private static func extractEmailEntities(
     text: String,
     existingEntities: [MessageEntity]
@@ -589,6 +714,44 @@ public class ProcessEntities {
       entity.type = .email
       entity.offset = Int64(match.range.location)
       entity.length = Int64(match.range.length)
+      entities.append(entity)
+    }
+
+    return entities
+  }
+
+  private static func extractPhoneNumberEntities(
+    text: String,
+    existingEntities: [MessageEntity]
+  ) -> [MessageEntity] {
+    guard !text.isEmpty else { return existingEntities }
+
+    var entities = existingEntities
+    let range = NSRange(location: 0, length: text.utf16.count)
+    let matches = phoneNumberRegex.matches(in: text, options: [], range: range)
+    let nsText = text as NSString
+
+    for match in matches {
+      guard match.range.length > 0 else { continue }
+
+      if isPositionWithinCodeBlock(position: match.range.location, entities: entities) {
+        continue
+      }
+
+      if entities.contains(where: { rangesOverlap(lhs: $0, rhs: match.range) }) {
+        continue
+      }
+
+      let rawPhoneNumber = nsText.substring(with: match.range)
+      guard let normalized = normalizePhoneNumber(rawPhoneNumber) else { continue }
+
+      var entity = MessageEntity()
+      entity.type = .textURL
+      entity.offset = Int64(match.range.location)
+      entity.length = Int64(match.range.length)
+      entity.textURL = MessageEntity.MessageEntityTextUrl.with {
+        $0.url = "tel:\(normalized)"
+      }
       entities.append(entity)
     }
 
