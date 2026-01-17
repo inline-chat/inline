@@ -7,6 +7,9 @@ const rootDir = resolve(import.meta.dir, "..");
 const cliDir = join(rootDir, "cli");
 const distDir = join(cliDir, "dist");
 const tempAssetsDir = join(rootDir, "scripts", ".release-tmp");
+const githubRepo = process.env.INLINE_CLI_GITHUB_REPO ?? "inline-chat/inline";
+const githubTagPrefix = process.env.INLINE_CLI_GITHUB_TAG_PREFIX ?? "cli-v";
+const githubRemote = process.env.INLINE_CLI_GIT_REMOTE ?? "origin";
 
 const accessKeyId = requireEnv("PUBLIC_RELEASES_R2_ACCESS_KEY_ID");
 const secretAccessKey = requireEnv("PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY");
@@ -76,6 +79,22 @@ async function runCommand(command: string, args: string[], options: { cwd?: stri
   }
 }
 
+async function runCommandCapture(
+  command: string,
+  args: string[],
+  options: { cwd?: string } = {},
+) {
+  const proc = Bun.spawn([command, ...args], {
+    cwd: options.cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const stdout = await new Response(proc.stdout).text();
+  const stderr = await new Response(proc.stderr).text();
+  const exitCode = await proc.exited;
+  return { stdout, stderr, exitCode };
+}
+
 async function uploadFile(
   r2: S3Client,
   key: string,
@@ -94,10 +113,12 @@ type ReleaseContext = {
 
 async function runRelease(r2: S3Client, publicBaseUrl: string, prefix: string) {
   const context = await getReleaseContext();
+  await assertNoDuplicateVersion(context);
   await runBuild(context);
   await runPackageManifest(r2, publicBaseUrl, prefix, context);
   await uploadInstall(r2);
   await createBundle(context);
+  await publishGitHubRelease(context);
 
   console.log(`Uploaded Inline CLI v${context.version}`);
   console.log(`Manifest: ${publicBaseUrl}/${prefix}/manifest.json`);
@@ -153,7 +174,7 @@ async function buildManifest(
 
   for (const target of context.targets) {
     const binaryPath = join(cliDir, "target", target, "release", "inline");
-    const artifactName = `inline-${context.version}-${target}.tar.gz`;
+    const artifactName = `inline-cli-${context.version}-${target}.tar.gz`;
     const artifactPath = join(context.releaseDir, artifactName);
 
     await runCommand("tar", ["-czf", artifactPath, "-C", dirname(binaryPath), "inline"]);
@@ -197,7 +218,7 @@ async function createBundle(context: ReleaseContext) {
   await copyFile(join(cliDir, "install.sh"), join(bundleWorkDir, "install.sh"));
 
   for (const target of context.targets) {
-    const artifactName = `inline-${context.version}-${target}.tar.gz`;
+    const artifactName = `inline-cli-${context.version}-${target}.tar.gz`;
     const artifactPath = join(context.releaseDir, artifactName);
     await copyFile(artifactPath, join(bundleWorkDir, artifactName));
     await copyFile(`${artifactPath}.sha256`, join(bundleWorkDir, `${artifactName}.sha256`));
@@ -207,6 +228,71 @@ async function createBundle(context: ReleaseContext) {
   const bundlePath = join(context.releaseDir, bundleName);
   await runCommand("tar", ["-czf", bundlePath, "-C", bundleWorkDir, "."]);
   console.log(`Bundle created: ${bundlePath}`);
+}
+
+function releaseTag(version: string): string {
+  return `${githubTagPrefix}${version}`;
+}
+
+async function assertNoDuplicateVersion(context: ReleaseContext) {
+  const tag = releaseTag(context.version);
+
+  const localTag = await runCommandCapture("git", ["tag", "--list", tag], { cwd: rootDir });
+  if (localTag.exitCode !== 0) {
+    throw new Error(`Failed to check local tags: ${localTag.stderr || localTag.stdout}`);
+  }
+  if (localTag.stdout.trim()) {
+    throw new Error(`Tag ${tag} already exists locally. Bump CLI version before releasing.`);
+  }
+
+  const remoteUrl = `https://github.com/${githubRepo}.git`;
+  const remoteTag = await runCommandCapture(
+    "git",
+    ["ls-remote", "--tags", remoteUrl, tag],
+    { cwd: rootDir },
+  );
+  if (remoteTag.exitCode !== 0) {
+    throw new Error(`Failed to check remote tags: ${remoteTag.stderr || remoteTag.stdout}`);
+  }
+  if (remoteTag.stdout.trim()) {
+    throw new Error(`Tag ${tag} already exists on ${githubRepo}. Bump CLI version.`);
+  }
+}
+
+async function publishGitHubRelease(context: ReleaseContext) {
+  const tag = releaseTag(context.version);
+  const assets: string[] = [];
+
+  for (const target of context.targets) {
+    const artifactName = `inline-cli-${context.version}-${target}.tar.gz`;
+    const artifactPath = join(context.releaseDir, artifactName);
+    assets.push(artifactPath, `${artifactPath}.sha256`);
+  }
+
+  const bundleName = `inline-cli-v${context.version}-bundle.tar.gz`;
+  const bundlePath = join(context.releaseDir, bundleName);
+  assets.push(bundlePath);
+
+  await runCommand("git", ["tag", "-a", tag, "-m", `Inline CLI v${context.version}`], {
+    cwd: rootDir,
+  });
+  await runCommand("git", ["push", githubRemote, tag], { cwd: rootDir });
+  await runCommand(
+    "gh",
+    [
+      "release",
+      "create",
+      tag,
+      "--repo",
+      githubRepo,
+      "--title",
+      `Inline CLI v${context.version}`,
+      "--notes",
+      `Automated release for Inline CLI v${context.version}.`,
+      ...assets,
+    ],
+    { cwd: rootDir },
+  );
 }
 
 async function getReleaseContext(): Promise<ReleaseContext> {

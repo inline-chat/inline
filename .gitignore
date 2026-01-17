@@ -122,6 +122,7 @@ test_write_permission
 
 # Rust 
 cli/target
+cli/dist
 
 # Release temp assets
 scripts/.release-tmp/
