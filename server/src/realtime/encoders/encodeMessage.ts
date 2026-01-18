@@ -21,6 +21,7 @@ import type { DbFullMessage } from "@in/server/db/models/messages"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { encodeReaction } from "@in/server/realtime/encoders/encodeReaction"
 import { decryptBinary } from "@in/server/modules/encryption/encryption"
+import { detectHasLink } from "@in/server/modules/message/linkDetection"
 
 export const encodeMessage = ({
   message,
@@ -61,6 +62,8 @@ export const encodeMessage = ({
     })
     entities = MessageEntities.fromBinary(decryptedEntities)
   }
+
+  const hasLink = message.hasLink ?? (detectHasLink({ entities }) ? true : undefined)
 
   let peerId: Peer
 
@@ -141,6 +144,7 @@ export const encodeMessage = ({
     replyToMsgId: message.replyToMsgId ? BigInt(message.replyToMsgId) : undefined,
     media: media,
     isSticker: message.isSticker || undefined,
+    hasLink: hasLink,
     entities: entities,
     sendMode: sendMode ?? undefined,
     fwdFrom: fwdFrom,
@@ -253,6 +257,8 @@ export const encodeFullMessage = ({
     }
   }
 
+  const hasLinkFromAttachments = message.messageAttachments?.some((attachment) => attachment.linkEmbed) ?? false
+
   const hasReactions = message.reactions.length > 0
 
   let fwdFrom: MessageFwdHeader | undefined = undefined
@@ -288,6 +294,9 @@ export const encodeFullMessage = ({
     replyToMsgId: message.replyToMsgId ? BigInt(message.replyToMsgId) : undefined,
     media: media,
     isSticker: message.isSticker ?? false,
+    hasLink:
+      message.hasLink ??
+      (detectHasLink({ entities: message.entities }) || hasLinkFromAttachments ? true : undefined),
     attachments: attachments,
     reactions: hasReactions
       ? {

@@ -29,6 +29,7 @@ import { UserSettingsNotificationsMode } from "@in/server/db/models/userSettings
 import { encryptBinary } from "@in/server/modules/encryption/encryption"
 import { processMessageText } from "@in/server/modules/message/processText"
 import { isUserMentioned } from "@in/server/modules/message/helpers"
+import { detectHasLink } from "@in/server/modules/message/linkDetection"
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -101,6 +102,10 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     entities = textContent?.entities
   }
 
+  const hasLink =
+    detectHasLink({ entities }) ||
+    (input.messageAttachments?.some((attachment) => attachment.urlPreviewId != null) ?? false)
+
   // Encrypt
   const encryptedMessage = text ? encryptMessage(text) : undefined
 
@@ -172,6 +177,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       videoId: dbFullVideo?.id ?? null,
       documentId: dbFullDocument?.id ?? null,
       isSticker: input.isSticker ?? false,
+      hasLink: hasLink,
       entitiesEncrypted: encryptedEntities?.encrypted ?? null,
       entitiesIv: encryptedEntities?.iv ?? null,
       entitiesTag: encryptedEntities?.authTag ?? null,

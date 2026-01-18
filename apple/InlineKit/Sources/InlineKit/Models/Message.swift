@@ -19,6 +19,7 @@ public struct ApiMessage: Codable, Hashable, Sendable {
   public var photo: [ApiPhoto]?
   public var replyToMsgId: Int64?
   public var isSticker: Bool?
+  public var hasLink: Bool?
 }
 
 public enum MessageSendingStatus: Int64, Codable, DatabaseValueConvertible, Sendable {
@@ -87,7 +88,13 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   public var documentId: Int64?
   public var transactionId: String?
   public var isSticker: Bool?
+  public var hasLink: Bool?
   public var entities: MessageEntities?
+
+  private static let allowedLinkSchemes: Set<String> = ["http", "https"]
+  private static let linkDetector: NSDataDetector? = {
+    try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+  }()
 
   public enum Columns {
     public static let globalId = Column(CodingKeys.globalId)
@@ -113,6 +120,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     public static let photoId = Column(CodingKeys.photoId)
     public static let videoId = Column(CodingKeys.videoId)
     public static let documentId = Column(CodingKeys.documentId)
+    public static let hasLink = Column(CodingKeys.hasLink)
     public static let entities = Column(CodingKeys.entities)
   }
 
@@ -223,6 +231,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     documentId: Int64? = nil,
     transactionId: String? = nil,
     isSticker: Bool? = nil,
+    hasLink: Bool? = nil,
     entities: MessageEntities? = nil
   ) {
     self.messageId = messageId
@@ -249,7 +258,9 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     self.documentId = documentId
     self.transactionId = transactionId
     self.isSticker = isSticker
+    self.hasLink = hasLink
     self.entities = entities
+    updateHasLinkIfNeeded()
 
     if peerUserId == nil, peerThreadId == nil {
       fatalError("One of peerUserId or peerThreadId must be set")
@@ -274,7 +285,8 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       editDate: from.editDate.map { Date(timeIntervalSince1970: TimeInterval($0)) },
       status: from.out == true ? MessageSendingStatus.sent : nil,
       repliedToMessageId: from.replyToMsgId,
-      isSticker: from.isSticker
+      isSticker: from.isSticker,
+      hasLink: from.hasLink
     )
   }
 
@@ -306,6 +318,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       videoId: from.media.video.hasVideo ? from.media.video.video.id : nil,
       documentId: from.media.document.hasDocument ? from.media.document.document.id : nil,
       isSticker: from.isSticker,
+      hasLink: from.hasHasLink_p ? from.hasLink_p : nil,
       entities: from.hasEntities ? from.entities : nil
     )
   }
@@ -319,6 +332,141 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     peerThreadId: nil,
     chatId: 1
   )
+
+  private mutating func updateHasLinkIfNeeded() {
+    guard hasLink != true else { return }
+    if Message.detectHasLink(text: text, entities: entities) {
+      hasLink = true
+    }
+  }
+
+  private static func detectHasLink(text: String?, entities: MessageEntities?) -> Bool {
+    if let entities,
+       entities.entities.contains(where: { $0.type == .url || $0.type == .textURL })
+    {
+      return true
+    }
+
+    guard let text, !text.isEmpty else { return false }
+    return textContainsLink(text)
+  }
+
+  private static func textContainsLink(_ text: String) -> Bool {
+    guard let detector = linkDetector else { return false }
+    let range = NSRange(text.startIndex..., in: text)
+    var hasLink = false
+
+    detector.enumerateMatches(in: text, options: [], range: range) { match, _, stop in
+      guard let url = match?.url,
+            let scheme = url.scheme?.lowercased(),
+            Self.allowedLinkSchemes.contains(scheme)
+      else {
+        return
+      }
+      hasLink = true
+      stop.pointee = true
+    }
+
+    return hasLink
+  }
+
+  var detectedLinkPreview: UrlPreview? {
+    guard hasLink == true else { return nil }
+    guard let text, !text.isEmpty else { return nil }
+    guard let url = Self.detectedLinkURL(text: text, entities: entities) else { return nil }
+
+    return UrlPreview(
+      id: Self.fallbackLinkPreviewId(messageId: messageId),
+      url: url.absoluteString,
+      siteName: url.host,
+      title: url.absoluteString,
+      description: nil,
+      photoId: nil,
+      duration: nil
+    )
+  }
+
+  private static func detectedLinkURL(text: String, entities: MessageEntities?) -> URL? {
+    if let entityURL = linkURL(from: text, entities: entities) {
+      return entityURL
+    }
+    return firstLinkURL(in: text)
+  }
+
+  private static func linkURL(from text: String, entities: MessageEntities?) -> URL? {
+    guard let entities else { return nil }
+    let sorted = entities.entities.sorted { $0.offset < $1.offset }
+
+    for entity in sorted {
+      switch entity.type {
+        case .url:
+          let range = NSRange(location: Int(entity.offset), length: Int(entity.length))
+          guard range.location >= 0, range.location + range.length <= text.utf16.count else { continue }
+          let substring = (text as NSString).substring(with: range)
+          if let url = urlFromString(substring) {
+            return url
+          }
+
+        case .textURL:
+          if case let .textURL(textURL) = entity.entity,
+             let url = urlFromString(textURL.url)
+          {
+            return url
+          }
+
+        default:
+          continue
+      }
+    }
+
+    return nil
+  }
+
+  private static func firstLinkURL(in text: String) -> URL? {
+    guard let detector = linkDetector else { return nil }
+    let range = NSRange(text.startIndex..., in: text)
+    var firstURL: URL? = nil
+
+    detector.enumerateMatches(in: text, options: [], range: range) { match, _, stop in
+      guard let url = match?.url,
+            let scheme = url.scheme?.lowercased(),
+            Self.allowedLinkSchemes.contains(scheme)
+      else {
+        return
+      }
+
+      firstURL = url
+      stop.pointee = true
+    }
+
+    return firstURL
+  }
+
+  private static func urlFromString(_ value: String) -> URL? {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+
+    if let url = URL(string: trimmed),
+       let scheme = url.scheme?.lowercased(),
+       allowedLinkSchemes.contains(scheme)
+    {
+      return url
+    }
+
+    if let url = URL(string: "https://\(trimmed)"),
+       let scheme = url.scheme?.lowercased(),
+       allowedLinkSchemes.contains(scheme)
+    {
+      return url
+    }
+
+    return nil
+  }
+
+  private static func fallbackLinkPreviewId(messageId: Int64) -> Int64 {
+    let baseId = messageId == 0 ? 1 : messageId
+    return baseId > 0 ? -baseId : baseId
+  }
 }
 
 // MARK: - UI helpers
@@ -388,6 +536,7 @@ public extension Message {
         photoId = photoId ?? existing.photoId
         documentId = documentId ?? existing.documentId
         videoId = videoId ?? existing.videoId
+        hasLink = hasLink ?? existing.hasLink
         entities = entities ?? existing.entities
         transactionId = existing.transactionId
         isExisting = true
@@ -395,6 +544,8 @@ public extension Message {
     } else {
       isExisting = true
     }
+
+    updateHasLinkIfNeeded()
 
     // Save the message
     let message = try saveAndFetch(db, onConflict: .ignore)
@@ -467,6 +618,7 @@ public extension ApiMessage {
       message.fileId = existing.fileId
       message.text = existing.text
       message.transactionId = existing.transactionId
+      message.hasLink = existing.hasLink
       message.editDate = editDate.map { Date(timeIntervalSince1970: TimeInterval($0)) }
       // ... anything else?
     } else {
@@ -525,6 +677,7 @@ public extension Message {
       message.documentId = message.documentId ?? existing.documentId
       message.transactionId = message.transactionId ?? existing.transactionId
       message.isSticker = message.isSticker ?? existing.isSticker
+      message.hasLink = message.hasLink ?? existing.hasLink
       message.editDate = message.editDate ?? existing.editDate
       message.repliedToMessageId = message.repliedToMessageId ?? existing.repliedToMessageId
       message.forwardFromPeerUserId = message.forwardFromPeerUserId ?? existing.forwardFromPeerUserId

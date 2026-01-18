@@ -213,6 +213,7 @@ message Message {
 
   // Whether the message is a sticker
   optional bool is_sticker = 15;
+  optional bool has_link = 6000;
 
   // Rich text entities
   optional MessageEntities entities = 16;
@@ -976,6 +977,7 @@ message SendMessageInput {
 
   // Whether the message is a sticker
   optional bool is_sticker = 6;
+  optional bool has_link = 6000;
 
   // Entities in the message (bold, italic, mention, etc)
   optional MessageEntities entities = 7;
@@ -1028,7 +1030,8 @@ enum SearchMessagesFilter {
 message SearchMessagesInput {
   InputPeer peer_id = 1;
 
-  // Queries to match in message text (space-separated terms ANDed within a query, ORed across queries)
+  // Queries to match in message text (space-separated terms ANDed within a
+  // query, ORed across queries)
   repeated string queries = 2;
 
   // Max number of results to return
@@ -1388,9 +1391,7 @@ message UpdateChatVisibilityInput {
   repeated InputChatParticipant participants = 3;
 }
 
-message UpdateChatVisibilityResult {
-  Chat chat = 1;
-}
+message UpdateChatVisibilityResult { Chat chat = 1; }
 
 // Apple only types
 message DraftMessage {
