@@ -2,6 +2,7 @@ import AppKit
 import Auth
 import Combine
 import InlineKit
+import InlineMacWindow
 import Logger
 import SwiftUI
 
@@ -32,7 +33,7 @@ class MainWindowController: NSWindowController, NSWindowDelegate {
   init(dependencies: AppDependencies) {
     self.dependencies = dependencies
 
-    let window = NSWindow(
+    let window = TrafficLightInsetWindow(
       contentRect: NSRect(origin: .zero, size: defaultSize),
       styleMask: [
         .titled,
@@ -44,6 +45,7 @@ class MainWindowController: NSWindowController, NSWindowDelegate {
       backing: .buffered,
       defer: false
     )
+    window.trafficLightsInset = CGPoint(x: 20, y: 16)
 
     keyMonitor = KeyMonitor(window: window)
     self.dependencies.keyMonitor = keyMonitor
@@ -52,29 +54,14 @@ class MainWindowController: NSWindowController, NSWindowDelegate {
 
     injectDependencies()
     configureWindow()
-    setupToolbar()
-    setupEventMonitor()
     subscribe()
-  }
-
-  private func setupToolbar() {
-    guard let window else { return }
-
-    let toolbar = NSToolbar(identifier: "MainToolbar")
-    toolbar.displayMode = .iconOnly
-    toolbar.allowsUserCustomization = false
-    window.toolbar = toolbar
-    window.titlebarAppearsTransparent = true
-    window.titleVisibility = .hidden
-    window.styleMask.insert(.fullSizeContentView)
-
-    // window.toolbarStyle = .unifiedCompact
-    window.toolbarStyle = .unified
   }
 
   private func configureWindow() {
     guard let window else { return }
     window.title = "Inline"
+    window.titleVisibility = .hidden
+    window.titlebarAppearsTransparent = true
     window.backgroundColor = NSColor.clear
     window.isOpaque = false
     window.setFrameAutosaveName("MainWindow")
@@ -188,36 +175,6 @@ class MainWindowController: NSWindowController, NSWindowDelegate {
 //    }
   }
 
-  // MARK: - Toolbar event handling
-
-  private var rightClickMonitor: Any?
-
-  private func setupEventMonitor() {
-    // Block right-click on toolbar
-    rightClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .rightMouseDown) { [weak self] event in
-      guard let self,
-            let window else { return event }
-
-      let locationInWindow = event.locationInWindow
-
-      // Check if click is in toolbar area (top of window)
-      let windowFrame = window.frame
-      let toolbarHeight: CGFloat = 52 // Approximate toolbar height
-      let toolbarRect = NSRect(
-        x: 0,
-        y: windowFrame.height - toolbarHeight,
-        width: windowFrame.width,
-        height: toolbarHeight
-      )
-
-      if toolbarRect.contains(locationInWindow) {
-        return nil // Block the event
-      }
-
-      return event
-    }
-  }
-
   // MARK: - NSWindowDelegate
 
   func window(
@@ -232,10 +189,6 @@ class MainWindowController: NSWindowController, NSWindowDelegate {
   // MARK: - Deinit
 
   deinit {
-    if let monitor = rightClickMonitor {
-      NSEvent.removeMonitor(monitor)
-    }
-
     cancellables.removeAll()
     navBackButton = nil
     navForwardButton = nil
