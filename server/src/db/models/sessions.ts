@@ -173,7 +173,7 @@ export class SessionsModel {
         applePushTokenEncrypted: encryptedApplePushToken.encrypted,
         applePushTokenIv: encryptedApplePushToken.iv,
         applePushTokenTag: encryptedApplePushToken.authTag,
-        deviceId: deviceId ?? null,
+        ...(deviceId ? { deviceId } : {}),
       })
       .where(eq(sessions.id, id))
   }
