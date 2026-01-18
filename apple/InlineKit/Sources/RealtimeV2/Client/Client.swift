@@ -305,7 +305,13 @@ actor ProtocolClient: ProtocolClientType {
   func sendConnectionInit() async throws {
     log.trace("sending connection init")
 
-    guard let token = auth.getToken() else {
+    var token = auth.getToken()
+    if token == nil {
+      await auth.refreshFromStorage()
+      token = auth.getToken()
+    }
+
+    guard let token else {
       log.error("No token available for connection init")
       throw ProtocolClientError.notAuthorized
     }

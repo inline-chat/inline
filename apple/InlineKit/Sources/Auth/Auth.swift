@@ -348,7 +348,7 @@ actor AuthManager: Sendable {
 
     var changed = false
 
-    if refreshedToken != cachedToken {
+    if let refreshedToken, refreshedToken != cachedToken {
       cachedToken = refreshedToken
       changed = true
     }
