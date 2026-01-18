@@ -46,9 +46,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     setupMainWindow()
     setupMainMenu()
     setupNotificationsSoundSetting()
-    Task { @MainActor in
-      self.dockBadgeService.start()
-    }
+    // TODO: Temporarily disable Dock badge updates until the update-applying bug is fixed.
+    NSApplication.shared.dockTile.badgeLabel = nil
+//    Task { @MainActor in
+//      self.dockBadgeService.start()
+//    }
     // Register Vim-style shortcuts (Ctrl-K / Ctrl-J) for chat navigation
     Task { @MainActor in
       self.globalHotkeys = GlobalHotkeys(dependencies: self.dependencies)
