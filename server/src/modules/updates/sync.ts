@@ -303,6 +303,19 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
         },
       }
 
+    case "userDialogArchived":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "dialogArchived",
+          dialogArchived: {
+            peerId: payload.userDialogArchived.peerId,
+            archived: payload.userDialogArchived.archived,
+          },
+        },
+      }
+
     default:
       log.warn("Unhandled user update", { type: payload.oneofKind })
       return null

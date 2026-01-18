@@ -550,12 +550,6 @@ public extension Message {
     // Save the message
     let message = try saveAndFetch(db, onConflict: .ignore)
 
-    // Handle unarchiving for incoming messages
-    if !isExisting, out != true {
-      // TODO: move this out of here
-      try unarchiveIncomingMessagesChat(db, peerId: peerId)
-    }
-
     // Publish changes if needed
     if publishChanges {
       let message = self // Create an immutable copy
@@ -576,30 +570,6 @@ public extension Message {
     return message
   }
 
-  func unarchiveIncomingMessagesChat(
-    _ db: Database,
-    peerId: Peer
-  ) throws {
-    if let dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peerId)),
-       dialog.archived == true
-    {
-      var updatedDialog = dialog
-      updatedDialog.archived = false
-      try updatedDialog.save(db, onConflict: .replace)
-
-      // Schedule API update after transaction
-      let peer = peerId
-      db.afterNextTransaction { _ in
-        Task {
-          try? await ApiClient.shared.updateDialog(
-            peerId: peer,
-            pinned: nil,
-            archived: false
-          )
-        }
-      }
-    }
-  }
 }
 
 public extension ApiMessage {

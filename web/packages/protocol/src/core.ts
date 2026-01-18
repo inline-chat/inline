@@ -2964,6 +2964,12 @@ export interface Update {
          */
         chatVisibility: UpdateChatVisibility;
     } | {
+        oneofKind: "dialogArchived";
+        /**
+         * @generated from protobuf field: UpdateDialogArchived dialog_archived = 29;
+         */
+        dialogArchived: UpdateDialogArchived;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -3182,6 +3188,25 @@ export interface UpdateMarkAsUnread {
      * @generated from protobuf field: bool unread_mark = 2;
      */
     unreadMark: boolean;
+}
+/**
+ * Update when a dialog is archived or unarchived
+ *
+ * @generated from protobuf message UpdateDialogArchived
+ */
+export interface UpdateDialogArchived {
+    /**
+     * Peer ID of the dialog that changed
+     *
+     * @generated from protobuf field: Peer peer_id = 1;
+     */
+    peerId?: Peer;
+    /**
+     * Whether it's archived (true) or unarchived (false)
+     *
+     * @generated from protobuf field: bool archived = 2;
+     */
+    archived: boolean;
 }
 /**
  * Update when a new chat is created either in space or a private chat
@@ -10862,7 +10887,8 @@ class Update$Type extends MessageType<Update> {
             { no: 25, name: "chat_has_new_updates", kind: "message", oneof: "update", T: () => UpdateChatHasNewUpdates },
             { no: 26, name: "space_has_new_updates", kind: "message", oneof: "update", T: () => UpdateSpaceHasNewUpdates },
             { no: 27, name: "space_member_update", kind: "message", oneof: "update", T: () => UpdateSpaceMemberUpdate },
-            { no: 28, name: "chat_visibility", kind: "message", oneof: "update", T: () => UpdateChatVisibility }
+            { no: 28, name: "chat_visibility", kind: "message", oneof: "update", T: () => UpdateChatVisibility },
+            { no: 29, name: "dialog_archived", kind: "message", oneof: "update", T: () => UpdateDialogArchived }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -11033,6 +11059,12 @@ class Update$Type extends MessageType<Update> {
                         chatVisibility: UpdateChatVisibility.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).chatVisibility)
                     };
                     break;
+                case /* UpdateDialogArchived dialog_archived */ 29:
+                    message.update = {
+                        oneofKind: "dialogArchived",
+                        dialogArchived: UpdateDialogArchived.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).dialogArchived)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -11126,6 +11158,9 @@ class Update$Type extends MessageType<Update> {
         /* UpdateChatVisibility chat_visibility = 28; */
         if (message.update.oneofKind === "chatVisibility")
             UpdateChatVisibility.internalBinaryWrite(message.update.chatVisibility, writer.tag(28, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateDialogArchived dialog_archived = 29; */
+        if (message.update.oneofKind === "dialogArchived")
+            UpdateDialogArchived.internalBinaryWrite(message.update.dialogArchived, writer.tag(29, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -11778,6 +11813,60 @@ class UpdateMarkAsUnread$Type extends MessageType<UpdateMarkAsUnread> {
  * @generated MessageType for protobuf message UpdateMarkAsUnread
  */
 export const UpdateMarkAsUnread = new UpdateMarkAsUnread$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateDialogArchived$Type extends MessageType<UpdateDialogArchived> {
+    constructor() {
+        super("UpdateDialogArchived", [
+            { no: 1, name: "peer_id", kind: "message", T: () => Peer },
+            { no: 2, name: "archived", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateDialogArchived>): UpdateDialogArchived {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.archived = false;
+        if (value !== undefined)
+            reflectionMergePartial<UpdateDialogArchived>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateDialogArchived): UpdateDialogArchived {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Peer peer_id */ 1:
+                    message.peerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* bool archived */ 2:
+                    message.archived = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateDialogArchived, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Peer peer_id = 1; */
+        if (message.peerId)
+            Peer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* bool archived = 2; */
+        if (message.archived !== false)
+            writer.tag(2, WireType.Varint).bool(message.archived);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateDialogArchived
+ */
+export const UpdateDialogArchived = new UpdateDialogArchived$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class UpdateNewChat$Type extends MessageType<UpdateNewChat> {
     constructor() {
