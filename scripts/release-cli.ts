@@ -10,6 +10,9 @@ const tempAssetsDir = join(rootDir, "scripts", ".release-tmp");
 const githubRepo = process.env.INLINE_CLI_GITHUB_REPO ?? "inline-chat/inline";
 const githubTagPrefix = process.env.INLINE_CLI_GITHUB_TAG_PREFIX ?? "cli-v";
 const githubRemote = process.env.INLINE_CLI_GIT_REMOTE ?? "origin";
+const homebrewTapPath =
+  process.env.INLINE_HOMEBREW_TAP_PATH ?? resolve(rootDir, "..", "homebrew-inline");
+const homebrewTapRemote = process.env.INLINE_HOMEBREW_TAP_REMOTE ?? "origin";
 const signingIdentity = process.env.APPLE_SIGNING_IDENTITY;
 const appleId = process.env.APPLE_ID;
 const applePassword = process.env.APPLE_PASSWORD;
@@ -36,6 +39,9 @@ if (command === "upload-install") {
 } else if (command === "package-manifest") {
   const { r2, publicBaseUrl, prefix } = getR2Context();
   await runPackageManifest(r2, publicBaseUrl, prefix);
+} else if (command === "update-homebrew") {
+  const context = await getReleaseContext();
+  await updateHomebrewCask(context);
 } else if (command === "release") {
   const { r2, publicBaseUrl, prefix } = getR2Context();
   await runRelease(r2, publicBaseUrl, prefix);
@@ -140,6 +146,7 @@ async function runRelease(r2: S3Client, publicBaseUrl: string, prefix: string) {
   await uploadInstall(r2, prefix);
   await createBundle(context);
   await publishGitHubRelease(context);
+  await updateHomebrewCask(context);
 
   console.log(`Uploaded Inline CLI v${context.version}`);
   console.log(`Manifest: ${publicBaseUrl}/${prefix}/manifest.json`);
@@ -303,6 +310,86 @@ async function createBundle(context: ReleaseContext) {
   console.log(`Bundle created: ${bundlePath}`);
 }
 
+async function updateHomebrewCask(context: ReleaseContext) {
+  if (process.env.INLINE_SKIP_HOMEBREW === "1") {
+    console.log("Skipping Homebrew cask update (INLINE_SKIP_HOMEBREW=1).");
+    return;
+  }
+
+  const caskPath = join(homebrewTapPath, "Casks", "inline.rb");
+  const caskRelativePath = join("Casks", "inline.rb");
+  await stat(caskPath).catch(() => {
+    throw new Error(
+      `Homebrew tap not found at ${caskPath}. Set INLINE_HOMEBREW_TAP_PATH if needed.`,
+    );
+  });
+
+  const status = await runCommandCapture("git", ["status", "--porcelain"], {
+    cwd: homebrewTapPath,
+  });
+  if (status.exitCode !== 0) {
+    throw new Error(`Failed to check Homebrew tap status: ${status.stderr || status.stdout}`);
+  }
+  if (status.stdout.trim()) {
+    throw new Error("Homebrew tap has uncommitted changes. Commit/stash before release.");
+  }
+
+  const armTarget = "aarch64-apple-darwin";
+  const intelTarget = "x86_64-apple-darwin";
+  const armArtifact = join(
+    context.releaseDir,
+    `inline-cli-${context.version}-${armTarget}.tar.gz`,
+  );
+  const intelArtifact = join(
+    context.releaseDir,
+    `inline-cli-${context.version}-${intelTarget}.tar.gz`,
+  );
+
+  const armSha = await sha256File(armArtifact);
+  const intelSha = await sha256File(intelArtifact);
+
+  const contents = await readFile(caskPath, "utf8");
+  const versionPattern = /version\s+"[^"]+"/;
+  const shaPattern =
+    /sha256\s+arm:\s+"[a-f0-9]{64}",\s*\n\s*intel:\s+"[a-f0-9]{64}"/;
+
+  if (!versionPattern.test(contents) || !shaPattern.test(contents)) {
+    throw new Error(`Failed to locate version/sha256 entries in ${caskPath}`);
+  }
+
+  const updated = contents
+    .replace(versionPattern, `version "${context.version}"`)
+    .replace(
+      shaPattern,
+      `sha256 arm: "${armSha}",\n         intel: "${intelSha}"`,
+    );
+
+  if (updated === contents) {
+    console.log("Homebrew cask already up to date.");
+    return;
+  }
+
+  await writeFile(caskPath, updated);
+
+  const branch = await runCommandCapture("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+    cwd: homebrewTapPath,
+  });
+  if (branch.exitCode !== 0) {
+    throw new Error(`Failed to read Homebrew tap branch: ${branch.stderr || branch.stdout}`);
+  }
+
+  await runCommand("git", ["add", caskRelativePath], { cwd: homebrewTapPath });
+  await runCommand(
+    "git",
+    ["commit", "-m", `cask: bump inline to v${context.version}`],
+    { cwd: homebrewTapPath },
+  );
+  await runCommand("git", ["push", homebrewTapRemote, branch.stdout.trim()], {
+    cwd: homebrewTapPath,
+  });
+  console.log("Homebrew cask updated and pushed.");
+}
+
 function releaseTag(version: string): string {
   return `${githubTagPrefix}${version}`;
 }
@@ -387,6 +474,7 @@ function printManualSteps() {
   console.log("  bun tsx scripts/release-cli.ts sign-notarize");
   console.log("  bun tsx scripts/release-cli.ts package-manifest");
   console.log("  bun tsx scripts/release-cli.ts upload-install");
+  console.log("  bun tsx scripts/release-cli.ts update-homebrew");
   console.log("  bun tsx scripts/release-cli.ts release-dry-run");
 }
 
