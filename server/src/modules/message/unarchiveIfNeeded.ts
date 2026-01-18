@@ -83,7 +83,7 @@ export const unarchiveIfNeeded = async (input: UnarchiveIfNeededInput): Promise<
     userId: target.userId,
     update: {
       update: {
-        oneofKind: "dialogArchived",
+        oneofKind: "dialogArchived" as const,
         dialogArchived: {
           peerId: target.peerId,
           archived: false,
