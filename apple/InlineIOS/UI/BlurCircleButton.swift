@@ -28,6 +28,7 @@ class BlurCircleButton: UIButton {
 
   private let iconImageView = UIImageView()
   private let backgroundView = UIView()
+  private let unreadBadgeView = UIView()
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -68,6 +69,12 @@ class BlurCircleButton: UIButton {
     iconImageView.translatesAutoresizingMaskIntoConstraints = false
     addSubview(iconImageView)
 
+    unreadBadgeView.translatesAutoresizingMaskIntoConstraints = false
+    unreadBadgeView.backgroundColor = ThemeManager.shared.selected.accent
+    unreadBadgeView.layer.cornerRadius = 4
+    unreadBadgeView.isHidden = true
+    addSubview(unreadBadgeView)
+
     NSLayoutConstraint.activate([
       backgroundView.topAnchor.constraint(equalTo: topAnchor),
       backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -81,6 +88,11 @@ class BlurCircleButton: UIButton {
 
       iconImageView.centerXAnchor.constraint(equalTo: centerXAnchor),
       iconImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+      unreadBadgeView.widthAnchor.constraint(equalToConstant: 8),
+      unreadBadgeView.heightAnchor.constraint(equalToConstant: 8),
+      unreadBadgeView.topAnchor.constraint(equalTo: topAnchor, constant: 2),
+      unreadBadgeView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
     ])
 
     addTarget(self, action: #selector(buttonTapped), for: .touchUpInside)
@@ -88,6 +100,10 @@ class BlurCircleButton: UIButton {
 
   @objc private func buttonTapped() {
     NotificationCenter.default.post(name: .scrollToBottom, object: nil)
+  }
+
+  func setHasUnread(_ hasUnread: Bool) {
+    unreadBadgeView.isHidden = !hasUnread
   }
 }
 

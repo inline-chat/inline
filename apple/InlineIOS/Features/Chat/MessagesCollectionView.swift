@@ -818,6 +818,7 @@ private extension MessagesCollectionView {
               collectionView.safeScrollToTop(animated: true)
             }
           }
+          handleIncomingMessages()
 
         case let .messagesDeleted(_, messageIds):
           var snapshot = dataSource.snapshot()
@@ -849,6 +850,40 @@ private extension MessagesCollectionView {
         return
       }
       UnreadManager.shared.readAll(peerId, chatId: chatId)
+    }
+
+    private func latestMessageId() -> Int64? {
+      messages.first?.message.messageId
+    }
+
+    private func markMessagesSeen() {
+      guard let latestId = latestMessageId() else { return }
+      lastSeenMessageId = latestId
+      if hasUnreadSinceScroll {
+        hasUnreadSinceScroll = false
+        notifyUnreadChanged()
+      }
+    }
+
+    private func handleIncomingMessages() {
+      guard let latestId = latestMessageId() else { return }
+      if isAtBottomForUnread {
+        markMessagesSeen()
+        return
+      }
+
+      if latestId > lastSeenMessageId, !hasUnreadSinceScroll {
+        hasUnreadSinceScroll = true
+        notifyUnreadChanged()
+      }
+    }
+
+    private func notifyUnreadChanged() {
+      NotificationCenter.default.post(
+        name: .scrollToBottomUnreadChanged,
+        object: nil,
+        userInfo: ["hasUnread": hasUnreadSinceScroll]
+      )
     }
 
     private var sizeCache: [FullMessage.ID: CGSize] = [:]
@@ -1573,6 +1608,9 @@ private extension MessagesCollectionView {
     private var isUserDragging = false
     private var isUserScrollInEffect = false
     private var wasPreviouslyAtBottom = false
+    private var isAtBottomForUnread = true
+    private var lastSeenMessageId: Int64 = 0
+    private var hasUnreadSinceScroll = false
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
       isUserDragging = true
@@ -1607,6 +1645,11 @@ private extension MessagesCollectionView {
 
       let threshold = messagesCollectionView.calculatedThreshold
       let isAtBottom = scrollView.contentOffset.y > -threshold
+      isAtBottomForUnread = isAtBottom
+
+      if isAtBottom {
+        markMessagesSeen()
+      }
 
       if isAtBottom != wasPreviouslyAtBottom, messages.count > 12 {
         NotificationCenter.default.post(
@@ -1875,6 +1918,7 @@ private extension MessagesCollectionView {
 
 extension Notification.Name {
   static let scrollToBottomChanged = Notification.Name("scrollToBottomChanged")
+  static let scrollToBottomUnreadChanged = Notification.Name("scrollToBottomUnreadChanged")
 }
 
 // MARK: - NotionTaskManagerDelegate Extension
