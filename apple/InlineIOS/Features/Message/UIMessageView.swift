@@ -30,6 +30,11 @@ class UIMessageView: UIView {
   private var shineEffectView: ShineEffectView?
 
   var linkTapHandler: ((URL) -> Void)?
+  var onPhotoTap: ((FullMessage, UIView, UIImage?, URL) -> Void)? {
+    didSet {
+      bindPhotoTapHandlerIfNeeded()
+    }
+  }
   var interaction: UIContextMenuInteraction?
 
   static let attributedCache: NSCache<NSString, NSAttributedString> = {
@@ -460,9 +465,23 @@ class UIMessageView: UIView {
     guard fullMessage.photoInfo != nil else { return }
 
     containerStack.addArrangedSubview(newPhotoView)
+    bindPhotoTapHandlerIfNeeded()
 
     if shouldShowFloatingMetadata {
       addFloatingMetadata(relativeTo: newPhotoView)
+    }
+  }
+
+  private func bindPhotoTapHandlerIfNeeded() {
+    guard fullMessage.photoInfo != nil else { return }
+    guard let onPhotoTap else {
+      newPhotoView.onTap = nil
+      return
+    }
+
+    newPhotoView.onTap = { [weak self] message, sourceView, sourceImage, url in
+      guard let self else { return }
+      onPhotoTap(message, sourceView, sourceImage, url)
     }
   }
 
