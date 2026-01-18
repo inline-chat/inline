@@ -376,7 +376,7 @@ class MessageViewAppKit: NSView {
   }()
 
   private var reactionsView: MessageReactionsView?
-  private var emailClickGesture: NSClickGestureRecognizer?
+  private var entityClickGesture: NSClickGestureRecognizer?
 
   // MARK: - Link Detection
 
@@ -492,7 +492,7 @@ class MessageViewAppKit: NSView {
 
     if hasText {
       contentView.addSubview(textView)
-      setupEmailClickHandling()
+      setupEntityClickHandling()
     }
 
     if hasReactions {
@@ -529,16 +529,16 @@ class MessageViewAppKit: NSView {
       }
   }
 
-  private func setupEmailClickHandling() {
-    let gesture = NSClickGestureRecognizer(target: self, action: #selector(handleEmailClick(_:)))
+  private func setupEntityClickHandling() {
+    let gesture = NSClickGestureRecognizer(target: self, action: #selector(handleEntityClick(_:)))
     gesture.numberOfClicksRequired = 1
     gesture.delaysPrimaryMouseButtonEvents = false
     gesture.delegate = self
     textView.addGestureRecognizer(gesture)
-    emailClickGesture = gesture
+    entityClickGesture = gesture
   }
 
-  @objc private func handleEmailClick(_ gesture: NSClickGestureRecognizer) {
+  @objc private func handleEntityClick(_ gesture: NSClickGestureRecognizer) {
     guard gesture.state == .ended else { return }
     guard let layoutManager = textView.layoutManager,
           let textContainer = textView.textContainer
@@ -555,6 +555,19 @@ class MessageViewAppKit: NSView {
           let textStorage = textView.textStorage,
           characterIndex < textStorage.length
     else { return }
+
+    var inlineCodeRange = NSRange(location: 0, length: 0)
+    if let isInlineCode = textStorage.attribute(
+      .inlineCode,
+      at: characterIndex,
+      effectiveRange: &inlineCodeRange
+    ) as? Bool, isInlineCode {
+      let inlineCodeText = (textStorage.string as NSString).substring(with: inlineCodeRange)
+      NSPasteboard.general.clearContents()
+      NSPasteboard.general.setString(inlineCodeText, forType: .string)
+      ToastCenter.shared.showSuccess("Copied code")
+      return
+    }
 
     if let email = textStorage.attribute(.emailAddress, at: characterIndex, effectiveRange: nil) as? String {
       NSPasteboard.general.clearContents()
