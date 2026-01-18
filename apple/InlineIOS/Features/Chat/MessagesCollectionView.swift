@@ -199,6 +199,16 @@ final class MessagesCollectionView: UICollectionView {
     return true
   }
 
+  func sourceViewForMessageId(_ messageId: Int64) -> UIView? {
+    guard let indexPath = findIndexPath(for: messageId),
+          let cell = cellForItem(at: indexPath) as? MessageCollectionViewCell
+    else {
+      return nil
+    }
+
+    return cell.messageView?.newPhotoView.imageView
+  }
+
   private func safeScrollToTop(animated: Bool = true) {
     // Check both view model and data source to avoid race conditions
     guard coordinator.viewModel.numberOfSections() > 0,
@@ -496,6 +506,7 @@ private extension MessagesCollectionView {
     private weak var collectionContextMenu: UIContextMenuInteraction?
     private var cancellables = Set<AnyCancellable>()
     private var updateWorkItem: DispatchWorkItem?
+    private var isPresentingImageViewer = false
 
     // MARK: - Date Separator Visibility Handling
 
@@ -640,6 +651,15 @@ private extension MessagesCollectionView {
             name: Notification.Name("NavigateToUser"),
             object: nil,
             userInfo: ["userId": userId]
+          )
+        }
+
+        cell.onPhotoTap = { [weak self] message, sourceView, sourceImage, url in
+          self?.presentPhotoGallery(
+            for: message,
+            sourceView: sourceView,
+            sourceImage: sourceImage,
+            imageURL: url
           )
         }
       }
@@ -884,6 +904,86 @@ private extension MessagesCollectionView {
         object: nil,
         userInfo: ["hasUnread": hasUnreadSinceScroll]
       )
+    private func presentPhotoGallery(
+      for message: FullMessage,
+      sourceView: UIView,
+      sourceImage: UIImage?,
+      imageURL: URL
+    ) {
+      guard message.message.isSticker != true else { return }
+      guard !isPresentingImageViewer else { return }
+      guard let collectionView = currentCollectionView as? MessagesCollectionView else { return }
+      guard let viewController = collectionView.findViewController() else { return }
+      if viewController.presentedViewController != nil ||
+        viewController.isBeingPresented ||
+        viewController.isBeingDismissed
+      {
+        return
+      }
+
+      var items = buildImageItems()
+      let messageId = message.message.messageId
+      if !items.contains(where: { $0.id == messageId }) {
+        items.append(ImageViewerItem(id: messageId, url: imageURL))
+      }
+      let initialIndex = items.firstIndex(where: { $0.id == messageId }) ?? 0
+
+      let viewer = ImageViewerController(
+        imageItems: items,
+        initialIndex: initialIndex,
+        sourceView: sourceView,
+        sourceImage: sourceImage,
+        sourceViewProvider: { [weak collectionView] id in
+          collectionView?.sourceViewForMessageId(id)
+        }
+      )
+      viewer.onDismiss = { [weak self] in
+        self?.isPresentingImageViewer = false
+      }
+
+      isPresentingImageViewer = true
+      viewController.present(viewer, animated: false)
+    }
+
+    private func buildImageItems() -> [ImageViewerItem] {
+      let photoMessages = viewModel.sections
+        .flatMap(\.messages)
+        .filter { $0.photoInfo != nil && $0.message.isSticker != true }
+
+      let sortedMessages = photoMessages.sorted { left, right in
+        if left.message.date != right.message.date {
+          return left.message.date < right.message.date
+        }
+        return left.message.messageId < right.message.messageId
+      }
+
+      var items: [ImageViewerItem] = []
+      items.reserveCapacity(sortedMessages.count)
+
+      for message in sortedMessages {
+        guard let url = photoURL(for: message) else { continue }
+        items.append(ImageViewerItem(id: message.message.messageId, url: url))
+      }
+
+      return items
+    }
+
+    private func photoURL(for message: FullMessage) -> URL? {
+      guard let photoInfo = message.photoInfo,
+            let photoSize = photoInfo.bestPhotoSize()
+      else {
+        return nil
+      }
+
+      if let localPath = photoSize.localPath {
+        return FileCache.getUrl(for: .photos, localPath: localPath)
+      }
+
+      if let cdnUrl = photoSize.cdnUrl {
+        return URL(string: cdnUrl)
+      }
+
+      return nil
     }
 
     private var sizeCache: [FullMessage.ID: CGSize] = [:]

@@ -5,10 +5,15 @@ import Nuke
 import NukeUI
 import UIKit
 
+struct ImageViewerItem: Hashable {
+  let id: Int64
+  let url: URL
+}
+
 final class ImageViewerController: UIViewController {
   // MARK: - Properties
 
-  private let imageURL: URL?
+  private var imageURL: URL?
   private let videoURL: URL?
   private weak var sourceView: UIView?
   private let sourceImage: UIImage?
@@ -16,6 +21,9 @@ final class ImageViewerController: UIViewController {
   private let sourceCornerRadius: CGFloat
   private let destinationCornerRadius: CGFloat = 0
   private let showInChatAction: (() -> Void)?
+  private let imageItems: [ImageViewerItem]
+  private var currentIndex: Int
+  private let sourceViewProvider: ((Int64) -> UIView?)?
   var onDismiss: (() -> Void)?
 
   private let isVideo: Bool
@@ -23,6 +31,8 @@ final class ImageViewerController: UIViewController {
   private var audioSessionSnapshot: AudioSessionSnapshot?
   private var playerViewController: AVPlayerViewController?
   private var didRestoreAudioSession = false
+  private var didRegisterImageObserver = false
+  private var didApplySourceImage = false
 
   private struct AudioSessionSnapshot {
     let category: AVAudioSession.Category
@@ -126,6 +136,23 @@ final class ImageViewerController: UIViewController {
     return button
   }()
 
+  private lazy var pageIndicatorView: UIView = {
+    let view = UIView()
+    view.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+    view.layer.cornerRadius = 12
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.isHidden = imageItems.count <= 1
+    return view
+  }()
+
+  private lazy var pageIndicatorLabel: UILabel = {
+    let label = UILabel()
+    label.textColor = .white
+    label.font = .systemFont(ofSize: 13, weight: .semibold)
+    label.translatesAutoresizingMaskIntoConstraints = false
+    return label
+  }()
+
     
   // MARK: - Initialization
     
@@ -144,6 +171,9 @@ final class ImageViewerController: UIViewController {
     self.isVideo = false
     self.sourceFrame = sourceView.convert(sourceView.bounds, to: nil)
     self.sourceCornerRadius = max(0, sourceCornerRadius)
+    self.imageItems = []
+    self.currentIndex = 0
+    self.sourceViewProvider = nil
       
     super.init(nibName: nil, bundle: nil)
     modalPresentationStyle = .overFullScreen
@@ -157,6 +187,38 @@ final class ImageViewerController: UIViewController {
     sourceCornerRadius: CGFloat = 16,
     showInChatAction: (() -> Void)? = nil
   ) {
+    imageItems: [ImageViewerItem],
+    initialIndex: Int,
+    sourceView: UIView,
+    sourceImage: UIImage? = nil,
+    showInChatAction: (() -> Void)? = nil,
+    sourceViewProvider: ((Int64) -> UIView?)? = nil
+  ) {
+    self.imageItems = imageItems
+    self.sourceViewProvider = sourceViewProvider
+
+    if imageItems.isEmpty {
+      self.imageURL = nil
+      self.currentIndex = 0
+    } else {
+      let safeIndex = max(0, min(initialIndex, imageItems.count - 1))
+      self.imageURL = imageItems[safeIndex].url
+      self.currentIndex = safeIndex
+    }
+
+    self.videoURL = nil
+    self.sourceView = sourceView
+    self.sourceImage = sourceImage
+    self.showInChatAction = showInChatAction
+    self.isVideo = false
+    self.sourceFrame = sourceView.convert(sourceView.bounds, to: nil)
+
+    super.init(nibName: nil, bundle: nil)
+    modalPresentationStyle = .overFullScreen
+    modalTransitionStyle = .crossDissolve
+  }
+
+  init(videoURL: URL, sourceView: UIView, sourceImage: UIImage? = nil, showInChatAction: (() -> Void)? = nil) {
     self.imageURL = nil
     self.videoURL = videoURL
     self.sourceView = sourceView
@@ -165,6 +227,9 @@ final class ImageViewerController: UIViewController {
     self.isVideo = true
     self.sourceFrame = sourceView.convert(sourceView.bounds, to: nil)
     self.sourceCornerRadius = max(0, sourceCornerRadius)
+    self.imageItems = []
+    self.currentIndex = 0
+    self.sourceViewProvider = nil
 
     super.init(nibName: nil, bundle: nil)
     modalPresentationStyle = .overFullScreen
@@ -182,6 +247,7 @@ final class ImageViewerController: UIViewController {
     super.viewDidLoad()
     setupViews()
     setupGestures()
+    updatePageIndicator()
 
     keepTransitionImageUntilLoad = !isVideo && sourceImage != nil
 
@@ -229,6 +295,11 @@ final class ImageViewerController: UIViewController {
     controlsContainerView.addSubview(closeButton)
     controlsContainerView.addSubview(shareButton)
     controlsContainerView.addSubview(showInChatButton)
+
+    if imageItems.count > 1 {
+      controlsContainerView.addSubview(pageIndicatorView)
+      pageIndicatorView.addSubview(pageIndicatorLabel)
+    }
         
     NSLayoutConstraint.activate([
       scrollView.topAnchor.constraint(equalTo: view.topAnchor),
@@ -267,6 +338,18 @@ final class ImageViewerController: UIViewController {
       showInChatButton.leadingAnchor.constraint(greaterThanOrEqualTo: closeButton.trailingAnchor, constant: 8),
       showInChatButton.trailingAnchor.constraint(lessThanOrEqualTo: shareButton.leadingAnchor, constant: -8)
     ])
+
+    if imageItems.count > 1 {
+      NSLayoutConstraint.activate([
+        pageIndicatorView.centerXAnchor.constraint(equalTo: controlsContainerView.centerXAnchor),
+        pageIndicatorView.centerYAnchor.constraint(equalTo: closeButton.centerYAnchor),
+
+        pageIndicatorLabel.topAnchor.constraint(equalTo: pageIndicatorView.topAnchor, constant: 6),
+        pageIndicatorLabel.bottomAnchor.constraint(equalTo: pageIndicatorView.bottomAnchor, constant: -6),
+        pageIndicatorLabel.leadingAnchor.constraint(equalTo: pageIndicatorView.leadingAnchor, constant: 10),
+        pageIndicatorLabel.trailingAnchor.constraint(equalTo: pageIndicatorView.trailingAnchor, constant: -10),
+      ])
+    }
         
     setupImageViewConstraints()
 
@@ -336,6 +419,52 @@ final class ImageViewerController: UIViewController {
     let panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePanGesture(_:)))
     panGesture.delegate = self
     view.addGestureRecognizer(panGesture)
+
+    if imageItems.count > 1 {
+      let swipeLeft = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipeGesture(_:)))
+      swipeLeft.direction = .left
+      swipeLeft.delegate = self
+      view.addGestureRecognizer(swipeLeft)
+
+      let swipeRight = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipeGesture(_:)))
+      swipeRight.direction = .right
+      swipeRight.delegate = self
+      view.addGestureRecognizer(swipeRight)
+    }
+  }
+
+  private func updatePageIndicator() {
+    guard imageItems.count > 1 else { return }
+    pageIndicatorLabel.text = "\(currentIndex + 1) / \(imageItems.count)"
+    pageIndicatorView.isHidden = false
+  }
+
+  private func updateSourceViewForCurrentItem() {
+    guard let sourceViewProvider, !imageItems.isEmpty else { return }
+    let itemId = imageItems[currentIndex].id
+    sourceView = sourceViewProvider(itemId)
+    if let sourceView {
+      sourceFrame = sourceView.convert(sourceView.bounds, to: nil)
+    }
+  }
+
+  private func showImage(at index: Int, direction: UISwipeGestureRecognizer.Direction) {
+    guard index >= 0, index < imageItems.count else { return }
+    currentIndex = index
+    imageURL = imageItems[index].url
+    updateSourceViewForCurrentItem()
+    updatePageIndicator()
+
+    let transition = CATransition()
+    transition.type = .push
+    transition.subtype = direction == .left ? .fromRight : .fromLeft
+    transition.duration = 0.25
+    transition.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+    mediaContainerView.layer.add(transition, forKey: "imageSwipe")
+
+    scrollView.setZoomScale(scrollView.minimumZoomScale, animated: false)
+    imageView.imageView.image = nil
+    loadImage()
   }
 
   private func loadMedia() {
@@ -350,10 +479,11 @@ final class ImageViewerController: UIViewController {
   private func loadImage() {
     guard let imageURL else { return }
 
-    if let sourceImage = sourceImage {
+    if let sourceImage = sourceImage, !didApplySourceImage {
       imageView.imageView.image = sourceImage
       updateImageViewConstraints()
       imageView.placeholderView = nil
+      didApplySourceImage = true
     }
 
     imageView.onSuccess = { [weak self] _ in
@@ -373,6 +503,16 @@ final class ImageViewerController: UIViewController {
     }
 
     imageView.url = imageURL
+
+    if !didRegisterImageObserver {
+      NotificationCenter.default.addObserver(
+        self,
+        selector: #selector(imageDidLoad),
+        name: .imageLoadingDidFinish,
+        object: nil
+      )
+      didRegisterImageObserver = true
+    }
   }
 
   private func loadVideo() {
@@ -563,6 +703,13 @@ final class ImageViewerController: UIViewController {
   }
 
   // MARK: - Actions
+
+  @objc private func handleSwipeGesture(_ gesture: UISwipeGestureRecognizer) {
+    guard !isVideo, imageItems.count > 1 else { return }
+    let delta = gesture.direction == .left ? 1 : -1
+    let nextIndex = currentIndex + delta
+    showImage(at: nextIndex, direction: gesture.direction)
+  }
 
   @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
     if scrollView.zoomScale > scrollView.minimumZoomScale {
@@ -836,6 +983,9 @@ extension ImageViewerController: UIScrollViewDelegate {
 
 extension ImageViewerController: UIGestureRecognizerDelegate {
   func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+    if gestureRecognizer is UISwipeGestureRecognizer {
+      return !isVideo && imageItems.count > 1 && scrollView.zoomScale == scrollView.minimumZoomScale
+    }
     if let panGesture = gestureRecognizer as? UIPanGestureRecognizer {
       let velocity = panGesture.velocity(in: view)
       // Only allow vertical panning to dismiss when not zoomed in

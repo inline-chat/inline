@@ -58,6 +58,7 @@ final class NewPhotoView: UIView {
   }()
 
   private var imageConstraints: [NSLayoutConstraint] = []
+  var onTap: ((FullMessage, UIView, UIImage?, URL) -> Void)?
 
   // MARK: - Initialization
 
@@ -361,6 +362,11 @@ final class NewPhotoView: UIView {
   @objc private func handleTap() {
     guard fullMessage.message.isSticker != true else { return }
     guard let url = imageLocalUrl() ?? imageCdnUrl() else { return }
+
+    if let onTap {
+      onTap(fullMessage, imageView, imageView.imageView.image, url)
+      return
+    }
 
     let imageViewer = ImageViewerController(
       imageURL: url,
