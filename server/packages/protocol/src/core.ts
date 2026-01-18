@@ -734,7 +734,11 @@ export enum MessageEntity_Type {
     /**
      * @generated from protobuf enum value: TYPE_PRE = 9;
      */
-    PRE = 9
+    PRE = 9,
+    /**
+     * @generated from protobuf enum value: TYPE_PHONE_NUMBER = 10;
+     */
+    PHONE_NUMBER = 10
 }
 /**
  * @generated from protobuf message MessageReactions

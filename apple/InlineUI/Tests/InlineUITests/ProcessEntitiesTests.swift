@@ -212,17 +212,14 @@ struct ProcessEntitiesTests {
     #expect(emailAttributes[.link] == nil)
   }
 
-  @Test("Phone number text_url applies phone attributes without link")
+  @Test("Phone number entity applies phone attributes without link")
   func testPhoneNumberTextURL() {
     let text = "Call (415)555-1234 for details"
     let phoneRange = rangeOfSubstring("(415)555-1234", in: text)
     var phoneEntity = MessageEntity()
-    phoneEntity.type = .textURL
+    phoneEntity.type = .phoneNumber
     phoneEntity.offset = Int64(phoneRange.location)
     phoneEntity.length = Int64(phoneRange.length)
-    phoneEntity.textURL = MessageEntity.MessageEntityTextUrl.with {
-      $0.url = "(415)555-1234"
-    }
 
     let entities = createMessageEntities([phoneEntity])
 
@@ -586,10 +583,9 @@ struct ProcessEntitiesTests {
     #expect(result.entities.entities.count == 1)
 
     let entity = result.entities.entities[0]
-    #expect(entity.type == .textURL)
+    #expect(entity.type == .phoneNumber)
     #expect(entity.offset == 0)
     #expect(entity.length == Int64(range.length))
-    #expect(entity.textURL.url == "+1(415)555-1234")
   }
 
   @Test("Detect email entity from plain text")
@@ -621,7 +617,7 @@ struct ProcessEntitiesTests {
 
     let phoneRange = rangeOfSubstring("+1(415)555-1234", in: text)
     let phoneEntity = result.entities.entities.first {
-      $0.type == .textURL && $0.textURL.url == "+1(415)555-1234"
+      $0.type == .phoneNumber
     }
     #expect(phoneEntity != nil)
     #expect(phoneEntity?.offset == Int64(phoneRange.location))
@@ -640,7 +636,7 @@ struct ProcessEntitiesTests {
 
     let phoneRange = rangeOfSubstring("4155551234", in: text)
     let phoneEntity = result.entities.entities.first {
-      $0.type == .textURL && $0.textURL.url == "4155551234"
+      $0.type == .phoneNumber
     }
     #expect(phoneEntity != nil)
     #expect(phoneEntity?.offset == Int64(phoneRange.location))
@@ -656,7 +652,7 @@ struct ProcessEntitiesTests {
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString)
-    let phoneEntity = result.entities.entities.first { $0.type == .textURL }
+    let phoneEntity = result.entities.entities.first { $0.type == .phoneNumber }
     #expect(phoneEntity == nil)
   }
 
@@ -669,7 +665,7 @@ struct ProcessEntitiesTests {
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString)
-    let phoneEntity = result.entities.entities.first { $0.type == .textURL }
+    let phoneEntity = result.entities.entities.first { $0.type == .phoneNumber }
     #expect(phoneEntity == nil)
   }
 
@@ -682,7 +678,7 @@ struct ProcessEntitiesTests {
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString)
-    let phoneEntity = result.entities.entities.first { $0.type == .textURL }
+    let phoneEntity = result.entities.entities.first { $0.type == .phoneNumber }
     #expect(phoneEntity == nil)
   }
 
@@ -695,7 +691,7 @@ struct ProcessEntitiesTests {
     )
 
     let result = ProcessEntities.fromAttributedString(attributedString)
-    let phoneEntity = result.entities.entities.first { $0.type == .textURL }
+    let phoneEntity = result.entities.entities.first { $0.type == .phoneNumber }
     #expect(phoneEntity == nil)
   }
 

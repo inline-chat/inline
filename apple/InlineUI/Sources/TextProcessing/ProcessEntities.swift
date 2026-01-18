@@ -167,6 +167,20 @@ public class ProcessEntities {
 
           attributedString.addAttributes(attributes, range: range)
 
+        case .phoneNumber:
+          let phoneText = (text as NSString).substring(with: range)
+          var attributes: [NSAttributedString.Key: Any] = [
+            .foregroundColor: configuration.linkColor,
+            .underlineStyle: 0,
+            .phoneNumber: phoneText,
+          ]
+
+          #if os(macOS)
+          attributes[.cursor] = NSCursor.pointingHand
+          #endif
+
+          attributedString.addAttributes(attributes, range: range)
+
         case .mention:
           if case let .mention(mention) = entity.entity {
             if configuration.convertMentionsToLink {
@@ -280,12 +294,9 @@ public class ProcessEntities {
          isValidPhoneNumberCandidate(phoneNumber)
       {
         var entity = MessageEntity()
-        entity.type = .textURL
+        entity.type = .phoneNumber
         entity.offset = Int64(range.location)
         entity.length = Int64(range.length)
-        entity.textURL = MessageEntity.MessageEntityTextUrl.with {
-          $0.url = phoneNumber
-        }
         entities.append(entity)
       }
     }
@@ -329,14 +340,11 @@ public class ProcessEntities {
         return
       }
 
-      if let phoneNumber = phoneNumber(from: urlString) {
+      if phoneNumber(from: urlString) != nil {
         var entity = MessageEntity()
-        entity.type = .textURL
+        entity.type = .phoneNumber
         entity.offset = Int64(range.location)
         entity.length = Int64(range.length)
-        entity.textURL = MessageEntity.MessageEntityTextUrl.with {
-          $0.url = phoneNumber
-        }
         entities.append(entity)
         return
       }
@@ -748,12 +756,9 @@ public class ProcessEntities {
       guard isValidPhoneNumberCandidate(rawPhoneNumber) else { continue }
 
       var entity = MessageEntity()
-      entity.type = .textURL
+      entity.type = .phoneNumber
       entity.offset = Int64(match.range.location)
       entity.length = Int64(match.range.length)
-      entity.textURL = MessageEntity.MessageEntityTextUrl.with {
-        $0.url = rawPhoneNumber
-      }
       entities.append(entity)
     }
 
