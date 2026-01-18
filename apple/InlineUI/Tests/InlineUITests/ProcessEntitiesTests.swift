@@ -212,6 +212,32 @@ struct ProcessEntitiesTests {
     #expect(emailAttributes[.link] == nil)
   }
 
+  @Test("Phone number text_url applies phone attributes without link")
+  func testPhoneNumberTextURL() {
+    let text = "Call (415)555-1234 for details"
+    let phoneRange = rangeOfSubstring("(415)555-1234", in: text)
+    var phoneEntity = MessageEntity()
+    phoneEntity.type = .textURL
+    phoneEntity.offset = Int64(phoneRange.location)
+    phoneEntity.length = Int64(phoneRange.length)
+    phoneEntity.textURL = MessageEntity.MessageEntityTextUrl.with {
+      $0.url = "tel:+14155551234"
+    }
+
+    let entities = createMessageEntities([phoneEntity])
+
+    let result = ProcessEntities.toAttributedString(
+      text: text,
+      entities: entities,
+      configuration: testConfiguration
+    )
+
+    let phoneAttributes = result.attributes(at: phoneRange.location, effectiveRange: nil)
+    #expect(phoneAttributes[.foregroundColor] as? PlatformColor == testConfiguration.linkColor)
+    #expect(phoneAttributes[.phoneNumber] as? String == "(415)555-1234")
+    #expect(phoneAttributes[.link] == nil)
+  }
+
   @Test("Italic text")
   func testItalicText() {
     let text = "This is italic text"
@@ -543,6 +569,29 @@ struct ProcessEntitiesTests {
     #expect(entity.length == Int64(range.length))
   }
 
+  @Test("Extract phone number from tel link attributes")
+  func testExtractPhoneNumberFromTelLinkAttributes() {
+    let text = "call me"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let range = NSRange(location: 0, length: (text as NSString).length)
+    attributedString.addAttribute(.link, value: "tel:+14155551234", range: range)
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+
+    #expect(result.text == text)
+    #expect(result.entities.entities.count == 1)
+
+    let entity = result.entities.entities[0]
+    #expect(entity.type == .textURL)
+    #expect(entity.offset == 0)
+    #expect(entity.length == Int64(range.length))
+    #expect(entity.textURL.url == "tel:+14155551234")
+  }
+
   @Test("Detect email entity from plain text")
   func testDetectEmailFromPlainText() {
     let text = "Email test@example.com for updates"
@@ -558,6 +607,96 @@ struct ProcessEntitiesTests {
     #expect(emailEntity != nil)
     #expect(emailEntity?.offset == Int64(emailRange.location))
     #expect(emailEntity?.length == Int64(emailRange.length))
+  }
+
+  @Test("Detect phone entity from plain text")
+  func testDetectPhoneFromPlainText() {
+    let text = "Call +1(415)555-1234 for updates"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+
+    let phoneRange = rangeOfSubstring("+1(415)555-1234", in: text)
+    let phoneEntity = result.entities.entities.first {
+      $0.type == .textURL && $0.textURL.url == "tel:+14155551234"
+    }
+    #expect(phoneEntity != nil)
+    #expect(phoneEntity?.offset == Int64(phoneRange.location))
+    #expect(phoneEntity?.length == Int64(phoneRange.length))
+  }
+
+  @Test("Detect digits-only phone entity from plain text")
+  func testDetectDigitsOnlyPhoneFromPlainText() {
+    let text = "Call 4155551234 for updates"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+
+    let phoneRange = rangeOfSubstring("4155551234", in: text)
+    let phoneEntity = result.entities.entities.first {
+      $0.type == .textURL && $0.textURL.url == "tel:4155551234"
+    }
+    #expect(phoneEntity != nil)
+    #expect(phoneEntity?.offset == Int64(phoneRange.location))
+    #expect(phoneEntity?.length == Int64(phoneRange.length))
+  }
+
+  @Test("Does not detect phone numbers with whitespace")
+  func testRejectPhoneWithWhitespace() {
+    let text = "Call 415 555 1234 for updates"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+    let phoneEntity = result.entities.entities.first { $0.type == .textURL && $0.textURL.url.hasPrefix("tel:") }
+    #expect(phoneEntity == nil)
+  }
+
+  @Test("Does not detect date-like numbers as phone numbers")
+  func testRejectDateLikePhoneNumber() {
+    let text = "Release 2025-09-12 is scheduled"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+    let phoneEntity = result.entities.entities.first { $0.type == .textURL && $0.textURL.url.hasPrefix("tel:") }
+    #expect(phoneEntity == nil)
+  }
+
+  @Test("Does not detect short dashed numbers as phone numbers")
+  func testRejectShortDashedPhoneNumber() {
+    let text = "SSN 123-45-6789 is not a phone"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+    let phoneEntity = result.entities.entities.first { $0.type == .textURL && $0.textURL.url.hasPrefix("tel:") }
+    #expect(phoneEntity == nil)
+  }
+
+  @Test("Does not detect short numeric strings as phone numbers")
+  func testRejectShortDigitsOnlyPhoneNumber() {
+    let text = "Code 1234567 should not match"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+    let phoneEntity = result.entities.entities.first { $0.type == .textURL && $0.textURL.url.hasPrefix("tel:") }
+    #expect(phoneEntity == nil)
   }
 
   @Test("Extract url from attributed string when visible text matches target")
