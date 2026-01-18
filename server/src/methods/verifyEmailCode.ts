@@ -51,6 +51,14 @@ export const handler = async (
     throw new InlineError(InlineError.ApiError.EMAIL_INVALID)
   }
 
+  if (!input.deviceId) {
+    Log.shared.warn("Missing deviceId on verifyEmailCode", {
+      clientType: input.clientType,
+      clientVersion: input.clientVersion,
+      osVersion: input.osVersion,
+    })
+  }
+
   let email = normalizeEmail(input.email)
 
   // add random delay to limit bruteforce

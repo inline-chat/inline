@@ -1,8 +1,9 @@
 import { describe, expect, it } from "bun:test"
 import { app } from "../index"
 import { db } from "@in/server/db"
-import { loginCodes, users } from "@in/server/db/schema"
+import { loginCodes, sessions, users } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
+import { hashToken } from "@in/server/utils/auth"
 import { testUtils, setupTestLifecycle } from "./setup"
 
 describe("API Endpoints", () => {
@@ -78,6 +79,48 @@ describe("API Endpoints", () => {
       const user = await db.select().from(users).where(eq(users.email, "test@example.com"))
       expect(user.length).toBe(1)
       expect(user[0]?.email).toBe("test@example.com")
+    })
+
+    it("should preserve deviceId when saving push token", async () => {
+      await db.insert(loginCodes).values({
+        email: "device@test.com",
+        code: "654321",
+        expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
+      })
+
+      const request = new Request("http://localhost/v1/verifyEmailCode", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: "device@test.com",
+          code: "654321",
+          deviceId: "device-test-1",
+        }),
+      })
+
+      const response = await testServer.handle(request)
+      expect(response.status).toBe(200)
+      const json = await response.json()
+      expect(json.ok).toBe(true)
+      const token = json.result.token as string
+      expect(token).toBeDefined()
+
+      const saveRequest = new Request("http://localhost/v1/savePushNotification?applePushToken=apn-test-token", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      const saveResponse = await testServer.handle(saveRequest)
+      expect(saveResponse.status).toBe(200)
+
+      const tokenHash = hashToken(token)
+      const session = (await db.select().from(sessions).where(eq(sessions.tokenHash, tokenHash)))[0]
+      expect(session).toBeDefined()
+      expect(session?.deviceId).toBe("device-test-1")
     })
   })
 })

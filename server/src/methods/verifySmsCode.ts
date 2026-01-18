@@ -53,6 +53,14 @@ export const handler = async (
       throw new InlineError(InlineError.ApiError.PHONE_INVALID)
     }
 
+    if (!input.deviceId) {
+      Log.shared.warn("Missing deviceId on verifySmsCode", {
+        clientType: input.clientType,
+        clientVersion: input.clientVersion,
+        osVersion: input.osVersion,
+      })
+    }
+
     let formattedPhoneNumber = phoneNumber.number
 
     // send sms code

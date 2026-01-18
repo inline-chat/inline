@@ -21,6 +21,7 @@
 - Avoid `Any`/`any`, force unwraps (`!`), `try!`, forced/unsafe casts (e.g. `as!`), and other unsafe patterns that can crash or trigger runtime fatal errors; use safe alternatives whenever possible unless there is no other way.
 - Regenerate protobufs after proto changes with `bun run generate:proto` (or per-language commands in `scripts/`); rebuild Swift `InlineProtocol` target if needed.
 - Default test timeout 25s; run focused tests from relevant package roots; avoid heavy/unapproved tooling (e.g., do not run `xcodebuild` full apps).
+- Run tests when a feature is finished or when asked to write tests; follow up with typecheck for TS when relevant.
 - NEVER revert, discard, reset unrelated changes to the work you are doing or files you are touching. User may be working on other files simultaneously. NEVER clean files you have not edited, created or moved. When asked to commit, just commit your changes.
 - For larger tasks, write a comprehensive plan first; if there are multiple design choices or any room for ambiguity, ask clarifying questions; when implementing a large plan (more than a few tasks) save the plan in a markdown file in .agent-docs/ and update it after each task before starting next one.
 - When adding markdown files in `.agent-docs/`, prefix the filename with the date in `YYYY-MM-DD-title-kebab-case.md` format (example: `2026-01-02-title-kebab-case.md`).
@@ -50,6 +51,7 @@
 - Logging via `Log.scoped`; avoid main-thread heavy work; use Swift concurrency; prefer small composable views/modifiers.
 - Regenerate Swift protos with `bun run proto:generate-swift` (scripts) then rebuild `InlineProtocol` target in Xcode if necessary.
 - Search for relevant Apple developer documentations for key APIs you want to use. To load the link, replace https://developer.apple.com/ with https://sosumi.ai/ to give you compact markdown versions of the same docs. Read the links via CURL, do not use web search for that. Read the URL.
+- Helpers: Liquid Glass (SwiftUI) — gate with `#available` (iOS/macOS 26+); apply `glassEffect` after layout/appearance; wrap multiple glass views in `GlassEffectContainer`; use `.interactive()` only for tappable elements.
 
 ## Backend
 
