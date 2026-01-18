@@ -26,6 +26,7 @@ message ServerUpdate {
     // User bucket updates
     ServerUserUpdateSpaceMemberDelete user_space_member_delete = 10;
     ServerUserUpdateChatParticipantDelete user_chat_participant_delete = 11;
+    ServerUserUpdateDialogArchived user_dialog_archived = 14;
   }
 }
 
@@ -88,3 +89,9 @@ message ServerUserUpdateSpaceMemberDelete { int64 space_id = 1; }
 
 // Update for a user when they were removed from a chat
 message ServerUserUpdateChatParticipantDelete { int64 chat_id = 1; }
+
+// Update for a user when a dialog is archived or unarchived
+message ServerUserUpdateDialogArchived {
+  Peer peer_id = 1;
+  bool archived = 2;
+}

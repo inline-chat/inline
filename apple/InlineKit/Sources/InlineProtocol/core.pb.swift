@@ -4530,6 +4530,14 @@ public struct Update: @unchecked Sendable {
     set {_uniqueStorage()._update = .chatVisibility(newValue)}
   }
 
+  public var dialogArchived: UpdateDialogArchived {
+    get {
+      if case .dialogArchived(let v)? = _storage._update {return v}
+      return UpdateDialogArchived()
+    }
+    set {_uniqueStorage()._update = .dialogArchived(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Update: Equatable, Sendable {
@@ -4568,6 +4576,7 @@ public struct Update: @unchecked Sendable {
     case spaceHasNewUpdates(UpdateSpaceHasNewUpdates)
     case spaceMemberUpdate(UpdateSpaceMemberUpdate)
     case chatVisibility(UpdateChatVisibility)
+    case dialogArchived(UpdateDialogArchived)
 
   }
 
@@ -4881,6 +4890,32 @@ public struct UpdateMarkAsUnread: Sendable {
 
   /// Whether it's marked as unread (true) or not (false)
   public var unreadMark: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: Peer? = nil
+}
+
+/// Update when a dialog is archived or unarchived
+public struct UpdateDialogArchived: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Peer ID of the dialog that changed
+  public var peerID: Peer {
+    get {return _peerID ?? Peer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {return self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  /// Whether it's archived (true) or unarchived (false)
+  public var archived: Bool = false
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -12293,6 +12328,7 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     26: .standard(proto: "space_has_new_updates"),
     27: .standard(proto: "space_member_update"),
     28: .standard(proto: "chat_visibility"),
+    29: .standard(proto: "dialog_archived"),
   ]
 
   fileprivate class _StorageClass {
@@ -12661,6 +12697,19 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
             _storage._update = .chatVisibility(v)
           }
         }()
+        case 29: try {
+          var v: UpdateDialogArchived?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .dialogArchived(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .dialogArchived(v)
+          }
+        }()
         default: break
         }
       }
@@ -12779,6 +12828,10 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
       case .chatVisibility?: try {
         guard case .chatVisibility(let v)? = _storage._update else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 28)
+      }()
+      case .dialogArchived?: try {
+        guard case .dialogArchived(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 29)
       }()
       case nil: break
       }
@@ -13330,6 +13383,48 @@ extension UpdateMarkAsUnread: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
   public static func ==(lhs: UpdateMarkAsUnread, rhs: UpdateMarkAsUnread) -> Bool {
     if lhs._peerID != rhs._peerID {return false}
     if lhs.unreadMark != rhs.unreadMark {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateDialogArchived: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateDialogArchived"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "peer_id"),
+    2: .same(proto: "archived"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self.archived) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if self.archived != false {
+      try visitor.visitSingularBoolField(value: self.archived, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateDialogArchived, rhs: UpdateDialogArchived) -> Bool {
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs.archived != rhs.archived {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
