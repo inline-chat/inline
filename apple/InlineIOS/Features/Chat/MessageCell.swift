@@ -17,6 +17,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
   weak var delegate: MessageCellDelegate?
   var onUserTap: ((Int64) -> Void)?
+  var onPhotoTap: ((FullMessage, UIView, UIImage?, URL) -> Void)?
   private var panGesture: UIPanGestureRecognizer!
   private var swipeActive = false
   private var initialTranslation: CGFloat = 0
@@ -119,6 +120,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
 
     // Reset delegate
     delegate = nil
+    onPhotoTap = nil
   }
 
   // MARK: - Constraints
@@ -411,6 +413,9 @@ extension MessageCollectionViewCell {
   func setupBaseMessageConstraints() {
     let newMessageView = UIMessageView(fullMessage: message, spaceId: spaceId)
     newMessageView.translatesAutoresizingMaskIntoConstraints = false
+    newMessageView.onPhotoTap = { [weak self] message, sourceView, sourceImage, url in
+      self?.onPhotoTap?(message, sourceView, sourceImage, url)
+    }
     contentView.addSubview(newMessageView)
 
     let topConstraint: NSLayoutConstraint
