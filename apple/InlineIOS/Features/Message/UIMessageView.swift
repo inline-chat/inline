@@ -668,6 +668,16 @@ class UIMessageView: UIView {
           return
         }
 
+        if let phoneNumber = attributedText.attribute(.phoneNumber, at: characterIndex, effectiveRange: nil) as? String {
+          UIPasteboard.general.string = phoneNumber
+          ToastManager.shared.showToast(
+            "Copied number",
+            type: .success,
+            systemImage: "doc.on.doc"
+          )
+          return
+        }
+
         attributedText.enumerateAttribute(.link, in: NSRange(
           location: 0,
           length: attributedText.length
