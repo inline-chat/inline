@@ -23,8 +23,11 @@ final class OverlayManager: ObservableObject, ToastPresenting {
 
   private weak var toastContainerView: NSView?
   private var toastHostingView: NSHostingView<ToastBannerView>?
+  private var toastTopConstraint: NSLayoutConstraint?
   private var toastModel: ToastModel?
   private var dismissTask: Task<Void, Never>?
+  private let toastVisibleTopOffset: CGFloat = 18
+  private let toastHiddenTopOffset: CGFloat = 8
 
   func attachToast(to containerView: NSView) {
     toastContainerView = containerView
@@ -70,12 +73,17 @@ final class OverlayManager: ObservableObject, ToastPresenting {
     toastModel = nil
 
     guard let host = toastHostingView else { return }
+    let topConstraint = toastTopConstraint
+    let containerView = host.superview
     NSAnimationContext.runAnimationGroup { ctx in
-      ctx.duration = 0.18
+      ctx.duration = 0.2
       host.animator().alphaValue = 0
+      topConstraint?.animator().constant = toastHiddenTopOffset
+      containerView?.animator().layoutSubtreeIfNeeded()
     } completionHandler: { [weak self] in
       host.removeFromSuperview()
       self?.toastHostingView = nil
+      self?.toastTopConstraint = nil
     }
   }
 
@@ -119,16 +127,21 @@ final class OverlayManager: ObservableObject, ToastPresenting {
       toastHostingView = host
       containerView.addSubview(host)
 
+      let topConstraint = host.topAnchor.constraint(equalTo: containerView.topAnchor, constant: toastHiddenTopOffset)
+      toastTopConstraint = topConstraint
       NSLayoutConstraint.activate([
-        host.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 18),
+        topConstraint,
         host.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
         host.widthAnchor.constraint(lessThanOrEqualTo: containerView.widthAnchor, constant: -36),
       ])
+      containerView.layoutSubtreeIfNeeded()
     }
 
     NSAnimationContext.runAnimationGroup { ctx in
-      ctx.duration = 0.18
+      ctx.duration = 0.2
       host.animator().alphaValue = 1
+      toastTopConstraint?.animator().constant = toastVisibleTopOffset
+      containerView.animator().layoutSubtreeIfNeeded()
     }
 
     if let seconds {
@@ -161,34 +174,51 @@ private struct ToastBannerView: View {
   let model: OverlayManager.ToastModel
   let dismiss: @MainActor () -> Void
 
-  private var background: Color {
+  @Environment(\.colorScheme) private var colorScheme
+
+  private var isInteractive: Bool {
+    model.actionTitle == nil || model.action == nil
+  }
+
+  private var tint: Color {
+    let opacity = 0.08
+    return colorScheme == .dark ? Color.black.opacity(opacity) : Color.white.opacity(opacity)
+  }
+
+  private var iconName: String {
     switch model.style {
       case .info:
-        return Color(nsColor: .windowBackgroundColor)
+        "info.circle.fill"
       case .success:
-        return Color.green.opacity(0.16)
+        "checkmark.circle.fill"
       case .error:
-        return Color.red.opacity(0.16)
+        "exclamationmark.triangle.fill"
     }
   }
 
-  private var stroke: Color {
+  private var iconColor: Color {
     switch model.style {
       case .info:
-        return Color(nsColor: .separatorColor)
+        .secondary
       case .success:
-        return Color.green.opacity(0.35)
+        .green
       case .error:
-        return Color.red.opacity(0.35)
+        .red
     }
   }
 
-  var body: some View {
-    HStack(spacing: 10) {
+  @ViewBuilder
+  private var toastContent: some View {
+    let shape = Capsule()
+    let content = HStack(spacing: 10) {
       if model.showsSpinner {
         ProgressView()
           .controlSize(.small)
       }
+
+      Image(systemName: iconName)
+        .font(.system(size: 12, weight: .semibold))
+        .foregroundStyle(iconColor)
 
       Text(model.message)
         .font(.system(size: 13, weight: .medium))
@@ -196,24 +226,49 @@ private struct ToastBannerView: View {
         .lineLimit(2)
 
       if let title = model.actionTitle, let action = model.action {
-        Button(title) {
-          action()
-          dismiss()
+        if #available(macOS 26.0, *) {
+          Button(title) {
+            action()
+            dismiss()
+          }
+          .buttonStyle(.glass)
+          .controlSize(.small)
+        } else {
+          Button(title) {
+            action()
+            dismiss()
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.small)
         }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
       }
     }
     .padding(.vertical, 10)
     .padding(.horizontal, 12)
-    .background(
-      RoundedRectangle(cornerRadius: 12, style: .continuous)
-        .fill(background)
-    )
-    .overlay(
-      RoundedRectangle(cornerRadius: 12, style: .continuous)
-        .stroke(stroke, lineWidth: 1)
-    )
-    .shadow(color: .black.opacity(0.10), radius: 10, x: 0, y: 6)
+    if #available(macOS 26.0, *) {
+      content
+        .glassEffect(.regular.interactive(isInteractive), in: shape)
+        .shadow(color: .black.opacity(0.10), radius: 10, x: 0, y: 6)
+        .contentShape(shape)
+        .if(model.actionTitle == nil || model.action == nil) { view in
+          view.onTapGesture {
+            dismiss()
+          }
+        }
+    } else {
+      content
+        .background(shape.fill(tint))
+        .shadow(color: .black.opacity(0.10), radius: 10, x: 0, y: 6)
+        .contentShape(shape)
+        .if(model.actionTitle == nil || model.action == nil) { view in
+          view.onTapGesture {
+            dismiss()
+          }
+        }
+    }
+  }
+
+  var body: some View {
+    toastContent
   }
 }
