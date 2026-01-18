@@ -36,7 +36,6 @@
 		CD0240C42EA439D400976FDE /* Invite in Frameworks */ = {isa = PBXBuildFile; productRef = CD0240C32EA439D400976FDE /* Invite */; };
 		CD0240C62EA439DA00976FDE /* Invite in Frameworks */ = {isa = PBXBuildFile; productRef = CD0240C52EA439DA00976FDE /* Invite */; };
 		CD092C4D2EDC6F4A00E867E5 /* InlineMacUI in Frameworks */ = {isa = PBXBuildFile; productRef = CD092C4C2EDC6F4A00E867E5 /* InlineMacUI */; };
-		E95DD2F1FC76F473B6D31EB6 /* InlineMacWindow in Frameworks */ = {isa = PBXBuildFile; productRef = 7BABF642C785B35DB0C34BF2 /* InlineMacWindow */; };
 		CD092C4F2EDC6F4A00E867E5 /* MacTheme in Frameworks */ = {isa = PBXBuildFile; productRef = CD092C4E2EDC6F4A00E867E5 /* MacTheme */; };
 		CD0A3CDA2CD536DF0081AD69 /* GRDBQuery in Frameworks */ = {isa = PBXBuildFile; productRef = CD0A3CD92CD536DF0081AD69 /* GRDBQuery */; };
 		CD27856F2CFB053C008A0EEF /* InlineConfig in Frameworks */ = {isa = PBXBuildFile; productRef = CD27856E2CFB053C008A0EEF /* InlineConfig */; };
@@ -55,6 +54,7 @@
 		CDC72E3D2D999C6D001E8A0C /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = CDC72E3C2D999C6D001E8A0C /* GRDB */; };
 		CDE960162CB94C4F004C541C /* SwiftUIIntrospect in Frameworks */ = {isa = PBXBuildFile; productRef = CDE960152CB94C4F004C541C /* SwiftUIIntrospect */; };
 		CDE9601C2CB94D1C004C541C /* KeychainSwift in Frameworks */ = {isa = PBXBuildFile; productRef = CDE9601B2CB94D1C004C541C /* KeychainSwift */; };
+		E95DD2F1FC76F473B6D31EB6 /* InlineMacWindow in Frameworks */ = {isa = PBXBuildFile; productRef = 7BABF642C785B35DB0C34BF2 /* InlineMacWindow */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -1514,6 +1514,10 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		7BABF642C785B35DB0C34BF2 /* InlineMacWindow */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineMacWindow;
+		};
 		B7020C532DCE157F007099D9 /* InlineConfig */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineConfig;
@@ -1639,10 +1643,6 @@
 		CD092C4C2EDC6F4A00E867E5 /* InlineMacUI */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = InlineMacUI;
-		};
-		7BABF642C785B35DB0C34BF2 /* InlineMacWindow */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = InlineMacWindow;
 		};
 		CD092C4E2EDC6F4A00E867E5 /* MacTheme */ = {
 			isa = XCSwiftPackageProductDependency;
