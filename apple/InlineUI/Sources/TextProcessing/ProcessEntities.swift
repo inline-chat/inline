@@ -121,19 +121,6 @@ public class ProcessEntities {
               #endif
 
               attributedString.addAttributes(attributes, range: range)
-            } else if phoneNumber(from: textURL.url) != nil {
-              let phoneText = (text as NSString).substring(with: range)
-              var attributes: [NSAttributedString.Key: Any] = [
-                .foregroundColor: configuration.linkColor,
-                .underlineStyle: 0,
-                .phoneNumber: phoneText,
-              ]
-
-              #if os(macOS)
-              attributes[.cursor] = NSCursor.pointingHand
-              #endif
-
-              attributedString.addAttributes(attributes, range: range)
             } else {
               var attributes: [NSAttributedString.Key: Any] = [
                 .foregroundColor: configuration.linkColor,
