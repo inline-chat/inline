@@ -6,6 +6,7 @@ struct ScrollToBottomButtonView: View {
   @State private var isPressed = false
 
   let buttonSize: CGFloat = Theme.scrollButtonSize
+  var hasUnread: Bool = false
   var onClick: (() -> Void)?
 
   var body: some View {
@@ -21,10 +22,20 @@ struct ScrollToBottomButtonView: View {
     .buttonStyle(ScrollToBottomButtonStyle())
     .focusable(false)
 
+    let content = button
+      .overlay(alignment: .topTrailing) {
+        if hasUnread {
+          Circle()
+            .fill(Color.accentColor)
+            .frame(width: 8, height: 8)
+            .offset(x: 1, y: -1)
+        }
+      }
+
     if #available(macOS 26.0, *) {
-      return button.glassEffect(.regular.interactive(), in: .circle)
+      return content.glassEffect(.regular.interactive(), in: .circle)
     } else {
-      return button.background(
+      return content.background(
         Circle()
           .fill(.ultraThinMaterial)
           .overlay(

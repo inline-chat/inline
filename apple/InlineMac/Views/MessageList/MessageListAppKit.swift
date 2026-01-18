@@ -611,6 +611,8 @@ class MessageListAppKit: NSViewController {
 
   // When exactly at the bottom
   private var isAtAbsoluteBottom = true
+  private var lastSeenMessageId: Int64 = 0
+  private var hasUnreadSinceScroll = false
 
   // This must be true for the whole duration of animation
   private var isPerformingUpdate = false
@@ -670,6 +672,11 @@ class MessageListAppKit: NSViewController {
     if prevAtBottom != isAtBottom {
       let shouldShow = !isAtBottom // && messages.count > 0
       scrollToBottomButton.setVisibility(shouldShow)
+      if isAtBottom {
+        markMessagesSeen()
+      } else {
+        updateUnreadBadgeVisibility()
+      }
     }
   }
 
@@ -803,6 +810,7 @@ class MessageListAppKit: NSViewController {
       }
 
       scrollToBottom(animated: false)
+      markMessagesSeen()
 
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
         guard let self else { return }
@@ -1044,7 +1052,7 @@ class MessageListAppKit: NSViewController {
     }
 
     switch update {
-      case .added:
+      case let .added(newMessages, _):
         log.trace("applying add changes")
 
         // Do incremental inserts only for provably-correct prefix/suffix insertions.
@@ -1057,6 +1065,7 @@ class MessageListAppKit: NSViewController {
         } else {
           reloadAll(animated: true)
         }
+        handleIncomingMessages(newMessages)
 
       case let .deleted(deletedIds, _):
         if newRowCount < oldRowCount, oldRowItems.starts(with: newRowItems) {
@@ -1521,6 +1530,7 @@ class MessageListAppKit: NSViewController {
     // Quicker check
     if isAtBottom {
       readAll()
+      markMessagesSeen()
       return
     }
 
@@ -1531,9 +1541,43 @@ class MessageListAppKit: NSViewController {
 
     if isLastRowVisible {
       readAll()
+      markMessagesSeen()
     }
   }
 
+  private func latestMessageId() -> Int64? {
+    let latest = viewModel.reversed ? messages.first : messages.last
+    return latest?.message.messageId
+  }
+
+  private func markMessagesSeen() {
+    guard let latestId = latestMessageId() else {
+      hasUnreadSinceScroll = false
+      updateUnreadBadgeVisibility()
+      return
+    }
+    lastSeenMessageId = latestId
+    hasUnreadSinceScroll = false
+    updateUnreadBadgeVisibility()
+  }
+
+  private func handleIncomingMessages(_ newMessages: [FullMessage]) {
+    guard !newMessages.isEmpty else { return }
+    if isAtBottom {
+      markMessagesSeen()
+      return
+    }
+
+    let newestId = newMessages.map(\.message.messageId).max() ?? lastSeenMessageId
+    if newestId > lastSeenMessageId {
+      hasUnreadSinceScroll = true
+      updateUnreadBadgeVisibility()
+    }
+  }
+
+  private func updateUnreadBadgeVisibility() {
+    scrollToBottomButton.setHasUnread(!isAtBottom && hasUnreadSinceScroll)
+  }
 }
 
 final class DateSeparatorTableCell: NSView {

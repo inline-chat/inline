@@ -4,6 +4,11 @@ import SwiftUI
 final class ScrollToBottomButtonHostingView: NSControl {
   private let hostingView: NSHostingView<ScrollToBottomButtonView>
   private var isVisible = false
+  private var hasUnread = false {
+    didSet {
+      hostingView.rootView.hasUnread = hasUnread
+    }
+  }
 
   var onClick: (() -> Void)? {
     didSet {
@@ -51,5 +56,10 @@ final class ScrollToBottomButtonHostingView: NSControl {
       context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
       alphaValue = targetOpacity
     }
+  }
+
+  func setHasUnread(_ hasUnread: Bool) {
+    guard self.hasUnread != hasUnread else { return }
+    self.hasUnread = hasUnread
   }
 }

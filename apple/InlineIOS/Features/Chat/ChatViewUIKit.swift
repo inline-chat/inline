@@ -197,6 +197,12 @@ public class ChatContainerView: UIView {
       name: .scrollToBottomChanged,
       object: nil
     )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleScrollToBottomUnreadChanged),
+      name: .scrollToBottomUnreadChanged,
+      object: nil
+    )
   }
 
   @objc private func handleScrollToBottomChanged(_ notification: Notification) {
@@ -223,6 +229,11 @@ public class ChatContainerView: UIView {
     if !isAtBottom {
       scrollButton.isHidden = true
     }
+  }
+
+  @objc private func handleScrollToBottomUnreadChanged(_ notification: Notification) {
+    guard let hasUnread = notification.userInfo?["hasUnread"] as? Bool else { return }
+    scrollButton.setHasUnread(hasUnread)
   }
 
   @objc private func keyboardWillShow(_ notification: Notification) {
