@@ -277,14 +277,14 @@ public class ProcessEntities {
       options: []
     ) { value, range, _ in
       if let phoneNumber = value as? String,
-         let normalized = normalizePhoneNumber(phoneNumber)
+         isValidPhoneNumberCandidate(phoneNumber)
       {
         var entity = MessageEntity()
         entity.type = .textURL
         entity.offset = Int64(range.location)
         entity.length = Int64(range.length)
         entity.textURL = MessageEntity.MessageEntityTextUrl.with {
-          $0.url = "tel:\(normalized)"
+          $0.url = "tel:\(phoneNumber)"
         }
         entities.append(entity)
       }
@@ -330,14 +330,14 @@ public class ProcessEntities {
       }
 
       if let phoneNumber = phoneNumber(from: urlString),
-         let normalized = normalizePhoneNumber(phoneNumber)
+         isValidPhoneNumberCandidate(phoneNumber)
       {
         var entity = MessageEntity()
         entity.type = .textURL
         entity.offset = Int64(range.location)
         entity.length = Int64(range.length)
         entity.textURL = MessageEntity.MessageEntityTextUrl.with {
-          $0.url = "tel:\(normalized)"
+          $0.url = urlString
         }
         entities.append(entity)
         return
@@ -516,25 +516,25 @@ public class ProcessEntities {
     return number?.isEmpty == false ? number : nil
   }
 
-  private static func normalizePhoneNumber(_ phoneNumber: String) -> String? {
+  private static func isValidPhoneNumberCandidate(_ phoneNumber: String) -> Bool {
     let trimmed = phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else { return nil }
+    guard !trimmed.isEmpty else { return false }
 
     if trimmed.rangeOfCharacter(from: .whitespacesAndNewlines) != nil {
-      return nil
+      return false
     }
 
     let allowedCharacters = CharacterSet(charactersIn: "+-()0123456789")
     if trimmed.rangeOfCharacter(from: allowedCharacters.inverted) != nil {
-      return nil
+      return false
     }
 
     let hasLeadingPlus = trimmed.first == "+"
     if hasLeadingPlus, trimmed.dropFirst().contains("+") {
-      return nil
+      return false
     }
     if !hasLeadingPlus, trimmed.contains("+") {
-      return nil
+      return false
     }
 
     var parenDepth = 0
@@ -544,23 +544,23 @@ public class ProcessEntities {
       } else if character == ")" {
         parenDepth -= 1
         if parenDepth < 0 {
-          return nil
+          return false
         }
       }
     }
     if parenDepth != 0 {
-      return nil
+      return false
     }
 
     let digits = trimmed.filter { $0.isNumber }
-    guard digits.count >= 7, digits.count <= 15 else { return nil }
+    guard digits.count >= 7, digits.count <= 15 else { return false }
 
     let hasStrongIndicator = trimmed.contains("+") || trimmed.contains("(") || trimmed.contains(")")
     if digits.count < 10 && !hasStrongIndicator {
-      return nil
+      return false
     }
 
-    return (hasLeadingPlus ? "+" : "") + digits
+    return true
   }
 
   // MARK: - Helper Methods
@@ -743,14 +743,14 @@ public class ProcessEntities {
       }
 
       let rawPhoneNumber = nsText.substring(with: match.range)
-      guard let normalized = normalizePhoneNumber(rawPhoneNumber) else { continue }
+      guard isValidPhoneNumberCandidate(rawPhoneNumber) else { continue }
 
       var entity = MessageEntity()
       entity.type = .textURL
       entity.offset = Int64(match.range.location)
       entity.length = Int64(match.range.length)
       entity.textURL = MessageEntity.MessageEntityTextUrl.with {
-        $0.url = "tel:\(normalized)"
+        $0.url = "tel:\(rawPhoneNumber)"
       }
       entities.append(entity)
     }

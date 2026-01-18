@@ -221,7 +221,7 @@ struct ProcessEntitiesTests {
     phoneEntity.offset = Int64(phoneRange.location)
     phoneEntity.length = Int64(phoneRange.length)
     phoneEntity.textURL = MessageEntity.MessageEntityTextUrl.with {
-      $0.url = "tel:+14155551234"
+      $0.url = "tel:+1(415)555-1234"
     }
 
     let entities = createMessageEntities([phoneEntity])
@@ -578,7 +578,7 @@ struct ProcessEntitiesTests {
     )
 
     let range = NSRange(location: 0, length: (text as NSString).length)
-    attributedString.addAttribute(.link, value: "tel:+14155551234", range: range)
+    attributedString.addAttribute(.link, value: "tel:+1(415)555-1234", range: range)
 
     let result = ProcessEntities.fromAttributedString(attributedString)
 
@@ -589,7 +589,7 @@ struct ProcessEntitiesTests {
     #expect(entity.type == .textURL)
     #expect(entity.offset == 0)
     #expect(entity.length == Int64(range.length))
-    #expect(entity.textURL.url == "tel:+14155551234")
+    #expect(entity.textURL.url == "tel:+1(415)555-1234")
   }
 
   @Test("Detect email entity from plain text")
@@ -621,7 +621,7 @@ struct ProcessEntitiesTests {
 
     let phoneRange = rangeOfSubstring("+1(415)555-1234", in: text)
     let phoneEntity = result.entities.entities.first {
-      $0.type == .textURL && $0.textURL.url == "tel:+14155551234"
+      $0.type == .textURL && $0.textURL.url == "tel:+1(415)555-1234"
     }
     #expect(phoneEntity != nil)
     #expect(phoneEntity?.offset == Int64(phoneRange.location))
