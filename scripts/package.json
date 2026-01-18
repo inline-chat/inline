@@ -13,6 +13,7 @@
   },
   "dependencies": {},
   "devDependencies": {
-    "@protobuf-ts/plugin": "^2.9.4"
+    "@protobuf-ts/plugin": "^2.9.4",
+    "protoc-gen-ts": "^0.8.7"
   }
 }

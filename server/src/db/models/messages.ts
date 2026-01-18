@@ -32,6 +32,7 @@ import { Encryption2 } from "@in/server/modules/encryption/encryption2"
 import { UpdateBucket, updates } from "@in/server/db/schema/updates"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
+import { detectHasLink } from "@in/server/modules/message/linkDetection"
 
 const log = new Log("MessageModel", LogLevel.INFO)
 
@@ -499,6 +500,7 @@ async function editMessage(input: EditMessageInput): Promise<{
   const encryptedMessage = text ? encryptMessage(text) : undefined
   const binaryEntities = entities ? MessageEntities.toBinary(entities) : undefined
   const encryptedEntities = binaryEntities && binaryEntities?.length > 0 ? encryptBinary(binaryEntities) : undefined
+  const hasLink = detectHasLink({ entities })
 
   let { message, update } = await db.transaction(async (tx) => {
     // First lock the specific chat row
@@ -540,6 +542,7 @@ async function editMessage(input: EditMessageInput): Promise<{
           entitiesEncrypted: encryptedEntities?.encrypted,
           entitiesIv: encryptedEntities?.iv,
           entitiesTag: encryptedEntities?.authTag,
+          hasLink: hasLink,
         })
         .where(and(eq(messages.chatId, chatId), eq(messages.messageId, messageId)))
         .returning(),

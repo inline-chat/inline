@@ -11,6 +11,7 @@ struct ChatInfoView: View {
   let chatItem: SpaceChatItem
   @StateObject var participantsWithMembersViewModel: ChatParticipantsWithMembersViewModel
   @EnvironmentStateObject var documentsViewModel: ChatDocumentsViewModel
+  @EnvironmentStateObject var linksViewModel: ChatLinksViewModel
   @EnvironmentStateObject var mediaViewModel: ChatMediaViewModel
   @EnvironmentStateObject var spaceMembersViewModel: SpaceMembersViewModel
   @StateObject var spaceFullMembersViewModel: SpaceFullMembersViewModel
@@ -38,10 +39,11 @@ struct ChatInfoView: View {
     case info = "Info"
     case media = "Media"
     case files = "Files"
+    case links = "Links"
   }
 
   var availableTabs: [ChatInfoTab] {
-    isDM ? [.media, .files] : [.info, .media, .files]
+    isDM ? [.media, .files, .links] : [.info, .media, .files, .links]
   }
 
   var currentChat: Chat? {
@@ -98,6 +100,13 @@ struct ChatInfoView: View {
         db: env.appDatabase,
         chatId: chatItem.chat?.id ?? 0,
         peer: chatItem.peerId
+      )
+    }
+
+    _linksViewModel = EnvironmentStateObject { env in
+      ChatLinksViewModel(
+        db: env.appDatabase,
+        chatId: chatItem.chat?.id ?? 0
       )
     }
 
@@ -218,16 +227,20 @@ struct ChatInfoView: View {
                     }
                   ))
               }
+            case .media:
+              MediaTabView(
+                mediaViewModel: mediaViewModel,
+                onShowInChat: showMessageInChat
+              )
             case .files:
               DocumentsTabView(
                 documentsViewModel: documentsViewModel,
                 peerUserId: chatItem.dialog.peerUserId,
                 peerThreadId: chatItem.dialog.peerThreadId
               )
-            case .media:
-              MediaTabView(
-                mediaViewModel: mediaViewModel,
-                onShowInChat: showMessageInChat
+            case .links:
+              LinksTabView(
+                linksViewModel: linksViewModel
               )
           }
         }
