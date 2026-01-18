@@ -255,6 +255,7 @@ message MessageEntity {
     TYPE_USERNAME_MENTION = 7;
     TYPE_CODE = 8;
     TYPE_PRE = 9;
+    TYPE_PHONE_NUMBER = 10;
   }
 
   Type type = 1;

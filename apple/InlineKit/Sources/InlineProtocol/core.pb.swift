@@ -1294,6 +1294,7 @@ public struct MessageEntity: Sendable {
     case usernameMention // = 7
     case code // = 8
     case pre // = 9
+    case phoneNumber // = 10
     case UNRECOGNIZED(Int)
 
     public init() {
@@ -1312,6 +1313,7 @@ public struct MessageEntity: Sendable {
       case 7: self = .usernameMention
       case 8: self = .code
       case 9: self = .pre
+      case 10: self = .phoneNumber
       default: self = .UNRECOGNIZED(rawValue)
       }
     }
@@ -1328,6 +1330,7 @@ public struct MessageEntity: Sendable {
       case .usernameMention: return 7
       case .code: return 8
       case .pre: return 9
+      case .phoneNumber: return 10
       case .UNRECOGNIZED(let i): return i
       }
     }
@@ -1344,6 +1347,7 @@ public struct MessageEntity: Sendable {
       .usernameMention,
       .code,
       .pre,
+      .phoneNumber,
     ]
 
   }
@@ -7358,6 +7362,7 @@ extension MessageEntity.TypeEnum: SwiftProtobuf._ProtoNameProviding {
     7: .same(proto: "TYPE_USERNAME_MENTION"),
     8: .same(proto: "TYPE_CODE"),
     9: .same(proto: "TYPE_PRE"),
+    10: .same(proto: "TYPE_PHONE_NUMBER"),
   ]
 }
 
