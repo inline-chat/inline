@@ -77,7 +77,7 @@ public class ProcessEntities {
         case .url:
           // URL is the text itself
           let urlText = (text as NSString).substring(with: range)
-          if phoneNumber(from: urlText) != nil {
+          if isValidPhoneNumberCandidate(urlText) {
             var attributes: [NSAttributedString.Key: Any] = [
               .foregroundColor: configuration.linkColor,
               .underlineStyle: 0,
@@ -284,7 +284,7 @@ public class ProcessEntities {
         entity.offset = Int64(range.location)
         entity.length = Int64(range.length)
         entity.textURL = MessageEntity.MessageEntityTextUrl.with {
-          $0.url = "tel:\(phoneNumber)"
+          $0.url = phoneNumber
         }
         entities.append(entity)
       }
@@ -329,15 +329,13 @@ public class ProcessEntities {
         return
       }
 
-      if let phoneNumber = phoneNumber(from: urlString),
-         isValidPhoneNumberCandidate(phoneNumber)
-      {
+      if let phoneNumber = phoneNumber(from: urlString) {
         var entity = MessageEntity()
         entity.type = .textURL
         entity.offset = Int64(range.location)
         entity.length = Int64(range.length)
         entity.textURL = MessageEntity.MessageEntityTextUrl.with {
-          $0.url = urlString
+          $0.url = phoneNumber
         }
         entities.append(entity)
         return
@@ -509,11 +507,15 @@ public class ProcessEntities {
   }
 
   private static func phoneNumber(from urlString: String) -> String? {
-    guard urlString.lowercased().hasPrefix("tel:") else { return nil }
-    let startIndex = urlString.index(urlString.startIndex, offsetBy: "tel:".count)
-    let remainder = String(urlString[startIndex...])
-    let number = remainder.split(separator: "?").first.map(String.init)
-    return number?.isEmpty == false ? number : nil
+    if urlString.lowercased().hasPrefix("tel:") {
+      let startIndex = urlString.index(urlString.startIndex, offsetBy: "tel:".count)
+      let remainder = String(urlString[startIndex...])
+      let number = remainder.split(separator: "?").first.map(String.init)
+      guard let number, !number.isEmpty else { return nil }
+      return isValidPhoneNumberCandidate(number) ? number : nil
+    }
+
+    return isValidPhoneNumberCandidate(urlString) ? urlString : nil
   }
 
   private static func isValidPhoneNumberCandidate(_ phoneNumber: String) -> Bool {
@@ -750,7 +752,7 @@ public class ProcessEntities {
       entity.offset = Int64(match.range.location)
       entity.length = Int64(match.range.length)
       entity.textURL = MessageEntity.MessageEntityTextUrl.with {
-        $0.url = "tel:\(rawPhoneNumber)"
+        $0.url = rawPhoneNumber
       }
       entities.append(entity)
     }
