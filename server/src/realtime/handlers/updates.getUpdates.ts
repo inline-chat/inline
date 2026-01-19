@@ -5,7 +5,7 @@ import type { HandlerContext } from "@in/server/realtime/types"
 
 export const getUpdates = async (input: GetUpdatesInput, handlerContext: HandlerContext): Promise<GetUpdatesResult> => {
   if (!input.bucket || input.bucket.type.oneofKind === undefined) {
-    throw RealtimeRpcError.BadRequest
+    throw RealtimeRpcError.BadRequest()
   }
 
   return Functions.updates.getUpdates(

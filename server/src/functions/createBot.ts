@@ -17,11 +17,11 @@ const log = new Log("createBot")
 export const createBot = async (input: CreateBotInput, context: FunctionContext): Promise<CreateBotResult> => {
   // Validate input
   if (!input.name || input.name.trim().length === 0) {
-    throw RealtimeRpcError.BadRequest
+    throw RealtimeRpcError.BadRequest()
   }
 
   if (!input.username || input.username.trim().length < 2) {
-    throw RealtimeRpcError.BadRequest
+    throw RealtimeRpcError.BadRequest()
   }
 
   const normalizedUsername = normalizeUsername(input.username)
@@ -29,7 +29,7 @@ export const createBot = async (input: CreateBotInput, context: FunctionContext)
   // Check if username is available
   const isUsernameAvailable = await checkUsernameAvailable(normalizedUsername, {})
   if (!isUsernameAvailable) {
-    throw RealtimeRpcError.BadRequest
+    throw RealtimeRpcError.BadRequest()
   }
 
   // Create bot user
@@ -48,7 +48,7 @@ export const createBot = async (input: CreateBotInput, context: FunctionContext)
 
   if (!botUser[0]) {
     log.error("Failed to create bot user", { input, currentUserId: context.currentUserId })
-    throw RealtimeRpcError.InternalError
+    throw RealtimeRpcError.InternalError()
   }
 
   const bot = botUser[0]

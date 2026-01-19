@@ -33,7 +33,7 @@ export const searchMessages = async (input: Input, context: FunctionContext): Pr
   const hasQueries = keywordGroups.length > 0
   const hasFilter = mediaFilter !== undefined
   if (!hasQueries && !hasFilter) {
-    throw RealtimeRpcError.BadRequest
+    throw RealtimeRpcError.BadRequest()
   }
 
   const maxResults = normalizeLimit(input.limit)
@@ -107,12 +107,12 @@ async function getChatWithAccess(inputPeer: InputPeer, currentUserId: number): P
         const peerUserId = Number(inputPeer.type.user.userId)
 
         if (!peerUserId || peerUserId <= 0) {
-          throw RealtimeRpcError.UserIdInvalid
+          throw RealtimeRpcError.UserIdInvalid()
         }
 
         const user = await UsersModel.getUserById(peerUserId)
         if (!user) {
-          throw RealtimeRpcError.UserIdInvalid
+          throw RealtimeRpcError.UserIdInvalid()
         }
 
         log.info("Auto-creating private chat and dialogs", {
@@ -132,7 +132,7 @@ async function getChatWithAccess(inputPeer: InputPeer, currentUserId: number): P
 
         chat = await ChatModel.getChatFromInputPeer(inputPeer, { currentUserId })
       } else if (inputPeer.type.oneofKind === "chat") {
-        throw RealtimeRpcError.ChatIdInvalid
+        throw RealtimeRpcError.ChatIdInvalid()
       } else {
         throw error
       }
@@ -180,13 +180,13 @@ function normalizeLimit(limit: number | undefined): number {
   }
 
   if (!Number.isFinite(limit)) {
-    throw RealtimeRpcError.BadRequest
+    throw RealtimeRpcError.BadRequest()
   }
 
   const normalized = Math.floor(limit)
 
   if (normalized <= 0) {
-    throw RealtimeRpcError.BadRequest
+    throw RealtimeRpcError.BadRequest()
   }
 
   return normalized

@@ -16,13 +16,13 @@ export const AccessGuards = {
 async function ensureChatAccess(chat: DbChat, userId: number) {
   if (chat.type === "private") {
     if (chat.minUserId !== userId && chat.maxUserId !== userId) {
-      throw RealtimeRpcError.PeerIdInvalid
+      throw RealtimeRpcError.PeerIdInvalid()
     }
     return
   }
 
   if (!chat.spaceId) {
-    throw RealtimeRpcError.ChatIdInvalid
+    throw RealtimeRpcError.ChatIdInvalid()
   }
 
   await ensureSpaceMember(chat.spaceId, userId)
@@ -31,7 +31,7 @@ async function ensureChatAccess(chat: DbChat, userId: number) {
   if (chat.publicThread) {
     const member = await MembersModel.getMemberByUserId(chat.spaceId, userId)
     if (!member || member.canAccessPublicChats === false) {
-      throw RealtimeRpcError.PeerIdInvalid
+      throw RealtimeRpcError.PeerIdInvalid()
     }
     return
   }
@@ -40,7 +40,7 @@ async function ensureChatAccess(chat: DbChat, userId: number) {
     const cachedParticipant = AccessGuardsCache.getChatParticipant(chat.id, userId)
     if (cachedParticipant !== undefined) {
       if (!cachedParticipant) {
-        throw RealtimeRpcError.PeerIdInvalid
+        throw RealtimeRpcError.PeerIdInvalid()
       }
       return
     }
@@ -57,7 +57,7 @@ async function ensureChatAccess(chat: DbChat, userId: number) {
     }
 
     if (!exists) {
-      throw RealtimeRpcError.PeerIdInvalid
+      throw RealtimeRpcError.PeerIdInvalid()
     }
   }
 }
@@ -66,7 +66,7 @@ async function ensureSpaceMember(spaceId: number, userId: number) {
   const cachedMember = AccessGuardsCache.getSpaceMember(spaceId, userId)
   if (cachedMember !== undefined) {
     if (!cachedMember) {
-      throw RealtimeRpcError.SpaceIdInvalid
+      throw RealtimeRpcError.SpaceIdInvalid()
     }
     return
   }
@@ -77,6 +77,6 @@ async function ensureSpaceMember(spaceId: number, userId: number) {
   }
 
   if (!isMember) {
-    throw RealtimeRpcError.SpaceIdInvalid
+    throw RealtimeRpcError.SpaceIdInvalid()
   }
 }

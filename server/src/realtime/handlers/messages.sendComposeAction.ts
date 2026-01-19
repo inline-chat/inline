@@ -8,7 +8,7 @@ export const sendComposeActionHandler = async (
   handlerContext: HandlerContext,
 ): Promise<SendComposeActionResult> => {
   if (!input.peerId) {
-    throw RealtimeRpcError.PeerIdInvalid
+    throw RealtimeRpcError.PeerIdInvalid()
   }
 
   await sendComposeAction(

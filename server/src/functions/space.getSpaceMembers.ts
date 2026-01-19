@@ -13,7 +13,7 @@ export const getSpaceMembers = async (
 ): Promise<GetSpaceMembersResult> => {
   const spaceId = Number(input.spaceId)
   if (isNaN(spaceId) || spaceId <= 0) {
-    throw RealtimeRpcError.BadRequest
+    throw RealtimeRpcError.BadRequest()
   }
 
   const members_ = await db._query.members.findMany({

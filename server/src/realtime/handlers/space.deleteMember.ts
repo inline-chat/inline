@@ -14,7 +14,7 @@ export const deleteMemberHandler = async (
   handlerContext: HandlerContext,
 ): Promise<DeleteMemberResult> => {
   if (!input.userId) {
-    throw RealtimeRpcError.UserIdInvalid
+    throw RealtimeRpcError.UserIdInvalid()
   }
 
   const exit = await Effect.runPromiseExit(
@@ -30,18 +30,18 @@ export const deleteMemberHandler = async (
     log.error("deleteMemberHandler failed", causeError)
 
     if (causeError instanceof SpaceIdInvalidError || causeError instanceof SpaceNotExistsError) {
-      throw RealtimeRpcError.SpaceIdInvalid
+      throw RealtimeRpcError.SpaceIdInvalid()
     }
 
     if (causeError instanceof MemberNotExistsError) {
-      throw RealtimeRpcError.UserIdInvalid
+      throw RealtimeRpcError.UserIdInvalid()
     }
 
     if (causeError instanceof RealtimeRpcError) {
       throw causeError
     }
 
-    throw RealtimeRpcError.InternalError
+    throw RealtimeRpcError.InternalError()
   }
 
   return {

@@ -17,7 +17,7 @@ export const addReaction = async (
   handlerContext: HandlerContext,
 ): Promise<AddReactionResult> => {
   if (!input.peerId) {
-    throw RealtimeRpcError.PeerIdInvalid
+    throw RealtimeRpcError.PeerIdInvalid()
   }
 
   const result = await Functions.messages.addReaction(

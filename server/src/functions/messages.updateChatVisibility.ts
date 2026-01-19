@@ -33,7 +33,7 @@ export async function updateChatVisibility(
 ): Promise<{ chat: DbChat }> {
   const chatId = Number(input.chatId)
   if (!Number.isSafeInteger(chatId) || chatId <= 0) {
-    throw RealtimeRpcError.ChatIdInvalid
+    throw RealtimeRpcError.ChatIdInvalid()
   }
 
   const isPublic = Boolean(input.isPublic)
@@ -46,7 +46,7 @@ export async function updateChatVisibility(
       const [chat] = await tx.select().from(chats).where(eq(chats.id, chatId)).for("update").limit(1)
 
       if (!chat) {
-        throw RealtimeRpcError.ChatIdInvalid
+        throw RealtimeRpcError.ChatIdInvalid()
       }
 
       if (!chat.spaceId || chat.type !== "thread") {
@@ -60,7 +60,7 @@ export async function updateChatVisibility(
         .limit(1)
 
       if (!member || (member.role !== "admin" && member.role !== "owner")) {
-        throw RealtimeRpcError.SpaceAdminRequired
+        throw RealtimeRpcError.SpaceAdminRequired()
       }
 
       if (isPublic) {
@@ -175,7 +175,7 @@ export async function updateChatVisibility(
         .returning()
 
       if (!chatRecord) {
-        throw RealtimeRpcError.InternalError
+        throw RealtimeRpcError.InternalError()
       }
 
       // NOTE: We only enqueue user-bucket updates for removals. Newly added participants
@@ -211,7 +211,7 @@ export async function updateChatVisibility(
   }
 
   if (!updatedChat) {
-    throw RealtimeRpcError.InternalError
+    throw RealtimeRpcError.InternalError()
   }
 
   AccessGuardsCache.resetChatParticipant(updatedChat.id)

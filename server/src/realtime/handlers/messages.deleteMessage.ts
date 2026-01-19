@@ -10,7 +10,7 @@ export const deleteMessage = async (
   handlerContext: HandlerContext,
 ): Promise<DeleteMessagesResult> => {
   if (!input.peerId) {
-    throw RealtimeRpcError.PeerIdInvalid
+    throw RealtimeRpcError.PeerIdInvalid()
   }
 
   const result = await Functions.messages.deleteMessage(

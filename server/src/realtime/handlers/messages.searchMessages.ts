@@ -8,7 +8,7 @@ export const searchMessages = async (
   handlerContext: HandlerContext,
 ): Promise<SearchMessagesResult> => {
   if (!input.peerId) {
-    throw RealtimeRpcError.PeerIdInvalid
+    throw RealtimeRpcError.PeerIdInvalid()
   }
 
   const queries = input.queries ?? []
@@ -16,7 +16,7 @@ export const searchMessages = async (
   const hasFilter =
     input.filter !== undefined && input.filter !== SearchMessagesFilter.FILTER_UNSPECIFIED
   if (!hasQueries && !hasFilter) {
-    throw RealtimeRpcError.BadRequest
+    throw RealtimeRpcError.BadRequest()
   }
 
   const result = await Functions.messages.searchMessages(

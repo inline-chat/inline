@@ -191,7 +191,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       return { updates: await selfUpdatesFromExistingMessage(input.randomId, currentUserId) }
     } else {
       log.error("error inserting message", error)
-      throw RealtimeRpcError.InternalError
+      throw RealtimeRpcError.InternalError()
     }
   }
 

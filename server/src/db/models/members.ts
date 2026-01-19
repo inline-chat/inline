@@ -100,7 +100,7 @@ async function addMemberToSpace(
     const space = await SpaceModel.getSpaceById(spaceId)
     if (!space) {
       log.error("Attempted to add member to non-existent space", { spaceId, userId })
-      throw RealtimeRpcError.SpaceIdInvalid
+      throw RealtimeRpcError.SpaceIdInvalid()
     }
 
     // Check if user is already a member (unless explicitly allowing duplicates)
@@ -108,7 +108,7 @@ async function addMemberToSpace(
       const existingMember = await getMemberByUserId(spaceId, userId)
       if (existingMember) {
         log.warn("User is already a member of the space", { spaceId, userId })
-        throw RealtimeRpcError.UserAlreadyMember
+        throw RealtimeRpcError.UserAlreadyMember()
       }
     }
   }
@@ -131,7 +131,7 @@ async function addMemberToSpace(
     return newMember
   } catch (error) {
     log.error("Failed to add member to space", { spaceId, userId, role, error })
-    throw RealtimeRpcError.InternalError
+    throw RealtimeRpcError.InternalError()
   }
 }
 

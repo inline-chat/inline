@@ -2,6 +2,7 @@ import { connectionManager } from "@in/server/ws/connections"
 import {
   ClientMessage,
   ConnectionInit,
+  Method,
   RpcError,
   RpcError_Code,
   RpcResult,
@@ -16,6 +17,26 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { InlineError } from "@in/server/types/errors"
 
 const log = new Log("realtime")
+
+const pickIdFields = (value: unknown): Record<string, unknown> | undefined => {
+  if (!value || typeof value !== "object") return undefined
+  const obj = value as Record<string, unknown>
+  const keys = ["userId", "peerId", "chatId", "spaceId", "messageId", "sessionId", "botId", "memberId", "inviteeId"]
+  const ids: Record<string, unknown> = {}
+
+  for (const key of keys) {
+    const entry = obj[key]
+    if (entry !== undefined && entry !== null) {
+      ids[key] = entry
+    }
+  }
+
+  return Object.keys(ids).length > 0 ? ids : undefined
+}
+
+const getMethodName = (method: number): string => {
+  return Method[method] ?? `UNKNOWN_METHOD_${method}`
+}
 
 // Cache for lazily-loaded RPC handler to avoid circular import and per-call dynamic import cost
 let rpcHandlerModulePromise: Promise<typeof import("@in/server/realtime/handlers/_rpc")> | null = null
@@ -112,10 +133,41 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
         break
     }
   } catch (e) {
-    log.error("error handling message", e)
+    const errorMeta: Record<string, unknown> = {
+      connectionId,
+      userId: handlerContext.userId,
+      sessionId: handlerContext.sessionId,
+      messageId: message.id,
+      messageKind: message.body.oneofKind,
+    }
+
+    if (message.body.oneofKind === "rpcCall") {
+      const call = message.body.rpcCall
+      errorMeta.method = getMethodName(call.method)
+      errorMeta.inputKind = call.input.oneofKind
+      const input = call.input.oneofKind ? (call.input as Record<string, unknown>)[call.input.oneofKind] : undefined
+      const inputIds = pickIdFields(input)
+      if (inputIds) {
+        errorMeta.inputIds = inputIds
+      }
+    }
+
+    if (e instanceof RealtimeRpcError) {
+      errorMeta.errorCode = e.code
+      errorMeta.errorCodeName = e.codeName
+      errorMeta.errorCodeNumber = e.codeNumber
+    } else if (e instanceof InlineError) {
+      errorMeta.errorType = e.type
+      errorMeta.errorCodeNumber = e.code
+    }
+
+    const logMessage =
+      message.body.oneofKind === "connectionInit"
+        ? "error handling message in connectionInit"
+        : "error handling message"
+    log.error(logMessage, e, errorMeta)
     if (message.body.oneofKind === "connectionInit") {
       // TODO: handle this better
-      log.error("error handling message in connectionInit")
       ws.close()
     } else {
       let rpcError: RealtimeRpcError
@@ -124,7 +176,7 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
       } else if (e instanceof InlineError) {
         rpcError = RealtimeRpcError.fromInlineError(e)
       } else {
-        rpcError = RealtimeRpcError.InternalError
+        rpcError = RealtimeRpcError.InternalError()
       }
 
       sendRaw({

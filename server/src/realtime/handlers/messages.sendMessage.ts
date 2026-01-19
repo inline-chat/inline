@@ -17,7 +17,7 @@ export const sendMessage = async (
   handlerContext: HandlerContext,
 ): Promise<SendMessageResult> => {
   if (!input.peerId) {
-    throw RealtimeRpcError.PeerIdInvalid
+    throw RealtimeRpcError.PeerIdInvalid()
   }
 
   let media = input.media?.media

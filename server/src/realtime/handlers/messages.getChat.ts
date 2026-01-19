@@ -5,7 +5,7 @@ import { Functions } from "@in/server/functions"
 
 export const getChat = async (input: GetChatInput, handlerContext: HandlerContext): Promise<GetChatResult> => {
   if (!input.peerId) {
-    throw RealtimeRpcError.PeerIdInvalid
+    throw RealtimeRpcError.PeerIdInvalid()
   }
 
   const result = await Functions.messages.getChat(

@@ -9,11 +9,11 @@ export async function handleTranslateMessages(
   context: HandlerContext,
 ): Promise<TranslateMessagesResult> {
   if (!input.peerId) {
-    throw RealtimeRpcError.PeerIdInvalid
+    throw RealtimeRpcError.PeerIdInvalid()
   }
 
   if (!input.language) {
-    throw RealtimeRpcError.BadRequest
+    throw RealtimeRpcError.BadRequest()
   }
 
   const functionsContext: FunctionContext = {

@@ -24,14 +24,14 @@ export const inviteToSpace = async (
 ): Promise<InviteToSpaceResult> => {
   const spaceId = Number(input.spaceId)
   if (!isValidSpaceId(spaceId)) {
-    throw RealtimeRpcError.BadRequest
+    throw RealtimeRpcError.BadRequest()
   }
 
   // Get space
   const space = await SpaceModel.getSpaceById(spaceId)
 
   if (!space) {
-    throw RealtimeRpcError.SpaceIdInvalid
+    throw RealtimeRpcError.SpaceIdInvalid()
   }
 
   // Validate our permission in this space and maximum role we can assign
@@ -41,11 +41,11 @@ export const inviteToSpace = async (
   const isAdmin = input.role?.role.oneofKind === "admin"
 
   if (ourMembership.role === "member" && isMember) {
-    throw RealtimeRpcError.SpaceAdminRequired
+    throw RealtimeRpcError.SpaceAdminRequired()
   }
 
   if (ourMembership.role === "member" && isAdmin) {
-    throw RealtimeRpcError.SpaceAdminRequired
+    throw RealtimeRpcError.SpaceAdminRequired()
   }
 
   let inviteInfo: InviteInfo
@@ -65,7 +65,7 @@ export const inviteToSpace = async (
       break
 
     default:
-      throw RealtimeRpcError.BadRequest
+      throw RealtimeRpcError.BadRequest()
   }
 
   // Create member (no chat/dialog auto-creation)
@@ -106,7 +106,7 @@ async function inviteViaUserId(
   // Validate user
   const user = await UsersModel.getUserById(userId)
   if (!user) {
-    throw RealtimeRpcError.UserIdInvalid
+    throw RealtimeRpcError.UserIdInvalid()
   }
   return { user }
 }
@@ -119,7 +119,7 @@ async function inviteViaEmail(
 ): Promise<InviteInfo> {
   // Validate email
   if (!isValidEmail(email)) {
-    throw RealtimeRpcError.EmailInvalid
+    throw RealtimeRpcError.EmailInvalid()
   }
 
   let normalizedEmail = email.toLowerCase().trim()
@@ -164,7 +164,7 @@ async function createMember(
   const member = await MembersModel.getMemberByUserId(spaceId, userId)
 
   if (member) {
-    throw RealtimeRpcError.UserAlreadyMember
+    throw RealtimeRpcError.UserAlreadyMember()
   }
 
   // Db member role

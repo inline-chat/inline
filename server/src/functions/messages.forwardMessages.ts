@@ -80,11 +80,11 @@ const cloneUrlPreviewById = async (previewId: bigint): Promise<number | null> =>
 
 export const forwardMessages = async (input: Input, context: FunctionContext): Promise<Output> => {
   if (!input.fromPeerId || !input.toPeerId) {
-    throw RealtimeRpcError.PeerIdInvalid
+    throw RealtimeRpcError.PeerIdInvalid()
   }
 
   if (input.messageIds.length === 0) {
-    throw RealtimeRpcError.BadRequest
+    throw RealtimeRpcError.BadRequest()
   }
 
   const currentUserId = context.currentUserId
@@ -122,7 +122,7 @@ export const forwardMessages = async (input: Input, context: FunctionContext): P
       sourceMessage = await MessageModel.getMessage(Number(messageId), sourceChat.id)
     } catch (error) {
       log.error("forwardMessages failed to fetch source message", { messageId, sourceChatId: sourceChat.id, error })
-      throw RealtimeRpcError.MessageIdInvalid
+      throw RealtimeRpcError.MessageIdInvalid()
     }
 
     let forwardHeader: { fromPeerId: InputPeer; fromId: number; fromMessageId: number } | undefined

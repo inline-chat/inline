@@ -62,7 +62,7 @@ async function getChatAndDialogForDM(
       .returning()
 
     if (!newDialog) {
-      throw RealtimeRpcError.InternalError
+      throw RealtimeRpcError.InternalError()
     }
 
     return { chat: existingChat, dialog: newDialog }
@@ -70,7 +70,7 @@ async function getChatAndDialogForDM(
 
   const user = await UsersModel.getUserById(peerUserId)
   if (!user) {
-    throw RealtimeRpcError.UserIdInvalid
+    throw RealtimeRpcError.UserIdInvalid()
   }
 
   log.info("Auto-creating private chat and dialogs for both users", {
@@ -115,7 +115,7 @@ async function getChatAndDialogForThread(
   })
 
   if (!result) {
-    throw RealtimeRpcError.ChatIdInvalid
+    throw RealtimeRpcError.ChatIdInvalid()
   }
 
   const chat = result
@@ -126,11 +126,11 @@ async function getChatAndDialogForThread(
   if (chat.type === "private") {
     if (!chat.minUserId || !chat.maxUserId) {
       log.error("Private chat missing user IDs", { chatId, minUserId: chat.minUserId, maxUserId: chat.maxUserId })
-      throw RealtimeRpcError.ChatIdInvalid
+      throw RealtimeRpcError.ChatIdInvalid()
     }
 
     if (chat.minUserId !== currentUserId && chat.maxUserId !== currentUserId) {
-      throw RealtimeRpcError.ChatIdInvalid
+      throw RealtimeRpcError.ChatIdInvalid()
     }
 
     if (dialog) {
@@ -143,7 +143,7 @@ async function getChatAndDialogForThread(
 
     if (!peerUserId) {
       log.error("Cannot determine peer user ID for private chat", { chatId, currentUserId, minUserId: chat.minUserId, maxUserId: chat.maxUserId })
-      throw RealtimeRpcError.InternalError
+      throw RealtimeRpcError.InternalError()
     }
 
     const [newDialog] = await db
@@ -156,14 +156,14 @@ async function getChatAndDialogForThread(
       .returning()
 
     if (!newDialog) {
-      throw RealtimeRpcError.InternalError
+      throw RealtimeRpcError.InternalError()
     }
 
     return { chat, dialog: newDialog }
   }
 
   if (!space || space.deleted || !chat.spaceId) {
-    throw RealtimeRpcError.ChatIdInvalid
+    throw RealtimeRpcError.ChatIdInvalid()
   }
 
   const [spaceMember] = await db
@@ -172,16 +172,16 @@ async function getChatAndDialogForThread(
     .where(and(eq(members.spaceId, chat.spaceId), eq(members.userId, currentUserId)))
 
   if (!spaceMember) {
-    throw RealtimeRpcError.ChatIdInvalid
+    throw RealtimeRpcError.ChatIdInvalid()
   }
 
   if (chat.publicThread) {
     if (!spaceMember.canAccessPublicChats) {
-      throw RealtimeRpcError.ChatIdInvalid
+      throw RealtimeRpcError.ChatIdInvalid()
     }
   } else {
     if (!participant) {
-      throw RealtimeRpcError.ChatIdInvalid
+      throw RealtimeRpcError.ChatIdInvalid()
     }
   }
 
@@ -201,7 +201,7 @@ async function getChatAndDialogForThread(
     .returning()
 
   if (!newDialog) {
-    throw RealtimeRpcError.InternalError
+    throw RealtimeRpcError.InternalError()
   }
 
   return { chat, dialog: newDialog }
@@ -218,7 +218,7 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
     const peerUserId = Number(inputPeer.type.user.userId)
 
     if (!peerUserId || peerUserId <= 0) {
-      throw RealtimeRpcError.UserIdInvalid
+      throw RealtimeRpcError.UserIdInvalid()
     }
 
     const result = await getChatAndDialogForDM(peerUserId, currentUserId)
@@ -228,7 +228,7 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
     const chatId = Number(inputPeer.type.chat.chatId)
 
     if (!chatId || chatId <= 0) {
-      throw RealtimeRpcError.ChatIdInvalid
+      throw RealtimeRpcError.ChatIdInvalid()
     }
 
     const result = await getChatAndDialogForThread(chatId, currentUserId)
@@ -239,7 +239,7 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
     chat = result.chat
     dialog = result.dialog
   } else {
-    throw RealtimeRpcError.PeerIdInvalid
+    throw RealtimeRpcError.PeerIdInvalid()
   }
 
   const [unreadData] = await DialogsModel.getBatchUnreadCounts({

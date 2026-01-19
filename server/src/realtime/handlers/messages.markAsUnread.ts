@@ -11,7 +11,7 @@ export const markAsUnread = async (
   handlerContext: HandlerContext,
 ): Promise<MarkAsUnreadResult> => {
   if (!input.peerId) {
-    throw RealtimeRpcError.PeerIdInvalid
+    throw RealtimeRpcError.PeerIdInvalid()
   }
 
   const result = await markAsUnreadFunction(

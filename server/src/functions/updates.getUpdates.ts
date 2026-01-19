@@ -37,12 +37,12 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
 
   const seqStartBigInt = input.startSeq ?? 0n
   if (seqStartBigInt < 0n) {
-    throw RealtimeRpcError.BadRequest
+    throw RealtimeRpcError.BadRequest()
   }
 
   const seqStart = Number(seqStartBigInt)
   if (!Number.isSafeInteger(seqStart)) {
-    throw RealtimeRpcError.BadRequest
+    throw RealtimeRpcError.BadRequest()
   }
 
   let seqEnd: number | undefined
@@ -50,14 +50,14 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
   const seqEndBigInt = input.seqEnd ?? 0n
   if (seqEndBigInt !== 0n) {
     if (seqEndBigInt < 0n) {
-      throw RealtimeRpcError.BadRequest
+      throw RealtimeRpcError.BadRequest()
     }
     const seqEndNumber = Number(seqEndBigInt)
     if (!Number.isSafeInteger(seqEndNumber)) {
-      throw RealtimeRpcError.BadRequest
+      throw RealtimeRpcError.BadRequest()
     }
     if (seqEndNumber < seqStart) {
-      throw RealtimeRpcError.BadRequest
+      throw RealtimeRpcError.BadRequest()
     }
     seqEnd = seqEndNumber
   }
@@ -163,7 +163,7 @@ const resolveBucket = async (
   context: FunctionContext,
 ): Promise<BucketDescriptor> => {
   if (!bucket || bucket.type.oneofKind === undefined) {
-    throw RealtimeRpcError.BadRequest
+    throw RealtimeRpcError.BadRequest()
   }
 
   switch (bucket.type.oneofKind) {
@@ -180,7 +180,7 @@ const resolveBucket = async (
     case "space": {
       const spaceId = Number(bucket.type.space.spaceId)
       if (!Number.isSafeInteger(spaceId) || spaceId <= 0) {
-        throw RealtimeRpcError.SpaceIdInvalid
+        throw RealtimeRpcError.SpaceIdInvalid()
       }
 
       await AccessGuards.ensureSpaceMember(spaceId, context.currentUserId)
@@ -198,7 +198,7 @@ const resolveBucket = async (
     case "chat": {
       const inputPeer = bucket.type.chat.peerId
       if (!inputPeer) {
-        throw RealtimeRpcError.PeerIdInvalid
+        throw RealtimeRpcError.PeerIdInvalid()
       }
 
       const chat = await getChatOrThrow(inputPeer, context)
@@ -232,7 +232,7 @@ const getChatOrThrow = async (inputPeer: InputPeer, context: FunctionContext): P
       error === ModelError.ChatInvalid ||
       (error instanceof ModelError && error.code === ModelError.Codes.CHAT_INVALID)
     ) {
-      throw RealtimeRpcError.PeerIdInvalid
+      throw RealtimeRpcError.PeerIdInvalid()
     }
     throw error
   }

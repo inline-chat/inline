@@ -32,7 +32,7 @@ export const markAsUnread = async (input: Input, context: FunctionContext): Prom
     .returning()
 
   if (result.length === 0) {
-    throw RealtimeRpcError.ChatIdInvalid
+    throw RealtimeRpcError.ChatIdInvalid()
   }
 
   // Create an update for the dialog change

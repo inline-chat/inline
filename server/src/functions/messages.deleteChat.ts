@@ -52,7 +52,7 @@ export async function deleteChat(input: { peer: InputPeer }, context: FunctionCo
     }
   } catch (err) {
     if (err instanceof ModelError && err.code === ModelError.Codes.CHAT_INVALID) {
-      throw RealtimeRpcError.ChatIdInvalid
+      throw RealtimeRpcError.ChatIdInvalid()
     }
     throw err
   }
