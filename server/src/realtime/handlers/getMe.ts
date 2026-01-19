@@ -8,7 +8,7 @@ export const getMe = async (_: GetMeInput, handlerContext: HandlerContext): Prom
   let user = await UsersModel.getUserById(handlerContext.userId)
 
   if (!user) {
-    throw RealtimeRpcError.InternalError
+    throw RealtimeRpcError.InternalError()
   }
 
   return {

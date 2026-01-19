@@ -50,7 +50,7 @@ async function addUserToSpace(
   const space = await getSpaceById(spaceId)
   if (!space) {
     log.error("Attempted to add user to non-existent space", { spaceId, userId })
-    throw RealtimeRpcError.SpaceIdInvalid
+    throw RealtimeRpcError.SpaceIdInvalid()
   }
 
   try {
@@ -67,12 +67,15 @@ async function addUserToSpace(
     })
   } catch (error) {
     // Re-throw known errors, wrap unknown ones
-    if (error === RealtimeRpcError.UserAlreadyMember || error === RealtimeRpcError.SpaceIdInvalid) {
+    if (
+      RealtimeRpcError.is(error, RealtimeRpcError.Code.USER_ALREADY_MEMBER) ||
+      RealtimeRpcError.is(error, RealtimeRpcError.Code.SPACE_ID_INVALID)
+    ) {
       throw error
     }
 
     log.error("Failed to add user to space", { spaceId, userId, role, error })
-    throw RealtimeRpcError.InternalError
+    throw RealtimeRpcError.InternalError()
   }
 }
 
@@ -101,13 +104,13 @@ async function removeUserFromSpace(spaceId: number, userId: number): Promise<boo
 async function validateSpaceAccess(spaceId: number, userId?: number): Promise<DbSpace> {
   const space = await getSpaceById(spaceId)
   if (!space) {
-    throw RealtimeRpcError.SpaceIdInvalid
+    throw RealtimeRpcError.SpaceIdInvalid()
   }
 
   if (userId) {
     const isMember = await MembersModel.isUserMemberOfSpace(spaceId, userId)
     if (!isMember) {
-      throw RealtimeRpcError.SpaceAdminRequired // or create a new "not a member" error
+      throw RealtimeRpcError.SpaceAdminRequired() // or create a new "not a member" error
     }
   }
 

@@ -11,10 +11,10 @@ export const updateMemberAccessHandler = async (
   handlerContext: HandlerContext,
 ): Promise<UpdateMemberAccessResult> => {
   if (!input.spaceId) {
-    throw RealtimeRpcError.BadRequest
+    throw RealtimeRpcError.BadRequest()
   }
   if (!input.userId) {
-    throw RealtimeRpcError.UserIdInvalid
+    throw RealtimeRpcError.UserIdInvalid()
   }
 
   try {
@@ -27,7 +27,7 @@ export const updateMemberAccessHandler = async (
     if (error instanceof RealtimeRpcError) {
       throw error
     }
-    throw RealtimeRpcError.InternalError
+    throw RealtimeRpcError.InternalError()
   }
 }
 

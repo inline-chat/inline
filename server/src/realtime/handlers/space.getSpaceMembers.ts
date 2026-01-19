@@ -9,7 +9,7 @@ export const getSpaceMembers = async (
   handlerContext: HandlerContext,
 ): Promise<GetSpaceMembersResult> => {
   if (!input.spaceId) {
-    throw RealtimeRpcError.BadRequest
+    throw RealtimeRpcError.BadRequest()
   }
 
   const result = await Functions.spaces.getSpaceMembers(

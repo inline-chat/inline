@@ -15,6 +15,6 @@ export const handleGetChats = async (input: {}, context: HandlerContext) => {
     return await getChats(input, functionContext)
   } catch (error) {
     log.error("Failed to get chats", { error })
-    throw RealtimeRpcError.InternalError
+    throw RealtimeRpcError.InternalError()
   }
 }

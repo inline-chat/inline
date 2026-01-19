@@ -8,7 +8,7 @@ export const editMessage = async (
   handlerContext: HandlerContext,
 ): Promise<EditMessageResult> => {
   if (!input.peerId) {
-    throw RealtimeRpcError.PeerIdInvalid
+    throw RealtimeRpcError.PeerIdInvalid()
   }
 
   const result = await Functions.messages.editMessage(

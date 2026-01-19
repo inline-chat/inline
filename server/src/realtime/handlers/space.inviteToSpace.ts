@@ -9,7 +9,7 @@ export const inviteToSpace = async (
   handlerContext: HandlerContext,
 ): Promise<InviteToSpaceResult> => {
   if (!input.spaceId) {
-    throw RealtimeRpcError.BadRequest
+    throw RealtimeRpcError.BadRequest()
   }
 
   const result = await Functions.spaces.inviteToSpace(

@@ -8,11 +8,11 @@ export const forwardMessagesHandler = async (
   handlerContext: HandlerContext,
 ): Promise<ForwardMessagesResult> => {
   if (!input.fromPeerId || !input.toPeerId) {
-    throw RealtimeRpcError.PeerIdInvalid
+    throw RealtimeRpcError.PeerIdInvalid()
   }
 
   if (input.messageIds.length === 0) {
-    throw RealtimeRpcError.BadRequest
+    throw RealtimeRpcError.BadRequest()
   }
 
   const result = await forwardMessages(

@@ -49,7 +49,9 @@ describe("AccessGuards", () => {
 
     await expect(AccessGuards.ensureChatAccess(chat, userA.id)).resolves.toBeUndefined()
     await expect(AccessGuards.ensureChatAccess(chat, userB.id)).resolves.toBeUndefined()
-    await expect(AccessGuards.ensureChatAccess(chat, userC.id)).rejects.toBe(RealtimeRpcError.PeerIdInvalid)
+    await expect(AccessGuards.ensureChatAccess(chat, userC.id)).rejects.toMatchObject({
+      code: RealtimeRpcError.Code.PEER_ID_INVALID,
+    })
   })
 
   it("requires membership for non-public threads", async () => {
@@ -75,8 +77,12 @@ describe("AccessGuards", () => {
     await db.insert(chatParticipants).values({ chatId: chat.id, userId: member.id })
 
     await expect(AccessGuards.ensureChatAccess(chat, member.id)).resolves.toBeUndefined()
-    await expect(AccessGuards.ensureChatAccess(chat, creator.id)).rejects.toBe(RealtimeRpcError.PeerIdInvalid)
-    await expect(AccessGuards.ensureChatAccess(chat, outsider.id)).rejects.toBe(RealtimeRpcError.SpaceIdInvalid)
+    await expect(AccessGuards.ensureChatAccess(chat, creator.id)).rejects.toMatchObject({
+      code: RealtimeRpcError.Code.PEER_ID_INVALID,
+    })
+    await expect(AccessGuards.ensureChatAccess(chat, outsider.id)).rejects.toMatchObject({
+      code: RealtimeRpcError.Code.SPACE_ID_INVALID,
+    })
   })
 
   it("blocks guests from public threads", async () => {
@@ -99,7 +105,9 @@ describe("AccessGuards", () => {
     const chat = requireChat(chatRecord, "public-thread")
 
     await expect(AccessGuards.ensureChatAccess(chat, creator.id)).resolves.toBeUndefined()
-    await expect(AccessGuards.ensureChatAccess(chat, guest.id)).rejects.toBe(RealtimeRpcError.PeerIdInvalid)
+    await expect(AccessGuards.ensureChatAccess(chat, guest.id)).rejects.toMatchObject({
+      code: RealtimeRpcError.Code.PEER_ID_INVALID,
+    })
   })
 
   it("validates space membership", async () => {
@@ -110,6 +118,8 @@ describe("AccessGuards", () => {
     await MembersModel.addMemberToSpace(space.id, user.id, "member")
 
     await expect(AccessGuards.ensureSpaceMember(space.id, user.id)).resolves.toBeUndefined()
-    await expect(AccessGuards.ensureSpaceMember(space.id, outsider.id)).rejects.toBe(RealtimeRpcError.SpaceIdInvalid)
+    await expect(AccessGuards.ensureSpaceMember(space.id, outsider.id)).rejects.toMatchObject({
+      code: RealtimeRpcError.Code.SPACE_ID_INVALID,
+    })
   })
 })

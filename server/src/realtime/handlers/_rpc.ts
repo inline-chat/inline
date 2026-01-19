@@ -43,7 +43,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
   switch (call.method) {
     case Method.GET_ME: {
       if (call.input.oneofKind !== "getMe") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await getMe(call.input, handlerContext)
       return { oneofKind: "getMe", getMe: result }
@@ -51,7 +51,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.DELETE_MESSAGES: {
       if (call.input.oneofKind !== "deleteMessages") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await deleteMessage(call.input.deleteMessages, handlerContext)
       return { oneofKind: "deleteMessages", deleteMessages: result }
@@ -59,7 +59,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.SEND_MESSAGE: {
       if (call.input.oneofKind !== "sendMessage") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await sendMessage(call.input.sendMessage, handlerContext)
       return { oneofKind: "sendMessage", sendMessage: result }
@@ -67,7 +67,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.GET_CHAT_HISTORY: {
       if (call.input.oneofKind !== "getChatHistory") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await getChatHistory(call.input.getChatHistory, handlerContext)
       return { oneofKind: "getChatHistory", getChatHistory: result }
@@ -75,7 +75,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.SEARCH_MESSAGES: {
       if (call.input.oneofKind !== "searchMessages") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await searchMessages(call.input.searchMessages, handlerContext)
       return { oneofKind: "searchMessages", searchMessages: result }
@@ -83,7 +83,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.ADD_REACTION: {
       if (call.input.oneofKind !== "addReaction") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await addReaction(call.input.addReaction, handlerContext)
       return { oneofKind: "addReaction", addReaction: result }
@@ -91,7 +91,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.DELETE_REACTION: {
       if (call.input.oneofKind !== "deleteReaction") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await deleteReaction(call.input.deleteReaction, handlerContext)
       return { oneofKind: "deleteReaction", deleteReaction: result }
@@ -99,7 +99,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.EDIT_MESSAGE: {
       if (call.input.oneofKind !== "editMessage") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await editMessage(call.input.editMessage, handlerContext)
       return { oneofKind: "editMessage", editMessage: result }
@@ -107,7 +107,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.CREATE_CHAT: {
       if (call.input.oneofKind !== "createChat") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await createChat(call.input.createChat, handlerContext)
       return { oneofKind: "createChat", createChat: result }
@@ -115,7 +115,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.GET_SPACE_MEMBERS: {
       if (call.input.oneofKind !== "getSpaceMembers") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await getSpaceMembers(call.input.getSpaceMembers, handlerContext)
       return { oneofKind: "getSpaceMembers", getSpaceMembers: result }
@@ -123,7 +123,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.DELETE_CHAT: {
       if (call.input.oneofKind !== "deleteChat") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await deleteChatHandler(call.input.deleteChat, handlerContext)
       return { oneofKind: "deleteChat", deleteChat: result }
@@ -131,7 +131,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.INVITE_TO_SPACE: {
       if (call.input.oneofKind !== "inviteToSpace") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await inviteToSpace(call.input.inviteToSpace, {
         currentUserId: handlerContext.userId,
@@ -142,7 +142,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.GET_CHAT_PARTICIPANTS: {
       if (call.input.oneofKind !== "getChatParticipants") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await getChatParticipants(call.input.getChatParticipants, handlerContext)
       return { oneofKind: "getChatParticipants", getChatParticipants: result }
@@ -150,7 +150,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.ADD_CHAT_PARTICIPANT: {
       if (call.input.oneofKind !== "addChatParticipant") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await addChatParticipant(call.input.addChatParticipant, handlerContext)
       return { oneofKind: "addChatParticipant", addChatParticipant: result }
@@ -158,7 +158,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.REMOVE_CHAT_PARTICIPANT: {
       if (call.input.oneofKind !== "removeChatParticipant") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await removeChatParticipant(call.input.removeChatParticipant, handlerContext)
       return { oneofKind: "removeChatParticipant", removeChatParticipant: result }
@@ -166,7 +166,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.TRANSLATE_MESSAGES: {
       if (call.input.oneofKind !== "translateMessages") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await handleTranslateMessages(call.input.translateMessages, handlerContext)
       return { oneofKind: "translateMessages", translateMessages: result }
@@ -174,7 +174,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.GET_CHATS: {
       if (call.input.oneofKind !== "getChats") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await handleGetChats(call.input.getChats, handlerContext)
       return { oneofKind: "getChats", getChats: result }
@@ -182,7 +182,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.GET_CHAT: {
       if (call.input.oneofKind !== "getChat") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await getChat(call.input.getChat, handlerContext)
       return { oneofKind: "getChat", getChat: result }
@@ -190,7 +190,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.GET_USER_SETTINGS: {
       if (call.input.oneofKind !== "getUserSettings") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await getUserSettingsHandler(call.input.getUserSettings, handlerContext)
       return { oneofKind: "getUserSettings", getUserSettings: result }
@@ -198,7 +198,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.UPDATE_USER_SETTINGS: {
       if (call.input.oneofKind !== "updateUserSettings") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await updateUserSettingsHandler(call.input.updateUserSettings, handlerContext)
       return { oneofKind: "updateUserSettings", updateUserSettings: result }
@@ -206,7 +206,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.SEND_COMPOSE_ACTION: {
       if (call.input.oneofKind !== "sendComposeAction") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await sendComposeActionHandler(call.input.sendComposeAction, handlerContext)
       return { oneofKind: "sendComposeAction", sendComposeAction: result }
@@ -214,7 +214,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.CREATE_BOT: {
       if (call.input.oneofKind !== "createBot") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await createBotHandler(call.input.createBot, handlerContext)
       return { oneofKind: "createBot", createBot: result }
@@ -222,7 +222,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.DELETE_MEMBER: {
       if (call.input.oneofKind !== "deleteMember") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await deleteMemberHandler(call.input.deleteMember, handlerContext)
       return { oneofKind: "deleteMember", deleteMember: result }
@@ -230,7 +230,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.UPDATE_MEMBER_ACCESS: {
       if (call.input.oneofKind !== "updateMemberAccess") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await updateMemberAccessHandler(call.input.updateMemberAccess, handlerContext)
       return { oneofKind: "updateMemberAccess", updateMemberAccess: result }
@@ -238,7 +238,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.MARK_AS_UNREAD: {
       if (call.input.oneofKind !== "markAsUnread") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await markAsUnread(call.input.markAsUnread, handlerContext)
       return { oneofKind: "markAsUnread", markAsUnread: result }
@@ -246,7 +246,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
     
     case Method.GET_UPDATES_STATE: {
       if (call.input.oneofKind !== "getUpdatesState") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await getUpdatesState(call.input.getUpdatesState, handlerContext)
       return { oneofKind: "getUpdatesState", getUpdatesState: result }
@@ -254,7 +254,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.GET_UPDATES: {
       if (call.input.oneofKind !== "getUpdates") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await getUpdates(call.input.getUpdates, handlerContext)
       return { oneofKind: "getUpdates", getUpdates: result }
@@ -262,7 +262,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.FORWARD_MESSAGES: {
       if (call.input.oneofKind !== "forwardMessages") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await forwardMessagesHandler(call.input.forwardMessages, handlerContext)
       return { oneofKind: "forwardMessages", forwardMessages: result }
@@ -270,7 +270,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     case Method.UPDATE_CHAT_VISIBILITY: {
       if (call.input.oneofKind !== "updateChatVisibility") {
-        throw RealtimeRpcError.BadRequest
+        throw RealtimeRpcError.BadRequest()
       }
       let result = await updateChatVisibilityHandler(call.input.updateChatVisibility, handlerContext)
       return { oneofKind: "updateChatVisibility", updateChatVisibility: result }
@@ -278,7 +278,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
 
     default:
       Log.shared.error(`Unknown method: ${call.method}`)
-      throw RealtimeRpcError.BadRequest
+      throw RealtimeRpcError.BadRequest()
   }
 }
 

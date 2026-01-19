@@ -36,12 +36,12 @@ async function getMessagesWithChatCreation(
         const peerUserId = Number(inputPeer.type.user.userId)
 
         if (!peerUserId || peerUserId <= 0) {
-          throw RealtimeRpcError.UserIdInvalid
+          throw RealtimeRpcError.UserIdInvalid()
         }
 
         const user = await UsersModel.getUserById(peerUserId)
         if (!user) {
-          throw RealtimeRpcError.UserIdInvalid
+          throw RealtimeRpcError.UserIdInvalid()
         }
 
         log.info("Auto-creating private chat and dialogs", {

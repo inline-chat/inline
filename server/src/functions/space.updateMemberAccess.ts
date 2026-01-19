@@ -27,32 +27,32 @@ export const updateMemberAccess = async (
 ): Promise<UpdateMemberAccessResult> => {
   const spaceId = Number(input.spaceId)
   if (!isValidSpaceId(spaceId)) {
-    throw RealtimeRpcError.SpaceIdInvalid
+    throw RealtimeRpcError.SpaceIdInvalid()
   }
 
   const userId = Number(input.userId)
   if (!Number.isSafeInteger(userId) || userId <= 0) {
-    throw RealtimeRpcError.UserIdInvalid
+    throw RealtimeRpcError.UserIdInvalid()
   }
 
   const roleKind = input.role?.role.oneofKind
   if (!roleKind) {
-    throw RealtimeRpcError.BadRequest
+    throw RealtimeRpcError.BadRequest()
   }
 
   // Ensure caller is admin/owner.
   const ourMembership = await MembersModel.getMemberByUserId(spaceId, context.currentUserId)
   if (!ourMembership || ourMembership.role === "member") {
-    throw RealtimeRpcError.SpaceAdminRequired
+    throw RealtimeRpcError.SpaceAdminRequired()
   }
 
   const targetMembership = await MembersModel.getMemberByUserId(spaceId, userId)
   if (!targetMembership) {
-    throw RealtimeRpcError.UserIdInvalid
+    throw RealtimeRpcError.UserIdInvalid()
   }
 
   if (targetMembership.role === "owner") {
-    throw RealtimeRpcError.SpaceOwnerRequired
+    throw RealtimeRpcError.SpaceOwnerRequired()
   }
 
   let newRole: DbMemberRole
@@ -68,7 +68,7 @@ export const updateMemberAccess = async (
       targetMembership.canAccessPublicChats ??
       DEFAULT_CAN_ACCESS_PUBLIC_CHATS
   } else {
-    throw RealtimeRpcError.BadRequest
+    throw RealtimeRpcError.BadRequest()
   }
 
   const [updatedMember] = await db
@@ -81,7 +81,7 @@ export const updateMemberAccess = async (
     .returning()
 
   if (!updatedMember) {
-    throw RealtimeRpcError.InternalError
+    throw RealtimeRpcError.InternalError()
   }
 
   // Reset access caches for this member.
@@ -158,7 +158,7 @@ const persistSpaceMemberUpdate = async ({
     const [space] = await tx.select().from(spaces).where(eq(spaces.id, spaceId)).for("update").limit(1)
 
     if (!space) {
-      throw RealtimeRpcError.SpaceIdInvalid
+      throw RealtimeRpcError.SpaceIdInvalid()
     }
 
     const update = await UpdatesModel.insertUpdate(tx, {

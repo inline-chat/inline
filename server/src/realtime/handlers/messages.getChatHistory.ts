@@ -8,7 +8,7 @@ export const getChatHistory = async (
   handlerContext: HandlerContext,
 ): Promise<GetChatHistoryResult> => {
   if (!input.peerId) {
-    throw RealtimeRpcError.PeerIdInvalid
+    throw RealtimeRpcError.PeerIdInvalid()
   }
 
   const result = await Functions.messages.getChatHistory(

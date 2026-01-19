@@ -61,7 +61,7 @@ export class UsersModel {
     // Parse phone number
     const parsedPhoneNumber = parsePhoneNumber(phoneNumber)
     if (!parsedPhoneNumber?.isValid()) {
-      throw RealtimeRpcError.PhoneNumberInvalid
+      throw RealtimeRpcError.PhoneNumberInvalid()
     }
 
     // E.164 phone numbers
@@ -87,7 +87,7 @@ export class UsersModel {
     if ("email" in input) {
       // Validate email
       if (!isValidEmail(input.email)) {
-        throw RealtimeRpcError.EmailInvalid
+        throw RealtimeRpcError.EmailInvalid()
       }
 
       email = input.email
@@ -97,7 +97,7 @@ export class UsersModel {
       // Validate and clean phone number
       const parsedPhoneNumber = parsePhoneNumber(input.phoneNumber)
       if (!parsedPhoneNumber?.isValid()) {
-        throw RealtimeRpcError.PhoneNumberInvalid
+        throw RealtimeRpcError.PhoneNumberInvalid()
       }
 
       phoneNumber = parsedPhoneNumber.number
@@ -120,7 +120,7 @@ export class UsersModel {
 
     if (!user[0]) {
       log.error("Failed to create user when invited", { input })
-      throw RealtimeRpcError.InternalError
+      throw RealtimeRpcError.InternalError()
     }
 
     return user[0]

@@ -19,7 +19,7 @@ export const deleteReaction = async (
   handlerContext: HandlerContext,
 ): Promise<DeleteReactionResult> => {
   if (!input.peerId) {
-    throw RealtimeRpcError.PeerIdInvalid
+    throw RealtimeRpcError.PeerIdInvalid()
   }
 
   const result = await Functions.messages.deleteReaction(
