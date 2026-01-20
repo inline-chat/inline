@@ -124,27 +124,6 @@ class ConnectionManager {
         this.subscribeUserToSpaceIds(userId)
       }
       this.authenticatedUsers.get(userId)?.add(id)
-
-      const connectionIds = this.authenticatedUsers.get(userId) ?? new Set<string>()
-      if (connectionIds.size > 1) {
-        const sessionCounts = new Map<number, number>()
-        for (const connectionId of connectionIds) {
-          const conn = this.connections.get(connectionId)
-          if (!conn?.sessionId) continue
-          sessionCounts.set(conn.sessionId, (sessionCounts.get(conn.sessionId) ?? 0) + 1)
-        }
-        const sessionSummary = Array.from(sessionCounts.entries()).map(([key, count]) => ({
-          sessionId: key,
-          count,
-        }))
-        log.debug("Realtime connections after auth", {
-          userId,
-          sessionId,
-          layer,
-          totalConnections: connectionIds.size,
-          sessions: sessionSummary,
-        })
-      }
     }
   }
 
