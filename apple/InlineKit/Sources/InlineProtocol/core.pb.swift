@@ -212,7 +212,7 @@ public enum SearchMessagesFilter: SwiftProtobuf.Enum, Swift.CaseIterable {
   case filterVideos // = 2
   case filterPhotoVideo // = 3
   case filterDocuments // = 4
-  case filterLinks // = 5000
+  case filterLinks // = 5
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -226,7 +226,7 @@ public enum SearchMessagesFilter: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 2: self = .filterVideos
     case 3: self = .filterPhotoVideo
     case 4: self = .filterDocuments
-    case 5000: self = .filterLinks
+    case 5: self = .filterLinks
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -238,7 +238,7 @@ public enum SearchMessagesFilter: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .filterVideos: return 2
     case .filterPhotoVideo: return 3
     case .filterDocuments: return 4
-    case .filterLinks: return 5000
+    case .filterLinks: return 5
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -5776,7 +5776,7 @@ extension SearchMessagesFilter: SwiftProtobuf._ProtoNameProviding {
     2: .same(proto: "FILTER_VIDEOS"),
     3: .same(proto: "FILTER_PHOTO_VIDEO"),
     4: .same(proto: "FILTER_DOCUMENTS"),
-    5000: .same(proto: "FILTER_LINKS"),
+    5: .same(proto: "FILTER_LINKS"),
   ]
 }
 
