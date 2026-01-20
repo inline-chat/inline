@@ -94,7 +94,7 @@ struct SpacesView: View {
       }
 
       VStack(alignment: .leading, spacing: 0) {
-        Text(shouldShow ? realtimeState.connectionState.title : "Chats")
+        Text(shouldShow ? realtimeState.connectionState.title : "Spaces")
           .font(.title3)
           .fontWeight(.semibold)
           .contentTransition(.numericText())
