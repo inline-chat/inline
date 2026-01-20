@@ -6,7 +6,11 @@ let totalErrors = 0
 
 const cleanupErrors = (now: number) => {
   const cutoff = now - ERROR_WINDOW_MS
-  while (errorTimestamps.length > 0 && errorTimestamps[0] < cutoff) {
+  while (errorTimestamps.length > 0) {
+    const first = errorTimestamps[0]
+    if (first === undefined || first >= cutoff) {
+      break
+    }
     errorTimestamps.shift()
   }
 }

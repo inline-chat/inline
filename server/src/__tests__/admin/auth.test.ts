@@ -26,7 +26,7 @@ const buildRequest = (
   }
 
   if (cookie) {
-    requestHeaders.Cookie = cookie
+    requestHeaders["Cookie"] = cookie
   }
 
   let requestBody: string | undefined

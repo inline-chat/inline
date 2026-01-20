@@ -28,12 +28,17 @@ export const generateTotpCode = (secret: string, timestampMs: number = Date.now(
   }
 
   const hmac = createHmac("sha1", key).update(counterBuffer).digest()
-  const offset = hmac[hmac.length - 1] & 0x0f
+  const lastByte = hmac[hmac.length - 1] ?? 0
+  const offset = lastByte & 0x0f
+  const b0 = hmac[offset] ?? 0
+  const b1 = hmac[offset + 1] ?? 0
+  const b2 = hmac[offset + 2] ?? 0
+  const b3 = hmac[offset + 3] ?? 0
   const binary =
-    ((hmac[offset] & 0x7f) << 24) |
-    ((hmac[offset + 1] & 0xff) << 16) |
-    ((hmac[offset + 2] & 0xff) << 8) |
-    (hmac[offset + 3] & 0xff)
+    ((b0 & 0x7f) << 24) |
+    ((b1 & 0xff) << 16) |
+    ((b2 & 0xff) << 8) |
+    (b3 & 0xff)
 
   const code = (binary % 10 ** CODE_DIGITS).toString().padStart(CODE_DIGITS, "0")
   return code

@@ -84,6 +84,9 @@ type AdminSessionContext = {
   stepUpAt: Date | null
 }
 
+type BunServer = Server<unknown>
+type AdminSet = { status?: number | string }
+
 type AdminCookieStore = {
   [ADMIN_COOKIE_NAME]: {
     value?: string
@@ -770,29 +773,39 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
         ? or(sql`${waitlist.email} ILIKE ${pattern}`, sql`${waitlist.name} ILIKE ${pattern}`)
         : undefined
 
-      let listQuery = db
-        .select({
-          id: waitlist.id,
-          email: waitlist.email,
-          name: waitlist.name,
-          verified: waitlist.verified,
-          date: waitlist.date,
-        })
-        .from(waitlist)
+      const listQuery = whereClause
+        ? db
+            .select({
+              id: waitlist.id,
+              email: waitlist.email,
+              name: waitlist.name,
+              verified: waitlist.verified,
+              date: waitlist.date,
+            })
+            .from(waitlist)
+            .where(whereClause)
+        : db
+            .select({
+              id: waitlist.id,
+              email: waitlist.email,
+              name: waitlist.name,
+              verified: waitlist.verified,
+              date: waitlist.date,
+            })
+            .from(waitlist)
 
-      if (whereClause) {
-        listQuery = listQuery.where(whereClause)
-      }
-
-      let countQuery = db
-        .select({
-          count: sql<number>`count(*)::int`,
-        })
-        .from(waitlist)
-
-      if (whereClause) {
-        countQuery = countQuery.where(whereClause)
-      }
+      const countQuery = whereClause
+        ? db
+            .select({
+              count: sql<number>`count(*)::int`.as("count"),
+            })
+            .from(waitlist)
+            .where(whereClause)
+        : db
+            .select({
+              count: sql<number>`count(*)::int`.as("count"),
+            })
+            .from(waitlist)
 
       const [rows, countRow] = await Promise.all([listQuery.orderBy(desc(waitlist.date)).limit(200), countQuery])
 
@@ -889,26 +902,40 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
           )
         : undefined
 
-      let queryBuilder = db
-        .select({
-          id: users.id,
-          email: users.email,
-          firstName: users.firstName,
-          lastName: users.lastName,
-          emailVerified: users.emailVerified,
-          username: users.username,
-          phoneNumber: users.phoneNumber,
-          online: users.online,
-          lastOnline: users.lastOnline,
-          createdAt: users.date,
-          deleted: users.deleted,
-          bot: users.bot,
-        })
-        .from(users)
-
-      if (whereClause) {
-        queryBuilder = queryBuilder.where(whereClause)
-      }
+      const queryBuilder = whereClause
+        ? db
+            .select({
+              id: users.id,
+              email: users.email,
+              firstName: users.firstName,
+              lastName: users.lastName,
+              emailVerified: users.emailVerified,
+              username: users.username,
+              phoneNumber: users.phoneNumber,
+              online: users.online,
+              lastOnline: users.lastOnline,
+              createdAt: users.date,
+              deleted: users.deleted,
+              bot: users.bot,
+            })
+            .from(users)
+            .where(whereClause)
+        : db
+            .select({
+              id: users.id,
+              email: users.email,
+              firstName: users.firstName,
+              lastName: users.lastName,
+              emailVerified: users.emailVerified,
+              username: users.username,
+              phoneNumber: users.phoneNumber,
+              online: users.online,
+              lastOnline: users.lastOnline,
+              createdAt: users.date,
+              deleted: users.deleted,
+              bot: users.bot,
+            })
+            .from(users)
 
       const rows = await queryBuilder.orderBy(desc(users.id)).limit(50)
 
@@ -1091,7 +1118,7 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
     },
   )
 
-const getRequestIp = (request: Request, server: Server | undefined) => {
+const getRequestIp = (request: Request, server: BunServer | undefined) => {
   return (
     request.headers.get("x-forwarded-for") ??
     request.headers.get("cf-connecting-ip") ??
@@ -1301,7 +1328,7 @@ const createAdminSession = async ({ userId, ip, userAgent, stepUpAt }: CreateAdm
   return { token }
 }
 
-const getAdminSession = async (cookie: AdminCookieStore, request: Request, server: Server | undefined) => {
+const getAdminSession = async (cookie: AdminCookieStore, request: Request, server: BunServer | undefined) => {
   const token = cookie[ADMIN_COOKIE_NAME]?.value
   if (!token) return null
 
@@ -1336,7 +1363,7 @@ const getAdminSession = async (cookie: AdminCookieStore, request: Request, serve
   if (!adminUser) return null
 
   const user = (await db.select().from(users).where(eq(users.id, session.userId)).limit(1))[0]
-  if (!user) return null
+  if (!user || !user.email) return null
 
   await db
     .update(superadminSessions)
@@ -1361,8 +1388,8 @@ const getAdminSession = async (cookie: AdminCookieStore, request: Request, serve
 const requireAdminSession = async (
   cookie: AdminCookieStore,
   request: Request,
-  server: Server | undefined,
-  set: { status?: number },
+  server: BunServer | undefined,
+  set: AdminSet,
 ) => {
   const session = await getAdminSession(cookie, request, server)
   if (!session) {
@@ -1372,7 +1399,7 @@ const requireAdminSession = async (
   return session
 }
 
-const requireSetupComplete = (session: AdminSessionContext, set: { status?: number }) => {
+const requireSetupComplete = (session: AdminSessionContext, set: AdminSet) => {
   if (!session.passwordSet || !session.totpEnabled) {
     set.status = 403
     return false
@@ -1380,7 +1407,7 @@ const requireSetupComplete = (session: AdminSessionContext, set: { status?: numb
   return true
 }
 
-const requireStepUp = (session: AdminSessionContext, set: { status?: number }) => {
+const requireStepUp = (session: AdminSessionContext, set: AdminSet) => {
   if (!session.stepUpAt) {
     set.status = 403
     return false
