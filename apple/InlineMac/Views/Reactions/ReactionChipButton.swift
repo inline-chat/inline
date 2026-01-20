@@ -20,6 +20,14 @@ final class ReactionChipButton: NSButton {
     didSet { updateColors() }
   }
 
+  var backgroundOverride: (primary: NSColor, secondary: NSColor)? {
+    didSet { updateColors() }
+  }
+
+  var foregroundOverride: NSColor? {
+    didSet { updateColors() }
+  }
+
   var currentUserId: Int64? {
     didSet { updateColors() }
   }
@@ -49,6 +57,21 @@ final class ReactionChipButton: NSButton {
     label.lineBreakMode = .byClipping
     return label
   }()
+
+  static let transparentOutgoingBackgrounds: (primary: NSColor, secondary: NSColor) = {
+    let primary = NSColor(name: "transparentOutgoingReactionPrimary") { appearance in
+      appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        ? NSColor(calibratedRed: 39 / 255, green: 38 / 255, blue: 46 / 255, alpha: 1.0)
+        : NSColor(calibratedRed: 205 / 255, green: 208 / 255, blue: 208 / 255, alpha: 1.0)
+    }
+    let secondary = NSColor(name: "transparentOutgoingReactionSecondary") { appearance in
+      appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        ? NSColor(calibratedRed: 49 / 255, green: 48 / 255, blue: 57 / 255, alpha: 1.0)
+        : NSColor(calibratedRed: 215 / 255, green: 218 / 255, blue: 218 / 255, alpha: 1.0)
+    }
+    return (primary: primary, secondary: secondary)
+  }()
+  static let transparentOutgoingForeground: NSColor = .labelColor
 
   init(emoji: String) {
     self.emoji = emoji
@@ -180,6 +203,9 @@ final class ReactionChipButton: NSButton {
   }
 
   private var backgroundColor: NSColor {
+    if let override = backgroundOverride {
+      return weReacted ? override.primary : override.secondary
+    }
     if forceIncomingStyle {
       let base: NSColor = isDarkMode ? .white : .controlAccentColor
       return weReacted ? base.withAlphaComponent(0.9) : base.withAlphaComponent(0.2)
@@ -194,6 +220,9 @@ final class ReactionChipButton: NSButton {
   }
 
   private var foregroundColor: NSColor {
+    if let override = foregroundOverride {
+      return override
+    }
     if forceIncomingStyle {
       if isDarkMode {
         return weReacted ? .controlAccentColor : .white

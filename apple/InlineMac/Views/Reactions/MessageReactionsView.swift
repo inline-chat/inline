@@ -44,6 +44,7 @@ final class MessageReactionsView: NSView {
     groups: [GroupedReaction],
     layoutItems: [String: MessageSizeCalculator.LayoutPlan],
     forceIncomingStyle: Bool = false,
+    transparentOutgoingStyle: Bool = false,
     animate: Bool = true
   ) {
     self.fullMessage = fullMessage
@@ -88,7 +89,8 @@ final class MessageReactionsView: NSView {
           chip: chip,
           group: group,
           fullMessage: fullMessage,
-          forceIncomingStyle: forceIncomingStyle
+          forceIncomingStyle: forceIncomingStyle,
+          transparentOutgoingStyle: transparentOutgoingStyle
         )
 
         if chip.frame != targetFrame {
@@ -109,7 +111,8 @@ final class MessageReactionsView: NSView {
           chip: chip,
           group: group,
           fullMessage: fullMessage,
-          forceIncomingStyle: forceIncomingStyle
+          forceIncomingStyle: forceIncomingStyle,
+          transparentOutgoingStyle: transparentOutgoingStyle
         )
         addSubview(chip)
         chipsByEmoji[emoji] = chip
@@ -138,11 +141,19 @@ final class MessageReactionsView: NSView {
     chip: ReactionChipButton,
     group: GroupedReaction,
     fullMessage: FullMessage,
-    forceIncomingStyle: Bool
+    forceIncomingStyle: Bool,
+    transparentOutgoingStyle: Bool
   ) {
     chip.isOutgoing = fullMessage.message.out == true
     chip.currentUserId = currentUserId
     chip.forceIncomingStyle = forceIncomingStyle
+    if transparentOutgoingStyle {
+      chip.backgroundOverride = ReactionChipButton.transparentOutgoingBackgrounds
+      chip.foregroundOverride = ReactionChipButton.transparentOutgoingForeground
+    } else {
+      chip.backgroundOverride = nil
+      chip.foregroundOverride = nil
+    }
     chip.group = group
   }
 

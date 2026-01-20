@@ -105,6 +105,10 @@ class MessageViewAppKit: NSView {
     props.layout.reactionsOutsideBubble
   }
 
+  private var shouldUseTransparentOutgoingReactions: Bool {
+    outgoing && (emojiMessage || reactionsOutsideBubble)
+  }
+
   private var textWidth: CGFloat {
     props.layout.text?.size.width ?? 1.0
   }
@@ -636,6 +640,7 @@ class MessageViewAppKit: NSView {
       groups: fullMessage.groupedReactions,
       layoutItems: props.layout.reactionItems,
       forceIncomingStyle: reactionsOutsideBubble,
+      transparentOutgoingStyle: shouldUseTransparentOutgoingReactions,
       animate: animate
     )
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -715,6 +720,7 @@ class MessageViewAppKit: NSView {
       groups: fullMessage.groupedReactions,
       layoutItems: props.layout.reactionItems,
       forceIncomingStyle: reactionsOutsideBubble,
+      transparentOutgoingStyle: shouldUseTransparentOutgoingReactions,
       animate: false
     )
   }
@@ -751,6 +757,7 @@ class MessageViewAppKit: NSView {
         groups: next.groupedReactions,
         layoutItems: props.layout.reactionItems,
         forceIncomingStyle: reactionsOutsideBubble,
+        transparentOutgoingStyle: shouldUseTransparentOutgoingReactions,
         animate: true
       )
     }
