@@ -73,7 +73,9 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     receiveLoopTask = nil
 
     // Cancel the underlying WebSocket task (if any).
-    task?.cancel()
+    if let task {
+      task.cancel(with: .goingAway, reason: "cleanup".data(using: .utf8))
+    }
     task = nil
   }
 
@@ -396,15 +398,15 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
 
   // MARK: Receive loop -------------------------------------------------------
 
-  private func receiveLoop() {
-    guard let task else { return }
-
+  private func receiveLoop(connectionToken: UInt64, webSocketTask: URLSessionWebSocketTask) {
     // Keep a reference so we can cancel on reconnect.
-    receiveLoopTask = Task.detached { [weak self, webSocketTask = task, eventChannel = _eventChannel] in
+    receiveLoopTask = Task.detached { [weak self, eventChannel = _eventChannel] in
       guard let self else { return }
       while true {
         do {
           let frame = try await webSocketTask.receive()
+
+          guard await self.isCurrentConnection(token: connectionToken, task: webSocketTask) else { break }
 
           switch frame {
             case let .data(data):
@@ -425,6 +427,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
               break
           }
         } catch {
+          guard await self.isCurrentConnection(token: connectionToken, task: webSocketTask) else { break }
           log.trace("Error in receive loop")
           await handleError(error)
           break
@@ -518,9 +521,14 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     // Cancel the connection timeout task since we've successfully connected
     stopConnectionTimeout()
 
-    receiveLoop()
+    let token = connectionToken
+    receiveLoop(connectionToken: token, webSocketTask: task)
 
     await connected()
+  }
+
+  private func isCurrentConnection(token: UInt64, task: URLSessionWebSocketTask) async -> Bool {
+    self.task === task && self.connectionToken == token && self.state != .idle
   }
 
   private func handleClose(
