@@ -54,6 +54,8 @@ class MainSidebarList: NSView {
   private var lastSnapshotContext: SnapshotContext?
   private var activeViewModelCancellables = Set<AnyCancellable>()
   private var scrollEventsSubject = PassthroughSubject<ScrollEvent, Never>()
+  private var quickSearchVisibilityObserver: NSObjectProtocol?
+  private var isQuickSearchVisible = false
 
   private var nav2: Nav2? { dependencies.nav2 }
   private var mode: Mode = .inbox
@@ -129,6 +131,9 @@ class MainSidebarList: NSView {
   }
 
   deinit {
+    if let quickSearchVisibilityObserver {
+      NotificationCenter.default.removeObserver(quickSearchVisibilityObserver)
+    }
     NotificationCenter.default.removeObserver(self)
   }
 
@@ -170,6 +175,18 @@ class MainSidebarList: NSView {
       name: NSScrollView.didEndLiveScrollNotification,
       object: scrollView
     )
+
+    quickSearchVisibilityObserver = NotificationCenter.default.addObserver(
+      forName: .quickSearchVisibilityChanged,
+      object: nil,
+      queue: .main
+    ) { [weak self] notification in
+      guard let self else { return }
+      guard let isVisible = notification.userInfo?["isVisible"] as? Bool else { return }
+      guard isQuickSearchVisible != isVisible else { return }
+      isQuickSearchVisible = isVisible
+      applySnapshot(animatingDifferences: false)
+    }
   }
 
   @objc private func didLiveScroll() {
@@ -217,7 +234,7 @@ class MainSidebarList: NSView {
           with: content,
           dependencies: dependencies,
           events: scrollEventsSubject,
-          highlightNavSelection: mode != .search
+          highlightNavSelection: mode != .search && !isQuickSearchVisible
         )
       }
 
