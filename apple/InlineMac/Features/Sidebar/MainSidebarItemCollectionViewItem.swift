@@ -7,8 +7,6 @@ class MainSidebarItemCollectionViewItem: NSCollectionViewItem {
     view as? MainSidebarItemCell
   }
 
-  private var isHeader: Bool = false
-
   override var isSelected: Bool {
     didSet {
       cellView?.setListSelected(isSelected)
@@ -19,7 +17,7 @@ class MainSidebarItemCollectionViewItem: NSCollectionViewItem {
     _ layoutAttributes: NSCollectionViewLayoutAttributes
   ) -> NSCollectionViewLayoutAttributes {
     let attributes = super.preferredLayoutAttributesFitting(layoutAttributes)
-    attributes.size.height = isHeader ? 20 : MainSidebar.itemHeight
+    attributes.size.height = MainSidebar.itemHeight
     return attributes
   }
 
@@ -35,13 +33,6 @@ class MainSidebarItemCollectionViewItem: NSCollectionViewItem {
   struct Content {
     enum Kind {
       case item(ChatListItem)
-      case header(
-        section: MainSidebarList.Section,
-        title: String,
-        symbol: String,
-        showsDisclosure: Bool,
-        isCollapsed: Bool
-      )
     }
 
     let kind: Kind
@@ -51,20 +42,13 @@ class MainSidebarItemCollectionViewItem: NSCollectionViewItem {
     with item: Content,
     dependencies: AppDependencies,
     events: PassthroughSubject<MainSidebarList.ScrollEvent, Never>,
-    highlightNavSelection: Bool,
-    onHeaderTap: ((MainSidebarList.Section) -> Void)?
+    highlightNavSelection: Bool
   ) {
-    if case .header = item.kind {
-      isHeader = true
-    } else {
-      isHeader = false
-    }
     cellView?.configure(
       with: item,
       dependencies: dependencies,
       events: events,
-      highlightNavSelection: highlightNavSelection,
-      onHeaderTap: onHeaderTap
+      highlightNavSelection: highlightNavSelection
     )
   }
 }

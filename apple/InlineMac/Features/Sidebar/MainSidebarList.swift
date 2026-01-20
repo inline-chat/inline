@@ -17,10 +17,7 @@ class MainSidebarList: NSView {
   private static let contentInsetTrailing: CGFloat = MainSidebar.outerEdgeInsets
 
   enum Section: Hashable {
-    case threads
-    case dms
-    case archiveChats
-    case searchResults
+    case chats
   }
 
   enum Mode: Hashable {
@@ -30,7 +27,6 @@ class MainSidebarList: NSView {
   }
 
   enum Item: Hashable {
-    case header(Section)
     case chat(ChatListItem.Identifier)
   }
 
@@ -62,8 +58,6 @@ class MainSidebarList: NSView {
   private var nav2: Nav2? { dependencies.nav2 }
   private var mode: Mode = .inbox
   private var searchQuery: String = ""
-  // TODO: Persist collapsed sections across sessions.
-  private var collapsedSections = Set<Section>()
 
   private(set) var lastChatItemCount: Int = 0
   var onChatCountChanged: ((Mode, Int) -> Void)?
@@ -223,10 +217,7 @@ class MainSidebarList: NSView {
           with: content,
           dependencies: dependencies,
           events: scrollEventsSubject,
-          highlightNavSelection: mode != .search,
-          onHeaderTap: { [weak self] section in
-            self?.toggleSection(section)
-          }
+          highlightNavSelection: mode != .search
         )
       }
 
@@ -374,20 +365,6 @@ class MainSidebarList: NSView {
     var chatMap: [ChatListItem.Identifier: ChatListItem] = [:]
     var chatItemCount: Int = 0
 
-    func appendSection(_ section: Section, chatItems: [ChatListItem]) {
-      guard chatItems.isEmpty == false else { return }
-      let isCollapsed = isCollapsibleSection(section) && collapsedSections.contains(section)
-      let sectionItems: [Item] = isCollapsed ? [.header(section)] : [.header(section)] + chatItems.map { .chat($0.id) }
-      sections.append(section)
-      items[section] = sectionItems
-      sectionItems.forEach { item in
-        switch item {
-          case let .chat(id): valuesByItem[item] = chatMap[id]
-          case let .header(section): valuesByItem[item] = "header-\(section)-\(isCollapsed)" as AnyHashable
-        }
-      }
-    }
-
     switch mode {
       case .archive:
         let combinedArchived = mergeUniqueItems(archivedChats + archivedContacts)
@@ -395,27 +372,25 @@ class MainSidebarList: NSView {
         let sortedArchived = viewModel.isSpaceSource ? sortSpaceItems(filteredArchived) : filteredArchived
         chatMap = Dictionary(uniqueKeysWithValues: sortedArchived.map { ($0.id, $0) })
         chatItemCount = sortedArchived.count
-        appendSection(.archiveChats, chatItems: sortedArchived)
+        sections = sortedArchived.isEmpty ? [] : [.chats]
+        items[.chats] = sortedArchived.map { .chat($0.id) }
 
       case .inbox:
+        let filteredThreads = threads.filter { $0.dialog != nil }
+        let filteredContacts = contacts.filter { $0.dialog != nil }
         if viewModel.isSpaceSource {
-          let filteredThreads = threads.filter { $0.dialog != nil }
-          let filteredContacts = contacts.filter { $0.dialog != nil }
-          let sortedThreads = sortSpaceItems(filteredThreads)
-          let sortedContacts = sortSpaceItems(filteredContacts)
-          let combined = mergeUniqueItems(sortedThreads + sortedContacts)
-          chatMap = Dictionary(uniqueKeysWithValues: combined.map { ($0.id, $0) })
-          chatItemCount = combined.count
-          appendSection(.threads, chatItems: sortedThreads)
-          appendSection(.dms, chatItems: sortedContacts)
+          let combined = mergeUniqueItems(filteredThreads + filteredContacts)
+          let sortedCombined = sortSpaceItems(combined)
+          chatMap = Dictionary(uniqueKeysWithValues: sortedCombined.map { ($0.id, $0) })
+          chatItemCount = sortedCombined.count
+          sections = sortedCombined.isEmpty ? [] : [.chats]
+          items[.chats] = sortedCombined.map { .chat($0.id) }
         } else {
-          let filteredThreads = threads.filter { $0.dialog != nil }
-          let splitItems = splitHomeItems(filteredThreads)
-          let combined = mergeUniqueItems(splitItems.threads + splitItems.dms)
+          let combined = mergeUniqueItems(filteredThreads + filteredContacts)
           chatMap = Dictionary(uniqueKeysWithValues: combined.map { ($0.id, $0) })
           chatItemCount = combined.count
-          appendSection(.threads, chatItems: splitItems.threads)
-          appendSection(.dms, chatItems: splitItems.dms)
+          sections = combined.isEmpty ? [] : [.chats]
+          items[.chats] = combined.map { .chat($0.id) }
         }
 
       case .search:
@@ -436,39 +411,25 @@ class MainSidebarList: NSView {
         let filteredThreads = allThreads.filter { matchesSearch($0, query: trimmedQuery) }
         let filteredContacts = allContacts.filter { matchesSearch($0, query: trimmedQuery) }
 
-        let combined = filteredThreads + filteredContacts
-        let filteredCombined = combined.filter { $0.dialog != nil }
-        let sortedCombined = viewModel.isSpaceSource ? sortSpaceItems(filteredCombined) : filteredCombined
-        let searchMap = Dictionary(uniqueKeysWithValues: sortedCombined.map { ($0.id, $0) })
-
+        let filteredCombined: [ChatListItem]
         if viewModel.isSpaceSource {
-          if sortedCombined.isEmpty == false {
-            let chatItems: [Item] = [.header(.searchResults)] + sortedCombined.map { .chat($0.id) }
-            sections = [.searchResults]
-            items[.searchResults] = chatItems
-            chatItems.forEach { item in
-              switch item {
-                case let .chat(id): valuesByItem[item] = searchMap[id]
-                case let .header(section): valuesByItem[item] = "header-\(section)" as AnyHashable
-              }
-            }
-          }
+          filteredCombined = filteredThreads + filteredContacts
         } else {
-          if filteredThreads.isEmpty == false {
-            let chatItems: [Item] = [.header(.searchResults)] + filteredThreads.map { .chat($0.id) }
-            sections = [.searchResults]
-            items[.searchResults] = chatItems
-            chatItems.forEach { item in
-              switch item {
-                case let .chat(id): valuesByItem[item] = searchMap[id]
-                case let .header(section): valuesByItem[item] = "header-\(section)" as AnyHashable
-              }
-            }
-          }
+          filteredCombined = filteredThreads
         }
 
-        chatMap = searchMap
-        chatItemCount = sortedCombined.count
+        let filteredItems = filteredCombined.filter { $0.dialog != nil }
+        let sortedItems = viewModel.isSpaceSource ? sortSpaceItems(filteredItems) : filteredItems
+        chatMap = Dictionary(uniqueKeysWithValues: sortedItems.map { ($0.id, $0) })
+        chatItemCount = sortedItems.count
+        sections = sortedItems.isEmpty ? [] : [.chats]
+        items[.chats] = sortedItems.map { .chat($0.id) }
+    }
+
+    items[.chats]?.forEach { item in
+      if case let .chat(id) = item {
+        valuesByItem[item] = chatMap[id]
+      }
     }
 
     return SnapshotData(
@@ -530,38 +491,6 @@ class MainSidebarList: NSView {
       case let .chat(id):
         guard let chat = chatItemsByID[id] else { return nil }
         return .init(kind: .item(chat))
-      case let .header(section):
-        let title: String
-        let symbol: String
-        let showsDisclosure: Bool
-        let isCollapsed = isCollapsibleSection(section) && collapsedSections.contains(section)
-        switch section {
-          case .threads:
-            title = "Threads"
-            symbol = "bubble.left.and.bubble.right.fill"
-            showsDisclosure = true
-          case .dms:
-            title = "DMs"
-            symbol = "person.fill"
-            showsDisclosure = true
-          case .archiveChats:
-            title = "Archived"
-            symbol = "archivebox.fill"
-            showsDisclosure = false
-          case .searchResults:
-            title = "Results"
-            symbol = "magnifyingglass"
-            showsDisclosure = false
-        }
-        return .init(
-          kind: .header(
-            section: section,
-            title: title,
-            symbol: symbol,
-            showsDisclosure: showsDisclosure,
-            isCollapsed: isCollapsed
-          )
-        )
     }
   }
 
@@ -655,38 +584,6 @@ class MainSidebarList: NSView {
     }
   }
 
-  private func isCollapsibleSection(_ section: Section) -> Bool {
-    switch section {
-      case .threads, .dms:
-        return true
-      case .archiveChats, .searchResults:
-        return false
-    }
-  }
-
-  private func toggleSection(_ section: Section) {
-    guard isCollapsibleSection(section) else { return }
-    if collapsedSections.contains(section) {
-      collapsedSections.remove(section)
-    } else {
-      collapsedSections.insert(section)
-    }
-    applySnapshot()
-  }
-
-  private func splitHomeItems(_ items: [ChatListItem]) -> (threads: [ChatListItem], dms: [ChatListItem]) {
-    var threads: [ChatListItem] = []
-    var dms: [ChatListItem] = []
-    for item in items {
-      if item.peerId?.isPrivate == true {
-        dms.append(item)
-      } else {
-        threads.append(item)
-      }
-    }
-    return (threads, dms)
-  }
-
   private func searchTokens(for item: ChatListItem) -> [String] {
     var tokens: [String] = []
 
@@ -764,9 +661,7 @@ class MainSidebarList: NSView {
   private func selectableItems(in snapshot: NSDiffableDataSourceSnapshot<Section, Item>) -> [Item] {
     snapshot.sectionIdentifiers.flatMap { section in
       snapshot.itemIdentifiers(inSection: section).filter { item in
-        if case .chat = item {
-          return true
-        }
+        if case .chat = item { return true }
         return false
       }
     }
