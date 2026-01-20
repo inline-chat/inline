@@ -152,6 +152,34 @@ class UIMessageView: UIView {
     return text.count > characterThreshold || text.contains("\n") || text.containsEmoji
   }
 
+  private var shouldUseTransparentOutgoingReactions: Bool {
+    outgoing && (isEmojiOnlyMessage || isMediaOnlyMessage)
+  }
+
+  private var transparentOutgoingReactionOverrides: (primary: UIColor, secondary: UIColor) {
+    let baseColor = ThemeManager.shared.selected.reactionIncomingSecoundry ?? .systemGray5
+    let primary = darkenedColor(baseColor, amount: 0.08)
+    let secondary = darkenedColor(baseColor, amount: 0.04)
+    return (primary, secondary)
+  }
+
+  private func darkenedColor(_ color: UIColor, amount: CGFloat) -> UIColor {
+    UIColor { trait in
+      let resolved = color.resolvedColor(with: trait)
+      var r: CGFloat = 0
+      var g: CGFloat = 0
+      var b: CGFloat = 0
+      var a: CGFloat = 0
+      guard resolved.getRed(&r, green: &g, blue: &b, alpha: &a) else { return resolved }
+      return UIColor(
+        red: max(r - amount, 0),
+        green: max(g - amount, 0),
+        blue: max(b - amount, 0),
+        alpha: a
+      )
+    }
+  }
+
   // MARK: - UI Components
 
   let bubbleView = createBubbleView()
@@ -171,7 +199,12 @@ class UIMessageView: UIView {
   private weak var metadataContainerView: UIStackView?
 
   lazy var reactionsFlowView: ReactionsFlowView = {
-    let view = ReactionsFlowView(outgoing: outgoing)
+    let overrides = shouldUseTransparentOutgoingReactions ? transparentOutgoingReactionOverrides : nil
+    let view = ReactionsFlowView(
+      outgoing: outgoing,
+      reactionBackgroundPrimaryOverride: overrides?.primary,
+      reactionBackgroundSecondaryOverride: overrides?.secondary
+    )
     view.onReactionTap = { [weak self] emoji in
       guard let self else { return }
 

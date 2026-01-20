@@ -37,6 +37,8 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
   let byCurrentUser: Bool
   let outgoing: Bool
   private(set) var reactionUsers: [ReactionUser]
+  private var backgroundPrimaryOverride: UIColor?
+  private var backgroundSecondaryOverride: UIColor?
 
   var onTap: ((String) -> Void)?
 
@@ -73,12 +75,22 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
 
   // MARK: - Initialization
 
-  init(emoji: String, count: Int, byCurrentUser: Bool, outgoing: Bool, reactionUsers: [ReactionUser]) {
+  init(
+    emoji: String,
+    count: Int,
+    byCurrentUser: Bool,
+    outgoing: Bool,
+    reactionUsers: [ReactionUser],
+    backgroundPrimaryOverride: UIColor? = nil,
+    backgroundSecondaryOverride: UIColor? = nil
+  ) {
     self.emoji = emoji
     self.count = count
     self.byCurrentUser = byCurrentUser
     self.outgoing = outgoing
     self.reactionUsers = reactionUsers
+    self.backgroundPrimaryOverride = backgroundPrimaryOverride
+    self.backgroundSecondaryOverride = backgroundSecondaryOverride
 
     super.init(frame: .zero)
     setupView()
@@ -110,12 +122,22 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
   }
 
   private func configureContainerAppearance() {
-    containerView.backgroundColor = byCurrentUser ?
-      (
+    if let primaryOverride = backgroundPrimaryOverride, let secondaryOverride = backgroundSecondaryOverride {
+      containerView.backgroundColor = byCurrentUser ? primaryOverride : secondaryOverride
+      return
+    }
+
+    if let override = backgroundPrimaryOverride ?? backgroundSecondaryOverride {
+      containerView.backgroundColor = override
+      return
+    }
+
+    containerView.backgroundColor = byCurrentUser
+      ? (
         outgoing ? ThemeManager.shared.selected.reactionOutgoingPrimary : ThemeManager.shared.selected
           .reactionIncomingPrimary
-      ) :
-      (
+      )
+      : (
         outgoing ? ThemeManager.shared.selected.reactionOutgoingSecoundry : ThemeManager.shared.selected
           .reactionIncomingSecoundry
       )
@@ -362,6 +384,12 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
   func updateReactionUsers(_ newReactionUsers: [ReactionUser]) {
     reactionUsers = newReactionUsers
     setupAvatars()
+  }
+
+  func updateBackgroundOverrides(primary: UIColor?, secondary: UIColor?) {
+    backgroundPrimaryOverride = primary
+    backgroundSecondaryOverride = secondary
+    configureContainerAppearance()
   }
 
   private func createAvatarImage(for userInfo: UserInfo) -> UIImage {
