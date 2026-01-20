@@ -751,14 +751,23 @@ class MessageSizeCalculator {
 
     if hasReactions {
       reactionsOutsideBubble = !hasText && (photoPlan != nil || videoPlan != nil)
-      let reactionsInsets: NSEdgeInsets = reactionsOutsideBubble
-        ? .zero
-        : NSEdgeInsets(
+      let reactionsInsets: NSEdgeInsets = if reactionsOutsideBubble {
+        .zero
+      } else if emojiMessage {
+        NSEdgeInsets(
+          top: 4.0,
+          left: 8.0,
+          bottom: 6.0,
+          right: 8.0
+        )
+      } else {
+        NSEdgeInsets(
           top: 8.0,
           left: 8.0,
           bottom: 0.0,
           right: 8.0
         )
+      }
       reactionsPlan = LayoutPlan(
         size: .zero,
         spacing: reactionsInsets
