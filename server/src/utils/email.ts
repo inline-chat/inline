@@ -17,7 +17,7 @@ type SendEmailInput = {
  * @see CodeTemplateInput
  * @see InvitedToSpaceTemplateInput
  */
-type SendEmailContent = CodeTemplateInput | InvitedToSpaceTemplateInput
+type SendEmailContent = CodeTemplateInput | InvitedToSpaceTemplateInput | AdminActionTemplateInput
 
 export const sendEmail = async (input: SendEmailInput) => {
   const template = getTemplate(input.content)
@@ -85,6 +85,9 @@ const getTemplate = (content: SendEmailContent): TextTemplate => {
 
     case "invitedToSpace":
       return InvitedToSpaceTemplate(content.variables)
+
+    case "adminAction":
+      return AdminActionTemplate(content.variables)
   }
 }
 
@@ -108,11 +111,22 @@ interface InvitedToSpaceTemplateInput extends TemplateInput {
   }
 }
 
+interface AdminActionTemplateInput extends TemplateInput {
+  template: "adminAction"
+  variables: {
+    actionTaken: string
+    actorEmail: string
+    ip?: string | null
+    userAgent?: string | null
+    timestamp: string
+  }
+}
+
 function CodeTemplate({ code, firstName, isExistingUser }: CodeTemplateInput["variables"]): TextTemplate {
   const codeType = isExistingUser ? "login" : "signup"
   const subject = `Your Inline ${codeType} code: ${code}`
   const text = `
-Hey ${firstName ? `${firstName},` : "–"}
+Hey ${firstName ? `${firstName},` : "-"}
 
 Here's your verification code for Inline ${codeType}: ${code}
 
@@ -133,7 +147,7 @@ function InvitedToSpaceTemplate({
     ? `by "${invitedByUserName.firstName ?? invitedByUserName.username ?? invitedByUserName.email}"`
     : ""
   const text = `
-Hey ${firstName ? `${firstName},` : "–"}
+Hey ${firstName ? `${firstName},` : "-"}
 
 You've been invited to join "${spaceName}" ${invitedByName} on Inline.
 
@@ -149,10 +163,31 @@ For iPhone/iPad: https://testflight.apple.com/join/FkC3f7fz
 For Mac: https://testflight.apple.com/join/Z8zUcWZH
     `
 }
+  `.trim()
+  return { subject, text }
+}
 
-Inline is a chat app for teams. 
+function AdminActionTemplate({
+  actionTaken,
+  actorEmail,
+  ip,
+  userAgent,
+  timestamp,
+}: AdminActionTemplateInput["variables"]): TextTemplate {
+  const subject = `Inline admin activity: ${actionTaken}`
+  const text = `
+Admin activity detected.
+
+Action: ${actionTaken}
+Actor: ${actorEmail}
+Time: ${timestamp}
+IP: ${ip ?? "unknown"}
+User agent: ${userAgent ?? "unknown"}
+
+If this wasn't you, rotate credentials immediately.
 
 Inline Team
   `.trim()
+
   return { subject, text }
 }

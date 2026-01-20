@@ -1,6 +1,7 @@
 import { authenticate, authenticateGet } from "@in/server/controllers/plugins"
 import { ApiError, ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
+import { recordApiError } from "@in/server/utils/metrics"
 import Elysia, { t, type TSchema, type Static, type InputSchema } from "elysia"
 import { type TUndefined, type TObject, type TDecodeType, Type } from "@sinclair/typebox"
 import { TOptional, TPeerInfo } from "@in/server/api-types"
@@ -22,6 +23,7 @@ export const TMakeApiResponse = <T extends TSchema>(type: T) => {
 export const handleError = new Elysia({ name: "api-error-handler" })
   .error("INLINE_ERROR", InlineError)
   .onError({ as: "scoped" }, ({ code, error, path }) => {
+    recordApiError()
     if (code === "NOT_FOUND") {
       Log.shared.error("API ERROR NOT FOUND", error)
       return {

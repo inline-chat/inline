@@ -56,7 +56,7 @@
 ## Backend
 
 - Runs on Bun (not Node); entry at `server/src/index.ts`; business logic in `src/functions`, RPC handlers in `src/realtime/handlers`, encoders in `src/realtime/encoders`, schema in `src/db/schema`, models in `src/db/models`.
-- Use Drizzle for DB; follow add-table flow: create schema, export in `schema/index.ts`, `bun run db:generate <migration>`, migrate, then add model/tests.
+- Use Drizzle for DB; follow add-table flow: create schema, export in `schema/index.ts`, `bun run db:generate <migration>`, migrate, then add model/tests. Never hand-write migrations.
 - REST endpoints (legacy) in `src/methods`; realtime is primary; keep auth via `src/utils/authorize.ts`; secure data via `src/modules/encryption/encryption2.ts`.
 - Testing/linting/typecheck from `server/`: `bun test`, `bun run lint`, `bun run typecheck`; set `DEBUG=1` for verbose output.
 - External services: APN (`src/libs/apn.ts`), R2 storage (`src/libs/r2.ts`), AI (Anthropic/OpenAI), Linear/Notion/Loom integrations; ensure env vars handled via `src/env.ts`.
@@ -68,3 +68,14 @@
 - Keep routing with TanStack conventions; prefer StyleX/Tailwind utilities over ad-hoc CSS; maintain SSR compatibility (Nitro).
 - When touching protocol-bound code, regenerate protos first (`bun run generate:proto`) to keep TS definitions synced.
 - Use StyleX variables for colors, fontSizes, fonts, radiuses, etc; Follow naming of Apple system variables for theming; Support dark and light theme; Check Theme for macOS/iOS if you are unsure about a variable;
+
+## Admin
+
+- Admin frontend lives in `admin/` (Vite + TanStack Router file-based routing). Routes are under `admin/src/routes`, pages under `admin/src/pages`, layout under `admin/src/components/layout/app-layout.tsx`.
+- Admin backend lives in `server/src/controllers/admin.ts`; keep new endpoints behind `/admin` with origin allowlist + admin session cookie.
+- Do not load remote assets/scripts/styles/fonts in admin UI. Use local assets from `admin/public` only.
+- Always require a valid admin session (cookie) for admin endpoints. Use step-up checks for sensitive actions (user updates, role changes, exports).
+- Keep admin cookies `httpOnly`, `secure` in prod, `sameSite: "strict"`, and scoped to the admin API domain.
+- Rate-limit or lockout admin auth flows (password + email code) when adding new login/verification paths.
+- Never send decrypted secrets to the client. For session/device data, limit to explicitly needed fields and redact when possible.
+- Maintain separate admin metrics endpoints for UI. For new metrics, exclude deleted users and bots by default.

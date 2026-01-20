@@ -2,6 +2,7 @@
   "name": "inline",
   "private": true,
   "workspaces": [
+    "admin",
     "server",
     "web",
     "web/packages/*",
@@ -11,6 +12,7 @@
     "generate:proto": "cd scripts && bun run generate",
     "dev:server": "cd server && bun run dev",
     "dev:web": "cd web && bun run dev",
+    "dev:admin": "cd admin && bun run dev",
     "dev:desktop": "cd desktop && bun run dev",
     "typecheck": "cd server && bun run typecheck",
     "dev": "cd server && bun run dev",

@@ -344,6 +344,34 @@
       "when": 1768646394304,
       "tag": "0048_add-message-has-link",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1768910362131,
+      "tag": "0049_admin-auth",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1768910496458,
+      "tag": "0050_superadmin-sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1768912420462,
+      "tag": "0051_superadmin-hardening",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1768921959147,
+      "tag": "0052_superadmin-login-throttle",
+      "breakpoints": true
     }
   ]
 }

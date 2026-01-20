@@ -22,6 +22,7 @@ import { connectionManager } from "@in/server/ws/connections"
 import { Log, LogLevel } from "@in/server/utils/log"
 import { realtime } from "@in/server/realtime"
 import { integrationsRouter } from "./controllers/integrations/integrationsRouter"
+import { admin } from "./controllers/admin"
 import type { Server } from "bun"
 import { EventEmitter } from "events"
 
@@ -54,6 +55,7 @@ export const app = new Elysia()
   .use(waitlist)
   .use(there)
   .use(integrationsRouter)
+  .use(admin)
 
   .use(
     swagger({
