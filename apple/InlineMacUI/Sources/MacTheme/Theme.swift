@@ -38,7 +38,7 @@ public enum Theme {
 
   public static let windowContentBackgroundColor: NSColor = .init(
     "windowContentBackgroundColor",
-    light: NSColor(red: 249 / 255, green: 249 / 255, blue: 250 / 255, alpha: 1),
+    light: NSColor.white,
     dark: NSColor(red: 15 / 255, green: 15 / 255, blue: 16 / 255, alpha: 1)
   )
 
