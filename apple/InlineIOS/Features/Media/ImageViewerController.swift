@@ -573,6 +573,7 @@ final class ImageViewerController: UIViewController {
       mediaContentView.transform = CGAffineTransform(translationX: 0, y: translation.y)
       let progress = min(1.0, abs(translation.y) / 200)
       view.backgroundColor = UIColor.black.withAlphaComponent(1.0 - progress * 0.8)
+      controlsContainerView.alpha = isControlsVisible ? (1.0 - progress) : 0.0
             
     case .ended, .cancelled:
       if abs(translation.y) > 100 || abs(velocity.y) > 500 {
@@ -612,6 +613,7 @@ final class ImageViewerController: UIViewController {
         UIView.animate(withDuration: 0.3) {
           self.mediaContentView.transform = .identity
           self.view.backgroundColor = .black
+          self.controlsContainerView.alpha = self.isControlsVisible ? 1.0 : 0.0
         }
       }
             
