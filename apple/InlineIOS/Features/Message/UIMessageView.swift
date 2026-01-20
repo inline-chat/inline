@@ -81,6 +81,10 @@ class UIMessageView: UIView {
     message.hasPhoto || message.hasVideo
   }
 
+  private var isMediaOnlyMessage: Bool {
+    hasMedia && !message.hasText
+  }
+
   private var shouldShowReactionsOutsideBubble: Bool {
     (hasMedia || isSticker) && !message.hasText && !fullMessage.reactions.isEmpty
   }
@@ -673,6 +677,23 @@ class UIMessageView: UIView {
     }
 
     bubbleView.addGestureRecognizer(doubleTapGesture)
+
+    if isMediaOnlyMessage {
+      let backgroundDoubleTapGesture = UITapGestureRecognizer(
+        target: self,
+        action: #selector(handleBackgroundDoubleTap)
+      )
+      backgroundDoubleTapGesture.numberOfTapsRequired = 2
+
+      if let interaction {
+        backgroundDoubleTapGesture.delegate = self
+        interaction.view?.gestureRecognizers?.forEach { gesture in
+          backgroundDoubleTapGesture.require(toFail: gesture)
+        }
+      }
+
+      addGestureRecognizer(backgroundDoubleTapGesture)
+    }
   }
 
   @objc func handleTextViewTap(_ gesture: UITapGestureRecognizer) {
@@ -780,6 +801,20 @@ class UIMessageView: UIView {
   }
 
   @objc func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
+    toggleCheckmarkReaction()
+  }
+
+  @objc private func handleBackgroundDoubleTap(_ gesture: UITapGestureRecognizer) {
+    guard isMediaOnlyMessage else { return }
+
+    let location = gesture.location(in: self)
+    guard !bubbleView.frame.contains(location) else { return }
+    guard bubbleView.frame.minY <= location.y, location.y <= bubbleView.frame.maxY else { return }
+
+    toggleCheckmarkReaction()
+  }
+
+  private func toggleCheckmarkReaction() {
     // Don't allow reactions on messages that are still sending
     if message.status == .sending {
       return
