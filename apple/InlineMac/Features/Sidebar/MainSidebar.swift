@@ -1,14 +1,9 @@
 import AppKit
-import InlineKit
-import Observation
-
 class MainSidebar: NSViewController {
   private let dependencies: AppDependencies
   private let listView: MainSidebarList
 
-  private var nav2: Nav2? { dependencies.nav2 }
   private var activeMode: MainSidebarMode = .inbox
-  private var focusSearchObserver: NSObjectProtocol?
 
   // MARK: - Sizes
 
@@ -44,25 +39,10 @@ class MainSidebar: NSViewController {
     return view
   }()
 
-  private lazy var searchFieldView: MainSidebarSearchFieldView = {
-    let view = MainSidebarSearchFieldView()
-    view.translatesAutoresizingMaskIntoConstraints = false
-    return view
-  }()
-
   private lazy var footerView: NSView = {
     let view = NSView()
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
-  }()
-
-  private lazy var archiveSummaryLabel: NSTextField = {
-    let label = NSTextField(labelWithString: "0 archives")
-    label.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
-    label.textColor = .tertiaryLabelColor
-    label.lineBreakMode = .byTruncatingTail
-    label.translatesAutoresizingMaskIntoConstraints = false
-    return label
   }()
 
   private lazy var archiveButton: MainSidebarArchiveButton = {
@@ -101,9 +81,7 @@ class MainSidebar: NSViewController {
 
   private func setupViews() {
     view.addSubview(headerView)
-    view.addSubview(searchFieldView)
     view.addSubview(listView)
-    view.addSubview(archiveSummaryLabel)
     view.addSubview(footerView)
     footerView.addSubview(archiveButton)
     view.addSubview(archiveEmptyView)
@@ -111,24 +89,14 @@ class MainSidebar: NSViewController {
     headerTopConstraint = headerView.topAnchor.constraint(equalTo: view.topAnchor, constant: headerTopInset())
 
     NSLayoutConstraint.activate([
-      headerView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Self.edgeInsets),
-      headerView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: Self.edgeInsets),
+      headerView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Self.outerEdgeInsets),
+      headerView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Self.outerEdgeInsets),
       headerTopConstraint!,
-
-      searchFieldView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Self.edgeInsets),
-      searchFieldView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Self.edgeInsets),
-      searchFieldView.topAnchor.constraint(equalTo: headerView.bottomAnchor, constant: 10),
-      searchFieldView.heightAnchor.constraint(equalToConstant: 30),
 
       listView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
       listView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-      listView.topAnchor.constraint(equalTo: searchFieldView.bottomAnchor, constant: 10),
-      listView.bottomAnchor.constraint(equalTo: archiveSummaryLabel.topAnchor, constant: -8),
-
-      archiveSummaryLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Self.edgeInsets),
-      archiveSummaryLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Self.edgeInsets),
-      archiveSummaryLabel.bottomAnchor.constraint(equalTo: footerView.topAnchor, constant: -8),
-      archiveSummaryLabel.heightAnchor.constraint(equalToConstant: 18),
+      listView.topAnchor.constraint(equalTo: headerView.bottomAnchor, constant: 10),
+      listView.bottomAnchor.constraint(equalTo: footerView.topAnchor, constant: -8),
 
       footerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
       footerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
@@ -153,22 +121,11 @@ class MainSidebar: NSViewController {
       self.archiveEmptyView.isHidden = !(mode == .archive && count == 0)
     }
 
-    listView.onArchiveCountChanged = { [weak self] count in
-      self?.updateArchiveSummary(count: count)
-    }
-
     setContent(for: .inbox)
   }
 
   override func viewDidLoad() {
     super.viewDidLoad()
-    focusSearchObserver = NotificationCenter.default.addObserver(
-      forName: .focusSearch,
-      object: nil,
-      queue: .main
-    ) { [weak self] _ in
-      self?.handleFocusSearch()
-    }
     switchToInboxObserver = NotificationCenter.default.addObserver(
       forName: .switchToInbox,
       object: nil,
@@ -179,9 +136,6 @@ class MainSidebar: NSViewController {
   }
 
   deinit {
-    if let focusSearchObserver {
-      NotificationCenter.default.removeObserver(focusSearchObserver)
-    }
     if let switchToInboxObserver {
       NotificationCenter.default.removeObserver(switchToInboxObserver)
     }
@@ -201,11 +155,6 @@ class MainSidebar: NSViewController {
     }
   }
 
-  private func updateArchiveSummary(count: Int) {
-    let label = count == 1 ? "1 archive" : "\(count) archives"
-    archiveSummaryLabel.stringValue = label
-  }
-
   private func updateArchiveButton() {
     archiveButton.isActive = activeMode == .archive
     archiveButton.toolTip = activeMode == .archive ? "Show inbox" : "Show archives"
@@ -214,10 +163,6 @@ class MainSidebar: NSViewController {
   @objc private func handleArchiveButton() {
     let nextMode: MainSidebarMode = activeMode == .archive ? .inbox : .archive
     setContent(for: nextMode)
-  }
-
-  private func handleFocusSearch() {
-    view.window?.makeFirstResponder(searchFieldView.textField)
   }
 
   private func headerTopInset() -> CGFloat {
@@ -328,70 +273,5 @@ private final class MainSidebarArchiveButton: NSButton {
       color = .clear
     }
     layer?.backgroundColor = color.cgColor
-  }
-}
-
-private final class MainSidebarSearchFieldView: NSView {
-  private static let cornerRadius: CGFloat = 8
-  private static let iconSize: CGFloat = 12
-  private static let iconLeadingPadding: CGFloat = 8
-  private static let textLeadingPadding: CGFloat = 6
-  private static let trailingPadding: CGFloat = 8
-
-  let textField: NSTextField = {
-    let field = NSTextField()
-    field.translatesAutoresizingMaskIntoConstraints = false
-    field.placeholderString = "Search"
-    field.isBordered = false
-    field.isBezeled = false
-    field.focusRingType = .none
-    field.alignment = .natural
-    field.font = NSFont.systemFont(ofSize: 13, weight: .regular)
-    field.controlSize = .regular
-    field.isEditable = true
-    field.isSelectable = true
-    field.drawsBackground = false
-    field.backgroundColor = .clear
-    return field
-  }()
-
-  private let iconView: NSImageView = {
-    let view = NSImageView()
-    view.translatesAutoresizingMaskIntoConstraints = false
-    let config = NSImage.SymbolConfiguration(pointSize: iconSize, weight: .regular)
-    view.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil)?
-      .withSymbolConfiguration(config)
-    view.contentTintColor = .tertiaryLabelColor
-    return view
-  }()
-
-  override init(frame frameRect: NSRect) {
-    super.init(frame: frameRect)
-    wantsLayer = true
-    layer?.cornerRadius = Self.cornerRadius
-    layer?.cornerCurve = .continuous
-    layer?.backgroundColor = NSColor.black.withAlphaComponent(0.08).cgColor
-    setupViews()
-  }
-
-  @available(*, unavailable)
-  required init?(coder _: NSCoder) {
-    fatalError("init(coder:) has not been implemented")
-  }
-
-  private func setupViews() {
-    addSubview(iconView)
-    addSubview(textField)
-
-    NSLayoutConstraint.activate([
-      iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.iconLeadingPadding),
-      iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
-      iconView.widthAnchor.constraint(equalToConstant: Self.iconSize),
-      iconView.heightAnchor.constraint(equalToConstant: Self.iconSize),
-
-      textField.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: Self.textLeadingPadding),
-      textField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.trailingPadding),
-      textField.centerYAnchor.constraint(equalTo: centerYAnchor),
-    ])
   }
 }
