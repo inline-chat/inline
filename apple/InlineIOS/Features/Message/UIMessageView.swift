@@ -164,6 +164,7 @@ class UIMessageView: UIView {
   lazy var documentView = createDocumentView()
   lazy var messageAttachmentEmbed = createMessageAttachmentEmbed()
   lazy var metadataView = createMessageTimeAndStatus()
+  private weak var metadataContainerView: UIStackView?
 
   lazy var reactionsFlowView: ReactionsFlowView = {
     let view = ReactionsFlowView(outgoing: outgoing)
@@ -508,7 +509,6 @@ class UIMessageView: UIView {
 
       if shouldShowReactionsInsideBubble {
         setupReactionsIfNeeded()
-        innerContainer.addArrangedSubview(reactionsFlowView)
       }
 
       let metadataContainer = UIStackView()
@@ -516,7 +516,20 @@ class UIMessageView: UIView {
       metadataContainer.translatesAutoresizingMaskIntoConstraints = false
       metadataContainer.addArrangedSubview(UIView())
       metadataContainer.addArrangedSubview(metadataView)
-      innerContainer.addArrangedSubview(metadataContainer)
+      metadataContainerView = metadataContainer
+
+      if shouldShowReactionsInsideBubble {
+        if isEmojiOnlyMessage {
+          innerContainer.addArrangedSubview(metadataContainer)
+          innerContainer.addArrangedSubview(reactionsFlowView)
+        } else {
+          innerContainer.addArrangedSubview(reactionsFlowView)
+          innerContainer.addArrangedSubview(metadataContainer)
+        }
+        applyEmojiReactionSpacing(to: innerContainer)
+      } else {
+        innerContainer.addArrangedSubview(metadataContainer)
+      }
 
       containerStack.addArrangedSubview(innerContainer)
     } else {
@@ -546,13 +559,39 @@ class UIMessageView: UIView {
       }
       if shouldShowReactionsInsideBubble {
         setupReactionsIfNeeded()
-        multiLineContainer.addArrangedSubview(reactionsFlowView)
       }
 
-      if message.hasText || isSticker {
-        setupMultilineMetadata()
+      if isEmojiOnlyMessage, shouldShowReactionsInsideBubble {
+        if message.hasText || isSticker {
+          setupMultilineMetadata()
+        }
+        multiLineContainer.addArrangedSubview(reactionsFlowView)
+        applyEmojiReactionSpacing(to: multiLineContainer)
+      } else {
+        if shouldShowReactionsInsideBubble {
+          multiLineContainer.addArrangedSubview(reactionsFlowView)
+          applyEmojiReactionSpacing(to: multiLineContainer)
+        }
+
+        if message.hasText || isSticker {
+          setupMultilineMetadata()
+        }
       }
       containerStack.addArrangedSubview(multiLineContainer)
+    }
+  }
+
+  private func applyEmojiReactionSpacing(to stack: UIStackView) {
+    guard isEmojiOnlyMessage, shouldShowReactionsInsideBubble else { return }
+
+    if stack.arrangedSubviews.contains(messageLabel) {
+      stack.setCustomSpacing(2, after: messageLabel)
+    }
+
+    if let metadataContainerView, stack.arrangedSubviews.contains(metadataContainerView) {
+      stack.setCustomSpacing(12, after: metadataContainerView)
+    } else if stack.arrangedSubviews.contains(reactionsFlowView) {
+      stack.setCustomSpacing(12, after: reactionsFlowView)
     }
   }
 
@@ -562,16 +601,24 @@ class UIMessageView: UIView {
     metadataContainer.addArrangedSubview(UIView()) // Spacer
     if isEmojiOnlyMessage || isSticker || shouldShowFloatingMetadata {
       metadataContainer.addSubview(floatingMetadataView)
+      let floatingTopOffset: CGFloat = if isSticker {
+        -30
+      } else if isEmojiOnlyMessage, shouldShowReactionsInsideBubble {
+        -6
+      } else {
+        -18
+      }
       NSLayoutConstraint.activate([
         floatingMetadataView.topAnchor.constraint(
           equalTo: metadataContainer.topAnchor,
-          constant: isSticker ? -30 : -18
+          constant: floatingTopOffset
         ),
         floatingMetadataView.trailingAnchor.constraint(equalTo: metadataContainer.trailingAnchor, constant: -4),
       ])
     } else {
       metadataContainer.addArrangedSubview(metadataView)
     }
+    metadataContainerView = metadataContainer
     multiLineContainer.addArrangedSubview(metadataContainer)
   }
 
