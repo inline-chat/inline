@@ -85,6 +85,8 @@ class MainTabBar: NSViewController {
 
   private var lastObservedTabs: [TabId] = []
   private var lastObservedActiveIndex: Int = 0
+  private var quickSearchVisibilityObserver: NSObjectProtocol?
+  private var isQuickSearchVisible = false
 
   init(dependencies: AppDependencies) {
     self.dependencies = dependencies
@@ -162,6 +164,24 @@ class MainTabBar: NSViewController {
     super.viewDidLoad()
     collectionView.reloadData()
     selectActiveTab()
+    quickSearchVisibilityObserver = NotificationCenter.default.addObserver(
+      forName: .quickSearchVisibilityChanged,
+      object: nil,
+      queue: .main
+    ) { [weak self] notification in
+      guard let self else { return }
+      guard let isVisible = notification.userInfo?["isVisible"] as? Bool else { return }
+      guard isQuickSearchVisible != isVisible else { return }
+      isQuickSearchVisible = isVisible
+      collectionView.reloadData()
+      selectActiveTab()
+    }
+  }
+
+  deinit {
+    if let quickSearchVisibilityObserver {
+      NotificationCenter.default.removeObserver(quickSearchVisibilityObserver)
+    }
   }
 
   override func viewDidLayout() {
@@ -225,10 +245,13 @@ class MainTabBar: NSViewController {
   private func selectActiveTab() {
     guard let collectionView else { return }
 
-    let activeIndex = nav2.activeTabIndex
-
     collectionView.deselectAll(nil)
 
+    if isQuickSearchVisible {
+      return
+    }
+
+    let activeIndex = nav2.activeTabIndex
     if activeIndex < nav2.tabs.count {
       let indexPath = IndexPath(item: activeIndex, section: 0)
       collectionView.selectItems(at: [indexPath], scrollPosition: [])
@@ -364,7 +387,7 @@ extension MainTabBar: NSCollectionViewDataSource {
 
     let tabId = nav2.tabs[indexPath.item]
     let tab = tabModel(for: tabId)
-    let selected = nav2.activeTabIndex == indexPath.item
+    let selected = nav2.activeTabIndex == indexPath.item && !isQuickSearchVisible
     let closable = isTabClosable(at: indexPath.item)
     let iconImage: NSImage? = {
       switch tabId {

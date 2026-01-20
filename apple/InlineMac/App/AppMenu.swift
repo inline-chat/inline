@@ -5,6 +5,7 @@ import Translation
 extension Notification.Name {
   static let toggleSidebar = Notification.Name("toggleSidebar")
   static let focusSearch = Notification.Name("focusSearch")
+  static let quickSearchVisibilityChanged = Notification.Name("quickSearchVisibilityChanged")
   static let switchToInbox = Notification.Name("switchToInbox")
   static let prevChat = Notification.Name("prevChat")
   static let nextChat = Notification.Name("nextChat")

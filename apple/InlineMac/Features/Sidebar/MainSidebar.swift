@@ -95,7 +95,7 @@ class MainSidebar: NSViewController {
 
       listView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
       listView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-      listView.topAnchor.constraint(equalTo: headerView.bottomAnchor, constant: 10),
+      listView.topAnchor.constraint(equalTo: headerView.bottomAnchor),
       listView.bottomAnchor.constraint(equalTo: footerView.topAnchor, constant: -8),
 
       footerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
