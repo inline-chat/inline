@@ -466,7 +466,7 @@ class UIMessageView: UIView {
   }
 
   func setupMultilineMessage() {
-    if hasMedia && (message.hasText || shouldShowReactionsInsideBubble) {
+    if hasMedia, message.hasText || shouldShowReactionsInsideBubble {
       let innerContainer = UIStackView()
       innerContainer.axis = .vertical
       innerContainer.isUserInteractionEnabled = true
@@ -531,6 +531,7 @@ class UIMessageView: UIView {
         innerContainer.addArrangedSubview(metadataContainer)
       }
 
+      applyReactionMetadataSpacing(to: innerContainer)
       containerStack.addArrangedSubview(innerContainer)
     } else {
       if message.hasText {
@@ -577,6 +578,7 @@ class UIMessageView: UIView {
           setupMultilineMetadata()
         }
       }
+      applyReactionMetadataSpacing(to: multiLineContainer)
       containerStack.addArrangedSubview(multiLineContainer)
     }
   }
@@ -592,6 +594,25 @@ class UIMessageView: UIView {
       stack.setCustomSpacing(12, after: metadataContainerView)
     } else if stack.arrangedSubviews.contains(reactionsFlowView) {
       stack.setCustomSpacing(12, after: reactionsFlowView)
+    }
+  }
+
+  private func applyReactionMetadataSpacing(to stack: UIStackView) {
+    guard shouldShowReactionsInsideBubble else { return }
+    guard let metadataContainerView else { return }
+
+    let reactionsIndex = stack.arrangedSubviews.firstIndex { $0 === reactionsFlowView }
+    let metadataIndex = stack.arrangedSubviews.firstIndex { $0 === metadataContainerView }
+    guard let reactionsIndex, let metadataIndex, reactionsIndex != metadataIndex else { return }
+
+    let extraSpacing = isEmojiOnlyMessage
+      ? StackPadding.emojiReactionMetadataExtraSpacing
+      : StackPadding.reactionMetadataExtraSpacing
+    let spacing = stack.spacing + extraSpacing
+    if reactionsIndex < metadataIndex {
+      stack.setCustomSpacing(spacing, after: reactionsFlowView)
+    } else {
+      stack.setCustomSpacing(spacing, after: metadataContainerView)
     }
   }
 
@@ -715,7 +736,9 @@ class UIMessageView: UIView {
           return
         }
 
-        if let phoneNumber = attributedText.attribute(.phoneNumber, at: characterIndex, effectiveRange: nil) as? String {
+        if let phoneNumber = attributedText
+          .attribute(.phoneNumber, at: characterIndex, effectiveRange: nil) as? String
+        {
           UIPasteboard.general.string = phoneNumber
           ToastManager.shared.showToast(
             "Copied number",
@@ -791,6 +814,8 @@ class UIMessageView: UIView {
     static let leading: CGFloat = 12
     static let bottom: CGFloat = 8
     static let trailing: CGFloat = 12
+    static let reactionMetadataExtraSpacing: CGFloat = 4
+    static let emojiReactionMetadataExtraSpacing: CGFloat = 8
   }
 
   func setupConstraints() {
