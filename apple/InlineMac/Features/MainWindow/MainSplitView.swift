@@ -48,7 +48,7 @@ class MainSplitView: NSViewController {
     let view = NSView()
     view.translatesAutoresizingMaskIntoConstraints = false
     view.wantsLayer = true
-    view.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.08).cgColor
+    view.layer?.backgroundColor = NSColor.clear.cgColor
     view.isHidden = true
     let recognizer = NSClickGestureRecognizer(target: self, action: #selector(handleQuickSearchBackgroundClick))
     view.addGestureRecognizer(recognizer)
