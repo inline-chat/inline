@@ -16,17 +16,29 @@ final class TabSurfaceButton: NSControl {
   private let pointSize: CGFloat
   private let weight: NSFont.Weight
   private let tintColor: NSColor
+  private let buttonWidth: CGFloat
+  private let buttonHeight: CGFloat
+  private let cornerRadius: CGFloat
+  private let iconCenterYOffset: CGFloat
 
   init(
     symbolName: String,
     pointSize: CGFloat,
     weight: NSFont.Weight,
-    tintColor: NSColor = .tertiaryLabelColor
+    tintColor: NSColor = .tertiaryLabelColor,
+    width: CGFloat = 36,
+    height: CGFloat = MainTabBar.Layout.surfaceButtonHeight,
+    cornerRadius: CGFloat = 10,
+    iconCenterYOffset: CGFloat = MainTabBar.Layout.surfaceButtonIconCenterYOffset
   ) {
     self.symbolName = symbolName
     self.pointSize = pointSize
     self.weight = weight
     self.tintColor = tintColor
+    self.buttonWidth = width
+    self.buttonHeight = height
+    self.cornerRadius = cornerRadius
+    self.iconCenterYOffset = iconCenterYOffset
     super.init(frame: .zero)
     setup()
   }
@@ -38,7 +50,7 @@ final class TabSurfaceButton: NSControl {
 
   private func setup() {
     wantsLayer = true
-    layer?.cornerRadius = 10
+    layer?.cornerRadius = cornerRadius
     layer?.backgroundColor = NSColor.clear.cgColor
 
     iconView.translatesAutoresizingMaskIntoConstraints = false
@@ -48,7 +60,7 @@ final class TabSurfaceButton: NSControl {
 
     iconCenterYConstraint = iconView.centerYAnchor.constraint(
       equalTo: centerYAnchor,
-      constant: MainTabBar.Layout.surfaceButtonIconCenterYOffset
+      constant: iconCenterYOffset
     )
 
     NSLayoutConstraint.activate([
@@ -56,8 +68,8 @@ final class TabSurfaceButton: NSControl {
       iconCenterYConstraint!,
       iconView.widthAnchor.constraint(equalToConstant: pointSize),
       iconView.heightAnchor.constraint(equalToConstant: pointSize),
-      widthAnchor.constraint(equalToConstant: 36),
-      heightAnchor.constraint(equalToConstant: MainTabBar.Layout.surfaceButtonHeight),
+      widthAnchor.constraint(equalToConstant: buttonWidth),
+      heightAnchor.constraint(equalToConstant: buttonHeight),
     ])
 
     let config = NSImage.SymbolConfiguration(pointSize: pointSize, weight: weight, scale: .large)
@@ -71,7 +83,7 @@ final class TabSurfaceButton: NSControl {
   }
 
   override var intrinsicContentSize: NSSize {
-    NSSize(width: 36, height: MainTabBar.Layout.surfaceButtonHeight)
+    NSSize(width: buttonWidth, height: buttonHeight)
   }
 
   override func updateTrackingAreas() {

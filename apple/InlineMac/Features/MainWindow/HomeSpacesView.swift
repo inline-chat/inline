@@ -59,6 +59,11 @@ struct HomeSpacesView: View {
   }
 
   private var spacesList: some View {
+    spacesListContent
+      .frame(maxWidth: .infinity, alignment: .center)
+  }
+
+  private var spacesListContent: some View {
     VStack(spacing: 6) {
       ForEach(visibleSpaces, id: \.id) { spaceItem in
         HomeSpaceRow(
@@ -74,17 +79,21 @@ struct HomeSpacesView: View {
       }
 
       if home.spaces.count > 5, !showAll {
-        Button("Show more") {
-          withAnimation(.easeInOut(duration: 0.18)) {
-            showAll = true
-          }
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
-        .padding(.top, 6)
+        showMoreButton
       }
     }
-    .frame(maxWidth: .infinity, alignment: .center)
+  }
+
+  @ViewBuilder
+  private var showMoreButton: some View {
+    Button("Show more") {
+      withAnimation(.easeInOut(duration: 0.18)) {
+        showAll = true
+      }
+    }
+    .buttonStyle(.plain)
+    .foregroundStyle(.secondary)
+    .padding(.top, 6)
   }
 
   private var emptyState: some View {
@@ -120,24 +129,28 @@ private struct HomeSpaceRow: View {
 
   var body: some View {
     Button(action: onSelect) {
-      HStack(spacing: 12) {
-        SpaceAvatar(space: space, size: 32)
-
-        Text(space.displayName)
-          .font(.system(size: 14, weight: .medium))
-          .foregroundStyle(.primary)
-
-        Spacer(minLength: 0)
-      }
-      .padding(.vertical, 6.4)
-      .padding(.horizontal, 10)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .background(
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
-          .fill(isHovered ? Color(nsColor: NSColor.controlAccentColor).opacity(0.12) : .clear)
-      )
+      rowContent
     }
     .buttonStyle(.plain)
+    .background(
+      RoundedRectangle(cornerRadius: 10, style: .continuous)
+        .fill(isHovered ? Color(nsColor: NSColor.controlAccentColor).opacity(0.12) : .clear)
+    )
     .onHover(perform: onHover)
+  }
+
+  private var rowContent: some View {
+    HStack(spacing: 12) {
+      SpaceAvatar(space: space, size: 32)
+
+      Text(space.displayName)
+        .font(.system(size: 14, weight: .medium))
+        .foregroundStyle(.primary)
+
+      Spacer(minLength: 0)
+    }
+    .padding(.vertical, 6.4)
+    .padding(.horizontal, 10)
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 }
