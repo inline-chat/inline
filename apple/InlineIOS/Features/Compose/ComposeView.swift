@@ -342,11 +342,9 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     let attributedText = textView.attributedText ?? NSAttributedString()
     let (textFromAttributedString, extractedEntities) = ProcessEntities.fromAttributedString(attributedText)
 
-    let entities = if extractedEntities.entities.isEmpty {
-      nil as MessageEntities?
-    } else {
-      extractedEntities
-    }
+    let hasEntities = !extractedEntities.entities.isEmpty
+    let entities: MessageEntities? = hasEntities ? extractedEntities : nil
+    let editEntities: MessageEntities? = hasEntities ? extractedEntities : MessageEntities()
 
     // Make text nil if empty and we have attachments
     let text = if rawText.isEmpty, hasAttachments {
@@ -362,7 +360,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
           text: textFromAttributedString ?? text ?? "",
           chatId: chatId,
           peerId: peerId,
-          entities: entities
+          entities: editEntities
         ))
       }
 
@@ -504,7 +502,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
             font: .systemFont(ofSize: 17),
             textColor: .label,
             linkColor: linkColor,
-            convertMentionsToLink: false // Keep as attributes for editing
+            convertMentionsToLink: false, // Keep as attributes for editing
+            renderPhoneNumbers: false
           )
 
           let attributedText = ProcessEntities.toAttributedString(

@@ -32,16 +32,21 @@ public class ProcessEntities {
     /// If enabled, mentions convert to in-app URLs
     var convertMentionsToLink: Bool
 
+    /// If enabled, phone numbers render as tappable entities
+    var renderPhoneNumbers: Bool
+
     public init(
       font: PlatformFont,
       textColor: PlatformColor,
       linkColor: PlatformColor,
-      convertMentionsToLink: Bool = true
+      convertMentionsToLink: Bool = true,
+      renderPhoneNumbers: Bool = true
     ) {
       self.font = font
       self.textColor = textColor
       self.linkColor = linkColor
       self.convertMentionsToLink = convertMentionsToLink
+      self.renderPhoneNumbers = renderPhoneNumbers
     }
   }
 
@@ -78,6 +83,7 @@ public class ProcessEntities {
           // URL is the text itself
           let urlText = (text as NSString).substring(with: range)
           if isValidPhoneNumberCandidate(urlText) {
+            guard configuration.renderPhoneNumbers else { break }
             var attributes: [NSAttributedString.Key: Any] = [
               .foregroundColor: configuration.linkColor,
               .underlineStyle: 0,
@@ -155,6 +161,7 @@ public class ProcessEntities {
           attributedString.addAttributes(attributes, range: range)
 
         case .phoneNumber:
+          guard configuration.renderPhoneNumbers else { break }
           let phoneText = (text as NSString).substring(with: range)
           var attributes: [NSAttributedString.Key: Any] = [
             .foregroundColor: configuration.linkColor,
@@ -277,15 +284,16 @@ public class ProcessEntities {
       in: fullRange,
       options: []
     ) { value, range, _ in
-      if let phoneNumber = value as? String,
-         isValidPhoneNumberCandidate(phoneNumber)
-      {
-        var entity = MessageEntity()
-        entity.type = .phoneNumber
-        entity.offset = Int64(range.location)
-        entity.length = Int64(range.length)
-        entities.append(entity)
-      }
+      guard value != nil, range.length > 0 else { return }
+
+      let phoneText = (attributedString.string as NSString).substring(with: range)
+      guard isValidPhoneNumberCandidate(phoneText) else { return }
+
+      var entity = MessageEntity()
+      entity.type = .phoneNumber
+      entity.offset = Int64(range.location)
+      entity.length = Int64(range.length)
+      entities.append(entity)
     }
 
     // Extract link entities (excluding mention links).
