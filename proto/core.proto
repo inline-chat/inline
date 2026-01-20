@@ -1026,6 +1026,7 @@ enum SearchMessagesFilter {
   FILTER_VIDEOS = 2;
   FILTER_PHOTO_VIDEO = 3;
   FILTER_DOCUMENTS = 4;
+  FILTER_LINKS = 5000;
 }
 
 message SearchMessagesInput {

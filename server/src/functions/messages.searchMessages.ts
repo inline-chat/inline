@@ -202,6 +202,8 @@ function normalizeMediaFilter(filter: SearchMessagesFilter | undefined): Message
       return "photo_video"
     case SearchMessagesFilter.FILTER_DOCUMENTS:
       return "documents"
+    case SearchMessagesFilter.FILTER_LINKS:
+      return "links"
     case SearchMessagesFilter.FILTER_UNSPECIFIED:
     case undefined:
       return undefined

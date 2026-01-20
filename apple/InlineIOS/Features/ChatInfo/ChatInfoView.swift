@@ -106,7 +106,8 @@ struct ChatInfoView: View {
     _linksViewModel = EnvironmentStateObject { env in
       ChatLinksViewModel(
         db: env.appDatabase,
-        chatId: chatItem.chat?.id ?? 0
+        chatId: chatItem.chat?.id ?? 0,
+        peer: chatItem.peerId
       )
     }
 

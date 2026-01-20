@@ -3883,7 +3883,11 @@ export enum SearchMessagesFilter {
     /**
      * @generated from protobuf enum value: FILTER_DOCUMENTS = 4;
      */
-    FILTER_DOCUMENTS = 4
+    FILTER_DOCUMENTS = 4,
+    /**
+     * @generated from protobuf enum value: FILTER_LINKS = 5000;
+     */
+    FILTER_LINKS = 5000
 }
 // @generated message type with reflection information, may provide speed optimized methods
 class ClientMessage$Type extends MessageType<ClientMessage> {
