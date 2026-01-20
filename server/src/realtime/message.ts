@@ -143,22 +143,22 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
 
     if (message.body.oneofKind === "rpcCall") {
       const call = message.body.rpcCall
-      errorMeta.method = getMethodName(call.method)
-      errorMeta.inputKind = call.input.oneofKind
+      errorMeta["method"] = getMethodName(call.method)
+      errorMeta["inputKind"] = call.input.oneofKind
       const input = call.input.oneofKind ? (call.input as Record<string, unknown>)[call.input.oneofKind] : undefined
       const inputIds = pickIdFields(input)
       if (inputIds) {
-        errorMeta.inputIds = inputIds
+        errorMeta["inputIds"] = inputIds
       }
     }
 
     if (e instanceof RealtimeRpcError) {
-      errorMeta.errorCode = e.code
-      errorMeta.errorCodeName = e.codeName
-      errorMeta.errorCodeNumber = e.codeNumber
+      errorMeta["errorCode"] = e.code
+      errorMeta["errorCodeName"] = e.codeName
+      errorMeta["errorCodeNumber"] = e.codeNumber
     } else if (e instanceof InlineError) {
-      errorMeta.errorType = e.type
-      errorMeta.errorCodeNumber = e.code
+      errorMeta["errorType"] = e.type
+      errorMeta["errorCodeNumber"] = e.code
     }
 
     const logMessage =

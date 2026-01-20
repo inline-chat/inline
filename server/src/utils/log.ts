@@ -57,7 +57,7 @@ export class Log {
 
     const scopeColored = styleText("red", this.scope)
     if (typeof messageOrError === "string") {
-      const args = [scopeColored, messageOrError]
+      const args: unknown[] = [scopeColored, messageOrError]
       if (errorOrMetadata !== undefined) args.push(errorOrMetadata)
       if (metadata !== undefined) args.push(metadata)
       console.error(...args)
@@ -69,7 +69,7 @@ export class Log {
         Sentry.captureException(new Error(messageOrError), { extra: errorOrMetadata as Record<string, unknown> })
       }
     } else {
-      const args = [scopeColored, messageOrError]
+      const args: unknown[] = [scopeColored, messageOrError]
       if (errorOrMetadata !== undefined) args.push(errorOrMetadata)
       if (metadata !== undefined) args.push(metadata)
       console.error(...args)
