@@ -180,6 +180,9 @@ class MessageSizeCalculator {
     var hasDocument: Bool { document != nil }
     var hasReactions: Bool { reactions != nil }
     var hasAttachments: Bool { attachments != nil }
+    var placesTimeAboveReactions: Bool {
+      emojiMessage && hasReactions && !reactionsOutsideBubble
+    }
 
     // used as edge inset for content view stack
     var topMostContentTopSpacing: CGFloat {
@@ -260,6 +263,29 @@ class MessageSizeCalculator {
       return top
     }
 
+    var timeViewTop: CGFloat {
+      var top: CGFloat = time?.spacing.top ?? 0
+      if let reply {
+        top += reply.spacing.top + reply.size.height + reply.spacing.bottom
+      }
+      if let video {
+        top += video.spacing.top + video.size.height + video.spacing.bottom
+      }
+      if let photo {
+        top += photo.spacing.top + photo.size.height + photo.spacing.bottom
+      }
+      if let document {
+        top += document.spacing.top + document.size.height + document.spacing.bottom
+      }
+      if let text {
+        top += text.spacing.top + text.size.height + text.spacing.bottom
+      }
+      if let attachments {
+        top += attachments.spacing.top + attachments.size.height + attachments.spacing.bottom
+      }
+      return top
+    }
+
     var reactionsViewTop: CGFloat {
       if reactionsOutsideBubble {
         return reactionsOutsideBubbleTopInset
@@ -282,6 +308,9 @@ class MessageSizeCalculator {
       }
       if let attachments {
         top += attachments.spacing.top + attachments.size.height + attachments.spacing.bottom
+      }
+      if placesTimeAboveReactions, let time {
+        top += time.spacing.top + time.size.height + time.spacing.bottom
       }
       return top
     }

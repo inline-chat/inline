@@ -1033,22 +1033,37 @@ class MessageViewAppKit: NSView {
 
     // Time
     if let time = layout.time {
-      constraints.append(
-        contentsOf: [
-          timeAndStateView.widthAnchor.constraint(
-            equalToConstant: time.size.width
-          ),
-          timeAndStateView.heightAnchor.constraint(
-            equalToConstant: time.size.height
-          ),
-          timeAndStateView.trailingAnchor
-            .constraint(
-              equalTo: bubbleView.trailingAnchor,
-              constant: -time.spacing.right
-            ),
-          timeAndStateView.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -time.spacing.bottom),
-        ]
+      let timeWidthConstraint = timeAndStateView.widthAnchor.constraint(
+        equalToConstant: time.size.width
       )
+      let timeHeightConstraint = timeAndStateView.heightAnchor.constraint(
+        equalToConstant: time.size.height
+      )
+      let timeTrailingConstraint = timeAndStateView.trailingAnchor
+        .constraint(
+          equalTo: bubbleView.trailingAnchor,
+          constant: -time.spacing.right
+        )
+
+      constraints.append(contentsOf: [
+        timeWidthConstraint,
+        timeHeightConstraint,
+        timeTrailingConstraint,
+      ])
+
+      if layout.placesTimeAboveReactions {
+        timeViewTopConstraint = timeAndStateView.topAnchor.constraint(
+          equalTo: contentView.topAnchor,
+          constant: layout.timeViewTop
+        )
+        constraints.append(timeViewTopConstraint!)
+      } else {
+        timeViewBottomConstraint = timeAndStateView.bottomAnchor.constraint(
+          equalTo: bubbleView.bottomAnchor,
+          constant: -time.spacing.bottom
+        )
+        constraints.append(timeViewBottomConstraint!)
+      }
     }
 
     if let reply = layout.reply {
@@ -1168,6 +1183,9 @@ class MessageViewAppKit: NSView {
   private var reactionViewTopConstraint: NSLayoutConstraint!
   private var reactionViewLeadingConstraint: NSLayoutConstraint?
   private var reactionViewTrailingConstraint: NSLayoutConstraint?
+
+  private var timeViewTopConstraint: NSLayoutConstraint?
+  private var timeViewBottomConstraint: NSLayoutConstraint?
 
   private var contentViewWidthConstraint: NSLayoutConstraint!
   private var contentViewHeightConstraint: NSLayoutConstraint!
@@ -1411,6 +1429,39 @@ class MessageViewAppKit: NSView {
         reactionViewLeadingConstraint,
         reactionViewTrailingConstraint,
       ].compactMap(\.self))
+    }
+
+    if let time = props.layout.time {
+      if props.layout.placesTimeAboveReactions {
+        if let timeViewTopConstraint {
+          if timeViewTopConstraint.constant != props.layout.timeViewTop {
+            timeViewTopConstraint.constant = props.layout.timeViewTop
+          }
+        } else {
+          timeViewBottomConstraint?.isActive = false
+          timeViewBottomConstraint = nil
+          timeViewTopConstraint = timeAndStateView.topAnchor.constraint(
+            equalTo: contentView.topAnchor,
+            constant: props.layout.timeViewTop
+          )
+          timeViewTopConstraint?.isActive = true
+        }
+      } else {
+        let bottomConstant = -time.spacing.bottom
+        if let timeViewBottomConstraint {
+          if timeViewBottomConstraint.constant != bottomConstant {
+            timeViewBottomConstraint.constant = bottomConstant
+          }
+        } else {
+          timeViewTopConstraint?.isActive = false
+          timeViewTopConstraint = nil
+          timeViewBottomConstraint = timeAndStateView.bottomAnchor.constraint(
+            equalTo: bubbleView.bottomAnchor,
+            constant: bottomConstant
+          )
+          timeViewBottomConstraint?.isActive = true
+        }
+      }
     }
 //    if hasReactions {
 //      for (index, reaction) in reactionItems.enumerated() {
