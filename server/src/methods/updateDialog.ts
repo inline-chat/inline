@@ -8,10 +8,11 @@ import { normalizeId, TInputId } from "../types/methods"
 import { InlineError } from "../types/errors"
 import { and, eq, or, sql } from "drizzle-orm"
 import { DialogsModel } from "@in/server/db/models/dialogs"
-
-type Context = {
-  currentUserId: number
-}
+import type { HandlerContext } from "@in/server/controllers/helpers"
+import type { Update } from "@in/protocol/core"
+import type { ServerUpdate } from "@in/protocol/server"
+import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
+import { RealtimeUpdates } from "@in/server/realtime/message"
 
 export const Input = Type.Object({
   pinned: Optional(Type.Boolean()),
@@ -28,7 +29,7 @@ export const Response = Type.Object({
 
 export const handler = async (
   input: Static<typeof Input>,
-  { currentUserId }: Context,
+  { currentUserId, currentSessionId }: HandlerContext,
 ): Promise<Static<typeof Response>> => {
   const peerId: { userId: number } | { threadId: number } = input.peerUserId
     ? { userId: Number(input.peerUserId) }
@@ -40,22 +41,84 @@ export const handler = async (
     throw new InlineError(InlineError.ApiError.PEER_INVALID)
   }
 
-  let [dialog] = await db
-    .update(dialogs)
-    .set({ pinned: input.pinned ?? null, draft: input.draft ?? null, archived: input.archived ?? null })
-    .where(
-      and(
-        eq(dialogs.userId, currentUserId),
-        or(
-          "userId" in peerId && peerId.userId ? eq(dialogs.peerUserId, peerId.userId) : sql`false`,
-          "threadId" in peerId && peerId.threadId ? eq(dialogs.chatId, peerId.threadId) : sql`false`,
-        ),
-      ),
-    )
-    .returning()
+  const whereClause = and(
+    eq(dialogs.userId, currentUserId),
+    or(
+      "userId" in peerId && peerId.userId ? eq(dialogs.peerUserId, peerId.userId) : sql`false`,
+      "threadId" in peerId && peerId.threadId ? eq(dialogs.chatId, peerId.threadId) : sql`false`,
+    ),
+  )
+
+  const outputPeer =
+    "userId" in peerId && peerId.userId
+      ? { type: { oneofKind: "user", user: { userId: BigInt(peerId.userId) } } }
+      : "threadId" in peerId && peerId.threadId
+        ? { type: { oneofKind: "chat", chat: { chatId: BigInt(peerId.threadId) } } }
+        : null
+
+  if (!outputPeer) {
+    throw new InlineError(InlineError.ApiError.PEER_INVALID)
+  }
+
+  let previousArchived: boolean | null | undefined
+  let shouldPublishArchiveUpdate = false
+
+  let dialog = await db.transaction(async (tx) => {
+    const [existingDialog] = await tx
+      .select({ archived: dialogs.archived })
+      .from(dialogs)
+      .where(whereClause)
+      .limit(1)
+
+    if (!existingDialog) {
+      throw new InlineError(InlineError.ApiError.INTERNAL)
+    }
+
+    previousArchived = existingDialog.archived
+
+    const [updatedDialog] = await tx
+      .update(dialogs)
+      .set({ pinned: input.pinned ?? null, draft: input.draft ?? null, archived: input.archived ?? null })
+      .where(whereClause)
+      .returning()
+
+    if (!updatedDialog) {
+      throw new InlineError(InlineError.ApiError.INTERNAL)
+    }
+
+    shouldPublishArchiveUpdate = input.archived !== undefined && input.archived !== previousArchived
+
+    if (shouldPublishArchiveUpdate) {
+      const userUpdate: ServerUpdate["update"] = {
+        oneofKind: "userDialogArchived",
+        userDialogArchived: {
+          peerId: outputPeer,
+          archived: input.archived ?? false,
+        },
+      }
+
+      await UserBucketUpdates.enqueue({ userId: currentUserId, update: userUpdate }, { tx })
+    }
+
+    return updatedDialog
+  })
 
   if (!dialog) {
     throw new InlineError(InlineError.ApiError.INTERNAL)
+  }
+
+  if (shouldPublishArchiveUpdate) {
+    const update: Update = {
+      update: {
+        oneofKind: "dialogArchived",
+        dialogArchived: {
+          peerId: outputPeer,
+          archived: input.archived ?? false,
+        },
+      },
+    }
+
+    RealtimeUpdates.pushToUser(currentUserId, [update], { skipSessionId: currentSessionId })
   }
 
   // AI did this, check more
