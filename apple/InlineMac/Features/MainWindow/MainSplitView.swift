@@ -5,10 +5,9 @@ import SwiftUI
 
 class MainSplitView: NSViewController {
   let dependencies: AppDependencies
+  private let quickSearchViewModel: QuickSearchViewModel
 
   // Views
-
-  lazy var tabsArea: NSView = .init()
 
   lazy var sideArea: NSView = .init()
 
@@ -30,18 +29,49 @@ class MainSplitView: NSViewController {
 
   // Constants
 
-  private var tabsHeight: CGFloat = Theme.tabBarHeight
   private var sideWidth: CGFloat = 240
   private var innerPadding: CGFloat = Theme.mainSplitViewInnerPadding
   private var contentRadius: CGFloat = Theme.mainSplitViewContentRadius
 
   private var lastRenderedRoute: Nav2Route?
   private var escapeKeyUnsubscriber: (() -> Void)?
+  private var quickSearchObserver: NSObjectProtocol?
+  private var quickSearchEscapeUnsubscriber: (() -> Void)?
+  private var quickSearchArrowUnsubscriber: (() -> Void)?
+  private var quickSearchVimUnsubscriber: (() -> Void)?
+  private var quickSearchReturnUnsubscriber: (() -> Void)?
+
+  private var quickSearchWidthConstraint: NSLayoutConstraint?
+  private var quickSearchHeightConstraint: NSLayoutConstraint?
+
+  private lazy var quickSearchOverlayBackground: NSView = {
+    let view = NSView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.wantsLayer = true
+    view.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.08).cgColor
+    view.isHidden = true
+    let recognizer = NSClickGestureRecognizer(target: self, action: #selector(handleQuickSearchBackgroundClick))
+    view.addGestureRecognizer(recognizer)
+    return view
+  }()
+
+  private lazy var quickSearchOverlayContainer: NSView = {
+    let view = NSView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.wantsLayer = true
+    view.isHidden = true
+    return view
+  }()
+
+  private var quickSearchHostingView: NSHostingView<AnyView>?
+  private var isQuickSearchVisible: Bool = false
+  private var didPrewarmQuickSearch: Bool = false
 
   // ....
 
   init(dependencies: AppDependencies) {
     self.dependencies = dependencies
+    quickSearchViewModel = QuickSearchViewModel(dependencies: dependencies)
     super.init(nibName: nil, bundle: nil)
   }
 
@@ -60,20 +90,16 @@ class MainSplitView: NSViewController {
     contentContainer.addSubview(contentArea)
     contentArea.addSubview(toolbarArea)
 
-    view.addSubview(tabsArea)
     view.addSubview(sideArea)
 
     sideArea.translatesAutoresizingMaskIntoConstraints = false
-    tabsArea.translatesAutoresizingMaskIntoConstraints = false
     contentContainer.translatesAutoresizingMaskIntoConstraints = false
     contentArea.translatesAutoresizingMaskIntoConstraints = false
 
     sideArea.wantsLayer = true
-    tabsArea.wantsLayer = true
     contentContainer.wantsLayer = true
     contentArea.wantsLayer = true
 
-    tabsArea.layer?.backgroundColor = .clear
     sideArea.layer?.backgroundColor = .clear
 
     let shadow = NSShadow()
@@ -96,7 +122,6 @@ class MainSplitView: NSViewController {
     contentArea.layer?.masksToBounds = true
 
     NSLayoutConstraint.activate([
-      tabsArea.heightAnchor.constraint(equalToConstant: tabsHeight),
       sideArea.widthAnchor.constraint(equalToConstant: sideWidth),
 
       sideArea.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -115,12 +140,7 @@ class MainSplitView: NSViewController {
       toolbarArea
         .heightAnchor.constraint(equalToConstant: Theme.toolbarHeight),
 
-      tabsArea.leadingAnchor.constraint(equalTo: sideArea.trailingAnchor),
-      tabsArea.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-
-      tabsArea.topAnchor.constraint(equalTo: view.topAnchor),
-      contentContainer.topAnchor
-        .constraint(equalTo: tabsArea.bottomAnchor),
+      contentContainer.topAnchor.constraint(equalTo: view.topAnchor, constant: innerPadding),
       contentContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -innerPadding),
 
       contentArea.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
@@ -129,19 +149,28 @@ class MainSplitView: NSViewController {
       contentArea.bottomAnchor.constraint(equalTo: contentContainer.bottomAnchor),
     ])
 
+    setupQuickSearchOverlay()
     setSidebar(viewController: MainSidebar(dependencies: dependencies))
-    setTabBar(viewController: MainTabBar(dependencies: dependencies))
-
     setupNav()
   }
 
   override func viewDidLoad() {
     super.viewDidLoad()
+    setupQuickSearchObserver()
+  }
+
+  override func viewDidAppear() {
+    super.viewDidAppear()
+    prewarmQuickSearchOverlay()
   }
 
   deinit {
     escapeKeyUnsubscriber?()
     escapeKeyUnsubscriber = nil
+    removeQuickSearchKeyHandlers()
+    if let quickSearchObserver {
+      NotificationCenter.default.removeObserver(quickSearchObserver)
+    }
   }
 
   private func setupNav() {
@@ -200,7 +229,6 @@ class MainSplitView: NSViewController {
   // MARK: - Public API
 
   private var sidebarVC: NSViewController?
-  private var tabBarVC: NSViewController?
   private var contentVC: NSViewController?
 
   func setSidebar(viewController: NSViewController) {
@@ -220,24 +248,6 @@ class MainSplitView: NSViewController {
       viewController.view.bottomAnchor.constraint(equalTo: sideArea.bottomAnchor),
       viewController.view.leadingAnchor.constraint(equalTo: sideArea.leadingAnchor),
       viewController.view.trailingAnchor.constraint(equalTo: sideArea.trailingAnchor),
-    ])
-  }
-
-  func setTabBar(viewController: NSViewController) {
-    tabBarVC?.removeFromParent()
-    tabBarVC?.view.removeFromSuperview()
-    tabBarVC = viewController
-
-    addChild(viewController)
-    tabsArea.addSubview(viewController.view)
-
-    // Pin to superview
-    viewController.view.translatesAutoresizingMaskIntoConstraints = false
-    NSLayoutConstraint.activate([
-      viewController.view.topAnchor.constraint(equalTo: tabsArea.topAnchor),
-      viewController.view.bottomAnchor.constraint(equalTo: tabsArea.bottomAnchor),
-      viewController.view.leadingAnchor.constraint(equalTo: tabsArea.leadingAnchor),
-      viewController.view.trailingAnchor.constraint(equalTo: tabsArea.trailingAnchor),
     ])
   }
 
@@ -268,6 +278,191 @@ class MainSplitView: NSViewController {
     let toolbar = toolbar(for: route)
     toolbarArea.update(with: toolbar)
     setContentArea(viewController: viewController)
+  }
+
+  // MARK: - Quick Search
+
+  private func setupQuickSearchOverlay() {
+    view.addSubview(quickSearchOverlayBackground)
+    view.addSubview(quickSearchOverlayContainer)
+
+    NSLayoutConstraint.activate([
+      quickSearchOverlayBackground.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+      quickSearchOverlayBackground.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+      quickSearchOverlayBackground.topAnchor.constraint(equalTo: view.topAnchor),
+      quickSearchOverlayBackground.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+      quickSearchOverlayContainer.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+      quickSearchOverlayContainer.topAnchor.constraint(equalTo: view.topAnchor, constant: 56),
+    ])
+
+    let widthConstraint = quickSearchOverlayContainer.widthAnchor.constraint(equalToConstant: 420)
+    let heightConstraint = quickSearchOverlayContainer.heightAnchor.constraint(equalToConstant: 220)
+    widthConstraint.isActive = true
+    heightConstraint.isActive = true
+    quickSearchWidthConstraint = widthConstraint
+    quickSearchHeightConstraint = heightConstraint
+
+    let rootView = AnyView(
+      QuickSearchOverlayView(
+        viewModel: quickSearchViewModel,
+        onDismiss: { [weak self] in
+          self?.hideQuickSearchOverlay()
+        },
+        onSizeChange: { [weak self] size in
+          self?.updateQuickSearchSize(size)
+        }
+      )
+      .environment(dependencies: dependencies)
+    )
+
+    let hostingView = NSHostingView(rootView: rootView)
+    hostingView.translatesAutoresizingMaskIntoConstraints = false
+    quickSearchOverlayContainer.addSubview(hostingView)
+    NSLayoutConstraint.activate([
+      hostingView.leadingAnchor.constraint(equalTo: quickSearchOverlayContainer.leadingAnchor),
+      hostingView.trailingAnchor.constraint(equalTo: quickSearchOverlayContainer.trailingAnchor),
+      hostingView.topAnchor.constraint(equalTo: quickSearchOverlayContainer.topAnchor),
+      hostingView.bottomAnchor.constraint(equalTo: quickSearchOverlayContainer.bottomAnchor),
+    ])
+    quickSearchHostingView = hostingView
+  }
+
+  private func prewarmQuickSearchOverlay() {
+    guard didPrewarmQuickSearch == false else { return }
+    didPrewarmQuickSearch = true
+    guard quickSearchHostingView != nil else { return }
+
+    quickSearchOverlayContainer.alphaValue = 0
+    quickSearchOverlayContainer.isHidden = false
+    view.layoutSubtreeIfNeeded()
+    quickSearchHostingView?.layoutSubtreeIfNeeded()
+
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      self.quickSearchOverlayContainer.isHidden = true
+      self.quickSearchOverlayContainer.alphaValue = 1
+    }
+  }
+
+  private func setupQuickSearchObserver() {
+    quickSearchObserver = NotificationCenter.default.addObserver(
+      forName: .focusSearch,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      self?.toggleQuickSearchOverlay()
+    }
+  }
+
+  private func toggleQuickSearchOverlay() {
+    if isQuickSearchVisible {
+      hideQuickSearchOverlay()
+    } else {
+      showQuickSearchOverlay()
+    }
+  }
+
+  private func showQuickSearchOverlay() {
+    guard isQuickSearchVisible == false else { return }
+    isQuickSearchVisible = true
+    quickSearchOverlayBackground.isHidden = false
+    quickSearchOverlayContainer.isHidden = false
+    quickSearchViewModel.requestFocus()
+    installQuickSearchKeyHandlers()
+    NotificationCenter.default.post(
+      name: .quickSearchVisibilityChanged,
+      object: nil,
+      userInfo: ["isVisible": true]
+    )
+  }
+
+  private func hideQuickSearchOverlay() {
+    guard isQuickSearchVisible else { return }
+    isQuickSearchVisible = false
+    quickSearchOverlayBackground.isHidden = true
+    quickSearchOverlayContainer.isHidden = true
+    quickSearchViewModel.reset()
+    removeQuickSearchKeyHandlers()
+    NotificationCenter.default.post(
+      name: .quickSearchVisibilityChanged,
+      object: nil,
+      userInfo: ["isVisible": false]
+    )
+  }
+
+  private func updateQuickSearchSize(_ size: NSSize) {
+    quickSearchWidthConstraint?.constant = size.width
+    quickSearchHeightConstraint?.constant = size.height
+    view.layoutSubtreeIfNeeded()
+  }
+
+  private func installQuickSearchKeyHandlers() {
+    guard quickSearchEscapeUnsubscriber == nil else { return }
+    guard let keyMonitor = dependencies.keyMonitor else { return }
+
+    quickSearchEscapeUnsubscriber = keyMonitor.addHandler(
+      for: .escape,
+      key: "quick_search_overlay_escape"
+    ) { [weak self] _ in
+      self?.hideQuickSearchOverlay()
+    }
+
+    quickSearchArrowUnsubscriber = keyMonitor.addHandler(
+      for: .arrowKeys,
+      key: "quick_search_overlay_arrows"
+    ) { [weak self] event in
+      guard let self else { return }
+      switch event.keyCode {
+        case 126:
+          self.quickSearchViewModel.moveSelection(isForward: false)
+        case 125:
+          self.quickSearchViewModel.moveSelection(isForward: true)
+        default:
+          break
+      }
+    }
+
+    quickSearchVimUnsubscriber = keyMonitor.addHandler(
+      for: .vimNavigation,
+      key: "quick_search_overlay_vim"
+    ) { [weak self] event in
+      guard let self else { return }
+      guard let char = event.charactersIgnoringModifiers?.lowercased() else { return }
+      switch char {
+        case "k", "p":
+          self.quickSearchViewModel.moveSelection(isForward: false)
+        case "j", "n":
+          self.quickSearchViewModel.moveSelection(isForward: true)
+        default:
+          break
+      }
+    }
+
+    quickSearchReturnUnsubscriber = keyMonitor.addHandler(
+      for: .returnKey,
+      key: "quick_search_overlay_return"
+    ) { [weak self] _ in
+      guard let self else { return }
+      if self.quickSearchViewModel.activateSelection() {
+        self.hideQuickSearchOverlay()
+      }
+    }
+  }
+
+  private func removeQuickSearchKeyHandlers() {
+    quickSearchEscapeUnsubscriber?()
+    quickSearchEscapeUnsubscriber = nil
+    quickSearchArrowUnsubscriber?()
+    quickSearchArrowUnsubscriber = nil
+    quickSearchVimUnsubscriber?()
+    quickSearchVimUnsubscriber = nil
+    quickSearchReturnUnsubscriber?()
+    quickSearchReturnUnsubscriber = nil
+  }
+
+  @objc private func handleQuickSearchBackgroundClick() {
+    hideQuickSearchOverlay()
   }
 }
 
