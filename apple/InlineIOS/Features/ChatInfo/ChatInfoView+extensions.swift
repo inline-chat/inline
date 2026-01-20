@@ -116,8 +116,14 @@ extension ChatInfoView {
   var chatInfoHeader: some View {
     VStack {
       if isDM, let userInfo = chatItem.userInfo {
-        ParticipantAvatarView(userInfo: userInfo, size: 82)
-          .frame(width: 82, height: 82)
+        let avatarSize: CGFloat = 82
+        if hasProfilePhoto(userInfo) {
+          ParticipantAvatarView(userInfo: userInfo, size: avatarSize)
+            .frame(width: avatarSize, height: avatarSize)
+        } else {
+          UserAvatar(userInfo: userInfo, size: avatarSize)
+            .frame(width: avatarSize, height: avatarSize)
+        }
         VStack(spacing: -3) {
           Text(userInfo.user.firstName ?? "User")
             .font(.title2)
@@ -162,6 +168,20 @@ extension ChatInfoView {
           .fontWeight(.semibold)
       }
     }
+  }
+
+  private func hasProfilePhoto(_ userInfo: UserInfo) -> Bool {
+    if userInfo.user.getLocalURL() != nil || userInfo.user.getRemoteURL() != nil {
+      return true
+    }
+
+    if let file = userInfo.profilePhoto?.first,
+       file.getLocalURL() != nil || file.getRemoteURL() != nil
+    {
+      return true
+    }
+
+    return false
   }
 
   @ViewBuilder
