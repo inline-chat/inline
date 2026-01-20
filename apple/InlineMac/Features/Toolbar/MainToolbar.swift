@@ -75,6 +75,7 @@ class MainToolbarView: NSView {
   var transparent: Bool = false {
     didSet {
       updateLayer()
+      hostingView?.isHidden = transparent
     }
   }
 
@@ -86,7 +87,7 @@ class MainToolbarView: NSView {
 
   private func setupView() {
     wantsLayer = true
-    layer?.backgroundColor = Theme.windowContentBackgroundColor.cgColor
+    layer?.backgroundColor = .clear
 
     // Add SwiftUI view to the toolbar
     let hostingView = NSHostingView(
@@ -113,7 +114,7 @@ class MainToolbarView: NSView {
   // MARK: - Lifecycle
 
   override func updateLayer() {
-    layer?.backgroundColor = transparent ? .clear : Theme.windowContentBackgroundColor.cgColor
+    layer?.backgroundColor = .clear
     super.updateLayer()
   }
 }
@@ -124,35 +125,57 @@ struct ToolbarSwiftUIView: View {
   var dependencies: AppDependencies
 
   var body: some View {
+    ZStack(alignment: .leading) {
+      toolbarBackground
+      toolbarContent
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 24)
+    }
+    .frame(height: Theme.toolbarHeight)
+    .ignoresSafeArea()
+  }
+
+  private var toolbarBackground: some View {
+    let baseColor = Color(nsColor: Theme.windowContentBackgroundColor)
+    return LinearGradient(
+      gradient: Gradient(stops: [
+        .init(color: baseColor.opacity(1), location: 0),
+        .init(color: baseColor.opacity(0.9), location: 0.2),
+        .init(color: baseColor.opacity(0.8), location: 0.5),
+        .init(color: baseColor.opacity(0.2), location: 0.9),
+        .init(color: baseColor.opacity(0), location: 1),
+      ]),
+      startPoint: .top,
+      endPoint: .bottom
+    )
+  }
+
+  @ViewBuilder
+  private var toolbarContent: some View {
     HStack(spacing: 12) {
       ForEach(Array(state.currentItems.enumerated()), id: \.offset) { _, item in
         switch item {
           case .navigationBack:
-            Button {
-              dependencies.nav2?.goBack()
-            } label: {
-              Image(systemName: "chevron.left")
-            }
-            .buttonStyle(.plain)
-            .controlSize(.large)
-            .disabled(!(dependencies.nav2?.canGoBack ?? false))
+            navigationBackButton
 
           case .navigationForward:
-            Button {
-              dependencies.nav2?.goForward()
-            } label: {
-              Image(systemName: "chevron.right")
-            }
-            .buttonStyle(.plain)
-            .controlSize(.large)
-            .disabled(!(dependencies.nav2?.canGoForward ?? false))
+            navigationForwardButton
 
           case let .translationIcon(peer):
-            TranslationButton(peer: peer)
-              .buttonStyle(.plain)
-              .controlSize(.large)
-              .frame(height: Theme.toolbarHeight - 8)
-              .id(peer.id)
+            if #available(macOS 26.0, *) {
+              TranslationButton(peer: peer)
+                .buttonStyle(.glass)
+                .controlSize(.large)
+                // .padding(.horizontal, 0)
+                // .frame(height: Theme.toolbarHeight)
+                .id(peer.id)
+            } else {
+              TranslationButton(peer: peer)
+                .buttonStyle(.plain)
+                .controlSize(.extraLarge)
+                // .frame(height: Theme.toolbarHeight - 8)
+                .id(peer.id)
+            }
 
           case let .participants(peer):
             ParticipantsToolbarButton(peer: peer, dependencies: dependencies)
@@ -170,8 +193,28 @@ struct ToolbarSwiftUIView: View {
         }
       }
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .padding(.horizontal, 24)
+  }
+
+  private var navigationBackButton: some View {
+    Button {
+      dependencies.nav2?.goBack()
+    } label: {
+      Image(systemName: "chevron.left")
+    }
+    .buttonStyle(.plain)
+    .controlSize(.large)
+    .disabled(!(dependencies.nav2?.canGoBack ?? false))
+  }
+
+  private var navigationForwardButton: some View {
+    Button {
+      dependencies.nav2?.goForward()
+    } label: {
+      Image(systemName: "chevron.right")
+    }
+    .buttonStyle(.plain)
+    .controlSize(.large)
+    .disabled(!(dependencies.nav2?.canGoForward ?? false))
   }
 }
 

@@ -328,7 +328,7 @@ class MessageListAppKit: NSViewController {
     // TODO: extract insets logic from bottom here.
   }
 
-  private var toolbarHeight: CGFloat = 52
+  private var toolbarHeight: CGFloat = AppSettings.shared.enableNewMacUI ? Theme.toolbarHeight : 52
 
   // This fixes the issue with the toolbar messing up initial content insets on window open. Now we call it on did
   // layout and it fixes the issue.

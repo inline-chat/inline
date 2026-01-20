@@ -4,12 +4,14 @@ import SwiftUI
 class ChatIconSwiftUIBridge: NSView {
   private var peerType: ChatIcon.PeerType?
   private var size: CGFloat
+  private var ignoresSafeArea: Bool
 
-  private var hostingView: NSHostingView<ChatIcon>?
+  private var hostingView: NSHostingView<AnyView>?
 
-  init(_ peerType: ChatIcon.PeerType, size: CGFloat) {
+  init(_ peerType: ChatIcon.PeerType, size: CGFloat, ignoresSafeArea: Bool = false) {
     self.peerType = peerType
     self.size = size
+    self.ignoresSafeArea = ignoresSafeArea
 
     super.init(frame: NSRect(
       x: 0,
@@ -41,10 +43,7 @@ class ChatIconSwiftUIBridge: NSView {
     hostingView?.removeFromSuperview()
 
     // Create new SwiftUI view
-    let swiftUIView = ChatIcon(
-      peer: peerType,
-      size: size
-    )
+    let swiftUIView = makeRootView(peerType: peerType)
     let newHostingView = NSHostingView(rootView: swiftUIView)
     newHostingView.translatesAutoresizingMaskIntoConstraints = false
 
@@ -63,10 +62,15 @@ class ChatIconSwiftUIBridge: NSView {
     self.peerType = peerType
 
     if let hostingView {
-      hostingView.rootView = ChatIcon(peer: peerType, size: size)
+      hostingView.rootView = makeRootView(peerType: peerType)
     } else {
       updateAvatar()
     }
+  }
+
+  private func makeRootView(peerType: ChatIcon.PeerType) -> AnyView {
+    let view = ChatIcon(peer: peerType, size: size)
+    return ignoresSafeArea ? AnyView(view.ignoresSafeArea()) : AnyView(view)
   }
 
   override var intrinsicContentSize: NSSize {

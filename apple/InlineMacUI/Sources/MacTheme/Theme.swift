@@ -45,7 +45,7 @@ public enum Theme {
   // MARK: - Main View & Split View
 
   public static let collapseSidebarAtWindowSize: CGFloat = 500
-  public static let toolbarHeight: CGFloat = 52
+  public static let toolbarHeight: CGFloat = 46
 
   // MARK: - Tab Bar
 
@@ -59,8 +59,8 @@ public enum Theme {
   // public static let mainSplitViewContentRadius: CGFloat = 16
   // public static let mainSplitViewInnerPadding: CGFloat = 8
   // public static let mainSplitViewContentRadius: CGFloat = 18
-  public static let mainSplitViewInnerPadding: CGFloat = 6
-  public static let mainSplitViewContentRadius: CGFloat = 20
+  public static let mainSplitViewInnerPadding: CGFloat = 5
+  public static let mainSplitViewContentRadius: CGFloat = 12
 
   // MARK: - Sidebar
 

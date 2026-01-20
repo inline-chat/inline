@@ -38,9 +38,9 @@ public struct TranslationButton: View {
       Image(systemName: "translate")
     }
     #if os(macOS)
-    .font(.system(size: 16))
-    .buttonStyle(.automatic)
+    // .font(.system(size: 18))
     .foregroundStyle(isTranslationEnabled ? Color.macOSAccent : .secondary)
+    // .buttonStyle(.automatic)
     #else
     .foregroundStyle(isTranslationEnabled ? Color.accentColor : .secondary)
     #endif
@@ -78,7 +78,7 @@ public struct TranslationButton: View {
         popover
       }
 
-#if os(macOS)
+    #if os(macOS)
       .overlay(alignment: .bottom) {
         Color.clear.frame(width: 1, height: 1)
           .allowsHitTesting(false)
@@ -86,7 +86,7 @@ public struct TranslationButton: View {
             prompt
           }
       }
-#endif
+    #endif
 
       .sheet(isPresented: $showOptionsSheet) {
         TranslationOptions(peer: peer)
@@ -99,7 +99,7 @@ public struct TranslationButton: View {
         isTranslationEnabled = enabled
       }
 
-#if os(macOS)
+    #if os(macOS)
       /// Listen for translation needed prompt
       .onReceive(TranslationDetector.shared.needsTranslation) { event in
         if event.peer == peer,
@@ -111,7 +111,7 @@ public struct TranslationButton: View {
           showPrompt = true
         }
       }
-#endif
+    #endif
   }
 
   private func pressed() {
