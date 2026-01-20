@@ -12,15 +12,11 @@ class MainSidebarItemCell: NSView {
   private weak var events: PassthroughSubject<ScrollEvent, Never>?
 
   private var item: ChatListItem?
-  private var onHeaderTap: ((MainSidebarList.Section) -> Void)?
 
   private static let avatarSize: CGFloat = MainSidebar.iconSize
   private static let avatarSpacing: CGFloat = MainSidebar.iconTrailingPadding
   private static let horizontalPadding: CGFloat = MainSidebar.innerEdgeInsets
   private static let font: NSFont = MainSidebar.font
-  private static let headerFont: NSFont = .systemFont(ofSize: 11, weight: .semibold)
-  private static let headerTextColor: NSColor = .tertiaryLabelColor
-  private static let headerDisclosureSize: CGFloat = 10
 
   private static let cornerRadius: CGFloat = 10
   private static let unreadBadgeSize: CGFloat = 5
@@ -149,20 +145,6 @@ class MainSidebarItemCell: NSView {
     return view
   }()
 
-  private lazy var headerDisclosureView: NSImageView = {
-    let view = NSImageView()
-    view.translatesAutoresizingMaskIntoConstraints = false
-    let config = NSImage.SymbolConfiguration(
-      pointSize: Self.headerDisclosureSize,
-      weight: .semibold,
-      scale: .small
-    )
-    view.image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)?
-      .withSymbolConfiguration(config)
-    view.contentTintColor = .tertiaryLabelColor
-    return view
-  }()
-
   private lazy var actionButton: NSButton = {
     let button = NSButton()
     button.translatesAutoresizingMaskIntoConstraints = false
@@ -255,35 +237,27 @@ class MainSidebarItemCell: NSView {
     stackView.setCustomSpacing(Self.avatarSpacing, after: leadingContainerView)
   }
 
-  private var content: MainSidebarItemCollectionViewItem.Content?
-
   func configure(
     with content: MainSidebarItemCollectionViewItem.Content,
     dependencies: AppDependencies,
     events: PassthroughSubject<ScrollEvent, Never>,
-    highlightNavSelection: Bool,
-    onHeaderTap: ((MainSidebarList.Section) -> Void)?
+    highlightNavSelection: Bool
   ) {
     preparingForReuse = false
     item = nil
-    self.content = content
-    switch content.kind {
-      case let .item(chatItem):
-        item = chatItem
-      case .header:
-        break
+    if case let .item(chatItem) = content.kind {
+      item = chatItem
     }
     self.dependencies = dependencies
     nav2 = dependencies.nav2
     self.events = events
     self.highlightNavSelection = highlightNavSelection
-    self.onHeaderTap = onHeaderTap
 
     cancellables.removeAll()
 
-    configureLeadingView(for: content.kind)
-    configureTitle(for: content.kind)
-    configureBadges(for: content.kind)
+    configureLeadingView()
+    configureTitle()
+    configureBadges()
 
     if highlightNavSelection {
       isNavSelected = nav2?.currentRoute == route
@@ -307,7 +281,6 @@ class MainSidebarItemCell: NSView {
     isHovered = false
     isNavSelected = false
     isKeyboardSelected = false
-    onHeaderTap = nil
     clearBadges()
     cancellables.removeAll()
   }
@@ -484,57 +457,44 @@ class MainSidebarItemCell: NSView {
     addGestureRecognizer(tapGesture)
   }
 
-  private func configureLeadingView(for kind: MainSidebarItemCollectionViewItem.Content.Kind) {
+  private func configureLeadingView() {
     leadingContainerView.subviews.forEach { $0.removeFromSuperview() }
 
-    switch kind {
-      case let .item(chatItem):
-        leadingContainerView.isHidden = false
-        leadingWidthConstraint?.constant = Self.avatarSize
-        leadingHeightConstraint?.constant = Self.avatarSize
-        if let user = chatItem.user {
-          avatarView = ChatIconSwiftUIBridge(.user(user), size: Self.avatarSize)
-        } else if let chat = chatItem.chat {
-          avatarView = ChatIconSwiftUIBridge(.chat(chat), size: Self.avatarSize)
-        } else {
-          avatarView = ChatIconSwiftUIBridge(.user(.deleted), size: Self.avatarSize)
-        }
-        leadingContainerView.addSubview(avatarView)
-        avatarView.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-          avatarView.centerXAnchor.constraint(equalTo: leadingContainerView.centerXAnchor),
-          avatarView.centerYAnchor.constraint(equalTo: leadingContainerView.centerYAnchor),
-          avatarView.widthAnchor.constraint(equalToConstant: Self.avatarSize),
-          avatarView.heightAnchor.constraint(equalToConstant: Self.avatarSize),
-        ])
-        stackView.setCustomSpacing(Self.avatarSpacing, after: leadingContainerView)
-      case .header:
-        leadingContainerView.isHidden = true
-        leadingWidthConstraint?.constant = 0
-        leadingHeightConstraint?.constant = 0
-        stackView.setCustomSpacing(0, after: leadingContainerView)
+    guard let item else { return }
+
+    leadingContainerView.isHidden = false
+    leadingWidthConstraint?.constant = Self.avatarSize
+    leadingHeightConstraint?.constant = Self.avatarSize
+    if let user = item.user {
+      avatarView = ChatIconSwiftUIBridge(.user(user), size: Self.avatarSize)
+    } else if let chat = item.chat {
+      avatarView = ChatIconSwiftUIBridge(.chat(chat), size: Self.avatarSize)
+    } else {
+      avatarView = ChatIconSwiftUIBridge(.user(.deleted), size: Self.avatarSize)
     }
+    leadingContainerView.addSubview(avatarView)
+    avatarView.translatesAutoresizingMaskIntoConstraints = false
+    NSLayoutConstraint.activate([
+      avatarView.centerXAnchor.constraint(equalTo: leadingContainerView.centerXAnchor),
+      avatarView.centerYAnchor.constraint(equalTo: leadingContainerView.centerYAnchor),
+      avatarView.widthAnchor.constraint(equalToConstant: Self.avatarSize),
+      avatarView.heightAnchor.constraint(equalToConstant: Self.avatarSize),
+    ])
+    stackView.setCustomSpacing(Self.avatarSpacing, after: leadingContainerView)
   }
 
-  private func configureTitle(for kind: MainSidebarItemCollectionViewItem.Content.Kind) {
-    nameLabel.stringValue = title(for: kind)
-    updateHeaderStyle(for: kind)
+  private func configureTitle() {
+    nameLabel.stringValue = title()
+    nameLabel.font = Self.font
+    nameLabel.textColor = .labelColor
   }
 
-  private func title(for kind: MainSidebarItemCollectionViewItem.Content.Kind) -> String {
-    switch kind {
-      case let .item(chatItem):
-        title(for: chatItem)
-      case let .header(_, title, _, _, _):
-        title
-    }
-  }
-
-  private func title(for chatItem: ChatListItem) -> String {
-    if let user = chatItem.user {
+  private func title() -> String {
+    guard let item else { return "Chat" }
+    if let user = item.user {
       return userTitle(for: user.user)
     }
-    if let chatTitle = nonEmpty(chatItem.chat?.title) {
+    if let chatTitle = nonEmpty(item.chat?.title) {
       return chatTitle
     }
     return "Chat"
@@ -562,28 +522,13 @@ class MainSidebarItemCell: NSView {
     return trimmed.isEmpty ? nil : trimmed
   }
 
-  private func configureBadges(for kind: MainSidebarItemCollectionViewItem.Content.Kind) {
+  private func configureBadges() {
     clearBadges()
-    switch kind {
-      case .item:
-        guard item?.kind == .thread else { return }
-        if hasUnread {
-          badgeContainerView.addArrangedSubview(createUnreadBadge())
-        } else if isPinned {
-          badgeContainerView.addArrangedSubview(createPinnedBadge())
-        }
-      case let .header(_, _, _, showsDisclosure, isCollapsed):
-        if showsDisclosure {
-          let symbolName = isCollapsed ? "chevron.right" : "chevron.down"
-          let config = NSImage.SymbolConfiguration(
-            pointSize: Self.headerDisclosureSize,
-            weight: .semibold,
-            scale: .small
-          )
-          headerDisclosureView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
-            .withSymbolConfiguration(config)
-          badgeContainerView.addArrangedSubview(headerDisclosureView)
-        }
+    guard item?.kind == .thread else { return }
+    if hasUnread {
+      badgeContainerView.addArrangedSubview(createUnreadBadge())
+    } else if isPinned {
+      badgeContainerView.addArrangedSubview(createPinnedBadge())
     }
   }
 
@@ -627,9 +572,7 @@ class MainSidebarItemCell: NSView {
   override func updateLayer() {
     containerView.effectiveAppearance.performAsCurrentDrawingAppearance {
       let backgroundColor: NSColor
-      if isHeader {
-        backgroundColor = .clear
-      } else if isNavSelected {
+      if isNavSelected {
         backgroundColor = selectedColor
       } else if isKeyboardSelected {
         backgroundColor = keyboardSelectionColor
@@ -652,16 +595,8 @@ class MainSidebarItemCell: NSView {
       return
     }
 
-    guard let content else { return }
-
-    switch content.kind {
-      case let .item(item):
-        guard let nav2, let peer = item.peerId else { return }
-        nav2.navigate(to: .chat(peer: peer))
-      case let .header(section, _, _, showsDisclosure, _):
-        guard showsDisclosure else { return }
-        onHeaderTap?(section)
-    }
+    guard let item, let nav2, let peer = item.peerId else { return }
+    nav2.navigate(to: .chat(peer: peer))
   }
 
   private func observeNavRoute() {
@@ -687,21 +622,4 @@ class MainSidebarItemCell: NSView {
     isKeyboardSelected = selected
   }
 
-  private var isHeader: Bool {
-    if let content, case .header = content.kind {
-      return true
-    }
-    return false
-  }
-
-  private func updateHeaderStyle(for kind: MainSidebarItemCollectionViewItem.Content.Kind) {
-    switch kind {
-      case .item:
-        nameLabel.font = Self.font
-        nameLabel.textColor = .labelColor
-      case .header:
-        nameLabel.font = Self.headerFont
-        nameLabel.textColor = Self.headerTextColor
-    }
-  }
 }
