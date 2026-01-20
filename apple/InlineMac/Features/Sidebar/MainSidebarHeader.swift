@@ -76,7 +76,7 @@ private struct SidebarHeaderRootView: View {
   var body: some View {
     @Bindable var nav2 = nav2
     let activeTab = nav2.activeTab
-    let isNewThreadActive = nav2.currentRoute == .newChat
+    let isNewThreadActive = nav2.currentRoute == .newChat && !isQuickSearchVisible
     let items = makeItems(activeTab: activeTab)
 
     VStack(spacing: MainSidebar.itemSpacing) {
@@ -106,7 +106,6 @@ private struct SidebarHeaderRootView: View {
             }
           }
         )
-        .modifier(AdditionalRowModifier(isExpanded: isExpanded, isTopRow: item == expandedTopItem))
       }
       SidebarQuickActionsSection(
         isSearchActive: isQuickSearchVisible,
@@ -155,9 +154,7 @@ private struct SidebarHeaderRootView: View {
 
   private func toggleExpansion(activeTab: TabId) {
     if isExpanded {
-      withAnimation(.easeInOut(duration: 0.18)) {
-        isExpanded = false
-      }
+      isExpanded = false
       expandedTopItem = nil
       expandedItemsSnapshot = []
       return
@@ -166,9 +163,7 @@ private struct SidebarHeaderRootView: View {
     let snapshot = makeExpandedSnapshot(activeTab: activeTab)
     expandedTopItem = snapshot.top
     expandedItemsSnapshot = snapshot.rest
-    withAnimation(.easeInOut(duration: 0.18)) {
-      isExpanded = true
-    }
+    isExpanded = true
   }
 
   private func makeExpandedSnapshot(activeTab: TabId) -> (top: SpaceHeaderItem, rest: [SpaceHeaderItem], combined: [SpaceHeaderItem]) {
@@ -246,28 +241,32 @@ private struct SidebarQuickActionsSection: View {
   private var topDivider: some View {
     SidebarSeparator(
       opacity: Self.dividerOpacity,
-      verticalPadding: Self.dividerVerticalPadding
+      topPadding: Self.dividerVerticalPadding,
+      bottomPadding: Self.dividerVerticalPadding
     )
   }
 
   private var bottomDivider: some View {
     SidebarSeparator(
       opacity: Self.dividerOpacity,
-      verticalPadding: 0
+      topPadding: Self.dividerVerticalPadding,
+      bottomPadding: 0
     )
   }
 }
 
 private struct SidebarSeparator: View {
   let opacity: CGFloat
-  let verticalPadding: CGFloat
+  let topPadding: CGFloat
+  let bottomPadding: CGFloat
 
   var body: some View {
     Rectangle()
       .fill(Color(nsColor: .labelColor).opacity(opacity))
       .frame(height: 1)
       .padding(.horizontal, MainSidebar.innerEdgeInsets)
-      .padding(.vertical, verticalPadding)
+      .padding(.top, topPadding)
+      .padding(.bottom, bottomPadding)
   }
 }
 
@@ -367,7 +366,6 @@ private struct SidebarHeaderRow<MenuContent: View>: View {
               Circle().fill(Color.black.opacity(isHovered ? 0.08 : 0))
             )
             .rotationEffect(.degrees(isExpanded ? 180 : 0))
-            .animation(.easeInOut(duration: 0.18), value: isExpanded)
         }
         .buttonStyle(.plain)
         .focusable(false)
@@ -509,28 +507,5 @@ private enum HeightPreferenceKey: PreferenceKey {
   static var defaultValue: CGFloat = 0
   static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
     value = max(value, nextValue())
-  }
-}
-
-private struct AdditionalRowModifier: ViewModifier {
-  let isExpanded: Bool
-  let isTopRow: Bool
-
-  func body(content: Content) -> some View {
-    if isExpanded, !isTopRow {
-      content
-        .transition(
-          .asymmetric(
-            insertion: .opacity
-              .combined(with: .scale(scale: 0.98, anchor: .topLeading))
-              .combined(with: .offset(x: 10, y: -2)),
-            removal: .opacity
-              .combined(with: .scale(scale: 0.98, anchor: .topLeading))
-              .combined(with: .offset(x: 10, y: -2))
-          )
-        )
-    } else {
-      content
-    }
   }
 }
