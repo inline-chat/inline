@@ -6,6 +6,9 @@ FROM base AS development-dependencies
 RUN mkdir -p /temp/dev
 COPY package.json bun.lock /temp/dev/
 COPY admin/package.json /temp/dev/admin/
+COPY server/package.json /temp/dev/server/
+COPY web/package.json /temp/dev/web/
+COPY scripts/package.json /temp/dev/scripts/
 RUN cd /temp/dev && bun install --frozen-lockfile
 
 # Install production dependencies only
@@ -13,6 +16,9 @@ FROM base AS production-dependencies
 RUN mkdir -p /temp/prod
 COPY package.json bun.lock /temp/prod/
 COPY admin/package.json /temp/prod/admin/
+COPY server/package.json /temp/prod/server/
+COPY web/package.json /temp/prod/web/
+COPY scripts/package.json /temp/prod/scripts/
 RUN cd /temp/prod && bun install --frozen-lockfile --production
 
 # Build stage
