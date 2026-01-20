@@ -193,6 +193,10 @@ final class UserAvatarView: UIView {
       imageView.request = nil
     }
   }
+
+  func currentImage() -> UIImage? {
+    imageView.imageView.image
+  }
 }
 
 // MARK: - UIColor Extensions

@@ -13,6 +13,8 @@ final class ImageViewerController: UIViewController {
   private weak var sourceView: UIView?
   private let sourceImage: UIImage?
   private let sourceFrame: CGRect
+  private let sourceCornerRadius: CGFloat
+  private let destinationCornerRadius: CGFloat = 0
   private let showInChatAction: (() -> Void)?
   var onDismiss: (() -> Void)?
 
@@ -124,7 +126,13 @@ final class ImageViewerController: UIViewController {
     
   // MARK: - Initialization
     
-  init(imageURL: URL, sourceView: UIView, sourceImage: UIImage? = nil, showInChatAction: (() -> Void)? = nil) {
+  init(
+    imageURL: URL,
+    sourceView: UIView,
+    sourceImage: UIImage? = nil,
+    sourceCornerRadius: CGFloat = 16,
+    showInChatAction: (() -> Void)? = nil
+  ) {
     self.imageURL = imageURL
     self.videoURL = nil
     self.sourceView = sourceView
@@ -132,13 +140,20 @@ final class ImageViewerController: UIViewController {
     self.showInChatAction = showInChatAction
     self.isVideo = false
     self.sourceFrame = sourceView.convert(sourceView.bounds, to: nil)
+    self.sourceCornerRadius = max(0, sourceCornerRadius)
       
     super.init(nibName: nil, bundle: nil)
     modalPresentationStyle = .overFullScreen
     modalTransitionStyle = .crossDissolve
   }
 
-  init(videoURL: URL, sourceView: UIView, sourceImage: UIImage? = nil, showInChatAction: (() -> Void)? = nil) {
+  init(
+    videoURL: URL,
+    sourceView: UIView,
+    sourceImage: UIImage? = nil,
+    sourceCornerRadius: CGFloat = 16,
+    showInChatAction: (() -> Void)? = nil
+  ) {
     self.imageURL = nil
     self.videoURL = videoURL
     self.sourceView = sourceView
@@ -146,6 +161,7 @@ final class ImageViewerController: UIViewController {
     self.showInChatAction = showInChatAction
     self.isVideo = true
     self.sourceFrame = sourceView.convert(sourceView.bounds, to: nil)
+    self.sourceCornerRadius = max(0, sourceCornerRadius)
 
     super.init(nibName: nil, bundle: nil)
     modalPresentationStyle = .overFullScreen
@@ -413,7 +429,7 @@ final class ImageViewerController: UIViewController {
     tempImageView.contentMode = .scaleAspectFit
     tempImageView.clipsToBounds = true
     tempImageView.image = sourceImage
-    tempImageView.layer.cornerRadius = 16
+    tempImageView.layer.cornerRadius = sourceCornerRadius
     view.addSubview(tempImageView)
     transitionImageView = tempImageView
         
@@ -445,7 +461,7 @@ final class ImageViewerController: UIViewController {
     }
         
     UIView.animate(withDuration: 0.25, animations: {
-      tempImageView.layer.cornerRadius = 0
+      tempImageView.layer.cornerRadius = self.destinationCornerRadius
       tempImageView.frame = finalFrame
       self.view.backgroundColor = .black
     }, completion: { _ in
@@ -478,7 +494,7 @@ final class ImageViewerController: UIViewController {
     tempImageView.contentMode = .scaleAspectFit
     tempImageView.clipsToBounds = true
     tempImageView.image = imageView.imageView.image ?? sourceImage
-    tempImageView.layer.cornerRadius = 0
+    tempImageView.layer.cornerRadius = destinationCornerRadius
     view.addSubview(tempImageView)
       
     // Calculate the proper starting frame
@@ -512,7 +528,7 @@ final class ImageViewerController: UIViewController {
       
     UIView.animate(withDuration: 0.2, delay: 0, options: .curveEaseInOut, animations: {
       tempImageView.frame = updatedFrame
-      tempImageView.layer.cornerRadius = 16
+      tempImageView.layer.cornerRadius = self.sourceCornerRadius
       self.view.backgroundColor = .clear
     }, completion: { _ in
       tempImageView.removeFromSuperview()
@@ -569,7 +585,7 @@ final class ImageViewerController: UIViewController {
         tempImageView.contentMode = .scaleAspectFit
         tempImageView.clipsToBounds = true
         tempImageView.image = imageView.imageView.image ?? sourceImage
-        tempImageView.layer.cornerRadius = 0
+        tempImageView.layer.cornerRadius = destinationCornerRadius
         
         view.insertSubview(tempImageView, at: 0)
         
@@ -582,7 +598,7 @@ final class ImageViewerController: UIViewController {
         
         UIView.animate(withDuration: 0.25, delay: 0, options: .curveEaseOut, animations: {
           tempImageView.frame = finalFrame
-          tempImageView.layer.cornerRadius = 16
+          tempImageView.layer.cornerRadius = self.sourceCornerRadius
           self.view.backgroundColor = .clear
           self.mediaContentView.alpha = 0
         }, completion: { _ in

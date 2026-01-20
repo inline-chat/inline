@@ -464,7 +464,8 @@ struct InfoTabView: View {
 
       ForEach(chatInfoView.participants) { userInfo in
         VStack(spacing: 4) {
-          UserAvatar(userInfo: userInfo, size: 68)
+          ParticipantAvatarView(userInfo: userInfo, size: 68)
+            .frame(width: 68, height: 68)
 
           Text(userInfo.user.shortDisplayName)
             .font(.callout)
@@ -492,5 +493,127 @@ struct InfoTabView: View {
     }
     .padding(.top, 8)
     .animation(.easeInOut(duration: 0.2), value: chatInfoView.participants.count)
+  }
+}
+
+struct ParticipantAvatarView: UIViewRepresentable {
+  let userInfo: UserInfo
+  let size: CGFloat
+
+  func makeUIView(context: Context) -> UserAvatarView {
+    let view = UserAvatarView()
+    view.isUserInteractionEnabled = true
+    let tapGesture = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap))
+    tapGesture.delegate = context.coordinator
+    view.addGestureRecognizer(tapGesture)
+    return view
+  }
+
+  func updateUIView(_ uiView: UserAvatarView, context: Context) {
+    uiView.configure(with: userInfo, size: size)
+    context.coordinator.userInfo = userInfo
+    context.coordinator.avatarView = uiView
+  }
+
+  func makeCoordinator() -> Coordinator {
+    Coordinator()
+  }
+
+  class Coordinator: NSObject, UIGestureRecognizerDelegate {
+    var userInfo: UserInfo?
+    weak var avatarView: UserAvatarView?
+
+    @objc func handleTap() {
+      guard let userInfo, let avatarView else { return }
+
+      let sourceImage = avatarView.currentImage() ?? snapshotImage(from: avatarView)
+      guard let resolved = resolveAvatarURL(for: userInfo, fallbackImage: sourceImage) else { return }
+
+      let sourceCornerRadius = max(
+        avatarView.layer.cornerRadius,
+        min(avatarView.bounds.width, avatarView.bounds.height) / 2
+      )
+      let imageViewer = ImageViewerController(
+        imageURL: resolved.url,
+        sourceView: avatarView,
+        sourceImage: sourceImage,
+        sourceCornerRadius: sourceCornerRadius
+      )
+      if resolved.isTemporary {
+        let temporaryUrl = resolved.url
+        imageViewer.onDismiss = {
+          try? FileManager.default.removeItem(at: temporaryUrl)
+        }
+      }
+
+      findViewController(from: avatarView)?.present(imageViewer, animated: false)
+    }
+
+    func gestureRecognizer(
+      _ gestureRecognizer: UIGestureRecognizer,
+      shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+      true
+    }
+
+    private func resolveAvatarURL(
+      for userInfo: UserInfo,
+      fallbackImage: UIImage?
+    ) -> (url: URL, isTemporary: Bool)? {
+      if let localUrl = userInfo.user.getLocalURL(),
+         FileManager.default.fileExists(atPath: localUrl.path)
+      {
+        return (localUrl, false)
+      }
+
+      if let localFileUrl = userInfo.profilePhoto?.first?.getLocalURL(),
+         FileManager.default.fileExists(atPath: localFileUrl.path)
+      {
+        return (localFileUrl, false)
+      }
+
+      if let remoteUrl = userInfo.user.getRemoteURL() {
+        return (remoteUrl, false)
+      }
+
+      if let remoteFileUrl = userInfo.profilePhoto?.first?.getRemoteURL() {
+        return (remoteFileUrl, false)
+      }
+
+      guard let fallbackImage, let temporaryUrl = cacheTemporaryImage(fallbackImage) else { return nil }
+      return (temporaryUrl, true)
+    }
+
+    private func cacheTemporaryImage(_ image: UIImage) -> URL? {
+      guard let data = image.jpegData(compressionQuality: 0.95) else { return nil }
+      let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("avatar-\(UUID().uuidString).jpg")
+      do {
+        try data.write(to: url, options: [.atomic])
+        return url
+      } catch {
+        Log.shared.error("Failed to cache avatar snapshot", error: error)
+        return nil
+      }
+    }
+
+    private func snapshotImage(from view: UIView) -> UIImage? {
+      guard view.bounds.width > 0, view.bounds.height > 0 else { return nil }
+      let renderer = UIGraphicsImageRenderer(bounds: view.bounds)
+      return renderer.image { context in
+        view.layer.render(in: context.cgContext)
+      }
+    }
+
+    private func findViewController(from view: UIView) -> UIViewController? {
+      var responder: UIResponder? = view
+      while let nextResponder = responder?.next {
+        if let viewController = nextResponder as? UIViewController {
+          return viewController
+        }
+        responder = nextResponder
+      }
+      return nil
+    }
   }
 }
