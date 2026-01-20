@@ -116,7 +116,8 @@ extension ChatInfoView {
   var chatInfoHeader: some View {
     VStack {
       if isDM, let userInfo = chatItem.userInfo {
-        UserAvatar(userInfo: userInfo, size: 82)
+        ParticipantAvatarView(userInfo: userInfo, size: 82)
+          .frame(width: 82, height: 82)
         VStack(spacing: -3) {
           Text(userInfo.user.firstName ?? "User")
             .font(.title2)
