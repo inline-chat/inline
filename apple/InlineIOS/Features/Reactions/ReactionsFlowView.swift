@@ -11,6 +11,16 @@ class ReactionsFlowView: UIView {
   var horizontalSpacing: CGFloat = 4
   var verticalSpacing: CGFloat = 4
   private var outgoing: Bool = false
+  var reactionBackgroundPrimaryOverride: UIColor? {
+    didSet {
+      updateReactionBackgroundOverrides()
+    }
+  }
+  var reactionBackgroundSecondaryOverride: UIColor? {
+    didSet {
+      updateReactionBackgroundOverrides()
+    }
+  }
 
   private var reactionViews = [String: MessageReactionView]()
   private var reactionFrames = [String: CGRect]()
@@ -22,8 +32,14 @@ class ReactionsFlowView: UIView {
 
   // MARK: - Initialization
 
-  init(outgoing: Bool) {
+  init(
+    outgoing: Bool,
+    reactionBackgroundPrimaryOverride: UIColor? = nil,
+    reactionBackgroundSecondaryOverride: UIColor? = nil
+  ) {
     self.outgoing = outgoing
+    self.reactionBackgroundPrimaryOverride = reactionBackgroundPrimaryOverride
+    self.reactionBackgroundSecondaryOverride = reactionBackgroundSecondaryOverride
     super.init(frame: .zero)
     setupView()
   }
@@ -91,7 +107,9 @@ class ReactionsFlowView: UIView {
           count: groupedReaction.reactions.count,
           byCurrentUser: byCurrentUser,
           outgoing: outgoing,
-          reactionUsers: reactionUsers
+          reactionUsers: reactionUsers,
+          backgroundPrimaryOverride: reactionBackgroundPrimaryOverride,
+          backgroundSecondaryOverride: reactionBackgroundSecondaryOverride
         )
 
         view.onTap = { [weak self] emoji in
@@ -221,6 +239,15 @@ class ReactionsFlowView: UIView {
     
     // Invalidate intrinsic content size
     invalidateIntrinsicContentSize()
+  }
+
+  private func updateReactionBackgroundOverrides() {
+    for view in reactionViews.values {
+      view.updateBackgroundOverrides(
+        primary: reactionBackgroundPrimaryOverride,
+        secondary: reactionBackgroundSecondaryOverride
+      )
+    }
   }
   
   private func calculateLayout(for views: [MessageReactionView]) -> (totalHeight: CGFloat, rows: [[MessageReactionView]]) {
