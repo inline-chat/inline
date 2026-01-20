@@ -1,5 +1,6 @@
 import Combine
 import GRDB
+import InlineProtocol
 import Logger
 import SwiftUI
 
@@ -64,16 +65,23 @@ public struct LinkMessage: Codable, Equatable, Hashable, FetchableRecord, Persis
 @MainActor
 public final class ChatLinksViewModel: ObservableObject, @unchecked Sendable {
   private let chatId: Int64
+  private let peer: Peer
   private let db: AppDatabase
 
   @Published public private(set) var linkMessages: [LinkMessage] = []
 
   private var cancellable: AnyCancellable?
+  private var isLoading = false
+  private var hasMore = true
+  private var nextOffsetId: Int64?
   private var hasStarted = false
 
-  public init(db: AppDatabase, chatId: Int64) {
+  private let pageSize: Int32 = 50
+
+  public init(db: AppDatabase, chatId: Int64, peer: Peer) {
     self.db = db
     self.chatId = chatId
+    self.peer = peer
     fetchLinkMessages()
   }
 
@@ -144,10 +152,59 @@ public final class ChatLinksViewModel: ObservableObject, @unchecked Sendable {
   public func loadInitial() async {
     guard !hasStarted else { return }
     hasStarted = true
+    await loadMore(reset: true)
   }
 
   public func loadMoreIfNeeded(currentMessageId: Int64) async {
-    _ = currentMessageId
+    guard let lastMessageId = linkMessages.last?.message.messageId else { return }
+    guard currentMessageId == lastMessageId else { return }
+    await loadMore(reset: false)
+  }
+
+  private func loadMore(reset: Bool) async {
+    guard !isLoading else { return }
+
+    if reset {
+      nextOffsetId = nil
+      hasMore = true
+    }
+
+    guard hasMore else { return }
+
+    isLoading = true
+    defer { isLoading = false }
+
+    do {
+      let result = try await Api.realtime.send(
+        .searchMessages(
+          peer: peer,
+          queries: [],
+          offsetID: nextOffsetId,
+          limit: pageSize,
+          filter: .filterLinks
+        )
+      )
+
+      guard case let .searchMessages(response) = result else {
+        Log.shared.error("Unexpected searchMessages response for links in chat \(chatId)")
+        return
+      }
+
+      guard !response.messages.isEmpty else {
+        hasMore = false
+        return
+      }
+
+      if let lastMessageId = response.messages.last?.id {
+        nextOffsetId = lastMessageId
+      }
+
+      if response.messages.count < pageSize {
+        hasMore = false
+      }
+    } catch {
+      Log.shared.error("Failed to load link messages", error: error)
+    }
   }
 }
 

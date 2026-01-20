@@ -157,6 +157,47 @@ describe("searchMessages", () => {
     expect(result.messages.map((message) => Number(message.id))).toEqual([1])
   })
 
+  test("allows empty queries with links filter", async () => {
+    const userA = (await testUtils.createUser("search-links-filter-a@example.com"))!
+    const userB = (await testUtils.createUser("search-links-filter-b@example.com"))!
+    const chat = (await testUtils.createPrivateChat(userA, userB))!
+
+    await db
+      .insert(schema.messages)
+      .values({
+        messageId: 1,
+        chatId: chat.id,
+        fromId: userA.id,
+        text: "no links here",
+        hasLink: false,
+      })
+      .execute()
+
+    await db
+      .insert(schema.messages)
+      .values({
+        messageId: 2,
+        chatId: chat.id,
+        fromId: userA.id,
+        text: "https://inline.chat",
+        hasLink: true,
+      })
+      .execute()
+
+    const result = await searchMessages(
+      {
+        peerId: {
+          type: { oneofKind: "user", user: { userId: BigInt(userB.id) } },
+        },
+        queries: [],
+        filter: SearchMessagesFilter.FILTER_LINKS,
+      },
+      makeFunctionContext(userA.id),
+    )
+
+    expect(result.messages.map((message) => Number(message.id))).toEqual([2])
+  })
+
   test("applies media filters when searching text", async () => {
     const userA = (await testUtils.createUser("search-media-filter-a@example.com"))!
     const userB = (await testUtils.createUser("search-media-filter-b@example.com"))!
