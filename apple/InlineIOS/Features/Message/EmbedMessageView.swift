@@ -29,6 +29,13 @@ class EmbedMessageView: UIView {
   }
 
   static let height: CGFloat = 42
+  static let composeHeight: CGFloat = {
+    let headerFont = UIFont.systemFont(ofSize: 17, weight: .medium)
+    let messageFont = UIFont.systemFont(ofSize: 17)
+    let spacing: CGFloat = 4
+    let totalHeight = (Constants.verticalPadding * 2) + headerFont.lineHeight + spacing + messageFont.lineHeight
+    return ceil(totalHeight)
+  }()
   private var outgoing: Bool = false
   private var isOnlyEmoji: Bool = false
   private var kind: Kind = .replyInMessage
