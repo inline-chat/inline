@@ -10,7 +10,7 @@ class ComposeEmbedViewContent: UIView, UIGestureRecognizerDelegate {
     static let closeButtonSize: CGFloat = 24
   }
 
-  static let height: CGFloat = EmbedMessageView.height + Constants.topPadding
+  static let height: CGFloat = EmbedMessageView.composeHeight + Constants.topPadding
 
   enum Mode {
     case reply
@@ -80,7 +80,7 @@ class ComposeEmbedViewContent: UIView, UIGestureRecognizerDelegate {
       embedView.leadingAnchor.constraint(equalTo: leadingAnchor),
       embedView.topAnchor.constraint(equalTo: topAnchor, constant: Constants.topPadding),
       embedView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      embedView.heightAnchor.constraint(equalToConstant: EmbedMessageView.height),
+      embedView.heightAnchor.constraint(equalToConstant: EmbedMessageView.composeHeight),
 
       closeButton.trailingAnchor.constraint(equalTo: trailingAnchor),
       closeButton.centerYAnchor.constraint(equalTo: embedView.centerYAnchor),
