@@ -15,7 +15,6 @@ struct NotificationSettingsButton: View {
         popover
           .padding(.vertical, 10)
           .padding(.horizontal, 8)
-          .frame(width: 320, height: 300, alignment: .top)
       }
   }
 
@@ -243,7 +242,7 @@ struct NotificationSettingsButton: View {
         }
       }
       .toggleStyle(.switch)
-      .padding(.horizontal, 8)
+      
 
       Button(action: {
         withAnimation(.easeOut(duration: 0.2)) {
@@ -312,6 +311,8 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
           .font(.caption)
           .foregroundStyle(.tertiary)
           .padding(.top, -1)
+          .lineLimit(1)
+          
       }
       Spacer()
       if let customizeAction {

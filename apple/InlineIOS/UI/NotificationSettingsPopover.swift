@@ -35,7 +35,6 @@ struct NotificationSettingsButton: View {
           .hidden()
         )
           
-        .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
       }
   }
