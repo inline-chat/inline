@@ -8,6 +8,7 @@ import Sentry
 import SwiftUI
 import UserNotifications
 
+@MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
   // Main Window
   private var mainWindowController: NSWindowController?
