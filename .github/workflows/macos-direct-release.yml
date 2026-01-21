@@ -38,6 +38,7 @@ jobs:
       - name: Preflight
         env:
           SCHEME: ${{ vars.MACOS_DIRECT_SCHEME }}
+          XCODE_PATH: ${{ vars.MACOS_XCODE_PATH }}
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
           MACOS_CERTIFICATE_NAME: ${{ secrets.MACOS_CERTIFICATE_NAME }}
@@ -55,8 +56,6 @@ jobs:
           PUBLIC_RELEASES_R2_PREFIX: ${{ secrets.PUBLIC_RELEASES_R2_PREFIX }}
         run: |
           set -euo pipefail
-          scheme="${SCHEME:-Inline (macOS)}"
-          echo "Using scheme: ${scheme}"
           required=(
             MACOS_CERTIFICATE
             MACOS_CERTIFICATE_PWD
@@ -86,10 +85,34 @@ jobs:
           if [[ -z "${PUBLIC_RELEASES_R2_PREFIX:-}" ]]; then
             echo "PUBLIC_RELEASES_R2_PREFIX not set; defaulting to 'mac' in script." >&2
           fi
-          if [[ ! -d "/Applications/Xcode_26.0.app" ]]; then
-            echo "Expected /Applications/Xcode_26.0.app not found on runner." >&2
+          if [[ -n "${XCODE_PATH:-}" ]]; then
+            xcode_path="${XCODE_PATH}"
+          elif [[ -d "/Applications/Xcode_26.1.app" ]]; then
+            xcode_path="/Applications/Xcode_26.1.app"
+          elif [[ -d "/Applications/Xcode_26.0.app" ]]; then
+            xcode_path="/Applications/Xcode_26.0.app"
+          elif [[ -d "/Applications/Xcode.app" ]]; then
+            xcode_path="/Applications/Xcode.app"
+          else
+            echo "No suitable Xcode found on runner." >&2
             exit 1
           fi
+          echo "Using Xcode path: ${xcode_path}"
+          echo "xcode_path=${xcode_path}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set Xcode version
+        run: sudo xcode-select -s "${{ steps.preflight.outputs.xcode_path }}"
+
+      - name: Xcode Version
+        run: xcodebuild -version
+
+      - name: Verify Scheme
+        env:
+          SCHEME: ${{ vars.MACOS_DIRECT_SCHEME }}
+        run: |
+          set -euo pipefail
+          scheme="${SCHEME:-Inline (macOS)}"
+          echo "Using scheme: ${scheme}"
           scheme_list=$(xcodebuild -list -project apple/Inline.xcodeproj)
           if ! echo "${scheme_list}" | grep -Fq "${scheme}"; then
             echo "Xcode scheme '${scheme}' not found in apple/Inline.xcodeproj." >&2
@@ -98,12 +121,6 @@ jobs:
             echo "${scheme_list}" | awk '/Schemes:/{flag=1;next} flag{print}' >&2
             exit 1
           fi
-
-      - name: Set Xcode version
-        run: sudo xcode-select -s /Applications/Xcode_26.0.app
-
-      - name: Xcode Version
-        run: xcodebuild -version
 
       - name: Install create-dmg
         run: npm install --global create-dmg
