@@ -37,6 +37,7 @@ jobs:
 
       - name: Preflight
         env:
+          SCHEME: ${{ vars.MACOS_DIRECT_SCHEME }}
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
           MACOS_CERTIFICATE_NAME: ${{ secrets.MACOS_CERTIFICATE_NAME }}
@@ -54,6 +55,7 @@ jobs:
           PUBLIC_RELEASES_R2_PREFIX: ${{ secrets.PUBLIC_RELEASES_R2_PREFIX }}
         run: |
           set -euo pipefail
+          scheme="${SCHEME:-Inline (macOS)}"
           required=(
             MACOS_CERTIFICATE
             MACOS_CERTIFICATE_PWD
@@ -85,6 +87,11 @@ jobs:
           fi
           if [[ ! -d "/Applications/Xcode_26.0.app" ]]; then
             echo "Expected /Applications/Xcode_26.0.app not found on runner." >&2
+            exit 1
+          fi
+          if ! xcodebuild -list -project apple/Inline.xcodeproj | grep -Fq "${scheme}"; then
+            echo "Xcode scheme '${scheme}' not found in apple/Inline.xcodeproj." >&2
+            echo "Set MACOS_DIRECT_SCHEME repository variable to override." >&2
             exit 1
           fi
 
@@ -120,6 +127,7 @@ jobs:
         env:
           SPARKLE_VERSION: ${{ inputs.sparkle_version }}
           CHANNEL: ${{ inputs.channel }}
+          SCHEME: ${{ vars.MACOS_DIRECT_SCHEME }}
           SPARKLE_PUBLIC_KEY: ${{ secrets.MACOS_SPARKLE_PUBLIC_KEY }}
           MACOS_CERTIFICATE_NAME: ${{ secrets.MACOS_CERTIFICATE_NAME }}
           APPLE_NOTARIZATION_KEY: ${{ secrets.APPLE_NOTARIZATION_KEY }}
