@@ -56,6 +56,7 @@ jobs:
         run: |
           set -euo pipefail
           scheme="${SCHEME:-Inline (macOS)}"
+          echo "Using scheme: ${scheme}"
           required=(
             MACOS_CERTIFICATE
             MACOS_CERTIFICATE_PWD
@@ -89,9 +90,12 @@ jobs:
             echo "Expected /Applications/Xcode_26.0.app not found on runner." >&2
             exit 1
           fi
-          if ! xcodebuild -list -project apple/Inline.xcodeproj | grep -Fq "${scheme}"; then
+          scheme_list=$(xcodebuild -list -project apple/Inline.xcodeproj)
+          if ! echo "${scheme_list}" | grep -Fq "${scheme}"; then
             echo "Xcode scheme '${scheme}' not found in apple/Inline.xcodeproj." >&2
             echo "Set MACOS_DIRECT_SCHEME repository variable to override." >&2
+            echo "Available schemes:" >&2
+            echo "${scheme_list}" | awk '/Schemes:/{flag=1;next} flag{print}' >&2
             exit 1
           fi
 
