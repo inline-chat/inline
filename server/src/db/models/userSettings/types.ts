@@ -16,6 +16,9 @@ export const UserSettingsGeneralSchema = z.object({
     /** If true, no sound will be played for notifications */
     silent: z.boolean(),
 
+    /** If true, direct message notifications are disabled */
+    disableDmNotifications: z.boolean().optional().default(false),
+
     /** If true, the notification requires mentioning the user */
     zenModeRequiresMention: z.boolean().optional().default(true),
 

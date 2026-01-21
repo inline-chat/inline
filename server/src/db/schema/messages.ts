@@ -66,7 +66,7 @@ export const messages = pgTable(
     groupedId: bigint("grouped_id", { mode: "bigint" }),
 
     /** media id, photo, video, document, etc */
-    mediaType: text("media_type", { enum: ["photo", "video", "document"] }),
+    mediaType: text("media_type", { enum: ["photo", "video", "document", "nudge"] }),
     photoId: bigint("photo_id", { mode: "number" }).references(() => photos.id),
     videoId: bigint("video_id", { mode: "number" }).references(() => videos.id),
     documentId: bigint("document_id", { mode: "number" }).references(() => documents.id),

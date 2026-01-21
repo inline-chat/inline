@@ -33,6 +33,7 @@ export const decodeUserSettings = (userSettings?: UserSettings): UserSettingsGen
     notifications: {
       mode,
       silent: notificationSettings.silent ?? false,
+      disableDmNotifications: notificationSettings.disableDmNotifications ?? false,
       zenModeRequiresMention: notificationSettings.zenModeRequiresMention ?? true,
       zenModeUsesDefaultRules: notificationSettings.zenModeUsesDefaultRules ?? true,
       zenModeCustomRules: notificationSettings.zenModeCustomRules ?? "",

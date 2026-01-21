@@ -429,6 +429,7 @@ extension LegacyMainWindowController: NSToolbarDelegate {
       .chatTitle,
       .participants,
       .space,
+      .nudge,
       .translate,
     ]
   }
@@ -494,6 +495,10 @@ extension LegacyMainWindowController: NSToolbarDelegate {
         guard case let .chat(peer) = nav.currentRoute else { return nil }
         return createTranslateButton(peer: peer)
 
+      case .nudge:
+        guard case let .chat(peer) = nav.currentRoute, case .user = peer else { return nil }
+        return createNudgeButton(peer: peer)
+
       default:
         return nil
     }
@@ -516,6 +521,12 @@ extension LegacyMainWindowController: NSToolbarDelegate {
 
   private func createTranslateButton(peer: Peer) -> NSToolbarItem {
     let item = TranslateToolbar(peer: peer, dependencies: dependencies)
+    item.visibilityPriority = .high
+    return item
+  }
+
+  private func createNudgeButton(peer: Peer) -> NSToolbarItem {
+    let item = NudgeToolbar(peer: peer, dependencies: dependencies)
     item.visibilityPriority = .high
     return item
   }
@@ -577,8 +588,13 @@ extension LegacyMainWindowController {
           items.append(.participants)
         }
 
-        // Add space between participants and translate
+        // Add space between participants and actions
         items.append(.space)
+
+        if case .user = peer {
+          items.append(.nudge)
+          items.append(.space)
+        }
 
         // FIXME: check if we should show this
         items.append(.translate)
@@ -681,6 +697,7 @@ extension NSToolbarItem.Identifier {
   static let navForward = Self("NavForward")
   static let chatTitle = Self("ChatTitle")
   static let participants = Self("Participants")
+  static let nudge = Self("Nudge")
   static let translate = Self("Translate")
   static let transparentItem = Self("TransparentItem")
   static let textItem = Self("TextItem")
