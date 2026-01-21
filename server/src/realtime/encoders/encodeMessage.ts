@@ -23,16 +23,6 @@ import { encodeReaction } from "@in/server/realtime/encoders/encodeReaction"
 import { decryptBinary } from "@in/server/modules/encryption/encryption"
 import { detectHasLink } from "@in/server/modules/message/linkDetection"
 
-const NUDGE_MESSAGE_TEXT = "👋"
-
-const isNudgeText = (text: string | undefined): boolean => {
-  if (!text) {
-    return false
-  }
-
-  return text.trim() === NUDGE_MESSAGE_TEXT
-}
-
 export const encodeMessage = ({
   message,
   file,
@@ -90,7 +80,14 @@ export const encodeMessage = ({
 
   let media: MessageMedia | undefined = undefined
 
-  if (file) {
+  if (message.mediaType === "nudge") {
+    media = {
+      media: {
+        oneofKind: "nudge",
+        nudge: {},
+      },
+    }
+  } else if (file) {
     media = {
       media: {
         oneofKind: "photo",
@@ -122,14 +119,6 @@ export const encodeMessage = ({
     }
   }
 
-  if (!media && isNudgeText(text)) {
-    media = {
-      media: {
-        oneofKind: "nudge",
-        nudge: {},
-      },
-    }
-  }
   let fwdFrom: MessageFwdHeader | undefined = undefined
   let fwdFromPeer: Peer | undefined = undefined
 
@@ -194,7 +183,14 @@ export const encodeFullMessage = ({
 
   let media: MessageMedia | undefined = undefined
 
-  if (message.photo) {
+  if (message.mediaType === "nudge") {
+    media = {
+      media: {
+        oneofKind: "nudge",
+        nudge: {},
+      },
+    }
+  } else if (message.photo) {
     media = {
       media: {
         oneofKind: "photo",
@@ -215,15 +211,6 @@ export const encodeFullMessage = ({
       media: {
         oneofKind: "document",
         document: { document: encodeDocument({ document: message.document }) },
-      },
-    }
-  }
-
-  if (!media && isNudgeText(message.text ?? undefined)) {
-    media = {
-      media: {
-        oneofKind: "nudge",
-        nudge: {},
       },
     }
   }

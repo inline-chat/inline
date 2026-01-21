@@ -24,6 +24,7 @@ public struct SendMessageTransaction: Transaction2 {
     public var chatId: Int64
     public var replyToMsgId: Int64?
     public var isSticker: Bool?
+    public var isNudge: Bool
     public var entities: MessageEntities?
     public var sendMode: MessageSendMode?
     public var randomId: Int64
@@ -35,6 +36,7 @@ public struct SendMessageTransaction: Transaction2 {
       case chatId
       case replyToMsgId
       case isSticker
+      case isNudge
       case entities
       case sendMode
       case randomId
@@ -47,6 +49,7 @@ public struct SendMessageTransaction: Transaction2 {
       chatId: Int64,
       replyToMsgId: Int64?,
       isSticker: Bool?,
+      isNudge: Bool,
       entities: MessageEntities?,
       sendMode: MessageSendMode?,
       randomId: Int64,
@@ -57,6 +60,7 @@ public struct SendMessageTransaction: Transaction2 {
       self.chatId = chatId
       self.replyToMsgId = replyToMsgId
       self.isSticker = isSticker
+      self.isNudge = isNudge
       self.entities = entities
       self.sendMode = sendMode
       self.randomId = randomId
@@ -70,6 +74,7 @@ public struct SendMessageTransaction: Transaction2 {
       chatId = try container.decode(Int64.self, forKey: .chatId)
       replyToMsgId = try container.decodeIfPresent(Int64.self, forKey: .replyToMsgId)
       isSticker = try container.decodeIfPresent(Bool.self, forKey: .isSticker)
+      isNudge = try container.decodeIfPresent(Bool.self, forKey: .isNudge) ?? false
       entities = try container.decodeIfPresent(MessageEntities.self, forKey: .entities)
       if let rawValue = try container.decodeIfPresent(Int.self, forKey: .sendMode) {
         sendMode = MessageSendMode(rawValue: rawValue) ?? .modeUnspecified
@@ -87,6 +92,9 @@ public struct SendMessageTransaction: Transaction2 {
       try container.encode(chatId, forKey: .chatId)
       try container.encodeIfPresent(replyToMsgId, forKey: .replyToMsgId)
       try container.encodeIfPresent(isSticker, forKey: .isSticker)
+      if isNudge {
+        try container.encode(isNudge, forKey: .isNudge)
+      }
       try container.encodeIfPresent(entities, forKey: .entities)
       if let sendMode = sendMode {
         try container.encode(sendMode.rawValue, forKey: .sendMode)
@@ -102,6 +110,7 @@ public struct SendMessageTransaction: Transaction2 {
     chatId: Int64,
     replyToMsgId: Int64? = nil,
     isSticker: Bool? = nil,
+    isNudge: Bool = false,
     entities: MessageEntities? = nil,
     sendMode: MessageSendMode? = nil
   ) {
@@ -112,6 +121,7 @@ public struct SendMessageTransaction: Transaction2 {
       chatId: chatId,
       replyToMsgId: replyToMsgId,
       isSticker: isSticker,
+      isNudge: isNudge,
       entities: entities,
       sendMode: sendMode,
       randomId: randomId,
@@ -130,6 +140,7 @@ public struct SendMessageTransaction: Transaction2 {
       if let replyToMsgId = context.replyToMsgId { $0.replyToMsgID = replyToMsgId }
       if let entities = context.entities { $0.entities = entities }
       if let sendMode = context.sendMode { $0.sendMode = sendMode }
+      if context.isNudge { $0.media = InputMedia.fromNudge() }
     })
   }
 
@@ -294,6 +305,7 @@ public extension Transaction2 where Self == SendMessageTransaction {
     chatId: Int64,
     replyToMsgId: Int64? = nil,
     isSticker: Bool? = nil,
+    isNudge: Bool = false,
     entities: MessageEntities? = nil,
     sendMode: MessageSendMode? = nil
   ) -> SendMessageTransaction {
@@ -303,6 +315,7 @@ public extension Transaction2 where Self == SendMessageTransaction {
       chatId: chatId,
       replyToMsgId: replyToMsgId,
       isSticker: isSticker,
+      isNudge: isNudge,
       entities: entities,
       sendMode: sendMode
     )

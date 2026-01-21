@@ -103,45 +103,45 @@ const buildFullMessage = (overrides: Partial<DbFullMessage> = {}): DbFullMessage
 })
 
 describe("encodeMessage nudge", () => {
-  it("encodes nudge media when text is a nudge", () => {
+  it("encodes nudge media when mediaType is nudge", () => {
+    const result = encodeMessage({
+      message: buildMessage({ text: "👋", mediaType: "nudge" }),
+      encodingForUserId: 100,
+      encodingForPeer: { peer },
+    })
+
+    expect(result.media?.media.oneofKind).toBe("nudge")
+  })
+
+  it("does not encode nudge media for wave-only text", () => {
     const result = encodeMessage({
       message: buildMessage({ text: " 👋 " }),
       encodingForUserId: 100,
       encodingForPeer: { peer },
     })
 
-    expect(result.media?.media.oneofKind).toBe("nudge")
-  })
-
-  it("does not encode nudge media for other text", () => {
-    const result = encodeMessage({
-      message: buildMessage({ text: "hello" }),
-      encodingForUserId: 100,
-      encodingForPeer: { peer },
-    })
-
-    expect(result.media).toBeUndefined()
+    expect(result.media?.media.oneofKind).not.toBe("nudge")
   })
 })
 
 describe("encodeFullMessage nudge", () => {
-  it("encodes nudge media when text is a nudge", () => {
+  it("encodes nudge media when mediaType is nudge", () => {
+    const result = encodeFullMessage({
+      message: buildFullMessage({ text: "👋", mediaType: "nudge" }),
+      encodingForUserId: 100,
+      encodingForPeer: { peer },
+    })
+
+    expect(result.media?.media.oneofKind).toBe("nudge")
+  })
+
+  it("does not encode nudge media for wave-only text", () => {
     const result = encodeFullMessage({
       message: buildFullMessage({ text: "👋" }),
       encodingForUserId: 100,
       encodingForPeer: { peer },
     })
 
-    expect(result.media?.media.oneofKind).toBe("nudge")
-  })
-
-  it("does not encode nudge media for other text", () => {
-    const result = encodeFullMessage({
-      message: buildFullMessage({ text: "👋🏻" }),
-      encodingForUserId: 100,
-      encodingForPeer: { peer },
-    })
-
-    expect(result.media).toBeUndefined()
+    expect(result.media?.media.oneofKind).not.toBe("nudge")
   })
 })
