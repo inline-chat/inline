@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 90
 
     steps:
@@ -91,19 +91,13 @@ jobs:
           ls -d /Applications/Xcode*.app 2>/dev/null || true
           if [[ -n "${XCODE_PATH:-}" ]]; then
             xcode_path="${XCODE_PATH}"
+          elif [[ -d "/Applications/Xcode_26.2.app" ]]; then
+            xcode_path="/Applications/Xcode_26.2.app"
+          elif [[ -d "/Applications/Xcode.app" ]]; then
+            xcode_path="/Applications/Xcode.app"
           else
-            xcode_candidates=()
-            while IFS= read -r path; do
-              xcode_candidates+=("${path}")
-            done < <(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort || true)
-            if [[ "${#xcode_candidates[@]}" -gt 0 ]]; then
-              xcode_path="${xcode_candidates[0]}"
-            elif [[ -d "/Applications/Xcode.app" ]]; then
-              xcode_path="/Applications/Xcode.app"
-            else
-              echo "No suitable Xcode found on runner." >&2
-              exit 1
-            fi
+            echo "No suitable Xcode found on runner." >&2
+            exit 1
           fi
           echo "Using Xcode path: ${xcode_path}"
           echo "xcode_path=${xcode_path}" >> "${GITHUB_OUTPUT}"
