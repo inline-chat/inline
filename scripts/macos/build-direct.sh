@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 SPARKLE_VERSION=${SPARKLE_VERSION:-2.7.3}
+SCHEME=${SCHEME:-"Inline (macOS)"}
 CHANNEL=${CHANNEL:-stable}
 APPCAST_URL=${APPCAST_URL:-"https://public-assets.inline.chat/mac/${CHANNEL}/appcast.xml"}
 SPARKLE_DIR=${SPARKLE_DIR:-"${ROOT_DIR}/.action/sparkle"}
@@ -37,7 +38,7 @@ SPARKLE_FRAMEWORK_PATH="${SPARKLE_DIR}/Sparkle.xcframework/macos-arm64_x86_64"
 
 xcodebuild \
   -project "${ROOT_DIR}/apple/Inline.xcodeproj" \
-  -scheme InlineMac \
+  -scheme "${SCHEME}" \
   -configuration Release \
   -derivedDataPath "${DERIVED_DATA}" \
   SWIFT_ACTIVE_COMPILATION_CONDITIONS="SPARKLE" \
