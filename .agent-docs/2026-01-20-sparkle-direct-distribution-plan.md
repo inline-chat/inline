@@ -134,17 +134,139 @@ If a sandboxed direct build is ever needed:
 
 ## Verification Checklist
 
-- Install DMG on a clean Mac; verify Gatekeeper + notarization.
-- Install older build; confirm Sparkle update is detected and installs.
-- Confirm App Store/TestFlight build launches without Sparkle linked.
+- Install DMG on a clean Mac; verify Gatekeeper + notarization (launch without quarantine warnings).
+- Confirm DMG includes `/Applications` symlink and app is codesigned.
+- Install an older build; confirm Sparkle detects update and installs.
+- Verify update channels:
+  - Stable appcast URL (`/mac/stable/appcast.xml`)
+  - Beta appcast URL (`/mac/beta/appcast.xml`)
+- Confirm TestFlight build launches without Sparkle linked (no Sparkle.framework present).
+- Confirm appcast signature validation succeeds (no “invalid signature” errors).
+- Validate cache headers:
+  - Appcast: `Cache-Control: no-cache, max-age=0, must-revalidate`
+  - DMG: `Cache-Control: public, max-age=31536000, immutable`
+- (Later) Add a Ghostty-style local test flow: host an appcast + DMG pair and verify update progression end-to-end.
 
-## Open Decisions
+## Locked Decisions (2026-01-21)
 
-- Hosting: R2/custom domain vs GitHub Releases.
-- Final confirmation: direct build unsandboxed (recommended).
+- Hosting: **Option 1**. Reuse existing assets bucket at `public-assets.inline.chat` with path-based channels.
+  - Stable appcast: `https://public-assets.inline.chat/mac/stable/appcast.xml`
+  - Beta appcast: `https://public-assets.inline.chat/mac/beta/appcast.xml`
+  - Stable DMG: `https://public-assets.inline.chat/mac/stable/<build>/Inline.dmg`
+  - Beta DMG: `https://public-assets.inline.chat/mac/beta/<build>/Inline.dmg`
+- Direct distribution build: **unsandboxed**, Sparkle enabled.
+- TestFlight/App Store build: **sandboxed**, Sparkle **excluded**.
+- Sparkle configuration: **Option C** (post-build `PlistBuddy` edits in CI).
+- Update channels: **two appcasts** (stable + beta) selected via `SPUUpdaterDelegate.feedURLString(for:)` (no Sparkle native channels).
+- Update UI: **custom** via `SPUUpdater` + custom `SPUUserDriver`.
+- Targets: **single app target** (`InlineMac`). Sparkle is manually integrated only for direct builds (no SPM).
+- Bundle identifier: **reuse existing** (`chat.inline.InlineMac`). Note: direct + TestFlight builds cannot be installed side-by-side.
 
 ## Production Readiness
 
 Not production-ready until:
-- Hosting and sandboxing choices are finalized.
+- Hosting and sandboxing choices are finalized. (Now locked.)
 - One end-to-end signed + notarized DMG update is verified.
+
+## Detailed Implementation Plan (InlineMac + CI)
+
+### A) App Architecture (Direct Builds Only)
+1. Keep a single app target (`InlineMac`) and use build-config gating (`SPARKLE`) for direct builds.
+2. Manually integrate Sparkle (no SPM) by downloading the Sparkle XCFramework in CI and linking only for Sparkle builds.
+3. Use separate entitlements files: sandboxed for TestFlight builds, unsandboxed for direct builds.
+4. Introduce a small Update module (new files under `apple/InlineMac/Features/Update/`):
+   - `UpdateController`: wraps `SPUUpdater`.
+   - `UpdateDriver`: custom `SPUUserDriver` to drive custom UI.
+   - `UpdateDelegate`: implements `SPUUpdaterDelegate` and returns the correct appcast URL.
+5. Add a channel setting (stable/beta) with UserDefaults-backed storage.
+6. Add "Check for Updates…" menu item (App menu) wired to the update controller.
+7. Ensure all Sparkle code is guarded with `#if SPARKLE` to keep TestFlight/App Store builds Sparkle-free.
+
+### B) Info.plist (Option C, CI-only)
+1. Post-build `PlistBuddy` edits in CI (Direct build only):
+   - `CFBundleVersion` = commit count (`git rev-list --count HEAD`).
+   - `SUPublicEDKey` = Sparkle public key from secrets.
+   - `SUFeedURL` = stable appcast URL by default.
+2. Do not store Sparkle keys in repo. Only public key in CI injection.
+
+### C) Packaging + Notarization (Direct Builds Only)
+1. Use `create-dmg` to generate `Inline.dmg` with `/Applications` symlink.
+2. Notarize DMG via `notarytool`, then staple both DMG and app.
+
+### D) Appcast + Uploads (Direct Builds Only)
+1. Sign updates with Sparkle `sign_update` (EdDSA) and update appcast.
+2. Upload DMG + appcast to `public-assets.inline.chat`:
+   - `mac/stable/<build>/Inline.dmg`
+   - `mac/beta/<build>/Inline.dmg`
+3. Upload DMG artifact to the GitHub tag/release for the build.
+4. Cache headers:
+   - Appcast: `Cache-Control: no-cache, max-age=0, must-revalidate`
+   - DMG: `Cache-Control: public, max-age=31536000, immutable`
+
+### E) TestFlight/App Store Builds
+1. Use existing App Store/TestFlight configuration.
+2. Ensure Sparkle is not linked; no Sparkle frameworks in the app bundle.
+
+## Master TODO List (with Breakpoints)
+
+### Batch 1 — App-side scaffolding (review after this batch)
+- Add update channel setting (stable/beta) + default.
+- Add Update module skeleton (`UpdateController`, `UpdateDriver`, `UpdateDelegate`) behind `#if SPARKLE`.
+- Add "Check for Updates…" menu item (guarded by `#if SPARKLE`).
+
+### Batch 2 — Sparkle integration (review after this batch)
+- Wire Update module into AppDelegate lifecycle.
+- Add custom update UI view(s) and connect to UpdateDriver.
+
+### Batch 3 — CI pipeline (review after this batch)
+- Set `SPARKLE` compilation condition for direct builds only.
+- Add build-config-gated link/embed steps (Sparkle builds only).
+- Add build-number + Sparkle plist injection via `PlistBuddy`.
+- Build + sign Sparkle helpers and app bundle.
+- Create DMG via `create-dmg`.
+- Notarize + staple DMG and app.
+
+### Batch 4 — Appcast + uploads (review after this batch)
+- Generate appcast (signed) and update content.
+- Upload DMG + appcast to `public-assets.inline.chat` paths.
+- Upload DMG to GitHub tag/release.
+- Apply cache headers (appcast vs DMG).
+
+### Batch 5 — Validation + release checklist (review after this batch)
+- Install DMG on clean Mac (Gatekeeper + notarization).
+- Install older build and verify Sparkle updates.
+- Confirm TestFlight build launches without Sparkle linked.
+
+## Modified Files (Tracking)
+
+- `apple/InlineMac/Views/Settings/AppSettings.swift`
+- `apple/InlineMac/Views/Settings/Views/GeneralSettingsDetailView.swift`
+- `apple/InlineMac/Features/Update/UpdateController.swift`
+- `apple/InlineMac/Features/Update/UpdateDriver.swift`
+- `apple/InlineMac/Features/Update/UpdateDelegate.swift`
+- `apple/InlineMac/Features/Update/UpdateViewModel.swift`
+- `apple/InlineMac/Features/Update/UpdateWindowController.swift`
+- `apple/InlineMac/Features/Update/UpdateWindowView.swift`
+- `apple/InlineMac/App/AppMenu.swift`
+- `apple/InlineMac/App/AppDelegate.swift`
+- `apple/InlineMac/InlineMacDirect.entitlements`
+- `scripts/macos/build-direct.sh`
+- `scripts/macos/README.md`
+- `scripts/macos/update_appcast.py`
+- `scripts/macos/release-direct.ts`
+- `scripts/package.json`
+- `.github/workflows/macos-direct-release.yml`
+
+## Production Deploy Steps (Draft)
+
+1. Ensure Sparkle keys are set in CI secrets (public + private).
+2. Run Direct build pipeline (Sparkle) and verify DMG + appcast URLs.
+3. Validate Sparkle update flow on a clean macOS install.
+4. Publish/trigger TestFlight build (no Sparkle).
+5. Attach DMG to GitHub tag/release for traceability.
+6. Confirm appcast + DMG links are reachable and cached as expected.
+
+## Changelog (Future)
+
+Not a priority right now. When needed, we can generate changelogs from git history
+or use GitHub Releases notes and link them from the appcast.

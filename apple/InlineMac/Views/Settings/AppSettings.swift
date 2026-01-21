@@ -2,6 +2,22 @@ import Combine
 import Foundation
 import SwiftUI
 
+enum AutoUpdateChannel: String, CaseIterable, Identifiable {
+  case stable
+  case beta
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .stable:
+      return "Stable"
+    case .beta:
+      return "Beta"
+    }
+  }
+}
+
 final class AppSettings: ObservableObject {
   static let shared = AppSettings()
 
@@ -47,6 +63,14 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  // MARK: - Updates
+
+  @Published var autoUpdateChannel: AutoUpdateChannel {
+    didSet {
+      UserDefaults.standard.set(autoUpdateChannel.rawValue, forKey: "autoUpdateChannel")
+    }
+  }
+
   private init() {
     sendsWithCmdEnter = UserDefaults.standard.bool(forKey: "sendsWithCmdEnter")
     automaticSpellCorrection = UserDefaults.standard.object(forKey: "automaticSpellCorrection") as? Bool ?? true
@@ -54,6 +78,7 @@ final class AppSettings: ObservableObject {
     disableNotificationSound = UserDefaults.standard.bool(forKey: "disableNotificationSound")
     showDockBadgeUnreadDMs = UserDefaults.standard.object(forKey: "showDockBadgeUnreadDMs") as? Bool ?? true
     enableNewMacUI = UserDefaults.standard.bool(forKey: "enableNewMacUI")
+    autoUpdateChannel = AutoUpdateChannel(rawValue: UserDefaults.standard.string(forKey: "autoUpdateChannel") ?? "") ?? .stable
   }
 }
 

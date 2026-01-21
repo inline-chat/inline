@@ -9,7 +9,8 @@
     "release:cli": "bun run release-cli.ts",
     "release:cli:install": "bun run release-cli.ts upload-install",
     "release:cli:sign-notarize": "bun run release-cli.ts sign-notarize",
-    "release:cli:dry-run": "bun run release-cli.ts release-dry-run"
+    "release:cli:dry-run": "bun run release-cli.ts release-dry-run",
+    "release:macos": "bun run macos/release-direct.ts"
   },
   "dependencies": {},
   "devDependencies": {

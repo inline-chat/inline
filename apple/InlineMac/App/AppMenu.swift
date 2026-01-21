@@ -46,6 +46,16 @@ final class AppMenu: NSObject {
       keyEquivalent: ""
     )
 
+#if SPARKLE
+    let checkForUpdatesMenuItem = NSMenuItem(
+      title: "Check for Updates…",
+      action: #selector(AppDelegate.checkForUpdates(_:)),
+      keyEquivalent: ""
+    )
+    checkForUpdatesMenuItem.target = NSApp.delegate
+    appMenu.addItem(checkForUpdatesMenuItem)
+#endif
+
     appMenu.addItem(NSMenuItem.separator())
 
     let servicesMenu = NSMenu()
