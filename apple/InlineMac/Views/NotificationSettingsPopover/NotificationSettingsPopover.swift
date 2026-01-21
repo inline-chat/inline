@@ -7,6 +7,7 @@ struct NotificationSettingsButton: View {
 
   @State private var presented = false
   @State private var customizingZen = false
+  @State private var customizingMentions = false
 
   var body: some View {
     button
@@ -14,7 +15,6 @@ struct NotificationSettingsButton: View {
         popover
           .padding(.vertical, 10)
           .padding(.horizontal, 8)
-          .frame(width: 320)
       }
   }
 
@@ -44,6 +44,9 @@ struct NotificationSettingsButton: View {
   private var popover: some View {
     if customizingZen {
       customize
+        .transition(.opacity)
+    } else if customizingMentions {
+      mentionsCustomize
         .transition(.opacity)
     } else {
       picker
@@ -100,6 +103,12 @@ struct NotificationSettingsButton: View {
             notificationSettings.mode = $0
 
           },
+          customizeAction: {
+            withAnimation(.easeOut(duration: 0.2)) {
+              customizingZen = false
+              customizingMentions = true
+            }
+          }
         )
 
         NotificationSettingsItem(
@@ -114,6 +123,7 @@ struct NotificationSettingsButton: View {
           customizeAction: {
             // Customize action for Zen Mode
             withAnimation(.easeOut(duration: 0.2)) {
+              customizingMentions = false
               customizingZen = true
             }
           }
@@ -162,37 +172,93 @@ struct NotificationSettingsButton: View {
           .font(.subheadline)
           .foregroundStyle(.secondary)
 
-        TextEditor(
-          text: notificationSettings.usesDefaultRules ? .constant(defaultRules) : $notificationSettings
-            .customRules
-        )
-        .font(.body)
-        .foregroundStyle(notificationSettings.usesDefaultRules ? .secondary : .primary)
-        .frame(height: 100)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 6)
-        .scrollContentBackground(.hidden)
-        .background(.secondary.opacity(0.2))
-        .cornerRadius(10)
+        if notificationSettings.usesDefaultRules {
+          ScrollView {
+            Text(defaultRules)
+              .font(.body)
+              .foregroundStyle(.secondary)
+              .frame(maxWidth: .infinity, alignment: .leading)
+          }
+          .frame(height: 100)
+          .padding(.horizontal, 6)
+          .padding(.vertical, 6)
+          .background(.secondary.opacity(0.2))
+          .cornerRadius(10)
+        } else {
+          TextEditor(text: $notificationSettings.customRules)
+            .font(.body)
+            .foregroundStyle(.primary)
+            .frame(height: 100)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 6)
+            .scrollContentBackground(.hidden)
+            .background(.secondary.opacity(0.2))
+            .cornerRadius(10)
+        }
 
       }.padding(.horizontal, 8)
 
       // Done button at the bottom
-      Button(action: {
-        withAnimation(.easeOut(duration: 0.2)) {
-          customizingZen = false
+      HStack {
+        Spacer()
+        Button("Done") {
+          withAnimation(.easeOut(duration: 0.2)) {
+            customizingZen = false
+          }
         }
-      }) {
-        Spacer()
-        Text("Done")
-          .font(.body.weight(.bold))
-          .foregroundStyle(.primary)
-          .frame(maxWidth: .infinity)
-          .padding(.vertical, 8)
-          .cornerRadius(8)
-        Spacer()
+        .buttonStyle(.borderedProminent)
+        .controlSize(.regular)
+        .buttonBorderShape(.capsule)
       }
-      .buttonStyle(.borderedProminent)
+      .padding(.horizontal, 8)
+      .padding(.top, 8)
+    }
+  }
+
+  @ViewBuilder
+  private var mentionsCustomize: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      HStack {
+        VStack(alignment: .leading, spacing: 0) {
+          Text("Messages to you")
+            .font(.headline)
+        }
+      }.padding(.horizontal, 6)
+
+      Divider().foregroundStyle(.tertiary)
+        .padding(.vertical, 6)
+
+      HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 2) {
+          Text("Disable DM notifications")
+            .font(.subheadline)
+          Text("Mentions and nudges will still notify you")
+            .font(.caption)
+            .foregroundStyle(.tertiary)
+        }
+
+        Spacer(minLength: 12)
+
+        Toggle("", isOn: $notificationSettings.disableDmNotifications)
+          .labelsHidden()
+          .toggleStyle(.switch)
+          .accessibilityLabel("Disable DM notifications")
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.horizontal, 8)
+      
+
+      HStack {
+        Spacer()
+        Button("Done") {
+          withAnimation(.easeOut(duration: 0.2)) {
+            customizingMentions = false
+          }
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.regular)
+        .buttonBorderShape(.capsule)
+      }
       .padding(.horizontal, 8)
       .padding(.top, 8)
     }
@@ -245,6 +311,8 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
           .font(.caption)
           .foregroundStyle(.tertiary)
           .padding(.top, -1)
+          .lineLimit(1)
+          
       }
       Spacer()
       if let customizeAction {

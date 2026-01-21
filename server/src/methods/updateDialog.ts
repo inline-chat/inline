@@ -9,7 +9,7 @@ import { InlineError } from "../types/errors"
 import { and, eq, or, sql } from "drizzle-orm"
 import { DialogsModel } from "@in/server/db/models/dialogs"
 import type { HandlerContext } from "@in/server/controllers/helpers"
-import type { Update } from "@in/protocol/core"
+import type { Peer, Update } from "@in/protocol/core"
 import type { ServerUpdate } from "@in/protocol/server"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
@@ -49,7 +49,7 @@ export const handler = async (
     ),
   )
 
-  const outputPeer =
+  const outputPeer: Peer | null =
     "userId" in peerId && peerId.userId
       ? { type: { oneofKind: "user", user: { userId: BigInt(peerId.userId) } } }
       : "threadId" in peerId && peerId.threadId

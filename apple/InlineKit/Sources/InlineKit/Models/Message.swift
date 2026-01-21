@@ -502,6 +502,8 @@ public extension InlineProtocol.Message {
       message
     } else if isSticker == true {
       "🖼️ Sticker"
+    } else if case .nudge = media.media {
+      "👋 Nudge"
     } else if media.photo.hasPhoto {
       "🖼️ Photo"
     } else if media.video.hasVideo {

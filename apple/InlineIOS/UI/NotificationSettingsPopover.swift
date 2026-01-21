@@ -6,6 +6,7 @@ struct NotificationSettingsButton: View {
   @EnvironmentObject private var notificationSettings: NotificationSettingsManager
 
   @State private var presented = false
+  @State private var showMentionsSettings = false
 
   var body: some View {
     button
@@ -22,8 +23,18 @@ struct NotificationSettingsButton: View {
               }
             }
         }
+        .background(
+          NavigationLink(
+            destination: MentionsNotificationSettingsView(
+              disableDmNotifications: $notificationSettings.disableDmNotifications
+            ),
+            isActive: $showMentionsSettings
+          ) {
+            EmptyView()
+          }
+          .hidden()
+        )
           
-        .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
       }
   }
@@ -86,7 +97,7 @@ struct NotificationSettingsButton: View {
           onChange: {
             notificationSettings.mode = $0
             close()
-          },
+          }
         )
 
         NotificationSettingsItem(
@@ -136,48 +147,96 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
   var selected: Bool
   var value: Value
   var onChange: (Value) -> Void
+  var customizeAction: (() -> Void)?
   let theme = ThemeManager.shared.selected
 
   var body: some View {
-    Button {
-      onChange(value)
-    } label: {
-      HStack(spacing: 12) {
-        Circle()
-          .fill(selected ? Color(theme.accent) : Color(.systemGray5))
-          .frame(width: 36, height: 36)
-          .overlay {
-            Image(systemName: systemImage)
-              .font(.system(size: 18, weight: .medium))
-              .foregroundStyle(selected ? Color.white : Color(.systemGray))
-          }
-
-        VStack(alignment: .leading, spacing: 2) {
-          Text(title)
-            .font(.body)
-            .fontWeight(.medium)
-              
-          Text(description)
-            .font(.caption)
-              
+    HStack(spacing: 12) {
+      Circle()
+        .fill(selected ? Color(theme.accent) : Color(.systemGray5))
+        .frame(width: 36, height: 36)
+        .overlay {
+          Image(systemName: systemImage)
+            .font(.system(size: 18, weight: .medium))
+            .foregroundStyle(selected ? Color.white : Color(.systemGray))
         }
 
-        Spacer()
+      VStack(alignment: .leading, spacing: 2) {
+        Text(title)
+          .font(.body)
+          .fontWeight(.medium)
 
-        if selected {
-          Image(systemName: "checkmark")
-            .font(.system(size: 16, weight: .semibold))
-            .foregroundStyle(Color(theme.accent))
+        Text(description)
+          .font(.caption)
+
+      }
+
+      Spacer()
+
+      if let customizeAction {
+        Button(action: customizeAction) {
+          Circle()
+            .frame(width: 28, height: 28)
+            .foregroundStyle(Color(.systemGray5))
+            .overlay {
+              Image(systemName: "ellipsis")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+            }
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+      }
+
+      if selected {
+        Image(systemName: "checkmark")
+          .font(.system(size: 16, weight: .semibold))
+          .foregroundStyle(Color(theme.accent))
+      }
+    }
+    .padding(.vertical, 8)
+    .padding(.horizontal, 12)
+    .background(
+      RoundedRectangle(cornerRadius: 12)
+        .fill(selected ? Color(theme.accent).opacity(0.1) : ThemeManager.shared.cardBackgroundColor)
+    )
+    .contentShape(Rectangle())
+    .onTapGesture {
+      onChange(value)
+    }
+    .animation(.easeOut(duration: 0.08), value: selected)
+  }
+}
+
+private struct MentionsNotificationSettingsView: View {
+  @Binding var disableDmNotifications: Bool
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      VStack(alignment: .leading, spacing: 6) {
+        Text("Direct Messages")
+          .font(.headline)
+
+        Text("Control DM notification behavior")
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+      }
+
+      Toggle(isOn: $disableDmNotifications) {
+        VStack(alignment: .leading, spacing: 2) {
+          Text("Disable DM notifications")
+            .font(.body)
+          Text("Mentions and nudges will still notify you")
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
       }
-      .padding(.vertical, 8)
-      .padding(.horizontal, 12)
-      .background(
-        RoundedRectangle(cornerRadius: 12)
-          .fill(selected ? Color(theme.accent).opacity(0.1) : ThemeManager.shared.cardBackgroundColor)
-      )
+      .toggleStyle(.switch)
+
+      Spacer()
     }
-    .buttonStyle(.plain)
-    .animation(.easeOut(duration: 0.08), value: selected)
+    .padding(16)
+    .navigationTitle("Direct Messages")
+    .navigationBarTitleDisplayMode(.inline)
   }
 }

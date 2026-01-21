@@ -80,7 +80,14 @@ export const encodeMessage = ({
 
   let media: MessageMedia | undefined = undefined
 
-  if (file) {
+  if (message.mediaType === "nudge") {
+    media = {
+      media: {
+        oneofKind: "nudge",
+        nudge: {},
+      },
+    }
+  } else if (file) {
     media = {
       media: {
         oneofKind: "photo",
@@ -111,6 +118,7 @@ export const encodeMessage = ({
       },
     }
   }
+
   let fwdFrom: MessageFwdHeader | undefined = undefined
   let fwdFromPeer: Peer | undefined = undefined
 
@@ -175,7 +183,14 @@ export const encodeFullMessage = ({
 
   let media: MessageMedia | undefined = undefined
 
-  if (message.photo) {
+  if (message.mediaType === "nudge") {
+    media = {
+      media: {
+        oneofKind: "nudge",
+        nudge: {},
+      },
+    }
+  } else if (message.photo) {
     media = {
       media: {
         oneofKind: "photo",
