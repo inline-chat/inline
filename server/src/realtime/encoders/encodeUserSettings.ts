@@ -29,6 +29,7 @@ export const encodeUserSettings = ({ general }: { general?: UserSettingsGeneral 
     notificationSettings = {
       mode,
       silent: general.notifications.silent,
+      disableDmNotifications: general.notifications.disableDmNotifications,
       zenModeRequiresMention: general.notifications.zenModeRequiresMention,
       zenModeUsesDefaultRules: general.notifications.zenModeUsesDefaultRules,
       zenModeCustomRules: general.notifications.zenModeCustomRules,

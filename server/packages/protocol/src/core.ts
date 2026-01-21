@@ -1130,6 +1130,12 @@ export interface MessageMedia {
          */
         document: MessageDocument;
     } | {
+        oneofKind: "nudge";
+        /**
+         * @generated from protobuf field: MessageNudge nudge = 4;
+         */
+        nudge: MessageNudge;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1159,6 +1165,13 @@ export interface MessageDocument {
      * @generated from protobuf field: Document document = 1;
      */
     document?: Document;
+}
+/**
+ * Nudge message (empty payload)
+ *
+ * @generated from protobuf message MessageNudge
+ */
+export interface MessageNudge {
 }
 /**
  * @generated from protobuf message Video
@@ -2195,6 +2208,12 @@ export interface NotificationSettings {
      * @generated from protobuf field: optional string zen_mode_custom_rules = 5;
      */
     zenModeCustomRules?: string;
+    /**
+     * If true, direct message notifications are disabled
+     *
+     * @generated from protobuf field: optional bool disable_dm_notifications = 6;
+     */
+    disableDmNotifications?: boolean;
 }
 /**
  * @generated from protobuf enum NotificationSettings.Mode
@@ -6528,7 +6547,8 @@ class MessageMedia$Type extends MessageType<MessageMedia> {
         super("MessageMedia", [
             { no: 1, name: "photo", kind: "message", oneof: "media", T: () => MessagePhoto },
             { no: 2, name: "video", kind: "message", oneof: "media", T: () => MessageVideo },
-            { no: 3, name: "document", kind: "message", oneof: "media", T: () => MessageDocument }
+            { no: 3, name: "document", kind: "message", oneof: "media", T: () => MessageDocument },
+            { no: 4, name: "nudge", kind: "message", oneof: "media", T: () => MessageNudge }
         ]);
     }
     create(value?: PartialMessage<MessageMedia>): MessageMedia {
@@ -6561,6 +6581,12 @@ class MessageMedia$Type extends MessageType<MessageMedia> {
                         document: MessageDocument.internalBinaryRead(reader, reader.uint32(), options, (message.media as any).document)
                     };
                     break;
+                case /* MessageNudge nudge */ 4:
+                    message.media = {
+                        oneofKind: "nudge",
+                        nudge: MessageNudge.internalBinaryRead(reader, reader.uint32(), options, (message.media as any).nudge)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -6582,6 +6608,9 @@ class MessageMedia$Type extends MessageType<MessageMedia> {
         /* MessageDocument document = 3; */
         if (message.media.oneofKind === "document")
             MessageDocument.internalBinaryWrite(message.media.document, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* MessageNudge nudge = 4; */
+        if (message.media.oneofKind === "nudge")
+            MessageNudge.internalBinaryWrite(message.media.nudge, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -6730,6 +6759,31 @@ class MessageDocument$Type extends MessageType<MessageDocument> {
  * @generated MessageType for protobuf message MessageDocument
  */
 export const MessageDocument = new MessageDocument$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageNudge$Type extends MessageType<MessageNudge> {
+    constructor() {
+        super("MessageNudge", []);
+    }
+    create(value?: PartialMessage<MessageNudge>): MessageNudge {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<MessageNudge>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageNudge): MessageNudge {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: MessageNudge, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageNudge
+ */
+export const MessageNudge = new MessageNudge$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class Video$Type extends MessageType<Video> {
     constructor() {
@@ -8921,7 +8975,8 @@ class NotificationSettings$Type extends MessageType<NotificationSettings> {
             { no: 2, name: "silent", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 3, name: "zen_mode_requires_mention", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 4, name: "zen_mode_uses_default_rules", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
-            { no: 5, name: "zen_mode_custom_rules", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 5, name: "zen_mode_custom_rules", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "disable_dm_notifications", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<NotificationSettings>): NotificationSettings {
@@ -8950,6 +9005,9 @@ class NotificationSettings$Type extends MessageType<NotificationSettings> {
                 case /* optional string zen_mode_custom_rules */ 5:
                     message.zenModeCustomRules = reader.string();
                     break;
+                case /* optional bool disable_dm_notifications */ 6:
+                    message.disableDmNotifications = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -8977,6 +9035,9 @@ class NotificationSettings$Type extends MessageType<NotificationSettings> {
         /* optional string zen_mode_custom_rules = 5; */
         if (message.zenModeCustomRules !== undefined)
             writer.tag(5, WireType.LengthDelimited).string(message.zenModeCustomRules);
+        /* optional bool disable_dm_notifications = 6; */
+        if (message.disableDmNotifications !== undefined)
+            writer.tag(6, WireType.Varint).bool(message.disableDmNotifications);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
