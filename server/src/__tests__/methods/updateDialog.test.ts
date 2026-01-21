@@ -5,6 +5,7 @@ import type { HandlerContext } from "../../controllers/helpers"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import { UpdatesModel } from "@in/server/db/models/updates"
 import { db } from "../../db"
+import type { ServerUpdate } from "@in/protocol/server"
 
 describe("updateDialog", () => {
   setupTestLifecycle()
@@ -16,6 +17,15 @@ describe("updateDialog", () => {
   })
 
   test("archives and unarchives dialogs while enqueuing user updates", async () => {
+    type UserDialogArchivedUpdate = Extract<ServerUpdate["update"], { oneofKind: "userDialogArchived" }>
+    type DecryptedUserDialogArchivedUpdate = UpdatesModel.DecryptedUpdate & {
+      payload: ServerUpdate & { update: UserDialogArchivedUpdate }
+    }
+
+    const isUserDialogArchivedUpdate = (
+      update: UpdatesModel.DecryptedUpdate,
+    ): update is DecryptedUserDialogArchivedUpdate => update.payload.update.oneofKind === "userDialogArchived"
+
     const userA = await testUtils.createUser("archive-owner@example.com")
     const userB = await testUtils.createUser("archive-peer@example.com")
     if (!userA || !userB) throw new Error("Failed to create users")
@@ -39,7 +49,7 @@ describe("updateDialog", () => {
 
     const archivedUpdates = userUpdates
       .map((update) => UpdatesModel.decrypt(update))
-      .filter((update) => update.payload.update.oneofKind === "userDialogArchived")
+      .filter(isUserDialogArchivedUpdate)
       .sort((a, b) => a.seq - b.seq)
 
     expect(archivedUpdates).toHaveLength(2)
