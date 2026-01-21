@@ -244,6 +244,7 @@ struct NotificationSettingsButton: View {
           .accessibilityLabel("Disable DM notifications")
       }
       .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.horizontal, 8)
       
 
       HStack {
