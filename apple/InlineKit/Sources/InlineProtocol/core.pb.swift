@@ -3831,12 +3831,21 @@ public struct InputMedia: Sendable {
     set {media = .document(newValue)}
   }
 
+  public var nudge: InputMediaNudge {
+    get {
+      if case .nudge(let v)? = media {return v}
+      return InputMediaNudge()
+    }
+    set {media = .nudge(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Media: Equatable, Sendable {
     case photo(InputMediaPhoto)
     case video(InputMediaVideo)
     case document(InputMediaDocument)
+    case nudge(InputMediaNudge)
 
   }
 
@@ -3876,6 +3885,17 @@ public struct InputMediaDocument: Sendable {
 
   /// ID of the document that we have uploaded
   public var documentID: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Nudge message (empty payload)
+public struct InputMediaNudge: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -11566,6 +11586,7 @@ extension InputMedia: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
     1: .same(proto: "photo"),
     2: .same(proto: "video"),
     3: .same(proto: "document"),
+    4: .same(proto: "nudge"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -11613,6 +11634,19 @@ extension InputMedia: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
           self.media = .document(v)
         }
       }()
+      case 4: try {
+        var v: InputMediaNudge?
+        var hadOneofValue = false
+        if let current = self.media {
+          hadOneofValue = true
+          if case .nudge(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.media = .nudge(v)
+        }
+      }()
       default: break
       }
     }
@@ -11635,6 +11669,10 @@ extension InputMedia: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
     case .document?: try {
       guard case .document(let v)? = self.media else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    }()
+    case .nudge?: try {
+      guard case .nudge(let v)? = self.media else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
     }()
     case nil: break
     }
@@ -11739,6 +11777,25 @@ extension InputMediaDocument: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
 
   public static func ==(lhs: InputMediaDocument, rhs: InputMediaDocument) -> Bool {
     if lhs.documentID != rhs.documentID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension InputMediaNudge: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "InputMediaNudge"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: InputMediaNudge, rhs: InputMediaNudge) -> Bool {
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

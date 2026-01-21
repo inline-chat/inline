@@ -110,6 +110,7 @@ public struct NudgeButton: View {
             chatId: resolvedChatId,
             replyToMsgId: nil,
             isSticker: nil,
+            isNudge: true,
             entities: nil,
             sendMode: nil
           )

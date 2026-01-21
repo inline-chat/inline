@@ -947,6 +947,7 @@ message InputMedia {
     InputMediaPhoto photo = 1;
     InputMediaVideo video = 2;
     InputMediaDocument document = 3;
+    InputMediaNudge nudge = 4;
   }
 }
 
@@ -964,6 +965,9 @@ message InputMediaDocument {
   // ID of the document that we have uploaded
   int64 document_id = 1;
 }
+
+// Nudge message (empty payload)
+message InputMediaNudge {}
 
 message SendMessageInput {
   InputPeer peer_id = 1;

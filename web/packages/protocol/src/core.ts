@@ -2510,6 +2510,12 @@ export interface InputMedia {
          */
         document: InputMediaDocument;
     } | {
+        oneofKind: "nudge";
+        /**
+         * @generated from protobuf field: InputMediaNudge nudge = 4;
+         */
+        nudge: InputMediaNudge;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -2545,6 +2551,13 @@ export interface InputMediaDocument {
      * @generated from protobuf field: int64 document_id = 1;
      */
     documentId: bigint;
+}
+/**
+ * Nudge message (empty payload)
+ *
+ * @generated from protobuf message InputMediaNudge
+ */
+export interface InputMediaNudge {
 }
 /**
  * @generated from protobuf message SendMessageInput
@@ -9920,7 +9933,8 @@ class InputMedia$Type extends MessageType<InputMedia> {
         super("InputMedia", [
             { no: 1, name: "photo", kind: "message", oneof: "media", T: () => InputMediaPhoto },
             { no: 2, name: "video", kind: "message", oneof: "media", T: () => InputMediaVideo },
-            { no: 3, name: "document", kind: "message", oneof: "media", T: () => InputMediaDocument }
+            { no: 3, name: "document", kind: "message", oneof: "media", T: () => InputMediaDocument },
+            { no: 4, name: "nudge", kind: "message", oneof: "media", T: () => InputMediaNudge }
         ]);
     }
     create(value?: PartialMessage<InputMedia>): InputMedia {
@@ -9953,6 +9967,12 @@ class InputMedia$Type extends MessageType<InputMedia> {
                         document: InputMediaDocument.internalBinaryRead(reader, reader.uint32(), options, (message.media as any).document)
                     };
                     break;
+                case /* InputMediaNudge nudge */ 4:
+                    message.media = {
+                        oneofKind: "nudge",
+                        nudge: InputMediaNudge.internalBinaryRead(reader, reader.uint32(), options, (message.media as any).nudge)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -9974,6 +9994,9 @@ class InputMedia$Type extends MessageType<InputMedia> {
         /* InputMediaDocument document = 3; */
         if (message.media.oneofKind === "document")
             InputMediaDocument.internalBinaryWrite(message.media.document, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* InputMediaNudge nudge = 4; */
+        if (message.media.oneofKind === "nudge")
+            InputMediaNudge.internalBinaryWrite(message.media.nudge, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -10125,6 +10148,31 @@ class InputMediaDocument$Type extends MessageType<InputMediaDocument> {
  * @generated MessageType for protobuf message InputMediaDocument
  */
 export const InputMediaDocument = new InputMediaDocument$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class InputMediaNudge$Type extends MessageType<InputMediaNudge> {
+    constructor() {
+        super("InputMediaNudge", []);
+    }
+    create(value?: PartialMessage<InputMediaNudge>): InputMediaNudge {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<InputMediaNudge>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: InputMediaNudge): InputMediaNudge {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: InputMediaNudge, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message InputMediaNudge
+ */
+export const InputMediaNudge = new InputMediaNudge$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class SendMessageInput$Type extends MessageType<SendMessageInput> {
     constructor() {

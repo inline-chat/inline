@@ -49,6 +49,7 @@ type Input = {
   photoId?: bigint
   videoId?: bigint
   documentId?: bigint
+  nudge?: boolean
   sendDate?: number
   isSticker?: boolean
   entities?: MessageEntities
@@ -114,9 +115,11 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   let dbFullPhoto: DbFullPhoto | undefined
   let dbFullVideo: DbFullVideo | undefined
   let dbFullDocument: DbFullDocument | undefined
-  let mediaType: "photo" | "video" | "document" | null = null
+  let mediaType: "photo" | "video" | "document" | "nudge" | null = null
 
-  if (input.photoId) {
+  if (input.nudge) {
+    mediaType = "nudge"
+  } else if (input.photoId) {
     dbFullPhoto = await FileModel.getPhotoById(input.photoId)
     mediaType = "photo"
   } else if (input.videoId) {
@@ -606,33 +609,8 @@ async function selfUpdatesFromExistingMessage(randomId: bigint, currentUserId: n
 // Push notifications
 // ------------------------------------------------------------
 
-const NUDGE_MESSAGE_TEXT = "👋"
-
-const isNudgeMessage = ({
-  text,
-  messageInfo,
-}: {
-  text: string | undefined
-  messageInfo: MessageInfo
-}): boolean => {
-  if (!text) {
-    return false
-  }
-
-  if (text.trim() !== NUDGE_MESSAGE_TEXT) {
-    return false
-  }
-
-  if (messageInfo.photo || messageInfo.video || messageInfo.document) {
-    return false
-  }
-
-  if (messageInfo.message.isSticker) {
-    return false
-  }
-
-  return true
-}
+const isNudgeMessage = ({ messageInfo }: { messageInfo: MessageInfo }): boolean =>
+  messageInfo.message.mediaType === "nudge"
 
 type SendPushForMsgInput = {
   updateGroup: UpdateGroup
@@ -652,7 +630,7 @@ async function sendNotifications(input: SendPushForMsgInput) {
   }
 
   const { updateGroup, messageInfo, currentUserId, chat, unencryptedText, unencryptedEntities, inputPeer } = input
-  const isNudge = isNudgeMessage({ text: unencryptedText, messageInfo })
+  const isNudge = isNudgeMessage({ messageInfo })
 
   // get sender of replied message ID if any
   const repliedToSenderId = messageInfo.message.replyToMsgId

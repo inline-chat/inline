@@ -51,4 +51,10 @@ public extension InputMedia {
       })
     }
   }
+
+  static func fromNudge() -> InputMedia {
+    InputMedia.with {
+      $0.media = .nudge(.init())
+    }
+  }
 }
