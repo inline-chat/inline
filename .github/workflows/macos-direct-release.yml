@@ -36,6 +36,7 @@ jobs:
           fetch-depth: 0
 
       - name: Preflight
+        id: preflight
         env:
           SCHEME: ${{ vars.MACOS_DIRECT_SCHEME }}
           XCODE_PATH: ${{ vars.MACOS_XCODE_PATH }}
