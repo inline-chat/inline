@@ -56,6 +56,8 @@ final class ImageViewerController: UIViewController {
     imageView.imageView.contentMode = .scaleAspectFit 
     imageView.translatesAutoresizingMaskIntoConstraints = false
     imageView.layer.cornerRadius = 18
+    imageView.transition = nil
+    imageView.isResetEnabled = false
     let activityIndicator = UIActivityIndicatorView(style: .medium)
     activityIndicator.color = .white
     activityIndicator.startAnimating()
@@ -74,6 +76,7 @@ final class ImageViewerController: UIViewController {
 
   private var imageViewConstraints: [NSLayoutConstraint] = []
   private var transitionImageView: UIImageView?
+  private var keepTransitionImageUntilLoad = false
   private var isControlsVisible = true
   private var player: AVPlayer?
     
@@ -179,6 +182,8 @@ final class ImageViewerController: UIViewController {
     super.viewDidLoad()
     setupViews()
     setupGestures()
+
+    keepTransitionImageUntilLoad = !isVideo && sourceImage != nil
 
     if let sourceImage {
       imageView.imageView.image = sourceImage
@@ -348,16 +353,26 @@ final class ImageViewerController: UIViewController {
     if let sourceImage = sourceImage {
       imageView.imageView.image = sourceImage
       updateImageViewConstraints()
+      imageView.placeholderView = nil
     }
-        
+
+    imageView.onSuccess = { [weak self] _ in
+      DispatchQueue.main.async {
+        self?.handleImageLoadCompletion()
+      }
+    }
+
+    imageView.onFailure = { [weak self] _ in
+      DispatchQueue.main.async {
+        guard let self else { return }
+        if let sourceImage = self.sourceImage {
+          self.imageView.imageView.image = sourceImage
+        }
+        self.handleImageLoadCompletion()
+      }
+    }
+
     imageView.url = imageURL
-        
-    NotificationCenter.default.addObserver(
-      self,
-      selector: #selector(imageDidLoad),
-      name: .imageLoadingDidFinish,
-      object: nil
-    )
   }
 
   private func loadVideo() {
@@ -405,13 +420,7 @@ final class ImageViewerController: UIViewController {
     imageView.isHidden = true
   }
 
-  @objc private func imageDidLoad(_ notification: Notification) {
-    guard let loadedImageView = notification.object as? LazyImageView,
-          loadedImageView === imageView
-    else {
-      return
-    }
-      
+  private func handleImageLoadCompletion() {
     // Reset zoom scale when a new image loads
     scrollView.zoomScale = scrollView.minimumZoomScale
       
@@ -419,6 +428,10 @@ final class ImageViewerController: UIViewController {
     
     // Center the content
     scrollViewDidZoom(scrollView)
+
+    if keepTransitionImageUntilLoad {
+      removeTransitionImage()
+    }
   }
 
   // MARK: - Animations
@@ -430,7 +443,12 @@ final class ImageViewerController: UIViewController {
     tempImageView.clipsToBounds = true
     tempImageView.image = sourceImage
     tempImageView.layer.cornerRadius = sourceCornerRadius
-    view.addSubview(tempImageView)
+    tempImageView.isUserInteractionEnabled = false
+    if controlsContainerView.superview != nil {
+      view.insertSubview(tempImageView, belowSubview: controlsContainerView)
+    } else {
+      view.addSubview(tempImageView)
+    }
     transitionImageView = tempImageView
         
     // Calculate the final frame
@@ -469,8 +487,10 @@ final class ImageViewerController: UIViewController {
       self.scrollView.alpha = 1
       self.controlsContainerView.alpha = 1
                 
-      tempImageView.removeFromSuperview()
-      self.transitionImageView = nil
+      if !self.keepTransitionImageUntilLoad {
+        tempImageView.removeFromSuperview()
+        self.transitionImageView = nil
+      }
       completion?()
     })
   }
@@ -534,6 +554,12 @@ final class ImageViewerController: UIViewController {
       tempImageView.removeFromSuperview()
       completion()
     })
+  }
+
+  private func removeTransitionImage() {
+    guard let transitionImageView else { return }
+    transitionImageView.removeFromSuperview()
+    self.transitionImageView = nil
   }
 
   // MARK: - Actions
@@ -825,10 +851,4 @@ extension ImageViewerController: UIGestureRecognizerDelegate {
     }
     return true
   }
-}
-
-// MARK: - Notification Extension
-
-extension Notification.Name {
-  static let imageLoadingDidFinish = Notification.Name("imageLoadingDidFinish")
 }
