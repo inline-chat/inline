@@ -81,11 +81,11 @@ public struct NudgeButton: View {
     triggerHaptic()
     if !hasSeenGuide {
       hasSeenGuide = true
-      showGuide = false
+      showGuide = true
       return
     }
 
-    showGuide = true
+    showGuide = false
     sendNudge()
   }
 
