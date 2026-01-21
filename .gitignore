@@ -126,3 +126,6 @@ cli/dist
 
 # Release temp assets
 scripts/.release-tmp/
+
+# Actions
+.action/sparkle/

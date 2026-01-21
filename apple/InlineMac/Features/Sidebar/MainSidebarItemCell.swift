@@ -21,6 +21,12 @@ class MainSidebarItemCell: NSView {
   private static let cornerRadius: CGFloat = 10
   private static let unreadBadgeSize: CGFloat = 5
   private static let unreadBadgeCornerRadius: CGFloat = 2.5
+  private static let unreadBadgeAvatarSpacing: CGFloat = 2
+  private static let unreadBadgeInsetAdjustment: CGFloat = unreadBadgeSize + unreadBadgeAvatarSpacing
+  private static let unreadBadgeLeadingInset: CGFloat = max(
+    0,
+    MainSidebar.innerEdgeInsets - unreadBadgeInsetAdjustment
+  )
   private static let pinnedBadgeSize: CGFloat = 8
   private static let pinnedBadgePointSize: CGFloat = 8
   private static let actionButtonSize: CGFloat = 16
@@ -145,6 +151,12 @@ class MainSidebarItemCell: NSView {
     return view
   }()
 
+  private lazy var unreadBadgeView: NSView = {
+    let view = createUnreadBadge()
+    view.isHidden = true
+    return view
+  }()
+
   private lazy var actionButton: NSButton = {
     let button = NSButton()
     button.translatesAutoresizingMaskIntoConstraints = false
@@ -202,6 +214,7 @@ class MainSidebarItemCell: NSView {
     addSubview(containerView)
     containerView.addSubview(stackView)
     containerView.addSubview(actionButton)
+    containerView.addSubview(unreadBadgeView)
     stackView.addArrangedSubview(leadingContainerView)
     stackView.addArrangedSubview(nameLabel)
     stackView.addArrangedSubview(badgeContainerView)
@@ -222,6 +235,11 @@ class MainSidebarItemCell: NSView {
       stackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: Self.horizontalPadding),
       stackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -Self.horizontalPadding),
       stackView.centerYAnchor.constraint(equalTo: containerView.centerYAnchor),
+    ])
+
+    NSLayoutConstraint.activate([
+      unreadBadgeView.centerYAnchor.constraint(equalTo: containerView.centerYAnchor),
+      unreadBadgeView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: Self.unreadBadgeLeadingInset),
     ])
 
     NSLayoutConstraint.activate([
@@ -281,6 +299,7 @@ class MainSidebarItemCell: NSView {
     isHovered = false
     isNavSelected = false
     isKeyboardSelected = false
+    unreadBadgeView.isHidden = true
     clearBadges()
     cancellables.removeAll()
   }
@@ -524,11 +543,17 @@ class MainSidebarItemCell: NSView {
 
   private func configureBadges() {
     clearBadges()
-    guard item?.kind == .thread else { return }
+    guard item?.kind == .thread else {
+      unreadBadgeView.isHidden = true
+      return
+    }
     if hasUnread {
-      badgeContainerView.addArrangedSubview(createUnreadBadge())
-    } else if isPinned {
-      badgeContainerView.addArrangedSubview(createPinnedBadge())
+      unreadBadgeView.isHidden = false
+    } else {
+      unreadBadgeView.isHidden = true
+      if isPinned {
+        badgeContainerView.addArrangedSubview(createPinnedBadge())
+      }
     }
   }
 

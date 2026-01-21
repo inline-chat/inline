@@ -21,6 +21,17 @@ struct GeneralSettingsDetailView: View {
         }
         .pickerStyle(.menu)
       }
+
+      #if SPARKLE
+      Section("Updates") {
+        Picker("Update Channel", selection: $appSettings.autoUpdateChannel) {
+          ForEach(AutoUpdateChannel.allCases) { channel in
+            Text(channel.title).tag(channel)
+          }
+        }
+        .pickerStyle(.menu)
+      }
+      #endif
     }
     .formStyle(.grouped)
     .scrollContentBackground(.hidden)

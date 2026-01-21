@@ -1,5 +1,6 @@
 import AppKit
 import InlineKit
+import Logger
 import Observation
 import SwiftUI
 
@@ -36,6 +37,7 @@ class MainSplitView: NSViewController {
   private var lastRenderedRoute: Nav2Route?
   private var escapeKeyUnsubscriber: (() -> Void)?
   private var quickSearchObserver: NSObjectProtocol?
+  private var appActiveObserver: NSObjectProtocol?
   private var quickSearchEscapeUnsubscriber: (() -> Void)?
   private var quickSearchArrowUnsubscriber: (() -> Void)?
   private var quickSearchVimUnsubscriber: (() -> Void)?
@@ -45,13 +47,11 @@ class MainSplitView: NSViewController {
   private var quickSearchHeightConstraint: NSLayoutConstraint?
 
   private lazy var quickSearchOverlayBackground: NSView = {
-    let view = NSView()
+    let view = PassthroughView()
     view.translatesAutoresizingMaskIntoConstraints = false
     view.wantsLayer = true
     view.layer?.backgroundColor = NSColor.clear.cgColor
     view.isHidden = true
-    let recognizer = NSClickGestureRecognizer(target: self, action: #selector(handleQuickSearchBackgroundClick))
-    view.addGestureRecognizer(recognizer)
     return view
   }()
 
@@ -66,6 +66,7 @@ class MainSplitView: NSViewController {
   private var quickSearchHostingView: NSHostingView<AnyView>?
   private var isQuickSearchVisible: Bool = false
   private var didPrewarmQuickSearch: Bool = false
+  private var quickSearchClickMonitor: Any?
 
   // ....
 
@@ -157,6 +158,8 @@ class MainSplitView: NSViewController {
   override func viewDidLoad() {
     super.viewDidLoad()
     setupQuickSearchObserver()
+    setupAppActiveObserver()
+    fetchInitialData()
   }
 
   override func viewDidAppear() {
@@ -170,6 +173,56 @@ class MainSplitView: NSViewController {
     removeQuickSearchKeyHandlers()
     if let quickSearchObserver {
       NotificationCenter.default.removeObserver(quickSearchObserver)
+    }
+    if let appActiveObserver {
+      NotificationCenter.default.removeObserver(appActiveObserver)
+    }
+    removeQuickSearchClickMonitor()
+  }
+
+  private func setupAppActiveObserver() {
+    guard appActiveObserver == nil else { return }
+    appActiveObserver = NotificationCenter.default.addObserver(
+      forName: NSApplication.didBecomeActiveNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      self?.refetchChats()
+    }
+  }
+
+  private func fetchInitialData() {
+    let realtime = dependencies.realtimeV2
+    let data = dependencies.data
+
+    Task.detached {
+      do {
+        try await realtime.send(.getMe())
+        Task.detached {
+          try? await data.getSpaces()
+        }
+      } catch {
+        Log.shared.error("Error fetching getMe info", error: error)
+      }
+    }
+
+    Task.detached {
+      do {
+        try await realtime.send(.getChats())
+      } catch {
+        Log.shared.error("Error fetching getChats", error: error)
+      }
+    }
+  }
+
+  private func refetchChats() {
+    let realtime = dependencies.realtimeV2
+    Task.detached {
+      do {
+        try await realtime.send(.getChats())
+      } catch {
+        Log.shared.error("Error refetching getChats", error: error)
+      }
     }
   }
 
@@ -370,6 +423,7 @@ class MainSplitView: NSViewController {
     quickSearchOverlayContainer.isHidden = false
     quickSearchViewModel.requestFocus()
     installQuickSearchKeyHandlers()
+    installQuickSearchClickMonitor()
     NotificationCenter.default.post(
       name: .quickSearchVisibilityChanged,
       object: nil,
@@ -384,6 +438,7 @@ class MainSplitView: NSViewController {
     quickSearchOverlayContainer.isHidden = true
     quickSearchViewModel.reset()
     removeQuickSearchKeyHandlers()
+    removeQuickSearchClickMonitor()
     NotificationCenter.default.post(
       name: .quickSearchVisibilityChanged,
       object: nil,
@@ -461,8 +516,24 @@ class MainSplitView: NSViewController {
     quickSearchReturnUnsubscriber = nil
   }
 
-  @objc private func handleQuickSearchBackgroundClick() {
-    hideQuickSearchOverlay()
+  private func installQuickSearchClickMonitor() {
+    guard quickSearchClickMonitor == nil else { return }
+    quickSearchClickMonitor = NSEvent.addLocalMonitorForEvents(
+      matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+    ) { [weak self] event in
+      guard let self, self.isQuickSearchVisible else { return event }
+      let pointInContainer = self.quickSearchOverlayContainer.convert(event.locationInWindow, from: nil)
+      if self.quickSearchOverlayContainer.bounds.contains(pointInContainer) == false {
+        self.hideQuickSearchOverlay()
+      }
+      return event
+    }
+  }
+
+  private func removeQuickSearchClickMonitor() {
+    guard let quickSearchClickMonitor else { return }
+    NSEvent.removeMonitor(quickSearchClickMonitor)
+    self.quickSearchClickMonitor = nil
   }
 }
 
@@ -480,5 +551,11 @@ class ContentAreaView: NSView {
   override func updateLayer() {
     layer?.backgroundColor = Theme.windowContentBackgroundColor.cgColor
     super.updateLayer()
+  }
+}
+
+private final class PassthroughView: NSView {
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    nil
   }
 }

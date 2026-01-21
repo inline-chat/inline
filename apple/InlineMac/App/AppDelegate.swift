@@ -20,6 +20,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   // Vim-style chat navigation key monitor
   @MainActor private var globalHotkeys: GlobalHotkeys?
 
+#if SPARKLE
+  private lazy var updateController = UpdateController()
+#endif
+
   // --
   let notifications = NotificationsManager()
   let navigation: NavigationModel = .shared
@@ -46,6 +50,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     setupMainWindow()
     setupMainMenu()
     setupNotificationsSoundSetting()
+#if SPARKLE
+    updateController.startIfNeeded()
+#endif
     // TODO: Temporarily disable Dock badge updates until the update-applying bug is fixed.
     NSApplication.shared.dockTile.badgeLabel = nil
 //    Task { @MainActor in
@@ -75,6 +82,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       }
     }
   }
+
+#if SPARKLE
+  @objc func checkForUpdates(_ sender: Any?) {
+    updateController.checkForUpdates()
+  }
+#endif
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     MainActor.assumeIsolated {
