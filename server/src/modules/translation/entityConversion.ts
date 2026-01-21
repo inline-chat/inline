@@ -8,37 +8,25 @@ import { Log } from "@in/server/utils/log"
 
 const log = new Log("modules/translation/entityConversion")
 
-const EntitiesPayloadSchema = z.union([
-  z.array(z.any()),
-  z
-    .object({
-      entities: z.array(z.any()),
-    })
-    .passthrough(),
-])
-
 // Schema for batch entity offset conversion
 const BatchEntityConversionResultSchema = z.object({
   conversions: z.array(
     z.object({
       messageId: z.number(),
-      entities: z.union([EntitiesPayloadSchema, z.string()]).nullable(),
+      entities: z.string().nullable(),
     }),
   ),
 })
 
 /**
- * Create indexed text showing UTF-16 character positions like "Hi" -> "0H1i",
- * with inline codepoint tags for non-ASCII characters.
+ * Create indexed text showing UTF-16 character positions like "Hi" -> "0H1i"
  */
 export function createIndexedText(text: string): string {
   let out = ""
   let index = 0
 
   for (const char of text) {
-    const codePoint = char.codePointAt(0) ?? 0
-    const tag = codePoint > 0x7f ? `(U+${codePoint.toString(16).toUpperCase().padStart(4, "0")})` : ""
-    out += `${index}${char}${tag}`
+    out += `${index}${char}`
     index += char.length
   }
 
@@ -47,61 +35,6 @@ export function createIndexedText(text: string): string {
 
 const formatEntitiesJson = (entities: MessageEntities): string => {
   return MessageEntities.toJsonString(entities)
-}
-
-const extractJsonSubstring = (value: string): string | null => {
-  const start = value.search(/[\[{]/)
-  if (start < 0) return null
-
-  let inString = false
-  let escapeNext = false
-  const stack: string[] = []
-
-  for (let i = start; i < value.length; i += 1) {
-    const char = value[i]
-
-    if (escapeNext) {
-      escapeNext = false
-      continue
-    }
-
-    if (char === "\\") {
-      escapeNext = true
-      continue
-    }
-
-    if (char === "\"") {
-      inString = !inString
-      continue
-    }
-
-    if (inString) continue
-
-    if (char === "{" || char === "[") {
-      stack.push(char)
-    } else if (char === "}" || char === "]") {
-      const last = stack.pop()
-      if (!last) continue
-      if ((last === "{" && char !== "}") || (last === "[" && char !== "]")) {
-        return null
-      }
-      if (stack.length === 0) {
-        return value.slice(start, i + 1)
-      }
-    }
-  }
-
-  return null
-}
-
-const parseEntitiesJson = (value: string): unknown => {
-  try {
-    return JSON.parse(value)
-  } catch {
-    const extracted = extractJsonSubstring(value)
-    if (!extracted) throw new Error("Failed to extract JSON substring")
-    return JSON.parse(extracted)
-  }
 }
 
 /**
@@ -131,7 +64,6 @@ Convert entity offsets from original texts to translated texts for ${
 # Instructions
 • Count ALL UTF-16 characters: letters, numbers, spaces, punctuation, emojis, newlines
 • Use the indexed translated text to see exactly where each character is positioned
-• The numbers shown before each character are UTF-16 offsets; (U+XXXX) tags are codepoints for reference
 • The offset is the position number where the entity content begins
 • If entity starts at index 0, it means the entity is at the beginning of the text and keep it the same. no need to move it to 1.
 
@@ -142,17 +74,10 @@ Convert entity offsets from original texts to translated texts for ${
 - Original entities in JSON format for each message
 
 # Output Format
-Return conversions array with messageId and updated entities as JSON objects (not strings).
-Use either {"entities":[...]} or [] or null. Do not include extra text.
+Return conversions array with messageId and updated entities JSON for each message.
 If there's no entities for a message, set entities to null.`
 
-  const examplePrompt = `# Example
-Translated text: "A🙂B"
-Indexed text: 0A1🙂(U+1F642)3B
-If an entity targets "🙂", offset = 1 and length = 2.`
-
   const userPrompt = `# Message${messageCount === 1 ? "" : "s"} to Convert
-${examplePrompt}
 ${input.messages
   .map(
     (msg) => `
@@ -197,8 +122,7 @@ ${input.messages
 
       if (conversion.entities) {
         try {
-          let parsed =
-            typeof conversion.entities === "string" ? parseEntitiesJson(conversion.entities) : conversion.entities
+          let parsed = JSON.parse(conversion.entities)
           if (Array.isArray(parsed)) {
             entities = MessageEntities.fromJson({ entities: parsed })
           } else if (typeof parsed === "object" && "entities" in parsed) {
