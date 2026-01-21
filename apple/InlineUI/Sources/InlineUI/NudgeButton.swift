@@ -12,7 +12,6 @@ import AppKit
 /// Nudge button used in iOS nav bar and macOS toolbar for DMs.
 public struct NudgeButton: View {
   private let log = Log.scoped("NudgeButton")
-  private let nudgeText = "👋"
 
   public let peer: Peer
   public let chatId: Int64?
@@ -67,10 +66,7 @@ public struct NudgeButton: View {
   }
 
   private var attentionTarget: String {
-    if let name = peerDisplayName, !name.isEmpty {
-      return "\(name)'s"
-    }
-    return "their"
+    NudgeButtonState.attentionTarget(displayName: peerDisplayName)
   }
 
   private func refreshPeerName(userId: Int64) {
@@ -109,7 +105,7 @@ public struct NudgeButton: View {
       do {
         _ = try await Api.realtime.send(
           .sendMessage(
-            text: nudgeText,
+            text: NudgeButtonState.nudgeText,
             peerId: peer,
             chatId: resolvedChatId,
             replyToMsgId: nil,
@@ -148,6 +144,18 @@ public struct NudgeButton: View {
 #elseif os(macOS)
     NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
 #endif
+  }
+}
+
+enum NudgeButtonState {
+  static let nudgeText = "👋"
+
+  static func attentionTarget(displayName: String?) -> String {
+    if let name = displayName, !name.isEmpty {
+      return "\(name)'s"
+    }
+
+    return "their"
   }
 }
 
