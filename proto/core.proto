@@ -435,6 +435,7 @@ message MessageMedia {
     MessagePhoto photo = 1;
     MessageVideo video = 2;
     MessageDocument document = 3;
+    MessageNudge nudge = 4;
   }
 }
 
@@ -443,6 +444,9 @@ message MessagePhoto { Photo photo = 1; }
 message MessageVideo { Video video = 1; }
 
 message MessageDocument { Document document = 1; }
+
+// Nudge message (empty payload)
+message MessageNudge {}
 
 message Video {
   int64 id = 1;
@@ -836,6 +840,9 @@ message NotificationSettings {
 
   // Custom rules for notifications
   optional string zen_mode_custom_rules = 5;
+
+  // If true, direct message notifications are disabled
+  optional bool disable_dm_notifications = 6;
 }
 
 message UpdateUserSettingsInput { UserSettings user_settings = 1; }

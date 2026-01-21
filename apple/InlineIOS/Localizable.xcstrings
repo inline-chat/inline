@@ -393,6 +393,9 @@
         }
       }
     },
+    "Control DM notification behavior" : {
+
+    },
     "Control how you receive notifications" : {
 
     },
@@ -478,7 +481,13 @@
         }
       }
     },
+    "Direct Messages" : {
+
+    },
     "Direct updates applied" : {
+
+    },
+    "Disable DM notifications" : {
 
     },
     "Disconnect" : {
@@ -725,6 +734,9 @@
 
     },
     "Mark Unread" : {
+
+    },
+    "Mentions and nudges will still notify you" : {
 
     },
     "name@example.com" : {

@@ -68,9 +68,30 @@ struct ChatView: View {
     .toolbar(.hidden, for: .tabBar)
     .toolbarRole(.editor)
     .toolbar {
-      ToolbarItem(placement: .topBarTrailing) {
-        TranslationButton(peer: peerId)
-          .tint(ThemeManager.shared.accentColor)
+      if peerId.isPrivate {
+        if #available(iOS 26.0, *) {
+          ToolbarItem(placement: .primaryAction) {
+            NudgeButton(peer: peerId, chatId: fullChatViewModel.chat?.id)
+          }
+          ToolbarSpacer(.fixed, placement: .primaryAction)
+          ToolbarItem(placement: .primaryAction) {
+            TranslationButton(peer: peerId)
+              .tint(ThemeManager.shared.accentColor)
+          }
+        } else {
+          ToolbarItem(placement: .topBarTrailing) {
+            NudgeButton(peer: peerId, chatId: fullChatViewModel.chat?.id)
+          }
+          ToolbarItem(placement: .primaryAction) {
+            TranslationButton(peer: peerId)
+              .tint(ThemeManager.shared.accentColor)
+          }
+        }
+      } else {
+        ToolbarItem(placement: .primaryAction) {
+          TranslationButton(peer: peerId)
+            .tint(ThemeManager.shared.accentColor)
+        }
       }
 
       if #available(iOS 26.0, *) {

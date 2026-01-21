@@ -606,6 +606,34 @@ async function selfUpdatesFromExistingMessage(randomId: bigint, currentUserId: n
 // Push notifications
 // ------------------------------------------------------------
 
+const NUDGE_MESSAGE_TEXT = "👋"
+
+const isNudgeMessage = ({
+  text,
+  messageInfo,
+}: {
+  text: string | undefined
+  messageInfo: MessageInfo
+}): boolean => {
+  if (!text) {
+    return false
+  }
+
+  if (text.trim() !== NUDGE_MESSAGE_TEXT) {
+    return false
+  }
+
+  if (messageInfo.photo || messageInfo.video || messageInfo.document) {
+    return false
+  }
+
+  if (messageInfo.message.isSticker) {
+    return false
+  }
+
+  return true
+}
+
 type SendPushForMsgInput = {
   updateGroup: UpdateGroup
   messageInfo: MessageInfo
@@ -624,6 +652,7 @@ async function sendNotifications(input: SendPushForMsgInput) {
   }
 
   const { updateGroup, messageInfo, currentUserId, chat, unencryptedText, unencryptedEntities, inputPeer } = input
+  const isNudge = isNudgeMessage({ text: unencryptedText, messageInfo })
 
   // get sender of replied message ID if any
   const repliedToSenderId = messageInfo.message.replyToMsgId
@@ -671,7 +700,7 @@ async function sendNotifications(input: SendPushForMsgInput) {
 
     const hasText = !!unencryptedText
 
-    if (needsAIEval && hasText) {
+    if (needsAIEval && hasText && !isNudge) {
       let evalResults = await batchEvaluate({
         chatId: chatId,
         message: {
@@ -711,6 +740,7 @@ async function sendNotifications(input: SendPushForMsgInput) {
       repliedToSenderId,
       chat,
       evalResult,
+      isNudge,
       updateGroup,
       inputPeer,
       currentUserId,
@@ -729,6 +759,7 @@ async function sendNotificationToUser({
   repliedToSenderId,
   chat,
   evalResult,
+  isNudge,
   updateGroup,
   inputPeer,
   currentUserId,
@@ -742,6 +773,7 @@ async function sendNotificationToUser({
   repliedToSenderId: number | undefined
   chat?: DbChat
   evalResult?: NotificationEvalResult
+  isNudge: boolean
   // For explicit mac notification
   updateGroup: UpdateGroup
   inputPeer: InputPeer
@@ -762,8 +794,13 @@ async function sendNotificationToUser({
   const isDM = inputPeer.type.oneofKind === "user"
   const isReplyToUser = repliedToSenderId === userId
   const isExplicitlyMentioned = messageEntities ? isUserMentioned(messageEntities, userId) : false
+
+  if (isDM && userSettings?.notifications.disableDmNotifications && !isNudge && !isExplicitlyMentioned) {
+    return
+  }
+
   const isMentioned = isDM || isExplicitlyMentioned || isReplyToUser
-  const requiresNotification = evalResult?.notifyUserIds?.includes(userId)
+  const requiresNotification = isNudge || evalResult?.notifyUserIds?.includes(userId)
 
   // Mentions
   if (userSettings?.notifications.mode === UserSettingsNotificationsMode.Mentions) {
