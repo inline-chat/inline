@@ -175,16 +175,26 @@ private struct NudgeGuideView: View {
         .multilineTextAlignment(.leading)
         .fixedSize(horizontal: false, vertical: true)
 
+      Text("Tap again to send a nudge.")
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.leading)
+        .fixedSize(horizontal: false, vertical: true)
+
       HStack {
         Spacer()
         Button("Got it") {
           onDismiss()
         }
-        #if os(macOS)
+#if os(iOS)
         .buttonStyle(.borderedProminent)
         .controlSize(.regular)
         .buttonBorderShape(.capsule)
-        #endif
+#elseif os(macOS)
+        .buttonStyle(.borderedProminent)
+        .controlSize(.regular)
+        .buttonBorderShape(.capsule)
+#endif
       }
       .padding(.top, 4)
     }
