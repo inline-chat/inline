@@ -38,6 +38,10 @@ public extension FullMessage {
       message.text
     }
   }
+
+  var displayTextForLastMessage: String? {
+    displayText?.replacingOccurrences(of: "\n", with: " ")
+  }
 }
 
 public extension EmbeddedMessage {

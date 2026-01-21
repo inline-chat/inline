@@ -224,7 +224,7 @@ class EmbeddedMessageView: NSView {
       return
     }
 
-    let messageContent: String = if let displayText = embeddedMessage.displayText, !displayText.isEmpty {
+    let messageContent: String = if let displayText = embeddedMessage.displayTextForLastMessage, !displayText.isEmpty {
       displayText
     } else {
       getMessageContentText(from: embeddedMessage.message)
@@ -246,7 +246,7 @@ class EmbeddedMessageView: NSView {
       return
     }
 
-    let messageContent: String = if let displayText = fullMessage.displayText, !displayText.isEmpty {
+    let messageContent: String = if let displayText = fullMessage.displayTextForLastMessage, !displayText.isEmpty {
       displayText
     } else {
       getMessageContentText(from: fullMessage.message)
