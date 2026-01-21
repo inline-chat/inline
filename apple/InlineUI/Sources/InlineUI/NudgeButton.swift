@@ -48,6 +48,10 @@ public struct NudgeButton: View {
       Image(systemName: "hand.wave")
         .font(.system(size: 16, weight: .regular))
     }
+#if os(iOS)
+    .frame(minWidth: 40, minHeight: 40)
+    .contentShape(Rectangle())
+#endif
     .accessibilityLabel("Send nudge")
     .disabled(isSending)
     .popover(isPresented: $showGuide, arrowEdge: .bottom) {
