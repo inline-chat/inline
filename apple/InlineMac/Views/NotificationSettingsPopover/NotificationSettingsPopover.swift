@@ -199,21 +199,16 @@ struct NotificationSettingsButton: View {
       }.padding(.horizontal, 8)
 
       // Done button at the bottom
-      Button(action: {
-        withAnimation(.easeOut(duration: 0.2)) {
-          customizingZen = false
+      HStack {
+        Spacer()
+        Button("Done") {
+          withAnimation(.easeOut(duration: 0.2)) {
+            customizingZen = false
+          }
         }
-      }) {
-        Spacer()
-        Text("Done")
-          .font(.body.weight(.bold))
-          .foregroundStyle(.primary)
-          .frame(maxWidth: .infinity)
-          .padding(.vertical, 8)
-          .cornerRadius(8)
-        Spacer()
+        .buttonStyle(.borderedProminent)
+        .controlSize(.regular)
       }
-      .buttonStyle(.borderedProminent)
       .padding(.horizontal, 8)
       .padding(.top, 8)
     }
@@ -232,7 +227,7 @@ struct NotificationSettingsButton: View {
       Divider().foregroundStyle(.tertiary)
         .padding(.vertical, 6)
 
-      Toggle(isOn: $notificationSettings.disableDmNotifications) {
+      HStack(spacing: 12) {
         VStack(alignment: .leading, spacing: 2) {
           Text("Disable DM notifications")
             .font(.subheadline)
@@ -240,25 +235,27 @@ struct NotificationSettingsButton: View {
             .font(.caption)
             .foregroundStyle(.tertiary)
         }
+
+        Spacer(minLength: 12)
+
+        Toggle("", isOn: $notificationSettings.disableDmNotifications)
+          .labelsHidden()
+          .toggleStyle(.switch)
+          .accessibilityLabel("Disable DM notifications")
       }
-      .toggleStyle(.switch)
+      .frame(maxWidth: .infinity, alignment: .leading)
       
 
-      Button(action: {
-        withAnimation(.easeOut(duration: 0.2)) {
-          customizingMentions = false
+      HStack {
+        Spacer()
+        Button("Done") {
+          withAnimation(.easeOut(duration: 0.2)) {
+            customizingMentions = false
+          }
         }
-      }) {
-        Spacer()
-        Text("Done")
-          .font(.body.weight(.bold))
-          .foregroundStyle(.primary)
-          .frame(maxWidth: .infinity)
-          .padding(.vertical, 8)
-          .cornerRadius(8)
-        Spacer()
+        .buttonStyle(.borderedProminent)
+        .controlSize(.regular)
       }
-      .buttonStyle(.borderedProminent)
       .padding(.horizontal, 8)
       .padding(.top, 8)
     }
