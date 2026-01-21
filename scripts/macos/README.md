@@ -26,6 +26,8 @@ with Sparkle (non-TestFlight) and preparing DMG artifacts.
 
 - `build-direct.sh`: builds a Sparkle-enabled app, injects Info.plist keys,
   signs Sparkle helpers + app, creates a DMG, and optionally notarizes.
+  Xcode signing is disabled during the build to avoid provisioning profile
+  requirements; the app is signed manually afterward.
 - `update_appcast.py`: generates/updates an appcast from `sign_update` output.
 - `release-direct.ts`: uploads DMG + appcast to R2 with cache headers.
 

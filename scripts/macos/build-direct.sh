@@ -44,7 +44,11 @@ xcodebuild \
   SWIFT_ACTIVE_COMPILATION_CONDITIONS="SPARKLE" \
   FRAMEWORK_SEARCH_PATHS="${SPARKLE_FRAMEWORK_PATH}" \
   OTHER_LDFLAGS="-framework Sparkle" \
-  CODE_SIGN_ENTITLEMENTS="InlineMac/InlineMacDirect.entitlements"
+  CODE_SIGN_ENTITLEMENTS="InlineMac/InlineMacDirect.entitlements" \
+  CODE_SIGNING_ALLOWED=NO \
+  CODE_SIGNING_REQUIRED=NO \
+  CODE_SIGN_STYLE=Manual \
+  PROVISIONING_PROFILE_SPECIFIER=""
 
 APP_PATH="${DERIVED_DATA}/Build/Products/Release/Inline.app"
 PLIST_PATH="${APP_PATH}/Contents/Info.plist"
