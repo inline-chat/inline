@@ -416,6 +416,12 @@ class SidebarItemRow: NSTableCellView {
 
     // Build signature for efficient comparison
     let newSignature = makeSignature(from: item)
+    let isThreadItem = newSignature.isThread
+
+    // Always enforce line count (protects against reuse/config issues)
+    let maxLines = isThreadItem ? 1 : 2
+    messageLabel.textContainer?.maximumNumberOfLines = maxLines
+    messageLabel.textContainer?.lineBreakMode = .byTruncatingTail
 
     // Early exit if nothing changed
     if let previousSignature, previousSignature == newSignature {
@@ -441,7 +447,6 @@ class SidebarItemRow: NSTableCellView {
     }
 
     // Configure space name (toggle visibility)
-    let isThreadItem = newSignature.isThread
     spaceNameLabel.isHidden = !isThreadItem
     if isThreadItem {
       spaceNameLabel.string = newSignature.spaceName ?? "Unknown space"
@@ -453,10 +458,6 @@ class SidebarItemRow: NSTableCellView {
     }
 
     // Configure last message
-    let maxLines = isThreadItem ? 1 : 2
-    messageLabel.textContainer?.maximumNumberOfLines = maxLines
-    messageLabel.textContainer?.lineBreakMode = .byTruncatingTail
-
     if messageLabel.string != newSignature.message {
       messageLabel.string = newSignature.message
     }
@@ -471,7 +472,6 @@ class SidebarItemRow: NSTableCellView {
         NSLayoutConstraint.activate([
           senderView!.leadingAnchor.constraint(equalTo: messageContainerView.leadingAnchor),
           senderView!.topAnchor.constraint(equalTo: messageContainerView.topAnchor),
-          senderView!.bottomAnchor.constraint(equalTo: messageContainerView.bottomAnchor),
         ])
 
       }
