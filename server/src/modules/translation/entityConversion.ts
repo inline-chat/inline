@@ -19,14 +19,17 @@ const BatchEntityConversionResultSchema = z.object({
 })
 
 /**
- * Create indexed text showing UTF-16 character positions like "Hi" -> "0H1i"
+ * Create indexed text showing UTF-16 character positions like "Hi" -> "0H1i",
+ * with inline codepoint tags for non-ASCII characters.
  */
 export function createIndexedText(text: string): string {
   let out = ""
   let index = 0
 
   for (const char of text) {
-    out += `${index}${char}`
+    const codePoint = char.codePointAt(0) ?? 0
+    const tag = codePoint > 0x7f ? `(U+${codePoint.toString(16).toUpperCase().padStart(4, "0")})` : ""
+    out += `${index}${char}${tag}`
     index += char.length
   }
 
@@ -64,6 +67,7 @@ Convert entity offsets from original texts to translated texts for ${
 # Instructions
 • Count ALL UTF-16 characters: letters, numbers, spaces, punctuation, emojis, newlines
 • Use the indexed translated text to see exactly where each character is positioned
+• The numbers shown before each character are UTF-16 offsets; (U+XXXX) tags are codepoints for reference
 • The offset is the position number where the entity content begins
 • If entity starts at index 0, it means the entity is at the beginning of the text and keep it the same. no need to move it to 1.
 
