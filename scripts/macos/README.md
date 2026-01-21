@@ -68,6 +68,7 @@ Choose one of the two auth methods below.
 ### Optional
 
 - `SPARKLE_VERSION` — Sparkle release version (default: 2.7.3)
+- `SCHEME` — Xcode scheme for the macOS app (default: `Inline (macOS)`)
 - `CHANNEL` — update channel (`stable` or `beta`, default: `stable`)
 - `APPCAST_URL` — override appcast URL (defaults to `https://public-assets.inline.chat/mac/<channel>/appcast.xml`)
 - `SPARKLE_DIR` — Sparkle download cache (default: `.action/sparkle`)
