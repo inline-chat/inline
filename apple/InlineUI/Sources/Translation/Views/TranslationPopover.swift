@@ -55,6 +55,7 @@ public struct TranslationPopover: View {
       #if os(macOS)
       .buttonStyle(.bordered)
       .controlSize(.regular)
+      .buttonBorderShape(.capsule)
       #endif
     } else {
       Button("Translate") {
@@ -63,6 +64,7 @@ public struct TranslationPopover: View {
       #if os(macOS)
       .buttonStyle(.borderedProminent)
       .controlSize(.regular)
+      .buttonBorderShape(.capsule)
       #endif
     }
   }
@@ -76,6 +78,7 @@ public struct TranslationPopover: View {
     #if os(macOS)
       .buttonStyle(.bordered)
       .controlSize(.regular)
+      .buttonBorderShape(.capsule)
       .focusEffectDisabled(true)
     #endif
   }

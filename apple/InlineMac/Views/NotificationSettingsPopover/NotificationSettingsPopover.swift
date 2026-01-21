@@ -208,6 +208,7 @@ struct NotificationSettingsButton: View {
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.regular)
+        .buttonBorderShape(.capsule)
       }
       .padding(.horizontal, 8)
       .padding(.top, 8)
@@ -256,6 +257,7 @@ struct NotificationSettingsButton: View {
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.regular)
+        .buttonBorderShape(.capsule)
       }
       .padding(.horizontal, 8)
       .padding(.top, 8)

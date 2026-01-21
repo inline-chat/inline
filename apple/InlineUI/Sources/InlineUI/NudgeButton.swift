@@ -174,6 +174,7 @@ private struct NudgeGuideView: View {
         #if os(macOS)
         .buttonStyle(.borderedProminent)
         .controlSize(.regular)
+        .buttonBorderShape(.capsule)
         #endif
       }
       .padding(.top, 4)
