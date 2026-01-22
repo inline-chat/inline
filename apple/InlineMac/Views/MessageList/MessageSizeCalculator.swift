@@ -136,6 +136,9 @@ class MessageSizeCalculator {
     var attachmentItems: [LayoutPlan]
     var attachments: LayoutPlan?
 
+    /// forward header is above reply/text
+    var forwardHeader: LayoutPlan?
+
     /// reply is always above text
     var reply: LayoutPlan?
 
@@ -177,6 +180,7 @@ class MessageSizeCalculator {
     var hasAvatar: Bool { avatar != nil }
     var hasName: Bool { name != nil }
     var hasReply: Bool { reply != nil }
+    var hasForwardHeader: Bool { forwardHeader != nil }
     var hasDocument: Bool { document != nil }
     var hasReactions: Bool { reactions != nil }
     var hasAttachments: Bool { attachments != nil }
@@ -186,7 +190,9 @@ class MessageSizeCalculator {
 
     // used as edge inset for content view stack
     var topMostContentTopSpacing: CGFloat {
-      if let reply {
+      if let forwardHeader {
+        forwardHeader.spacing.top
+      } else if let reply {
         reply.spacing.top
       } else if let video {
         video.spacing.top
@@ -219,11 +225,18 @@ class MessageSizeCalculator {
     }
 
     var replyContentTop: CGFloat {
-      reply?.spacing.top ?? 0
+      var top: CGFloat = reply?.spacing.top ?? 0
+      if let forwardHeader {
+        top += forwardHeader.spacing.top + forwardHeader.size.height + forwardHeader.spacing.bottom
+      }
+      return top
     }
 
     var photoContentViewTop: CGFloat {
       var top: CGFloat = photo?.spacing.top ?? 0
+      if let forwardHeader {
+        top += forwardHeader.spacing.top + forwardHeader.size.height + forwardHeader.spacing.bottom
+      }
       if let reply {
         top += reply.spacing.top + reply.size.height + reply.spacing.bottom
       }
@@ -232,6 +245,9 @@ class MessageSizeCalculator {
 
     var videoContentViewTop: CGFloat {
       var top: CGFloat = video?.spacing.top ?? 0
+      if let forwardHeader {
+        top += forwardHeader.spacing.top + forwardHeader.size.height + forwardHeader.spacing.bottom
+      }
       if let reply {
         top += reply.spacing.top + reply.size.height + reply.spacing.bottom
       }
@@ -240,6 +256,9 @@ class MessageSizeCalculator {
 
     var documentContentViewTop: CGFloat {
       var top: CGFloat = document?.spacing.top ?? 0
+      if let forwardHeader {
+        top += forwardHeader.spacing.top + forwardHeader.size.height + forwardHeader.spacing.bottom
+      }
       if let reply {
         top += reply.spacing.top + reply.size.height + reply.spacing.bottom
       }
@@ -248,6 +267,9 @@ class MessageSizeCalculator {
 
     var textContentViewTop: CGFloat {
       var top: CGFloat = text?.spacing.top ?? 0
+      if let forwardHeader {
+        top += forwardHeader.spacing.top + forwardHeader.size.height + forwardHeader.spacing.bottom
+      }
       if let reply {
         top += reply.spacing.top + reply.size.height + reply.spacing.bottom
       }
@@ -265,6 +287,9 @@ class MessageSizeCalculator {
 
     var timeViewTop: CGFloat {
       var top: CGFloat = time?.spacing.top ?? 0
+      if let forwardHeader {
+        top += forwardHeader.spacing.top + forwardHeader.size.height + forwardHeader.spacing.bottom
+      }
       if let reply {
         top += reply.spacing.top + reply.size.height + reply.spacing.bottom
       }
@@ -291,6 +316,9 @@ class MessageSizeCalculator {
         return reactionsOutsideBubbleTopInset
       }
       var top: CGFloat = reactions?.spacing.top ?? 0
+      if let forwardHeader {
+        top += forwardHeader.spacing.top + forwardHeader.size.height + forwardHeader.spacing.bottom
+      }
       if let reply {
         top += reply.spacing.top + reply.size.height + reply.spacing.bottom
       }
@@ -317,6 +345,9 @@ class MessageSizeCalculator {
 
     var attachmentsContentViewTop: CGFloat {
       var top: CGFloat = attachments?.spacing.top ?? 0
+      if let forwardHeader {
+        top += forwardHeader.spacing.top + forwardHeader.size.height + forwardHeader.spacing.bottom
+      }
       if let reply {
         top += reply.spacing.top + reply.size.height + reply.spacing.bottom
       }
@@ -364,6 +395,7 @@ class MessageSizeCalculator {
     let hasMedia = message.hasMedia
     let hasDocument = message.documentInfo != nil
     let hasReply = message.message.repliedToMessageId != nil
+    let hasForwardHeader = message.message.forwardFromUserId != nil
     let hasReactions = message.reactions.count > 0
     let renderableAttachments = message.attachments.filter(\.isRenderableAttachment)
     let hasAttachments = !renderableAttachments.isEmpty
@@ -376,7 +408,7 @@ class MessageSizeCalculator {
     let isTextOnly: Bool = hasText && !hasMedia && !hasDocument && !hasAttachments
     let emojiInfo: (count: Int, isAllEmojis: Bool) = isTextOnly ? text.emojiInfo : (0, false)
     // TODO: remove has reply once we confirm reply embed style looks good with emojis
-    let emojiMessage = !hasReply && isTextOnly && emojiInfo.isAllEmojis && emojiInfo.count > 0
+    let emojiMessage = !hasReply && !hasForwardHeader && isTextOnly && emojiInfo.isAllEmojis && emojiInfo.count > 0
     let hasBubbleColor = !emojiMessage && !isSticker
 
     // Font size
@@ -610,6 +642,7 @@ class MessageSizeCalculator {
     var photoPlan: LayoutPlan?
     var videoPlan: LayoutPlan?
     var documentPlan: LayoutPlan?
+    var forwardHeaderPlan: LayoutPlan?
     var replyPlan: LayoutPlan?
     var reactionsPlan: LayoutPlan?
     var reactionItemsPlan: [String: LayoutPlan] = [:]
@@ -654,7 +687,7 @@ class MessageSizeCalculator {
       let textSidePadding = hasBubbleColor ? Theme.messageBubbleContentHorizontalInset : 0
 
       // If just text
-      if !hasMedia, !hasReply {
+      if !hasMedia, !hasReply, !hasForwardHeader {
         textTopSpacing += Theme.messageTextOnlyVerticalInsets
       }
 
@@ -675,6 +708,20 @@ class MessageSizeCalculator {
           bottom: textBottomSpacing,
           right: textSidePadding
         )
+      )
+    }
+
+    // MARK: - Forward Header
+
+    if hasForwardHeader {
+      forwardHeaderPlan = LayoutPlan(size: .zero, spacing: .zero)
+      forwardHeaderPlan!.size.height = Theme.messageNameLabelHeight
+      forwardHeaderPlan!.size.width = 0
+      forwardHeaderPlan!.spacing = .init(
+        top: 4.0,
+        left: Theme.messageBubbleContentHorizontalInset,
+        bottom: 2.0,
+        right: Theme.messageBubbleContentHorizontalInset
       )
     }
 
@@ -897,6 +944,14 @@ class MessageSizeCalculator {
         bubbleWidth = max(bubbleWidth, textPlan.size.width + textPlan.spacing.horizontalTotal + timePlan.size.width)
       }
     }
+    if let forwardHeaderPlan {
+      bubbleHeight += forwardHeaderPlan.size.height
+      bubbleHeight += forwardHeaderPlan.spacing.bottom
+      bubbleWidth = max(
+        bubbleWidth,
+        forwardHeaderPlan.size.width + forwardHeaderPlan.spacing.horizontalTotal
+      )
+    }
     if let replyPlan {
       bubbleHeight += replyPlan.size.height
       bubbleHeight += replyPlan.spacing.bottom
@@ -1002,6 +1057,7 @@ class MessageSizeCalculator {
       document: documentPlan,
       attachmentItems: attachmentItemsPlans,
       attachments: attachmentsPlan,
+      forwardHeader: forwardHeaderPlan,
       reply: replyPlan,
       reactions: reactionsPlan,
       reactionItems: reactionItemsPlan,

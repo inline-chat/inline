@@ -21,6 +21,7 @@ class EmbedMessageView: UIView {
     case replyInMessage
     case replyingInCompose
     case editingInCompose
+    case forwardingInCompose
   }
 
   enum Style {
@@ -143,7 +144,10 @@ class EmbedMessageView: UIView {
     senderNameForColor = nil
 
     headerLabel.text = headerText(for: kind, senderName: senderName)
-    messageLabel.text = "Message not loaded"
+    let fallbackText = "Message not loaded"
+    messageLabel.text = kind == .forwardingInCompose
+      ? forwardDescription(for: senderName, messageText: fallbackText)
+      : fallbackText
 
     let config = UIImage.SymbolConfiguration(pointSize: iconPointSize, weight: .medium)
     imageIconView.image = UIImage(systemName: "exclamationmark.circle", withConfiguration: config)
@@ -158,7 +162,8 @@ class EmbedMessageView: UIView {
     kind: Kind = .replyInMessage,
     outgoing: Bool,
     isOnlyEmoji: Bool,
-    style: Style? = nil
+    style: Style? = nil,
+    senderNameOverride: String? = nil
   ) {
     updateView(
       message: embeddedMessage.message,
@@ -169,7 +174,8 @@ class EmbedMessageView: UIView {
       kind: kind,
       outgoing: outgoing,
       isOnlyEmoji: isOnlyEmoji,
-      style: style
+      style: style,
+      senderNameOverride: senderNameOverride
     )
   }
 
@@ -178,7 +184,8 @@ class EmbedMessageView: UIView {
     kind: Kind,
     outgoing: Bool = false,
     isOnlyEmoji: Bool = false,
-    style: Style? = nil
+    style: Style? = nil,
+    senderNameOverride: String? = nil
   ) {
     updateView(
       message: fullMessage.message,
@@ -189,7 +196,8 @@ class EmbedMessageView: UIView {
       kind: kind,
       outgoing: outgoing,
       isOnlyEmoji: isOnlyEmoji,
-      style: style
+      style: style,
+      senderNameOverride: senderNameOverride
     )
   }
 }
@@ -291,14 +299,15 @@ private extension EmbedMessageView {
     kind: Kind,
     outgoing: Bool,
     isOnlyEmoji: Bool,
-    style: Style?
+    style: Style?,
+    senderNameOverride: String?
   ) {
     self.kind = kind
     self.style = resolveStyle(for: kind, styleOverride: style)
     self.outgoing = outgoing
     self.isOnlyEmoji = isOnlyEmoji
 
-    let senderName = from?.shortDisplayName ?? "User"
+    let senderName = senderNameOverride ?? from?.shortDisplayName ?? "User"
     senderNameForColor = AvatarColorUtility.formatNameForHashing(
       firstName: from?.firstName,
       lastName: from?.lastName,
@@ -306,7 +315,12 @@ private extension EmbedMessageView {
     )
 
     headerLabel.text = headerText(for: kind, senderName: senderName)
-    messageLabel.text = messageContent(for: message, displayText: displayText)
+    messageLabel.text = messageContent(
+      for: message,
+      displayText: displayText,
+      senderName: senderName,
+      kind: kind
+    )
 
     updateIcon(for: message)
 
@@ -325,41 +339,56 @@ private extension EmbedMessageView {
       return "Replying to \(senderName)"
     case .editingInCompose:
       return "Editing message"
+    case .forwardingInCompose:
+      return "Forward Message"
     }
   }
 
-  func messageContent(for message: Message, displayText: String?) -> String {
+  func messageContent(
+    for message: Message,
+    displayText: String?,
+    senderName: String,
+    kind: Kind
+  ) -> String {
     let resolvedText = (displayText ?? message.text)?.replacingOccurrences(of: "\n", with: " ")
 
+    let baseContent: String
     if message.hasUnsupportedTypes {
-      return "Unsupported message"
-    }
-    if message.isSticker == true {
-      return "Sticker"
-    }
-    if message.hasVideo {
+      baseContent = "Unsupported message"
+    } else if message.isSticker == true {
+      baseContent = "Sticker"
+    } else if message.hasVideo {
       if message.hasText, let resolvedText {
-        return resolvedText
+        baseContent = resolvedText
+      } else {
+        baseContent = "Video"
       }
-      return "Video"
-    }
-    if message.documentId != nil {
+    } else if message.documentId != nil {
       if message.hasText, let resolvedText {
-        return resolvedText
+        baseContent = resolvedText
+      } else {
+        baseContent = "Document"
       }
-      return "Document"
-    }
-    if message.hasPhoto {
+    } else if message.hasPhoto {
       if message.hasText, let resolvedText {
-        return resolvedText
+        baseContent = resolvedText
+      } else {
+        baseContent = "Photo"
       }
-      return "Photo"
-    }
-    if message.hasText, let resolvedText {
-      return resolvedText
+    } else if message.hasText, let resolvedText {
+      baseContent = resolvedText
+    } else {
+      baseContent = "Message"
     }
 
-    return "Message"
+    if kind == .forwardingInCompose {
+      return forwardDescription(for: senderName, messageText: baseContent)
+    }
+    return baseContent
+  }
+
+  func forwardDescription(for senderName: String, messageText: String) -> String {
+    "\(senderName): \(messageText)"
   }
 
   func updateIcon(for message: Message) {

@@ -82,6 +82,19 @@ extension UIMessageView {
     return view
   }
 
+  func createForwardHeaderLabel() -> UILabel {
+    let label = UILabel()
+    label.font = .preferredFont(forTextStyle: .caption1)
+    label.textColor = ThemeManager.shared.selected.accent
+    label.numberOfLines = 1
+    label.lineBreakMode = .byTruncatingTail
+    label.setContentCompressionResistancePriority(.required, for: .vertical)
+    label.isUserInteractionEnabled = true
+    let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleForwardHeaderTap))
+    label.addGestureRecognizer(tapGesture)
+    return label
+  }
+
   func createPhotoView() -> PhotoView {
     let view = PhotoView(fullMessage)
     view.translatesAutoresizingMaskIntoConstraints = false

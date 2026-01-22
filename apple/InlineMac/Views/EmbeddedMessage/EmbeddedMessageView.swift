@@ -23,6 +23,7 @@ class EmbeddedMessageView: NSView {
     case replyInMessage
     case replyingInCompose
     case editingInCompose
+    case forwardingInCompose
   }
 
   private var kind: Kind = .replyInMessage
@@ -291,6 +292,9 @@ class EmbeddedMessageView: NSView {
 
       case .editingInCompose:
         "Edit Message"
+
+      case .forwardingInCompose:
+        "Forward Message"
     }
 
     // Update colors after setting senderNameForColor
@@ -303,7 +307,15 @@ class EmbeddedMessageView: NSView {
     let overlaySymbol = videoInfo != nil ? "play.circle.fill" : nil
     updatePhotoView(photoInfo: previewPhoto, overlaySymbol: overlaySymbol)
 
-    messageLabel.stringValue = messageContent
+    if kind == .forwardingInCompose {
+      messageLabel.stringValue = forwardDescription(for: senderName, messageText: messageContent)
+    } else {
+      messageLabel.stringValue = messageContent
+    }
+  }
+
+  private func forwardDescription(for senderName: String, messageText: String) -> String {
+    "\(senderName): \(messageText)"
   }
 
   private func getMessageContentText(from message: Message) -> String {

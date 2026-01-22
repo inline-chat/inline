@@ -15,11 +15,12 @@ class ComposeEmbedViewContent: UIView, UIGestureRecognizerDelegate {
   enum Mode {
     case reply
     case edit
+    case forward
   }
 
   var mode: Mode = .reply
   var peerId: Peer
-  private var chatId: Int64
+  private var messageChatId: Int64
   private var messageId: Int64
   private var viewModel: FullMessageViewModel
 
@@ -40,13 +41,12 @@ class ComposeEmbedViewContent: UIView, UIGestureRecognizerDelegate {
     return button
   }()
 
-  init(peerId: Peer, chatId: Int64, messageId: Int64) {
-    mode = ChatState.shared.getState(peer: peerId).editingMessageId != nil ? .edit : .reply
-
+  init(peerId: Peer, messageChatId: Int64, messageId: Int64, mode: Mode) {
+    self.mode = mode
     self.peerId = peerId
-    self.chatId = chatId
+    self.messageChatId = messageChatId
     self.messageId = messageId
-    viewModel = FullMessageViewModel(db: AppDatabase.shared, messageId: messageId, chatId: chatId)
+    viewModel = FullMessageViewModel(db: AppDatabase.shared, messageId: messageId, chatId: messageChatId)
 
     super.init(frame: .zero)
 
@@ -103,7 +103,7 @@ class ComposeEmbedViewContent: UIView, UIGestureRecognizerDelegate {
   }
 
   func setMessageIdToVM(_ msgId: Int64) {
-    viewModel = FullMessageViewModel(db: AppDatabase.shared, messageId: msgId, chatId: chatId)
+    viewModel = FullMessageViewModel(db: AppDatabase.shared, messageId: msgId, chatId: messageChatId)
   }
 
   func fetchMessage(_ msgId: Int64, chatId: Int64) {
@@ -115,9 +115,19 @@ class ComposeEmbedViewContent: UIView, UIGestureRecognizerDelegate {
   }
 
   func updateContent() {
-    let kind: EmbedMessageView.Kind = mode == .reply ? .replyingInCompose : .editingInCompose
+    let kind: EmbedMessageView.Kind = switch mode {
+    case .reply:
+      .replyingInCompose
+    case .edit:
+      .editingInCompose
+    case .forward:
+      .forwardingInCompose
+    }
     let style: EmbedMessageView.Style = mode == .reply ? .replyBubble : .compose
-    let senderName = viewModel.fullMessage?.from?.shortDisplayName ?? "User"
+    let fallbackSenderName = viewModel.fullMessage?.from?.shortDisplayName ?? "User"
+    let forwardSenderName = mode == .forward
+      ? (viewModel.fullMessage?.forwardFromUserInfo?.user.shortDisplayName ?? fallbackSenderName)
+      : fallbackSenderName
 
     if let fullMessage = viewModel.fullMessage {
       embedView.configure(
@@ -125,12 +135,13 @@ class ComposeEmbedViewContent: UIView, UIGestureRecognizerDelegate {
         kind: kind,
         outgoing: false,
         isOnlyEmoji: false,
-        style: style
+        style: style,
+        senderNameOverride: mode == .forward ? forwardSenderName : nil
       )
     } else {
       embedView.showNotLoaded(
         kind: kind,
-        senderName: senderName,
+        senderName: forwardSenderName,
         outgoing: false,
         isOnlyEmoji: false,
         style: style
@@ -152,6 +163,8 @@ class ComposeEmbedViewContent: UIView, UIGestureRecognizerDelegate {
         composeView.clearDraft()
         composeView.updateHeight()
       }
+    case .forward:
+      ChatState.shared.clearForwarding(peer: peerId)
     }
   }
 
@@ -163,7 +176,7 @@ class ComposeEmbedViewContent: UIView, UIGestureRecognizerDelegate {
       object: nil,
       userInfo: [
         "repliedToMessageId": messageId,
-        "chatId": chatId,
+        "chatId": messageChatId,
       ]
     )
   }

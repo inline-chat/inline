@@ -35,7 +35,7 @@ class MessageViewAppKit: NSView {
       return true
     }
     guard let currentUserId = Auth.shared.currentUserId else { return false }
-    return currentUserId == 1900 || currentUserId == 1600
+    return currentUserId == 1_900 || currentUserId == 1_600
   }
 
   private static var isDebugBuild: Bool {
@@ -97,6 +97,10 @@ class MessageViewAppKit: NSView {
     props.layout.hasReply
   }
 
+  private var hasForwardHeader: Bool {
+    props.layout.hasForwardHeader
+  }
+
   private var hasText: Bool {
     props.layout.hasText
   }
@@ -119,6 +123,65 @@ class MessageViewAppKit: NSView {
 
   private var textColor: NSColor {
     Self.textColor(outgoing: outgoing)
+  }
+
+  private var forwardHeaderTextColor: NSColor {
+    if outgoing, props.layout.hasBubbleColor {
+      return .white
+    }
+    return .controlAccentColor
+  }
+
+  private var forwardHeaderTitle: String {
+    if message.forwardFromPeerThreadId != nil {
+      let title = fullMessage.forwardFromChatInfo?.title
+      if let title, !title.isEmpty {
+        return title
+      }
+      return "Chat"
+    }
+
+    if let peerUserId = message.forwardFromPeerUserId {
+      if let peerUserInfo = fullMessage.forwardFromPeerUserInfo {
+        return peerUserInfo.user.shortDisplayName
+      }
+
+      if peerUserId == message.forwardFromUserId,
+         let forwardUserInfo = fullMessage.forwardFromUserInfo
+      {
+        return forwardUserInfo.user.shortDisplayName
+      }
+    }
+
+    return "User"
+  }
+
+  private var forwardHeaderIsPrivate: Bool {
+    if message.forwardFromPeerThreadId != nil {
+      return fullMessage.forwardFromChatInfo == nil
+    }
+
+    if let peerUserId = message.forwardFromPeerUserId {
+      if fullMessage.forwardFromPeerUserInfo != nil {
+        return false
+      }
+
+      if peerUserId == message.forwardFromUserId,
+         fullMessage.forwardFromUserInfo != nil
+      {
+        return false
+      }
+      return true
+    }
+
+    return true
+  }
+
+  private var forwardHeaderText: String {
+    if forwardHeaderIsPrivate {
+      return "Forwarded from a private chat"
+    }
+    return "Forwarded from: \(forwardHeaderTitle)"
   }
 
   static func textColor(outgoing: Bool) -> NSColor {
@@ -210,6 +273,23 @@ class MessageViewAppKit: NSView {
     label.font = senderFont
     label.lineBreakMode = .byTruncatingTail
 
+    return label
+  }()
+
+  private lazy var forwardHeaderLabel: NSTextField = {
+    let label = NSTextField(labelWithString: "")
+    label.translatesAutoresizingMaskIntoConstraints = false
+    label.font = .preferredFont(forTextStyle: .callout)
+    label.textColor = forwardHeaderTextColor
+    label.lineBreakMode = .byTruncatingTail
+    label.maximumNumberOfLines = 1
+    label.cell?.usesSingleLineMode = true
+    label.heightAnchor.constraint(equalToConstant: Theme.messageNameLabelHeight).isActive = true
+    let clickGesture = NSClickGestureRecognizer(
+      target: self,
+      action: #selector(handleForwardHeaderClick)
+    )
+    label.addGestureRecognizer(clickGesture)
     return label
   }()
 
@@ -478,6 +558,12 @@ class MessageViewAppKit: NSView {
 
     addSubview(contentView)
 
+    if hasForwardHeader {
+      forwardHeaderLabel.textColor = forwardHeaderTextColor
+      forwardHeaderLabel.stringValue = forwardHeaderText
+      contentView.addSubview(forwardHeaderLabel)
+    }
+
     if hasReply {
       contentView.addSubview(replyView)
     }
@@ -577,7 +663,9 @@ class MessageViewAppKit: NSView {
       NSPasteboard.general.clearContents()
       NSPasteboard.general.setString(email, forType: .string)
       ToastCenter.shared.showSuccess("Copied email")
-    } else if let phoneNumber = textStorage.attribute(.phoneNumber, at: characterIndex, effectiveRange: nil) as? String {
+    } else if let phoneNumber = textStorage
+      .attribute(.phoneNumber, at: characterIndex, effectiveRange: nil) as? String
+    {
       NSPasteboard.general.clearContents()
       NSPasteboard.general.setString(phoneNumber, forType: .string)
       ToastCenter.shared.showSuccess("Copied number")
@@ -852,6 +940,35 @@ class MessageViewAppKit: NSView {
     }
   }
 
+  @objc private func handleForwardHeaderClick(_: NSClickGestureRecognizer) {
+    guard let forwardedMessageId = message.forwardFromMessageId else { return }
+
+    let forwardPeer: Peer? = if let userId = message.forwardFromPeerUserId {
+      .user(id: userId)
+    } else if let threadId = message.forwardFromPeerThreadId {
+      .thread(id: threadId)
+    } else {
+      nil
+    }
+
+    let targetPeer = forwardPeer ?? message.peerId
+
+    if targetPeer == message.peerId {
+      let chatState = ChatsManager.shared.get(for: targetPeer, chatId: message.chatId)
+      chatState.scrollTo(msgId: forwardedMessageId)
+      return
+    }
+
+    guard let chat = try? Chat.getByPeerId(peerId: targetPeer) else {
+      ToastCenter.shared.showError("You don't have access to that chat")
+      return
+    }
+
+    Nav.main.open(.chat(peer: targetPeer))
+    let chatState = ChatsManager.shared.get(for: targetPeer, chatId: chat.id)
+    chatState.scrollTo(msgId: forwardedMessageId)
+  }
+
   private func setupConstraints() {
     var constraints: [NSLayoutConstraint] = []
     let layout = props.layout
@@ -1073,10 +1190,31 @@ class MessageViewAppKit: NSView {
       }
     }
 
+    if let forwardHeader = layout.forwardHeader {
+      forwardHeaderTopConstraint = forwardHeaderLabel.topAnchor.constraint(
+        equalTo: contentView.topAnchor,
+        constant: forwardHeader.spacing.top
+      )
+
+      constraints.append(
+        contentsOf: [
+          forwardHeaderLabel.leadingAnchor.constraint(
+            equalTo: contentView.leadingAnchor,
+            constant: forwardHeader.spacing.left
+          ),
+          forwardHeaderLabel.trailingAnchor.constraint(
+            equalTo: contentView.trailingAnchor,
+            constant: -forwardHeader.spacing.right
+          ),
+          forwardHeaderTopConstraint!,
+        ]
+      )
+    }
+
     if let reply = layout.reply {
       replyViewTopConstraint = replyView.topAnchor.constraint(
         equalTo: contentView.topAnchor,
-        constant: reply.spacing.top
+        constant: layout.replyContentTop
       )
 
       constraints.append(
@@ -1180,6 +1318,7 @@ class MessageViewAppKit: NSView {
   private var videoViewTopConstraint: NSLayoutConstraint?
 
   private var replyViewTopConstraint: NSLayoutConstraint?
+  private var forwardHeaderTopConstraint: NSLayoutConstraint?
 
   private var documentViewTopConstraint: NSLayoutConstraint?
 
@@ -1270,8 +1409,17 @@ class MessageViewAppKit: NSView {
        let replyViewTopConstraint
     {
       log.trace("Updating reply view constraints for message \(reply.size)")
-      if replyViewTopConstraint.constant != reply.spacing.top {
-        replyViewTopConstraint.constant = reply.spacing.top
+      if replyViewTopConstraint.constant != props.layout.replyContentTop {
+        replyViewTopConstraint.constant = props.layout.replyContentTop
+      }
+    }
+
+    if let forwardHeader = props.layout.forwardHeader,
+       let forwardHeaderTopConstraint
+    {
+      log.trace("Updating forward header constraints for message \(forwardHeader.size)")
+      if forwardHeaderTopConstraint.constant != forwardHeader.spacing.top {
+        forwardHeaderTopConstraint.constant = forwardHeader.spacing.top
       }
     }
 
@@ -1722,23 +1870,26 @@ class MessageViewAppKit: NSView {
     guard let window, let presentingController = window.contentViewController else { return }
 
     weak var weakHostingController: NSViewController?
-    let rootView = ForwardMessagesSheet(messages: [fullMessage]) { count, singleTitle in
-      let message = count == 1
-        ? "Forwarded to \(singleTitle ?? "chat")"
-        : "Forwarded to \(count) chats"
-      ToastCenter.shared.showSuccess(message)
+    let rootView = ForwardMessagesSheet(messages: [fullMessage]) { destination, selection in
+      guard let destinationChatId = destination.dialog.chatId ?? destination.chat?.id else {
+        Log.shared.error("Forward nav failed: missing destination chat id")
+        return
+      }
+      let destinationPeer = destination.peerId
+      let state = ChatsManager.get(for: destinationPeer, chatId: destinationChatId)
+      state.setForwardingMessages(
+        fromPeerId: selection.fromPeerId,
+        sourceChatId: selection.sourceChatId,
+        messageIds: selection.messageIds
+      )
+
+      Nav.main.open(.chat(peer: destinationPeer))
       NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
-    } onForwardFailure: { forwardedCount, totalCount in
-      let message = forwardedCount > 0
-        ? "Forwarded to \(forwardedCount) chats, some failed"
-        : "Failed to forward"
-      ToastCenter.shared.showError(message)
     } onClose: { [weak presentingController] in
       guard let hostingController = weakHostingController else { return }
       presentingController?.dismiss(hostingController)
     }
-      .appDatabase(AppDatabase.shared)
-      .environment(\.realtimeV2, Api.realtime)
+    .appDatabase(AppDatabase.shared)
 
     let hostingController = NSHostingController(rootView: AnyView(rootView))
     weakHostingController = hostingController
@@ -1930,6 +2081,11 @@ class MessageViewAppKit: NSView {
 
     // Update bubble background
     bubbleView.backgroundColor = bubbleBackgroundColor
+
+    if hasForwardHeader {
+      forwardHeaderLabel.textColor = forwardHeaderTextColor
+      forwardHeaderLabel.stringValue = forwardHeaderText
+    }
 
     // Photo
     if hasPhoto {

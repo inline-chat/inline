@@ -169,6 +169,30 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     request(for: Message.from)
   }
 
+  public static let forwardFromUser = belongsTo(
+    User.self,
+    using: ForeignKey(["forwardFromUserId"], to: ["id"])
+  )
+  public var forwardFromUser: QueryInterfaceRequest<User> {
+    request(for: Message.forwardFromUser)
+  }
+
+  public static let forwardFromPeerUser = belongsTo(
+    User.self,
+    using: ForeignKey(["forwardFromPeerUserId"], to: ["id"])
+  )
+  public var forwardFromPeerUser: QueryInterfaceRequest<User> {
+    request(for: Message.forwardFromPeerUser)
+  }
+
+  public static let forwardFromPeerThread = belongsTo(
+    Chat.self,
+    using: ForeignKey(["forwardFromPeerThreadId"], to: ["id"])
+  )
+  public var forwardFromPeerThread: QueryInterfaceRequest<Chat> {
+    request(for: Message.forwardFromPeerThread)
+  }
+
   // needs chat id as well
   public static let repliedToMessage = belongsTo(
     Message.self,

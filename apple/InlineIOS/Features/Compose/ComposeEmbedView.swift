@@ -8,25 +8,33 @@ import UIKit
 enum EmbedType: String {
   case edit
   case reply
+  case forward
 }
 
 class ComposeEmbedView: UIView {
   static let height: CGFloat = ComposeEmbedViewContent.height
 
   var peerId: Peer
-  private var chatId: Int64
+  private var messageChatId: Int64
   private var messageId: Int64
+  private var mode: ComposeEmbedViewContent.Mode
 
   lazy var content: ComposeEmbedViewContent = {
-    let view = ComposeEmbedViewContent(peerId: peerId, chatId: chatId, messageId: messageId)
+    let view = ComposeEmbedViewContent(
+      peerId: peerId,
+      messageChatId: messageChatId,
+      messageId: messageId,
+      mode: mode
+    )
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
 
-  init(peerId: Peer, chatId: Int64, messageId: Int64) {
+  init(peerId: Peer, messageChatId: Int64, messageId: Int64, mode: ComposeEmbedViewContent.Mode) {
     self.peerId = peerId
-    self.chatId = chatId
+    self.messageChatId = messageChatId
     self.messageId = messageId
+    self.mode = mode
 
     super.init(frame: .zero)
 

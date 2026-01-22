@@ -1535,31 +1535,22 @@ private extension MessagesCollectionView {
 
       guard let viewController = findViewController(from: currentCollectionView) else { return }
 
-      let rootView = InlineUI.ForwardMessagesSheet(messages: [fullMessage]) { count, singleTitle in
-        let message = count == 1
-          ? "Forwarded to \(singleTitle ?? "chat")"
-          : "Forwarded to \(count) chats"
-        ToastManager.shared.showToast(
-          message,
-          type: .success,
-          systemImage: "checkmark.circle"
+      let rootView = InlineUI.ForwardMessagesSheet(messages: [fullMessage]) { destination, selection in
+        let destinationPeer = destination.peerId
+        ChatState.shared.setForwardingMessages(
+          peer: destinationPeer,
+          fromPeerId: selection.fromPeerId,
+          sourceChatId: selection.sourceChatId,
+          messageIds: selection.messageIds
         )
 
-        let generator = UIImpactFeedbackGenerator(style: .light)
-        generator.prepare()
-        generator.impactOccurred(intensity: 1.0)
-      } onForwardFailure: { forwardedCount, totalCount in
-        let message = forwardedCount > 0
-          ? "Forwarded to \(forwardedCount) chats, some failed"
-          : "Failed to forward"
-        ToastManager.shared.showToast(
-          message,
-          type: .error,
-          systemImage: "exclamationmark.triangle"
-        )
+        if let router = (UIApplication.shared.delegate as? AppDelegate)?.router {
+          router.push(.chat(peer: destinationPeer))
+        } else {
+          Log.shared.error("Forward nav failed: router unavailable")
+        }
       }
-        .appDatabase(AppDatabase.shared)
-        .environment(\.realtimeV2, Api.realtime)
+      .appDatabase(AppDatabase.shared)
 
       let hostingController = UIHostingController(rootView: rootView)
       hostingController.modalPresentationStyle = UIModalPresentationStyle.pageSheet

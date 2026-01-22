@@ -57,7 +57,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   var canSend: Bool {
     let hasText = !(textView.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
     let hasAttachments = !attachmentItems.isEmpty
-    return hasText || hasAttachments
+    let hasForward = peerId.map { ChatState.shared.getState(peer: $0).forwardContext != nil } ?? false
+    return hasText || hasAttachments || hasForward
   }
 
   var onHeightChange: ((CGFloat) -> Void)?
@@ -91,6 +92,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   var embedContainerHeightConstraint: NSLayoutConstraint?
   private var embedView: ComposeEmbedView?
   private var currentEmbedMessageId: Int64?
+  private var currentEmbedMode: ComposeEmbedViewContent.Mode?
+  private var currentEmbedMessageChatId: Int64?
 
   // MARK: - Initialization
 
@@ -329,14 +332,15 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     guard let peerId else { return }
     let state = ChatState.shared.getState(peer: peerId)
     let isEditing = state.editingMessageId != nil
+    let forwardContext = state.forwardContext
     guard let chatId else { return }
 
     let rawText = textView.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     let hasText = !rawText.isEmpty
     let hasAttachments = !attachmentItems.isEmpty
 
-    // Can't send if no text and no attachments
-    guard hasText || hasAttachments else { return }
+    // Can't send if no text, no attachments, and not forwarding
+    guard hasText || hasAttachments || forwardContext != nil else { return }
 
     // Extract all entities using TextProcessing module
     let attributedText = textView.attributedText ?? NSAttributedString()
@@ -353,21 +357,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       rawText
     }
 
-    if isEditing {
-      Task(priority: .userInitiated) { @MainActor in
-        try await Api.realtime.send(.editMessage(
-          messageId: state.editingMessageId ?? 0,
-          text: textFromAttributedString ?? text ?? "",
-          chatId: chatId,
-          peerId: peerId,
-          entities: editEntities
-        ))
-      }
-
-      ChatState.shared.clearEditingMessageId(peer: peerId)
-    } else {
-      let replyToMessageId = state.replyingMessageId
-
+    func sendTextAndAttachments(replyToMessageId: Int64?) {
       if attachmentItems.isEmpty {
         Task(priority: .userInitiated) { @MainActor in
           try await Api.realtime.send(
@@ -405,6 +395,44 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
           )))
         }
       }
+    }
+
+    if isEditing {
+      Task(priority: .userInitiated) { @MainActor in
+        try await Api.realtime.send(.editMessage(
+          messageId: state.editingMessageId ?? 0,
+          text: textFromAttributedString ?? text ?? "",
+          chatId: chatId,
+          peerId: peerId,
+          entities: editEntities
+        ))
+      }
+
+      ChatState.shared.clearEditingMessageId(peer: peerId)
+    } else if let forwardContext {
+      guard !forwardContext.messageIds.isEmpty else {
+        log.error("Forward failed: empty message ids")
+        return
+      }
+      if hasText || hasAttachments {
+        sendTextAndAttachments(replyToMessageId: nil)
+      }
+      Task(priority: .userInitiated) { @MainActor in
+        do {
+          try await Api.realtime.send(.forwardMessages(
+            fromPeerId: forwardContext.fromPeerId,
+            toPeerId: peerId,
+            messageIds: forwardContext.messageIds
+          ))
+        } catch {
+          log.error("Forward failed", error: error)
+        }
+      }
+
+      ChatState.shared.clearForwarding(peer: peerId)
+    } else {
+      let replyToMessageId = state.replyingMessageId
+      sendTextAndAttachments(replyToMessageId: replyToMessageId)
 
       ChatState.shared.clearReplyingMessageId(peer: peerId)
     }
@@ -473,6 +501,18 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       name: .init("ChatStateClearReplyCalled"),
       object: nil
     )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleForwardStateChange),
+      name: .init("ChatStateSetForwardCalled"),
+      object: nil
+    )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleForwardStateChange),
+      name: .init("ChatStateClearForwardCalled"),
+      object: nil
+    )
   }
 
   func setupStickerObserver() {
@@ -536,26 +576,79 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     updateEmbedState(animated: true)
   }
 
+  @objc private func handleForwardStateChange() {
+    updateEmbedState(animated: true)
+    updateSendButtonVisibility()
+  }
+
   private func updateEmbedState(animated: Bool) {
     guard let peerId, let chatId else { return }
 
     let state = ChatState.shared.getState(peer: peerId)
-    let messageId = state.replyingMessageId ?? state.editingMessageId
-
-    if let messageId {
-      showEmbedView(peerId: peerId, messageId: messageId, chatId: chatId, animated: animated)
+    if let editingMessageId = state.editingMessageId {
+      showEmbedView(
+        peerId: peerId,
+        messageId: editingMessageId,
+        messageChatId: chatId,
+        mode: .edit,
+        animated: animated
+      )
       becomeFirstResponder()
       textView.becomeFirstResponder()
-    } else {
-      hideEmbedView(animated: animated)
+      return
     }
+
+    if let forwardContext = state.forwardContext,
+       let previewMessageId = forwardContext.messageIds.first
+    {
+      showEmbedView(
+        peerId: peerId,
+        messageId: previewMessageId,
+        messageChatId: forwardContext.sourceChatId,
+        mode: .forward,
+        animated: animated
+      )
+      becomeFirstResponder()
+      textView.becomeFirstResponder()
+      updateSendButtonVisibility()
+      return
+    }
+
+    if let replyingMessageId = state.replyingMessageId {
+      showEmbedView(
+        peerId: peerId,
+        messageId: replyingMessageId,
+        messageChatId: chatId,
+        mode: .reply,
+        animated: animated
+      )
+      becomeFirstResponder()
+      textView.becomeFirstResponder()
+      return
+    }
+
+    hideEmbedView(animated: animated)
   }
 
-  private func showEmbedView(peerId: InlineKit.Peer, messageId: Int64, chatId: Int64, animated: Bool) {
-    let needsNewView = embedView == nil || currentEmbedMessageId != messageId
+  private func showEmbedView(
+    peerId: InlineKit.Peer,
+    messageId: Int64,
+    messageChatId: Int64,
+    mode: ComposeEmbedViewContent.Mode,
+    animated: Bool
+  ) {
+    let needsNewView = embedView == nil ||
+      currentEmbedMessageId != messageId ||
+      currentEmbedMode != mode ||
+      currentEmbedMessageChatId != messageChatId
     if needsNewView {
       embedView?.removeFromSuperview()
-      let newEmbedView = ComposeEmbedView(peerId: peerId, chatId: chatId, messageId: messageId)
+      let newEmbedView = ComposeEmbedView(
+        peerId: peerId,
+        messageChatId: messageChatId,
+        messageId: messageId,
+        mode: mode
+      )
       newEmbedView.translatesAutoresizingMaskIntoConstraints = false
       UIView.performWithoutAnimation {
         embedContainerView.addSubview(newEmbedView)
@@ -569,6 +662,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       }
       embedView = newEmbedView
       currentEmbedMessageId = messageId
+      currentEmbedMode = mode
+      currentEmbedMessageChatId = messageChatId
     }
 
     if embedContainerView.isHidden {
@@ -598,6 +693,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       self.embedView?.removeFromSuperview()
       self.embedView = nil
       self.currentEmbedMessageId = nil
+      self.currentEmbedMode = nil
+      self.currentEmbedMessageChatId = nil
       self.embedContainerView.isHidden = true
     }
 

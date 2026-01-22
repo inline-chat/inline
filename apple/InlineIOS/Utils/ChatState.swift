@@ -9,6 +9,13 @@ final class ChatState: ObservableObject {
  public struct State {
     var replyingMessageId: Int64?
     var editingMessageId: Int64?
+    var forwardContext: ForwardContext?
+  }
+
+  public struct ForwardContext: Codable {
+    var fromPeerId: Peer
+    var sourceChatId: Int64
+    var messageIds: [Int64]
   }
 
   @Published var states: [Peer: State] = [:]
@@ -36,6 +43,7 @@ final class ChatState: ObservableObject {
   }
 
   func setReplyingMessageId(peer: Peer, id: Int64) {
+    clearForwarding(peer: peer)
     var state = getState(peer: peer)
     state.replyingMessageId = id
     states[peer] = state
@@ -53,6 +61,7 @@ final class ChatState: ObservableObject {
   }
 
   func setEditingMessageId(peer: Peer, id: Int64) {
+    clearForwarding(peer: peer)
     var state = getState(peer: peer)
     state.editingMessageId = id
     states[peer] = state
@@ -85,6 +94,45 @@ final class ChatState: ObservableObject {
     state.editingMessageId = nil
     states[peer] = state
     NotificationCenter.default.post(name: .init("ChatStateClearEditingCalled"), object: nil)
+
+    Task(priority: .background) {
+      persistStates()
+    }
+  }
+
+  func setForwardingMessages(
+    peer: Peer,
+    fromPeerId: Peer,
+    sourceChatId: Int64,
+    messageIds: [Int64]
+  ) {
+    clearReplyingMessageId(peer: peer)
+    clearEditingMessageId(peer: peer)
+    var state = getState(peer: peer)
+    state.forwardContext = ForwardContext(
+      fromPeerId: fromPeerId,
+      sourceChatId: sourceChatId,
+      messageIds: messageIds
+    )
+    states[peer] = state
+
+    NotificationCenter.default.post(
+      name: .init("ChatStateSetForwardCalled"),
+      object: nil,
+      userInfo: ["messageIds": messageIds]
+    )
+
+    Task(priority: .background) {
+      persistStates()
+    }
+  }
+
+  func clearForwarding(peer: Peer) {
+    var state = getState(peer: peer)
+    guard state.forwardContext != nil else { return }
+    state.forwardContext = nil
+    states[peer] = state
+    NotificationCenter.default.post(name: .init("ChatStateClearForwardCalled"), object: nil)
 
     Task(priority: .background) {
       persistStates()
