@@ -10,7 +10,10 @@
     "release:cli:install": "bun run release-cli.ts upload-install",
     "release:cli:sign-notarize": "bun run release-cli.ts sign-notarize",
     "release:cli:dry-run": "bun run release-cli.ts release-dry-run",
-    "release:macos": "bun run macos/release-direct.ts"
+    "release:macos": "bun run macos/release-direct.ts",
+    "macos:build-direct": "bash macos/build-direct.sh",
+    "macos:release-local": "bash macos/release-local.sh",
+    "macos:appcast-only": "bash macos/appcast-only.sh"
   },
   "dependencies": {},
   "devDependencies": {
