@@ -705,8 +705,8 @@ async function sendNotifications(input: SendPushForMsgInput) {
   // TODO: send to users who have it set to All immediately
   // Handle DMs and threads
   for (let userId of updateGroup.userIds) {
-    if (userId === currentUserId && !isNudge) {
-      // Don't send push notifications to yourself unless it's a nudge.
+    if (userId === currentUserId) {
+      // Don't send push notifications to yourself.
       continue
     }
 
