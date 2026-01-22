@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 class MainSidebar: NSViewController {
   private let dependencies: AppDependencies
   private let listView: MainSidebarList
@@ -53,6 +54,68 @@ class MainSidebar: NSViewController {
     return button
   }()
 
+  private lazy var plusButton: MainSidebarFooterIconButton = {
+    let button = MainSidebarFooterIconButton(
+      symbolName: "plus",
+      accessibilityLabel: "New"
+    )
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.target = self
+    button.action = #selector(handlePlusButton)
+    button.toolTip = "New"
+    return button
+  }()
+
+  private lazy var notificationsButton: NSHostingView<AnyView> = {
+    let hostingView = NSHostingView(
+      rootView: AnyView(
+        NotificationSettingsButton()
+          .environmentObject(dependencies.userSettings.notification)
+      )
+    )
+    hostingView.translatesAutoresizingMaskIntoConstraints = false
+    return hostingView
+  }()
+
+  private lazy var newSpaceMenuItem: NSMenuItem = {
+    let item = NSMenuItem(
+      title: "New Space",
+      action: #selector(handleNewSpace),
+      keyEquivalent: ""
+    )
+    item.target = self
+    item.image = menuIcon(named: "plus")
+    return item
+  }()
+
+  private lazy var inviteMenuItem: NSMenuItem = {
+    let item = NSMenuItem(
+      title: "Invite",
+      action: #selector(handleInvite),
+      keyEquivalent: ""
+    )
+    item.target = self
+    item.image = menuIcon(named: "person.badge.plus")
+    return item
+  }()
+
+  private lazy var newThreadMenuItem: NSMenuItem = {
+    let item = NSMenuItem(
+      title: "New Thread",
+      action: #selector(handleNewThread),
+      keyEquivalent: ""
+    )
+    item.target = self
+    item.image = menuIcon(named: "bubble.left.and.bubble.right")
+    return item
+  }()
+
+  private lazy var plusMenu: NSMenu = {
+    let menu = NSMenu()
+    menu.items = [newSpaceMenuItem, inviteMenuItem, newThreadMenuItem]
+    return menu
+  }()
+
   private lazy var archiveEmptyView: NSStackView = {
     let label = NSTextField(labelWithString: "You haven't archived any chats yet!")
     label.font = NSFont.systemFont(ofSize: 13, weight: .medium)
@@ -71,6 +134,7 @@ class MainSidebar: NSViewController {
 
   private var headerTopConstraint: NSLayoutConstraint?
   private var switchToInboxObserver: NSObjectProtocol?
+  private static let footerButtonSpacing: CGFloat = 6
 
   override func loadView() {
     view = NSView()
@@ -84,6 +148,8 @@ class MainSidebar: NSViewController {
     view.addSubview(listView)
     view.addSubview(footerView)
     footerView.addSubview(archiveButton)
+    footerView.addSubview(plusButton)
+    footerView.addSubview(notificationsButton)
     view.addSubview(archiveEmptyView)
 
     headerTopConstraint = headerView.topAnchor.constraint(equalTo: view.topAnchor, constant: headerTopInset())
@@ -107,6 +173,16 @@ class MainSidebar: NSViewController {
       archiveButton.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
       archiveButton.widthAnchor.constraint(equalToConstant: 28),
       archiveButton.heightAnchor.constraint(equalToConstant: 28),
+
+      plusButton.leadingAnchor.constraint(equalTo: archiveButton.trailingAnchor, constant: Self.footerButtonSpacing),
+      plusButton.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
+      plusButton.widthAnchor.constraint(equalToConstant: 28),
+      plusButton.heightAnchor.constraint(equalToConstant: 28),
+
+      notificationsButton.trailingAnchor.constraint(equalTo: footerView.trailingAnchor, constant: -Self.edgeInsets),
+      notificationsButton.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
+      notificationsButton.widthAnchor.constraint(equalToConstant: 28),
+      notificationsButton.heightAnchor.constraint(equalToConstant: 28),
 
       archiveEmptyView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
       archiveEmptyView.centerYAnchor.constraint(equalTo: listView.centerYAnchor),
@@ -163,6 +239,29 @@ class MainSidebar: NSViewController {
   @objc private func handleArchiveButton() {
     let nextMode: MainSidebarMode = activeMode == .archive ? .inbox : .archive
     setContent(for: nextMode)
+  }
+
+  @objc private func handlePlusButton(_ sender: NSButton) {
+    let point = NSPoint(x: 0, y: sender.bounds.maxY + 6)
+    plusMenu.popUp(positioning: nil, at: point, in: sender)
+  }
+
+  @objc private func handleNewSpace() {
+    dependencies.nav2?.navigate(to: .createSpace)
+  }
+
+  @objc private func handleInvite() {
+    dependencies.nav2?.navigate(to: .inviteToSpace)
+  }
+
+  @objc private func handleNewThread() {
+    dependencies.nav2?.navigate(to: .newChat)
+  }
+
+  private func menuIcon(named symbolName: String) -> NSImage? {
+    let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
+    return NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
+      .withSymbolConfiguration(config)
   }
 
   private func headerTopInset() -> CGFloat {
@@ -251,6 +350,7 @@ private final class MainSidebarArchiveButton: NSButton {
     bezelStyle = .regularSquare
     imagePosition = .imageOnly
     focusRingType = .none
+    accessibilityLabel = accessibilityLabel
     updateAppearance()
   }
 
@@ -261,6 +361,95 @@ private final class MainSidebarArchiveButton: NSButton {
       .withSymbolConfiguration(config)
     contentTintColor = isActive ? Self.activeTint : Self.inactiveTint
     updateBackground()
+  }
+
+  private func updateBackground() {
+    let color: NSColor
+    if isHighlighted {
+      color = Self.pressedColor
+    } else if isHovering {
+      color = Self.hoverColor
+    } else {
+      color = .clear
+    }
+    layer?.backgroundColor = color.cgColor
+  }
+}
+
+private final class MainSidebarFooterIconButton: NSButton {
+  private static let cornerRadius: CGFloat = 8
+  private static let iconSize: CGFloat = 14
+  private static let hoverColor = NSColor.black.withAlphaComponent(0.08)
+  private static let pressedColor = NSColor.black.withAlphaComponent(0.12)
+  private static let tint = NSColor.secondaryLabelColor
+
+  private var trackingArea: NSTrackingArea?
+  private let symbolName: String
+  private let labelText: String
+
+  private var isHovering = false {
+    didSet { updateBackground() }
+  }
+
+  init(symbolName: String, accessibilityLabel: String) {
+    self.symbolName = symbolName
+    labelText = accessibilityLabel
+    super.init(frame: .zero)
+    setup()
+  }
+
+  @available(*, unavailable)
+  required init?(coder _: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override var isHighlighted: Bool {
+    didSet { updateBackground() }
+  }
+
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    if let trackingArea {
+      removeTrackingArea(trackingArea)
+    }
+    let options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect]
+    let area = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
+    trackingArea = area
+    addTrackingArea(area)
+  }
+
+  override func mouseEntered(with event: NSEvent) {
+    super.mouseEntered(with: event)
+    isHovering = true
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    super.mouseExited(with: event)
+    isHovering = false
+  }
+
+  private func setup() {
+    wantsLayer = true
+    layer?.cornerRadius = Self.cornerRadius
+    layer?.cornerCurve = .continuous
+    setButtonType(.momentaryChange)
+    isBordered = false
+    bezelStyle = .regularSquare
+    imagePosition = .imageOnly
+    focusRingType = .none
+    updateAppearance()
+  }
+
+  private func updateAppearance() {
+    let config = NSImage.SymbolConfiguration(pointSize: Self.iconSize, weight: .semibold)
+    image = NSImage(systemSymbolName: symbolName, accessibilityDescription: labelText)?
+      .withSymbolConfiguration(config)
+    contentTintColor = Self.tint
+    updateBackground()
+  }
+
+  override func accessibilityLabel() -> String? {
+    labelText
   }
 
   private func updateBackground() {
