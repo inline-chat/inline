@@ -34,7 +34,7 @@ extension ComposeView {
 
     // Extract all entities using TextProcessing module
     let attributedText = textView.attributedText ?? NSAttributedString()
-    let (_, extractedEntities) = ProcessEntities.fromAttributedString(attributedText)
+    let (_, extractedEntities) = ProcessEntities.fromAttributedString(attributedText, parseMarkdown: false)
 
     // Determine final entities to save
     let entities: MessageEntities? = if !extractedEntities.entities.isEmpty {

@@ -241,7 +241,8 @@ public class ProcessEntities {
   /// Extract entities from attributed string
   ///
   public static func fromAttributedString(
-    _ attributedString: NSAttributedString
+    _ attributedString: NSAttributedString,
+    parseMarkdown: Bool = true
   ) -> (text: String, entities: MessageEntities) {
     var text = attributedString.string
     var entities: [MessageEntity] = []
@@ -464,21 +465,23 @@ public class ProcessEntities {
       }
     }
 
-    // Extract pre code entities from ```text``` markdown syntax and update all entity offsets
-    // NOTE: This must come FIRST to establish all code blocks before other markdown parsing
-    entities = extractPreFromMarkdown(text: &text, existingEntities: entities)
+    if parseMarkdown {
+      // Extract pre code entities from ```text``` markdown syntax and update all entity offsets
+      // NOTE: This must come FIRST to establish all code blocks before other markdown parsing
+      entities = extractPreFromMarkdown(text: &text, existingEntities: entities)
 
-    // Extract inline code entities from `text` markdown syntax and update all entity offsets
-    // NOTE: This must come SECOND to avoid interference with pre code blocks
-    entities = extractInlineCodeFromMarkdown(text: &text, existingEntities: entities)
+      // Extract inline code entities from `text` markdown syntax and update all entity offsets
+      // NOTE: This must come SECOND to avoid interference with pre code blocks
+      entities = extractInlineCodeFromMarkdown(text: &text, existingEntities: entities)
 
-    // Extract bold entities from **text** markdown syntax and update all entity offsets
-    // NOTE: Only extract if not within code blocks
-    entities = extractBoldFromMarkdown(text: &text, existingEntities: entities)
+      // Extract bold entities from **text** markdown syntax and update all entity offsets
+      // NOTE: Only extract if not within code blocks
+      entities = extractBoldFromMarkdown(text: &text, existingEntities: entities)
 
-    // Extract italic entities from _text_ markdown syntax and update all entity offsets
-    // NOTE: Only extract if not within code blocks
-    entities = extractItalicFromMarkdown(text: &text, existingEntities: entities)
+      // Extract italic entities from _text_ markdown syntax and update all entity offsets
+      // NOTE: Only extract if not within code blocks
+      entities = extractItalicFromMarkdown(text: &text, existingEntities: entities)
+    }
 
     entities = extractEmailEntities(text: text, existingEntities: entities)
     entities = extractPhoneNumberEntities(text: text, existingEntities: entities)
@@ -1160,7 +1163,7 @@ public class ProcessEntities {
 public extension Drafts {
   func update(peerId: InlineKit.Peer, attributedString: NSAttributedString) {
     // Extract entities from attributed string
-    let (text, entities) = ProcessEntities.fromAttributedString(attributedString)
+    let (text, entities) = ProcessEntities.fromAttributedString(attributedString, parseMarkdown: false)
 
     // Update
     update(peerId: peerId, text: text, entities: entities)
