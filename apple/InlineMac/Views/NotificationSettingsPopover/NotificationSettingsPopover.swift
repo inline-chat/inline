@@ -104,10 +104,8 @@ struct NotificationSettingsButton: View {
 
           },
           customizeAction: {
-            withAnimation(.easeOut(duration: 0.2)) {
-              customizingZen = false
-              customizingMentions = true
-            }
+            customizingZen = false
+            customizingMentions = true
           }
         )
 
@@ -122,10 +120,8 @@ struct NotificationSettingsButton: View {
           },
           customizeAction: {
             // Customize action for Zen Mode
-            withAnimation(.easeOut(duration: 0.2)) {
-              customizingMentions = false
-              customizingZen = true
-            }
+            customizingMentions = false
+            customizingZen = true
           }
         )
 
@@ -202,9 +198,7 @@ struct NotificationSettingsButton: View {
       HStack {
         Spacer()
         Button("Done") {
-          withAnimation(.easeOut(duration: 0.2)) {
-            customizingZen = false
-          }
+          customizingZen = false
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.regular)
@@ -251,9 +245,7 @@ struct NotificationSettingsButton: View {
       HStack {
         Spacer()
         Button("Done") {
-          withAnimation(.easeOut(duration: 0.2)) {
-            customizingMentions = false
-          }
+          customizingMentions = false
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.regular)
@@ -290,31 +282,41 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
 
   var body: some View {
     HStack(spacing: 8) {
-      Circle()
-        .fill(selected ? Color.accent : .secondary.opacity(0.3))
-        .frame(width: 30, height: 30)
-        .overlay {
-          Image(systemName: systemImage)
-            .font(.system(size: 16, weight: .regular))
-            .foregroundStyle(selected ? Color.white : .secondary.opacity(0.9))
-            .frame(
-              width: 28,
-              height: 28,
-              alignment: .center
-            )
-        }
+      Button {
+        onChange(value)
+      } label: {
+        HStack(spacing: 8) {
+          Circle()
+            .fill(selected ? Color.accent : .secondary.opacity(0.3))
+            .frame(width: 30, height: 30)
+            .overlay {
+              Image(systemName: systemImage)
+                .font(.system(size: 16, weight: .regular))
+                .foregroundStyle(selected ? Color.white : .secondary.opacity(0.9))
+                .frame(
+                  width: 28,
+                  height: 28,
+                  alignment: .center
+                )
+            }
 
-      VStack(alignment: .leading, spacing: 0) {
-        Text(title)
-          .font(.body)
-        Text(description)
-          .font(.caption)
-          .foregroundStyle(.tertiary)
-          .padding(.top, -1)
-          .lineLimit(1)
-          
+          VStack(alignment: .leading, spacing: 0) {
+            Text(title)
+              .font(.body)
+            Text(description)
+              .font(.caption)
+              .foregroundStyle(.tertiary)
+              .padding(.top, -1)
+              .lineLimit(1)
+          }
+
+          Spacer()
+        }
       }
-      Spacer()
+      .buttonStyle(.plain)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .contentShape(Rectangle())
+
       if let customizeAction {
         Button(action: customizeAction) {
           Circle()
@@ -330,6 +332,7 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
         .buttonStyle(.plain)
       }
     }
+    .frame(maxWidth: .infinity, alignment: .leading)
     .animation(.easeOut(duration: 0.08), value: selected)
     .padding(4)
     .background(
@@ -337,9 +340,6 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
         .fill(hovered ? Color.secondary.opacity(0.2) : Color.clear)
         .animation(.easeOut(duration: 0.1), value: hovered)
     )
-    .onTapGesture {
-      onChange(value)
-    }
     .onHover { hovered in
       self.hovered = hovered
     }
