@@ -297,10 +297,11 @@ class EmbeddedMessageView: NSView {
         "Forward Message"
     }
 
-    // Update colors after setting senderNameForColor
+    // Update visuals after setting senderNameForColor
     rectangleView.layer?.backgroundColor = rectangleColor.cgColor
     nameLabel.textColor = nameLabelColor
     layer?.backgroundColor = backgroundColor?.cgColor
+    layer?.cornerRadius = cornerRadius
 
     // Handle photo if available
     let previewPhoto = photoInfo ?? videoInfo?.thumbnail
