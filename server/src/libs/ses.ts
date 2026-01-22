@@ -9,17 +9,11 @@ export const sesClient = new SESv2Client({
   region: "us-east-1",
 })
 
-type SendEmailContent =
-  | {
-      type: "html"
-      subject: string
-      html: string
-    }
-  | {
-      type: "text"
-      subject: string
-      text: string
-    }
+type SendEmailContent = {
+  subject: string
+  text: string
+  html?: string
+}
 
 export interface SendEmailInput {
   from: "team@inline.chat"
@@ -34,10 +28,12 @@ export const sendEmail = async (input: SendEmailInput) => {
         Subject: {
           Data: input.content.subject,
         },
-        Body:
-          input.content.type === "html"
-            ? { Html: { Data: input.content.html } }
-            : { Text: { Data: input.content.text } },
+        Body: input.content.html
+          ? {
+              Html: { Data: input.content.html },
+              Text: { Data: input.content.text },
+            }
+          : { Text: { Data: input.content.text } },
       },
     },
     FromEmailAddress: `"Inline" <${input.from}>`,
