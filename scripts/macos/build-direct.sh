@@ -2,6 +2,14 @@
 set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+
+if [[ -f "${ROOT_DIR}/scripts/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "${ROOT_DIR}/scripts/.env"
+  set +a
+fi
+
 SPARKLE_VERSION=${SPARKLE_VERSION:-2.7.3}
 SCHEME=${SCHEME:-"Inline (macOS)"}
 CHANNEL=${CHANNEL:-stable}
@@ -54,9 +62,20 @@ APP_PATH="${DERIVED_DATA}/Build/Products/Release/Inline.app"
 PLIST_PATH="${APP_PATH}/Contents/Info.plist"
 BUILD_NUMBER=$(git -C "${ROOT_DIR}" rev-list --count HEAD)
 
-/usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${BUILD_NUMBER}" "${PLIST_PATH}"
-/usr/libexec/PlistBuddy -c "Set :SUPublicEDKey ${SPARKLE_PUBLIC_KEY}" "${PLIST_PATH}"
-/usr/libexec/PlistBuddy -c "Set :SUFeedURL ${APPCAST_URL}" "${PLIST_PATH}"
+plist_set_string() {
+  local key="$1"
+  local value="$2"
+
+  if /usr/libexec/PlistBuddy -c "Print :${key}" "${PLIST_PATH}" >/dev/null 2>&1; then
+    /usr/libexec/PlistBuddy -c "Set :${key} \"${value}\"" "${PLIST_PATH}"
+  else
+    /usr/libexec/PlistBuddy -c "Add :${key} string \"${value}\"" "${PLIST_PATH}"
+  fi
+}
+
+plist_set_string "CFBundleVersion" "${BUILD_NUMBER}"
+plist_set_string "SUPublicEDKey" "${SPARKLE_PUBLIC_KEY}"
+plist_set_string "SUFeedURL" "${APPCAST_URL}"
 
 FRAMEWORKS_DIR="${APP_PATH}/Contents/Frameworks"
 mkdir -p "${FRAMEWORKS_DIR}"

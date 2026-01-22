@@ -2,7 +2,6 @@
 import AppKit
 import Sparkle
 
-@MainActor
 final class UpdateController: NSObject {
   private let updater: SPUUpdater
   private let userDriver: UpdateDriver

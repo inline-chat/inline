@@ -2,13 +2,11 @@
 import AppKit
 import SwiftUI
 
-@MainActor
 protocol UpdatePresenting: AnyObject {
   func show(activate: Bool)
   func closeIfNeeded()
 }
 
-@MainActor
 final class UpdateWindowController: NSWindowController, UpdatePresenting {
   private let viewModel: UpdateViewModel
 
