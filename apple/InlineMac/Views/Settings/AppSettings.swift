@@ -78,7 +78,28 @@ final class AppSettings: ObservableObject {
     disableNotificationSound = UserDefaults.standard.bool(forKey: "disableNotificationSound")
     showDockBadgeUnreadDMs = UserDefaults.standard.object(forKey: "showDockBadgeUnreadDMs") as? Bool ?? true
     enableNewMacUI = UserDefaults.standard.bool(forKey: "enableNewMacUI")
-    autoUpdateChannel = AutoUpdateChannel(rawValue: UserDefaults.standard.string(forKey: "autoUpdateChannel") ?? "") ?? .stable
+    if let storedChannel = UserDefaults.standard.string(forKey: "autoUpdateChannel"),
+       !storedChannel.isEmpty,
+       let channel = AutoUpdateChannel(rawValue: storedChannel) {
+      autoUpdateChannel = channel
+    } else if let inferred = AppSettings.inferUpdateChannelFromBundle() {
+      autoUpdateChannel = inferred
+    } else {
+      autoUpdateChannel = .stable
+    }
+  }
+
+  private static func inferUpdateChannelFromBundle() -> AutoUpdateChannel? {
+    guard let feedUrl = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String else {
+      return nil
+    }
+    if feedUrl.contains("/beta/") {
+      return .beta
+    }
+    if feedUrl.contains("/stable/") {
+      return .stable
+    }
+    return nil
   }
 }
 
