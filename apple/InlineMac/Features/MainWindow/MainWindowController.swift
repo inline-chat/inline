@@ -66,6 +66,7 @@ class MainWindowController: NSWindowController, NSWindowDelegate {
     window.isOpaque = false
     window.setFrameAutosaveName("MainWindow")
     window.contentViewController = windowView
+    dependencies.overlay.attachToast(to: windowView.view)
     window.delegate = self
     window.setContentSize(defaultSize)
 
