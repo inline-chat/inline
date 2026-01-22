@@ -49,7 +49,7 @@ class UIMessageView: UIView {
   }
 
   var bubbleColor: UIColor {
-    if isEmojiOnlyMessage || isSticker || shouldShowFloatingMetadata {
+    if isEmojiOnlyMessage || isSticker || shouldClearBubbleForMedia {
       UIColor.clear
     } else if outgoing {
       // Show red bubble for failed messages using theme-aware color
@@ -133,6 +133,10 @@ class UIMessageView: UIView {
 
   var shouldShowFloatingMetadata: Bool {
     (message.hasPhoto || message.hasVideo) && !message.hasText && !shouldShowReactionsInsideBubble
+  }
+
+  private var shouldClearBubbleForMedia: Bool {
+    shouldShowFloatingMetadata && message.forwardFromUserId == nil
   }
 
   var isSticker: Bool {
@@ -516,7 +520,7 @@ class UIMessageView: UIView {
     containerStack.setCustomSpacing(2, after: forwardHeaderLabel)
   }
 
-  @objc private func handleForwardHeaderTap() {
+  @objc  func handleForwardHeaderTap() {
     guard let forwardedMessageId = message.forwardFromMessageId else { return }
 
     let forwardPeer: Peer? = if let userId = message.forwardFromPeerUserId {
