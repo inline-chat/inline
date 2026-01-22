@@ -2,24 +2,25 @@ import SwiftUI
 
 struct ScrollToBottomButtonView: View {
   @Environment(\.colorScheme) private var colorScheme
-  @State private var isHovered = false
-  @State private var isPressed = false
+  var isHovered: Bool = false
 
   let buttonSize: CGFloat = Theme.scrollButtonSize
   var hasUnread: Bool = false
   var onClick: (() -> Void)?
 
   var body: some View {
+    let iconColor = colorScheme == .dark ? Color.white.opacity(0.7) : Color.black.opacity(0.5)
+
     let button = Button(action: {
       onClick?()
     }) {
       Image(systemName: "chevron.down")
         .font(.system(size: 12, weight: .regular))
-        .foregroundColor(colorScheme == .dark ? .white.opacity(0.7) : .black.opacity(0.5))
-        .frame(width: buttonSize, height: buttonSize)
-        .contentShape(.interaction, Circle())
+        .foregroundColor(iconColor)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
-    .buttonStyle(ScrollToBottomButtonStyle())
+    .frame(width: buttonSize, height: buttonSize)
+    .contentShape(.interaction, Circle())
     .focusable(false)
 
     let content = button
@@ -33,26 +34,37 @@ struct ScrollToBottomButtonView: View {
       }
 
     if #available(macOS 26.0, *) {
-      return content.glassEffect(.regular.interactive(), in: .circle)
+      let hoverTint = colorScheme == .dark ? Color.white.opacity(0.16) : Color.black.opacity(0.08)
+      let glass = Glass.regular
+        .tint(isHovered ? hoverTint : nil)
+        .interactive()
+      return content
+        .buttonStyle(.plain)
+        .glassEffect(glass, in: .circle)
+        .animation(.easeInOut(duration: 0.12), value: isHovered)
     } else {
-      return content.background(
-        Circle()
-          .fill(.ultraThinMaterial)
-          .overlay(
-            Circle()
-              .strokeBorder(
-                (colorScheme == .dark ? Color.white : Color.black).opacity(0.1),
-                lineWidth: 0.5
-              )
+      return content
+        .buttonStyle(ScrollToBottomButtonStyle())
+        .background(
+          Circle()
+            .fill(.ultraThinMaterial)
+            .overlay(
+              Circle()
+                .strokeBorder(
+                  (colorScheme == .dark ? Color.white : Color.black)
+                    .opacity(isHovered ? 0.22 : 0.1),
+                  lineWidth: 0.5
+                )
+            )
+            .shadow(
+              color: (colorScheme == .dark ? Color.white : Color.black)
+                .opacity(colorScheme == .dark ? (isHovered ? 0.2 : 0.1) : (isHovered ? 0.25 : 0.15)),
+              radius: isHovered ? 3 : 2,
+              x: 0,
+              y: -1
           )
-          .shadow(
-            color: (colorScheme == .dark ? Color.white : Color.black)
-              .opacity(colorScheme == .dark ? 0.1 : 0.15),
-            radius: 2,
-            x: 0,
-            y: -1
-          )
-      )
+        )
+        .animation(.easeInOut(duration: 0.12), value: isHovered)
     }
   }
 }

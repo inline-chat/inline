@@ -4,6 +4,12 @@ import SwiftUI
 final class ScrollToBottomButtonHostingView: NSControl {
   private let hostingView: NSHostingView<ScrollToBottomButtonView>
   private var isVisible = false
+  private var trackingArea: NSTrackingArea?
+  private var isHovered = false {
+    didSet {
+      hostingView.rootView.isHovered = isHovered
+    }
+  }
   private var hasUnread = false {
     didSet {
       hostingView.rootView.hasUnread = hasUnread
@@ -40,6 +46,33 @@ final class ScrollToBottomButtonHostingView: NSControl {
     fatalError("init(coder:) has not been implemented")
   }
 
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+
+    if let trackingArea {
+      removeTrackingArea(trackingArea)
+    }
+
+    let options: NSTrackingArea.Options = [
+      .mouseEnteredAndExited,
+      .activeAlways,
+      .inVisibleRect,
+    ]
+    let area = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
+    addTrackingArea(area)
+    trackingArea = area
+  }
+
+  override func mouseEntered(with event: NSEvent) {
+    super.mouseEntered(with: event)
+    setHover(true)
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    super.mouseExited(with: event)
+    setHover(false)
+  }
+
   override func accessibilityLabel() -> String? {
     NSLocalizedString("Scroll to bottom", comment: "Accessibility label")
   }
@@ -61,5 +94,10 @@ final class ScrollToBottomButtonHostingView: NSControl {
   func setHasUnread(_ hasUnread: Bool) {
     guard self.hasUnread != hasUnread else { return }
     self.hasUnread = hasUnread
+  }
+
+  private func setHover(_ hovered: Bool) {
+    guard isHovered != hovered else { return }
+    isHovered = hovered
   }
 }
