@@ -4,6 +4,7 @@ struct ToastView: View {
   let toast: ToastData
   @State private var animationProgress: Double = 0
   @State private var previousMessage: String = ""
+  private let toastManager = ToastManager.shared
 
   var body: some View {
     HStack(alignment: .top, spacing: 8) {
@@ -119,6 +120,10 @@ struct ToastView: View {
     )
     .padding(.horizontal, 20)
     .shadow(color: Color.primary.opacity(0.06), radius: 8, x: 0, y: 3)
+    .contentShape(RoundedRectangle(cornerRadius: 20))
+    .onTapGesture {
+      toastManager.hideToast()
+    }
     .transition(
       .asymmetric(
         insertion: .opacity.combined(with: .move(edge: .top)),
