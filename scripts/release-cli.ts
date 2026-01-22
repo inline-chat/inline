@@ -67,7 +67,7 @@ function getR2Context() {
   const bucket = requireEnv("PUBLIC_RELEASES_R2_BUCKET");
   const endpoint = requireEnv("PUBLIC_RELEASES_R2_ENDPOINT");
   const publicBaseUrl = trimSlash(requireEnv("PUBLIC_RELEASES_R2_PUBLIC_BASE_URL"));
-  const prefix = trimSlash(process.env.PUBLIC_RELEASES_R2_PREFIX || "inline-cli");
+  const prefix = "inline-cli";
 
   const r2 = new S3Client({
     accessKeyId,

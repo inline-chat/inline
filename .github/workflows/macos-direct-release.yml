@@ -85,9 +85,6 @@ jobs:
           if [[ "${missing}" -ne 0 ]]; then
             exit 1
           fi
-          if [[ -z "${PUBLIC_RELEASES_R2_PREFIX:-}" ]]; then
-            echo "PUBLIC_RELEASES_R2_PREFIX not set; defaulting to 'mac' in script." >&2
-          fi
           sw_vers
           echo "Available Xcodes:"
           ls -d /Applications/Xcode*.app 2>/dev/null || true
@@ -164,6 +161,52 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: bash scripts/macos/build-direct.sh
 
+      - name: Resolve Release Tag
+        id: release_tag
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          TAG_INPUT: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="${TAG_INPUT}"
+          if [[ -z "${tag}" && "${CHANNEL}" == "beta" ]]; then
+            tag="tip"
+          fi
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload DMG to R2
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          DMG_PATH: build/macos-direct/Inline.dmg
+          PUBLIC_RELEASES_R2_ACCESS_KEY_ID: ${{ secrets.PUBLIC_RELEASES_R2_ACCESS_KEY_ID }}
+          PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY: ${{ secrets.PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY }}
+          PUBLIC_RELEASES_R2_BUCKET: ${{ secrets.PUBLIC_RELEASES_R2_BUCKET }}
+          PUBLIC_RELEASES_R2_ENDPOINT: ${{ secrets.PUBLIC_RELEASES_R2_ENDPOINT }}
+          PUBLIC_RELEASES_R2_PUBLIC_BASE_URL: ${{ secrets.PUBLIC_RELEASES_R2_PUBLIC_BASE_URL }}
+          UPLOAD_MODE: dmg
+        run: |
+          BUILD_NUMBER=$(git rev-list --count HEAD)
+          export BUILD_NUMBER
+          bun run scripts/macos/release-direct.ts
+
+      - name: Verify DMG availability
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          PUBLIC_RELEASES_R2_PUBLIC_BASE_URL: ${{ secrets.PUBLIC_RELEASES_R2_PUBLIC_BASE_URL }}
+        run: |
+          set -euo pipefail
+          BUILD_NUMBER=$(git rev-list --count HEAD)
+          BASE_URL="${PUBLIC_RELEASES_R2_PUBLIC_BASE_URL%/}"
+          DMG_URL="${BASE_URL}/mac/${CHANNEL}/${BUILD_NUMBER}/Inline.dmg"
+          for attempt in 1 2 3 4 5; do
+            if curl -fsI "${DMG_URL}" >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "DMG not reachable at ${DMG_URL}" >&2
+          exit 1
+
       - name: Generate Appcast
         env:
           CHANNEL: ${{ inputs.channel }}
@@ -198,28 +241,47 @@ jobs:
           INLINE_COMMIT_LONG="${COMMIT_LONG}" \\
           python3 scripts/macos/update_appcast.py
 
-      - name: Upload to R2
+          python3 scripts/macos/validate_appcast.py \\
+            --appcast appcast_new.xml \\
+            --require-build "${BUILD_NUMBER}" \\
+            --require-url "${DMG_URL}"
+
+      - name: Upload Appcast to R2
         env:
           CHANNEL: ${{ inputs.channel }}
-          DMG_PATH: build/macos-direct/Inline.dmg
           APPCAST_PATH: appcast_new.xml
           PUBLIC_RELEASES_R2_ACCESS_KEY_ID: ${{ secrets.PUBLIC_RELEASES_R2_ACCESS_KEY_ID }}
           PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY: ${{ secrets.PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY }}
           PUBLIC_RELEASES_R2_BUCKET: ${{ secrets.PUBLIC_RELEASES_R2_BUCKET }}
           PUBLIC_RELEASES_R2_ENDPOINT: ${{ secrets.PUBLIC_RELEASES_R2_ENDPOINT }}
           PUBLIC_RELEASES_R2_PUBLIC_BASE_URL: ${{ secrets.PUBLIC_RELEASES_R2_PUBLIC_BASE_URL }}
-          PUBLIC_RELEASES_R2_PREFIX: mac
+          UPLOAD_MODE: appcast
         run: |
           BUILD_NUMBER=$(git rev-list --count HEAD)
           export BUILD_NUMBER
           bun run scripts/macos/release-direct.ts
 
       - name: Upload DMG to GitHub Release
-        if: inputs.tag != ''
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ inputs.tag }}
-          files: build/macos-direct/Inline.dmg
+        if: steps.release_tag.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+          tag="${RELEASE_TAG}"
+          prerelease_flag=""
+          if [[ "${CHANNEL}" == "beta" ]]; then
+            prerelease_flag="--prerelease"
+          fi
+          if ! gh release view "${tag}" >/dev/null 2>&1; then
+            gh release create "${tag}" --title "${tag}" ${prerelease_flag} --notes "Automated macOS direct release."
+          else
+            if [[ "${CHANNEL}" == "beta" ]]; then
+              gh release edit "${tag}" --prerelease
+            fi
+          fi
+          gh release upload "${tag}" build/macos-direct/Inline.dmg --clobber
 
       - name: Upload DMG
         uses: actions/upload-artifact@v4
