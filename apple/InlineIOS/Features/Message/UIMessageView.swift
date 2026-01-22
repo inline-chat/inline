@@ -151,6 +151,10 @@ class UIMessageView: UIView {
     hasMedia && !message.hasText
   }
 
+  private var shouldPadForwardHeader: Bool {
+    isMediaOnlyMessage && !shouldShowReactionsInsideBubble
+  }
+
   private var shouldShowReactionsOutsideBubble: Bool {
     (hasMedia || isSticker) && !message.hasText && !fullMessage.reactions.isEmpty
   }
@@ -516,8 +520,30 @@ class UIMessageView: UIView {
     guard message.forwardFromUserId != nil else { return }
     forwardHeaderLabel.textColor = forwardHeaderTextColor
     forwardHeaderLabel.text = forwardHeaderText
-    containerStack.addArrangedSubview(forwardHeaderLabel)
-    containerStack.setCustomSpacing(2, after: forwardHeaderLabel)
+    if shouldPadForwardHeader {
+      let headerContainer = UIView()
+      headerContainer.translatesAutoresizingMaskIntoConstraints = false
+      headerContainer.layoutMargins = UIEdgeInsets(
+        top: StackPadding.forwardHeaderVertical,
+        left: StackPadding.leading,
+        bottom: StackPadding.forwardHeaderVertical,
+        right: StackPadding.trailing
+      )
+      headerContainer.insetsLayoutMarginsFromSafeArea = false
+      forwardHeaderLabel.translatesAutoresizingMaskIntoConstraints = false
+      headerContainer.addSubview(forwardHeaderLabel)
+      NSLayoutConstraint.activate([
+        forwardHeaderLabel.topAnchor.constraint(equalTo: headerContainer.layoutMarginsGuide.topAnchor),
+        forwardHeaderLabel.leadingAnchor.constraint(equalTo: headerContainer.layoutMarginsGuide.leadingAnchor),
+        forwardHeaderLabel.trailingAnchor.constraint(equalTo: headerContainer.layoutMarginsGuide.trailingAnchor),
+        forwardHeaderLabel.bottomAnchor.constraint(equalTo: headerContainer.layoutMarginsGuide.bottomAnchor),
+      ])
+      containerStack.addArrangedSubview(headerContainer)
+      containerStack.setCustomSpacing(StackPadding.forwardHeaderSpacing, after: headerContainer)
+    } else {
+      containerStack.addArrangedSubview(forwardHeaderLabel)
+      containerStack.setCustomSpacing(StackPadding.forwardHeaderSpacing, after: forwardHeaderLabel)
+    }
   }
 
   @objc  func handleForwardHeaderTap() {
@@ -745,7 +771,9 @@ class UIMessageView: UIView {
         }
       }
       applyReactionMetadataSpacing(to: multiLineContainer)
-      containerStack.addArrangedSubview(multiLineContainer)
+      if !multiLineContainer.arrangedSubviews.isEmpty {
+        containerStack.addArrangedSubview(multiLineContainer)
+      }
     }
   }
 
@@ -1009,6 +1037,8 @@ class UIMessageView: UIView {
     static let trailing: CGFloat = 12
     static let reactionMetadataExtraSpacing: CGFloat = 4
     static let emojiReactionMetadataExtraSpacing: CGFloat = 8
+    static let forwardHeaderVertical: CGFloat = 6
+    static let forwardHeaderSpacing: CGFloat = 1
   }
 
   func setupConstraints() {
