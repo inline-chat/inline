@@ -51,13 +51,13 @@ const styles = {
 
 export function CodeEmail({ code, firstName, isExistingUser }: CodeEmailProps) {
   const codeType = isExistingUser ? "login" : "signup"
-  const greetingName = firstName ? `${firstName},` : "-"
+  const greeting = firstName ? `Hey ${firstName},` : "Hey,"
 
   return (
     <Html>
       <Body style={styles.body}>
         <Container style={styles.container}>
-          <Text style={styles.greeting}>Hey {greetingName}</Text>
+          <Text style={styles.greeting}>{greeting}</Text>
           <Text style={styles.copy}>Here's your verification code for Inline {codeType}:</Text>
           <Section style={{ marginBottom: "20px" }}>
             <div style={styles.codeWrap}>
