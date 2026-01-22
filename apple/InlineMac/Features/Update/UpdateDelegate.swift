@@ -1,14 +1,21 @@
 #if SPARKLE
 import AppKit
+import Logger
 import Sparkle
 
 final class UpdateDelegate: NSObject, SPUUpdaterDelegate {
+  private let log = Log.scoped("UpdateDelegate")
+
   func feedURLString(for _: SPUUpdater) -> String? {
     switch AppSettings.shared.autoUpdateChannel {
     case .beta:
-      return "https://public-assets.inline.chat/mac/beta/appcast.xml"
+      let url = "https://public-assets.inline.chat/mac/beta/appcast.xml"
+      log.info("Using beta appcast: \(url)")
+      return url
     case .stable:
-      return "https://public-assets.inline.chat/mac/stable/appcast.xml"
+      let url = "https://public-assets.inline.chat/mac/stable/appcast.xml"
+      log.info("Using stable appcast: \(url)")
+      return url
     }
   }
 

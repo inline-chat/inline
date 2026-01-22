@@ -23,6 +23,8 @@ final class UpdateWindowController: NSWindowController, UpdatePresenting {
     window.titleVisibility = .hidden
     window.titlebarAppearsTransparent = true
     window.isMovableByWindowBackground = true
+    window.setContentSize(NSSize(width: 420, height: 260))
+    window.contentMinSize = NSSize(width: 420, height: 260)
     super.init(window: window)
     window.contentViewController = NSHostingController(
       rootView: UpdateWindowView(viewModel: viewModel)
