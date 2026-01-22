@@ -30,6 +30,10 @@ final class NewPhotoView: UIView {
     fullMessage.message.repliedToMessageId != nil
   }
 
+  private var hasForwardHeader: Bool {
+    fullMessage.message.forwardFromUserId != nil
+  }
+
   private struct ImageDimensions {
     let width: CGFloat
     let height: CGFloat
@@ -259,18 +263,16 @@ final class NewPhotoView: UIView {
 
     // Determine which corners to round based on message properties
     let hasReactionsInBubble = !fullMessage.reactions.isEmpty && hasText
+    let hasTopHeader = hasReply || hasForwardHeader
 
-    let roundingCorners: UIRectCorner = if !hasText, !hasReply, !hasReactionsInBubble {
-      // No text and no reply - round all corners
+    let roundingCorners: UIRectCorner = if !hasText, !hasTopHeader, !hasReactionsInBubble {
+      // No text and no header - round all corners
       .allCorners
-    } else if hasReactionsInBubble {
-      // Reactions inside bubble - round top corners only
+    } else if !hasTopHeader, hasReactionsInBubble || hasText {
+      // Text (or reactions) without a header - round top corners only
       [.topLeft, .topRight]
-    } else if hasText, !hasReply {
-      // Has text but no reply - round top corners
-      [.topLeft, .topRight]
-    } else if hasReply, !hasText {
-      // Has reply but no text - round bottom corners
+    } else if hasTopHeader, !hasText {
+      // Has header but no text - round bottom corners
       [.bottomLeft, .bottomRight]
     } else {
       // Default case - don't round any corners
