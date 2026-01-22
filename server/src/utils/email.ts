@@ -2,10 +2,13 @@ import { EMAIL_PROVIDER } from "@in/server/config"
 
 import { sendEmail as sendEmailViaSES } from "@in/server/libs/ses"
 import { sendEmail as sendEmailViaResend } from "@in/server/libs/resend"
+import { CodeEmail } from "@in/server/emails/code-email"
 import { isProd } from "@in/server/env"
 import { styleText } from "node:util"
 import { Log } from "@in/server/utils/log"
 import type { UserName } from "@in/server/modules/cache/userNames"
+import { render } from "@react-email/render"
+import * as React from "react"
 type SendEmailInput = {
   to: string
   content: SendEmailContent
@@ -20,7 +23,7 @@ type SendEmailInput = {
 type SendEmailContent = CodeTemplateInput | InvitedToSpaceTemplateInput | AdminActionTemplateInput
 
 export const sendEmail = async (input: SendEmailInput) => {
-  const template = getTemplate(input.content)
+  const template = await getTemplate(input.content)
 
   if (!isProd && !process.env["SEND_EMAIL"]) {
     // let's log the email beautifully with formatting, subject, email, from and text so it's easy to read and matches the email
@@ -45,9 +48,9 @@ ${styleText("cyan", "[Preview email. Force sending via SEND_EMAIL=1]")}
       to: input.to,
       from: "team@inline.chat",
       content: {
-        type: "text",
         subject: template.subject,
         text: template.text,
+        html: template.html,
       },
     })
   } else {
@@ -56,6 +59,7 @@ ${styleText("cyan", "[Preview email. Force sending via SEND_EMAIL=1]")}
       to: input.to,
       subject: template.subject,
       text: template.text,
+      html: template.html,
       replyTo: "founders@inline.chat",
     })
 
@@ -76,9 +80,10 @@ interface TemplateInput {
 type TextTemplate = {
   subject: string
   text: string
+  html?: string
 }
 
-const getTemplate = (content: SendEmailContent): TextTemplate => {
+const getTemplate = async (content: SendEmailContent): Promise<TextTemplate> => {
   switch (content.template) {
     case "code":
       return CodeTemplate(content.variables)
@@ -122,7 +127,7 @@ interface AdminActionTemplateInput extends TemplateInput {
   }
 }
 
-function CodeTemplate({ code, firstName, isExistingUser }: CodeTemplateInput["variables"]): TextTemplate {
+async function CodeTemplate({ code, firstName, isExistingUser }: CodeTemplateInput["variables"]): Promise<TextTemplate> {
   const codeType = isExistingUser ? "login" : "signup"
   const subject = `Your Inline ${codeType} code: ${code}`
   const text = `
@@ -132,7 +137,14 @@ Here's your verification code for Inline ${codeType}: ${code}
 
 Inline Team
   `.trim()
-  return { subject, text }
+  const html = await render(
+    React.createElement(CodeEmail, {
+      code,
+      firstName,
+      isExistingUser,
+    }),
+  )
+  return { subject, text, html }
 }
 
 function InvitedToSpaceTemplate({
