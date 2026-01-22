@@ -3,7 +3,7 @@ import { setupTestLifecycle, testUtils } from "../setup"
 import { handler } from "../../methods/updateDialog"
 import type { HandlerContext } from "../../controllers/helpers"
 import { UpdateBucket } from "@in/server/db/schema/updates"
-import { UpdatesModel } from "@in/server/db/models/updates"
+import { UpdatesModel, type DecryptedUpdate } from "@in/server/db/models/updates"
 import { db } from "../../db"
 import type { ServerUpdate } from "@in/protocol/server"
 
@@ -18,12 +18,12 @@ describe("updateDialog", () => {
 
   test("archives and unarchives dialogs while enqueuing user updates", async () => {
     type UserDialogArchivedUpdate = Extract<ServerUpdate["update"], { oneofKind: "userDialogArchived" }>
-    type DecryptedUserDialogArchivedUpdate = UpdatesModel.DecryptedUpdate & {
+    type DecryptedUserDialogArchivedUpdate = DecryptedUpdate & {
       payload: ServerUpdate & { update: UserDialogArchivedUpdate }
     }
 
     const isUserDialogArchivedUpdate = (
-      update: UpdatesModel.DecryptedUpdate,
+      update: DecryptedUpdate,
     ): update is DecryptedUserDialogArchivedUpdate => update.payload.update.oneofKind === "userDialogArchived"
 
     const userA = await testUtils.createUser("archive-owner@example.com")
@@ -55,8 +55,12 @@ describe("updateDialog", () => {
     expect(archivedUpdates).toHaveLength(2)
     expect(archivedUpdates[0]?.payload.update.oneofKind).toBe("userDialogArchived")
     expect(archivedUpdates[0]?.payload.update.userDialogArchived.archived).toBe(true)
-    expect(archivedUpdates[0]?.payload.update.userDialogArchived.peerId?.type.oneofKind).toBe("user")
-    expect(archivedUpdates[0]?.payload.update.userDialogArchived.peerId?.type.user.userId).toBe(BigInt(userB.id))
+    const peerType = archivedUpdates[0]?.payload.update.userDialogArchived.peerId?.type
+    expect(peerType?.oneofKind).toBe("user")
+    if (peerType?.oneofKind !== "user") {
+      throw new Error("Expected archived update peer to be a user")
+    }
+    expect(peerType.user.userId).toBe(BigInt(userB.id))
     expect(archivedUpdates[1]?.payload.update.oneofKind).toBe("userDialogArchived")
     expect(archivedUpdates[1]?.payload.update.userDialogArchived.archived).toBe(false)
   })
