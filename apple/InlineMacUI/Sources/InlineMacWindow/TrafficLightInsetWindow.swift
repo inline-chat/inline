@@ -10,6 +10,18 @@ open class TrafficLightInsetWindow: NSWindow, TrafficLightInsetApplicable {
   public var trafficLightsInset = CGPoint(x: 20, y: 16)
   private var isApplyingTrafficLights = false
 
+  open override func sendEvent(_ event: NSEvent) {
+    if !isKeyWindow {
+      switch event.type {
+        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+          makeKeyAndOrderFront(nil)
+        default:
+          break
+      }
+    }
+    super.sendEvent(event)
+  }
+
   public func applyTrafficLightsInset() {
     if isApplyingTrafficLights { return }
     guard let close = standardWindowButton(.closeButton),
