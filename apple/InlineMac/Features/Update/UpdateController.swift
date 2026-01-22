@@ -5,27 +5,22 @@ import Sparkle
 
 final class UpdateController: NSObject {
   private let updater: SPUUpdater
-  private let userDriver: UpdateDriver
   private let updateDelegate: UpdateDelegate
+  private let userDriver: SPUStandardUserDriver
   private var didStart = false
   private let log = Log.scoped("UpdateController")
 
   override init() {
-    let viewModel = UpdateViewModel()
-    let presenter = UpdateWindowController(viewModel: viewModel)
-    userDriver = UpdateDriver(viewModel: viewModel, presenter: presenter)
     updateDelegate = UpdateDelegate()
+    userDriver = SPUStandardUserDriver(hostBundle: .main, delegate: nil)
     updater = SPUUpdater(
       hostBundle: .main,
       applicationBundle: .main,
       userDriver: userDriver,
       delegate: updateDelegate
     )
-    userDriver.retryCheck = { [weak updater] in
-      updater?.checkForUpdates()
-    }
     super.init()
-    log.info("Initialized Sparkle updater")
+    log.info("Initialized Sparkle updater (standard UI)")
   }
 
   func startIfNeeded() {
