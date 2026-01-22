@@ -1710,6 +1710,7 @@ extension MessageListAppKit: NSTableViewDelegate {
         let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? MessageTableCell
           ?? MessageTableCell()
         cell.identifier = identifier
+        cell.setDependencies(dependencies)
 
         let inputProps = messageProps(for: row)
 

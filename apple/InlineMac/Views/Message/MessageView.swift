@@ -19,6 +19,7 @@ class MessageViewAppKit: NSView {
   private let log = Log.scoped("MessageView", enableTracing: true)
   static let avatarSize: CGFloat = Theme.messageAvatarSize
   private(set) var fullMessage: FullMessage
+  private let dependencies: AppDependencies?
   private var props: MessageViewProps
   private var translationStateCancellable: AnyCancellable?
   private var notionAccessCancellable: AnyCancellable?
@@ -499,9 +500,15 @@ class MessageViewAppKit: NSView {
 
   // MARK: - Initialization
 
-  init(fullMessage: FullMessage, props: MessageViewProps, isScrolling: Bool = false) {
+  init(
+    fullMessage: FullMessage,
+    props: MessageViewProps,
+    dependencies: AppDependencies? = nil,
+    isScrolling: Bool = false
+  ) {
     self.fullMessage = fullMessage
     self.props = props
+    self.dependencies = dependencies
     scrollState = isScrolling ? .scrolling : .idle
     super.init(frame: .zero)
     setupView()
@@ -964,7 +971,7 @@ class MessageViewAppKit: NSView {
       return
     }
 
-    Nav.main.open(.chat(peer: targetPeer))
+    openChat(peer: targetPeer)
     let chatState = ChatsManager.shared.get(for: targetPeer, chatId: chat.id)
     chatState.scrollTo(msgId: forwardedMessageId)
   }
@@ -1870,7 +1877,7 @@ class MessageViewAppKit: NSView {
     guard let window, let presentingController = window.contentViewController else { return }
 
     weak var weakHostingController: NSViewController?
-    let rootView = ForwardMessagesSheet(messages: [fullMessage]) { destination, selection in
+    let rootView = ForwardMessagesSheet(messages: [fullMessage]) { [weak self] destination, selection in
       guard let destinationChatId = destination.dialog.chatId ?? destination.chat?.id else {
         Log.shared.error("Forward nav failed: missing destination chat id")
         return
@@ -1883,7 +1890,7 @@ class MessageViewAppKit: NSView {
         messageIds: selection.messageIds
       )
 
-      Nav.main.open(.chat(peer: destinationPeer))
+      self?.openChat(peer: destinationPeer)
       NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
     } onClose: { [weak presentingController] in
       guard let hostingController = weakHostingController else { return }
@@ -1901,6 +1908,14 @@ class MessageViewAppKit: NSView {
       window.title = "Forward"
       window.styleMask.insert(.closable)
       window.standardWindowButton(.closeButton)?.isHidden = false
+    }
+  }
+
+  private func openChat(peer: Peer) {
+    if let nav2 = dependencies?.nav2 {
+      nav2.navigate(to: .chat(peer: peer))
+    } else {
+      Nav.main.open(.chat(peer: peer))
     }
   }
 
