@@ -505,6 +505,20 @@ struct ProcessEntitiesTests {
     #expect(entity.mention.userID == 123)
   }
 
+  @Test("Skip markdown parsing when disabled")
+  func testSkipMarkdownParsing() {
+    let text = "**bold**"
+    let attributedString = NSAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let result = ProcessEntities.fromAttributedString(attributedString, parseMarkdown: false)
+
+    #expect(result.text == text)
+    #expect(result.entities.entities.isEmpty == true)
+  }
+
   @Test("Ignore non-web link targets (e.g. data detectors)")
   func testIgnoreNonWebLinkTargets() {
     let text = "Call me"
