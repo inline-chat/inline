@@ -1,14 +1,16 @@
 #if SPARKLE
 import Foundation
+import Logger
 import Sparkle
 
 final class UpdateDriver: NSObject, SPUUserDriver {
   private let viewModel: UpdateViewModel
-  private weak var presenter: UpdatePresenting?
+  private let presenter: UpdatePresenting
   private var downloadExpectedLength: Int64?
   private var downloadReceivedLength: Int64 = 0
   private var pendingActivation = false
   var retryCheck: (() -> Void)?
+  private let log = Log.scoped("UpdateDriver")
 
   init(viewModel: UpdateViewModel, presenter: UpdatePresenting) {
     self.viewModel = viewModel
@@ -20,9 +22,9 @@ final class UpdateDriver: NSObject, SPUUserDriver {
     let wasIdle = viewModel.state.isIdle
     viewModel.state = state
     if state.isIdle {
-      presenter?.closeIfNeeded()
+      presenter.closeIfNeeded()
     } else if wasIdle {
-      presenter?.show(activate: pendingActivation)
+      presenter.show(activate: pendingActivation)
       pendingActivation = false
     }
   }
@@ -54,6 +56,7 @@ final class UpdateDriver: NSObject, SPUUserDriver {
   func showUpdateFound(with appcastItem: SUAppcastItem,
                        state _: SPUUserUpdateState,
                        reply: @escaping @Sendable (SPUUserUpdateChoice) -> Void) {
+    log.info("Update found: \(appcastItem.displayVersionString) (\(appcastItem.versionString))")
     setState(.updateAvailable(.init(
       version: appcastItem.displayVersionString,
       build: appcastItem.versionString,
@@ -75,6 +78,7 @@ final class UpdateDriver: NSObject, SPUUserDriver {
   }
 
   func showUpdateNotFoundWithError(_: any Error, acknowledgement: @escaping () -> Void) {
+    log.info("No update available")
     setState(.notFound(.init(acknowledgement: {
       acknowledgement()
       self.setState(.idle)
@@ -82,6 +86,11 @@ final class UpdateDriver: NSObject, SPUUserDriver {
   }
 
   func showUpdaterError(_ error: any Error, acknowledgement: @escaping () -> Void) {
+    let nsError = error as NSError
+    log.error("Sparkle updater error (domain: \(nsError.domain) code: \(nsError.code))", error: error)
+    if !nsError.userInfo.isEmpty {
+      log.info("Sparkle error details: \(nsError.userInfo)")
+    }
     setState(.error(.init(
       message: error.localizedDescription,
       retry: {
@@ -97,6 +106,7 @@ final class UpdateDriver: NSObject, SPUUserDriver {
   }
 
   func showDownloadInitiated(cancellation: @escaping () -> Void) {
+    log.info("Update download started")
     downloadExpectedLength = nil
     downloadReceivedLength = 0
     setState(.downloading(.init(
@@ -136,6 +146,7 @@ final class UpdateDriver: NSObject, SPUUserDriver {
   }
 
   func showReady(toInstallAndRelaunch reply: @escaping @Sendable (SPUUserUpdateChoice) -> Void) {
+    log.info("Update ready to install")
     setState(.readyToInstall(.init(
       install: { reply(.install) },
       later: {
@@ -158,7 +169,7 @@ final class UpdateDriver: NSObject, SPUUserDriver {
   }
 
   func showUpdateInFocus() {
-    presenter?.show(activate: true)
+    presenter.show(activate: true)
   }
 
   func dismissUpdateInstallation() {
