@@ -350,7 +350,6 @@ private final class MainSidebarArchiveButton: NSButton {
     bezelStyle = .regularSquare
     imagePosition = .imageOnly
     focusRingType = .none
-    accessibilityLabel = accessibilityLabel
     updateAppearance()
   }
 
@@ -373,6 +372,10 @@ private final class MainSidebarArchiveButton: NSButton {
       color = .clear
     }
     layer?.backgroundColor = color.cgColor
+  }
+
+  override func accessibilityLabel() -> String? {
+    "Archive"
   }
 }
 
