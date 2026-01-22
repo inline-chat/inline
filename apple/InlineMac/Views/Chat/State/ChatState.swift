@@ -11,6 +11,7 @@ enum MessageListAction {
 class ChatState {
   struct ChatStateData: Codable {
     var replyingToMsgId: Int64?
+    var forwardContext: ForwardContext?
   }
 
   // Static
@@ -28,9 +29,19 @@ class ChatState {
   }
 
   public var editingMsgId: Int64?
+  public var forwardContext: ForwardContext? {
+    data.forwardContext
+  }
 
   public let replyingToMsgIdPublisher = PassthroughSubject<Int64?, Never>()
   public let editingMsgIdPublisher = PassthroughSubject<Int64?, Never>()
+  public let forwardContextPublisher = PassthroughSubject<ForwardContext?, Never>()
+
+  struct ForwardContext: Codable {
+    var fromPeerId: Peer
+    var sourceChatId: Int64
+    var messageIds: [Int64]
+  }
 
   init(peerId: Peer, chatId: Int64) {
     self.peerId = peerId
@@ -56,6 +67,7 @@ class ChatState {
   }
 
   public func setReplyingToMsgId(_ id: Int64) {
+    clearForwarding()
     data.replyingToMsgId = id
     replyingToMsgIdPublisher.send(id)
     save()
@@ -70,6 +82,7 @@ class ChatState {
 
   public func setEditingMsgId(_ id: Int64) {
     clearReplyingToMsgId()
+    clearForwarding()
     editingMsgId = id
     editingMsgIdPublisher.send(id)
   }
@@ -81,6 +94,29 @@ class ChatState {
     guard editingMsgId != nil else { return }
     editingMsgId = nil
     editingMsgIdPublisher.send(nil)
+  }
+
+  public func setForwardingMessages(
+    fromPeerId: Peer,
+    sourceChatId: Int64,
+    messageIds: [Int64]
+  ) {
+    clearReplyingToMsgId()
+    clearEditingMsgId()
+    data.forwardContext = ForwardContext(
+      fromPeerId: fromPeerId,
+      sourceChatId: sourceChatId,
+      messageIds: messageIds
+    )
+    forwardContextPublisher.send(data.forwardContext)
+    save()
+  }
+
+  public func clearForwarding() {
+    guard data.forwardContext != nil else { return }
+    data.forwardContext = nil
+    forwardContextPublisher.send(nil)
+    save()
   }
 
   // MARK: - Persistance

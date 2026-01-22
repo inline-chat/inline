@@ -7,6 +7,7 @@ class ComposeMessageView: NSView {
   enum Kind {
     case replying
     case editing
+    case forwarding
   }
 
   // MARK: - Properties
@@ -115,11 +116,17 @@ class ComposeMessageView: NSView {
   func update(with fullMessage: FullMessage, kind: Kind) {
     self.kind = kind
 
-    messageView
-      .update(
-        with: fullMessage,
-        kind: kind == .replying ? .replyingInCompose : .editingInCompose
-      )
+    let embeddedKind: EmbeddedMessageView.Kind
+    switch kind {
+    case .replying:
+      embeddedKind = .replyingInCompose
+    case .editing:
+      embeddedKind = .editingInCompose
+    case .forwarding:
+      embeddedKind = .forwardingInCompose
+    }
+
+    messageView.update(with: fullMessage, kind: embeddedKind)
   }
 
   func open(animated: Bool = true) {

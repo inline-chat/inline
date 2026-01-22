@@ -42,6 +42,24 @@ public struct SpaceChatItem: Codable, FetchableRecord, PersistableRecord, Sendab
   public var id: Int64 {
     dialog.id
   }
+
+  public init(
+    dialog: Dialog,
+    chat: Chat? = nil,
+    userInfo: UserInfo? = nil,
+    message: Message? = nil,
+    from: UserInfo? = nil,
+    translations: [Translation] = [],
+    photoInfo: PhotoInfo? = nil
+  ) {
+    self.dialog = dialog
+    self.chat = chat
+    self.userInfo = userInfo
+    self.message = message
+    self.from = from
+    self.translations = translations
+    self.photoInfo = photoInfo
+  }
 }
 
 public struct FullMemberItem: Codable, FetchableRecord, PersistableRecord, Sendable, Hashable,

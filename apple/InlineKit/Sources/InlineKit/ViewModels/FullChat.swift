@@ -66,6 +66,9 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
 {
   public var file: File?
   public var senderInfo: UserInfo?
+  public var forwardFromUserInfo: UserInfo?
+  public var forwardFromPeerUserInfo: UserInfo?
+  public var forwardFromChatInfo: Chat?
   public var message: Message
   public var reactions: [FullReaction]
   public var repliedToMessage: EmbeddedMessage?
@@ -103,6 +106,9 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
   //  public static let preview = FullMessage(user: User, message: Message)
   public init(
     senderInfo: UserInfo?,
+    forwardFromUserInfo: UserInfo? = nil,
+    forwardFromPeerUserInfo: UserInfo? = nil,
+    forwardFromChatInfo: Chat? = nil,
     message: Message,
     reactions: [FullReaction],
     repliedToMessage: EmbeddedMessage?,
@@ -110,6 +116,9 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
     translations: [Translation] = []
   ) {
     self.senderInfo = senderInfo
+    self.forwardFromUserInfo = forwardFromUserInfo
+    self.forwardFromPeerUserInfo = forwardFromPeerUserInfo
+    self.forwardFromChatInfo = forwardFromChatInfo
     self.message = message
     self.reactions = reactions
     self.repliedToMessage = repliedToMessage
@@ -129,6 +138,9 @@ public struct FullMessage: FetchableRecord, Identifiable, Codable, Hashable, Per
   public init(from embeddedMessage: EmbeddedMessage) {
     message = embeddedMessage.message
     senderInfo = embeddedMessage.senderInfo
+    forwardFromUserInfo = nil
+    forwardFromPeerUserInfo = nil
+    forwardFromChatInfo = nil
     translations = embeddedMessage.translations
     photoInfo = embeddedMessage.photoInfo
     videoInfo = embeddedMessage.videoInfo
@@ -186,6 +198,23 @@ public extension FullMessage {
         Message.from
           .forKey(CodingKeys.senderInfo)
           .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
+      )
+      .including(
+        optional:
+        Message.forwardFromUser
+          .forKey(CodingKeys.forwardFromUserInfo)
+          .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
+      )
+      .including(
+        optional:
+        Message.forwardFromPeerUser
+          .forKey(CodingKeys.forwardFromPeerUserInfo)
+          .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
+      )
+      .including(
+        optional:
+        Message.forwardFromPeerThread
+          .forKey(CodingKeys.forwardFromChatInfo)
       )
       .including(optional: Message.file)
       .including(

@@ -40,7 +40,7 @@ class ComposeAppKit: NSView {
   }
 
   private var canSend: Bool {
-    !isEmptyTrimmed || attachmentItems.count > 0
+    !isEmptyTrimmed || attachmentItems.count > 0 || state.forwardContext != nil
   }
 
   // [uniqueId: FileMediaItem]
@@ -122,6 +122,7 @@ class ComposeAppKit: NSView {
       onClose: { [weak self] in
         self?.state.clearReplyingToMsgId()
         self?.state.clearEditingMsgId()
+        self?.state.clearForwarding()
       }
     )
 
@@ -323,6 +324,21 @@ class ComposeAppKit: NSView {
         updateMessageView(to: editingMsgId, kind: .editing, animate: true)
         focus()
       }.store(in: &cancellables)
+
+    state.forwardContextPublisher
+      .sink { [weak self] forwardContext in
+        guard let self else { return }
+        let messageId = forwardContext?.messageIds.first
+        let sourceChatId = forwardContext?.sourceChatId
+        updateMessageView(
+          to: messageId,
+          sourceChatId: sourceChatId,
+          kind: .forwarding,
+          animate: true
+        )
+        updateSendButtonIfNeeded()
+        focus()
+      }.store(in: &cancellables)
   }
 
   private func setupTextEditor() {
@@ -475,7 +491,7 @@ class ComposeAppKit: NSView {
     var height = getTextViewHeight()
 
     // Reply view
-    if state.replyingToMsgId != nil || state.editingMsgId != nil {
+    if state.replyingToMsgId != nil || state.editingMsgId != nil || state.forwardContext != nil {
       height += Theme.embeddedMessageHeight
     }
 
@@ -555,6 +571,20 @@ class ComposeAppKit: NSView {
     if let editingMessageId = state.editingMsgId {
       updateMessageView(to: editingMessageId, kind: .editing, animate: false, shouldUpdateHeight: false)
     }
+
+    if let forwardContext = state.forwardContext,
+       let previewMessageId = forwardContext.messageIds.first
+    {
+      updateMessageView(
+        to: previewMessageId,
+        sourceChatId: forwardContext.sourceChatId,
+        kind: .forwarding,
+        animate: false,
+        shouldUpdateHeight: false
+      )
+    }
+
+    updateSendButtonIfNeeded()
   }
 
   private var keyMonitorEscUnsubscribe: (() -> Void)?
@@ -566,6 +596,7 @@ class ComposeAppKit: NSView {
         guard let self else { return }
         state.clearReplyingToMsgId()
         state.clearEditingMsgId()
+        state.clearForwarding()
         removeReplyEscHandler()
       }
     )
@@ -578,13 +609,15 @@ class ComposeAppKit: NSView {
 
   private func updateMessageView(
     to msgId: Int64?,
+    sourceChatId: Int64? = nil,
     kind: ComposeMessageView.Kind,
     animate: Bool = false,
     shouldUpdateHeight: Bool = true
   ) {
     if let msgId {
       // Update and show the reply view
-      if let message = try? FullMessage.get(messageId: msgId, chatId: chatId ?? 0) {
+      let resolvedChatId = sourceChatId ?? chatId ?? 0
+      if let message = try? FullMessage.get(messageId: msgId, chatId: resolvedChatId) {
         messageView.update(with: message, kind: kind)
         messageView.open(animated: animate)
         addReplyEscHandler()
@@ -795,6 +828,7 @@ class ComposeAppKit: NSView {
     sendButton.updateCanSend(false)
     state.clearReplyingToMsgId()
     state.clearEditingMsgId()
+    state.clearForwarding()
     clearDraft()
 
     // Views
@@ -818,6 +852,7 @@ class ComposeAppKit: NSView {
     let attachmentItems = attachmentItems
     // keep a copy of editingMessageId before we clear it
     let editingMessageId = state.editingMsgId
+    let forwardContext = state.forwardContext
 
     // Extract mention entities from attributed text
     // TODO: replace with `fromAttributedString`
@@ -844,6 +879,26 @@ class ComposeAppKit: NSView {
           entities: entities
         ))
       }
+    }
+
+    // Forward message
+    else if let forwardContext {
+      guard !forwardContext.messageIds.isEmpty else {
+        log.error("Forward failed: empty message ids")
+        return
+      }
+      Task.detached(priority: .userInitiated) {
+        do {
+          try await Api.realtime.send(.forwardMessages(
+            fromPeerId: forwardContext.fromPeerId,
+            toPeerId: self.peerId,
+            messageIds: forwardContext.messageIds
+          ))
+        } catch {
+          self.log.error("Forward failed", error: error)
+        }
+      }
+      state.clearForwarding()
     }
 
     // Send message

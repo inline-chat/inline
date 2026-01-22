@@ -35,6 +35,7 @@ class UIMessageView: UIView {
       bindPhotoTapHandlerIfNeeded()
     }
   }
+
   var interaction: UIContextMenuInteraction?
 
   static let attributedCache: NSCache<NSString, NSAttributedString> = {
@@ -70,6 +71,62 @@ class UIMessageView: UIView {
     }
   }
 
+  private var forwardHeaderTextColor: UIColor {
+    if outgoing, bubbleColor != .clear {
+      return .white
+    }
+    return ThemeManager.shared.selected.accent
+  }
+
+  private var forwardHeaderTitle: String {
+    if message.forwardFromPeerThreadId != nil {
+      let title = fullMessage.forwardFromChatInfo?.title
+      return (title?.isEmpty == false) ? title! : "Chat"
+    }
+
+    if let peerUserId = message.forwardFromPeerUserId {
+      if let peerUserInfo = fullMessage.forwardFromPeerUserInfo {
+        return peerUserInfo.user.shortDisplayName
+      }
+
+      if peerUserId == message.forwardFromUserId,
+         let forwardUserInfo = fullMessage.forwardFromUserInfo
+      {
+        return forwardUserInfo.user.shortDisplayName
+      }
+    }
+
+    return "User"
+  }
+
+  private var forwardHeaderIsPrivate: Bool {
+    if message.forwardFromPeerThreadId != nil {
+      return fullMessage.forwardFromChatInfo == nil
+    }
+
+    if let peerUserId = message.forwardFromPeerUserId {
+      if fullMessage.forwardFromPeerUserInfo != nil {
+        return false
+      }
+
+      if peerUserId == message.forwardFromUserId,
+         fullMessage.forwardFromUserInfo != nil
+      {
+        return false
+      }
+      return true
+    }
+
+    return true
+  }
+
+  private var forwardHeaderText: String {
+    if forwardHeaderIsPrivate {
+      return "Forwarded from a private chat"
+    }
+    return "Forwarded from: \(forwardHeaderTitle)"
+  }
+
   var message: Message {
     fullMessage.message
   }
@@ -99,6 +156,9 @@ class UIMessageView: UIView {
   }
 
   var isEmojiOnlyMessage: Bool {
+    if message.repliedToMessageId != nil || message.forwardFromUserId != nil {
+      return false
+    }
     guard let text = message.text else { return false }
     if text.containsOnlyEmojis {
       return true
@@ -194,6 +254,7 @@ class UIMessageView: UIView {
   lazy var messageLabel = createMessageLabel()
   lazy var unsupportedLabel = createUnsupportedLabel()
   lazy var embedView = createEmbedView()
+  lazy var forwardHeaderLabel = createForwardHeaderLabel()
   lazy var photoView = createPhotoView()
   lazy var newPhotoView = createNewPhotoView()
   lazy var videoView = createVideoView()
@@ -272,6 +333,7 @@ class UIMessageView: UIView {
     addSubview(bubbleView)
     bubbleView.addSubview(containerStack)
 
+    setupForwardHeaderIfNeeded()
     setupReplyViewIfNeeded()
     setupFileViewIfNeeded()
     setupPhotoViewIfNeeded()
@@ -443,6 +505,50 @@ class UIMessageView: UIView {
       )
     } else {
       embedView.showNotLoaded(kind: .replyInMessage, outgoing: outgoing, isOnlyEmoji: isEmojiOnlyMessage)
+    }
+  }
+
+  private func setupForwardHeaderIfNeeded() {
+    guard message.forwardFromUserId != nil else { return }
+    forwardHeaderLabel.textColor = forwardHeaderTextColor
+    forwardHeaderLabel.text = forwardHeaderText
+    containerStack.addArrangedSubview(forwardHeaderLabel)
+    containerStack.setCustomSpacing(2, after: forwardHeaderLabel)
+  }
+
+  @objc private func handleForwardHeaderTap() {
+    guard let forwardedMessageId = message.forwardFromMessageId else { return }
+
+    let forwardPeer: Peer? = if let userId = message.forwardFromPeerUserId {
+      .user(id: userId)
+    } else if let threadId = message.forwardFromPeerThreadId {
+      .thread(id: threadId)
+    } else {
+      nil
+    }
+
+    if forwardPeer == nil || forwardPeer == message.peerId {
+      NotificationCenter.default.post(
+        name: Notification.Name("ScrollToRepliedMessage"),
+        object: nil,
+        userInfo: ["repliedToMessageId": forwardedMessageId, "chatId": message.chatId]
+      )
+      return
+    }
+
+    if let forwardPeer {
+      var userInfo: [AnyHashable: Any] = ["messageId": forwardedMessageId]
+      if let userId = forwardPeer.asUserId() {
+        userInfo["peerUserId"] = userId
+      }
+      if let threadId = forwardPeer.asThreadId() {
+        userInfo["peerThreadId"] = threadId
+      }
+      NotificationCenter.default.post(
+        name: Notification.Name("NavigateToForwardedMessage"),
+        object: nil,
+        userInfo: userInfo
+      )
     }
   }
 
@@ -730,22 +836,20 @@ class UIMessageView: UIView {
 
     bubbleView.addGestureRecognizer(doubleTapGesture)
 
-    if isMediaOnlyMessage {
-      let backgroundDoubleTapGesture = UITapGestureRecognizer(
-        target: self,
-        action: #selector(handleBackgroundDoubleTap)
-      )
-      backgroundDoubleTapGesture.numberOfTapsRequired = 2
+    let backgroundDoubleTapGesture = UITapGestureRecognizer(
+      target: self,
+      action: #selector(handleBackgroundDoubleTap)
+    )
+    backgroundDoubleTapGesture.numberOfTapsRequired = 2
 
-      if let interaction {
-        backgroundDoubleTapGesture.delegate = self
-        interaction.view?.gestureRecognizers?.forEach { gesture in
-          backgroundDoubleTapGesture.require(toFail: gesture)
-        }
+    if let interaction {
+      backgroundDoubleTapGesture.delegate = self
+      interaction.view?.gestureRecognizers?.forEach { gesture in
+        backgroundDoubleTapGesture.require(toFail: gesture)
       }
-
-      addGestureRecognizer(backgroundDoubleTapGesture)
     }
+
+    addGestureRecognizer(backgroundDoubleTapGesture)
   }
 
   @objc func handleTextViewTap(_ gesture: UITapGestureRecognizer) {
@@ -857,8 +961,6 @@ class UIMessageView: UIView {
   }
 
   @objc private func handleBackgroundDoubleTap(_ gesture: UITapGestureRecognizer) {
-    guard isMediaOnlyMessage else { return }
-
     let location = gesture.location(in: self)
     guard !bubbleView.frame.contains(location) else { return }
     guard bubbleView.frame.minY <= location.y, location.y <= bubbleView.frame.maxY else { return }
