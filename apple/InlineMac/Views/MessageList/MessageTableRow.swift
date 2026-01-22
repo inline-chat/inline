@@ -9,6 +9,7 @@ class MessageTableCell: NSView {
   private var messageView: MessageViewAppKit?
   private var currentContent: (message: FullMessage, props: MessageViewProps)?
   private let log = Log.scoped("MessageTableCell", enableTracing: false)
+  private var dependencies: AppDependencies?
 
   override init(frame: NSRect) {
     super.init(frame: frame)
@@ -27,6 +28,10 @@ class MessageTableCell: NSView {
   }
 
   private var wasTranslated: Bool? = nil
+
+  func setDependencies(_ dependencies: AppDependencies) {
+    self.dependencies = dependencies
+  }
 
   func configure(with message: FullMessage, props: MessageViewProps, animate: Bool = true) {
     defer { wasTranslated = message.isTranslated }
@@ -142,6 +147,7 @@ class MessageTableCell: NSView {
     let newMessageView = MessageViewAppKit(
       fullMessage: content.0,
       props: content.1,
+      dependencies: dependencies,
       isScrolling: scrollState.isScrolling
     )
     newMessageView.translatesAutoresizingMaskIntoConstraints = false
