@@ -42,6 +42,8 @@ now = datetime.now(timezone.utc)
 attrs = {}
 with open(sign_update_path, "r", encoding="utf-8") as f:
     for pair in f.read().split(" "):
+        if not pair or "=" not in pair:
+            continue
         key, value = pair.split("=", 1)
         value = value.strip()
         if value and value[0] == '"':
