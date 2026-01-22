@@ -217,6 +217,21 @@ struct ChatView: View {
         Log.shared.error("NavigateToForwardedMessage: missing chat for peer \(targetPeer)")
       }
     }
+    .onReceive(
+      NotificationCenter.default
+        .publisher(for: Notification.Name("NavigateToForwardDestination"))
+    ) { notification in
+      let targetPeer: Peer? = if let userId = notification.userInfo?["peerUserId"] as? Int64 {
+        .user(id: userId)
+      } else if let threadId = notification.userInfo?["peerThreadId"] as? Int64 {
+        .thread(id: threadId)
+      } else {
+        nil
+      }
+
+      guard let targetPeer, targetPeer != peerId else { return }
+      router.push(.chat(peer: targetPeer))
+    }
     .environmentObject(fullChatViewModel)
     .environment(router)
   }

@@ -1544,11 +1544,18 @@ private extension MessagesCollectionView {
           messageIds: selection.messageIds
         )
 
-        if let router = (UIApplication.shared.delegate as? AppDelegate)?.router {
-          router.push(.chat(peer: destinationPeer))
-        } else {
-          Log.shared.error("Forward nav failed: router unavailable")
+        var userInfo: [AnyHashable: Any] = [:]
+        if let userId = destinationPeer.asUserId() {
+          userInfo["peerUserId"] = userId
         }
+        if let threadId = destinationPeer.asThreadId() {
+          userInfo["peerThreadId"] = threadId
+        }
+        NotificationCenter.default.post(
+          name: Notification.Name("NavigateToForwardDestination"),
+          object: nil,
+          userInfo: userInfo
+        )
       }
       .appDatabase(AppDatabase.shared)
 
