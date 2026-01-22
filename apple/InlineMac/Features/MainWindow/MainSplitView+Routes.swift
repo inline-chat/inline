@@ -58,20 +58,25 @@ extension MainSplitView {
   func toolbar(for route: Nav2Route) -> MainToolbarItems {
     switch route {
       case let .chat(peer):
-        MainToolbarItems(
-          items: [
-            .navigationBack,
-            .navigationForward,
-            .chatTitle(peer: peer),
-            .spacer,
-            .participants(peer: peer),
-            .translationIcon(peer: peer),
-          ],
-        )
+        var items: [MainToolbarItemIdentifier] = [
+          .navigationBack,
+          .navigationForward,
+          .chatTitle(peer: peer),
+          .spacer,
+          .participants(peer: peer),
+        ]
+
+        if case .user = peer {
+          items.append(.nudge(peer: peer))
+        }
+
+        items.append(.translationIcon(peer: peer))
+
+        return MainToolbarItems(items: items)
 
       default:
         // TODO: Show a basic toolbar with undo redo and a title
-        MainToolbarItems.defaultItems()
+        return MainToolbarItems.defaultItems()
     }
   }
 }
