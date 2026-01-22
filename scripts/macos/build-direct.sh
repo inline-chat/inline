@@ -112,9 +112,21 @@ plist_set_string() {
   fi
 }
 
+plist_set_bool() {
+  local key="$1"
+  local value="$2"
+
+  if /usr/libexec/PlistBuddy -c "Print :${key}" "${PLIST_PATH}" >/dev/null 2>&1; then
+    /usr/libexec/PlistBuddy -c "Set :${key} ${value}" "${PLIST_PATH}"
+  else
+    /usr/libexec/PlistBuddy -c "Add :${key} bool ${value}" "${PLIST_PATH}"
+  fi
+}
+
 plist_set_string "CFBundleVersion" "${BUILD_NUMBER}"
 plist_set_string "SUPublicEDKey" "${SPARKLE_PUBLIC_KEY}"
 plist_set_string "SUFeedURL" "${APPCAST_URL}"
+plist_set_bool "SUEnableAutomaticChecks" "true"
 
 FRAMEWORKS_DIR="${APP_PATH}/Contents/Frameworks"
 mkdir -p "${FRAMEWORKS_DIR}"
