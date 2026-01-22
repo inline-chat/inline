@@ -2,7 +2,6 @@
 import Foundation
 import Sparkle
 
-@MainActor
 final class UpdateDriver: NSObject, SPUUserDriver {
   private let viewModel: UpdateViewModel
   private weak var presenter: UpdatePresenting?

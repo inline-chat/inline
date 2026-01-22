@@ -2,12 +2,10 @@
 import Combine
 import Foundation
 
-@MainActor
 final class UpdateViewModel: ObservableObject {
   @Published var state: UpdateState = .idle
 }
 
-@MainActor
 enum UpdateState {
   case idle
   case permission(UpdatePermissionState)
@@ -26,19 +24,16 @@ enum UpdateState {
   }
 }
 
-@MainActor
 struct UpdatePermissionState {
   let message: String
   let allow: () -> Void
   let deny: () -> Void
 }
 
-@MainActor
 struct UpdateCheckingState {
   let cancel: () -> Void
 }
 
-@MainActor
 struct UpdateAvailableState {
   let version: String
   let build: String?
@@ -47,36 +42,30 @@ struct UpdateAvailableState {
   let later: () -> Void
 }
 
-@MainActor
 struct UpdateDownloadingState {
   let cancel: () -> Void
   let expectedLength: Int64?
   let receivedLength: Int64
 }
 
-@MainActor
 struct UpdateExtractingState {
   let progress: Double
 }
 
-@MainActor
 struct UpdateReadyState {
   let install: () -> Void
   let later: () -> Void
 }
 
-@MainActor
 struct UpdateInstallingState {
   let retryTerminatingApplication: () -> Void
   let dismiss: () -> Void
 }
 
-@MainActor
 struct UpdateNotFoundState {
   let acknowledgement: () -> Void
 }
 
-@MainActor
 struct UpdateErrorState {
   let message: String
   let retry: () -> Void

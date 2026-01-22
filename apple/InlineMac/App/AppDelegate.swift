@@ -21,7 +21,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   @MainActor private var globalHotkeys: GlobalHotkeys?
 
 #if SPARKLE
-  @MainActor private var updateController: UpdateController?
+  private lazy var updateController = UpdateController()
 #endif
 
   // --
@@ -31,7 +31,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   private var cancellables = Set<AnyCancellable>()
 
-  @MainActor func applicationWillFinishLaunching(_: Notification) {
+  func applicationWillFinishLaunching(_: Notification) {
     // Disable native tabbing
     NSWindow.allowsAutomaticWindowTabbing = false
 
@@ -45,15 +45,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     dependencies.logOut = logOut
   }
 
-  @MainActor func applicationDidFinishLaunching(_: Notification) {
+  func applicationDidFinishLaunching(_: Notification) {
     initializeServices()
     setupMainWindow()
     setupMainMenu()
     setupNotificationsSoundSetting()
 #if SPARKLE
-    Task { @MainActor in
-      self.updateControllerIfNeeded().startIfNeeded()
-    }
+    updateController.startIfNeeded()
 #endif
     // TODO: Temporarily disable Dock badge updates until the update-applying bug is fixed.
     NSApplication.shared.dockTile.badgeLabel = nil
@@ -87,13 +85,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
 #if SPARKLE
   @objc func checkForUpdates(_ sender: Any?) {
-    Task { @MainActor in
-      self.updateControllerIfNeeded().checkForUpdates()
-    }
+    updateController.checkForUpdates()
   }
 #endif
 
-  @MainActor func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+  func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     MainActor.assumeIsolated {
       dockBadgeService.prepareForTermination()
     }
@@ -141,7 +137,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     mainWindowController = controller
   }
 
-  @MainActor func applicationShouldHandleReopen(_: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+  func applicationShouldHandleReopen(_: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
     if !flag {
       setupMainWindow()
     }
@@ -263,7 +259,7 @@ extension AppDelegate {
 
     if let peerId = getPeerFromNotification(userInfo) {
       Task(priority: .userInitiated) { @MainActor in
-        dependencies.nav.open(.chat(peer: peerId))
+        self.dependencies.nav.open(.chat(peer: peerId))
       }
     }
   }
@@ -283,8 +279,8 @@ extension AppDelegate {
   }
 
   private func logOut() async {
-    await MainActor.run {
-      // Navigate outside of the app
+    // Navigate outside of the app
+    DispatchQueue.main.async {
       self.dependencies.viewModel.navigate(.onboarding)
 
       // Reset internal navigation
@@ -307,25 +303,10 @@ extension AppDelegate {
       Transactions.shared.clearAll()
 
       // Stop WebSocket
-      await MainActor.run {
-        await self.dependencies.realtime.loggedOut()
-      }
+      await dependencies.realtime.loggedOut()
     }
   }
 }
-
-#if SPARKLE
-extension AppDelegate {
-  @MainActor private func updateControllerIfNeeded() -> UpdateController {
-    if let updateController {
-      return updateController
-    }
-    let controller = UpdateController()
-    updateController = controller
-    return controller
-  }
-}
-#endif
 
 // MARK: - URL Scheme Handling
 
