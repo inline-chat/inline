@@ -13,6 +13,7 @@ enum MainToolbarItemIdentifier: Hashable, Sendable {
   case translationIcon(peer: Peer)
   case participants(peer: Peer)
   case chatTitle(peer: Peer)
+  case nudge(peer: Peer)
 }
 
 struct MainToolbarItems {
@@ -174,6 +175,19 @@ struct ToolbarSwiftUIView: View {
                 .buttonStyle(.plain)
                 .controlSize(.extraLarge)
                 // .frame(height: Theme.toolbarHeight - 8)
+                .id(peer.id)
+            }
+
+          case let .nudge(peer):
+            if #available(macOS 26.0, *) {
+              NudgeButton(peer: peer)
+                .buttonStyle(.glass)
+                .controlSize(.large)
+                .id(peer.id)
+            } else {
+              NudgeButton(peer: peer)
+                .buttonStyle(.plain)
+                .controlSize(.extraLarge)
                 .id(peer.id)
             }
 
