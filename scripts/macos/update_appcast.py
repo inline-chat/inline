@@ -19,6 +19,7 @@ Output:
 """
 
 import os
+import sys
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
@@ -62,10 +63,15 @@ def find_sparkle_child(item: ET.Element, name: str) -> ET.Element | None:
     )
 
 if appcast_path.exists():
-    et = ET.parse(appcast_path)
-    root = et.getroot()
+    try:
+        et = ET.parse(appcast_path)
+        root = et.getroot()
+    except ET.ParseError as error:
+        print(f"Warning: failed to parse existing appcast ({appcast_path}): {error}", file=sys.stderr)
+        root = ET.Element("rss", {"version": "2.0"})
+        et = ET.ElementTree(root)
 else:
-    root = ET.Element("rss", {"version": "2.0", "xmlns:sparkle": namespaces["sparkle"]})
+    root = ET.Element("rss", {"version": "2.0"})
     et = ET.ElementTree(root)
 
 channel_el = root.find("channel")

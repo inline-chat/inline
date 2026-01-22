@@ -32,6 +32,7 @@ with Sparkle (non-TestFlight) and preparing DMG artifacts.
 - `validate_appcast.py`: validates Sparkle appcasts before upload.
 - `release-direct.ts`: uploads DMG and/or appcast to R2 with cache headers.
 - `release-local.sh`: runs a full local release (build → upload DMG → update appcast → upload appcast).
+- `appcast-only.sh`: updates the appcast only (no rebuild), with validation.
 
 ## Environment Variables
 
@@ -151,6 +152,12 @@ bash scripts/macos/release-local.sh --channel beta
 
 Local release artifacts (signing key, sign_update output, appcast files) are
 written under `build/macos-release-tmp/` and cleaned up each run.
+
+## Appcast Only (No Rebuild)
+
+```bash
+bash scripts/macos/appcast-only.sh --channel beta
+```
 
 ## Notes
 

@@ -23,7 +23,10 @@ def sparkle_tag(name: str) -> str:
 
 
 def find_sparkle_child(item: ET.Element, name: str) -> ET.Element | None:
-    return item.find(sparkle_tag(name)) or item.find(f"sparkle:{name}")
+    element = item.find(sparkle_tag(name))
+    if element is None:
+        element = item.find(f"sparkle:{name}", {"sparkle": SPARKLE_NS})
+    return element
 
 
 def main() -> int:
@@ -45,7 +48,22 @@ def main() -> int:
         return 1
 
     root = tree.getroot()
-    channel = root.find("channel") or root.find("./channel")
+    def has_sparkle_namespace() -> bool:
+        for el in root.iter():
+            if isinstance(el.tag, str) and el.tag.startswith(f"{{{SPARKLE_NS}}}"):
+                return True
+            for attr in el.attrib:
+                if attr.startswith(f"{{{SPARKLE_NS}}}"):
+                    return True
+        return False
+
+    if not has_sparkle_namespace():
+        print("Appcast missing Sparkle namespace usage", file=sys.stderr)
+        return 1
+
+    channel = root.find("channel")
+    if channel is None:
+        channel = root.find("./channel")
     if channel is None:
         print("Appcast missing <channel>", file=sys.stderr)
         return 1

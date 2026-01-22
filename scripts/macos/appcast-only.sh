@@ -19,7 +19,7 @@ TEMP_ROOT="${ROOT_DIR}/build/macos-release-tmp"
 
 usage() {
   cat <<'EOF'
-Usage: release-local.sh [--channel stable|beta] [--app-path <path>] [--dmg-path <path>] [--derived-data <path>]
+Usage: appcast-only.sh [--channel stable|beta] [--app-path <path>] [--dmg-path <path>] [--derived-data <path>]
 EOF
 }
 
@@ -66,7 +66,7 @@ if [[ -z "${DMG_PATH}" ]]; then
 fi
 
 mkdir -p "${TEMP_ROOT}"
-TEMP_DIR=$(mktemp -d "${TEMP_ROOT}/run.XXXXXX")
+TEMP_DIR=$(mktemp -d "${TEMP_ROOT}/appcast.XXXXXX")
 SIGNING_KEY_PATH="${TEMP_DIR}/signing.key"
 SIGN_UPDATE_PATH="${TEMP_DIR}/sign_update.txt"
 APPCAST_PATH="${TEMP_DIR}/appcast.xml"
@@ -94,49 +94,30 @@ require_cmd() {
 require_cmd bun
 require_cmd python3
 
-if [[ -z "${SPARKLE_PUBLIC_KEY:-}" && -n "${MACOS_SPARKLE_PUBLIC_KEY:-}" ]]; then
-  SPARKLE_PUBLIC_KEY="${MACOS_SPARKLE_PUBLIC_KEY}"
-fi
 if [[ -z "${SPARKLE_PRIVATE_KEY:-}" && -n "${MACOS_SPARKLE_PRIVATE_KEY:-}" ]]; then
   SPARKLE_PRIVATE_KEY="${MACOS_SPARKLE_PRIVATE_KEY}"
 fi
-
-require_env SPARKLE_PUBLIC_KEY
 require_env SPARKLE_PRIVATE_KEY
-require_env MACOS_CERTIFICATE_NAME
 require_env PUBLIC_RELEASES_R2_ACCESS_KEY_ID
 require_env PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY
 require_env PUBLIC_RELEASES_R2_BUCKET
 require_env PUBLIC_RELEASES_R2_ENDPOINT
 require_env PUBLIC_RELEASES_R2_PUBLIC_BASE_URL
 
-if [[ -z "${MACOS_PROVISIONING_PROFILE_BASE64:-}" && -z "${MACOS_PROVISIONING_PROFILE_PATH:-}" ]]; then
-  echo "MACOS_PROVISIONING_PROFILE_BASE64 or MACOS_PROVISIONING_PROFILE_PATH is required." >&2
-  exit 1
-fi
-
-echo "• Building DMG (channel: ${CHANNEL})"
-CHANNEL="${CHANNEL}" DERIVED_DATA="${DERIVED_DATA}" DMG_PATH="${DMG_PATH}" \
-  bash "${ROOT_DIR}/scripts/macos/build-direct.sh"
-
-if [[ ! -d "${APP_PATH}" ]]; then
-  echo "App not found at ${APP_PATH}" >&2
-  exit 1
-fi
 if [[ ! -f "${DMG_PATH}" ]]; then
   echo "DMG not found at ${DMG_PATH}" >&2
   exit 1
 fi
+if [[ ! -d "${APP_PATH}" ]]; then
+  echo "App not found at ${APP_PATH}" >&2
+  exit 1
+fi
 
-BUILD_NUMBER=$(git -C "${ROOT_DIR}" rev-list --count HEAD)
+BUILD_NUMBER=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "${APP_PATH}/Contents/Info.plist")
 export BUILD_NUMBER
 BASE_URL="${PUBLIC_RELEASES_R2_PUBLIC_BASE_URL%/}"
 DMG_URL="${BASE_URL}/mac/${CHANNEL}/${BUILD_NUMBER}/Inline.dmg"
 APPCAST_URL="${BASE_URL}/mac/${CHANNEL}/appcast.xml"
-
-echo "• Upload DMG to R2"
-UPLOAD_MODE="dmg" CHANNEL="${CHANNEL}" DMG_PATH="${DMG_PATH}" \
-  bun run "${ROOT_DIR}/scripts/macos/release-direct.ts"
 
 echo "• Verify DMG availability"
 for attempt in 1 2 3 4 5; do
@@ -155,6 +136,7 @@ INFO_PLIST="${APP_PATH}/Contents/Info.plist"
 VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "${INFO_PLIST}")
 COMMIT=$(git -C "${ROOT_DIR}" rev-parse --short HEAD)
 COMMIT_LONG=$(git -C "${ROOT_DIR}" rev-parse HEAD)
+
 echo "${SPARKLE_PRIVATE_KEY}" > "${SIGNING_KEY_PATH}"
 "${SPARKLE_DIR}/bin/sign_update" -f "${SIGNING_KEY_PATH}" "${DMG_PATH}" > "${SIGN_UPDATE_PATH}"
 
@@ -185,4 +167,4 @@ echo "• Upload appcast to R2"
 UPLOAD_MODE="appcast" CHANNEL="${CHANNEL}" APPCAST_PATH="${APPCAST_OUTPUT_PATH}" \
   bun run "${ROOT_DIR}/scripts/macos/release-direct.ts"
 
-echo "• Release complete"
+echo "• Appcast update complete"
