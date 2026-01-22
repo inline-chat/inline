@@ -904,6 +904,7 @@ private extension MessagesCollectionView {
         object: nil,
         userInfo: ["hasUnread": hasUnreadSinceScroll]
       )
+    }
     private func presentPhotoGallery(
       for message: FullMessage,
       sourceView: UIView,

@@ -17,7 +17,7 @@ final class ImageViewerController: UIViewController {
   private let videoURL: URL?
   private weak var sourceView: UIView?
   private let sourceImage: UIImage?
-  private let sourceFrame: CGRect
+  private var sourceFrame: CGRect
   private let sourceCornerRadius: CGFloat
   private let destinationCornerRadius: CGFloat = 0
   private let showInChatAction: (() -> Void)?
@@ -187,10 +187,29 @@ final class ImageViewerController: UIViewController {
     sourceCornerRadius: CGFloat = 16,
     showInChatAction: (() -> Void)? = nil
   ) {
+    self.imageURL = nil
+    self.videoURL = videoURL
+    self.sourceView = sourceView
+    self.sourceImage = sourceImage
+    self.showInChatAction = showInChatAction
+    self.isVideo = true
+    self.sourceFrame = sourceView.convert(sourceView.bounds, to: nil)
+    self.sourceCornerRadius = max(0, sourceCornerRadius)
+    self.imageItems = []
+    self.currentIndex = 0
+    self.sourceViewProvider = nil
+
+    super.init(nibName: nil, bundle: nil)
+    modalPresentationStyle = .overFullScreen
+    modalTransitionStyle = .crossDissolve
+  }
+
+  init(
     imageItems: [ImageViewerItem],
     initialIndex: Int,
     sourceView: UIView,
     sourceImage: UIImage? = nil,
+    sourceCornerRadius: CGFloat = 16,
     showInChatAction: (() -> Void)? = nil,
     sourceViewProvider: ((Int64) -> UIView?)? = nil
   ) {
@@ -212,24 +231,7 @@ final class ImageViewerController: UIViewController {
     self.showInChatAction = showInChatAction
     self.isVideo = false
     self.sourceFrame = sourceView.convert(sourceView.bounds, to: nil)
-
-    super.init(nibName: nil, bundle: nil)
-    modalPresentationStyle = .overFullScreen
-    modalTransitionStyle = .crossDissolve
-  }
-
-  init(videoURL: URL, sourceView: UIView, sourceImage: UIImage? = nil, showInChatAction: (() -> Void)? = nil) {
-    self.imageURL = nil
-    self.videoURL = videoURL
-    self.sourceView = sourceView
-    self.sourceImage = sourceImage
-    self.showInChatAction = showInChatAction
-    self.isVideo = true
-    self.sourceFrame = sourceView.convert(sourceView.bounds, to: nil)
     self.sourceCornerRadius = max(0, sourceCornerRadius)
-    self.imageItems = []
-    self.currentIndex = 0
-    self.sourceViewProvider = nil
 
     super.init(nibName: nil, bundle: nil)
     modalPresentationStyle = .overFullScreen
@@ -513,6 +515,10 @@ final class ImageViewerController: UIViewController {
       )
       didRegisterImageObserver = true
     }
+  }
+
+  @objc private func imageDidLoad() {
+    handleImageLoadCompletion()
   }
 
   private func loadVideo() {
@@ -956,6 +962,10 @@ final class ImageViewerController: UIViewController {
 
     audioSessionSnapshot = nil
   }
+}
+
+private extension Notification.Name {
+  static let imageLoadingDidFinish = Notification.Name("imageLoadingDidFinish")
 }
 
 // MARK: - UIScrollViewDelegate
