@@ -33,12 +33,13 @@ commit_long = os.environ.get("INLINE_COMMIT_LONG", "")
 
 appcast_path = Path(os.environ.get("APPCAST_PATH", "appcast.xml"))
 output_path = Path(os.environ.get("APPCAST_OUTPUT", "appcast_new.xml"))
+sign_update_path = Path(os.environ.get("SIGN_UPDATE_PATH", "sign_update.txt"))
 
 now = datetime.now(timezone.utc)
 
 # Read sign_update output
 attrs = {}
-with open("sign_update.txt", "r", encoding="utf-8") as f:
+with open(sign_update_path, "r", encoding="utf-8") as f:
     for pair in f.read().split(" "):
         key, value = pair.split("=", 1)
         value = value.strip()
@@ -46,9 +47,19 @@ with open("sign_update.txt", "r", encoding="utf-8") as f:
             value = value[1:-1]
         attrs[key] = value
 
-namespaces = {"sparkle": "http://www.andymatuschak.org/xml-namespaces/sparkle"}
-for prefix, uri in namespaces.items():
-    ET.register_namespace(prefix, uri)
+SPARKLE_NS = "http://www.andymatuschak.org/xml-namespaces/sparkle"
+namespaces = {"sparkle": SPARKLE_NS}
+ET.register_namespace("sparkle", SPARKLE_NS)
+
+def sparkle_tag(name: str) -> str:
+    return f"{{{SPARKLE_NS}}}{name}"
+
+def find_sparkle_child(item: ET.Element, name: str) -> ET.Element | None:
+    return (
+        item.find(sparkle_tag(name))
+        or item.find(f"sparkle:{name}", namespaces)
+        or item.find(f"sparkle:{name}")
+    )
 
 if appcast_path.exists():
     et = ET.parse(appcast_path)
@@ -69,7 +80,7 @@ if channel_el is None:
 
 # Remove any existing item with the same build number
 for item in list(channel_el.findall("item")):
-    version_el = item.find("sparkle:version", namespaces)
+    version_el = find_sparkle_child(item, "version")
     if version_el is not None and version_el.text == build:
         channel_el.remove(item)
 
@@ -81,13 +92,13 @@ item_title.text = f"Inline {version}"
 pub_date = ET.SubElement(item, "pubDate")
 pub_date.text = now.strftime("%a, %d %b %Y %H:%M:%S %z")
 
-sparkle_version = ET.SubElement(item, "sparkle:version")
+sparkle_version = ET.SubElement(item, sparkle_tag("version"))
 sparkle_version.text = build
 
-sparkle_short = ET.SubElement(item, "sparkle:shortVersionString")
+sparkle_short = ET.SubElement(item, sparkle_tag("shortVersionString"))
 sparkle_short.text = version
 
-sparkle_min = ET.SubElement(item, "sparkle:minimumSystemVersion")
+sparkle_min = ET.SubElement(item, sparkle_tag("minimumSystemVersion"))
 sparkle_min.text = min_macos
 
 if commit:
@@ -98,7 +109,10 @@ enclosure = ET.SubElement(item, "enclosure")
 enclosure.set("url", dmg_url)
 enclosure.set("type", "application/octet-stream")
 for key, value in attrs.items():
-    enclosure.set(key, value)
+    if key.startswith("sparkle:"):
+        enclosure.set(sparkle_tag(key.split(":", 1)[1]), value)
+    else:
+        enclosure.set(key, value)
 
 output_path.parent.mkdir(parents=True, exist_ok=True)
 et.write(output_path, xml_declaration=True, encoding="utf-8")

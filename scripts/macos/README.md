@@ -29,14 +29,19 @@ with Sparkle (non-TestFlight) and preparing DMG artifacts.
   Xcode signing is disabled during the build to avoid provisioning profile
   requirements; the app is signed manually afterward.
 - `update_appcast.py`: generates/updates an appcast from `sign_update` output.
-- `release-direct.ts`: uploads DMG + appcast to R2 with cache headers.
+- `validate_appcast.py`: validates Sparkle appcasts before upload.
+- `release-direct.ts`: uploads DMG and/or appcast to R2 with cache headers.
+- `release-local.sh`: runs a full local release (build → upload DMG → update appcast → upload appcast).
 
 ## Environment Variables
 
 ### Required for `build-direct.sh`
 
 - `SPARKLE_PUBLIC_KEY` — Sparkle EdDSA public key (embedded into Info.plist).
+- `MACOS_SPARKLE_PUBLIC_KEY` — accepted as an alias for `SPARKLE_PUBLIC_KEY`.
 - `MACOS_CERTIFICATE_NAME` — signing identity (Keychain name).
+- `MACOS_PROVISIONING_PROFILE_BASE64` or `MACOS_PROVISIONING_PROFILE_PATH` —
+  required when using APS/keychain entitlements for direct distribution.
 
 ### Required for notarization (unless `SKIP_NOTARIZE=1`)
 
@@ -57,6 +62,7 @@ Choose one of the two auth methods below.
 ### Required for appcast signing
 
 - `SPARKLE_PRIVATE_KEY` — Sparkle EdDSA private key (used by `sign_update`).
+- `MACOS_SPARKLE_PRIVATE_KEY` — accepted as an alias for `SPARKLE_PRIVATE_KEY`.
 
 ### Required for R2 uploads
 
@@ -65,7 +71,6 @@ Choose one of the two auth methods below.
 - `PUBLIC_RELEASES_R2_BUCKET`
 - `PUBLIC_RELEASES_R2_ENDPOINT`
 - `PUBLIC_RELEASES_R2_PUBLIC_BASE_URL` (expected: `https://public-assets.inline.chat`)
-- `PUBLIC_RELEASES_R2_PREFIX` (set to `mac`)
 
 ### Optional
 
@@ -78,6 +83,7 @@ Choose one of the two auth methods below.
 - `OUTPUT_DIR` — DMG output directory (default: `build/macos-direct`)
 - `DMG_PATH` — output DMG path (default: `build/macos-direct/Inline.dmg`)
 - `SKIP_NOTARIZE=1` — skip notarization (dev only)
+- `UPLOAD_MODE` — for `release-direct.ts`: `all` (default), `dmg`, or `appcast`
 
 ### CI Secrets Mapping (GitHub Actions)
 
@@ -87,6 +93,7 @@ Choose one of the two auth methods below.
 - `MACOS_CI_KEYCHAIN_PWD`
 - `MACOS_SPARKLE_PUBLIC_KEY`
 - `MACOS_SPARKLE_PRIVATE_KEY`
+- `MACOS_PROVISIONING_PROFILE_BASE64`
 - `APPLE_NOTARIZATION_KEY`
 - `APPLE_NOTARIZATION_KEY_ID`
 - `APPLE_NOTARIZATION_ISSUER`
@@ -104,6 +111,22 @@ Choose one of the two auth methods below.
 The workflow `macos-direct-release.yml` accepts an optional `tag` input. If set,
 the DMG will be attached to that GitHub tag/release for traceability.
 
+## Beta (Tip-Style) Releases
+
+- Run the `macos-direct-release.yml` workflow manually with `channel = beta`.
+- Leave `tag` empty so the workflow attaches the DMG to the `tip` release.
+- The appcast is updated **after** the DMG is uploaded to avoid incomplete releases.
+
+## Stable Release Guide
+
+1. Ensure all CI secrets are set (including `MACOS_PROVISIONING_PROFILE_BASE64`).
+2. Run `macos-direct-release.yml` with `channel = stable`.
+3. (Recommended) Provide a `tag` to attach the DMG to a GitHub Release.
+4. Verify:
+   - DMG is uploaded to R2 at `/mac/stable/<build>/Inline.dmg`.
+   - Appcast at `/mac/stable/appcast.xml` points to the new build.
+   - Notarization/stapling succeeded.
+
 ## Local Dev Usage (Direct Build)
 
 ```
@@ -115,9 +138,24 @@ bash scripts/macos/build-direct.sh
 
 The resulting DMG is written to `build/macos-direct/Inline.dmg`.
 
+## Local Release (Stable/Beta)
+
+The local release script uses the **same env var list as CI** (plus optional
+`MACOS_PROVISIONING_PROFILE_PATH` for convenience).
+
+```bash
+bash scripts/macos/release-local.sh --channel stable
+# or
+bash scripts/macos/release-local.sh --channel beta
+```
+
+Local release artifacts (signing key, sign_update output, appcast files) are
+written under `build/macos-release-tmp/` and cleaned up each run.
+
 ## Notes
 
 - Sparkle private key is **never** embedded in the app bundle. It is only used
   for appcast signing in the release pipeline.
 - This script does not upload artifacts. Uploads and appcast updates are handled
-  by CI steps in later pipeline stages.
+  by CI steps in later pipeline stages, with DMG uploads happening before appcast updates.
+- Appcasts are validated locally and in CI before upload to avoid broken feeds.
