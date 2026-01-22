@@ -40,26 +40,12 @@ final class NewPhotoView: NSView {
   init(_ fullMessage: FullMessage, scrollState: MessageListScrollState) {
     self.fullMessage = fullMessage
     isScrolling = scrollState.isScrolling
-    let text = fullMessage.message.text
-    let hasText = text != nil && text?.isEmpty == false
-
     if fullMessage.message.isSticker == true {
       backgroundView.backgroundColor = .clear
     }
-    // Adjust radius based on text presence
-    if hasText {
-      topLeftRadius = Theme.messageBubbleCornerRadius - 1
-      topRightRadius = Theme.messageBubbleCornerRadius - 1
-      bottomLeftRadius = 2.0
-      bottomRightRadius = 2.0
-    } else {
-      topLeftRadius = Theme.messageBubbleCornerRadius - 1
-      topRightRadius = Theme.messageBubbleCornerRadius - 1
-      bottomLeftRadius = Theme.messageBubbleCornerRadius - 1
-      bottomRightRadius = Theme.messageBubbleCornerRadius - 1
-    }
 
     super.init(frame: .zero)
+    updateCornerRadii()
     setupView()
   }
 
@@ -129,6 +115,8 @@ final class NewPhotoView: NSView {
   public func update(with fullMessage: FullMessage) {
     let prev = self.fullMessage
     self.fullMessage = fullMessage
+    updateCornerRadii()
+    updateMasks()
 
     // Only reload if file id or image source has changed
     if
@@ -141,6 +129,25 @@ final class NewPhotoView: NSView {
     }
 
     updateImage()
+  }
+
+  private func updateCornerRadii() {
+    let hasText = fullMessage.message.text?.isEmpty == false
+    let hasTopHeader = fullMessage.message.repliedToMessageId != nil
+      || fullMessage.message.forwardFromUserId != nil
+    let bubbleRadius = Theme.messageBubbleCornerRadius - 1
+    let topRadius = hasTopHeader ? 0 : bubbleRadius
+
+    topLeftRadius = topRadius
+    topRightRadius = topRadius
+
+    if hasText {
+      bottomLeftRadius = 2.0
+      bottomRightRadius = 2.0
+    } else {
+      bottomLeftRadius = bubbleRadius
+      bottomRightRadius = bubbleRadius
+    }
   }
 
   private var wasLoadedWithPlaceholder = false
