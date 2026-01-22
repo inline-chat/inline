@@ -39,6 +39,11 @@ if ! command -v create-dmg >/dev/null 2>&1; then
   exit 1
 fi
 
+if [[ ! -f "${ENTITLEMENTS_PATH}" ]]; then
+  echo "Entitlements file not found: ${ENTITLEMENTS_PATH}" >&2
+  exit 1
+fi
+
 entitlement_exists() {
   /usr/libexec/PlistBuddy -c "Print :$1" "${ENTITLEMENTS_PATH}" >/dev/null 2>&1
 }
@@ -64,6 +69,10 @@ if [[ ! -f "${SPARKLE_DIR}/Sparkle.xcframework/Info.plist" ]]; then
 fi
 
 SPARKLE_FRAMEWORK_PATH="${SPARKLE_DIR}/Sparkle.xcframework/macos-arm64_x86_64"
+if [[ ! -d "${SPARKLE_FRAMEWORK_PATH}" ]]; then
+  echo "Sparkle framework path not found: ${SPARKLE_FRAMEWORK_PATH}" >&2
+  exit 1
+fi
 
 xcodebuild \
   -project "${ROOT_DIR}/apple/Inline.xcodeproj" \
@@ -82,6 +91,11 @@ xcodebuild \
 APP_PATH="${DERIVED_DATA}/Build/Products/Release/Inline.app"
 PLIST_PATH="${APP_PATH}/Contents/Info.plist"
 BUILD_NUMBER=$(git -C "${ROOT_DIR}" rev-list --count HEAD)
+
+if [[ ! -d "${APP_PATH}" ]]; then
+  echo "Built app not found at ${APP_PATH}" >&2
+  exit 1
+fi
 
 plist_set_string() {
   local key="$1"
@@ -103,8 +117,13 @@ mkdir -p "${FRAMEWORKS_DIR}"
 rsync -a "${SPARKLE_FRAMEWORK_PATH}/Sparkle.framework" "${FRAMEWORKS_DIR}/"
 
 SPARKLE_FRAMEWORK="${FRAMEWORKS_DIR}/Sparkle.framework"
+if [[ ! -d "${SPARKLE_FRAMEWORK}" ]]; then
+  echo "Sparkle framework not found at ${SPARKLE_FRAMEWORK}" >&2
+  exit 1
+fi
 
 if [[ -n "${MACOS_PROVISIONING_PROFILE_BASE64}" || -n "${MACOS_PROVISIONING_PROFILE_PATH}" ]]; then
+  mkdir -p "${OUTPUT_DIR}"
   PROFILE_PATH="${OUTPUT_DIR}/embedded.provisionprofile"
   if [[ -n "${MACOS_PROVISIONING_PROFILE_BASE64}" ]]; then
     if base64 -D >/dev/null 2>&1 <<<""; then
@@ -122,6 +141,10 @@ if [[ -n "${MACOS_PROVISIONING_PROFILE_BASE64}" || -n "${MACOS_PROVISIONING_PROF
   PROFILE_TEAM_ID=$(/usr/libexec/PlistBuddy -c "Print :Entitlements:com.apple.developer.team-identifier" "${PROFILE_PLIST}")
   PROFILE_APS_ENV=$(/usr/libexec/PlistBuddy -c "Print :Entitlements:com.apple.developer.aps-environment" "${PROFILE_PLIST}" 2>/dev/null || true)
   rm -f "${PROFILE_PLIST}"
+  if [[ -z "${PROFILE_UUID}" || -z "${PROFILE_TEAM_ID}" ]]; then
+    echo "Provisioning profile is missing UUID or team identifier." >&2
+    exit 1
+  fi
 
   mkdir -p "${HOME}/Library/MobileDevice/Provisioning Profiles"
   cp "${PROFILE_PATH}" "${HOME}/Library/MobileDevice/Provisioning Profiles/${PROFILE_UUID}.provisionprofile"
