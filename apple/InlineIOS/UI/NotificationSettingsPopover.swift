@@ -6,7 +6,6 @@ struct NotificationSettingsButton: View {
   @EnvironmentObject private var notificationSettings: NotificationSettingsManager
 
   @State private var presented = false
-  @State private var showMentionsSettings = false
 
   var body: some View {
     button
@@ -23,19 +22,8 @@ struct NotificationSettingsButton: View {
               }
             }
         }
-        .background(
-          NavigationLink(
-            destination: MentionsNotificationSettingsView(
-              disableDmNotifications: $notificationSettings.disableDmNotifications
-            ),
-            isActive: $showMentionsSettings
-          ) {
-            EmptyView()
-          }
-          .hidden()
-        )
-          
         .presentationDragIndicator(.visible)
+        .presentationDetents([.medium])
       }
   }
 
@@ -97,7 +85,12 @@ struct NotificationSettingsButton: View {
           onChange: {
             notificationSettings.mode = $0
             close()
-          }
+          },
+          menuContent: AnyView(
+            Toggle(isOn: $notificationSettings.disableDmNotifications) {
+              Text("Disable DM notifications")
+            }
+          )
         )
 
         NotificationSettingsItem(
@@ -148,32 +141,63 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
   var value: Value
   var onChange: (Value) -> Void
   var customizeAction: (() -> Void)?
+  var menuContent: AnyView?
   let theme = ThemeManager.shared.selected
 
   var body: some View {
     HStack(spacing: 12) {
-      Circle()
-        .fill(selected ? Color(theme.accent) : Color(.systemGray5))
-        .frame(width: 36, height: 36)
-        .overlay {
-          Image(systemName: systemImage)
-            .font(.system(size: 18, weight: .medium))
-            .foregroundStyle(selected ? Color.white : Color(.systemGray))
+      Button {
+        onChange(value)
+      } label: {
+        HStack(spacing: 12) {
+          Circle()
+            .fill(selected ? Color(theme.accent) : Color(.systemGray5))
+            .frame(width: 36, height: 36)
+            .overlay {
+              Image(systemName: systemImage)
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(selected ? Color.white : Color(.systemGray))
+            }
+
+          VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+              .font(.body)
+              .fontWeight(.medium)
+
+            Text(description)
+              .font(.caption)
+          }
+
+          Spacer()
+
+          if selected {
+            Image(systemName: "checkmark")
+              .font(.system(size: 16, weight: .semibold))
+              .foregroundStyle(Color(theme.accent))
+          }
         }
-
-      VStack(alignment: .leading, spacing: 2) {
-        Text(title)
-          .font(.body)
-          .fontWeight(.medium)
-
-        Text(description)
-          .font(.caption)
-
+        .frame(maxWidth: .infinity, alignment: .leading)
       }
+      .buttonStyle(.plain)
+      .contentShape(Rectangle())
 
-      Spacer()
-
-      if let customizeAction {
+      if let menuContent {
+        Menu {
+          menuContent
+        } label: {
+          Circle()
+            .frame(width: 28, height: 28)
+            .foregroundStyle(Color(.systemGray5))
+            .overlay {
+              Image(systemName: "ellipsis")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+            }
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title) options")
+      } else if let customizeAction {
         Button(action: customizeAction) {
           Circle()
             .frame(width: 28, height: 28)
@@ -187,12 +211,6 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
         }
         .buttonStyle(.plain)
       }
-
-      if selected {
-        Image(systemName: "checkmark")
-          .font(.system(size: 16, weight: .semibold))
-          .foregroundStyle(Color(theme.accent))
-      }
     }
     .padding(.vertical, 8)
     .padding(.horizontal, 12)
@@ -200,43 +218,6 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
       RoundedRectangle(cornerRadius: 12)
         .fill(selected ? Color(theme.accent).opacity(0.1) : ThemeManager.shared.cardBackgroundColor)
     )
-    .contentShape(Rectangle())
-    .onTapGesture {
-      onChange(value)
-    }
     .animation(.easeOut(duration: 0.08), value: selected)
-  }
-}
-
-private struct MentionsNotificationSettingsView: View {
-  @Binding var disableDmNotifications: Bool
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      VStack(alignment: .leading, spacing: 6) {
-        Text("Direct Messages")
-          .font(.headline)
-
-        Text("Control DM notification behavior")
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
-      }
-
-      Toggle(isOn: $disableDmNotifications) {
-        VStack(alignment: .leading, spacing: 2) {
-          Text("Disable DM notifications")
-            .font(.body)
-          Text("Mentions and nudges will still notify you")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-      }
-      .toggleStyle(.switch)
-
-      Spacer()
-    }
-    .padding(16)
-    .navigationTitle("Direct Messages")
-    .navigationBarTitleDisplayMode(.inline)
   }
 }
