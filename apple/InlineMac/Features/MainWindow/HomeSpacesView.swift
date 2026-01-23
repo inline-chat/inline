@@ -4,6 +4,7 @@ import InlineUI
 import Logger
 import SwiftUI
 
+// NOTE: Currently unused in the new macOS UI (home no longer shows spaces).
 struct HomeSpacesView: View {
   @Environment(\.dependencies) private var dependencies
   @EnvironmentObject private var data: DataManager

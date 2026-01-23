@@ -274,7 +274,7 @@ class MainSplitView: NSViewController {
   private func escapeTargetRoute(for nav2: Nav2) -> Nav2Route? {
     switch nav2.activeTab {
       case .home:
-        return nav2.currentRoute == .spaces ? nil : .spaces
+        return nav2.currentRoute == .empty ? nil : .empty
       case .space:
         return nav2.currentRoute == .empty ? nil : .empty
     }
