@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import Combine
 import InlineKit
+import InlineMacWindow
 import Observation
 
 class MainSidebarList: NSView {
@@ -66,7 +67,7 @@ class MainSidebarList: NSView {
   var onArchiveCountChanged: ((Int) -> Void)?
 
   lazy var collectionView: NSCollectionView = {
-    let collectionView = NSCollectionView()
+    let collectionView = MainSidebarCollectionView()
     collectionView.collectionViewLayout = createLayout()
     collectionView.backgroundColors = [.clear]
     collectionView.translatesAutoresizingMaskIntoConstraints = false
@@ -741,6 +742,18 @@ class MainSidebarList: NSView {
         return false
       }
     }
+  }
+}
+
+private final class MainSidebarCollectionView: NSCollectionView {
+  override func mouseDown(with event: NSEvent) {
+    let point = convert(event.locationInWindow, from: nil)
+    if indexPathForItem(at: point) == nil {
+      deselectAll(nil)
+      window?.beginWindowDrag(with: event)
+      return
+    }
+    super.mouseDown(with: event)
   }
 }
 
