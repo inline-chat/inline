@@ -6,8 +6,7 @@ import SwiftUI
 import Translation
 
 enum MainToolbarItemIdentifier: Hashable, Sendable {
-  case navigationBack
-  case navigationForward
+  case navigationButtons
   case title
   case spacer
   case translationIcon(peer: Peer)
@@ -29,7 +28,7 @@ extension MainToolbarItems {
   }
 
   static func defaultItems() -> MainToolbarItems {
-    MainToolbarItems(items: [.navigationBack, .navigationForward, .title])
+    MainToolbarItems(items: [.navigationButtons, .title])
   }
 }
 
@@ -37,7 +36,7 @@ final class ToolbarState: ObservableObject {
   @Published var currentItems: [MainToolbarItemIdentifier]
 
   init() {
-    currentItems = [.navigationBack, .navigationForward]
+    currentItems = [.navigationButtons]
   }
 
   func update(with items: [MainToolbarItemIdentifier]) {
@@ -125,12 +124,16 @@ struct ToolbarSwiftUIView: View {
   @ObservedObject var state: ToolbarState
   var dependencies: AppDependencies
 
+  private let navButtonSymbolSize: CGFloat = 18
+  private let navButtonSymbolFrame: CGFloat = 24
+  private let navButtonHitFrame: CGFloat = 32
+
   var body: some View {
     ZStack(alignment: .leading) {
       toolbarBackground
       toolbarContent
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 24)
+        .padding(.horizontal, 16)
     }
     .frame(height: Theme.toolbarHeight)
     .ignoresSafeArea()
@@ -156,11 +159,8 @@ struct ToolbarSwiftUIView: View {
     HStack(spacing: 12) {
       ForEach(Array(state.currentItems.enumerated()), id: \.offset) { _, item in
         switch item {
-          case .navigationBack:
-            navigationBackButton
-
-          case .navigationForward:
-            navigationForwardButton
+          case .navigationButtons:
+            navigationButtons
 
           case let .translationIcon(peer):
             if #available(macOS 26.0, *) {
@@ -210,25 +210,44 @@ struct ToolbarSwiftUIView: View {
   }
 
   private var navigationBackButton: some View {
-    Button {
+    navigationButton(
+      systemName: "chevron.left",
+      isEnabled: dependencies.nav2?.canGoBack ?? false
+    ) {
       dependencies.nav2?.goBack()
-    } label: {
-      Image(systemName: "chevron.left")
     }
-    .buttonStyle(.plain)
-    .controlSize(.large)
-    .disabled(!(dependencies.nav2?.canGoBack ?? false))
+  }
+
+  private var navigationButtons: some View {
+    HStack(spacing: 0) {
+      navigationBackButton
+      navigationForwardButton
+    }
   }
 
   private var navigationForwardButton: some View {
-    Button {
+    navigationButton(
+      systemName: "chevron.right",
+      isEnabled: dependencies.nav2?.canGoForward ?? false
+    ) {
       dependencies.nav2?.goForward()
-    } label: {
-      Image(systemName: "chevron.right")
+    }
+  }
+
+  private func navigationButton(
+    systemName: String,
+    isEnabled: Bool,
+    action: @escaping () -> Void
+  ) -> some View {
+    Button(action: action) {
+      Image(systemName: systemName)
+        .font(.system(size: navButtonSymbolSize, weight: .regular))
+        .frame(width: navButtonSymbolFrame, height: navButtonSymbolFrame)
+        .frame(width: navButtonHitFrame, height: navButtonHitFrame)
+        .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
-    .controlSize(.large)
-    .disabled(!(dependencies.nav2?.canGoForward ?? false))
+    .disabled(!isEnabled)
   }
 }
 
