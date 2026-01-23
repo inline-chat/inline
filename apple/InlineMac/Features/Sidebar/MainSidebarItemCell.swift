@@ -29,8 +29,9 @@ class MainSidebarItemCell: NSView {
   )
   private static let pinnedBadgeSize: CGFloat = 8
   private static let pinnedBadgePointSize: CGFloat = 8
-  private static let actionButtonSize: CGFloat = 16
-  private static let actionButtonPadding: CGFloat = 3
+  private static let actionButtonSize: CGFloat = 18
+  private static let actionButtonTrailingInset: CGFloat = MainSidebar.innerEdgeInsets
+  private static let actionButtonSpacing: CGFloat = 6
 
   private var hoverColor: NSColor {
     .white.withAlphaComponent(0.2)
@@ -47,6 +48,12 @@ class MainSidebarItemCell: NSView {
   private var isHovered = false {
     didSet {
       updateAppearance()
+    }
+  }
+
+  private var isActionButtonHovered = false {
+    didSet {
+      actionButton.setHovered(isActionButtonHovered)
     }
   }
 
@@ -78,6 +85,10 @@ class MainSidebarItemCell: NSView {
     setup()
     setupGestureRecognizers()
     setupTrackingArea()
+  }
+
+  override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+    true
   }
 
   @available(*, unavailable)
@@ -112,6 +123,7 @@ class MainSidebarItemCell: NSView {
 
   private var leadingWidthConstraint: NSLayoutConstraint?
   private var leadingHeightConstraint: NSLayoutConstraint?
+  private var stackViewTrailingConstraint: NSLayoutConstraint?
 
   lazy var avatarView: ChatIconSwiftUIBridge = {
     let view = ChatIconSwiftUIBridge(
@@ -157,22 +169,13 @@ class MainSidebarItemCell: NSView {
     return view
   }()
 
-  private lazy var actionButton: NSButton = {
-    let button = NSButton()
+  private lazy var actionButton: SidebarItemActionButton = {
+    let button = SidebarItemActionButton()
     button.translatesAutoresizingMaskIntoConstraints = false
-    button.isBordered = false
-    button.wantsLayer = true
-    button.layer?.cornerRadius = 4
-    button.layer?.masksToBounds = true
-    button.imagePosition = .imageOnly
-
     button.widthAnchor.constraint(equalToConstant: Self.actionButtonSize).isActive = true
     button.heightAnchor.constraint(equalToConstant: Self.actionButtonSize).isActive = true
     button.setContentHuggingPriority(.required, for: .horizontal)
     button.setContentCompressionResistancePriority(.required, for: .horizontal)
-
-    button.target = self
-    button.action = #selector(handleActionButtonClick)
     button.isHidden = true
 
     return button
@@ -231,9 +234,15 @@ class MainSidebarItemCell: NSView {
       containerView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
 
+    let stackViewTrailingConstraint = stackView.trailingAnchor.constraint(
+      equalTo: containerView.trailingAnchor,
+      constant: -Self.horizontalPadding
+    )
+    self.stackViewTrailingConstraint = stackViewTrailingConstraint
+
     NSLayoutConstraint.activate([
       stackView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: Self.horizontalPadding),
-      stackView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -Self.horizontalPadding),
+      stackViewTrailingConstraint,
       stackView.centerYAnchor.constraint(equalTo: containerView.centerYAnchor),
     ])
 
@@ -248,11 +257,20 @@ class MainSidebarItemCell: NSView {
     ])
 
     NSLayoutConstraint.activate([
-      actionButton.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -Self.actionButtonPadding),
+      actionButton.trailingAnchor.constraint(
+        equalTo: containerView.trailingAnchor,
+        constant: -Self.actionButtonTrailingInset
+      ),
       actionButton.centerYAnchor.constraint(equalTo: containerView.centerYAnchor),
     ])
 
     stackView.setCustomSpacing(Self.avatarSpacing, after: leadingContainerView)
+
+    let pressGesture = NSPressGestureRecognizer(target: self, action: #selector(handleActionPress(_:)))
+    pressGesture.minimumPressDuration = 0
+    pressGesture.allowableMovement = 2
+    pressGesture.delaysPrimaryMouseButtonEvents = false
+    containerView.addGestureRecognizer(pressGesture)
   }
 
   func configure(
@@ -289,6 +307,7 @@ class MainSidebarItemCell: NSView {
 
     setupEventListeners()
     observeNavRoute()
+    updateActionButtonAppearance()
   }
 
   private var preparingForReuse = false
@@ -382,11 +401,7 @@ class MainSidebarItemCell: NSView {
     }
 
     if isArchived {
-      // Switch to inbox and navigate first, then unarchive in background
-      // This avoids a race condition where the tab switch happens before
-      // the view model receives the database update via Combine
-      nav2?.navigate(to: .chat(peer: peer))
-      NotificationCenter.default.post(name: .switchToInbox, object: nil)
+      // Unarchive without changing navigation.
       Task(priority: .userInitiated) {
         try await DataManager.shared.updateDialog(peerId: peer, archived: false, spaceId: item.spaceId)
       }
@@ -449,7 +464,7 @@ class MainSidebarItemCell: NSView {
 
     let trackingArea = NSTrackingArea(
       rect: bounds,
-      options: [.mouseEnteredAndExited, .activeAlways],
+      options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways],
       owner: self,
       userInfo: nil
     )
@@ -464,11 +479,19 @@ class MainSidebarItemCell: NSView {
   override func mouseEntered(with event: NSEvent) {
     super.mouseEntered(with: event)
     isHovered = true
+    updateActionButtonHover(with: event)
   }
 
   override func mouseExited(with event: NSEvent) {
     super.mouseExited(with: event)
     isHovered = false
+    isActionButtonHovered = false
+    actionButton.setPressed(false)
+  }
+
+  override func mouseMoved(with event: NSEvent) {
+    super.mouseMoved(with: event)
+    updateActionButtonHover(with: event)
   }
 
   private func setupGestureRecognizers() {
@@ -571,8 +594,16 @@ class MainSidebarItemCell: NSView {
   private func updateActionButtonVisibility() {
     let shouldShow = isHovered && item != nil
     actionButton.isHidden = !shouldShow
+    let trailingInset = shouldShow
+      ? (Self.actionButtonTrailingInset + Self.actionButtonSize + Self.actionButtonSpacing)
+      : Self.horizontalPadding
+    stackViewTrailingConstraint?.constant = -trailingInset
     if shouldShow {
       updateActionButtonAppearance()
+      refreshActionButtonHover()
+    } else {
+      isActionButtonHovered = false
+      actionButton.setPressed(false)
     }
   }
 
@@ -582,16 +613,17 @@ class MainSidebarItemCell: NSView {
 
     if isArchived {
       symbolName = "chevron.right"
-      accessibilityLabel = "Open"
+      accessibilityLabel = "Unarchive"
     } else {
       symbolName = "xmark"
       accessibilityLabel = "Archive"
     }
 
-    let config = NSImage.SymbolConfiguration(pointSize: 8, weight: .bold)
-      .applying(.init(paletteColors: [.secondaryLabelColor]))
-    actionButton.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: accessibilityLabel)?
-      .withSymbolConfiguration(config)
+    actionButton.setSymbol(
+      symbolName: symbolName,
+      accessibilityLabel: accessibilityLabel,
+      tint: .secondaryLabelColor
+    )
   }
 
   override func updateLayer() {
@@ -647,4 +679,128 @@ class MainSidebarItemCell: NSView {
     isKeyboardSelected = selected
   }
 
+  private func updateActionButtonHover(with event: NSEvent) {
+    guard !actionButton.isHidden else {
+      isActionButtonHovered = false
+      return
+    }
+    let location = convert(event.locationInWindow, from: nil)
+    let locationInContainer = containerView.convert(location, from: self)
+    isActionButtonHovered = isActionButtonPointInsideContainer(locationInContainer)
+  }
+
+  private func isActionButtonPointInsideContainer(_ point: NSPoint) -> Bool {
+    guard !actionButton.isHidden else { return false }
+    return actionButton.frame.contains(point)
+  }
+
+  private func refreshActionButtonHover() {
+    guard let window, !actionButton.isHidden else { return }
+    let mouseLocation = window.mouseLocationOutsideOfEventStream
+    let locationInContainer = containerView.convert(mouseLocation, from: nil)
+    isActionButtonHovered = isActionButtonPointInsideContainer(locationInContainer)
+  }
+
+  @objc private func handleActionPress(_ gesture: NSPressGestureRecognizer) {
+    let location = gesture.location(in: containerView)
+    let isInside = isActionButtonPointInsideContainer(location)
+    switch gesture.state {
+      case .began, .changed:
+        actionButton.setPressed(isInside)
+      default:
+        actionButton.setPressed(false)
+    }
+  }
+
+}
+
+private final class SidebarItemActionButton: NSView {
+  private static let cornerRadius: CGFloat = 6
+  private static let iconSize: CGFloat = 10
+  private static let hoverColor = NSColor.black.withAlphaComponent(0.08)
+  private static let pressedColor = NSColor.black.withAlphaComponent(0.16)
+
+  private let imageView = NonDraggableImageView()
+  private var accessibilityLabelText = "Action"
+
+  private var isHovering = false {
+    didSet { updateBackground() }
+  }
+  private var isPressed = false {
+    didSet { updateBackground() }
+  }
+
+  override init(frame: NSRect) {
+    super.init(frame: frame)
+    setup()
+  }
+
+  convenience init() {
+    self.init(frame: .zero)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    // Let the parent view handle clicks so pressed state and actions stay centralized.
+    nil
+  }
+
+  func setHovered(_ hovered: Bool) {
+    isHovering = hovered
+  }
+
+  func setPressed(_ pressed: Bool) {
+    isPressed = pressed
+  }
+
+  func setSymbol(symbolName: String, accessibilityLabel: String, tint: NSColor) {
+    accessibilityLabelText = accessibilityLabel
+    let config = NSImage.SymbolConfiguration(pointSize: Self.iconSize, weight: .semibold)
+    imageView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: accessibilityLabel)?
+      .withSymbolConfiguration(config)
+    imageView.contentTintColor = tint
+  }
+
+  private func setup() {
+    wantsLayer = true
+    layer?.cornerRadius = Self.cornerRadius
+    layer?.cornerCurve = .continuous
+
+    imageView.translatesAutoresizingMaskIntoConstraints = false
+    imageView.imageScaling = .scaleProportionallyDown
+    addSubview(imageView)
+
+    NSLayoutConstraint.activate([
+      imageView.centerXAnchor.constraint(equalTo: centerXAnchor),
+      imageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+      imageView.widthAnchor.constraint(equalToConstant: Self.iconSize),
+      imageView.heightAnchor.constraint(equalToConstant: Self.iconSize),
+    ])
+
+    updateBackground()
+  }
+
+  override func accessibilityRole() -> NSAccessibility.Role? {
+    .button
+  }
+
+  override func accessibilityLabel() -> String? {
+    accessibilityLabelText
+  }
+
+  private func updateBackground() {
+    let color: NSColor
+    if isPressed {
+      color = Self.pressedColor
+    } else if isHovering {
+      color = Self.hoverColor
+    } else {
+      color = .clear
+    }
+    layer?.backgroundColor = color.cgColor
+  }
 }
