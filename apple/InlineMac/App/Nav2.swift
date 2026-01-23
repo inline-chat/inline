@@ -139,7 +139,7 @@ struct Nav2Entry: Codable {
     if let last = history.last, tabs.contains(last.tab) {
       return last.route
     }
-    return activeTab == .home ? .spaces : .empty
+    return .empty
   }
 
   // MARK: - Methods
@@ -301,7 +301,7 @@ struct Nav2Entry: Codable {
     let targetTab = tabs[index]
     activeTabIndex = index
 
-    let defaultRoute: Nav2Route = targetTab == .home ? .spaces : .empty
+    let defaultRoute: Nav2Route = .empty
     let targetRoute = routeOverride ?? lastRoutes[targetTab] ?? defaultRoute
     lastRoutes[targetTab] = targetRoute
 
