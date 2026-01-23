@@ -175,6 +175,18 @@ class MainSidebarList: NSView {
       name: NSScrollView.didEndLiveScrollNotification,
       object: scrollView
     )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleNextChat),
+      name: .nextChat,
+      object: nil
+    )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handlePrevChat),
+      name: .prevChat,
+      object: nil
+    )
 
     quickSearchVisibilityObserver = NotificationCenter.default.addObserver(
       forName: .quickSearchVisibilityChanged,
@@ -197,6 +209,53 @@ class MainSidebarList: NSView {
   @objc private func didEndLiveScroll() {
     scrollEventsSubject.send(.didEndLiveScroll)
     updateScrollSeparators()
+  }
+
+  // MARK: - Chat Navigation
+
+  @objc private func handleNextChat() {
+    navigateChat(offset: 1)
+  }
+
+  @objc private func handlePrevChat() {
+    navigateChat(offset: -1)
+  }
+
+  private func canNavigateChats() -> Bool {
+    guard mode != .search else { return false }
+    return !isQuickSearchVisible
+  }
+
+  private func navigateChat(offset: Int) {
+    guard canNavigateChats() else { return }
+    guard let nav2 else { return }
+
+    let snapshot = dataSource.snapshot()
+    let orderedChatIds: [ChatListItem.Identifier] = snapshot.sectionIdentifiers.flatMap { section in
+      snapshot.itemIdentifiers(inSection: section).compactMap { item in
+        if case let .chat(id) = item { return id }
+        return nil
+      }
+    }
+
+    guard orderedChatIds.isEmpty == false else { return }
+
+    let currentPeer: Peer? = switch nav2.currentRoute {
+      case let .chat(peer):
+        peer
+      default:
+        nil
+    }
+
+    let currentIndex: Int = {
+      guard let currentPeer else { return -1 }
+      return orderedChatIds.firstIndex(where: { chatItemsByID[$0]?.peerId == currentPeer }) ?? -1
+    }()
+
+    let targetIndex = currentIndex + offset
+    guard targetIndex >= 0, targetIndex < orderedChatIds.count else { return }
+    guard let targetPeer = chatItemsByID[orderedChatIds[targetIndex]]?.peerId else { return }
+    nav2.navigate(to: .chat(peer: targetPeer))
   }
 
   private func createLayout() -> NSCollectionViewLayout {

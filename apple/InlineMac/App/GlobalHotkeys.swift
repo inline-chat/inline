@@ -127,6 +127,9 @@ final class GlobalHotkeys {
   // MARK: Helper state checks
 
   private var isChatNavigationRelevant: Bool {
+    if dependencies.nav2 != nil {
+      return true
+    }
     let nav = dependencies.nav
     return nav.selectedTab == .inbox || nav.selectedTab == .archive
   }

@@ -562,9 +562,13 @@ final class AppMenu: NSObject {
 
 extension AppMenu: NSMenuItemValidation {
   func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-    guard let nav = dependencies?.nav else { return false }
+    guard let dependencies else { return false }
 
     if menuItem.action == #selector(prevChat(_:)) || menuItem.action == #selector(nextChat(_:)) {
+      if dependencies.nav2 != nil {
+        return true
+      }
+      let nav = dependencies.nav
       return nav.selectedTab == .inbox || nav.selectedTab == .archive
     }
 
