@@ -6,7 +6,7 @@ extension MainSplitView {
   func viewController(for route: Nav2Route) -> NSViewController {
     switch route {
       case .empty:
-        return PlaceholderContentViewController(message: "Select a chat to get started")
+        return PlaceholderContentViewController(message: nil)
 
       case .spaces:
         return NSHostingController(
