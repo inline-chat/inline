@@ -18,7 +18,10 @@ class MainSidebarItemCell: NSView {
   private static let horizontalPadding: CGFloat = MainSidebar.innerEdgeInsets
   private static let font: NSFont = MainSidebar.font
 
-  private static let cornerRadius: CGFloat = 10
+  private static let cornerRadius: CGFloat = 8
+  private static let activeShadowOpacity: Float = 0.05
+  private static let activeShadowRadius: CGFloat = 1
+  private static let activeShadowOffset = CGSize(width: 0, height: -1)
   private static let unreadBadgeSize: CGFloat = 5
   private static let unreadBadgeCornerRadius: CGFloat = 2.5
   private static let unreadBadgeAvatarSpacing: CGFloat = 2
@@ -94,7 +97,8 @@ class MainSidebarItemCell: NSView {
     let view = NSView()
     view.wantsLayer = true
     view.layer?.cornerRadius = Self.cornerRadius
-    view.layer?.masksToBounds = true
+    view.layer?.cornerCurve = .continuous
+    view.layer?.masksToBounds = false
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -242,7 +246,10 @@ class MainSidebarItemCell: NSView {
 
     NSLayoutConstraint.activate([
       unreadBadgeView.centerYAnchor.constraint(equalTo: containerView.centerYAnchor),
-      unreadBadgeView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: Self.unreadBadgeLeadingInset),
+      unreadBadgeView.leadingAnchor.constraint(
+        equalTo: containerView.leadingAnchor,
+        constant: Self.unreadBadgeLeadingInset
+      ),
     ])
 
     NSLayoutConstraint.activate([
@@ -259,7 +266,6 @@ class MainSidebarItemCell: NSView {
     ])
 
     stackView.setCustomSpacing(Self.avatarSpacing, after: leadingContainerView)
-
   }
 
   func configure(
@@ -565,7 +571,7 @@ class MainSidebarItemCell: NSView {
   }
 
   private func clearBadges() {
-    badgeContainerView.arrangedSubviews.forEach { badge in
+    for badge in badgeContainerView.arrangedSubviews {
       badge.removeFromSuperview()
     }
   }
@@ -610,20 +616,39 @@ class MainSidebarItemCell: NSView {
 
   override func updateLayer() {
     containerView.effectiveAppearance.performAsCurrentDrawingAppearance {
-      let backgroundColor: NSColor
-      if isNavSelected {
-        backgroundColor = selectedColor
+      let backgroundColor: NSColor = if isNavSelected {
+        selectedColor
       } else if isKeyboardSelected {
-        backgroundColor = keyboardSelectionColor
+        keyboardSelectionColor
       } else if isHovered {
-        backgroundColor = hoverColor
+        hoverColor
       } else {
-        backgroundColor = .clear
+        .clear
       }
 
       containerView.layer?.backgroundColor = backgroundColor.cgColor
+      containerView.layer?.shadowColor = NSColor.black.cgColor
+      containerView.layer?.shadowOpacity = isNavSelected ? Self.activeShadowOpacity : 0
+      containerView.layer?.shadowRadius = Self.activeShadowRadius
+      containerView.layer?.shadowOffset = Self.activeShadowOffset
     }
     super.updateLayer()
+  }
+
+  override func layout() {
+    super.layout()
+    updateShadowPath()
+  }
+
+  private func updateShadowPath() {
+    guard let layer = containerView.layer else { return }
+    let path = CGPath(
+      roundedRect: containerView.bounds,
+      cornerWidth: Self.cornerRadius,
+      cornerHeight: Self.cornerRadius,
+      transform: nil
+    )
+    layer.shadowPath = path
   }
 
   @objc private func handleTap(_ gesture: NSClickGestureRecognizer) {
@@ -784,11 +809,10 @@ private final class SidebarItemActionButton: NSView {
   }
 
   private func updateBackground() {
-    let color: NSColor
-    if isHovering {
-      color = Self.hoverColor
+    let color: NSColor = if isHovering {
+      Self.hoverColor
     } else {
-      color = .clear
+      .clear
     }
     layer?.backgroundColor = color.cgColor
   }

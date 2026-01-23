@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+
 class MainSidebar: NSViewController {
   private let dependencies: AppDependencies
   private let listView: MainSidebarList
@@ -11,12 +12,12 @@ class MainSidebar: NSViewController {
   // Used in header, collection view item, and collection view layout.
 
   static let iconSize: CGFloat = 24
-  static let itemHeight: CGFloat = 32
+  static let itemHeight: CGFloat = 34
   static let iconTrailingPadding: CGFloat = 8
-  static let fontSize: CGFloat = 13
+  static let fontSize: CGFloat = 14
   static let fontWeight: NSFont.Weight = .regular
   static let font: NSFont = .systemFont(ofSize: fontSize, weight: fontWeight)
-  static let itemSpacing: CGFloat = 2
+  static let itemSpacing: CGFloat = 0
   static let outerEdgeInsets: CGFloat = 10
   static let innerEdgeInsets: CGFloat = 8
   static let edgeInsets: CGFloat = MainSidebar.outerEdgeInsets + MainSidebar.innerEdgeInsets
@@ -66,7 +67,7 @@ class MainSidebar: NSViewController {
     return button
   }()
 
-  private lazy var notificationsButton: NSHostingView<AnyView> = {
+  private lazy var notificationsButton: MainSidebarFooterHostingButton = {
     let hostingView = NSHostingView(
       rootView: AnyView(
         NotificationSettingsButton()
@@ -74,7 +75,9 @@ class MainSidebar: NSViewController {
       )
     )
     hostingView.translatesAutoresizingMaskIntoConstraints = false
-    return hostingView
+    let container = MainSidebarFooterHostingButton(contentView: hostingView)
+    container.translatesAutoresizingMaskIntoConstraints = false
+    return container
   }()
 
   private lazy var newSpaceMenuItem: NSMenuItem = {
@@ -134,7 +137,7 @@ class MainSidebar: NSViewController {
 
   private var headerTopConstraint: NSLayoutConstraint?
   private var switchToInboxObserver: NSObjectProtocol?
-  private static let footerButtonSpacing: CGFloat = 6
+  private static let footerHeight: CGFloat = MainSidebarFooterStyle.buttonSize + 16
 
   override func loadView() {
     view = NSView()
@@ -167,22 +170,22 @@ class MainSidebar: NSViewController {
       footerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
       footerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
       footerView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-      footerView.heightAnchor.constraint(equalToConstant: 40),
+      footerView.heightAnchor.constraint(equalToConstant: Self.footerHeight),
 
       archiveButton.leadingAnchor.constraint(equalTo: footerView.leadingAnchor, constant: Self.edgeInsets),
       archiveButton.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
-      archiveButton.widthAnchor.constraint(equalToConstant: 28),
-      archiveButton.heightAnchor.constraint(equalToConstant: 28),
+      archiveButton.widthAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
+      archiveButton.heightAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
 
-      plusButton.leadingAnchor.constraint(equalTo: archiveButton.trailingAnchor, constant: Self.footerButtonSpacing),
+      plusButton.centerXAnchor.constraint(equalTo: footerView.centerXAnchor),
       plusButton.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
-      plusButton.widthAnchor.constraint(equalToConstant: 28),
-      plusButton.heightAnchor.constraint(equalToConstant: 28),
+      plusButton.widthAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
+      plusButton.heightAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
 
       notificationsButton.trailingAnchor.constraint(equalTo: footerView.trailingAnchor, constant: -Self.edgeInsets),
       notificationsButton.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
-      notificationsButton.widthAnchor.constraint(equalToConstant: 28),
-      notificationsButton.heightAnchor.constraint(equalToConstant: 28),
+      notificationsButton.widthAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
+      notificationsButton.heightAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
 
       archiveEmptyView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
       archiveEmptyView.centerYAnchor.constraint(equalTo: listView.centerYAnchor),
@@ -194,7 +197,7 @@ class MainSidebar: NSViewController {
 
     listView.onChatCountChanged = { [weak self] mode, count in
       guard let self else { return }
-      self.archiveEmptyView.isHidden = !(mode == .archive && count == 0)
+      archiveEmptyView.isHidden = !(mode == .archive && count == 0)
     }
 
     setContent(for: .inbox)
@@ -284,13 +287,21 @@ private enum MainSidebarMode {
   case inbox
 }
 
+private enum MainSidebarFooterStyle {
+  static let buttonSize: CGFloat = 24
+  static let cornerRadius: CGFloat = 8
+  static let iconSize: CGFloat = 15
+  static let hoverColor = NSColor.black.withAlphaComponent(0.08)
+  static let pressedColor = NSColor.black.withAlphaComponent(0.12)
+}
+
 private final class MainSidebarArchiveButton: NSButton {
-  private static let cornerRadius: CGFloat = 8
-  private static let iconSize: CGFloat = 14
-  private static let hoverColor = NSColor.black.withAlphaComponent(0.08)
-  private static let pressedColor = NSColor.black.withAlphaComponent(0.12)
+  private static let cornerRadius: CGFloat = MainSidebarFooterStyle.cornerRadius
+  private static let iconSize: CGFloat = MainSidebarFooterStyle.iconSize
+  private static let hoverColor = MainSidebarFooterStyle.hoverColor
+  private static let pressedColor = MainSidebarFooterStyle.pressedColor
   private static let activeTint = NSColor.controlAccentColor
-  private static let inactiveTint = NSColor.secondaryLabelColor
+  private static let inactiveTint = NSColor.tertiaryLabelColor
 
   private var trackingArea: NSTrackingArea?
 
@@ -363,13 +374,12 @@ private final class MainSidebarArchiveButton: NSButton {
   }
 
   private func updateBackground() {
-    let color: NSColor
-    if isHighlighted {
-      color = Self.pressedColor
+    let color: NSColor = if isHighlighted {
+      Self.pressedColor
     } else if isHovering {
-      color = Self.hoverColor
+      Self.hoverColor
     } else {
-      color = .clear
+      .clear
     }
     layer?.backgroundColor = color.cgColor
   }
@@ -380,11 +390,11 @@ private final class MainSidebarArchiveButton: NSButton {
 }
 
 private final class MainSidebarFooterIconButton: NSButton {
-  private static let cornerRadius: CGFloat = 8
-  private static let iconSize: CGFloat = 14
-  private static let hoverColor = NSColor.black.withAlphaComponent(0.08)
-  private static let pressedColor = NSColor.black.withAlphaComponent(0.12)
-  private static let tint = NSColor.secondaryLabelColor
+  private static let cornerRadius: CGFloat = MainSidebarFooterStyle.cornerRadius
+  private static let iconSize: CGFloat = MainSidebarFooterStyle.iconSize
+  private static let hoverColor = MainSidebarFooterStyle.hoverColor
+  private static let pressedColor = MainSidebarFooterStyle.pressedColor
+  private static let tint = NSColor.tertiaryLabelColor
 
   private var trackingArea: NSTrackingArea?
   private let symbolName: String
@@ -456,13 +466,124 @@ private final class MainSidebarFooterIconButton: NSButton {
   }
 
   private func updateBackground() {
-    let color: NSColor
-    if isHighlighted {
-      color = Self.pressedColor
+    let color: NSColor = if isHighlighted {
+      Self.pressedColor
     } else if isHovering {
-      color = Self.hoverColor
+      Self.hoverColor
     } else {
-      color = .clear
+      .clear
+    }
+    layer?.backgroundColor = color.cgColor
+  }
+}
+
+private final class MainSidebarFooterHostingButton: NSView {
+  private var trackingArea: NSTrackingArea?
+  private var mouseMonitor: Any?
+  private let contentView: NSView
+
+  private var isHovering = false {
+    didSet { updateBackground() }
+  }
+
+  private var isPressed = false {
+    didSet { updateBackground() }
+  }
+
+  init(contentView: NSView) {
+    self.contentView = contentView
+    super.init(frame: .zero)
+    setup()
+  }
+
+  @available(*, unavailable)
+  required init?(coder _: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    if let trackingArea {
+      removeTrackingArea(trackingArea)
+    }
+    let options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect]
+    let area = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
+    trackingArea = area
+    addTrackingArea(area)
+  }
+
+  override func mouseEntered(with event: NSEvent) {
+    super.mouseEntered(with: event)
+    isHovering = true
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    super.mouseExited(with: event)
+    isHovering = false
+  }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    if window == nil {
+      removeMouseMonitor()
+    } else if mouseMonitor == nil {
+      installMouseMonitor()
+    }
+  }
+
+  deinit {
+    removeMouseMonitor()
+  }
+
+  private func setup() {
+    wantsLayer = true
+    layer?.cornerRadius = MainSidebarFooterStyle.cornerRadius
+    layer?.cornerCurve = .continuous
+    addSubview(contentView)
+
+    NSLayoutConstraint.activate([
+      contentView.centerXAnchor.constraint(equalTo: centerXAnchor),
+      contentView.centerYAnchor.constraint(equalTo: centerYAnchor),
+      contentView.widthAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
+      contentView.heightAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
+    ])
+
+    updateBackground()
+  }
+
+  private func installMouseMonitor() {
+    mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] event in
+      guard let self else { return event }
+      let location = convert(event.locationInWindow, from: nil)
+      let containsPoint = bounds.contains(location)
+      switch event.type {
+        case .leftMouseDown:
+          if containsPoint {
+            isPressed = true
+          }
+        case .leftMouseUp:
+          isPressed = false
+        default:
+          break
+      }
+      return event
+    }
+  }
+
+  private func removeMouseMonitor() {
+    if let mouseMonitor {
+      NSEvent.removeMonitor(mouseMonitor)
+      self.mouseMonitor = nil
+    }
+  }
+
+  private func updateBackground() {
+    let color: NSColor = if isPressed {
+      MainSidebarFooterStyle.pressedColor
+    } else if isHovering {
+      MainSidebarFooterStyle.hoverColor
+    } else {
+      .clear
     }
     layer?.backgroundColor = color.cgColor
   }
