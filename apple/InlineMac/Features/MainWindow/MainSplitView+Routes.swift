@@ -56,8 +56,7 @@ extension MainSplitView {
     switch route {
       case let .chat(peer):
         var items: [MainToolbarItemIdentifier] = [
-          .navigationBack,
-          .navigationForward,
+          .navigationButtons,
           .chatTitle(peer: peer),
           .spacer,
           .participants(peer: peer),
