@@ -3,10 +3,10 @@ import InlineKit
 import SwiftUI
 
 final class PlaceholderContentViewController: NSViewController {
-  private let message: String
+  private let message: String?
   private let imageView = NSImageView()
 
-  init(message: String) {
+  init(message: String?) {
     self.message = message
     super.init(nibName: nil, bundle: nil)
   }
@@ -17,10 +17,6 @@ final class PlaceholderContentViewController: NSViewController {
   }
 
   override func loadView() {
-    let label = NSTextField(labelWithString: message)
-    label.alignment = .center
-    label.textColor = .secondaryLabelColor
-
     imageView.image = NSImage(named: "inline-logo-bg")
     imageView.imageScaling = .scaleProportionallyUpOrDown
     imageView.translatesAutoresizingMaskIntoConstraints = false
@@ -30,18 +26,25 @@ final class PlaceholderContentViewController: NSViewController {
     }
 
     container.addSubview(imageView)
-    container.addSubview(label)
 
-    label.translatesAutoresizingMaskIntoConstraints = false
     NSLayoutConstraint.activate([
       imageView.centerXAnchor.constraint(equalTo: container.centerXAnchor),
       imageView.centerYAnchor.constraint(equalTo: container.centerYAnchor),
       imageView.widthAnchor.constraint(lessThanOrEqualToConstant: 320),
       imageView.heightAnchor.constraint(lessThanOrEqualToConstant: 320),
-
-      label.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-      label.topAnchor.constraint(equalTo: imageView.bottomAnchor, constant: 12),
     ])
+
+    if let message, !message.isEmpty {
+      let label = NSTextField(labelWithString: message)
+      label.alignment = .center
+      label.textColor = .secondaryLabelColor
+      label.translatesAutoresizingMaskIntoConstraints = false
+      container.addSubview(label)
+      NSLayoutConstraint.activate([
+        label.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+        label.topAnchor.constraint(equalTo: imageView.bottomAnchor, constant: 12),
+      ])
+    }
 
     view = container
     updateForAppearance()
