@@ -960,6 +960,11 @@ class MessageViewAppKit: NSView {
 
     let targetPeer = forwardPeer ?? message.peerId
 
+    if forwardHeaderIsPrivate, targetPeer.isPrivate, targetPeer != message.peerId {
+      openChat(peer: targetPeer)
+      return
+    }
+
     if targetPeer == message.peerId {
       let chatState = ChatsManager.shared.get(for: targetPeer, chatId: message.chatId)
       chatState.scrollTo(msgId: forwardedMessageId)
