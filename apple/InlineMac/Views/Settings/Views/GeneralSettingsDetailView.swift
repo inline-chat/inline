@@ -5,9 +5,9 @@ struct GeneralSettingsDetailView: View {
 
   var body: some View {
     Form {
-      // Section("Startup") {
-      //   Toggle("Launch at Login", isOn: $launchAtLogin)
-      // }
+      Section("Startup") {
+        Toggle("Launch at Login", isOn: $appSettings.launchAtLogin)
+      }
 
       Section("Compose") {
         Toggle("Automatic Spell Correction", isOn: $appSettings.automaticSpellCorrection)
