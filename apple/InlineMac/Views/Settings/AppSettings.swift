@@ -41,6 +41,12 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  @Published var launchAtLogin: Bool {
+    didSet {
+      UserDefaults.standard.set(launchAtLogin, forKey: "launchAtLogin")
+    }
+  }
+
   // MARK: - Notification Settings
 
   @Published var disableNotificationSound: Bool {
@@ -75,6 +81,7 @@ final class AppSettings: ObservableObject {
     sendsWithCmdEnter = UserDefaults.standard.bool(forKey: "sendsWithCmdEnter")
     automaticSpellCorrection = UserDefaults.standard.object(forKey: "automaticSpellCorrection") as? Bool ?? true
     checkSpellingWhileTyping = UserDefaults.standard.object(forKey: "checkSpellingWhileTyping") as? Bool ?? true
+    launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
     disableNotificationSound = UserDefaults.standard.bool(forKey: "disableNotificationSound")
     showDockBadgeUnreadDMs = UserDefaults.standard.object(forKey: "showDockBadgeUnreadDMs") as? Bool ?? true
     enableNewMacUI = UserDefaults.standard.bool(forKey: "enableNewMacUI")

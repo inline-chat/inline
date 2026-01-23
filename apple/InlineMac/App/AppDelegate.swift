@@ -20,6 +20,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   // Vim-style chat navigation key monitor
   @MainActor private var globalHotkeys: GlobalHotkeys?
 
+  private let launchAtLoginController = LaunchAtLoginController()
+
 #if SPARKLE
   private lazy var updateController = UpdateController()
 #endif
@@ -50,6 +52,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     setupMainWindow()
     setupMainMenu()
     setupNotificationsSoundSetting()
+    launchAtLoginController.start()
 #if SPARKLE
     updateController.startIfNeeded()
 #endif
