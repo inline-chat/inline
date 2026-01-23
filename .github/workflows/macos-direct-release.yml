@@ -19,6 +19,9 @@ on:
         description: "Git tag to attach the DMG to (optional)"
         required: false
         default: ""
+  push:
+    tags:
+      - "macos-v*.*.*"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -123,6 +126,21 @@ jobs:
             exit 1
           fi
 
+      - name: Resolve Release Inputs
+        id: release_inputs
+        env:
+          CHANNEL_INPUT: ${{ github.event.inputs.channel }}
+          SPARKLE_INPUT: ${{ github.event.inputs.sparkle_version }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            echo "channel=stable" >> "${GITHUB_OUTPUT}"
+            echo "sparkle_version=2.7.3" >> "${GITHUB_OUTPUT}"
+          else
+            echo "channel=${CHANNEL_INPUT}" >> "${GITHUB_OUTPUT}"
+            echo "sparkle_version=${SPARKLE_INPUT}" >> "${GITHUB_OUTPUT}"
+          fi
+
       - name: Install create-dmg
         run: npm install --global create-dmg
 
@@ -147,8 +165,8 @@ jobs:
 
       - name: Build Direct DMG
         env:
-          SPARKLE_VERSION: ${{ inputs.sparkle_version }}
-          CHANNEL: ${{ inputs.channel }}
+          SPARKLE_VERSION: ${{ steps.release_inputs.outputs.sparkle_version }}
+          CHANNEL: ${{ steps.release_inputs.outputs.channel }}
           SCHEME: ${{ vars.MACOS_DIRECT_SCHEME }}
           SPARKLE_PUBLIC_KEY: ${{ secrets.MACOS_SPARKLE_PUBLIC_KEY }}
           MACOS_CERTIFICATE_NAME: ${{ secrets.MACOS_CERTIFICATE_NAME }}
@@ -164,11 +182,14 @@ jobs:
       - name: Resolve Release Tag
         id: release_tag
         env:
-          CHANNEL: ${{ inputs.channel }}
-          TAG_INPUT: ${{ inputs.tag }}
+          CHANNEL: ${{ steps.release_inputs.outputs.channel }}
+          TAG_INPUT: ${{ github.event.inputs.tag }}
         run: |
           set -euo pipefail
           tag="${TAG_INPUT}"
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            tag="${GITHUB_REF_NAME}"
+          fi
           if [[ -z "${tag}" && "${CHANNEL}" == "beta" ]]; then
             tag="tip"
           fi
@@ -176,7 +197,7 @@ jobs:
 
       - name: Upload DMG to R2
         env:
-          CHANNEL: ${{ inputs.channel }}
+          CHANNEL: ${{ steps.release_inputs.outputs.channel }}
           DMG_PATH: build/macos-direct/Inline.dmg
           PUBLIC_RELEASES_R2_ACCESS_KEY_ID: ${{ secrets.PUBLIC_RELEASES_R2_ACCESS_KEY_ID }}
           PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY: ${{ secrets.PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY }}
@@ -191,7 +212,7 @@ jobs:
 
       - name: Verify DMG availability
         env:
-          CHANNEL: ${{ inputs.channel }}
+          CHANNEL: ${{ steps.release_inputs.outputs.channel }}
           PUBLIC_RELEASES_R2_PUBLIC_BASE_URL: ${{ secrets.PUBLIC_RELEASES_R2_PUBLIC_BASE_URL }}
         run: |
           set -euo pipefail
@@ -209,7 +230,7 @@ jobs:
 
       - name: Generate Appcast
         env:
-          CHANNEL: ${{ inputs.channel }}
+          CHANNEL: ${{ steps.release_inputs.outputs.channel }}
           SPARKLE_PRIVATE_KEY: ${{ secrets.MACOS_SPARKLE_PRIVATE_KEY }}
           PUBLIC_RELEASES_R2_PUBLIC_BASE_URL: ${{ secrets.PUBLIC_RELEASES_R2_PUBLIC_BASE_URL }}
         run: |
@@ -248,7 +269,7 @@ jobs:
 
       - name: Upload Appcast to R2
         env:
-          CHANNEL: ${{ inputs.channel }}
+          CHANNEL: ${{ steps.release_inputs.outputs.channel }}
           APPCAST_PATH: appcast_new.xml
           PUBLIC_RELEASES_R2_ACCESS_KEY_ID: ${{ secrets.PUBLIC_RELEASES_R2_ACCESS_KEY_ID }}
           PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY: ${{ secrets.PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY }}
@@ -266,7 +287,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
-          CHANNEL: ${{ inputs.channel }}
+          CHANNEL: ${{ steps.release_inputs.outputs.channel }}
         run: |
           set -euo pipefail
           tag="${RELEASE_TAG}"

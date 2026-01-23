@@ -95,6 +95,7 @@ xcodebuild \
 APP_PATH="${DERIVED_DATA}/Build/Products/Release/Inline.app"
 PLIST_PATH="${APP_PATH}/Contents/Info.plist"
 BUILD_NUMBER=$(git -C "${ROOT_DIR}" rev-list --count HEAD)
+INLINE_COMMIT=$(git -C "${ROOT_DIR}" rev-parse --short HEAD)
 
 if [[ ! -d "${APP_PATH}" ]]; then
   echo "Built app not found at ${APP_PATH}" >&2
@@ -124,6 +125,7 @@ plist_set_bool() {
 }
 
 plist_set_string "CFBundleVersion" "${BUILD_NUMBER}"
+plist_set_string "InlineCommit" "${INLINE_COMMIT}"
 plist_set_string "SUPublicEDKey" "${SPARKLE_PUBLIC_KEY}"
 plist_set_string "SUFeedURL" "${APPCAST_URL}"
 plist_set_bool "SUEnableAutomaticChecks" "true"

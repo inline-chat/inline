@@ -21,6 +21,7 @@ with Sparkle (non-TestFlight) and preparing DMG artifacts.
 - Xcode (via `xcode-select`)
 - `create-dmg` (`npm install --global create-dmg`)
 - `curl`, `unzip`, `rsync`
+- `xcodeproj` gem (`gem install xcodeproj`) for `update-version.ts`
 
 ## Scripts
 
@@ -32,6 +33,7 @@ with Sparkle (non-TestFlight) and preparing DMG artifacts.
 - `validate_appcast.py`: validates Sparkle appcasts before upload.
 - `release-direct.ts`: uploads DMG and/or appcast to R2 with cache headers.
 - `release-local.sh`: runs a full local release (build → upload DMG → update appcast → upload appcast).
+- `update-version.ts`: bumps the InlineMac marketing version, creates a `macos-vX.Y.Z` tag, and pushes to trigger CI.
 - `appcast-only.sh`: updates the appcast only (no rebuild), with validation.
 
 ## Environment Variables
@@ -121,9 +123,27 @@ the DMG will be attached to that GitHub tag/release for traceability.
 ## Stable Release Guide
 
 1. Ensure all CI secrets are set (including `MACOS_PROVISIONING_PROFILE_BASE64`).
-2. Run `macos-direct-release.yml` with `channel = stable`.
-3. (Recommended) Provide a `tag` to attach the DMG to a GitHub Release.
-4. Verify:
+2. Bump and tag the release:
+
+```bash
+bun run scripts/macos/update-version.ts --version X.Y.Z
+```
+
+Skip the confirmation prompt:
+
+```bash
+bun run scripts/macos/update-version.ts --version X.Y.Z -y
+```
+
+To undo the last macOS version bump (requires a clean git state):
+
+```bash
+bun run scripts/macos/update-version.ts --undo
+```
+
+3. CI will run `macos-direct-release.yml` on the `macos-vX.Y.Z` tag.
+4. (Optional) Run `macos-direct-release.yml` manually with `channel = stable` if you need to rebuild.
+5. Verify:
    - DMG is uploaded to R2 at `/mac/stable/<build>/Inline.dmg`.
    - Appcast at `/mac/stable/appcast.xml` points to the new build.
    - Notarization/stapling succeeded.
