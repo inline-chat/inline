@@ -1,5 +1,6 @@
 #if SPARKLE
 import AppKit
+import Combine
 import Logger
 import Sparkle
 
@@ -7,6 +8,7 @@ final class UpdateController: NSObject {
   private let updater: SPUUpdater
   private let updateDelegate: UpdateDelegate
   private let userDriver: SPUStandardUserDriver
+  private var settingsCancellable: AnyCancellable?
   private var didStart = false
   private let log = Log.scoped("UpdateController")
 
@@ -20,6 +22,12 @@ final class UpdateController: NSObject {
       delegate: updateDelegate
     )
     super.init()
+    settingsCancellable = AppSettings.shared.$autoUpdateMode
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] mode in
+        self?.applyAutoUpdateMode(mode)
+      }
+    applyAutoUpdateMode(AppSettings.shared.autoUpdateMode)
     log.info("Initialized Sparkle updater (standard UI)")
   }
 
@@ -40,6 +48,21 @@ final class UpdateController: NSObject {
     log.info("User initiated update check (started: \(didStart))")
     startIfNeeded()
     updater.checkForUpdates()
+  }
+
+  private func applyAutoUpdateMode(_ mode: AutoUpdateMode) {
+    switch mode {
+    case .off:
+      updater.automaticallyChecksForUpdates = false
+      updater.automaticallyDownloadsUpdates = false
+    case .check:
+      updater.automaticallyChecksForUpdates = true
+      updater.automaticallyDownloadsUpdates = false
+    case .download:
+      updater.automaticallyChecksForUpdates = true
+      updater.automaticallyDownloadsUpdates = true
+    }
+    log.info("Auto-update mode set to \(mode.rawValue)")
   }
 }
 #endif
