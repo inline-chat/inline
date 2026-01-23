@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import InlineMacWindow
 
 class MainWindowBg: NSVisualEffectView {
   private let overlayView: NSView = {
@@ -27,6 +28,14 @@ class MainWindowBg: NSVisualEffectView {
   override func updateLayer() {
     overlayView.layer?.backgroundColor = Theme.windowBackgroundColor.cgColor
     super.updateLayer()
+  }
+
+  override func mouseDown(with event: NSEvent) {
+    if event.type == .leftMouseDown {
+      window?.beginWindowDrag(with: event)
+      return
+    }
+    super.mouseDown(with: event)
   }
 
   private func setupView() {

@@ -8,6 +8,13 @@
 import AppKit
 import InlineMacWindow
 
+fileprivate final class MainWindowContentView: NSView {
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    let hit = super.hitTest(point)
+    return hit === self ? nil : hit
+  }
+}
+
 class MainWindowView: NSViewController {
   override func loadView() {
     view = MainWindowRootView()
@@ -36,7 +43,7 @@ class MainWindowView: NSViewController {
 }
 
 final class MainWindowRootView: TrafficLightInsetApplierView {
-  let contentView = NSView()
+  fileprivate let contentView = MainWindowContentView()
   private let backgroundView = MainWindowBg()
 
   override init(frame frameRect: NSRect) {
