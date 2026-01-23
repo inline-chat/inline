@@ -51,12 +51,6 @@ class MainSidebarItemCell: NSView {
     }
   }
 
-  private var isActionButtonHovered = false {
-    didSet {
-      actionButton.setHovered(isActionButtonHovered)
-    }
-  }
-
   private var isNavSelected = false {
     didSet {
       updateAppearance()
@@ -266,11 +260,6 @@ class MainSidebarItemCell: NSView {
 
     stackView.setCustomSpacing(Self.avatarSpacing, after: leadingContainerView)
 
-    let pressGesture = NSPressGestureRecognizer(target: self, action: #selector(handleActionPress(_:)))
-    pressGesture.minimumPressDuration = 0
-    pressGesture.allowableMovement = 2
-    pressGesture.delaysPrimaryMouseButtonEvents = false
-    containerView.addGestureRecognizer(pressGesture)
   }
 
   func configure(
@@ -464,7 +453,7 @@ class MainSidebarItemCell: NSView {
 
     let trackingArea = NSTrackingArea(
       rect: bounds,
-      options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways],
+      options: [.mouseEnteredAndExited, .activeAlways],
       owner: self,
       userInfo: nil
     )
@@ -474,28 +463,23 @@ class MainSidebarItemCell: NSView {
   override func updateTrackingAreas() {
     super.updateTrackingAreas()
     updateTrackingArea()
+    refreshHoverStateIfNeeded()
   }
 
   override func mouseEntered(with event: NSEvent) {
     super.mouseEntered(with: event)
     isHovered = true
-    updateActionButtonHover(with: event)
   }
 
   override func mouseExited(with event: NSEvent) {
     super.mouseExited(with: event)
+    guard !mouseIsInsideCell() else { return }
     isHovered = false
-    isActionButtonHovered = false
-    actionButton.setPressed(false)
-  }
-
-  override func mouseMoved(with event: NSEvent) {
-    super.mouseMoved(with: event)
-    updateActionButtonHover(with: event)
   }
 
   private func setupGestureRecognizers() {
     let tapGesture = NSClickGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+    tapGesture.delegate = self
     addGestureRecognizer(tapGesture)
   }
 
@@ -600,10 +584,8 @@ class MainSidebarItemCell: NSView {
     stackViewTrailingConstraint?.constant = -trailingInset
     if shouldShow {
       updateActionButtonAppearance()
-      refreshActionButtonHover()
     } else {
-      isActionButtonHovered = false
-      actionButton.setPressed(false)
+      actionButton.setHovered(false)
     }
   }
 
@@ -679,54 +661,46 @@ class MainSidebarItemCell: NSView {
     isKeyboardSelected = selected
   }
 
-  private func updateActionButtonHover(with event: NSEvent) {
-    guard !actionButton.isHidden else {
-      isActionButtonHovered = false
-      return
-    }
-    let location = convert(event.locationInWindow, from: nil)
-    let locationInContainer = containerView.convert(location, from: self)
-    isActionButtonHovered = isActionButtonPointInsideContainer(locationInContainer)
-  }
-
   private func isActionButtonPointInsideContainer(_ point: NSPoint) -> Bool {
     guard !actionButton.isHidden else { return false }
     return actionButton.frame.contains(point)
   }
 
-  private func refreshActionButtonHover() {
-    guard let window, !actionButton.isHidden else { return }
-    let mouseLocation = window.mouseLocationOutsideOfEventStream
-    let locationInContainer = containerView.convert(mouseLocation, from: nil)
-    isActionButtonHovered = isActionButtonPointInsideContainer(locationInContainer)
-  }
-
-  @objc private func handleActionPress(_ gesture: NSPressGestureRecognizer) {
-    let location = gesture.location(in: containerView)
-    let isInside = isActionButtonPointInsideContainer(location)
-    switch gesture.state {
-      case .began, .changed:
-        actionButton.setPressed(isInside)
-      default:
-        actionButton.setPressed(false)
+  private func refreshHoverStateIfNeeded() {
+    guard !isParentScrolling, let window else { return }
+    let location = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+    let hovered = bounds.contains(location)
+    if hovered != isHovered {
+      isHovered = hovered
     }
   }
 
+  private func mouseIsInsideCell() -> Bool {
+    guard let window else { return false }
+    let location = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+    return bounds.contains(location)
+  }
+}
+
+extension MainSidebarItemCell: NSGestureRecognizerDelegate {
+  func gestureRecognizer(_ gestureRecognizer: NSGestureRecognizer, shouldReceive event: NSEvent) -> Bool {
+    guard gestureRecognizer is NSClickGestureRecognizer else { return true }
+    let location = convert(event.locationInWindow, from: nil)
+    let locationInContainer = containerView.convert(location, from: self)
+    return !isActionButtonPointInsideContainer(locationInContainer)
+  }
 }
 
 private final class SidebarItemActionButton: NSView {
   private static let cornerRadius: CGFloat = 6
   private static let iconSize: CGFloat = 10
   private static let hoverColor = NSColor.black.withAlphaComponent(0.08)
-  private static let pressedColor = NSColor.black.withAlphaComponent(0.16)
 
   private let imageView = NonDraggableImageView()
   private var accessibilityLabelText = "Action"
 
+  private var trackingArea: NSTrackingArea?
   private var isHovering = false {
-    didSet { updateBackground() }
-  }
-  private var isPressed = false {
     didSet { updateBackground() }
   }
 
@@ -745,16 +719,12 @@ private final class SidebarItemActionButton: NSView {
   }
 
   override func hitTest(_ point: NSPoint) -> NSView? {
-    // Let the parent view handle clicks so pressed state and actions stay centralized.
-    nil
+    guard !isHidden, alphaValue > 0.01 else { return nil }
+    return bounds.contains(point) ? self : nil
   }
 
   func setHovered(_ hovered: Bool) {
     isHovering = hovered
-  }
-
-  func setPressed(_ pressed: Bool) {
-    isPressed = pressed
   }
 
   func setSymbol(symbolName: String, accessibilityLabel: String, tint: NSColor) {
@@ -792,11 +762,30 @@ private final class SidebarItemActionButton: NSView {
     accessibilityLabelText
   }
 
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    if let trackingArea {
+      removeTrackingArea(trackingArea)
+    }
+    let options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect]
+    let area = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
+    trackingArea = area
+    addTrackingArea(area)
+  }
+
+  override func mouseEntered(with event: NSEvent) {
+    super.mouseEntered(with: event)
+    isHovering = true
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    super.mouseExited(with: event)
+    isHovering = false
+  }
+
   private func updateBackground() {
     let color: NSColor
-    if isPressed {
-      color = Self.pressedColor
-    } else if isHovering {
+    if isHovering {
       color = Self.hoverColor
     } else {
       color = .clear
