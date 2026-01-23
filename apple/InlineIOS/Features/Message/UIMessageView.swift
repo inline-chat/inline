@@ -557,6 +557,19 @@ class UIMessageView: UIView {
       nil
     }
 
+    if forwardHeaderIsPrivate,
+       let forwardPeer,
+       let userId = forwardPeer.asUserId(),
+       forwardPeer != message.peerId
+    {
+      NotificationCenter.default.post(
+        name: Notification.Name("NavigateToForwardDestination"),
+        object: nil,
+        userInfo: ["peerUserId": userId]
+      )
+      return
+    }
+
     if forwardPeer == nil || forwardPeer == message.peerId {
       NotificationCenter.default.post(
         name: Notification.Name("ScrollToRepliedMessage"),
