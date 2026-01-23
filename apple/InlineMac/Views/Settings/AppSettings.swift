@@ -18,6 +18,25 @@ enum AutoUpdateChannel: String, CaseIterable, Identifiable {
   }
 }
 
+enum AutoUpdateMode: String, CaseIterable, Identifiable {
+  case off
+  case check
+  case download
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .off:
+      return "Off"
+    case .check:
+      return "Check Automatically"
+    case .download:
+      return "Download Automatically"
+    }
+  }
+}
+
 final class AppSettings: ObservableObject {
   static let shared = AppSettings()
 
@@ -77,6 +96,12 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  @Published var autoUpdateMode: AutoUpdateMode {
+    didSet {
+      UserDefaults.standard.set(autoUpdateMode.rawValue, forKey: "autoUpdateMode")
+    }
+  }
+
   private init() {
     sendsWithCmdEnter = UserDefaults.standard.bool(forKey: "sendsWithCmdEnter")
     automaticSpellCorrection = UserDefaults.standard.object(forKey: "automaticSpellCorrection") as? Bool ?? true
@@ -93,6 +118,14 @@ final class AppSettings: ObservableObject {
       autoUpdateChannel = inferred
     } else {
       autoUpdateChannel = .stable
+    }
+
+    if let storedMode = UserDefaults.standard.string(forKey: "autoUpdateMode"),
+       !storedMode.isEmpty,
+       let mode = AutoUpdateMode(rawValue: storedMode) {
+      autoUpdateMode = mode
+    } else {
+      autoUpdateMode = .download
     }
   }
 

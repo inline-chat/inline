@@ -24,6 +24,12 @@ struct GeneralSettingsDetailView: View {
 
       #if SPARKLE
       Section("Updates") {
+        Picker("Automatic Updates", selection: $appSettings.autoUpdateMode) {
+          ForEach(AutoUpdateMode.allCases) { mode in
+            Text(mode.title).tag(mode)
+          }
+        }
+        .pickerStyle(.menu)
         Picker("Update Channel", selection: $appSettings.autoUpdateChannel) {
           ForEach(AutoUpdateChannel.allCases) { channel in
             Text(channel.title).tag(channel)
