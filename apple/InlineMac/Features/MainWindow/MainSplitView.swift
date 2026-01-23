@@ -1,5 +1,6 @@
 import AppKit
 import InlineKit
+import InlineMacWindow
 import Logger
 import Observation
 import SwiftUI
@@ -31,8 +32,8 @@ class MainSplitView: NSViewController {
   // Constants
 
   private var sideWidth: CGFloat = 240
-  private var innerPadding: CGFloat = Theme.mainSplitViewInnerPadding
-  private var contentRadius: CGFloat = Theme.mainSplitViewContentRadius
+  private var innerPadding: CGFloat = Theme.mainSplitViewUseFullBleedContent ? 0 : Theme.mainSplitViewInnerPadding
+  private var contentRadius: CGFloat = Theme.mainSplitViewUseFullBleedContent ? 0 : Theme.mainSplitViewContentRadius
 
   private var lastRenderedRoute: Nav2Route?
   private var escapeKeyUnsubscriber: (() -> Void)?
@@ -82,7 +83,7 @@ class MainSplitView: NSViewController {
   }
 
   override func loadView() {
-    let rootView = NSView()
+    let rootView = WindowDragHandleView()
     view = rootView
     view.wantsLayer = true
 
