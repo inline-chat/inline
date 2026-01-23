@@ -5,11 +5,36 @@ import InlineUI
 import Logger
 import SwiftUI
 
+private enum QuickSearchLayout {
+  static let preferredWidth: CGFloat = 420
+  static let maxListHeight: CGFloat = 420
+  static let rowHeight: CGFloat = Theme.sidebarItemHeight
+  static let rowSpacing: CGFloat = 1
+  static let rowInnerPadding: CGFloat = 4
+  static let sectionHeaderHeight: CGFloat = 22
+  static let sectionSpacing: CGFloat = 8
+  static let searchBarHeight: CGFloat = 36
+  static let contentHorizontalPadding: CGFloat = 10
+  static let contentVerticalPadding: CGFloat = 10
+  static let searchHeaderVerticalPadding: CGFloat = 6
+  static let searchHeaderHeight: CGFloat = searchBarHeight + (searchHeaderVerticalPadding * 2)
+  static let listContentHorizontalInset: CGFloat = contentHorizontalPadding
+  static let listContentTopInset: CGFloat = contentVerticalPadding
+  static let listContentBottomInset: CGFloat = contentVerticalPadding
+  static let separatorHeight: CGFloat = 1
+  static let searchBarTextInset: CGFloat = 6
+  static let cornerRadius: CGFloat = 14
+  static let iconSize: CGFloat = 24
+  static let iconContainerSize: CGFloat = 28
+  static let iconTextSpacing: CGFloat = Theme.sidebarIconSpacing
+  static let itemTextSpacing: CGFloat = 6
+}
+
 @MainActor
 final class QuickSearchViewModel: ObservableObject {
   @Published var query: String = ""
   @Published var selectedIndex: Int = 0
-  @Published var focusToken: UUID = UUID()
+  @Published var focusToken: UUID = .init()
 
   let localSearch: HomeSearchViewModel
   let globalSearch: GlobalSearch
@@ -32,6 +57,21 @@ final class QuickSearchViewModel: ObservableObject {
     globalSearch.results
   }
 
+  var renderedGlobalResults: [GlobalSearchResult] {
+    let localUserIds = Set(localResults.compactMap { result in
+      if case let .user(user) = result {
+        return user.id
+      }
+      return nil
+    })
+    return globalResults.filter { result in
+      switch result {
+        case let .users(user):
+          localUserIds.contains(user.id) == false
+      }
+    }
+  }
+
   var isLoading: Bool {
     globalSearch.isLoading
   }
@@ -41,7 +81,7 @@ final class QuickSearchViewModel: ObservableObject {
   }
 
   var totalResults: Int {
-    localResults.count + globalResults.count
+    localResults.count + renderedGlobalResults.count
   }
 
   func performSearch() {
@@ -81,8 +121,8 @@ final class QuickSearchViewModel: ObservableObject {
       selectLocal(localResults[selectedIndex])
     } else {
       let index = selectedIndex - localResults.count
-      if globalResults.indices.contains(index) {
-        if case let .users(user) = globalResults[index] {
+      if renderedGlobalResults.indices.contains(index) {
+        if case let .users(user) = renderedGlobalResults[index] {
           selectRemote(user)
         }
       }
@@ -160,31 +200,22 @@ struct QuickSearchOverlayView: View {
 
   @Environment(\.colorScheme) private var colorScheme
 
-  private let preferredWidth: CGFloat = 420
-  private let maxListHeight: CGFloat = 420
-  private let rowHeight: CGFloat = Theme.sidebarItemHeight
-  private let rowSpacing: CGFloat = 6
-  private let rowInnerPadding: CGFloat = 6
-  private let sectionHeaderHeight: CGFloat = 22
-  private let listInsetsHeight: CGFloat = 0
-  private let searchBarHeight: CGFloat = 36
-  private let contentHorizontalPadding: CGFloat = 18
-  private let contentVerticalPadding: CGFloat = 12
-  private let listTopSpacing: CGFloat = 6
-  private let searchBarTextInset: CGFloat = 6
-  private let cornerRadius: CGFloat = 14
-
   var body: some View {
-    let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+    let shape = RoundedRectangle(cornerRadius: QuickSearchLayout.cornerRadius, style: .continuous)
     let content = VStack(spacing: 0) {
-      searchBar
+      searchHeader
+      if shouldShowDivider {
+        Divider()
+          .frame(height: QuickSearchLayout.separatorHeight)
+      }
       if shouldShowList {
         QuickSearchResultsView(
           viewModel: viewModel,
-          rowHeight: rowHeight,
-          rowSpacing: rowSpacing,
-          rowInnerPadding: rowInnerPadding,
-          sectionHeaderHeight: sectionHeaderHeight,
+          rowHeight: QuickSearchLayout.rowHeight,
+          rowSpacing: QuickSearchLayout.rowSpacing,
+          rowInnerPadding: QuickSearchLayout.rowInnerPadding,
+          sectionHeaderHeight: QuickSearchLayout.sectionHeaderHeight,
+          sectionSpacing: QuickSearchLayout.sectionSpacing,
           onSelectLocal: { result in
             viewModel.selectLocal(result)
             onDismiss()
@@ -195,12 +226,10 @@ struct QuickSearchOverlayView: View {
           }
         )
         .frame(height: listHeight)
-        .padding(.horizontal, contentHorizontalPadding)
-        .padding(.bottom, contentVerticalPadding)
       }
     }
-    .frame(width: preferredWidth)
-    .background(shape.fill(self.tint))
+    .frame(width: QuickSearchLayout.preferredWidth)
+    .background(shape.fill(tint))
     .overlay(shape.strokeBorder(Color.primary.opacity(0.08)))
     .shadow(color: Color.black.opacity(0.18), radius: 24, x: 0, y: 10)
 
@@ -226,7 +255,7 @@ struct QuickSearchOverlayView: View {
       viewModel.clampSelection()
       notifySizeChange()
     }
-    .onChange(of: viewModel.globalResults.count) { _ in
+    .onChange(of: viewModel.renderedGlobalResults.count) { _ in
       viewModel.clampSelection()
       notifySizeChange()
     }
@@ -238,7 +267,7 @@ struct QuickSearchOverlayView: View {
     }
   }
 
-  private var searchBar: some View {
+  private var searchHeader: some View {
     TextField(
       "",
       text: $viewModel.query,
@@ -247,14 +276,14 @@ struct QuickSearchOverlayView: View {
     )
     .textFieldStyle(.plain)
     .font(.system(size: 15, weight: .medium))
-    .frame(maxWidth: .infinity, minHeight: searchBarHeight, alignment: .leading)
+    .frame(maxWidth: .infinity, minHeight: QuickSearchLayout.searchBarHeight, alignment: .leading)
     .submitLabel(.search)
     .autocorrectionDisabled()
     .focused($isFocused)
-    .padding(.horizontal, searchBarTextInset)
-    .padding(.horizontal, contentHorizontalPadding)
-    .padding(.top, contentVerticalPadding)
-    .padding(.bottom, shouldShowList ? listTopSpacing : contentVerticalPadding)
+    .padding(.horizontal, QuickSearchLayout.searchBarTextInset)
+    .padding(.horizontal, QuickSearchLayout.contentHorizontalPadding)
+    .padding(.vertical, QuickSearchLayout.searchHeaderVerticalPadding)
+    .frame(height: QuickSearchLayout.searchHeaderHeight)
     .onSubmit {
       if viewModel.activateSelection() {
         onDismiss()
@@ -274,29 +303,39 @@ struct QuickSearchOverlayView: View {
     guard shouldShowList else { return 0 }
 
     if viewModel.totalResults == 0, viewModel.isLoading == false, viewModel.error == nil {
-      return rowHeight + listInsetsHeight
+      return QuickSearchLayout.rowHeight +
+        QuickSearchLayout.listContentTopInset +
+        QuickSearchLayout.listContentBottomInset
     }
 
     let visibleRows = min(viewModel.totalResults, 8)
-    let rowBlockHeight = CGFloat(visibleRows) * rowHeight + CGFloat(max(visibleRows - 1, 0)) * rowSpacing
-    var height = rowBlockHeight + listInsetsHeight
-    let minimumHeight = rowHeight + listInsetsHeight
+    let rowBlockHeight = CGFloat(visibleRows) * QuickSearchLayout.rowHeight +
+      CGFloat(max(visibleRows - 1, 0)) * QuickSearchLayout.rowSpacing
+    var height = rowBlockHeight +
+      QuickSearchLayout.listContentTopInset +
+      QuickSearchLayout.listContentBottomInset
+    let minimumHeight = QuickSearchLayout.rowHeight +
+      QuickSearchLayout.listContentTopInset +
+      QuickSearchLayout.listContentBottomInset
 
     if shouldShowGlobalHeader {
-      height += sectionHeaderHeight + rowSpacing
+      height += QuickSearchLayout.sectionHeaderHeight + QuickSearchLayout.rowSpacing
+      if shouldShowSectionSpacing {
+        height += QuickSearchLayout.sectionSpacing
+      }
     }
 
-    return min(max(height, minimumHeight), maxListHeight)
+    return min(max(height, minimumHeight), QuickSearchLayout.maxListHeight)
   }
 
   private var preferredHeight: CGFloat {
-    var height = searchBarHeight + contentVerticalPadding
-    if shouldShowList {
-      height += listTopSpacing + listHeight + contentVerticalPadding
-    } else {
-      height += contentVerticalPadding
-    }
-    return height
+    QuickSearchLayout.searchHeaderHeight +
+      (shouldShowDivider ? QuickSearchLayout.separatorHeight : 0) +
+      (shouldShowList ? listHeight : 0)
+  }
+
+  private var shouldShowDivider: Bool {
+    shouldShowList
   }
 
   private var tint: Color {
@@ -305,11 +344,15 @@ struct QuickSearchOverlayView: View {
   }
 
   private var shouldShowGlobalHeader: Bool {
-    !viewModel.globalResults.isEmpty
+    !viewModel.renderedGlobalResults.isEmpty
+  }
+
+  private var shouldShowSectionSpacing: Bool {
+    !viewModel.localResults.isEmpty && shouldShowGlobalHeader
   }
 
   private func notifySizeChange() {
-    let newSize = NSSize(width: preferredWidth, height: preferredHeight)
+    let newSize = NSSize(width: QuickSearchLayout.preferredWidth, height: preferredHeight)
     guard abs(newSize.height - lastSize.height) > 0.5 else { return }
     lastSize = newSize
     onSizeChange(newSize)
@@ -322,15 +365,20 @@ private struct QuickSearchResultsView: View {
   let rowSpacing: CGFloat
   let rowInnerPadding: CGFloat
   let sectionHeaderHeight: CGFloat
+  let sectionSpacing: CGFloat
   let onSelectLocal: (HomeSearchResultItem) -> Void
   let onSelectRemote: (ApiUser) -> Void
 
   private var hasAnyResults: Bool {
-    !viewModel.localResults.isEmpty || !viewModel.globalResults.isEmpty
+    !viewModel.localResults.isEmpty || !viewModel.renderedGlobalResults.isEmpty
   }
 
   private var trimmedQuery: String {
     viewModel.query.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private var shouldShowSectionSpacing: Bool {
+    !viewModel.localResults.isEmpty && !viewModel.renderedGlobalResults.isEmpty
   }
 
   var body: some View {
@@ -349,14 +397,15 @@ private struct QuickSearchResultsView: View {
             }
           }
 
-          if !viewModel.globalResults.isEmpty {
+          if !viewModel.renderedGlobalResults.isEmpty {
             QuickSearchSectionHeader(
               title: "Global Search",
               height: sectionHeaderHeight,
               rowInnerPadding: rowInnerPadding
             )
+            .padding(.top, shouldShowSectionSpacing ? sectionSpacing : 0)
 
-            ForEach(Array(viewModel.globalResults.enumerated()), id: \.element.id) { index, result in
+            ForEach(Array(viewModel.renderedGlobalResults.enumerated()), id: \.element.id) { index, result in
               let globalIndex = index + viewModel.localResults.count
               switch result {
                 case let .users(user):
@@ -382,7 +431,26 @@ private struct QuickSearchResultsView: View {
           QuickSearchEmptyRow(text: "No results found", rowHeight: rowHeight, rowInnerPadding: rowInnerPadding)
         }
       }
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
+    .contentMargins(
+      .horizontal,
+      QuickSearchLayout.listContentHorizontalInset,
+      for: .scrollContent
+    )
+    .contentMargins(
+      .top,
+      QuickSearchLayout.listContentTopInset,
+      for: .scrollContent
+    )
+    .contentMargins(
+      .bottom,
+      QuickSearchLayout.listContentBottomInset,
+      for: .scrollContent
+    )
+    .scrollIndicators(.hidden, axes: .horizontal)
+    .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+    .scrollBounceBehavior(.basedOnSize, axes: .vertical)
     .frame(maxWidth: .infinity, alignment: .leading)
   }
 }
@@ -396,7 +464,7 @@ private struct QuickSearchSectionHeader: View {
     Text(title)
       .font(.system(size: 11, weight: .semibold))
       .foregroundStyle(.secondary)
-      .frame(height: height, alignment: .leading)
+      .frame(maxWidth: .infinity, minHeight: height, alignment: .leading)
       .padding(.horizontal, rowInnerPadding)
   }
 }
@@ -443,24 +511,34 @@ private struct QuickSearchRow: View {
 
   var body: some View {
     Button(action: action) {
-      HStack(spacing: Theme.sidebarIconSpacing) {
+      HStack(alignment: .center, spacing: QuickSearchLayout.iconTextSpacing) {
         if let item {
           switch item {
             case let .thread(threadInfo):
-              ChatIcon(peer: .chat(threadInfo.chat))
-              HStack(spacing: 6) {
+              ChatIcon(peer: .chat(threadInfo.chat), size: QuickSearchLayout.iconSize)
+                .frame(
+                  width: QuickSearchLayout.iconContainerSize,
+                  height: QuickSearchLayout.iconContainerSize,
+                  alignment: .center
+                )
+              HStack(spacing: QuickSearchLayout.itemTextSpacing) {
+                Text(threadInfo.chat.title ?? "")
+                  .lineLimit(1)
                 if let spaceName = threadInfo.space?.name {
                   Text(spaceName)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 }
-                Text(threadInfo.chat.title ?? "")
-                  .lineLimit(1)
               }
 
             case let .user(user):
-              ChatIcon(peer: .user(UserInfo(user: user)))
-              HStack(spacing: 6) {
+              ChatIcon(peer: .user(UserInfo(user: user)), size: QuickSearchLayout.iconSize)
+                .frame(
+                  width: QuickSearchLayout.iconContainerSize,
+                  height: QuickSearchLayout.iconContainerSize,
+                  alignment: .center
+                )
+              HStack(spacing: QuickSearchLayout.itemTextSpacing) {
                 Text(user.displayName)
                   .lineLimit(1)
                 if let username = user.username {
@@ -471,8 +549,13 @@ private struct QuickSearchRow: View {
               }
           }
         } else if let user {
-          UserAvatar(apiUser: user)
-          HStack(spacing: 6) {
+          UserAvatar(apiUser: user, size: QuickSearchLayout.iconSize)
+            .frame(
+              width: QuickSearchLayout.iconContainerSize,
+              height: QuickSearchLayout.iconContainerSize,
+              alignment: .center
+            )
+          HStack(spacing: QuickSearchLayout.itemTextSpacing) {
             Text(user.firstName ?? user.username ?? "")
               .lineLimit(1)
             if let username = user.username {
@@ -485,6 +568,7 @@ private struct QuickSearchRow: View {
 
         Spacer(minLength: 0)
       }
+      .frame(maxWidth: .infinity, alignment: .leading)
       .frame(height: rowHeight)
       .padding(.horizontal, rowInnerPadding)
       .background(
