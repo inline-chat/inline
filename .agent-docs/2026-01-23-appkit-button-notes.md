@@ -5,6 +5,7 @@
 - Always set `imageScaling` for symbol-only views (e.g. `.scaleProportionallyDown`) to avoid stretched glyphs.
 - Keep the hit target square and center the symbol; size the symbol independent of the hit target for clarity.
 - Drive hover/pressed state from a single tracking source (the row or container) to avoid flicker and double-tracking.
+- For pressed state on custom buttons, prefer an `NSControl` subclass that uses `isHighlighted` (or a single press gesture) rather than mixing mouseDown overrides with external gesture handlers.
 - Add accessibility explicitly when you build a custom control (role + label), since you do not get it for free.
 
 ## Pros / Cons
