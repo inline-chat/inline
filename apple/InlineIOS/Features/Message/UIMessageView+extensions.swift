@@ -50,7 +50,7 @@ extension UIMessageView {
   }
 
   func createMessageLabel() -> UITextView {
-    let textView = UITextView()
+    let textView = CodeBlockTextView()
     textView.backgroundColor = .clear
     textView.textAlignment = .natural
     textView.font = .systemFont(ofSize: 17)

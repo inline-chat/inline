@@ -3,6 +3,10 @@ import InlineKit
 import InlineProtocol
 import Logger
 
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
+
 #if canImport(AppKit)
 import AppKit
 #endif
@@ -18,6 +22,62 @@ public typealias PlatformColor = NSColor
 public typealias PlatformFont = UIFont
 public typealias PlatformColor = UIColor
 #endif
+
+public struct CodeBlockStyle: Sendable {
+  public var cornerRadius: CGFloat
+  public var lineWidth: CGFloat
+  public var lineSpacing: CGFloat
+  public var horizontalPadding: CGFloat
+  public var verticalPadding: CGFloat
+  public var blockSpacing: CGFloat
+  public var blockHorizontalInset: CGFloat
+
+  public init(
+    cornerRadius: CGFloat = 8,
+    lineWidth: CGFloat = 4,
+    lineSpacing: CGFloat = 4,
+    horizontalPadding: CGFloat = 6,
+    verticalPadding: CGFloat = 6,
+    blockSpacing: CGFloat = 6,
+    blockHorizontalInset: CGFloat = 2
+  ) {
+    self.cornerRadius = cornerRadius
+    self.lineWidth = lineWidth
+    self.lineSpacing = lineSpacing
+    self.horizontalPadding = horizontalPadding
+    self.verticalPadding = verticalPadding
+    self.blockSpacing = blockSpacing
+    self.blockHorizontalInset = blockHorizontalInset
+  }
+
+  public var textInsetLeft: CGFloat {
+    lineWidth + lineSpacing + horizontalPadding
+  }
+
+  public var textInsetRight: CGFloat {
+    horizontalPadding
+  }
+
+  public static let block = CodeBlockStyle(
+    cornerRadius: 8,
+    lineWidth: 4,
+    lineSpacing: 3,
+    horizontalPadding: 4,
+    verticalPadding: 8,
+    blockSpacing: 6,
+    blockHorizontalInset: 0
+  )
+
+  public static let inline = CodeBlockStyle(
+    cornerRadius: 6,
+    lineWidth: 3,
+    lineSpacing: 3,
+    horizontalPadding: 4,
+    verticalPadding: 2,
+    blockSpacing: 0,
+    blockHorizontalInset: 0
+  )
+}
 
 public class ProcessEntities {
   public struct Configuration {
@@ -58,6 +118,10 @@ public class ProcessEntities {
     entities: MessageEntities?,
     configuration: Configuration
   ) -> NSMutableAttributedString {
+    let inlineCodeBackground = configuration.textColor.withAlphaComponent(0.12)
+    let blockCodeBackground = configuration.textColor.withAlphaComponent(0.08)
+    let codeBlockStyle = CodeBlockStyle.block
+
     let attributedString = NSMutableAttributedString(
       string: text,
       attributes: [
@@ -220,14 +284,28 @@ public class ProcessEntities {
           attributedString.addAttributes([
             .font: monospaceFont,
             .inlineCode: true,
+            .inlineCodeBackground: inlineCodeBackground,
           ], range: range)
 
         case .pre:
           let monospaceFont = createMonospaceFont(from: configuration.font)
+          let paragraphStyle = NSMutableParagraphStyle()
+          paragraphStyle.firstLineHeadIndent = codeBlockStyle.textInsetLeft
+          paragraphStyle.headIndent = codeBlockStyle.textInsetLeft
+          paragraphStyle.tailIndent = -codeBlockStyle.textInsetRight
           attributedString.addAttributes([
             .font: monospaceFont,
             .preCode: true,
+            .codeBlock: true,
+            .codeBlockBackground: blockCodeBackground,
+            .paragraphStyle: paragraphStyle,
           ], range: range)
+          applyCodeBlockSpacing(
+            text: text,
+            blockRange: range,
+            attributedString: attributedString,
+            spacing: codeBlockStyle.blockSpacing
+          )
 
         default:
           break
@@ -235,6 +313,49 @@ public class ProcessEntities {
     }
 
     return attributedString
+  }
+
+  private static func applyCodeBlockSpacing(
+    text: String,
+    blockRange: NSRange,
+    attributedString: NSMutableAttributedString,
+    spacing: CGFloat
+  ) {
+    guard spacing > 0, blockRange.length > 0 else { return }
+    let nsText = text as NSString
+    let firstParagraph = nsText.paragraphRange(for: NSRange(location: blockRange.location, length: 0))
+    let lastLocation = max(blockRange.location, blockRange.location + blockRange.length - 1)
+    let lastParagraph = nsText.paragraphRange(for: NSRange(location: lastLocation, length: 0))
+
+    if NSEqualRanges(firstParagraph, lastParagraph) {
+      let intersection = NSIntersectionRange(firstParagraph, blockRange)
+      guard intersection.length > 0 else { return }
+      let existing = attributedString.attribute(.paragraphStyle, at: intersection.location, effectiveRange: nil)
+        as? NSParagraphStyle
+      let style = (existing?.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
+      style.paragraphSpacingBefore = spacing
+      style.paragraphSpacing = spacing
+      attributedString.addAttribute(.paragraphStyle, value: style, range: intersection)
+      return
+    }
+
+    let firstIntersection = NSIntersectionRange(firstParagraph, blockRange)
+    if firstIntersection.length > 0 {
+      let existing = attributedString.attribute(.paragraphStyle, at: firstIntersection.location, effectiveRange: nil)
+        as? NSParagraphStyle
+      let style = (existing?.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
+      style.paragraphSpacingBefore = spacing
+      attributedString.addAttribute(.paragraphStyle, value: style, range: firstIntersection)
+    }
+
+    let lastIntersection = NSIntersectionRange(lastParagraph, blockRange)
+    if lastIntersection.length > 0 {
+      let existing = attributedString.attribute(.paragraphStyle, at: lastIntersection.location, effectiveRange: nil)
+        as? NSParagraphStyle
+      let style = (existing?.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
+      style.paragraphSpacing = spacing
+      attributedString.addAttribute(.paragraphStyle, value: style, range: lastIntersection)
+    }
   }
 
   ///

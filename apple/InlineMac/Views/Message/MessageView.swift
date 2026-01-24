@@ -653,6 +653,16 @@ class MessageViewAppKit: NSView {
           characterIndex < textStorage.length
     else { return }
 
+    if let messageTextView = textView as? MessageTextView,
+       let codeRange = messageTextView.codeBlockRange(at: location)
+    {
+      let codeText = (textStorage.string as NSString).substring(with: codeRange)
+      NSPasteboard.general.clearContents()
+      NSPasteboard.general.setString(codeText, forType: .string)
+      ToastCenter.shared.showSuccess("Copied code")
+      return
+    }
+
     var inlineCodeRange = NSRange(location: 0, length: 0)
     if let isInlineCode = textStorage.attribute(
       .inlineCode,
