@@ -108,4 +108,7 @@ public extension NSAttributedString.Key {
   static let inlineCode = NSAttributedString.Key("inlineCode")
   static let preCode = NSAttributedString.Key("preCode")
   static let italic = NSAttributedString.Key("italic")
+  static let codeBlock = NSAttributedString.Key("codeBlock")
+  static let codeBlockBackground = NSAttributedString.Key("codeBlockBackground")
+  static let inlineCodeBackground = NSAttributedString.Key("inlineCodeBackground")
 }

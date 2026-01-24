@@ -902,6 +902,19 @@ class UIMessageView: UIView {
     let textContainer = messageLabel.textContainer
     let layoutManager = messageLabel.layoutManager
 
+    if let codeTextView = messageLabel as? CodeBlockTextView,
+       let codeRange = codeTextView.codeBlockRange(at: tapLocation)
+    {
+      let codeText = (messageLabel.text as NSString).substring(with: codeRange)
+      UIPasteboard.general.string = codeText
+      ToastManager.shared.showToast(
+        "Copied code",
+        type: .success,
+        systemImage: "doc.on.doc"
+      )
+      return
+    }
+
     // Get character index at tap location
     let characterIndex = layoutManager.characterIndex(
       for: tapLocation,
