@@ -3,6 +3,9 @@ import Foundation
 enum SettingsCategory: String, CaseIterable, Identifiable {
   case account
   case general
+#if SPARKLE
+  case updates
+#endif
   case appearance
   case notifications
   case experimental
@@ -18,6 +21,10 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
       return "Appearance"
     case .account:
       return "Account"
+#if SPARKLE
+    case .updates:
+      return "Updates"
+#endif
     case .notifications:
       return "Notifications"
     case .experimental:
@@ -35,6 +42,10 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
       return "paintbrush"
     case .account:
       return "person.circle"
+#if SPARKLE
+    case .updates:
+      return "arrow.triangle.2.circlepath"
+#endif
     case .notifications:
       return "bell"
     case .experimental:
