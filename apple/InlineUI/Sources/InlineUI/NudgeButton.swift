@@ -20,6 +20,15 @@ public struct NudgeButton: View {
   @State private var showGuide = false
   @State private var isSending = false
   @State private var peerDisplayName: String? = nil
+#if os(iOS)
+  @State private var chargeTask: Task<Void, Never>?
+  @State private var chargeSendTask: Task<Void, Never>?
+  @State private var isPressing = false
+  @State private var isChargeCancelled = false
+  private let chargeDuration: TimeInterval = 1.5
+  private let chargeTick: TimeInterval = 0.15
+  private let chargeMaxDistance: CGFloat = 32
+#endif
 
   public init(peer: Peer, chatId: Int64? = nil) {
     self.peer = peer
@@ -51,8 +60,23 @@ public struct NudgeButton: View {
 #if os(iOS)
     .frame(minWidth: 40, minHeight: 40)
     .contentShape(Rectangle())
+    .simultaneousGesture(
+      DragGesture(minimumDistance: 0)
+        .onChanged { value in
+          handlePressChanged(value)
+        }
+        .onEnded { _ in
+          handlePressEnded()
+        }
+    )
+    .onDisappear {
+      handlePressEnded()
+    }
 #endif
     .accessibilityLabel("Send nudge")
+#if os(iOS)
+    .accessibilityHint("Press and hold to send a nudge.")
+#endif
     .disabled(isSending)
     .popover(isPresented: $showGuide, arrowEdge: .bottom) {
       NudgeGuideView(attentionTarget: attentionTarget) {
@@ -78,6 +102,12 @@ public struct NudgeButton: View {
   }
 
   private func handleTap() {
+#if os(iOS)
+    if !hasSeenGuide {
+      hasSeenGuide = true
+      showGuide = true
+    }
+#else
     triggerHaptic()
     if !hasSeenGuide {
       hasSeenGuide = true
@@ -87,9 +117,10 @@ public struct NudgeButton: View {
 
     showGuide = false
     sendNudge()
+#endif
   }
 
-  private func sendNudge() {
+  private func sendNudge(shouldTriggerSentHaptic: Bool = false) {
     guard !isSending else { return }
 
     isSending = true
@@ -119,6 +150,13 @@ public struct NudgeButton: View {
             sendMode: nil
           )
         )
+#if os(iOS)
+        if shouldTriggerSentHaptic {
+          await MainActor.run {
+            triggerSentHaptic()
+          }
+        }
+#endif
       } catch {
         log.error("Failed to send nudge", error: error)
       }
@@ -150,6 +188,95 @@ public struct NudgeButton: View {
     NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
 #endif
   }
+
+#if os(iOS)
+  private func beginCharging() {
+    guard !isSending, chargeTask == nil, chargeSendTask == nil else { return }
+    startChargeHaptics()
+    scheduleChargedSend()
+  }
+
+  private func handleChargedSend() {
+    cancelCharging()
+    if !hasSeenGuide {
+      hasSeenGuide = true
+      showGuide = true
+    } else {
+      showGuide = false
+    }
+
+    sendNudge(shouldTriggerSentHaptic: true)
+  }
+
+  private func cancelCharging() {
+    chargeTask?.cancel()
+    chargeTask = nil
+    chargeSendTask?.cancel()
+    chargeSendTask = nil
+  }
+
+  private func startChargeHaptics() {
+    let start = Date()
+
+    chargeTask = Task { @MainActor in
+      let generator = UIImpactFeedbackGenerator(style: .soft)
+      generator.prepare()
+
+      while !Task.isCancelled {
+        let elapsed = Date().timeIntervalSince(start)
+        let progress = min(max(elapsed / chargeDuration, 0), 1)
+        let intensity = CGFloat(0.2 + (0.8 * progress))
+        generator.impactOccurred(intensity: intensity)
+        generator.prepare()
+
+        if progress >= 1 {
+          break
+        }
+
+        let delay = UInt64(chargeTick * 1_000_000_000)
+        try? await Task.sleep(nanoseconds: delay)
+      }
+    }
+  }
+
+  private func scheduleChargedSend() {
+    chargeSendTask = Task { @MainActor in
+      let delay = UInt64(chargeDuration * 1_000_000_000)
+      try? await Task.sleep(nanoseconds: delay)
+      if Task.isCancelled {
+        chargeSendTask = nil
+        return
+      }
+      handleChargedSend()
+      chargeSendTask = nil
+    }
+  }
+
+  private func handlePressChanged(_ value: DragGesture.Value) {
+    guard !isSending, !isChargeCancelled else { return }
+    let distance = hypot(value.translation.width, value.translation.height)
+    if distance > Double(chargeMaxDistance) {
+      isChargeCancelled = true
+      cancelCharging()
+      return
+    }
+    if !isPressing {
+      isPressing = true
+      beginCharging()
+    }
+  }
+
+  private func handlePressEnded() {
+    isPressing = false
+    isChargeCancelled = false
+    cancelCharging()
+  }
+
+  private func triggerSentHaptic() {
+    let generator = UIImpactFeedbackGenerator(style: .heavy)
+    generator.impactOccurred()
+  }
+#endif
 }
 
 enum NudgeButtonState {
@@ -179,7 +306,7 @@ private struct NudgeGuideView: View {
         .multilineTextAlignment(.leading)
         .fixedSize(horizontal: false, vertical: true)
 
-      Text("Tap again to send a nudge.")
+      guideHintText
         .font(.subheadline)
         .foregroundStyle(.secondary)
         .multilineTextAlignment(.leading)
@@ -204,6 +331,15 @@ private struct NudgeGuideView: View {
     }
     .padding(12)
     .frame(maxWidth: 260)
+  }
+
+  @ViewBuilder
+  private var guideHintText: some View {
+#if os(iOS)
+    Text("Press and hold for 1.5 seconds to send a nudge.")
+#elseif os(macOS)
+    Text("Tap again to send a nudge.")
+#endif
   }
 }
 
