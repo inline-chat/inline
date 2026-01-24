@@ -61,7 +61,7 @@ public enum Theme {
   // public static let mainSplitViewContentRadius: CGFloat = 18
   public static let mainSplitViewUseFullBleedContent: Bool = false
   public static let mainSplitViewInnerPadding: CGFloat = 7
-  public static let mainSplitViewContentRadius: CGFloat = 10
+  public static let mainSplitViewContentRadius: CGFloat = 11
 
   // MARK: - Sidebar
 
