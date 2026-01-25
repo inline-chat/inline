@@ -204,7 +204,11 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
 
   public nonisolated func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
     guard let error else { return }
-    Task { await self.handleDisconnect(error: error) }
+    Task { [weak self] in
+      guard let self else { return }
+      guard let currentTask = await self.task, currentTask === task else { return }
+      await self.handleDisconnect(error: error)
+    }
   }
 
   // MARK: Delegate helpers --------------------------------------------------
