@@ -85,7 +85,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
   func requestPushNotifications() {
     let notificationCenter = UNUserNotificationCenter.current()
-    notificationCenter.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+    notificationCenter.requestAuthorization(options: [.alert, .sound, .badge, .timeSensitive]) { granted, _ in
       guard granted else { return }
       self.getNotificationSettings()
     }

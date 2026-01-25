@@ -631,6 +631,8 @@ async function sendNotifications(input: SendPushForMsgInput) {
 
   const { updateGroup, messageInfo, currentUserId, chat, unencryptedText, unencryptedEntities, inputPeer } = input
   const isNudge = isNudgeMessage({ messageInfo })
+  const trimmedText = unencryptedText?.trim()
+  const isUrgentNudge = isNudge && trimmedText === "🚨"
 
   // get sender of replied message ID if any
   const repliedToSenderId = messageInfo.message.replyToMsgId
@@ -719,6 +721,7 @@ async function sendNotifications(input: SendPushForMsgInput) {
       chat,
       evalResult,
       isNudge,
+      isUrgentNudge,
       updateGroup,
       inputPeer,
       currentUserId,
@@ -738,6 +741,7 @@ async function sendNotificationToUser({
   chat,
   evalResult,
   isNudge,
+  isUrgentNudge,
   updateGroup,
   inputPeer,
   currentUserId,
@@ -752,6 +756,7 @@ async function sendNotificationToUser({
   chat?: DbChat
   evalResult?: NotificationEvalResult
   isNudge: boolean
+  isUrgentNudge: boolean
   // For explicit mac notification
   updateGroup: UpdateGroup
   inputPeer: InputPeer
@@ -763,7 +768,7 @@ async function sendNotificationToUser({
   let needsExplicitMacNotification = false
   let reason = UpdateNewMessageNotification_Reason.UNSPECIFIED
   let userSettings = await getCachedUserSettings(userId)
-  if (userSettings?.notifications.mode === UserSettingsNotificationsMode.None) {
+  if (userSettings?.notifications.mode === UserSettingsNotificationsMode.None && !isUrgentNudge) {
     // Do not notify
     return
   }
@@ -877,6 +882,7 @@ async function sendNotificationToUser({
       messageId: String(messageInfo.message.messageId),
       title,
       body,
+      isUrgentNudge: isUrgentNudge,
       senderDisplayName: senderName ?? undefined,
       senderEmail,
       senderPhone,
