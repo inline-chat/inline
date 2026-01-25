@@ -10,14 +10,25 @@ final class ChatsViewModel: ObservableObject {
     case space(id: Int64)
   }
 
-  @Published private(set) var threads: [ChatListItem] = []
-  @Published private(set) var contacts: [ChatListItem] = []
-  @Published private(set) var archivedChats: [ChatListItem] = []
-  @Published private(set) var archivedContacts: [ChatListItem] = []
+  enum SortStrategy: Equatable {
+    case lastActivity
+    case creationDate
+  }
+
+  struct Items: Equatable {
+    let active: [ChatListItem]
+    let archived: [ChatListItem]
+  }
+
+  @Published private(set) var items: Items = .init(active: [], archived: [])
 
   private let source: Source
   private let db: AppDatabase
   private let log = Log.scoped("SidebarDebug")
+
+  private var threadItems: [ChatListItem] = []
+  private var contactItems: [ChatListItem] = []
+  private var sortStrategy: SortStrategy = .lastActivity
 
   private var cancellables = Set<AnyCancellable>()
   private var threadsCancellable: AnyCancellable?
@@ -44,8 +55,8 @@ final class ChatsViewModel: ObservableObject {
     switch source {
       case .home:
         bindHomeChats()
-        contacts = []
-        archivedContacts = []
+        contactItems = []
+        updateItems()
       case let .space(id):
         bindSpaceChats(spaceId: id)
         bindSpaceContacts(spaceId: id)
@@ -73,14 +84,12 @@ final class ChatsViewModel: ObservableObject {
           },
           receiveValue: { [weak self] chats in
             guard let self else { return }
-            // Home shows non-archived chats without a space. Treat nil archived as not archived.
+            // Home shows chats without a space.
             let spaceScoped = chats.filter { $0.space == nil }
-            let sorted = HomeViewModel.sortChats(spaceScoped)
-            let archived = sorted.filter { $0.dialog.archived == true }
-            let active = sorted.filter { ($0.dialog.archived ?? false) == false }
-            self.threads = active.map(ChatListItem.init(chatItem:))
-            self.archivedChats = archived.map(ChatListItem.init(chatItem:))
-            log.debug("[SidebarDebug] home chats total=\(chats.count) spaceNil=\(spaceScoped.count) active=\(active.count) archived=\(archived.count)")
+            let filtered = HomeViewModel.filterEmptyChats(spaceScoped)
+            threadItems = filtered.map(ChatListItem.init(chatItem:))
+            updateItems()
+            log.debug("[SidebarDebug] home chats total=\(chats.count) spaceNil=\(spaceScoped.count)")
           }
         )
   }
@@ -100,11 +109,8 @@ final class ChatsViewModel: ObservableObject {
           receiveCompletion: { _ in },
           receiveValue: { [weak self] chats in
             guard let self else { return }
-            let sorted = self.sortSpaceChatItems(chats)
-            let archived = sorted.filter { $0.dialog.archived == true }
-            let active = sorted.filter { $0.dialog.archived != true }
-            self.threads = active.map(ChatListItem.init(spaceChatItem:))
-            self.archivedChats = archived.map(ChatListItem.init(spaceChatItem:))
+            threadItems = chats.map(ChatListItem.init(spaceChatItem:))
+            updateItems()
           }
         )
   }
@@ -127,23 +133,56 @@ final class ChatsViewModel: ObservableObject {
           receiveCompletion: { _ in },
           receiveValue: { [weak self] (items: [SpaceChatItem]) in
             guard let self else { return }
-            let sorted = self.sortSpaceChatItems(items)
-            let active = sorted.filter { $0.dialog.archived != true }
-            let archived = sorted.filter { $0.dialog.archived == true }
-            self.contacts = active.map(ChatListItem.init(spaceContactItem:))
-            self.archivedContacts = archived.map(ChatListItem.init(spaceContactItem:))
+            contactItems = items.map(ChatListItem.init(spaceContactItem:))
+            updateItems()
           }
         )
   }
 
-  private func sortSpaceChatItems(_ chats: [SpaceChatItem]) -> [SpaceChatItem] {
-    chats.sorted { lhs, rhs in
-      let pinned1 = lhs.dialog.pinned ?? false
-      let pinned2 = rhs.dialog.pinned ?? false
+  func setSortStrategy(_ strategy: SortStrategy) {
+    guard sortStrategy != strategy else { return }
+    sortStrategy = strategy
+    updateItems()
+  }
+
+  private func updateItems() {
+    let combined = mergeUniqueItems(threadItems + contactItems)
+    let sorted = sortItems(combined)
+    let active = sorted.filter { ($0.dialog?.archived ?? false) == false }
+    let archived = sorted.filter { $0.dialog?.archived == true }
+    items = Items(active: active, archived: archived)
+  }
+
+  private func mergeUniqueItems(_ items: [ChatListItem]) -> [ChatListItem] {
+    var seen = Set<ChatListItem.Identifier>()
+    return items.filter { item in
+      seen.insert(item.id).inserted
+    }
+  }
+
+  private func sortItems(_ items: [ChatListItem]) -> [ChatListItem] {
+    items.sorted { lhs, rhs in
+      let pinned1 = lhs.dialog?.pinned ?? false
+      let pinned2 = rhs.dialog?.pinned ?? false
       if pinned1 != pinned2 { return pinned1 }
-      let date1 = lhs.message?.date ?? lhs.chat?.date ?? Date.distantPast
-      let date2 = rhs.message?.date ?? rhs.chat?.date ?? Date.distantPast
+      let date1 = sortDate(for: lhs)
+      let date2 = sortDate(for: rhs)
       return date1 > date2
+    }
+  }
+
+  private func sortDate(for item: ChatListItem) -> Date {
+    switch sortStrategy {
+      case .lastActivity:
+        return item.lastMessage?.message.date
+          ?? item.chat?.date
+          ?? item.member?.date
+          ?? Date.distantPast
+      case .creationDate:
+        return item.chat?.date
+          ?? item.member?.date
+          ?? item.lastMessage?.message.date
+          ?? Date.distantPast
     }
   }
 }

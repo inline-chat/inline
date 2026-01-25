@@ -308,14 +308,9 @@ class MainSidebarList: NSView {
     let viewModel = activeChatsViewModel()
     activeViewModelCancellables.removeAll()
 
-    Publishers.CombineLatest4(
-      viewModel.$threads,
-      viewModel.$contacts,
-      viewModel.$archivedChats,
-      viewModel.$archivedContacts
-    )
+    viewModel.$items
       .receive(on: DispatchQueue.main)
-      .sink { [weak self] _, _, _, _ in
+      .sink { [weak self] _ in
         self?.applySnapshot()
       }
       .store(in: &activeViewModelCancellables)
@@ -429,12 +424,9 @@ class MainSidebarList: NSView {
 
   private func makeSnapshotData() -> SnapshotData {
     let viewModel = activeChatsViewModel()
-
-    let threads = viewModel.threads
-    let contacts = viewModel.contacts
-    let archivedChats = viewModel.archivedChats
-    let archivedContacts = viewModel.archivedContacts
-    let archivedCount = archivedChats.count + archivedContacts.count
+    let activeItems = viewModel.items.active
+    let archivedItems = viewModel.items.archived
+    let archivedCount = archivedItems.count
 
     var sections: [Section] = []
     var items: [Section: [Item]] = [:]
@@ -442,66 +434,36 @@ class MainSidebarList: NSView {
     var chatMap: [ChatListItem.Identifier: ChatListItem] = [:]
     var chatItemCount: Int = 0
 
+    if mode == .search {
+      let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard trimmedQuery.isEmpty == false else {
+        return SnapshotData(
+          sections: [],
+          items: [:],
+          chatItemsByID: [:],
+          valuesByItem: [:],
+          chatItemCount: 0,
+          archivedCount: archivedCount
+        )
+      }
+    }
+
+    let filteredItems: [ChatListItem]
     switch mode {
       case .archive:
-        let combinedArchived = mergeUniqueItems(archivedChats + archivedContacts)
-        let filteredArchived = combinedArchived.filter { $0.dialog != nil }
-        let sortedArchived = viewModel.isSpaceSource ? sortSpaceItems(filteredArchived) : filteredArchived
-        chatMap = Dictionary(uniqueKeysWithValues: sortedArchived.map { ($0.id, $0) })
-        chatItemCount = sortedArchived.count
-        sections = sortedArchived.isEmpty ? [] : [.chats]
-        items[.chats] = sortedArchived.map { .chat($0.id) }
-
+        filteredItems = archivedItems
       case .inbox:
-        let filteredThreads = threads.filter { $0.dialog != nil }
-        let filteredContacts = contacts.filter { $0.dialog != nil }
-        if viewModel.isSpaceSource {
-          let combined = mergeUniqueItems(filteredThreads + filteredContacts)
-          let sortedCombined = sortSpaceItems(combined)
-          chatMap = Dictionary(uniqueKeysWithValues: sortedCombined.map { ($0.id, $0) })
-          chatItemCount = sortedCombined.count
-          sections = sortedCombined.isEmpty ? [] : [.chats]
-          items[.chats] = sortedCombined.map { .chat($0.id) }
-        } else {
-          let combined = mergeUniqueItems(filteredThreads + filteredContacts)
-          chatMap = Dictionary(uniqueKeysWithValues: combined.map { ($0.id, $0) })
-          chatItemCount = combined.count
-          sections = combined.isEmpty ? [] : [.chats]
-          items[.chats] = combined.map { .chat($0.id) }
-        }
-
+        filteredItems = activeItems
       case .search:
         let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmedQuery.isEmpty == false else {
-          return SnapshotData(
-            sections: [],
-            items: [:],
-            chatItemsByID: [:],
-            valuesByItem: [:],
-            chatItemCount: 0,
-            archivedCount: archivedCount
-          )
-        }
-
-        let allThreads = mergeUniqueItems(threads + archivedChats)
-        let allContacts = mergeUniqueItems(contacts + archivedContacts)
-        let filteredThreads = allThreads.filter { matchesSearch($0, query: trimmedQuery) }
-        let filteredContacts = allContacts.filter { matchesSearch($0, query: trimmedQuery) }
-
-        let filteredCombined: [ChatListItem]
-        if viewModel.isSpaceSource {
-          filteredCombined = filteredThreads + filteredContacts
-        } else {
-          filteredCombined = filteredThreads
-        }
-
-        let filteredItems = filteredCombined.filter { $0.dialog != nil }
-        let sortedItems = viewModel.isSpaceSource ? sortSpaceItems(filteredItems) : filteredItems
-        chatMap = Dictionary(uniqueKeysWithValues: sortedItems.map { ($0.id, $0) })
-        chatItemCount = sortedItems.count
-        sections = sortedItems.isEmpty ? [] : [.chats]
-        items[.chats] = sortedItems.map { .chat($0.id) }
+        filteredItems = (activeItems + archivedItems).filter { matchesSearch($0, query: trimmedQuery) }
     }
+
+    let visibleItems = filteredItems.filter { $0.dialog != nil }
+    chatMap = Dictionary(uniqueKeysWithValues: visibleItems.map { ($0.id, $0) })
+    chatItemCount = visibleItems.count
+    sections = visibleItems.isEmpty ? [] : [.chats]
+    items[.chats] = visibleItems.map { .chat($0.id) }
 
     items[.chats]?.forEach { item in
       if case let .chat(id) = item {
@@ -638,27 +600,9 @@ class MainSidebarList: NSView {
     return true
   }
 
-  private func mergeUniqueItems(_ items: [ChatListItem]) -> [ChatListItem] {
-    var seen = Set<ChatListItem.Identifier>()
-    return items.filter { item in
-      seen.insert(item.id).inserted
-    }
-  }
-
   private func matchesSearch(_ item: ChatListItem, query: String) -> Bool {
     let combined = searchTokens(for: item).joined(separator: " ")
     return combined.localizedCaseInsensitiveContains(query)
-  }
-
-  private func sortSpaceItems(_ items: [ChatListItem]) -> [ChatListItem] {
-    items.sorted { lhs, rhs in
-      let pinned1 = lhs.dialog?.pinned ?? false
-      let pinned2 = rhs.dialog?.pinned ?? false
-      if pinned1 != pinned2 { return pinned1 }
-      let date1 = lhs.lastMessage?.message.date ?? lhs.chat?.date ?? Date.distantPast
-      let date2 = rhs.lastMessage?.message.date ?? rhs.chat?.date ?? Date.distantPast
-      return date1 > date2
-    }
   }
 
   private func searchTokens(for item: ChatListItem) -> [String] {
