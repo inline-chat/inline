@@ -4,22 +4,14 @@ import Foundation
 import InlineProtocol
 import Logger
 
-#if canImport(UIKit)
-import UIKit
-#endif
-
-#if canImport(AppKit)
-import AppKit
-#endif
-
-/// Communicate with the transport and handle auth, generating messages, sequencing, track ACKs, etc.
-actor ProtocolClient: ProtocolClientType {
-  private let log = Log.scoped("RealtimeV2.ProtocolClient")
+/// Handles protocol messaging and RPC lifecycle over a live transport connection.
+actor ProtocolSession: ProtocolSessionType {
+  private let log = Log.scoped("RealtimeV2.ProtocolSession")
   private let transport: Transport
   private let auth: Auth
 
   // Events
-  let events = AsyncChannel<ClientEvent>()
+  nonisolated let events = AsyncChannel<ProtocolSessionEvent>()
 
   // State
   var state: ClientState = .connecting
@@ -33,230 +25,99 @@ actor ProtocolClient: ProtocolClientType {
   private var lastTimestamp: UInt32 = 0
   private var sequence: UInt32 = 0
 
-  // Connection
-
-  /// Connection attempt number for handling reconnection delay
-  private var connectionAttemptNo: UInt32 = 0
-
-  /// Reconnection task for handling client failure with a local delay
-  private var reconnectionTask: Task<Void, Never>?
-
-  /// Authentication timeout task for handling authentication failure after 10s
-  private var authenticationTimeoutTask: Task<Void, Never>?
-
-  /// Tasks for managing listeners
-  private var tasks: Set<Task<Void, Never>> = []
-
-  /// Ping pong service to keep connection alive
-  private let pingPong: PingPongService
-
-  #if canImport(UIKit) || canImport(AppKit)
-  private var lifecycleObserversInstalled = false
-  #endif
-  private var isHandlingForegroundTransition = false
-  private let foregroundTransitionClock = ContinuousClock()
-  private var lastForegroundTransitionAt: ContinuousClock.Instant?
-  private let foregroundTransitionCoalesceWindow: Duration = .seconds(1)
+  private var listenerTask: Task<Void, Never>?
 
   init(transport: Transport, auth: Auth) {
     self.transport = transport
     self.auth = auth
-    pingPong = PingPongService()
-    Task { await pingPong.configure(client: self) }
-
-    Task {
-      await self.startListeners()
-    }
-
-    #if canImport(UIKit) || canImport(AppKit)
-    Task { await self.startLifecycleObservers() }
-    #endif
   }
 
   deinit {
-    #if canImport(UIKit) || canImport(AppKit)
-    NotificationCenter.default.removeObserver(self)
-    #endif
+    listenerTask?.cancel()
+    listenerTask = nil
   }
 
   func reset() {
     seq = 0
     lastTimestamp = 0
-    connectionAttemptNo = 0
     sequence = 0
-    stopAuthenticationTimeout()
-    reconnectionTask?.cancel()
-    reconnectionTask = nil
-    lastForegroundTransitionAt = nil
-    Task { await pingPong.stop() }
-    cancelAllRpcContinuations(with: ProtocolClientError.stopped)
-  }
-
-  // MARK: - State
-
-  func handleForegroundTransition() async {
-    guard auth.getIsLoggedIn() == true else { return }
-    let now = foregroundTransitionClock.now
-    if let last = lastForegroundTransitionAt, now - last < foregroundTransitionCoalesceWindow {
-      log.trace("Foreground transition ignored (coalesced)")
-      return
-    }
-    guard !isHandlingForegroundTransition else { return }
-    lastForegroundTransitionAt = now
-    isHandlingForegroundTransition = true
-    defer { isHandlingForegroundTransition = false }
-    log.debug("Foreground transition: resetting reconnection delay")
-    connectionAttemptNo = 0
-    reconnectionTask?.cancel()
-    reconnectionTask = nil
-    stopAuthenticationTimeout()
-
-    if state == .open {
-      let probeSucceeded = await pingPong.probeConnection(timeout: .seconds(3))
-      if probeSucceeded {
-        log.debug("Foreground probe succeeded; keeping existing connection")
-        return
-      }
-
-      log.warning("Foreground probe timed out; reconnecting")
-    }
-
-    await transport.handleForegroundTransition()
-  }
-
-  private func connectionOpen() async {
-    state = .open
-    Task { await events.send(.open) }
-    stopAuthenticationTimeout()
-    reconnectionTask?.cancel()
-    reconnectionTask = nil
-    connectionAttemptNo = 0
-    await pingPong.start()
-  }
-
-  private func connecting() async {
+    cancelAllRpcContinuations(with: ProtocolSessionError.stopped)
     state = .connecting
-    Task { await events.send(.connecting) }
-    stopAuthenticationTimeout()
-    await pingPong.stop()
-    cancelAllRpcContinuations(with: ProtocolClientError.notConnected)
+  }
+
+  // MARK: - Startup
+
+  func start() {
+    guard listenerTask == nil else { return }
+    listenerTask = Task { [weak self] in
+      await self?.startListeners()
+    }
   }
 
   // MARK: - Listeners
 
-  #if canImport(UIKit) || canImport(AppKit)
-  private func startLifecycleObservers() {
-    guard !lifecycleObserversInstalled else { return }
-    lifecycleObserversInstalled = true
-
-    #if canImport(UIKit)
-    NotificationCenter.default.addObserver(
-      self,
-      selector: #selector(handleAppDidBecomeActive),
-      name: UIApplication.didBecomeActiveNotification,
-      object: nil
-    )
-    #elseif canImport(AppKit)
-    NotificationCenter.default.addObserver(
-      self,
-      selector: #selector(handleAppDidBecomeActive),
-      name: NSApplication.didBecomeActiveNotification,
-      object: nil
-    )
-    #endif
-  }
-
-  @objc private nonisolated func handleAppDidBecomeActive() {
-    Task { await self.handleForegroundTransition() }
-  }
-  #endif
-
   /// Start listening for transport events to handle protocol messages
   private func startListeners() async {
-    // Transport events
-    Task.detached {
-      self.log.trace("Starting protocol client transport events listener")
-      for await event in self.transport.events {
-        guard !Task.isCancelled else { return }
+    log.trace("Starting protocol session transport events listener")
+    for await event in transport.events {
+      guard !Task.isCancelled else { return }
 
-        switch event {
-        case .connected:
-          self.log.trace("Protocol client: Transport connected")
-          Task {
-            await self.authenticate()
-          }
+      switch event {
+      case .connected:
+        log.trace("Protocol session: transport connected")
+        await events.send(.transportConnected)
 
-        case let .message(message):
-          self.log.trace("Protocol client received transport message: \(message)")
-          Task {
-            await self.handleTransportMessage(message)
-          }
+      case .connecting:
+        await events.send(.transportConnecting)
 
-        case .connecting:
-          await self.connecting()
+      case let .disconnected(errorDescription):
+        log.trace("Protocol session: transport disconnected")
+        reset()
+        await events.send(.transportDisconnected(errorDescription: errorDescription))
 
-        case .stopping:
-          self.log.trace("Protocol client: Transport stopping. Resetting state and clearing RPC calls")
-          Task {
-            await self.reset()
-          }
-        }
+      case let .message(message):
+        log.trace("Protocol session received transport message: \(message)")
+        await handleTransportMessage(message)
       }
-    }.store(in: &tasks)
+    }
   }
 
   /// Handle incoming transport messages
   private func handleTransportMessage(_ message: ServerProtocolMessage) async {
     switch message.body {
     case .connectionOpen:
-      await connectionOpen()
-      log.info("Protocol client: Connection established")
+      state = .open
+      log.info("Protocol session: connection established")
+      await events.send(.protocolOpen)
 
     case let .rpcResult(result):
       completeRpcResult(msgId: result.reqMsgID, rpcResult: result.result)
-      Task { await events.send(.rpcResult(msgId: result.reqMsgID, rpcResult: result.result)) }
+      await events.send(.rpcResult(msgId: result.reqMsgID, rpcResult: result.result))
 
     case let .rpcError(error):
       completeRpcError(msgId: error.reqMsgID, rpcError: error)
-      Task { await events.send(.rpcError(msgId: error.reqMsgID, rpcError: error)) }
+      await events.send(.rpcError(msgId: error.reqMsgID, rpcError: error))
 
     case let .ack(ack):
       log.trace("Received ack: \(ack.msgID)")
-      Task { await events.send(.ack(msgId: ack.msgID)) }
+      await events.send(.ack(msgId: ack.msgID))
 
     case let .message(serverMessage):
       log.trace("Received server message: \(serverMessage)")
       switch serverMessage.payload {
       case let .update(updatesPayload):
-        Task { await events.send(.updates(updates: updatesPayload)) }
+        await events.send(.updates(updates: updatesPayload))
       default:
-        log.trace("Protocol client: Unhandled message type: \(String(describing: serverMessage.payload))")
+        log.trace("Protocol session: unhandled message type: \(String(describing: serverMessage.payload))")
       }
 
     case let .pong(pong):
       log.trace("Received pong: \(pong.nonce)")
-      Task { await pingPong.pong(nonce: pong.nonce) }
+      await events.send(.pong(nonce: pong.nonce))
 
     default:
-      log.trace("Protocol client: Unhandled message type: \(String(describing: message.body))")
+      log.trace("Protocol session: unhandled message type: \(String(describing: message.body))")
     }
-  }
-
-  func sendPing(nonce: UInt64) async {
-    let msg = wrapMessage(body: .ping(.with {
-      $0.nonce = nonce
-    }))
-    do {
-      try await transport.send(msg)
-    } catch {
-      log.error("Failed to send ping: \(error)")
-      // Reconnect with delay??
-    }
-  }
-
-  func reconnect(skipDelay: Bool = false) async {
-    log.trace("Reconnecting transport")
-    await transport.reconnect(skipDelay: skipDelay)
   }
 
   // MARK: - ID Generation
@@ -313,7 +174,7 @@ actor ProtocolClient: ProtocolClientType {
 
     guard let token else {
       log.error("No token available for connection init")
-      throw ProtocolClientError.notAuthorized
+      throw ProtocolSessionError.notAuthorized
     }
 
     let msg = wrapMessage(body: .connectionInit(.with {
@@ -324,74 +185,33 @@ actor ProtocolClient: ProtocolClientType {
       $0.layer = 2
     }))
 
-    try await transport.send(msg)
+    do {
+      try await transport.send(msg)
+    } catch let error as TransportError {
+      switch error {
+      case .notConnected:
+        throw ProtocolSessionError.notConnected
+      }
+    } catch {
+      throw error
+    }
     log.trace("connection init sent successfully")
   }
 
-  /// Send connection init
-  private func authenticate() async {
+  func startHandshake() async {
     do {
       try await sendConnectionInit()
-
       log.trace("Sent authentication message")
-
-      startAuthenticationTimeout()
-    } catch {
-      log.error("Failed to authenticate, attempting restart", error: error)
-      handleClientFailure()
-    }
-  }
-
-  private func startAuthenticationTimeout() {
-    authenticationTimeoutTask = Task.detached(name: "authentication timeout") { [weak self] in
-      try? await Task.sleep(for: .seconds(10))
-
-      guard let self else { return }
-
-      guard !Task.isCancelled else { return }
-
-      if await state == .connecting {
-        log.error("Authentication timeout. Reconnecting")
-        // Skip delay because we already have a delay here
-        Task { await self.reconnect(skipDelay: true) }
+    } catch let error as ProtocolSessionError {
+      switch error {
+      case .notAuthorized:
+        await events.send(.authFailed)
+      default:
+        await events.send(.transportDisconnected(errorDescription: "handshake_failed"))
       }
+    } catch {
+      await events.send(.transportDisconnected(errorDescription: "handshake_failed"))
     }
-  }
-
-  private func stopAuthenticationTimeout() {
-    authenticationTimeoutTask?.cancel()
-    authenticationTimeoutTask = nil
-  }
-
-  /// This is when transport works fine but server is not responding to our messages or we have a failure inside the
-  /// Client. We need to clear client's state, with a timeout, reconnect and start over.
-  private func handleClientFailure() {
-    log.debug("Client failure. Reconnecting")
-    connectionAttemptNo = connectionAttemptNo &+ 1
-    stopAuthenticationTimeout()
-
-    reconnectionTask?.cancel()
-    reconnectionTask = Task {
-      try? await Task.sleep(for: .seconds(getReconnectionDelay()))
-
-      guard !Task.isCancelled else { return }
-      guard state != .open else { return }
-
-      // Skip delay because we already have a delay here
-      await self.reconnect(skipDelay: true)
-    }
-  }
-
-  private func getReconnectionDelay() -> TimeInterval {
-    let attemptNo = connectionAttemptNo
-
-    if attemptNo >= 8 {
-      return 8.0 + Double.random(in: 0.0 ... 5.0)
-    }
-
-    // Custom formula: 0.2 + (attempt^1.5 * 0.4)
-    // Produces: 0.6, 1.33, 2.28, 3.4, 4.69, 6.12, 7.68s
-    return min(8.0, 0.2 + pow(Double(attemptNo), 1.5) * 0.4)
   }
 
   // MARK: - Public API
@@ -402,14 +222,24 @@ actor ProtocolClient: ProtocolClientType {
 
   func stopTransport() async {
     await transport.stop()
+    reset()
   }
 
-  // MARK: - RPC Calls are defined in the `ProtocolClient` extension below
+  func sendPing(nonce: UInt64) async {
+    let msg = wrapMessage(body: .ping(.with {
+      $0.nonce = nonce
+    }))
+    do {
+      try await transport.send(msg)
+    } catch {
+      log.error("Failed to send ping: \(error)")
+    }
+  }
 }
 
 // MARK: - Errors
 
-enum ProtocolClientError: Error {
+enum ProtocolSessionError: Error {
   case notAuthorized
   case notConnected
   case rpcError(errorCode: String, message: String, code: Int)
@@ -419,7 +249,7 @@ enum ProtocolClientError: Error {
 
 // MARK: - RPC Extension
 
-extension ProtocolClient {
+extension ProtocolSession {
   // MARK: - RPC Calls
 
   @discardableResult
@@ -429,7 +259,16 @@ extension ProtocolClient {
       $0.input = input
     }))
 
-    try await transport.send(message)
+    do {
+      try await transport.send(message)
+    } catch let error as TransportError {
+      switch error {
+      case .notConnected:
+        throw ProtocolSessionError.notConnected
+      }
+    } catch {
+      throw error
+    }
 
     return message.id
   }
@@ -458,22 +297,34 @@ extension ProtocolClient {
 
       Task {
         do {
-          try await self.transport.send(message)
+          do {
+            try await self.transport.send(message)
+          } catch let error as TransportError {
+            switch error {
+            case .notConnected:
+              await self.failRpcContinuation(for: message.id, error: ProtocolSessionError.notConnected)
+              return
+            }
+          }
         } catch {
           await self.failRpcContinuation(for: message.id, error: error)
         }
       }
 
       if let timeout {
-        Task.detached { [weak self] in
-          try? await Task.sleep(for: timeout)
+        Task { [weak self] in
           guard let self else { return }
-          guard !Task.isCancelled else { return }
-          if await hasPendingRpcContinuation(for: message.id) {
-            await failRpcContinuation(for: message.id, error: ProtocolClientError.timeout)
-          }
+          await self.timeOutRpcContinuation(after: timeout, msgId: message.id)
         }
       }
+    }
+  }
+
+  private func timeOutRpcContinuation(after timeout: Duration, msgId: UInt64) async {
+    try? await Task.sleep(for: timeout)
+    guard !Task.isCancelled else { return }
+    if hasPendingRpcContinuation(for: msgId) {
+      await failRpcContinuation(for: msgId, error: ProtocolSessionError.timeout)
     }
   }
 
@@ -500,7 +351,7 @@ extension ProtocolClient {
 
   private func completeRpcError(msgId: UInt64, rpcError: InlineProtocol.RpcError) {
     let codeString = String(describing: rpcError.errorCode)
-    let error = ProtocolClientError.rpcError(errorCode: codeString, message: rpcError.message, code: Int(rpcError.code))
+    let error = ProtocolSessionError.rpcError(errorCode: codeString, message: rpcError.message, code: Int(rpcError.code))
     getAndRemoveRpcContinuation(for: msgId)?.resume(throwing: error)
   }
 
@@ -512,7 +363,7 @@ extension ProtocolClient {
     rpcContinuations[msgId] != nil
   }
 
-  private func cancelAllRpcContinuations(with error: any Error = ProtocolClientError.stopped) {
+  private func cancelAllRpcContinuations(with error: any Error = ProtocolSessionError.stopped) {
     for (_, continuation) in rpcContinuations {
       continuation.resume(throwing: error)
     }

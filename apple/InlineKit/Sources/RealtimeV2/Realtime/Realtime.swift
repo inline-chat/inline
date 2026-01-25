@@ -20,7 +20,8 @@ public actor RealtimeV2 {
   // MARK: - Core Components
 
   private var auth: Auth
-  private var client: ProtocolClient
+  private var session: ProtocolSession
+  private var connectionManager: ConnectionManager
   private var sync: Sync
   private var transactions: Transactions
 
@@ -32,10 +33,14 @@ public actor RealtimeV2 {
   private let log = Log.scoped("RealtimeV2", level: .debug)
   private var cancellables = Set<AnyCancellable>()
   private var tasks: Set<Task<Void, Never>> = []
+  private var authAdapter: AuthConnectionAdapter?
+  private var lifecycleAdapter: LifecycleConnectionAdapter?
+  private var networkAdapter: NetworkConnectionAdapter?
 
   // Connection state channel for cross-task consumption and the latest cached state
-  private let connectionStateChannel = AsyncChannel<RealtimeConnectionState>()
+  private var connectionStateContinuations: [UUID: AsyncStream<RealtimeConnectionState>.Continuation] = [:]
   private var currentConnectionState: RealtimeConnectionState = .connecting
+  private var lastSnapshotState: ConnectionState = .stopped
 
   // Transaction execution
   private var transactionContinuations: [TransactionId: CheckedContinuation<
@@ -54,11 +59,21 @@ public actor RealtimeV2 {
     persistenceHandler: TransactionPersistenceHandler? = nil,
   ) {
     self.auth = auth
-    client = ProtocolClient(transport: transport, auth: auth)
+    session = ProtocolSession(transport: transport, auth: auth)
+    let initialConstraints = ConnectionConstraints(
+      authAvailable: auth.getIsLoggedIn() == true || auth.getToken() != nil,
+      networkAvailable: true,
+      appActive: true,
+      userWantsConnection: true
+    )
+    connectionManager = ConnectionManager(session: session, constraints: initialConstraints)
     let syncConfig = RealtimeConfigStore.initialSyncConfig()
-    sync = Sync(applyUpdates: applyUpdates, syncStorage: syncStorage, client: client, config: syncConfig)
+    sync = Sync(applyUpdates: applyUpdates, syncStorage: syncStorage, client: session, config: syncConfig)
     transactions = Transactions(persistenceHandler: persistenceHandler)
     stateObject = RealtimeState()
+    authAdapter = AuthConnectionAdapter(auth: auth, manager: connectionManager)
+    lifecycleAdapter = LifecycleConnectionAdapter(manager: connectionManager)
+    networkAdapter = NetworkConnectionAdapter(manager: connectionManager)
 
     Task {
       // Initialize everything and start
@@ -74,10 +89,9 @@ public actor RealtimeV2 {
       task.cancel()
     }
     tasks.removeAll()
-
     // Stop core components
     Task { [self] in
-      await client.stopTransport()
+      await connectionManager.stop()
     }
   }
 
@@ -88,8 +102,12 @@ public actor RealtimeV2 {
     stateObject.start(realtime: self)
     await startListeners()
 
-    if auth.isLoggedIn {
-      await startTransport()
+    await session.start()
+    await connectionManager.start()
+    authAdapter?.start()
+    if auth.getIsLoggedIn() == true || auth.getToken() != nil {
+      await connectionManager.setAuthAvailable(true)
+      await connectionManager.connectNow()
     }
   }
 
@@ -97,62 +115,52 @@ public actor RealtimeV2 {
   /// Reset all state to their initial values.
   /// Stop transport. But do not kill the listeners and tasks. This is state is recoverable via a transport start.
   private func stopAndReset() async {
-    await client.stopTransport()
+    await connectionManager.stop()
   }
 
   /// Listen for auth events, transport events, sync events, etc.
   private func startListeners() async {
-    // Auth events
-    Task.detached {
-      self.log.trace("Starting auth events listener")
-      for await event in await self.auth.events {
+    // Connection snapshots
+    Task {
+      self.log.trace("Starting connection snapshot listener")
+      for await snapshot in await self.connectionManager.snapshots() {
         guard !Task.isCancelled else { return }
 
-        switch event {
-          case .login:
-            Task {
-              await self.startTransport()
-            }
+        let mapped = self.mapConnectionState(snapshot.state)
+        await self.updateConnectionState(mapped)
 
-          case .logout:
-            Task { await self.stopAndReset() }
+        if snapshot.state == .open && self.lastSnapshotState != .open {
+          await self.restartTransactions()
         }
+        self.lastSnapshotState = snapshot.state
       }
     }.store(in: &tasks)
 
-    // Client/Transport events
-    Task.detached {
-      self.log.trace("Starting transport events listener")
-      for await event in await self.client.events {
+    // Session events (RPC + updates)
+    Task {
+      self.log.trace("Starting session events listener")
+      for await event in await self.connectionManager.sessionEvents() {
         guard !Task.isCancelled else { return }
 
         switch event {
-          case .open:
-            self.log.trace("Client connected (transport open and auth successful)")
-            Task {
-              await self.updateConnectionState(.connected)
-              await self.restartTransactions()
-            }
+        case let .ack(msgId):
+          self.log.trace("Received ACK for message \(msgId)")
+          await self.ackTransaction(msgId: msgId)
 
-          case .connecting:
-            self.log.trace("Transport connecting")
-            Task { await self.updateConnectionState(.connecting) }
+        case let .rpcResult(msgId, rpcResult):
+          self.log.trace("Received RPC result for message \(msgId)")
+          await self.completeTransaction(msgId: msgId, rpcResult: rpcResult)
 
-          case let .ack(msgId):
-            self.log.trace("Received ACK for message \(msgId)")
-            Task { await self.ackTransaction(msgId: msgId) }
+        case let .rpcError(msgId, rpcError):
+          self.log.trace("Received RPC error for message \(msgId)")
+          await self.completeTransaction(msgId: msgId, error: TransactionError.rpcError(rpcError))
 
-          case let .rpcResult(msgId, rpcResult):
-            self.log.trace("Received RPC result for message \(msgId)")
-            Task { await self.completeTransaction(msgId: msgId, rpcResult: rpcResult) }
+        case let .updates(updates):
+          self.log.trace("Received updates \(updates)")
+          await self.sync.process(updates: updates.updates)
 
-          case let .rpcError(msgId, rpcError):
-            self.log.trace("Received RPC error for message \(msgId)")
-            Task { await self.completeTransaction(msgId: msgId, error: TransactionError.rpcError(rpcError)) }
-
-          case let .updates(updates):
-            self.log.trace("Received updates \(updates)")
-            Task { await self.sync.process(updates: updates.updates) }
+        default:
+          break
         }
       }
     }.store(in: &tasks)
@@ -176,17 +184,19 @@ public actor RealtimeV2 {
 
   private func startTransport() async {
     await updateConnectionState(.connecting)
-    await client.startTransport()
+    await connectionManager.start()
+    await connectionManager.connectNow()
   }
 
   private func stopTransport() async {
-    await client.stopTransport()
+    await connectionManager.stop()
   }
 
   /// Ensure the transport is started when credentials are available.
   /// This is intentionally light-weight so callers can pre-warm the connection without using transactions.
   public func connectIfNeeded() async {
-    if auth.isLoggedIn || auth.getToken() != nil {
+    if auth.getIsLoggedIn() == true || auth.getToken() != nil {
+      await connectionManager.setAuthAvailable(true)
       await startTransport()
     }
   }
@@ -199,7 +209,7 @@ public actor RealtimeV2 {
     Task {
       do {
         // send as RPC message
-        let msgId = try await client.sendRpc(method: transaction.method, input: transaction.input)
+        let msgId = try await session.sendRpc(method: transaction.method, input: transaction.input)
         // mark as running
         await transactions.running(transactionId: transactionWrapper.id, rpcMsgId: msgId)
         // the rest of the work (ack, etc) is handled later
@@ -308,16 +318,13 @@ public actor RealtimeV2 {
 
   /// Returns a stream of connection state changes that can be consumed from any task.
   public func connectionStates() -> AsyncStream<RealtimeConnectionState> {
-    let channel = connectionStateChannel
+    let id = UUID()
     return AsyncStream { continuation in
-      let task = Task {
-        for await state in channel {
-          continuation.yield(state)
-        }
-        continuation.finish()
+      Task { [weak self] in
+        await self?.addConnectionStateContinuation(id: id, continuation: continuation)
       }
-      continuation.onTermination = { @Sendable _ in
-        task.cancel()
+      continuation.onTermination = { [weak self] _ in
+        Task { await self?.removeConnectionStateContinuation(id) }
       }
     }
   }
@@ -334,8 +341,8 @@ public actor RealtimeV2 {
     timeout: Duration? = .seconds(15)
   ) async throws -> InlineProtocol.RpcResult.OneOf_Result? {
     do {
-      return try await client.callRpc(method: method, input: input, timeout: timeout)
-    } catch let error as ProtocolClientError {
+      return try await session.callRpc(method: method, input: input, timeout: timeout)
+    } catch let error as ProtocolSessionError {
       switch error {
         case .notAuthorized:
           throw RealtimeDirectRpcError.notAuthorized
@@ -380,11 +387,34 @@ public actor RealtimeV2 {
 
   // MARK: - Helpers
 
+  private func mapConnectionState(_ state: ConnectionState) -> RealtimeConnectionState {
+    switch state {
+    case .open:
+      return .connected
+    case .connectingTransport, .authenticating, .backoff, .waitingForConstraints, .backgroundSuspended, .stopped:
+      return .connecting
+    }
+  }
+
   private func updateConnectionState(_ newState: RealtimeConnectionState) async {
     guard newState != currentConnectionState else { return }
     currentConnectionState = newState
-    Task { await connectionStateChannel.send(newState) }
+    for continuation in connectionStateContinuations.values {
+      continuation.yield(newState)
+    }
     Task { await sync.connectionStateChanged(state: newState) }
+  }
+
+  private func addConnectionStateContinuation(
+    id: UUID,
+    continuation: AsyncStream<RealtimeConnectionState>.Continuation
+  ) {
+    connectionStateContinuations[id] = continuation
+    continuation.yield(currentConnectionState)
+  }
+
+  private func removeConnectionStateContinuation(_ id: UUID) {
+    connectionStateContinuations.removeValue(forKey: id)
   }
 
   private func syncConfig(for enableMessageUpdates: Bool) -> SyncConfig {

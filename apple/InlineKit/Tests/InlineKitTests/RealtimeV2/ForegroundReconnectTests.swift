@@ -1,52 +1,100 @@
 import AsyncAlgorithms
-@testable import Auth
+import Foundation
 import InlineProtocol
 import Testing
 
 @testable import RealtimeV2
 
-@Suite("RealtimeV2.ForegroundReconnect")
-final class ForegroundReconnectTests {
-  @Test("foreground transition is coalesced")
-  func testForegroundTransitionCoalesces() async throws {
-    let transport = CountingTransport()
-    let auth = Auth(mockAuthenticated: true)
-    let client = ProtocolClient(transport: transport, auth: auth)
+@Suite("RealtimeV2.ConnectionManager")
+final class ConnectionManagerTests {
+  @Test("login triggers immediate transport start")
+  func testLoginTriggersImmediateTransportStart() async throws {
+    let session = FakeProtocolSession()
+    let manager = ConnectionManager(session: session, constraints: .initial)
 
-    async let first: Void = client.handleForegroundTransition()
-    async let second: Void = client.handleForegroundTransition()
-    async let third: Void = client.handleForegroundTransition()
+    await manager.start()
+    await manager.setAuthAvailable(true)
+    await manager.connectNow()
 
-    _ = await (first, second, third)
+    let didStart = await waitForCondition { await session.startTransportCount == 1 }
+    #expect(didStart)
 
-    let calls = await transport.getForegroundCallCount()
-    #expect(calls == 1)
+    await manager.shutdownForTesting()
+  }
+
+  @Test("transport connected triggers handshake")
+  func testTransportConnectedTriggersHandshake() async throws {
+    let session = FakeProtocolSession()
+    let manager = ConnectionManager(session: session, constraints: .initial)
+
+    await manager.start()
+    await manager.setAuthAvailable(true)
+    await manager.connectNow()
+
+    session.emit(.transportConnected)
+    let didHandshake = await waitForCondition { await session.startHandshakeCount == 1 }
+    #expect(didHandshake)
+
+    await manager.shutdownForTesting()
   }
 }
 
-// MARK: - Test Transport
+// MARK: - Test Helpers
 
-actor CountingTransport: Transport {
-  nonisolated var events: AsyncChannel<TransportEvent> { channel }
+private func waitForCondition(
+  timeout: Duration = .seconds(1),
+  pollInterval: Duration = .milliseconds(10),
+  _ condition: @escaping @Sendable () async -> Bool
+) async -> Bool {
+  let clock = ContinuousClock()
+  let deadline = clock.now + timeout
 
-  func start() async {}
-
-  func stop() async {}
-
-  func send(_ message: ClientMessage) async throws {}
-
-  func stopConnection() async {}
-
-  func reconnect(skipDelay: Bool) async {}
-
-  func handleForegroundTransition() async {
-    foregroundCallCount += 1
+  while await condition() == false {
+    if clock.now >= deadline {
+      return false
+    }
+    try? await clock.sleep(for: pollInterval)
   }
 
-  func getForegroundCallCount() -> Int {
-    foregroundCallCount
+  return true
+}
+
+actor FakeProtocolSession: ProtocolSessionType {
+  nonisolated let events = AsyncChannel<ProtocolSessionEvent>()
+
+  private(set) var startTransportCount: Int = 0
+  private(set) var stopTransportCount: Int = 0
+  private(set) var startHandshakeCount: Int = 0
+
+  func startTransport() async {
+    startTransportCount += 1
   }
 
-  private var foregroundCallCount = 0
-  private let channel = AsyncChannel<TransportEvent>()
+  func stopTransport() async {
+    stopTransportCount += 1
+  }
+
+  func startHandshake() async {
+    startHandshakeCount += 1
+  }
+
+  func sendPing(nonce: UInt64) async {}
+
+  func sendRpc(method: InlineProtocol.Method, input: RpcCall.OneOf_Input?) async throws -> UInt64 {
+    0
+  }
+
+  func callRpc(
+    method: InlineProtocol.Method,
+    input: RpcCall.OneOf_Input?,
+    timeout: Duration?
+  ) async throws -> InlineProtocol.RpcResult.OneOf_Result? {
+    nil
+  }
+
+  nonisolated func emit(_ event: ProtocolSessionEvent) {
+    Task {
+      await events.send(event)
+    }
+  }
 }

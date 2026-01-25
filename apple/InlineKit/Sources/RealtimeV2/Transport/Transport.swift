@@ -9,8 +9,8 @@ public enum TransportEvent: Sendable {
   /// The transport is fully connected and ready to send/receive messages.
   case connected
 
-  /// The transport is stopping. Due to a logout or fatal error during connection flow.
-  case stopping
+  /// The transport disconnected (error description is optional).
+  case disconnected(errorDescription: String?)
 
   /// A message was received from the server.
   case message(ServerProtocolMessage)
@@ -35,9 +35,4 @@ public protocol Transport: Sendable {
   /// Send an encoded `ClientMessage` to the server.  Throws if the transport
   /// is not currently in the `.connected` state.
   func send(_ message: ClientMessage) async throws
-
-  func stopConnection() async
-  func reconnect(skipDelay: Bool) async
-  /// Reset any reconnection backoff and attempt an immediate reconnect on foreground transitions.
-  func handleForegroundTransition() async
 }
