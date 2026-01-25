@@ -159,6 +159,7 @@ final class QuickSearchViewModel: ObservableObject {
     } else {
       openHomeTabIfNeeded()
     }
+    unarchiveIfNeeded(peer: peer, spaceId: space?.id)
     nav2.navigate(to: .chat(peer: peer))
   }
 
@@ -170,6 +171,20 @@ final class QuickSearchViewModel: ObservableObject {
       return false
     }) {
       nav2.setActiveTab(index: index)
+    }
+  }
+
+  private func unarchiveIfNeeded(peer: Peer, spaceId: Int64?) {
+    Task(priority: .userInitiated) { [database = dependencies.database, data = dependencies.data] in
+      do {
+        let dialog = try await database.reader.read { db in
+          try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peer))
+        }
+        guard dialog?.archived == true else { return }
+        try await data.updateDialog(peerId: peer, archived: false, spaceId: spaceId)
+      } catch {
+        Log.shared.error("Failed to unarchive chat \(peer.toString())", error: error)
+      }
     }
   }
 
@@ -515,7 +530,7 @@ private struct QuickSearchRow: View {
         if let item {
           switch item {
             case let .thread(threadInfo):
-              ChatIcon(peer: .chat(threadInfo.chat), size: QuickSearchLayout.iconSize)
+              SidebarChatIcon(peer: .chat(threadInfo.chat), size: QuickSearchLayout.iconSize)
                 .frame(
                   width: QuickSearchLayout.iconContainerSize,
                   height: QuickSearchLayout.iconContainerSize,
@@ -532,7 +547,7 @@ private struct QuickSearchRow: View {
               }
 
             case let .user(user):
-              ChatIcon(peer: .user(UserInfo(user: user)), size: QuickSearchLayout.iconSize)
+              SidebarChatIcon(peer: .user(UserInfo(user: user)), size: QuickSearchLayout.iconSize)
                 .frame(
                   width: QuickSearchLayout.iconContainerSize,
                   height: QuickSearchLayout.iconContainerSize,
