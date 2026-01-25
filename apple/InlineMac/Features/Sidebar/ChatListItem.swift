@@ -7,6 +7,12 @@ struct ChatListItem: Hashable, Identifiable {
     case contact
   }
 
+  enum BadgeState: Hashable {
+    case none
+    case unread
+    case pinned
+  }
+
   struct Identifier: Hashable {
     let kind: Kind
     let rawValue: Int64
@@ -41,6 +47,21 @@ struct ChatListItem: Hashable, Identifiable {
       user?.user.username ??
       chat?.title ??
       "Chat"
+  }
+
+  var hasUnread: Bool {
+    guard let dialog else { return false }
+    return (dialog.unreadCount ?? 0) > 0 || (dialog.unreadMark == true)
+  }
+
+  var badgeState: BadgeState {
+    if hasUnread {
+      return .unread
+    }
+    if dialog?.pinned == true {
+      return .pinned
+    }
+    return .none
   }
 
   init(chatItem: HomeChatItem) {

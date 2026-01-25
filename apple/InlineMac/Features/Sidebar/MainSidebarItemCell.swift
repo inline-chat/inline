@@ -556,17 +556,18 @@ class MainSidebarItemCell: NSView {
 
   private func configureBadges() {
     clearBadges()
-    guard item?.kind == .thread else {
+    guard let item else {
       unreadBadgeView.isHidden = true
       return
     }
-    if hasUnread {
-      unreadBadgeView.isHidden = false
-    } else {
-      unreadBadgeView.isHidden = true
-      if isPinned {
+    switch item.badgeState {
+      case .unread:
+        unreadBadgeView.isHidden = false
+      case .pinned:
+        unreadBadgeView.isHidden = true
         badgeContainerView.addArrangedSubview(createPinnedBadge())
-      }
+      case .none:
+        unreadBadgeView.isHidden = true
     }
   }
 
