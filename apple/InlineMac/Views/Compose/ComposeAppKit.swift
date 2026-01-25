@@ -102,9 +102,8 @@ class ComposeAppKit: NSView {
   }()
 
   private lazy var emojiButton: ComposeEmojiButton = {
-    let view = ComposeEmojiButton { [weak self] in
-      self?.openEmojiPicker()
-    }
+    let view = ComposeEmojiButton()
+    view.delegate = self
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -1326,20 +1325,6 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
 
   }
 
-  private func openEmojiPicker() {
-    focusWindowIfNeeded()
-    focus()
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-      guard let self else { return }
-      let textView = self.textEditor.textView
-      _ = self.window?.makeFirstResponder(textView)
-      let showSelector = Selector(("showEmojiAndSymbols:"))
-      if NSApplication.shared.sendAction(showSelector, to: nil, from: textView) == false {
-        NSApplication.shared.orderFrontCharacterPalette(nil)
-      }
-    }
-  }
-
   /// Reflect state changes in send button
   func updateSendButtonIfNeeded() {
     sendButton.updateCanSend(canSend)
@@ -1432,6 +1417,20 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   func textViewDidLoseFocus(_ textView: NSTextView) {
     // Hide mention menu when text view loses focus
     hideMentionCompletion()
+  }
+}
+
+// MARK: ComposeEmojiButtonDelegate
+
+extension ComposeAppKit: ComposeEmojiButtonDelegate {
+  func composeEmojiButton(_ button: ComposeEmojiButton, didReceiveText text: String) {
+    focus()
+    textEditor.insertText(text)
+  }
+
+  func composeEmojiButton(_ button: ComposeEmojiButton, didReceiveSticker image: NSImage) {
+    sendSticker(image)
+    focus()
   }
 }
 
