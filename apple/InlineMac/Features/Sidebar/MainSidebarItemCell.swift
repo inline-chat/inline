@@ -123,8 +123,8 @@ class MainSidebarItemCell: NSView {
   private var leadingHeightConstraint: NSLayoutConstraint?
   private var stackViewTrailingConstraint: NSLayoutConstraint?
 
-  lazy var avatarView: ChatIconSwiftUIBridge = {
-    let view = ChatIconSwiftUIBridge(
+  lazy var avatarView: SidebarChatIconSwiftUIBridge = {
+    let view = SidebarChatIconSwiftUIBridge(
       .user(.deleted),
       size: Self.avatarSize
     )
@@ -498,11 +498,11 @@ class MainSidebarItemCell: NSView {
     leadingWidthConstraint?.constant = Self.avatarSize
     leadingHeightConstraint?.constant = Self.avatarSize
     if let user = item.user {
-      avatarView = ChatIconSwiftUIBridge(.user(user), size: Self.avatarSize)
+      avatarView = SidebarChatIconSwiftUIBridge(.user(user), size: Self.avatarSize)
     } else if let chat = item.chat {
-      avatarView = ChatIconSwiftUIBridge(.chat(chat), size: Self.avatarSize)
+      avatarView = SidebarChatIconSwiftUIBridge(.chat(chat), size: Self.avatarSize)
     } else {
-      avatarView = ChatIconSwiftUIBridge(.user(.deleted), size: Self.avatarSize)
+      avatarView = SidebarChatIconSwiftUIBridge(.user(.deleted), size: Self.avatarSize)
     }
     leadingContainerView.addSubview(avatarView)
     avatarView.translatesAutoresizingMaskIntoConstraints = false
