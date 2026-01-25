@@ -25,6 +25,7 @@ type SendMessagePushPayload = {
   subtitle?: string
   isThread?: boolean
   messageId: string
+  isUrgentNudge?: boolean
   senderDisplayName?: string
   senderEmail?: string
   senderPhone?: string
@@ -56,6 +57,15 @@ type SendPushToUserInput = {
 }
 
 const log = new Log("notifications.sendToUser")
+
+type ApsOverrides = {
+  ["interruption-level"]?: "time-sensitive"
+}
+
+const configureTimeSensitive = (notification: Notification) => {
+  const aps = notification.aps as unknown as ApsOverrides
+  aps["interruption-level"] = "time-sensitive"
+}
 
 export const sendPushNotificationToUser = async ({ userId, payload }: SendPushToUserInput) => {
   try {
@@ -103,6 +113,9 @@ export const sendPushNotificationToUser = async ({ userId, payload }: SendPushTo
         configureAlertNotification(notification)
 
         notification.sound = "default"
+        if (payload.isUrgentNudge) {
+          configureTimeSensitive(notification)
+        }
         notification.alert = {
           title: payload.title,
           body: payload.body,

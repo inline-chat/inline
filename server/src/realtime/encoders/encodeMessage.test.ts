@@ -113,7 +113,7 @@ describe("encodeMessage nudge", () => {
     expect(result.media?.media.oneofKind).toBe("nudge")
   })
 
-  it("does not encode nudge media for wave-only text", () => {
+  it("does not encode nudge media for emoji-only text", () => {
     const result = encodeMessage({
       message: buildMessage({ text: " 👋 " }),
       encodingForUserId: 100,
@@ -135,7 +135,7 @@ describe("encodeFullMessage nudge", () => {
     expect(result.media?.media.oneofKind).toBe("nudge")
   })
 
-  it("does not encode nudge media for wave-only text", () => {
+  it("does not encode nudge media for emoji-only text", () => {
     const result = encodeFullMessage({
       message: buildFullMessage({ text: "👋" }),
       encodingForUserId: 100,
