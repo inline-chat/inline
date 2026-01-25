@@ -16,10 +16,10 @@ public struct Photo: Codable, Equatable, Hashable, Sendable, Identifiable, Fetch
   public var format: ImageFormat
 
   public enum Columns {
-    static let id = Column(CodingKeys.id)
-    static let photoId = Column(CodingKeys.photoId)
-    static let date = Column(CodingKeys.date)
-    static let format = Column(CodingKeys.format)
+    public  static let id = Column(CodingKeys.id)
+    public  static let photoId = Column(CodingKeys.photoId)
+    public  static let date = Column(CodingKeys.date)
+    public  static let format = Column(CodingKeys.format)
   }
 
   public init(

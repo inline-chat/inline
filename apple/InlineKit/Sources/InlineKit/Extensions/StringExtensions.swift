@@ -1,7 +1,7 @@
 import Foundation
 
-extension Character {
-  var isEmoji: Bool {
+public extension Character {
+   var isEmoji: Bool {
     // Check if it's a single emoji presentation character
     if unicodeScalars.count == 1, let scalar = unicodeScalars.first {
       return scalar.properties.isEmojiPresentation
