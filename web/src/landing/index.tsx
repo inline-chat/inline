@@ -75,7 +75,7 @@ const COPY = {
       privacy: "Privacy",
       email: "hey@inline.chat",
     },
-    copyright: "© 2025 Inline Chat",
+    copyright: "© 2026 Inline Chat",
   },
 }
 
