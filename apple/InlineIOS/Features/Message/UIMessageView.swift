@@ -1183,6 +1183,9 @@ class UIMessageView: UIView {
     let font = UIFont
       .systemFont(ofSize: isSingleEmojiMessage ? 80 : isTripleEmojiMessage ? 70 : isEmojiOnlyMessage ? 32 : 17)
 
+    let codeBlockBackgroundColor = outgoing ? nil : textColor.withAlphaComponent(0.05)
+    let inlineCodeBackgroundColor = outgoing ? nil : textColor.withAlphaComponent(0.06)
+
     /// Apply entities to text and create an NSAttributedString
     let attributedString = ProcessEntities.toAttributedString(
       text: text,
@@ -1191,6 +1194,8 @@ class UIMessageView: UIView {
         font: font,
         textColor: textColor,
         linkColor: MessageRichTextRenderer.linkColor(for: outgoing),
+        codeBlockBackgroundColor: codeBlockBackgroundColor,
+        inlineCodeBackgroundColor: inlineCodeBackgroundColor
       )
     )
 

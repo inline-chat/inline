@@ -114,28 +114,6 @@ class MessageTextView: NSTextView {
       let path = NSBezierPath(roundedRect: inlineRect, xRadius: inlineCodeStyle.cornerRadius, yRadius: inlineCodeStyle.cornerRadius)
       backgroundColor.setFill()
       path.fill()
-
-      let textColor = (textStorage.attribute(.foregroundColor, at: range.location, effectiveRange: nil)
-        as? NSColor) ?? NSColor.labelColor
-      let lineColor = textColor.withAlphaComponent(0.35)
-      let lineRect = NSRect(
-        x: inlineRect.minX,
-        y: inlineRect.minY,
-        width: inlineCodeStyle.lineWidth,
-        height: inlineRect.height
-      )
-      let linePath = NSBezierPath(roundedRect: lineRect, xRadius: inlineCodeStyle.lineWidth / 2, yRadius: inlineCodeStyle.lineWidth / 2)
-      if let context = NSGraphicsContext.current?.cgContext {
-        context.saveGState()
-        context.addPath(path.cgPath)
-        context.clip()
-        lineColor.setFill()
-        linePath.fill()
-        context.restoreGState()
-      } else {
-        lineColor.setFill()
-        linePath.fill()
-      }
     }
   }
 
@@ -180,13 +158,14 @@ class MessageTextView: NSTextView {
     rect.origin.x += textContainerInset.width
     rect.origin.y += textContainerInset.height
 
-    rect.origin.x -= style.textInsetLeft
-    rect.size.width += style.textInsetLeft + style.textInsetRight
-    rect.origin.y -= style.verticalPadding
-    rect.size.height += style.verticalPadding * 2
+    var padded = rect
+    padded.origin.x -= style.textInsetLeft
+    padded.size.width += style.textInsetLeft + style.textInsetRight
+    padded.origin.y -= style.verticalPadding
+    padded.size.height += style.verticalPadding * 2
 
     let insetBounds = bounds.insetBy(dx: style.blockHorizontalInset, dy: 0)
-    let clipped = rect.intersection(insetBounds)
+    let clipped = padded.intersection(insetBounds)
     return clipped.isNull ? nil : clipped
   }
 }

@@ -660,6 +660,7 @@ class MessageViewAppKit: NSView {
       NSPasteboard.general.clearContents()
       NSPasteboard.general.setString(codeText, forType: .string)
       ToastCenter.shared.showSuccess("Copied code")
+      performProgressiveHaptic()
       return
     }
 
@@ -673,6 +674,7 @@ class MessageViewAppKit: NSView {
       NSPasteboard.general.clearContents()
       NSPasteboard.general.setString(inlineCodeText, forType: .string)
       ToastCenter.shared.showSuccess("Copied code")
+      performProgressiveHaptic()
       return
     }
 
@@ -680,12 +682,22 @@ class MessageViewAppKit: NSView {
       NSPasteboard.general.clearContents()
       NSPasteboard.general.setString(email, forType: .string)
       ToastCenter.shared.showSuccess("Copied email")
+      performProgressiveHaptic()
     } else if let phoneNumber = textStorage
       .attribute(.phoneNumber, at: characterIndex, effectiveRange: nil) as? String
     {
       NSPasteboard.general.clearContents()
       NSPasteboard.general.setString(phoneNumber, forType: .string)
       ToastCenter.shared.showSuccess("Copied number")
+      performProgressiveHaptic()
+    }
+  }
+
+  private func performProgressiveHaptic() {
+    let performer = NSHapticFeedbackManager.defaultPerformer
+    performer.perform(.generic, performanceTime: .default)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+      performer.perform(.levelChange, performanceTime: .default)
     }
   }
 
@@ -1689,6 +1701,9 @@ class MessageViewAppKit: NSView {
       }
     }
 
+    let codeBlockBackgroundColor = outgoing ? nil : textColor.withAlphaComponent(0.05)
+    let inlineCodeBackgroundColor = outgoing ? nil : textColor.withAlphaComponent(0.06)
+
     /// Apply entities to text and create an NSAttributedString
     let attributedString = ProcessEntities.toAttributedString(
       text: text,
@@ -1698,6 +1713,8 @@ class MessageViewAppKit: NSView {
         font: .systemFont(ofSize: props.layout.fontSize),
         textColor: textColor,
         linkColor: mentionColor,
+        codeBlockBackgroundColor: codeBlockBackgroundColor,
+        inlineCodeBackgroundColor: inlineCodeBackgroundColor
       )
     )
 

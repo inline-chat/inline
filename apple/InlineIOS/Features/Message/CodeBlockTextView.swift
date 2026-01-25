@@ -19,7 +19,7 @@ final class CodeBlockTextView: UITextView {
     var match: NSRange?
     textStorage.enumerateAttribute(.codeBlock, in: fullRange, options: []) { value, range, stop in
       guard (value as? Bool) == true else { return }
-      guard let blockRect = codeBlockRect(for: range, style: codeBlockStyle),
+      guard let blockRect = codeBlockRect(for: range, style: codeBlockStyle, tight: false),
             blockRect.contains(point)
       else { return }
       match = range
@@ -34,7 +34,7 @@ final class CodeBlockTextView: UITextView {
     let fullRange = NSRange(location: 0, length: textStorage.length)
     textStorage.enumerateAttribute(.codeBlock, in: fullRange, options: []) { value, range, _ in
       guard (value as? Bool) == true else { return }
-      guard let blockRect = codeBlockRect(for: range, style: codeBlockStyle),
+      guard let blockRect = codeBlockRect(for: range, style: codeBlockStyle, tight: false),
             blockRect.intersects(rect)
       else { return }
       let backgroundColor = (textStorage.attribute(.codeBlockBackground, at: range.location, effectiveRange: nil)
@@ -72,7 +72,7 @@ final class CodeBlockTextView: UITextView {
     let fullRange = NSRange(location: 0, length: textStorage.length)
     textStorage.enumerateAttribute(.inlineCode, in: fullRange, options: []) { value, range, _ in
       guard (value as? Bool) == true else { return }
-      guard let inlineRect = codeBlockRect(for: range, style: inlineCodeStyle),
+      guard let inlineRect = codeBlockRect(for: range, style: inlineCodeStyle, tight: true),
             inlineRect.intersects(rect)
       else { return }
       let backgroundColor = (textStorage.attribute(.inlineCodeBackground, at: range.location, effectiveRange: nil)
@@ -80,47 +80,48 @@ final class CodeBlockTextView: UITextView {
       let path = UIBezierPath(roundedRect: inlineRect, cornerRadius: inlineCodeStyle.cornerRadius)
       backgroundColor.setFill()
       path.fill()
-
-      let textColor = (textStorage.attribute(.foregroundColor, at: range.location, effectiveRange: nil)
-        as? UIColor) ?? tintColor ?? UIColor.label
-      let lineColor = textColor.withAlphaComponent(0.35)
-      let lineRect = CGRect(
-        x: inlineRect.minX,
-        y: inlineRect.minY,
-        width: inlineCodeStyle.lineWidth,
-        height: inlineRect.height
-      )
-      let linePath = UIBezierPath(roundedRect: lineRect, cornerRadius: inlineCodeStyle.lineWidth / 2)
-      if let context = UIGraphicsGetCurrentContext() {
-        context.saveGState()
-        path.addClip()
-        lineColor.setFill()
-        linePath.fill()
-        context.restoreGState()
-      } else {
-        lineColor.setFill()
-        linePath.fill()
-      }
     }
   }
 
-  private func codeBlockRect(for range: NSRange, style: CodeBlockStyle) -> CGRect? {
+  private func codeBlockRect(for range: NSRange, style: CodeBlockStyle, tight: Bool) -> CGRect? {
     let layoutManager = self.layoutManager
     let textContainer = self.textContainer
     let glyphRange = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
     guard glyphRange.length > 0 else { return nil }
 
-    var rect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
-    rect.origin.x += textContainerInset.left - contentOffset.x
-    rect.origin.y += textContainerInset.top - contentOffset.y
+    layoutManager.ensureLayout(forCharacterRange: range)
 
-    rect.origin.x -= style.textInsetLeft
-    rect.size.width += style.textInsetLeft + style.textInsetRight
-    rect.origin.y -= style.verticalPadding
-    rect.size.height += style.verticalPadding * 2
+    let rect: CGRect
+    if tight {
+      var bounding = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+      bounding.origin.x += textContainerInset.left - contentOffset.x
+      bounding.origin.y += textContainerInset.top - contentOffset.y
+      rect = bounding
+    } else {
+      var unionRect: CGRect?
+      layoutManager.enumerateLineFragments(forGlyphRange: glyphRange) { _, usedRect, _, _, _ in
+        var fragment = usedRect
+        fragment.origin.x += self.textContainerInset.left - self.contentOffset.x
+        fragment.origin.y += self.textContainerInset.top - self.contentOffset.y
+        unionRect = unionRect?.union(fragment) ?? fragment
+      }
+
+      var computed = unionRect ?? layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+      if unionRect == nil {
+        computed.origin.x += textContainerInset.left - contentOffset.x
+        computed.origin.y += textContainerInset.top - contentOffset.y
+      }
+      rect = computed
+    }
+
+    var padded = rect
+    padded.origin.x -= style.textInsetLeft
+    padded.size.width += style.textInsetLeft + style.textInsetRight
+    padded.origin.y -= style.verticalPadding
+    padded.size.height += style.verticalPadding * 2
 
     let insetBounds = bounds.insetBy(dx: style.blockHorizontalInset, dy: 0)
-    let clipped = rect.intersection(insetBounds)
+    let clipped = padded.intersection(insetBounds)
     return clipped.isNull ? nil : clipped
   }
 }
