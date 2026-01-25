@@ -1,3 +1,4 @@
+import AsyncAlgorithms
 import Foundation
 import InlineProtocol
 import Testing
@@ -378,6 +379,8 @@ class SyncTests {
 // MARK: - Test Helpers
 
 final actor FakeProtocolClient: ProtocolClientType {
+  nonisolated let events = AsyncChannel<ProtocolSessionEvent>()
+
   private var responses: [InlineProtocol.RpcResult.OneOf_Result?]
   private var methodResponses: [InlineProtocol.Method: [InlineProtocol.RpcResult.OneOf_Result?]]?
   private var callCount = 0
@@ -396,6 +399,18 @@ final actor FakeProtocolClient: ProtocolClientType {
     self.responses = responses
     self.gateFirstCall = gateFirstCall
     self.methodResponses = methodResponses
+  }
+
+  func startTransport() async {}
+
+  func stopTransport() async {}
+
+  func startHandshake() async {}
+
+  func sendPing(nonce: UInt64) async {}
+
+  func sendRpc(method: InlineProtocol.Method, input: RpcCall.OneOf_Input?) async throws -> UInt64 {
+    0
   }
 
   func callRpc(

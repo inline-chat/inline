@@ -19,6 +19,7 @@ actor MockTransport: Transport {
   func stop() async {
     guard started else { return }
     started = false
+    await channel.send(.disconnected(errorDescription: "stopped"))
   }
 
   func send(_ message: ClientMessage) async throws {
@@ -43,19 +44,5 @@ actor MockTransport: Transport {
 
   init() {
     channel = AsyncChannel<TransportEvent>()
-  }
-
-  func stopConnection() async {
-    started = false
-  }
-
-  func reconnect(skipDelay: Bool) async {
-    started = true
-    await channel.send(.connecting)
-    await channel.send(.connected)
-  }
-
-  func handleForegroundTransition() async {
-    await reconnect(skipDelay: true)
   }
 }

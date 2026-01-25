@@ -2,13 +2,15 @@ import Foundation
 import Logger
 import Network
 
+@available(*, deprecated, message: "Replaced by ConnectionManager-managed ping loop in RealtimeV2.")
 actor PingPongService {
   private let log = Log.scoped("RealtimeV2.PingPongService", level: .info)
 
   init() {}
 
-  private weak var client: ProtocolClient?
+  private weak var client: ProtocolSession?
   private var pingTask: Task<Void, Never>?
+  private var onConnectionLost: (@Sendable () async -> Void)?
 
   private var pings: [UInt64: Date] = [:] // nonce -> timestamp
   private var recentLatenciesMs: [UInt32] = []
@@ -46,8 +48,9 @@ actor PingPongService {
     pingTask = nil
   }
 
-  func configure(client: ProtocolClient) {
+  func configure(client: ProtocolSession, onConnectionLost: (@Sendable () async -> Void)? = nil) {
     self.client = client
+    self.onConnectionLost = onConnectionLost
   }
 
   /// Call when reconnected
@@ -133,8 +136,8 @@ actor PingPongService {
     let pingsInFlight = pings.filter { $0.value.timeIntervalSinceNow > -30 }
     guard pingsInFlight.count > 0 else { return }
 
-    // Trigger a reconnect
-    await client.reconnect()
+    // Notify connection manager (if configured)
+    await onConnectionLost?()
   }
 
   private func timeoutProbe(nonce: UInt64) {

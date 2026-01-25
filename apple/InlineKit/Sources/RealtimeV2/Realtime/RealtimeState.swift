@@ -31,4 +31,9 @@ public class RealtimeState: ObservableObject, @unchecked Sendable {
       }
     }
   }
+
+  deinit {
+    task?.cancel()
+    task = nil
+  }
 }
