@@ -67,6 +67,7 @@ extension MainSplitView {
         }
 
         items.append(.translationIcon(peer: peer))
+        items.append(.menu(peer: peer))
 
         return MainToolbarItems(items: items)
 

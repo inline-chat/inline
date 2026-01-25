@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import GRDB
 import InlineKit
 import InlineUI
 import SwiftUI
@@ -13,6 +14,7 @@ enum MainToolbarItemIdentifier: Hashable, Sendable {
   case participants(peer: Peer)
   case chatTitle(peer: Peer)
   case nudge(peer: Peer)
+  case menu(peer: Peer)
 }
 
 struct MainToolbarItems {
@@ -124,16 +126,17 @@ struct ToolbarSwiftUIView: View {
   @ObservedObject var state: ToolbarState
   var dependencies: AppDependencies
 
-  private let navButtonSymbolSize: CGFloat = 18
-  private let navButtonSymbolFrame: CGFloat = 24
-  private let navButtonHitFrame: CGFloat = 32
+  private enum ToolbarButtonMetrics {
+    static let symbolSize: CGFloat = 14
+    static let size: CGFloat = 28
+  }
 
   var body: some View {
     ZStack(alignment: .leading) {
       toolbarBackground
       toolbarContent
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 10)
     }
     .frame(height: Theme.toolbarHeight)
     .ignoresSafeArea()
@@ -165,15 +168,13 @@ struct ToolbarSwiftUIView: View {
           case let .translationIcon(peer):
             if #available(macOS 26.0, *) {
               TranslationButton(peer: peer)
-                .buttonStyle(.glass)
-                .controlSize(.large)
+                .buttonStyle(ToolbarButtonStyle())
                 // .padding(.horizontal, 0)
                 // .frame(height: Theme.toolbarHeight)
                 .id(peer.id)
             } else {
               TranslationButton(peer: peer)
-                .buttonStyle(.plain)
-                .controlSize(.extraLarge)
+                .buttonStyle(ToolbarButtonStyle())
                 // .frame(height: Theme.toolbarHeight - 8)
                 .id(peer.id)
             }
@@ -181,13 +182,11 @@ struct ToolbarSwiftUIView: View {
           case let .nudge(peer):
             if #available(macOS 26.0, *) {
               NudgeButton(peer: peer)
-                .buttonStyle(.glass)
-                .controlSize(.large)
+                .buttonStyle(ToolbarButtonStyle())
                 .id(peer.id)
             } else {
               NudgeButton(peer: peer)
-                .buttonStyle(.plain)
-                .controlSize(.extraLarge)
+                .buttonStyle(ToolbarButtonStyle())
                 .id(peer.id)
             }
 
@@ -204,6 +203,14 @@ struct ToolbarSwiftUIView: View {
 
           case .title:
             EmptyView()
+
+          case let .menu(peer):
+            ChatToolbarMenu(
+              peer: peer,
+              database: dependencies.database,
+              spaceId: dependencies.nav2?.activeSpaceId
+            )
+            .id(peer.id)
         }
       }
     }
@@ -241,16 +248,107 @@ struct ToolbarSwiftUIView: View {
   ) -> some View {
     Button(action: action) {
       Image(systemName: systemName)
-        .font(.system(size: navButtonSymbolSize, weight: .regular))
-        .frame(width: navButtonSymbolFrame, height: navButtonSymbolFrame)
-        .frame(width: navButtonHitFrame, height: navButtonHitFrame)
-        .contentShape(Rectangle())
     }
-    .buttonStyle(.plain)
+    .buttonStyle(ToolbarButtonStyle())
+    .contentShape(Rectangle())
+    .opacity(isEnabled ? 1 : 0.35)
     .disabled(!isEnabled)
   }
 }
 
+@MainActor
+private final class ChatToolbarMenuModel: ObservableObject {
+  @Published private(set) var isPinned: Bool = false
+  @Published private(set) var isArchived: Bool = false
+
+  private let peer: Peer
+  private let db: AppDatabase
+  private var dialogCancellable: AnyCancellable?
+
+  init(peer: Peer, db: AppDatabase) {
+    self.peer = peer
+    self.db = db
+    bindDialog()
+  }
+
+  private func bindDialog() {
+    dialogCancellable = ValueObservation
+      .tracking { db in
+        try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: self.peer))
+      }
+      .publisher(in: db.dbWriter, scheduling: .immediate)
+      .receive(on: DispatchQueue.main)
+      .sink(
+        receiveCompletion: { _ in },
+        receiveValue: { [weak self] dialog in
+          guard let self else { return }
+          self.isPinned = dialog?.pinned ?? false
+          self.isArchived = dialog?.archived ?? false
+        }
+      )
+  }
+}
+
+private struct ChatToolbarMenu: View {
+  let peer: Peer
+  let spaceId: Int64?
+
+  @StateObject private var model: ChatToolbarMenuModel
+
+  init(peer: Peer, database: AppDatabase, spaceId: Int64?) {
+    self.peer = peer
+    self.spaceId = spaceId
+    _model = StateObject(wrappedValue: ChatToolbarMenuModel(peer: peer, db: database))
+  }
+
+  var body: some View {
+    Menu {
+      Button(
+        model.isPinned ? "Unpin" : "Pin",
+        systemImage: model.isPinned ? "pin.slash.fill" : "pin.fill"
+      ) {
+        Task(priority: .userInitiated) {
+          try await DataManager.shared.updateDialog(
+            peerId: peer,
+            pinned: !model.isPinned,
+            spaceId: spaceId
+          )
+        }
+      }
+
+      Button(
+        model.isArchived ? "Unarchive" : "Archive",
+        systemImage: "archivebox.fill"
+      ) {
+        Task(priority: .userInitiated) {
+          try await DataManager.shared.updateDialog(
+            peerId: peer,
+            archived: !model.isArchived,
+            spaceId: spaceId
+          )
+        }
+      }
+    } label: {
+      Image(systemName: "ellipsis")
+    }
+    .menuStyle(.button)
+    .buttonStyle(ToolbarButtonStyle())
+    .menuIndicator(.hidden)
+    .fixedSize()
+  }
+}
+
+private struct ToolbarButtonStyle: SwiftUI.ButtonStyle {
+  func makeBody(configuration: SwiftUI.ButtonStyleConfiguration) -> some View {
+    configuration.label
+      .font(.system(size: 15, weight: .semibold))
+      .imageScale(.medium)
+      .foregroundStyle(.secondary)
+      .frame(width: 28, height: 28)
+      .contentShape(Rectangle())
+      .opacity(configuration.isPressed ? 0.7 : 1)
+  }
+}
 // Bridge the existing AppKit chat title toolbar into SwiftUI
 private struct ChatTitleToolbarRepresentable: NSViewRepresentable {
   let peer: Peer
