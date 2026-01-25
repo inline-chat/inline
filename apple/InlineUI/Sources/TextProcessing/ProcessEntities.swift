@@ -63,17 +63,17 @@ public struct CodeBlockStyle: Sendable {
     lineWidth: 4,
     lineSpacing: 3,
     horizontalPadding: 4,
-    verticalPadding: 8,
+    verticalPadding: 8.0 / 3.0,
     blockSpacing: 6,
     blockHorizontalInset: 0
   )
 
   public static let inline = CodeBlockStyle(
     cornerRadius: 6,
-    lineWidth: 3,
-    lineSpacing: 3,
-    horizontalPadding: 4,
-    verticalPadding: 2,
+    lineWidth: 0,
+    lineSpacing: 0,
+    horizontalPadding: 3,
+    verticalPadding: 1,
     blockSpacing: 0,
     blockHorizontalInset: 0
   )
@@ -95,18 +95,28 @@ public class ProcessEntities {
     /// If enabled, phone numbers render as tappable entities
     var renderPhoneNumbers: Bool
 
+    /// Optional override for block code background color.
+    var codeBlockBackgroundColor: PlatformColor?
+
+    /// Optional override for inline code background color.
+    var inlineCodeBackgroundColor: PlatformColor?
+
     public init(
       font: PlatformFont,
       textColor: PlatformColor,
       linkColor: PlatformColor,
       convertMentionsToLink: Bool = true,
-      renderPhoneNumbers: Bool = true
+      renderPhoneNumbers: Bool = true,
+      codeBlockBackgroundColor: PlatformColor? = nil,
+      inlineCodeBackgroundColor: PlatformColor? = nil
     ) {
       self.font = font
       self.textColor = textColor
       self.linkColor = linkColor
       self.convertMentionsToLink = convertMentionsToLink
       self.renderPhoneNumbers = renderPhoneNumbers
+      self.codeBlockBackgroundColor = codeBlockBackgroundColor
+      self.inlineCodeBackgroundColor = inlineCodeBackgroundColor
     }
   }
 
@@ -118,8 +128,10 @@ public class ProcessEntities {
     entities: MessageEntities?,
     configuration: Configuration
   ) -> NSMutableAttributedString {
-    let inlineCodeBackground = configuration.textColor.withAlphaComponent(0.12)
-    let blockCodeBackground = configuration.textColor.withAlphaComponent(0.08)
+    let inlineCodeBackground = configuration.inlineCodeBackgroundColor
+      ?? configuration.textColor.withAlphaComponent(0.12)
+    let blockCodeBackground = configuration.codeBlockBackgroundColor
+      ?? configuration.textColor.withAlphaComponent(0.08)
     let codeBlockStyle = CodeBlockStyle.block
 
     let attributedString = NSMutableAttributedString(
@@ -281,20 +293,26 @@ public class ProcessEntities {
         case .code:
           // monospace font with custom marker
           let monospaceFont = createMonospaceFont(from: configuration.font)
+          let inlineFont = monospaceFont.withSize(max(11, monospaceFont.pointSize - 1))
           attributedString.addAttributes([
-            .font: monospaceFont,
+            .font: inlineFont,
             .inlineCode: true,
             .inlineCodeBackground: inlineCodeBackground,
           ], range: range)
 
         case .pre:
           let monospaceFont = createMonospaceFont(from: configuration.font)
+          #if os(iOS)
+          let blockFont = monospaceFont.withSize(max(11, monospaceFont.pointSize - 2))
+          #else
+          let blockFont = monospaceFont.withSize(max(11, monospaceFont.pointSize - 1))
+          #endif
           let paragraphStyle = NSMutableParagraphStyle()
           paragraphStyle.firstLineHeadIndent = codeBlockStyle.textInsetLeft
           paragraphStyle.headIndent = codeBlockStyle.textInsetLeft
           paragraphStyle.tailIndent = -codeBlockStyle.textInsetRight
           attributedString.addAttributes([
-            .font: monospaceFont,
+            .font: blockFont,
             .preCode: true,
             .codeBlock: true,
             .codeBlockBackground: blockCodeBackground,
@@ -1155,15 +1173,25 @@ public class ProcessEntities {
             continue // Skip this match if range conversion fails
           }
 
-          // Extract content text without trimming to preserve positioning
-          let contentText = String(text[swiftContentRange])
+          // Extract content text and trim a single leading newline to avoid extra blank lines
+          let rawContentText = String(text[swiftContentRange])
+          var leadingTrimLength = 0
+          if rawContentText.hasPrefix("\r\n") {
+            leadingTrimLength = 2
+          } else if rawContentText.hasPrefix("\n") {
+            leadingTrimLength = 1
+          }
+          let adjustedContentLocation = contentRange.location + leadingTrimLength
+          let adjustedContentLength = max(0, contentRange.length - leadingTrimLength)
+          let adjustedContentRange = NSRange(location: adjustedContentLocation, length: adjustedContentLength)
+          let contentText = nsText.substring(with: adjustedContentRange)
 
           // Replace the full match with just the content
           text.replaceSubrange(swiftFullRange, with: contentText)
 
-          let prefixRemovedLength = contentRange.location - fullRange.location
+          let prefixRemovedLength = adjustedContentRange.location - fullRange.location
           let fullRangeEnd = fullRange.location + fullRange.length
-          let contentRangeEnd = contentRange.location + contentRange.length
+          let contentRangeEnd = adjustedContentRange.location + adjustedContentRange.length
           let suffixRemovedLength = fullRangeEnd - contentRangeEnd
 
           if prefixRemovedLength > 0 {
@@ -1176,8 +1204,8 @@ public class ProcessEntities {
           // Store the entity position in pre-removal coordinates; map after applying removals.
           var preEntity = MessageEntity()
           preEntity.type = .pre
-          preEntity.offset = Int64(contentRange.location)
-          preEntity.length = Int64(contentRange.length)
+          preEntity.offset = Int64(adjustedContentRange.location)
+          preEntity.length = Int64(adjustedContentRange.length)
           preEntities.append(preEntity)
         }
       }
