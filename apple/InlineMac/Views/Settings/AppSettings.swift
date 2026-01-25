@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 import SwiftUI
@@ -37,6 +38,36 @@ enum AutoUpdateMode: String, CaseIterable, Identifiable {
   }
 }
 
+enum AppAppearance: String, CaseIterable, Identifiable {
+  case system
+  case light
+  case dark
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .system:
+      return "System"
+    case .light:
+      return "Light"
+    case .dark:
+      return "Dark"
+    }
+  }
+
+  var nsAppearance: NSAppearance? {
+    switch self {
+    case .system:
+      return nil
+    case .light:
+      return NSAppearance(named: .aqua)
+    case .dark:
+      return NSAppearance(named: .darkAqua)
+    }
+  }
+}
+
 final class AppSettings: ObservableObject {
   static let shared = AppSettings()
 
@@ -63,6 +94,14 @@ final class AppSettings: ObservableObject {
   @Published var launchAtLogin: Bool {
     didSet {
       UserDefaults.standard.set(launchAtLogin, forKey: "launchAtLogin")
+    }
+  }
+
+  // MARK: - Appearance
+
+  @Published var appearance: AppAppearance {
+    didSet {
+      UserDefaults.standard.set(appearance.rawValue, forKey: "appAppearance")
     }
   }
 
@@ -107,6 +146,12 @@ final class AppSettings: ObservableObject {
     automaticSpellCorrection = UserDefaults.standard.object(forKey: "automaticSpellCorrection") as? Bool ?? true
     checkSpellingWhileTyping = UserDefaults.standard.object(forKey: "checkSpellingWhileTyping") as? Bool ?? true
     launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
+    if let storedAppearance = UserDefaults.standard.string(forKey: "appAppearance"),
+       let appearanceValue = AppAppearance(rawValue: storedAppearance) {
+      appearance = appearanceValue
+    } else {
+      appearance = .system
+    }
     disableNotificationSound = UserDefaults.standard.bool(forKey: "disableNotificationSound")
     showDockBadgeUnreadDMs = UserDefaults.standard.object(forKey: "showDockBadgeUnreadDMs") as? Bool ?? true
     enableNewMacUI = UserDefaults.standard.bool(forKey: "enableNewMacUI")
