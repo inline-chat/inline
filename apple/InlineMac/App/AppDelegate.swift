@@ -49,6 +49,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   func applicationDidFinishLaunching(_: Notification) {
     initializeServices()
+    setupAppearanceSetting()
     setupMainWindow()
     setupMainMenu()
     setupNotificationsSoundSetting()
@@ -220,6 +221,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
       }
       .store(in: &cancellables)
+  }
+
+  private func setupAppearanceSetting() {
+    applyAppearance(AppSettings.shared.appearance)
+
+    AppSettings.shared.$appearance
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] appearance in
+        // Defer to the next run loop to avoid re-entrancy during SwiftUI updates.
+        DispatchQueue.main.async {
+          self?.applyAppearance(appearance)
+        }
+      }
+      .store(in: &cancellables)
+  }
+
+  private func applyAppearance(_ appearance: AppAppearance) {
+    let resolvedAppearance = appearance.nsAppearance
+    if NSApp.appearance?.name != resolvedAppearance?.name {
+      NSApp.appearance = resolvedAppearance
+    }
+    for window in NSApp.windows {
+      if window.appearance?.name != resolvedAppearance?.name {
+        window.appearance = resolvedAppearance
+      }
+    }
   }
 
 }
