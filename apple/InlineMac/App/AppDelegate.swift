@@ -227,7 +227,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     applyAppearance(AppSettings.shared.appearance)
 
     AppSettings.shared.$appearance
-      .receive(on: DispatchQueue.main)
+      .removeDuplicates()
+      .debounce(for: .milliseconds(120), scheduler: RunLoop.main)
       .sink { [weak self] appearance in
         // Defer to the next run loop to avoid re-entrancy during SwiftUI updates.
         DispatchQueue.main.async {
