@@ -79,3 +79,12 @@
 - Rate-limit or lockout admin auth flows (password + email code) when adding new login/verification paths.
 - Never send decrypted secrets to the client. For session/device data, limit to explicitly needed fields and redact when possible.
 - Maintain separate admin metrics endpoints for UI. For new metrics, exclude deleted users and bots by default.
+
+
+## Glossary 
+
+### Area nicknames we use to reference to different files/views on macOS
+- New UI: Refers to an alternative all-new UI that starts with a new MainWindowController that is swapped based on a toggle in the settings.
+- New sidebar: Refers to MainSidebar.swift that is used in new sidebar 
+- New chat icon: `apple/InlineMac/Views/ChatIcon/SidebarChatIconView.swift` a cleaner version of chat icon used in new UI
+- CMD+K menu: `apple/InlineMac/Features/MainWindow/QuickSearchPopover.swift`
