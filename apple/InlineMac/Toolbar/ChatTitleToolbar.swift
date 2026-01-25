@@ -433,23 +433,23 @@ final class ChatIconView: NSView {
     let avatar = {
       if let user {
         if user.user.isCurrentUser() {
-          let avatar = ChatIconSwiftUIBridge(.savedMessage(user.user), size: iconSize, ignoresSafeArea: true)
+          let avatar = SidebarChatIconSwiftUIBridge(.savedMessage(user.user), size: iconSize, ignoresSafeArea: true)
           avatar.translatesAutoresizingMaskIntoConstraints = false
           addSubview(avatar)
           return avatar
         } else {
-          let avatar = ChatIconSwiftUIBridge(.user(user), size: iconSize, ignoresSafeArea: true)
+          let avatar = SidebarChatIconSwiftUIBridge(.user(user), size: iconSize, ignoresSafeArea: true)
           avatar.translatesAutoresizingMaskIntoConstraints = false
           addSubview(avatar)
           return avatar
         }
       } else if let chat {
-        let avatar = ChatIconSwiftUIBridge(.chat(chat), size: iconSize, ignoresSafeArea: true)
+        let avatar = SidebarChatIconSwiftUIBridge(.chat(chat), size: iconSize, ignoresSafeArea: true)
         avatar.translatesAutoresizingMaskIntoConstraints = false
         addSubview(avatar)
         return avatar
       } else {
-        let avatar = ChatIconSwiftUIBridge(.user(.deleted), size: iconSize, ignoresSafeArea: true)
+        let avatar = SidebarChatIconSwiftUIBridge(.user(.deleted), size: iconSize, ignoresSafeArea: true)
         avatar.translatesAutoresizingMaskIntoConstraints = false
         addSubview(avatar)
         return avatar
