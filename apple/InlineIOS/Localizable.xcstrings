@@ -32,6 +32,9 @@
         }
       }
     },
+    "%@ options" : {
+
+    },
     "%@ Settings" : {
 
     },
@@ -393,9 +396,6 @@
         }
       }
     },
-    "Control DM notification behavior" : {
-
-    },
     "Control how you receive notifications" : {
 
     },
@@ -480,9 +480,6 @@
           }
         }
       }
-    },
-    "Direct Messages" : {
-
     },
     "Direct updates applied" : {
 
@@ -734,9 +731,6 @@
 
     },
     "Mark Unread" : {
-
-    },
-    "Mentions and nudges will still notify you" : {
 
     },
     "name@example.com" : {
