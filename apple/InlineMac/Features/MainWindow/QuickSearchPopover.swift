@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import GRDB
 import InlineKit
 import InlineUI
 import Logger
@@ -135,16 +136,25 @@ final class QuickSearchViewModel: ObservableObject {
       case let .thread(threadInfo):
         openChat(peer: .thread(id: threadInfo.chat.id), space: threadInfo.space)
       case let .user(user):
-        openChat(peer: .user(id: user.id), space: nil)
+        openUserChat(userId: user.id)
     }
   }
 
   func selectRemote(_ user: ApiUser) {
-    openHomeTabIfNeeded()
     Task { @MainActor in
+      let activeSpaceId = dependencies.nav2?.activeTab.spaceId
+      async let isMemberTask = isMemberOfCurrentSpace(userId: user.id, activeSpaceId: activeSpaceId)
       do {
-        try await dependencies.data.createPrivateChatWithOptimistic(user: user)
+        let hasDialog = await hasExistingDialog(userId: user.id)
+        if hasDialog == false {
+          try await dependencies.data.createPrivateChatWithOptimistic(user: user)
+        }
+        let isMember = await isMemberTask
+        if activeSpaceId != nil, isMember == false {
+          openHomeTabIfNeeded()
+        }
         dependencies.nav2?.navigate(to: .chat(peer: .user(id: user.id)))
+        unarchiveIfNeeded(peer: .user(id: user.id))
       } catch {
         Log.shared.error("Failed to open a private chat with \(user.anyName)", error: error)
         dependencies.overlay.showError(message: "Failed to open a private chat with \(user.anyName)")
@@ -159,8 +169,20 @@ final class QuickSearchViewModel: ObservableObject {
     } else {
       openHomeTabIfNeeded()
     }
-    unarchiveIfNeeded(peer: peer, spaceId: space?.id)
+    unarchiveIfNeeded(peer: peer)
     nav2.navigate(to: .chat(peer: peer))
+  }
+
+  private func openUserChat(userId: Int64) {
+    Task(priority: .userInitiated) { @MainActor in
+      let activeSpaceId = dependencies.nav2?.activeTab.spaceId
+      let isMember = await isMemberOfCurrentSpace(userId: userId, activeSpaceId: activeSpaceId)
+      if activeSpaceId != nil, isMember == false {
+        openHomeTabIfNeeded()
+      }
+      dependencies.nav2?.navigate(to: .chat(peer: .user(id: userId)))
+      unarchiveIfNeeded(peer: .user(id: userId))
+    }
   }
 
   private func openHomeTabIfNeeded() {
@@ -174,14 +196,42 @@ final class QuickSearchViewModel: ObservableObject {
     }
   }
 
-  private func unarchiveIfNeeded(peer: Peer, spaceId: Int64?) {
+  private func isMemberOfCurrentSpace(userId: Int64, activeSpaceId: Int64?) async -> Bool {
+    guard let activeSpaceId else { return false }
+    do {
+      let member = try await dependencies.database.reader.read { db in
+        try Member
+          .filter(Member.Columns.userId == userId)
+          .filter(Member.Columns.spaceId == activeSpaceId)
+          .fetchOne(db)
+      }
+      return member != nil
+    } catch {
+      Log.shared.error("Failed to check membership for user \(userId) in space \(activeSpaceId)", error: error)
+      return false
+    }
+  }
+
+  private func hasExistingDialog(userId: Int64) async -> Bool {
+    do {
+      let dialog = try await dependencies.database.reader.read { db in
+        try Dialog.fetchOne(db, id: Dialog.getDialogId(peerUserId: userId))
+      }
+      return dialog != nil
+    } catch {
+      Log.shared.error("Failed to check dialog for user \(userId)", error: error)
+      return false
+    }
+  }
+
+  private func unarchiveIfNeeded(peer: Peer) {
     Task(priority: .userInitiated) { [database = dependencies.database, data = dependencies.data] in
       do {
         let dialog = try await database.reader.read { db in
           try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peer))
         }
         guard dialog?.archived == true else { return }
-        try await data.updateDialog(peerId: peer, archived: false, spaceId: spaceId)
+        try await data.updateDialog(peerId: peer, archived: false)
       } catch {
         Log.shared.error("Failed to unarchive chat \(peer.toString())", error: error)
       }

@@ -26,12 +26,12 @@ public struct Member: FetchableRecord, Identifiable, Codable, Hashable, Persista
   public var canAccessPublicChats: Bool
 
   public enum Columns {
-    static let id = Column(CodingKeys.id)
-    static let date = Column(CodingKeys.date)
-    static let userId = Column(CodingKeys.userId)
-    static let spaceId = Column(CodingKeys.spaceId)
-    static let role = Column(CodingKeys.role)
-    static let canAccessPublicChats = Column(CodingKeys.canAccessPublicChats)
+    public static let id = Column(CodingKeys.id)
+    public static let date = Column(CodingKeys.date)
+    public static let userId = Column(CodingKeys.userId)
+    public static let spaceId = Column(CodingKeys.spaceId)
+    public static let role = Column(CodingKeys.role)
+    public static let canAccessPublicChats = Column(CodingKeys.canAccessPublicChats)
   }
 
   // Member -> Space
