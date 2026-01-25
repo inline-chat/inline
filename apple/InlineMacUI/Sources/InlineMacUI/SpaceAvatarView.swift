@@ -1,9 +1,11 @@
 import AppKit
+import GRDB
 import InlineKit
 
 public class SpaceAvatarView: NSView {
   private var space: Space?
   private var size: CGFloat
+  private var downloadRequestedPhotoId: Int64?
 
   private lazy var imageView: NSImageView = {
     let view = NSImageView()
@@ -26,6 +28,9 @@ public class SpaceAvatarView: NSView {
   }
 
   private func setupView() {
+    wantsLayer = true
+    layer?.cornerRadius = size / 3
+    layer?.masksToBounds = true
     translatesAutoresizingMaskIntoConstraints = false
     addSubview(imageView)
 
@@ -43,6 +48,7 @@ public class SpaceAvatarView: NSView {
     self.space = space
     if let size {
       self.size = size
+      layer?.cornerRadius = size / 3
     }
     render()
   }
@@ -52,12 +58,72 @@ public class SpaceAvatarView: NSView {
       imageView.image = nil
       return
     }
+
+    if let photoImage = Self.photoImage(for: space, size: size, downloadHandler: requestDownloadIfNeeded) {
+      imageView.image = photoImage
+      return
+    }
+
     imageView.image = Self.renderImage(for: space, size: size)
   }
 
   /// Returns an NSImage for the space avatar. Use this when you need an image instead of a view.
   public static func image(for space: Space, size: CGFloat) -> NSImage {
-    renderImage(for: space, size: size)
+    if let photoImage = photoImage(for: space, size: size, downloadHandler: nil) {
+      return photoImage
+    }
+    return renderImage(for: space, size: size)
+  }
+
+  private static func photoImage(
+    for space: Space,
+    size: CGFloat,
+    downloadHandler: ((PhotoInfo) -> Void)?
+  ) -> NSImage? {
+    guard let photoInfo = photoInfo(for: space) else { return nil }
+
+    if let localUrl = localUrl(for: photoInfo),
+       let image = NSImage(contentsOf: localUrl)
+    {
+      return image
+    }
+
+    downloadHandler?(photoInfo)
+    return nil
+  }
+
+  private static func photoInfo(for space: Space) -> PhotoInfo? {
+    guard let photoId = space.photoId else { return nil }
+
+    return try? AppDatabase.shared.dbWriter.read { db in
+      try Photo
+        .filter(Photo.Columns.photoId == photoId)
+        .including(all: Photo.sizes.forKey(PhotoInfo.CodingKeys.sizes))
+        .asRequest(of: PhotoInfo.self)
+        .fetchOne(db)
+    }
+  }
+
+  private static func localUrl(for photoInfo: PhotoInfo) -> URL? {
+    guard let size = photoInfo.bestPhotoSize(),
+          let localPath = size.localPath
+    else { return nil }
+
+    let url = FileCache.getUrl(for: .photos, localPath: localPath)
+    guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+    return url
+  }
+
+  private func requestDownloadIfNeeded(_ photoInfo: PhotoInfo) {
+    guard downloadRequestedPhotoId != photoInfo.id else { return }
+    downloadRequestedPhotoId = photoInfo.id
+
+    Task { [weak self] in
+      await FileCache.shared.download(photo: photoInfo)
+      await MainActor.run {
+        self?.render()
+      }
+    }
   }
 
   private static func renderImage(for space: Space, size: CGFloat) -> NSImage {
@@ -117,12 +183,5 @@ public class SpaceAvatarView: NSView {
 private extension String {
   var isAllEmojis: Bool {
     !isEmpty && allSatisfy { $0.isEmoji }
-  }
-}
-
-private extension Character {
-  var isEmoji: Bool {
-    guard let scalar = unicodeScalars.first else { return false }
-    return scalar.properties.isEmoji && (scalar.value > 0x238C || unicodeScalars.count > 1)
   }
 }
