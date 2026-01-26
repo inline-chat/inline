@@ -3,7 +3,7 @@
 import stylesheet from "../styles/tailwind.css?url"
 import stylesheet2 from "../styles/stylex.css?url"
 import { type ReactNode } from "react"
-import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router"
+import { createRootRoute, HeadContent, Outlet, Scripts, useRouterState } from "@tanstack/react-router"
 import { InlineClientProvider, useInlineClientProvider } from "@inline/client"
 import { ClientRuntime } from "~/components/ClientRuntime"
 import { useImagePreload } from "~/lib/imageCache"
@@ -50,21 +50,31 @@ export const Route = createRootRoute({
 })
 
 function RootComponent() {
+  const pathname = useRouterState({ select: (state) => state.location.pathname })
+  const isAppRoute = pathname === "/app" || pathname.startsWith("/app/")
+
+  return (
+    <RootDocument>
+      {isAppRoute ? <AppRoot /> : <Outlet />}
+    </RootDocument>
+  )
+}
+
+function AppRoot() {
   const { value: client, hasDbHydrated } = useInlineClientProvider()
   const hasImagesPreloaded = useImagePreload(client.db, hasDbHydrated)
   console.log("hasDbHydrated", hasDbHydrated)
   console.log("hasImagesPreloaded", hasImagesPreloaded)
+
+  if (!hasDbHydrated || !hasImagesPreloaded) {
+    return <div>Loading...</div>
+  }
+
   return (
-    <RootDocument>
-      {hasDbHydrated && hasImagesPreloaded ? (
-        <InlineClientProvider value={client}>
-          <ClientRuntime />
-          <Outlet />
-        </InlineClientProvider>
-      ) : (
-        <div>Loading...</div>
-      )}
-    </RootDocument>
+    <InlineClientProvider value={client}>
+      <ClientRuntime />
+      <Outlet />
+    </InlineClientProvider>
   )
 }
 
