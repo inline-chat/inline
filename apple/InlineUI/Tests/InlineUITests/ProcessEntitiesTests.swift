@@ -1126,7 +1126,7 @@ struct ProcessEntitiesTests {
     ], range: mentionRange)
 
     let result = ProcessEntities.fromAttributedString(attributedString)
-    #expect(result.text == "🙂 \nlet x = 1\n @john")
+    #expect(result.text == "🙂 let x = 1 @john")
 
     let resultMentionRange = rangeOfSubstring("@john", in: result.text)
     #expect(resultMentionRange.location != NSNotFound)
