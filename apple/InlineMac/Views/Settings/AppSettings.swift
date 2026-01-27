@@ -105,6 +105,14 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  // MARK: - Sidebar
+
+  @Published var showSidebarMessagePreview: Bool {
+    didSet {
+      UserDefaults.standard.set(showSidebarMessagePreview, forKey: "showSidebarMessagePreview")
+    }
+  }
+
   // MARK: - Notification Settings
 
   @Published var disableNotificationSound: Bool {
@@ -152,6 +160,7 @@ final class AppSettings: ObservableObject {
     } else {
       appearance = .system
     }
+    showSidebarMessagePreview = UserDefaults.standard.bool(forKey: "showSidebarMessagePreview")
     disableNotificationSound = UserDefaults.standard.bool(forKey: "disableNotificationSound")
     showDockBadgeUnreadDMs = UserDefaults.standard.object(forKey: "showDockBadgeUnreadDMs") as? Bool ?? true
     enableNewMacUI = UserDefaults.standard.bool(forKey: "enableNewMacUI")

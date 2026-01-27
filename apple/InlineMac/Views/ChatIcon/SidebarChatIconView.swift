@@ -66,6 +66,17 @@ final class SidebarChatIconSwiftUIBridge: NSView {
     }
   }
 
+  func update(size: CGFloat) {
+    guard self.size != size else { return }
+    self.size = size
+    invalidateIntrinsicContentSize()
+    if let peerType, let hostingView {
+      hostingView.rootView = makeRootView(peerType: peerType)
+    } else {
+      updateAvatar()
+    }
+  }
+
   private func makeRootView(peerType: ChatIcon.PeerType) -> AnyView {
     let view = SidebarChatIcon(peer: peerType, size: size)
     return ignoresSafeArea ? AnyView(view.ignoresSafeArea()) : AnyView(view)

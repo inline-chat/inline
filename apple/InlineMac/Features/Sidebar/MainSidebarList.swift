@@ -10,7 +10,6 @@ class MainSidebarList: NSView {
   private let homeChatsViewModel: ChatsViewModel
   private var spaceChatsViewModels: [Int64: ChatsViewModel] = [:]
 
-  private static let itemHeight: CGFloat = MainSidebar.itemHeight
   private static let itemSpacing: CGFloat = MainSidebar.itemSpacing
   private static let contentInsetTop: CGFloat = MainSidebar.outerEdgeInsets
   private static let contentInsetBottom: CGFloat = 8
@@ -27,8 +26,53 @@ class MainSidebarList: NSView {
     case search
   }
 
+  enum DisplayMode: Equatable {
+    case compact
+    case messagePreview
+
+    var itemHeight: CGFloat {
+      switch self {
+      case .compact:
+        return MainSidebar.itemHeight
+      case .messagePreview:
+        return 46
+      }
+    }
+
+    var avatarSize: CGFloat {
+      switch self {
+      case .compact:
+        return MainSidebar.iconSize
+      case .messagePreview:
+        return 34
+      }
+    }
+
+    var messageFontSize: CGFloat {
+      12
+    }
+
+    var messageLineSpacing: CGFloat {
+      switch self {
+      case .compact:
+        return 0
+      case .messagePreview:
+        return 2
+      }
+    }
+
+    var showsMessagePreview: Bool {
+      self == .messagePreview
+    }
+  }
+
   enum Item: Hashable {
     case chat(ChatListItem.Identifier)
+    case action(ActionItem)
+  }
+
+  enum ActionItem: Hashable {
+    case newThread
   }
 
   enum ScrollEvent {
@@ -54,6 +98,7 @@ class MainSidebarList: NSView {
   private var selectedItemID: Item?
   private var lastSnapshotContext: SnapshotContext?
   private var activeViewModelCancellables = Set<AnyCancellable>()
+  private var settingsCancellable: AnyCancellable?
   private var scrollEventsSubject = PassthroughSubject<ScrollEvent, Never>()
   private var quickSearchVisibilityObserver: NSObjectProtocol?
   private var isQuickSearchVisible = false
@@ -61,6 +106,8 @@ class MainSidebarList: NSView {
   private var nav2: Nav2? { dependencies.nav2 }
   private var mode: Mode = .inbox
   private var searchQuery: String = ""
+  private var displayMode: DisplayMode = .compact
+  private var sortStrategy: ChatsViewModel.SortStrategy = .lastActivity
 
   private(set) var lastChatItemCount: Int = 0
   var onChatCountChanged: ((Mode, Int) -> Void)?
@@ -117,10 +164,12 @@ class MainSidebarList: NSView {
 
     super.init(frame: .zero)
     translatesAutoresizingMaskIntoConstraints = false
+    displayMode = AppSettings.shared.showSidebarMessagePreview ? .messagePreview : .compact
 
     setupViews()
     setupNotifications()
     setupDataSource()
+    bindDisplayModeSettings()
     bindActiveChatsViewModel()
     observeNav()
     applySnapshot(animatingDifferences: false)
@@ -200,6 +249,16 @@ class MainSidebarList: NSView {
       isQuickSearchVisible = isVisible
       applySnapshot(animatingDifferences: false)
     }
+  }
+
+  private func bindDisplayModeSettings() {
+    settingsCancellable = AppSettings.shared.$showSidebarMessagePreview
+      .removeDuplicates()
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] showPreview in
+        let mode: DisplayMode = showPreview ? .messagePreview : .compact
+        self?.setDisplayMode(mode)
+      }
   }
 
   @objc private func didLiveScroll() {
@@ -294,7 +353,8 @@ class MainSidebarList: NSView {
           with: content,
           dependencies: dependencies,
           events: scrollEventsSubject,
-          highlightNavSelection: mode != .search && !isQuickSearchVisible
+          highlightNavSelection: mode != .search && !isQuickSearchVisible,
+          displayMode: displayMode
         )
       }
 
@@ -307,6 +367,7 @@ class MainSidebarList: NSView {
   private func bindActiveChatsViewModel() {
     let viewModel = activeChatsViewModel()
     activeViewModelCancellables.removeAll()
+    viewModel.setSortStrategy(sortStrategy)
 
     viewModel.$items
       .receive(on: DispatchQueue.main)
@@ -462,12 +523,23 @@ class MainSidebarList: NSView {
     let visibleItems = filteredItems.filter { $0.dialog != nil }
     chatMap = Dictionary(uniqueKeysWithValues: visibleItems.map { ($0.id, $0) })
     chatItemCount = visibleItems.count
-    sections = visibleItems.isEmpty ? [] : [.chats]
-    items[.chats] = visibleItems.map { .chat($0.id) }
 
-    items[.chats]?.forEach { item in
-      if case let .chat(id) = item {
-        valuesByItem[item] = chatMap[id]
+    var sectionItems = visibleItems.map { Item.chat($0.id) }
+    if mode == .inbox {
+      sectionItems.append(.action(.newThread))
+    }
+
+    if sectionItems.isEmpty == false {
+      sections = [.chats]
+      items[.chats] = sectionItems
+
+      sectionItems.forEach { item in
+        switch item {
+          case let .chat(id):
+            valuesByItem[item] = chatMap[id]
+          case let .action(action):
+            valuesByItem[item] = action
+        }
       }
     }
 
@@ -482,15 +554,16 @@ class MainSidebarList: NSView {
   }
 
   private func layout(for _: Section) -> NSCollectionLayoutSection {
+    let height = displayMode.itemHeight
     let itemSize = NSCollectionLayoutSize(
       widthDimension: .fractionalWidth(1.0),
-      heightDimension: .estimated(Self.itemHeight)
+      heightDimension: .estimated(height)
     )
     let item = NSCollectionLayoutItem(layoutSize: itemSize)
 
     let groupSize = NSCollectionLayoutSize(
       widthDimension: .fractionalWidth(1.0),
-      heightDimension: .estimated(Self.itemHeight)
+      heightDimension: .estimated(height)
     )
     let group = NSCollectionLayoutGroup.horizontal(
       layoutSize: groupSize,
@@ -530,6 +603,8 @@ class MainSidebarList: NSView {
       case let .chat(id):
         guard let chat = chatItemsByID[id] else { return nil }
         return .init(kind: .item(chat))
+      case let .action(action):
+        return .init(kind: .action(action))
     }
   }
 
@@ -546,6 +621,7 @@ class MainSidebarList: NSView {
           return existing
         }
         let viewModel = ChatsViewModel(source: .space(id: id), db: dependencies.database)
+        viewModel.setSortStrategy(sortStrategy)
         spaceChatsViewModels[id] = viewModel
         return viewModel
     }
@@ -559,6 +635,37 @@ class MainSidebarList: NSView {
       collectionView.deselectAll(nil)
     }
     applySnapshot()
+  }
+
+  var currentSortStrategy: ChatsViewModel.SortStrategy {
+    sortStrategy
+  }
+
+  func setSortStrategy(_ strategy: ChatsViewModel.SortStrategy) {
+    guard sortStrategy != strategy else { return }
+    sortStrategy = strategy
+    homeChatsViewModel.setSortStrategy(strategy)
+    for viewModel in spaceChatsViewModels.values {
+      viewModel.setSortStrategy(strategy)
+    }
+    applySnapshot()
+  }
+
+  var currentDisplayMode: DisplayMode {
+    displayMode
+  }
+
+  func setDisplayMode(_ mode: DisplayMode) {
+    guard displayMode != mode else { return }
+    displayMode = mode
+    let visibleItems = collectionView.indexPathsForVisibleItems().compactMap { indexPath in
+      collectionView.item(at: indexPath) as? MainSidebarItemCollectionViewItem
+    }
+    visibleItems.forEach { item in
+      item.setDisplayMode(mode)
+    }
+    collectionView.collectionViewLayout?.invalidateLayout()
+    collectionView.layoutSubtreeIfNeeded()
   }
 
   func setSearchQuery(_ query: String) {

@@ -1,9 +1,12 @@
 import AppKit
+import InlineKit
 import SwiftUI
 
-class MainSidebar: NSViewController {
+class MainSidebar: NSViewController, NSMenuDelegate {
   private let dependencies: AppDependencies
   private let listView: MainSidebarList
+  private let homeViewModel: HomeViewModel
+  private let spacePickerState = SpacePickerState()
 
   private var activeMode: MainSidebarMode = .inbox
 
@@ -24,6 +27,7 @@ class MainSidebar: NSViewController {
 
   init(dependencies: AppDependencies) {
     self.dependencies = dependencies
+    homeViewModel = HomeViewModel(db: dependencies.database)
     listView = MainSidebarList(dependencies: dependencies)
 
     super.init(nibName: nil, bundle: nil)
@@ -36,10 +40,22 @@ class MainSidebar: NSViewController {
 
   // Header
   private lazy var headerView: MainSidebarHeaderView = {
-    let view = MainSidebarHeaderView(dependencies: dependencies)
+    let view = MainSidebarHeaderView(
+      dependencies: dependencies,
+      spacePickerState: spacePickerState
+    )
     view.translatesAutoresizingMaskIntoConstraints = false
+    // Space picker overlay is hosted in MainSidebar so it can render above the list.
+    view.onSpacePickerChange = { [weak self] isVisible in
+      self?.updateSpacePicker(isVisible: isVisible)
+    }
     return view
   }()
+
+  private static let spacePickerWidth: CGFloat = 240
+
+  private var spacePickerWindow: SpacePickerOverlayWindow?
+  private var spacePickerClickMonitor: Any?
 
   private lazy var footerView: NSView = {
     let view = NSView()
@@ -47,11 +63,43 @@ class MainSidebar: NSViewController {
     return view
   }()
 
+  private lazy var leftFooterStack: NSStackView = {
+    let stack = NSStackView()
+    stack.orientation = .horizontal
+    stack.spacing = 8
+    stack.alignment = .centerY
+    stack.distribution = .fill
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    return stack
+  }()
+
+  private lazy var rightFooterStack: NSStackView = {
+    let stack = NSStackView()
+    stack.orientation = .horizontal
+    stack.spacing = 8
+    stack.alignment = .centerY
+    stack.distribution = .fill
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    return stack
+  }()
+
   private lazy var archiveButton: MainSidebarArchiveButton = {
     let button = MainSidebarArchiveButton()
     button.translatesAutoresizingMaskIntoConstraints = false
     button.target = self
     button.action = #selector(handleArchiveButton)
+    return button
+  }()
+
+  private lazy var searchButton: MainSidebarFooterIconButton = {
+    let button = MainSidebarFooterIconButton(
+      symbolName: "magnifyingglass",
+      accessibilityLabel: "Search"
+    )
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.target = self
+    button.action = #selector(handleSearchButton)
+    button.toolTip = "Search"
     return button
   }()
 
@@ -78,6 +126,18 @@ class MainSidebar: NSViewController {
     let container = MainSidebarFooterHostingButton(contentView: hostingView)
     container.translatesAutoresizingMaskIntoConstraints = false
     return container
+  }()
+
+  private lazy var viewOptionsButton: MainSidebarFooterIconButton = {
+    let button = MainSidebarFooterIconButton(
+      symbolName: "line.3.horizontal.decrease",
+      accessibilityLabel: "View options"
+    )
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.target = self
+    button.action = #selector(handleViewOptionsButton)
+    button.toolTip = "View options"
+    return button
   }()
 
   private lazy var newSpaceMenuItem: NSMenuItem = {
@@ -119,6 +179,83 @@ class MainSidebar: NSViewController {
     return menu
   }()
 
+  private lazy var sortHeaderMenuItem: NSMenuItem = {
+    let item = NSMenuItem(title: "Sort", action: nil, keyEquivalent: "")
+    item.isEnabled = false
+    return item
+  }()
+
+  private lazy var sortByLastActivityMenuItem: NSMenuItem = {
+    let item = NSMenuItem(
+      title: "Last activity",
+      action: #selector(handleSortByLastActivity),
+      keyEquivalent: ""
+    )
+    item.target = self
+    return item
+  }()
+
+  private lazy var sortByCreationDateMenuItem: NSMenuItem = {
+    let item = NSMenuItem(
+      title: "Creation date",
+      action: #selector(handleSortByCreationDate),
+      keyEquivalent: ""
+    )
+    item.target = self
+    return item
+  }()
+
+  private lazy var displayModeHeaderMenuItem: NSMenuItem = {
+    let item = NSMenuItem(title: "Display Mode", action: nil, keyEquivalent: "")
+    item.isEnabled = false
+    return item
+  }()
+
+  private lazy var displayModeCompactMenuItem: NSMenuItem = {
+    let item = NSMenuItem(
+      title: "Compact",
+      action: #selector(handleDisplayModeCompact),
+      keyEquivalent: ""
+    )
+    item.target = self
+    item.image = menuIcon(named: "rectangle.compress.vertical")
+    item.attributedTitle = displayModeTitle(
+      title: "Compact",
+      subtitle: "Single line, smaller avatars"
+    )
+    return item
+  }()
+
+  private lazy var displayModePreviewMenuItem: NSMenuItem = {
+    let item = NSMenuItem(
+      title: "Show previews",
+      action: #selector(handleDisplayModePreview),
+      keyEquivalent: ""
+    )
+    item.target = self
+    item.image = menuIcon(named: "rectangle.expand.vertical")
+    item.attributedTitle = displayModeTitle(
+      title: "Show previews",
+      subtitle: "Preview line, larger avatars"
+    )
+    return item
+  }()
+
+  private lazy var viewOptionsMenu: NSMenu = {
+    let menu = NSMenu()
+    menu.delegate = self
+    menu.items = [
+      // sortHeaderMenuItem,
+      // sortByLastActivityMenuItem,
+      // sortByCreationDateMenuItem,
+      // .separator(),
+      displayModeHeaderMenuItem,
+      displayModeCompactMenuItem,
+      displayModePreviewMenuItem,
+    ]
+    return menu
+  }()
+
   private lazy var archiveEmptyView: NSStackView = {
     let label = NSTextField(labelWithString: "You haven't archived any chats yet!")
     label.font = NSFont.systemFont(ofSize: 13, weight: .medium)
@@ -135,9 +272,24 @@ class MainSidebar: NSViewController {
     return stack
   }()
 
+  private lazy var archiveTitleLabel: NSTextField = {
+    let label = NSTextField(labelWithString: "Archived Chats")
+    label.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+    label.textColor = .secondaryLabelColor
+    label.translatesAutoresizingMaskIntoConstraints = false
+    label.isHidden = true
+    return label
+  }()
+
   private var headerTopConstraint: NSLayoutConstraint?
+  private var archiveTitleHeightConstraint: NSLayoutConstraint?
+  private var archiveTitleTopConstraint: NSLayoutConstraint?
+  private var archiveTitleBottomConstraint: NSLayoutConstraint?
   private var switchToInboxObserver: NSObjectProtocol?
   private static let footerHeight: CGFloat = MainSidebarFooterStyle.buttonSize + 16
+  private static let archiveTitleHeight: CGFloat = 18
+  private static let archiveTitleTopSpacing: CGFloat = 6
+  private static let archiveTitleBottomSpacing: CGFloat = 6
 
   override func loadView() {
     view = NSView()
@@ -148,23 +300,44 @@ class MainSidebar: NSViewController {
 
   private func setupViews() {
     view.addSubview(headerView)
+    view.addSubview(archiveTitleLabel)
     view.addSubview(listView)
     view.addSubview(footerView)
-    footerView.addSubview(archiveButton)
+    footerView.addSubview(leftFooterStack)
     footerView.addSubview(plusButton)
-    footerView.addSubview(notificationsButton)
+    footerView.addSubview(rightFooterStack)
     view.addSubview(archiveEmptyView)
 
+    leftFooterStack.addArrangedSubview(archiveButton)
+    leftFooterStack.addArrangedSubview(searchButton)
+    rightFooterStack.addArrangedSubview(viewOptionsButton)
+    rightFooterStack.addArrangedSubview(notificationsButton)
+
     headerTopConstraint = headerView.topAnchor.constraint(equalTo: view.topAnchor, constant: headerTopInset())
+
+    let archiveTitleTopConstraint = archiveTitleLabel.topAnchor.constraint(
+      equalTo: headerView.bottomAnchor,
+      constant: Self.archiveTitleTopSpacing
+    )
+    self.archiveTitleTopConstraint = archiveTitleTopConstraint
 
     NSLayoutConstraint.activate([
       headerView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Self.outerEdgeInsets),
       headerView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Self.outerEdgeInsets),
       headerTopConstraint!,
 
+      archiveTitleLabel.leadingAnchor.constraint(
+        equalTo: view.leadingAnchor,
+        constant: Self.outerEdgeInsets + Self.innerEdgeInsets
+      ),
+      archiveTitleLabel.trailingAnchor.constraint(
+        lessThanOrEqualTo: view.trailingAnchor,
+        constant: -Self.outerEdgeInsets
+      ),
+      archiveTitleTopConstraint,
+
       listView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
       listView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-      listView.topAnchor.constraint(equalTo: headerView.bottomAnchor),
       listView.bottomAnchor.constraint(equalTo: footerView.topAnchor, constant: -8),
 
       footerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -172,18 +345,24 @@ class MainSidebar: NSViewController {
       footerView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
       footerView.heightAnchor.constraint(equalToConstant: Self.footerHeight),
 
-      archiveButton.leadingAnchor.constraint(equalTo: footerView.leadingAnchor, constant: Self.edgeInsets),
-      archiveButton.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
+      leftFooterStack.leadingAnchor.constraint(equalTo: footerView.leadingAnchor, constant: Self.edgeInsets),
+      leftFooterStack.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
+
       archiveButton.widthAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
       archiveButton.heightAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
+      searchButton.widthAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
+      searchButton.heightAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
 
       plusButton.centerXAnchor.constraint(equalTo: footerView.centerXAnchor),
       plusButton.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
       plusButton.widthAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
       plusButton.heightAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
 
-      notificationsButton.trailingAnchor.constraint(equalTo: footerView.trailingAnchor, constant: -Self.edgeInsets),
-      notificationsButton.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
+      rightFooterStack.trailingAnchor.constraint(equalTo: footerView.trailingAnchor, constant: -Self.edgeInsets),
+      rightFooterStack.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
+
+      viewOptionsButton.widthAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
+      viewOptionsButton.heightAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
       notificationsButton.widthAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
       notificationsButton.heightAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
 
@@ -192,6 +371,16 @@ class MainSidebar: NSViewController {
       archiveEmptyView.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 24),
       archiveEmptyView.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -24),
     ])
+
+    let archiveTitleHeightConstraint = archiveTitleLabel.heightAnchor.constraint(equalToConstant: 0)
+    let archiveTitleBottomConstraint = listView.topAnchor.constraint(
+      equalTo: archiveTitleLabel.bottomAnchor,
+      constant: 0
+    )
+    archiveTitleHeightConstraint.isActive = true
+    archiveTitleBottomConstraint.isActive = true
+    self.archiveTitleHeightConstraint = archiveTitleHeightConstraint
+    self.archiveTitleBottomConstraint = archiveTitleBottomConstraint
 
     archiveEmptyView.isHidden = true
 
@@ -223,6 +412,7 @@ class MainSidebar: NSViewController {
   private func setContent(for mode: MainSidebarMode) {
     activeMode = mode
     updateArchiveButton()
+    updateArchiveTitle()
 
     switch mode {
       case .archive:
@@ -239,6 +429,14 @@ class MainSidebar: NSViewController {
     archiveButton.toolTip = activeMode == .archive ? "Show inbox" : "Show archives"
   }
 
+  private func updateArchiveTitle() {
+    let shouldShow = activeMode == .archive
+    archiveTitleLabel.isHidden = !shouldShow
+    archiveTitleTopConstraint?.constant = shouldShow ? Self.archiveTitleTopSpacing : 0
+    archiveTitleHeightConstraint?.constant = shouldShow ? Self.archiveTitleHeight : 0
+    archiveTitleBottomConstraint?.constant = shouldShow ? Self.archiveTitleBottomSpacing : 0
+  }
+
   @objc private func handleArchiveButton() {
     let nextMode: MainSidebarMode = activeMode == .archive ? .inbox : .archive
     setContent(for: nextMode)
@@ -247,6 +445,156 @@ class MainSidebar: NSViewController {
   @objc private func handlePlusButton(_ sender: NSButton) {
     let point = NSPoint(x: 0, y: sender.bounds.maxY + 6)
     plusMenu.popUp(positioning: nil, at: point, in: sender)
+  }
+
+  @objc private func handleSearchButton() {
+    NotificationCenter.default.post(name: .focusSearch, object: nil)
+  }
+
+  private func updateSpacePicker(isVisible: Bool) {
+    if isVisible {
+      showSpacePicker()
+    } else {
+      hideSpacePicker()
+    }
+  }
+
+  private func showSpacePicker() {
+    guard let parentWindow = view.window else { return }
+    let window = ensureSpacePickerWindow()
+
+    if window.parent != parentWindow {
+      parentWindow.addChildWindow(window, ordered: .above)
+    }
+
+    let headerRectInWindow = headerView.convert(headerView.bounds, to: nil)
+    let headerRectInScreen = parentWindow.convertToScreen(headerRectInWindow)
+    let size = window.frame.size
+    let insetX = SpacePickerOverlayWindow.contentInsetX
+    let insetY = SpacePickerOverlayWindow.contentInsetY
+    var origin = NSPoint(
+      x: headerRectInScreen.minX - insetX,
+      y: headerRectInScreen.minY - size.height - 6 + insetY
+    )
+
+    if let screen = parentWindow.screen {
+      let visible = screen.visibleFrame
+      let maxX = visible.maxX - size.width
+      origin.x = min(max(origin.x, visible.minX), maxX)
+      if origin.y < visible.minY {
+        origin.y = visible.minY
+      }
+    }
+
+    window.setFrameOrigin(origin)
+    window.orderFront(nil)
+    installSpacePickerClickMonitor()
+  }
+
+  private func hideSpacePicker() {
+    if let window = spacePickerWindow {
+      window.orderOut(nil)
+      window.parent?.removeChildWindow(window)
+    }
+    if spacePickerState.isVisible {
+      spacePickerState.isVisible = false
+    }
+    removeSpacePickerClickMonitor()
+  }
+
+  private func ensureSpacePickerWindow() -> SpacePickerOverlayWindow {
+    let items = spacePickerItems()
+    let activeTab = dependencies.nav2?.activeTab ?? .home
+    let rootView = SpacePickerOverlayView(
+      items: items,
+      activeTab: activeTab,
+      onSelect: { [weak self] item in
+        self?.handleSpacePickerSelection(item)
+        self?.hideSpacePicker()
+      },
+      onCreateSpace: { [weak self] in
+        self?.dependencies.nav2?.navigate(to: .createSpace)
+        self?.hideSpacePicker()
+      }
+    )
+
+    if let window = spacePickerWindow {
+      window.update(rootView: rootView)
+      return window
+    }
+
+    let window = SpacePickerOverlayWindow(rootView: rootView, preferredWidth: Self.spacePickerWidth)
+    spacePickerWindow = window
+    return window
+  }
+
+  private func spacePickerItems() -> [SpaceHeaderItem] {
+    [.home] + homeViewModel.spaces.map { SpaceHeaderItem(space: $0.space) }
+  }
+
+  private func handleSpacePickerSelection(_ item: SpaceHeaderItem) {
+    guard let nav2 = dependencies.nav2 else { return }
+    switch item.kind {
+      case .home:
+        if let index = nav2.tabs.firstIndex(of: .home) {
+          nav2.setActiveTab(index: index)
+        }
+      case .space:
+        if let space = item.space {
+          nav2.openSpace(space)
+        }
+    }
+  }
+
+  private func installSpacePickerClickMonitor() {
+    guard spacePickerClickMonitor == nil else { return }
+    spacePickerClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
+      guard let self else { return event }
+      guard let window = spacePickerWindow, window.isVisible else { return event }
+      if let parentWindow = view.window, event.window === parentWindow {
+        let pointInHeader = headerView.convert(event.locationInWindow, from: nil)
+        if headerView.bounds.contains(pointInHeader) {
+          return event
+        }
+      }
+      if event.window !== window {
+        hideSpacePicker()
+      }
+      return event
+    }
+  }
+
+  private func removeSpacePickerClickMonitor() {
+    if let spacePickerClickMonitor {
+      NSEvent.removeMonitor(spacePickerClickMonitor)
+      self.spacePickerClickMonitor = nil
+    }
+  }
+
+  @objc private func handleViewOptionsButton(_ sender: NSButton) {
+    updateViewOptionsMenuState()
+    let point = NSPoint(x: 0, y: sender.bounds.maxY + 6)
+    viewOptionsMenu.popUp(positioning: nil, at: point, in: sender)
+  }
+
+  @objc private func handleSortByLastActivity() {
+    listView.setSortStrategy(.lastActivity)
+    updateViewOptionsMenuState()
+  }
+
+  @objc private func handleSortByCreationDate() {
+    listView.setSortStrategy(.creationDate)
+    updateViewOptionsMenuState()
+  }
+
+  @objc private func handleDisplayModeCompact() {
+    AppSettings.shared.showSidebarMessagePreview = false
+    updateViewOptionsMenuState()
+  }
+
+  @objc private func handleDisplayModePreview() {
+    AppSettings.shared.showSidebarMessagePreview = true
+    updateViewOptionsMenuState()
   }
 
   @objc private func handleNewSpace() {
@@ -259,6 +607,42 @@ class MainSidebar: NSViewController {
 
   @objc private func handleNewThread() {
     dependencies.nav2?.navigate(to: .newChat)
+  }
+
+  private func updateViewOptionsMenuState() {
+    // let currentSort = listView.currentSortStrategy
+    // sortByLastActivityMenuItem.state = currentSort == .lastActivity ? .on : .off
+    // sortByCreationDateMenuItem.state = currentSort == .creationDate ? .on : .off
+    let showPreview = AppSettings.shared.showSidebarMessagePreview
+    displayModeCompactMenuItem.state = showPreview ? .off : .on
+    displayModePreviewMenuItem.state = showPreview ? .on : .off
+  }
+
+  func menuWillOpen(_ menu: NSMenu) {
+    guard menu == viewOptionsMenu else { return }
+    updateViewOptionsMenuState()
+  }
+
+  private func displayModeTitle(title: String, subtitle: String) -> NSAttributedString {
+    let paragraph = NSMutableParagraphStyle()
+    paragraph.alignment = .left
+    paragraph.lineBreakMode = .byTruncatingTail
+    paragraph.lineSpacing = 0
+
+    let titleAttributes: [NSAttributedString.Key: Any] = [
+      .font: NSFont.systemFont(ofSize: 13, weight: .regular),
+      .foregroundColor: NSColor.labelColor,
+      .paragraphStyle: paragraph,
+    ]
+    let subtitleAttributes: [NSAttributedString.Key: Any] = [
+      .font: NSFont.systemFont(ofSize: 11, weight: .regular),
+      .foregroundColor: NSColor.secondaryLabelColor,
+      .paragraphStyle: paragraph,
+    ]
+
+    let combined = NSMutableAttributedString(string: title, attributes: titleAttributes)
+    combined.append(NSAttributedString(string: "\n\(subtitle)", attributes: subtitleAttributes))
+    return combined
   }
 
   private func menuIcon(named symbolName: String) -> NSImage? {

@@ -7,6 +7,8 @@ class MainSidebarItemCollectionViewItem: NSCollectionViewItem {
     view as? MainSidebarItemCell
   }
 
+  private var displayMode: MainSidebarList.DisplayMode = .compact
+
   override var isSelected: Bool {
     didSet {
       cellView?.setListSelected(isSelected)
@@ -17,7 +19,7 @@ class MainSidebarItemCollectionViewItem: NSCollectionViewItem {
     _ layoutAttributes: NSCollectionViewLayoutAttributes
   ) -> NSCollectionViewLayoutAttributes {
     let attributes = super.preferredLayoutAttributesFitting(layoutAttributes)
-    attributes.size.height = MainSidebar.itemHeight
+    attributes.size.height = displayMode.itemHeight
     return attributes
   }
 
@@ -33,6 +35,7 @@ class MainSidebarItemCollectionViewItem: NSCollectionViewItem {
   struct Content {
     enum Kind {
       case item(ChatListItem)
+      case action(MainSidebarList.ActionItem)
     }
 
     let kind: Kind
@@ -42,13 +45,21 @@ class MainSidebarItemCollectionViewItem: NSCollectionViewItem {
     with item: Content,
     dependencies: AppDependencies,
     events: PassthroughSubject<MainSidebarList.ScrollEvent, Never>,
-    highlightNavSelection: Bool
+    highlightNavSelection: Bool,
+    displayMode: MainSidebarList.DisplayMode
   ) {
+    self.displayMode = displayMode
     cellView?.configure(
       with: item,
       dependencies: dependencies,
       events: events,
-      highlightNavSelection: highlightNavSelection
+      highlightNavSelection: highlightNavSelection,
+      displayMode: displayMode
     )
+  }
+
+  func setDisplayMode(_ displayMode: MainSidebarList.DisplayMode) {
+    self.displayMode = displayMode
+    cellView?.updateDisplayMode(displayMode)
   }
 }
