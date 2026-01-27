@@ -51,6 +51,29 @@ describe("getChats", () => {
     const result = await getChats({}, makeHandlerContext(users[0].id))
   })
 
+  test("includes home threads for participants", async () => {
+    const owner = await testUtils.createUser("home-chats-owner@example.com")
+    const participant = await testUtils.createUser("home-chats-participant@example.com")
+    if (!owner || !participant) throw new Error("Users not created")
+
+    const chat = await testUtils.createChat(null, "Home Thread", "thread", false, owner.id)
+    if (!chat) throw new Error("Chat not created")
+
+    await testUtils.addParticipant(chat.id, owner.id)
+    await testUtils.addParticipant(chat.id, participant.id)
+
+    const result = await getChats({}, makeHandlerContext(owner.id))
+
+    const chatIds = result.chats.map((c) => Number(c.id))
+    expect(chatIds).toContain(chat.id)
+
+    const dialogChatIds = result.dialogs.map((d) => Number(d.chatId))
+    expect(dialogChatIds).toContain(chat.id)
+
+    const returnedChat = result.chats.find((c) => Number(c.id) === chat.id)
+    expect(returnedChat?.spaceId).toBeUndefined()
+  })
+
   // test("auto-creates private chats and dialogs for all space members", async () => {
   //   const { space, users } = await testUtils.createSpaceWithMembers("Test Space", [
   //     "user1@example.com",

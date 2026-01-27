@@ -4,6 +4,9 @@ import { createChat } from "../../functions/messages.createChat"
 import { CreateChatInput } from "@in/protocol/core"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { testUtils, defaultTestContext, setupTestLifecycle } from "../setup"
+import { db } from "../../db"
+import * as schema from "../../db/schema"
+import { eq } from "drizzle-orm"
 import type { FunctionContext } from "../../functions/_types"
 
 describe("messages.createChat", () => {
@@ -109,5 +112,79 @@ describe("messages.createChat", () => {
 
     expect(functionResult.chat.isPublic).toBe(false)
     expect(functionResult.chat.title).toBe("Private Chat")
+  })
+
+  test("should create home thread with participants and creator", async () => {
+    const currentUser = await testUtils.createUser("home-owner@example.com")
+    if (!currentUser) throw new Error("Failed to create current user")
+    const otherUser = await testUtils.createUser("home-participant@example.com")
+    if (!otherUser) throw new Error("Failed to create other user")
+
+    const input: CreateChatInput = {
+      title: "Home Thread",
+      isPublic: false,
+      participants: [{ userId: BigInt(otherUser.id) }],
+    }
+
+    const handlerResult = await handler(input, {
+      ...mockHandlerContext,
+      userId: currentUser.id,
+    })
+
+    expect(handlerResult.chat?.isPublic).toBe(false)
+    expect(handlerResult.chat?.spaceId).toBeUndefined()
+
+    const [createdChat] = await db
+      .select()
+      .from(schema.chats)
+      .where(eq(schema.chats.id, Number(handlerResult.chat?.id)))
+
+    expect(createdChat?.spaceId).toBeNull()
+    expect(createdChat?.createdBy).toBe(currentUser.id)
+    expect(createdChat?.publicThread).toBe(false)
+
+    const participants = await db
+      .select()
+      .from(schema.chatParticipants)
+      .where(eq(schema.chatParticipants.chatId, createdChat!.id))
+
+    const participantIds = participants.map((p) => p.userId).sort()
+    expect(participantIds).toEqual([currentUser.id, otherUser.id].sort())
+  })
+
+  test("rejects public home thread creation", async () => {
+    const currentUser = await testUtils.createUser("home-public-owner@example.com")
+    if (!currentUser) throw new Error("Failed to create current user")
+
+    await expect(
+      createChat(
+        {
+          title: "Home Public Thread",
+          isPublic: true,
+        },
+        {
+          ...mockFunctionContext,
+          currentUserId: currentUser.id,
+        },
+      ),
+    ).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+  })
+
+  test("rejects home thread creation without participants", async () => {
+    const currentUser = await testUtils.createUser("home-empty-owner@example.com")
+    if (!currentUser) throw new Error("Failed to create current user")
+
+    await expect(
+      createChat(
+        {
+          title: "Home Thread Missing Participants",
+          isPublic: false,
+        },
+        {
+          ...mockFunctionContext,
+          currentUserId: currentUser.id,
+        },
+      ),
+    ).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
   })
 })

@@ -27,6 +27,14 @@ export async function addChatParticipant(
       throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, `Chat with ID ${input.chatId} not found`, 404)
     }
 
+    if (chat[0]?.type !== "thread") {
+      throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Chat is not a thread", 400)
+    }
+
+    if (chat[0]?.spaceId == null && chat[0]?.createdBy !== context.currentUserId) {
+      throw RealtimeRpcError.PeerIdInvalid()
+    }
+
     // Check if user exists
     const user = await db.select().from(users).where(eq(users.id, input.userId)).limit(1)
     if (!user || user.length === 0) {

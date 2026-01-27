@@ -223,6 +223,20 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
             },
           },
         },
+
+        // Home threads (non-space)
+        {
+          type: "thread",
+          publicThread: false,
+          spaceId: {
+            isNull: true,
+          },
+          participants: {
+            user: {
+              id: currentUserId,
+            },
+          },
+        },
       ],
     },
 

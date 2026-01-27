@@ -7,6 +7,7 @@ import { chats, messages, type DbChat, type DbMessage } from "@in/server/db/sche
 import { encrypt, encryptBinary } from "@in/server/modules/encryption/encryption"
 import { MessageEntities, MessageEntity_Type } from "@in/protocol/core"
 import type { FunctionContext } from "@in/server/functions/_types"
+import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 
 // Test database configuration
 const TEST_DB_NAME = "test_db"
@@ -121,6 +122,7 @@ export const teardownTestDatabase = async () => {
 
 export const cleanDatabase = async () => {
   try {
+    AccessGuardsCache.resetAll()
     // Get all tables from the schema
     const tables = Object.values(schema).filter((table) => typeof table === "object" && "name" in table) as any[]
 
@@ -170,10 +172,11 @@ export const testUtils = {
 
   // Create a test chat
   async createChat(
-    spaceId: number,
+    spaceId: number | null,
     title: string = "Test Chat",
     type: "private" | "thread" = "thread",
     publicThread: boolean = true,
+    createdBy?: number,
   ) {
     const [chat] = await db
       .insert(schema.chats)
@@ -182,6 +185,7 @@ export const testUtils = {
         title,
         spaceId,
         publicThread,
+        createdBy: createdBy ?? null,
       })
       .returning()
     return chat

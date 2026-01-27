@@ -30,6 +30,14 @@ export async function removeChatParticipant(
         throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, `Chat with ID ${input.chatId} not found`, 404)
       }
 
+      if (chat.type !== "thread") {
+        throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Chat is not a thread", 400)
+      }
+
+      if (chat.spaceId == null && chat.createdBy !== context.currentUserId) {
+        throw RealtimeRpcError.PeerIdInvalid()
+      }
+
       const user = await tx.select().from(users).where(eq(users.id, input.userId)).limit(1)
       if (!user || user.length === 0) {
         throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, `User with ID ${input.userId} not found`, 404)

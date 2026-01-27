@@ -28,13 +28,33 @@ export async function createChat(
   },
   context: FunctionContext,
 ): Promise<{ chat: Chat; dialog: Dialog }> {
-  const spaceId = Number(input.spaceId)
-  if (isNaN(spaceId)) {
+  const hasSpaceId = input.spaceId !== undefined && input.spaceId !== null
+  const spaceId = hasSpaceId ? Number(input.spaceId) : null
+  if (hasSpaceId && Number.isNaN(spaceId)) {
     throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Space ID is invalid", 400)
   }
 
+  const isPublic = input.isPublic ?? (hasSpaceId ? true : false)
+
+  if (!hasSpaceId) {
+    if (isPublic) {
+      throw new RealtimeRpcError(
+        RealtimeRpcError.Code.BAD_REQUEST,
+        "Public home threads are not supported",
+        400,
+      )
+    }
+    if (!input.participants || input.participants.length === 0) {
+      throw new RealtimeRpcError(
+        RealtimeRpcError.Code.BAD_REQUEST,
+        "Participants are required for home threads",
+        400,
+      )
+    }
+  }
+
   // For space threads, if it's private, participants are required
-  if (input.isPublic === false && (!input.participants || input.participants.length === 0)) {
+  if (hasSpaceId && isPublic === false && (!input.participants || input.participants.length === 0)) {
     throw new RealtimeRpcError(
       RealtimeRpcError.Code.BAD_REQUEST,
       "Participants are required for private space threads",
@@ -43,7 +63,7 @@ export async function createChat(
   }
 
   // For space threads, if it's public, participants should be empty
-  if (input.isPublic === true && input.participants && input.participants.length > 0) {
+  if (hasSpaceId && isPublic === true && input.participants && input.participants.length > 0) {
     throw new RealtimeRpcError(
       RealtimeRpcError.Code.BAD_REQUEST,
       "Participants should be empty for public space threads",
@@ -52,32 +72,37 @@ export async function createChat(
   }
 
   // For private chats, ensure the current user is included in participants
-  if (input.isPublic === false && input.participants) {
+  if (isPublic === false && input.participants) {
     const currentUserIncluded = input.participants.some((p) => p.userId === BigInt(context.currentUserId))
     if (!currentUserIncluded) {
       input.participants.push({ userId: BigInt(context.currentUserId) })
     }
   }
 
-  var maxThreadNumber: number = await db
-    .select({ maxThreadNumber: sql<number>`MAX(${chats.threadNumber})` })
-    .from(chats)
-    .where(eq(chats.spaceId, spaceId))
-    .then((result) => result[0]?.maxThreadNumber ?? 0)
+  let threadNumber: number | null = null
+  if (hasSpaceId) {
+    const resolvedSpaceId = spaceId as number
+    const maxThreadNumber: number = await db
+      .select({ maxThreadNumber: sql<number>`MAX(${chats.threadNumber})` })
+      .from(chats)
+      .where(eq(chats.spaceId, resolvedSpaceId))
+      .then((result) => result[0]?.maxThreadNumber ?? 0)
 
-  var threadNumber = maxThreadNumber + 1
+    threadNumber = maxThreadNumber + 1
+  }
 
   const chat = await db
     .insert(chats)
     .values({
       type: "thread",
-      spaceId: spaceId,
+      spaceId: hasSpaceId ? spaceId : null,
       title: input.title,
-      publicThread: input.isPublic ?? true,
+      publicThread: isPublic,
       date: new Date(),
       threadNumber: threadNumber,
       emoji: input.emoji ?? null,
       description: input.description ?? null,
+      createdBy: hasSpaceId ? null : context.currentUserId,
     })
     .returning()
 
@@ -86,7 +111,7 @@ export async function createChat(
   }
 
   // If it's a private space thread, add participants
-  if (input.isPublic === false && input.participants) {
+  if (isPublic === false && input.participants) {
     const participants = input.participants.map((p) => ({
       chatId: chat[0]!.id,
       userId: Number(p.userId),
@@ -105,7 +130,7 @@ export async function createChat(
       .values({
         chatId: chat[0].id,
         userId: context.currentUserId,
-        spaceId: spaceId,
+        spaceId: hasSpaceId ? spaceId : null,
         date: new Date(),
       })
       .returning()

@@ -110,6 +110,26 @@ describe("AccessGuards", () => {
     })
   })
 
+  it("requires participation for home threads", async () => {
+    const creator = requireUser(await testUtils.createUser("home-owner@example.com"), "creator")
+    const participant = requireUser(await testUtils.createUser("home-participant@example.com"), "participant")
+    const outsider = requireUser(await testUtils.createUser("home-outsider@example.com"), "outsider")
+
+    const chat = requireChat(
+      await testUtils.createChat(null, "Home Thread", "thread", false, creator.id),
+      "home-thread",
+    )
+
+    await db.insert(chatParticipants).values({ chatId: chat.id, userId: creator.id })
+    await db.insert(chatParticipants).values({ chatId: chat.id, userId: participant.id })
+
+    await expect(AccessGuards.ensureChatAccess(chat, creator.id)).resolves.toBeUndefined()
+    await expect(AccessGuards.ensureChatAccess(chat, participant.id)).resolves.toBeUndefined()
+    await expect(AccessGuards.ensureChatAccess(chat, outsider.id)).rejects.toMatchObject({
+      code: RealtimeRpcError.Code.PEER_ID_INVALID,
+    })
+  })
+
   it("validates space membership", async () => {
     const user = requireUser(await testUtils.createUser("space-member@example.com"), "space member")
     const outsider = requireUser(await testUtils.createUser("space-outsider@example.com"), "outsider")
