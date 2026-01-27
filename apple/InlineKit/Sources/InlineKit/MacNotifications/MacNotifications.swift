@@ -5,6 +5,8 @@ import UserNotifications
 public actor MacNotifications: Sendable {
   public static let shared = MacNotifications()
 
+  private static let urgentNudgeText = "\u{1F6A8}"
+
   private var soundEnabled = true
 
   func requestPermission() async throws -> Bool {
@@ -15,12 +17,17 @@ public actor MacNotifications: Sendable {
     soundEnabled = enabled
   }
 
+  private func isSoundEnabled() -> Bool {
+    soundEnabled
+  }
+
   nonisolated func showMessageNotification(
     title: String,
     subtitle: String? = nil,
     body: String,
     userInfo: [AnyHashable: Any],
-    imageURL: URL? = nil
+    imageURL: URL? = nil,
+    forceSound: Bool = false
   ) async {
     let content = UNMutableNotificationContent()
     content.title = title
@@ -29,7 +36,8 @@ public actor MacNotifications: Sendable {
       content.subtitle = subtitle
     }
     content.userInfo = userInfo
-    content.sound = await soundEnabled ? .default : nil
+    let isSoundEnabled = await self.isSoundEnabled()
+    content.sound = (forceSound || isSoundEnabled) ? .default : nil
 
     if let imageURL {
       do {
@@ -142,6 +150,12 @@ extension MacNotifications {
     //   }
     // }
 
+    let trimmedText = protocolMsg.hasMessage ? protocolMsg.message.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+    let isUrgentNudge = {
+      guard case .nudge = protocolMsg.media.media else { return false }
+      return trimmedText == Self.urgentNudgeText
+    }()
+
     Task {
       // Show notification
       await MacNotifications.shared.showMessageNotification(
@@ -154,7 +168,8 @@ extension MacNotifications {
           "isThread": chat?.type == .thread,
           "threadId": chat?.id as Any,
         ],
-        imageURL: imageURL
+        imageURL: imageURL,
+        forceSound: isUrgentNudge
         // userInfo: ["chatId": message.chatID],
       )
     }
