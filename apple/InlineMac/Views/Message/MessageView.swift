@@ -142,15 +142,13 @@ class MessageViewAppKit: NSView {
       return "Chat"
     }
 
-    if let peerUserId = message.forwardFromPeerUserId {
-      if let peerUserInfo = fullMessage.forwardFromPeerUserInfo {
-        return peerUserInfo.user.shortDisplayName
+    if message.forwardFromPeerUserId != nil {
+      if let forwardUserInfo = fullMessage.forwardFromUserInfo {
+        return forwardUserInfo.user.shortDisplayName
       }
 
-      if peerUserId == message.forwardFromUserId,
-         let forwardUserInfo = fullMessage.forwardFromUserInfo
-      {
-        return forwardUserInfo.user.shortDisplayName
+      if let peerUserInfo = fullMessage.forwardFromPeerUserInfo {
+        return peerUserInfo.user.shortDisplayName
       }
     }
 
@@ -162,14 +160,12 @@ class MessageViewAppKit: NSView {
       return fullMessage.forwardFromChatInfo == nil
     }
 
-    if let peerUserId = message.forwardFromPeerUserId {
-      if fullMessage.forwardFromPeerUserInfo != nil {
+    if message.forwardFromPeerUserId != nil {
+      if fullMessage.forwardFromUserInfo != nil {
         return false
       }
 
-      if peerUserId == message.forwardFromUserId,
-         fullMessage.forwardFromUserInfo != nil
-      {
+      if fullMessage.forwardFromPeerUserInfo != nil {
         return false
       }
       return true
@@ -972,12 +968,16 @@ class MessageViewAppKit: NSView {
   @objc private func handleForwardHeaderClick(_: NSClickGestureRecognizer) {
     guard let forwardedMessageId = message.forwardFromMessageId else { return }
 
-    let forwardPeer: Peer? = if let userId = message.forwardFromPeerUserId {
-      .user(id: userId)
+    var forwardPeer: Peer?
+    if let peerUserId = message.forwardFromPeerUserId {
+      let currentUserId = Auth.shared.currentUserId
+      if let senderId = message.forwardFromUserId, senderId != currentUserId {
+        forwardPeer = .user(id: senderId)
+      } else {
+        forwardPeer = .user(id: peerUserId)
+      }
     } else if let threadId = message.forwardFromPeerThreadId {
-      .thread(id: threadId)
-    } else {
-      nil
+      forwardPeer = .thread(id: threadId)
     }
 
     let targetPeer = forwardPeer ?? message.peerId
