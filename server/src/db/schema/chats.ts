@@ -32,6 +32,9 @@ export const chats = pgTable(
     /** optional, required for space chats, thread number */
     threadNumber: integer("thread_number"),
 
+    /** optional, creator user id (required for home threads) */
+    createdBy: integer("created_by").references(() => users.id),
+
     /** optional, required for private chats, least user id */
     minUserId: integer("min_user_id").references(() => users.id),
     /** optional, required for private chats, greatest user id */

@@ -87,6 +87,22 @@ describe("getUpdateGroup & getUpdateGroupFromInputPeer", () => {
     expect((group as any).userIds.sort()).toEqual([users[0].id, users[1].id].sort())
   })
 
+  test("returns participants for home thread", async () => {
+    const userA = await testUtils.createUser("home-a@ex.com")
+    const userB = await testUtils.createUser("home-b@ex.com")
+    if (!userA || !userB) throw new Error("Users not created")
+    const chat = await testUtils.createChat(null, "Home Thread", "thread", false, userA.id)
+    if (!chat) throw new Error("Chat not created")
+    await testUtils.addParticipant(chat.id, userA.id)
+    await testUtils.addParticipant(chat.id, userB.id)
+    const peer: TPeerInfo = { threadId: chat.id }
+    const context = { currentUserId: userA.id }
+    const group = await getUpdateGroup(peer, context)
+    expect(group.type).toBe("threadUsers")
+    expect((group as any).spaceId).toBeUndefined()
+    expect((group as any).userIds.sort()).toEqual([userA.id, userB.id].sort())
+  })
+
   test("getUpdateGroupFromInputPeer: user peer", async () => {
     const { users } = await testUtils.createSpaceWithMembers("InputPeer User", ["a@ex.com", "b@ex.com"])
     const [userA, userB] = users
@@ -114,5 +130,21 @@ describe("getUpdateGroup & getUpdateGroupFromInputPeer", () => {
     const group = await getUpdateGroupFromInputPeer(inputPeer, context)
     expect(group.type).toBe("threadUsers")
     expect((group as any).userIds.sort()).toEqual([users[0].id])
+  })
+
+  test("getUpdateGroupFromInputPeer: home thread", async () => {
+    const userA = await testUtils.createUser("home-input-a@ex.com")
+    const userB = await testUtils.createUser("home-input-b@ex.com")
+    if (!userA || !userB) throw new Error("Users not created")
+    const chat = await testUtils.createChat(null, "Home Thread Input", "thread", false, userA.id)
+    if (!chat) throw new Error("Chat not created")
+    await testUtils.addParticipant(chat.id, userA.id)
+    await testUtils.addParticipant(chat.id, userB.id)
+    const inputPeer = makeInputPeerChat(chat.id)
+    const context = { currentUserId: userA.id }
+    const group = await getUpdateGroupFromInputPeer(inputPeer, context)
+    expect(group.type).toBe("threadUsers")
+    expect((group as any).spaceId).toBeUndefined()
+    expect((group as any).userIds.sort()).toEqual([userA.id, userB.id].sort())
   })
 })

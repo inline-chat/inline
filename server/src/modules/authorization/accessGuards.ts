@@ -22,7 +22,8 @@ async function ensureChatAccess(chat: DbChat, userId: number) {
   }
 
   if (!chat.spaceId) {
-    throw RealtimeRpcError.ChatIdInvalid()
+    await ensureChatParticipant(chat.id, userId)
+    return
   }
 
   await ensureSpaceMember(chat.spaceId, userId)
@@ -37,28 +38,7 @@ async function ensureChatAccess(chat: DbChat, userId: number) {
   }
 
   if (!chat.publicThread) {
-    const cachedParticipant = AccessGuardsCache.getChatParticipant(chat.id, userId)
-    if (cachedParticipant !== undefined) {
-      if (!cachedParticipant) {
-        throw RealtimeRpcError.PeerIdInvalid()
-      }
-      return
-    }
-
-    const participant = await db
-      .select({ id: chatParticipants.id })
-      .from(chatParticipants)
-      .where(and(eq(chatParticipants.chatId, chat.id), eq(chatParticipants.userId, userId)))
-      .limit(1)
-
-    const exists = participant.length > 0
-    if (exists) {
-      AccessGuardsCache.setChatParticipant(chat.id, userId)
-    }
-
-    if (!exists) {
-      throw RealtimeRpcError.PeerIdInvalid()
-    }
+    await ensureChatParticipant(chat.id, userId)
   }
 }
 
@@ -78,5 +58,30 @@ async function ensureSpaceMember(spaceId: number, userId: number) {
 
   if (!isMember) {
     throw RealtimeRpcError.SpaceIdInvalid()
+  }
+}
+
+async function ensureChatParticipant(chatId: number, userId: number) {
+  const cachedParticipant = AccessGuardsCache.getChatParticipant(chatId, userId)
+  if (cachedParticipant !== undefined) {
+    if (!cachedParticipant) {
+      throw RealtimeRpcError.PeerIdInvalid()
+    }
+    return
+  }
+
+  const participant = await db
+    .select({ id: chatParticipants.id })
+    .from(chatParticipants)
+    .where(and(eq(chatParticipants.chatId, chatId), eq(chatParticipants.userId, userId)))
+    .limit(1)
+
+  const exists = participant.length > 0
+  if (exists) {
+    AccessGuardsCache.setChatParticipant(chatId, userId)
+  }
+
+  if (!exists) {
+    throw RealtimeRpcError.PeerIdInvalid()
   }
 }

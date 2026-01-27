@@ -8,7 +8,7 @@ export type UpdateGroup =
   // Used for DMs and non-public threads
   | { type: "dmUsers"; userIds: number[] }
   // Used for public threads
-  | { type: "threadUsers"; spaceId: number; userIds: number[] }
+  | { type: "threadUsers"; spaceId?: number; userIds: number[] }
   // Used for spaces
   | { type: "spaceUsers"; spaceId: number; userIds: number[] }
 
@@ -32,7 +32,12 @@ export const getUpdateGroup = async (peerId: TPeerInfo, context: { currentUserId
     return { type: "dmUsers", userIds: [chat.minUserId, chat.maxUserId] }
   } else if (chat.type === "thread") {
     if (!chat.spaceId) {
-      throw new InlineError(InlineError.ApiError.PEER_INVALID)
+      const participantIds = await db
+        .select({ userId: chatParticipants.userId })
+        .from(chatParticipants)
+        .where(eq(chatParticipants.chatId, chat.id))
+        .then((result) => result.map(({ userId }) => userId))
+      return { type: "threadUsers", userIds: participantIds }
     }
     if (chat.publicThread) {
       // Legacy
@@ -78,7 +83,12 @@ export const getUpdateGroupFromInputPeer = async (
     return { type: "dmUsers", userIds: [chat.minUserId, chat.maxUserId] }
   } else if (chat.type === "thread") {
     if (!chat.spaceId) {
-      throw new InlineError(InlineError.ApiError.PEER_INVALID)
+      const participantIds = await db
+        .select({ userId: chatParticipants.userId })
+        .from(chatParticipants)
+        .where(eq(chatParticipants.chatId, chat.id))
+        .then((result) => result.map(({ userId }) => userId))
+      return { type: "threadUsers", userIds: participantIds }
     }
     if (chat.publicThread) {
       // Legacy

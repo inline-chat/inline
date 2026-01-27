@@ -162,6 +162,31 @@ async function getChatAndDialogForThread(
     return { chat, dialog: newDialog }
   }
 
+  if (!chat.spaceId) {
+    if (!participant) {
+      throw RealtimeRpcError.ChatIdInvalid()
+    }
+
+    if (dialog) {
+      return { chat, dialog }
+    }
+
+    const [newDialog] = await db
+      .insert(dialogs)
+      .values({
+        chatId,
+        userId: currentUserId,
+        spaceId: null,
+      })
+      .returning()
+
+    if (!newDialog) {
+      throw RealtimeRpcError.InternalError()
+    }
+
+    return { chat, dialog: newDialog }
+  }
+
   if (!space || space.deleted || !chat.spaceId) {
     throw RealtimeRpcError.ChatIdInvalid()
   }

@@ -988,11 +988,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if title.is_empty() {
                         return Err("Chat title cannot be empty".into());
                     }
-                    if args.space_id.is_none() {
-                        return Err("Provide --space-id to create a thread.".into());
-                    }
                     if args.public && !args.participants.is_empty() {
                         return Err("Public chats cannot include explicit participants".into());
+                    }
+                    if args.space_id.is_none() {
+                        if args.public {
+                            return Err("Public home threads are not supported yet.".into());
+                        }
+                        if args.participants.is_empty() {
+                            return Err("Provide at least one --participant for a home thread.".into());
+                        }
                     }
                     let token = require_token(&auth_store)?;
                     let mut realtime =
@@ -1913,6 +1918,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         zen_mode_requires_mention: Some(values.zen_requires_mention),
                         zen_mode_uses_default_rules: Some(values.zen_uses_default_rules),
                         zen_mode_custom_rules: Some(values.zen_custom_rules),
+                        disable_dm_notifications: Some(values.disable_dm_notifications),
                     };
                     let user_settings = proto::UserSettings {
                         notification_settings: Some(notification_settings),
@@ -2223,6 +2229,7 @@ async fn send_message(
         media,
         temporary_send_date: Some(send_date),
         is_sticker: None,
+        has_link: None,
         entities,
         parse_markdown: Some(parse_markdown),
         send_mode: None,
@@ -2742,6 +2749,7 @@ struct NotificationSettingsValues {
     zen_requires_mention: bool,
     zen_uses_default_rules: bool,
     zen_custom_rules: String,
+    disable_dm_notifications: bool,
 }
 
 fn notification_settings_values(
@@ -2771,6 +2779,9 @@ fn notification_settings_values(
     let zen_custom_rules = settings
         .and_then(|value| value.zen_mode_custom_rules.clone())
         .unwrap_or_default();
+    let disable_dm_notifications = settings
+        .and_then(|value| value.disable_dm_notifications)
+        .unwrap_or(false);
 
     NotificationSettingsValues {
         mode,
@@ -2778,6 +2789,7 @@ fn notification_settings_values(
         zen_requires_mention,
         zen_uses_default_rules,
         zen_custom_rules,
+        disable_dm_notifications,
     }
 }
 
@@ -2811,6 +2823,10 @@ fn print_notification_settings(settings: Option<&proto::UserSettings>) {
     println!("Notification settings");
     println!("  mode: {}", notification_mode_label(values.mode));
     println!("  silent: {}", if values.silent { "yes" } else { "no" });
+    println!(
+        "  disable dm notifications: {}",
+        if values.disable_dm_notifications { "yes" } else { "no" }
+    );
     println!(
         "  zen requires mention: {}",
         if values.zen_requires_mention { "yes" } else { "no" }
@@ -3642,6 +3658,16 @@ fn message_media_summary(message: &proto::Message) -> Option<MediaSummary> {
                 url,
             })
         }
+        Some(proto::message_media::Media::Nudge(_)) => Some(MediaSummary {
+            kind: "nudge".to_string(),
+            file_name: None,
+            mime_type: None,
+            size: None,
+            duration: None,
+            width: None,
+            height: None,
+            url: None,
+        }),
         None => None,
     }
 }
@@ -3955,6 +3981,7 @@ async fn download_message_media(
             };
             (url, "photo")
         }
+        Some(proto::message_media::Media::Nudge(_)) => (None, "nudge"),
         None => (None, "media"),
     };
     let url = match url {
@@ -4003,6 +4030,7 @@ fn media_file_name(media: &proto::MessageMedia) -> Option<String> {
             };
             Some(format!("photo-{}.{}", photo.id, ext))
         }
+        Some(proto::message_media::Media::Nudge(_)) => None,
         None => None,
     }
 }

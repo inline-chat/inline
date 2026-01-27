@@ -372,6 +372,13 @@
       "when": 1768921959147,
       "tag": "0052_superadmin-login-throttle",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1769440469218,
+      "tag": "0053_add_chat_creator",
+      "breakpoints": true
     }
   ]
 }
