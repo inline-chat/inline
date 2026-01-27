@@ -515,6 +515,25 @@ public extension Message {
     }
   }
 
+  /// Returns a string representation of the message without emoji prefixes.
+  var stringRepresentationPlain: String {
+    if let text, !text.isEmpty {
+      text
+    } else if isSticker == true {
+      "Sticker"
+    } else if fileId != nil {
+      "File"
+    } else if let _ = photoId {
+      "Photo"
+    } else if let _ = videoId {
+      "Video"
+    } else if let _ = documentId {
+      "Document"
+    } else {
+      "Message"
+    }
+  }
+
   var outgoing: Bool {
     out ?? false
   }
@@ -534,6 +553,24 @@ public extension InlineProtocol.Message {
       "🎥 Video"
     } else if media.document.hasDocument {
       "📄 Document"
+    } else {
+      "Message"
+    }
+  }
+
+  var stringRepresentationPlain: String {
+    if hasMessage {
+      message
+    } else if isSticker == true {
+      "Sticker"
+    } else if case .nudge = media.media {
+      "Nudge"
+    } else if media.photo.hasPhoto {
+      "Photo"
+    } else if media.video.hasVideo {
+      "Video"
+    } else if media.document.hasDocument {
+      "Document"
     } else {
       "Message"
     }
