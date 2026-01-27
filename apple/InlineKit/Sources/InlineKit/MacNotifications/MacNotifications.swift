@@ -241,7 +241,7 @@ private actor AvatarAttachmentBuilder {
 
   private func retrieveImage(from source: Source) async -> CGImage? {
     let options: KingfisherOptionsInfo = [
-      .callbackQueue(.dispatch(DispatchQueue.global(qos: .utility))),
+      .callbackQueue(.mainCurrentOrAsync),
       .processor(DownsamplingImageProcessor(size: CGSize(
         width: CGFloat(thumbnailMaxPixel),
         height: CGFloat(thumbnailMaxPixel)
@@ -260,11 +260,9 @@ private actor AvatarAttachmentBuilder {
       ) { result in
         switch result {
         case let .success(value):
-          DispatchQueue.main.async {
-            var rect = CGRect(origin: .zero, size: value.image.size)
-            let cgImage = value.image.cgImage(forProposedRect: &rect, context: nil, hints: nil)
-            continuation.resume(returning: cgImage)
-          }
+          var rect = CGRect(origin: .zero, size: value.image.size)
+          let cgImage = value.image.cgImage(forProposedRect: &rect, context: nil, hints: nil)
+          continuation.resume(returning: cgImage)
         case let .failure(error):
           logger.error("Failed to download avatar image", error: error)
           continuation.resume(returning: nil)
