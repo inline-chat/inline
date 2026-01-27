@@ -8,8 +8,9 @@ metadata:
 If not specified a timeframe, ask the user for a time frame to read commits until then.
 Read all commits until specified point in history, list files for each commit and compile a list of new features and fixes for each app. For changes in shared modules, include it for both apps.
 
-Write in past tense. Example:
+Write in past tense. Use these examples for the tone, tense, and wording. Example:
 
+```
 New
 
 - Added video upload support
@@ -19,6 +20,26 @@ Fixes & Improvements
 
 - Fixed emojis appearing as invalid character
 - Fixed video upload failing
+```
+
+Example:
+```
+New
+
+- You can now edit gradients directly on the canvas using gradient handles
+- Added text formatting panel to control casing, wrapping, and truncation
+- Added support for automatic optical size in variable fonts
+
+Improvements and fixes
+
+- Reworked the snapping system for better performance and improved heuristics
+- Improved performance of duplicating elements with -drag
+- Fill and Fit sizes now report rounded values
+- Removed unnecessary background-repeat styles from the code output
+- Improved handling of mismatching font versions
+- Editor will no longer attempt to load a font from Google if a local version is available
+- Fixed an issue where an empty Selection colors panel was sometimes shown
+```
 
 # More guidelines
 
