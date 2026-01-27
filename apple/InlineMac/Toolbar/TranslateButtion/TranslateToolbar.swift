@@ -17,7 +17,10 @@ class TranslateToolbar: NSToolbarItem {
     visibilityPriority = .low
 
     // Create a hosting view for the SwiftUI button
-    let hostingView = NSHostingView(rootView: TranslationButton(peer: peer))
+    let hostingView = NSHostingView(
+      rootView: TranslationButton(peer: peer)
+        .buttonStyle(ToolbarButtonStyle())
+    )
     view = hostingView
   }
 }

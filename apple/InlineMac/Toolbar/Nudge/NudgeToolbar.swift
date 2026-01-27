@@ -14,7 +14,10 @@ class NudgeToolbar: NSToolbarItem {
 
     visibilityPriority = .low
 
-    let hostingView = NSHostingView(rootView: NudgeButton(peer: peer))
+    let hostingView = NSHostingView(
+      rootView: NudgeButton(peer: peer)
+        .buttonStyle(ToolbarButtonStyle())
+    )
     view = hostingView
   }
 }
