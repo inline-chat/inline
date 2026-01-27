@@ -1,6 +1,13 @@
+#if os(macOS)
+import AppKit
+import CoreGraphics
 import Foundation
+import ImageIO
 import InlineProtocol
+import Kingfisher
+import Logger
 import UserNotifications
+import UniformTypeIdentifiers
 
 public actor MacNotifications: Sendable {
   public static let shared = MacNotifications()
@@ -8,6 +15,8 @@ public actor MacNotifications: Sendable {
   private static let urgentNudgeText = "\u{1F6A8}"
 
   private var soundEnabled = true
+  private let log = Log.scoped("MacNotifications")
+  private let avatarBuilder = AvatarAttachmentBuilder(avatarDiameter: 44)
 
   func requestPermission() async throws -> Bool {
     try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
@@ -49,7 +58,7 @@ public actor MacNotifications: Sendable {
         content.attachments = [attachment]
 
       } catch {
-        print("Failed to create notification attachment: \(error)")
+        log.error("Failed to create notification attachment", error: error)
       }
     }
 
@@ -63,7 +72,7 @@ public actor MacNotifications: Sendable {
       let center = UNUserNotificationCenter.current()
       try await center.add(request)
     } catch {
-      print("Failed to show notification: \(error)")
+      log.error("Failed to show notification", error: error)
     }
   }
 }
@@ -128,50 +137,243 @@ extension MacNotifications {
       body = protocolMsg.stringRepresentationWithEmoji
     }
 
-    // // Get sender avatar if available
-    var imageURL: URL?
-
-    if let file = user?.profilePhoto?.first, let localUrl = file.getLocalURL() {
-      imageURL = localUrl
-    }
-    // if let sender {
-    //   do {
-    //     try await AppDatabase.shared.reader.read { db in
-    //       // Get the most recent profile photo
-    //       if let photo = try sender.photos
-    //         .order(Column("date").desc)
-    //         .fetchOne(db)
-    //       {
-    //         imageURL = photo.getRemoteURL()
-    //       }
-    //     }
-    //   } catch {
-    //     print("Failed to fetch user photo: \(error)")
-    //   }
-    // }
-
+    let avatarURL = await avatarBuilder.attachmentURL(for: user)
     let trimmedText = protocolMsg.hasMessage ? protocolMsg.message.trimmingCharacters(in: .whitespacesAndNewlines) : nil
     let isUrgentNudge = {
       guard case .nudge = protocolMsg.media.media else { return false }
       return trimmedText == Self.urgentNudgeText
     }()
 
-    Task {
-      // Show notification
-      await MacNotifications.shared.showMessageNotification(
-        title: title,
-        subtitle: subtitle,
-        body: body,
-        userInfo: [
-          // sender user ID
-          "userId": protocolMsg.fromID,
-          "isThread": chat?.type == .thread,
-          "threadId": chat?.id as Any,
-        ],
-        imageURL: imageURL,
-        forceSound: isUrgentNudge
-        // userInfo: ["chatId": message.chatID],
-      )
-    }
+    await showMessageNotification(
+      title: title,
+      subtitle: subtitle,
+      body: body,
+      userInfo: [
+        // sender user ID
+        "userId": protocolMsg.fromID,
+        "isThread": chat?.type == .thread,
+        "threadId": chat?.id as Any,
+      ],
+      imageURL: avatarURL,
+      forceSound: isUrgentNudge
+    )
   }
 }
+
+// MARK: - Avatar attachments
+
+private actor AvatarAttachmentBuilder {
+  private let log = Log.scoped("NotificationAvatar")
+  private let avatarDiameter: CGFloat
+  private let thumbnailMaxPixel: Int
+  private let timeoutSeconds: TimeInterval = 3
+  private let cacheLimit: Int = 64
+  private var cachedAttachments: [String: URL] = [:]
+  private var cacheOrder: [String] = []
+  private let downloader: ImageDownloader
+
+  init(avatarDiameter: CGFloat) {
+    self.avatarDiameter = avatarDiameter
+    thumbnailMaxPixel = max(Int(avatarDiameter * 3), 132)
+    let downloader = ImageDownloader(name: "notification-avatar")
+    downloader.downloadTimeout = timeoutSeconds
+    self.downloader = downloader
+  }
+
+  func attachmentURL(for userInfo: UserInfo?) async -> URL? {
+    guard let source = await loadAvatarSource(for: userInfo) else {
+      return nil
+    }
+
+    if let cached = cachedAttachments[source.cacheKey] {
+      if FileManager.default.fileExists(atPath: cached.path) {
+        return cached
+      }
+      removeCachedAttachment(forKey: source.cacheKey)
+    }
+
+    guard let outputURL = makeCircularAvatarImage(from: source.image) else {
+      log.error("Failed to create circular avatar image")
+      return nil
+    }
+
+    cacheAttachment(outputURL, forKey: source.cacheKey)
+    return outputURL
+  }
+
+  private func loadAvatarSource(for userInfo: UserInfo?) async -> AvatarSource? {
+    guard let userInfo else {
+      return nil
+    }
+
+    if let localURL = userInfo.profilePhoto?.first?.getLocalURL(),
+       FileManager.default.fileExists(atPath: localURL.path),
+       let image = await retrieveImage(from: .provider(LocalFileImageDataProvider(fileURL: localURL)))
+    {
+      return AvatarSource(cacheKey: cacheKey(for: localURL), image: image)
+    }
+
+    if let localURL = userInfo.user.getLocalURL(),
+       FileManager.default.fileExists(atPath: localURL.path),
+       let image = await retrieveImage(from: .provider(LocalFileImageDataProvider(fileURL: localURL)))
+    {
+      return AvatarSource(cacheKey: cacheKey(for: localURL), image: image)
+    }
+
+    if let remoteURL = userInfo.profilePhoto?.first?.getRemoteURL() ?? userInfo.user.getRemoteURL() {
+      if let image = await retrieveImage(from: .network(remoteURL)) {
+        return AvatarSource(cacheKey: remoteURL.absoluteString, image: image)
+      }
+    }
+
+    return nil
+  }
+
+  private func cacheKey(for localURL: URL) -> String {
+    if let attributes = try? FileManager.default.attributesOfItem(atPath: localURL.path),
+       let modifiedAt = attributes[.modificationDate] as? Date
+    {
+      return "\(localURL.path)-\(modifiedAt.timeIntervalSince1970)"
+    }
+
+    return localURL.path
+  }
+
+  private func retrieveImage(from source: Source) async -> CGImage? {
+    let options: KingfisherOptionsInfo = [
+      .callbackQueue(.dispatch(DispatchQueue.global(qos: .utility))),
+      .processor(DownsamplingImageProcessor(size: CGSize(
+        width: CGFloat(thumbnailMaxPixel),
+        height: CGFloat(thumbnailMaxPixel)
+      ))),
+      .downloader(downloader),
+      .cacheMemoryOnly,
+      .scaleFactor(1),
+    ]
+
+    let logger = log
+
+    return await withCheckedContinuation { continuation in
+      _ = KingfisherManager.shared.retrieveImage(
+        with: source,
+        options: options
+      ) { result in
+        switch result {
+        case let .success(value):
+          DispatchQueue.main.async {
+            var rect = CGRect(origin: .zero, size: value.image.size)
+            let cgImage = value.image.cgImage(forProposedRect: &rect, context: nil, hints: nil)
+            continuation.resume(returning: cgImage)
+          }
+        case let .failure(error):
+          logger.error("Failed to download avatar image", error: error)
+          continuation.resume(returning: nil)
+        }
+      }
+    }
+  }
+
+  private func makeCircularAvatarImage(from image: CGImage) -> URL? {
+    let size = CGSize(width: avatarDiameter, height: avatarDiameter)
+    let width = Int(size.width)
+    let height = Int(size.height)
+
+    guard let context = CGContext(
+      data: nil,
+      width: width,
+      height: height,
+      bitsPerComponent: 8,
+      bytesPerRow: 0,
+      space: CGColorSpaceCreateDeviceRGB(),
+      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ) else {
+      log.error("Failed to create bitmap context for avatar")
+      return nil
+    }
+
+    context.interpolationQuality = .high
+    context.addEllipse(in: CGRect(origin: .zero, size: size))
+    context.clip()
+
+    let drawRect = aspectFillRect(
+      for: CGSize(width: image.width, height: image.height),
+      in: CGRect(origin: .zero, size: size)
+    )
+    context.draw(image, in: drawRect)
+
+    guard let outputImage = context.makeImage() else {
+      log.error("Failed to render avatar image")
+      return nil
+    }
+
+    let fileName = "notification-avatar-\(UUID().uuidString).png"
+    let fileURL = FileHelpers.getTrueTemporaryDirectory().appendingPathComponent(fileName)
+    guard let destination = CGImageDestinationCreateWithURL(
+      fileURL as CFURL,
+      UTType.png.identifier as CFString,
+      1,
+      nil
+    ) else {
+      log.error("Failed to create image destination for avatar")
+      return nil
+    }
+
+    CGImageDestinationAddImage(destination, outputImage, nil)
+    guard CGImageDestinationFinalize(destination) else {
+      log.error("Failed to write avatar image to disk")
+      return nil
+    }
+
+    return fileURL
+  }
+
+  private func aspectFillRect(for imageSize: CGSize, in bounds: CGRect) -> CGRect {
+    guard imageSize.width > 0, imageSize.height > 0 else {
+      return bounds
+    }
+
+    let scale = max(bounds.width / imageSize.width, bounds.height / imageSize.height)
+    let scaledSize = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
+    let origin = CGPoint(
+      x: bounds.midX - scaledSize.width / 2,
+      y: bounds.midY - scaledSize.height / 2
+    )
+    return CGRect(origin: origin, size: scaledSize)
+  }
+
+  private func cacheAttachment(_ url: URL, forKey key: String) {
+    if cachedAttachments[key] != nil {
+      removeCacheOrderEntry(forKey: key)
+    }
+
+    cachedAttachments[key] = url
+    cacheOrder.append(key)
+
+    while cacheOrder.count > cacheLimit {
+      let evictedKey = cacheOrder.removeFirst()
+      if let evictedURL = cachedAttachments.removeValue(forKey: evictedKey) {
+        try? FileManager.default.removeItem(at: evictedURL)
+      }
+    }
+  }
+
+  private func removeCachedAttachment(forKey key: String) {
+    if let url = cachedAttachments.removeValue(forKey: key) {
+      try? FileManager.default.removeItem(at: url)
+    }
+    removeCacheOrderEntry(forKey: key)
+  }
+
+  private func removeCacheOrderEntry(forKey key: String) {
+    if let index = cacheOrder.firstIndex(of: key) {
+      cacheOrder.remove(at: index)
+    }
+  }
+
+}
+
+private struct AvatarSource {
+  let cacheKey: String
+  let image: CGImage
+}
+#endif
