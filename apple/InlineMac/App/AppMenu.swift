@@ -473,14 +473,9 @@ final class AppMenu: NSObject {
     helpMenu.addItem(statusPageItem)
   }
 
-  private var settingsWindowController: SettingsWindowController?
-
   @objc private func showPreferences(_ sender: Any?) {
-    if settingsWindowController == nil {
-      guard let dependencies else { return }
-      settingsWindowController = SettingsWindowController(dependencies: dependencies)
-    }
-    settingsWindowController?.showWindow(sender)
+    guard let dependencies else { return }
+    SettingsWindowController.show(using: dependencies, sender: sender)
   }
 
   @objc private func logOut(_ sender: Any?) {
