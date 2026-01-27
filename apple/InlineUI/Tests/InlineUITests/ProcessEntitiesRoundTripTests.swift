@@ -115,11 +115,11 @@ struct ProcessEntitiesRoundTripTests {
     let input = "Check this out:\n```\nlet x = 1\n```\nCool, right?"
     let (text, entities) = ProcessEntities.fromAttributedString(NSAttributedString(string: input))
     
-    #expect(text == "Check this out:\n\nlet x = 1\n\nCool, right?")
+    #expect(text == "Check this out:\nlet x = 1\nCool, right?")
     #expect(entities.entities.count == 1)
     #expect(entities.entities[0].type == .pre)
     #expect(entities.entities[0].offset == 16) // After "Check this out:\n"
-    #expect(entities.entities[0].length == 11) // "\nlet x = 1\n"
+    #expect(entities.entities[0].length == 9) // "let x = 1"
   }
   
   @Test("Round trip compatibility - simple text")

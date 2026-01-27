@@ -1173,7 +1173,7 @@ public class ProcessEntities {
             continue // Skip this match if range conversion fails
           }
 
-          // Extract content text and trim a single leading newline to avoid extra blank lines
+          // Extract content text and trim a single leading/trailing newline to avoid extra blank lines
           let rawContentText = String(text[swiftContentRange])
           var leadingTrimLength = 0
           if rawContentText.hasPrefix("\r\n") {
@@ -1181,10 +1181,19 @@ public class ProcessEntities {
           } else if rawContentText.hasPrefix("\n") {
             leadingTrimLength = 1
           }
+
+          let leadingTrimmedText = leadingTrimLength > 0 ? String(rawContentText.dropFirst(leadingTrimLength)) : rawContentText
+          var trailingTrimLength = 0
+          if leadingTrimmedText.hasSuffix("\r\n") {
+            trailingTrimLength = 2
+          } else if leadingTrimmedText.hasSuffix("\n") {
+            trailingTrimLength = 1
+          }
+
           let adjustedContentLocation = contentRange.location + leadingTrimLength
-          let adjustedContentLength = max(0, contentRange.length - leadingTrimLength)
+          let adjustedContentLength = max(0, contentRange.length - leadingTrimLength - trailingTrimLength)
           let adjustedContentRange = NSRange(location: adjustedContentLocation, length: adjustedContentLength)
-          let contentText = nsText.substring(with: adjustedContentRange)
+          let contentText = adjustedContentLength > 0 ? nsText.substring(with: adjustedContentRange) : ""
 
           // Replace the full match with just the content
           text.replaceSubrange(swiftFullRange, with: contentText)
