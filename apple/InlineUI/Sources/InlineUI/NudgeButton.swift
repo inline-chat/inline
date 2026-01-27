@@ -22,10 +22,18 @@ public struct NudgeButton: View {
   @State private var showUrgent = false
   @State private var isHolding = false
   @State private var holdProgress: Double = 0
+  @State private var holdProgressTask: Task<Void, Never>?
   @State private var holdHapticTask: Task<Void, Never>?
+  @State private var holdRevealTask: Task<Void, Never>?
   @State private var longPressTask: Task<Void, Never>?
+  @State private var pressStartedAt: Date?
+  @State private var shouldSuppressTap = false
   @State private var isSending = false
   @State private var peerDisplayName: String? = nil
+
+  private let longPressDuration: TimeInterval = 1.5
+  private let holdProgressRevealDelay: TimeInterval = 0.2
+  private let holdProgressUpdateInterval: TimeInterval = 1.0 / 60.0
 
   public init(peer: Peer, chatId: Int64? = nil) {
     self.peer = peer
@@ -103,21 +111,26 @@ public struct NudgeButton: View {
           Circle()
             .trim(from: 0, to: holdProgress)
 #if os(iOS)
-            .stroke(Color.red.opacity(0.7), style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
+            .stroke(Color.red, style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
             .frame(width: 32, height: 32)
 #else
-            .stroke(Color.red.opacity(0.6), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+            .stroke(Color.red, style: StrokeStyle(lineWidth: 2, lineCap: .round))
             .frame(width: 28, height: 28)
 #endif
             .rotationEffect(.degrees(-90))
+            .animation(.linear(duration: holdProgressUpdateInterval), value: holdProgress)
         }
         if showUrgent {
           Text(NudgeButtonState.urgentNudgeText)
+#if os(iOS)
             .font(.title3.weight(.bold))
+#endif
             .scaleEffect(isHolding ? 0.92 : 1)
         } else {
           Image(systemName: NudgeButtonState.nudgeIconName)
+#if os(iOS)
             .font(.body.weight(.regular))
+#endif
             .imageScale(.medium)
             .scaleEffect(isHolding ? 0.92 : 1)
         }
@@ -151,6 +164,7 @@ public struct NudgeButton: View {
       if newValue == nil {
         showUrgent = false
         holdProgress = 0
+        cancelHoldProgress()
         cancelHoldHaptics()
       }
     }
@@ -217,6 +231,10 @@ public struct NudgeButton: View {
       didLongPress = false
       return
     }
+    if shouldSuppressTap {
+      shouldSuppressTap = false
+      return
+    }
     triggerHaptic()
     if !hasSeenGuide {
       hasSeenGuide = true
@@ -231,6 +249,7 @@ public struct NudgeButton: View {
   private func handleLongPress() {
     guard !isSending else { return }
     didLongPress = true
+    cancelHoldProgress()
     showUrgent = true
     cancelHoldHaptics()
     triggerHaptic()
@@ -241,12 +260,11 @@ public struct NudgeButton: View {
     guard longPressTask == nil else { return }
     isHolding = true
     holdProgress = 0
-    withAnimation(.linear(duration: 1.5)) {
-      holdProgress = 1
-    }
-    startHoldHaptics()
+    pressStartedAt = Date()
+    shouldSuppressTap = false
+    scheduleHoldProgressReveal()
     longPressTask = Task {
-      try? await Task.sleep(nanoseconds: 1_500_000_000)
+      try? await Task.sleep(nanoseconds: UInt64(longPressDuration * 1_000_000_000))
       if Task.isCancelled { return }
       await MainActor.run {
         longPressTask = nil
@@ -259,13 +277,62 @@ public struct NudgeButton: View {
     longPressTask?.cancel()
     longPressTask = nil
     isHolding = false
-    cancelHoldHaptics()
-    withAnimation(.easeOut(duration: 0.15)) {
-      holdProgress = 0
+    if let pressStartedAt {
+      let pressDuration = Date().timeIntervalSince(pressStartedAt)
+      if !didLongPress && pressDuration >= holdProgressRevealDelay {
+        shouldSuppressTap = true
+      }
     }
+    pressStartedAt = nil
+    cancelHoldProgress()
+    cancelHoldHaptics()
+    holdProgress = 0
     if activePopover == nil {
       showUrgent = false
     }
+  }
+
+  private func scheduleHoldProgressReveal() {
+    holdRevealTask?.cancel()
+    holdRevealTask = Task {
+      try? await Task.sleep(nanoseconds: UInt64(holdProgressRevealDelay * 1_000_000_000))
+      if Task.isCancelled { return }
+      await MainActor.run {
+        holdRevealTask = nil
+        startHoldHaptics()
+        startHoldProgress(duration: max(0.1, longPressDuration - holdProgressRevealDelay))
+      }
+    }
+  }
+
+  private func startHoldProgress(duration: TimeInterval) {
+    holdProgressTask?.cancel()
+    holdProgressTask = Task { @MainActor in
+      if duration <= 0 {
+        holdProgress = 1
+        holdProgressTask = nil
+        return
+      }
+
+      let start = Date()
+      while !Task.isCancelled {
+        let elapsed = Date().timeIntervalSince(start)
+        let progress = min(1, max(0, elapsed / duration))
+        holdProgress = progress
+        if progress >= 1 {
+          break
+        }
+        try? await Task.sleep(nanoseconds: UInt64(holdProgressUpdateInterval * 1_000_000_000))
+      }
+      holdProgressTask = nil
+    }
+  }
+
+  private func cancelHoldProgress() {
+    holdRevealTask?.cancel()
+    holdRevealTask = nil
+    holdProgressTask?.cancel()
+    holdProgressTask = nil
   }
 
   private func startHoldHaptics() {
