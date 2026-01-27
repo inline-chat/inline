@@ -31,6 +31,81 @@ private enum QuickSearchLayout {
   static let itemTextSpacing: CGFloat = 6
 }
 
+fileprivate enum QuickSearchLocalItem: Identifiable, Hashable {
+  case thread(ThreadInfo)
+  case user(User)
+  case space(Space)
+  case command(QuickSearchCommand)
+
+  var id: String {
+    switch self {
+      case let .thread(threadInfo):
+        "thread-\(threadInfo.id)"
+      case let .user(user):
+        "user-\(user.id)"
+      case let .space(space):
+        "space-\(space.id)"
+      case let .command(command):
+        "command-\(command.id)"
+    }
+  }
+}
+
+fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashable {
+  case settings
+  case newThread
+  case newSpace
+
+  var id: String {
+    rawValue
+  }
+
+  var title: String {
+    switch self {
+      case .settings:
+        "Settings"
+      case .newThread:
+        "New thread"
+      case .newSpace:
+        "New space"
+    }
+  }
+
+  var typeLabel: String {
+    "Command"
+  }
+
+  var symbol: String {
+    switch self {
+      case .settings:
+        "gearshape"
+      case .newThread:
+        "bubble.left.and.bubble.right.fill"
+      case .newSpace:
+        "square.stack.3d.up.fill"
+    }
+  }
+
+  var keywords: [String] {
+    switch self {
+      case .settings:
+        ["prefs", "preferences", "settings", "config", "configuration"]
+      case .newThread:
+        ["new", "thread", "chat", "message", "conversation"]
+      case .newSpace:
+        ["new", "space", "workspace", "team"]
+    }
+  }
+
+  func matches(_ query: String) -> Bool {
+    let normalized = query.lowercased()
+    if title.lowercased().contains(normalized) {
+      return true
+    }
+    return keywords.contains { $0.contains(normalized) }
+  }
+}
+
 @MainActor
 final class QuickSearchViewModel: ObservableObject {
   @Published var query: String = ""
@@ -41,6 +116,8 @@ final class QuickSearchViewModel: ObservableObject {
   let globalSearch: GlobalSearch
 
   private let dependencies: AppDependencies
+  @Published private var spaceResults: [Space] = []
+  private var spaceSearchToken = UUID()
   private var cancellables = Set<AnyCancellable>()
 
   init(dependencies: AppDependencies) {
@@ -50,8 +127,20 @@ final class QuickSearchViewModel: ObservableObject {
     bindSearchUpdates()
   }
 
-  var localResults: [HomeSearchResultItem] {
-    localSearch.results
+  fileprivate var localResults: [QuickSearchLocalItem] {
+    let locals = localSearch.results.map { result in
+      switch result {
+        case let .thread(threadInfo):
+          return QuickSearchLocalItem.thread(threadInfo)
+        case let .user(user):
+          return QuickSearchLocalItem.user(user)
+      }
+    }
+    let spaces = spaceResults
+      .sorted(by: { $0.displayName < $1.displayName })
+      .map { QuickSearchLocalItem.space($0) }
+    let commands = commandResults.map { QuickSearchLocalItem.command($0) }
+    return locals + spaces + commands
   }
 
   var globalResults: [GlobalSearchResult] {
@@ -59,7 +148,7 @@ final class QuickSearchViewModel: ObservableObject {
   }
 
   var renderedGlobalResults: [GlobalSearchResult] {
-    let localUserIds = Set(localResults.compactMap { result in
+    let localUserIds = Set(localSearch.results.compactMap { result in
       if case let .user(user) = result {
         return user.id
       }
@@ -87,6 +176,7 @@ final class QuickSearchViewModel: ObservableObject {
 
   func performSearch() {
     localSearch.search(query: query)
+    searchSpaces(query: query)
     globalSearch.updateQuery(query)
     selectedIndex = 0
   }
@@ -98,6 +188,7 @@ final class QuickSearchViewModel: ObservableObject {
   func reset() {
     query = ""
     localSearch.search(query: "")
+    spaceResults = []
     globalSearch.clear()
     selectedIndex = 0
   }
@@ -131,12 +222,16 @@ final class QuickSearchViewModel: ObservableObject {
     return true
   }
 
-  func selectLocal(_ result: HomeSearchResultItem) {
+  fileprivate func selectLocal(_ result: QuickSearchLocalItem) {
     switch result {
       case let .thread(threadInfo):
         openChat(peer: .thread(id: threadInfo.chat.id), space: threadInfo.space)
       case let .user(user):
         openUserChat(userId: user.id)
+      case let .space(space):
+        dependencies.nav2?.openSpace(space)
+      case let .command(command):
+        runCommand(command)
     }
   }
 
@@ -252,6 +347,51 @@ final class QuickSearchViewModel: ObservableObject {
         self?.objectWillChange.send()
       }
       .store(in: &cancellables)
+  }
+
+  private var commandResults: [QuickSearchCommand] {
+    let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmedQuery.isEmpty == false else { return [] }
+    return QuickSearchCommand.allCases.filter { $0.matches(trimmedQuery) }
+  }
+
+  private func searchSpaces(query: String) {
+    let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    spaceSearchToken = UUID()
+    let token = spaceSearchToken
+    guard !trimmedQuery.isEmpty else {
+      spaceResults = []
+      return
+    }
+
+    Task { @MainActor in
+      do {
+        let spaces = try await dependencies.database.reader.read { db in
+          try Space
+            .filter {
+              $0.name.like("%\(trimmedQuery)%")
+            }
+            .fetchAll(db)
+        }
+        guard spaceSearchToken == token else { return }
+        spaceResults = spaces
+      } catch {
+        Log.shared.error("Failed to search spaces", error: error)
+        guard spaceSearchToken == token else { return }
+        spaceResults = []
+      }
+    }
+  }
+
+  private func runCommand(_ command: QuickSearchCommand) {
+    switch command {
+      case .settings:
+        SettingsWindowController.show(using: dependencies)
+      case .newThread:
+        dependencies.nav2?.navigate(to: .newChat)
+      case .newSpace:
+        dependencies.nav2?.navigate(to: .createSpace)
+    }
   }
 }
 
@@ -431,7 +571,7 @@ private struct QuickSearchResultsView: View {
   let rowInnerPadding: CGFloat
   let sectionHeaderHeight: CGFloat
   let sectionSpacing: CGFloat
-  let onSelectLocal: (HomeSearchResultItem) -> Void
+  let onSelectLocal: (QuickSearchLocalItem) -> Void
   let onSelectRemote: (ApiUser) -> Void
 
   private var hasAnyResults: Bool {
@@ -537,7 +677,7 @@ private struct QuickSearchSectionHeader: View {
 private struct QuickSearchRow: View {
   @State private var isHovered: Bool = false
 
-  let item: HomeSearchResultItem?
+  let item: QuickSearchLocalItem?
   let user: ApiUser?
   let highlighted: Bool
   let rowHeight: CGFloat
@@ -545,7 +685,7 @@ private struct QuickSearchRow: View {
   let action: () -> Void
 
   init(
-    item: HomeSearchResultItem,
+    item: QuickSearchLocalItem,
     highlighted: Bool,
     rowHeight: CGFloat,
     rowInnerPadding: CGFloat,
@@ -594,6 +734,10 @@ private struct QuickSearchRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 }
+                Spacer(minLength: 0)
+                Text("Thread")
+                  .foregroundStyle(.secondary)
+                  .lineLimit(1)
               }
 
             case let .user(user):
@@ -611,6 +755,42 @@ private struct QuickSearchRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 }
+                Spacer(minLength: 0)
+                Text("User")
+                  .foregroundStyle(.secondary)
+                  .lineLimit(1)
+              }
+
+            case let .space(space):
+              SpaceAvatar(space: space, size: QuickSearchLayout.iconSize)
+                .frame(
+                  width: QuickSearchLayout.iconContainerSize,
+                  height: QuickSearchLayout.iconContainerSize,
+                  alignment: .center
+                )
+              HStack(spacing: QuickSearchLayout.itemTextSpacing) {
+                Text(space.displayName)
+                  .lineLimit(1)
+                Spacer(minLength: 0)
+                Text("Space")
+                  .foregroundStyle(.secondary)
+                  .lineLimit(1)
+              }
+
+            case let .command(command):
+              InitialsCircle(name: command.title, size: QuickSearchLayout.iconSize, symbol: command.symbol)
+                .frame(
+                  width: QuickSearchLayout.iconContainerSize,
+                  height: QuickSearchLayout.iconContainerSize,
+                  alignment: .center
+                )
+              HStack(spacing: QuickSearchLayout.itemTextSpacing) {
+                Text(command.title)
+                  .lineLimit(1)
+                Spacer(minLength: 0)
+                Text(command.typeLabel)
+                  .foregroundStyle(.secondary)
+                  .lineLimit(1)
               }
           }
         } else if let user {
@@ -628,6 +808,10 @@ private struct QuickSearchRow: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             }
+            Spacer(minLength: 0)
+            Text("User")
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
           }
         }
 

@@ -5,6 +5,14 @@ import SwiftUI
 class SettingsWindowController: NSWindowController {
   private let log = Log.scoped("SettingsWindowController")
   private let dependencies: AppDependencies
+  private static var shared: SettingsWindowController?
+
+  static func show(using dependencies: AppDependencies, sender: Any? = nil) {
+    if shared == nil {
+      shared = SettingsWindowController(dependencies: dependencies)
+    }
+    shared?.showWindow(sender)
+  }
 
   init(dependencies: AppDependencies) {
     self.dependencies = dependencies
