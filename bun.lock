@@ -1,6 +1,5 @@
 {
   "lockfileVersion": 1,
-  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "inline",
@@ -54,6 +53,7 @@
         "@elysiajs/cors": "^1.1.1",
         "@elysiajs/html": "^1.1.1",
         "@elysiajs/swagger": "^1.1.5",
+        "@inline-chat/email-templates": "workspace:*",
         "@linear/sdk": "^38.0.0",
         "@notionhq/client": "^3.0.1",
         "@prelude.so/sdk": "^0.3.0",
@@ -95,6 +95,25 @@
         "oxlint": "^1.39.0",
         "typescript": "^5.8.3",
         "typescript-eslint": "^8.17.0",
+      },
+    },
+    "server/packages/email-preview": {
+      "name": "@inline-chat/email-preview",
+      "version": "0.0.1",
+      "dependencies": {
+        "@inline-chat/email-templates": "workspace:*",
+        "@react-email/components": "^1.0.6",
+        "@react-email/render": "^2.0.4",
+        "react": "^19.2.3",
+        "react-dom": "^19.2.3",
+      },
+    },
+    "server/packages/email-templates": {
+      "name": "@inline-chat/email-templates",
+      "version": "0.0.1",
+      "dependencies": {
+        "@react-email/components": "^1.0.6",
+        "react": "^19.2.3",
       },
     },
     "web": {
@@ -456,6 +475,10 @@
     "@in/protocol": ["@in/protocol@workspace:web/packages/protocol"],
 
     "@inline-chat/admin": ["@inline-chat/admin@workspace:admin"],
+
+    "@inline-chat/email-preview": ["@inline-chat/email-preview@workspace:server/packages/email-preview"],
+
+    "@inline-chat/email-templates": ["@inline-chat/email-templates@workspace:server/packages/email-templates"],
 
     "@inline-chat/server": ["@inline-chat/server@workspace:server"],
 
@@ -2207,6 +2230,12 @@
 
     "@humanfs/node/@humanwhocodes/retry": ["@humanwhocodes/retry@0.3.1", "", {}, "sha512-JBxkERygn7Bv/GbN5Rv8Ul6LVknS+5Bp6RgDC/O8gEBU/yeH5Ui5C/OlWrTb6qct7LjjfT6Re2NxB0ln0yYybA=="],
 
+    "@inline-chat/email-preview/react": ["react@19.2.3", "", {}, "sha512-Ku/hhYbVjOQnXDZFv2+RibmLFGwFdeeKHFcOTlrt7xplBnya5OGn/hIRDsqDiSUcfORsDC7MPxwork8jBwsIWA=="],
+
+    "@inline-chat/email-preview/react-dom": ["react-dom@19.2.3", "", { "dependencies": { "scheduler": "^0.27.0" }, "peerDependencies": { "react": "^19.2.3" } }, "sha512-yELu4WmLPw5Mr/lmeEpox5rw3RETacE++JgHqQzd2dg+YbJuat3jH4ingc+WPZhxaoFzdv9y33G+F7Nl5O0GBg=="],
+
+    "@inline-chat/email-templates/react": ["react@19.2.3", "", {}, "sha512-Ku/hhYbVjOQnXDZFv2+RibmLFGwFdeeKHFcOTlrt7xplBnya5OGn/hIRDsqDiSUcfORsDC7MPxwork8jBwsIWA=="],
+
     "@inline-chat/server/@types/react": ["@types/react@19.2.9", "", { "dependencies": { "csstype": "^3.2.2" } }, "sha512-Lpo8kgb/igvMIPeNV2rsYKTgaORYdO1XGVZ4Qz3akwOj0ySGYMPlQWa8BaLn0G63D1aSaAQ5ldR06wCpChQCjA=="],
 
     "@inline-chat/server/@types/react-dom": ["@types/react-dom@19.2.3", "", { "peerDependencies": { "@types/react": "^19.2.0" } }, "sha512-jp2L/eY6fn+KgVVQAOqYItbF0VY/YApe5Mz2F0aykSO8gx31bYCZyvSeYxCHKvzHG5eZjc+zyaS5BrBWya2+kQ=="],
@@ -2448,6 +2477,8 @@
     "@esbuild-kit/core-utils/esbuild/@esbuild/win32-ia32": ["@esbuild/win32-ia32@0.18.20", "", { "os": "win32", "cpu": "ia32" }, "sha512-Wv7QBi3ID/rROT08SABTS7eV4hX26sVduqDOTe1MvGMjNd3EjOz4b7zeexIR62GTIEKrfJXKL9LFxTYgkyeu7g=="],
 
     "@esbuild-kit/core-utils/esbuild/@esbuild/win32-x64": ["@esbuild/win32-x64@0.18.20", "", { "os": "win32", "cpu": "x64" }, "sha512-kTdfRcSiDfQca/y9QIkng02avJ+NCaQvrMejlsB3RRv5sE9rRoeBPISaZpKxHELzRxZyLvNts1P27W3wV+8geQ=="],
+
+    "@inline-chat/email-preview/react-dom/scheduler": ["scheduler@0.27.0", "", {}, "sha512-eNv+WrVbKu1f3vbYJT/xtiF5syA5HPIMtf9IgY/nKg0sWqzAUEvqY/xm7OcZc/qafLx/iO9FgOmeSAp4v5ti/Q=="],
 
     "@inline-chat/server/@types/react/csstype": ["csstype@3.2.3", "", {}, "sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ=="],
 
