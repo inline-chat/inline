@@ -64,22 +64,12 @@ class MainSidebar: NSViewController, NSMenuDelegate {
     return view
   }()
 
-  private lazy var leftFooterStack: NSStackView = {
+  private lazy var footerStack: NSStackView = {
     let stack = NSStackView()
     stack.orientation = .horizontal
-    stack.spacing = 8
+    stack.spacing = MainSidebarFooterStyle.minimumSpacing
     stack.alignment = .centerY
-    stack.distribution = .fill
-    stack.translatesAutoresizingMaskIntoConstraints = false
-    return stack
-  }()
-
-  private lazy var rightFooterStack: NSStackView = {
-    let stack = NSStackView()
-    stack.orientation = .horizontal
-    stack.spacing = 8
-    stack.alignment = .centerY
-    stack.distribution = .fill
+    stack.distribution = .equalSpacing
     stack.translatesAutoresizingMaskIntoConstraints = false
     return stack
   }()
@@ -119,7 +109,7 @@ class MainSidebar: NSViewController, NSMenuDelegate {
   private lazy var notificationsButton: MainSidebarFooterHostingButton = {
     let hostingView = NSHostingView(
       rootView: AnyView(
-        NotificationSettingsButton()
+        NotificationSettingsButton(style: .sidebarFooter)
           .environmentObject(dependencies.userSettings.notification)
       )
     )
@@ -307,7 +297,8 @@ class MainSidebar: NSViewController, NSMenuDelegate {
   private var archiveTitleTopConstraint: NSLayoutConstraint?
   private var archiveTitleBottomConstraint: NSLayoutConstraint?
   private var switchToInboxObserver: NSObjectProtocol?
-  private static let footerHeight: CGFloat = MainSidebarFooterStyle.buttonSize + 16
+  private static let footerHeight: CGFloat = MainSidebarFooterStyle.buttonSize
+    + (MainSidebarFooterStyle.verticalPadding * 2)
   private static let archiveTitleHeight: CGFloat = 16
   private static let archiveTitleTopSpacing: CGFloat = 12
   private static let archiveTitleBottomSpacing: CGFloat = 4
@@ -324,15 +315,14 @@ class MainSidebar: NSViewController, NSMenuDelegate {
     view.addSubview(archiveTitleLabel)
     view.addSubview(listView)
     view.addSubview(footerView)
-    footerView.addSubview(leftFooterStack)
-    footerView.addSubview(plusButton)
-    footerView.addSubview(rightFooterStack)
+    footerView.addSubview(footerStack)
     view.addSubview(archiveEmptyView)
 
-    leftFooterStack.addArrangedSubview(archiveButton)
-    leftFooterStack.addArrangedSubview(searchButton)
-    rightFooterStack.addArrangedSubview(viewOptionsButton)
-    rightFooterStack.addArrangedSubview(notificationsButton)
+    footerStack.addArrangedSubview(archiveButton)
+    footerStack.addArrangedSubview(searchButton)
+    footerStack.addArrangedSubview(plusButton)
+    footerStack.addArrangedSubview(viewOptionsButton)
+    footerStack.addArrangedSubview(notificationsButton)
 
     headerTopConstraint = headerView.topAnchor.constraint(equalTo: view.topAnchor, constant: headerTopInset())
 
@@ -359,29 +349,24 @@ class MainSidebar: NSViewController, NSMenuDelegate {
 
       listView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
       listView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-      listView.bottomAnchor.constraint(equalTo: footerView.topAnchor, constant: -8),
+      listView.bottomAnchor.constraint(equalTo: footerView.topAnchor),
 
       footerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
       footerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
       footerView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
       footerView.heightAnchor.constraint(equalToConstant: Self.footerHeight),
 
-      leftFooterStack.leadingAnchor.constraint(equalTo: footerView.leadingAnchor, constant: Self.edgeInsets),
-      leftFooterStack.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
+      footerStack.leadingAnchor.constraint(equalTo: footerView.leadingAnchor, constant: Self.edgeInsets),
+      footerStack.trailingAnchor.constraint(equalTo: footerView.trailingAnchor, constant: -Self.edgeInsets),
+      footerStack.topAnchor.constraint(equalTo: footerView.topAnchor, constant: MainSidebarFooterStyle.verticalPadding),
+      footerStack.bottomAnchor.constraint(equalTo: footerView.bottomAnchor, constant: -MainSidebarFooterStyle.verticalPadding),
 
       archiveButton.widthAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
       archiveButton.heightAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
       searchButton.widthAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
       searchButton.heightAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
-
-      plusButton.centerXAnchor.constraint(equalTo: footerView.centerXAnchor),
-      plusButton.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
       plusButton.widthAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
       plusButton.heightAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
-
-      rightFooterStack.trailingAnchor.constraint(equalTo: footerView.trailingAnchor, constant: -Self.edgeInsets),
-      rightFooterStack.centerYAnchor.constraint(equalTo: footerView.centerYAnchor),
-
       viewOptionsButton.widthAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
       viewOptionsButton.heightAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
       notificationsButton.widthAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
@@ -404,6 +389,19 @@ class MainSidebar: NSViewController, NSMenuDelegate {
     self.archiveTitleBottomConstraint = archiveTitleBottomConstraint
 
     archiveEmptyView.isHidden = true
+
+    [
+      archiveButton,
+      searchButton,
+      plusButton,
+      viewOptionsButton,
+      notificationsButton,
+    ].forEach { button in
+      button.setContentHuggingPriority(.required, for: .horizontal)
+      button.setContentHuggingPriority(.required, for: .vertical)
+      button.setContentCompressionResistancePriority(.required, for: .horizontal)
+      button.setContentCompressionResistancePriority(.required, for: .vertical)
+    }
 
     listView.onChatCountChanged = { [weak self] mode, count in
       guard let self else { return }
@@ -720,6 +718,8 @@ private enum MainSidebarFooterStyle {
   static let iconSize: CGFloat = 15
   static let hoverColor = NSColor.black.withAlphaComponent(0.08)
   static let pressedColor = NSColor.black.withAlphaComponent(0.12)
+  static let verticalPadding: CGFloat = 6
+  static let minimumSpacing: CGFloat = 8
 }
 
 private final class MainSidebarArchiveButton: NSButton {
