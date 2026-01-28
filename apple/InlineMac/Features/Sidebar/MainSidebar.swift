@@ -257,25 +257,45 @@ class MainSidebar: NSViewController, NSMenuDelegate {
   }()
 
   private lazy var archiveEmptyView: NSStackView = {
-    let label = NSTextField(labelWithString: "You haven't archived any chats yet!")
-    label.font = NSFont.systemFont(ofSize: 13, weight: .medium)
-    label.textColor = .tertiaryLabelColor
-    label.alignment = .center
-    label.maximumNumberOfLines = 2
-    label.lineBreakMode = .byWordWrapping
+    let symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 30, weight: .regular)
+    let symbolImage = NSImage(
+      systemSymbolName: "archivebox",
+      accessibilityDescription: "Archive"
+    )?.withSymbolConfiguration(symbolConfiguration)
 
-    let stack = NSStackView(views: [label])
+    let symbolView = NSImageView()
+    symbolView.image = symbolImage
+    symbolView.contentTintColor = .tertiaryLabelColor
+    symbolView.imageScaling = .scaleProportionallyDown
+
+    let titleLabel = NSTextField(labelWithString: "Your archive is empty")
+    titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+    titleLabel.textColor = .secondaryLabelColor
+    titleLabel.alignment = .center
+    titleLabel.lineBreakMode = .byTruncatingTail
+
+    let descriptionLabel = NSTextField(
+      labelWithString: "Archived chats appear here and return to your main list when they get new messages."
+    )
+    descriptionLabel.font = NSFont.systemFont(ofSize: 12, weight: .regular)
+    descriptionLabel.textColor = .secondaryLabelColor
+    descriptionLabel.alignment = .center
+    descriptionLabel.lineBreakMode = .byWordWrapping
+
+    let stack = NSStackView(views: [symbolView, titleLabel, descriptionLabel])
     stack.orientation = .vertical
     stack.alignment = .centerX
-    stack.spacing = 8
+    stack.spacing = 10
     stack.translatesAutoresizingMaskIntoConstraints = false
     return stack
   }()
 
   private lazy var archiveTitleLabel: NSTextField = {
     let label = NSTextField(labelWithString: "Archived Chats")
-    label.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+    label.font = NSFont.systemFont(ofSize: 12, weight: .medium)
     label.textColor = .secondaryLabelColor
+    label.lineBreakMode = .byTruncatingTail
+    label.usesSingleLineMode = true
     label.translatesAutoresizingMaskIntoConstraints = false
     label.isHidden = true
     return label
@@ -287,9 +307,9 @@ class MainSidebar: NSViewController, NSMenuDelegate {
   private var archiveTitleBottomConstraint: NSLayoutConstraint?
   private var switchToInboxObserver: NSObjectProtocol?
   private static let footerHeight: CGFloat = MainSidebarFooterStyle.buttonSize + 16
-  private static let archiveTitleHeight: CGFloat = 18
-  private static let archiveTitleTopSpacing: CGFloat = 6
-  private static let archiveTitleBottomSpacing: CGFloat = 6
+  private static let archiveTitleHeight: CGFloat = 16
+  private static let archiveTitleTopSpacing: CGFloat = 12
+  private static let archiveTitleBottomSpacing: CGFloat = 4
 
   override func loadView() {
     view = NSView()
@@ -386,7 +406,9 @@ class MainSidebar: NSViewController, NSMenuDelegate {
 
     listView.onChatCountChanged = { [weak self] mode, count in
       guard let self else { return }
-      archiveEmptyView.isHidden = !(mode == .archive && count == 0)
+      let isArchiveEmpty = mode == .archive && count == 0
+      archiveEmptyView.isHidden = !isArchiveEmpty
+      updateArchiveTitle(archiveCount: count)
     }
 
     setContent(for: .inbox)
@@ -412,15 +434,17 @@ class MainSidebar: NSViewController, NSMenuDelegate {
   private func setContent(for mode: MainSidebarMode) {
     activeMode = mode
     updateArchiveButton()
-    updateArchiveTitle()
 
     switch mode {
       case .archive:
         listView.setMode(.archive)
-        archiveEmptyView.isHidden = listView.lastChatItemCount != 0
+        let archiveCount = listView.lastChatItemCount
+        archiveEmptyView.isHidden = archiveCount != 0
+        updateArchiveTitle(archiveCount: archiveCount)
       case .inbox:
         listView.setMode(.inbox)
         archiveEmptyView.isHidden = true
+        updateArchiveTitle(archiveCount: 0)
     }
   }
 
@@ -429,8 +453,8 @@ class MainSidebar: NSViewController, NSMenuDelegate {
     archiveButton.toolTip = activeMode == .archive ? "Show inbox" : "Show archives"
   }
 
-  private func updateArchiveTitle() {
-    let shouldShow = activeMode == .archive
+  private func updateArchiveTitle(archiveCount: Int) {
+    let shouldShow = activeMode == .archive && archiveCount > 0
     archiveTitleLabel.isHidden = !shouldShow
     archiveTitleTopConstraint?.constant = shouldShow ? Self.archiveTitleTopSpacing : 0
     archiveTitleHeightConstraint?.constant = shouldShow ? Self.archiveTitleHeight : 0
