@@ -1,13 +1,24 @@
+import AppKit
 import InlineKit
 import SwiftUI
 
 /// A button that opens the notification settings popover used in home sidebar
 struct NotificationSettingsButton: View {
+  enum Style {
+    case standard
+    case sidebarFooter
+  }
+
+  private let style: Style
   @EnvironmentObject private var notificationSettings: NotificationSettingsManager
 
   @State private var presented = false
   @State private var customizingZen = false
   @State private var customizingMentions = false
+
+  init(style: Style = .standard) {
+    self.style = style
+  }
 
   var body: some View {
     button
@@ -23,9 +34,7 @@ struct NotificationSettingsButton: View {
     Button {
       presented.toggle()
     } label: {
-      Image(systemName: notificationIcon)
-        .font(.system(size: 16, weight: .regular))
-        .foregroundStyle(.tertiary)
+      iconImage
         .frame(
           width: Theme.sidebarTitleIconSize,
           height: Theme.sidebarTitleIconSize,
@@ -38,6 +47,21 @@ struct NotificationSettingsButton: View {
         .animation(.easeOut(duration: 0.2), value: notificationIcon)
     }
     .buttonStyle(.plain)
+  }
+
+  @ViewBuilder
+  private var iconImage: some View {
+    let image = Image(systemName: notificationIcon)
+    switch style {
+      case .standard:
+        image
+          .font(.system(size: 16, weight: .regular))
+          .foregroundStyle(.tertiary)
+      case .sidebarFooter:
+        image
+          .font(.system(size: 15, weight: .semibold))
+          .foregroundStyle(Color(NSColor.tertiaryLabelColor))
+    }
   }
 
   @ViewBuilder
