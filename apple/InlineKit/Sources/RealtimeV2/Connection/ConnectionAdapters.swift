@@ -66,6 +66,9 @@ final class LifecycleConnectionAdapter {
 
   deinit {
     NotificationCenter.default.removeObserver(self)
+    #if canImport(AppKit)
+    NSWorkspace.shared.notificationCenter.removeObserver(self)
+    #endif
   }
 
   private func installObservers() {
@@ -93,6 +96,20 @@ final class LifecycleConnectionAdapter {
       name: NSApplication.didBecomeActiveNotification,
       object: nil
     )
+
+    NSWorkspace.shared.notificationCenter.addObserver(
+      self,
+      selector: #selector(handleSystemWillSleep),
+      name: NSWorkspace.willSleepNotification,
+      object: nil
+    )
+
+    NSWorkspace.shared.notificationCenter.addObserver(
+      self,
+      selector: #selector(handleSystemDidWake),
+      name: NSWorkspace.didWakeNotification,
+      object: nil
+    )
     #endif
   }
 
@@ -105,6 +122,18 @@ final class LifecycleConnectionAdapter {
   @objc private func handleAppDidEnterBackground() {
     Task { [manager] in
       await manager.setAppActive(false)
+    }
+  }
+
+  @objc private func handleSystemWillSleep() {
+    Task { [manager] in
+      await manager.setAppActive(false)
+    }
+  }
+
+  @objc private func handleSystemDidWake() {
+    Task { [manager] in
+      await manager.systemDidWake()
     }
   }
 }
@@ -120,7 +149,11 @@ final class NetworkConnectionAdapter {
     let manager = self.manager
     monitor.pathUpdateHandler = { path in
       let isSatisfied = path.status == .satisfied
-      Task { await manager.setNetworkAvailable(isSatisfied) }
+      let quality: ConnectionNetworkQuality = (path.isConstrained || path.isExpensive) ? .constrained : .good
+      Task {
+        await manager.setNetworkAvailable(isSatisfied)
+        await manager.setNetworkQuality(quality)
+      }
     }
 
     monitor.start(queue: DispatchQueue(label: "RealtimeV2.ConnectionManager.path"))

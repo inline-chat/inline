@@ -11,6 +11,7 @@ public enum ConnectionEvent: Sendable {
 
   case appForeground
   case appBackground
+  case systemWake
 
   case transportConnecting
   case transportConnected
