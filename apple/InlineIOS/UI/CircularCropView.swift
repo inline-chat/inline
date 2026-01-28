@@ -5,51 +5,49 @@ struct CircularCropView: View {
   var onCrop: (UIImage) -> Void
   @Environment(\.presentationMode) var presentationMode
 
-  @State private var circleScale: CGFloat = 1.0
-  @State private var circleOffset: CGSize = .zero
-  @GestureState private var gestureCircleScale: CGFloat = 1.0
-  @GestureState private var gestureCircleOffset: CGSize = .zero
+  @State private var imageScale: CGFloat = 1.0
+  @State private var imageOffset: CGSize = .zero
+  @GestureState private var gestureImageScale: CGFloat = 1.0
+  @GestureState private var gestureImageOffset: CGSize = .zero
   @State private var containerSize: CGSize = .zero
   @State private var appear = false
   @State private var displayImage: UIImage
+  @State private var hasInitializedTransform = false
 
   private let outputSize: CGFloat = 320
-  private let baseCircleRatio: CGFloat = 0.7
-  private let minCircleScale: CGFloat = 0.45
-  private let maxCircleScale: CGFloat = 1.6
+  private let baseCircleRatio: CGFloat = 0.82
+  private let maxScaleMultiplier: CGFloat = 4.0
 
   init(image: UIImage, onCrop: @escaping (UIImage) -> Void) {
     self.image = image
     self.onCrop = onCrop
-    _displayImage = State(initialValue: image)
+    let normalized = image.imageOrientation == .up ? image : Self.normalizedImage(image)
+    _displayImage = State(initialValue: normalized)
   }
 
   var body: some View {
     ZStack {
+      Color.black.ignoresSafeArea()
       GeometryReader { geo in
-        let imageRect = imageFrame(in: geo.size)
-        let baseDiameter = min(imageRect.width, imageRect.height) * baseCircleRatio
-        let liveScale = clampedScale(circleScale * gestureCircleScale)
-        let diameter = baseDiameter * liveScale
+        let diameter = circleDiameter(in: geo.size)
+        let minScale = minImageScale(in: geo.size, circleDiameter: diameter)
+        let liveScale = clampedScale(imageScale * gestureImageScale, minScale: minScale)
         let rawOffset = CGSize(
-          width: circleOffset.width + gestureCircleOffset.width,
-          height: circleOffset.height + gestureCircleOffset.height
+          width: imageOffset.width + gestureImageOffset.width,
+          height: imageOffset.height + gestureImageOffset.height
         )
-        let clampedOffset = clampedCircleOffset(
+        let clampedOffset = clampedImageOffset(
           rawOffset,
           in: geo.size,
-          diameter: diameter,
-          imageFrame: imageRect
+          imageScale: liveScale,
+          circleDiameter: diameter
         )
-        let center = CGPoint(
-          x: geo.size.width / 2 + clampedOffset.width,
-          y: geo.size.height / 2 + clampedOffset.height
-        )
+        let imageRect = imageFrame(in: geo.size, scale: liveScale, offset: clampedOffset)
+        let center = CGPoint(x: geo.size.width / 2, y: geo.size.height / 2)
 
         ZStack {
           Image(uiImage: displayImage)
             .resizable()
-            .scaledToFit()
             .frame(width: imageRect.width, height: imageRect.height)
             .position(x: imageRect.midX, y: imageRect.midY)
             .clipped()
@@ -80,42 +78,38 @@ struct CircularCropView: View {
             .frame(width: diameter, height: diameter)
             .position(center)
 
-          Circle()
-            .fill(Color.clear)
-            .frame(width: diameter, height: diameter)
-            .position(center)
-            .contentShape(Circle())
+          Color.clear
+            .contentShape(Rectangle())
             .gesture(
               SimultaneousGesture(
                 MagnificationGesture()
-                  .updating($gestureCircleScale) { value, state, _ in
+                  .updating($gestureImageScale) { value, state, _ in
                     state = value
                   }
                   .onEnded { value in
-                    let newScale = clampedScale(circleScale * value)
-                    circleScale = newScale
-                    let newDiameter = baseDiameter * newScale
-                    circleOffset = clampedCircleOffset(
-                      circleOffset,
+                    let newScale = clampedScale(imageScale * value, minScale: minScale)
+                    imageScale = newScale
+                    imageOffset = clampedImageOffset(
+                      imageOffset,
                       in: geo.size,
-                      diameter: newDiameter,
-                      imageFrame: imageRect
+                      imageScale: newScale,
+                      circleDiameter: diameter
                     )
                   },
                 DragGesture()
-                  .updating($gestureCircleOffset) { value, state, _ in
+                  .updating($gestureImageOffset) { value, state, _ in
                     state = value.translation
                   }
                   .onEnded { value in
                     let candidate = CGSize(
-                      width: circleOffset.width + value.translation.width,
-                      height: circleOffset.height + value.translation.height
+                      width: imageOffset.width + value.translation.width,
+                      height: imageOffset.height + value.translation.height
                     )
-                    circleOffset = clampedCircleOffset(
+                    imageOffset = clampedImageOffset(
                       candidate,
                       in: geo.size,
-                      diameter: baseDiameter * circleScale,
-                      imageFrame: imageRect
+                      imageScale: imageScale,
+                      circleDiameter: diameter
                     )
                   }
               )
@@ -123,16 +117,35 @@ struct CircularCropView: View {
         }
         .onAppear {
           containerSize = geo.size
+          let minScale = minImageScale(in: geo.size, circleDiameter: diameter)
+          if !hasInitializedTransform {
+            imageScale = minScale
+            imageOffset = .zero
+            hasInitializedTransform = true
+          } else {
+            if imageScale < minScale {
+              imageScale = minScale
+            }
+            imageOffset = clampedImageOffset(
+              imageOffset,
+              in: geo.size,
+              imageScale: imageScale,
+              circleDiameter: diameter
+            )
+          }
         }
         .onChange(of: geo.size) { newSize in
           containerSize = newSize
-          let newImageFrame = imageFrame(in: newSize)
-          let newDiameter = min(newImageFrame.width, newImageFrame.height) * baseCircleRatio * circleScale
-          circleOffset = clampedCircleOffset(
-            circleOffset,
+          let newDiameter = circleDiameter(in: newSize)
+          let minScale = minImageScale(in: newSize, circleDiameter: newDiameter)
+          if imageScale < minScale {
+            imageScale = minScale
+          }
+          imageOffset = clampedImageOffset(
+            imageOffset,
             in: newSize,
-            diameter: newDiameter,
-            imageFrame: newImageFrame
+            imageScale: imageScale,
+            circleDiameter: newDiameter
           )
         }
       }
@@ -175,9 +188,6 @@ struct CircularCropView: View {
     }
     .onAppear {
       appear = true
-      if displayImage.imageOrientation != .up {
-        displayImage = normalizedImage(displayImage)
-      }
     }
   }
 
@@ -186,19 +196,17 @@ struct CircularCropView: View {
       return displayImage
     }
 
-    let imageFrame = imageFrame(in: containerSize)
-    let baseDiameter = min(imageFrame.width, imageFrame.height) * baseCircleRatio
-    let diameter = baseDiameter * circleScale
-    let clampedOffset = clampedCircleOffset(
-      circleOffset,
+    let diameter = circleDiameter(in: containerSize)
+    let minScale = minImageScale(in: containerSize, circleDiameter: diameter)
+    let resolvedScale = clampedScale(imageScale, minScale: minScale)
+    let clampedOffset = clampedImageOffset(
+      imageOffset,
       in: containerSize,
-      diameter: diameter,
-      imageFrame: imageFrame
+      imageScale: resolvedScale,
+      circleDiameter: diameter
     )
-    let center = CGPoint(
-      x: containerSize.width / 2 + clampedOffset.width,
-      y: containerSize.height / 2 + clampedOffset.height
-    )
+    let imageFrame = imageFrame(in: containerSize, scale: resolvedScale, offset: clampedOffset)
+    let center = CGPoint(x: containerSize.width / 2, y: containerSize.height / 2)
 
     let imgSize = displayImage.size
     guard imgSize.width > 0, imgSize.height > 0 else {
@@ -238,62 +246,79 @@ struct CircularCropView: View {
     }
   }
 
-  private func clampedScale(_ value: CGFloat) -> CGFloat {
-    min(max(value, minCircleScale), maxCircleScale)
+  private func circleDiameter(in container: CGSize) -> CGFloat {
+    min(container.width, container.height) * baseCircleRatio
   }
 
-  private func clampedCircleOffset(
+  private func minImageScale(in container: CGSize, circleDiameter: CGFloat) -> CGFloat {
+    let imageSize = displayImage.size
+    guard container.width > 0, container.height > 0, imageSize.width > 0, imageSize.height > 0 else {
+      return 1
+    }
+
+    let scaleForWidth = container.width / imageSize.width
+    let scaleForCircleHeight = circleDiameter / imageSize.height
+    return max(scaleForWidth, scaleForCircleHeight)
+  }
+
+  private func clampedScale(_ value: CGFloat, minScale: CGFloat) -> CGFloat {
+    let maxScale = minScale * maxScaleMultiplier
+    return min(max(value, minScale), maxScale)
+  }
+
+  private func clampedImageOffset(
     _ offset: CGSize,
     in container: CGSize,
-    diameter: CGFloat,
-    imageFrame: CGRect
+    imageScale: CGFloat,
+    circleDiameter: CGFloat
   ) -> CGSize {
-    let radius = diameter / 2
-    let containerCenter = CGPoint(x: container.width / 2, y: container.height / 2)
-    let desiredCenter = CGPoint(
-      x: containerCenter.x + offset.width,
-      y: containerCenter.y + offset.height
-    )
+    let imageSize = displayImage.size
+    guard imageSize.width > 0, imageSize.height > 0 else {
+      return .zero
+    }
 
-    let minX = imageFrame.minX + radius
-    let maxX = imageFrame.maxX - radius
-    let minY = imageFrame.minY + radius
-    let maxY = imageFrame.maxY - radius
+    let radius = circleDiameter / 2
+    let halfWidth = (imageSize.width * imageScale) / 2
+    let halfHeight = (imageSize.height * imageScale) / 2
+
+    let minX = radius - halfWidth
+    let maxX = -radius + halfWidth
+    let minY = radius - halfHeight
+    let maxY = -radius + halfHeight
 
     let clampedX: CGFloat
     if minX > maxX {
-      clampedX = imageFrame.midX
+      clampedX = 0
     } else {
-      clampedX = min(max(desiredCenter.x, minX), maxX)
+      clampedX = min(max(offset.width, minX), maxX)
     }
 
     let clampedY: CGFloat
     if minY > maxY {
-      clampedY = imageFrame.midY
+      clampedY = 0
     } else {
-      clampedY = min(max(desiredCenter.y, minY), maxY)
+      clampedY = min(max(offset.height, minY), maxY)
     }
 
-    return CGSize(width: clampedX - containerCenter.x, height: clampedY - containerCenter.y)
+    return CGSize(width: clampedX, height: clampedY)
   }
 
-  private func imageFrame(in container: CGSize) -> CGRect {
+  private func imageFrame(in container: CGSize, scale: CGFloat, offset: CGSize) -> CGRect {
     let imageSize = displayImage.size
     guard container.width > 0, container.height > 0, imageSize.width > 0, imageSize.height > 0 else {
       return CGRect(origin: .zero, size: container)
     }
 
-    let scale = min(container.width / imageSize.width, container.height / imageSize.height)
     let displaySize = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
     let origin = CGPoint(
-      x: (container.width - displaySize.width) / 2,
-      y: (container.height - displaySize.height) / 2
+      x: (container.width - displaySize.width) / 2 + offset.width,
+      y: (container.height - displaySize.height) / 2 + offset.height
     )
 
     return CGRect(origin: origin, size: displaySize)
   }
 
-  private func normalizedImage(_ source: UIImage) -> UIImage {
+  private static func normalizedImage(_ source: UIImage) -> UIImage {
     guard source.imageOrientation != .up else {
       return source
     }
