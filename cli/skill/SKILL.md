@@ -87,14 +87,15 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 
 ### messages
 
-- `inline messages list [--chat-id 123 | --user-id 42] [--limit 50] [--offset-id 456] [--translate en]`
+- `inline messages list [--chat-id 123 | --user-id 42] [--limit 50] [--offset-id 456] [--translate en] [--since "yesterday"] [--until "today"]`
   - List chat history for a chat or DM.
   - `--translate <lang>` fetches translations and includes them in output.
-- `inline messages export [--chat-id 123 | --user-id 42] [--limit 50] [--offset-id 456] --output PATH`
+- `inline messages export [--chat-id 123 | --user-id 42] [--limit 50] [--offset-id 456] [--since "1w ago"] [--until "today"] --output PATH`
   - Export chat history to a JSON file.
-- `inline messages search [--chat-id 123 | --user-id 42] --query "onboarding" [--query "alpha beta"] [--limit 50]`
+- `inline messages search [--chat-id 123 | --user-id 42] --query "onboarding" [--query "alpha beta"] [--limit 50] [--since "today"] [--until "tomorrow"]`
   - Search messages in a chat or DM.
   - `--query` is repeatable; each query can contain space-separated terms (ANDed within a query, ORed across queries). Extra whitespace is collapsed.
+  - `--since` and `--until` accept relative time expressions like `yesterday`, `2h ago`, `monday`, `2024-01-15`, or RFC3339.
 - `inline messages get --chat-id 123 --message-id 456 [--translate en]`
   - Fetch one full message by id (includes media + attachments).
 - `inline messages send [--chat-id 123 | --user-id 42] [--text "hi"] [--stdin] [--reply-to 456] [--mention USER_ID:OFFSET:LENGTH ...] [--attach PATH ...] [--force-file]`
@@ -128,8 +129,12 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
   - JSON: `inline messages search --chat-id 123 --query "design review" --json`
 - Translate and list messages:
   - `inline messages list --chat-id 123 --translate en`
+- Filter messages by time:
+  - `inline messages list --chat-id 123 --since "yesterday"`
+  - `inline messages list --chat-id 123 --since "2h ago" --until "1h ago"`
 - Export messages to a file:
   - `inline messages export --chat-id 123 --output ./messages.json`
+  - `inline messages export --chat-id 123 --since "1w ago" --output ./recent.json`
 - Send message with multiple attachments:
   - `inline messages send --chat-id 123 --text "FYI" --attach ./photo.jpg --attach ./spec.pdf`
 - Reply to a message:
