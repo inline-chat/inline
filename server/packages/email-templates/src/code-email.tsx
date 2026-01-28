@@ -41,7 +41,7 @@ const styles = {
     fontSize: "24px",
     lineHeight: "28px",
     letterSpacing: "2px",
-    textAlign: "center",
+    textAlign: "center" as const,
     fontFamily:
       "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
   },
