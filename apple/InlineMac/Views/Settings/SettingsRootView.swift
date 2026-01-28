@@ -23,7 +23,12 @@ struct SettingsRootView: View {
   var body: some View {
     NavigationSplitView(columnVisibility: .constant(.all)) {
       SettingsSidebarView(selectedCategory: $selectedCategory)
-        .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 250)
+        .frame(minWidth: Metrics.sidebarMinWidth)
+        .navigationSplitViewColumnWidth(
+          min: Metrics.sidebarMinWidth,
+          ideal: Metrics.sidebarIdealWidth,
+          max: Metrics.sidebarMaxWidth
+        )
         .toolbar(removing: .sidebarToggle)
     } detail: {
       NavigationStack(path: $detailPath) {
@@ -106,6 +111,12 @@ struct SettingsRootView: View {
     selectedCategory = state.category
     detailPath = state.detailPath
   }
+}
+
+private enum Metrics {
+  static let sidebarMinWidth: CGFloat = 150
+  static let sidebarIdealWidth: CGFloat = 200
+  static let sidebarMaxWidth: CGFloat = 250
 }
 
 private struct SettingsNavigationState: Equatable {
