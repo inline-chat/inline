@@ -21,6 +21,7 @@ actor ConnectionManager {
   private var sessionID: UInt64 = 0
   private var stateSince: Date
   private var constraints: ConnectionConstraints
+  private var networkQuality: ConnectionNetworkQuality = .good
   private var lastErrorDescription: String?
 
   private var eventTask: Task<Void, Never>?
@@ -32,6 +33,9 @@ actor ConnectionManager {
   private var connectTimeoutTask: Task<Void, Never>?
   private var pingTask: Task<Void, Never>?
   private var pingTimeoutTask: Task<Void, Never>?
+  private var probeTimeoutTask: Task<Void, Never>?
+  private var probeContinuation: CheckedContinuation<Bool, Never>?
+  private var probeNonce: UInt64?
   private var backgroundGraceTask: Task<Void, Never>?
   private var pendingPingNonce: UInt64?
   private var backgroundGraceActive = false
@@ -81,8 +85,16 @@ actor ConnectionManager {
     eventContinuation.yield(available ? .networkAvailable : .networkUnavailable)
   }
 
+  func setNetworkQuality(_ quality: ConnectionNetworkQuality) async {
+    networkQuality = quality
+  }
+
   func setAppActive(_ active: Bool) async {
     eventContinuation.yield(active ? .appForeground : .appBackground)
+  }
+
+  func systemDidWake() async {
+    eventContinuation.yield(.systemWake)
   }
 
   func setUserWantsConnection(_ wants: Bool) async {
@@ -178,6 +190,21 @@ actor ConnectionManager {
         scheduleBackgroundGrace()
       } else {
         backgroundGraceActive = false
+      }
+
+    case .systemWake:
+      constraints.appActive = true
+      attempt = 0
+      cancelBackgroundGrace()
+      backgroundGraceActive = false
+      cancelBackoff()
+      resetPendingPing()
+      await evaluateConstraints(resetBackoff: true)
+      if state == .open {
+        let isHealthy = await probeConnection(timeout: policy.wakeProbeTimeout)
+        if !isHealthy, state == .open {
+          await forceReconnect(reason: .none)
+        }
       }
 
     case .transportConnecting:
@@ -318,6 +345,15 @@ actor ConnectionManager {
     scheduleBackoff(sessionID: sessionID)
   }
 
+  private func forceReconnect(reason: ConnectionReason) async {
+    lastErrorDescription = nil
+    attempt = 0
+    cancelBackoff()
+    await transition(to: .stopped, reason: reason)
+    await stopTransportAndReset()
+    await evaluateConstraints(resetBackoff: true)
+  }
+
   private func startConnecting() async {
     sessionID = sessionID &+ 1
     cancelAllTimers()
@@ -447,7 +483,8 @@ actor ConnectionManager {
     pingTimeoutTask?.cancel()
     pingTimeoutTask = Task { [weak self] in
       guard let self else { return }
-      await self.timeProvider.sleep(for: self.policy.pingTimeout)
+      let timeout = self.policy.pingTimeout(for: await self.networkQuality)
+      await self.timeProvider.sleep(for: timeout)
       guard !Task.isCancelled else { return }
       guard await self.sessionID == sessionID else { return }
       guard await self.pendingPingNonce == nonce else { return }
@@ -456,16 +493,71 @@ actor ConnectionManager {
   }
 
   private func handlePong(nonce: UInt64) {
-    guard pendingPingNonce == nonce else { return }
-    pendingPingNonce = nil
-    pingTimeoutTask?.cancel()
-    pingTimeoutTask = nil
+    if pendingPingNonce == nonce {
+      resetPendingPing()
+    }
+
+    if probeNonce == nonce {
+      probeNonce = nil
+      probeTimeoutTask?.cancel()
+      probeTimeoutTask = nil
+      if let continuation = probeContinuation {
+        probeContinuation = nil
+        continuation.resume(returning: true)
+      }
+    }
+  }
+
+  private func probeConnection(timeout: Duration) async -> Bool {
+    guard state == .open else { return false }
+    if probeContinuation != nil {
+      return false
+    }
+
+    let nonce = UInt64.random(in: 0 ... UInt64.max)
+    probeNonce = nonce
+
+    return await withCheckedContinuation { continuation in
+      probeContinuation = continuation
+
+      probeTimeoutTask?.cancel()
+      probeTimeoutTask = Task { [weak self] in
+        guard let self else { return }
+        await self.timeProvider.sleep(for: timeout)
+        guard !Task.isCancelled else { return }
+        await self.timeoutProbe(nonce: nonce)
+      }
+
+      Task { await self.session.sendPing(nonce: nonce) }
+    }
+  }
+
+  private func timeoutProbe(nonce: UInt64) async {
+    guard probeNonce == nonce else { return }
+    probeNonce = nil
+    probeTimeoutTask?.cancel()
+    probeTimeoutTask = nil
+    if let continuation = probeContinuation {
+      probeContinuation = nil
+      continuation.resume(returning: false)
+    }
+  }
+
+  private func cancelProbe() {
+    probeTimeoutTask?.cancel()
+    probeTimeoutTask = nil
+    if let continuation = probeContinuation {
+      probeContinuation = nil
+      continuation.resume(returning: false)
+    }
+    probeNonce = nil
   }
 
   private func cancelAllTimers(exceptBackground: Bool = false) {
     cancelBackoff()
     cancelAuthTimeout()
     cancelConnectTimeout()
+    cancelProbe()
     pingTask?.cancel()
     pingTask = nil
     pingTimeoutTask?.cancel()
@@ -473,5 +565,11 @@ actor ConnectionManager {
     if !exceptBackground {
       cancelBackgroundGrace()
     }
+  }
+
+  private func resetPendingPing() {
+    pendingPingNonce = nil
+    pingTimeoutTask?.cancel()
+    pingTimeoutTask = nil
   }
 }
