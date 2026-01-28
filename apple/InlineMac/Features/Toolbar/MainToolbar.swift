@@ -208,7 +208,8 @@ struct ToolbarSwiftUIView: View {
             ChatToolbarMenu(
               peer: peer,
               database: dependencies.database,
-              spaceId: dependencies.nav2?.activeSpaceId
+              spaceId: dependencies.nav2?.activeSpaceId,
+              dependencies: dependencies
             )
             .id(peer.id)
         }
@@ -292,17 +293,25 @@ private final class ChatToolbarMenuModel: ObservableObject {
 private struct ChatToolbarMenu: View {
   let peer: Peer
   let spaceId: Int64?
+  let dependencies: AppDependencies
 
   @StateObject private var model: ChatToolbarMenuModel
 
-  init(peer: Peer, database: AppDatabase, spaceId: Int64?) {
+  init(peer: Peer, database: AppDatabase, spaceId: Int64?, dependencies: AppDependencies) {
     self.peer = peer
     self.spaceId = spaceId
+    self.dependencies = dependencies
     _model = StateObject(wrappedValue: ChatToolbarMenuModel(peer: peer, db: database))
   }
 
   var body: some View {
     Menu {
+      Button("Chat Info", systemImage: "info.circle") {
+        openChatInfo()
+      }
+
+      Divider()
+
       Button(
         model.isPinned ? "Unpin" : "Pin",
         systemImage: model.isPinned ? "pin.slash.fill" : "pin.fill"
@@ -335,6 +344,14 @@ private struct ChatToolbarMenu: View {
     .buttonStyle(ToolbarButtonStyle())
     .menuIndicator(.hidden)
     .fixedSize()
+  }
+
+  private func openChatInfo() {
+    if let nav2 = dependencies.nav2 {
+      nav2.navigate(to: .chatInfo(peer: peer))
+    } else {
+      dependencies.nav.open(.chatInfo(peer: peer))
+    }
   }
 }
 
