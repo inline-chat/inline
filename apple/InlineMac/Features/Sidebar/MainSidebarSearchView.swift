@@ -11,7 +11,6 @@ final class MainSidebarSearchView: NSView {
 
   private var lastResultCount: Int = 0
   private var arrowKeyUnsubscriber: (() -> Void)?
-  private var vimKeyUnsubscriber: (() -> Void)?
   private var escapeKeyUnsubscriber: (() -> Void)?
 
   var onExitToInbox: (() -> Void)?
@@ -162,18 +161,6 @@ final class MainSidebarSearchView: NSView {
       }
     }
 
-    vimKeyUnsubscriber = keyMonitor.addHandler(for: .vimNavigation, key: "main_sidebar_search_vim") { [weak self] event in
-      guard let self else { return }
-      guard let char = event.charactersIgnoringModifiers?.lowercased() else { return }
-      switch char {
-        case "k", "p":
-          self.listView.selectPreviousResult()
-        case "j", "n":
-          self.listView.selectNextResult()
-        default:
-          break
-      }
-    }
   }
 
   private func unsubscribeKeyHandlers() {
@@ -181,8 +168,6 @@ final class MainSidebarSearchView: NSView {
     escapeKeyUnsubscriber = nil
     arrowKeyUnsubscriber?()
     arrowKeyUnsubscriber = nil
-    vimKeyUnsubscriber?()
-    vimKeyUnsubscriber = nil
   }
 
   private func handleSubmit() {
