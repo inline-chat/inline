@@ -56,6 +56,7 @@ class MainSidebar: NSViewController, NSMenuDelegate {
 
   private var spacePickerWindow: SpacePickerOverlayWindow?
   private var spacePickerClickMonitor: Any?
+  private var spacePickerEscapeUnsubscriber: (() -> Void)?
 
   private lazy var footerView: NSView = {
     let view = NSView()
@@ -513,6 +514,7 @@ class MainSidebar: NSViewController, NSMenuDelegate {
     window.setFrameOrigin(origin)
     window.orderFront(nil)
     installSpacePickerClickMonitor()
+    installSpacePickerKeyHandlers()
   }
 
   private func hideSpacePicker() {
@@ -524,6 +526,7 @@ class MainSidebar: NSViewController, NSMenuDelegate {
       spacePickerState.isVisible = false
     }
     removeSpacePickerClickMonitor()
+    removeSpacePickerKeyHandlers()
   }
 
   private func ensureSpacePickerWindow() -> SpacePickerOverlayWindow {
@@ -593,6 +596,22 @@ class MainSidebar: NSViewController, NSMenuDelegate {
       NSEvent.removeMonitor(spacePickerClickMonitor)
       self.spacePickerClickMonitor = nil
     }
+  }
+
+  private func installSpacePickerKeyHandlers() {
+    guard spacePickerEscapeUnsubscriber == nil else { return }
+    guard let keyMonitor = dependencies.keyMonitor else { return }
+    spacePickerEscapeUnsubscriber = keyMonitor.addHandler(
+      for: .escape,
+      key: "space_picker_escape"
+    ) { [weak self] _ in
+      self?.hideSpacePicker()
+    }
+  }
+
+  private func removeSpacePickerKeyHandlers() {
+    spacePickerEscapeUnsubscriber?()
+    spacePickerEscapeUnsubscriber = nil
   }
 
   @objc private func handleViewOptionsButton(_ sender: NSButton) {
