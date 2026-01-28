@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import InlineKit
 import Logger
+import SwiftUI
 
 /// A root content view controller that manages the display of different content based on current route
 class ContentViewController: NSViewController {
@@ -74,6 +75,13 @@ class ContentViewController: NSViewController {
       case let .chat(peer):
         let chatView = ChatViewAppKit(peerId: peer, dependencies: dependencies)
         addRouteSubview(chatView.view, chatView)
+
+      case let .chatInfo(peer):
+        let hostingController = NSHostingController(
+          rootView: ChatInfo(peerId: peer)
+            .environment(dependencies: dependencies)
+        )
+        addRouteSubview(hostingController.view, hostingController)
 
       case .createSpace:
         let createSpaceVC = CreateSpaceViewController(dependencies: dependencies)
