@@ -8,11 +8,15 @@ class MainSidebarHeaderView: NSView {
   private static let defaultHeight: CGFloat = MainSidebar.itemHeight
 
   private let dependencies: AppDependencies
+  private let spacePickerState: SpacePickerState
   private var heightConstraint: NSLayoutConstraint?
   private var hostingView: NSHostingView<SidebarHeaderRootView>?
+  // MainSidebar hosts the overlay; header reports visibility for positioning.
+  var onSpacePickerChange: ((Bool) -> Void)?
 
-  init(dependencies: AppDependencies) {
+  init(dependencies: AppDependencies, spacePickerState: SpacePickerState) {
     self.dependencies = dependencies
+    self.spacePickerState = spacePickerState
     super.init(frame: .zero)
     translatesAutoresizingMaskIntoConstraints = false
     setupHosting()
@@ -27,7 +31,7 @@ class MainSidebarHeaderView: NSView {
     let nav2 = dependencies.nav2 ?? Nav2()
     let rootView = SidebarHeaderRootView(
       nav2: nav2,
-      database: dependencies.database,
+      spacePickerState: spacePickerState,
       onHeightChange: { [weak self] height in
         guard let self else { return }
         let clamped = max(Self.defaultHeight, height)
@@ -35,6 +39,9 @@ class MainSidebarHeaderView: NSView {
           heightConstraint?.constant = clamped
           invalidateIntrinsicContentSize()
         }
+      },
+      onSpacePickerChange: { [weak self] isVisible in
+        self?.onSpacePickerChange?(isVisible)
       }
     )
 
@@ -59,121 +66,53 @@ class MainSidebarHeaderView: NSView {
 
 private struct SidebarHeaderRootView: View {
   let nav2: Nav2
-  @StateObject private var homeViewModel: HomeViewModel
+  @ObservedObject var spacePickerState: SpacePickerState
   let onHeightChange: (CGFloat) -> Void
+  let onSpacePickerChange: (Bool) -> Void
 
-  @State private var isExpanded = false
-  @State private var isQuickSearchVisible = false
-  @State private var expandedTopItem: SpaceHeaderItem?
-  @State private var expandedItemsSnapshot: [SpaceHeaderItem] = []
-
-  init(nav2: Nav2, database: AppDatabase, onHeightChange: @escaping (CGFloat) -> Void) {
+  init(
+    nav2: Nav2,
+    spacePickerState: SpacePickerState,
+    onHeightChange: @escaping (CGFloat) -> Void,
+    onSpacePickerChange: @escaping (Bool) -> Void
+  ) {
     self.nav2 = nav2
-    _homeViewModel = StateObject(wrappedValue: HomeViewModel(db: database))
+    self.spacePickerState = spacePickerState
     self.onHeightChange = onHeightChange
+    self.onSpacePickerChange = onSpacePickerChange
   }
 
   var body: some View {
     @Bindable var nav2 = nav2
     let activeTab = nav2.activeTab
-    let isNewThreadActive = nav2.currentRoute == .newChat && !isQuickSearchVisible
-    let items = makeItems(activeTab: activeTab)
+    let item = item(for: activeTab)
 
     VStack(spacing: MainSidebar.itemSpacing) {
-      ForEach(items) { item in
-        SidebarHeaderRow(
-          item: item,
-          isActive: item.matches(spaceId: activeTab.spaceId, isHome: activeTab == .home),
-          showsToggle: shouldShowToggle(for: item, activeTab: activeTab),
-          showsMenu: item.kind == .space && item.spaceId == activeTab.spaceId,
-          isExpanded: isExpanded,
-          onSelect: {
-            select(item)
-          },
-          onToggle: {
-            toggleExpansion(activeTab: activeTab)
-          },
-          onMenu: {
-            if let spaceId = item.spaceId {
-              nav2.navigate(to: .members(spaceId: spaceId))
-            }
-          },
-          menuContent: {
-            if let spaceId = item.spaceId {
-              Button("Members") { nav2.navigate(to: .members(spaceId: spaceId)) }
-              Button("Invite") { nav2.navigate(to: .inviteToSpace) }
-              Button("Integrations") { nav2.navigate(to: .spaceIntegrations(spaceId: spaceId)) }
-            }
-          }
-        )
-      }
-      SidebarQuickActionsSection(
-        isSearchActive: isQuickSearchVisible,
-        isNewThreadActive: isNewThreadActive,
-        onSearch: {
-          triggerQuickSearch()
+      SidebarHeaderRow(
+        item: item,
+        isActive: true,
+        showsArrow: true,
+        showsMenu: item.kind == .space && item.spaceId == activeTab.spaceId,
+        isExpanded: spacePickerState.isVisible,
+        onSelect: {
+          spacePickerState.isVisible.toggle()
         },
-        onNewThread: {
-          openNewThread()
+        menuContent: {
+          if let spaceId = item.spaceId {
+            Button("Members") { nav2.navigate(to: .members(spaceId: spaceId)) }
+            Button("Invite") { nav2.navigate(to: .inviteToSpace) }
+            Button("Integrations") { nav2.navigate(to: .spaceIntegrations(spaceId: spaceId)) }
+          }
         }
       )
     }
     .background(HeightReader(onHeightChange: onHeightChange))
-    .onReceive(NotificationCenter.default.publisher(for: .quickSearchVisibilityChanged)) { notification in
-      guard let isVisible = notification.userInfo?["isVisible"] as? Bool else { return }
-      isQuickSearchVisible = isVisible
+    .onChange(of: nav2.activeTab) { _ in
+      spacePickerState.isVisible = false
     }
-  }
-
-  private func shouldShowToggle(for item: SpaceHeaderItem, activeTab: TabId) -> Bool {
-    if isExpanded {
-      if let expandedTopItem {
-        return item == expandedTopItem
-      }
-      return item.matches(spaceId: activeTab.spaceId, isHome: activeTab == .home)
+    .onChange(of: spacePickerState.isVisible) { isVisible in
+      onSpacePickerChange(isVisible)
     }
-    return item.matches(spaceId: activeTab.spaceId, isHome: activeTab == .home)
-  }
-
-  private func makeItems(activeTab: TabId) -> [SpaceHeaderItem] {
-    if isExpanded {
-      if let expandedTopItem {
-        return [expandedTopItem] + expandedItemsSnapshot
-      }
-      return makeExpandedSnapshot(activeTab: activeTab).combined
-    }
-
-    switch activeTab {
-      case .home:
-        return [.home]
-      case let .space(id, name):
-        let fallback = ObjectCache.shared.getSpace(id: id) ?? Space(id: id, name: name, date: Date())
-        return [SpaceHeaderItem(space: fallback)]
-    }
-  }
-
-  private func toggleExpansion(activeTab: TabId) {
-    if isExpanded {
-      isExpanded = false
-      expandedTopItem = nil
-      expandedItemsSnapshot = []
-      return
-    }
-
-    let snapshot = makeExpandedSnapshot(activeTab: activeTab)
-    expandedTopItem = snapshot.top
-    expandedItemsSnapshot = snapshot.rest
-    isExpanded = true
-  }
-
-  private func makeExpandedSnapshot(activeTab: TabId) -> (top: SpaceHeaderItem, rest: [SpaceHeaderItem], combined: [SpaceHeaderItem]) {
-    let top = item(for: activeTab)
-    var rest: [SpaceHeaderItem] = [.home]
-    rest.append(contentsOf: homeViewModel.spaces.map { SpaceHeaderItem(space: $0.space) })
-    if let index = rest.firstIndex(of: top) {
-      rest.remove(at: index)
-    }
-    return (top: top, rest: rest, combined: [top] + rest)
   }
 
   private func item(for activeTab: TabId) -> SpaceHeaderItem {
@@ -199,140 +138,17 @@ private struct SidebarHeaderRootView: View {
     }
   }
 
-  private func triggerQuickSearch() {
-    NotificationCenter.default.post(name: .focusSearch, object: nil)
-  }
-
-  private func openNewThread() {
-    nav2.navigate(to: .newChat)
-  }
 }
 
-private struct SidebarQuickActionsSection: View {
-  private static let dividerOpacity: CGFloat = 0.08
-  private static let dividerVerticalPadding: CGFloat = 6
-
-  let isSearchActive: Bool
-  let isNewThreadActive: Bool
-  let onSearch: () -> Void
-  let onNewThread: () -> Void
-
-  var body: some View {
-    VStack(spacing: 0) {
-      topDivider
-      SidebarActionRow(
-        title: "Search",
-        systemImage: "magnifyingglass",
-        isActive: isSearchActive,
-        onTap: onSearch
-      )
-      Spacer()
-        .frame(height: MainSidebar.itemSpacing)
-      SidebarActionRow(
-        title: "New thread",
-        systemImage: "square.and.pencil",
-        isActive: isNewThreadActive,
-        onTap: onNewThread
-      )
-      bottomDivider
-    }
-  }
-
-  private var topDivider: some View {
-    SidebarSeparator(
-      opacity: Self.dividerOpacity,
-      topPadding: Self.dividerVerticalPadding,
-      bottomPadding: Self.dividerVerticalPadding
-    )
-  }
-
-  private var bottomDivider: some View {
-    SidebarSeparator(
-      opacity: Self.dividerOpacity,
-      topPadding: Self.dividerVerticalPadding,
-      bottomPadding: 0
-    )
-  }
-}
-
-private struct SidebarSeparator: View {
-  let opacity: CGFloat
-  let topPadding: CGFloat
-  let bottomPadding: CGFloat
-
-  var body: some View {
-    Rectangle()
-      .fill(Color(nsColor: .labelColor).opacity(opacity))
-      .frame(height: 1)
-      .padding(.horizontal, MainSidebar.innerEdgeInsets)
-      .padding(.top, topPadding)
-      .padding(.bottom, bottomPadding)
-  }
-}
-
-private struct SidebarActionRow: View {
-  let title: String
-  let systemImage: String
-  let isActive: Bool
-  let onTap: () -> Void
-
-  @State private var isHovered = false
-
-  var body: some View {
-    HStack(spacing: MainSidebar.iconTrailingPadding) {
-      Image(systemName: systemImage)
-        .font(.system(size: 13, weight: .medium))
-        .foregroundColor(textColor)
-        .frame(width: MainSidebar.iconSize, height: MainSidebar.iconSize)
-
-      Text(title)
-        .font(Font(MainSidebar.font))
-        .foregroundColor(textColor)
-        .lineLimit(1)
-
-      Spacer(minLength: 0)
-    }
-    .frame(height: MainSidebar.itemHeight)
-    .padding(.horizontal, MainSidebar.innerEdgeInsets)
-    .background(backgroundView)
-    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-    .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-    .onHover { hovering in
-      isHovered = hovering
-    }
-    .onTapGesture {
-      onTap()
-    }
-  }
-
-  private var backgroundView: some View {
-    Group {
-      if isActive {
-        Color(nsColor: Theme.windowContentBackgroundColor)
-      } else if isHovered {
-        Color.white.opacity(0.2)
-      } else {
-        Color.clear
-      }
-    }
-  }
-
-  private var textColor: Color {
-    (isActive || isHovered)
-      ? Color(nsColor: .labelColor)
-      : Color(nsColor: .secondaryLabelColor)
-  }
-}
+// Intentionally no anchor reporting: MainSidebar positions overlay under headerView.
 
 private struct SidebarHeaderRow<MenuContent: View>: View {
   let item: SpaceHeaderItem
   let isActive: Bool
-  let showsToggle: Bool
+  let showsArrow: Bool
   let showsMenu: Bool
   let isExpanded: Bool
   let onSelect: () -> Void
-  let onToggle: () -> Void
-  let onMenu: () -> Void
   @ViewBuilder let menuContent: () -> MenuContent
 
   @State private var isHovered = false
@@ -355,21 +171,6 @@ private struct SidebarHeaderRow<MenuContent: View>: View {
         .menuIndicator(.hidden)
         .focusable(false)
       }
-
-      if showsToggle {
-        Button(action: onToggle) {
-          Image(systemName: "chevron.down")
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundColor(textColor)
-            .padding(4)
-            .background(
-              Circle().fill(Color.black.opacity(isHovered ? 0.08 : 0))
-            )
-            .rotationEffect(.degrees(isExpanded ? 180 : 0))
-        }
-        .buttonStyle(.plain)
-        .focusable(false)
-      }
     }
     .frame(height: MainSidebar.itemHeight)
     .padding(.horizontal, MainSidebar.innerEdgeInsets)
@@ -378,13 +179,6 @@ private struct SidebarHeaderRow<MenuContent: View>: View {
     .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     .onHover { hovering in
       isHovered = hovering
-    }
-    .onTapGesture {
-      if showsToggle {
-        onToggle()
-      } else {
-        onSelect()
-      }
     }
   }
 
@@ -395,10 +189,19 @@ private struct SidebarHeaderRow<MenuContent: View>: View {
         .font(Font(MainSidebar.font))
         .foregroundColor(textColor)
         .lineLimit(1)
+      if showsArrow {
+        Image(systemName: "chevron.down")
+          .font(.system(size: 12, weight: .semibold))
+          .foregroundColor(textColor)
+          .rotationEffect(.degrees(isExpanded ? 180 : 0))
+      }
       Spacer(minLength: 0)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .contentShape(Rectangle())
+    .onTapGesture {
+      onSelect()
+    }
   }
 
   private var iconView: some View {
@@ -436,7 +239,7 @@ private struct SidebarHeaderRow<MenuContent: View>: View {
   }
 }
 
-private struct SpaceHeaderItem: Identifiable, Hashable {
+struct SpaceHeaderItem: Identifiable, Hashable {
   enum Kind {
     case home
     case space
