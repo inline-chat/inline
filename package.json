@@ -5,6 +5,7 @@
     "admin",
     "server",
     "web",
+    "server/packages/*",
     "web/packages/*",
     "scripts"
   ],
@@ -13,6 +14,7 @@
     "dev:server": "cd server && bun run dev",
     "dev:web": "cd web && bun run dev",
     "dev:admin": "cd admin && bun run dev",
+    "dev:emails": "cd server/packages/email-preview && bun run dev",
     "dev:desktop": "cd desktop && bun run dev",
     "typecheck": "cd server && bun run typecheck",
     "dev": "cd server && bun run dev",

@@ -2,7 +2,7 @@ import { EMAIL_PROVIDER } from "@in/server/config"
 
 import { sendEmail as sendEmailViaSES } from "@in/server/libs/ses"
 import { sendEmail as sendEmailViaResend } from "@in/server/libs/resend"
-import { CodeEmail } from "@in/server/emails/code-email"
+import { CodeEmail } from "@inline-chat/email-templates"
 import { isProd } from "@in/server/env"
 import { styleText } from "node:util"
 import { Log } from "@in/server/utils/log"
