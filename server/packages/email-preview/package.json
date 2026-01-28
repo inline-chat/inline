@@ -1,0 +1,17 @@
+{
+  "name": "@inline-chat/email-preview",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.tsx",
+    "start": "bun src/index.tsx"
+  },
+  "dependencies": {
+    "@inline-chat/email-templates": "workspace:*",
+    "@react-email/components": "^1.0.6",
+    "@react-email/render": "^2.0.4",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  }
+}

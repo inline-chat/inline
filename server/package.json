@@ -39,6 +39,7 @@
     "@protobuf-ts/runtime": "^2.11.1",
     "@react-email/components": "^1.0.6",
     "@react-email/render": "^2.0.4",
+    "@inline-chat/email-templates": "workspace:*",
     "@sentry/bun": "10",
     "@sinclair/typebox": "=0.32.34",
     "apn": "^2.2.0",
