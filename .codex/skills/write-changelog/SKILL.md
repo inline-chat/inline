@@ -53,6 +53,8 @@ Improvements and fixes
 
 # Language Guidelines
 
+- Write short, benefit-focused bullets for each user-facing change.
+- Use clear verbs and plain language; avoid internal jargon.
 - Translate technical terms into user-facing descriptions.
 - Avoid versions of "API", "refactor", "nil", "crash log", or "dependency".
 - Prefer "Improved", "Added", "Fixed", "Updated" or action verbs like "Search", "Upload", "Sync".
