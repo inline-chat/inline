@@ -35,16 +35,15 @@ export const setupTestDatabase = async () => {
     // Store original database URL
     originalDbUrl = process.env.DATABASE_URL!
 
-    const adminUrl = new URL(originalDbUrl)
-    adminUrl.pathname = "/postgres"
-
-    const testUrl = new URL(originalDbUrl)
-    testUrl.pathname = `/${TEST_DB_NAME}`
-    testDbUrl = testUrl.toString()
+    // Create test database URL
+    const parts = originalDbUrl.split("/")
+    const databaseWithoutDb = parts.slice(0, -1).join("/")
+    testDbUrl = `${databaseWithoutDb}/${TEST_DB_NAME}`
 
     // Create admin connection to create/drop the test database
-    adminDb = postgres(adminUrl.toString(), {
+    adminDb = postgres(databaseWithoutDb, {
       max: 1,
+      database: "postgres",
       idle_timeout: 10,
     })
 
@@ -86,10 +85,11 @@ export const setupTestDatabase = async () => {
 export const teardownTestDatabase = async () => {
   try {
     // Create admin connection again for cleanup
-    const adminUrl = new URL(originalDbUrl)
-    adminUrl.pathname = "/postgres"
-    adminDb = postgres(adminUrl.toString(), {
+    const parts = originalDbUrl.split("/")
+    const databaseWithoutDb = parts.slice(0, -1).join("/")
+    adminDb = postgres(databaseWithoutDb, {
       max: 1,
+      database: "postgres",
       idle_timeout: 10,
     })
 
