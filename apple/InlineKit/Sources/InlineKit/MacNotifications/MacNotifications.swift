@@ -6,8 +6,8 @@ import ImageIO
 import InlineProtocol
 import Kingfisher
 import Logger
-import UserNotifications
 import UniformTypeIdentifiers
+import UserNotifications
 
 public actor MacNotifications: Sendable {
   public static let shared = MacNotifications()
@@ -45,7 +45,7 @@ public actor MacNotifications: Sendable {
       content.subtitle = subtitle
     }
     content.userInfo = userInfo
-    let isSoundEnabled = await self.isSoundEnabled()
+    let isSoundEnabled = await isSoundEnabled()
     content.sound = (forceSound || isSoundEnabled) ? .default : nil
 
     if let imageURL {
@@ -259,13 +259,13 @@ private actor AvatarAttachmentBuilder {
         options: options
       ) { result in
         switch result {
-        case let .success(value):
-          var rect = CGRect(origin: .zero, size: value.image.size)
-          let cgImage = value.image.cgImage(forProposedRect: &rect, context: nil, hints: nil)
-          continuation.resume(returning: cgImage)
-        case let .failure(error):
-          logger.error("Failed to download avatar image", error: error)
-          continuation.resume(returning: nil)
+          case let .success(value):
+            var rect = CGRect(origin: .zero, size: value.image.size)
+            let cgImage = value.image.cgImage(forProposedRect: &rect, context: nil, hints: nil)
+            continuation.resume(returning: cgImage)
+          case let .failure(error):
+            logger.error("Failed to download avatar image", error: error)
+            continuation.resume(returning: nil)
         }
       }
     }
@@ -367,7 +367,6 @@ private actor AvatarAttachmentBuilder {
       cacheOrder.remove(at: index)
     }
   }
-
 }
 
 private struct AvatarSource {
