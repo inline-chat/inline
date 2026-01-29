@@ -16,6 +16,7 @@
     "dev:admin": "cd admin && bun run dev",
     "dev:emails": "cd server/packages/email-preview && bun run dev",
     "dev:desktop": "cd desktop && bun run dev",
+    "docker:workspaces": "bun run scripts/docker-workspace-manifests.ts",
     "typecheck": "cd server && bun run typecheck",
     "dev": "cd server && bun run dev",
     "test": "cd server && bun test",

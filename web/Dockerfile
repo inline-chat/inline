@@ -1,27 +1,19 @@
-# syntax=docker/dockerfile:1.7
 FROM oven/bun:1 AS base
 WORKDIR /usr/src/app
 
+# Requires build/docker-workspaces (bun run docker:workspaces) before docker build.
 # Install dependencies into temp directory with devDependencies
 FROM base AS development-dependencies
 RUN mkdir -p /temp/dev
 COPY package.json bun.lock /temp/dev/
-COPY admin/package.json /temp/dev/admin/
-COPY web/package.json /temp/dev/web/
-COPY server/package.json /temp/dev/server/
-COPY scripts/package.json /temp/dev/scripts/
-COPY --parents web/packages/*/package.json /temp/dev/
+COPY build/docker-workspaces/ /temp/dev/
 RUN cd /temp/dev && bun install --frozen-lockfile
 
 # Install production dependencies only
 FROM base AS production-dependencies
 RUN mkdir -p /temp/prod
 COPY package.json bun.lock /temp/prod/
-COPY admin/package.json /temp/prod/admin/
-COPY web/package.json /temp/prod/web/
-COPY server/package.json /temp/prod/server/
-COPY scripts/package.json /temp/prod/scripts/
-COPY --parents web/packages/*/package.json /temp/prod/
+COPY build/docker-workspaces/ /temp/prod/
 RUN cd /temp/prod && bun install --frozen-lockfile --production
 
 # Build stage
