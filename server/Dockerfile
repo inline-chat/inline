@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # use the official Bun image
 # see all versions at https://hub.docker.com/r/oven/bun/tags
 FROM oven/bun:1 AS base
@@ -10,14 +11,11 @@ RUN mkdir -p /temp/dev
 COPY package.json bun.lock /temp/dev/
 COPY admin/package.json /temp/dev/admin/
 COPY web/package.json /temp/dev/web/
-COPY web/packages/auth/package.json /temp/dev/web/packages/auth/
-COPY web/packages/client/package.json /temp/dev/web/packages/client/
-COPY web/packages/config/package.json /temp/dev/web/packages/config/
-COPY web/packages/log/package.json /temp/dev/web/packages/log/
-COPY web/packages/protocol/package.json /temp/dev/web/packages/protocol/
 COPY desktop/package.json /temp/dev/desktop/
 COPY scripts/package.json /temp/dev/scripts/
 COPY server/package.json /temp/dev/server/
+COPY --parents web/packages/*/package.json /temp/dev/
+COPY --parents server/packages/*/package.json /temp/dev/
 RUN cd /temp/dev && bun install --frozen-lockfile
 
 # install with --production (exclude devDependencies)
@@ -25,14 +23,11 @@ RUN mkdir -p /temp/prod
 COPY package.json bun.lock /temp/prod/
 COPY admin/package.json /temp/prod/admin/
 COPY web/package.json /temp/prod/web/
-COPY web/packages/auth/package.json /temp/prod/web/packages/auth/
-COPY web/packages/client/package.json /temp/prod/web/packages/client/
-COPY web/packages/config/package.json /temp/prod/web/packages/config/
-COPY web/packages/log/package.json /temp/prod/web/packages/log/
-COPY web/packages/protocol/package.json /temp/prod/web/packages/protocol/
 COPY desktop/package.json /temp/prod/desktop/
 COPY scripts/package.json /temp/prod/scripts/
 COPY server/package.json /temp/prod/server/
+COPY --parents web/packages/*/package.json /temp/prod/
+COPY --parents server/packages/*/package.json /temp/prod/
 RUN cd /temp/prod && bun install --frozen-lockfile --production
 
 # copy node_modules from temp directory
@@ -63,14 +58,11 @@ COPY --from=prerelease /usr/src/app/server/package.json ./server/package.json
 COPY --from=prerelease /usr/src/app/package.json .
 COPY --from=prerelease /usr/src/app/bun.lock .
 COPY --from=prerelease /usr/src/app/web/package.json ./web/
-COPY --from=prerelease /usr/src/app/web/packages/auth/package.json ./web/packages/auth/
-COPY --from=prerelease /usr/src/app/web/packages/client/package.json ./web/packages/client/
-COPY --from=prerelease /usr/src/app/web/packages/config/package.json ./web/packages/config/
-COPY --from=prerelease /usr/src/app/web/packages/log/package.json ./web/packages/log/
-COPY --from=prerelease /usr/src/app/web/packages/protocol/package.json ./web/packages/protocol/
 COPY --from=prerelease /usr/src/app/desktop/package.json ./desktop/
 COPY --from=prerelease /usr/src/app/scripts/package.json ./scripts/
 COPY --from=prerelease /usr/src/app/server/package.json ./server/
+COPY --parents web/packages/*/package.json ./
+COPY --parents server/packages/*/package.json ./
 RUN bun install --frozen-lockfile --production
 
 # Install curl for Coolify healthcheck
