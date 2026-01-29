@@ -175,9 +175,6 @@
         }
       }
     },
-    "Applies immediately. Use to sync new/edit/attachment updates via bucket fetches." : {
-
-    },
     "Archive" : {
 
     },
@@ -548,6 +545,9 @@
 
     },
     "Email" : {
+
+    },
+    "Enable experimental view" : {
 
     },
     "Enable sync message updates" : {
@@ -1041,6 +1041,9 @@
 
     },
     "Type to find existing chats or search for people to start new conversations" : {
+
+    },
+    "UI changes may require an app restart. Sync changes apply immediately." : {
 
     },
     "Unarchive" : {
