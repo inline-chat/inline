@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 FROM oven/bun:1 AS base
 WORKDIR /usr/src/app
 
@@ -8,8 +9,8 @@ COPY package.json bun.lock /temp/dev/
 COPY admin/package.json /temp/dev/admin/
 COPY server/package.json /temp/dev/server/
 COPY web/package.json /temp/dev/web/
-COPY web/packages/ /temp/dev/web/packages/
 COPY scripts/package.json /temp/dev/scripts/
+COPY --parents web/packages/*/package.json /temp/dev/
 RUN cd /temp/dev && bun install --frozen-lockfile
 
 # Install production dependencies only
@@ -19,8 +20,8 @@ COPY package.json bun.lock /temp/prod/
 COPY admin/package.json /temp/prod/admin/
 COPY server/package.json /temp/prod/server/
 COPY web/package.json /temp/prod/web/
-COPY web/packages/ /temp/prod/web/packages/
 COPY scripts/package.json /temp/prod/scripts/
+COPY --parents web/packages/*/package.json /temp/prod/
 RUN cd /temp/prod && bun install --frozen-lockfile --production
 
 # Build stage
