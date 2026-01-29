@@ -272,6 +272,10 @@ final class NewVideoView: NSView {
   private var isScrolling = false
   private var haveAddedImageView = false
   private let maskLayer = CAShapeLayer()
+  private var topLeftRadius: CGFloat = Theme.messageBubbleCornerRadius - 1
+  private var topRightRadius: CGFloat = Theme.messageBubbleCornerRadius - 1
+  private var bottomLeftRadius: CGFloat = Theme.messageBubbleCornerRadius - 1
+  private var bottomRightRadius: CGFloat = Theme.messageBubbleCornerRadius - 1
   private var isDownloading = false
   private var isShowingPreview = false
   private var progressCancellable: AnyCancellable?
@@ -302,6 +306,7 @@ final class NewVideoView: NSView {
     self.fullMessage = fullMessage
     isScrolling = scrollState.isScrolling
     super.init(frame: .zero)
+    updateCornerRadii()
     setupView()
   }
 
@@ -315,6 +320,8 @@ final class NewVideoView: NSView {
   func update(with fullMessage: FullMessage) {
     let prev = self.fullMessage
     self.fullMessage = fullMessage
+    updateCornerRadii()
+    updateMasks()
 
     if
       prev.videoInfo?.id == fullMessage.videoInfo?.id,
@@ -548,10 +555,75 @@ final class NewVideoView: NSView {
 
   private func updateMasks() {
     guard bounds.width > 0, bounds.height > 0 else { return }
-    let radius = Theme.messageBubbleCornerRadius - 1
-    let path = NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius)
-    maskLayer.path = path.cgPath
     maskLayer.frame = bounds
+    maskLayer.path = createRoundedRectPath(for: bounds)
+  }
+
+  private func updateCornerRadii() {
+    let hasText = fullMessage.message.text?.isEmpty == false
+    let hasTopHeader = fullMessage.message.repliedToMessageId != nil
+      || fullMessage.message.forwardFromUserId != nil
+    let bubbleRadius = Theme.messageBubbleCornerRadius - 1
+    let topRadius = hasTopHeader ? 0 : bubbleRadius
+
+    topLeftRadius = topRadius
+    topRightRadius = topRadius
+
+    if hasText {
+      bottomLeftRadius = 0.0
+      bottomRightRadius = 0.0
+    } else {
+      bottomLeftRadius = bubbleRadius
+      bottomRightRadius = bubbleRadius
+    }
+  }
+
+  private func createRoundedRectPath(for rect: CGRect) -> CGPath {
+    let path = CGMutablePath()
+    let width = rect.width
+    let height = rect.height
+
+    if width <= 0 || height <= 0 {
+      return path
+    }
+
+    // AppKit coordinate system: origin is bottom-left.
+    path.move(to: CGPoint(x: bottomLeftRadius, y: 0))
+    path.addLine(to: CGPoint(x: width - bottomRightRadius, y: 0))
+    path.addArc(
+      center: CGPoint(x: width - bottomRightRadius, y: bottomRightRadius),
+      radius: bottomRightRadius,
+      startAngle: CGFloat(3 * Double.pi / 2),
+      endAngle: 0,
+      clockwise: false
+    )
+    path.addLine(to: CGPoint(x: width, y: height - topRightRadius))
+    path.addArc(
+      center: CGPoint(x: width - topRightRadius, y: height - topRightRadius),
+      radius: topRightRadius,
+      startAngle: 0,
+      endAngle: CGFloat(Double.pi / 2),
+      clockwise: false
+    )
+    path.addLine(to: CGPoint(x: topLeftRadius, y: height))
+    path.addArc(
+      center: CGPoint(x: topLeftRadius, y: height - topLeftRadius),
+      radius: topLeftRadius,
+      startAngle: CGFloat(Double.pi / 2),
+      endAngle: CGFloat(Double.pi),
+      clockwise: false
+    )
+    path.addLine(to: CGPoint(x: 0, y: bottomLeftRadius))
+    path.addArc(
+      center: CGPoint(x: bottomLeftRadius, y: bottomLeftRadius),
+      radius: bottomLeftRadius,
+      startAngle: CGFloat(Double.pi),
+      endAngle: CGFloat(3 * Double.pi / 2),
+      clockwise: false
+    )
+
+    path.closeSubpath()
+    return path
   }
 
   private func updateImageLayerFrame() {

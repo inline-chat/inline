@@ -317,6 +317,7 @@ final class NewVideoView: UIView {
   public func update(with fullMessage: FullMessage) {
     let prev = self.fullMessage
     self.fullMessage = fullMessage
+    updateMask()
 
     if
       prev.videoInfo?.id == fullMessage.videoInfo?.id,

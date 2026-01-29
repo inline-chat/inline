@@ -299,6 +299,7 @@ final class NewPhotoView: UIView {
   public func update(with fullMessage: FullMessage) {
     let prev = self.fullMessage
     self.fullMessage = fullMessage
+    updateMask()
 
     if
       prev.photoInfo?.id == fullMessage.photoInfo?.id,
