@@ -15,6 +15,8 @@ DERIVED_DATA="${DERIVED_DATA:-"${ROOT_DIR}/build/InlineMacDirect"}"
 APP_PATH="${APP_PATH:-""}"
 DMG_PATH="${DMG_PATH:-""}"
 SPARKLE_DIR="${SPARKLE_DIR:-"${ROOT_DIR}/.action/sparkle"}"
+RELEASE_TAG="${RELEASE_TAG:-""}"
+SKIP_GITHUB_RELEASE="${SKIP_GITHUB_RELEASE:-0}"
 TEMP_ROOT="${ROOT_DIR}/build/macos-release-tmp"
 
 usage() {
@@ -56,6 +58,10 @@ done
 if [[ -z "${CHANNEL}" ]]; then
   echo "Missing --channel value" >&2
   exit 1
+fi
+
+if [[ -z "${RELEASE_TAG}" && "${CHANNEL}" == "beta" ]]; then
+  RELEASE_TAG="tip"
 fi
 
 if [[ -z "${APP_PATH}" ]]; then
@@ -184,5 +190,29 @@ python3 "${ROOT_DIR}/scripts/macos/validate_appcast.py" \
 echo "• Upload appcast to R2"
 UPLOAD_MODE="appcast" CHANNEL="${CHANNEL}" APPCAST_PATH="${APPCAST_OUTPUT_PATH}" \
   bun run "${ROOT_DIR}/scripts/macos/release-direct.ts"
+
+if [[ -n "${RELEASE_TAG}" && "${SKIP_GITHUB_RELEASE}" != "1" ]]; then
+  require_cmd gh
+
+  echo "• Update GitHub tag (${RELEASE_TAG})"
+  git -C "${ROOT_DIR}" config user.name "github-actions[bot]"
+  git -C "${ROOT_DIR}" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+  git -C "${ROOT_DIR}" tag -fa "${RELEASE_TAG}" -m "Latest Sparkle release" HEAD
+  git -C "${ROOT_DIR}" push --force origin "${RELEASE_TAG}"
+
+  echo "• Upload artifacts to GitHub Release (${RELEASE_TAG})"
+  prerelease_flag=""
+  if [[ "${CHANNEL}" == "beta" ]]; then
+    prerelease_flag="--prerelease"
+  fi
+  if ! gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+    gh release create "${RELEASE_TAG}" --title "${RELEASE_TAG}" ${prerelease_flag} --notes "Automated macOS direct release."
+  else
+    if [[ "${CHANNEL}" == "beta" ]]; then
+      gh release edit "${RELEASE_TAG}" --prerelease
+    fi
+  fi
+  gh release upload "${RELEASE_TAG}" "${DMG_PATH}" --clobber
+fi
 
 echo "• Release complete"
