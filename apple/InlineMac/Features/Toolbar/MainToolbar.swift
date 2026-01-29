@@ -147,9 +147,9 @@ struct ToolbarSwiftUIView: View {
     return LinearGradient(
       gradient: Gradient(stops: [
         .init(color: baseColor.opacity(1), location: 0),
-        .init(color: baseColor.opacity(0.9), location: 0.2),
-        .init(color: baseColor.opacity(0.8), location: 0.5),
-        .init(color: baseColor.opacity(0.2), location: 0.9),
+        .init(color: baseColor.opacity(0.97), location: 0.2),
+        .init(color: baseColor.opacity(0.9), location: 0.5),
+        .init(color: baseColor.opacity(0.35), location: 0.85),
         .init(color: baseColor.opacity(0), location: 1),
       ]),
       startPoint: .top,
