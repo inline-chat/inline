@@ -14,7 +14,6 @@ struct NotificationSettingsButton: View {
 
   @State private var presented = false
   @State private var customizingZen = false
-  @State private var customizingMentions = false
 
   init(style: Style = .standard) {
     self.style = style
@@ -69,9 +68,6 @@ struct NotificationSettingsButton: View {
     if customizingZen {
       customize
         .transition(.opacity)
-    } else if customizingMentions {
-      mentionsCustomize
-        .transition(.opacity)
     } else {
       picker
         .transition(.opacity)
@@ -107,30 +103,41 @@ struct NotificationSettingsButton: View {
       VStack(alignment: .leading, spacing: 1) {
         NotificationSettingsItem(
           systemImage: "bell.fill",
-          title: "All messages",
+          title: "All",
           description: "Receive notifications for every message",
           selected: notificationSettings.mode == .all,
           value: NotificationMode.all,
           onChange: {
             notificationSettings.mode = $0
+            notificationSettings.disableDmNotifications = false
 
           },
         )
 
         NotificationSettingsItem(
           systemImage: "at",
-          title: "Messages to you",
+          title: "Any message to you",
           description: "Mentions, direct messages, and replies to you",
-          selected: notificationSettings.mode == .mentions,
+          selected: notificationSettings.mode == .mentions && !notificationSettings.disableDmNotifications,
           value: NotificationMode.mentions,
           onChange: {
             notificationSettings.mode = $0
+            notificationSettings.disableDmNotifications = false
 
-          },
-          customizeAction: {
-            customizingZen = false
-            customizingMentions = true
           }
+        )
+
+        NotificationSettingsItem(
+          systemImage: "bubble.left.and.bubble.right.fill",
+          title: "Only mentions",
+          description: "Mentions and nudges still notify you",
+          selected: notificationSettings.mode == .mentions && notificationSettings.disableDmNotifications,
+          value: true,
+          onChange: { _ in
+            notificationSettings.mode = .mentions
+            notificationSettings.disableDmNotifications = true
+          },
+          iconFontSize: 12
         )
 
         NotificationSettingsItem(
@@ -141,10 +148,10 @@ struct NotificationSettingsButton: View {
           value: NotificationMode.importantOnly,
           onChange: {
             notificationSettings.mode = $0
+            notificationSettings.disableDmNotifications = false
           },
           customizeAction: {
             // Customize action for Zen Mode
-            customizingMentions = false
             customizingZen = true
           }
         )
@@ -157,6 +164,7 @@ struct NotificationSettingsButton: View {
           value: NotificationMode.none,
           onChange: {
             notificationSettings.mode = $0
+            notificationSettings.disableDmNotifications = false
           },
         )
       }
@@ -233,55 +241,8 @@ struct NotificationSettingsButton: View {
     }
   }
 
-  @ViewBuilder
-  private var mentionsCustomize: some View {
-    VStack(alignment: .leading, spacing: 4) {
-      HStack {
-        VStack(alignment: .leading, spacing: 0) {
-          Text("Messages to you")
-            .font(.headline)
-        }
-      }.padding(.horizontal, 6)
-
-      Divider().foregroundStyle(.tertiary)
-        .padding(.vertical, 6)
-
-      HStack(spacing: 12) {
-        VStack(alignment: .leading, spacing: 2) {
-          Text("Disable DM notifications")
-            .font(.subheadline)
-          Text("Mentions and nudges will still notify you")
-            .font(.caption)
-            .foregroundStyle(.tertiary)
-        }
-
-        Spacer(minLength: 12)
-
-        Toggle("", isOn: $notificationSettings.disableDmNotifications)
-          .labelsHidden()
-          .toggleStyle(.switch)
-          .accessibilityLabel("Disable DM notifications")
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(.horizontal, 8)
-      
-
-      HStack {
-        Spacer()
-        Button("Done") {
-          customizingMentions = false
-        }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.regular)
-        .buttonBorderShape(.capsule)
-      }
-      .padding(.horizontal, 8)
-      .padding(.top, 8)
-    }
-  }
-
   let defaultRules = """
-  - Something urgent has came up (eg. a bug or an incident). 
+  - Something urgent has come up (e.g., a bug or an incident).
   - I must wake up for something.
   """
 
@@ -301,6 +262,7 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
   var value: Value
   var onChange: (Value) -> Void
   var customizeAction: (() -> Void)?
+  var iconFontSize: CGFloat? = nil
 
   @State private var hovered = false
 
@@ -315,7 +277,7 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
             .frame(width: 30, height: 30)
             .overlay {
               Image(systemName: systemImage)
-                .font(.system(size: 16, weight: .regular))
+                .font(.system(size: iconFontSize ?? 16, weight: .regular))
                 .foregroundStyle(selected ? Color.white : .secondary.opacity(0.9))
                 .frame(
                   width: 28,
