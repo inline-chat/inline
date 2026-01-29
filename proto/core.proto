@@ -825,6 +825,7 @@ message NotificationSettings {
     MODE_NONE = 2;
     MODE_MENTIONS = 3;
     MODE_IMPORTANT_ONLY = 4;
+    MODE_ONLY_MENTIONS = 5;
   }
 
   optional Mode mode = 1;

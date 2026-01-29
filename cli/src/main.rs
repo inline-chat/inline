@@ -648,6 +648,8 @@ enum NotificationModeArg {
     All,
     None,
     Mentions,
+    #[value(name = "only-mentions", alias = "only_mentions")]
+    OnlyMentions,
     #[value(name = "important", alias = "important-only")]
     ImportantOnly,
 }
@@ -658,7 +660,7 @@ struct NotificationsSetArgs {
         long,
         value_name = "MODE",
         value_enum,
-        help = "Notification mode: all, none, mentions, important"
+        help = "Notification mode: all, none, mentions, only-mentions, important"
     )]
     mode: Option<NotificationModeArg>,
 
@@ -1905,6 +1907,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     );
                     if let Some(mode) = args.mode {
                         values.mode = notification_mode_from_arg(mode);
+                        values.disable_dm_notifications =
+                            values.mode == proto::notification_settings::Mode::OnlyMentions;
                     }
                     if args.silent {
                         values.silent = true;
@@ -2755,7 +2759,7 @@ struct NotificationSettingsValues {
 fn notification_settings_values(
     settings: Option<&proto::NotificationSettings>,
 ) -> NotificationSettingsValues {
-    let mode = match settings
+    let mut mode = match settings
         .and_then(|value| value.mode)
         .and_then(|value| proto::notification_settings::Mode::try_from(value).ok())
     {
@@ -2766,6 +2770,9 @@ fn notification_settings_values(
         }
         Some(proto::notification_settings::Mode::ImportantOnly) => {
             proto::notification_settings::Mode::ImportantOnly
+        }
+        Some(proto::notification_settings::Mode::OnlyMentions) => {
+            proto::notification_settings::Mode::OnlyMentions
         }
         _ => proto::notification_settings::Mode::All,
     };
@@ -2779,9 +2786,16 @@ fn notification_settings_values(
     let zen_custom_rules = settings
         .and_then(|value| value.zen_mode_custom_rules.clone())
         .unwrap_or_default();
-    let disable_dm_notifications = settings
+    let mut disable_dm_notifications = settings
         .and_then(|value| value.disable_dm_notifications)
         .unwrap_or(false);
+
+    if mode == proto::notification_settings::Mode::Mentions && disable_dm_notifications {
+        mode = proto::notification_settings::Mode::OnlyMentions;
+    }
+    if mode == proto::notification_settings::Mode::OnlyMentions {
+        disable_dm_notifications = true;
+    }
 
     NotificationSettingsValues {
         mode,
@@ -2800,6 +2814,7 @@ fn notification_mode_from_arg(
         NotificationModeArg::All => proto::notification_settings::Mode::All,
         NotificationModeArg::None => proto::notification_settings::Mode::None,
         NotificationModeArg::Mentions => proto::notification_settings::Mode::Mentions,
+        NotificationModeArg::OnlyMentions => proto::notification_settings::Mode::OnlyMentions,
         NotificationModeArg::ImportantOnly => {
             proto::notification_settings::Mode::ImportantOnly
         }
@@ -2811,6 +2826,7 @@ fn notification_mode_label(mode: proto::notification_settings::Mode) -> &'static
         proto::notification_settings::Mode::All => "all",
         proto::notification_settings::Mode::None => "none",
         proto::notification_settings::Mode::Mentions => "mentions",
+        proto::notification_settings::Mode::OnlyMentions => "only-mentions",
         proto::notification_settings::Mode::ImportantOnly => "important",
         _ => "all",
     }

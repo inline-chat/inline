@@ -49,6 +49,7 @@ struct NotificationSettingsButton: View {
       case .none: "bell.slash"
       case .mentions: "at"
       case .importantOnly: "apple.meditate"
+      case .onlyMentions: "at"
     }
   }
 
@@ -81,7 +82,7 @@ struct NotificationSettingsButton: View {
           systemImage: "at",
           title: "Any message to you",
           description: "Mentions, direct messages, and replies to you",
-          selected: notificationSettings.mode == .mentions && !notificationSettings.disableDmNotifications,
+          selected: notificationSettings.mode == .mentions,
           value: NotificationMode.mentions,
           onChange: {
             notificationSettings.mode = $0
@@ -94,10 +95,10 @@ struct NotificationSettingsButton: View {
           systemImage: "bubble.left.and.bubble.right.fill",
           title: "Only mentions",
           description: "Mentions and nudges still notify you",
-          selected: notificationSettings.mode == .mentions && notificationSettings.disableDmNotifications,
-          value: true,
-          onChange: { _ in
-            notificationSettings.mode = .mentions
+          selected: notificationSettings.mode == .onlyMentions,
+          value: NotificationMode.onlyMentions,
+          onChange: { mode in
+            notificationSettings.mode = mode
             notificationSettings.disableDmNotifications = true
             close()
           },

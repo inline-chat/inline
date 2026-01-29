@@ -3,6 +3,7 @@ import { setupTestDatabase, teardownTestDatabase, testUtils } from "./setup"
 import { getUserSettingsHandler } from "@in/server/realtime/handlers/user.getUserSettings"
 import { updateUserSettingsHandler } from "@in/server/realtime/handlers/user.updateUserSettings"
 import { UserSettingsNotificationsMode } from "@in/server/db/models/userSettings/types"
+import { UserSettingsModel } from "@in/server/db/models/userSettings/userSettings"
 import { NotificationSettings_Mode } from "@in/protocol/core"
 
 describe("User Settings RPC", () => {
@@ -62,5 +63,62 @@ describe("User Settings RPC", () => {
 
     expect(getResult.userSettings?.notificationSettings?.mode).toBe(NotificationSettings_Mode.MENTIONS)
     expect(getResult.userSettings?.notificationSettings?.silent).toBe(true)
+  })
+
+  test("updateUserSettings should map legacy disable DM to only-mentions", async () => {
+    const context = {
+      userId,
+      sessionId: 1,
+      connectionId: "test",
+      sendRaw: () => {},
+      sendRpcReply: () => {},
+    }
+
+    const updateInput = {
+      userSettings: {
+        notificationSettings: {
+          mode: NotificationSettings_Mode.MENTIONS,
+          disableDmNotifications: true,
+        },
+      },
+    }
+
+    await updateUserSettingsHandler(updateInput, context)
+
+    const stored = await UserSettingsModel.getGeneral(userId)
+    expect(stored?.notifications.mode).toBe(UserSettingsNotificationsMode.OnlyMentions)
+    expect(stored?.notifications.disableDmNotifications).toBe(true)
+
+    const getResult = await getUserSettingsHandler({}, context)
+    expect(getResult.userSettings?.notificationSettings?.mode).toBe(NotificationSettings_Mode.MENTIONS)
+    expect(getResult.userSettings?.notificationSettings?.disableDmNotifications).toBe(true)
+  })
+
+  test("updateUserSettings should accept only-mentions mode and downlevel on read", async () => {
+    const context = {
+      userId,
+      sessionId: 1,
+      connectionId: "test",
+      sendRaw: () => {},
+      sendRpcReply: () => {},
+    }
+
+    const updateInput = {
+      userSettings: {
+        notificationSettings: {
+          mode: NotificationSettings_Mode.ONLY_MENTIONS,
+        },
+      },
+    }
+
+    await updateUserSettingsHandler(updateInput, context)
+
+    const stored = await UserSettingsModel.getGeneral(userId)
+    expect(stored?.notifications.mode).toBe(UserSettingsNotificationsMode.OnlyMentions)
+    expect(stored?.notifications.disableDmNotifications).toBe(true)
+
+    const getResult = await getUserSettingsHandler({}, context)
+    expect(getResult.userSettings?.notificationSettings?.mode).toBe(NotificationSettings_Mode.MENTIONS)
+    expect(getResult.userSettings?.notificationSettings?.disableDmNotifications).toBe(true)
   })
 })

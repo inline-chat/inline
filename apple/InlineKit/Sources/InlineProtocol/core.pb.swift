@@ -3407,6 +3407,7 @@ public struct NotificationSettings: Sendable {
     case none // = 2
     case mentions // = 3
     case importantOnly // = 4
+    case onlyMentions // = 5
     case UNRECOGNIZED(Int)
 
     public init() {
@@ -3420,6 +3421,7 @@ public struct NotificationSettings: Sendable {
       case 2: self = .none
       case 3: self = .mentions
       case 4: self = .importantOnly
+      case 5: self = .onlyMentions
       default: self = .UNRECOGNIZED(rawValue)
       }
     }
@@ -3431,6 +3433,7 @@ public struct NotificationSettings: Sendable {
       case .none: return 2
       case .mentions: return 3
       case .importantOnly: return 4
+      case .onlyMentions: return 5
       case .UNRECOGNIZED(let i): return i
       }
     }
@@ -3442,6 +3445,7 @@ public struct NotificationSettings: Sendable {
       .none,
       .mentions,
       .importantOnly,
+      .onlyMentions,
     ]
 
   }
@@ -10940,6 +10944,7 @@ extension NotificationSettings.Mode: SwiftProtobuf._ProtoNameProviding {
     2: .same(proto: "MODE_NONE"),
     3: .same(proto: "MODE_MENTIONS"),
     4: .same(proto: "MODE_IMPORTANT_ONLY"),
+    5: .same(proto: "MODE_ONLY_MENTIONS"),
   ]
 }
 
