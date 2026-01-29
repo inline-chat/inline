@@ -3,20 +3,23 @@
 FROM oven/bun:1 AS base
 WORKDIR /usr/src/app
 
-# Requires build/docker-workspaces (bun run docker:workspaces) before docker build.
+FROM base AS workspaces
+COPY . .
+RUN bun scripts/docker-workspace-manifests.ts /tmp/workspaces
+
 # install dependencies into temp directory
 # this will cache them and speed up future builds
 FROM base AS install
 RUN mkdir -p /temp/dev
 COPY package.json bun.lock /temp/dev/
-COPY build/docker-workspaces/ /temp/dev/
+COPY --from=workspaces /tmp/workspaces/ /temp/dev/
 COPY desktop/package.json /temp/dev/desktop/
 RUN cd /temp/dev && bun install --frozen-lockfile
 
 # install with --production (exclude devDependencies)
 RUN mkdir -p /temp/prod
 COPY package.json bun.lock /temp/prod/
-COPY build/docker-workspaces/ /temp/prod/
+COPY --from=workspaces /tmp/workspaces/ /temp/prod/
 COPY desktop/package.json /temp/prod/desktop/
 RUN cd /temp/prod && bun install --frozen-lockfile --production
 
@@ -43,7 +46,7 @@ RUN cd server && bun run build
 FROM base AS release
 COPY --from=install /temp/prod/node_modules node_modules
 COPY --from=prerelease /usr/src/app/server/dist ./server/dist
-COPY --from=prerelease /usr/src/app/build/docker-workspaces/ ./
+COPY --from=workspaces /tmp/workspaces/ ./
 COPY --from=prerelease /usr/src/app/package.json .
 COPY --from=prerelease /usr/src/app/bun.lock .
 COPY --from=prerelease /usr/src/app/desktop/package.json ./desktop/
