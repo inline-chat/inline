@@ -279,20 +279,79 @@ extension AppDelegate {
       return
     }
 
-    if let peerId = getPeerFromNotification(userInfo) {
+    let threadIdentifier = response.notification.request.content.threadIdentifier
+
+    if let peerId = resolvePeerFromNotification(userInfo, threadIdentifier: threadIdentifier) {
       Task(priority: .userInitiated) { @MainActor in
-        self.dependencies.nav.open(.chat(peer: peerId))
+        NSApp.activate(ignoringOtherApps: true)
+        setupMainWindow()
+        if let controller = self.mainWindowController as? MainWindowController {
+          await controller.openChatFromNotification(peer: peerId)
+        } else {
+          self.dependencies.nav.open(.chat(peer: peerId))
+        }
+        await self.unarchiveIfNeeded(peer: peerId)
       }
+    } else {
+      log.warning("Failed to resolve peer from notification userInfo")
     }
   }
 
-  func getPeerFromNotification(_ userInfo: [String: Any]) -> Peer? {
-    if let isThread = userInfo["isThread"] as? Bool, let threadId = userInfo["threadId"] as? Int64, isThread {
-      .thread(id: threadId)
-    } else if let peerUserId = userInfo["userId"] as? Int64 {
-      .user(id: peerUserId)
-    } else {
-      nil
+  func resolvePeerFromNotification(_ userInfo: [String: Any], threadIdentifier: String) -> Peer? {
+    let coercedThreadId = coerceThreadId(userInfo["threadId"]) ?? coerceThreadId(threadIdentifier)
+    if let isThread = userInfo["isThread"] as? Bool,
+       isThread
+    {
+      if let threadId = coercedThreadId {
+        return .thread(id: threadId)
+      }
+    }
+
+    if let peerUserId = coerceInt64(userInfo["userId"]) {
+      return .user(id: peerUserId)
+    }
+
+    if let threadId = coercedThreadId {
+      if let chat = try? AppDatabase.shared.reader.read({ db in
+        try Chat.fetchOne(db, id: threadId)
+      }) {
+        if let peerUserId = chat.peerUserId {
+          return .user(id: peerUserId)
+        }
+      }
+      return .thread(id: threadId)
+    }
+
+    return nil
+  }
+
+  private func coerceInt64(_ value: Any?) -> Int64? {
+    if let int64 = value as? Int64 { return int64 }
+    if let int = value as? Int { return Int64(int) }
+    if let number = value as? NSNumber { return number.int64Value }
+    if let string = value as? String { return Int64(string) }
+    return nil
+  }
+
+  private func coerceThreadId(_ value: Any?) -> Int64? {
+    if let threadId = coerceInt64(value) { return threadId }
+    if let string = value as? String {
+      let normalized = string.replacingOccurrences(of: "chat_", with: "")
+      return Int64(normalized)
+    }
+    return nil
+  }
+
+  @MainActor
+  private func unarchiveIfNeeded(peer: Peer) async {
+    do {
+      let dialog = try await dependencies.database.reader.read { db in
+        try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peer))
+      }
+      guard dialog?.archived == true else { return }
+      try await dependencies.data.updateDialog(peerId: peer, archived: false)
+    } catch {
+      log.error("Failed to unarchive chat \(peer.toString())", error: error)
     }
   }
 

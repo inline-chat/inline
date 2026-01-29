@@ -103,6 +103,11 @@ class MainWindowController: NSWindowController, NSWindowDelegate {
     setupWindowFor(route: nav.currentRoute)
   }
 
+  @MainActor
+  func openChatFromNotification(peer: Peer) async {
+    await nav2.openChat(peer: peer)
+  }
+
   private func switchTopLevel(_ route: TopLevelRoute) {
     currentTopLevelRoute = route
     switch route {

@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import GRDB
 import InlineKit
 import Logger
 import Observation
@@ -219,6 +220,37 @@ struct Nav2Entry: Codable {
     activateTab(at: tabs.count - 1, routeOverride: .empty)
   }
 
+  @MainActor
+  func openChat(peer: Peer, space: Space? = nil, database: AppDatabase = .shared) async {
+    switch peer {
+      case let .thread(threadId):
+        let resolvedSpaceId: Int64? = if let space {
+          space.id
+        } else {
+          await resolveThreadSpaceId(threadId: threadId, database: database)
+        }
+
+        if let space {
+          openSpace(space)
+        } else if let spaceId = resolvedSpaceId {
+          await openSpace(id: spaceId, database: database)
+        } else {
+          openHomeTabIfNeeded()
+        }
+
+        navigate(to: .chat(peer: peer))
+
+      case let .user(userId):
+        if let activeSpaceId = activeTab.spaceId {
+          let isMember = await isMemberOfSpace(userId: userId, spaceId: activeSpaceId, database: database)
+          if isMember == false {
+            openHomeTabIfNeeded()
+          }
+        }
+        navigate(to: .chat(peer: peer))
+    }
+  }
+
   // MARK: - Initialization & Persistence
 
   init() {
@@ -377,6 +409,61 @@ struct Nav2Entry: Codable {
       activeTabIndex = newIndex
     } else {
       activeTabIndex = 0
+    }
+  }
+
+  @MainActor
+  private func openHomeTabIfNeeded() {
+    if case .home = activeTab { return }
+    if let index = tabs.firstIndex(of: .home) {
+      setActiveTab(index: index)
+    }
+  }
+
+  @MainActor
+  private func openSpace(id spaceId: Int64, database: AppDatabase) async {
+    if let space = await fetchSpace(id: spaceId, database: database) {
+      openSpace(space)
+    } else {
+      openSpace(Space(id: spaceId, name: "Space", date: Date()))
+    }
+  }
+
+  private func resolveThreadSpaceId(threadId: Int64, database: AppDatabase) async -> Int64? {
+    do {
+      let chat = try await database.reader.read { db in
+        try Chat.filter(Column("id") == threadId).fetchOne(db)
+      }
+      return chat?.spaceId
+    } catch {
+      log.error("Failed to resolve thread space id", error: error)
+      return nil
+    }
+  }
+
+  private func fetchSpace(id spaceId: Int64, database: AppDatabase) async -> Space? {
+    do {
+      return try await database.reader.read { db in
+        try Space.fetchOne(db, id: spaceId)
+      }
+    } catch {
+      log.error("Failed to fetch space \(spaceId)", error: error)
+      return nil
+    }
+  }
+
+  private func isMemberOfSpace(userId: Int64, spaceId: Int64, database: AppDatabase) async -> Bool {
+    do {
+      let member = try await database.reader.read { db in
+        try Member
+          .filter(Member.Columns.userId == userId)
+          .filter(Member.Columns.spaceId == spaceId)
+          .fetchOne(db)
+      }
+      return member != nil
+    } catch {
+      log.error("Failed to check membership for user \(userId) in space \(spaceId)", error: error)
+      return false
     }
   }
 }
