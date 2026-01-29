@@ -1,19 +1,22 @@
 FROM oven/bun:1 AS base
 WORKDIR /usr/src/app
 
-# Requires build/docker-workspaces (bun run docker:workspaces) before docker build.
+FROM base AS workspaces
+COPY . .
+RUN bun scripts/docker-workspace-manifests.ts /tmp/workspaces
+
 # Install dependencies into temp directory with devDependencies
 FROM base AS development-dependencies
 RUN mkdir -p /temp/dev
 COPY package.json bun.lock /temp/dev/
-COPY build/docker-workspaces/ /temp/dev/
+COPY --from=workspaces /tmp/workspaces/ /temp/dev/
 RUN cd /temp/dev && bun install --frozen-lockfile
 
 # Install production dependencies only
 FROM base AS production-dependencies
 RUN mkdir -p /temp/prod
 COPY package.json bun.lock /temp/prod/
-COPY build/docker-workspaces/ /temp/prod/
+COPY --from=workspaces /tmp/workspaces/ /temp/prod/
 RUN cd /temp/prod && bun install --frozen-lockfile --production
 
 # Build stage
