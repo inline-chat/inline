@@ -72,25 +72,36 @@ struct NotificationSettingsButton: View {
           value: NotificationMode.all,
           onChange: {
             notificationSettings.mode = $0
+            notificationSettings.disableDmNotifications = false
             close()
           },
         )
 
         NotificationSettingsItem(
           systemImage: "at",
-          title: "Messages to you",
+          title: "Any message to you",
           description: "Mentions, direct messages, and replies to you",
-          selected: notificationSettings.mode == .mentions,
+          selected: notificationSettings.mode == .mentions && !notificationSettings.disableDmNotifications,
           value: NotificationMode.mentions,
           onChange: {
             notificationSettings.mode = $0
+            notificationSettings.disableDmNotifications = false
             close()
           },
-          menuContent: AnyView(
-            Toggle(isOn: $notificationSettings.disableDmNotifications) {
-              Text("Disable DM notifications")
-            }
-          )
+        )
+
+        NotificationSettingsItem(
+          systemImage: "bubble.left.and.bubble.right.fill",
+          title: "Only mentions",
+          description: "Mentions and nudges still notify you",
+          selected: notificationSettings.mode == .mentions && notificationSettings.disableDmNotifications,
+          value: true,
+          onChange: { _ in
+            notificationSettings.mode = .mentions
+            notificationSettings.disableDmNotifications = true
+            close()
+          },
+          iconFontSize: 14
         )
 
         NotificationSettingsItem(
@@ -101,6 +112,7 @@ struct NotificationSettingsButton: View {
           value: NotificationMode.importantOnly,
           onChange: {
             notificationSettings.mode = $0
+            notificationSettings.disableDmNotifications = false
             close()
           },
         )
@@ -113,6 +125,7 @@ struct NotificationSettingsButton: View {
           value: NotificationMode.none,
           onChange: {
             notificationSettings.mode = $0
+            notificationSettings.disableDmNotifications = false
             close()
           },
         )
@@ -142,6 +155,7 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
   var onChange: (Value) -> Void
   var customizeAction: (() -> Void)?
   var menuContent: AnyView?
+  var iconFontSize: CGFloat? = nil
   let theme = ThemeManager.shared.selected
 
   var body: some View {
@@ -155,7 +169,7 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
             .frame(width: 36, height: 36)
             .overlay {
               Image(systemName: systemImage)
-                .font(.system(size: 18, weight: .medium))
+                .font(.system(size: iconFontSize ?? 18, weight: .medium))
                 .foregroundStyle(selected ? Color.white : Color(.systemGray))
             }
 
