@@ -888,6 +888,9 @@
     "Retry" : {
 
     },
+    "Return to previous UI" : {
+
+    },
     "Save Photo" : {
 
     },
@@ -1097,6 +1100,9 @@
           }
         }
       }
+    },
+    "WIP" : {
+
     },
     "xxxxxx" : {
       "comment" : "Code input placeholder",
