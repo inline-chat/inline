@@ -19,6 +19,7 @@ struct InlineRootView: View {
 }
 
 private struct ExperimentalRootView: View {
+  @AppStorage("enableExperimentalView") private var enableExperimentalView = true
   @State private var showSettings = false
   @StateObject private var onboardingNavigation = OnboardingNavigation()
   @StateObject private var mainViewRouter = MainViewRouter()
@@ -26,8 +27,17 @@ private struct ExperimentalRootView: View {
 
   var body: some View {
     NavigationStack {
-      Text("")
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+      VStack(spacing: 12) {
+        Text("WIP")
+          .font(.title2)
+          .fontWeight(.semibold)
+
+        Button("Return to previous UI") {
+          enableExperimentalView = false
+        }
+        .buttonStyle(.borderedProminent)
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         .toolbar {
           ToolbarItem(placement: .topBarTrailing) {
             Button {
