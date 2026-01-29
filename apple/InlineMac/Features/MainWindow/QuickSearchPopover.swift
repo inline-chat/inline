@@ -1,6 +1,5 @@
 import AppKit
 import Combine
-import GRDB
 import InlineKit
 import InlineUI
 import Logger
@@ -225,9 +224,18 @@ final class QuickSearchViewModel: ObservableObject {
   fileprivate func selectLocal(_ result: QuickSearchLocalItem) {
     switch result {
       case let .thread(threadInfo):
-        openChat(peer: .thread(id: threadInfo.chat.id), space: threadInfo.space)
+        Task { @MainActor in
+          await dependencies.nav2?.openChat(
+            peer: .thread(id: threadInfo.chat.id),
+            space: threadInfo.space
+          )
+          unarchiveIfNeeded(peer: .thread(id: threadInfo.chat.id))
+        }
       case let .user(user):
-        openUserChat(userId: user.id)
+        Task { @MainActor in
+          await dependencies.nav2?.openChat(peer: .user(id: user.id))
+          unarchiveIfNeeded(peer: .user(id: user.id))
+        }
       case let .space(space):
         dependencies.nav2?.openSpace(space)
       case let .command(command):
@@ -237,73 +245,17 @@ final class QuickSearchViewModel: ObservableObject {
 
   func selectRemote(_ user: ApiUser) {
     Task { @MainActor in
-      let activeSpaceId = dependencies.nav2?.activeTab.spaceId
-      async let isMemberTask = isMemberOfCurrentSpace(userId: user.id, activeSpaceId: activeSpaceId)
       do {
         let hasDialog = await hasExistingDialog(userId: user.id)
         if hasDialog == false {
           try await dependencies.data.createPrivateChatWithOptimistic(user: user)
         }
-        let isMember = await isMemberTask
-        if activeSpaceId != nil, isMember == false {
-          openHomeTabIfNeeded()
-        }
-        dependencies.nav2?.navigate(to: .chat(peer: .user(id: user.id)))
+        await dependencies.nav2?.openChat(peer: .user(id: user.id))
         unarchiveIfNeeded(peer: .user(id: user.id))
       } catch {
         Log.shared.error("Failed to open a private chat with \(user.anyName)", error: error)
         dependencies.overlay.showError(message: "Failed to open a private chat with \(user.anyName)")
       }
-    }
-  }
-
-  private func openChat(peer: Peer, space: Space?) {
-    guard let nav2 = dependencies.nav2 else { return }
-    if let space {
-      nav2.openSpace(space)
-    } else {
-      openHomeTabIfNeeded()
-    }
-    unarchiveIfNeeded(peer: peer)
-    nav2.navigate(to: .chat(peer: peer))
-  }
-
-  private func openUserChat(userId: Int64) {
-    Task(priority: .userInitiated) { @MainActor in
-      let activeSpaceId = dependencies.nav2?.activeTab.spaceId
-      let isMember = await isMemberOfCurrentSpace(userId: userId, activeSpaceId: activeSpaceId)
-      if activeSpaceId != nil, isMember == false {
-        openHomeTabIfNeeded()
-      }
-      dependencies.nav2?.navigate(to: .chat(peer: .user(id: userId)))
-      unarchiveIfNeeded(peer: .user(id: userId))
-    }
-  }
-
-  private func openHomeTabIfNeeded() {
-    guard let nav2 = dependencies.nav2 else { return }
-    if case .home = nav2.activeTab { return }
-    if let index = nav2.tabs.firstIndex(where: { tab in
-      if case .home = tab { return true }
-      return false
-    }) {
-      nav2.setActiveTab(index: index)
-    }
-  }
-
-  private func isMemberOfCurrentSpace(userId: Int64, activeSpaceId: Int64?) async -> Bool {
-    guard let activeSpaceId else { return false }
-    do {
-      let member = try await dependencies.database.reader.read { db in
-        try Member
-          .filter(Member.Columns.userId == userId)
-          .filter(Member.Columns.spaceId == activeSpaceId)
-          .fetchOne(db)
-      }
-      return member != nil
-    } catch {
-      Log.shared.error("Failed to check membership for user \(userId) in space \(activeSpaceId)", error: error)
-      return false
     }
   }
 
