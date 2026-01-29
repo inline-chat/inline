@@ -768,7 +768,13 @@ async function sendNotificationToUser({
   let needsExplicitMacNotification = false
   let reason = UpdateNewMessageNotification_Reason.UNSPECIFIED
   let userSettings = await getCachedUserSettings(userId)
-  if (userSettings?.notifications.mode === UserSettingsNotificationsMode.None && !isUrgentNudge) {
+  const rawMode = userSettings?.notifications.mode
+  const legacyOnlyMentions =
+    rawMode === UserSettingsNotificationsMode.OnlyMentions ||
+    (rawMode === UserSettingsNotificationsMode.Mentions && userSettings?.notifications.disableDmNotifications)
+  const effectiveMode = legacyOnlyMentions ? UserSettingsNotificationsMode.OnlyMentions : rawMode
+
+  if (effectiveMode === UserSettingsNotificationsMode.None && !isUrgentNudge) {
     // Do not notify
     return
   }
@@ -778,22 +784,31 @@ async function sendNotificationToUser({
   const isReplyToUser = repliedToSenderId === userId
   const isExplicitlyMentioned = messageEntities ? isUserMentioned(messageEntities, userId) : false
 
-  if (isDM && userSettings?.notifications.disableDmNotifications && !isNudge && !isExplicitlyMentioned) {
+  if (
+    isDM &&
+    effectiveMode === UserSettingsNotificationsMode.OnlyMentions &&
+    !isNudge &&
+    !isExplicitlyMentioned
+  ) {
     return
   }
 
-  const isMentioned = isDM || isExplicitlyMentioned || isReplyToUser
+  const countsDmAsMention = effectiveMode !== UserSettingsNotificationsMode.OnlyMentions
+  const isMentioned = isExplicitlyMentioned || isReplyToUser || (countsDmAsMention && isDM)
   const requiresNotification = isNudge || evalResult?.notifyUserIds?.includes(userId)
 
   // Mentions
-  if (userSettings?.notifications.mode === UserSettingsNotificationsMode.Mentions) {
+  if (
+    effectiveMode === UserSettingsNotificationsMode.Mentions ||
+    effectiveMode === UserSettingsNotificationsMode.OnlyMentions
+  ) {
     if (
       // Not mentioned
       !isMentioned &&
       // Not notified
       !requiresNotification &&
       // Not DMs - always send for DMs if it's set to "Mentions"
-      !isDM
+      !(effectiveMode === UserSettingsNotificationsMode.Mentions && isDM)
     ) {
       // Do not notify
       return
@@ -803,7 +818,7 @@ async function sendNotificationToUser({
   }
 
   // Important only
-  if (userSettings?.notifications.mode === UserSettingsNotificationsMode.ImportantOnly) {
+  if (effectiveMode === UserSettingsNotificationsMode.ImportantOnly) {
     if (!isMentioned || !requiresNotification) {
       // Do not notify
       return

@@ -8,6 +8,7 @@ export const encodeUserSettings = ({ general }: { general?: UserSettingsGeneral 
 
   if (general?.notifications) {
     let mode: NotificationSettings_Mode
+    let disableDmNotifications = general.notifications.disableDmNotifications
     switch (general.notifications.mode) {
       case UserSettingsNotificationsMode.All:
         mode = NotificationSettings_Mode.ALL
@@ -21,6 +22,10 @@ export const encodeUserSettings = ({ general }: { general?: UserSettingsGeneral 
       case UserSettingsNotificationsMode.ImportantOnly:
         mode = NotificationSettings_Mode.IMPORTANT_ONLY
         break
+      case UserSettingsNotificationsMode.OnlyMentions:
+        mode = NotificationSettings_Mode.MENTIONS
+        disableDmNotifications = true
+        break
       default:
         mode = NotificationSettings_Mode.UNSPECIFIED
         break
@@ -29,7 +34,7 @@ export const encodeUserSettings = ({ general }: { general?: UserSettingsGeneral 
     notificationSettings = {
       mode,
       silent: general.notifications.silent,
-      disableDmNotifications: general.notifications.disableDmNotifications,
+      disableDmNotifications,
       zenModeRequiresMention: general.notifications.zenModeRequiresMention,
       zenModeUsesDefaultRules: general.notifications.zenModeUsesDefaultRules,
       zenModeCustomRules: general.notifications.zenModeCustomRules,

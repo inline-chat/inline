@@ -2238,7 +2238,11 @@ export enum NotificationSettings_Mode {
     /**
      * @generated from protobuf enum value: MODE_IMPORTANT_ONLY = 4;
      */
-    IMPORTANT_ONLY = 4
+    IMPORTANT_ONLY = 4,
+    /**
+     * @generated from protobuf enum value: MODE_ONLY_MENTIONS = 5;
+     */
+    ONLY_MENTIONS = 5
 }
 /**
  * @generated from protobuf message UpdateUserSettingsInput

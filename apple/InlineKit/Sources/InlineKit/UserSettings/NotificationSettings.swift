@@ -24,21 +24,22 @@ public class NotificationSettingsManager: ObservableObject, Codable, @unchecked 
   // MARK: - Protocol
 
   init(from: InlineProtocol.NotificationSettings) {
-    mode = switch from.mode {
-      case .all: .all
-      case .mentions: .mentions
-      case .none: .none
-      case .importantOnly: .importantOnly
-      default: .all
-    }
+    let hasOnlyMentions = from.mode == .onlyMentions || (from.mode == .mentions && from.disableDmNotifications)
+    mode =
+      hasOnlyMentions
+        ? .onlyMentions
+        : switch from.mode {
+          case .all: .all
+          case .mentions: .mentions
+          case .none: .none
+          case .importantOnly: .importantOnly
+          case .onlyMentions: .onlyMentions
+          default: .all
+        }
 
     silent = from.silent
 
-    if from.hasDisableDmNotifications {
-      disableDmNotifications = from.disableDmNotifications
-    } else {
-      disableDmNotifications = false
-    }
+    disableDmNotifications = hasOnlyMentions
 
     if from.hasZenModeRequiresMention {
       requiresMention = from.zenModeRequiresMention
@@ -58,19 +59,22 @@ public class NotificationSettingsManager: ObservableObject, Codable, @unchecked 
   }
 
   func update(from: InlineProtocol.NotificationSettings) {
-    mode = switch from.mode {
-      case .all: .all
-      case .mentions: .mentions
-      case .none: .none
-      case .importantOnly: .importantOnly
-      case .unspecified: .all
-      case .UNRECOGNIZED: .all
-    }
+    let hasOnlyMentions = from.mode == .onlyMentions || (from.mode == .mentions && from.disableDmNotifications)
+    mode =
+      hasOnlyMentions
+        ? .onlyMentions
+        : switch from.mode {
+          case .all: .all
+          case .mentions: .mentions
+          case .none: .none
+          case .importantOnly: .importantOnly
+          case .onlyMentions: .onlyMentions
+          case .unspecified: .all
+          case .UNRECOGNIZED: .all
+        }
 
     silent = from.silent
-    if from.hasDisableDmNotifications {
-      disableDmNotifications = from.disableDmNotifications
-    }
+    disableDmNotifications = hasOnlyMentions
     if from.hasZenModeRequiresMention {
       requiresMention = from.zenModeRequiresMention
     }
@@ -89,9 +93,10 @@ public class NotificationSettingsManager: ObservableObject, Codable, @unchecked 
         case .mentions: .mentions
         case .importantOnly: .importantOnly
         case .none: .none
+        case .onlyMentions: .onlyMentions
       }
       $0.silent = silent
-      $0.disableDmNotifications = disableDmNotifications
+      $0.disableDmNotifications = mode == .onlyMentions
       $0.zenModeRequiresMention = requiresMention
       $0.zenModeUsesDefaultRules = usesDefaultRules
       $0.zenModeCustomRules = customRules
@@ -107,9 +112,12 @@ public class NotificationSettingsManager: ObservableObject, Codable, @unchecked 
   public required init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
 
-    mode = try container.decode(NotificationMode.self, forKey: .mode)
+    let decodedMode = try container.decode(NotificationMode.self, forKey: .mode)
+    let decodedDisable = try container.decode(Bool.self, forKey: .disableDmNotifications)
+    let hasOnlyMentions = decodedMode == .onlyMentions || (decodedMode == .mentions && decodedDisable)
+    mode = hasOnlyMentions ? .onlyMentions : decodedMode
     silent = try container.decode(Bool.self, forKey: .silent)
-    disableDmNotifications = try container.decode(Bool.self, forKey: .disableDmNotifications)
+    disableDmNotifications = hasOnlyMentions
     requiresMention = try container.decode(Bool.self, forKey: .requiresMention)
     usesDefaultRules = try container.decode(Bool.self, forKey: .usesDefaultRules)
     customRules = try container.decode(String.self, forKey: .customRules)
@@ -120,7 +128,7 @@ public class NotificationSettingsManager: ObservableObject, Codable, @unchecked 
 
     try container.encode(mode, forKey: .mode)
     try container.encode(silent, forKey: .silent)
-    try container.encode(disableDmNotifications, forKey: .disableDmNotifications)
+    try container.encode(mode == .onlyMentions, forKey: .disableDmNotifications)
     try container.encode(requiresMention, forKey: .requiresMention)
     try container.encode(usesDefaultRules, forKey: .usesDefaultRules)
     try container.encode(customRules, forKey: .customRules)
@@ -134,4 +142,5 @@ public enum NotificationMode: String, Codable, Sendable {
   case none
   case mentions
   case importantOnly
+  case onlyMentions
 }

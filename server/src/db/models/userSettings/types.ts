@@ -5,6 +5,7 @@ export enum UserSettingsNotificationsMode {
   None = "2",
   Mentions = "3",
   ImportantOnly = "4",
+  OnlyMentions = "5",
 }
 
 export const UserSettingsGeneralSchema = z.object({
