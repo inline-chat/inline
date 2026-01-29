@@ -27,6 +27,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-26
@@ -194,6 +197,14 @@ jobs:
             tag="tip"
           fi
           echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Update Tip Tag
+        if: steps.release_tag.outputs.tag == 'tip'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -fa tip -m "Latest Sparkle beta release" "${GITHUB_SHA}"
+          git push --force origin tip
 
       - name: Upload DMG to R2
         env:
