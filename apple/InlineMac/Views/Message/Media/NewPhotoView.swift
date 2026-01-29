@@ -58,8 +58,8 @@ final class NewPhotoView: NSView {
   private let maskLayer = CAShapeLayer()
   var topLeftRadius: CGFloat = Theme.messageBubbleCornerRadius - 1
   var topRightRadius: CGFloat = Theme.messageBubbleCornerRadius - 1
-  var bottomLeftRadius: CGFloat = 2.0
-  var bottomRightRadius: CGFloat = 2.0
+  var bottomLeftRadius: CGFloat = 0.0
+  var bottomRightRadius: CGFloat = 0.0
 
   var haveAddedImageView = false
 
@@ -142,8 +142,8 @@ final class NewPhotoView: NSView {
     topRightRadius = topRadius
 
     if hasText {
-      bottomLeftRadius = 2.0
-      bottomRightRadius = 2.0
+      bottomLeftRadius = 0.0
+      bottomRightRadius = 0.0
     } else {
       bottomLeftRadius = bubbleRadius
       bottomRightRadius = bubbleRadius
