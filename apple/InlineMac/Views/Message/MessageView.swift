@@ -1834,6 +1834,7 @@ class MessageViewAppKit: NSView {
   }
 
   @objc private func addReaction() {
+    focusWindowIfNeeded()
     // Show reaction overlay
     showReactionOverlay()
   }
