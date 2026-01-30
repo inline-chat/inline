@@ -160,7 +160,11 @@ final class AppSettings: ObservableObject {
     } else {
       appearance = .system
     }
-    showSidebarMessagePreview = UserDefaults.standard.bool(forKey: "showSidebarMessagePreview")
+    if let storedShowPreview = UserDefaults.standard.object(forKey: "showSidebarMessagePreview") as? Bool {
+      showSidebarMessagePreview = storedShowPreview
+    } else {
+      showSidebarMessagePreview = true
+    }
     disableNotificationSound = UserDefaults.standard.bool(forKey: "disableNotificationSound")
     showDockBadgeUnreadDMs = UserDefaults.standard.object(forKey: "showDockBadgeUnreadDMs") as? Bool ?? true
     enableNewMacUI = UserDefaults.standard.bool(forKey: "enableNewMacUI")
