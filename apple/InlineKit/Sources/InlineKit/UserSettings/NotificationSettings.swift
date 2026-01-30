@@ -25,17 +25,24 @@ public class NotificationSettingsManager: ObservableObject, Codable, @unchecked 
 
   init(from: InlineProtocol.NotificationSettings) {
     let hasOnlyMentions = from.mode == .onlyMentions || (from.mode == .mentions && from.disableDmNotifications)
-    mode =
-      hasOnlyMentions
-        ? .onlyMentions
-        : switch from.mode {
-          case .all: .all
-          case .mentions: .mentions
-          case .none: .none
-          case .importantOnly: .importantOnly
-          case .onlyMentions: .onlyMentions
-          default: .all
-        }
+    if hasOnlyMentions {
+      mode = .onlyMentions
+    } else {
+      switch from.mode {
+      case .all:
+        mode = .all
+      case .mentions:
+        mode = .mentions
+      case .none:
+        mode = .none
+      case .importantOnly:
+        mode = .importantOnly
+      case .onlyMentions:
+        mode = .onlyMentions
+      default:
+        mode = .all
+      }
+    }
 
     silent = from.silent
 
@@ -60,18 +67,24 @@ public class NotificationSettingsManager: ObservableObject, Codable, @unchecked 
 
   func update(from: InlineProtocol.NotificationSettings) {
     let hasOnlyMentions = from.mode == .onlyMentions || (from.mode == .mentions && from.disableDmNotifications)
-    mode =
-      hasOnlyMentions
-        ? .onlyMentions
-        : switch from.mode {
-          case .all: .all
-          case .mentions: .mentions
-          case .none: .none
-          case .importantOnly: .importantOnly
-          case .onlyMentions: .onlyMentions
-          case .unspecified: .all
-          case .UNRECOGNIZED: .all
-        }
+    if hasOnlyMentions {
+      mode = .onlyMentions
+    } else {
+      switch from.mode {
+      case .all:
+        mode = .all
+      case .mentions:
+        mode = .mentions
+      case .none:
+        mode = .none
+      case .importantOnly:
+        mode = .importantOnly
+      case .onlyMentions:
+        mode = .onlyMentions
+      case .unspecified, .UNRECOGNIZED:
+        mode = .all
+      }
+    }
 
     silent = from.silent
     disableDmNotifications = hasOnlyMentions
