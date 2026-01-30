@@ -431,11 +431,19 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
         if hasText || hasAttachments {
           await sendTextAndAttachments(replyToMessageId: nil, queueOnly: true)
         }
-        _ = await Api.realtime.sendQueued(.forwardMessages(
-          fromPeerId: forwardContext.fromPeerId,
-          toPeerId: peerId,
-          messageIds: forwardContext.messageIds
-        ))
+        do {
+          let result = try await Api.realtime.send(.forwardMessages(
+            fromPeerId: forwardContext.fromPeerId,
+            toPeerId: peerId,
+            messageIds: forwardContext.messageIds
+          ))
+
+          if case let .forwardMessages(response) = result, response.updates.isEmpty {
+            _ = await Api.realtime.sendQueued(.getChatHistory(peer: peerId))
+          }
+        } catch {
+          log.error("Forward failed", error: error)
+        }
       }
 
       ChatState.shared.clearForwarding(peer: peerId)
