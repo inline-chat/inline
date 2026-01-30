@@ -337,7 +337,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
     let rawText = textView.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     let hasText = !rawText.isEmpty
-    let hasAttachments = !attachmentItems.isEmpty
+    let attachmentItemsSnapshot = attachmentItems
+    let hasAttachments = !attachmentItemsSnapshot.isEmpty
 
     // Can't send if no text, no attachments, and not forwarding
     guard hasText || hasAttachments || forwardContext != nil else { return }
@@ -357,11 +358,21 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       rawText
     }
 
-    func sendTextAndAttachments(replyToMessageId: Int64?) {
-      if attachmentItems.isEmpty {
-        Task(priority: .userInitiated) { @MainActor in
-          try await Api.realtime.send(
-            .sendMessage(
+    func sendTextAndAttachments(replyToMessageId: Int64?, queueOnly: Bool) async {
+      if attachmentItemsSnapshot.isEmpty {
+        if queueOnly {
+          _ = await Api.realtime.sendQueued(.sendMessage(
+            text: textFromAttributedString ?? text ?? "",
+            peerId: peerId,
+            chatId: chatId,
+            replyToMsgId: replyToMessageId,
+            isSticker: nil,
+            entities: entities,
+            sendMode: sendMode
+          ))
+        } else {
+          do {
+            try await Api.realtime.send(.sendMessage(
               text: textFromAttributedString ?? text ?? "",
               peerId: peerId,
               chatId: chatId,
@@ -369,11 +380,13 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
               isSticker: nil,
               entities: entities,
               sendMode: sendMode
-            )
-          )
+            ))
+          } catch {
+            log.error("Send message failed", error: error)
+          }
         }
       } else {
-        for (index, (_, attachment)) in attachmentItems.enumerated() {
+        for (index, (_, attachment)) in attachmentItemsSnapshot.enumerated() {
           log.debug("Sending attachment: \(attachment)")
           let isFirst = index == 0
 
@@ -414,25 +427,23 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
         log.error("Forward failed: empty message ids")
         return
       }
-      if hasText || hasAttachments {
-        sendTextAndAttachments(replyToMessageId: nil)
-      }
       Task(priority: .userInitiated) { @MainActor in
-        do {
-          try await Api.realtime.send(.forwardMessages(
-            fromPeerId: forwardContext.fromPeerId,
-            toPeerId: peerId,
-            messageIds: forwardContext.messageIds
-          ))
-        } catch {
-          log.error("Forward failed", error: error)
+        if hasText || hasAttachments {
+          await sendTextAndAttachments(replyToMessageId: nil, queueOnly: true)
         }
+        _ = await Api.realtime.sendQueued(.forwardMessages(
+          fromPeerId: forwardContext.fromPeerId,
+          toPeerId: peerId,
+          messageIds: forwardContext.messageIds
+        ))
       }
 
       ChatState.shared.clearForwarding(peer: peerId)
     } else {
       let replyToMessageId = state.replyingMessageId
-      sendTextAndAttachments(replyToMessageId: replyToMessageId)
+      Task(priority: .userInitiated) { @MainActor in
+        await sendTextAndAttachments(replyToMessageId: replyToMessageId, queueOnly: false)
+      }
 
       ChatState.shared.clearReplyingMessageId(peer: peerId)
     }

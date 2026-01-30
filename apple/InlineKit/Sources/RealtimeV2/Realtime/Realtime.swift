@@ -316,6 +316,19 @@ public actor RealtimeV2 {
     }
   }
 
+  /// Send a transaction without waiting for a result.
+  /// Optimistic updates still run immediately, and the transaction is queued in order.
+  @discardableResult
+  public nonisolated func sendQueued(_ transaction: any Transaction2) async -> TransactionId {
+    // run optimistic immediately
+    await transaction.optimistic()
+
+    // add to execution queue
+    let transactionId = await transactions.queue(transaction: transaction)
+    log.trace("Queued transaction \(transaction.debugDescription)")
+    return transactionId
+  }
+
   /// Returns a stream of connection state changes that can be consumed from any task.
   public func connectionStates() -> AsyncStream<RealtimeConnectionState> {
     let id = UUID()
