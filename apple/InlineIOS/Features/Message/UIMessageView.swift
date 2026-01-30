@@ -123,6 +123,23 @@ class UIMessageView: UIView {
     return "Forwarded from: \(forwardHeaderTitle)"
   }
 
+  private var isForwardFromSelfDm: Bool {
+    guard let forwardFromUserId = message.forwardFromUserId else { return false }
+    let currentUserId = Auth.shared.getCurrentUserId() ?? 0
+    guard forwardFromUserId == currentUserId else { return false }
+    if message.forwardFromPeerUserId != nil {
+      return true
+    }
+    if let forwardChat = fullMessage.forwardFromChatInfo, forwardChat.type == .privateChat {
+      return true
+    }
+    return false
+  }
+
+  private var shouldShowForwardHeader: Bool {
+    message.forwardFromUserId != nil && !isForwardFromSelfDm
+  }
+
   var message: Message {
     fullMessage.message
   }
@@ -513,7 +530,7 @@ class UIMessageView: UIView {
   }
 
   private func setupForwardHeaderIfNeeded() {
-    guard message.forwardFromUserId != nil else { return }
+    guard shouldShowForwardHeader else { return }
     forwardHeaderLabel.textColor = forwardHeaderTextColor
     forwardHeaderLabel.text = forwardHeaderText
     if shouldPadForwardHeader {
