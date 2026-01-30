@@ -32,7 +32,7 @@ class ComposeEmbedViewContent: UIView, UIGestureRecognizerDelegate {
   }()
 
   private lazy var closeButton: UIButton = {
-    let button = UIButton()
+    let button = ComposeEmbedCloseButton()
     let config = UIImage.SymbolConfiguration(pointSize: 17)
     button.setImage(UIImage(systemName: "xmark", withConfiguration: config), for: .normal)
     button.tintColor = .secondaryLabel
@@ -150,19 +150,16 @@ class ComposeEmbedViewContent: UIView, UIGestureRecognizerDelegate {
   }
 
   @objc private func closeButtonTapped() {
+    if let composeView = findComposeView() {
+      composeView.dismissEmbed(mode: mode)
+      return
+    }
+
     switch mode {
     case .reply:
       ChatState.shared.clearReplyingMessageId(peer: peerId)
     case .edit:
       ChatState.shared.clearEditingMessageId(peer: peerId)
-      if let composeView = findComposeView() {
-        composeView.textView.text = ""
-        composeView.textView.showPlaceholder(true)
-        composeView.buttonDisappear()
-
-        composeView.clearDraft()
-        composeView.updateHeight()
-      }
     case .forward:
       ChatState.shared.clearForwarding(peer: peerId)
     }
@@ -201,5 +198,14 @@ class ComposeEmbedViewContent: UIView, UIGestureRecognizerDelegate {
 
   deinit {
     NotificationCenter.default.removeObserver(self)
+  }
+}
+
+private final class ComposeEmbedCloseButton: UIButton {
+  private let hitSlop: CGFloat = 10
+
+  override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+    let hitFrame = bounds.insetBy(dx: -hitSlop, dy: -hitSlop)
+    return hitFrame.contains(point)
   }
 }
