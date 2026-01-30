@@ -848,7 +848,7 @@ class ComposeAppKit: NSView {
     ignoreNextHeightChange = true
     let attributedString = trimmedAttributedString(textEditor.attributedString)
     let replyToMsgId = state.replyingToMsgId
-    let attachmentItems = attachmentItems
+    let attachmentItemsSnapshot = attachmentItems
     // keep a copy of editingMessageId before we clear it
     let editingMessageId = state.editingMsgId
     let forwardContext = state.forwardContext
@@ -857,11 +857,35 @@ class ComposeAppKit: NSView {
     // TODO: replace with `fromAttributedString`
     let (rawText, entities) = ProcessEntities.fromAttributedString(attributedString)
 
+    let hasText = !rawText.isEmpty
+    let hasAttachments = !attachmentItemsSnapshot.isEmpty
+
     // make it nil if empty
-    let text = if rawText.isEmpty, !attachmentItems.isEmpty {
+    let text = if rawText.isEmpty, hasAttachments {
       nil as String?
     } else {
       rawText
+    }
+
+    func enqueueAttachments(replyToMessageId: Int64?) {
+      for (index, (_, attachment)) in attachmentItemsSnapshot.enumerated() {
+        let isFirst = index == 0
+        _ = Transactions.shared.mutate(
+          transaction:
+          .sendMessage(
+            TransactionSendMessage(
+              text: isFirst ? text : nil,
+              peerId: peerId,
+              chatId: chatId ?? 0, // FIXME: chatId fallback
+              mediaItems: [attachment],
+              replyToMsgId: isFirst ? replyToMessageId : nil,
+              isSticker: nil,
+              entities: isFirst ? entities : nil,
+              sendMode: sendMode
+            )
+          )
+        )
+      }
     }
 
     if !canSend { return }
@@ -886,22 +910,39 @@ class ComposeAppKit: NSView {
         log.error("Forward failed: empty message ids")
         return
       }
-      Task.detached(priority: .userInitiated) {
-        do {
-          try await Api.realtime.send(.forwardMessages(
-            fromPeerId: forwardContext.fromPeerId,
-            toPeerId: self.peerId,
-            messageIds: forwardContext.messageIds
-          ))
-        } catch {
-          self.log.error("Forward failed", error: error)
+
+      if hasAttachments {
+        enqueueAttachments(replyToMessageId: nil)
+      }
+
+      Task.detached(priority: .userInitiated) { [weak self] in
+        guard let self else { return }
+
+        if hasText, !hasAttachments {
+          _ = await Api.realtime.sendQueued(
+            .sendMessage(
+              text: text,
+              peerId: self.peerId,
+              chatId: self.chatId ?? 0, // FIXME: chatId fallback
+              replyToMsgId: nil,
+              isSticker: nil,
+              entities: entities,
+              sendMode: sendMode
+            )
+          )
         }
+
+        _ = await Api.realtime.sendQueued(.forwardMessages(
+          fromPeerId: forwardContext.fromPeerId,
+          toPeerId: self.peerId,
+          messageIds: forwardContext.messageIds
+        ))
       }
       state.clearForwarding()
     }
 
     // Send message
-    else if attachmentItems.isEmpty {
+    else if attachmentItemsSnapshot.isEmpty {
       // Text-only
       // Send via V2
       Task.detached(priority: .userInitiated) { // @MainActor in
@@ -935,24 +976,7 @@ class ComposeAppKit: NSView {
 
     // With image/file/video
     else {
-      for (index, (_, attachment)) in attachmentItems.enumerated() {
-        let isFirst = index == 0
-        _ = Transactions.shared.mutate(
-          transaction:
-          .sendMessage(
-            TransactionSendMessage(
-              text: isFirst ? text : nil,
-              peerId: peerId,
-              chatId: chatId ?? 0, // FIXME: chatId fallback
-              mediaItems: [attachment],
-              replyToMsgId: isFirst ? replyToMsgId : nil,
-              isSticker: nil,
-              entities: isFirst ? entities : nil,
-              sendMode: sendMode
-            )
-          )
-        )
-      }
+      enqueueAttachments(replyToMessageId: replyToMsgId)
     }
 
     // Clear immediately
