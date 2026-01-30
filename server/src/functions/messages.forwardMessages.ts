@@ -138,7 +138,14 @@ export const forwardMessages = async (input: Input, context: FunctionContext): P
         }
       }
 
-      if (!forwardHeader) {
+      const isSelfDmMessage =
+        sourceChat.type === "private" &&
+        sourceChat.minUserId != null &&
+        sourceChat.maxUserId != null &&
+        sourceChat.minUserId !== sourceChat.maxUserId &&
+        sourceMessage.fromId === currentUserId
+
+      if (!forwardHeader && !isSelfDmMessage) {
         forwardHeader = {
           fromPeerId: normalizedFromPeer,
           fromId: sourceMessage.fromId,
