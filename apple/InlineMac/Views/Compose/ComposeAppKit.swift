@@ -1131,6 +1131,23 @@ class ComposeAppKit: NSView {
 // MARK: External Interface for file drop
 
 extension ComposeAppKit {
+  func handlePasteboardAttachments(_ attachments: [PasteboardAttachment]) {
+    for attachment in attachments {
+      switch attachment {
+        case let .image(image, url):
+          handleImageDropOrPaste(image, url)
+        case let .video(url, thumbnail):
+          Task { [weak self] in
+            await self?.addVideo(url, thumbnail: thumbnail)
+          }
+        case let .file(url, _):
+          handleFileDrop([url])
+        case let .text(text):
+          handleTextDropOrPaste(text)
+      }
+    }
+  }
+
   func handleFileDrop(_ urls: [URL]) {
     for url in urls {
       if isVideoFile(url) {
