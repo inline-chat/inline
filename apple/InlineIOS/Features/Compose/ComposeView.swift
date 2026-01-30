@@ -600,8 +600,35 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     updateSendButtonVisibility()
   }
 
+  func dismissEmbed(mode: ComposeEmbedViewContent.Mode) {
+    if let peerId {
+      switch mode {
+      case .reply:
+        ChatState.shared.clearReplyingMessageId(peer: peerId)
+      case .edit:
+        ChatState.shared.clearEditingMessageId(peer: peerId)
+        clearEditingComposeState()
+      case .forward:
+        ChatState.shared.clearForwarding(peer: peerId)
+      }
+    } else {
+      if mode == .edit {
+        clearEditingComposeState()
+      }
+    }
+
+    updateEmbedState(animated: true)
+  }
+
   private func updateEmbedState(animated: Bool) {
-    guard let peerId, let chatId else { return }
+    guard let peerId else {
+      hideEmbedView(animated: animated)
+      return
+    }
+    guard let chatId else {
+      hideEmbedView(animated: animated)
+      return
+    }
 
     let state = ChatState.shared.getState(peer: peerId)
     if let editingMessageId = state.editingMessageId {
@@ -647,6 +674,15 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     }
 
     hideEmbedView(animated: animated)
+  }
+
+  private func clearEditingComposeState() {
+    textView.text = ""
+    textView.showPlaceholder(true)
+    buttonDisappear()
+    clearDraft()
+    resetTextViewState()
+    updateHeight()
   }
 
   private func showEmbedView(
