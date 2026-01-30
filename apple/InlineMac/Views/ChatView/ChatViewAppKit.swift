@@ -35,6 +35,7 @@ class ChatViewAppKit: NSViewController {
   private var compose: ComposeAppKit?
   private var spinnerVC: NSHostingController<SpinnerView>?
   private var errorVC: NSHostingController<ErrorView>?
+  private var pendingDropObserver: NSObjectProtocol?
 
   private var didInitialRefetch = false
 
@@ -72,6 +73,7 @@ class ChatViewAppKit: NSViewController {
   override func viewDidLoad() {
     super.viewDidLoad()
     setupDragAndDrop()
+    setupPendingDropObserver()
   }
 
   override func viewDidLayout() {
@@ -184,6 +186,8 @@ class ChatViewAppKit: NSViewController {
       compose.leadingAnchor.constraint(equalTo: view.leadingAnchor),
       compose.trailingAnchor.constraint(equalTo: view.trailingAnchor),
     ])
+
+    consumePendingDropAttachmentsIfPossible()
   }
 
   private func fetchChat() {
@@ -243,6 +247,9 @@ class ChatViewAppKit: NSViewController {
 
     // Remove observer
     NotificationCenter.default.removeObserver(self, name: NSApplication.didBecomeActiveNotification, object: nil)
+    if let pendingDropObserver {
+      NotificationCenter.default.removeObserver(pendingDropObserver)
+    }
 
     // Remove window check since cleanup should have happened in viewWillDisappear
     Log.shared.debug("🗑️ Deinit: \(type(of: self)) - \(self)")
@@ -255,6 +262,25 @@ class ChatViewAppKit: NSViewController {
     dropView.dropHandler = { [weak self] sender in
       self?.handleAttachments(from: sender.draggingPasteboard) ?? false
     }
+  }
+
+  private func setupPendingDropObserver() {
+    pendingDropObserver = NotificationCenter.default.addObserver(
+      forName: PendingDropAttachments.didUpdateNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] notification in
+      guard let self else { return }
+      guard let peer = notification.userInfo?["peerId"] as? Peer, peer == self.peerId else { return }
+      self.consumePendingDropAttachmentsIfPossible()
+    }
+  }
+
+  private func consumePendingDropAttachmentsIfPossible() {
+    guard let compose else { return }
+    let attachments = PendingDropAttachments.shared.consume(peerId: peerId)
+    guard attachments.isEmpty == false else { return }
+    compose.handlePasteboardAttachments(attachments)
   }
 
   private func handleAttachments(from pasteboard: NSPasteboard) -> Bool {

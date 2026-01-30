@@ -37,6 +37,21 @@ class MainSidebarItemCell: NSView {
   private static let actionButtonTrailingInset: CGFloat = MainSidebar.innerEdgeInsets
   private static let actionButtonSpacing: CGFloat = 6
   private static var pinnedIconTint: NSColor = .secondaryLabelColor
+  private static let dragTypes: [NSPasteboard.PasteboardType] = [
+    .fileURL,
+    .tiff,
+    .png,
+    NSPasteboard.PasteboardType("public.image"),
+    NSPasteboard.PasteboardType("public.jpeg"),
+    NSPasteboard.PasteboardType("image/png"),
+    NSPasteboard.PasteboardType("image/jpeg"),
+    NSPasteboard.PasteboardType("public.file-url"),
+    NSPasteboard.PasteboardType("public.mpeg-4"),
+    NSPasteboard.PasteboardType("video/mp4"),
+    NSPasteboard.PasteboardType("com.apple.quicktime-movie"),
+    NSPasteboard.PasteboardType("public.movie"),
+    NSPasteboard.PasteboardType("public.video"),
+  ]
   
   private var hoverColor: NSColor {
     .white.withAlphaComponent(0.2)
@@ -51,6 +66,12 @@ class MainSidebarItemCell: NSView {
   }
 
   private var isHovered = false {
+    didSet {
+      updateAppearance()
+    }
+  }
+
+  private var isDropTarget = false {
     didSet {
       updateAppearance()
     }
@@ -145,6 +166,14 @@ class MainSidebarItemCell: NSView {
     view.alignment = .centerY
     view.spacing = 0
     view.distribution = .fill
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    return view
+  }()
+
+  private lazy var titleRowSpacerView: NSView = {
+    let view = NSView()
     view.translatesAutoresizingMaskIntoConstraints = false
     view.setContentHuggingPriority(.defaultLow, for: .horizontal)
     view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -278,6 +307,7 @@ class MainSidebarItemCell: NSView {
     contentStackView.addArrangedSubview(titleRowStackView)
     contentStackView.addArrangedSubview(messageLabel)
     titleRowStackView.addArrangedSubview(nameLabel)
+    titleRowStackView.addArrangedSubview(titleRowSpacerView)
     titleRowStackView.addArrangedSubview(pinnedIconView)
     titleRowStackView.addArrangedSubview(badgeContainerView)
 
@@ -343,6 +373,8 @@ class MainSidebarItemCell: NSView {
     titleRowStackView.setCustomSpacing(4, after: nameLabel)
     titleRowStackView.setCustomSpacing(4, after: pinnedIconView)
     applyDisplayMode(displayMode)
+
+    registerForDraggedTypes(Self.dragTypes)
   }
 
   func configure(
@@ -397,6 +429,7 @@ class MainSidebarItemCell: NSView {
     Log.shared.debug("MainSidebarItemCell preparing for reuse")
     preparingForReuse = true
     isHovered = false
+    isDropTarget = false
     isNavSelected = false
     isKeyboardSelected = false
     unreadBadgeView.isHidden = true
@@ -781,7 +814,7 @@ class MainSidebarItemCell: NSView {
         selectedColor
       } else if isKeyboardSelected {
         keyboardSelectionColor
-      } else if isHovered {
+      } else if isDropTarget || isHovered {
         hoverColor
       } else {
         .clear
@@ -801,6 +834,41 @@ class MainSidebarItemCell: NSView {
     updateShadowPath()
   }
 
+  override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+    let canHandle = canHandleDrop(sender.draggingPasteboard)
+    updateDropState(canHandle)
+    return canHandle ? .copy : []
+  }
+
+  override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+    let canHandle = canHandleDrop(sender.draggingPasteboard)
+    updateDropState(canHandle)
+    return canHandle ? .copy : []
+  }
+
+  override func draggingExited(_ sender: NSDraggingInfo?) {
+    updateDropState(false)
+  }
+
+  override func draggingEnded(_ sender: NSDraggingInfo) {
+    updateDropState(false)
+  }
+
+  override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+    defer { updateDropState(false) }
+    guard let item, actionItem == nil, let peer = item.peerId, let nav2 else { return false }
+
+    let attachments = InlinePasteboard.findAttachments(
+      from: sender.draggingPasteboard,
+      includeText: false
+    )
+    guard attachments.isEmpty == false else { return false }
+
+    PendingDropAttachments.shared.enqueue(peerId: peer, attachments: attachments)
+    nav2.navigate(to: .chat(peer: peer))
+    return true
+  }
+
   private func updateShadowPath() {
     guard let layer = containerView.layer else { return }
     let path = CGPath(
@@ -810,6 +878,48 @@ class MainSidebarItemCell: NSView {
       transform: nil
     )
     layer.shadowPath = path
+  }
+
+  private func updateDropState(_ isActive: Bool) {
+    if isDropTarget != isActive {
+      isDropTarget = isActive
+    }
+  }
+
+  private func canHandleDrop(_ pasteboard: NSPasteboard) -> Bool {
+    guard actionItem == nil, item?.peerId != nil else { return false }
+
+    let fileOptions: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+    if pasteboard.canReadObject(forClasses: [NSURL.self], options: fileOptions) {
+      return true
+    }
+
+    let imageTypes: [NSPasteboard.PasteboardType] = [
+      .tiff,
+      .png,
+      NSPasteboard.PasteboardType("public.image"),
+      NSPasteboard.PasteboardType("public.jpeg"),
+      NSPasteboard.PasteboardType("image/png"),
+      NSPasteboard.PasteboardType("image/jpeg"),
+      NSPasteboard.PasteboardType("image/gif"),
+      NSPasteboard.PasteboardType("image/webp"),
+    ]
+    if pasteboard.availableType(from: imageTypes) != nil {
+      return true
+    }
+
+    let videoTypes: [NSPasteboard.PasteboardType] = [
+      NSPasteboard.PasteboardType("public.mpeg-4"),
+      NSPasteboard.PasteboardType("video/mp4"),
+      NSPasteboard.PasteboardType("com.apple.quicktime-movie"),
+      NSPasteboard.PasteboardType("public.movie"),
+      NSPasteboard.PasteboardType("public.video"),
+    ]
+    if pasteboard.availableType(from: videoTypes) != nil {
+      return true
+    }
+
+    return false
   }
 
   @objc private func handleTap(_ gesture: NSClickGestureRecognizer) {
