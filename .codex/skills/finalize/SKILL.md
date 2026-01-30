@@ -17,7 +17,7 @@ User is mostly happy with the outcome and has probably done some manual QA check
 - Prepare a list of changes, and a commit message.
 - If the scope is large, summarize work using the skill before committing. If the scope is minimal and review is safe, commit.
 
-# Review Criterial 
+# Review criteria
 
 - Make sure the work done matches the spec 
 - Make sure we don't introduce unfinished work
