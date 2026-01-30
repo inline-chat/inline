@@ -1,3 +1,4 @@
+import InlineKit
 import SwiftUI
 
 struct InlineRootView: View {
@@ -24,6 +25,13 @@ private struct ExperimentalRootView: View {
   @StateObject private var onboardingNavigation = OnboardingNavigation()
   @StateObject private var mainViewRouter = MainViewRouter()
   @StateObject private var fileUploadViewModel = FileUploadViewModel()
+  @EnvironmentStateObject private var compactSpaceList: CompactSpaceList
+
+  init() {
+    _compactSpaceList = EnvironmentStateObject { env in
+      CompactSpaceList(db: env.appDatabase)
+    }
+  }
 
   var body: some View {
     NavigationStack {
@@ -39,6 +47,9 @@ private struct ExperimentalRootView: View {
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         .toolbar {
+          ToolbarItem(placement: .principal) {
+            SpacePickerMenu()
+          }
           ToolbarItem(placement: .topBarTrailing) {
             Button {
               showSettings = true
@@ -57,5 +68,6 @@ private struct ExperimentalRootView: View {
     .environmentObject(onboardingNavigation)
     .environmentObject(mainViewRouter)
     .environmentObject(fileUploadViewModel)
+    .environmentObject(compactSpaceList)
   }
 }
