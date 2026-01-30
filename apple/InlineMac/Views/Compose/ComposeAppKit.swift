@@ -932,11 +932,19 @@ class ComposeAppKit: NSView {
           )
         }
 
-        _ = await Api.realtime.sendQueued(.forwardMessages(
-          fromPeerId: forwardContext.fromPeerId,
-          toPeerId: self.peerId,
-          messageIds: forwardContext.messageIds
-        ))
+        do {
+          let result = try await Api.realtime.send(.forwardMessages(
+            fromPeerId: forwardContext.fromPeerId,
+            toPeerId: self.peerId,
+            messageIds: forwardContext.messageIds
+          ))
+
+          if case let .forwardMessages(response) = result, response.updates.isEmpty {
+            _ = await Api.realtime.sendQueued(.getChatHistory(peer: self.peerId))
+          }
+        } catch {
+          self.log.error("Forward failed", error: error)
+        }
       }
       state.clearForwarding()
     }
