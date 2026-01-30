@@ -26,6 +26,29 @@ open class WindowDragHandleView: NSView {
     }
     window?.beginWindowDrag(with: event)
   }
+
+  public override func mouseUp(with event: NSEvent) {
+    guard isDragEnabled else {
+      super.mouseUp(with: event)
+      return
+    }
+
+    if event.clickCount == 2 {
+      handleDoubleClick()
+      return
+    }
+
+    super.mouseUp(with: event)
+  }
+
+  private func handleDoubleClick() {
+    let action = UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") ?? "Maximize"
+    if action == "Minimize" {
+      window?.performMiniaturize(nil)
+    } else {
+      window?.performZoom(nil)
+    }
+  }
 }
 
 public extension NSWindow {
