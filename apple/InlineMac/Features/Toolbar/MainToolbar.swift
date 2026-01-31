@@ -74,9 +74,19 @@ class MainToolbarView: NSView {
     // )
   }
 
-  func updateLeadingPadding(_ padding: CGFloat) {
+  func updateLeadingPadding(
+    _ padding: CGFloat,
+    animated: Bool = false,
+    duration: TimeInterval = 0.2
+  ) {
     guard state.leadingPadding != padding else { return }
-    state.leadingPadding = padding
+    if animated {
+      withAnimation(.easeInOut(duration: duration)) {
+        state.leadingPadding = padding
+      }
+    } else {
+      state.leadingPadding = padding
+    }
   }
 
   // MARK: - UI
