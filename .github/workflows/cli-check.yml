@@ -1,0 +1,44 @@
+name: CLI Build
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "cli/**"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "cli/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build CLI
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust builds
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            cli -> target
+
+      - name: Build
+        working-directory: cli
+        run: cargo build --locked
+
+      - name: Test
+        working-directory: cli
+        run: cargo test --locked --profile ci-test
