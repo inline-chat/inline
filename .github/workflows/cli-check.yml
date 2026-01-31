@@ -6,11 +6,13 @@ on:
       - main
     paths:
       - "cli/**"
+      - ".github/workflows/cli-check.yml"
   pull_request:
     branches:
       - main
     paths:
       - "cli/**"
+      - ".github/workflows/cli-check.yml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
