@@ -21,6 +21,7 @@
 - Prefer `rg` for search; keep edits ASCII; strip debug prints; use logging utilities (`Log` in Swift, `server/src/utils/log.ts`).
 - Avoid `Any`/`any`, force unwraps (`!`), `try!`, forced/unsafe casts (e.g. `as!`), and other unsafe patterns that can crash or trigger runtime fatal errors; use safe alternatives whenever possible unless there is no other way.
 - Regenerate protobufs after proto changes with `bun run generate:proto` (or per-language commands in `scripts/`); rebuild Swift `InlineProtocol` target if needed.
+- If changes touch a Swift package, run a focused `swift build` for that package before asking the user to build.
 - Default test timeout 25s; run focused tests from relevant package roots; avoid heavy/unapproved tooling (e.g., do not run `xcodebuild` full apps).
 - Run tests when a feature is finished or when asked to write tests; follow up with typecheck for TS when relevant.
 - NEVER revert, discard, reset unrelated changes to the work you are doing or files you are touching. User may be working on other files simultaneously. NEVER clean files you have not edited, created or moved. When asked to commit, just commit your changes.
@@ -82,11 +83,11 @@
 - Never send decrypted secrets to the client. For session/device data, limit to explicitly needed fields and redact when possible.
 - Maintain separate admin metrics endpoints for UI. For new metrics, exclude deleted users and bots by default.
 
-
-## Glossary 
+## Glossary
 
 ### Area nicknames we use to reference to different files/views on macOS
+
 - New UI: Refers to an alternative all-new UI that starts with a new MainWindowController that is swapped based on a toggle in the settings.
-- New sidebar: Refers to MainSidebar.swift that is used in new sidebar 
+- New sidebar: Refers to MainSidebar.swift that is used in new sidebar
 - New chat icon: `apple/InlineMac/Views/ChatIcon/SidebarChatIconView.swift` a cleaner version of chat icon used in new UI
 - CMD+K menu: `apple/InlineMac/Features/MainWindow/QuickSearchPopover.swift`
