@@ -37,9 +37,6 @@ use crate::protocol::proto;
 use crate::realtime::RealtimeClient;
 use crate::state::LocalDb;
 
-#[cfg(not(target_os = "macos"))]
-compile_error!("inline-cli currently supports macOS only.");
-
 const MAX_ATTACHMENT_BYTES: u64 = 200 * 1024 * 1024;
 
 #[derive(Parser)]
