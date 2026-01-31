@@ -46,11 +46,11 @@ class MainSplitView: NSViewController {
   }
 
   private enum SidebarAnimation {
-    static let openDuration: TimeInterval = 0.16
-    static let closeDuration: TimeInterval = 0.14
+    static let openDuration: TimeInterval = 0.2
+    static let closeDuration: TimeInterval = 0.18
 
     static func timing(forCollapsed isCollapsed: Bool) -> CAMediaTimingFunction {
-      return CAMediaTimingFunction(name: .easeOut)
+      return CAMediaTimingFunction(name: .easeInEaseOut)
     }
 
     static func duration(forCollapsed isCollapsed: Bool) -> TimeInterval {
@@ -491,13 +491,17 @@ class MainSplitView: NSViewController {
     dependencies.trafficLightController?.setInsetPreset(
       targetCollapsed ? .sidebarHidden : .sidebarVisible
     )
-    updateToolbarLeadingPadding()
 
     guard let sidebarLeadingConstraint, let contentLeadingToSidebarConstraint else { return }
 
     let shouldAnimate = animated
       && view.window != nil
       && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+
+    updateToolbarLeadingPadding(
+      animated: shouldAnimate,
+      duration: SidebarAnimation.duration(forCollapsed: targetCollapsed)
+    )
 
     if shouldAnimate {
       view.layoutSubtreeIfNeeded()
@@ -523,7 +527,10 @@ class MainSplitView: NSViewController {
     trafficLightPresenceObserver = controller.addPresenceObserver { [weak self] visible in
       guard let self else { return }
       trafficLightsVisible = visible
-      updateToolbarLeadingPadding()
+      updateToolbarLeadingPadding(
+        animated: false,
+        duration: SidebarAnimation.duration(forCollapsed: isSidebarCollapsed)
+      )
       updateSidebarTrafficLightPresence(visible)
     }
     controller.setInsetPreset(isSidebarCollapsed ? .sidebarHidden : .sidebarVisible)
@@ -535,12 +542,23 @@ class MainSplitView: NSViewController {
     }
   }
 
-  private func updateToolbarLeadingPadding() {
+  private func updateToolbarLeadingPadding(
+    animated: Bool = false,
+    duration: TimeInterval = 0.2
+  ) {
     guard trafficLightsVisible, isSidebarCollapsed else {
-      toolbarArea.updateLeadingPadding(ToolbarMetrics.defaultLeadingPadding)
+      toolbarArea.updateLeadingPadding(
+        ToolbarMetrics.defaultLeadingPadding,
+        animated: animated,
+        duration: duration
+      )
       return
     }
-    toolbarArea.updateLeadingPadding(ToolbarMetrics.collapsedLeadingPadding)
+    toolbarArea.updateLeadingPadding(
+      ToolbarMetrics.collapsedLeadingPadding,
+      animated: animated,
+      duration: duration
+    )
   }
 
   private func toggleQuickSearchOverlay() {
