@@ -36,11 +36,9 @@ extension MainToolbarItems {
 
 final class ToolbarState: ObservableObject {
   @Published var currentItems: [MainToolbarItemIdentifier]
-  @Published var leadingPadding: CGFloat
 
   init() {
     currentItems = [.navigationButtons]
-    leadingPadding = 10
   }
 
   func update(with items: [MainToolbarItemIdentifier]) {
@@ -51,6 +49,7 @@ final class ToolbarState: ObservableObject {
 class MainToolbarView: NSView {
   private var dependencies: AppDependencies
   private var hostingView: NSHostingView<ToolbarSwiftUIView>?
+  private var hostingLeadingConstraint: NSLayoutConstraint?
 
   init(dependencies: AppDependencies) {
     self.dependencies = dependencies
@@ -79,13 +78,18 @@ class MainToolbarView: NSView {
     animated: Bool = false,
     duration: TimeInterval = 0.2
   ) {
-    guard state.leadingPadding != padding else { return }
-    if animated {
-      withAnimation(.easeInOut(duration: duration)) {
-        state.leadingPadding = padding
+    guard hostingLeadingConstraint?.constant != padding else { return }
+    if animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = duration
+        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        context.allowsImplicitAnimation = true
+        hostingLeadingConstraint?.animator().constant = padding
+        layoutSubtreeIfNeeded()
       }
     } else {
-      state.leadingPadding = padding
+      hostingLeadingConstraint?.constant = padding
+      layoutSubtreeIfNeeded()
     }
   }
 
@@ -122,8 +126,10 @@ class MainToolbarView: NSView {
       for: .horizontal
     )
     addSubview(hostingView)
+    let leadingConstraint = hostingView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10)
+    hostingLeadingConstraint = leadingConstraint
     NSLayoutConstraint.activate([
-      hostingView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      leadingConstraint,
       hostingView.trailingAnchor.constraint(equalTo: trailingAnchor),
       hostingView.topAnchor.constraint(equalTo: topAnchor),
       hostingView.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -153,7 +159,6 @@ struct ToolbarSwiftUIView: View {
       toolbarBackground
       toolbarContent
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.leading, state.leadingPadding)
         .padding(.trailing, 10)
     }
     .frame(height: Theme.toolbarHeight)
@@ -178,7 +183,7 @@ struct ToolbarSwiftUIView: View {
   @ViewBuilder
   private var toolbarContent: some View {
     HStack(spacing: 12) {
-      ForEach(Array(state.currentItems.enumerated()), id: \.offset) { _, item in
+      ForEach(state.currentItems, id: \.self) { item in
         switch item {
           case .navigationButtons:
             navigationButtons
