@@ -45,6 +45,7 @@ pub enum UpdateError {
 #[serde(rename_all = "camelCase")]
 struct UpdateManifest {
     version: String,
+    #[allow(dead_code)]
     published_at: Option<String>,
     install_url: Option<String>,
     targets: HashMap<String, UpdateTarget>,
@@ -55,6 +56,7 @@ struct UpdateManifest {
 struct UpdateTarget {
     url: String,
     sha256: String,
+    #[allow(dead_code)]
     size: Option<u64>,
 }
 

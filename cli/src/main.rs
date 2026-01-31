@@ -779,7 +779,7 @@ fn install_broken_pipe_handler() {
     }));
 }
 
-fn is_broken_pipe_panic(info: &std::panic::PanicInfo<'_>) -> bool {
+fn is_broken_pipe_panic(info: &std::panic::PanicHookInfo<'_>) -> bool {
     let message = info.to_string();
     message.contains("failed printing to stdout")
         && (message.contains("Broken pipe") || message.contains("broken pipe"))
@@ -2260,6 +2260,7 @@ struct PreparedAttachment {
     mime_type: Option<String>,
     file_type: UploadFileType,
     video_metadata: Option<UploadVideoMetadata>,
+    #[allow(dead_code)]
     size_bytes: u64,
     cleanup_path: Option<PathBuf>,
 }

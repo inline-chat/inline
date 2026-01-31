@@ -266,6 +266,7 @@ impl ApiClient {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SendCodeResult {
+    #[allow(dead_code)]
     pub existing_user: bool,
 }
 
@@ -373,10 +374,16 @@ pub struct CreateNotionTaskResult {
 #[derive(Debug, Deserialize)]
 #[serde(untagged, rename_all = "camelCase")]
 enum ApiResponse<T> {
-    Ok { ok: bool, result: T },
+    Ok {
+        #[allow(dead_code)]
+        ok: bool,
+        result: T,
+    },
     Err {
+        #[allow(dead_code)]
         ok: bool,
         error: String,
+        #[allow(dead_code)]
         error_code: Option<i32>,
         description: Option<String>,
     },
