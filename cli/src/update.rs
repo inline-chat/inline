@@ -84,6 +84,9 @@ async fn run_update_inner(
     }
     let target = current_target();
     if target == "unknown" {
+        if !json {
+            eprintln!("Auto-update is not supported on this OS yet.");
+        }
         return Ok(());
     }
 
@@ -254,10 +257,14 @@ fn print_reinstall_instructions(install_url: Option<&str>) {
 }
 
 fn current_target() -> &'static str {
-    if cfg!(target_arch = "aarch64") {
-        "aarch64-apple-darwin"
-    } else if cfg!(target_arch = "x86_64") {
-        "x86_64-apple-darwin"
+    if cfg!(target_os = "macos") {
+        if cfg!(target_arch = "aarch64") {
+            "aarch64-apple-darwin"
+        } else if cfg!(target_arch = "x86_64") {
+            "x86_64-apple-darwin"
+        } else {
+            "unknown"
+        }
     } else {
         "unknown"
     }
