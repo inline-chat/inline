@@ -1,12 +1,14 @@
 mod api;
 mod auth;
 mod config;
+mod dates;
 mod output;
 mod protocol;
 mod realtime;
 mod state;
 mod update;
 
+use chrono::{DateTime, Utc};
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use dialoguer::{Confirm, Input, Select};
 use futures_util::StreamExt;
@@ -24,6 +26,7 @@ use crate::api::{
 };
 use crate::auth::AuthStore;
 use crate::config::Config;
+use crate::dates::parse_relative_time;
 use crate::output::{
     AttachmentSummary, ChatListItem, ChatListOutput, ChatParticipantSummary,
     ChatParticipantsOutput, MediaSummary, MessageListOutput, MessageSummary, PeerSummary,
@@ -69,9 +72,13 @@ Examples:
   inline spaces invite --space-id 31 --email you@example.com
   inline users list --json
   inline messages list --chat-id 123
+  inline messages list --chat-id 123 --since "yesterday"
+  inline messages list --chat-id 123 --since "2h ago" --until "1h ago"
   inline messages list --chat-id 123 --translate en
   inline messages export --chat-id 123 --output ./messages.json
+  inline messages export --chat-id 123 --since "1w ago" --output ./recent.json
   inline messages search --chat-id 123 --query "onboarding"
+  inline messages search --chat-id 123 --query "urgent" --since "today"
   inline messages get --chat-id 123 --message-id 456
   inline messages send --chat-id 123 --text "hello"
   inline messages send --chat-id 123 --reply-to 456 --text "on it"
@@ -393,6 +400,20 @@ struct MessagesListArgs {
         help = "Translate messages to language code (e.g., en)"
     )]
     translate: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "TIME",
+        help = "Filter messages since time (e.g., yesterday, 2h ago, 2024-01-15)"
+    )]
+    since: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "TIME",
+        help = "Filter messages until time (e.g., today, 1d ago, 2024-01-20)"
+    )]
+    until: Option<String>,
 }
 
 #[derive(Args)]
@@ -408,6 +429,20 @@ struct MessagesSearchArgs {
 
     #[arg(long, help = "Maximum number of results to return")]
     limit: Option<i32>,
+
+    #[arg(
+        long,
+        value_name = "TIME",
+        help = "Filter results since time (e.g., yesterday, 2h ago)"
+    )]
+    since: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "TIME",
+        help = "Filter results until time (e.g., today, 1d ago)"
+    )]
+    until: Option<String>,
 }
 
 #[derive(Args)]
@@ -482,6 +517,20 @@ struct MessagesExportArgs {
 
     #[arg(long, value_name = "PATH", help = "Output file path")]
     output: PathBuf,
+
+    #[arg(
+        long,
+        value_name = "TIME",
+        help = "Filter messages since time (e.g., yesterday, 2h ago, 2024-01-15)"
+    )]
+    since: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "TIME",
+        help = "Filter messages until time (e.g., today, 1d ago, 2024-01-20)"
+    )]
+    until: Option<String>,
 }
 
 #[derive(Args)]
@@ -1281,7 +1330,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .await?;
 
                     match result {
-                        proto::rpc_result::Result::GetChatHistory(payload) => {
+                        proto::rpc_result::Result::GetChatHistory(mut payload) => {
+                            let (since_ts, until_ts) = parse_time_filters(
+                                args.since.as_deref(),
+                                args.until.as_deref(),
+                                Utc::now(),
+                            )?;
+                            filter_messages_by_time(&mut payload.messages, since_ts, until_ts);
+
                             if cli.json {
                                 output::print_json(&payload, json_format)?;
                             } else {
@@ -1367,7 +1423,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .await?;
 
                     match result {
-                        proto::rpc_result::Result::SearchMessages(payload) => {
+                        proto::rpc_result::Result::SearchMessages(mut payload) => {
+                            let (since_ts, until_ts) = parse_time_filters(
+                                args.since.as_deref(),
+                                args.until.as_deref(),
+                                Utc::now(),
+                            )?;
+                            filter_messages_by_time(&mut payload.messages, since_ts, until_ts);
+
                             if cli.json {
                                 output::print_json(&payload, json_format)?;
                             } else {
@@ -1536,7 +1599,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         )
                         .await?;
                     match result {
-                        proto::rpc_result::Result::GetChatHistory(payload) => {
+                        proto::rpc_result::Result::GetChatHistory(mut payload) => {
+                            let (since_ts, until_ts) = parse_time_filters(
+                                args.since.as_deref(),
+                                args.until.as_deref(),
+                                Utc::now(),
+                            )?;
+                            filter_messages_by_time(&mut payload.messages, since_ts, until_ts);
+
                             let output_path = args.output;
                             let payload_text = output::json_string(&payload, json_format)?;
                             if let Some(parent) = output_path.parent() {
@@ -3178,6 +3248,46 @@ fn normalize_search_queries(queries: &[String]) -> Result<Vec<String>, Box<dyn s
     }
 
     Ok(normalized)
+}
+
+fn parse_time_filters(
+    since: Option<&str>,
+    until: Option<&str>,
+    now: DateTime<Utc>,
+) -> Result<(Option<i64>, Option<i64>), Box<dyn std::error::Error>> {
+    let since_ts = since
+        .map(|value| parse_relative_time(value, now))
+        .transpose()
+        .map_err(|e| format!("invalid --since: {e}"))?;
+    let until_ts = until
+        .map(|value| parse_relative_time(value, now))
+        .transpose()
+        .map_err(|e| format!("invalid --until: {e}"))?;
+
+    if let (Some(s), Some(u)) = (since_ts, until_ts) {
+        if u < s {
+            return Err("--until must be on or after --since".into());
+        }
+    }
+
+    Ok((since_ts, until_ts))
+}
+
+fn filter_messages_by_time(
+    messages: &mut Vec<proto::Message>,
+    since_ts: Option<i64>,
+    until_ts: Option<i64>,
+) {
+    if since_ts.is_none() && until_ts.is_none() {
+        return;
+    }
+
+    messages.retain(|msg| {
+        let msg_ts = msg.date;
+        let after_since = since_ts.map_or(true, |ts| msg_ts >= ts);
+        let before_until = until_ts.map_or(true, |ts| msg_ts <= ts);
+        after_since && before_until
+    });
 }
 
 fn normalize_translation_language(language: &str) -> Result<String, Box<dyn std::error::Error>> {
