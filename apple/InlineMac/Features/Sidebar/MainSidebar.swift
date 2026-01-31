@@ -293,6 +293,9 @@ class MainSidebar: NSViewController, NSMenuDelegate {
   }()
 
   private var headerTopConstraint: NSLayoutConstraint?
+  private var trafficLightsVisible = true
+  private static let headerBaseTopInset: CGFloat = 14
+  private static let headerTrafficLightInset: CGFloat = 34
   private var archiveTitleHeightConstraint: NSLayoutConstraint?
   private var archiveTitleTopConstraint: NSLayoutConstraint?
   private var archiveTitleBottomConstraint: NSLayoutConstraint?
@@ -324,7 +327,10 @@ class MainSidebar: NSViewController, NSMenuDelegate {
     footerStack.addArrangedSubview(viewOptionsButton)
     footerStack.addArrangedSubview(notificationsButton)
 
-    headerTopConstraint = headerView.topAnchor.constraint(equalTo: view.topAnchor, constant: headerTopInset())
+    headerTopConstraint = headerView.topAnchor.constraint(
+      equalTo: view.topAnchor,
+      constant: headerTopInset()
+    )
 
     let archiveTitleTopConstraint = archiveTitleLabel.topAnchor.constraint(
       equalTo: headerView.bottomAnchor,
@@ -693,17 +699,25 @@ class MainSidebar: NSViewController, NSMenuDelegate {
   }
 
   private func headerTopInset() -> CGFloat {
-    if let window = view.window, window.styleMask.contains(.fullSizeContentView) {
-      // Leave room for traffic lights when content is full-height.
-      return 44
+    guard trafficLightsVisible else { return Self.headerBaseTopInset }
+    guard let window = view.window,
+          window.styleMask.contains(.fullSizeContentView)
+    else {
+      return Self.headerBaseTopInset
     }
-    return 8
+    return Self.headerBaseTopInset + Self.headerTrafficLightInset
   }
 
-  // TODO: This doesn't trigger the change when the window enters full screen
   override func viewDidLayout() {
     super.viewDidLayout()
     headerTopConstraint?.constant = headerTopInset()
+  }
+
+  func setTrafficLightsVisible(_ isVisible: Bool) {
+    guard trafficLightsVisible != isVisible else { return }
+    trafficLightsVisible = isVisible
+    headerTopConstraint?.constant = headerTopInset()
+    view.needsLayout = true
   }
 }
 

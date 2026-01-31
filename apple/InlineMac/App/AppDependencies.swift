@@ -20,6 +20,7 @@ public struct AppDependencies {
   let nav: Nav = .main
   var nav2: Nav2? = nil
   var keyMonitor: KeyMonitor?
+  var trafficLightController: TrafficLightController?
 
   // Optional
   var rootData: RootData?

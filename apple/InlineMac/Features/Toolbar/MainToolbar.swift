@@ -36,9 +36,11 @@ extension MainToolbarItems {
 
 final class ToolbarState: ObservableObject {
   @Published var currentItems: [MainToolbarItemIdentifier]
+  @Published var leadingPadding: CGFloat
 
   init() {
     currentItems = [.navigationButtons]
+    leadingPadding = 10
   }
 
   func update(with items: [MainToolbarItemIdentifier]) {
@@ -70,6 +72,11 @@ class MainToolbarView: NSView {
     //   state: state,
     //   dependencies: dependencies
     // )
+  }
+
+  func updateLeadingPadding(_ padding: CGFloat) {
+    guard state.leadingPadding != padding else { return }
+    state.leadingPadding = padding
   }
 
   // MARK: - UI
@@ -136,7 +143,8 @@ struct ToolbarSwiftUIView: View {
       toolbarBackground
       toolbarContent
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 10)
+        .padding(.leading, state.leadingPadding)
+        .padding(.trailing, 10)
     }
     .frame(height: Theme.toolbarHeight)
     .ignoresSafeArea()

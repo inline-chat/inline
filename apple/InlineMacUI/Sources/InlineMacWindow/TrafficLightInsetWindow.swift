@@ -23,6 +23,7 @@ open class TrafficLightInsetWindow: NSWindow, TrafficLightInsetApplicable {
   }
 
   public func applyTrafficLightsInset() {
+    if styleMask.contains(.fullScreen) { return }
     if isApplyingTrafficLights { return }
     guard let close = standardWindowButton(.closeButton),
           let miniaturize = standardWindowButton(.miniaturizeButton),
