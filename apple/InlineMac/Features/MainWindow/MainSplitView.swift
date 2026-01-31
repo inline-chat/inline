@@ -5,6 +5,7 @@ import Logger
 import Observation
 import SwiftUI
 
+@MainActor
 class MainSplitView: NSViewController {
   let dependencies: AppDependencies
   private let quickSearchViewModel: QuickSearchViewModel
@@ -34,18 +35,46 @@ class MainSplitView: NSViewController {
   private var sideWidth: CGFloat = 240
   private var innerPadding: CGFloat = Theme.mainSplitViewUseFullBleedContent ? 0 : Theme.mainSplitViewInnerPadding
   private var contentRadius: CGFloat = Theme.mainSplitViewUseFullBleedContent ? 0 : Theme.mainSplitViewContentRadius
+  private var isSidebarCollapsed = false
+  private var trafficLightsVisible = true
+
+  private enum ToolbarMetrics {
+    /// Baseline toolbar padding when we are not reserving space for traffic lights.
+    static let defaultLeadingPadding: CGFloat = 10
+    /// Fixed padding when the sidebar is collapsed and traffic lights are visible.
+    static let collapsedLeadingPadding: CGFloat = 90
+  }
+
+  private enum SidebarAnimation {
+    static let openDuration: TimeInterval = 0.16
+    static let closeDuration: TimeInterval = 0.14
+
+    static func timing(forCollapsed isCollapsed: Bool) -> CAMediaTimingFunction {
+      return CAMediaTimingFunction(name: .easeOut)
+    }
+
+    static func duration(forCollapsed isCollapsed: Bool) -> TimeInterval {
+      isCollapsed ? closeDuration : openDuration
+    }
+  }
 
   private var lastRenderedRoute: Nav2Route?
   private var escapeKeyUnsubscriber: (() -> Void)?
   private var quickSearchObserver: NSObjectProtocol?
   private var appActiveObserver: NSObjectProtocol?
+  private var sidebarToggleObserver: NSObjectProtocol?
+  private var trafficLightPresenceObserver: UUID?
   private var quickSearchEscapeUnsubscriber: (() -> Void)?
   private var quickSearchArrowUnsubscriber: (() -> Void)?
   private var quickSearchVimUnsubscriber: (() -> Void)?
   private var quickSearchReturnUnsubscriber: (() -> Void)?
+  private var didTearDownObservers = false
 
   private var quickSearchWidthConstraint: NSLayoutConstraint?
   private var quickSearchHeightConstraint: NSLayoutConstraint?
+  private var sidebarWidthConstraint: NSLayoutConstraint?
+  private var sidebarLeadingConstraint: NSLayoutConstraint?
+  private var contentLeadingToSidebarConstraint: NSLayoutConstraint?
 
   private lazy var quickSearchOverlayBackground: NSView = {
     let view = PassthroughView()
@@ -123,14 +152,21 @@ class MainSplitView: NSViewController {
     ]
     contentArea.layer?.masksToBounds = true
 
-    NSLayoutConstraint.activate([
-      sideArea.widthAnchor.constraint(equalToConstant: sideWidth),
+    let sideWidthConstraint = sideArea.widthAnchor.constraint(equalToConstant: sideWidth)
+    let sideLeadingConstraint = sideArea.leadingAnchor.constraint(equalTo: view.leadingAnchor)
+    let contentLeadingToSidebar = contentContainer.leadingAnchor.constraint(equalTo: sideArea.trailingAnchor)
+    sidebarWidthConstraint = sideWidthConstraint
+    sidebarLeadingConstraint = sideLeadingConstraint
+    contentLeadingToSidebarConstraint = contentLeadingToSidebar
 
-      sideArea.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+    NSLayoutConstraint.activate([
+      sideWidthConstraint,
+
+      sideLeadingConstraint,
       sideArea.topAnchor.constraint(equalTo: view.topAnchor),
       sideArea.bottomAnchor.constraint(equalTo: view.bottomAnchor),
 
-      contentContainer.leadingAnchor.constraint(equalTo: sideArea.trailingAnchor),
+      contentLeadingToSidebar,
       contentContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -innerPadding),
 
       toolbarArea
@@ -158,6 +194,7 @@ class MainSplitView: NSViewController {
 
   override func viewDidLoad() {
     super.viewDidLoad()
+    setupSidebarToggleObserver()
     setupQuickSearchObserver()
     setupAppActiveObserver()
     fetchInitialData()
@@ -166,9 +203,23 @@ class MainSplitView: NSViewController {
   override func viewDidAppear() {
     super.viewDidAppear()
     prewarmQuickSearchOverlay()
+    setupTrafficLightController()
+    applySidebarVisibility(animated: false)
+  }
+
+  override func viewWillDisappear() {
+    super.viewWillDisappear()
+    tearDownObservers()
   }
 
   deinit {
+    // Cleanup happens in viewWillDisappear to stay on the main actor.
+  }
+
+  @MainActor
+  private func tearDownObservers() {
+    guard !didTearDownObservers else { return }
+    didTearDownObservers = true
     escapeKeyUnsubscriber?()
     escapeKeyUnsubscriber = nil
     removeQuickSearchKeyHandlers()
@@ -177,6 +228,13 @@ class MainSplitView: NSViewController {
     }
     if let appActiveObserver {
       NotificationCenter.default.removeObserver(appActiveObserver)
+    }
+    if let sidebarToggleObserver {
+      NotificationCenter.default.removeObserver(sidebarToggleObserver)
+    }
+    if let trafficLightPresenceObserver, let controller = dependencies.trafficLightController {
+      controller.removePresenceObserver(trafficLightPresenceObserver)
+      self.trafficLightPresenceObserver = nil
     }
     removeQuickSearchClickMonitor()
   }
@@ -303,6 +361,7 @@ class MainSplitView: NSViewController {
       viewController.view.leadingAnchor.constraint(equalTo: sideArea.leadingAnchor),
       viewController.view.trailingAnchor.constraint(equalTo: sideArea.trailingAnchor),
     ])
+    updateSidebarTrafficLightPresence(trafficLightsVisible)
   }
 
   private func setContentArea(viewController: NSViewController) {
@@ -407,6 +466,81 @@ class MainSplitView: NSViewController {
     ) { [weak self] _ in
       self?.toggleQuickSearchOverlay()
     }
+  }
+
+  private func setupSidebarToggleObserver() {
+    guard sidebarToggleObserver == nil else { return }
+    sidebarToggleObserver = NotificationCenter.default.addObserver(
+      forName: .toggleSidebar,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      self?.toggleSidebar()
+    }
+  }
+
+  private func toggleSidebar() {
+    isSidebarCollapsed.toggle()
+    applySidebarVisibility()
+  }
+
+  private func applySidebarVisibility(animated: Bool = true) {
+    let targetCollapsed = isSidebarCollapsed
+    let targetLeading = targetCollapsed ? -sideWidth : 0
+    let targetContentLeading = targetCollapsed ? innerPadding : 0
+    dependencies.trafficLightController?.setInsetPreset(
+      targetCollapsed ? .sidebarHidden : .sidebarVisible
+    )
+    updateToolbarLeadingPadding()
+
+    guard let sidebarLeadingConstraint, let contentLeadingToSidebarConstraint else { return }
+
+    let shouldAnimate = animated
+      && view.window != nil
+      && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+
+    if shouldAnimate {
+      view.layoutSubtreeIfNeeded()
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = SidebarAnimation.duration(forCollapsed: targetCollapsed)
+        context.timingFunction = SidebarAnimation.timing(forCollapsed: targetCollapsed)
+        context.allowsImplicitAnimation = true
+        sidebarLeadingConstraint.animator().constant = targetLeading
+        contentLeadingToSidebarConstraint.animator().constant = targetContentLeading
+        view.layoutSubtreeIfNeeded()
+      }
+    } else {
+      sidebarLeadingConstraint.constant = targetLeading
+      contentLeadingToSidebarConstraint.constant = targetContentLeading
+      view.layoutSubtreeIfNeeded()
+    }
+  }
+
+  private func setupTrafficLightController() {
+    guard trafficLightPresenceObserver == nil,
+          let controller = dependencies.trafficLightController
+    else { return }
+    trafficLightPresenceObserver = controller.addPresenceObserver { [weak self] visible in
+      guard let self else { return }
+      trafficLightsVisible = visible
+      updateToolbarLeadingPadding()
+      updateSidebarTrafficLightPresence(visible)
+    }
+    controller.setInsetPreset(isSidebarCollapsed ? .sidebarHidden : .sidebarVisible)
+  }
+
+  private func updateSidebarTrafficLightPresence(_ isVisible: Bool) {
+    if let sidebar = sidebarVC as? MainSidebar {
+      sidebar.setTrafficLightsVisible(isVisible)
+    }
+  }
+
+  private func updateToolbarLeadingPadding() {
+    guard trafficLightsVisible, isSidebarCollapsed else {
+      toolbarArea.updateLeadingPadding(ToolbarMetrics.defaultLeadingPadding)
+      return
+    }
+    toolbarArea.updateLeadingPadding(ToolbarMetrics.collapsedLeadingPadding)
   }
 
   private func toggleQuickSearchOverlay() {

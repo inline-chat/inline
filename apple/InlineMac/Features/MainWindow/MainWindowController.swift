@@ -45,7 +45,11 @@ class MainWindowController: NSWindowController, NSWindowDelegate {
       backing: .buffered,
       defer: false
     )
-    window.trafficLightsInset = CGPoint(x: 18, y: 18)
+    let trafficLightController = TrafficLightController(
+      window: window,
+      insetPreset: .sidebarVisible
+    )
+    self.dependencies.trafficLightController = trafficLightController
 
     keyMonitor = KeyMonitor(window: window)
     self.dependencies.keyMonitor = keyMonitor
