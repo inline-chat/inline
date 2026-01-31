@@ -4,6 +4,7 @@ import GRDB
 import InlineKit
 import Logger
 import Observation
+import os.signpost
 
 enum Nav2Route: Equatable, Hashable, Codable {
   case empty
@@ -99,6 +100,8 @@ struct Nav2Entry: Codable {
 @Observable class Nav2 {
   @ObservationIgnored private let log = Log.scoped("Nav2", enableTracing: false)
   @ObservationIgnored private var saveStateTask: Task<Void, Never>?
+  @ObservationIgnored private let navigationSignpostLog = OSLog(subsystem: "InlineMac", category: "Navigation")
+  @ObservationIgnored private var activeChatNavigation: (peer: Peer, id: OSSignpostID)?
 
   // MARK: - State
 
@@ -147,6 +150,10 @@ struct Nav2Entry: Codable {
 
   func navigate(to route: Nav2Route) {
     log.trace("Navigating to \(route)")
+    if case let .chat(peer) = route {
+      // PERF MARK: begin chat navigation signpost (remove when done).
+      beginChatNavigationSignpost(peer: peer)
+    }
     lastRoutes[activeTab] = route
     _ = recordNavigation(route: route, tab: activeTab, isImplicit: false, replaceImplicit: true)
     forwardHistory.removeAll()
@@ -249,6 +256,48 @@ struct Nav2Entry: Codable {
         }
         navigate(to: .chat(peer: peer))
     }
+  }
+
+  // MARK: - Perf signposts
+
+  private func beginChatNavigationSignpost(peer: Peer) {
+    if let activeChatNavigation {
+      // PERF MARK: end superseded chat navigation signpost (remove when done).
+      os_signpost(
+        .end,
+        log: navigationSignpostLog,
+        name: "ChatNavigation",
+        signpostID: activeChatNavigation.id,
+        "%{public}s",
+        "superseded"
+      )
+    }
+
+    let signpostID = OSSignpostID(log: navigationSignpostLog)
+    activeChatNavigation = (peer, signpostID)
+    // PERF MARK: begin chat navigation signpost (remove when done).
+    os_signpost(
+      .begin,
+      log: navigationSignpostLog,
+      name: "ChatNavigation",
+      signpostID: signpostID,
+      "%{public}s",
+      String(describing: peer)
+    )
+  }
+
+  func endChatNavigationSignpost(peer: Peer, reason: String) {
+    guard let activeChatNavigation, activeChatNavigation.peer == peer else { return }
+    // PERF MARK: end chat navigation signpost (remove when done).
+    os_signpost(
+      .end,
+      log: navigationSignpostLog,
+      name: "ChatNavigation",
+      signpostID: activeChatNavigation.id,
+      "%{public}s",
+      reason
+    )
+    self.activeChatNavigation = nil
   }
 
   // MARK: - Initialization & Persistence

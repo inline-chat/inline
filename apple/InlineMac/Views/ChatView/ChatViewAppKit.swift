@@ -5,6 +5,7 @@ import InlineUI
 import Logger
 import Nuke
 import SwiftUI
+import os.signpost
 
 enum ChatViewError: Error {
   case failedToLoad
@@ -38,6 +39,7 @@ class ChatViewAppKit: NSViewController {
   private var pendingDropObserver: NSObjectProtocol?
 
   private var didInitialRefetch = false
+  private let messageListSignpostLog = OSLog(subsystem: "InlineMac", category: "MessageList")
 
   init(peerId: Peer, chat: Chat? = nil, dependencies: AppDependencies) {
     self.peerId = peerId
@@ -104,8 +106,12 @@ class ChatViewAppKit: NSViewController {
         showSpinner()
       case let .loaded(chat):
         setupChatComponents(chat: chat)
+        // PERF MARK: end chat navigation signpost (remove when done).
+        dependencies.nav2?.endChatNavigationSignpost(peer: peerId, reason: "loaded")
       case let .error(error):
         showError(error: error)
+        // PERF MARK: end chat navigation signpost (remove when done).
+        dependencies.nav2?.endChatNavigationSignpost(peer: peerId, reason: "error")
     }
   }
 
@@ -152,6 +158,9 @@ class ChatViewAppKit: NSViewController {
   }
 
   private func setupChatComponents(chat: Chat) {
+    let signpostID = OSSignpostID(log: messageListSignpostLog)
+    // PERF MARK: begin message list setup (remove when done).
+    os_signpost(.begin, log: messageListSignpostLog, name: "MessageListSetup", signpostID: signpostID)
     // Message List
     let messageListVC_ = MessageListAppKit(dependencies: dependencies, peerId: peerId, chat: chat)
     addChild(messageListVC_)
@@ -159,6 +168,8 @@ class ChatViewAppKit: NSViewController {
     messageListVC_.view.translatesAutoresizingMaskIntoConstraints = false
 
     messageListVC = messageListVC_
+    // PERF MARK: end message list setup (remove when done).
+    os_signpost(.end, log: messageListSignpostLog, name: "MessageListSetup", signpostID: signpostID)
 
     // Compose
     let compose = ComposeAppKit(
