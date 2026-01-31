@@ -4,7 +4,7 @@ enum TrafficLightInsetPreset {
   case sidebarVisible
   case sidebarHidden
 
-  private static let sidebarVisibleInset = CGPoint(x: 18, y: 18)
+  private static let sidebarVisibleInset = CGPoint(x: 20, y: 20)
   private static let sidebarHiddenInset = CGPoint(x: 24, y: 24)
 
   var inset: CGPoint {
