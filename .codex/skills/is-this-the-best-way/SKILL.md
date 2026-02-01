@@ -8,3 +8,13 @@ metadata:
 # Instructions
 
 - Is this the best way to do it? how safe is this? how maintainable is this? what are our alternatives? what is the trade-off? What's the idiomatic way to accomplish this task? What can go long with our solution in the long term? What would you do if you were a senior engineer who wants to refactor this?
+
+# Structured review
+- Current approach
+- Alternatives (1–3)
+- Trade-offs (perf, safety, testability, complexity)
+- Risks/edge cases
+- Recommendation
+
+# When uncertain
+- Propose a small spike or incremental refactor plan.

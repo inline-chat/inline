@@ -66,3 +66,14 @@ Improvements and fixes
 - No duplicate bullets that describe the same change.
 - No internal jargon or file paths.
 - Final list fits App Store text limits for the target storefront if provided.
+
+# Inputs
+- Ask for timeframe/range if missing (tag/date/commit).
+
+# Data gathering
+- Use `git log <range> --name-only --pretty=...` and map shared changes to both apps.
+
+# Output rules
+- 5–10 bullets total.
+- Past tense, user-facing language only.
+- No internal jargon, file paths, or duplicate bullets.
