@@ -57,7 +57,11 @@ public struct GetChatTransaction: Transaction2 {
 
         do {
           let dialog = Dialog(from: response.dialog)
-          try dialog.save(db)
+          let dialogId = Dialog.getDialogId(peerId: dialog.peerId)
+          let existingDialog = try Dialog.fetchOne(db, id: dialogId)
+          if existingDialog == nil {
+            try dialog.save(db)
+          }
         } catch {
           log.error("Failed to save dialog", error: error)
           throw error
