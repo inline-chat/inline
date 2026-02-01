@@ -7,8 +7,8 @@ import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { Log } from "@in/server/utils/log"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { db } from "@in/server/db"
-import { and, eq } from "drizzle-orm"
-import { chats, dialogs, members, chatParticipants, type DbChat, type DbDialog } from "@in/server/db/schema"
+import { and, desc, eq, isNull, not } from "drizzle-orm"
+import { chats, dialogs, members, chatParticipants, messages, type DbChat, type DbDialog } from "@in/server/db/schema"
 
 type Input = {
   peerId: InputPeer
@@ -17,6 +17,7 @@ type Input = {
 type Output = {
   chat: Chat
   dialog: Dialog
+  pinnedMessageIds: bigint[]
 }
 
 const log = new Log("functions.getChat")
@@ -275,8 +276,17 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
   const encodedChat = Encoders.chat(chat, { encodingForUserId: currentUserId })
   const encodedDialog = Encoders.dialog(dialog, { unreadCount: unreadData?.unreadCount ?? 0 })
 
+  const pinnedRows = await db
+    .select({ messageId: messages.messageId })
+    .from(messages)
+    .where(and(eq(messages.chatId, chat.id), not(isNull(messages.pinnedAt))))
+    .orderBy(desc(messages.pinnedAt), desc(messages.messageId))
+
+  const pinnedMessageIds = pinnedRows.map((row) => BigInt(row.messageId))
+
   return {
     chat: encodedChat,
     dialog: encodedDialog,
+    pinnedMessageIds,
   }
 }

@@ -18,6 +18,8 @@ message ServerUpdate {
     ServerChatUpdateDeleteChat delete_chat = 7;
     ServerChatUpdateParticipantDelete participant_delete = 8;
     ServerChatUpdateVisibility chat_visibility = 13;
+    ServerChatUpdateInfo chat_info = 15;
+    ServerChatUpdatePinnedMessages pinned_messages = 16;
 
     // Space updates
     ServerSpaceUpdateRemoveMember space_remove_member = 9;
@@ -65,6 +67,19 @@ message ServerChatUpdateParticipantDelete {
 message ServerChatUpdateVisibility {
   int64 chat_id = 1;
   bool is_public = 2;
+}
+
+// Update for a chat when pinned messages change
+message ServerChatUpdatePinnedMessages {
+  int64 chat_id = 1;
+  repeated int64 message_ids = 2;
+}
+
+// Update for a chat when title or emoji changes
+message ServerChatUpdateInfo {
+  int64 chat_id = 1;
+  optional string title = 2;
+  optional string emoji = 3;
 }
 
 // ------------------------------------------------------------

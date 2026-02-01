@@ -209,6 +209,33 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
           },
         }
 
+      case "chatInfo":
+        return {
+          seq: update.seq,
+          date: encodeDateStrict(update.date),
+          update: {
+            oneofKind: "chatInfo",
+            chatInfo: {
+              chatId: serverUpdate.update.chatInfo.chatId,
+              title: serverUpdate.update.chatInfo.title,
+              emoji: serverUpdate.update.chatInfo.emoji,
+            },
+          },
+        }
+
+      case "pinnedMessages":
+        return {
+          seq: update.seq,
+          date: encodeDateStrict(update.date),
+          update: {
+            oneofKind: "pinnedMessages",
+            pinnedMessages: {
+              peerId: peerId,
+              messageIds: serverUpdate.update.pinnedMessages.messageIds,
+            },
+          },
+        }
+
       default:
         throw new Error(`Unknown update type: ${serverUpdate.update.oneofKind}`)
     }

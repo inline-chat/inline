@@ -67,6 +67,7 @@ export interface Chat extends DbModelBase<DbObjectKind.Chat> {
   emoji?: string
   isPublic?: boolean
   lastMsgId?: number
+  pinnedMessageIds?: number[]
 }
 
 export interface Message extends DbModelBase<DbObjectKind.Message> {

@@ -19,6 +19,21 @@ const getPeerUserId = (peer: Peer | undefined) => {
   return toNumber(peer.type.user.userId)
 }
 
+const getChatIdForPeer = (db: Db, peer: Peer | undefined) => {
+  const chatId = getPeerChatId(peer)
+  if (chatId != null) return chatId
+
+  const peerUserId = getPeerUserId(peer)
+  if (peerUserId == null) return undefined
+
+  const matches = db.queryCollection(
+    DbQueryPlanType.Objects,
+    DbObjectKind.Dialog,
+    (dialog) => dialog.peerUserId === peerUserId,
+  )
+  return matches[0]?.chatId
+}
+
 const updateDialogForPeer = (
   db: Db,
   peer: Peer | undefined,
@@ -112,6 +127,22 @@ export const applyUpdates = (db: Db, updates: Update[]) => {
         db.update({
           ...existing,
           isPublic: update.update.chatVisibility.isPublic,
+        })
+        break
+      }
+
+      case "pinnedMessages": {
+        const chatId = getChatIdForPeer(db, update.update.pinnedMessages.peerId)
+        if (chatId == null) break
+        const ref = db.ref(DbObjectKind.Chat, chatId)
+        const existing = db.get(ref)
+        if (!existing) break
+        const pinnedMessageIds = update.update.pinnedMessages.messageIds
+          .map((id) => toNumber(id))
+          .filter((id): id is number => id != null)
+        db.update({
+          ...existing,
+          pinnedMessageIds,
         })
         break
       }

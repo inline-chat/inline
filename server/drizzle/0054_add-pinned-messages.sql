@@ -1,0 +1,1 @@
+ALTER TABLE "messages" ADD COLUMN "pinned_at" timestamp (3);

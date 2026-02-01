@@ -1,0 +1,205 @@
+import Combine
+import GRDB
+import InlineKit
+import Logger
+import UIKit
+
+final class PinnedMessageHeaderView: UIView, UIGestureRecognizerDelegate {
+  static let preferredHeight: CGFloat = EmbedMessageView.height + 32
+
+  var onHeightChange: ((CGFloat) -> Void)?
+
+  private let peerId: Peer
+  private let chatId: Int64
+  private let log = Log.scoped("PinnedMessageHeaderView")
+
+  private var pinnedMessageObservation: AnyCancellable?
+  private var messageObservation: AnyCancellable?
+  private var currentMessageId: Int64?
+
+  private let blurView = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
+
+  private lazy var embedView: EmbedMessageView = {
+    let view = EmbedMessageView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.showsBackground = false
+    view.showsLeadingBar = false
+    view.textLeadingPadding = 10
+    return view
+  }()
+
+  private lazy var closeButton: UIButton = {
+    let button = UIButton(type: .system)
+    let config = UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+    button.setImage(UIImage(systemName: "xmark", withConfiguration: config), for: .normal)
+    button.tintColor = .secondaryLabel
+    button.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
+    button.translatesAutoresizingMaskIntoConstraints = false
+    return button
+  }()
+
+  init(peerId: Peer, chatId: Int64) {
+    self.peerId = peerId
+    self.chatId = chatId
+    super.init(frame: .zero)
+    setupViews()
+    setupConstraints()
+    observePinnedMessages()
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  private func setupViews() {
+    translatesAutoresizingMaskIntoConstraints = false
+    backgroundColor = .clear
+    isHidden = true
+
+    blurView.translatesAutoresizingMaskIntoConstraints = false
+    blurView.layer.cornerRadius = 10
+    blurView.layer.masksToBounds = true
+    addSubview(blurView)
+    blurView.contentView.addSubview(embedView)
+    blurView.contentView.addSubview(closeButton)
+
+    let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+    tapGesture.delegate = self
+    addGestureRecognizer(tapGesture)
+  }
+
+  private func setupConstraints() {
+    NSLayoutConstraint.activate([
+      blurView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+      blurView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+      blurView.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+      blurView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
+
+      embedView.leadingAnchor.constraint(equalTo: blurView.contentView.leadingAnchor, constant: 8),
+      embedView.centerYAnchor.constraint(equalTo: blurView.contentView.centerYAnchor),
+      embedView.heightAnchor.constraint(equalToConstant: EmbedMessageView.height),
+
+      closeButton.leadingAnchor.constraint(equalTo: embedView.trailingAnchor, constant: 8),
+      closeButton.trailingAnchor.constraint(equalTo: blurView.contentView.trailingAnchor, constant: -8),
+      closeButton.centerYAnchor.constraint(equalTo: embedView.centerYAnchor),
+      closeButton.widthAnchor.constraint(equalToConstant: 24),
+      closeButton.heightAnchor.constraint(equalToConstant: 24),
+    ])
+  }
+
+  private func observePinnedMessages() {
+    pinnedMessageObservation = ValueObservation
+      .tracking { [chatId] db in
+        try PinnedMessage
+          .filter(Column("chatId") == chatId)
+          .order(PinnedMessage.Columns.position.asc)
+          .fetchOne(db)
+      }
+      .publisher(in: AppDatabase.shared.dbWriter, scheduling: .immediate)
+      .receive(on: DispatchQueue.main)
+      .sink(
+        receiveCompletion: { [weak self] completion in
+          self?.log.error("Pinned message observation failed: \(completion)")
+        },
+        receiveValue: { [weak self] pinned in
+          self?.updatePinnedMessageId(pinned?.messageId)
+        }
+      )
+  }
+
+  private func updatePinnedMessageId(_ messageId: Int64?) {
+    guard messageId != currentMessageId else { return }
+
+    currentMessageId = messageId
+    messageObservation?.cancel()
+    messageObservation = nil
+
+    if let messageId {
+      setVisible(true)
+      embedView.showNotLoaded(
+        kind: .pinnedInHeader,
+        outgoing: false,
+        isOnlyEmoji: false,
+        style: .replyBubble,
+        messageText: "Pinned message unavailable"
+      )
+      observePinnedMessageContent(messageId: messageId)
+    } else {
+      setVisible(false)
+    }
+  }
+
+  private func observePinnedMessageContent(messageId: Int64) {
+    messageObservation = ValueObservation
+      .tracking { [chatId] db in
+        try FullMessage.queryRequest()
+          .filter(
+            Column("messageId") == messageId && Column("chatId") == chatId
+          )
+          .fetchOne(db)
+      }
+      .publisher(in: AppDatabase.shared.dbWriter, scheduling: .immediate)
+      .receive(on: DispatchQueue.main)
+      .sink(
+        receiveCompletion: { [weak self] completion in
+          self?.log.error("Pinned message fetch failed: \(completion)")
+        },
+        receiveValue: { [weak self] message in
+          guard let self else { return }
+          if let message {
+            embedView.configure(
+              fullMessage: message,
+              kind: .pinnedInHeader,
+              outgoing: false,
+              isOnlyEmoji: false,
+              style: .replyBubble
+            )
+          } else {
+            embedView.showNotLoaded(
+              kind: .pinnedInHeader,
+              outgoing: false,
+              isOnlyEmoji: false,
+              style: .replyBubble,
+              messageText: "Pinned message unavailable"
+            )
+          }
+        }
+      )
+  }
+
+  private func setVisible(_ visible: Bool) {
+    isHidden = !visible
+    onHeightChange?(visible ? Self.preferredHeight : 0)
+  }
+
+  @objc private func handleTap() {
+    guard let messageId = currentMessageId else { return }
+    NotificationCenter.default.post(
+      name: Notification.Name("ScrollToRepliedMessage"),
+      object: nil,
+      userInfo: [
+        "repliedToMessageId": messageId,
+        "chatId": chatId,
+      ]
+    )
+  }
+
+  @objc private func closeTapped() {
+    guard let messageId = currentMessageId else { return }
+    Task { @MainActor in
+      do {
+        _ = try await Api.realtime.send(.pinMessage(peer: peerId, messageId: messageId, unpin: true))
+      } catch {
+        Log.shared.error("Failed to unpin message", error: error)
+      }
+    }
+  }
+
+  func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+    if let touchedView = touch.view, touchedView.isDescendant(of: closeButton) {
+      return false
+    }
+    return true
+  }
+}

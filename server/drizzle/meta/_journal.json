@@ -379,6 +379,13 @@
       "when": 1769440469218,
       "tag": "0053_add_chat_creator",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1769968246284,
+      "tag": "0054_add-pinned-messages",
+      "breakpoints": true
     }
   ]
 }

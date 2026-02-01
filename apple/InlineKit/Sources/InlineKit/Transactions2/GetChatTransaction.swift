@@ -62,6 +62,21 @@ public struct GetChatTransaction: Transaction2 {
           log.error("Failed to save dialog", error: error)
           throw error
         }
+
+        do {
+          let chatId = response.chat.id
+          try PinnedMessage.filter(Column("chatId") == chatId).deleteAll(db)
+
+          if !response.pinnedMessageIds.isEmpty {
+            for (index, messageId) in response.pinnedMessageIds.enumerated() {
+              let pinned = PinnedMessage(chatId: chatId, messageId: messageId, position: Int64(index))
+              try pinned.save(db)
+            }
+          }
+        } catch {
+          log.error("Failed to save pinned messages", error: error)
+          throw error
+        }
       }
       log.trace("getChat saved")
     } catch {

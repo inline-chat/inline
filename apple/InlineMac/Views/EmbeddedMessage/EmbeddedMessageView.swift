@@ -24,6 +24,7 @@ class EmbeddedMessageView: NSView {
     case replyingInCompose
     case editingInCompose
     case forwardingInCompose
+    case pinnedInHeader
   }
 
   private var kind: Kind = .replyInMessage
@@ -34,11 +35,45 @@ class EmbeddedMessageView: NSView {
   private var senderNameForColor: String?
   private var simplePhotoView: SimplePhotoView?
   private var textLeadingConstraint: NSLayoutConstraint?
+  private var nameTrailingConstraint: NSLayoutConstraint?
+  private var messageTrailingConstraint: NSLayoutConstraint?
+  private var rectangleWidthConstraint: NSLayoutConstraint?
   private var photoConstraints: [NSLayoutConstraint] = []
+
+  var showsBackground: Bool = true {
+    didSet {
+      applyBackgroundAppearance()
+    }
+  }
+
+  var showsLeadingBar: Bool = true {
+    didSet {
+      applyLeadingBarAppearance()
+    }
+  }
+
+  var textHorizontalPadding: CGFloat = Constants.horizontalPadding {
+    didSet {
+      textLeadingPadding = textHorizontalPadding
+      textTrailingPadding = textHorizontalPadding
+    }
+  }
+
+  var textLeadingPadding: CGFloat = Constants.horizontalPadding {
+    didSet {
+      applyTextPadding()
+    }
+  }
+
+  var textTrailingPadding: CGFloat = Constants.horizontalPadding {
+    didSet {
+      applyTextPadding()
+    }
+  }
 
   private var cornerRadius: CGFloat {
     switch kind {
-      case .replyInMessage:
+      case .replyInMessage, .pinnedInHeader:
         8
       default:
         0
@@ -46,7 +81,8 @@ class EmbeddedMessageView: NSView {
   }
 
   private var senderFont: NSFont {
-    .systemFont(ofSize: 12, weight: .semibold)
+    let weight: NSFont.Weight = kind == .pinnedInHeader ? .regular : .semibold
+    return .systemFont(ofSize: 12, weight: weight)
   }
 
   private var messageFont: NSFont {
@@ -70,7 +106,7 @@ class EmbeddedMessageView: NSView {
   }
 
   private var shouldUseSenderColor: Bool {
-    style == .colored && kind == .replyInMessage
+    style == .colored && (kind == .replyInMessage || kind == .pinnedInHeader)
   }
 
   private var rectangleColor: NSColor {
@@ -90,7 +126,7 @@ class EmbeddedMessageView: NSView {
   }
 
   private var backgroundColor: NSColor? {
-    guard kind == .replyInMessage else { return nil }
+    guard kind == .replyInMessage || kind == .pinnedInHeader else { return nil }
 
     if style == .colored {
       return senderColor.withAlphaComponent(0.08)
@@ -157,7 +193,6 @@ class EmbeddedMessageView: NSView {
 
   private func setupView() {
     wantsLayer = true
-    layer?.cornerRadius = cornerRadius
     layer?.masksToBounds = true
 
     translatesAutoresizingMaskIntoConstraints = false
@@ -169,6 +204,14 @@ class EmbeddedMessageView: NSView {
     textLeadingConstraint = nameLabel.leadingAnchor.constraint(
       equalTo: rectangleView.trailingAnchor, constant: Constants.contentSpacing
     )
+    rectangleWidthConstraint = rectangleView.widthAnchor.constraint(equalToConstant: Constants.rectangleWidth)
+
+    nameTrailingConstraint = nameLabel.trailingAnchor.constraint(
+      equalTo: trailingAnchor, constant: -Constants.horizontalPadding
+    )
+    messageTrailingConstraint = messageLabel.trailingAnchor.constraint(
+      equalTo: trailingAnchor, constant: -Constants.horizontalPadding
+    )
 
     NSLayoutConstraint.activate([
       // Height
@@ -176,22 +219,18 @@ class EmbeddedMessageView: NSView {
 
       // Rectangle view
       rectangleView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      rectangleView.widthAnchor.constraint(equalToConstant: Constants.rectangleWidth),
+      rectangleWidthConstraint!,
       rectangleView.topAnchor.constraint(equalTo: topAnchor, constant: 0),
       rectangleView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: 0),
 
       // Name label
       textLeadingConstraint!,
-      nameLabel.trailingAnchor.constraint(
-        equalTo: trailingAnchor, constant: -Constants.horizontalPadding
-      ),
+      nameTrailingConstraint!,
       nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: Constants.verticalPadding),
 
       // Message label
       messageLabel.leadingAnchor.constraint(equalTo: nameLabel.leadingAnchor),
-      messageLabel.trailingAnchor.constraint(
-        equalTo: trailingAnchor, constant: -Constants.horizontalPadding
-      ),
+      messageTrailingConstraint!,
       messageLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor),
       messageLabel.bottomAnchor.constraint(
         equalTo: bottomAnchor, constant: -Constants.verticalPadding
@@ -203,6 +242,10 @@ class EmbeddedMessageView: NSView {
       action: #selector(handleTap)
     )
     addGestureRecognizer(clickGesture)
+
+    applyBackgroundAppearance()
+    applyLeadingBarAppearance()
+    applyTextPadding()
   }
 
   func setRelatedMessage(_ message: Message) {
@@ -295,13 +338,16 @@ class EmbeddedMessageView: NSView {
 
       case .forwardingInCompose:
         "Forward Message"
+
+      case .pinnedInHeader:
+        "Pinned message"
     }
 
     // Update visuals after setting senderNameForColor
+    nameLabel.font = senderFont
     rectangleView.layer?.backgroundColor = rectangleColor.cgColor
     nameLabel.textColor = nameLabelColor
-    layer?.backgroundColor = backgroundColor?.cgColor
-    layer?.cornerRadius = cornerRadius
+    applyBackgroundAppearance()
 
     // Handle photo if available
     let previewPhoto = photoInfo ?? videoInfo?.thumbnail
@@ -310,8 +356,64 @@ class EmbeddedMessageView: NSView {
 
     if kind == .forwardingInCompose {
       messageLabel.stringValue = forwardDescription(for: senderName, messageText: messageContent)
+    } else if kind == .pinnedInHeader {
+      messageLabel.stringValue = "\(senderName): \(messageContent)"
     } else {
       messageLabel.stringValue = messageContent
+    }
+  }
+
+  func showNotLoaded(kind: Kind, senderName: String? = nil, messageText: String) {
+    self.kind = kind
+    self.message = nil
+    senderNameForColor = senderName
+
+    let resolvedSender = senderName ?? "User"
+
+    nameLabel.stringValue = switch kind {
+      case .replyInMessage:
+        resolvedSender
+      case .replyingInCompose:
+        "Reply to \(resolvedSender)"
+      case .editingInCompose:
+        "Edit Message"
+      case .forwardingInCompose:
+        "Forward Message"
+      case .pinnedInHeader:
+        "Pinned message"
+    }
+
+    if kind == .forwardingInCompose {
+      messageLabel.stringValue = forwardDescription(for: resolvedSender, messageText: messageText)
+    } else {
+      messageLabel.stringValue = messageText
+    }
+
+    updatePhotoView(photoInfo: nil, overlaySymbol: nil)
+
+    nameLabel.font = senderFont
+    rectangleView.layer?.backgroundColor = rectangleColor.cgColor
+    nameLabel.textColor = nameLabelColor
+    applyBackgroundAppearance()
+  }
+
+  private func applyBackgroundAppearance() {
+    layer?.backgroundColor = showsBackground ? backgroundColor?.cgColor : nil
+    layer?.cornerRadius = showsBackground ? cornerRadius : 0
+  }
+
+  private func applyLeadingBarAppearance() {
+    let leadingPadding = showsLeadingBar ? Constants.contentSpacing : textLeadingPadding
+    rectangleView.isHidden = !showsLeadingBar
+    rectangleWidthConstraint?.constant = showsLeadingBar ? Constants.rectangleWidth : 0
+    textLeadingConstraint?.constant = leadingPadding
+  }
+
+  private func applyTextPadding() {
+    nameTrailingConstraint?.constant = -textTrailingPadding
+    messageTrailingConstraint?.constant = -textTrailingPadding
+    if !showsLeadingBar {
+      textLeadingConstraint?.constant = textLeadingPadding
     }
   }
 

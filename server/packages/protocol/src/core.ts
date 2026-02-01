@@ -1648,6 +1648,18 @@ export interface RpcCall {
          */
         updateChatVisibility: UpdateChatVisibilityInput;
     } | {
+        oneofKind: "pinMessage";
+        /**
+         * @generated from protobuf field: PinMessageInput pinMessage = 32;
+         */
+        pinMessage: PinMessageInput;
+    } | {
+        oneofKind: "updateChatInfo";
+        /**
+         * @generated from protobuf field: UpdateChatInfoInput updateChatInfo = 33;
+         */
+        updateChatInfo: UpdateChatInfoInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1842,6 +1854,18 @@ export interface RpcResult {
          * @generated from protobuf field: UpdateChatVisibilityResult updateChatVisibility = 31;
          */
         updateChatVisibility: UpdateChatVisibilityResult;
+    } | {
+        oneofKind: "pinMessage";
+        /**
+         * @generated from protobuf field: PinMessageResult pinMessage = 32;
+         */
+        pinMessage: PinMessageResult;
+    } | {
+        oneofKind: "updateChatInfo";
+        /**
+         * @generated from protobuf field: UpdateChatInfoResult updateChatInfo = 33;
+         */
+        updateChatInfo: UpdateChatInfoResult;
     } | {
         oneofKind: undefined;
     };
@@ -2090,6 +2114,10 @@ export interface GetChatResult {
      * @generated from protobuf field: Dialog dialog = 2;
      */
     dialog?: Dialog;
+    /**
+     * @generated from protobuf field: repeated int64 pinned_message_ids = 3;
+     */
+    pinnedMessageIds: bigint[];
 }
 /**
  * Mark dialog as unread
@@ -3010,6 +3038,18 @@ export interface Update {
          */
         dialogArchived: UpdateDialogArchived;
     } | {
+        oneofKind: "chatInfo";
+        /**
+         * @generated from protobuf field: UpdateChatInfo chat_info = 30;
+         */
+        chatInfo: UpdateChatInfo;
+    } | {
+        oneofKind: "pinnedMessages";
+        /**
+         * @generated from protobuf field: UpdatePinnedMessages pinned_messages = 31;
+         */
+        pinnedMessages: UpdatePinnedMessages;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -3078,6 +3118,44 @@ export interface UpdateChatVisibility {
      * @generated from protobuf field: bool is_public = 2;
      */
     isPublic: boolean;
+}
+/**
+ * Update when chat title or emoji changes
+ *
+ * @generated from protobuf message UpdateChatInfo
+ */
+export interface UpdateChatInfo {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: optional string title = 2;
+     */
+    title?: string;
+    /**
+     * @generated from protobuf field: optional string emoji = 3;
+     */
+    emoji?: string;
+}
+/**
+ * Update when pinned messages change for a chat
+ *
+ * @generated from protobuf message UpdatePinnedMessages
+ */
+export interface UpdatePinnedMessages {
+    /**
+     * Peer ID of the chat
+     *
+     * @generated from protobuf field: Peer peer_id = 1;
+     */
+    peerId?: Peer;
+    /**
+     * Ordered list of pinned message IDs (latest first)
+     *
+     * @generated from protobuf field: repeated int64 message_ids = 2;
+     */
+    messageIds: bigint[];
 }
 /**
  * @generated from protobuf message UpdateNewMessageNotification
@@ -3740,6 +3818,60 @@ export interface UpdateChatVisibilityResult {
     chat?: Chat;
 }
 /**
+ * @generated from protobuf message UpdateChatInfoInput
+ */
+export interface UpdateChatInfoInput {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: optional string title = 2;
+     */
+    title?: string;
+    /**
+     * @generated from protobuf field: optional string emoji = 3;
+     */
+    emoji?: string;
+}
+/**
+ * @generated from protobuf message UpdateChatInfoResult
+ */
+export interface UpdateChatInfoResult {
+    /**
+     * @generated from protobuf field: Chat chat = 1;
+     */
+    chat?: Chat;
+}
+/**
+ * Pin or unpin a message for everyone
+ *
+ * @generated from protobuf message PinMessageInput
+ */
+export interface PinMessageInput {
+    /**
+     * @generated from protobuf field: InputPeer peer_id = 1;
+     */
+    peerId?: InputPeer;
+    /**
+     * @generated from protobuf field: int64 message_id = 2;
+     */
+    messageId: bigint;
+    /**
+     * @generated from protobuf field: bool unpin = 3;
+     */
+    unpin: boolean;
+}
+/**
+ * @generated from protobuf message PinMessageResult
+ */
+export interface PinMessageResult {
+    /**
+     * @generated from protobuf field: repeated Update updates = 1;
+     */
+    updates: Update[];
+}
+/**
  * Apple only types
  *
  * @generated from protobuf message DraftMessage
@@ -3894,7 +4026,15 @@ export enum Method {
     /**
      * @generated from protobuf enum value: UPDATE_CHAT_VISIBILITY = 30;
      */
-    UPDATE_CHAT_VISIBILITY = 30
+    UPDATE_CHAT_VISIBILITY = 30,
+    /**
+     * @generated from protobuf enum value: PIN_MESSAGE = 31;
+     */
+    PIN_MESSAGE = 31,
+    /**
+     * @generated from protobuf enum value: UPDATE_CHAT_INFO = 32;
+     */
+    UPDATE_CHAT_INFO = 32
 }
 /**
  * @generated from protobuf enum SearchMessagesFilter
@@ -7256,7 +7396,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 28, name: "updateMemberAccess", kind: "message", oneof: "input", T: () => UpdateMemberAccessInput },
             { no: 29, name: "searchMessages", kind: "message", oneof: "input", T: () => SearchMessagesInput },
             { no: 30, name: "forwardMessages", kind: "message", oneof: "input", T: () => ForwardMessagesInput },
-            { no: 31, name: "updateChatVisibility", kind: "message", oneof: "input", T: () => UpdateChatVisibilityInput }
+            { no: 31, name: "updateChatVisibility", kind: "message", oneof: "input", T: () => UpdateChatVisibilityInput },
+            { no: 32, name: "pinMessage", kind: "message", oneof: "input", T: () => PinMessageInput },
+            { no: 33, name: "updateChatInfo", kind: "message", oneof: "input", T: () => UpdateChatInfoInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -7455,6 +7597,18 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         updateChatVisibility: UpdateChatVisibilityInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).updateChatVisibility)
                     };
                     break;
+                case /* PinMessageInput pinMessage */ 32:
+                    message.input = {
+                        oneofKind: "pinMessage",
+                        pinMessage: PinMessageInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).pinMessage)
+                    };
+                    break;
+                case /* UpdateChatInfoInput updateChatInfo */ 33:
+                    message.input = {
+                        oneofKind: "updateChatInfo",
+                        updateChatInfo: UpdateChatInfoInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).updateChatInfo)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -7560,6 +7714,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* UpdateChatVisibilityInput updateChatVisibility = 31; */
         if (message.input.oneofKind === "updateChatVisibility")
             UpdateChatVisibilityInput.internalBinaryWrite(message.input.updateChatVisibility, writer.tag(31, WireType.LengthDelimited).fork(), options).join();
+        /* PinMessageInput pinMessage = 32; */
+        if (message.input.oneofKind === "pinMessage")
+            PinMessageInput.internalBinaryWrite(message.input.pinMessage, writer.tag(32, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateChatInfoInput updateChatInfo = 33; */
+        if (message.input.oneofKind === "updateChatInfo")
+            UpdateChatInfoInput.internalBinaryWrite(message.input.updateChatInfo, writer.tag(33, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -7604,7 +7764,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 28, name: "updateMemberAccess", kind: "message", oneof: "result", T: () => UpdateMemberAccessResult },
             { no: 29, name: "searchMessages", kind: "message", oneof: "result", T: () => SearchMessagesResult },
             { no: 30, name: "forwardMessages", kind: "message", oneof: "result", T: () => ForwardMessagesResult },
-            { no: 31, name: "updateChatVisibility", kind: "message", oneof: "result", T: () => UpdateChatVisibilityResult }
+            { no: 31, name: "updateChatVisibility", kind: "message", oneof: "result", T: () => UpdateChatVisibilityResult },
+            { no: 32, name: "pinMessage", kind: "message", oneof: "result", T: () => PinMessageResult },
+            { no: 33, name: "updateChatInfo", kind: "message", oneof: "result", T: () => UpdateChatInfoResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -7803,6 +7965,18 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         updateChatVisibility: UpdateChatVisibilityResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).updateChatVisibility)
                     };
                     break;
+                case /* PinMessageResult pinMessage */ 32:
+                    message.result = {
+                        oneofKind: "pinMessage",
+                        pinMessage: PinMessageResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).pinMessage)
+                    };
+                    break;
+                case /* UpdateChatInfoResult updateChatInfo */ 33:
+                    message.result = {
+                        oneofKind: "updateChatInfo",
+                        updateChatInfo: UpdateChatInfoResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).updateChatInfo)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -7908,6 +8082,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* UpdateChatVisibilityResult updateChatVisibility = 31; */
         if (message.result.oneofKind === "updateChatVisibility")
             UpdateChatVisibilityResult.internalBinaryWrite(message.result.updateChatVisibility, writer.tag(31, WireType.LengthDelimited).fork(), options).join();
+        /* PinMessageResult pinMessage = 32; */
+        if (message.result.oneofKind === "pinMessage")
+            PinMessageResult.internalBinaryWrite(message.result.pinMessage, writer.tag(32, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateChatInfoResult updateChatInfo = 33; */
+        if (message.result.oneofKind === "updateChatInfo")
+            UpdateChatInfoResult.internalBinaryWrite(message.result.updateChatInfo, writer.tag(33, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -8610,11 +8790,13 @@ class GetChatResult$Type extends MessageType<GetChatResult> {
     constructor() {
         super("GetChatResult", [
             { no: 1, name: "chat", kind: "message", T: () => Chat },
-            { no: 2, name: "dialog", kind: "message", T: () => Dialog }
+            { no: 2, name: "dialog", kind: "message", T: () => Dialog },
+            { no: 3, name: "pinned_message_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<GetChatResult>): GetChatResult {
         const message = globalThis.Object.create((this.messagePrototype!));
+        message.pinnedMessageIds = [];
         if (value !== undefined)
             reflectionMergePartial<GetChatResult>(this, message, value);
         return message;
@@ -8629,6 +8811,13 @@ class GetChatResult$Type extends MessageType<GetChatResult> {
                     break;
                 case /* Dialog dialog */ 2:
                     message.dialog = Dialog.internalBinaryRead(reader, reader.uint32(), options, message.dialog);
+                    break;
+                case /* repeated int64 pinned_message_ids */ 3:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.pinnedMessageIds.push(reader.int64().toBigInt());
+                    else
+                        message.pinnedMessageIds.push(reader.int64().toBigInt());
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -8648,6 +8837,13 @@ class GetChatResult$Type extends MessageType<GetChatResult> {
         /* Dialog dialog = 2; */
         if (message.dialog)
             Dialog.internalBinaryWrite(message.dialog, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* repeated int64 pinned_message_ids = 3; */
+        if (message.pinnedMessageIds.length) {
+            writer.tag(3, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.pinnedMessageIds.length; i++)
+                writer.int64(message.pinnedMessageIds[i]);
+            writer.join();
+        }
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -11009,7 +11205,9 @@ class Update$Type extends MessageType<Update> {
             { no: 26, name: "space_has_new_updates", kind: "message", oneof: "update", T: () => UpdateSpaceHasNewUpdates },
             { no: 27, name: "space_member_update", kind: "message", oneof: "update", T: () => UpdateSpaceMemberUpdate },
             { no: 28, name: "chat_visibility", kind: "message", oneof: "update", T: () => UpdateChatVisibility },
-            { no: 29, name: "dialog_archived", kind: "message", oneof: "update", T: () => UpdateDialogArchived }
+            { no: 29, name: "dialog_archived", kind: "message", oneof: "update", T: () => UpdateDialogArchived },
+            { no: 30, name: "chat_info", kind: "message", oneof: "update", T: () => UpdateChatInfo },
+            { no: 31, name: "pinned_messages", kind: "message", oneof: "update", T: () => UpdatePinnedMessages }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -11186,6 +11384,18 @@ class Update$Type extends MessageType<Update> {
                         dialogArchived: UpdateDialogArchived.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).dialogArchived)
                     };
                     break;
+                case /* UpdateChatInfo chat_info */ 30:
+                    message.update = {
+                        oneofKind: "chatInfo",
+                        chatInfo: UpdateChatInfo.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).chatInfo)
+                    };
+                    break;
+                case /* UpdatePinnedMessages pinned_messages */ 31:
+                    message.update = {
+                        oneofKind: "pinnedMessages",
+                        pinnedMessages: UpdatePinnedMessages.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).pinnedMessages)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -11282,6 +11492,12 @@ class Update$Type extends MessageType<Update> {
         /* UpdateDialogArchived dialog_archived = 29; */
         if (message.update.oneofKind === "dialogArchived")
             UpdateDialogArchived.internalBinaryWrite(message.update.dialogArchived, writer.tag(29, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateChatInfo chat_info = 30; */
+        if (message.update.oneofKind === "chatInfo")
+            UpdateChatInfo.internalBinaryWrite(message.update.chatInfo, writer.tag(30, WireType.LengthDelimited).fork(), options).join();
+        /* UpdatePinnedMessages pinned_messages = 31; */
+        if (message.update.oneofKind === "pinnedMessages")
+            UpdatePinnedMessages.internalBinaryWrite(message.update.pinnedMessages, writer.tag(31, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -11511,6 +11727,129 @@ class UpdateChatVisibility$Type extends MessageType<UpdateChatVisibility> {
  * @generated MessageType for protobuf message UpdateChatVisibility
  */
 export const UpdateChatVisibility = new UpdateChatVisibility$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateChatInfo$Type extends MessageType<UpdateChatInfo> {
+    constructor() {
+        super("UpdateChatInfo", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "title", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "emoji", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateChatInfo>): UpdateChatInfo {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<UpdateChatInfo>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateChatInfo): UpdateChatInfo {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* optional string title */ 2:
+                    message.title = reader.string();
+                    break;
+                case /* optional string emoji */ 3:
+                    message.emoji = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateChatInfo, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* optional string title = 2; */
+        if (message.title !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.title);
+        /* optional string emoji = 3; */
+        if (message.emoji !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.emoji);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateChatInfo
+ */
+export const UpdateChatInfo = new UpdateChatInfo$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdatePinnedMessages$Type extends MessageType<UpdatePinnedMessages> {
+    constructor() {
+        super("UpdatePinnedMessages", [
+            { no: 1, name: "peer_id", kind: "message", T: () => Peer },
+            { no: 2, name: "message_ids", kind: "scalar", repeat: 1 /*RepeatType.PACKED*/, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpdatePinnedMessages>): UpdatePinnedMessages {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.messageIds = [];
+        if (value !== undefined)
+            reflectionMergePartial<UpdatePinnedMessages>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdatePinnedMessages): UpdatePinnedMessages {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Peer peer_id */ 1:
+                    message.peerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* repeated int64 message_ids */ 2:
+                    if (wireType === WireType.LengthDelimited)
+                        for (let e = reader.int32() + reader.pos; reader.pos < e;)
+                            message.messageIds.push(reader.int64().toBigInt());
+                    else
+                        message.messageIds.push(reader.int64().toBigInt());
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdatePinnedMessages, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Peer peer_id = 1; */
+        if (message.peerId)
+            Peer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated int64 message_ids = 2; */
+        if (message.messageIds.length) {
+            writer.tag(2, WireType.LengthDelimited).fork();
+            for (let i = 0; i < message.messageIds.length; i++)
+                writer.int64(message.messageIds[i]);
+            writer.join();
+        }
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdatePinnedMessages
+ */
+export const UpdatePinnedMessages = new UpdatePinnedMessages$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class UpdateNewMessageNotification$Type extends MessageType<UpdateNewMessageNotification> {
     constructor() {
@@ -13609,6 +13948,222 @@ class UpdateChatVisibilityResult$Type extends MessageType<UpdateChatVisibilityRe
  * @generated MessageType for protobuf message UpdateChatVisibilityResult
  */
 export const UpdateChatVisibilityResult = new UpdateChatVisibilityResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateChatInfoInput$Type extends MessageType<UpdateChatInfoInput> {
+    constructor() {
+        super("UpdateChatInfoInput", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "title", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "emoji", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateChatInfoInput>): UpdateChatInfoInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<UpdateChatInfoInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateChatInfoInput): UpdateChatInfoInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* optional string title */ 2:
+                    message.title = reader.string();
+                    break;
+                case /* optional string emoji */ 3:
+                    message.emoji = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateChatInfoInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* optional string title = 2; */
+        if (message.title !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.title);
+        /* optional string emoji = 3; */
+        if (message.emoji !== undefined)
+            writer.tag(3, WireType.LengthDelimited).string(message.emoji);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateChatInfoInput
+ */
+export const UpdateChatInfoInput = new UpdateChatInfoInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateChatInfoResult$Type extends MessageType<UpdateChatInfoResult> {
+    constructor() {
+        super("UpdateChatInfoResult", [
+            { no: 1, name: "chat", kind: "message", T: () => Chat }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateChatInfoResult>): UpdateChatInfoResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<UpdateChatInfoResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateChatInfoResult): UpdateChatInfoResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Chat chat */ 1:
+                    message.chat = Chat.internalBinaryRead(reader, reader.uint32(), options, message.chat);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateChatInfoResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Chat chat = 1; */
+        if (message.chat)
+            Chat.internalBinaryWrite(message.chat, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateChatInfoResult
+ */
+export const UpdateChatInfoResult = new UpdateChatInfoResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class PinMessageInput$Type extends MessageType<PinMessageInput> {
+    constructor() {
+        super("PinMessageInput", [
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 2, name: "message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "unpin", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<PinMessageInput>): PinMessageInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.messageId = 0n;
+        message.unpin = false;
+        if (value !== undefined)
+            reflectionMergePartial<PinMessageInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: PinMessageInput): PinMessageInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* int64 message_id */ 2:
+                    message.messageId = reader.int64().toBigInt();
+                    break;
+                case /* bool unpin */ 3:
+                    message.unpin = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: PinMessageInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* int64 message_id = 2; */
+        if (message.messageId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.messageId);
+        /* bool unpin = 3; */
+        if (message.unpin !== false)
+            writer.tag(3, WireType.Varint).bool(message.unpin);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message PinMessageInput
+ */
+export const PinMessageInput = new PinMessageInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class PinMessageResult$Type extends MessageType<PinMessageResult> {
+    constructor() {
+        super("PinMessageResult", [
+            { no: 1, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update }
+        ]);
+    }
+    create(value?: PartialMessage<PinMessageResult>): PinMessageResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.updates = [];
+        if (value !== undefined)
+            reflectionMergePartial<PinMessageResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: PinMessageResult): PinMessageResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Update updates */ 1:
+                    message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: PinMessageResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Update updates = 1; */
+        for (let i = 0; i < message.updates.length; i++)
+            Update.internalBinaryWrite(message.updates[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message PinMessageResult
+ */
+export const PinMessageResult = new PinMessageResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class DraftMessage$Type extends MessageType<DraftMessage> {
     constructor() {

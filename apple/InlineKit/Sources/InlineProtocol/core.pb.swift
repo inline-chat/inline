@@ -88,6 +88,8 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case searchMessages // = 28
   case forwardMessages // = 29
   case updateChatVisibility // = 30
+  case pinMessage // = 31
+  case updateChatInfo // = 32
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -127,6 +129,8 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 28: self = .searchMessages
     case 29: self = .forwardMessages
     case 30: self = .updateChatVisibility
+    case 31: self = .pinMessage
+    case 32: self = .updateChatInfo
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -164,6 +168,8 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .searchMessages: return 28
     case .forwardMessages: return 29
     case .updateChatVisibility: return 30
+    case .pinMessage: return 31
+    case .updateChatInfo: return 32
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -201,6 +207,8 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .searchMessages,
     .forwardMessages,
     .updateChatVisibility,
+    .pinMessage,
+    .updateChatInfo,
   ]
 
 }
@@ -2516,6 +2524,22 @@ public struct RpcCall: Sendable {
     set {input = .updateChatVisibility(newValue)}
   }
 
+  public var pinMessage: PinMessageInput {
+    get {
+      if case .pinMessage(let v)? = input {return v}
+      return PinMessageInput()
+    }
+    set {input = .pinMessage(newValue)}
+  }
+
+  public var updateChatInfo: UpdateChatInfoInput {
+    get {
+      if case .updateChatInfo(let v)? = input {return v}
+      return UpdateChatInfoInput()
+    }
+    set {input = .updateChatInfo(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Input: Equatable, Sendable {
@@ -2549,6 +2573,8 @@ public struct RpcCall: Sendable {
     case searchMessages(SearchMessagesInput)
     case forwardMessages(ForwardMessagesInput)
     case updateChatVisibility(UpdateChatVisibilityInput)
+    case pinMessage(PinMessageInput)
+    case updateChatInfo(UpdateChatInfoInput)
 
   }
 
@@ -2810,6 +2836,22 @@ public struct RpcResult: @unchecked Sendable {
     set {_uniqueStorage()._result = .updateChatVisibility(newValue)}
   }
 
+  public var pinMessage: PinMessageResult {
+    get {
+      if case .pinMessage(let v)? = _storage._result {return v}
+      return PinMessageResult()
+    }
+    set {_uniqueStorage()._result = .pinMessage(newValue)}
+  }
+
+  public var updateChatInfo: UpdateChatInfoResult {
+    get {
+      if case .updateChatInfo(let v)? = _storage._result {return v}
+      return UpdateChatInfoResult()
+    }
+    set {_uniqueStorage()._result = .updateChatInfo(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Result: Equatable, Sendable {
@@ -2843,6 +2885,8 @@ public struct RpcResult: @unchecked Sendable {
     case searchMessages(SearchMessagesResult)
     case forwardMessages(ForwardMessagesResult)
     case updateChatVisibility(UpdateChatVisibilityResult)
+    case pinMessage(PinMessageResult)
+    case updateChatInfo(UpdateChatInfoResult)
 
   }
 
@@ -3183,6 +3227,11 @@ public struct GetChatResult: @unchecked Sendable {
   public var hasDialog: Bool {return _storage._dialog != nil}
   /// Clears the value of `dialog`. Subsequent reads from it will return its default value.
   public mutating func clearDialog() {_uniqueStorage()._dialog = nil}
+
+  public var pinnedMessageIds: [Int64] {
+    get {return _storage._pinnedMessageIds}
+    set {_uniqueStorage()._pinnedMessageIds = newValue}
+  }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -4601,6 +4650,22 @@ public struct Update: @unchecked Sendable {
     set {_uniqueStorage()._update = .dialogArchived(newValue)}
   }
 
+  public var chatInfo: UpdateChatInfo {
+    get {
+      if case .chatInfo(let v)? = _storage._update {return v}
+      return UpdateChatInfo()
+    }
+    set {_uniqueStorage()._update = .chatInfo(newValue)}
+  }
+
+  public var pinnedMessages: UpdatePinnedMessages {
+    get {
+      if case .pinnedMessages(let v)? = _storage._update {return v}
+      return UpdatePinnedMessages()
+    }
+    set {_uniqueStorage()._update = .pinnedMessages(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Update: Equatable, Sendable {
@@ -4640,6 +4705,8 @@ public struct Update: @unchecked Sendable {
     case spaceMemberUpdate(UpdateSpaceMemberUpdate)
     case chatVisibility(UpdateChatVisibility)
     case dialogArchived(UpdateDialogArchived)
+    case chatInfo(UpdateChatInfo)
+    case pinnedMessages(UpdatePinnedMessages)
 
   }
 
@@ -4718,6 +4785,66 @@ public struct UpdateChatVisibility: Sendable {
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+}
+
+/// Update when chat title or emoji changes
+public struct UpdateChatInfo: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var chatID: Int64 = 0
+
+  public var title: String {
+    get {return _title ?? String()}
+    set {_title = newValue}
+  }
+  /// Returns true if `title` has been explicitly set.
+  public var hasTitle: Bool {return self._title != nil}
+  /// Clears the value of `title`. Subsequent reads from it will return its default value.
+  public mutating func clearTitle() {self._title = nil}
+
+  public var emoji: String {
+    get {return _emoji ?? String()}
+    set {_emoji = newValue}
+  }
+  /// Returns true if `emoji` has been explicitly set.
+  public var hasEmoji: Bool {return self._emoji != nil}
+  /// Clears the value of `emoji`. Subsequent reads from it will return its default value.
+  public mutating func clearEmoji() {self._emoji = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _title: String? = nil
+  fileprivate var _emoji: String? = nil
+}
+
+/// Update when pinned messages change for a chat
+public struct UpdatePinnedMessages: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Peer ID of the chat
+  public var peerID: Peer {
+    get {return _peerID ?? Peer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {return self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  /// Ordered list of pinned message IDs (latest first)
+  public var messageIds: [Int64] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: Peer? = nil
 }
 
 public struct UpdateNewMessageNotification: Sendable {
@@ -5755,6 +5882,98 @@ public struct UpdateChatVisibilityResult: Sendable {
   fileprivate var _chat: Chat? = nil
 }
 
+public struct UpdateChatInfoInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var chatID: Int64 = 0
+
+  public var title: String {
+    get {return _title ?? String()}
+    set {_title = newValue}
+  }
+  /// Returns true if `title` has been explicitly set.
+  public var hasTitle: Bool {return self._title != nil}
+  /// Clears the value of `title`. Subsequent reads from it will return its default value.
+  public mutating func clearTitle() {self._title = nil}
+
+  public var emoji: String {
+    get {return _emoji ?? String()}
+    set {_emoji = newValue}
+  }
+  /// Returns true if `emoji` has been explicitly set.
+  public var hasEmoji: Bool {return self._emoji != nil}
+  /// Clears the value of `emoji`. Subsequent reads from it will return its default value.
+  public mutating func clearEmoji() {self._emoji = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _title: String? = nil
+  fileprivate var _emoji: String? = nil
+}
+
+public struct UpdateChatInfoResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var chat: Chat {
+    get {return _chat ?? Chat()}
+    set {_chat = newValue}
+  }
+  /// Returns true if `chat` has been explicitly set.
+  public var hasChat: Bool {return self._chat != nil}
+  /// Clears the value of `chat`. Subsequent reads from it will return its default value.
+  public mutating func clearChat() {self._chat = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _chat: Chat? = nil
+}
+
+/// Pin or unpin a message for everyone
+public struct PinMessageInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var peerID: InputPeer {
+    get {return _peerID ?? InputPeer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {return self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  public var messageID: Int64 = 0
+
+  public var unpin: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: InputPeer? = nil
+}
+
+public struct PinMessageResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var updates: [Update] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 /// Apple only types
 public struct DraftMessage: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
@@ -5821,6 +6040,8 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     28: .same(proto: "SEARCH_MESSAGES"),
     29: .same(proto: "FORWARD_MESSAGES"),
     30: .same(proto: "UPDATE_CHAT_VISIBILITY"),
+    31: .same(proto: "PIN_MESSAGE"),
+    32: .same(proto: "UPDATE_CHAT_INFO"),
   ]
 }
 
@@ -8780,6 +9001,8 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     29: .same(proto: "searchMessages"),
     30: .same(proto: "forwardMessages"),
     31: .same(proto: "updateChatVisibility"),
+    32: .same(proto: "pinMessage"),
+    33: .same(proto: "updateChatInfo"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -9179,6 +9402,32 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
           self.input = .updateChatVisibility(v)
         }
       }()
+      case 32: try {
+        var v: PinMessageInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .pinMessage(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .pinMessage(v)
+        }
+      }()
+      case 33: try {
+        var v: UpdateChatInfoInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .updateChatInfo(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .updateChatInfo(v)
+        }
+      }()
       default: break
       }
     }
@@ -9313,6 +9562,14 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       guard case .updateChatVisibility(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 31)
     }()
+    case .pinMessage?: try {
+      guard case .pinMessage(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 32)
+    }()
+    case .updateChatInfo?: try {
+      guard case .updateChatInfo(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 33)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -9360,6 +9617,8 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     29: .same(proto: "searchMessages"),
     30: .same(proto: "forwardMessages"),
     31: .same(proto: "updateChatVisibility"),
+    32: .same(proto: "pinMessage"),
+    33: .same(proto: "updateChatInfo"),
   ]
 
   fileprivate class _StorageClass {
@@ -9790,6 +10049,32 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
             _storage._result = .updateChatVisibility(v)
           }
         }()
+        case 32: try {
+          var v: PinMessageResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .pinMessage(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .pinMessage(v)
+          }
+        }()
+        case 33: try {
+          var v: UpdateChatInfoResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .updateChatInfo(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .updateChatInfo(v)
+          }
+        }()
         default: break
         }
       }
@@ -9925,6 +10210,14 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
       case .updateChatVisibility?: try {
         guard case .updateChatVisibility(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 31)
+      }()
+      case .pinMessage?: try {
+        guard case .pinMessage(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 32)
+      }()
+      case .updateChatInfo?: try {
+        guard case .updateChatInfo(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 33)
       }()
       case nil: break
       }
@@ -10501,11 +10794,13 @@ extension GetChatResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .same(proto: "chat"),
     2: .same(proto: "dialog"),
+    3: .standard(proto: "pinned_message_ids"),
   ]
 
   fileprivate class _StorageClass {
     var _chat: Chat? = nil
     var _dialog: Dialog? = nil
+    var _pinnedMessageIds: [Int64] = []
 
     #if swift(>=5.10)
       // This property is used as the initial default value for new instances of the type.
@@ -10522,6 +10817,7 @@ extension GetChatResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
     init(copying source: _StorageClass) {
       _chat = source._chat
       _dialog = source._dialog
+      _pinnedMessageIds = source._pinnedMessageIds
     }
   }
 
@@ -10542,6 +10838,7 @@ extension GetChatResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
         switch fieldNumber {
         case 1: try { try decoder.decodeSingularMessageField(value: &_storage._chat) }()
         case 2: try { try decoder.decodeSingularMessageField(value: &_storage._dialog) }()
+        case 3: try { try decoder.decodeRepeatedInt64Field(value: &_storage._pinnedMessageIds) }()
         default: break
         }
       }
@@ -10560,6 +10857,9 @@ extension GetChatResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
       try { if let v = _storage._dialog {
         try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
       } }()
+      if !_storage._pinnedMessageIds.isEmpty {
+        try visitor.visitPackedInt64Field(value: _storage._pinnedMessageIds, fieldNumber: 3)
+      }
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -10571,6 +10871,7 @@ extension GetChatResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
         let rhs_storage = _args.1
         if _storage._chat != rhs_storage._chat {return false}
         if _storage._dialog != rhs_storage._dialog {return false}
+        if _storage._pinnedMessageIds != rhs_storage._pinnedMessageIds {return false}
         return true
       }
       if !storagesAreEqual {return false}
@@ -12475,6 +12776,8 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     27: .standard(proto: "space_member_update"),
     28: .standard(proto: "chat_visibility"),
     29: .standard(proto: "dialog_archived"),
+    30: .standard(proto: "chat_info"),
+    31: .standard(proto: "pinned_messages"),
   ]
 
   fileprivate class _StorageClass {
@@ -12856,6 +13159,32 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
             _storage._update = .dialogArchived(v)
           }
         }()
+        case 30: try {
+          var v: UpdateChatInfo?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .chatInfo(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .chatInfo(v)
+          }
+        }()
+        case 31: try {
+          var v: UpdatePinnedMessages?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .pinnedMessages(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .pinnedMessages(v)
+          }
+        }()
         default: break
         }
       }
@@ -12978,6 +13307,14 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
       case .dialogArchived?: try {
         guard case .dialogArchived(let v)? = _storage._update else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 29)
+      }()
+      case .chatInfo?: try {
+        guard case .chatInfo(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 30)
+      }()
+      case .pinnedMessages?: try {
+        guard case .pinnedMessages(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 31)
       }()
       case nil: break
       }
@@ -13153,6 +13490,96 @@ extension UpdateChatVisibility: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
   public static func ==(lhs: UpdateChatVisibility, rhs: UpdateChatVisibility) -> Bool {
     if lhs.chatID != rhs.chatID {return false}
     if lhs.isPublic != rhs.isPublic {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateChatInfo: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateChatInfo"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "chat_id"),
+    2: .same(proto: "title"),
+    3: .same(proto: "emoji"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.chatID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self._title) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._emoji) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.chatID != 0 {
+      try visitor.visitSingularInt64Field(value: self.chatID, fieldNumber: 1)
+    }
+    try { if let v = self._title {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    } }()
+    try { if let v = self._emoji {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateChatInfo, rhs: UpdateChatInfo) -> Bool {
+    if lhs.chatID != rhs.chatID {return false}
+    if lhs._title != rhs._title {return false}
+    if lhs._emoji != rhs._emoji {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdatePinnedMessages: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdatePinnedMessages"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "peer_id"),
+    2: .standard(proto: "message_ids"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 2: try { try decoder.decodeRepeatedInt64Field(value: &self.messageIds) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if !self.messageIds.isEmpty {
+      try visitor.visitPackedInt64Field(value: self.messageIds, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdatePinnedMessages, rhs: UpdatePinnedMessages) -> Bool {
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs.messageIds != rhs.messageIds {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -14929,6 +15356,170 @@ extension UpdateChatVisibilityResult: SwiftProtobuf.Message, SwiftProtobuf._Mess
 
   public static func ==(lhs: UpdateChatVisibilityResult, rhs: UpdateChatVisibilityResult) -> Bool {
     if lhs._chat != rhs._chat {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateChatInfoInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateChatInfoInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "chat_id"),
+    2: .same(proto: "title"),
+    3: .same(proto: "emoji"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.chatID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self._title) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._emoji) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.chatID != 0 {
+      try visitor.visitSingularInt64Field(value: self.chatID, fieldNumber: 1)
+    }
+    try { if let v = self._title {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    } }()
+    try { if let v = self._emoji {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateChatInfoInput, rhs: UpdateChatInfoInput) -> Bool {
+    if lhs.chatID != rhs.chatID {return false}
+    if lhs._title != rhs._title {return false}
+    if lhs._emoji != rhs._emoji {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateChatInfoResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateChatInfoResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "chat"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._chat) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._chat {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateChatInfoResult, rhs: UpdateChatInfoResult) -> Bool {
+    if lhs._chat != rhs._chat {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension PinMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "PinMessageInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "peer_id"),
+    2: .standard(proto: "message_id"),
+    3: .same(proto: "unpin"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.messageID) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self.unpin) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if self.messageID != 0 {
+      try visitor.visitSingularInt64Field(value: self.messageID, fieldNumber: 2)
+    }
+    if self.unpin != false {
+      try visitor.visitSingularBoolField(value: self.unpin, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: PinMessageInput, rhs: PinMessageInput) -> Bool {
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs.messageID != rhs.messageID {return false}
+    if lhs.unpin != rhs.unpin {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension PinMessageResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "PinMessageResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "updates"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.updates) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.updates.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.updates, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: PinMessageResult, rhs: PinMessageResult) -> Bool {
+    if lhs.updates != rhs.updates {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

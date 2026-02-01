@@ -606,6 +606,8 @@ enum Method {
   SEARCH_MESSAGES = 28;
   FORWARD_MESSAGES = 29;
   UPDATE_CHAT_VISIBILITY = 30;
+  PIN_MESSAGE = 31;
+  UPDATE_CHAT_INFO = 32;
 }
 
 message RpcCall {
@@ -641,6 +643,8 @@ message RpcCall {
     SearchMessagesInput searchMessages = 29;
     ForwardMessagesInput forwardMessages = 30;
     UpdateChatVisibilityInput updateChatVisibility = 31;
+    PinMessageInput pinMessage = 32;
+    UpdateChatInfoInput updateChatInfo = 33;
   }
 }
 
@@ -678,6 +682,8 @@ message RpcResult {
     SearchMessagesResult searchMessages = 29;
     ForwardMessagesResult forwardMessages = 30;
     UpdateChatVisibilityResult updateChatVisibility = 31;
+    PinMessageResult pinMessage = 32;
+    UpdateChatInfoResult updateChatInfo = 33;
   }
 }
 
@@ -781,6 +787,7 @@ message GetChatInput {
 message GetChatResult {
   Chat chat = 1;
   Dialog dialog = 2;
+  repeated int64 pinned_message_ids = 3;
 }
 
 // Mark dialog as unread
@@ -1129,6 +1136,8 @@ message Update {
     UpdateSpaceMemberUpdate space_member_update = 27;
     UpdateChatVisibility chat_visibility = 28;
     UpdateDialogArchived dialog_archived = 29;
+    UpdateChatInfo chat_info = 30;
+    UpdatePinnedMessages pinned_messages = 31;
   }
 }
 
@@ -1158,6 +1167,22 @@ message UpdateChatSkipPts { int64 chat_id = 1; }
 message UpdateChatVisibility {
   int64 chat_id = 1;
   bool is_public = 2;
+}
+
+// Update when chat title or emoji changes
+message UpdateChatInfo {
+  int64 chat_id = 1;
+  optional string title = 2;
+  optional string emoji = 3;
+}
+
+// Update when pinned messages change for a chat
+message UpdatePinnedMessages {
+  // Peer ID of the chat
+  Peer peer_id = 1;
+
+  // Ordered list of pinned message IDs (latest first)
+  repeated int64 message_ids = 2;
 }
 
 message UpdateNewMessageNotification {
@@ -1416,6 +1441,23 @@ message UpdateChatVisibilityInput {
 }
 
 message UpdateChatVisibilityResult { Chat chat = 1; }
+
+message UpdateChatInfoInput {
+  int64 chat_id = 1;
+  optional string title = 2;
+  optional string emoji = 3;
+}
+
+message UpdateChatInfoResult { Chat chat = 1; }
+
+// Pin or unpin a message for everyone
+message PinMessageInput {
+  InputPeer peer_id = 1;
+  int64 message_id = 2;
+  bool unpin = 3;
+}
+
+message PinMessageResult { repeated Update updates = 1; }
 
 // Apple only types
 message DraftMessage {

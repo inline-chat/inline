@@ -72,6 +72,12 @@ public actor UpdatesEngine: Sendable {
         case let .chatVisibility(chatVisibility):
           try chatVisibility.apply(db)
 
+        case let .chatInfo(chatInfo):
+          try chatInfo.apply(db)
+
+        case let .pinnedMessages(pinnedMessages):
+          try pinnedMessages.apply(db)
+
         case let .newMessageNotification(newMessageNotification):
           try newMessageNotification.apply(db)
 
@@ -718,6 +724,50 @@ extension InlineProtocol.UpdateChatVisibility {
       Log.shared.error("Failed to update chat visibility", error: error)
     }
 
+  }
+}
+
+extension InlineProtocol.UpdateChatInfo {
+  func apply(_ db: Database) throws {
+    Log.shared.debug("update chat info \(chatID)")
+
+    do {
+      if var chat = try Chat.fetchOne(db, id: chatID) {
+        if hasTitle {
+          chat.title = title
+        }
+        if hasEmoji {
+          chat.emoji = emoji.isEmpty ? nil : emoji
+        }
+        try chat.save(db)
+      }
+    } catch {
+      Log.shared.error("Failed to update chat info", error: error)
+    }
+  }
+}
+
+extension InlineProtocol.UpdatePinnedMessages {
+  func apply(_ db: Database) throws {
+    let peer = peerID.toPeer()
+    guard let chat = try Chat.getByPeerId(peerId: peer) else { return }
+
+    do {
+      try PinnedMessage.filter(Column("chatId") == chat.id).deleteAll(db)
+    } catch {
+      Log.shared.error("Failed to clear pinned messages", error: error)
+    }
+
+    guard !messageIds.isEmpty else { return }
+
+    do {
+      for (index, messageId) in messageIds.enumerated() {
+        let pinned = PinnedMessage(chatId: chat.id, messageId: messageId, position: Int64(index))
+        try pinned.save(db)
+      }
+    } catch {
+      Log.shared.error("Failed to save pinned messages", error: error)
+    }
   }
 }
 

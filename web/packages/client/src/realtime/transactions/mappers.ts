@@ -64,6 +64,8 @@ export const upsertUser = (db: Db, user: User) => {
 export const upsertChat = (db: Db, chat: Chat) => {
   const id = toNumber(chat.id)
   if (id == null) return
+  const ref = db.ref(DbObjectKind.Chat, id)
+  const existing = db.get(ref) as DbChat | undefined
   const model: DbChat = {
     kind: DbObjectKind.Chat,
     id,
@@ -72,8 +74,13 @@ export const upsertChat = (db: Db, chat: Chat) => {
     emoji: chat.emoji ?? undefined,
     isPublic: chat.isPublic ?? undefined,
     lastMsgId: toNumber(chat.lastMsgId),
+    pinnedMessageIds: existing?.pinnedMessageIds,
   }
-  upsert(db, model)
+  if (existing) {
+    db.update(model)
+  } else {
+    db.insert(model)
+  }
 }
 
 const getDialogId = (props: { peerUserId: number } | { peerThreadId: number }) => {
