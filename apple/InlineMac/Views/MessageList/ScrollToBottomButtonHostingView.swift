@@ -23,7 +23,7 @@ final class ScrollToBottomButtonHostingView: NSControl {
   }
 
   override init(frame: NSRect) {
-    hostingView = NSHostingView(rootView: ScrollToBottomButtonView())
+    hostingView = NSHostingView(rootView: ScrollToBottomButtonView(isVisible: false))
     super.init(frame: frame)
 
     wantsLayer = true
@@ -38,7 +38,7 @@ final class ScrollToBottomButtonHostingView: NSControl {
       hostingView.heightAnchor.constraint(equalToConstant: Theme.scrollButtonSize),
     ])
 
-    alphaValue = 0
+    alphaValue = 1
   }
 
   @available(*, unavailable)
@@ -78,17 +78,9 @@ final class ScrollToBottomButtonHostingView: NSControl {
   }
 
   func setVisibility(_ visible: Bool) {
-    let hidden = !visible
-    let targetOpacity: CGFloat = hidden ? 0 : 1
-    guard alphaValue != targetOpacity else { return }
-
+    guard isVisible != visible else { return }
     isVisible = visible
-
-    NSAnimationContext.runAnimationGroup { context in
-      context.duration = 0.2
-      context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-      alphaValue = targetOpacity
-    }
+    hostingView.rootView.isVisible = visible
   }
 
   func setHasUnread(_ hasUnread: Bool) {
