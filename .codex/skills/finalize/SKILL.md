@@ -16,6 +16,7 @@ User is mostly happy with the outcome and has probably done some manual QA check
 - Run related tests/lint/typecheck. If change is UI code, make sure we didn't break any other UI that uses the view we modified. 
 - Prepare a list of changes, and a commit message.
 - If the scope is large, summarize work using the skill before committing. If the scope is minimal and review is safe, commit.
+- If `$summarize-work` was run immediately before this, move faster: avoid re-reading files and proceed to commit after minimal checks.
 
 # Review criteria
 
