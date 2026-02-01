@@ -30,3 +30,15 @@ User is mostly happy with the outcome and has probably done some manual QA check
 - Clean up unused code we added earlier in the sessions that is no longer needed.
 - Remove debug logs that are not helpful to remain in code or we added to debug an issue.
 - Follow best practices for preparing a commit.
+
+# Preflight checklist
+- `git status` clean of unrelated changes (ignore but do not touch).
+- Scan for debug logs and remove if not required.
+- Verify no secrets or hardcoded prod values were introduced.
+
+# Test scope
+- Run minimal, focused tests only; ask before heavy commands.
+
+# Commit prep
+- Propose a commit message in repo style.
+- End with “Production readiness” note and any risks.
