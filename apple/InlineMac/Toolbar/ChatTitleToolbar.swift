@@ -1,6 +1,9 @@
 import AppKit
+import Auth
 import Combine
+import GRDB
 import InlineKit
+import Logger
 import RealtimeV2
 
 class ChatTitleToolbar: NSToolbarItem {
@@ -8,6 +11,7 @@ class ChatTitleToolbar: NSToolbarItem {
   private var dependencies: AppDependencies
   private var iconSize: CGFloat = Theme.chatToolbarIconSize
   private var chatSubscription: AnyCancellable?
+  private var isEditingTitle = false
 
   private lazy var iconView = ChatIconView(peer: peer, iconSize: iconSize)
   private lazy var statusView = ChatStatusView(peer: peer, dependencies: self.dependencies)
@@ -35,11 +39,21 @@ class ChatTitleToolbar: NSToolbarItem {
     return tf
   }()
 
+  private let nameEditor: NSTextField = {
+    let tf = NSTextField(string: "")
+    tf.font = .systemFont(ofSize: 13, weight: .semibold)
+    tf.maximumNumberOfLines = 1
+    tf.isEditable = true
+    tf.isSelectable = true
+    tf.isBordered = true
+    tf.isBezeled = true
+    tf.focusRingType = .default
+    tf.isHidden = true
+    return tf
+  }()
+
   private lazy var textStack: NSStackView = {
-    let subviews = if user?.user.isCurrentUser() == true { [nameLabel] } else { [nameLabel, statusView] }
-    let stack = NSStackView(
-      views: subviews
-    )
+    let stack = NSStackView(views: [nameLabel, nameEditor, statusView])
     stack.orientation = .vertical
     stack.alignment = .leading
     stack.spacing = 0
@@ -71,6 +85,9 @@ class ChatTitleToolbar: NSToolbarItem {
     view = containerView
     containerView.addSubview(iconView)
     containerView.addSubview(textStack)
+    nameEditor.delegate = self
+    nameEditor.target = self
+    nameEditor.action = #selector(commitTitleEdit)
   }
 
   private func setupConstraints() {
@@ -87,11 +104,94 @@ class ChatTitleToolbar: NSToolbarItem {
   private func setupInteraction() {
     let click = NSClickGestureRecognizer(target: self, action: #selector(handleClick))
     containerView.addGestureRecognizer(click)
+
+    let doubleClick = NSClickGestureRecognizer(target: self, action: #selector(handleTitleDoubleClick))
+    doubleClick.numberOfClicksRequired = 2
+    doubleClick.delaysPrimaryMouseButtonEvents = false
+    nameLabel.addGestureRecognizer(doubleClick)
+    nameLabel.isSelectable = false
   }
 
   @objc private func handleClick() {
     // Handle title click to show chat info
     // NSApp.sendAction(#selector(ChatWindowController.showChatInfo(_:)), to: nil, from: self)
+  }
+
+  @objc private func handleTitleDoubleClick() {
+    beginTitleEditing()
+  }
+
+  @objc private func commitTitleEdit() {
+    endTitleEditing(commit: true)
+  }
+
+  private func beginTitleEditing() {
+    guard peer.isThread else { return }
+    guard isRenameAllowed() else { return }
+    guard !isEditingTitle else { return }
+    isEditingTitle = true
+    nameEditor.stringValue = chatTitle
+    nameLabel.isHidden = true
+    nameEditor.isHidden = false
+    nameEditor.selectText(nil)
+    containerView.window?.makeFirstResponder(nameEditor)
+  }
+
+  private func endTitleEditing(commit: Bool) {
+    guard isEditingTitle else { return }
+    isEditingTitle = false
+    nameEditor.isHidden = true
+    nameLabel.isHidden = false
+
+    let trimmedTitle = nameEditor.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    if commit, !trimmedTitle.isEmpty, trimmedTitle != chatTitle {
+      nameLabel.stringValue = trimmedTitle
+      if let chatId = peer.asThreadId() {
+        Task {
+          do {
+            _ = try await dependencies.realtimeV2.send(.updateChatInfo(
+              chatID: chatId,
+              title: trimmedTitle,
+              emoji: nil
+            ))
+          } catch {
+            Log.shared.error("Failed to update chat title", error: error)
+          }
+        }
+      }
+    } else {
+      nameLabel.stringValue = chatTitle
+    }
+
+    nameEditor.stringValue = chatTitle
+  }
+
+  private func isRenameAllowed() -> Bool {
+    guard case let .thread(chatId) = peer else { return false }
+    guard let currentUserId = Auth.shared.getCurrentUserId() else { return false }
+
+    do {
+      return try dependencies.database.reader.read { db in
+        if let chat = try Chat.fetchOne(db, id: chatId),
+           chat.isPublic == true,
+           let spaceId = chat.spaceId
+        {
+          return try Member
+            .filter(Member.Columns.userId == currentUserId)
+            .filter(Member.Columns.spaceId == spaceId)
+            .fetchOne(db) != nil
+        }
+
+        return try ChatParticipant
+          .filter(Column("chatId") == chatId)
+          .filter(Column("userId") == currentUserId)
+          .fetchOne(db) != nil
+      }
+    } catch {
+      Log.shared.error("Failed to check chat rename eligibility", error: error)
+      return false
+    }
   }
 
   var chatTitle: String {
@@ -110,6 +210,10 @@ class ChatTitleToolbar: NSToolbarItem {
 
   func configure() {
     nameLabel.stringValue = chatTitle
+    if !isEditingTitle {
+      nameEditor.stringValue = chatTitle
+    }
+    statusView.isHidden = user?.user.isCurrentUser() == true
     iconView.configure()
   }
 
@@ -388,6 +492,18 @@ final class ChatStatusView: NSView {
   private func stopTimer() {
     timer?.invalidate()
     timer = nil
+  }
+}
+
+extension ChatTitleToolbar: NSTextFieldDelegate {
+  func controlTextDidEndEditing(_ obj: Notification) {
+    guard isEditingTitle else { return }
+    let movementValue = obj.userInfo?[NSText.movementUserInfoKey] as? Int
+    if movementValue == NSTextMovement.return.rawValue {
+      endTitleEditing(commit: true)
+    } else {
+      endTitleEditing(commit: false)
+    }
   }
 }
 

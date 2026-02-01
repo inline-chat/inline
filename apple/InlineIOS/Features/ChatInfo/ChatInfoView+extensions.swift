@@ -2,6 +2,7 @@ import GRDB
 import InlineKit
 import InlineUI
 import Logger
+import MCEmojiPicker
 import SwiftUI
 
 extension ChatInfoView {
@@ -139,33 +140,73 @@ extension ChatInfoView {
           }
         }
       } else {
-        Circle()
-          .fill(
-            LinearGradient(
-              colors: chatProfileColors,
-              startPoint: .top,
-              endPoint: .bottom
-            )
-          )
-          .overlay {
-            Group {
-              if let emoji = currentChat?.emoji {
-                Text(
-                  String(describing: emoji).replacingOccurrences(of: "Optional(\"", with: "")
-                    .replacingOccurrences(of: "\")", with: "")
+        if isEditingInfo {
+          VStack(spacing: 12) {
+            Button {
+              isEmojiPickerPresented.toggle()
+            } label: {
+              Circle()
+                .fill(
+                  LinearGradient(
+                    colors: chatProfileColors,
+                    startPoint: .top,
+                    endPoint: .bottom
+                  )
                 )
-                .font(.system(size: 40))
-              } else {
-                Text("💬")
+                .overlay {
+                  if !draftEmoji.isEmpty {
+                    Text(draftEmoji)
+                      .font(.system(size: 40))
+                  } else {
+                    Text("💬")
+                      .font(.system(size: 40))
+                  }
+                }
+                .frame(width: 100, height: 100)
+            }
+            .buttonStyle(.plain)
+            .emojiPicker(
+              isPresented: $isEmojiPickerPresented,
+              selectedEmoji: $draftEmoji
+            )
+
+            TextField("Chat Title", text: $draftTitle)
+              .font(.title2)
+              .fontWeight(.semibold)
+              .multilineTextAlignment(.center)
+              .textInputAutocapitalization(.never)
+              .autocorrectionDisabled(true)
+              .focused($isTitleFocused)
+          }
+        } else {
+          Circle()
+            .fill(
+              LinearGradient(
+                colors: chatProfileColors,
+                startPoint: .top,
+                endPoint: .bottom
+              )
+            )
+            .overlay {
+              Group {
+                if let emoji = currentChat?.emoji {
+                  Text(
+                    String(describing: emoji).replacingOccurrences(of: "Optional(\"", with: "")
+                      .replacingOccurrences(of: "\")", with: "")
+                  )
                   .font(.system(size: 40))
+                } else {
+                  Text("💬")
+                    .font(.system(size: 40))
+                }
               }
             }
-          }
-          .frame(width: 100, height: 100)
+            .frame(width: 100, height: 100)
 
-        Text(chatTitle)
-          .font(.title2)
-          .fontWeight(.semibold)
+          Text(chatTitle)
+            .font(.title2)
+            .fontWeight(.semibold)
+        }
       }
     }
   }
@@ -182,6 +223,57 @@ extension ChatInfoView {
     }
 
     return false
+  }
+
+  var canSaveChatInfo: Bool {
+    let trimmed = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+    return !trimmed.isEmpty && currentChatId != 0
+  }
+
+  func startEditingChatInfo() {
+    guard canEditChatInfo else { return }
+    draftTitle = chatTitle
+    draftEmoji = currentChat?.emoji ?? ""
+    isEditingInfo = true
+    isEmojiPickerPresented = false
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+      isTitleFocused = true
+    }
+  }
+
+  func cancelEditingChatInfo() {
+    isEditingInfo = false
+    isEmojiPickerPresented = false
+    isSavingInfo = false
+  }
+
+  func saveChatInfo() {
+    let trimmedTitle = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedTitle.isEmpty else { return }
+    guard currentChatId != 0 else { return }
+
+    let normalizedEmoji = draftEmoji.trimmingCharacters(in: .whitespacesAndNewlines)
+    isSavingInfo = true
+
+    Task {
+      do {
+        _ = try await Api.realtime.send(.updateChatInfo(
+          chatID: currentChatId,
+          title: trimmedTitle,
+          emoji: normalizedEmoji
+        ))
+
+        await MainActor.run {
+          isSavingInfo = false
+          isEditingInfo = false
+        }
+      } catch {
+        Log.shared.error("Failed to update chat info", error: error)
+        await MainActor.run {
+          isSavingInfo = false
+        }
+      }
+    }
   }
 
   @ViewBuilder

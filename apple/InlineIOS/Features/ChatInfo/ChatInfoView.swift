@@ -15,7 +15,7 @@ struct ChatInfoView: View {
   @EnvironmentStateObject var mediaViewModel: ChatMediaViewModel
   @EnvironmentStateObject var spaceMembersViewModel: SpaceMembersViewModel
   @StateObject var spaceFullMembersViewModel: SpaceFullMembersViewModel
-  @State private var space: Space?
+  @State  var space: Space?
   @State var isSearching = false
   @State var searchText = ""
   @State var searchResults: [UserInfo] = []
@@ -26,11 +26,17 @@ struct ChatInfoView: View {
   @Environment(Router.self) var router
   @State var selectedTab: ChatInfoTab
   @Namespace var tabSelection
-  @State private var showMakePublicAlert = false
-  @State private var showMakePrivateSheet = false
-  @State private var selectedVisibilityParticipants: Set<Int64> = []
-  @State private var chat: Chat?
-  @State private var chatSubscription: AnyCancellable?
+  @State  var showMakePublicAlert = false
+  @State  var showMakePrivateSheet = false
+  @State  var selectedVisibilityParticipants: Set<Int64> = []
+  @State  var chat: Chat?
+  @State  var chatSubscription: AnyCancellable?
+  @State  var isEditingInfo = false
+  @State  var draftTitle = ""
+  @State  var draftEmoji = ""
+  @State  var isEmojiPickerPresented = false
+  @State  var isSavingInfo = false
+  @FocusState  var isTitleFocused: Bool
 
   @Environment(\.appDatabase) var database
   @Environment(\.colorScheme) var colorScheme
@@ -74,6 +80,16 @@ struct ChatInfoView: View {
 
   var isOwnerOrAdmin: Bool {
     currentMemberRole == .owner || currentMemberRole == .admin
+  }
+
+  var isCurrentUserParticipant: Bool {
+    guard let currentUserId = Auth.shared.getCurrentUserId() else { return false }
+    return participantsWithMembersViewModel.participants.contains(where: { $0.user.id == currentUserId })
+  }
+
+  var canEditChatInfo: Bool {
+    guard !isDM else { return false }
+    return isCurrentUserParticipant
   }
 
   var chatTitle: String {
@@ -305,7 +321,7 @@ struct ChatInfoView: View {
               await participantsWithMembersViewModel.refetchParticipants()
               showMakePrivateSheet = false
             } catch {
-              Log.shared.error("Failed to make chat private", error: error)
+              Log.shared.error("Failed to make chat ", error: error)
             }
           }
         },
@@ -334,10 +350,37 @@ struct ChatInfoView: View {
     } message: {
       Text("People without access to public chats will lose access to this thread.")
     }
+    .toolbar {
+      if canEditChatInfo {
+        if isEditingInfo {
+          ToolbarItem(placement: .topBarLeading) {
+            Button("Cancel") {
+              cancelEditingChatInfo()
+            }
+            .buttonStyle(.borderless)
+          }
+          ToolbarItem(placement: .topBarTrailing) {
+            Button(isSavingInfo ? "Saving..." : "Save") {
+              saveChatInfo()
+            }
+            .buttonStyle(.borderless)
+            .disabled(!canSaveChatInfo || isSavingInfo)
+            .opacity((!canSaveChatInfo || isSavingInfo) ? 0.5 : 1)
+          }
+        } else {
+          ToolbarItem(placement: .topBarTrailing) {
+            Button("Edit") {
+              startEditingChatInfo()
+            }
+            .buttonStyle(.borderless)
+          }
+        }
+      }
+    }
   }
 
   @MainActor
-  private func subscribeToChatUpdates() {
+   func subscribeToChatUpdates() {
     guard chatSubscription == nil else { return }
     guard case let .thread(chatId) = chatItem.peerId else { return }
 
@@ -351,9 +394,9 @@ struct ChatInfoView: View {
 }
 
 struct InfoTabView: View {
-  @EnvironmentObject private var chatInfoView: ChatInfoViewEnvironment
-  @State private var participantToRemove: UserInfo?
-  @State private var showRemoveAlert = false
+  @EnvironmentObject  var chatInfoView: ChatInfoViewEnvironment
+  @State  var participantToRemove: UserInfo?
+  @State  var showRemoveAlert = false
 
   var body: some View {
     VStack(spacing: 16) {
@@ -556,7 +599,7 @@ struct ParticipantAvatarView: UIViewRepresentable {
       true
     }
 
-    private func resolveAvatarURL(
+     func resolveAvatarURL(
       for userInfo: UserInfo,
       fallbackImage: UIImage?
     ) -> (url: URL, isTemporary: Bool)? {
@@ -584,7 +627,7 @@ struct ParticipantAvatarView: UIViewRepresentable {
       return (temporaryUrl, true)
     }
 
-    private func cacheTemporaryImage(_ image: UIImage) -> URL? {
+     func cacheTemporaryImage(_ image: UIImage) -> URL? {
       guard let data = image.jpegData(compressionQuality: 0.95) else { return nil }
       let url = FileManager.default.temporaryDirectory
         .appendingPathComponent("avatar-\(UUID().uuidString).jpg")
@@ -597,7 +640,7 @@ struct ParticipantAvatarView: UIViewRepresentable {
       }
     }
 
-    private func snapshotImage(from view: UIView) -> UIImage? {
+     func snapshotImage(from view: UIView) -> UIImage? {
       guard view.bounds.width > 0, view.bounds.height > 0 else { return nil }
       let renderer = UIGraphicsImageRenderer(bounds: view.bounds)
       return renderer.image { context in
@@ -605,7 +648,7 @@ struct ParticipantAvatarView: UIViewRepresentable {
       }
     }
 
-    private func findViewController(from view: UIView) -> UIViewController? {
+     func findViewController(from view: UIView) -> UIViewController? {
       var responder: UIResponder? = view
       while let nextResponder = responder?.next {
         if let viewController = nextResponder as? UIViewController {
