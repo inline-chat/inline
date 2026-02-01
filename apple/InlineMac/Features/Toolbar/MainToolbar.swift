@@ -1,4 +1,5 @@
 import AppKit
+import Auth
 import Combine
 import GRDB
 import InlineKit
@@ -284,15 +285,18 @@ struct ToolbarSwiftUIView: View {
 private final class ChatToolbarMenuModel: ObservableObject {
   @Published private(set) var isPinned: Bool = false
   @Published private(set) var isArchived: Bool = false
+  @Published private(set) var canRename: Bool = false
 
   private let peer: Peer
   private let db: AppDatabase
   private var dialogCancellable: AnyCancellable?
+  private var renameCancellable: AnyCancellable?
 
   init(peer: Peer, db: AppDatabase) {
     self.peer = peer
     self.db = db
     bindDialog()
+    bindRenameEligibility()
   }
 
   private func bindDialog() {
@@ -311,6 +315,43 @@ private final class ChatToolbarMenuModel: ObservableObject {
         }
       )
   }
+
+  private func bindRenameEligibility() {
+    guard case let .thread(chatId) = peer else {
+      canRename = false
+      return
+    }
+    guard let currentUserId = Auth.shared.getCurrentUserId() else {
+      canRename = false
+      return
+    }
+
+    renameCancellable = ValueObservation
+      .tracking { db in
+        if let chat = try Chat.fetchOne(db, id: chatId),
+           chat.isPublic == true,
+           let spaceId = chat.spaceId
+        {
+          return try Member
+            .filter(Member.Columns.userId == currentUserId)
+            .filter(Member.Columns.spaceId == spaceId)
+            .fetchOne(db) != nil
+        }
+
+        return try ChatParticipant
+          .filter(Column("chatId") == chatId)
+          .filter(Column("userId") == currentUserId)
+          .fetchOne(db) != nil
+      }
+      .publisher(in: db.dbWriter, scheduling: .immediate)
+      .receive(on: DispatchQueue.main)
+      .sink(
+        receiveCompletion: { _ in },
+        receiveValue: { [weak self] isParticipant in
+          self?.canRename = isParticipant
+        }
+      )
+  }
 }
 
 private struct ChatToolbarMenu: View {
@@ -319,6 +360,7 @@ private struct ChatToolbarMenu: View {
   let dependencies: AppDependencies
 
   @StateObject private var model: ChatToolbarMenuModel
+  @State private var showRenameSheet = false
 
   init(peer: Peer, database: AppDatabase, spaceId: Int64?, dependencies: AppDependencies) {
     self.peer = peer
@@ -331,6 +373,12 @@ private struct ChatToolbarMenu: View {
     Menu {
       Button("Chat Info", systemImage: "info.circle") {
         openChatInfo()
+      }
+
+      if peer.isThread, model.canRename {
+        Button("Rename Chat...", systemImage: "pencil") {
+          showRenameSheet = true
+        }
       }
 
       Divider()
@@ -367,6 +415,9 @@ private struct ChatToolbarMenu: View {
     .buttonStyle(ToolbarButtonStyle())
     .menuIndicator(.hidden)
     .fixedSize()
+    .sheet(isPresented: $showRenameSheet) {
+      RenameChatSheet(peer: peer)
+    }
   }
 
   private func openChatInfo() {

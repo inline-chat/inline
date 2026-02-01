@@ -891,10 +891,16 @@
     "Return to previous UI" : {
 
     },
+    "Save" : {
+
+    },
     "Save Photo" : {
 
     },
     "Save Video" : {
+
+    },
+    "Saving..." : {
 
     },
     "Search countries..." : {
