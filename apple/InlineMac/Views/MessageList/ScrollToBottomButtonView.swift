@@ -3,6 +3,7 @@ import SwiftUI
 struct ScrollToBottomButtonView: View {
   @Environment(\.colorScheme) private var colorScheme
   var isHovered: Bool = false
+  var isVisible: Bool = true
 
   let buttonSize: CGFloat = Theme.scrollButtonSize
   var hasUnread: Bool = false
@@ -14,24 +15,26 @@ struct ScrollToBottomButtonView: View {
     let button = Button(action: {
       onClick?()
     }) {
-      Image(systemName: "chevron.down")
-        .font(.system(size: 12, weight: .regular))
-        .foregroundColor(iconColor)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-    .frame(width: buttonSize, height: buttonSize)
-    .contentShape(.interaction, Circle())
-    .focusable(false)
+      ZStack(alignment: .topTrailing) {
+        Image(systemName: "chevron.down")
+          .font(.system(size: 12, weight: .regular))
+          .foregroundColor(iconColor)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-    let content = button
-      .overlay(alignment: .topTrailing) {
         if hasUnread {
           Circle()
             .fill(Color.accentColor)
             .frame(width: 8, height: 8)
             .offset(x: 1, y: -1)
+            .allowsHitTesting(false)
         }
       }
+      .frame(width: buttonSize, height: buttonSize)
+      .contentShape(.interaction, Circle())
+    }
+    .focusable(false)
+
+    let content = button
 
     if #available(macOS 26.0, *) {
       let hoverTint = colorScheme == .dark ? Color.white.opacity(0.16) : Color.black.opacity(0.08)
@@ -41,7 +44,11 @@ struct ScrollToBottomButtonView: View {
       return content
         .buttonStyle(.plain)
         .glassEffect(glass, in: .circle)
+        .opacity(isVisible ? 1 : 0)
+        .scaleEffect(isVisible ? 1 : 0.92)
         .animation(.easeInOut(duration: 0.12), value: isHovered)
+        .animation(.easeInOut(duration: 0.2), value: isVisible)
+        .allowsHitTesting(isVisible)
     } else {
       return content
         .buttonStyle(ScrollToBottomButtonStyle())
@@ -64,7 +71,11 @@ struct ScrollToBottomButtonView: View {
               y: -1
           )
         )
+        .opacity(isVisible ? 1 : 0)
+        .scaleEffect(isVisible ? 1 : 0.92)
         .animation(.easeInOut(duration: 0.12), value: isHovered)
+        .animation(.easeInOut(duration: 0.2), value: isVisible)
+        .allowsHitTesting(isVisible)
     }
   }
 }
