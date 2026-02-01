@@ -22,6 +22,7 @@ class EmbedMessageView: UIView {
     case replyingInCompose
     case editingInCompose
     case forwardingInCompose
+    case pinnedInHeader
   }
 
   enum Style {
@@ -75,6 +76,15 @@ class EmbedMessageView: UIView {
     return stackView
   }()
 
+  private lazy var glassView: UIVisualEffectView = {
+    let view = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.isUserInteractionEnabled = false
+    view.clipsToBounds = true
+    view.isHidden = true
+    return view
+  }()
+
   private lazy var rectangleView: UIView = {
     let view = UIView()
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -112,6 +122,39 @@ class EmbedMessageView: UIView {
   private var textLeadingToRectangleConstraint: NSLayoutConstraint?
   private var textLeadingToThumbnailConstraint: NSLayoutConstraint?
   private var headerToMessageConstraint: NSLayoutConstraint?
+  private var rectangleWidthConstraint: NSLayoutConstraint?
+  private var headerTrailingConstraint: NSLayoutConstraint?
+  private var messageTrailingConstraint: NSLayoutConstraint?
+
+  var showsBackground: Bool = true {
+    didSet {
+      applyBackgroundAppearance()
+    }
+  }
+
+  var showsGlassBackground: Bool = false {
+    didSet {
+      applyGlassAppearance()
+    }
+  }
+
+  var showsLeadingBar: Bool = true {
+    didSet {
+      applyLeadingBarAppearance()
+    }
+  }
+
+  var textLeadingPadding: CGFloat = Constants.horizontalPadding {
+    didSet {
+      applyTextPadding()
+    }
+  }
+
+  var textTrailingPadding: CGFloat = Constants.horizontalPadding {
+    didSet {
+      applyTextPadding()
+    }
+  }
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -135,7 +178,8 @@ class EmbedMessageView: UIView {
     senderName: String = "User",
     outgoing: Bool,
     isOnlyEmoji: Bool,
-    style: Style? = nil
+    style: Style? = nil,
+    messageText: String = "Message not loaded"
   ) {
     self.kind = kind
     self.style = resolveStyle(for: kind, styleOverride: style)
@@ -144,7 +188,7 @@ class EmbedMessageView: UIView {
     senderNameForColor = nil
 
     headerLabel.text = headerText(for: kind, senderName: senderName)
-    let fallbackText = "Message not loaded"
+    let fallbackText = messageText
     messageLabel.text = kind == .forwardingInCompose
       ? forwardDescription(for: senderName, messageText: fallbackText)
       : fallbackText
@@ -215,10 +259,11 @@ private extension EmbedMessageView {
     if let styleOverride {
       return styleOverride
     }
-    return kind == .replyInMessage ? .replyBubble : .compose
+    return (kind == .replyInMessage || kind == .pinnedInHeader) ? .replyBubble : .compose
   }
 
   func setupViews() {
+    addSubview(glassView)
     addSubview(rectangleView)
     addSubview(thumbnailContainer)
     addSubview(headerLabel)
@@ -238,10 +283,24 @@ private extension EmbedMessageView {
     thumbnailHeightConstraint = thumbnailContainer.heightAnchor.constraint(equalToConstant: 0)
 
     headerToMessageConstraint = messageStackView.topAnchor.constraint(equalTo: headerLabel.bottomAnchor)
+    rectangleWidthConstraint = rectangleView.widthAnchor.constraint(equalToConstant: Constants.rectangleWidth)
+    headerTrailingConstraint = headerLabel.trailingAnchor.constraint(
+      equalTo: trailingAnchor,
+      constant: -Constants.horizontalPadding
+    )
+    messageTrailingConstraint = messageStackView.trailingAnchor.constraint(
+      equalTo: trailingAnchor,
+      constant: -Constants.horizontalPadding
+    )
 
     NSLayoutConstraint.activate([
+      glassView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      glassView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      glassView.topAnchor.constraint(equalTo: topAnchor),
+      glassView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
       rectangleView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      rectangleView.widthAnchor.constraint(equalToConstant: Constants.rectangleWidth),
+      rectangleWidthConstraint!,
       rectangleView.topAnchor.constraint(equalTo: topAnchor),
       rectangleView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
@@ -261,10 +320,7 @@ private extension EmbedMessageView {
       thumbnailOverlayView.centerXAnchor.constraint(equalTo: thumbnailContainer.centerXAnchor),
       thumbnailOverlayView.centerYAnchor.constraint(equalTo: thumbnailContainer.centerYAnchor),
 
-      headerLabel.trailingAnchor.constraint(
-        equalTo: trailingAnchor,
-        constant: -Constants.horizontalPadding
-      ),
+      headerTrailingConstraint!,
       headerLabel.topAnchor.constraint(
         equalTo: topAnchor,
         constant: Constants.verticalPadding
@@ -272,15 +328,16 @@ private extension EmbedMessageView {
       headerToMessageConstraint!,
 
       messageStackView.leadingAnchor.constraint(equalTo: headerLabel.leadingAnchor),
-      messageStackView.trailingAnchor.constraint(
-        equalTo: trailingAnchor,
-        constant: -Constants.horizontalPadding
-      ),
+      messageTrailingConstraint!,
       messageStackView.bottomAnchor.constraint(
         equalTo: bottomAnchor,
         constant: -Constants.verticalPadding
       ),
     ])
+
+    applyLeadingBarAppearance()
+    applyTextPadding()
+    applyGlassAppearance()
   }
 
   func setupLayer() {
@@ -341,6 +398,8 @@ private extension EmbedMessageView {
       return "Editing message"
     case .forwardingInCompose:
       return "Forward Message"
+    case .pinnedInHeader:
+      return "Pinned message"
     }
   }
 
@@ -383,6 +442,9 @@ private extension EmbedMessageView {
 
     if kind == .forwardingInCompose {
       return forwardDescription(for: senderName, messageText: baseContent)
+    }
+    if kind == .pinnedInHeader {
+      return "\(senderName): \(baseContent)"
     }
     return baseContent
   }
@@ -468,9 +530,12 @@ private extension EmbedMessageView {
   }
 
   func applyAppearance() {
-    headerLabel.font = style == .replyBubble
-      ? .systemFont(ofSize: 14, weight: .bold)
-      : .systemFont(ofSize: 17, weight: .medium)
+    if style == .replyBubble {
+      let weight: UIFont.Weight = kind == .pinnedInHeader ? .regular : .bold
+      headerLabel.font = .systemFont(ofSize: 14, weight: weight)
+    } else {
+      headerLabel.font = .systemFont(ofSize: 17, weight: .medium)
+    }
 
     messageLabel.font = style == .replyBubble
       ? .systemFont(ofSize: 14)
@@ -479,8 +544,11 @@ private extension EmbedMessageView {
     headerToMessageConstraint?.constant = style == .replyBubble ? 0 : 4
 
     layer.cornerRadius = cornerRadius
-    rectangleView.isHidden = style != .replyBubble
     updateColors()
+    applyBackgroundAppearance()
+    applyGlassAppearance()
+    applyLeadingBarAppearance()
+    applyTextPadding()
     setNeedsLayout()
   }
 
@@ -500,13 +568,17 @@ private extension EmbedMessageView {
       let rectangleColor: UIColor = useWhite ? .white : senderColor
       let bgAlpha: CGFloat = useWhite ? 0.13 : 0.08
 
-      backgroundColor = useWhite ? .white.withAlphaComponent(bgAlpha)
+      let baseBackgroundColor = useWhite ? UIColor.white.withAlphaComponent(bgAlpha)
         : headerColor.withAlphaComponent(bgAlpha)
 
       headerLabel.textColor = headerColor
       messageLabel.textColor = textColor
       rectangleView.backgroundColor = rectangleColor
       imageIconView.tintColor = textColor
+
+      if showsBackground {
+        backgroundColor = baseBackgroundColor
+      }
 
     case .compose:
       let accentColor = ThemeManager.shared.selected.accent
@@ -516,6 +588,36 @@ private extension EmbedMessageView {
       messageLabel.textColor = .secondaryLabel
       rectangleView.backgroundColor = accentColor
       imageIconView.tintColor = .secondaryLabel
+    }
+  }
+
+  func applyBackgroundAppearance() {
+    if showsBackground == false {
+      backgroundColor = .clear
+    }
+  }
+
+  func applyGlassAppearance() {
+    glassView.isHidden = !showsGlassBackground
+    glassView.layer.cornerRadius = cornerRadius
+  }
+
+  func applyLeadingBarAppearance() {
+    let shouldShowBar = showsLeadingBar && style == .replyBubble
+    rectangleView.isHidden = !shouldShowBar
+    rectangleWidthConstraint?.constant = shouldShowBar ? Constants.rectangleWidth : 0
+    if textLeadingToRectangleConstraint?.isActive == true {
+      textLeadingToRectangleConstraint?.constant = shouldShowBar
+        ? Constants.contentSpacing
+        : textLeadingPadding
+    }
+  }
+
+  func applyTextPadding() {
+    headerTrailingConstraint?.constant = -textTrailingPadding
+    messageTrailingConstraint?.constant = -textTrailingPadding
+    if textLeadingToRectangleConstraint?.isActive == true && !(showsLeadingBar && style == .replyBubble) {
+      textLeadingToRectangleConstraint?.constant = textLeadingPadding
     }
   }
 

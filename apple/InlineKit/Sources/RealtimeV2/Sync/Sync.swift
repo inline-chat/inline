@@ -440,6 +440,8 @@ actor Sync {
         .chat(peer: .with { $0.chat = .with { $0.chatID = payload.chatID } })
       case let .chatVisibility(payload):
         .chat(peer: .with { $0.chat = .with { $0.chatID = payload.chatID } })
+      case let .pinnedMessages(payload):
+        .chat(peer: payload.peerID)
       default:
         nil
     }
@@ -497,6 +499,8 @@ actor BucketActor {
       case .participantDelete:
         true
       case .chatVisibility:
+        true
+      case .chatInfo:
         true
       case .deleteChat:
         true

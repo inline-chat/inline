@@ -33,6 +33,8 @@ import { getUpdatesState } from "@in/server/realtime/handlers/updates.getUpdates
 import { getUpdates } from "@in/server/realtime/handlers/updates.getUpdates"
 import { forwardMessagesHandler } from "@in/server/realtime/handlers/messages.forwardMessages"
 import { updateChatVisibilityHandler } from "@in/server/realtime/handlers/messages.updateChatVisibility"
+import { updateChatInfoHandler } from "@in/server/realtime/handlers/messages.updateChatInfo"
+import { pinMessageHandler } from "@in/server/realtime/handlers/messages.pinMessage"
 
 const log = new Log("rpc")
 
@@ -274,6 +276,22 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await updateChatVisibilityHandler(call.input.updateChatVisibility, handlerContext)
       return { oneofKind: "updateChatVisibility", updateChatVisibility: result }
+    }
+
+    case Method.UPDATE_CHAT_INFO: {
+      if (call.input.oneofKind !== "updateChatInfo") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      let result = await updateChatInfoHandler(call.input.updateChatInfo, handlerContext)
+      return { oneofKind: "updateChatInfo", updateChatInfo: result }
+    }
+
+    case Method.PIN_MESSAGE: {
+      if (call.input.oneofKind !== "pinMessage") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      let result = await pinMessageHandler(call.input.pinMessage, handlerContext)
+      return { oneofKind: "pinMessage", pinMessage: result }
     }
 
     default:

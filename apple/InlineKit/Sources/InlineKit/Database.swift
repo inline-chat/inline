@@ -608,6 +608,22 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("pinned messages") { db in
+      try db.create(table: "pinnedMessage") { t in
+        t.autoIncrementedPrimaryKey("id")
+        t.column("chatId", .integer).notNull().references("chat", column: "id", onDelete: .cascade)
+        t.column("messageId", .integer).notNull()
+        t.column("position", .integer).notNull()
+        t.uniqueKey(["chatId", "messageId"], onConflict: .replace)
+      }
+
+      try db.create(
+        index: "pinned_message_chat_position_idx",
+        on: "pinnedMessage",
+        columns: ["chatId", "position"]
+      )
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

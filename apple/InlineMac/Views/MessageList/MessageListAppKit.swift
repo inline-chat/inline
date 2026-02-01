@@ -140,6 +140,19 @@ class MessageListAppKit: NSViewController {
   }
 
   private lazy var toolbarBgView: NSVisualEffectView = ChatToolbarView(dependencies: dependencies)
+  private var pinnedHeaderHeight: CGFloat = 0
+  private var pinnedHeaderTopConstraint: NSLayoutConstraint?
+  private var pinnedHeaderHeightConstraint: NSLayoutConstraint?
+  private lazy var pinnedHeaderView: PinnedMessageHeaderView = {
+    let view = PinnedMessageHeaderView(dependencies: dependencies, peerId: peerId, chatId: chatId)
+    view.onHeightChange = { [weak self] height in
+      guard let self else { return }
+      pinnedHeaderHeight = height
+      pinnedHeaderHeightConstraint?.constant = height
+      updateScrollViewInsets()
+    }
+    return view
+  }()
 
   private func rebuildRowItems() {
     messageIndexById.removeAll(keepingCapacity: true)
@@ -340,12 +353,16 @@ class MessageListAppKit: NSViewController {
     let contentFrame = window.contentLayoutRect
     let toolbarHeight = windowFrame.height - contentFrame.height
     self.toolbarHeight = toolbarHeight
+    let topInset = toolbarHeight + pinnedHeaderHeight
 
-    if scrollView.contentInsets.top != toolbarHeight {
+    pinnedHeaderTopConstraint?.constant = toolbarHeight
+    pinnedHeaderHeightConstraint?.constant = pinnedHeaderHeight
+
+    if scrollView.contentInsets.top != topInset {
       log.trace("Adjusting view's insets")
 
       scrollView.contentInsets = NSEdgeInsets(
-        top: toolbarHeight,
+        top: topInset,
         left: 0,
         bottom: Theme.messageListBottomInset + insetForCompose,
         right: 0
@@ -413,6 +430,17 @@ class MessageListAppKit: NSViewController {
         toolbarBgView.heightAnchor.constraint(equalToConstant: toolbarHeight),
       ])
     }
+
+    view.addSubview(pinnedHeaderView)
+    pinnedHeaderTopConstraint = pinnedHeaderView.topAnchor.constraint(equalTo: view.topAnchor, constant: toolbarHeight)
+    pinnedHeaderHeightConstraint = pinnedHeaderView.heightAnchor.constraint(equalToConstant: pinnedHeaderHeight)
+
+    NSLayoutConstraint.activate([
+      pinnedHeaderTopConstraint!,
+      pinnedHeaderView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+      pinnedHeaderView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+      pinnedHeaderHeightConstraint!,
+    ])
 
     // Set column width to match scroll view width
     // updateColumnWidth()

@@ -18,5 +18,5 @@ export const getChat = async (input: GetChatInput, handlerContext: HandlerContex
     },
   )
 
-  return { chat: result.chat, dialog: result.dialog }
+  return { chat: result.chat, dialog: result.dialog, pinnedMessageIds: result.pinnedMessageIds }
 }

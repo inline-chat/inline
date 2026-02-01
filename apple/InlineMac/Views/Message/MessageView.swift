@@ -47,6 +47,20 @@ class MessageViewAppKit: NSView {
     #endif
   }
 
+  private func isMessagePinned() -> Bool {
+    do {
+      return try AppDatabase.shared.reader.read { db in
+        try PinnedMessage
+          .filter(Column("chatId") == message.chatId)
+          .filter(Column("messageId") == message.messageId)
+          .fetchCount(db) > 0
+      }
+    } catch {
+      log.error("Failed to read pinned message state", error: error)
+      return false
+    }
+  }
+
   private var isDM: Bool {
     props.isDM
   }
@@ -1896,6 +1910,39 @@ class MessageViewAppKit: NSView {
     }
   }
 
+  @objc private func pinMessage() {
+    Task(priority: .userInitiated) { @MainActor in
+      let peer = chatPeerId()
+      try await Api.realtime.send(.pinMessage(
+        peer: peer,
+        messageId: message.messageId,
+        unpin: false
+      ))
+    }
+  }
+
+  @objc private func unpinMessage() {
+    Task(priority: .userInitiated) { @MainActor in
+      let peer = chatPeerId()
+      try await Api.realtime.send(.pinMessage(
+        peer: peer,
+        messageId: message.messageId,
+        unpin: true
+      ))
+    }
+  }
+
+  private func chatPeerId() -> Peer {
+    do {
+      if let chat = try AppDatabase.shared.reader.read({ db in try Chat.fetchOne(db, id: message.chatId) }) {
+        return chat.peerId.toPeer()
+      }
+    } catch {
+      log.error("Failed to resolve chat peer for pin", error: error)
+    }
+    return message.peerId
+  }
+
   @objc private func reply() {
     let state = ChatsManager
       .get(
@@ -2616,6 +2663,16 @@ extension MessageViewAppKit: NSMenuDelegate {
       let forwardItem = NSMenuItem(title: "Forward", action: #selector(forwardMessage), keyEquivalent: "")
       forwardItem.image = NSImage(systemSymbolName: "arrowshape.turn.up.right", accessibilityDescription: "Forward")
       menu.addItem(forwardItem)
+
+      let pinned = isMessagePinned()
+      let pinTitle = pinned ? "Unpin" : "Pin"
+      let pinAction = pinned ? #selector(unpinMessage) : #selector(pinMessage)
+      let pinItem = NSMenuItem(title: pinTitle, action: pinAction, keyEquivalent: "")
+      pinItem.image = NSImage(
+        systemSymbolName: pinned ? "pin.slash" : "pin",
+        accessibilityDescription: pinTitle
+      )
+      menu.addItem(pinItem)
     }
 
     // Edit

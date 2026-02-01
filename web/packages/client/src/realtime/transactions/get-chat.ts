@@ -2,10 +2,16 @@ import type { GetChatInput, InputPeer, RpcCall, RpcResult } from "@in/protocol/c
 import { Method } from "@in/protocol/core"
 import type { Db } from "../../database"
 import { upsertChat, upsertDialog } from "./mappers"
+import { DbObjectKind } from "../../database/models"
 import { Query, type Transaction } from "./transaction"
 
 export type GetChatContext = {
   peerId?: InputPeer
+}
+
+const toNumber = (value: bigint | number | undefined) => {
+  if (value == null) return undefined
+  return typeof value === "bigint" ? Number(value) : value
 }
 
 export class GetChatTransaction implements Transaction<GetChatContext> {
@@ -36,6 +42,22 @@ export class GetChatTransaction implements Transaction<GetChatContext> {
     }
     if (result.getChat.dialog) {
       upsertDialog(db, result.getChat.dialog)
+    }
+
+    const pinnedMessageIds = result.getChat.pinnedMessageIds
+      .map((id) => toNumber(id))
+      .filter((id): id is number => id != null)
+
+    const chatId = toNumber(result.getChat.chat?.id)
+    if (chatId != null) {
+      const ref = db.ref(DbObjectKind.Chat, chatId)
+      const existing = db.get(ref)
+      if (existing) {
+        db.update({
+          ...existing,
+          pinnedMessageIds,
+        })
+      }
     }
   }
 }

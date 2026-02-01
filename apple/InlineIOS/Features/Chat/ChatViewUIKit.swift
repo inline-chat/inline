@@ -15,6 +15,16 @@ public class ChatContainerView: UIView {
     return collectionView
   }()
 
+  private lazy var pinnedHeaderView: PinnedMessageHeaderView = {
+    let view = PinnedMessageHeaderView(peerId: peerId, chatId: chatId ?? 0)
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.onHeightChange = { [weak self] height in
+      self?.pinnedHeaderHeightConstraint?.constant = height
+      self?.messagesCollectionView.updatePinnedHeaderHeight(height)
+    }
+    return view
+  }()
+
   lazy var composeView: ComposeView = {
     let view = ComposeView()
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -80,6 +90,7 @@ public class ChatContainerView: UIView {
   let scrollButton = BlurCircleButton()
 
   private var composeContainerViewBottomConstraint: NSLayoutConstraint?
+  private var pinnedHeaderHeightConstraint: NSLayoutConstraint?
 
   deinit {
     edgePanGestureRecognizer?.removeTarget(self, action: #selector(handleEdgePan(_:)))
@@ -112,6 +123,7 @@ public class ChatContainerView: UIView {
     backgroundColor = ThemeManager.shared.selected.backgroundColor
 
     addSubview(messagesCollectionView)
+    addSubview(pinnedHeaderView)
     addSubview(composeBlurBackgroundView)
     addSubview(composeContainerView)
     composeContainerView.addSubview(borderView)
@@ -126,6 +138,7 @@ public class ChatContainerView: UIView {
     // initialize mention completion height constraint
     mentionCompletionHeightConstraint = mentionCompletionViewWrapper.heightAnchor
       .constraint(equalToConstant: 0)
+    pinnedHeaderHeightConstraint = pinnedHeaderView.heightAnchor.constraint(equalToConstant: 0)
 
     NSLayoutConstraint.activate(
       [
@@ -133,6 +146,11 @@ public class ChatContainerView: UIView {
         messagesCollectionView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
         messagesCollectionView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
         messagesCollectionView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+        pinnedHeaderView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
+        pinnedHeaderView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
+        pinnedHeaderView.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor),
+        pinnedHeaderHeightConstraint!,
 
         composeBlurBackgroundView.leadingAnchor.constraint(equalTo: composeContainerView.leadingAnchor),
         composeBlurBackgroundView.trailingAnchor.constraint(equalTo: composeContainerView.trailingAnchor),

@@ -99,6 +99,12 @@ final class MessagesCollectionView: UICollectionView {
   }
 
   private var composeHeight: CGFloat = ComposeView.minHeight
+  private var pinnedHeaderHeight: CGFloat = 0
+
+  func updatePinnedHeaderHeight(_ height: CGFloat) {
+    pinnedHeaderHeight = height
+    updateContentInsets()
+  }
 
   func updateComposeInset(composeHeight: CGFloat) {
     self.composeHeight = composeHeight
@@ -133,13 +139,14 @@ final class MessagesCollectionView: UICollectionView {
     let topSafeArea = isLandscape ? window.safeAreaInsets.top : window.safeAreaInsets.top
 //    let bottomSafeArea = isLandscape ? window.safeAreaInsets.right : window.safeAreaInsets.bottom
     let bottomSafeArea = isLandscape ? window.safeAreaInsets.bottom : window.safeAreaInsets.bottom
-    let totalTopInset = topSafeArea + effectiveNavBarHeight
+    let navBarInset = topSafeArea + effectiveNavBarHeight
+    let totalTopInset = navBarInset + pinnedHeaderHeight
 
     NotificationCenter.default.post(
       name: Notification.Name("NavigationBarHeight"),
       object: nil,
       userInfo: [
-        "navBarHeight": totalTopInset,
+        "navBarHeight": navBarInset,
       ]
     )
 
@@ -627,6 +634,42 @@ private extension MessagesCollectionView {
 
     private var hasLinearConnected: Bool = false
     private var linearTeamId: String?
+
+    private func isMessagePinned(_ message: Message) -> Bool {
+      do {
+        return try AppDatabase.shared.reader.read { db in
+          try PinnedMessage
+            .filter(Column("chatId") == message.chatId)
+            .filter(Column("messageId") == message.messageId)
+            .fetchCount(db) > 0
+        }
+      } catch {
+        Log.shared.error("Failed to read pinned message state", error: error)
+        return false
+      }
+    }
+
+    private func togglePinMessage(_ message: Message, unpin: Bool) {
+      Task { @MainActor in
+        do {
+          let peer = chatPeerId(for: message)
+          _ = try await Api.realtime.send(.pinMessage(peer: peer, messageId: message.messageId, unpin: unpin))
+        } catch {
+          Log.shared.error("Failed to update pinned message", error: error)
+        }
+      }
+    }
+
+    private func chatPeerId(for message: Message) -> Peer {
+      do {
+        if let chat = try AppDatabase.shared.reader.read({ db in try Chat.fetchOne(db, id: message.chatId) }) {
+          return chat.peerId.toPeer()
+        }
+      } catch {
+        Log.shared.error("Failed to resolve chat peer for pin", error: error)
+      }
+      return message.peerId
+    }
 
     func setupDataSource(_ collectionView: UICollectionView) {
       currentCollectionView = collectionView
@@ -1428,6 +1471,15 @@ private extension MessagesCollectionView {
           self.presentForwardSheet(fullMessage)
         }
         actions.append(forwardAction)
+
+        let pinned = isMessagePinned(message)
+        let pinAction = UIAction(
+          title: pinned ? "Unpin" : "Pin",
+          image: UIImage(systemName: pinned ? "pin.slash" : "pin")
+        ) { [weak self] _ in
+          self?.togglePinMessage(message, unpin: pinned)
+        }
+        actions.append(pinAction)
 
         var editAction: UIAction?
         if message.fromId == Auth.shared.getCurrentUserId() ?? 0, message.hasText {

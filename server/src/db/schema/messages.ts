@@ -53,6 +53,9 @@ export const messages = pgTable(
 
     date: creationDate,
 
+    /** when it was pinned; null means not pinned */
+    pinnedAt: timestamp("pinned_at", { mode: "date", precision: 3 }),
+
     /** optional, message it is replying to */
     replyToMsgId: integer("reply_to_msg_id"),
 
