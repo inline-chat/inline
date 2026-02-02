@@ -5,7 +5,7 @@ import Logger
 import UIKit
 
 final class PinnedMessageHeaderView: UIView, UIGestureRecognizerDelegate {
-  static let preferredHeight: CGFloat = EmbedMessageView.height + 32
+  static let preferredHeight: CGFloat = EmbedMessageView.height + 24
 
   var onHeightChange: ((CGFloat) -> Void)?
 
@@ -73,8 +73,8 @@ final class PinnedMessageHeaderView: UIView, UIGestureRecognizerDelegate {
     NSLayoutConstraint.activate([
       blurView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
       blurView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-      blurView.topAnchor.constraint(equalTo: topAnchor, constant: 12),
-      blurView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
+      blurView.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+      blurView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
 
       embedView.leadingAnchor.constraint(equalTo: blurView.contentView.leadingAnchor, constant: 8),
       embedView.centerYAnchor.constraint(equalTo: blurView.contentView.centerYAnchor),
