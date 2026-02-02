@@ -335,6 +335,7 @@ private final class ChatToolbarMenuModel: ObservableObject {
           return try Member
             .filter(Member.Columns.userId == currentUserId)
             .filter(Member.Columns.spaceId == spaceId)
+            .filter(Member.Columns.canAccessPublicChats == true)
             .fetchOne(db) != nil
         }
 
