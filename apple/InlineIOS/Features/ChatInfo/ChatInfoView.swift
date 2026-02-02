@@ -331,7 +331,7 @@ struct ChatInfoView: View {
               await participantsWithMembersViewModel.refetchParticipants()
               showMakePrivateSheet = false
             } catch {
-              Log.shared.error("Failed to make chat ", error: error)
+              Log.shared.error("Failed to make chat private", error: error)
             }
           }
         },
