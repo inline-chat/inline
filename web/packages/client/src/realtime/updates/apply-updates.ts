@@ -131,6 +131,22 @@ export const applyUpdates = (db: Db, updates: Update[]) => {
         break
       }
 
+      case "chatInfo": {
+        const chatId = toNumber(update.update.chatInfo.chatId)
+        if (chatId == null) break
+        const ref = db.ref(DbObjectKind.Chat, chatId)
+        const existing = db.get(ref)
+        if (!existing) break
+        const nextTitle = update.update.chatInfo.title
+        const nextEmoji = update.update.chatInfo.emoji
+        db.update({
+          ...existing,
+          title: nextTitle ?? existing.title,
+          emoji: nextEmoji !== undefined ? (nextEmoji.length > 0 ? nextEmoji : undefined) : existing.emoji,
+        })
+        break
+      }
+
       case "pinnedMessages": {
         const chatId = getChatIdForPeer(db, update.update.pinnedMessages.peerId)
         if (chatId == null) break
