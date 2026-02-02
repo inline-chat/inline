@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "inline",
@@ -115,6 +116,10 @@
         "@react-email/components": "^1.0.6",
         "react": "^19.2.3",
       },
+    },
+    "server/packages/protocol": {
+      "name": "@inline-chat/protocol",
+      "version": "0.0.1",
     },
     "web": {
       "name": "@inline-chat/web",
@@ -479,6 +484,8 @@
     "@inline-chat/email-preview": ["@inline-chat/email-preview@workspace:server/packages/email-preview"],
 
     "@inline-chat/email-templates": ["@inline-chat/email-templates@workspace:server/packages/email-templates"],
+
+    "@inline-chat/protocol": ["@inline-chat/protocol@workspace:server/packages/protocol"],
 
     "@inline-chat/server": ["@inline-chat/server@workspace:server"],
 
