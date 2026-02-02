@@ -489,9 +489,8 @@ actor BucketActor {
 
   /// Determines if an update should be processed based on its type during sync catch-up.
   ///
-  /// We selectively apply only critical structure changes for now:
-  /// - spaceMemberDelete (User removed from space)
-  /// - participantDelete (User removed from chat)
+  /// We selectively apply only critical structure changes for now
+  /// (membership, chat metadata, and other non-history state).
   private func shouldProcessUpdate(_ update: InlineProtocol.Update) -> Bool {
     switch update.update {
       case .spaceMemberDelete:
@@ -511,6 +510,8 @@ actor BucketActor {
       case .spaceMemberAdd:
         true
       case .dialogArchived:
+        true
+      case .pinnedMessages:
         true
       case .newMessage, .editMessage, .messageAttachment:
         enableMessageUpdates
