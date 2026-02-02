@@ -2,7 +2,7 @@ import InlineKit
 import SwiftUI
 
 struct InlineRootView: View {
-  @AppStorage("enableExperimentalView") private var enableExperimentalView = true
+  @AppStorage("enableExperimentalView") private var enableExperimentalView = false
   @Environment(Router.self) private var router
 
   var body: some View {
@@ -20,7 +20,7 @@ struct InlineRootView: View {
 }
 
 private struct ExperimentalRootView: View {
-  @AppStorage("enableExperimentalView") private var enableExperimentalView = true
+  @AppStorage("enableExperimentalView") private var enableExperimentalView = false
   @State private var showSettings = false
   @StateObject private var onboardingNavigation = OnboardingNavigation()
   @StateObject private var mainViewRouter = MainViewRouter()

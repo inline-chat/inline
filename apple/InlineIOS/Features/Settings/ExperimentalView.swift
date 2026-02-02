@@ -3,7 +3,7 @@ import RealtimeV2
 import SwiftUI
 
 struct ExperimentalView: View {
-  @AppStorage("enableExperimentalView") private var enableExperimentalView = true
+  @AppStorage("enableExperimentalView") private var enableExperimentalView = false
   @Environment(\.realtimeV2) private var realtimeV2
   @State private var enableSyncMessageUpdates = Api.realtime.getEnableSyncMessageUpdates()
 
