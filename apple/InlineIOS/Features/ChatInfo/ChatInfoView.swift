@@ -87,8 +87,18 @@ struct ChatInfoView: View {
     return participantsWithMembersViewModel.participants.contains(where: { $0.user.id == currentUserId })
   }
 
+  var isCurrentUserSpaceMemberWithPublicAccess: Bool {
+    guard let currentUserId = Auth.shared.getCurrentUserId() else { return false }
+    return spaceMembersViewModel.members.contains(where: { member in
+      member.userId == currentUserId && member.canAccessPublicChats
+    })
+  }
+
   var canEditChatInfo: Bool {
     guard !isDM else { return false }
+    if currentChat?.isPublic == true {
+      return isCurrentUserSpaceMemberWithPublicAccess
+    }
     return isCurrentUserParticipant
   }
 
