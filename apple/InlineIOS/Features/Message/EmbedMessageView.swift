@@ -399,7 +399,7 @@ private extension EmbedMessageView {
     case .forwardingInCompose:
       return "Forward Message"
     case .pinnedInHeader:
-      return "Pinned message"
+      return "Pinned Message"
     }
   }
 
@@ -444,7 +444,7 @@ private extension EmbedMessageView {
       return forwardDescription(for: senderName, messageText: baseContent)
     }
     if kind == .pinnedInHeader {
-      return "\(senderName): \(baseContent)"
+      return baseContent
     }
     return baseContent
   }
@@ -554,6 +554,9 @@ private extension EmbedMessageView {
 
   func updateColors() {
     let senderColor: UIColor = {
+      if kind == .pinnedInHeader {
+        return ThemeManager.shared.selected.accent
+      }
       if let senderNameForColor {
         return AvatarColorUtility.uiColorFor(name: senderNameForColor)
       }
@@ -564,7 +567,7 @@ private extension EmbedMessageView {
     case .replyBubble:
       let useWhite = outgoing && !isOnlyEmoji
       let textColor: UIColor = useWhite ? .white : .label
-      let headerColor: UIColor = useWhite ? .white : senderColor
+      let headerColor: UIColor = kind == .pinnedInHeader ? textColor : (useWhite ? .white : senderColor)
       let rectangleColor: UIColor = useWhite ? .white : senderColor
       let bgAlpha: CGFloat = useWhite ? 0.13 : 0.08
 
