@@ -5,6 +5,36 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 
 # Inline CLI
 
+## Quick Reference (Agent-Friendly Shortcuts)
+
+**Top-level shortcuts** - use these directly without nesting:
+- `inline login` → `inline auth login`
+- `inline logout` → `inline auth logout`
+- `inline me` or `inline whoami` → `inline auth me`
+- `inline send` → `inline messages send`
+- `inline search` → `inline messages search`
+
+**Command aliases** - all work identically:
+| Command | Aliases |
+|---------|---------|
+| `chats` | `chat`, `c` |
+| `users` | `user`, `u` |
+| `messages` | `message`, `msg`, `m` |
+| `spaces` | `space`, `s` |
+| `auth` | `a` |
+| `notifications` | `notification`, `notif`, `n` |
+| `tasks` | `task`, `t` |
+
+**Name resolution** - use names instead of IDs:
+- `--chat "Design"` → resolves to `--chat-id` by chat title match
+- `--to alice` or `--user alice` → resolves to `--user-id` by username or name
+- Works with: `send`, `search`, `messages list`
+
+**Flag aliases**:
+- `--message` or `--msg` → `--text`
+- `--user` → `--to`
+- `--file` → `--attach`
+
 ## Global flags
 
 - `--json`: Output JSON instead of human tables/details (available on all commands). This greatly increases the verbosity and information you can get. Most of the data is either not included or truncated/redacted in the default human readable mode. Use JSON mode when you need exact details of a chat, message, etc. You can start with default mode and switch to json mode for more details and form your response.
@@ -117,6 +147,26 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
   - Download the attachment from a message.
 
 ## Examples
+
+### Using shortcuts (preferred)
+
+```bash
+# Login/logout
+inline login                                    # shortcut
+inline logout
+inline me                                       # or: inline whoami
+
+# Send messages using name resolution
+inline send --to alice --text "Hey!"            # DM by username/name
+inline send --chat "Design" --text "Done"       # chat by title
+inline send --chat "Design" --message "Done"    # --message = --text
+
+# Search using shortcuts
+inline search --chat "Engineering" --query "bug" # resolve chat name
+inline search --to sam --query "feedback"       # search DM by name
+```
+
+### Using full commands
 
 - Login and greet user:
   - `inline auth login` (prompts for email/phone + code, then prints welcome name)

@@ -104,6 +104,81 @@ pub struct UserListOutput {
     pub users: Vec<UserSummary>,
 }
 
+// --- Meta types for agent-friendly JSON output ---
+
+/// Pagination metadata for message list responses
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageListMeta {
+    /// Whether there are more messages to fetch
+    pub has_more: bool,
+    /// The offset_id to use for the next page (if has_more is true)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_offset_id: Option<i64>,
+    /// Count of messages returned in this response
+    pub total_in_response: usize,
+    /// The resolved chat_id (if applicable)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chat_id: Option<i64>,
+    /// The resolved user_id (if applicable)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<i64>,
+}
+
+/// JSON wrapper for message list with metadata
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageListJsonOutput {
+    pub messages: Vec<proto::Message>,
+    #[serde(rename = "_meta")]
+    pub meta: MessageListMeta,
+}
+
+/// Metadata for chat list responses
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatListMeta {
+    /// Count of chats in the response
+    pub total_chats: usize,
+    /// Count of dialogs in the response
+    pub total_dialogs: usize,
+    /// Count of users in the response
+    pub total_users: usize,
+}
+
+/// JSON wrapper for chat list with metadata
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatListJsonOutput {
+    pub dialogs: Vec<proto::Dialog>,
+    pub chats: Vec<proto::Chat>,
+    pub spaces: Vec<proto::Space>,
+    pub users: Vec<proto::User>,
+    pub messages: Vec<proto::Message>,
+    #[serde(rename = "_meta")]
+    pub meta: ChatListMeta,
+}
+
+/// Metadata for user list responses
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserListMeta {
+    /// Count of users in the response
+    pub total_users: usize,
+    /// The filter string if one was used
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter_applied: Option<String>,
+}
+
+/// JSON wrapper for user list with metadata
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserListJsonOutput {
+    pub users: Vec<UserSummary>,
+    #[serde(rename = "_meta")]
+    pub meta: UserListMeta,
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpaceListOutput {

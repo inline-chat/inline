@@ -28,16 +28,18 @@ use crate::auth::AuthStore;
 use crate::config::Config;
 use crate::dates::parse_relative_time;
 use crate::output::{
-    AttachmentSummary, ChatListItem, ChatListOutput, ChatParticipantSummary,
-    ChatParticipantsOutput, MediaSummary, MessageListOutput, MessageSummary, PeerSummary,
-    SpaceListOutput, SpaceMemberSummary, SpaceMembersOutput, SpaceSummary, UserListOutput,
-    UserSummary,
+    AttachmentSummary, ChatListItem, ChatListJsonOutput, ChatListMeta, ChatListOutput,
+    ChatParticipantSummary, ChatParticipantsOutput, MediaSummary, MessageListJsonOutput,
+    MessageListMeta, MessageListOutput, MessageSummary, PeerSummary, SpaceListOutput,
+    SpaceMemberSummary, SpaceMembersOutput, SpaceSummary, UserListJsonOutput, UserListMeta,
+    UserListOutput, UserSummary,
 };
 use crate::protocol::proto;
 use crate::realtime::RealtimeClient;
 use crate::state::LocalDb;
 
 const MAX_ATTACHMENT_BYTES: u64 = 200 * 1024 * 1024;
+const DEFAULT_MESSAGE_LIMIT: i32 = 50;
 
 #[derive(Parser)]
 #[command(
@@ -130,7 +132,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    #[command(about = "Authenticate this CLI")]
+    // === Core commands with aliases ===
+    #[command(about = "Authenticate this CLI", alias = "a")]
     Auth {
         #[command(subcommand)]
         command: AuthCommand,
@@ -139,36 +142,48 @@ enum Command {
     Update,
     #[command(about = "Print diagnostic information about this CLI")]
     Doctor,
-    #[command(about = "List chats and threads")]
+    #[command(about = "List chats and threads", alias = "chat", alias = "c")]
     Chats {
         #[command(subcommand)]
         command: ChatsCommand,
     },
-    #[command(about = "List users or fetch a user by id")]
+    #[command(about = "List users or fetch a user by id", alias = "user", alias = "u")]
     Users {
         #[command(subcommand)]
         command: UsersCommand,
     },
-    #[command(about = "Read and send messages")]
+    #[command(about = "Read and send messages", alias = "message", alias = "msg", alias = "m")]
     Messages {
         #[command(subcommand)]
         command: MessagesCommand,
     },
-    #[command(about = "List spaces from your chats")]
+    #[command(about = "List spaces from your chats", alias = "space", alias = "s")]
     Spaces {
         #[command(subcommand)]
         command: SpacesCommand,
     },
-    #[command(about = "View or update notification settings")]
+    #[command(about = "View or update notification settings", alias = "notification", alias = "notif", alias = "n")]
     Notifications {
         #[command(subcommand)]
         command: NotificationsCommand,
     },
-    #[command(about = "Create tasks from messages (Linear, Notion)")]
+    #[command(about = "Create tasks from messages (Linear, Notion)", alias = "task", alias = "t")]
     Tasks {
         #[command(subcommand)]
         command: TasksCommand,
     },
+
+    // === Top-level shortcuts (desire paths) ===
+    #[command(about = "Log in (shortcut for auth login)")]
+    Login(AuthLoginArgs),
+    #[command(about = "Log out (shortcut for auth logout)")]
+    Logout,
+    #[command(about = "Show current user (shortcut for auth me)", alias = "whoami")]
+    Me,
+    #[command(about = "Send a message (shortcut for messages send)")]
+    Send(MessagesSendArgs),
+    #[command(about = "Search messages (shortcut for messages search)")]
+    Search(MessagesSearchArgs),
 }
 
 #[derive(Subcommand)]
@@ -385,6 +400,12 @@ struct MessagesListArgs {
     #[arg(long, help = "User id (for DMs)")]
     user_id: Option<i64>,
 
+    #[arg(long, help = "Chat name (resolved to id)")]
+    chat: Option<String>,
+
+    #[arg(long, alias = "user", help = "Username or name (resolved to user id for DM)")]
+    to: Option<String>,
+
     #[arg(long, help = "Maximum number of messages to return")]
     limit: Option<i32>,
 
@@ -420,6 +441,12 @@ struct MessagesSearchArgs {
 
     #[arg(long, help = "User id (for DMs)")]
     user_id: Option<i64>,
+
+    #[arg(long, help = "Chat name (resolved to id)")]
+    chat: Option<String>,
+
+    #[arg(long, alias = "user", help = "Username or name (resolved to user id for DM)")]
+    to: Option<String>,
 
     #[arg(long, help = "Search query (repeatable)")]
     query: Vec<String>,
@@ -466,7 +493,13 @@ struct MessagesSendArgs {
     #[arg(long, help = "User id (for DMs)")]
     user_id: Option<i64>,
 
-    #[arg(long, help = "Message text (used as caption for attachments)")]
+    #[arg(long, help = "Chat name (resolved to id)")]
+    chat: Option<String>,
+
+    #[arg(long, alias = "user", help = "Username or name (resolved to user id for DM)")]
+    to: Option<String>,
+
+    #[arg(long, alias = "message", alias = "msg", help = "Message text (used as caption for attachments)")]
     text: Option<String>,
 
     #[arg(long, help = "Reply to message id")]
@@ -901,13 +934,24 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     match result {
                         proto::rpc_result::Result::GetChats(payload) => {
                             if cli.json {
-                                if args.limit.is_some() || args.offset.is_some() {
-                                    let payload =
-                                        apply_chat_list_limits(payload, args.limit, args.offset);
-                                    output::print_json(&payload, json_format)?;
+                                let payload = if args.limit.is_some() || args.offset.is_some() {
+                                    apply_chat_list_limits(payload, args.limit, args.offset)
                                 } else {
-                                    output::print_json(&payload, json_format)?;
-                                }
+                                    payload
+                                };
+                                let json_output = ChatListJsonOutput {
+                                    meta: ChatListMeta {
+                                        total_chats: payload.chats.len(),
+                                        total_dialogs: payload.dialogs.len(),
+                                        total_users: payload.users.len(),
+                                    },
+                                    dialogs: payload.dialogs,
+                                    chats: payload.chats,
+                                    spaces: payload.spaces,
+                                    users: payload.users,
+                                    messages: payload.messages,
+                                };
+                                output::print_json(&json_output, json_format)?;
                             } else {
                                 let current_user = local_db.load()?.current_user;
                                 let output = build_chat_list(
@@ -1034,17 +1078,17 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 ChatsCommand::Create(args) => {
                     let title = args.title.trim();
                     if title.is_empty() {
-                        return Err("Chat title cannot be empty".into());
+                        return Err("Invalid argument: chat title cannot be empty".into());
                     }
                     if args.public && !args.participants.is_empty() {
-                        return Err("Public chats cannot include explicit participants".into());
+                        return Err("Conflicting arguments: public chats cannot include explicit participants\n\n  Hint: Remove --participant flags for public chats, or remove --public for private chats".into());
                     }
                     if args.space_id.is_none() {
                         if args.public {
-                            return Err("Public home threads are not supported yet.".into());
+                            return Err("Invalid configuration: public home threads are not supported yet\n\n  Hint: Add --space-id for public chats within a space".into());
                         }
                         if args.participants.is_empty() {
-                            return Err("Provide at least one --participant for a home thread.".into());
+                            return Err("Missing required argument: home threads require at least one participant\n\n  Example: inline chats create --title \"Project\" --participant 42".into());
                         }
                     }
                     let token = require_token(&auth_store)?;
@@ -1116,13 +1160,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 ChatsCommand::UpdateVisibility(args) => {
                     if args.public == args.private {
-                        return Err("Provide --public or --private".into());
+                        return Err("Missing required argument: specify --public or --private\n\n  Example: inline chats update-visibility --chat-id 123 --public\n           inline chats update-visibility --chat-id 123 --private --participant 42".into());
                     }
                     if args.public && !args.participants.is_empty() {
-                        return Err("Public chats cannot include explicit participants".into());
+                        return Err("Conflicting arguments: public chats cannot include explicit participants\n\n  Hint: Remove --participant flags when using --public".into());
                     }
                     if args.private && args.participants.is_empty() {
-                        return Err("Private chats require at least one participant.".into());
+                        return Err("Missing required argument: private chats require at least one participant\n\n  Example: inline chats update-visibility --chat-id 123 --private --participant 42".into());
                     }
 
                     let token = require_token(&auth_store)?;
@@ -1251,7 +1295,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             let mut output = build_user_list(&payload);
                             filter_users_output(&mut output, args.filter.as_deref());
                             if cli.json {
-                                output::print_json(&output, json_format)?;
+                                let json_output = UserListJsonOutput {
+                                    meta: UserListMeta {
+                                        total_users: output.users.len(),
+                                        filter_applied: args.filter.clone(),
+                                    },
+                                    users: output.users,
+                                };
+                                output::print_json(&json_output, json_format)?;
                             } else {
                                 output::print_users(&output, false, json_format)?;
                             }
@@ -1280,7 +1331,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 {
                                     output::print_json(user, json_format)?;
                                 } else {
-                                    return Err("User not found in getChats users list".into());
+                                    return Err("Not found: user ID does not exist\n\n  Hint: Run `inline users list` to see available user IDs".into());
                                 }
                             } else {
                                 let output = build_user_list(&payload);
@@ -1295,7 +1346,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                         json_format,
                                     )?;
                                 } else {
-                                    return Err("User not found in getChats users list".into());
+                                    return Err("Not found: user ID does not exist\n\n  Hint: Run `inline users list` to see available user IDs".into());
                                 }
                             }
                         }
@@ -1308,10 +1359,17 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             Command::Messages { command } => match command {
                 MessagesCommand::List(args) => {
                     let token = require_token(&auth_store)?;
-                    let peer = input_peer_from_args(args.chat_id, args.user_id)?;
-                    let peer_summary = peer_summary_from_input(&peer);
                     let mut realtime =
                         RealtimeClient::connect(&config.realtime_url, &token).await?;
+                    let peer = resolve_peer_from_names(
+                        &mut realtime,
+                        args.chat_id,
+                        args.user_id,
+                        args.chat.as_deref(),
+                        args.to.as_deref(),
+                    )
+                    .await?;
+                    let peer_summary = peer_summary_from_input(&peer);
 
                     let input = proto::GetChatHistoryInput {
                         peer_id: Some(peer.clone()),
@@ -1336,7 +1394,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             filter_messages_by_time(&mut payload.messages, since_ts, until_ts);
 
                             if cli.json {
-                                output::print_json(&payload, json_format)?;
+                                let json_output = build_message_list_json_output(
+                                    payload.messages,
+                                    args.limit,
+                                    &peer,
+                                );
+                                output::print_json(&json_output, json_format)?;
                             } else {
                                 let translation_language = args
                                     .translate
@@ -1398,11 +1461,18 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 MessagesCommand::Search(args) => {
                     let token = require_token(&auth_store)?;
-                    let peer = input_peer_from_args(args.chat_id, args.user_id)?;
                     let queries = normalize_search_queries(&args.query)?;
-                    let peer_summary = peer_summary_from_input(&peer);
                     let mut realtime =
                         RealtimeClient::connect(&config.realtime_url, &token).await?;
+                    let peer = resolve_peer_from_names(
+                        &mut realtime,
+                        args.chat_id,
+                        args.user_id,
+                        args.chat.as_deref(),
+                        args.to.as_deref(),
+                    )
+                    .await?;
+                    let peer_summary = peer_summary_from_input(&peer);
 
                     let input = proto::SearchMessagesInput {
                         peer_id: Some(peer.clone()),
@@ -1429,7 +1499,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             filter_messages_by_time(&mut payload.messages, since_ts, until_ts);
 
                             if cli.json {
-                                output::print_json(&payload, json_format)?;
+                                let json_output = build_message_list_json_output(
+                                    payload.messages,
+                                    args.limit,
+                                    &peer,
+                                );
+                                output::print_json(&json_output, json_format)?;
                             } else {
                                 let chats_result = realtime
                                     .call_rpc(
@@ -1525,9 +1600,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 MessagesCommand::Send(args) => {
                     let token = require_token(&auth_store)?;
-                    let peer = input_peer_from_args(args.chat_id, args.user_id)?;
                     let reply_to = args.reply_to;
-                    let caption = resolve_message_caption(args.text, args.stdin)?;
+                    let caption = resolve_message_caption(args.text.clone(), args.stdin)?;
                     let attachments = prepare_attachments(
                         &args.attachments,
                         &config.data_dir,
@@ -1537,13 +1611,21 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                     let mention_entities = parse_mention_entities(&args.mentions)?;
                     if mention_entities.is_some() && caption.is_none() {
-                        return Err("Mentions require --text or --stdin".into());
+                        return Err("Invalid usage: --mention requires message text via --text or --stdin\n\n  Example: inline messages send --chat-id 123 --text \"@Sam hello\" --mention 42:0:4".into());
                     }
                     let mut realtime =
                         RealtimeClient::connect(&config.realtime_url, &token).await?;
+                    let peer = resolve_peer_from_names(
+                        &mut realtime,
+                        args.chat_id,
+                        args.user_id,
+                        args.chat.as_deref(),
+                        args.to.as_deref(),
+                    )
+                    .await?;
                     if attachments.is_empty() {
                         let text = caption
-                            .ok_or_else(|| "Provide --text, --stdin, or --attach".to_string())?;
+                            .ok_or_else(|| "Missing required argument: provide --text, --stdin, or --attach\n\n  Hint: Use --text for inline message text\n        Use --stdin to read message from standard input\n        Use --attach to send a file".to_string())?;
                         let payload = send_message(
                             &mut realtime,
                             &peer,
@@ -1634,7 +1716,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 MessagesCommand::Download(args) => {
                     let token = require_token(&auth_store)?;
                     if args.output.is_some() && args.dir.is_some() {
-                        return Err("Provide only one of --output or --dir".into());
+                        return Err("Conflicting arguments: provide only one of --output or --dir, not both".into());
                     }
                     let peer = input_peer_from_args(args.chat_id, args.user_id)?;
                     let mut realtime =
@@ -1697,7 +1779,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let token = require_token(&auth_store)?;
                     let peer = input_peer_from_args(args.chat_id, args.user_id)?;
                     let text = resolve_message_caption(args.text, args.stdin)?
-                        .ok_or_else(|| "Provide --text or --stdin".to_string())?;
+                        .ok_or_else(|| "Missing required argument: provide --text or --stdin\n\n  Hint: Use --text for inline message text\n        Use --stdin to read message from standard input".to_string())?;
                     let mut realtime =
                         RealtimeClient::connect(&config.realtime_url, &token).await?;
                     let input = proto::EditMessageInput {
@@ -1728,7 +1810,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let peer = input_peer_from_args(args.chat_id, args.user_id)?;
                     let emoji = args.emoji.trim().to_string();
                     if emoji.is_empty() {
-                        return Err("Emoji cannot be empty".into());
+                        return Err("Invalid argument: emoji cannot be empty\n\n  Hint: Provide a valid emoji character".into());
                     }
                     let mut realtime =
                         RealtimeClient::connect(&config.realtime_url, &token).await?;
@@ -1759,7 +1841,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let peer = input_peer_from_args(args.chat_id, args.user_id)?;
                     let emoji = args.emoji.trim().to_string();
                     if emoji.is_empty() {
-                        return Err("Emoji cannot be empty".into());
+                        return Err("Invalid argument: emoji cannot be empty\n\n  Hint: Provide a valid emoji character".into());
                     }
                     let mut realtime =
                         RealtimeClient::connect(&config.realtime_url, &token).await?;
@@ -1960,7 +2042,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 NotificationsCommand::Set(args) => {
                     if args.mode.is_none() && !args.silent && !args.sound {
                         return Err(
-                            "Provide at least one of --mode, --silent, or --sound".into(),
+                            "Missing required argument: provide at least one of --mode, --silent, or --sound\n\n  Hint: Use --mode to set notification mode (all, direct, none)\n        Use --silent to toggle silent notifications\n        Use --sound to toggle notification sound".into(),
                         );
                     }
                     let token = require_token(&auth_store)?;
@@ -2057,7 +2139,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                     let text = message.message.unwrap_or_default();
                     if text.trim().is_empty() {
-                        return Err("Message has no text content".into());
+                        return Err("Invalid message: this message has no text content to create a task from\n\n  Hint: Select a message that contains text (not just media)".into());
                     }
 
                     let api_input = CreateLinearIssueInput {
@@ -2104,6 +2186,175 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             },
+
+            // === Top-level shortcuts (desire paths) ===
+            Command::Login(args) => {
+                handle_login(args, &api, &auth_store, &config.realtime_url, &local_db).await?;
+            }
+            Command::Logout => {
+                auth_store.clear_token()?;
+                local_db.clear_current_user()?;
+                println!("Logged out.");
+            }
+            Command::Me => {
+                let token = require_token(&auth_store)?;
+                let mut realtime = RealtimeClient::connect(&config.realtime_url, &token).await?;
+                let me = fetch_me(&mut realtime).await?;
+                local_db.set_current_user(me.clone())?;
+                if cli.json {
+                    output::print_json(&me, json_format)?;
+                } else {
+                    print_auth_user(&me);
+                }
+            }
+            Command::Send(args) => {
+                let token = require_token(&auth_store)?;
+                let reply_to = args.reply_to;
+                let caption = resolve_message_caption(args.text.clone(), args.stdin)?;
+                let attachments = prepare_attachments(
+                    &args.attachments,
+                    &config.data_dir,
+                    args.force_file,
+                    cli.json,
+                )?;
+
+                let mention_entities = parse_mention_entities(&args.mentions)?;
+                if mention_entities.is_some() && caption.is_none() {
+                    return Err("Invalid usage: --mention requires message text via --text or --stdin\n\n  Example: inline messages send --chat-id 123 --text \"@Sam hello\" --mention 42:0:4".into());
+                }
+                let mut realtime = RealtimeClient::connect(&config.realtime_url, &token).await?;
+                let peer = resolve_peer_from_names(
+                    &mut realtime,
+                    args.chat_id,
+                    args.user_id,
+                    args.chat.as_deref(),
+                    args.to.as_deref(),
+                )
+                .await?;
+                if attachments.is_empty() {
+                    let text = caption
+                        .ok_or_else(|| "Missing required argument: provide --text, --stdin, or --attach\n\n  Hint: Use --text for inline message text\n        Use --stdin to read message from standard input\n        Use --attach to send a file".to_string())?;
+                    let payload = send_message(
+                        &mut realtime,
+                        &peer,
+                        Some(text),
+                        None,
+                        true,
+                        reply_to,
+                        mention_entities,
+                    )
+                    .await?;
+                    if cli.json {
+                        output::print_json(&payload, json_format)?;
+                    } else {
+                        println!("Message sent (updates: {}).", payload.updates.len());
+                    }
+                } else {
+                    let peer_summary = peer_summary_from_input(&peer);
+                    let output = send_messages_with_attachments(
+                        &api,
+                        &mut realtime,
+                        &token,
+                        &peer,
+                        caption,
+                        reply_to,
+                        mention_entities,
+                        attachments,
+                        peer_summary,
+                        cli.json,
+                    )
+                    .await?;
+                    if cli.json {
+                        output::print_json(&output, json_format)?;
+                    }
+                }
+            }
+            Command::Search(args) => {
+                let token = require_token(&auth_store)?;
+                let queries = normalize_search_queries(&args.query)?;
+                let mut realtime = RealtimeClient::connect(&config.realtime_url, &token).await?;
+                let peer = resolve_peer_from_names(
+                    &mut realtime,
+                    args.chat_id,
+                    args.user_id,
+                    args.chat.as_deref(),
+                    args.to.as_deref(),
+                )
+                .await?;
+                let peer_summary = peer_summary_from_input(&peer);
+
+                let input = proto::SearchMessagesInput {
+                    peer_id: Some(peer.clone()),
+                    queries,
+                    limit: args.limit,
+                    offset_id: None,
+                    filter: None,
+                };
+
+                let result = realtime
+                    .call_rpc(
+                        proto::Method::SearchMessages,
+                        proto::rpc_call::Input::SearchMessages(input),
+                    )
+                    .await?;
+
+                match result {
+                    proto::rpc_result::Result::SearchMessages(mut payload) => {
+                        let (since_ts, until_ts) = parse_time_filters(
+                            args.since.as_deref(),
+                            args.until.as_deref(),
+                            Utc::now(),
+                        )?;
+                        filter_messages_by_time(&mut payload.messages, since_ts, until_ts);
+
+                        if cli.json {
+                            let json_output = build_message_list_json_output(
+                                payload.messages,
+                                args.limit,
+                                &peer,
+                            );
+                            output::print_json(&json_output, json_format)?;
+                        } else {
+                            let chats_result = realtime
+                                .call_rpc(
+                                    proto::Method::GetChats,
+                                    proto::rpc_call::Input::GetChats(proto::GetChatsInput {}),
+                                )
+                                .await?;
+                            let (users_by_id, chats_by_id) = match chats_result {
+                                proto::rpc_result::Result::GetChats(chats_payload) => {
+                                    let users = chats_payload
+                                        .users
+                                        .into_iter()
+                                        .map(|user| (user.id, user))
+                                        .collect();
+                                    let chats = chats_payload
+                                        .chats
+                                        .into_iter()
+                                        .map(|chat| (chat.id, chat))
+                                        .collect();
+                                    (users, chats)
+                                }
+                                _ => return Err("Unexpected RPC result for getChats".into()),
+                            };
+                            let current_user_id =
+                                local_db.load()?.current_user.map(|user| user.id);
+                            let output = build_message_list_from_messages(
+                                &payload.messages,
+                                &users_by_id,
+                                current_user_id,
+                                peer_summary,
+                                peer_name_from_input(&peer, &users_by_id, &chats_by_id),
+                                None,
+                            );
+                            output::print_messages(&output, false, json_format)?;
+                        }
+                    }
+                    _ => {
+                        return Err("Unexpected RPC result for searchMessages".into());
+                    }
+                }
+            }
         }
 
         Ok::<(), Box<dyn std::error::Error>>(())
@@ -2210,7 +2461,7 @@ fn prompt_code() -> Result<String, Box<dyn std::error::Error>> {
 
 fn contact_from_args(args: AuthLoginArgs) -> Result<Option<Contact>, Box<dyn std::error::Error>> {
     if args.email.is_some() && args.phone.is_some() {
-        return Err("Provide only one of --email or --phone".into());
+        return Err("Conflicting arguments: provide only one of --email or --phone, not both".into());
     }
 
     if let Some(email) = args.email {
@@ -2263,7 +2514,7 @@ fn resolve_message_caption(
         std::io::stdin().read_to_string(&mut buffer)?;
         let trimmed = buffer.trim();
         if trimmed.is_empty() {
-            return Err("stdin was empty".into());
+            return Err("Empty input: stdin was empty (no message text received)\n\n  Hint: Pipe text to stdin, e.g.: echo \"hello\" | inline messages send --chat-id 123 --stdin".into());
         }
         return Ok(Some(trimmed.to_string()));
     }
@@ -2271,7 +2522,7 @@ fn resolve_message_caption(
     if let Some(text) = text {
         let trimmed = text.trim();
         if trimmed.is_empty() {
-            return Err("message text is empty".into());
+            return Err("Empty input: message text cannot be empty\n\n  Hint: Provide message content with --text \"your message\"".into());
         }
         return Ok(Some(trimmed.to_string()));
     }
@@ -2522,7 +2773,7 @@ fn ensure_attachment_size(
         if !quiet {
             eprintln!("Attachment {} is {} (limit 200MB).", label, size_label);
         }
-        return Err("Attachment exceeds 200MB limit".into());
+        return Err("Attachment exceeds 200MB limit\n\n  Hint: Consider compressing the file or splitting into smaller parts".into());
     }
     Ok(())
 }
@@ -2577,7 +2828,7 @@ fn zip_directory(
     zip.finish()?;
 
     if !has_entries {
-        return Err("Folder has no files to upload.".into());
+        return Err("Empty folder: the specified folder contains no files to upload\n\n  Hint: The folder must contain at least one file (not just subfolders)".into());
     }
 
     Ok((zip_path, zip_name))
@@ -2674,7 +2925,7 @@ fn input_peer_from_args(
     user_id: Option<i64>,
 ) -> Result<proto::InputPeer, Box<dyn std::error::Error>> {
     match (chat_id, user_id) {
-        (Some(_), Some(_)) => Err("Provide only one of --chat-id or --user-id".into()),
+        (Some(_), Some(_)) => Err("Conflicting arguments: provide only one of --chat-id or --user-id, not both".into()),
         (Some(chat_id), None) => Ok(proto::InputPeer {
             r#type: Some(proto::input_peer::Type::Chat(proto::InputPeerChat {
                 chat_id,
@@ -2685,8 +2936,93 @@ fn input_peer_from_args(
                 user_id,
             })),
         }),
-        (None, None) => Err("Provide --chat-id or --user-id".into()),
+        (None, None) => Err("Missing required argument: provide --chat-id or --user-id\n\n  Hint: Use `inline chats list` to see available chat IDs\n        Use `inline users list` to see available user IDs for DMs".into()),
     }
+}
+
+/// Resolve --chat (name) and --to (username/name) to IDs using getChats data.
+/// This is called only when name-based args are provided.
+async fn resolve_peer_from_names(
+    realtime: &mut RealtimeClient,
+    chat_id: Option<i64>,
+    user_id: Option<i64>,
+    chat_name: Option<&str>,
+    to_name: Option<&str>,
+) -> Result<proto::InputPeer, Box<dyn std::error::Error>> {
+    // If IDs are provided directly, use them
+    if chat_id.is_some() || user_id.is_some() {
+        return input_peer_from_args(chat_id, user_id);
+    }
+
+    // If no name-based args, fail
+    if chat_name.is_none() && to_name.is_none() {
+        return Err("Missing required argument: provide --chat-id, --user-id, --chat, or --to\n\n  Hint: Use --chat-id or --user-id with numeric IDs\n        Use --chat or --to with names (resolved automatically)\n        Run `inline chats list` or `inline users list` to see available options".into());
+    }
+
+    // Fetch chats/users to resolve names
+    let result = realtime
+        .call_rpc(
+            proto::Method::GetChats,
+            proto::rpc_call::Input::GetChats(proto::GetChatsInput {}),
+        )
+        .await?;
+
+    let (users, chats) = match result {
+        proto::rpc_result::Result::GetChats(payload) => (payload.users, payload.chats),
+        _ => return Err("Unexpected RPC result for getChats".into()),
+    };
+
+    // Resolve --chat to chat_id
+    if let Some(name) = chat_name {
+        let name_lower = name.to_lowercase();
+        let matched = chats.iter().find(|c| c.title.to_lowercase().contains(&name_lower));
+        if let Some(chat) = matched {
+            return Ok(proto::InputPeer {
+                r#type: Some(proto::input_peer::Type::Chat(proto::InputPeerChat {
+                    chat_id: chat.id,
+                })),
+            });
+        }
+        return Err(format!("No chat found matching '{}'\n\n  Hint: Run `inline chats list` to see available chats\n        Use --chat-id with a numeric ID instead", name).into());
+    }
+
+    // Resolve --to to user_id
+    if let Some(name) = to_name {
+        let name_lower = name.to_lowercase();
+        let matched = users.iter().find(|u| {
+            // Match by username (exact, case-insensitive)
+            if let Some(username) = &u.username {
+                if username.to_lowercase() == name_lower
+                    || username.to_lowercase() == name_lower.trim_start_matches('@')
+                {
+                    return true;
+                }
+            }
+            // Match by first name (contains)
+            if let Some(first) = &u.first_name {
+                if first.to_lowercase().contains(&name_lower) {
+                    return true;
+                }
+            }
+            // Match by last name (contains)
+            if let Some(last) = &u.last_name {
+                if last.to_lowercase().contains(&name_lower) {
+                    return true;
+                }
+            }
+            false
+        });
+        if let Some(user) = matched {
+            return Ok(proto::InputPeer {
+                r#type: Some(proto::input_peer::Type::User(proto::InputPeerUser {
+                    user_id: user.id,
+                })),
+            });
+        }
+        return Err(format!("No user found matching '{}'\n\n  Hint: Run `inline users list` to see available users\n        Use --user-id with a numeric ID instead", name).into());
+    }
+
+    Err("Missing required argument: provide --chat-id, --user-id, --chat, or --to\n\n  Hint: Use --chat-id or --user-id with numeric IDs\n        Use --chat or --to with names (resolved automatically)\n        Run `inline chats list` or `inline users list` to see available options".into())
 }
 
 fn peer_label_from_input(peer: &proto::InputPeer) -> String {
@@ -2707,11 +3043,11 @@ fn invite_target_from_args(
     }
     if let Some(email) = args.email.as_ref() {
         if target.is_some() {
-            return Err("Provide only one of --user-id, --email, or --phone".into());
+            return Err("Conflicting arguments: provide only one of --user-id, --email, or --phone".into());
         }
         let trimmed = email.trim();
         if trimmed.is_empty() {
-            return Err("Email cannot be empty".into());
+            return Err("Invalid argument: email cannot be empty\n\n  Hint: Provide a valid email address".into());
         }
         target = Some(proto::invite_to_space_input::Via::Email(
             trimmed.to_string(),
@@ -2719,17 +3055,17 @@ fn invite_target_from_args(
     }
     if let Some(phone) = args.phone.as_ref() {
         if target.is_some() {
-            return Err("Provide only one of --user-id, --email, or --phone".into());
+            return Err("Conflicting arguments: provide only one of --user-id, --email, or --phone".into());
         }
         let trimmed = phone.trim();
         if trimmed.is_empty() {
-            return Err("Phone number cannot be empty".into());
+            return Err("Invalid argument: phone number cannot be empty\n\n  Hint: Provide a valid phone number".into());
         }
         target = Some(proto::invite_to_space_input::Via::PhoneNumber(
             trimmed.to_string(),
         ));
     }
-    target.ok_or_else(|| "Provide --user-id, --email, or --phone".into())
+    target.ok_or_else(|| "Missing required argument: provide --user-id, --email, or --phone\n\n  Hint: Use --user-id to invite an existing user\n        Use --email to invite by email address\n        Use --phone to invite by phone number".into())
 }
 
 fn invite_role_from_args(
@@ -2737,7 +3073,7 @@ fn invite_role_from_args(
     public_chats: bool,
 ) -> Result<Option<proto::SpaceMemberRole>, Box<dyn std::error::Error>> {
     if admin && public_chats {
-        return Err("Provide only one of --admin or --public-chats".into());
+        return Err("Conflicting arguments: --admin and --public-chats cannot be used together\n\n  Hint: Use --admin to invite as admin\n        Use --public-chats to grant member access to public chats".into());
     }
     if admin {
         return Ok(Some(space_member_role_admin()));
@@ -2754,13 +3090,13 @@ fn require_member_access_role(
     public_chats: bool,
 ) -> Result<proto::SpaceMemberRole, Box<dyn std::error::Error>> {
     if admin && (member || public_chats) {
-        return Err("Provide only one of --admin or --member/--public-chats".into());
+        return Err("Conflicting arguments: --admin cannot be used with --member or --public-chats\n\n  Hint: Use --admin alone for admin role\n        Use --member with optional --public-chats for member role".into());
     }
     if admin {
         return Ok(space_member_role_admin());
     }
     if !member && !public_chats {
-        return Err("Provide --admin or --member (or --public-chats)".into());
+        return Err("Missing required argument: provide --admin or --member\n\n  Hint: Use --admin for admin access\n        Use --member for member access (add --public-chats for public chat access)".into());
     }
     Ok(space_member_role_member(public_chats))
 }
@@ -3241,7 +3577,7 @@ fn normalize_search_queries(queries: &[String]) -> Result<Vec<String>, Box<dyn s
         .collect();
 
     if normalized.is_empty() {
-        return Err("Provide --query (repeatable)".into());
+        return Err("Missing required argument: provide --query with search terms\n\n  Example: inline messages search --chat-id 123 --query \"meeting notes\"".into());
     }
 
     Ok(normalized)
@@ -3263,7 +3599,7 @@ fn parse_time_filters(
 
     if let (Some(s), Some(u)) = (since_ts, until_ts) {
         if u < s {
-            return Err("--until must be on or after --since".into());
+            return Err("Invalid time range: --until must be on or after --since\n\n  Hint: Time flows from --since to --until (e.g., --since \"2d ago\" --until \"1d ago\")".into());
         }
     }
 
@@ -3290,7 +3626,7 @@ fn filter_messages_by_time(
 fn normalize_translation_language(language: &str) -> Result<String, Box<dyn std::error::Error>> {
     let trimmed = language.trim();
     if trimmed.is_empty() {
-        return Err("Provide a language code for --translate".into());
+        return Err("Missing value: --translate requires a language code\n\n  Example: --translate en, --translate es, --translate de".into());
     }
     Ok(trimmed.to_string())
 }
@@ -3307,7 +3643,7 @@ fn parse_mention_entities(
         let parts: Vec<&str> = raw.split(':').collect();
         if parts.len() != 3 {
             return Err(format!(
-                "Invalid mention '{raw}'. Use USER_ID:OFFSET:LENGTH (offset/length are UTF-16 units)."
+                "Invalid mention format: '{raw}'\n\n  Expected: USER_ID:OFFSET:LENGTH (offset/length are UTF-16 units)\n  Example: --mention 42:0:4 for \"@Sam hello\" (mentions user 42 at position 0, length 4)"
             )
             .into());
         }
@@ -4061,7 +4397,7 @@ async fn fetch_message_by_id(
             _ => return Err("Unexpected RPC result for getChatHistory".into()),
         }
     }
-    Err("Message not found in recent history for that peer.".into())
+    Err("Message not found: the specified message-id was not found in recent history\n\n  Hint: Verify the --message-id is correct\n        Use `inline messages list --chat-id <ID>` to see recent messages".into())
 }
 
 fn resolve_download_path(
@@ -4086,7 +4422,7 @@ async fn download_message_media(
     output_path: &PathBuf,
 ) -> Result<u64, Box<dyn std::error::Error>> {
     let Some(media) = message.media.as_ref() else {
-        return Err("Message has no downloadable media.".into());
+        return Err("No media: this message has no downloadable attachment\n\n  Hint: Only messages with photos, videos, or documents can be downloaded\n        Use `inline messages get --chat-id <ID> --message-id <ID>` to inspect the message".into());
     };
     let (url, description) = match &media.media {
         Some(proto::message_media::Media::Document(document)) => {
@@ -4110,7 +4446,7 @@ async fn download_message_media(
     };
     let url = match url {
         Some(url) if !url.trim().is_empty() => url,
-        _ => return Err(format!("No CDN URL available for {description}.").into()),
+        _ => return Err(format!("Download unavailable: no CDN URL available for {description}\n\n  Hint: The media may not be fully uploaded yet, try again later").into()),
     };
 
     if let Some(parent) = output_path.parent() {
@@ -4216,6 +4552,42 @@ fn peer_summary_from_input(peer: &proto::InputPeer) -> Option<PeerSummary> {
             id: 0,
         }),
         None => None,
+    }
+}
+
+/// Extract (chat_id, user_id) from an InputPeer for metadata
+fn extract_peer_ids(peer: &proto::InputPeer) -> (Option<i64>, Option<i64>) {
+    match &peer.r#type {
+        Some(proto::input_peer::Type::Chat(chat)) => (Some(chat.chat_id), None),
+        Some(proto::input_peer::Type::User(user)) => (None, Some(user.user_id)),
+        Some(proto::input_peer::Type::Self_(_)) => (None, None),
+        None => (None, None),
+    }
+}
+
+fn build_message_list_json_output(
+    messages: Vec<proto::Message>,
+    limit: Option<i32>,
+    peer: &proto::InputPeer,
+) -> MessageListJsonOutput {
+    let total = messages.len();
+    let limit_size = limit.unwrap_or(DEFAULT_MESSAGE_LIMIT) as usize;
+    let has_more = total >= limit_size;
+    let next_offset_id = if has_more {
+        messages.last().map(|m| m.id)
+    } else {
+        None
+    };
+    let (chat_id, user_id) = extract_peer_ids(peer);
+    MessageListJsonOutput {
+        messages,
+        meta: MessageListMeta {
+            has_more,
+            next_offset_id,
+            total_in_response: total,
+            chat_id,
+            user_id,
+        },
     }
 }
 
