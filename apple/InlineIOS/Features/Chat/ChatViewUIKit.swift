@@ -149,7 +149,7 @@ public class ChatContainerView: UIView {
 
         pinnedHeaderView.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
         pinnedHeaderView.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
-        pinnedHeaderView.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor),
+        pinnedHeaderView.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: -4),
         pinnedHeaderHeightConstraint!,
 
         composeBlurBackgroundView.leadingAnchor.constraint(equalTo: composeContainerView.leadingAnchor),
