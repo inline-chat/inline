@@ -133,4 +133,52 @@ describe("getUpdates", () => {
 
     expect(result.resultType).toBe(GetUpdatesResult_ResultType.TOO_LONG)
   })
+
+  test("advances seq when updates cannot be inflated", async () => {
+    const { users, space } = await testUtils.createSpaceWithMembers("Unhandled Update", ["skip@example.com"])
+    const user = users[0]
+    if (!user || !space) throw new Error("Fixture creation failed")
+
+    const chat = await testUtils.createChat(space.id, "Skip Chat", "thread", true)
+    if (!chat) throw new Error("Chat creation failed")
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.Chat,
+      entityId: chat.id,
+      seq: 1,
+      payload: {
+        oneofKind: "userChatParticipantDelete",
+        userChatParticipantDelete: {
+          chatId: BigInt(chat.id),
+        },
+      },
+    })
+
+    const inputPeer: InputPeer = {
+      type: {
+        oneofKind: "chat",
+        chat: { chatId: BigInt(chat.id) },
+      },
+    }
+
+    const result = await getUpdates(
+      {
+        bucket: {
+          type: {
+            oneofKind: "chat",
+            chat: { peerId: inputPeer },
+          },
+        },
+        startSeq: 0n,
+        seqEnd: 0n,
+        totalLimit: 1000,
+      },
+      { currentUserId: user.id } as any,
+    )
+
+    expect(result.updates).toHaveLength(0)
+    expect(result.seq).toBe(1n)
+    expect(result.final).toBe(true)
+    expect(result.resultType).toBe(GetUpdatesResult_ResultType.EMPTY)
+  })
 })

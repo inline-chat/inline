@@ -1,11 +1,13 @@
 import type { Message, Peer, Update } from "@in/protocol/core"
 import { db } from "@in/server/db"
 import { MessageModel } from "@in/server/db/models/messages"
+import { UsersModel } from "@in/server/db/models/users"
 import { UpdatesModel, type UpdateBoxInput, type DecryptedUpdate } from "@in/server/db/models/updates"
-import { UpdateBucket, type DbUpdate } from "@in/server/db/schema"
+import { UpdateBucket, chats, type DbUpdate, type DbUser, type DbFile } from "@in/server/db/schema"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { Log, LogLevel } from "@in/server/utils/log"
+import { eq } from "drizzle-orm"
 
 const log = new Log("Sync", LogLevel.TRACE)
 
@@ -116,6 +118,7 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
 
   // Find attached nodes (later we'll support for types)
   let messageIds: Set<bigint> = new Set()
+  let needsChat = false
 
   // Loop through updates to find message ids we need to fetch
   for (const update of decryptedUpdates) {
@@ -124,6 +127,29 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
       messageIds.add(serverUpdate.newMessage.msgId)
     } else if (serverUpdate.oneofKind === "editMessage") {
       messageIds.add(serverUpdate.editMessage.msgId)
+    } else if (serverUpdate.oneofKind === "newChat") {
+      needsChat = true
+    }
+  }
+
+  let chatRecord: typeof chats.$inferSelect | undefined
+  let otherUser: { user: DbUser; photoFile?: DbFile } | undefined
+  if (needsChat) {
+    const [chat] = await db.select().from(chats).where(eq(chats.id, chatId)).limit(1)
+    if (!chat) {
+      log.warn("Failed to find chat for newChat update", { chatId })
+    } else {
+      chatRecord = chat
+
+      if (chat.type === "private" && chat.minUserId && chat.maxUserId) {
+        const otherUserId = chat.minUserId === userId ? chat.maxUserId : chat.minUserId
+        if (otherUserId && otherUserId !== userId) {
+          const users = await UsersModel.getUsersWithPhotos([otherUserId])
+          if (users[0]) {
+            otherUser = users[0]
+          }
+        }
+      }
     }
   }
 
@@ -142,12 +168,13 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
   }
 
   // Encode updates
-  const inflatedUpdates: Update[] = decryptedUpdates.map((update): Update => {
+  const inflatedUpdates: Update[] = []
+  for (const update of decryptedUpdates) {
     const serverUpdate = update.payload
 
     switch (serverUpdate.update.oneofKind) {
       case "newMessage":
-        return {
+        inflatedUpdates.push({
           seq: update.seq,
           date: encodeDateStrict(update.date),
           update: {
@@ -156,10 +183,11 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
               message: msgs.get(serverUpdate.update.newMessage.msgId),
             },
           },
-        }
+        })
+        break
 
       case "editMessage":
-        return {
+        inflatedUpdates.push({
           seq: update.seq,
           date: encodeDateStrict(update.date),
           update: {
@@ -168,10 +196,11 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
               message: msgs.get(serverUpdate.update.editMessage.msgId),
             },
           },
-        }
+        })
+        break
 
       case "deleteMessages":
-        return {
+        inflatedUpdates.push({
           seq: update.seq,
           date: encodeDateStrict(update.date),
           update: {
@@ -181,10 +210,11 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
               peerId: peerId,
             },
           },
-        }
+        })
+        break
 
       case "participantDelete":
-        return {
+        inflatedUpdates.push({
           seq: update.seq,
           date: encodeDateStrict(update.date),
           update: {
@@ -194,10 +224,11 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
               userId: serverUpdate.update.participantDelete.userId,
             },
           },
-        }
+        })
+        break
 
       case "chatVisibility":
-        return {
+        inflatedUpdates.push({
           seq: update.seq,
           date: encodeDateStrict(update.date),
           update: {
@@ -207,7 +238,39 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
               isPublic: serverUpdate.update.chatVisibility.isPublic,
             },
           },
+        })
+        break
+
+      case "deleteChat":
+        inflatedUpdates.push({
+          seq: update.seq,
+          date: encodeDateStrict(update.date),
+          update: {
+            oneofKind: "deleteChat",
+            deleteChat: {
+              peerId: peerId,
+            },
+          },
+        })
+        break
+
+      case "newChat":
+        if (!chatRecord) {
+          log.warn("Skipping newChat update due to missing chat record", { chatId })
+          break
         }
+        inflatedUpdates.push({
+          seq: update.seq,
+          date: encodeDateStrict(update.date),
+          update: {
+            oneofKind: "newChat",
+            newChat: {
+              chat: Encoders.chat(chatRecord, { encodingForUserId: userId }),
+              user: otherUser ? Encoders.user({ user: otherUser.user, photoFile: otherUser.photoFile }) : undefined,
+            },
+          },
+        })
+        break
 
       case "chatInfo":
         return {
@@ -237,9 +300,10 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
         }
 
       default:
-        throw new Error(`Unknown update type: ${serverUpdate.update.oneofKind}`)
+        log.warn("Unhandled chat update", { type: serverUpdate.update.oneofKind })
+        break
     }
-  })
+  }
 
   return { updates: inflatedUpdates }
 }
@@ -294,6 +358,20 @@ function convertSpaceUpdate(update: DecryptedUpdate): Update | null {
     }
   }
 
+  if (payload.oneofKind === "spaceMemberAdd") {
+    return {
+      seq,
+      date,
+      update: {
+        oneofKind: "spaceMemberAdd",
+        spaceMemberAdd: {
+          member: payload.spaceMemberAdd.member,
+          user: payload.spaceMemberAdd.user,
+        },
+      },
+    }
+  }
+
   log.warn("Unhandled space update", { type: payload.oneofKind })
   return null
 }
@@ -339,6 +417,19 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
           dialogArchived: {
             peerId: payload.userDialogArchived.peerId,
             archived: payload.userDialogArchived.archived,
+          },
+        },
+      }
+
+    case "userJoinSpace":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "joinSpace",
+          joinSpace: {
+            space: payload.userJoinSpace.space,
+            member: payload.userJoinSpace.member,
           },
         },
       }

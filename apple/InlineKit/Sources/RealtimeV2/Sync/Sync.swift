@@ -430,10 +430,12 @@ actor Sync {
         .space(id: payload.spaceID)
       case let .spaceMemberUpdate(payload):
         .space(id: payload.member.spaceID)
-      case let .joinSpace(payload):
-        .space(id: payload.space.id)
-      case .updateUserStatus, .updateUserSettings, .newChat, .dialogArchived:
+      case .joinSpace:
         .user
+      case .updateUserStatus, .updateUserSettings, .dialogArchived:
+        .user
+      case let .newChat(payload):
+        .chat(peer: payload.chat.peerID)
       case let .participantAdd(payload):
         .chat(peer: .with { $0.chat = .with { $0.chatID = payload.chatID } })
       case let .participantDelete(payload):
@@ -512,6 +514,10 @@ actor BucketActor {
       case .dialogArchived:
         true
       case .pinnedMessages:
+        true
+      case .newChat:
+        true
+      case .joinSpace:
         true
       case .newMessage, .editMessage, .messageAttachment:
         enableMessageUpdates

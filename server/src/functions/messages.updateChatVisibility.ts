@@ -13,6 +13,7 @@ import { Encoders } from "@in/server/realtime/encoders/encoders"
 import type { Update } from "@in/protocol/core"
 import { getUpdateGroup, type UpdateGroup } from "@in/server/modules/updates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
+import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 
 const log = new Log("functions.updateChatVisibility")
 
@@ -25,6 +26,7 @@ type UpdateChatVisibilityInput = {
 type UpdateChatVisibilityOutput = {
   chat: DbChat
   removedUserIds: number[]
+  update: { seq: number; date: Date }
 }
 
 export async function updateChatVisibility(
@@ -40,6 +42,7 @@ export async function updateChatVisibility(
 
   let removedUserIds: number[] = []
   let updatedChat: DbChat | undefined
+  let persistedUpdate: { seq: number; date: Date } | undefined
 
   try {
     const result = await db.transaction(async (tx): Promise<UpdateChatVisibilityOutput> => {
@@ -197,11 +200,12 @@ export async function updateChatVisibility(
         )
       }
 
-      return { chat: chatRecord, removedUserIds }
+      return { chat: chatRecord, removedUserIds, update }
     })
 
     updatedChat = result.chat
     removedUserIds = result.removedUserIds
+    persistedUpdate = result.update
   } catch (error) {
     log.error("Failed to update chat visibility", { chatId, error })
     if (error instanceof RealtimeRpcError) {
@@ -210,7 +214,7 @@ export async function updateChatVisibility(
     throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to update chat visibility", 500)
   }
 
-  if (!updatedChat) {
+  if (!updatedChat || !persistedUpdate) {
     throw RealtimeRpcError.InternalError()
   }
 
@@ -222,6 +226,7 @@ export async function updateChatVisibility(
     isPublic,
     removedUserIds,
     currentUserId: context.currentUserId,
+    update: persistedUpdate,
   })
 
   return { chat: updatedChat }
@@ -236,11 +241,13 @@ const pushUpdates = async ({
   isPublic,
   removedUserIds,
   currentUserId,
+  update,
 }: {
   chat: DbChat
   isPublic: boolean
   removedUserIds: number[]
   currentUserId: number
+  update: { seq: number; date: Date }
 }): Promise<{ updateGroup: UpdateGroup }> => {
   const updateGroup = await getUpdateGroup({ threadId: chat.id }, { currentUserId })
 
@@ -255,6 +262,8 @@ const pushUpdates = async ({
         },
       },
       {
+        seq: update.seq,
+        date: encodeDateStrict(update.date),
         update: {
           oneofKind: "chatVisibility",
           chatVisibility: {

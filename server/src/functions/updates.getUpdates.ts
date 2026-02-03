@@ -128,6 +128,13 @@ export const getUpdates = async (input: GetUpdatesInput, context: FunctionContex
     deliveredSeqNumber = Number(lastDelivered?.seq ?? seqStart)
     deliveredDate = findDateForSeq(dbUpdates, deliveredSeqNumber) ?? sliceDate
   }
+
+  const lastDbRecord = dbUpdates.length > 0 ? dbUpdates[dbUpdates.length - 1] : undefined
+  if (lastDbRecord && deliveredSeqNumber < lastDbRecord.seq) {
+    // Advance past updates we couldn't inflate to avoid infinite fetch loops.
+    deliveredSeqNumber = lastDbRecord.seq
+    deliveredDate = lastDbRecord.date
+  }
   const final = latestSeq <= deliveredSeqNumber
 
   let resultType = updates.length === 0 ? GetUpdatesResult_ResultType.EMPTY : GetUpdatesResult_ResultType.SLICE

@@ -5,6 +5,7 @@ import { updates, UpdateBucket } from "@in/server/db/schema"
 import { sql } from "drizzle-orm"
 import type { ServerUpdate } from "@in/protocol/server"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
+import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 
 type EnqueueUserUpdateInput = {
   userId: number
@@ -12,14 +13,13 @@ type EnqueueUserUpdateInput = {
 }
 
 export const UserBucketUpdates = {
-  async enqueue(input: EnqueueUserUpdateInput, options?: { tx?: Transaction }) {
+  async enqueue(input: EnqueueUserUpdateInput, options?: { tx?: Transaction }): Promise<UpdateSeqAndDate> {
     if (options?.tx) {
-      await insertUserUpdate(options.tx, input)
-      return
+      return await insertUserUpdate(options.tx, input)
     }
 
-    await db.transaction(async (tx) => {
-      await insertUserUpdate(tx, input)
+    return await db.transaction(async (tx) => {
+      return await insertUserUpdate(tx, input)
     })
   },
 }
@@ -40,7 +40,7 @@ const selectLatestSeq = async (tx: Transaction, userId: number): Promise<number>
   return result?.seq ?? 0
 }
 
-const insertUserUpdate = async (tx: Transaction, input: EnqueueUserUpdateInput) => {
+const insertUserUpdate = async (tx: Transaction, input: EnqueueUserUpdateInput): Promise<UpdateSeqAndDate> => {
   const currentSeq = await selectLatestSeq(tx, input.userId)
   const nextSeq = currentSeq + 1
   const now = new Date()
@@ -60,5 +60,6 @@ const insertUserUpdate = async (tx: Transaction, input: EnqueueUserUpdateInput) 
     payload: updateRecord.encrypted,
     date: now,
   })
-}
 
+  return { seq: nextSeq, date: now }
+}

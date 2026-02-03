@@ -16,6 +16,10 @@ import type { UpdateGroup } from "@in/server/modules/updates"
 import type { DbChat, DbDialog } from "@in/server/db/schema"
 import { encodeDialog } from "@in/server/realtime/encoders/encodeDialog"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
+import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
+import { UpdateBucket } from "@in/server/db/schema/updates"
+import type { ServerUpdate } from "@in/protocol/server"
+import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 
 export async function createChat(
   input: {
@@ -145,8 +149,10 @@ export async function createChat(
 
   let encodedDialog: Dialog = Encoders.dialog(dialog, { unreadCount: 0 })
 
+  const persisted = await persistNewChatUpdate(chat[0].id)
+
   // Broadcast the new chat update
-  await pushUpdates({ chat: chat[0], currentUserId: context.currentUserId })
+  await pushUpdates({ chat: chat[0], currentUserId: context.currentUserId, update: persisted })
 
   return {
     chat: encodeChat(chat[0], { encodingForUserId: context.currentUserId }),
@@ -162,9 +168,11 @@ export async function createChat(
 const pushUpdates = async ({
   chat,
   currentUserId,
+  update,
 }: {
   chat: DbChat
   currentUserId: number
+  update: UpdateSeqAndDate
 }): Promise<{ selfUpdates: Update[]; updateGroup: UpdateGroup }> => {
   // Use getUpdateGroup with the new chat info
   const updateGroup = await getUpdateGroup({ threadId: chat.id }, { currentUserId })
@@ -175,6 +183,8 @@ const pushUpdates = async ({
   updateGroup.userIds.forEach((userId) => {
     // Prepare the update
     const newChatUpdate: Update = {
+      seq: update.seq,
+      date: encodeDateStrict(update.date),
       update: {
         oneofKind: "newChat",
         newChat: {
@@ -191,4 +201,39 @@ const pushUpdates = async ({
   })
 
   return { selfUpdates, updateGroup }
+}
+
+const persistNewChatUpdate = async (chatId: number): Promise<UpdateSeqAndDate> => {
+  const chatUpdatePayload: ServerUpdate["update"] = {
+    oneofKind: "newChat",
+    newChat: {
+      chatId: BigInt(chatId),
+    },
+  }
+
+  const persisted = await db.transaction(async (tx): Promise<UpdateSeqAndDate> => {
+    const [chat] = await tx.select().from(chats).where(eq(chats.id, chatId)).for("update").limit(1)
+
+    if (!chat) {
+      throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Chat not found", 404)
+    }
+
+    const update = await UpdatesModel.insertUpdate(tx, {
+      update: chatUpdatePayload,
+      bucket: UpdateBucket.Chat,
+      entity: chat,
+    })
+
+    await tx
+      .update(chats)
+      .set({
+        updateSeq: update.seq,
+        lastUpdateDate: update.date,
+      })
+      .where(eq(chats.id, chatId))
+
+    return update
+  })
+
+  return persisted
 }
