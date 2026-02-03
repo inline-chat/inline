@@ -68,7 +68,6 @@ class MainSplitView: NSViewController {
   private var quickSearchArrowUnsubscriber: (() -> Void)?
   private var quickSearchVimUnsubscriber: (() -> Void)?
   private var quickSearchReturnUnsubscriber: (() -> Void)?
-  private var didTearDownObservers = false
 
   private var quickSearchWidthConstraint: NSLayoutConstraint?
   private var quickSearchHeightConstraint: NSLayoutConstraint?
@@ -194,10 +193,14 @@ class MainSplitView: NSViewController {
 
   override func viewDidLoad() {
     super.viewDidLoad()
+    fetchInitialData()
+  }
+
+  override func viewWillAppear() {
+    super.viewWillAppear()
     setupSidebarToggleObserver()
     setupQuickSearchObserver()
     setupAppActiveObserver()
-    fetchInitialData()
   }
 
   override func viewDidAppear() {
@@ -218,19 +221,20 @@ class MainSplitView: NSViewController {
 
   @MainActor
   private func tearDownObservers() {
-    guard !didTearDownObservers else { return }
-    didTearDownObservers = true
     escapeKeyUnsubscriber?()
     escapeKeyUnsubscriber = nil
     removeQuickSearchKeyHandlers()
     if let quickSearchObserver {
       NotificationCenter.default.removeObserver(quickSearchObserver)
+      self.quickSearchObserver = nil
     }
     if let appActiveObserver {
       NotificationCenter.default.removeObserver(appActiveObserver)
+      self.appActiveObserver = nil
     }
     if let sidebarToggleObserver {
       NotificationCenter.default.removeObserver(sidebarToggleObserver)
+      self.sidebarToggleObserver = nil
     }
     if let trafficLightPresenceObserver, let controller = dependencies.trafficLightController {
       controller.removePresenceObserver(trafficLightPresenceObserver)
