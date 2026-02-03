@@ -56,6 +56,10 @@ final class PinnedMessageHeaderView: NSView {
     return button
   }()
 
+  private var glassViewTopConstraint: NSLayoutConstraint?
+  private var glassViewBottomConstraint: NSLayoutConstraint?
+  private var closeButtonHeightConstraint: NSLayoutConstraint?
+
   init(dependencies: AppDependencies, peerId: Peer, chatId: Int64) {
     self.dependencies = dependencies
     self.peerId = peerId
@@ -63,6 +67,7 @@ final class PinnedMessageHeaderView: NSView {
     super.init(frame: .zero)
     setupView()
     setupConstraints()
+    setVisible(false)
     observePinnedMessages()
   }
 
@@ -82,21 +87,23 @@ final class PinnedMessageHeaderView: NSView {
   }
 
   private func setupConstraints() {
+    glassViewTopConstraint = glassView.topAnchor.constraint(equalTo: topAnchor, constant: 12)
+    glassViewBottomConstraint = glassView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12)
+    closeButtonHeightConstraint = closeButton.heightAnchor.constraint(equalToConstant: 24)
+
     NSLayoutConstraint.activate([
       glassView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
       glassView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-      glassView.topAnchor.constraint(equalTo: topAnchor, constant: 12),
-      glassView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
+      glassViewTopConstraint!,
+      glassViewBottomConstraint!,
 
       embedView.leadingAnchor.constraint(equalTo: glassView.leadingAnchor, constant: 6),
       embedView.centerYAnchor.constraint(equalTo: glassView.centerYAnchor),
-      embedView.heightAnchor.constraint(equalToConstant: Theme.embeddedMessageHeight),
-
       closeButton.leadingAnchor.constraint(equalTo: embedView.trailingAnchor, constant: 8),
       closeButton.trailingAnchor.constraint(equalTo: glassView.trailingAnchor, constant: -8),
       closeButton.centerYAnchor.constraint(equalTo: embedView.centerYAnchor),
       closeButton.widthAnchor.constraint(equalToConstant: 24),
-      closeButton.heightAnchor.constraint(equalToConstant: 24),
+      closeButtonHeightConstraint!,
     ])
   }
 
@@ -165,6 +172,10 @@ final class PinnedMessageHeaderView: NSView {
   private func setVisible(_ visible: Bool) {
     let height = visible ? Self.preferredHeight : 0
     isHidden = !visible
+    glassViewTopConstraint?.constant = visible ? 12 : 0
+    glassViewBottomConstraint?.constant = visible ? -12 : 0
+    embedView.setCollapsed(!visible)
+    closeButtonHeightConstraint?.constant = visible ? 24 : 0
     onHeightChange?(height)
   }
 

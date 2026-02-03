@@ -212,14 +212,16 @@ private actor SentryReporter {
     file: String = #file,
     function: String = #function,
     line: Int = #line
-  ) {
-    SentrySDK.capture(error: error) { sentryScope in
-      sentryScope.setLevel(level.sentryLevel)
-      sentryScope.setTag(value: scope, key: "scope")
-      sentryScope.setExtra(value: message, key: "message")
-      sentryScope.setExtra(value: file, key: "file")
-      sentryScope.setExtra(value: function, key: "function")
-      sentryScope.setExtra(value: line, key: "line")
+  ) async {
+    await MainActor.run {
+      SentrySDK.capture(error: error) { sentryScope in
+        sentryScope.setLevel(level.sentryLevel)
+        sentryScope.setTag(value: scope, key: "scope")
+        sentryScope.setExtra(value: message, key: "message")
+        sentryScope.setExtra(value: file, key: "file")
+        sentryScope.setExtra(value: function, key: "function")
+        sentryScope.setExtra(value: line, key: "line")
+      }
     }
   }
 
@@ -231,15 +233,17 @@ private actor SentryReporter {
     file: String = #file,
     function: String = #function,
     line: Int = #line
-  ) {
-    SentrySDK.capture(message: message) { sentryScope in
-      sentryScope.setLevel(level.sentryLevel)
-      sentryScope.setTag(value: scope, key: "scope")
-      sentryScope.setExtra(value: file, key: "file")
-      sentryScope.setExtra(value: function, key: "function")
-      sentryScope.setExtra(value: line, key: "line")
-      if let error {
-        sentryScope.setExtra(value: error.localizedDescription, key: "error")
+  ) async {
+    await MainActor.run {
+      SentrySDK.capture(message: message) { sentryScope in
+        sentryScope.setLevel(level.sentryLevel)
+        sentryScope.setTag(value: scope, key: "scope")
+        sentryScope.setExtra(value: file, key: "file")
+        sentryScope.setExtra(value: function, key: "function")
+        sentryScope.setExtra(value: line, key: "line")
+        if let error {
+          sentryScope.setExtra(value: error.localizedDescription, key: "error")
+        }
       }
     }
   }

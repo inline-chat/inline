@@ -38,6 +38,10 @@ class EmbeddedMessageView: NSView {
   private var nameTrailingConstraint: NSLayoutConstraint?
   private var messageTrailingConstraint: NSLayoutConstraint?
   private var rectangleWidthConstraint: NSLayoutConstraint?
+  private var heightConstraint: NSLayoutConstraint?
+  private var nameLabelHeightConstraint: NSLayoutConstraint?
+  private var nameLabelTopConstraint: NSLayoutConstraint?
+  private var messageLabelBottomConstraint: NSLayoutConstraint?
   private var photoConstraints: [NSLayoutConstraint] = []
 
   var showsBackground: Bool = true {
@@ -156,7 +160,6 @@ class EmbeddedMessageView: NSView {
     label.font = senderFont
     label.lineBreakMode = .byTruncatingTail
     label.textColor = textColor
-    label.heightAnchor.constraint(equalToConstant: Theme.messageNameLabelHeight).isActive = true
     return label
   }()
 
@@ -206,6 +209,13 @@ class EmbeddedMessageView: NSView {
     )
     rectangleWidthConstraint = rectangleView.widthAnchor.constraint(equalToConstant: Constants.rectangleWidth)
 
+    heightConstraint = heightAnchor.constraint(equalToConstant: Constants.height)
+    nameLabelHeightConstraint = nameLabel.heightAnchor.constraint(equalToConstant: Theme.messageNameLabelHeight)
+    nameLabelTopConstraint = nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: Constants.verticalPadding)
+    messageLabelBottomConstraint = messageLabel.bottomAnchor.constraint(
+      equalTo: bottomAnchor, constant: -Constants.verticalPadding
+    )
+
     nameTrailingConstraint = nameLabel.trailingAnchor.constraint(
       equalTo: trailingAnchor, constant: -Constants.horizontalPadding
     )
@@ -215,7 +225,7 @@ class EmbeddedMessageView: NSView {
 
     NSLayoutConstraint.activate([
       // Height
-      heightAnchor.constraint(equalToConstant: Constants.height),
+      heightConstraint!,
 
       // Rectangle view
       rectangleView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -226,15 +236,14 @@ class EmbeddedMessageView: NSView {
       // Name label
       textLeadingConstraint!,
       nameTrailingConstraint!,
-      nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: Constants.verticalPadding),
+      nameLabelTopConstraint!,
+      nameLabelHeightConstraint!,
 
       // Message label
       messageLabel.leadingAnchor.constraint(equalTo: nameLabel.leadingAnchor),
       messageTrailingConstraint!,
       messageLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor),
-      messageLabel.bottomAnchor.constraint(
-        equalTo: bottomAnchor, constant: -Constants.verticalPadding
-      ),
+      messageLabelBottomConstraint!,
     ])
 
     let clickGesture = NSClickGestureRecognizer(
@@ -246,6 +255,17 @@ class EmbeddedMessageView: NSView {
     applyBackgroundAppearance()
     applyLeadingBarAppearance()
     applyTextPadding()
+  }
+
+  func setCollapsed(_ collapsed: Bool) {
+    let height = collapsed ? 0 : Constants.height
+    let nameHeight = collapsed ? 0 : Theme.messageNameLabelHeight
+    let verticalPadding = collapsed ? 0 : Constants.verticalPadding
+
+    heightConstraint?.constant = height
+    nameLabelHeightConstraint?.constant = nameHeight
+    nameLabelTopConstraint?.constant = verticalPadding
+    messageLabelBottomConstraint?.constant = -verticalPadding
   }
 
   func setRelatedMessage(_ message: Message) {
