@@ -110,22 +110,25 @@ class EmbeddedMessageView: NSView {
   }
 
   private var shouldUseSenderColor: Bool {
-    style == .colored && (kind == .replyInMessage || kind == .pinnedInHeader)
+    style == .colored && kind == .replyInMessage
   }
 
   private var rectangleColor: NSColor {
     if style == .colored {
-      shouldUseSenderColor ? senderColor : NSColor.controlAccentColor
+      return shouldUseSenderColor ? senderColor : NSColor.controlAccentColor
     } else {
-      NSColor.white
+      return NSColor.white
     }
   }
 
   private var nameLabelColor: NSColor {
     if style == .colored {
-      shouldUseSenderColor ? senderColor : NSColor.controlAccentColor
+      if kind == .pinnedInHeader {
+        return textColor
+      }
+      return shouldUseSenderColor ? senderColor : NSColor.controlAccentColor
     } else {
-      NSColor.white
+      return NSColor.white
     }
   }
 
@@ -133,7 +136,8 @@ class EmbeddedMessageView: NSView {
     guard kind == .replyInMessage || kind == .pinnedInHeader else { return nil }
 
     if style == .colored {
-      return senderColor.withAlphaComponent(0.08)
+      let baseColor = shouldUseSenderColor ? senderColor : NSColor.controlAccentColor
+      return baseColor.withAlphaComponent(0.08)
     } else {
       return NSColor.white.withAlphaComponent(0.09)
     }
@@ -360,7 +364,7 @@ class EmbeddedMessageView: NSView {
         "Forward Message"
 
       case .pinnedInHeader:
-        "Pinned message"
+        "Pinned Message"
     }
 
     // Update visuals after setting senderNameForColor
@@ -377,7 +381,7 @@ class EmbeddedMessageView: NSView {
     if kind == .forwardingInCompose {
       messageLabel.stringValue = forwardDescription(for: senderName, messageText: messageContent)
     } else if kind == .pinnedInHeader {
-      messageLabel.stringValue = "\(senderName): \(messageContent)"
+      messageLabel.stringValue = messageContent
     } else {
       messageLabel.stringValue = messageContent
     }
@@ -400,7 +404,7 @@ class EmbeddedMessageView: NSView {
       case .forwardingInCompose:
         "Forward Message"
       case .pinnedInHeader:
-        "Pinned message"
+        "Pinned Message"
     }
 
     if kind == .forwardingInCompose {
