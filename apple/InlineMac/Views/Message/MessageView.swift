@@ -1957,25 +1957,33 @@ class MessageViewAppKit: NSView {
     guard let window, let presentingController = window.contentViewController else { return }
 
     weak var weakHostingController: NSViewController?
-    let rootView = ForwardMessagesSheet(messages: [fullMessage]) { [weak self] destination, selection in
-      guard let destinationChatId = destination.dialog.chatId ?? destination.chat?.id else {
-        Log.shared.error("Forward nav failed: missing destination chat id")
-        return
-      }
-      let destinationPeer = destination.peerId
-      let state = ChatsManager.get(for: destinationPeer, chatId: destinationChatId)
-      state.setForwardingMessages(
-        fromPeerId: selection.fromPeerId,
-        sourceChatId: selection.sourceChatId,
-        messageIds: selection.messageIds
-      )
+    let rootView = ForwardMessagesSheet(
+      messages: [fullMessage],
+      onSelect: { [weak self] destination, selection in
+        guard let destinationChatId = destination.dialog.chatId ?? destination.chat?.id else {
+          Log.shared.error("Forward nav failed: missing destination chat id")
+          return
+        }
+        let destinationPeer = destination.peerId
+        let state = ChatsManager.get(for: destinationPeer, chatId: destinationChatId)
+        state.setForwardingMessages(
+          fromPeerId: selection.fromPeerId,
+          sourceChatId: selection.sourceChatId,
+          messageIds: selection.messageIds
+        )
 
-      self?.openChat(peer: destinationPeer)
-      NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
-    } onClose: { [weak presentingController] in
-      guard let hostingController = weakHostingController else { return }
-      presentingController?.dismiss(hostingController)
-    }
+        self?.openChat(peer: destinationPeer)
+        NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
+      },
+      onSend: { [weak self] destinations, selection in
+        guard let self else { return }
+        await self.forwardMessages(destinations: destinations, selection: selection)
+      },
+      onClose: { [weak presentingController] in
+        guard let hostingController = weakHostingController else { return }
+        presentingController?.dismiss(hostingController)
+      }
+    )
     .appDatabase(AppDatabase.shared)
 
     let hostingController = NSHostingController(rootView: AnyView(rootView))
@@ -1997,6 +2005,37 @@ class MessageViewAppKit: NSView {
     } else {
       Nav.main.open(.chat(peer: peer))
     }
+  }
+
+  @MainActor
+  private func forwardMessages(
+    destinations: [HomeChatItem],
+    selection: ForwardMessagesSheet.ForwardMessagesSelection
+  ) async {
+    guard !destinations.isEmpty else { return }
+    guard !selection.messageIds.isEmpty else {
+      log.error("Forward failed: empty message ids")
+      return
+    }
+
+    for destination in destinations {
+      let destinationPeer = destination.peerId
+      do {
+        let result = try await Api.realtime.send(.forwardMessages(
+          fromPeerId: selection.fromPeerId,
+          toPeerId: destinationPeer,
+          messageIds: selection.messageIds
+        ))
+
+        if case let .forwardMessages(response) = result, response.updates.isEmpty {
+          _ = await Api.realtime.sendQueued(.getChatHistory(peer: destinationPeer))
+        }
+      } catch {
+        log.error("Forward failed", error: error)
+      }
+    }
+
+    ToastCenter.shared.showSuccess("Forwarded to \(destinations.count) chats")
   }
 
   @objc private func editMessage() {
