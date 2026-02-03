@@ -30,6 +30,10 @@ import { Updates } from "@in/server/modules/updates/updates"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { UsersModel } from "@in/server/db/models/users"
+import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
+import { UpdateBucket } from "@in/server/db/schema/updates"
+import type { ServerUpdate } from "@in/protocol/server"
+import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 
 export const Input = Type.Object({
   userId: Type.String(),
@@ -65,6 +69,11 @@ export const handler = async (
 
   const currentUserName = currentUser?.firstName
   const title = isSelfChat ? `${currentUserName} (You)` : null
+
+  const existingChat = await db._query.chats.findFirst({
+    where: and(eq(chats.type, "private"), eq(chats.minUserId, minUserId), eq(chats.maxUserId, maxUserId)),
+  })
+  const createdChat = !existingChat
 
   // Create or get existing chat
   const [chat] = await db
@@ -161,16 +170,19 @@ export const handler = async (
     throw new InlineError(InlineError.ApiError.INTERNAL)
   }
 
+  const persistedUpdate = createdChat ? await persistNewChatUpdate(chat.id) : undefined
+
   // Push update to both users
   pushUpdate({
     chat,
     user: currentUser,
     pushToUserId: user.id,
+    update: persistedUpdate,
   }).catch((error) => {
     Log.shared.error("Failed to push update to user", { error })
   })
 
-  pushUpdate({ chat, user, pushToUserId: context.currentUserId }).catch((error) => {
+  pushUpdate({ chat, user, pushToUserId: context.currentUserId, update: persistedUpdate }).catch((error) => {
     Log.shared.error("Failed to push update to user", { error })
   })
 
@@ -186,8 +198,13 @@ export const handler = async (
   }
 }
 
-const pushUpdate = async (input: { chat: DbChat; user: DbUserWithProfile; pushToUserId: number }) => {
-  const { chat, user, pushToUserId } = input
+const pushUpdate = async (input: {
+  chat: DbChat
+  user: DbUserWithProfile
+  pushToUserId: number
+  update?: UpdateSeqAndDate
+}) => {
+  const { chat, user, pushToUserId, update: persisted } = input
 
   const encodingForUserId = pushToUserId
   const update: Update = {
@@ -204,5 +221,45 @@ const pushUpdate = async (input: { chat: DbChat; user: DbUserWithProfile; pushTo
     },
   }
 
+  if (persisted) {
+    update.seq = persisted.seq
+    update.date = encodeDateStrict(persisted.date)
+  }
+
   RealtimeUpdates.pushToUser(pushToUserId, [update])
+}
+
+const persistNewChatUpdate = async (chatId: number): Promise<UpdateSeqAndDate> => {
+  const chatUpdatePayload: ServerUpdate["update"] = {
+    oneofKind: "newChat",
+    newChat: {
+      chatId: BigInt(chatId),
+    },
+  }
+
+  const persisted = await db.transaction(async (tx): Promise<UpdateSeqAndDate> => {
+    const [chat] = await tx.select().from(chats).where(eq(chats.id, chatId)).for("update").limit(1)
+
+    if (!chat) {
+      throw new InlineError(InlineError.ApiError.CHAT_INVALID)
+    }
+
+    const update = await UpdatesModel.insertUpdate(tx, {
+      update: chatUpdatePayload,
+      bucket: UpdateBucket.Chat,
+      entity: chat,
+    })
+
+    await tx
+      .update(chats)
+      .set({
+        updateSeq: update.seq,
+        lastUpdateDate: update.date,
+      })
+      .where(eq(chats.id, chatId))
+
+    return update
+  })
+
+  return persisted
 }

@@ -13,8 +13,16 @@ import { SpaceModel } from "@in/server/db/models/spaces"
 import { Notifications } from "@in/server/modules/notifications/notifications"
 import { getCachedUserName } from "@in/server/modules/cache/userNames"
 import { Log } from "@in/server/utils/log"
-import { getUpdateGroup, getUpdateGroupForSpace } from "@in/server/modules/updates"
+import { getUpdateGroupForSpace } from "@in/server/modules/updates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
+import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
+import { UpdateBucket } from "@in/server/db/schema/updates"
+import type { ServerUpdate } from "@in/protocol/server"
+import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
+import { db } from "@in/server/db"
+import { spaces } from "@in/server/db/schema"
+import { eq } from "drizzle-orm"
+import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 
 const log = new Log("space.inviteToSpace")
 
@@ -81,9 +89,27 @@ export const inviteToSpace = async (
       log.error(error, "Failed to send invite", { spaceId, userId: inviteInfo.user.id })
     })
 
+  const persistedSpaceUpdate = await persistSpaceMemberAddUpdate({
+    spaceId,
+    member,
+    user: inviteInfo.user,
+  })
+
+  const joinUpdate = await persistJoinSpaceUpdate({
+    inviteUserId: inviteInfo.user.id,
+    space,
+    member,
+  })
+
   // Send updates
-  pushUpdateForInvitedUser({ space, member, inviteUserId: inviteInfo.user.id })
-  pushUpdatesForSpace({ spaceId, member, user: inviteInfo.user, currentUserId: context.currentUserId })
+  pushUpdateForInvitedUser({ space, member, inviteUserId: inviteInfo.user.id, persisted: joinUpdate })
+  pushUpdatesForSpace({
+    spaceId,
+    member,
+    user: inviteInfo.user,
+    currentUserId: context.currentUserId,
+    persisted: persistedSpaceUpdate,
+  })
 
   return {
     user: Encoders.user({ user: inviteInfo.user, min: false }),
@@ -231,13 +257,17 @@ const pushUpdateForInvitedUser = async ({
   space,
   member,
   inviteUserId,
+  persisted,
 }: {
   inviteUserId: number
   space: DbSpace
   member: DbMember
+  persisted: UpdateSeqAndDate
 }) => {
   // Update for the person who was invited
   const update: Update = {
+    seq: persisted.seq,
+    date: encodeDateStrict(persisted.date),
     update: {
       oneofKind: "joinSpace",
       joinSpace: {
@@ -255,13 +285,17 @@ const pushUpdatesForSpace = async ({
   member,
   user,
   currentUserId,
+  persisted,
 }: {
   spaceId: number
   member: DbMember
   user: DbUser
   currentUserId: number
+  persisted: UpdateSeqAndDate
 }) => {
   const update: Update = {
+    seq: persisted.seq,
+    date: encodeDateStrict(persisted.date),
     update: {
       oneofKind: "spaceMemberAdd",
       spaceMemberAdd: {
@@ -277,4 +311,68 @@ const pushUpdatesForSpace = async ({
   updateGroup.userIds.forEach((userId) => {
     RealtimeUpdates.pushToUser(userId, [update])
   })
+}
+
+const persistSpaceMemberAddUpdate = async ({
+  spaceId,
+  member,
+  user,
+}: {
+  spaceId: number
+  member: DbMember
+  user: DbUser
+}): Promise<UpdateSeqAndDate> => {
+  const spaceServerUpdatePayload: ServerUpdate["update"] = {
+    oneofKind: "spaceMemberAdd",
+    spaceMemberAdd: {
+      member: Encoders.member(member),
+      user: Encoders.user({ user, min: false }),
+    },
+  }
+
+  const persisted = await db.transaction(async (tx): Promise<UpdateSeqAndDate> => {
+    const [space] = await tx.select().from(spaces).where(eq(spaces.id, spaceId)).for("update").limit(1)
+
+    if (!space) {
+      throw RealtimeRpcError.SpaceIdInvalid()
+    }
+
+    const update = await UpdatesModel.insertUpdate(tx, {
+      update: spaceServerUpdatePayload,
+      bucket: UpdateBucket.Space,
+      entity: space,
+    })
+
+    await tx
+      .update(spaces)
+      .set({
+        updateSeq: update.seq,
+        lastUpdateDate: update.date,
+      })
+      .where(eq(spaces.id, spaceId))
+
+    return update
+  })
+
+  return persisted
+}
+
+const persistJoinSpaceUpdate = async ({
+  inviteUserId,
+  space,
+  member,
+}: {
+  inviteUserId: number
+  space: DbSpace
+  member: DbMember
+}): Promise<UpdateSeqAndDate> => {
+  const userServerUpdatePayload: ServerUpdate["update"] = {
+    oneofKind: "userJoinSpace",
+    userJoinSpace: {
+      space: Encoders.space(space, { encodingForUserId: inviteUserId }),
+      member: Encoders.member(member),
+    },
+  }
+
+  return await UserBucketUpdates.enqueue({ userId: inviteUserId, update: userServerUpdatePayload })
 }

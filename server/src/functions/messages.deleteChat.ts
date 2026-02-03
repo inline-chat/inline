@@ -1,4 +1,4 @@
-import type { InputPeer } from "@in/protocol/core"
+import type { InputPeer, Peer, Update } from "@in/protocol/core"
 import { db } from "@in/server/db"
 import { chats, chatParticipants } from "@in/server/db/schema/chats"
 import { dialogs } from "@in/server/db/schema/dialogs"
@@ -9,6 +9,13 @@ import type { FunctionContext } from "@in/server/functions/_types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { and, eq } from "drizzle-orm"
 import { ModelError } from "@in/server/db/models/_errors"
+import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
+import { UpdateBucket } from "@in/server/db/schema/updates"
+import type { ServerUpdate } from "@in/protocol/server"
+import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
+import { RealtimeUpdates } from "@in/server/realtime/message"
+import { Encoders } from "@in/server/realtime/encoders/encoders"
+import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 
 const log = new Log("functions.deleteChat")
 /**
@@ -37,13 +44,87 @@ export async function deleteChat(input: { peer: InputPeer }, context: FunctionCo
       throw new RealtimeRpcError(RealtimeRpcError.Code.UNAUTHENTICATED, "Not allowed", 403)
     }
 
+    let persistedUpdate: UpdateSeqAndDate | undefined
+    let recipientIds: number[] = []
+    let peerId: Peer | undefined
+
     // Delete chat, participants, dialogs in a transaction
     try {
       await db.transaction(async (tx) => {
+        const [lockedChat] = await tx.select().from(chats).where(eq(chats.id, chat.id)).for("update").limit(1)
+        if (!lockedChat) {
+          throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Chat not found", 404)
+        }
+
+        peerId = Encoders.peerFromChat(lockedChat, { currentUserId })
+
+        if (lockedChat.publicThread) {
+          const rows = await tx
+            .select({ userId: members.userId })
+            .from(members)
+            .where(and(eq(members.spaceId, lockedChat.spaceId!), eq(members.canAccessPublicChats, true)))
+          recipientIds = rows.map((row) => row.userId)
+        } else {
+          const rows = await tx
+            .select({ userId: chatParticipants.userId })
+            .from(chatParticipants)
+            .where(eq(chatParticipants.chatId, lockedChat.id))
+          recipientIds = rows.map((row) => row.userId)
+        }
+
+        const chatServerUpdatePayload: ServerUpdate["update"] = {
+          oneofKind: "deleteChat",
+          deleteChat: {
+            chatId: BigInt(lockedChat.id),
+          },
+        }
+
+        const update = await UpdatesModel.insertUpdate(tx, {
+          update: chatServerUpdatePayload,
+          bucket: UpdateBucket.Chat,
+          entity: lockedChat,
+        })
+
+        persistedUpdate = update
+
+        for (const userId of recipientIds) {
+          const userServerUpdatePayload: ServerUpdate["update"] = {
+            oneofKind: "userChatParticipantDelete",
+            userChatParticipantDelete: {
+              chatId: BigInt(lockedChat.id),
+            },
+          }
+          await UserBucketUpdates.enqueue(
+            {
+              userId,
+              update: userServerUpdatePayload,
+            },
+            { tx },
+          )
+        }
+
         await tx.delete(chatParticipants).where(eq(chatParticipants.chatId, chat.id))
         await tx.delete(dialogs).where(eq(dialogs.chatId, chat.id))
         await tx.delete(chats).where(eq(chats.id, chat.id))
       })
+
+      if (persistedUpdate && peerId) {
+        const update: Update = {
+          seq: persistedUpdate.seq,
+          date: encodeDateStrict(persistedUpdate.date),
+          update: {
+            oneofKind: "deleteChat",
+            deleteChat: {
+              peerId: peerId,
+            },
+          },
+        }
+
+        recipientIds.forEach((userId) => {
+          RealtimeUpdates.pushToUser(userId, [update])
+        })
+      }
+
       log.info("Deleted chat and related data", { chatId: chat.id })
       return {}
     } catch (err) {

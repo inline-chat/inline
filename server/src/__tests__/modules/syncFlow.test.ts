@@ -9,6 +9,8 @@ import { UpdatesModel } from "@in/server/db/models/updates"
 import type { Peer } from "@in/protocol/core"
 import { Functions } from "@in/server/functions"
 import { GetUpdatesResult_ResultType } from "@in/protocol/core"
+import { Encoders } from "@in/server/realtime/encoders/encoders"
+import { MembersModel } from "@in/server/db/models/members"
 
 const insertServerUpdate = async (params: {
   bucket: UpdateBucket
@@ -85,6 +87,99 @@ describe("Sync core flow", () => {
     expect(firstUpdate.update.participantDelete.userId).toBe(BigInt(userB.id))
   })
 
+  it("inflates new chat updates from chat bucket", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("New Chat Sync", ["newchat@sync.com"])
+    const user = users[0]
+    if (!space || !user) {
+      throw new Error("Failed to create new chat fixtures")
+    }
+
+    const chat = await testUtils.createChat(space.id, "New Chat", "thread", true)
+    if (!chat) {
+      throw new Error("Failed to create chat")
+    }
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.Chat,
+      entityId: chat.id,
+      seq: 1,
+      payload: {
+        oneofKind: "newChat",
+        newChat: {
+          chatId: BigInt(chat.id),
+        },
+      },
+    })
+
+    const { updates: dbUpdates } = await Sync.getUpdates({
+      bucket: { type: UpdateBucket.Chat, chatId: chat.id },
+      seqStart: 0,
+      limit: 10,
+    })
+
+    const peer: Peer = { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } }
+    const { updates: inflated } = await Sync.processChatUpdates({
+      chatId: chat.id,
+      peerId: peer,
+      updates: dbUpdates,
+      userId: user.id,
+    })
+
+    expect(inflated).toHaveLength(1)
+    const [firstUpdate] = inflated
+    if (!firstUpdate || firstUpdate.update.oneofKind !== "newChat") {
+      throw new Error("Expected newChat update")
+    }
+    expect(firstUpdate.update.newChat.chat.id).toBe(BigInt(chat.id))
+  })
+
+  it("inflates delete chat updates from chat bucket", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Delete Chat Sync", ["delete@sync.com"])
+    const user = users[0]
+    if (!space || !user) {
+      throw new Error("Failed to create delete chat fixtures")
+    }
+
+    const chat = await testUtils.createChat(space.id, "Delete Chat", "thread", true)
+    if (!chat) {
+      throw new Error("Failed to create chat")
+    }
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.Chat,
+      entityId: chat.id,
+      seq: 1,
+      payload: {
+        oneofKind: "deleteChat",
+        deleteChat: {
+          chatId: BigInt(chat.id),
+        },
+      },
+    })
+
+    const { updates: dbUpdates } = await Sync.getUpdates({
+      bucket: { type: UpdateBucket.Chat, chatId: chat.id },
+      seqStart: 0,
+      limit: 10,
+    })
+
+    const peer: Peer = { type: { oneofKind: "chat", chat: { chatId: BigInt(chat.id) } } }
+    const { updates: inflated } = await Sync.processChatUpdates({
+      chatId: chat.id,
+      peerId: peer,
+      updates: dbUpdates,
+      userId: user.id,
+    })
+
+    expect(inflated).toHaveLength(1)
+    const [firstUpdate] = inflated
+    if (!firstUpdate || firstUpdate.update.oneofKind !== "deleteChat") {
+      throw new Error("Expected deleteChat update")
+    }
+    expect(firstUpdate.update.deleteChat.peerId?.type?.oneofKind).toBe("chat")
+    expect(firstUpdate.update.deleteChat.peerId?.type?.chat?.chatId).toBe(BigInt(chat.id))
+  })
+
   it("inflates user bucket updates for chat participant removal", async () => {
     const { users } = await testUtils.createSpaceWithMembers("User Sync", ["user@sync.com"])
     const user = users[0]
@@ -151,6 +246,86 @@ describe("Sync core flow", () => {
       throw new Error("Expected spaceMemberDelete update")
     }
     expect(spaceUpdate.update.spaceMemberDelete.userId).toBe(BigInt(user.id))
+  })
+
+  it("inflates space bucket updates for member addition", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Space Member Add Sync", ["add@sync.com"])
+    const user = users[0]
+    if (!space || !user) {
+      throw new Error("Failed to create member add fixtures")
+    }
+
+    const member = await MembersModel.getMemberByUserId(space.id, user.id)
+    if (!member) {
+      throw new Error("Failed to load member")
+    }
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.Space,
+      entityId: space.id,
+      seq: 1,
+      payload: {
+        oneofKind: "spaceMemberAdd",
+        spaceMemberAdd: {
+          member: Encoders.member(member),
+          user: Encoders.user({ user, min: false }),
+        },
+      },
+    })
+
+    const { updates: dbUpdates } = await Sync.getUpdates({
+      bucket: { type: UpdateBucket.Space, spaceId: space.id },
+      seqStart: 0,
+      limit: 10,
+    })
+
+    const updates = Sync.inflateSpaceUpdates(dbUpdates)
+    expect(updates).toHaveLength(1)
+    const [spaceUpdate] = updates
+    if (!spaceUpdate || spaceUpdate.update.oneofKind !== "spaceMemberAdd") {
+      throw new Error("Expected spaceMemberAdd update")
+    }
+    expect(spaceUpdate.update.spaceMemberAdd.member.userId).toBe(BigInt(user.id))
+  })
+
+  it("inflates user bucket updates for join space", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Join Space Sync", ["join@sync.com"])
+    const user = users[0]
+    if (!space || !user) {
+      throw new Error("Failed to create join space fixtures")
+    }
+
+    const member = await MembersModel.getMemberByUserId(space.id, user.id)
+    if (!member) {
+      throw new Error("Failed to load member")
+    }
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.User,
+      entityId: user.id,
+      seq: 1,
+      payload: {
+        oneofKind: "userJoinSpace",
+        userJoinSpace: {
+          space: Encoders.space(space, { encodingForUserId: user.id }),
+          member: Encoders.member(member),
+        },
+      },
+    })
+
+    const { updates: dbUpdates } = await Sync.getUpdates({
+      bucket: { type: UpdateBucket.User, userId: user.id },
+      seqStart: 0,
+      limit: 10,
+    })
+
+    const updates = Sync.inflateUserUpdates(dbUpdates)
+    expect(updates).toHaveLength(1)
+    const [userUpdate] = updates
+    if (!userUpdate || userUpdate.update.oneofKind !== "joinSpace") {
+      throw new Error("Expected joinSpace update")
+    }
+    expect(userUpdate.update.joinSpace.space.id).toBe(BigInt(space.id))
   })
 
   it("respects sequence offsets when fetching updates", async () => {

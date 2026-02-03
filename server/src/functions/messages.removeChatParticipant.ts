@@ -10,10 +10,11 @@ import { getUpdateGroup } from "../modules/updates"
 import { RealtimeUpdates } from "../realtime/message"
 import type { Update } from "@in/protocol/core"
 import { UpdateBucket } from "@in/server/db/schema"
-import { UpdatesModel } from "@in/server/db/models/updates"
+import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import type { ServerUpdate } from "@in/protocol/server"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
+import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 
 export async function removeChatParticipant(
   input: {
@@ -23,7 +24,7 @@ export async function removeChatParticipant(
   context: FunctionContext,
 ): Promise<void> {
   try {
-    await db.transaction(async (tx) => {
+    const { update } = await db.transaction(async (tx): Promise<{ update: UpdateSeqAndDate }> => {
       const [chat] = await tx.select().from(chats).where(eq(chats.id, input.chatId)).for("update").limit(1)
 
       if (!chat) {
@@ -94,12 +95,15 @@ export async function removeChatParticipant(
         },
         { tx },
       )
+
+      return { update }
     })
 
     await pushUpdates({
       chatId: input.chatId,
       userId: input.userId,
       currentUserId: context.currentUserId,
+      update,
     })
   } catch (error) {
     Log.shared.error(`Failed to remove participant from chat ${input.chatId}: ${error}`)
@@ -115,16 +119,20 @@ const pushUpdates = async ({
   chatId,
   userId,
   currentUserId,
+  update,
 }: {
   chatId: number
   userId: number
   currentUserId: number
+  update: UpdateSeqAndDate
 }): Promise<{ selfUpdates: Update[]; updateGroup: UpdateGroup }> => {
   const updateGroup = await getUpdateGroup({ threadId: chatId }, { currentUserId })
 
   let selfUpdates: Update[] = []
 
   const chatParticipantDelete: Update = {
+    seq: update.seq,
+    date: encodeDateStrict(update.date),
     update: {
       oneofKind: "participantDelete",
       participantDelete: {

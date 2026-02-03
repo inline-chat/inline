@@ -14,7 +14,7 @@ import { RealtimeUpdates } from "@in/server/realtime/message"
 import { AuthorizeEffect } from "@in/server/utils/authorize.effect"
 import { Effect } from "effect"
 import { SpaceIdInvalidError, SpaceNotExistsError } from "@in/server/functions/_errors"
-import { UpdatesModel } from "@in/server/db/models/updates"
+import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import type { ServerUpdate } from "@in/protocol/server"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
@@ -22,6 +22,7 @@ import { db } from "@in/server/db"
 import { MemberNotExistsError } from "@in/server/modules/effect/commonErrors"
 import { and, eq, inArray } from "drizzle-orm"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
+import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 
 const log = new Log("space.removeMember")
 
@@ -83,7 +84,7 @@ export const deleteMember = (input: DeleteMemberInput, context: FunctionContext)
       catch: (error) => (error instanceof Error ? error : new Error("deleteDialogsForSpace failed")),
     })
 
-    yield* Effect.tryPromise({
+    const persisted = yield* Effect.tryPromise({
       try: () =>
         persistSpaceMemberDeleteUpdate({
           spaceId,
@@ -94,7 +95,7 @@ export const deleteMember = (input: DeleteMemberInput, context: FunctionContext)
 
     // Push updates
     const { updates } = yield* Effect.promise(() =>
-      pushUpdatesForSpace({ spaceId, userId, currentUserId: context.currentUserId }),
+      pushUpdatesForSpace({ spaceId, userId, currentUserId: context.currentUserId, persisted }),
     )
 
     // Return result
@@ -110,12 +111,16 @@ const pushUpdatesForSpace = async ({
   spaceId,
   userId,
   currentUserId,
+  persisted,
 }: {
   spaceId: number
   userId: number
   currentUserId: number
+  persisted: UpdateSeqAndDate
 }) => {
   const update: Update = {
+    seq: persisted.seq,
+    date: encodeDateStrict(persisted.date),
     update: {
       oneofKind: "spaceMemberDelete",
       spaceMemberDelete: {
@@ -140,7 +145,13 @@ const pushUpdatesForSpace = async ({
   return { updates: [update] }
 }
 
-const persistSpaceMemberDeleteUpdate = async ({ spaceId, userId }: { spaceId: number; userId: number }) => {
+const persistSpaceMemberDeleteUpdate = async ({
+  spaceId,
+  userId,
+}: {
+  spaceId: number
+  userId: number
+}): Promise<UpdateSeqAndDate> => {
   const spaceServerUpdatePayload: ServerUpdate["update"] = {
     oneofKind: "spaceRemoveMember",
     spaceRemoveMember: {
@@ -156,7 +167,7 @@ const persistSpaceMemberDeleteUpdate = async ({ spaceId, userId }: { spaceId: nu
     },
   }
 
-  await db.transaction(async (tx) => {
+  const persisted = await db.transaction(async (tx): Promise<UpdateSeqAndDate> => {
     const [space] = await tx.select().from(spaces).where(eq(spaces.id, spaceId)).for("update").limit(1)
 
     if (!space) {
@@ -184,7 +195,11 @@ const persistSpaceMemberDeleteUpdate = async ({ spaceId, userId }: { spaceId: nu
       },
       { tx },
     )
+
+    return update
   })
+
+  return persisted
 }
 
 // ------------------------------------------------------------

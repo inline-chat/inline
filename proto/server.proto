@@ -17,6 +17,7 @@ message ServerUpdate {
     ServerChatUpdateDeleteMessages delete_messages = 6;
     ServerChatUpdateDeleteChat delete_chat = 7;
     ServerChatUpdateParticipantDelete participant_delete = 8;
+    ServerChatUpdateNewChat new_chat = 18;
     ServerChatUpdateVisibility chat_visibility = 13;
     ServerChatUpdateInfo chat_info = 15;
     ServerChatUpdatePinnedMessages pinned_messages = 16;
@@ -24,11 +25,13 @@ message ServerUpdate {
     // Space updates
     ServerSpaceUpdateRemoveMember space_remove_member = 9;
     ServerSpaceUpdateMemberUpdate space_member_update = 12;
+    ServerSpaceUpdateMemberAdd space_member_add = 19;
 
     // User bucket updates
     ServerUserUpdateSpaceMemberDelete user_space_member_delete = 10;
     ServerUserUpdateChatParticipantDelete user_chat_participant_delete = 11;
     ServerUserUpdateDialogArchived user_dialog_archived = 14;
+    ServerUserUpdateJoinSpace user_join_space = 17;
   }
 }
 
@@ -56,6 +59,9 @@ message ServerChatUpdateDeleteMessages {
 
 // Update for a chat when it is deleted
 message ServerChatUpdateDeleteChat { int64 chat_id = 1; }
+
+// Update for a chat when it is created
+message ServerChatUpdateNewChat { int64 chat_id = 1; }
 
 // Update for a chat when a participant is removed
 message ServerChatUpdateParticipantDelete {
@@ -95,6 +101,12 @@ message ServerSpaceUpdateRemoveMember {
 // Update for a space when a member's access/role changes
 message ServerSpaceUpdateMemberUpdate { Member member = 1; }
 
+// Update for a space when a new member is added
+message ServerSpaceUpdateMemberAdd {
+  Member member = 1;
+  User user = 2;
+}
+
 // ------------------------------------------------------------
 // User bucket updates
 // ------------------------------------------------------------
@@ -109,4 +121,10 @@ message ServerUserUpdateChatParticipantDelete { int64 chat_id = 1; }
 message ServerUserUpdateDialogArchived {
   Peer peer_id = 1;
   bool archived = 2;
+}
+
+// Update for a user when they joined a space
+message ServerUserUpdateJoinSpace {
+  Space space = 1;
+  Member member = 2;
 }

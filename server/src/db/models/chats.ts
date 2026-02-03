@@ -32,12 +32,13 @@ export const ChatModel = {
 async function createUserChatAndDialog(input: {
   peerUserId: number
   currentUserId: number
-}): Promise<{ chat: DbChat; dialog: DbDialog }> {
+}): Promise<{ chat: DbChat; dialog: DbDialog; createdChat: boolean }> {
   let minUserId = Math.min(input.peerUserId, input.currentUserId)
   let maxUserId = Math.max(input.peerUserId, input.currentUserId)
 
   const result = await db.transaction(async (tx) => {
     let chat: DbChat | undefined
+    let createdChat = false
 
     // Check if already a chat, fetch it
     chat = await tx._query.chats.findFirst({
@@ -45,6 +46,7 @@ async function createUserChatAndDialog(input: {
     })
 
     if (!chat) {
+      createdChat = true
       // Create chat
       ;[chat] = await tx
         .insert(chats)
@@ -82,7 +84,7 @@ async function createUserChatAndDialog(input: {
       throw ModelError.Failed
     }
 
-    return { chat, dialog }
+    return { chat, dialog, createdChat }
   })
 
   return result
