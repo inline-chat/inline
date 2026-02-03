@@ -59,6 +59,7 @@ struct RenameChatSheet: View {
       TextField("Chat Title", text: $title)
         .textFieldStyle(.roundedBorder)
         .focused($isTitleFocused)
+        .onSubmit { save() }
 
       HStack {
         Button("Cancel") {
@@ -125,7 +126,7 @@ struct RenameChatSheet: View {
   }
 
   private func save() {
-    guard canSave else { return }
+    guard canSave, !isSaving else { return }
     guard let chatId = peer.asThreadId() else {
       dismiss()
       return
