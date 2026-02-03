@@ -1587,34 +1587,78 @@ private extension MessagesCollectionView {
 
       guard let viewController = findViewController(from: currentCollectionView) else { return }
 
-      let rootView = InlineUI.ForwardMessagesSheet(messages: [fullMessage]) { destination, selection in
-        let destinationPeer = destination.peerId
-        ChatState.shared.setForwardingMessages(
-          peer: destinationPeer,
-          fromPeerId: selection.fromPeerId,
-          sourceChatId: selection.sourceChatId,
-          messageIds: selection.messageIds
-        )
+      let rootView = InlineUI.ForwardMessagesSheet(
+        messages: [fullMessage],
+        onSelect: { destination, selection in
+          let destinationPeer = destination.peerId
+          ChatState.shared.setForwardingMessages(
+            peer: destinationPeer,
+            fromPeerId: selection.fromPeerId,
+            sourceChatId: selection.sourceChatId,
+            messageIds: selection.messageIds
+          )
 
-        var userInfo: [AnyHashable: Any] = [:]
-        if let userId = destinationPeer.asUserId() {
-          userInfo["peerUserId"] = userId
+          var userInfo: [AnyHashable: Any] = [:]
+          if let userId = destinationPeer.asUserId() {
+            userInfo["peerUserId"] = userId
+          }
+          if let threadId = destinationPeer.asThreadId() {
+            userInfo["peerThreadId"] = threadId
+          }
+          NotificationCenter.default.post(
+            name: Notification.Name("NavigateToForwardDestination"),
+            object: nil,
+            userInfo: userInfo
+          )
+        },
+        onSend: { destinations, selection in
+          await self.forwardMessages(
+            destinations: destinations,
+            selection: selection
+          )
         }
-        if let threadId = destinationPeer.asThreadId() {
-          userInfo["peerThreadId"] = threadId
-        }
-        NotificationCenter.default.post(
-          name: Notification.Name("NavigateToForwardDestination"),
-          object: nil,
-          userInfo: userInfo
-        )
-      }
+      )
       .appDatabase(AppDatabase.shared)
 
       let hostingController = UIHostingController(rootView: rootView)
       hostingController.modalPresentationStyle = UIModalPresentationStyle.pageSheet
 
       viewController.present(hostingController, animated: true)
+    }
+
+    @MainActor
+    private func forwardMessages(
+      destinations: [HomeChatItem],
+      selection: InlineUI.ForwardMessagesSheet.ForwardMessagesSelection
+    ) async {
+      guard !destinations.isEmpty else { return }
+      guard !selection.messageIds.isEmpty else {
+        Log.shared.error("Forward failed: empty message ids")
+        return
+      }
+
+      for destination in destinations {
+        let destinationPeer = destination.peerId
+        do {
+          let result = try await Api.realtime.send(.forwardMessages(
+            fromPeerId: selection.fromPeerId,
+            toPeerId: destinationPeer,
+            messageIds: selection.messageIds
+          ))
+
+          if case let .forwardMessages(response) = result, response.updates.isEmpty {
+            _ = await Api.realtime.sendQueued(.getChatHistory(peer: destinationPeer))
+          }
+        } catch {
+          Log.shared.error("Forward failed", error: error)
+        }
+      }
+
+      ToastManager.shared.showToast(
+        "Forwarded to \(destinations.count) chats",
+        type: .success,
+        systemImage: "arrowshape.turn.up.right"
+      )
     }
 
     func showDeleteConfirmationForFailed(messageId: Int64, peerId: Peer, chatId: Int64) {
