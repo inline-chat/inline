@@ -22,17 +22,30 @@ public struct ForwardMessagesSheet: View {
     }
   }
 
-  public typealias ForwardMessagesSelectHandler = (_ destination: HomeChatItem, _ selection: ForwardMessagesSelection) -> Void
+  public typealias ForwardMessagesSelectHandler = (_ destination: HomeChatItem, _ selection: ForwardMessagesSelection)
+    -> Void
+  public typealias ForwardMessagesSendHandler = @MainActor (
+    _ destinations: [HomeChatItem],
+    _ selection: ForwardMessagesSelection
+  ) async -> Void
 
   @Environment(\.dismiss) private var dismiss
 
   private let messages: [FullMessage]
   private let onSelect: ForwardMessagesSelectHandler?
+  private let onSend: ForwardMessagesSendHandler?
   private let onClose: (() -> Void)?
+  private let log = Log.scoped("ForwardMessagesSheet")
 
   @StateObject private var homeViewModel: HomeViewModel
   @State private var searchText = ""
-  private let log = Log.scoped("ForwardMessagesSheet")
+  @State private var isSelecting = false
+  @State private var isSending = false
+  @State private var selectedPeers: Set<Peer> = []
+
+  private var supportsMultiSelect: Bool {
+    onSend != nil
+  }
 
   private var allChats: [HomeChatItem] {
     homeViewModel.myChats + homeViewModel.archivedChats
@@ -42,14 +55,33 @@ public struct ForwardMessagesSheet: View {
     filterChats(allChats)
   }
 
+  private var selectedCount: Int {
+    selectedPeers.count
+  }
+
+  private var shouldShowSendButton: Bool {
+    supportsMultiSelect && isSelecting && selectedCount > 0
+  }
+
+  private var selectedChats: [HomeChatItem] {
+    guard !selectedPeers.isEmpty else { return [] }
+    return allChats.filter { selectedPeers.contains($0.peerId) }
+  }
+
+  private var navigationTitle: String {
+    selectedCount > 0 ? "\(selectedCount) Selected" : "Forward"
+  }
+
   public init(
     messages: [FullMessage],
     database: AppDatabase = AppDatabase.shared,
     onSelect: ForwardMessagesSelectHandler? = nil,
+    onSend: ForwardMessagesSendHandler? = nil,
     onClose: (() -> Void)? = nil
   ) {
     self.messages = messages
     self.onSelect = onSelect
+    self.onSend = onSend
     self.onClose = onClose
     _homeViewModel = StateObject(wrappedValue: HomeViewModel(db: database))
   }
@@ -57,18 +89,29 @@ public struct ForwardMessagesSheet: View {
   public var body: some View {
     NavigationStack {
       chatList
-        .navigationTitle("Forward")
+        .navigationTitle(navigationTitle)
+        #if os(iOS)
+        .toolbarTitleDisplayMode(.inline)
+        #endif
+        .toolbar { toolbarContent }
     }
     #if os(macOS)
+    .onExitCommand(perform: closeSheet)
     .frame(minWidth: 420, minHeight: 520)
     #endif
   }
 
-  private func closeSheet() {
-    if let onClose {
-      onClose()
-    } else {
-      dismiss()
+  @ToolbarContentBuilder
+  private var toolbarContent: some ToolbarContent {
+    if supportsMultiSelect {
+      ToolbarItem(placement: .primaryAction) {
+        selectToggleButton
+      }
+      if shouldShowSendButton {
+        ToolbarItem(placement: .confirmationAction) {
+          sendButton
+        }
+      }
     }
   }
 
@@ -85,6 +128,7 @@ public struct ForwardMessagesSheet: View {
       }
     }
     .searchable(text: $searchText)
+    .disabled(isSending)
   }
 
   @ViewBuilder
@@ -93,6 +137,9 @@ public struct ForwardMessagesSheet: View {
       handleSelection(item)
     } label: {
       HStack(spacing: 10) {
+        if supportsMultiSelect, isSelecting {
+          selectionIndicator(item)
+        }
         avatarView(item)
         VStack(alignment: .leading, spacing: 1) {
           Text(chatTitle(item))
@@ -128,6 +175,53 @@ public struct ForwardMessagesSheet: View {
     }
   }
 
+  private var selectToggleButton: some View {
+    toolbarButton(isSelecting ? "Cancel" : "Select") {
+      if isSelecting {
+        selectedPeers.removeAll()
+        isSelecting = false
+      } else {
+        isSelecting = true
+      }
+    }
+  }
+
+  private var sendButton: some View {
+    toolbarButton("Send", prominent: true) {
+      handleSend()
+    }
+  }
+
+  @ViewBuilder
+  private func toolbarButton(_ title: String, prominent: Bool = false, action: @escaping () -> Void)
+    -> some View
+  {
+    let button = Button(title, action: action)
+      .disabled(isSending)
+    #if os(iOS)
+    if #available(iOS 26, *) {
+      if prominent {
+        button.buttonStyle(.glassProminent)
+      } else {
+        button.buttonStyle(.glass)
+      }
+    } else {
+      button
+    }
+    #else
+    button
+    #endif
+  }
+
+  @ViewBuilder
+  private func selectionIndicator(_ item: HomeChatItem) -> some View {
+    let isSelected = selectedPeers.contains(item.peerId)
+    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+      .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+      .font(.system(size: 18, weight: .medium))
+      .frame(width: 20)
+  }
+
   private func filterChats(_ items: [HomeChatItem]) -> [HomeChatItem] {
     guard !searchText.isEmpty else { return items }
     return items.filter { item in
@@ -149,27 +243,68 @@ public struct ForwardMessagesSheet: View {
   }
 
   private func handleSelection(_ item: HomeChatItem) {
+    if supportsMultiSelect, isSelecting {
+      toggleSelection(for: item)
+      return
+    }
+
+    guard let selection = buildSelection() else { return }
+    onSelect?(item, selection)
+    closeSheet()
+  }
+
+  private func handleSend() {
+    guard let selection = buildSelection() else { return }
+    let destinations = selectedChats
+    guard !destinations.isEmpty else { return }
+    guard let onSend else {
+      log.error("Missing onSend handler for multi-forward")
+      return
+    }
+
+    isSending = true
+    Task { @MainActor in
+      await onSend(destinations, selection)
+      isSending = false
+      closeSheet()
+    }
+  }
+
+  private func closeSheet() {
+    if let onClose {
+      onClose()
+    } else {
+      dismiss()
+    }
+  }
+
+  private func toggleSelection(for item: HomeChatItem) {
+    let peerId = item.peerId
+    if selectedPeers.contains(peerId) {
+      selectedPeers.remove(peerId)
+    } else {
+      selectedPeers.insert(peerId)
+    }
+  }
+
+  private func buildSelection() -> ForwardMessagesSelection? {
     guard let fromPeerId = messages.first?.peerId,
           let sourceChatId = messages.first?.chatId
     else {
       log.error("Missing forward source metadata")
-      return
+      return nil
     }
     let messageIds = messages.map(\.message.messageId)
     guard let previewMessageId = messageIds.first else {
       log.error("Missing forward message ids")
-      return
+      return nil
     }
 
-    onSelect?(
-      item,
-      ForwardMessagesSelection(
-        fromPeerId: fromPeerId,
-        sourceChatId: sourceChatId,
-        messageIds: messageIds,
-        previewMessageId: previewMessageId
-      )
+    return ForwardMessagesSelection(
+      fromPeerId: fromPeerId,
+      sourceChatId: sourceChatId,
+      messageIds: messageIds,
+      previewMessageId: previewMessageId
     )
-    closeSheet()
   }
 }
