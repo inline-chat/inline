@@ -1939,11 +1939,11 @@ private extension MessagesCollectionView {
     }
 
     private func createWillDoMenu(for message: Message) -> UIAction? {
-      // Only show "Will Do" if user has integration access
+      // Only show "Create Notion Task" if user has integration access
       guard NotionTaskManager.shared.hasAccess else { return nil }
 
       return UIAction(
-        title: "Will Do",
+        title: "Create Notion Task",
         image: UIImage(systemName: "circle.badge.plus")
       ) { _ in
         Task {
