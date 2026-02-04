@@ -34,6 +34,7 @@ Help continue an in-progress rebase (or similar conflict cleanup from a merge or
   - **Option C**: keep both with a surgical refactor (briefly describe how)
 - Mark one option as **Recommended** and explain why, briefly. For trivial conflicts, recommend the cleanest auto-resolve and mention it can be applied quickly if approved.
 - Ask the user to choose A/B/C.
+- For the "keep both" approach, make sure you understand in git diffs, some part of the code that should've been duplicated may have been detected as one and you need to manually add it again in another part that was collapsed by git. 
 
 3) Apply the chosen resolution
 - Implement the selected option by editing the file and removing conflict markers.
