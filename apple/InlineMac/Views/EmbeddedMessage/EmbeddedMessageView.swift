@@ -85,12 +85,18 @@ class EmbeddedMessageView: NSView {
   }
 
   private var senderFont: NSFont {
-    let weight: NSFont.Weight = kind == .pinnedInHeader ? .regular : .semibold
-    return .systemFont(ofSize: 12, weight: weight)
+    let weight: NSFont.Weight = kind == .pinnedInHeader ? .medium : .semibold
+    let size: CGFloat = kind == .pinnedInHeader
+      ? max(10, Theme.messageTextFont.pointSize - 1)
+      : 12
+    return .systemFont(ofSize: size, weight: weight)
   }
 
   private var messageFont: NSFont {
-    Theme.messageTextFont
+    if kind == .pinnedInHeader {
+      return .systemFont(ofSize: max(10, Theme.messageTextFont.pointSize - 1))
+    }
+    return Theme.messageTextFont
   }
 
   private var textColor: NSColor {
@@ -369,6 +375,8 @@ class EmbeddedMessageView: NSView {
 
     // Update visuals after setting senderNameForColor
     nameLabel.font = senderFont
+    messageLabel.font = messageFont
+    updateLabelLayout()
     rectangleView.layer?.backgroundColor = rectangleColor.cgColor
     nameLabel.textColor = nameLabelColor
     applyBackgroundAppearance()
@@ -387,7 +395,14 @@ class EmbeddedMessageView: NSView {
     }
   }
 
-  func showNotLoaded(kind: Kind, senderName: String? = nil, messageText: String) {
+  func showNotLoaded(
+    kind: Kind,
+    senderName: String? = nil,
+    outgoing _: Bool = false,
+    isOnlyEmoji _: Bool = false,
+    style _: Style? = nil,
+    messageText: String
+  ) {
     self.kind = kind
     self.message = nil
     senderNameForColor = senderName
@@ -416,9 +431,21 @@ class EmbeddedMessageView: NSView {
     updatePhotoView(photoInfo: nil, overlaySymbol: nil)
 
     nameLabel.font = senderFont
+    messageLabel.font = messageFont
+    updateLabelLayout()
     rectangleView.layer?.backgroundColor = rectangleColor.cgColor
     nameLabel.textColor = nameLabelColor
     applyBackgroundAppearance()
+  }
+
+  private func updateLabelLayout() {
+    let nameLabelHeight: CGFloat
+    if kind == .pinnedInHeader {
+      nameLabelHeight = ceil(senderFont.ascender - senderFont.descender + senderFont.leading)
+    } else {
+      nameLabelHeight = Theme.messageNameLabelHeight
+    }
+    nameLabelHeightConstraint?.constant = nameLabelHeight
   }
 
   private func applyBackgroundAppearance() {
@@ -507,3 +534,40 @@ class EmbeddedMessageView: NSView {
     }
   }
 }
+
+extension EmbeddedMessageView {
+  enum Style {
+    case replyBubble
+    case compose
+  }
+
+  static let height: CGFloat = Theme.embeddedMessageHeight
+
+  convenience init() {
+    self.init(style: .colored)
+  }
+
+  func configure(
+    embeddedMessage: EmbeddedMessage,
+    kind: Kind = .replyInMessage,
+    outgoing _: Bool = false,
+    isOnlyEmoji _: Bool = false,
+    style _: Style? = nil,
+    senderNameOverride _: String? = nil
+  ) {
+    update(with: embeddedMessage, kind: kind)
+  }
+
+  func configure(
+    fullMessage: FullMessage,
+    kind: Kind,
+    outgoing _: Bool = false,
+    isOnlyEmoji _: Bool = false,
+    style _: Style? = nil,
+    senderNameOverride _: String? = nil
+  ) {
+    update(with: fullMessage, kind: kind)
+  }
+}
+
+typealias EmbedMessageView = EmbeddedMessageView

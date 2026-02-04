@@ -38,6 +38,7 @@ class EmbedMessageView: UIView {
     let totalHeight = (Constants.verticalPadding * 2) + headerFont.lineHeight + spacing + messageFont.lineHeight
     return ceil(totalHeight)
   }()
+
   private var outgoing: Bool = false
   private var isOnlyEmoji: Bool = false
   private var kind: Kind = .replyInMessage
@@ -390,16 +391,16 @@ private extension EmbedMessageView {
 
   func headerText(for kind: Kind, senderName: String) -> String {
     switch kind {
-    case .replyInMessage:
-      return senderName
-    case .replyingInCompose:
-      return "Replying to \(senderName)"
-    case .editingInCompose:
-      return "Editing message"
-    case .forwardingInCompose:
-      return "Forward Message"
-    case .pinnedInHeader:
-      return "Pinned Message"
+      case .replyInMessage:
+        senderName
+      case .replyingInCompose:
+        "Replying to \(senderName)"
+      case .editingInCompose:
+        "Editing message"
+      case .forwardingInCompose:
+        "Forward Message"
+      case .pinnedInHeader:
+        "Pinned Message"
     }
   }
 
@@ -411,33 +412,32 @@ private extension EmbedMessageView {
   ) -> String {
     let resolvedText = (displayText ?? message.text)?.replacingOccurrences(of: "\n", with: " ")
 
-    let baseContent: String
-    if message.hasUnsupportedTypes {
-      baseContent = "Unsupported message"
+    let baseContent: String = if message.hasUnsupportedTypes {
+      "Unsupported message"
     } else if message.isSticker == true {
-      baseContent = "Sticker"
+      "Sticker"
     } else if message.hasVideo {
       if message.hasText, let resolvedText {
-        baseContent = resolvedText
+        resolvedText
       } else {
-        baseContent = "Video"
+        "Video"
       }
     } else if message.documentId != nil {
       if message.hasText, let resolvedText {
-        baseContent = resolvedText
+        resolvedText
       } else {
-        baseContent = "Document"
+        "Document"
       }
     } else if message.hasPhoto {
       if message.hasText, let resolvedText {
-        baseContent = resolvedText
+        resolvedText
       } else {
-        baseContent = "Photo"
+        "Photo"
       }
     } else if message.hasText, let resolvedText {
-      baseContent = resolvedText
+      resolvedText
     } else {
-      baseContent = "Message"
+      "Message"
     }
 
     if kind == .forwardingInCompose {
@@ -531,8 +531,7 @@ private extension EmbedMessageView {
 
   func applyAppearance() {
     if style == .replyBubble {
-      let weight: UIFont.Weight = kind == .pinnedInHeader ? .regular : .bold
-      headerLabel.font = .systemFont(ofSize: 14, weight: weight)
+      headerLabel.font = .systemFont(ofSize: 14, weight: .medium)
     } else {
       headerLabel.font = .systemFont(ofSize: 17, weight: .medium)
     }
@@ -564,33 +563,33 @@ private extension EmbedMessageView {
     }()
 
     switch style {
-    case .replyBubble:
-      let useWhite = outgoing && !isOnlyEmoji
-      let textColor: UIColor = useWhite ? .white : .label
-      let headerColor: UIColor = kind == .pinnedInHeader ? textColor : (useWhite ? .white : senderColor)
-      let rectangleColor: UIColor = useWhite ? .white : senderColor
-      let bgAlpha: CGFloat = useWhite ? 0.13 : 0.08
+      case .replyBubble:
+        let useWhite = outgoing && !isOnlyEmoji
+        let textColor: UIColor = useWhite ? .white : .label
+        let headerColor: UIColor = kind == .pinnedInHeader ? textColor : (useWhite ? .white : senderColor)
+        let rectangleColor: UIColor = useWhite ? .white : senderColor
+        let bgAlpha: CGFloat = useWhite ? 0.13 : 0.08
 
-      let baseBackgroundColor = useWhite ? UIColor.white.withAlphaComponent(bgAlpha)
-        : headerColor.withAlphaComponent(bgAlpha)
+        let baseBackgroundColor = useWhite ? UIColor.white.withAlphaComponent(bgAlpha)
+          : headerColor.withAlphaComponent(bgAlpha)
 
-      headerLabel.textColor = headerColor
-      messageLabel.textColor = textColor
-      rectangleView.backgroundColor = rectangleColor
-      imageIconView.tintColor = textColor
+        headerLabel.textColor = headerColor
+        messageLabel.textColor = textColor
+        rectangleView.backgroundColor = rectangleColor
+        imageIconView.tintColor = textColor
 
-      if showsBackground {
-        backgroundColor = baseBackgroundColor
-      }
+        if showsBackground {
+          backgroundColor = baseBackgroundColor
+        }
 
-    case .compose:
-      let accentColor = ThemeManager.shared.selected.accent
+      case .compose:
+        let accentColor = ThemeManager.shared.selected.accent
 
-      backgroundColor = .clear
-      headerLabel.textColor = accentColor
-      messageLabel.textColor = .secondaryLabel
-      rectangleView.backgroundColor = accentColor
-      imageIconView.tintColor = .secondaryLabel
+        backgroundColor = .clear
+        headerLabel.textColor = accentColor
+        messageLabel.textColor = .secondaryLabel
+        rectangleView.backgroundColor = accentColor
+        imageIconView.tintColor = .secondaryLabel
     }
   }
 
@@ -619,7 +618,7 @@ private extension EmbedMessageView {
   func applyTextPadding() {
     headerTrailingConstraint?.constant = -textTrailingPadding
     messageTrailingConstraint?.constant = -textTrailingPadding
-    if textLeadingToRectangleConstraint?.isActive == true && !(showsLeadingBar && style == .replyBubble) {
+    if textLeadingToRectangleConstraint?.isActive == true, !(showsLeadingBar && style == .replyBubble) {
       textLeadingToRectangleConstraint?.constant = textLeadingPadding
     }
   }

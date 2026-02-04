@@ -8,7 +8,7 @@ import UIKit
 final class PinnedMessageHeaderView: UIView, UIGestureRecognizerDelegate {
   private enum Constants {
     static let horizontalPadding: CGFloat = 6
-    static let verticalPadding: CGFloat = 8
+    static let verticalPadding: CGFloat = 10
     static let contentSpacing: CGFloat = 6
     static let closeButtonSize: CGFloat = 24
   }
