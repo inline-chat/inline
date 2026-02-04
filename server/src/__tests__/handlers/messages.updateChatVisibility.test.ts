@@ -218,4 +218,55 @@ describe("messages.updateChatVisibility", () => {
     }
     expect(inflatedUpdate.chatVisibility.isPublic).toBe(true)
   })
+
+  test("allows thread creator (non-admin) to make thread public", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("Visibility Creator", [
+      "creator@inline.test",
+      "member@inline.test",
+    ])
+    const [creator, member] = users
+    if (!space || !creator || !member) {
+      throw new Error("Failed to create fixtures")
+    }
+
+    const chat = await testUtils.createChat(space.id, "Private Thread", "thread", false, creator.id)
+    if (!chat) throw new Error("Failed to create chat")
+
+    await db
+      .insert(chatParticipants)
+      .values([
+        { chatId: chat.id, userId: creator.id },
+        { chatId: chat.id, userId: member.id },
+      ])
+      .execute()
+
+    await db
+      .insert(dialogs)
+      .values([
+        { userId: creator.id, chatId: chat.id, spaceId: space.id },
+        { userId: member.id, chatId: chat.id, spaceId: space.id },
+      ])
+      .execute()
+
+    await updateChatVisibility(
+      {
+        chatId: chat.id,
+        isPublic: true,
+        participants: [],
+      },
+      {
+        currentUserId: creator.id,
+        currentSessionId: 1,
+      },
+    )
+
+    const [updatedChat] = await db.select().from(chats).where(eq(chats.id, chat.id)).limit(1)
+    expect(updatedChat?.publicThread).toBe(true)
+
+    const participants = await db
+      .select({ userId: chatParticipants.userId })
+      .from(chatParticipants)
+      .where(eq(chatParticipants.chatId, chat.id))
+    expect(participants).toHaveLength(0)
+  })
 })

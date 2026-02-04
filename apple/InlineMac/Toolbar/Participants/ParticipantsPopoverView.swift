@@ -15,8 +15,8 @@ public struct ParticipantsPopoverView: View {
   @State private var searchText = ""
   @State private var chat: Chat?
   @State private var isOwnerOrAdmin = false
+  @State private var isCreator = false
   @State private var showVisibilityPicker = false
-  @State private var showMakePublicConfirm = false
   @State private var selectedParticipantIds: Set<Int64> = []
   @State private var chatSubscription: AnyCancellable?
 
@@ -71,7 +71,7 @@ public struct ParticipantsPopoverView: View {
     guard case .thread = peer,
           let chat,
           chat.spaceId != nil,
-          isOwnerOrAdmin
+          (isOwnerOrAdmin || isCreator)
     else {
       return false
     }
@@ -109,7 +109,7 @@ public struct ParticipantsPopoverView: View {
             selectedParticipantIds = currentUserId.map { [$0] } ?? []
             showVisibilityPicker = true
           } else {
-            showMakePublicConfirm = true
+            updateVisibility(isPublic: true, participantIds: [])
           }
         }) {
           HStack(spacing: 6) {
@@ -162,14 +162,6 @@ public struct ParticipantsPopoverView: View {
         )
       }
     }
-    .alert("Make Public", isPresented: $showMakePublicConfirm) {
-      Button("Cancel", role: .cancel) {}
-      Button("Make Public", role: .destructive) {
-        updateVisibility(isPublic: true, participantIds: [])
-      }
-    } message: {
-      Text("People without public chat access will lose access to this chat.")
-    }
   }
 
   private func loadChat() async {
@@ -192,8 +184,10 @@ public struct ParticipantsPopoverView: View {
             .fetchOne(db)
         }
         isOwnerOrAdmin = member?.role == .owner || member?.role == .admin
+        isCreator = loadedChat.createdBy == currentUserId
       } else {
         isOwnerOrAdmin = false
+        isCreator = false
       }
     } catch {
       Log.shared.error("Failed to load chat for participants", error: error)

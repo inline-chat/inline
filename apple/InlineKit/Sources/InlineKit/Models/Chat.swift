@@ -19,6 +19,7 @@ public struct ApiChat: Codable, Hashable, Sendable {
   public var lastMsgId: Int64?
   public var emoji: String?
   public var publicThread: Bool?
+  public var createdBy: Int64?
 }
 
 public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable {
@@ -31,6 +32,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var lastMsgId: Int64?
   public var emoji: String?
   public var isPublic: Bool?
+  public var createdBy: Int64?
 
   public enum Columns {
     static let id = Column(CodingKeys.id)
@@ -42,6 +44,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     static let lastMsgId = Column(CodingKeys.lastMsgId)
     static let emoji = Column(CodingKeys.emoji)
     static let isPublic = Column(CodingKeys.isPublic)
+    static let createdBy = Column(CodingKeys.createdBy)
   }
 
   public static let space = belongsTo(Space.self)
@@ -66,7 +69,10 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     request(for: Chat.messages)
   }
 
-  public static let peerUser = belongsTo(User.self)
+  public static let peerUser = belongsTo(
+    User.self,
+    using: ForeignKey([Columns.peerUserId], to: [User.Columns.id])
+  )
 
   public var peerUser: QueryInterfaceRequest<User> {
     request(for: Chat.peerUser)
@@ -74,7 +80,8 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
 
   public init(
     id: Int64 = Int64.random(in: 1 ... 50_000), date: Date, type: ChatType, title: String?,
-    spaceId: Int64?, peerUserId: Int64? = nil, lastMsgId: Int64? = nil, emoji: String? = nil
+    spaceId: Int64?, peerUserId: Int64? = nil, lastMsgId: Int64? = nil, emoji: String? = nil,
+    createdBy: Int64? = nil
   ) {
     self.id = id
     self.date = date
@@ -84,10 +91,20 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     self.peerUserId = peerUserId
     self.lastMsgId = lastMsgId
     self.emoji = emoji
+    self.createdBy = createdBy
   }
 }
 
 public extension Chat {
+  public var humanReadableTitle: String? {
+    if let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines),
+       trimmed.isEmpty == false
+    {
+      return trimmed
+    }
+    return type == .thread ? "Untitled" : nil
+  }
+
   var peerId: InlineProtocol.Peer {
     if let peerUserId {
       .with { $0.user.userID = peerUserId }
@@ -149,8 +166,13 @@ public extension Chat {
   init(from: ApiChat) {
     id = from.id
     date = Self.fromTimestamp(from: from.date)
-    title = from.title
+    if let titleValue = from.title, !titleValue.isEmpty {
+      title = titleValue
+    } else {
+      title = nil
+    }
     isPublic = from.publicThread
+    createdBy = from.createdBy
     spaceId = from.spaceId
     type = from.type == "private" ? .privateChat : .thread
     peerUserId =
@@ -177,11 +199,12 @@ public extension Chat {
   init(from: InlineProtocol.Chat) {
     id = from.id
     date = from.hasDate ? Date(timeIntervalSince1970: Double(from.date)) : Date(timeIntervalSince1970: Double(0))
-    title = from.title
+    title = from.title.isEmpty ? nil : from.title
     spaceId = from.hasSpaceID ? from.spaceID : nil
     lastMsgId = from.hasLastMsgID ? from.lastMsgID : nil
     emoji = from.hasEmoji ? from.emoji : nil
     isPublic = from.hasIsPublic ? from.isPublic : nil
+    createdBy = from.hasCreatedBy ? from.createdBy : nil
 
     if case let .user(peerUser) = from.peerID.type {
       peerUserId = peerUser.userID
