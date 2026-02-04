@@ -17,6 +17,8 @@
     "dev:emails": "cd server/packages/email-preview && bun run dev",
     "dev:desktop": "cd desktop && bun run dev",
     "typecheck": "cd server && bun run typecheck",
+    "db:migrate": "cd server && bun run db:migrate",
+    "db:generate": "cd server && bun run db:generate",
     "dev": "cd server && bun run dev",
     "test": "cd server && bun test",
     "lint": "bunx oxlint@latest",
