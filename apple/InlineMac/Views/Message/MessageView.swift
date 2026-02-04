@@ -149,11 +149,7 @@ class MessageViewAppKit: NSView {
 
   private var forwardHeaderTitle: String {
     if message.forwardFromPeerThreadId != nil {
-      let title = fullMessage.forwardFromChatInfo?.title
-      if let title, !title.isEmpty {
-        return title
-      }
-      return "Chat"
+      return fullMessage.forwardFromChatInfo?.humanReadableTitle ?? "Untitled"
     }
 
     if message.forwardFromPeerUserId != nil {
@@ -2732,8 +2728,11 @@ extension MessageViewAppKit: NSMenuDelegate {
     var integrationItems: [NSMenuItem] = []
 
     if regularMessage, NotionTaskService.shared.hasAccess {
-      let willDoItem = NSMenuItem(title: "Will Do", action: #selector(handleWillDo), keyEquivalent: "")
-      willDoItem.image = NSImage(systemSymbolName: "circle.badge.plus", accessibilityDescription: "Create Notion Task")
+      let willDoItem = NSMenuItem(title: "Create Notion Task", action: #selector(handleWillDo), keyEquivalent: "")
+      willDoItem.image = NSImage(
+        systemSymbolName: "circle.badge.plus",
+        accessibilityDescription: "Create Notion Task"
+      )
       integrationItems.append(willDoItem)
     }
 
