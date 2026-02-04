@@ -47,6 +47,16 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     }
 
     NotificationCenter.default.addObserver(
+      forName: UIApplication.didBecomeActiveNotification,
+      object: nil,
+      queue: .main
+    ) { _ in
+      Task {
+        await Auth.shared.refreshFromStorage()
+      }
+    }
+
+    NotificationCenter.default.addObserver(
       self,
       selector: #selector(handleAuthenticationChange(_:)),
       name: .authenticationChanged,
