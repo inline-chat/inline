@@ -1,13 +1,108 @@
+import GRDB
 import InlineKit
 import InlineUI
+import Logger
 import SwiftUI
 
 struct ChatInfo: View {
+  @Environment(\.dependencies) private var dependencies
   @EnvironmentStateObject var fullChat: FullChatViewModel
   @EnvironmentStateObject private var documentsState: ChatInfoDocumentsState
 
-  var peerId: Peer
+  let peerId: Peer
   @State private var selectedTab: ChatInfoTab = .files
+  @State private var isOwnerOrAdmin = false
+  @State private var isCreator = false
+  @State private var showVisibilityPicker = false
+  @State private var selectedParticipantIds: Set<Int64> = []
+
+  private var chatTitle: String {
+    if let userInfo = fullChat.chatItem?.userInfo {
+      userInfo.user.fullName
+    } else if let chat = fullChat.chatItem?.chat {
+      chat.humanReadableTitle ?? "Chat"
+    } else {
+      "Chat"
+    }
+  }
+
+  private var chatId: Int64? {
+    fullChat.chat?.id ?? fullChat.chatItem?.dialog.chatId
+  }
+
+  private var chatTypeLabel: String {
+    if peerId.isThread {
+      return "Thread"
+    }
+    if let chatType = fullChat.chat?.type {
+      switch chatType {
+        case .thread:
+          return "Thread"
+        case .privateChat:
+          return "Private"
+      }
+    }
+    if fullChat.peerUser != nil {
+      return "Private"
+    }
+    return "Chat"
+  }
+
+  private var visibilityLabel: String {
+    if fullChat.chat?.isPublic == true {
+      return "Public"
+    }
+    if fullChat.chat?.isPublic == false {
+      return "Private"
+    }
+    return "Unknown"
+  }
+
+  private var shouldShowVisibilityRow: Bool {
+    peerId.isThread
+  }
+
+  private var canToggleVisibility: Bool {
+    guard peerId.isThread,
+          let chat = fullChat.chat,
+          chat.spaceId != nil,
+          (isOwnerOrAdmin || isCreator)
+    else {
+      return false
+    }
+    return true
+  }
+
+  private var visibilityBinding: Binding<Bool> {
+    Binding(
+      get: { fullChat.chat?.isPublic ?? false },
+      set: { newValue in
+        handleVisibilityToggle(newValue)
+      }
+    )
+  }
+
+  private var isPrivateThread: Bool {
+    guard case .thread = peerId else { return false }
+    guard let isPublic = fullChat.chat?.isPublic else { return false }
+    return isPublic == false
+  }
+
+  private var availableTabs: [ChatInfoTab] {
+    var tabs: [ChatInfoTab] = [.files, .media, .links]
+    if isPrivateThread {
+      tabs.append(.participants)
+    }
+    return tabs
+  }
+
+  private var availableTabsKey: String {
+    availableTabs.map(\.title).joined(separator: "|")
+  }
+
+  private var permissionsTaskKey: String {
+    "\(peerId.toString())-\(fullChat.chat?.spaceId ?? 0)-\(dependencies?.auth.currentUserId ?? 0)"
+  }
 
   public init(peerId: Peer) {
     self.peerId = peerId
@@ -23,6 +118,7 @@ struct ChatInfo: View {
     ScrollView {
       VStack(spacing: 24) {
         header
+        infoForm
 
         Picker("Tabs", selection: $selectedTab) {
           ForEach(availableTabs, id: \.self) { tab in
@@ -42,6 +138,9 @@ struct ChatInfo: View {
     .onAppear {
       updateDocumentsChatId()
       ensureSelectedTab()
+    }
+    .task(id: permissionsTaskKey) {
+      await loadVisibilityPermissions()
     }
     .onChange(of: chatId) { _ in
       updateDocumentsChatId()
@@ -75,42 +174,65 @@ struct ChatInfo: View {
     .frame(maxWidth: .infinity)
   }
 
-  private var chatTitle: String {
-    fullChat.chatItem?.title ?? "Chat"
-  }
+  private var infoForm: some View {
+    VStack(spacing: 0) {
+      ChatInfoDetailRow(title: "Chat ID") {
+        if let chatId {
+          Text(String(chatId))
+            .font(.system(.body, design: .monospaced))
+            .textSelection(.enabled)
+        } else {
+          Text("—")
+            .foregroundStyle(.secondary)
+        }
+      }
 
-  private var chatId: Int64? {
-    fullChat.chat?.id ?? fullChat.chatItem?.dialog.chatId
-  }
+      Divider()
 
-  private var isPrivateThread: Bool {
-    guard case .thread = peerId else { return false }
-    guard let isPublic = fullChat.chat?.isPublic else { return false }
-    return isPublic == false
-  }
+      ChatInfoDetailRow(title: "Chat Type") {
+        Text(chatTypeLabel)
+      }
 
-  private var availableTabs: [ChatInfoTab] {
-    var tabs: [ChatInfoTab] = [.files, .media, .links]
-    if isPrivateThread {
-      tabs.append(.participants)
+      if shouldShowVisibilityRow {
+        Divider()
+
+        ChatInfoDetailRow(title: "Visibility") {
+          HStack(spacing: 8) {
+            Text(visibilityLabel)
+              .foregroundStyle(canToggleVisibility ? .primary : .secondary)
+
+            Toggle("", isOn: visibilityBinding)
+              .labelsHidden()
+              .accessibilityLabel("Visibility")
+              .toggleStyle(.switch)
+              .disabled(!canToggleVisibility)
+          }
+        }
+      }
     }
-    return tabs
-  }
-
-  private var availableTabsKey: String {
-    availableTabs.map(\.title).joined(separator: "|")
-  }
-
-  private func ensureSelectedTab() {
-    guard availableTabs.contains(selectedTab) else {
-      selectedTab = availableTabs.first ?? .files
-      return
+    .background(
+      RoundedRectangle(cornerRadius: 12)
+        .fill(Color(nsColor: .windowBackgroundColor))
+        .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 2)
+    )
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(.horizontal, 16)
+    .sheet(isPresented: $showVisibilityPicker) {
+      if let chat = fullChat.chat,
+         let spaceId = chat.spaceId,
+         let dependencies
+      {
+        ChatVisibilityParticipantsSheet(
+          spaceId: spaceId,
+          selectedUserIds: $selectedParticipantIds,
+          db: dependencies.database,
+          isPresented: $showVisibilityPicker,
+          onConfirm: { participantIds in
+            updateVisibility(isPublic: false, participantIds: Array(participantIds))
+          }
+        )
+      }
     }
-  }
-
-  private func updateDocumentsChatId() {
-    guard let chatId, chatId > 0 else { return }
-    documentsState.updateChatId(chatId)
   }
 
   @ViewBuilder
@@ -153,6 +275,87 @@ struct ChatInfo: View {
     .frame(maxWidth: .infinity)
     .padding(.vertical, 40)
   }
+
+  private func ensureSelectedTab() {
+    guard availableTabs.contains(selectedTab) else {
+      selectedTab = availableTabs.first ?? .files
+      return
+    }
+  }
+
+  private func updateDocumentsChatId() {
+    guard let chatId, chatId > 0 else { return }
+    documentsState.updateChatId(chatId)
+  }
+
+  private func loadVisibilityPermissions() async {
+    guard peerId.isThread else {
+      isOwnerOrAdmin = false
+      return
+    }
+    guard let dependencies,
+          let chat = fullChat.chat,
+          let spaceId = chat.spaceId,
+          let currentUserId = dependencies.auth.currentUserId
+    else {
+      isOwnerOrAdmin = false
+      isCreator = false
+      return
+    }
+
+    do {
+      let member = try await dependencies.database.dbWriter.read { db in
+        try Member
+          .filter(Column("spaceId") == spaceId)
+          .filter(Column("userId") == currentUserId)
+          .fetchOne(db)
+      }
+      isOwnerOrAdmin = member?.role == .owner || member?.role == .admin
+      isCreator = chat.createdBy == currentUserId
+    } catch {
+      isOwnerOrAdmin = false
+      isCreator = false
+      Log.shared.error("Failed to load chat permissions", error: error)
+    }
+  }
+
+  private func handleVisibilityToggle(_ isPublic: Bool) {
+    guard canToggleVisibility,
+          let chat = fullChat.chat
+    else { return }
+
+    let currentlyPublic = chat.isPublic == true
+    guard isPublic != currentlyPublic else { return }
+
+    if isPublic {
+      updateVisibility(isPublic: true, participantIds: [])
+    } else {
+      guard let currentUserId = dependencies?.auth.currentUserId else { return }
+      selectedParticipantIds = [currentUserId]
+      showVisibilityPicker = true
+    }
+  }
+
+  private func updateVisibility(isPublic: Bool, participantIds: [Int64]) {
+    guard case let .thread(chatId) = peerId else { return }
+
+    Task {
+      do {
+        _ = try await Api.realtime.send(.updateChatVisibility(
+          chatID: chatId,
+          isPublic: isPublic,
+          participantIDs: participantIds
+        ))
+        do {
+          try await Api.realtime.send(.getChatParticipants(chatID: chatId))
+        } catch {
+          Log.shared.error("Failed to refetch chat participants after visibility update", error: error)
+        }
+      } catch {
+        Log.shared.error("Failed to update chat visibility", error: error)
+      }
+    }
+  }
 }
 
 private enum ChatInfoTab: String, CaseIterable, Hashable {
@@ -163,6 +366,24 @@ private enum ChatInfoTab: String, CaseIterable, Hashable {
 
   var title: String {
     rawValue.capitalized
+  }
+}
+
+private struct ChatInfoDetailRow<Content: View>: View {
+  let title: String
+  @ViewBuilder let content: () -> Content
+
+  var body: some View {
+    HStack(spacing: 12) {
+      Text(title)
+        .foregroundStyle(.secondary)
+
+      Spacer()
+
+      content()
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 10)
   }
 }
 
