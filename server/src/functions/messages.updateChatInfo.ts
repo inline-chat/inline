@@ -41,9 +41,12 @@ export async function updateChatInfo(
     throw RealtimeRpcError.BadRequest()
   }
 
-  const nextTitle = titleProvided ? (input.title ?? "").trim() : undefined
-  if (titleProvided && nextTitle.length === 0) {
-    throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Title cannot be empty", 400)
+  let nextTitle: string | undefined
+  if (titleProvided) {
+    nextTitle = (input.title ?? "").trim()
+    if (nextTitle.length === 0) {
+      throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Title cannot be empty", 400)
+    }
   }
 
   const nextEmoji = emojiProvided ? (input.emoji ?? "").trim() : undefined
