@@ -14,7 +14,10 @@ class MainWindowController: NSWindowController, NSWindowDelegate {
   private var nav2: Nav2 = .init()
 
   private var defaultSize = NSSize(width: 860, height: 640)
-  private var minSize = NSSize(width: 640, height: 320)
+  private var minimumWindowHeight: CGFloat = Theme.windowMinimumSize.height
+  private var minSize: NSSize {
+    NSSize(width: 0, height: minimumWindowHeight)
+  }
 
   private var topLevelRoute: TopLevelRoute {
     dependencies.viewModel.topLevelRoute
@@ -26,9 +29,17 @@ class MainWindowController: NSWindowController, NSWindowDelegate {
 
   private var currentTopLevelRoute: TopLevelRoute?
   private var windowView: MainWindowView = .init()
+  private var mainSplitView: MainSplitView?
 
   private var navBackButton: NSButton?
   private var navForwardButton: NSButton?
+  private var sidebarToggleObserver: NSObjectProtocol?
+  private var autoCollapsedSidebar = false
+  private let sidebarAutoCollapseHysteresis: CGFloat = 16
+
+  private func collapseSidebarThreshold() -> CGFloat {
+    700
+  }
 
   init(dependencies: AppDependencies) {
     self.dependencies = dependencies
@@ -75,6 +86,7 @@ class MainWindowController: NSWindowController, NSWindowDelegate {
     window.setContentSize(defaultSize)
 
     switchTopLevel(topLevelRoute)
+    setupSidebarToggleObserver()
   }
 
   /// Animate or switch to next VC
@@ -83,26 +95,30 @@ class MainWindowController: NSWindowController, NSWindowDelegate {
   }
 
   private func setupOnboarding() {
+    autoCollapsedSidebar = false
+    mainSplitView = nil
     switchViewController(to: OnboardingViewController(dependencies: dependencies))
 
     // configure window
     window?.isMovableByWindowBackground = true
     window?.backgroundColor = .clear
     window?.setContentSize(defaultSize)
+    window?.minSize = minSize
   }
 
   private func setupMainSplitView() {
     log.debug("Setting up main split view")
 
+    autoCollapsedSidebar = false
     window?.isMovableByWindowBackground = false
 
     // re-add rootData so it has fresh user ID
     dependencies.rootData = RootData(db: dependencies.database, auth: dependencies.auth)
 
     // set main view
-    switchViewController(
-      to: MainSplitView(dependencies: dependencies)
-    )
+    let splitView = MainSplitView(dependencies: dependencies)
+    mainSplitView = splitView
+    switchViewController(to: splitView)
 
     setupWindowFor(route: nav.currentRoute)
   }
@@ -121,10 +137,14 @@ class MainWindowController: NSWindowController, NSWindowDelegate {
         setupMainSplitView()
     }
 
-    // TODO: fix window sizing
     window?.setContentSize(defaultSize)
     window?.setFrameUsingName("MainWindow")
-    window?.minSize = minSize
+    if route == .main {
+      updateWindowMinimumSize()
+      synchronizeSidebarWithWindowSize(animated: false)
+    } else {
+      window?.minSize = minSize
+    }
   }
 
   private var cancellables: Set<AnyCancellable> = []
@@ -185,6 +205,73 @@ class MainWindowController: NSWindowController, NSWindowDelegate {
 //    }
   }
 
+  private func setupSidebarToggleObserver() {
+    guard sidebarToggleObserver == nil else { return }
+    sidebarToggleObserver = NotificationCenter.default.addObserver(
+      forName: .toggleSidebar,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      self?.toggleSidebar()
+    }
+  }
+
+  private func toggleSidebar() {
+    guard let splitView = mainSplitView else { return }
+    let willExpand = splitView.isSidebarCollapsed
+    autoCollapsedSidebar = false
+    splitView.setSidebarCollapsed(!splitView.isSidebarCollapsed, animated: true)
+    if willExpand {
+      DispatchQueue.main.async { [weak self] in
+        self?.ensureWindowWidthForExpandedSidebar(animated: true)
+      }
+    }
+  }
+
+  private func synchronizeSidebarWithWindowSize(animated: Bool) {
+    guard let window, let splitView = mainSplitView else { return }
+    updateWindowMinimumSize()
+
+    let width = window.frame.width
+    let threshold = collapseSidebarThreshold()
+    let expandThreshold = threshold + sidebarAutoCollapseHysteresis
+    if splitView.isSidebarCollapsed {
+      guard autoCollapsedSidebar else { return }
+      guard width > expandThreshold else { return }
+      autoCollapsedSidebar = false
+      splitView.setSidebarCollapsed(false, animated: animated)
+      ensureWindowWidthForExpandedSidebar(animated: animated)
+      return
+    }
+
+    guard width <= threshold else { return }
+
+    let shouldAnimate = animated && !window.inLiveResize
+    autoCollapsedSidebar = true
+    splitView.setSidebarCollapsed(true, animated: shouldAnimate)
+  }
+
+  private func updateWindowMinimumSize() {
+    guard let window else { return }
+    let minSize = NSSize(width: 0, height: minimumWindowHeight)
+    guard window.minSize != minSize else { return }
+    window.minSize = minSize
+  }
+
+  private func ensureWindowWidthForExpandedSidebar(animated: Bool) {
+    guard let window else { return }
+    let minimumFrameWidth = collapseSidebarThreshold() + sidebarAutoCollapseHysteresis
+    guard window.frame.width < minimumFrameWidth else { return }
+
+    var frame = window.frame
+    frame.size.width = minimumFrameWidth
+    if let screen = window.screen {
+      frame = window.constrainFrameRect(frame, to: screen)
+    }
+    let shouldAnimate = animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    window.setFrame(frame, display: true, animate: shouldAnimate)
+  }
+
   // MARK: - NSWindowDelegate
 
   func window(
@@ -196,12 +283,33 @@ class MainWindowController: NSWindowController, NSWindowDelegate {
     [.autoHideToolbar, .autoHideMenuBar, .fullScreen]
   }
 
+  func windowWillResize(_ _: NSWindow, to frameSize: NSSize) -> NSSize {
+    guard topLevelRoute == .main else { return frameSize }
+    guard let splitView = mainSplitView else { return frameSize }
+    guard !splitView.isSidebarCollapsed else { return frameSize }
+
+    if frameSize.width <= collapseSidebarThreshold() {
+      autoCollapsedSidebar = true
+      splitView.setSidebarCollapsed(true, animated: false)
+      updateWindowMinimumSize()
+    }
+    return frameSize
+  }
+
+  func windowDidResize(_ notification: Notification) {
+    guard topLevelRoute == .main else { return }
+    synchronizeSidebarWithWindowSize(animated: false)
+  }
+
   // MARK: - Deinit
 
   deinit {
     cancellables.removeAll()
     navBackButton = nil
     navForwardButton = nil
+    if let sidebarToggleObserver {
+      NotificationCenter.default.removeObserver(sidebarToggleObserver)
+    }
   }
 }
 
