@@ -20,6 +20,8 @@ import { pinMessage } from "./messages.pinMessage"
 import { getUserSettings } from "./user.getUserSettings"
 import { updateUserSettings } from "./user.updateUserSettings"
 import { createBot } from "./createBot"
+import { listBots } from "./bot.listBots"
+import { revealBotToken } from "./bot.revealToken"
 import { deleteMember } from "@in/server/functions/space.deleteMember"
 import { markAsUnread } from "./messages.markAsUnread"
 import { getUpdatesState } from "./updates.getUpdatesState"
@@ -60,6 +62,8 @@ export const Functions = {
   },
   bot: {
     createBot: createBot,
+    listBots: listBots,
+    revealBotToken: revealBotToken,
   },
   updates: {
     getUpdatesState: getUpdatesState,

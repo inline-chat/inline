@@ -8,15 +8,18 @@ import { checkUsernameAvailable } from "@in/server/methods/checkUsername"
 import { normalizeUsername } from "@in/server/utils/normalize"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { SpaceModel } from "@in/server/db/models/spaces"
+import { BotTokensModel } from "@in/server/db/models/botTokens"
+import { and, eq, isNull, or, sql } from "drizzle-orm"
 
-import { Member_Role, type CreateBotInput, type CreateBotResult } from "@in/protocol/core"
+import { type CreateBotInput, type CreateBotResult } from "@in/protocol/core"
 import type { FunctionContext } from "@in/server/functions/_types"
 
 const log = new Log("createBot")
 
 export const createBot = async (input: CreateBotInput, context: FunctionContext): Promise<CreateBotResult> => {
   // Validate input
-  if (!input.name || input.name.trim().length === 0) {
+  const trimmedName = input.name?.trim()
+  if (!trimmedName || trimmedName.length === 0) {
     throw RealtimeRpcError.BadRequest()
   }
 
@@ -25,6 +28,26 @@ export const createBot = async (input: CreateBotInput, context: FunctionContext)
   }
 
   const normalizedUsername = normalizeUsername(input.username)
+  const normalizedUsernameLower = normalizedUsername.toLowerCase()
+
+  if (!normalizedUsernameLower.endsWith("bot")) {
+    throw RealtimeRpcError.BadRequest()
+  }
+
+  const [{ count: existingBots }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(users)
+    .where(
+      and(
+        eq(users.bot, true),
+        eq(users.botCreatorId, context.currentUserId),
+        or(isNull(users.deleted), eq(users.deleted, false)),
+      ),
+    )
+
+  if (existingBots >= 5) {
+    throw RealtimeRpcError.BadRequest()
+  }
 
   // Check if username is available
   const isUsernameAvailable = await checkUsernameAvailable(normalizedUsername, {})
@@ -36,7 +59,7 @@ export const createBot = async (input: CreateBotInput, context: FunctionContext)
   const botUser = await db
     .insert(users)
     .values({
-      firstName: input.name,
+      firstName: trimmedName,
       username: normalizedUsername,
       bot: true,
       botCreatorId: context.currentUserId,
@@ -56,12 +79,18 @@ export const createBot = async (input: CreateBotInput, context: FunctionContext)
   // Generate token for the bot
   const { token } = await generateToken(bot.id)
 
-  // Create session for the bot (bots use web client type)
-  await SessionsModel.create({
+  // Create session for the bot (bots use api client type)
+  const session = await SessionsModel.create({
     userId: bot.id,
     tokenHash: hashToken(token),
     personalData: {},
-    clientType: "web",
+    clientType: "api",
+  })
+
+  await BotTokensModel.create({
+    botUserId: bot.id,
+    sessionId: session.id,
+    token,
   })
 
   // Add bot to space if specified

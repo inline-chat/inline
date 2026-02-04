@@ -26,6 +26,8 @@ import { getUserSettingsHandler } from "./user.getUserSettings"
 import { updateUserSettingsHandler } from "./user.updateUserSettings"
 import { sendComposeActionHandler } from "./messages.sendComposeAction"
 import { createBotHandler } from "./createBot"
+import { listBotsHandler } from "./listBots"
+import { revealBotTokenHandler } from "./revealBotToken"
 import { deleteMemberHandler } from "@in/server/realtime/handlers/space.deleteMember"
 import { updateMemberAccessHandler } from "@in/server/realtime/handlers/space.updateMemberAccess"
 import { markAsUnread } from "./messages.markAsUnread"
@@ -220,6 +222,22 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await createBotHandler(call.input.createBot, handlerContext)
       return { oneofKind: "createBot", createBot: result }
+    }
+
+    case Method.LIST_BOTS: {
+      if (call.input.oneofKind !== "listBots") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      let result = await listBotsHandler(call.input.listBots, handlerContext)
+      return { oneofKind: "listBots", listBots: result }
+    }
+
+    case Method.REVEAL_BOT_TOKEN: {
+      if (call.input.oneofKind !== "revealBotToken") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      let result = await revealBotTokenHandler(call.input.revealBotToken, handlerContext)
+      return { oneofKind: "revealBotToken", revealBotToken: result }
     }
 
     case Method.DELETE_MEMBER: {
