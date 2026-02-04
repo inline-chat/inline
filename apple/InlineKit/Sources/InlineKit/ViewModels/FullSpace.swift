@@ -22,13 +22,7 @@ public struct SpaceChatItem: Codable, FetchableRecord, PersistableRecord, Sendab
   // ------ GETTERS ----------
   // Peer user
   public var peerId: Peer {
-    if let user {
-      Peer(userId: user.id)
-    } else if let chat {
-      Peer(threadId: chat.id)
-    } else {
-      fatalError("No peer found for space chat item")
-    }
+    dialog.peerId
   }
 
   public var title: String? {
