@@ -167,6 +167,9 @@ message Chat {
 
   // Date of creation
   optional int64 date = 9;
+
+  // Creator user ID
+  optional int64 created_by = 10;
 }
 
 message Message {
@@ -608,6 +611,8 @@ enum Method {
   UPDATE_CHAT_VISIBILITY = 30;
   PIN_MESSAGE = 31;
   UPDATE_CHAT_INFO = 32;
+  LIST_BOTS = 33;
+  REVEAL_BOT_TOKEN = 34;
 }
 
 message RpcCall {
@@ -645,6 +650,8 @@ message RpcCall {
     UpdateChatVisibilityInput updateChatVisibility = 31;
     PinMessageInput pinMessage = 32;
     UpdateChatInfoInput updateChatInfo = 33;
+    ListBotsInput listBots = 34;
+    RevealBotTokenInput revealBotToken = 35;
   }
 }
 
@@ -684,6 +691,8 @@ message RpcResult {
     UpdateChatVisibilityResult updateChatVisibility = 31;
     PinMessageResult pinMessage = 32;
     UpdateChatInfoResult updateChatInfo = 33;
+    ListBotsResult listBots = 34;
+    RevealBotTokenResult revealBotToken = 35;
   }
 }
 
@@ -816,6 +825,14 @@ message CreateBotResult {
   // Token to use for the bot
   string token = 2;
 }
+
+message ListBotsInput {}
+
+message ListBotsResult { repeated User bots = 1; }
+
+message RevealBotTokenInput { int64 bot_user_id = 1; }
+
+message RevealBotTokenResult { string token = 1; }
 
 message GetUserSettingsInput {}
 

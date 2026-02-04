@@ -144,6 +144,8 @@ struct SettingsDetailView: View {
           AppearanceSettingsDetailView()
         case .account:
           AccountSettingsDetailView()
+        case .bots:
+          BotsSettingsDetailView()
         case .notifications:
           NotificationsSettingsDetailView()
         case .experimental:

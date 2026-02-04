@@ -33,7 +33,12 @@ struct SettingsSidebarView: View {
 #if SPARKLE
     categories.append(.updates)
 #endif
-    categories.append(contentsOf: [.appearance, .notifications, .experimental, .debug])
+    categories.append(contentsOf: [.appearance, .notifications, .experimental])
+
+    if auth.isLoggedIn {
+      categories.append(.bots)
+    }
+    categories.append(.debug)
 
     return categories
   }

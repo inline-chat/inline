@@ -46,6 +46,15 @@ describe("createBot", () => {
     await expect(createBot(input, mockFunctionContext)).rejects.toThrow()
   })
 
+  test("should fail when username does not end with bot", async () => {
+    const input = {
+      name: "Test Bot",
+      username: "notvalid",
+    }
+
+    await expect(createBot(input, mockFunctionContext)).rejects.toThrow()
+  })
+
   test("should fail with empty name", async () => {
     const input = {
       name: "",
@@ -92,5 +101,26 @@ describe("createBot", () => {
     expect(result.bot?.bot).toBe(true)
     expect(result.token).toBeDefined()
     expect(typeof result.token).toBe("string")
+  })
+
+  test("should enforce bot limit per creator", async () => {
+    const inputs = Array.from({ length: 5 }, (_, index) => ({
+      name: `Bot ${index + 1}`,
+      username: `limitbot${index + 1}bot`,
+    }))
+
+    for (const input of inputs) {
+      await createBot(input, mockFunctionContext)
+    }
+
+    await expect(
+      createBot(
+        {
+          name: "Overflow Bot",
+          username: "overflowbot",
+        },
+        mockFunctionContext,
+      ),
+    ).rejects.toThrow()
   })
 })
