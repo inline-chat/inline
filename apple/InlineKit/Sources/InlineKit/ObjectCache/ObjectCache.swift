@@ -13,10 +13,12 @@ public class ObjectCache {
   private var log = Log.scoped("ObjectCache", enableTracing: false)
   private var db = AppDatabase.shared
   private var observingUsers: Set<Int64> = []
+  private var observingChats: Set<Int64> = []
+  private var observingSpaces: Set<Int64> = []
   private var users: [Int64: UserInfo] = [:]
   private var chats: [Int64: Chat] = [:]
   private var spaces: [Int64: Space] = [:]
-  private var cancellables: Set<AnyCancellable> = []
+  private var dbCancellables: [AnyDatabaseCancellable] = []
   private var userPublishers: [Int64: PassthroughSubject<UserInfo?, Never>] = [:]
   private var chatPublishers: [Int64: PassthroughSubject<Chat?, Never>] = [:]
 
@@ -43,7 +45,7 @@ public class ObjectCache {
   }
 
   public func getChat(id: Int64) -> Chat? {
-    if chats[id] == nil {
+    if chats[id] == nil, observingChats.contains(id) == false {
       // fill in the cache
       observeChat(id: id)
     }
@@ -61,7 +63,7 @@ public class ObjectCache {
   }
 
   public func getSpace(id: Int64) -> Space? {
-    if spaces[id] == nil {
+    if spaces[id] == nil, observingSpaces.contains(id) == false {
       // fill in the cache
       observeSpace(id: id)
     }
@@ -73,94 +75,86 @@ public class ObjectCache {
 // User
 public extension ObjectCache {
   func observeUser(id userId: Int64) {
+    guard observingUsers.contains(userId) == false else { return }
     log.trace("Observing user \(userId)")
     observingUsers.insert(userId)
-    ValueObservation.tracking { db in
+    let cancellable = ValueObservation.tracking { db in
       try User
         .filter(id: userId)
         .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
         .asRequest(of: UserInfo.self)
         .fetchOne(db)
     }
-    .publisher(in: db.dbWriter, scheduling: .immediate)
-    .sink(
-      receiveCompletion: { completion in
-        if case let .failure(error) = completion {
-          Log.shared.error("Failed to observe user \(userId): \(error)")
-        }
-      },
-      receiveValue: { [weak self] user in
-        if let user {
-          self?.log.trace("User \(userId) updated")
-          self?.users[userId] = user
-        } else {
-          self?.log.trace("User \(userId) not found")
-          self?.users[userId] = nil
-        }
-
-        // update publishers
-        self?.userPublishers[userId]?.send(user)
+    .start(in: db.reader, scheduling: .immediate, onError: { [weak self] error in
+      Log.shared.error("Failed to observe user \(userId): \(error)")
+      self?.observingUsers.remove(userId)
+    }, onChange: { [weak self] user in
+      if let user {
+        self?.log.trace("User \(userId) updated")
+        self?.users[userId] = user
+      } else {
+        self?.log.trace("User \(userId) not found")
+        self?.users[userId] = nil
       }
-    ).store(in: &cancellables)
+
+      self?.userPublishers[userId]?.send(user)
+    })
+    dbCancellables.append(cancellable)
   }
 }
 
 // Chats
 public extension ObjectCache {
   func observeChat(id chatId: Int64) {
+    guard observingChats.contains(chatId) == false else { return }
     log.trace("Observing chat \(chatId)")
-    ValueObservation.tracking { db in
+    observingChats.insert(chatId)
+    let cancellable = ValueObservation.tracking { db in
       try Chat
         .filter(id: chatId)
         .fetchOne(db)
     }
-    .publisher(in: db.dbWriter, scheduling: .immediate)
-    .sink(
-      receiveCompletion: { completion in
-        if case let .failure(error) = completion {
-          Log.shared.error("Failed to observe chat \(chatId): \(error)")
-        }
-      },
-      receiveValue: { [weak self] chat in
-        if let chat {
-          self?.log.trace("Chat \(chatId) updated")
-          self?.chats[chatId] = chat
-        } else {
-          self?.log.trace("Chat \(chatId) not found")
-          self?.chats[chatId] = nil
-        }
-
-        self?.chatPublishers[chatId]?.send(chat)
+    .start(in: db.reader, scheduling: .immediate, onError: { [weak self] error in
+      Log.shared.error("Failed to observe chat \(chatId): \(error)")
+      self?.observingChats.remove(chatId)
+    }, onChange: { [weak self] chat in
+      if let chat {
+        self?.log.trace("Chat \(chatId) updated")
+        self?.chats[chatId] = chat
+      } else {
+        self?.log.trace("Chat \(chatId) not found")
+        self?.chats[chatId] = nil
       }
-    ).store(in: &cancellables)
+
+      self?.chatPublishers[chatId]?.send(chat)
+    })
+    dbCancellables.append(cancellable)
   }
 }
 
 // Spaces
 public extension ObjectCache {
   func observeSpace(id spaceId: Int64) {
+    guard observingSpaces.contains(spaceId) == false else { return }
     log.trace("Observing space \(spaceId)")
-    ValueObservation.tracking { db in
+    observingSpaces.insert(spaceId)
+    let cancellable = ValueObservation.tracking { db in
       try Space
         .filter(id: spaceId)
         .fetchOne(db)
     }
-    .publisher(in: db.dbWriter, scheduling: .immediate)
-    .sink(
-      receiveCompletion: { completion in
-        if case let .failure(error) = completion {
-          Log.shared.error("Failed to observe space \(spaceId): \(error)")
-        }
-      },
-      receiveValue: { [weak self] space in
-        if let space {
-          self?.log.trace("Space \(spaceId) updated")
-          self?.spaces[spaceId] = space
-        } else {
-          self?.log.trace("Space \(spaceId) not found")
-          self?.spaces[spaceId] = nil
-        }
+    .start(in: db.reader, scheduling: .immediate, onError: { [weak self] error in
+      Log.shared.error("Failed to observe space \(spaceId): \(error)")
+      self?.observingSpaces.remove(spaceId)
+    }, onChange: { [weak self] space in
+      if let space {
+        self?.log.trace("Space \(spaceId) updated")
+        self?.spaces[spaceId] = space
+      } else {
+        self?.log.trace("Space \(spaceId) not found")
+        self?.spaces[spaceId] = nil
       }
-    ).store(in: &cancellables)
+    })
+    dbCancellables.append(cancellable)
   }
 }
