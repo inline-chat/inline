@@ -489,10 +489,7 @@ class MainSidebarItemCell: NSView {
   }
 
   @objc private func handleArchiveAction() {
-    guard let item, let peer = item.peerId else { return }
-    Task(priority: .userInitiated) {
-      try await DataManager.shared.updateDialog(peerId: peer, archived: !isArchived, spaceId: item.spaceId)
-    }
+    archiveChat(archived: !isArchived)
   }
 
   @objc private func handleReadUnreadAction() {
@@ -512,21 +509,47 @@ class MainSidebarItemCell: NSView {
   }
 
   @objc private func handleActionButtonClick() {
-    guard let item, let peer = item.peerId else {
+    guard item?.peerId != nil else {
       Log.shared.warning("handleActionButtonClick: item or peer is nil")
       return
     }
 
     if isArchived {
       // Unarchive without changing navigation.
-      Task(priority: .userInitiated) {
-        try await DataManager.shared.updateDialog(peerId: peer, archived: false, spaceId: item.spaceId)
-      }
+      archiveChat(archived: false)
     } else {
       // Archive the chat
-      Task(priority: .userInitiated) {
-        try await DataManager.shared.updateDialog(peerId: peer, archived: true, spaceId: item.spaceId)
+      archiveChat(archived: true)
+    }
+  }
+
+  private func archiveChat(archived: Bool) {
+    guard let item, let peer = item.peerId else { return }
+    let spaceId = item.spaceId
+    let shouldNavigateOut = shouldNavigateOutOnArchive(peer: peer, archived: archived)
+    let nav2 = nav2
+
+    Task(priority: .userInitiated) {
+      do {
+        try await DataManager.shared.updateDialog(peerId: peer, archived: archived, spaceId: spaceId)
+        if shouldNavigateOut {
+          await MainActor.run {
+            nav2?.navigate(to: .empty)
+          }
+        }
+      } catch {
+        Log.shared.error("Failed to update archive state", error: error)
       }
+    }
+  }
+
+  private func shouldNavigateOutOnArchive(peer: Peer, archived: Bool) -> Bool {
+    guard archived, let nav2 else { return false }
+    switch nav2.currentRoute {
+      case let .chat(currentPeer), let .chatInfo(currentPeer):
+        return currentPeer == peer
+      default:
+        return false
     }
   }
 
@@ -709,8 +732,8 @@ class MainSidebarItemCell: NSView {
     if let user = item.user {
       return userTitle(for: user.user)
     }
-    if let chatTitle = nonEmpty(item.chat?.title) {
-      return chatTitle
+    if let title = item.chat?.humanReadableTitle {
+      return title
     }
     return "Chat"
   }
@@ -940,10 +963,10 @@ class MainSidebarItemCell: NSView {
   }
 
   private func handleActionItem(_ action: MainSidebarList.ActionItem) {
-    guard let nav2 else { return }
+    guard let nav2, let dependencies else { return }
     switch action {
       case .newThread:
-        nav2.navigate(to: .newChat)
+        NewThreadAction.start(dependencies: dependencies, spaceId: nav2.activeSpaceId)
     }
   }
 
