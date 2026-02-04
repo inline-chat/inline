@@ -32,10 +32,10 @@ class MainSplitView: NSViewController {
 
   // Constants
 
-  private var sideWidth: CGFloat = 240
+  private var sideWidth: CGFloat = Theme.idealSidebarWidth
   private var innerPadding: CGFloat = Theme.mainSplitViewUseFullBleedContent ? 0 : Theme.mainSplitViewInnerPadding
   private var contentRadius: CGFloat = Theme.mainSplitViewUseFullBleedContent ? 0 : Theme.mainSplitViewContentRadius
-  private var isSidebarCollapsed = false
+  private var sidebarCollapsed = false
   private var trafficLightsVisible = true
 
   private enum ToolbarMetrics {
@@ -62,7 +62,6 @@ class MainSplitView: NSViewController {
   private var escapeKeyUnsubscriber: (() -> Void)?
   private var quickSearchObserver: NSObjectProtocol?
   private var appActiveObserver: NSObjectProtocol?
-  private var sidebarToggleObserver: NSObjectProtocol?
   private var trafficLightPresenceObserver: UUID?
   private var quickSearchEscapeUnsubscriber: (() -> Void)?
   private var quickSearchArrowUnsubscriber: (() -> Void)?
@@ -198,7 +197,6 @@ class MainSplitView: NSViewController {
 
   override func viewWillAppear() {
     super.viewWillAppear()
-    setupSidebarToggleObserver()
     setupQuickSearchObserver()
     setupAppActiveObserver()
   }
@@ -231,10 +229,6 @@ class MainSplitView: NSViewController {
     if let appActiveObserver {
       NotificationCenter.default.removeObserver(appActiveObserver)
       self.appActiveObserver = nil
-    }
-    if let sidebarToggleObserver {
-      NotificationCenter.default.removeObserver(sidebarToggleObserver)
-      self.sidebarToggleObserver = nil
     }
     if let trafficLightPresenceObserver, let controller = dependencies.trafficLightController {
       controller.removePresenceObserver(trafficLightPresenceObserver)
@@ -346,6 +340,10 @@ class MainSplitView: NSViewController {
 
   private var sidebarVC: NSViewController?
   private var contentVC: NSViewController?
+
+  var isSidebarCollapsed: Bool {
+    sidebarCollapsed
+  }
 
   func setSidebar(viewController: NSViewController) {
     // Remove previous
@@ -472,24 +470,14 @@ class MainSplitView: NSViewController {
     }
   }
 
-  private func setupSidebarToggleObserver() {
-    guard sidebarToggleObserver == nil else { return }
-    sidebarToggleObserver = NotificationCenter.default.addObserver(
-      forName: .toggleSidebar,
-      object: nil,
-      queue: .main
-    ) { [weak self] _ in
-      self?.toggleSidebar()
-    }
-  }
-
-  private func toggleSidebar() {
-    isSidebarCollapsed.toggle()
-    applySidebarVisibility()
+  func setSidebarCollapsed(_ collapsed: Bool, animated: Bool) {
+    guard collapsed != sidebarCollapsed else { return }
+    sidebarCollapsed = collapsed
+    applySidebarVisibility(animated: animated)
   }
 
   private func applySidebarVisibility(animated: Bool = true) {
-    let targetCollapsed = isSidebarCollapsed
+    let targetCollapsed = sidebarCollapsed
     let targetLeading = targetCollapsed ? -sideWidth : 0
     let targetContentLeading = targetCollapsed ? innerPadding : 0
     dependencies.trafficLightController?.setInsetPreset(
@@ -533,11 +521,11 @@ class MainSplitView: NSViewController {
       trafficLightsVisible = visible
       updateToolbarLeadingPadding(
         animated: false,
-        duration: SidebarAnimation.duration(forCollapsed: isSidebarCollapsed)
+        duration: SidebarAnimation.duration(forCollapsed: sidebarCollapsed)
       )
       updateSidebarTrafficLightPresence(visible)
     }
-    controller.setInsetPreset(isSidebarCollapsed ? .sidebarHidden : .sidebarVisible)
+    controller.setInsetPreset(sidebarCollapsed ? .sidebarHidden : .sidebarVisible)
   }
 
   private func updateSidebarTrafficLightPresence(_ isVisible: Bool) {
@@ -550,7 +538,7 @@ class MainSplitView: NSViewController {
     animated: Bool = false,
     duration: TimeInterval = 0.2
   ) {
-    guard trafficLightsVisible, isSidebarCollapsed else {
+    guard trafficLightsVisible, sidebarCollapsed else {
       toolbarArea.updateLeadingPadding(
         ToolbarMetrics.defaultLeadingPadding,
         animated: animated,
