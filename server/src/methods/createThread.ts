@@ -47,6 +47,7 @@ export const handler = async (
         date: new Date(),
         threadNumber: threadNumber,
         emoji: input.emoji ?? null,
+        createdBy: context.currentUserId,
       })
       .returning()
 

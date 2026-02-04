@@ -19,7 +19,9 @@ import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 
 const log = new Log("functions.deleteChat")
 /**
- * Deletes a chat (space thread) if the user is an admin/owner of the space.
+ * Deletes a chat (thread).
+ * - Space threads: admin/owner or the thread creator.
+ * - Home threads: thread creator only.
  * Also deletes participants and dialogs for the chat.
  */
 export async function deleteChat(input: { peer: InputPeer }, context: FunctionContext): Promise<{}> {
@@ -30,18 +32,84 @@ export async function deleteChat(input: { peer: InputPeer }, context: FunctionCo
     // Get chat
     const chat = await ChatModel.getChatFromInputPeer(peer, { currentUserId })
 
-    if (!chat.spaceId || chat.type !== "thread") {
-      log.error("Chat is not a space thread", { chatId: chat.id })
-      throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Chat is not a space thread", 400)
+    if (chat.type !== "thread") {
+      log.error("Chat is not a thread", { chatId: chat.id })
+      throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Chat is not a thread", 400)
     }
 
-    // Check user role in space
-    const member = await db._query.members.findFirst({
-      where: and(eq(members.spaceId, chat.spaceId), eq(members.userId, currentUserId)),
-    })
-    if (!member || (member.role !== "admin" && member.role !== "owner")) {
-      log.error("User is not admin/owner in space", { userId: currentUserId, spaceId: chat.spaceId })
-      throw new RealtimeRpcError(RealtimeRpcError.Code.UNAUTHENTICATED, "Not allowed", 403)
+    const isCreator = chat.createdBy === currentUserId
+    const trimmedTitle = chat.title?.trim() ?? ""
+    const hasTitle = trimmedTitle.length > 0
+    const hasMessages = chat.lastMsgId != null && chat.lastMsgId !== 0
+
+    // Temporary: allow any participant to delete empty untitled threads until rollout is complete.
+    const canParticipantDeleteEmptyThread = !hasTitle && !hasMessages
+
+    if (chat.spaceId) {
+      // Check user role in space
+      const member = await db._query.members.findFirst({
+        where: and(eq(members.spaceId, chat.spaceId), eq(members.userId, currentUserId)),
+      })
+      if (!member) {
+        log.error("User is not a member of space", { userId: currentUserId, spaceId: chat.spaceId })
+        throw new RealtimeRpcError(RealtimeRpcError.Code.UNAUTHENTICATED, "Not allowed", 403)
+      }
+
+      const canDelete = member.role === "admin" || member.role === "owner" || isCreator
+      if (!canDelete) {
+        if (canParticipantDeleteEmptyThread) {
+          if (chat.publicThread) {
+            if (member.canAccessPublicChats) {
+              // allow delete
+            } else {
+              log.error("User cannot access public chats in space", {
+                userId: currentUserId,
+                spaceId: chat.spaceId,
+                chatId: chat.id,
+              })
+              throw new RealtimeRpcError(RealtimeRpcError.Code.UNAUTHENTICATED, "Not allowed", 403)
+            }
+          } else {
+            const participant = await db._query.chatParticipants.findFirst({
+              where: and(
+                eq(chatParticipants.chatId, chat.id),
+                eq(chatParticipants.userId, currentUserId),
+              ),
+            })
+            if (!participant) {
+              log.error("User is not a participant in private thread", {
+                userId: currentUserId,
+                spaceId: chat.spaceId,
+                chatId: chat.id,
+              })
+              throw new RealtimeRpcError(RealtimeRpcError.Code.UNAUTHENTICATED, "Not allowed", 403)
+            }
+          }
+        } else {
+          log.error("User is not admin/owner or creator in space", {
+            userId: currentUserId,
+            spaceId: chat.spaceId,
+            chatId: chat.id,
+          })
+          throw new RealtimeRpcError(RealtimeRpcError.Code.UNAUTHENTICATED, "Not allowed", 403)
+        }
+      }
+    } else if (!isCreator) {
+      if (canParticipantDeleteEmptyThread) {
+        const participant = await db._query.chatParticipants.findFirst({
+          where: and(
+            eq(chatParticipants.chatId, chat.id),
+            eq(chatParticipants.userId, currentUserId),
+          ),
+        })
+        if (!participant) {
+          log.error("User is not a participant for home thread", { userId: currentUserId, chatId: chat.id })
+          throw new RealtimeRpcError(RealtimeRpcError.Code.UNAUTHENTICATED, "Not allowed", 403)
+        }
+      } else {
+        log.error("User is not creator for home thread", { userId: currentUserId, chatId: chat.id })
+        throw new RealtimeRpcError(RealtimeRpcError.Code.UNAUTHENTICATED, "Not allowed", 403)
+      }
     }
 
     let persistedUpdate: UpdateSeqAndDate | undefined
