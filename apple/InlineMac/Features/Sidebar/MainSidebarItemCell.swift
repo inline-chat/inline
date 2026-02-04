@@ -54,11 +54,21 @@ class MainSidebarItemCell: NSView {
   ]
   
   private var hoverColor: NSColor {
-    .white.withAlphaComponent(0.2)
+    NSColor(name: "MainSidebarItemCell.hoverColor") { appearance in
+      if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
+        return NSColor.white.withAlphaComponent(0.07)
+      }
+      return NSColor.white.withAlphaComponent(0.2)
+    }
   }
 
   private var selectedColor: NSColor {
-    Theme.windowContentBackgroundColor
+    NSColor(name: "MainSidebarItemCell.selectedColor") { appearance in
+      if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
+        return NSColor.white.withAlphaComponent(0.1)
+      }
+      return Theme.windowContentBackgroundColor
+    }
   }
 
   private var keyboardSelectionColor: NSColor {

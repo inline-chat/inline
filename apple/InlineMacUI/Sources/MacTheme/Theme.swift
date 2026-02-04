@@ -37,10 +37,14 @@ public enum Theme {
   )
 
   public static let windowContentBackgroundColor: NSColor = .init(
-    "windowContentBackgroundColor",
-    light: NSColor.white,
-    dark: NSColor(red: 15 / 255, green: 15 / 255, blue: 16 / 255, alpha: 1)
-  )
+    name: "windowContentBackgroundColor"
+  ) { appearance in
+    if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
+      // Prefer the system's darker content background in dark mode.
+      return NSColor.controlBackgroundColor
+    }
+    return NSColor.windowBackgroundColor
+  }
 
   // MARK: - Main View & Split View
 
