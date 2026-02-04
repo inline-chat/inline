@@ -43,18 +43,31 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
           return peer.map { [$0] } ?? []
         }
 
-        if let chat, chat.isPublic == true {
-          log.debug("🔍 Public thread, fetching space members")
-          let spaceMembers = try Member
-            .fullMemberQuery()
-            .filter(Column("spaceId") == chat.spaceId)
-            .fetchAll(db)
+        if let chat {
+          if let spaceId = chat.spaceId {
+            if chat.isPublic == true {
+              log.debug("🔍 Public space thread, fetching space members")
+              let spaceMembers = try Member
+                .fullMemberQuery()
+                .filter(Column("spaceId") == spaceId)
+                .fetchAll(db)
 
-          return spaceMembers.map(\.userInfo)
-        } else {
-          log.debug("🔍 Private thread, fetching chat participants")
-          // Get chat participants
-          let chatParticipants = try ChatParticipant
+              return spaceMembers.map(\.userInfo)
+            }
+
+            log.debug("🔍 Private space thread, fetching chat participants")
+            return try ChatParticipant
+              .including(
+                required: ChatParticipant.user
+                  .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
+              )
+              .filter(Column("chatId") == chatId)
+              .asRequest(of: UserInfo.self)
+              .fetchAll(db)
+          }
+
+          log.debug("🔍 Home thread, fetching chat participants")
+          return try ChatParticipant
             .including(
               required: ChatParticipant.user
                 .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
@@ -62,9 +75,9 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
             .filter(Column("chatId") == chatId)
             .asRequest(of: UserInfo.self)
             .fetchAll(db)
-
-          return chatParticipants
         }
+
+        return []
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .sink(

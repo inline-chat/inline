@@ -93,7 +93,10 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     request(for: User.dialog)
   }
 
-  public static let chat = hasOne(Chat.self)
+  public static let chat = hasOne(
+    Chat.self,
+    using: ForeignKey([Chat.Columns.peerUserId], to: [Columns.id])
+  )
   public var chat: QueryInterfaceRequest<Chat> {
     request(for: User.chat)
   }

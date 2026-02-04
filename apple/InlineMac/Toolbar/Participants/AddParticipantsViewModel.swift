@@ -17,6 +17,7 @@ final class AddParticipantsViewModel: ObservableObject {
   private let spaceViewModel: SpaceFullMembersViewModel
   private let db: AppDatabase
   private var cancellables = Set<AnyCancellable>()
+  private var didRequestMembers = false
 
   var filteredMembers: [FullMemberItem] {
     let members = availableMembers.filter { member in
@@ -50,10 +51,11 @@ final class AddParticipantsViewModel: ObservableObject {
     self.spaceViewModel = SpaceFullMembersViewModel(db: db, spaceId: spaceId)
 
     availableMembers = spaceViewModel.members
-    isLoading = spaceViewModel.isLoading
+    isLoading = availableMembers.isEmpty
     errorMessage = spaceViewModel.errorMessage
 
     observeSpaceMembers()
+    Task { await requestMembersIfNeeded() }
   }
 
   private func observeSpaceMembers() {
@@ -80,6 +82,12 @@ final class AddParticipantsViewModel: ObservableObject {
   }
 
   func loadMembers() async {
+    await requestMembersIfNeeded()
+  }
+
+  private func requestMembersIfNeeded() async {
+    guard !didRequestMembers else { return }
+    didRequestMembers = true
     await spaceViewModel.refetchMembers()
   }
 

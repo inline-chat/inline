@@ -62,7 +62,8 @@ export async function updateChatVisibility(
         .where(and(eq(members.spaceId, chat.spaceId), eq(members.userId, context.currentUserId)))
         .limit(1)
 
-      if (!member || (member.role !== "admin" && member.role !== "owner")) {
+      const isCreator = chat.createdBy === context.currentUserId
+      if (!member || (!isCreator && member.role !== "admin" && member.role !== "owner")) {
         throw RealtimeRpcError.SpaceAdminRequired()
       }
 
