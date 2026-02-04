@@ -198,12 +198,13 @@ public struct ForwardMessagesSheet: View {
   {
     let button = Button(title, action: action)
       .disabled(isSending)
+      .padding(.horizontal, 8)
     #if os(iOS)
     if #available(iOS 26, *) {
       if prominent {
         button.buttonStyle(.glassProminent)
       } else {
-        button.buttonStyle(.glass)
+        button.buttonStyle(.plain)
       }
     } else {
       button
