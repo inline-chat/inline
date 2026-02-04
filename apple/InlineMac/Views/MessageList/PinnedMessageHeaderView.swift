@@ -13,7 +13,7 @@ final class PinnedMessageHeaderView: NSView {
     static let closeButtonSize: CGFloat = 24
   }
 
-  static let preferredHeight: CGFloat = Theme.embeddedMessageHeight + (Constants.verticalPadding * 2)
+  static let preferredHeight: CGFloat = EmbedMessageView.height + (Constants.verticalPadding * 2)
   private static let backgroundCornerRadius: CGFloat = 14
 
   private let peerId: Peer
@@ -31,8 +31,8 @@ final class PinnedMessageHeaderView: NSView {
   private let backgroundContentView: NSView
   private var didStartObservation = false
 
-  private lazy var embedView: EmbeddedMessageView = {
-    let view = EmbeddedMessageView(style: .colored)
+  private lazy var embedView: EmbedMessageView = {
+    let view = EmbedMessageView()
     view.translatesAutoresizingMaskIntoConstraints = false
     view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
     view.showsBackground = false
@@ -178,9 +178,21 @@ final class PinnedMessageHeaderView: NSView {
     if let messageId {
       setVisible(true)
       if let message = loadPinnedMessage(messageId: messageId) {
-        embedView.update(with: message, kind: .pinnedInHeader)
+        embedView.configure(
+          fullMessage: message,
+          kind: .pinnedInHeader,
+          outgoing: false,
+          isOnlyEmoji: false,
+          style: .replyBubble
+        )
       } else {
-        embedView.showNotLoaded(kind: .pinnedInHeader, messageText: "Pinned message unavailable")
+        embedView.showNotLoaded(
+          kind: .pinnedInHeader,
+          outgoing: false,
+          isOnlyEmoji: false,
+          style: .replyBubble,
+          messageText: "Pinned message unavailable"
+        )
       }
       observePinnedMessageContent(messageId: messageId)
     } else {
@@ -221,9 +233,21 @@ final class PinnedMessageHeaderView: NSView {
         receiveValue: { [weak self] message in
           guard let self else { return }
           if let message {
-            embedView.update(with: message, kind: .pinnedInHeader)
+            embedView.configure(
+              fullMessage: message,
+              kind: .pinnedInHeader,
+              outgoing: false,
+              isOnlyEmoji: false,
+              style: .replyBubble
+            )
           } else {
-            embedView.showNotLoaded(kind: .pinnedInHeader, messageText: "Pinned message unavailable")
+            embedView.showNotLoaded(
+              kind: .pinnedInHeader,
+              outgoing: false,
+              isOnlyEmoji: false,
+              style: .replyBubble,
+              messageText: "Pinned message unavailable"
+            )
           }
         }
       )
