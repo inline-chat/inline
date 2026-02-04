@@ -7,6 +7,8 @@ import { RealtimeUpdates } from "@in/server/realtime/message"
 // Mock RealtimeUpdates.pushToUser to track what updates are sent
 const mockPushToUser = mock()
 RealtimeUpdates.pushToUser = mockPushToUser
+let emailCounter = 0
+const nextEmail = (label: string) => `${label}-${++emailCounter}@example.com`
 
 describe("sendComposeAction", () => {
   beforeEach(async () => {
@@ -15,8 +17,8 @@ describe("sendComposeAction", () => {
   })
 
   test("should send typing action to DM participant with correct peer encoding", async () => {
-    const user1 = await testUtils.createUser("user1@example.com")
-    const user2 = await testUtils.createUser("user2@example.com")
+    const user1 = await testUtils.createUser(nextEmail("user1"))
+    const user2 = await testUtils.createUser(nextEmail("user2"))
 
     if (!user1 || !user2) throw new Error("Failed to create users")
 
@@ -55,8 +57,8 @@ describe("sendComposeAction", () => {
   })
 
   test("should send stop action (NONE) to DM participant", async () => {
-    const user1 = await testUtils.createUser("user1@example.com")
-    const user2 = await testUtils.createUser("user2@example.com")
+    const user1 = await testUtils.createUser(nextEmail("user1"))
+    const user2 = await testUtils.createUser(nextEmail("user2"))
 
     if (!user1 || !user2) throw new Error("Failed to create users")
 
@@ -94,9 +96,9 @@ describe("sendComposeAction", () => {
 
   test("should send upload action to thread participants with correct peer encoding", async () => {
     const { space, users } = await testUtils.createSpaceWithMembers("Test Space", [
-      "user1@example.com",
-      "user2@example.com",
-      "user3@example.com",
+      nextEmail("user1"),
+      nextEmail("user2"),
+      nextEmail("user3"),
     ])
     const [user1, user2, user3] = users
 
@@ -141,8 +143,8 @@ describe("sendComposeAction", () => {
   })
 
   test("should not send update to sender", async () => {
-    const user1 = await testUtils.createUser("user1@example.com")
-    const user2 = await testUtils.createUser("user2@example.com")
+    const user1 = await testUtils.createUser(nextEmail("user1"))
+    const user2 = await testUtils.createUser(nextEmail("user2"))
 
     if (!user1 || !user2) throw new Error("Failed to create users")
 
@@ -169,8 +171,8 @@ describe("sendComposeAction", () => {
   })
 
   test("should default to NONE action when no action provided", async () => {
-    const user1 = await testUtils.createUser("user1@example.com")
-    const user2 = await testUtils.createUser("user2@example.com")
+    const user1 = await testUtils.createUser(nextEmail("user1"))
+    const user2 = await testUtils.createUser(nextEmail("user2"))
 
     if (!user1 || !user2) throw new Error("Failed to create users")
 
