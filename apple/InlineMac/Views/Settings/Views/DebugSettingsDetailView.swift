@@ -2,6 +2,9 @@ import SwiftUI
 
 struct DebugSettingsDetailView: View {
   @State private var showSyncStats = false
+#if DEBUG
+  @EnvironmentObject private var updateInstallState: UpdateInstallState
+#endif
 
   var body: some View {
     Form {
@@ -10,6 +13,12 @@ struct DebugSettingsDetailView: View {
           showSyncStats = true
         }
       }
+#if DEBUG
+      Section("Updates") {
+        Toggle("Show Update Button", isOn: $updateInstallState.debugForceReady)
+          .toggleStyle(.switch)
+      }
+#endif
     }
     .formStyle(.grouped)
     .scrollContentBackground(.hidden)

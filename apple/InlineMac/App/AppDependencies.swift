@@ -8,6 +8,7 @@ public struct AppDependencies {
   let auth = Auth.shared
   let viewModel = MainWindowViewModel()
   let overlay = OverlayManager()
+  let updateInstallState = UpdateInstallState()
   let navigation = NavigationModel.shared
   let transactions = Transactions.shared
   let realtime = Realtime.shared
@@ -33,6 +34,7 @@ extension View {
     var result = environment(\.auth, deps.auth)
       .environmentObject(deps.viewModel)
       .environmentObject(deps.overlay)
+      .environmentObject(deps.updateInstallState)
       .environmentObject(deps.navigation)
       .environmentObject(deps.nav)
       .environmentObject(deps.data)

@@ -7,14 +7,15 @@ import Sparkle
 final class UpdateController: NSObject {
   private let updater: SPUUpdater
   private let updateDelegate: UpdateDelegate
-  private let userDriver: SPUStandardUserDriver
+  private let userDriver: UpdateUserDriverProxy
   private var settingsCancellable: AnyCancellable?
   private var didStart = false
   private let log = Log.scoped("UpdateController")
 
-  override init() {
+  init(installState: UpdateInstallState) {
     updateDelegate = UpdateDelegate()
-    userDriver = SPUStandardUserDriver(hostBundle: .main, delegate: nil)
+    let standardDriver = SPUStandardUserDriver(hostBundle: .main, delegate: nil)
+    userDriver = UpdateUserDriverProxy(installState: installState, baseDriver: standardDriver)
     updater = SPUUpdater(
       hostBundle: .main,
       applicationBundle: .main,

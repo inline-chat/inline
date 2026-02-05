@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import InlineKit
 import SwiftUI
 
@@ -63,6 +64,20 @@ class MainSidebar: NSViewController, NSMenuDelegate {
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
+
+  private lazy var updateOverlayView: NSHostingView<AnyView> = {
+    let view = NSHostingView(
+      rootView: AnyView(
+        UpdateSidebarOverlayButton()
+          .environmentObject(dependencies.updateInstallState)
+      )
+    )
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.isHidden = true
+    return view
+  }()
+
+  private var updateOverlayCancellable: AnyCancellable?
 
   private lazy var footerStack: NSStackView = {
     let stack = NSStackView()
@@ -318,6 +333,7 @@ class MainSidebar: NSViewController, NSMenuDelegate {
     view.addSubview(archiveTitleLabel)
     view.addSubview(listView)
     view.addSubview(footerView)
+    view.addSubview(updateOverlayView)
     footerView.addSubview(footerStack)
     view.addSubview(archiveEmptyView)
 
@@ -361,6 +377,17 @@ class MainSidebar: NSViewController, NSMenuDelegate {
       footerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
       footerView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
       footerView.heightAnchor.constraint(equalToConstant: Self.footerHeight),
+
+      updateOverlayView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+      updateOverlayView.bottomAnchor.constraint(equalTo: footerView.topAnchor, constant: -16),
+      updateOverlayView.leadingAnchor.constraint(
+        greaterThanOrEqualTo: view.leadingAnchor,
+        constant: Self.outerEdgeInsets
+      ),
+      updateOverlayView.trailingAnchor.constraint(
+        lessThanOrEqualTo: view.trailingAnchor,
+        constant: -Self.outerEdgeInsets
+      ),
 
       footerStack.leadingAnchor.constraint(equalTo: footerView.leadingAnchor, constant: Self.edgeInsets),
       footerStack.trailingAnchor.constraint(equalTo: footerView.trailingAnchor, constant: -Self.edgeInsets),
@@ -415,6 +442,12 @@ class MainSidebar: NSViewController, NSMenuDelegate {
       archiveEmptyView.isHidden = !isArchiveEmpty
       updateArchiveTitle(archiveCount: count)
     }
+
+    updateOverlayCancellable = dependencies.updateInstallState.$isReadyToInstall
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] isReady in
+        self?.updateOverlayView.isHidden = !isReady
+      }
 
     setContent(for: .inbox)
   }
