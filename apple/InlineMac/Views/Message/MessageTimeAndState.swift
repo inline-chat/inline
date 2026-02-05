@@ -156,6 +156,13 @@ class MessageTimeAndState: NSView {
     updateScaleFactors()
   }
 
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    updateTimeContent()
+    updateColorStyles()
+    needsLayout = true
+  }
+
   private func updateScaleFactors() {
     let scale = effectiveScaleFactor
     timeLayer.contentsScale = scale
