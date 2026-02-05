@@ -686,7 +686,7 @@ class MainSidebar: NSViewController, NSMenuDelegate {
   }
 
   @objc private func handleNewThread() {
-    dependencies.nav2?.navigate(to: .newChat)
+    NewThreadAction.start(dependencies: dependencies, spaceId: dependencies.nav2?.activeSpaceId)
   }
 
   private func updateViewOptionsMenuState() {
