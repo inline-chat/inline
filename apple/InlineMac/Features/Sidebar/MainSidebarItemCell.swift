@@ -119,7 +119,6 @@ class MainSidebarItemCell: NSView {
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     setup()
-    setupGestureRecognizers()
     setupTrackingArea()
   }
 
@@ -271,6 +270,9 @@ class MainSidebarItemCell: NSView {
     button.setContentHuggingPriority(.required, for: .horizontal)
     button.setContentCompressionResistancePriority(.required, for: .horizontal)
     button.isHidden = true
+    button.onClick = { [weak self] in
+      self?.handleActionButtonClick()
+    }
 
     return button
   }()
@@ -638,10 +640,20 @@ class MainSidebarItemCell: NSView {
     isHovered = false
   }
 
-  private func setupGestureRecognizers() {
-    let tapGesture = NSClickGestureRecognizer(target: self, action: #selector(handleTap(_:)))
-    tapGesture.delegate = self
-    addGestureRecognizer(tapGesture)
+  override func mouseDown(with event: NSEvent) {
+    let locationInContainer = containerView.convert(event.locationInWindow, from: nil)
+    if !actionButton.isHidden, actionButton.frame.contains(locationInContainer) {
+      handleActionButtonClick()
+      return
+    }
+
+    if let actionItem {
+      handleActionItem(actionItem)
+      return
+    }
+
+    guard let item, let nav2, let peer = item.peerId else { return }
+    nav2.navigate(to: .chat(peer: peer))
   }
 
   private func configureLeadingView() {
@@ -955,23 +967,6 @@ class MainSidebarItemCell: NSView {
     return false
   }
 
-  @objc private func handleTap(_ gesture: NSClickGestureRecognizer) {
-    let location = gesture.location(in: containerView)
-    if !actionButton.isHidden, actionButton.frame.contains(location) {
-      Log.shared.debug("handleTap: button click detected at \(location), button frame: \(actionButton.frame)")
-      handleActionButtonClick()
-      return
-    }
-
-    if let actionItem {
-      handleActionItem(actionItem)
-      return
-    }
-
-    guard let item, let nav2, let peer = item.peerId else { return }
-    nav2.navigate(to: .chat(peer: peer))
-  }
-
   private func handleActionItem(_ action: MainSidebarList.ActionItem) {
     guard let nav2, let dependencies else { return }
     switch action {
@@ -1040,6 +1035,7 @@ private final class SidebarItemActionButton: NSView {
 
   private let imageView = NonDraggableImageView()
   private var accessibilityLabelText = "Action"
+  var onClick: (() -> Void)?
 
   private var trackingArea: NSTrackingArea?
   private var isHovering = false {
@@ -1123,6 +1119,11 @@ private final class SidebarItemActionButton: NSView {
   override func mouseExited(with event: NSEvent) {
     super.mouseExited(with: event)
     isHovering = false
+  }
+
+  override func mouseDown(with event: NSEvent) {
+    super.mouseDown(with: event)
+    onClick?()
   }
 
   private func updateBackground() {
