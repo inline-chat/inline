@@ -6,12 +6,14 @@ public struct InitialsCircle: View, Equatable {
   let name: String
   let size: CGFloat
   let symbol: String?
+  let symbolWeight: Font.Weight
   let emoji: String?
 
   public nonisolated static func == (lhs: InitialsCircle, rhs: InitialsCircle) -> Bool {
     lhs.name == rhs.name &&
       lhs.size == rhs.size &&
       lhs.symbol == rhs.symbol &&
+      lhs.symbolWeight == rhs.symbolWeight &&
       lhs.emoji == rhs.emoji
   }
 
@@ -72,10 +74,17 @@ public struct InitialsCircle: View, Equatable {
     )
   }
 
-  public init(name: String, size: CGFloat = 32, symbol: String? = nil, emoji: String? = nil) {
+  public init(
+    name: String,
+    size: CGFloat = 32,
+    symbol: String? = nil,
+    symbolWeight: Font.Weight = .regular,
+    emoji: String? = nil
+  ) {
     self.name = name
     self.size = size
     self.symbol = symbol
+    self.symbolWeight = symbolWeight
     self.emoji = emoji
   }
 
@@ -97,7 +106,7 @@ public struct InitialsCircle: View, Equatable {
         } else if let symbol {
           Image(systemName: symbol)
             .foregroundColor(foregroundColor.opacity(1.0))
-            .font(.system(size: size * 0.46, weight: .regular))
+            .font(.system(size: size * 0.46, weight: symbolWeight))
         } else {
           Text(initials)
             .foregroundColor(foregroundColor.opacity(1.0))

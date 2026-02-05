@@ -71,8 +71,8 @@ private struct ThreadIcon: View {
           Text(emoji)
             .font(.system(size: emojiPointSize, weight: .regular))
         } else {
-          Image(systemName: "message.fill")
-            .font(.system(size: symbolPointSize, weight: .regular))
+          Image(systemName: "number")
+            .font(.system(size: symbolPointSize, weight: .medium))
             .foregroundColor(Self.symbolForeground)
         }
       }
