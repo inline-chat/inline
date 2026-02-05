@@ -1580,6 +1580,7 @@ extension ComposeAppKit {
 
     // Update compose height
     updateHeight(animate: false)
+    updateSendButtonIfNeeded()
   }
 }
 
