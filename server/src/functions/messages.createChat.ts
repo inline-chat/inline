@@ -1,7 +1,7 @@
 import { db } from "@in/server/db"
 import { chats, chatParticipants } from "@in/server/db/schema/chats"
 import { Log } from "@in/server/utils/log"
-import { eq, sql } from "drizzle-orm"
+import { and, eq, isNull, sql } from "drizzle-orm"
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import { Chat, Dialog } from "@in/protocol/core"
 import { encodeChat } from "@in/server/realtime/encoders/encodeChat"
@@ -83,6 +83,32 @@ export async function createChat(
     }
   }
 
+  const trimmedTitle = input.title?.trim()
+  if (trimmedTitle) {
+    const titleLower = trimmedTitle.toLowerCase()
+    const duplicate = await db
+      .select({ id: chats.id })
+      .from(chats)
+      .where(
+        and(
+          eq(chats.type, "thread"),
+          hasSpaceId
+            ? eq(chats.spaceId, spaceId)
+            : and(isNull(chats.spaceId), eq(chats.createdBy, context.currentUserId)),
+          sql`lower(trim(${chats.title})) = ${titleLower}`,
+        ),
+      )
+      .limit(1)
+
+    if (duplicate.length > 0) {
+      throw new RealtimeRpcError(
+        RealtimeRpcError.Code.BAD_REQUEST,
+        "A thread with that name already exists",
+        400,
+      )
+    }
+  }
+
   let threadNumber: number | null = null
   if (hasSpaceId) {
     const resolvedSpaceId = spaceId as number
@@ -106,7 +132,7 @@ export async function createChat(
       threadNumber: threadNumber,
       emoji: input.emoji ?? null,
       description: input.description ?? null,
-      createdBy: hasSpaceId ? null : context.currentUserId,
+      createdBy: context.currentUserId,
     })
     .returning()
 

@@ -54,7 +54,7 @@ describe("messages.createChat", () => {
     // Test function directly
     const functionResult = await createChat(
       {
-        title: "Public Chat",
+        title: "Public Chat 2",
         spaceId: BigInt(space.id),
         isPublic: true,
       },
@@ -65,7 +65,7 @@ describe("messages.createChat", () => {
     )
 
     expect(functionResult.chat.isPublic).toBe(true)
-    expect(functionResult.chat.title).toBe("Public Chat")
+    expect(functionResult.chat.title).toBe("Public Chat 2")
   })
 
   test("should create private chat with participants", async () => {
@@ -99,7 +99,7 @@ describe("messages.createChat", () => {
     // Test function directly
     const functionResult = await createChat(
       {
-        title: "Private Chat",
+        title: "Private Chat 2",
         spaceId: BigInt(space.id),
         isPublic: false,
         participants: [{ userId: BigInt(otherUser.id) }],
@@ -111,7 +111,7 @@ describe("messages.createChat", () => {
     )
 
     expect(functionResult.chat.isPublic).toBe(false)
-    expect(functionResult.chat.title).toBe("Private Chat")
+    expect(functionResult.chat.title).toBe("Private Chat 2")
   })
 
   test("should create home thread with participants and creator", async () => {
@@ -183,6 +183,40 @@ describe("messages.createChat", () => {
         {
           ...mockFunctionContext,
           currentUserId: currentUser.id,
+        },
+      ),
+    ).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+  })
+
+  test("rejects duplicate thread names in the same space (case-insensitive)", async () => {
+    const space = await testUtils.createSpace()
+    if (!space) throw new Error("Failed to create space")
+
+    const user = await testUtils.createUser("dup-space-owner@example.com")
+    if (!user) throw new Error("Failed to create user")
+
+    await createChat(
+      {
+        title: "Design",
+        spaceId: BigInt(space.id),
+        isPublic: true,
+      },
+      {
+        ...mockFunctionContext,
+        currentUserId: user.id,
+      },
+    )
+
+    await expect(
+      createChat(
+        {
+          title: "design",
+          spaceId: BigInt(space.id),
+          isPublic: true,
+        },
+        {
+          ...mockFunctionContext,
+          currentUserId: user.id,
         },
       ),
     ).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })

@@ -1,6 +1,6 @@
 import { db } from "@in/server/db"
 import { and, eq, not } from "drizzle-orm"
-import { users } from "@in/server/db/schema"
+import { lower, users } from "@in/server/db/schema"
 import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
@@ -32,7 +32,7 @@ export const checkUsernameAvailable = async (username: string, context: { userId
   const normalizedUsername = username.toLowerCase().trim()
   const result = await db._query.users.findFirst({
     where: and(
-      eq(users.username, normalizedUsername),
+      eq(lower(users.username), normalizedUsername),
       // If the user ID is provided, we don't want to check against the current user
       not(eq(users.id, context.userId ?? 0)),
     ),
