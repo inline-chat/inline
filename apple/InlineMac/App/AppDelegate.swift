@@ -21,7 +21,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   private let launchAtLoginController = LaunchAtLoginController()
 
 #if SPARKLE
-  private lazy var updateController = UpdateController(installState: dependencies.updateInstallState)
+  private var updateController: UpdateController?
 #endif
 
   // --
@@ -53,7 +53,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     setupNotificationsSoundSetting()
     launchAtLoginController.start()
 #if SPARKLE
-    updateController.startIfNeeded()
+    Task { @MainActor in
+      ensureUpdateController()
+      updateController?.startIfNeeded()
+    }
 #endif
     Task { @MainActor in
       self.dockBadgeService.start()
@@ -80,7 +83,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
 #if SPARKLE
   @objc func checkForUpdates(_ sender: Any?) {
-    updateController.checkForUpdates()
+    Task { @MainActor in
+      ensureUpdateController()
+      updateController?.checkForUpdates()
+    }
+  }
+#endif
+
+#if SPARKLE
+  @MainActor private func ensureUpdateController() {
+    if updateController == nil {
+      updateController = UpdateController(installState: dependencies.updateInstallState)
+    }
   }
 #endif
 
