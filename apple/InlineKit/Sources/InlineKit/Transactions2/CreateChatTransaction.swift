@@ -15,7 +15,7 @@ public struct CreateChatTransaction: Transaction2 {
     public var title: String
     public var emoji: String?
     public var isPublic: Bool
-    public var spaceId: Int64
+    public var spaceId: Int64?
     public var participants: [Int64]
   }
 
@@ -25,14 +25,14 @@ public struct CreateChatTransaction: Transaction2 {
 
   private var log = Log.scoped("Transactions/CreateChat")
 
-  public init(title: String, emoji: String?, isPublic: Bool, spaceId: Int64, participants: [Int64]) {
+  public init(title: String, emoji: String?, isPublic: Bool, spaceId: Int64?, participants: [Int64]) {
     context = Context(title: title, emoji: emoji, isPublic: isPublic, spaceId: spaceId, participants: participants)
   }
 
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
     .createChat(.with {
       $0.title = context.title
-      $0.spaceID = context.spaceId
+      if let spaceId = context.spaceId { $0.spaceID = spaceId }
       if let emoji = context.emoji { $0.emoji = emoji }
       $0.isPublic = context.isPublic
       $0.participants = context.participants.map { userId in
@@ -83,7 +83,7 @@ public extension Transaction2 where Self == CreateChatTransaction {
     title: String,
     emoji: String?,
     isPublic: Bool,
-    spaceId: Int64,
+    spaceId: Int64?,
     participants: [Int64]
   ) -> CreateChatTransaction {
     CreateChatTransaction(title: title, emoji: emoji, isPublic: isPublic, spaceId: spaceId, participants: participants)
