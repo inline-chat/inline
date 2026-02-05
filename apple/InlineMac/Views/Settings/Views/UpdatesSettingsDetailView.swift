@@ -3,7 +3,6 @@ import SwiftUI
 
 struct UpdatesSettingsDetailView: View {
   @StateObject private var appSettings = AppSettings.shared
-
   var body: some View {
     Form {
       #if SPARKLE

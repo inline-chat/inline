@@ -15,6 +15,7 @@ struct SpaceSidebar: View {
   @State var searchQuery: String = ""
 
   var spaceId: Int64
+  private static let updateOverlayBottomPadding: CGFloat = 42 + 16
 
   enum Tab: String, Hashable {
     case archive
@@ -135,6 +136,11 @@ struct SpaceSidebar: View {
       .animation(.smoothSnappy, value: items)
       .listRowBackground(Color.clear)
       .listStyle(.sidebar)
+      .overlay(alignment: .bottom) {
+        UpdateSidebarOverlayButton()
+          .padding(.horizontal, Theme.sidebarItemOuterSpacing)
+          .padding(.bottom, Self.updateOverlayBottomPadding)
+      }
       .safeAreaInset(
         edge: .bottom,
         content: {

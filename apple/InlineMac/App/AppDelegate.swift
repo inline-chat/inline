@@ -21,7 +21,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   private let launchAtLoginController = LaunchAtLoginController()
 
 #if SPARKLE
-  private lazy var updateController = UpdateController()
+  private lazy var updateController = UpdateController(installState: dependencies.updateInstallState)
 #endif
 
   // --

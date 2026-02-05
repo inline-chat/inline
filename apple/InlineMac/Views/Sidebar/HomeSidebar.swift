@@ -25,6 +25,7 @@ struct HomeSidebar: View {
   @State private var keyMonitorSearchUnsubscriber: (() -> Void)?
   @State private var keyMonitorVimUnsubscriber: (() -> Void)?
   @State private var hasRestoredSpaceSelection = false
+  private static let updateOverlayBottomPadding: CGFloat = 42 + 16
 
   // MARK: - Initializer
 
@@ -134,6 +135,11 @@ struct HomeSidebar: View {
 
       // Bottom tabs
       tabs
+    }
+    .overlay(alignment: .bottom) {
+      UpdateSidebarOverlayButton()
+        .padding(.horizontal, Theme.sidebarItemOuterSpacing)
+        .padding(.bottom, Self.updateOverlayBottomPadding)
     }
     .onChange(of: nav.currentRoute) { _ in
       DispatchQueue.main.async {
