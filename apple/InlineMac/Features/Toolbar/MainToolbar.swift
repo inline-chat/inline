@@ -527,6 +527,10 @@ private struct ChatToolbarMenu: View {
     .buttonStyle(ToolbarButtonStyle())
     .menuIndicator(.hidden)
     .fixedSize()
+    .onReceive(NotificationCenter.default.publisher(for: .renameThread)) { _ in
+      guard peer.isThread, model.canRename else { return }
+      showRenameSheet = true
+    }
     .sheet(isPresented: $showRenameSheet) {
       RenameChatSheet(peer: peer)
     }

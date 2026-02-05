@@ -3,6 +3,7 @@ import Combine
 import InlineKit
 import InlineUI
 import Logger
+import Observation
 import SwiftUI
 
 private enum QuickSearchLayout {
@@ -50,9 +51,74 @@ fileprivate enum QuickSearchLocalItem: Identifiable, Hashable {
   }
 }
 
+
+fileprivate struct QuickSearchCommandContext: Equatable {
+  var route: Nav2Route?
+  var activeTab: TabId?
+  var hasSelectedMessage: Bool
+
+  init(route: Nav2Route? = nil, activeTab: TabId? = nil, hasSelectedMessage: Bool = false) {
+    self.route = route
+    self.activeTab = activeTab
+    self.hasSelectedMessage = hasSelectedMessage
+  }
+
+  var activePeer: Peer? {
+    guard let route else { return nil }
+    if case let .chat(peer) = route {
+      return peer
+    }
+    return nil
+  }
+
+  var hasOpenChat: Bool {
+    guard let route else { return false }
+    if case .chat = route {
+      return true
+    }
+    return false
+  }
+
+  var hasOpenThread: Bool {
+    activePeer?.isThread == true
+  }
+
+  var hasSelectedSpace: Bool {
+    guard let activeTab else { return false }
+    if case .space = activeTab {
+      return true
+    }
+    return false
+  }
+}
+
+fileprivate enum QuickSearchCommandCondition: Hashable {
+  case always
+  case chatOpen
+  case threadOpen
+  case spaceSelected
+  case messageSelected
+
+  func isSatisfied(by context: QuickSearchCommandContext) -> Bool {
+    switch self {
+      case .always:
+        true
+      case .chatOpen:
+        context.hasOpenChat
+      case .threadOpen:
+        context.hasOpenThread
+      case .spaceSelected:
+        context.hasSelectedSpace
+      case .messageSelected:
+        context.hasSelectedMessage
+    }
+  }
+}
+
 fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashable {
   case settings
   case newThread
+  case renameThread
   case newSpace
 
   var id: String {
@@ -65,6 +131,8 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
         "Settings"
       case .newThread:
         "New thread"
+      case .renameThread:
+        "Rename thread"
       case .newSpace:
         "New space"
     }
@@ -80,6 +148,8 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
         "gearshape"
       case .newThread:
         "bubble.left.and.bubble.right.fill"
+      case .renameThread:
+        "pencil"
       case .newSpace:
         "square.stack.3d.up.fill"
     }
@@ -91,12 +161,28 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
         ["prefs", "preferences", "settings", "config", "configuration"]
       case .newThread:
         ["new", "thread", "chat", "message", "conversation"]
+      case .renameThread:
+        ["rename", "thread", "chat", "title", "name"]
       case .newSpace:
         ["new", "space", "workspace", "team"]
     }
   }
 
+  var condition: QuickSearchCommandCondition {
+    switch self {
+      case .settings, .newThread, .newSpace:
+        .always
+      case .renameThread:
+        .threadOpen
+    }
+  }
+
+  func isAvailable(in context: QuickSearchCommandContext) -> Bool {
+    condition.isSatisfied(by: context)
+  }
+
   func matches(_ query: String) -> Bool {
+
     let normalized = query.lowercased()
     if title.lowercased().contains(normalized) {
       return true
@@ -116,6 +202,7 @@ final class QuickSearchViewModel: ObservableObject {
 
   private let dependencies: AppDependencies
   @Published private var spaceResults: [Space] = []
+  @Published private var commandContext = QuickSearchCommandContext()
   private var spaceSearchToken = UUID()
   private var cancellables = Set<AnyCancellable>()
 
@@ -124,6 +211,7 @@ final class QuickSearchViewModel: ObservableObject {
     localSearch = HomeSearchViewModel(db: dependencies.database)
     globalSearch = GlobalSearch()
     bindSearchUpdates()
+    bindCommandContext()
   }
 
   fileprivate var localResults: [QuickSearchLocalItem] {
@@ -304,7 +392,10 @@ final class QuickSearchViewModel: ObservableObject {
   private var commandResults: [QuickSearchCommand] {
     let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
     guard trimmedQuery.isEmpty == false else { return [] }
-    return QuickSearchCommand.allCases.filter { $0.matches(trimmedQuery) }
+    let context = commandContext
+    return QuickSearchCommand.allCases
+      .filter { $0.isAvailable(in: context) }
+      .filter { $0.matches(trimmedQuery) }
   }
 
   private func searchSpaces(query: String) {
@@ -340,11 +431,33 @@ final class QuickSearchViewModel: ObservableObject {
       case .settings:
         SettingsWindowController.show(using: dependencies)
       case .newThread:
-        dependencies.nav2?.navigate(to: .newChat)
+        NewThreadAction.start(dependencies: dependencies, spaceId: dependencies.nav2?.activeSpaceId)
+      case .renameThread:
+        NotificationCenter.default.post(name: .renameThread, object: nil)
       case .newSpace:
         dependencies.nav2?.navigate(to: .createSpace)
     }
   }
+
+  private func bindCommandContext() {
+    guard let nav2 = dependencies.nav2 else { return }
+    withObservationTracking { [weak self] in
+      guard let self else { return }
+      let context = QuickSearchCommandContext(
+        route: nav2.currentRoute,
+        activeTab: nav2.activeTab,
+        hasSelectedMessage: false
+      )
+      if commandContext != context {
+        commandContext = context
+      }
+    } onChange: { [weak self] in
+      Task { @MainActor [weak self] in
+        self?.bindCommandContext()
+      }
+    }
+  }
+
 }
 
 struct QuickSearchOverlayView: View {
