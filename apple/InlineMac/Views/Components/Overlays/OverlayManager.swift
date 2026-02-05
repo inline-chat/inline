@@ -26,6 +26,7 @@ final class OverlayManager: ObservableObject, ToastPresenting {
   private var toastTopConstraint: NSLayoutConstraint?
   private var toastModel: ToastModel?
   private var dismissTask: Task<Void, Never>?
+  private let toastYOffset: CGFloat = 80
   private let toastVisibleTopOffset: CGFloat = 18
   private let toastHiddenTopOffset: CGFloat = 8
 
@@ -78,7 +79,7 @@ final class OverlayManager: ObservableObject, ToastPresenting {
     NSAnimationContext.runAnimationGroup { ctx in
       ctx.duration = 0.2
       host.animator().alphaValue = 0
-      topConstraint?.animator().constant = toastHiddenTopOffset
+      topConstraint?.animator().constant = toastHiddenTopOffset + toastYOffset
       containerView?.animator().layoutSubtreeIfNeeded()
     } completionHandler: { [weak self] in
       host.removeFromSuperview()
@@ -127,7 +128,7 @@ final class OverlayManager: ObservableObject, ToastPresenting {
       toastHostingView = host
       containerView.addSubview(host)
 
-      let topConstraint = host.topAnchor.constraint(equalTo: containerView.topAnchor, constant: toastHiddenTopOffset)
+      let topConstraint = host.topAnchor.constraint(equalTo: containerView.topAnchor, constant: toastHiddenTopOffset + toastYOffset)
       toastTopConstraint = topConstraint
       NSLayoutConstraint.activate([
         topConstraint,
@@ -140,7 +141,7 @@ final class OverlayManager: ObservableObject, ToastPresenting {
     NSAnimationContext.runAnimationGroup { ctx in
       ctx.duration = 0.2
       host.animator().alphaValue = 1
-      toastTopConstraint?.animator().constant = toastVisibleTopOffset
+      toastTopConstraint?.animator().constant = toastVisibleTopOffset + toastYOffset
       containerView.animator().layoutSubtreeIfNeeded()
     }
 
