@@ -57,6 +57,9 @@ class ComposeAppKit: NSView {
   private var currentMentionRange: MentionRange?
   private var mentionKeyMonitorEscUnsubscribe: (() -> Void)?
   private var mentionMenuConstraints: [NSLayoutConstraint] = []
+  private var pendingAutoAddParticipants: Set<Int64> = []
+
+  private static let mentionAutoAddLimit = 10
 
   // Draft
   private var draftDebounceTask: Task<Void, Never>?
@@ -363,14 +366,13 @@ class ComposeAppKit: NSView {
   // MARK: - Mention Completion
 
   private func setupMentionCompletion() {
-    guard let chatId else {
-      return
-    }
+    guard let chatId else { return }
 
     // Initialize chat participants view model
     chatParticipantsViewModel = InlineKit.ChatParticipantsWithMembersViewModel(
       db: dependencies.database,
-      chatId: chatId
+      chatId: chatId,
+      purpose: .mentionCandidates
     )
 
     // Create mention completion menu
@@ -892,6 +894,8 @@ class ComposeAppKit: NSView {
 
     // Edit message
     if let editingMessageId {
+      autoAddMentionedUsersIfNeeded(from: entities)
+
       // Edit message
       Task.detached(priority: .userInitiated) { // @MainActor in
         try await Api.realtime.send(.editMessage(
@@ -951,6 +955,8 @@ class ComposeAppKit: NSView {
 
     // Send message
     else if attachmentItemsSnapshot.isEmpty {
+      autoAddMentionedUsersIfNeeded(from: entities)
+
       // Text-only
       // Send via V2
       Task.detached(priority: .userInitiated) { // @MainActor in
@@ -984,6 +990,7 @@ class ComposeAppKit: NSView {
 
     // With image/file/video
     else {
+      autoAddMentionedUsersIfNeeded(from: entities)
       enqueueAttachments(replyToMessageId: replyToMsgId)
     }
 
@@ -1536,6 +1543,71 @@ extension ComposeAppKit: MentionCompletionMenuDelegate {
   }
 }
 
+private extension ComposeAppKit {
+  @MainActor
+  func autoAddMentionedUsersIfNeeded(from entities: MessageEntities?) {
+    guard let entities else { return }
+    let userIds = Set(
+      entities.entities.compactMap { entity in
+        guard entity.type == .mention else { return nil }
+        return entity.mention.userID
+      }
+    ).filter { $0 != 0 }
+
+    guard !userIds.isEmpty else { return }
+    for userId in userIds {
+      autoAddMentionedUserIfNeeded(userId)
+    }
+  }
+
+  @MainActor
+  func autoAddMentionedUserIfNeeded(_ userId: Int64) {
+    guard let chatId, let chat else { return }
+    guard chat.type == .thread else { return }
+    guard chat.isPublic != true else { return }
+    guard let currentUserId = dependencies.auth.currentUserId, currentUserId != userId else { return }
+    guard pendingAutoAddParticipants.contains(userId) == false else { return }
+
+    pendingAutoAddParticipants.insert(userId)
+
+    Task.detached(priority: .userInitiated) { [weak self] in
+      guard let self else { return }
+      defer {
+        Task { @MainActor in
+          self.pendingAutoAddParticipants.remove(userId)
+        }
+      }
+
+      do {
+        let (messageCount, isParticipant) = try await self.dependencies.database.reader.read { db in
+          let messageCount = try Message
+            .filter(Column("chatId") == chatId)
+            .fetchCount(db)
+          let isParticipant = try ChatParticipant
+            .filter(Column("chatId") == chatId)
+            .filter(Column("userId") == userId)
+            .fetchOne(db) != nil
+          return (messageCount, isParticipant)
+        }
+
+        guard messageCount < Self.mentionAutoAddLimit else {
+          return
+        }
+        guard !isParticipant else { return }
+
+        try await Api.realtime.send(
+          .addChatParticipant(
+            chatID: chatId,
+            userID: userId
+          )
+        )
+      } catch {
+        Log.shared.error("Failed to auto-add mentioned user", error: error)
+      }
+    }
+  }
+}
+
 // MARK: - Rich text loading
 
 extension ComposeAppKit {
@@ -1580,6 +1652,7 @@ extension ComposeAppKit {
 
     // Update compose height
     updateHeight(animate: false)
+
     updateSendButtonIfNeeded()
   }
 }
