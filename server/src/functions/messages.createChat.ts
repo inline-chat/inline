@@ -33,10 +33,11 @@ export async function createChat(
   context: FunctionContext,
 ): Promise<{ chat: Chat; dialog: Dialog }> {
   const hasSpaceId = input.spaceId !== undefined && input.spaceId !== null
-  const spaceId = hasSpaceId ? Number(input.spaceId) : null
-  if (hasSpaceId && Number.isNaN(spaceId)) {
+  const spaceId = hasSpaceId ? Number(input.spaceId) : undefined
+  if (hasSpaceId && (spaceId === undefined || Number.isNaN(spaceId))) {
     throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Space ID is invalid", 400)
   }
+  const resolvedSpaceId = spaceId as number
 
   const isPublic = input.isPublic ?? (hasSpaceId ? true : false)
 
@@ -93,7 +94,7 @@ export async function createChat(
         and(
           eq(chats.type, "thread"),
           hasSpaceId
-            ? eq(chats.spaceId, spaceId)
+            ? eq(chats.spaceId, resolvedSpaceId)
             : and(isNull(chats.spaceId), eq(chats.createdBy, context.currentUserId)),
           sql`lower(trim(${chats.title})) = ${titleLower}`,
         ),
@@ -111,7 +112,6 @@ export async function createChat(
 
   let threadNumber: number | null = null
   if (hasSpaceId) {
-    const resolvedSpaceId = spaceId as number
     const maxThreadNumber: number = await db
       .select({ maxThreadNumber: sql<number>`MAX(${chats.threadNumber})` })
       .from(chats)
@@ -125,7 +125,7 @@ export async function createChat(
     .insert(chats)
     .values({
       type: "thread",
-      spaceId: hasSpaceId ? spaceId : null,
+      spaceId: hasSpaceId ? resolvedSpaceId : null,
       title: input.title,
       publicThread: isPublic,
       date: new Date(),
@@ -160,7 +160,7 @@ export async function createChat(
       .values({
         chatId: chat[0].id,
         userId: context.currentUserId,
-        spaceId: hasSpaceId ? spaceId : null,
+        spaceId: hasSpaceId ? resolvedSpaceId : null,
         date: new Date(),
       })
       .returning()

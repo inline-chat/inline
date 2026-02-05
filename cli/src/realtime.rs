@@ -165,6 +165,7 @@ impl RealtimeClient {
             token: token.to_string(),
             build_number: None,
             layer: None,
+            client_version: Some(env!("CARGO_PKG_VERSION").to_string()),
         };
 
         let message = proto::ClientMessage {

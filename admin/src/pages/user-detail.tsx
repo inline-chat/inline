@@ -197,7 +197,8 @@ export const UserDetailPage = ({ userId }: UserDetailPageProps) => {
                 <tr>
                   <th className="pb-2">Session</th>
                   <th className="pb-2">Client</th>
-                  <th className="pb-2">Version</th>
+                  <th className="pb-2">Client version</th>
+                  <th className="pb-2">OS version</th>
                   <th className="pb-2">Active</th>
                   <th className="pb-2">Created</th>
                   <th className="pb-2">Last active</th>
@@ -212,9 +213,8 @@ export const UserDetailPage = ({ userId }: UserDetailPageProps) => {
                   <tr key={session.id} className="border-t border-border">
                     <td className="py-2">{session.id}</td>
                     <td className="py-2">{session.clientType ?? "N/A"}</td>
-                    <td className="py-2">
-                      {[session.clientVersion, session.osVersion].filter(Boolean).join(" / ") || "N/A"}
-                    </td>
+                    <td className="py-2">{session.clientVersion ?? "N/A"}</td>
+                    <td className="py-2">{session.osVersion ?? "N/A"}</td>
                     <td className="py-2">{session.active ? "Yes" : "No"}</td>
                     <td className="py-2">{session.date ? new Date(session.date).toLocaleString() : "N/A"}</td>
                     <td className="py-2">

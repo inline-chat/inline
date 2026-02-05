@@ -273,7 +273,7 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
         break
 
       case "chatInfo":
-        return {
+        inflatedUpdates.push({
           seq: update.seq,
           date: encodeDateStrict(update.date),
           update: {
@@ -284,10 +284,11 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
               emoji: serverUpdate.update.chatInfo.emoji,
             },
           },
-        }
+        })
+        break
 
       case "pinnedMessages":
-        return {
+        inflatedUpdates.push({
           seq: update.seq,
           date: encodeDateStrict(update.date),
           update: {
@@ -297,7 +298,8 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
               messageIds: serverUpdate.update.pinnedMessages.messageIds,
             },
           },
-        }
+        })
+        break
 
       default:
         log.warn("Unhandled chat update", { type: serverUpdate.update.oneofKind })

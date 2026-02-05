@@ -75,6 +75,12 @@ export interface ConnectionInit {
      * @generated from protobuf field: optional uint32 layer = 3;
      */
     layer?: number;
+    /**
+     * Client version (semver)
+     *
+     * @generated from protobuf field: optional string client_version = 4;
+     */
+    clientVersion?: string;
 }
 /**
  * @generated from protobuf message ServerProtocolMessage
@@ -4237,7 +4243,8 @@ class ConnectionInit$Type extends MessageType<ConnectionInit> {
         super("ConnectionInit", [
             { no: 1, name: "token", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 2, name: "build_number", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
-            { no: 3, name: "layer", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ }
+            { no: 3, name: "layer", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ },
+            { no: 4, name: "client_version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<ConnectionInit>): ConnectionInit {
@@ -4261,6 +4268,9 @@ class ConnectionInit$Type extends MessageType<ConnectionInit> {
                 case /* optional uint32 layer */ 3:
                     message.layer = reader.uint32();
                     break;
+                case /* optional string client_version */ 4:
+                    message.clientVersion = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -4282,6 +4292,9 @@ class ConnectionInit$Type extends MessageType<ConnectionInit> {
         /* optional uint32 layer = 3; */
         if (message.layer !== undefined)
             writer.tag(3, WireType.Varint).uint32(message.layer);
+        /* optional string client_version = 4; */
+        if (message.clientVersion !== undefined)
+            writer.tag(4, WireType.LengthDelimited).string(message.clientVersion);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
