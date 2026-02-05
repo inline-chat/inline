@@ -36,6 +36,11 @@ class ChatTitleToolbar: NSToolbarItem {
     let tf = NSTextField(labelWithString: "")
     tf.font = .systemFont(ofSize: 13, weight: .semibold)
     tf.maximumNumberOfLines = 1
+    tf.usesSingleLineMode = true
+    tf.lineBreakMode = .byTruncatingTail
+    tf.cell?.lineBreakMode = .byTruncatingTail
+    tf.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    tf.setContentHuggingPriority(.defaultLow, for: .horizontal)
     return tf
   }()
 
@@ -43,11 +48,14 @@ class ChatTitleToolbar: NSToolbarItem {
     let tf = NSTextField(string: "")
     tf.font = .systemFont(ofSize: 13, weight: .semibold)
     tf.maximumNumberOfLines = 1
+    tf.usesSingleLineMode = true
     tf.isEditable = true
     tf.isSelectable = true
     tf.isBordered = true
     tf.isBezeled = true
     tf.focusRingType = .default
+    tf.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    tf.setContentHuggingPriority(.defaultLow, for: .horizontal)
     tf.isHidden = true
     return tf
   }()
@@ -57,6 +65,8 @@ class ChatTitleToolbar: NSToolbarItem {
     stack.orientation = .vertical
     stack.alignment = .leading
     stack.spacing = 0
+    stack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    stack.setContentHuggingPriority(.defaultLow, for: .horizontal)
     return stack
   }()
 
@@ -67,6 +77,8 @@ class ChatTitleToolbar: NSToolbarItem {
 
     visibilityPriority = .high
     isBordered = false
+    minSize = NSSize(width: iconSize + 8, height: Theme.toolbarHeight)
+    maxSize = NSSize(width: 600, height: Theme.toolbarHeight)
 
     setupView()
     setupConstraints()
@@ -85,6 +97,9 @@ class ChatTitleToolbar: NSToolbarItem {
     view = containerView
     containerView.addSubview(iconView)
     containerView.addSubview(textStack)
+    containerView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    containerView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    textStack.translatesAutoresizingMaskIntoConstraints = false
     nameEditor.delegate = self
     nameEditor.target = self
     nameEditor.action = #selector(commitTitleEdit)
@@ -251,6 +266,12 @@ final class ChatStatusView: NSView {
     let tf = NSTextField(labelWithString: "")
     tf.font = .systemFont(ofSize: 11)
     tf.textColor = subtitleColor
+    tf.maximumNumberOfLines = 1
+    tf.usesSingleLineMode = true
+    tf.lineBreakMode = .byTruncatingTail
+    tf.cell?.lineBreakMode = .byTruncatingTail
+    tf.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    tf.setContentHuggingPriority(.defaultLow, for: .horizontal)
     tf.translatesAutoresizingMaskIntoConstraints = false
     return tf
   }()
@@ -457,6 +478,8 @@ final class ChatStatusView: NSView {
   private func setupView() {
     translatesAutoresizingMaskIntoConstraints = false
     addSubview(label)
+    setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    setContentHuggingPriority(.defaultLow, for: .horizontal)
 
     NSLayoutConstraint.activate([
       label.leadingAnchor.constraint(equalTo: leadingAnchor),

@@ -1,8 +1,10 @@
 import AppKit
+import QuartzCore
 import Auth
 import Combine
 import GRDB
 import InlineKit
+import InlineMacWindow
 import InlineUI
 import SwiftUI
 import Translation
@@ -35,22 +37,15 @@ extension MainToolbarItems {
   }
 }
 
-final class ToolbarState: ObservableObject {
-  @Published var currentItems: [MainToolbarItemIdentifier]
-
-  init() {
-    currentItems = [.navigationButtons]
-  }
-
-  func update(with items: [MainToolbarItemIdentifier]) {
-    currentItems = items
-  }
-}
-
 class MainToolbarView: NSView {
   private var dependencies: AppDependencies
-  private var hostingView: NSHostingView<ToolbarSwiftUIView>?
-  private var hostingLeadingConstraint: NSLayoutConstraint?
+  private var contentLeadingConstraint: NSLayoutConstraint?
+  private let backgroundView = MainToolbarBackgroundView()
+  private let contentStackView = NSStackView()
+  private var currentItems: [MainToolbarItemIdentifier] = []
+  private var chatTitleToolbar: ChatTitleToolbar?
+  private weak var navBackButton: NSButton?
+  private weak var navForwardButton: NSButton?
 
   init(dependencies: AppDependencies) {
     self.dependencies = dependencies
@@ -64,14 +59,14 @@ class MainToolbarView: NSView {
   }
 
   func update(with toolbar: MainToolbarItems) {
-    state.update(with: toolbar.items)
     transparent = toolbar.transparent
-
-    // Force SwiftUI to refresh in case Observation misses changes from AppKit
-    // hostingView?.rootView = ToolbarSwiftUIView(
-    //   state: state,
-    //   dependencies: dependencies
-    // )
+    let itemsChanged = currentItems != toolbar.items
+    if itemsChanged {
+      currentItems = toolbar.items
+      rebuildContent()
+    }
+    updateNavigationButtonStates()
+    chatTitleToolbar?.configure()
   }
 
   func updateLeadingPadding(
@@ -79,17 +74,17 @@ class MainToolbarView: NSView {
     animated: Bool = false,
     duration: TimeInterval = 0.2
   ) {
-    guard hostingLeadingConstraint?.constant != padding else { return }
+    guard contentLeadingConstraint?.constant != padding else { return }
     if animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
       NSAnimationContext.runAnimationGroup { context in
         context.duration = duration
         context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
         context.allowsImplicitAnimation = true
-        hostingLeadingConstraint?.animator().constant = padding
+        contentLeadingConstraint?.animator().constant = padding
         layoutSubtreeIfNeeded()
       }
     } else {
-      hostingLeadingConstraint?.constant = padding
+      contentLeadingConstraint?.constant = padding
       layoutSubtreeIfNeeded()
     }
   }
@@ -99,13 +94,10 @@ class MainToolbarView: NSView {
   var transparent: Bool = false {
     didSet {
       updateLayer()
-      hostingView?.isHidden = transparent
+      contentStackView.isHidden = transparent
+      backgroundView.isHidden = transparent
     }
   }
-
-  // MARK: - State
-
-  var state = ToolbarState()
 
   // MARK: - Setup
 
@@ -113,27 +105,29 @@ class MainToolbarView: NSView {
     wantsLayer = true
     layer?.backgroundColor = .clear
 
-    // Add SwiftUI view to the toolbar
-    let hostingView = NSHostingView(
-      rootView: ToolbarSwiftUIView(
-        state: state,
-        dependencies: dependencies
-      )
-    )
-    self.hostingView = hostingView
-    hostingView.translatesAutoresizingMaskIntoConstraints = false
-    hostingView.setContentHuggingPriority(
-      .defaultLow,
-      for: .horizontal
-    )
-    addSubview(hostingView)
-    let leadingConstraint = hostingView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10)
-    hostingLeadingConstraint = leadingConstraint
+    backgroundView.translatesAutoresizingMaskIntoConstraints = false
+    addSubview(backgroundView)
+
+    contentStackView.translatesAutoresizingMaskIntoConstraints = false
+    contentStackView.orientation = .horizontal
+    contentStackView.alignment = .centerY
+    contentStackView.spacing = 12
+    contentStackView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    addSubview(contentStackView)
+
+    let leadingConstraint = contentStackView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10)
+    contentLeadingConstraint = leadingConstraint
     NSLayoutConstraint.activate([
+      backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      backgroundView.topAnchor.constraint(equalTo: topAnchor),
+      backgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
       leadingConstraint,
-      hostingView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      hostingView.topAnchor.constraint(equalTo: topAnchor),
-      hostingView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      contentStackView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+      contentStackView.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
+      contentStackView.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor),
+      contentStackView.centerYAnchor.constraint(equalTo: centerYAnchor),
     ])
   }
 
@@ -143,141 +137,258 @@ class MainToolbarView: NSView {
     layer?.backgroundColor = .clear
     super.updateLayer()
   }
+
+  private func rebuildContent() {
+    chatTitleToolbar = nil
+    for view in contentStackView.arrangedSubviews {
+      contentStackView.removeArrangedSubview(view)
+      view.removeFromSuperview()
+    }
+
+    for item in currentItems {
+      guard let view = makeView(for: item) else { continue }
+      contentStackView.addArrangedSubview(view)
+    }
+  }
+
+  private func makeView(for item: MainToolbarItemIdentifier) -> NSView? {
+    switch item {
+      case .navigationButtons:
+        return makeNavigationButtonsView()
+
+      case let .translationIcon(peer):
+        return makeHostingView(
+          TranslationButton(peer: peer)
+            .buttonStyle(ToolbarButtonStyle())
+            .id(peer.id)
+        )
+
+      case let .nudge(peer):
+        return makeHostingView(
+          NudgeButton(peer: peer)
+            .buttonStyle(ToolbarButtonStyle())
+            .id(peer.id)
+        )
+
+      case let .participants(peer):
+        return makeHostingView(
+          ParticipantsToolbarButton(peer: peer, dependencies: dependencies)
+            .id(peer.id)
+        )
+
+      case let .chatTitle(peer):
+        let toolbarItem = ChatTitleToolbar(peer: peer, dependencies: dependencies)
+        chatTitleToolbar = toolbarItem
+        guard let view = toolbarItem.view else { return nil }
+        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        view.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return view
+
+      case .spacer:
+        return makeSpacerView()
+
+      case .title:
+        return makeTitlePlaceholderView()
+
+      case let .menu(peer):
+        return makeHostingView(
+          ChatToolbarMenu(
+            peer: peer,
+            database: dependencies.database,
+            spaceId: dependencies.nav2?.activeSpaceId,
+            dependencies: dependencies
+          )
+          .id(peer.id)
+        )
+    }
+  }
+
+  private func makeHostingView<Content: View>(_ view: Content) -> NSView {
+    let hostingView = NSHostingView(
+      rootView: ToolbarHostingContainer(content: view)
+        .ignoresSafeArea()
+    )
+    hostingView.translatesAutoresizingMaskIntoConstraints = false
+    return hostingView
+  }
+
+  private func makeNavigationButtonsView() -> NSView {
+    let stack = NSStackView()
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    stack.orientation = .horizontal
+    stack.alignment = .centerY
+    stack.spacing = 0
+
+    let backButton = ToolbarIconButton(
+      systemName: "chevron.left",
+      target: self,
+      action: #selector(handleBack)
+    )
+    let forwardButton = ToolbarIconButton(
+      systemName: "chevron.right",
+      target: self,
+      action: #selector(handleForward)
+    )
+
+    navBackButton = backButton
+    navForwardButton = forwardButton
+    updateNavigationButtonStates()
+
+    stack.addArrangedSubview(backButton)
+    stack.addArrangedSubview(forwardButton)
+    return stack
+  }
+
+  private func makeSpacerView() -> NSView {
+    let spacer = ToolbarDragAreaView()
+    spacer.translatesAutoresizingMaskIntoConstraints = false
+    spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    spacer.widthAnchor.constraint(greaterThanOrEqualToConstant: 0).isActive = true
+    return spacer
+  }
+
+  private func makeTitlePlaceholderView() -> NSView {
+    let view = NSView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.widthAnchor.constraint(equalToConstant: 0).isActive = true
+    return view
+  }
+
+  private func updateNavigationButtonStates() {
+    navBackButton?.isEnabled = dependencies.nav2?.canGoBack ?? false
+    navForwardButton?.isEnabled = dependencies.nav2?.canGoForward ?? false
+  }
+
+  @objc private func handleBack() {
+    dependencies.nav2?.goBack()
+  }
+
+  @objc private func handleForward() {
+    dependencies.nav2?.goForward()
+  }
 }
 
-// Swift UI representation of the toolbar
-struct ToolbarSwiftUIView: View {
-  @ObservedObject var state: ToolbarState
-  var dependencies: AppDependencies
-
-  private enum ToolbarButtonMetrics {
-    static let symbolSize: CGFloat = 14
-    static let size: CGFloat = 28
+private final class MainToolbarBackgroundView: NSView {
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    wantsLayer = true
   }
 
-  var body: some View {
-    ZStack(alignment: .leading) {
-      toolbarBackground
-      toolbarContent
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.trailing, 10)
+  required init?(coder: NSCoder) {
+    super.init(coder: coder)
+    wantsLayer = true
+  }
+
+  override var wantsUpdateLayer: Bool {
+    true
+  }
+
+  override func makeBackingLayer() -> CALayer {
+    CAGradientLayer()
+  }
+
+  override func updateLayer() {
+    guard let gradientLayer = layer as? CAGradientLayer else { return }
+    let baseColor = Theme.windowContentBackgroundColor
+    gradientLayer.colors = [
+      baseColor.withAlphaComponent(1).cgColor,
+      baseColor.withAlphaComponent(0.97).cgColor,
+      baseColor.withAlphaComponent(0.9).cgColor,
+      baseColor.withAlphaComponent(0.35).cgColor,
+      baseColor.withAlphaComponent(0).cgColor,
+    ]
+    gradientLayer.locations = [0, 0.2, 0.5, 0.85, 1]
+    gradientLayer.startPoint = CGPoint(x: 0.5, y: 1)
+    gradientLayer.endPoint = CGPoint(x: 0.5, y: 0)
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    updateLayer()
+  }
+}
+
+private final class ToolbarIconButton: NSButton {
+  init(systemName: String, target: AnyObject?, action: Selector?) {
+    super.init(frame: .zero)
+    configure(systemName: systemName, target: target, action: action)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override var isHighlighted: Bool {
+    didSet { updateAlpha() }
+  }
+
+  override var isEnabled: Bool {
+    didSet { updateAlpha() }
+  }
+
+  private func configure(systemName: String, target: AnyObject?, action: Selector?) {
+    translatesAutoresizingMaskIntoConstraints = false
+    isBordered = false
+    bezelStyle = .regularSquare
+    imagePosition = .imageOnly
+    setButtonType(.momentaryChange)
+    contentTintColor = .secondaryLabelColor
+    imageScaling = .scaleProportionallyDown
+    self.target = target
+    self.action = action
+
+    if let image = NSImage(systemSymbolName: systemName, accessibilityDescription: nil) {
+      let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .semibold, scale: .medium)
+      self.image = image.withSymbolConfiguration(config)
     }
-    .frame(height: Theme.toolbarHeight)
-    .ignoresSafeArea()
+
+    widthAnchor.constraint(equalToConstant: 28).isActive = true
+    heightAnchor.constraint(equalToConstant: 28).isActive = true
+    updateAlpha()
   }
 
-  private var toolbarBackground: some View {
-    let baseColor = Color(nsColor: Theme.windowContentBackgroundColor)
-    return LinearGradient(
-      gradient: Gradient(stops: [
-        .init(color: baseColor.opacity(1), location: 0),
-        .init(color: baseColor.opacity(0.97), location: 0.2),
-        .init(color: baseColor.opacity(0.9), location: 0.5),
-        .init(color: baseColor.opacity(0.35), location: 0.85),
-        .init(color: baseColor.opacity(0), location: 1),
-      ]),
-      startPoint: .top,
-      endPoint: .bottom
-    )
+  private func updateAlpha() {
+    if isHighlighted {
+      alphaValue = 0.7
+    } else {
+      alphaValue = isEnabled ? 1 : 0.35
+    }
+  }
+}
+
+private final class ToolbarDragAreaView: NSView {
+  override var mouseDownCanMoveWindow: Bool {
+    false
   }
 
-  @ViewBuilder
-  private var toolbarContent: some View {
-    HStack(spacing: 12) {
-      ForEach(state.currentItems, id: \.self) { item in
-        switch item {
-          case .navigationButtons:
-            navigationButtons
+  override func mouseDown(with event: NSEvent) {
+    window?.beginWindowDrag(with: event)
+  }
 
-          case let .translationIcon(peer):
-            if #available(macOS 26.0, *) {
-              TranslationButton(peer: peer)
-                .buttonStyle(ToolbarButtonStyle())
-                // .padding(.horizontal, 0)
-                // .frame(height: Theme.toolbarHeight)
-                .id(peer.id)
-            } else {
-              TranslationButton(peer: peer)
-                .buttonStyle(ToolbarButtonStyle())
-                // .frame(height: Theme.toolbarHeight - 8)
-                .id(peer.id)
-            }
-
-          case let .nudge(peer):
-            if #available(macOS 26.0, *) {
-              NudgeButton(peer: peer)
-                .buttonStyle(ToolbarButtonStyle())
-                .id(peer.id)
-            } else {
-              NudgeButton(peer: peer)
-                .buttonStyle(ToolbarButtonStyle())
-                .id(peer.id)
-            }
-
-          case let .participants(peer):
-            ParticipantsToolbarButton(peer: peer, dependencies: dependencies)
-              .id(peer.id)
-
-          case let .chatTitle(peer):
-            ChatTitleToolbarRepresentable(peer: peer, dependencies: dependencies)
-              .id(peer.id)
-
-          case .spacer:
-            Spacer()
-
-          case .title:
-            EmptyView()
-
-          case let .menu(peer):
-            ChatToolbarMenu(
-              peer: peer,
-              database: dependencies.database,
-              spaceId: dependencies.nav2?.activeSpaceId,
-              dependencies: dependencies
-            )
-            .id(peer.id)
-        }
+  override func mouseUp(with event: NSEvent) {
+    if event.clickCount == 2 {
+      let action = UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") ?? "Maximize"
+      if action == "Minimize" {
+        window?.performMiniaturize(nil)
+      } else {
+        window?.performZoom(nil)
       }
     }
   }
+}
 
-  private var navigationBackButton: some View {
-    navigationButton(
-      systemName: "chevron.left",
-      isEnabled: dependencies.nav2?.canGoBack ?? false
-    ) {
-      dependencies.nav2?.goBack()
-    }
-  }
+private struct ToolbarHostingContainer<Content: View>: View {
+  let content: Content
 
-  private var navigationButtons: some View {
-    HStack(spacing: 0) {
-      navigationBackButton
-      navigationForwardButton
+  var body: some View {
+    VStack(spacing: 0) {
+      Spacer(minLength: 0)
+      content
+      Spacer(minLength: 0)
     }
-  }
-
-  private var navigationForwardButton: some View {
-    navigationButton(
-      systemName: "chevron.right",
-      isEnabled: dependencies.nav2?.canGoForward ?? false
-    ) {
-      dependencies.nav2?.goForward()
-    }
-  }
-
-  private func navigationButton(
-    systemName: String,
-    isEnabled: Bool,
-    action: @escaping () -> Void
-  ) -> some View {
-    Button(action: action) {
-      Image(systemName: systemName)
-    }
-    .buttonStyle(ToolbarButtonStyle())
-    .contentShape(Rectangle())
-    .opacity(isEnabled ? 1 : 0.35)
-    .disabled(!isEnabled)
+    .frame(height: Theme.toolbarHeight)
   }
 }
 
@@ -427,29 +538,5 @@ private struct ChatToolbarMenu: View {
     } else {
       dependencies.nav.open(.chatInfo(peer: peer))
     }
-  }
-}
-
-// Bridge the existing AppKit chat title toolbar into SwiftUI
-private struct ChatTitleToolbarRepresentable: NSViewRepresentable {
-  let peer: Peer
-  let dependencies: AppDependencies
-
-  func makeCoordinator() -> Coordinator {
-    Coordinator()
-  }
-
-  func makeNSView(context: Context) -> NSView {
-    let toolbarItem = ChatTitleToolbar(peer: peer, dependencies: dependencies)
-    context.coordinator.toolbarItem = toolbarItem
-    return toolbarItem.view ?? NSView()
-  }
-
-  func updateNSView(_ nsView: NSView, context: Context) {
-    context.coordinator.toolbarItem?.configure()
-  }
-
-  class Coordinator {
-    var toolbarItem: ChatTitleToolbar?
   }
 }
