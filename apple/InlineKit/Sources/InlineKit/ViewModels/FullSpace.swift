@@ -29,7 +29,7 @@ public struct SpaceChatItem: Codable, FetchableRecord, PersistableRecord, Sendab
     if let user {
       user.fullName
     } else {
-      chat?.title ?? nil
+      chat?.humanReadableTitle
     }
   }
 
