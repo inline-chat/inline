@@ -62,7 +62,8 @@ class MentionManager: NSObject {
   private func setupParticipantsViewModel() {
     chatParticipantsViewModel = ChatParticipantsWithMembersViewModel(
       db: database,
-      chatId: chatId
+      chatId: chatId,
+      purpose: .mentionCandidates
     )
 
     // Subscribe to participants updates
