@@ -1,0 +1,4 @@
+interface:
+  display_name: "Run Checks"
+  short_description: "Run static and pre-push checks"
+  default_prompt: "Run applicable static checks and high-level validation for the current changes before production push. Determine impacted areas and execute the right commands, then summarize results and gaps."
