@@ -1,3 +1,4 @@
+import Auth
 import Combine
 import GRDB
 import Logger
@@ -88,7 +89,7 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
           }
 
           log.debug("🔍 Home thread, fetching chat participants")
-          return try ChatParticipant
+          let participants = try ChatParticipant
             .including(
               required: ChatParticipant.user
                 .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
@@ -96,6 +97,58 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
             .filter(Column("chatId") == chatId)
             .asRequest(of: UserInfo.self)
             .fetchAll(db)
+
+          if purpose == .mentionCandidates {
+            let currentUserId = Auth.shared.getCurrentUserId()
+            let nonSelfParticipants = participants.filter { participant in
+              if participant.user.pendingSetup == true {
+                return false
+              }
+              if let currentUserId {
+                return participant.user.id != currentUserId
+              }
+              return true
+            }
+
+            if nonSelfParticipants.isEmpty {
+              log.debug("🔍 Home thread mention candidates empty, falling back to local users")
+              let users = try User
+                .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
+                .asRequest(of: UserInfo.self)
+                .fetchAll(db)
+
+              return users.filter { userInfo in
+                if userInfo.user.pendingSetup == true {
+                  return false
+                }
+                if let currentUserId {
+                  return userInfo.user.id != currentUserId
+                }
+                return true
+              }
+            }
+          }
+
+          return participants
+        }
+
+        if purpose == .mentionCandidates {
+          log.debug("🔍 Missing chat, falling back to local users for mention candidates")
+          let users = try User
+            .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
+            .asRequest(of: UserInfo.self)
+            .fetchAll(db)
+
+          let currentUserId = Auth.shared.getCurrentUserId()
+          return users.filter { userInfo in
+            if userInfo.user.pendingSetup == true {
+              return false
+            }
+            if let currentUserId {
+              return userInfo.user.id != currentUserId
+            }
+            return true
+          }
         }
 
         return []
