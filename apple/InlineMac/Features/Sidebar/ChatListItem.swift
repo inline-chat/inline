@@ -45,7 +45,7 @@ struct ChatListItem: Hashable, Identifiable {
     user?.user.firstName ??
       user?.user.lastName ??
       user?.user.username ??
-      chat?.title ??
+      chat?.humanReadableTitle ??
       "Chat"
   }
 

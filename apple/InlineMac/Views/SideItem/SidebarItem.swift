@@ -388,7 +388,7 @@ struct SidebarItem: View {
   var title: String {
     switch type {
       case let .chat(chat, spaceName):
-        chat.title ?? ""
+        chat.humanReadableTitle ?? ""
 
       case let .user(userInfo, _):
         if isCurrentUser {

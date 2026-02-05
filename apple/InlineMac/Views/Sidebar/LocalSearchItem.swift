@@ -24,7 +24,7 @@ struct LocalSearchItem: View {
               .padding(.trailing, Theme.sidebarIconSpacing)
 
             VStack(alignment: .leading, spacing: 0) {
-              Text(threadInfo.chat.title ?? "")
+              Text(threadInfo.chat.humanReadableTitle ?? "")
                 .lineLimit(1)
 
               if let spaceName = threadInfo.space?.name {

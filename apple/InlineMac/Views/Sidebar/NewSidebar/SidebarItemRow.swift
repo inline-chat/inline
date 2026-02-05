@@ -34,7 +34,7 @@ class SidebarItemRow: NSTableCellView {
     if let user = item.user {
       name = user.user.firstName ?? user.user.lastName ?? user.user.username ?? user.user.phoneNumber ?? user.user.email ?? ""
     } else if let chat = item.chat {
-      name = chat.title ?? "Unknown"
+      name = chat.humanReadableTitle ?? "Unknown"
     } else {
       name = "Unknown"
     }

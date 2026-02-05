@@ -16,7 +16,13 @@ struct ChatSideItem: View {
   }
 
   var title: String {
-    item.chat?.title ?? item.user?.fullName ?? "Chat"
+    if let userName = item.user?.fullName {
+      return userName
+    }
+    if let title = item.chat?.humanReadableTitle {
+      return title
+    }
+    return "Untitled"
   }
 
   var body: some View {
