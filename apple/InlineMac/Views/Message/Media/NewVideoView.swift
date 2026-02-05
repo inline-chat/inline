@@ -128,7 +128,7 @@ private final class VideoOverlayView: NSView {
     let view = NSView()
     view.wantsLayer = true
     view.layer?.cornerRadius = 24
-    view.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.1).cgColor
+    view.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.5).cgColor
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -287,15 +287,24 @@ final class NewVideoView: NSView {
 
   private var activeTransfer: ActiveTransfer?
 
+  private let durationBadgeBackground: NSView = {
+    let view = NSView()
+    view.wantsLayer = true
+    view.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.5).cgColor
+    view.layer?.cornerRadius = 10
+    view.layer?.cornerCurve = .continuous
+    view.layer?.masksToBounds = true
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
+
   private let durationBadge: NSTextField = {
     let label = NSTextField(labelWithString: "")
     label.font = .systemFont(ofSize: 11, weight: .semibold)
     label.textColor = .white
-    label.backgroundColor = NSColor.black.withAlphaComponent(0.55)
     label.isBordered = false
-    label.wantsLayer = true
-    label.layer?.cornerRadius = 6
-    label.layer?.masksToBounds = true
+    label.isEditable = false
+    label.isSelectable = false
     label.alignment = .center
     label.translatesAutoresizingMaskIntoConstraints = false
     label.lineBreakMode = .byClipping
@@ -369,11 +378,16 @@ final class NewVideoView: NSView {
       overlayView.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
 
+    addSubview(durationBadgeBackground)
     addSubview(durationBadge)
     NSLayoutConstraint.activate([
-      durationBadge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-      durationBadge.topAnchor.constraint(equalTo: topAnchor, constant: 8),
-      durationBadge.heightAnchor.constraint(equalToConstant: 20),
+      durationBadgeBackground.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+      durationBadgeBackground.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+      durationBadgeBackground.heightAnchor.constraint(equalToConstant: 20),
+
+      durationBadge.leadingAnchor.constraint(equalTo: durationBadgeBackground.leadingAnchor, constant: 6),
+      durationBadge.trailingAnchor.constraint(equalTo: durationBadgeBackground.trailingAnchor, constant: -6),
+      durationBadge.centerYAnchor.constraint(equalTo: durationBadgeBackground.centerYAnchor),
     ])
     durationBadge.setContentCompressionResistancePriority(.required, for: .horizontal)
     durationBadge.setContentHuggingPriority(.required, for: .horizontal)
@@ -636,10 +650,12 @@ final class NewVideoView: NSView {
   private func updateDurationLabel() {
     guard let durationSeconds = fullMessage.videoInfo?.video.duration, durationSeconds > 0 else {
       durationBadge.isHidden = true
+      durationBadgeBackground.isHidden = true
       return
     }
 
     durationBadge.isHidden = false
+    durationBadgeBackground.isHidden = false
     durationBadge.stringValue = formatDuration(seconds: durationSeconds)
   }
 
