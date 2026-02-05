@@ -313,7 +313,8 @@ struct HomeView: View {
             InitialsCircle(
               name: threadInfo.chat.title ?? "Group Chat",
               size: 34,
-              symbol: "bubble.fill",
+              symbol: "number",
+              symbolWeight: .medium,
               emoji: threadInfo.chat.emoji
             )
           case let .globalUser(apiUser):

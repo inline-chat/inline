@@ -56,7 +56,13 @@ struct ChatIcon: View {
   var body: some View {
     switch peer {
       case let .chat(thread):
-        InitialsCircle(name: thread.title ?? "", size: size, symbol: "bubble.fill", emoji: thread.emoji)
+        InitialsCircle(
+          name: thread.title ?? "",
+          size: size,
+          symbol: "number",
+          symbolWeight: .medium,
+          emoji: thread.emoji
+        )
 
       // raw icon
 //        HStack {
