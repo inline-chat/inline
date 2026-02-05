@@ -67,7 +67,7 @@ struct SpaceSmallChatItem: View {
       ChatIcon(peer: .chat(chat), size: Self.iconSize)
         .padding(.trailing, Self.iconSpacing)
 
-      Text(chat.title ?? "Untitled Thread")
+      Text(chat.humanReadableTitle ?? "Untitled")
         .lineLimit(1)
         .font(Self.titleFont)
         .foregroundColor(.primary)

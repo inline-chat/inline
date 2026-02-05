@@ -79,7 +79,7 @@ struct RenameChatSheet: View {
     .onReceive(fullChat.$chatItem) { item in
       guard !didLoad else { return }
       guard let chat = item?.chat else { return }
-      title = chat.title ?? "Chat"
+    title = chat.humanReadableTitle ?? "Untitled"
       emoji = chat.emoji ?? ""
       didLoad = true
       isTitleFocused = true

@@ -51,7 +51,6 @@ fileprivate enum QuickSearchLocalItem: Identifiable, Hashable {
   }
 }
 
-
 fileprivate struct QuickSearchCommandContext: Equatable {
   var route: Nav2Route?
   var activeTab: TabId?
@@ -182,7 +181,6 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
   }
 
   func matches(_ query: String) -> Bool {
-
     let normalized = query.lowercased()
     if title.lowercased().contains(normalized) {
       return true
@@ -457,7 +455,6 @@ final class QuickSearchViewModel: ObservableObject {
       }
     }
   }
-
 }
 
 struct QuickSearchOverlayView: View {
@@ -792,7 +789,7 @@ private struct QuickSearchRow: View {
                   alignment: .center
                 )
               HStack(spacing: QuickSearchLayout.itemTextSpacing) {
-                Text(threadInfo.chat.title ?? "")
+                Text(threadInfo.chat.humanReadableTitle ?? "")
                   .lineLimit(1)
                 if let spaceName = threadInfo.space?.name {
                   Text(spaceName)

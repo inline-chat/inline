@@ -19,7 +19,7 @@ struct ThreadItem: View {
   }
 
   var body: some View {
-    let text = Text(thread.title ?? "Untitled")
+    let text = Text(thread.humanReadableTitle ?? "Untitled")
       .lineLimit(1)
 
     let view = Button {
