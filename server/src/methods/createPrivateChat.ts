@@ -241,7 +241,7 @@ const persistNewChatUpdate = async (chatId: number): Promise<UpdateSeqAndDate> =
     const [chat] = await tx.select().from(chats).where(eq(chats.id, chatId)).for("update").limit(1)
 
     if (!chat) {
-      throw new InlineError(InlineError.ApiError.CHAT_INVALID)
+      throw new InlineError(InlineError.ApiError.CHAT_ID_INVALID)
     }
 
     const update = await UpdatesModel.insertUpdate(tx, {

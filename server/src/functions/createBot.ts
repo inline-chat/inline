@@ -34,7 +34,7 @@ export const createBot = async (input: CreateBotInput, context: FunctionContext)
     throw RealtimeRpcError.BadRequest()
   }
 
-  const [{ count: existingBots }] = await db
+  const existingBotsResult = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(users)
     .where(
@@ -44,6 +44,7 @@ export const createBot = async (input: CreateBotInput, context: FunctionContext)
         or(isNull(users.deleted), eq(users.deleted, false)),
       ),
     )
+  const existingBots = existingBotsResult[0]?.count ?? 0
 
   if (existingBots >= 5) {
     throw RealtimeRpcError.BadRequest()

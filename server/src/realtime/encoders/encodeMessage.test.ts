@@ -39,6 +39,7 @@ const baseMessage: DbMessage = {
   documentId: null,
   fileId: null,
   isSticker: false,
+  pinnedAt: null,
   hasLink: null,
 }
 
@@ -89,6 +90,7 @@ const baseFullMessage: DbFullMessage = {
   documentId: null,
   fileId: null,
   isSticker: false,
+  pinnedAt: null,
   hasLink: null,
   entities: null,
   from: baseUser,

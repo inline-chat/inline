@@ -130,7 +130,11 @@ describe("Sync core flow", () => {
     if (!firstUpdate || firstUpdate.update.oneofKind !== "newChat") {
       throw new Error("Expected newChat update")
     }
-    expect(firstUpdate.update.newChat.chat.id).toBe(BigInt(chat.id))
+    const newChat = firstUpdate.update.newChat.chat
+    if (!newChat) {
+      throw new Error("Expected chat payload in newChat update")
+    }
+    expect(newChat.id).toBe(BigInt(chat.id))
   })
 
   it("inflates delete chat updates from chat bucket", async () => {
@@ -176,8 +180,11 @@ describe("Sync core flow", () => {
     if (!firstUpdate || firstUpdate.update.oneofKind !== "deleteChat") {
       throw new Error("Expected deleteChat update")
     }
-    expect(firstUpdate.update.deleteChat.peerId?.type?.oneofKind).toBe("chat")
-    expect(firstUpdate.update.deleteChat.peerId?.type?.chat?.chatId).toBe(BigInt(chat.id))
+    const peerType = firstUpdate.update.deleteChat.peerId?.type
+    if (!peerType || peerType.oneofKind !== "chat") {
+      throw new Error("Expected chat peer in deleteChat update")
+    }
+    expect(peerType.chat.chatId).toBe(BigInt(chat.id))
   })
 
   it("inflates user bucket updates for chat participant removal", async () => {
@@ -285,7 +292,11 @@ describe("Sync core flow", () => {
     if (!spaceUpdate || spaceUpdate.update.oneofKind !== "spaceMemberAdd") {
       throw new Error("Expected spaceMemberAdd update")
     }
-    expect(spaceUpdate.update.spaceMemberAdd.member.userId).toBe(BigInt(user.id))
+    const memberPayload = spaceUpdate.update.spaceMemberAdd.member
+    if (!memberPayload) {
+      throw new Error("Expected member payload in spaceMemberAdd update")
+    }
+    expect(memberPayload.userId).toBe(BigInt(user.id))
   })
 
   it("inflates user bucket updates for join space", async () => {
@@ -325,7 +336,11 @@ describe("Sync core flow", () => {
     if (!userUpdate || userUpdate.update.oneofKind !== "joinSpace") {
       throw new Error("Expected joinSpace update")
     }
-    expect(userUpdate.update.joinSpace.space.id).toBe(BigInt(space.id))
+    const spacePayload = userUpdate.update.joinSpace.space
+    if (!spacePayload) {
+      throw new Error("Expected space payload in joinSpace update")
+    }
+    expect(spacePayload.id).toBe(BigInt(space.id))
   })
 
   it("respects sequence offsets when fetching updates", async () => {
