@@ -77,8 +77,6 @@ class ChatTitleToolbar: NSToolbarItem {
 
     visibilityPriority = .high
     isBordered = false
-    minSize = NSSize(width: iconSize + 8, height: Theme.toolbarHeight)
-    maxSize = NSSize(width: 600, height: Theme.toolbarHeight)
 
     setupView()
     setupConstraints()
