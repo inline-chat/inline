@@ -53,7 +53,7 @@ struct ChatItemRow: View {
               }
             }
         }
-        Text(item.chat?.title ?? "Chat")
+        Text(item.chat?.humanReadableTitle ?? "Chat")
           .font(.body)
             
           .padding(.leading, 8)
