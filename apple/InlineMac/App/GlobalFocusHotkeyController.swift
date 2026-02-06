@@ -4,7 +4,6 @@ import InlineMacUI
 import Logger
 
 /// Registers a system-global hotkey (works even when Inline isn't focused) and triggers a handler.
-@MainActor
 final class GlobalFocusHotkeyController {
   private let log = Log.scoped("GlobalFocusHotkeyController")
 
@@ -23,17 +22,19 @@ final class GlobalFocusHotkeyController {
   }
 
   deinit {
-    // Best-effort cleanup; deinit is nonisolated even for @MainActor classes.
-    // `assumeIsolated` keeps this synchronous while satisfying Swift 6 isolation rules.
-    MainActor.assumeIsolated {
-      unregister()
-      if let eventHandlerRef {
-        RemoveEventHandler(eventHandlerRef)
-      }
+    // Best-effort cleanup; important to remove the Carbon handler synchronously,
+    // otherwise it could fire after deallocation (UAF via `userData`).
+    unregister()
+    if let eventHandlerRef {
+      RemoveEventHandler(eventHandlerRef)
     }
   }
 
   func applyHotkey(enabled: Bool, hotkey: InlineHotkey?) {
+    if !Thread.isMainThread {
+      log.warning("applyHotkey called off main thread")
+    }
+
     // Always unregister first; makes updates predictable.
     unregister()
 

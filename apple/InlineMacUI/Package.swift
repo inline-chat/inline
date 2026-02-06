@@ -18,6 +18,7 @@ let package = Package(
 
   products: [
     .library(name: "InlineMacUI", targets: ["InlineMacUI"]),
+    .library(name: "InlineMacHotkeys", targets: ["InlineMacHotkeys"]),
     .library(name: "InlineMacWindow", targets: ["InlineMacWindow"]),
     .library(name: "MacTheme", targets: ["MacTheme"]),
   ],
@@ -31,7 +32,12 @@ let package = Package(
   targets: [
     .target(
       name: "InlineMacUI",
-      dependencies: baseDependencies
+      dependencies: baseDependencies + ["InlineMacHotkeys"]
+    ),
+
+    .target(
+      name: "InlineMacHotkeys",
+      dependencies: []
     ),
 
     .target(
@@ -47,6 +53,11 @@ let package = Package(
     .testTarget(
       name: "InlineMacUITests",
       dependencies: ["InlineMacUI"]
+    ),
+
+    .testTarget(
+      name: "InlineMacHotkeysTests",
+      dependencies: ["InlineMacHotkeys"]
     ),
   ]
 )
