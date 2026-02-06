@@ -21,9 +21,10 @@ struct NotificationSettingsButton: View {
                 }
               }
             }
-        }
+      }
         .presentationDragIndicator(.visible)
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
+        .presentationContentInteraction(.scrolls)
       }
   }
 
@@ -55,87 +56,88 @@ struct NotificationSettingsButton: View {
 
   @ViewBuilder
   private var popover: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      // Header
-      VStack(alignment: .leading, spacing: 4) {
-        Text("Control how you receive notifications")
-          .font(.subheadline)
-            
+    ScrollView {
+      VStack(alignment: .leading, spacing: 16) {
+        // Header
+        VStack(alignment: .leading, spacing: 4) {
+          Text("Control how you receive notifications")
+            .font(.subheadline)
+            .multilineTextAlignment(.leading)
+        }
+        .padding(.horizontal, 16)
+
+        VStack(alignment: .leading, spacing: 8) {
+          NotificationSettingsItem(
+            systemImage: "bell.fill",
+            title: "All",
+            description: "Receive all notifications",
+            selected: notificationSettings.mode == .all,
+            value: NotificationMode.all,
+            onChange: {
+              notificationSettings.mode = $0
+              notificationSettings.disableDmNotifications = false
+              close()
+            },
+          )
+
+          NotificationSettingsItem(
+            systemImage: "at",
+            title: "Any message to you",
+            description: "Mentions, direct messages, and replies to you",
+            selected: notificationSettings.mode == .mentions,
+            value: NotificationMode.mentions,
+            onChange: {
+              notificationSettings.mode = $0
+              notificationSettings.disableDmNotifications = false
+              close()
+            },
+          )
+
+          NotificationSettingsItem(
+            systemImage: "bubble.left.and.bubble.right.fill",
+            title: "Only mentions",
+            description: "Mentions and nudges still notify you",
+            selected: notificationSettings.mode == .onlyMentions,
+            value: NotificationMode.onlyMentions,
+            onChange: { mode in
+              notificationSettings.mode = mode
+              notificationSettings.disableDmNotifications = true
+              close()
+            },
+            iconFontSize: 14
+          )
+
+          NotificationSettingsItem(
+            systemImage: "apple.meditate",
+            title: "Zen",
+            description: "Only important messages",
+            selected: notificationSettings.mode == .importantOnly,
+            value: NotificationMode.importantOnly,
+            onChange: {
+              notificationSettings.mode = $0
+              notificationSettings.disableDmNotifications = false
+              close()
+            },
+          )
+
+          NotificationSettingsItem(
+            systemImage: "bell.slash.fill",
+            title: "None",
+            description: "No notifications",
+            selected: notificationSettings.mode == .none,
+            value: NotificationMode.none,
+            onChange: {
+              notificationSettings.mode = $0
+              notificationSettings.disableDmNotifications = false
+              close()
+            },
+          )
+        }
+        .padding(.horizontal, 16)
       }
-      .padding(.horizontal, 16)
-
-      VStack(alignment: .leading, spacing: 8) {
-        NotificationSettingsItem(
-          systemImage: "bell.fill",
-          title: "All",
-          description: "Receive all notifications",
-          selected: notificationSettings.mode == .all,
-          value: NotificationMode.all,
-          onChange: {
-            notificationSettings.mode = $0
-            notificationSettings.disableDmNotifications = false
-            close()
-          },
-        )
-
-        NotificationSettingsItem(
-          systemImage: "at",
-          title: "Any message to you",
-          description: "Mentions, direct messages, and replies to you",
-          selected: notificationSettings.mode == .mentions,
-          value: NotificationMode.mentions,
-          onChange: {
-            notificationSettings.mode = $0
-            notificationSettings.disableDmNotifications = false
-            close()
-          },
-        )
-
-        NotificationSettingsItem(
-          systemImage: "bubble.left.and.bubble.right.fill",
-          title: "Only mentions",
-          description: "Mentions and nudges still notify you",
-          selected: notificationSettings.mode == .onlyMentions,
-          value: NotificationMode.onlyMentions,
-          onChange: { mode in
-            notificationSettings.mode = mode
-            notificationSettings.disableDmNotifications = true
-            close()
-          },
-          iconFontSize: 14
-        )
-
-        NotificationSettingsItem(
-          systemImage: "apple.meditate",
-          title: "Zen",
-          description: "Only important messages",
-          selected: notificationSettings.mode == .importantOnly,
-          value: NotificationMode.importantOnly,
-          onChange: {
-            notificationSettings.mode = $0
-            notificationSettings.disableDmNotifications = false
-            close()
-          },
-        )
-
-        NotificationSettingsItem(
-          systemImage: "bell.slash.fill",
-          title: "None",
-          description: "No notifications",
-          selected: notificationSettings.mode == .none,
-          value: NotificationMode.none,
-          onChange: {
-            notificationSettings.mode = $0
-            notificationSettings.disableDmNotifications = false
-            close()
-          },
-        )
-      }
-      .padding(.horizontal, 16)
-
-      Spacer()
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.vertical, 20)
     }
-    .padding(.vertical, 20)
     .background(Color(.systemBackground))
   }
 
@@ -181,7 +183,10 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
 
             Text(description)
               .font(.caption)
+              .multilineTextAlignment(.leading)
+              .fixedSize(horizontal: false, vertical: true)
           }
+          .layoutPriority(1)
 
           Spacer()
 
