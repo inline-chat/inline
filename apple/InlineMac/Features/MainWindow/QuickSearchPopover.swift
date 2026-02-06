@@ -918,7 +918,7 @@ private struct QuickSearchRow: View {
                     .lineLimit(1)
                 }
                 Spacer(minLength: 0)
-                Text("New Thread")
+                Text("Command")
                   .foregroundStyle(.secondary)
                   .lineLimit(1)
               }
