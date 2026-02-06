@@ -4,6 +4,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
   case account
   case bots
   case general
+  case hotkeys
 #if SPARKLE
   case updates
 #endif
@@ -18,6 +19,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
     switch self {
     case .general:
       return "General"
+    case .hotkeys:
+      return "Hotkeys"
     case .appearance:
       return "Appearance"
     case .account:
@@ -41,6 +44,8 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
     switch self {
     case .general:
       return "gear"
+    case .hotkeys:
+      return "keyboard"
     case .appearance:
       return "paintbrush"
     case .account:
