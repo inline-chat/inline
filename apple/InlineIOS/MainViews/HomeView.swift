@@ -311,7 +311,7 @@ struct HomeView: View {
             UserAvatar(user: user, size: 34)
           case let .localThread(threadInfo):
             InitialsCircle(
-              name: threadInfo.chat.title ?? "Group Chat",
+              name: threadInfo.chat.humanReadableTitle ?? "Group Chat",
               size: 34,
               symbol: "number",
               symbolWeight: .medium,
@@ -381,7 +381,7 @@ struct HomeView: View {
       case let .localUser(user):
         "\(user.firstName ?? "") \(user.lastName ?? "")".trimmingCharacters(in: .whitespaces)
       case let .localThread(threadInfo):
-        threadInfo.chat.title ?? "Group Chat"
+        threadInfo.chat.humanReadableTitle ?? "Group Chat"
       case let .globalUser(apiUser):
         "\(apiUser.firstName ?? "") \(apiUser.lastName ?? "")".trimmingCharacters(in: .whitespaces)
     }
@@ -424,7 +424,7 @@ struct HomeView: View {
         score += 5
 
       case let .localThread(threadInfo):
-        let title = threadInfo.chat.title?.lowercased() ?? ""
+        let title = threadInfo.chat.humanReadableTitle?.lowercased() ?? ""
 
         if title == queryLower {
           score += 100
