@@ -167,7 +167,7 @@ public struct ForwardMessagesSheet: View {
     if let userInfo = item.user {
       UserAvatar(userInfo: userInfo, size: size)
     } else if let chat = item.chat {
-      InitialsCircle(name: chat.title ?? "Chat", size: size)
+      InitialsCircle(name: chat.humanReadableTitle ?? "Chat", size: size)
     } else {
       Circle()
         .fill(Color.gray.opacity(0.3))
@@ -237,7 +237,7 @@ public struct ForwardMessagesSheet: View {
     }
 
     if let chat = item.chat {
-      return chat.title ?? "Chat"
+      return chat.humanReadableTitle ?? "Chat"
     }
 
     return "Chat"
