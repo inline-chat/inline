@@ -363,7 +363,14 @@ private final class HoverHighlightButton: NSButton {
 
   override func layout() {
     super.layout()
-    hoverLayer.frame = bounds
+    let size = min(bounds.width, bounds.height) * 0.7
+    hoverLayer.frame = CGRect(
+      x: (bounds.width - size) / 2,
+      y: (bounds.height - size) / 2,
+      width: size,
+      height: size
+    )
+    hoverLayer.cornerRadius = min(pinnedHeaderCornerRadius, size / 2)
   }
 
   override func updateTrackingAreas() {
