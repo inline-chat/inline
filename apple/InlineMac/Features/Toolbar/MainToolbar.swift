@@ -290,7 +290,10 @@ private final class MainToolbarBackgroundView: NSView {
 
   override func updateLayer() {
     guard let gradientLayer = layer as? CAGradientLayer else { return }
-    let baseColor = Theme.windowContentBackgroundColor
+    // Theme colors here are dynamic (depend on NSAppearance). Resolve them for the
+    // current effective appearance before converting to CGColor, otherwise the
+    // gradient can render as black when the user forces Light/Dark in settings.
+    let baseColor = Theme.windowContentBackgroundColor.resolvedColor(with: effectiveAppearance)
     gradientLayer.colors = [
       baseColor.withAlphaComponent(1).cgColor,
       baseColor.withAlphaComponent(0.97).cgColor,

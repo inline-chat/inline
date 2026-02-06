@@ -505,11 +505,7 @@ class TabCollectionViewItem: NSCollectionViewItem, TabBarItemHoverDelegate {
 }
 
 private func resolvedColor(_ color: NSColor, for appearance: NSAppearance) -> NSColor {
-  var resolved = color
-  appearance.performAsCurrentDrawingAppearance {
-    resolved = color
-  }
-  return resolved
+  color.resolvedColor(with: appearance)
 }
 
 private class TabSelectedBackgroundView: NSView {
@@ -525,6 +521,8 @@ private class TabSelectedBackgroundView: NSView {
 
   override func updateLayer() {
     super.updateLayer()
-    layer?.backgroundColor = Theme.windowContentBackgroundColor.cgColor
+    layer?.backgroundColor = Theme.windowContentBackgroundColor
+      .resolvedColor(with: effectiveAppearance)
+      .cgColor
   }
 }
