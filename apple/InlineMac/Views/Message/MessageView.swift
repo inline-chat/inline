@@ -618,6 +618,13 @@ class MessageViewAppKit: NSView {
   }
 
   private func setupTranslationStateObservation() {
+    guard AppSettings.shared.translationUIEnabled else {
+      translationStateCancellable?.cancel()
+      translationStateCancellable = nil
+      updateShineEffect(isTranslating: false)
+      return
+    }
+
     translationStateCancellable = TranslatingStatePublisher.shared.publisher
       .receive(on: DispatchQueue.main)
       .sink { [weak self] translatingSet in

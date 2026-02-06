@@ -66,7 +66,9 @@ extension MainSplitView {
           items.append(.nudge(peer: peer))
         }
 
-        items.append(.translationIcon(peer: peer))
+        if AppSettings.shared.translationUIEnabled {
+          items.append(.translationIcon(peer: peer))
+        }
         items.append(.menu(peer: peer))
 
         return MainToolbarItems(items: items)

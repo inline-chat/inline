@@ -228,6 +228,7 @@ class NewSidebar: NSViewController {
 
   /// Check which messages need to be translated
   private func processForTranslation(items: [HomeChatItem]) {
+    guard AppSettings.shared.translationUIEnabled else { return }
     let currentRoute = dependencies.nav.currentRoute
     Task.detached {
       for item in items {

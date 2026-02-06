@@ -487,6 +487,15 @@ class LegacyMainWindowController: NSWindowController {
         reloadToolbar()
       }.store(in: &cancellables)
 
+    AppSettings.shared.$translationUIEnabled
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] _ in
+        guard let self else { return }
+        guard topLevelRoute == .main else { return }
+        self.reloadToolbar()
+      }
+      .store(in: &cancellables)
+
     dependencies.nav.canGoBackPublisher
       .receive(on: DispatchQueue.main).sink { [weak self] value in
         self?.navBackButton?.isEnabled = value
@@ -610,6 +619,7 @@ extension LegacyMainWindowController: NSToolbarDelegate {
         return NSToolbarItem(itemIdentifier: .space)
 
       case .translate:
+        guard AppSettings.shared.translationUIEnabled else { return nil }
         guard case let .chat(peer) = nav.currentRoute else { return nil }
         return createTranslateButton(peer: peer)
 
@@ -714,8 +724,10 @@ extension LegacyMainWindowController {
           items.append(.space)
         }
 
-        // FIXME: check if we should show this
-        items.append(.translate)
+        // Translation UI is controlled by a global settings toggle.
+        if AppSettings.shared.translationUIEnabled {
+          items.append(.translate)
+        }
 
       default:
         break
