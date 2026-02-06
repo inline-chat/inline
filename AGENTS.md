@@ -50,6 +50,7 @@
 
 - Swift 6 targets in `apple/InlineKit` (shared logic/DB/networking), `InlineUI` (shared UI), app targets `InlineIOS` (SwiftUI+UIKit) and `InlineMac` (AppKit+SwiftUI); share protocol via generated `InlineProtocol`.
 - iOS minimum supported version is 18; macOS min version is 15.
+- Prefer Swift Testing for Apple code (`import Testing`, `@Test`, `@Suite`) instead of XCTest.
 - Do not build full apps with `xcodebuild`; ask user to run. Allowed: package tests and builds via e.g. `cd apple/InlineKit && swift test` and `cd apple/InlineUI && swift build`.
 - Database migrations live in `InlineKit/Sources/InlineKit/Database.swift`; models in `Sources/InlineKit/Models/`; transactions in `Sources/InlineKit/Transactions/Methods/`.
 - Logging via `Log.scoped`; avoid main-thread heavy work; use Swift concurrency; prefer small composable views/modifiers.
