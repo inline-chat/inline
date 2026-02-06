@@ -5,16 +5,18 @@ import InlineKit
 import Logger
 import SwiftUI
 
+private let pinnedHeaderCornerRadius: CGFloat = 14
+
 final class PinnedMessageHeaderView: NSView {
   private enum Constants {
     static let horizontalPadding: CGFloat = 8
     static let verticalPadding: CGFloat = 16
     static let contentSpacing: CGFloat = 8
-    static let closeButtonSize: CGFloat = 24
+    static let closeButtonSize: CGFloat = 32
+    static let fadeDuration: TimeInterval = 0.12
   }
 
   static let preferredHeight: CGFloat = EmbedMessageView.height + (Constants.verticalPadding * 2)
-  private static let backgroundCornerRadius: CGFloat = 14
 
   private let peerId: Peer
   private let chatId: Int64
@@ -42,13 +44,12 @@ final class PinnedMessageHeaderView: NSView {
     return view
   }()
 
-  private lazy var closeButton: NSButton = {
-    let button = NSButton()
+  private lazy var closeButton: HoverHighlightButton = {
+    let button = HoverHighlightButton()
     button.translatesAutoresizingMaskIntoConstraints = false
     button.isBordered = false
     button.bezelStyle = .inline
     button.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Unpin")
-    button.contentTintColor = .secondaryLabelColor
     button.target = self
     button.action = #selector(unpinTapped)
     button.toolTip = "Unpin"
@@ -58,13 +59,14 @@ final class PinnedMessageHeaderView: NSView {
   private var backgroundViewTopConstraint: NSLayoutConstraint?
   private var backgroundViewBottomConstraint: NSLayoutConstraint?
   private var closeButtonHeightConstraint: NSLayoutConstraint?
+  private var isVisible = false
 
   init(dependencies: AppDependencies, peerId: Peer, chatId: Int64) {
     self.dependencies = dependencies
     self.peerId = peerId
     self.chatId = chatId
     if #available(macOS 26.0, *) {
-      let glassView = PinnedMessageGlassBackgroundView(cornerRadius: Self.backgroundCornerRadius)
+      let glassView = PinnedMessageGlassBackgroundView(cornerRadius: pinnedHeaderCornerRadius)
       backgroundView = glassView
       backgroundContentView = glassView
     } else {
@@ -74,7 +76,7 @@ final class PinnedMessageHeaderView: NSView {
       glassView.blendingMode = .withinWindow
       glassView.state = .active
       glassView.wantsLayer = true
-      glassView.layer?.cornerRadius = Self.backgroundCornerRadius
+      glassView.layer?.cornerRadius = pinnedHeaderCornerRadius
       glassView.layer?.masksToBounds = true
       glassView.layer?.borderWidth = 0
       glassView.layer?.borderColor = nil
@@ -84,7 +86,7 @@ final class PinnedMessageHeaderView: NSView {
     super.init(frame: .zero)
     setupView()
     setupConstraints()
-    setVisible(false)
+    setVisible(false, animate: false)
   }
 
   @available(*, unavailable)
@@ -123,6 +125,7 @@ final class PinnedMessageHeaderView: NSView {
       closeButtonHeightConstraint!,
     ])
   }
+
 
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
@@ -253,14 +256,54 @@ final class PinnedMessageHeaderView: NSView {
       )
   }
 
-  private func setVisible(_ visible: Bool) {
-    let height = visible ? Self.preferredHeight : 0
-    isHidden = !visible
-    backgroundViewTopConstraint?.constant = visible ? Constants.verticalPadding : 0
-    backgroundViewBottomConstraint?.constant = visible ? -Constants.verticalPadding : 0
-    embedView.setCollapsed(!visible)
-    closeButtonHeightConstraint?.constant = visible ? Constants.closeButtonSize : 0
-    onHeightChange?(height)
+  private func setVisible(_ visible: Bool, animate: Bool = true) {
+    guard visible != isVisible else { return }
+    isVisible = visible
+
+    let canAnimate = animate && window != nil && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+
+    if visible {
+      isHidden = false
+      alphaValue = canAnimate ? 0 : 1
+      backgroundViewTopConstraint?.constant = Constants.verticalPadding
+      backgroundViewBottomConstraint?.constant = -Constants.verticalPadding
+      embedView.setCollapsed(false)
+      closeButtonHeightConstraint?.constant = Constants.closeButtonSize
+      onHeightChange?(Self.preferredHeight)
+
+      guard canAnimate else { return }
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = Constants.fadeDuration
+        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        context.allowsImplicitAnimation = true
+        animator().alphaValue = 1
+      }
+    } else {
+      guard canAnimate else {
+        applyHiddenState()
+        return
+      }
+
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = Constants.fadeDuration
+        context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        context.allowsImplicitAnimation = true
+        animator().alphaValue = 0
+      } completionHandler: { [weak self] in
+        guard let self, !self.isVisible else { return }
+        self.applyHiddenState()
+      }
+    }
+  }
+
+  private func applyHiddenState() {
+    isHidden = true
+    alphaValue = 0
+    backgroundViewTopConstraint?.constant = 0
+    backgroundViewBottomConstraint?.constant = 0
+    embedView.setCollapsed(true)
+    closeButtonHeightConstraint?.constant = 0
+    onHeightChange?(0)
   }
 
   @objc private func unpinTapped() {
@@ -272,6 +315,74 @@ final class PinnedMessageHeaderView: NSView {
         Log.shared.error("Failed to unpin message", error: error)
       }
     }
+  }
+}
+
+private final class HoverHighlightButton: NSButton {
+  private var trackingArea: NSTrackingArea?
+  private var isHovered = false {
+    didSet {
+      updateAppearance()
+    }
+  }
+
+  private let normalTintColor: NSColor = .secondaryLabelColor
+  private let hoverTintColor: NSColor = .labelColor
+
+  override init(frame: NSRect) {
+    super.init(frame: frame)
+    configure()
+  }
+
+  required init?(coder: NSCoder) {
+    super.init(coder: coder)
+    configure()
+  }
+
+  private func configure() {
+    wantsLayer = true
+    layer?.cornerRadius = pinnedHeaderCornerRadius
+    layer?.cornerCurve = .continuous
+    layer?.masksToBounds = true
+    updateAppearance()
+  }
+
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    if let trackingArea {
+      removeTrackingArea(trackingArea)
+    }
+    let options: NSTrackingArea.Options = [
+      .activeInKeyWindow,
+      .mouseEnteredAndExited,
+      .inVisibleRect,
+    ]
+    let area = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
+    addTrackingArea(area)
+    trackingArea = area
+  }
+
+  override func mouseEntered(with event: NSEvent) {
+    super.mouseEntered(with: event)
+    isHovered = true
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    super.mouseExited(with: event)
+    isHovered = false
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    updateAppearance()
+  }
+
+  private func updateAppearance() {
+    let isDarkMode = effectiveAppearance.isDarkMode
+    let hoverAlpha: CGFloat = isDarkMode ? 0.24 : 0.12
+    let backgroundColor = isHovered ? NSColor.systemGray.withAlphaComponent(hoverAlpha) : .clear
+    layer?.backgroundColor = backgroundColor.cgColor
+    contentTintColor = isHovered ? hoverTintColor : normalTintColor
   }
 }
 
