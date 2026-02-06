@@ -13,7 +13,7 @@ open class TrafficLightInsetWindow: NSWindow, TrafficLightInsetApplicable {
   open override func sendEvent(_ event: NSEvent) {
     if !isKeyWindow {
       switch event.type {
-        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+        case .rightMouseDown, .otherMouseDown:
           makeKeyAndOrderFront(nil)
         default:
           break
