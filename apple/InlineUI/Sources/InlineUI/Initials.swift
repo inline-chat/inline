@@ -8,13 +8,15 @@ public struct InitialsCircle: View, Equatable {
   let symbol: String?
   let symbolWeight: Font.Weight
   let emoji: String?
+  let backgroundOpacity: Double
 
   public nonisolated static func == (lhs: InitialsCircle, rhs: InitialsCircle) -> Bool {
     lhs.name == rhs.name &&
       lhs.size == rhs.size &&
       lhs.symbol == rhs.symbol &&
       lhs.symbolWeight == rhs.symbolWeight &&
-      lhs.emoji == rhs.emoji
+      lhs.emoji == rhs.emoji &&
+      lhs.backgroundOpacity == rhs.backgroundOpacity
   }
 
   @Environment(\.colorScheme) private var colorScheme
@@ -66,8 +68,8 @@ public struct InitialsCircle: View, Equatable {
   private var backgroundGradient: LinearGradient {
     LinearGradient(
       colors: [
-        backgroundColor.adjustLuminosity(by: 0.2),
-        backgroundColor.adjustLuminosity(by: 0),
+        backgroundColor.adjustLuminosity(by: 0.2).opacity(backgroundOpacity),
+        backgroundColor.adjustLuminosity(by: 0).opacity(backgroundOpacity),
       ],
       startPoint: .top,
       endPoint: .bottom
@@ -79,13 +81,15 @@ public struct InitialsCircle: View, Equatable {
     size: CGFloat = 32,
     symbol: String? = nil,
     symbolWeight: Font.Weight = .regular,
-    emoji: String? = nil
+    emoji: String? = nil,
+    backgroundOpacity: Double = 1.0
   ) {
     self.name = name
     self.size = size
     self.symbol = symbol
     self.symbolWeight = symbolWeight
     self.emoji = emoji
+    self.backgroundOpacity = backgroundOpacity
   }
 
   public var body: some View {
@@ -94,7 +98,7 @@ public struct InitialsCircle: View, Equatable {
       .overlay(
         Circle()
           .stroke(
-            backgroundColor.adjustLuminosity(by: -0.4).opacity(0.1),
+            backgroundColor.adjustLuminosity(by: -0.4).opacity(0.1 * backgroundOpacity),
             lineWidth: 0.5
           )
       )
