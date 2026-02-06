@@ -1,6 +1,6 @@
 import type { Chat, Dialog, InputPeer, Message, MessageAttachment, Space, User } from "@in/protocol/core"
 import { ModelError } from "@in/server/db/models/_errors"
-import { MessageModel, type DbFullMessage } from "@in/server/db/models/messages"
+import { MessageModel } from "@in/server/db/models/messages"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { Log } from "@in/server/utils/log"
@@ -9,10 +9,7 @@ import { and, eq, inArray, isNull, or } from "drizzle-orm"
 import {
   chats,
   dialogs,
-  files,
-  messages,
   spaces,
-  users,
   members,
   chatParticipants,
   type DbSpace,
@@ -337,6 +334,8 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
   }
 
   // Add chats to results
+  const messagesByKey = new Map<string, Message>()
+  const missingLastMsgKeys: { chatId: number; messageId: number }[] = []
   chats.forEach((chat) => {
     // chat
     chatsList.push(chat)
@@ -349,14 +348,16 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
         encodingForUserId: currentUserId,
         encodingForPeer: { inputPeer: encodePeerFromChat(chat, { currentUserId }) },
       })
-      if (processedMsg) {
-        messagesList.push(encodedMsg)
-      }
+      messagesByKey.set(`${chat.id}:${processedMsg.messageId}`, encodedMsg)
 
       // sender
       if (chat.lastMsg.from) {
         usersList.push(chat.lastMsg.from)
       }
+    } else if (chat.lastMsgId) {
+      // Should be rare (FK enforces validity), but keep the contract: if chat.lastMsgId is set,
+      // GetChatsResult.messages must include that message so clients never need O(n) follow-up calls.
+      missingLastMsgKeys.push({ chatId: chat.id, messageId: chat.lastMsgId })
     }
 
     if (chat.dialogs.length > 0) {
@@ -372,6 +373,36 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
       }
     }
   })
+
+  if (missingLastMsgKeys.length > 0) {
+    const messageIdsByChatId = new Map<number, bigint[]>()
+    for (const key of missingLastMsgKeys) {
+      let list = messageIdsByChatId.get(key.chatId)
+      if (!list) {
+        list = []
+        messageIdsByChatId.set(key.chatId, list)
+      }
+      list.push(BigInt(key.messageId))
+    }
+
+    for (const [chatId, messageIds] of messageIdsByChatId) {
+      const chat = chatsList.find((c) => c.id === chatId)
+      if (!chat) continue
+
+      const recovered = await MessageModel.getMessagesByIds(chatId, messageIds)
+      for (const msg of recovered) {
+        const encodedMsg = Encoders.fullMessage({
+          message: msg,
+          encodingForUserId: currentUserId,
+          encodingForPeer: { inputPeer: encodePeerFromChat(chat, { currentUserId }) },
+        })
+        messagesByKey.set(`${chat.id}:${msg.messageId}`, encodedMsg)
+        usersList.push(msg.from)
+      }
+    }
+  }
+
+  messagesList = Array.from(messagesByKey.values())
 
   // // 7. Get unread counts for all dialogs
   const unreadCounts = await DialogsModel.getBatchUnreadCounts({
