@@ -10,6 +10,7 @@ public struct UserAvatar: View, Equatable {
     lhs.firstName == rhs.firstName && lhs.lastName == rhs.lastName && lhs.email == rhs.email
       && lhs.username == rhs.username && lhs.size == rhs.size
       && lhs.ignoresSafeArea == rhs.ignoresSafeArea
+      && lhs.backgroundOpacity == rhs.backgroundOpacity
       // FIXME: This causes flicker because every time we fetch there is a new URL
       && lhs.remoteUrl == rhs.remoteUrl
       && lhs.fileId == rhs.fileId && lhs.localUrl == rhs.localUrl
@@ -22,6 +23,7 @@ public struct UserAvatar: View, Equatable {
   let size: CGFloat
   let ignoresSafeArea: Bool
   let userId: Int64
+  let backgroundOpacity: Double
 
   var file: File? = nil
   var fileId: String? = nil
@@ -38,7 +40,12 @@ public struct UserAvatar: View, Equatable {
     )
   }
 
-  public init(user: User, size: CGFloat = 32, ignoresSafeArea: Bool = false) {
+  public init(
+    user: User,
+    size: CGFloat = 32,
+    ignoresSafeArea: Bool = false,
+    backgroundOpacity: Double = 1.0
+  ) {
     userId = user.id
     firstName = user.firstName
     lastName = user.lastName
@@ -48,10 +55,16 @@ public struct UserAvatar: View, Equatable {
     remoteUrl = user.getRemoteURL()
     localUrl = user.getLocalURL()
     self.ignoresSafeArea = ignoresSafeArea
+    self.backgroundOpacity = backgroundOpacity
     nameForInitials = Self.getNameForInitials(user: user)
   }
 
-  public init(userInfo: UserInfo, size: CGFloat = 32, ignoresSafeArea: Bool = false) {
+  public init(
+    userInfo: UserInfo,
+    size: CGFloat = 32,
+    ignoresSafeArea: Bool = false,
+    backgroundOpacity: Double = 1.0
+  ) {
     let user = userInfo.user
     userId = user.id
     file = userInfo.profilePhoto?.first
@@ -64,10 +77,16 @@ public struct UserAvatar: View, Equatable {
     username = user.username
     self.size = size
     self.ignoresSafeArea = ignoresSafeArea
+    self.backgroundOpacity = backgroundOpacity
     nameForInitials = Self.getNameForInitials(user: user)
   }
 
-  public init(apiUser: ApiUser, size: CGFloat = 32, ignoresSafeArea: Bool = false) {
+  public init(
+    apiUser: ApiUser,
+    size: CGFloat = 32,
+    ignoresSafeArea: Bool = false,
+    backgroundOpacity: Double = 1.0
+  ) {
     userId = apiUser.id
     firstName = apiUser.firstName
     lastName = apiUser.lastName
@@ -75,6 +94,7 @@ public struct UserAvatar: View, Equatable {
     username = apiUser.username
     self.size = size
     self.ignoresSafeArea = ignoresSafeArea
+    self.backgroundOpacity = backgroundOpacity
     nameForInitials = AvatarColorUtility.formatNameForHashing(
       firstName: apiUser.firstName,
       lastName: apiUser.lastName,
@@ -92,7 +112,8 @@ public struct UserAvatar: View, Equatable {
     InitialsCircle(
       name: nameForInitials,
       size: size,
-      symbol: shouldShowPersonSymbol ? "person.fill" : nil
+      symbol: shouldShowPersonSymbol ? "person.fill" : nil,
+      backgroundOpacity: backgroundOpacity
     )
     .equatable()
     .frame(width: size, height: size)

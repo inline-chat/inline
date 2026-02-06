@@ -4,13 +4,20 @@ import SwiftUI
 class ChatIconSwiftUIBridge: NSView {
   private var peerType: ChatIcon.PeerType?
   private var size: CGFloat
+  private var backgroundOpacity: Double
   private var ignoresSafeArea: Bool
 
   private var hostingView: NSHostingView<AnyView>?
 
-  init(_ peerType: ChatIcon.PeerType, size: CGFloat, ignoresSafeArea: Bool = false) {
+  init(
+    _ peerType: ChatIcon.PeerType,
+    size: CGFloat,
+    backgroundOpacity: Double = 1.0,
+    ignoresSafeArea: Bool = false
+  ) {
     self.peerType = peerType
     self.size = size
+    self.backgroundOpacity = backgroundOpacity
     self.ignoresSafeArea = ignoresSafeArea
 
     super.init(frame: NSRect(
@@ -69,7 +76,7 @@ class ChatIconSwiftUIBridge: NSView {
   }
 
   private func makeRootView(peerType: ChatIcon.PeerType) -> AnyView {
-    let view = ChatIcon(peer: peerType, size: size)
+    let view = ChatIcon(peer: peerType, size: size, backgroundOpacity: backgroundOpacity)
     return ignoresSafeArea ? AnyView(view.ignoresSafeArea()) : AnyView(view)
   }
 

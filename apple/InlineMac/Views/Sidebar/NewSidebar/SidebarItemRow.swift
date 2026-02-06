@@ -76,6 +76,7 @@ class SidebarItemRow: NSTableCellView {
   static let avatarSize: CGFloat = 48
   static let height: CGFloat = 64
   static let verticalPadding: CGFloat = ((SidebarItemRow.height - SidebarItemRow.avatarSize) / 2)
+  static let avatarBackgroundOpacity: Double = 0.85
   let avatarSpacing: CGFloat = 6
 
   private var hoverColor: NSColor {
@@ -213,7 +214,8 @@ class SidebarItemRow: NSTableCellView {
   lazy var avatarView: ChatIconSwiftUIBridge = {
     let view = ChatIconSwiftUIBridge(
       .user(.deleted),
-      size: Self.avatarSize
+      size: Self.avatarSize,
+      backgroundOpacity: Self.avatarBackgroundOpacity
     )
     view.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
     view.setContentHuggingPriority(.defaultHigh, for: .horizontal)

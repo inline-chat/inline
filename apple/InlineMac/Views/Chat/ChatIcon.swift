@@ -52,6 +52,7 @@ struct ChatIcon: View {
 
   var peer: PeerType
   var size: CGFloat = 34
+  var backgroundOpacity: Double = 1.0
 
   var body: some View {
     switch peer {
@@ -61,7 +62,8 @@ struct ChatIcon: View {
           size: size,
           symbol: "number",
           symbolWeight: .medium,
-          emoji: thread.emoji
+          emoji: thread.emoji,
+          backgroundOpacity: backgroundOpacity
         )
 
       // raw icon
@@ -76,10 +78,15 @@ struct ChatIcon: View {
 //        .fixedSize()
 
       case let .user(userInfo):
-        UserAvatar(userInfo: userInfo, size: size)
+        UserAvatar(userInfo: userInfo, size: size, backgroundOpacity: backgroundOpacity)
 
       case let .savedMessage(user):
-        InitialsCircle(name: user.firstName ?? user.username ?? "", size: size, symbol: "bookmark.fill")
+        InitialsCircle(
+          name: user.firstName ?? user.username ?? "",
+          size: size,
+          symbol: "bookmark.fill",
+          backgroundOpacity: backgroundOpacity
+        )
     }
   }
 }
