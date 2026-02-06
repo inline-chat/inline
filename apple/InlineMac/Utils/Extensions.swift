@@ -171,6 +171,22 @@ public extension NSAppearance {
   }
 }
 
+public extension NSColor {
+  /// Resolve dynamic (appearance-dependent) AppKit colors for a specific appearance.
+  ///
+  /// AppKit resolves named/dynamic colors based on the *current drawing appearance*.
+  /// This helper temporarily switches the drawing appearance, then converts the
+  /// color to a concrete representation (component-based / device RGB), so later
+  /// `cgColor` conversions don't accidentally resolve against the wrong appearance.
+  func resolvedColor(with appearance: NSAppearance) -> NSColor {
+    var resolved: NSColor = self
+    appearance.performAsCurrentDrawingAppearance {
+      resolved = self.usingType(.componentBased) ?? self.usingColorSpace(.deviceRGB) ?? self
+    }
+    return resolved
+  }
+}
+
 public extension NSRange {
   var min: Int {
     location
