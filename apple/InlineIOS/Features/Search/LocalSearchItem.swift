@@ -22,7 +22,7 @@ struct LocalSearchItem: View {
               )
 
             VStack(alignment: .leading, spacing: 0) {
-              Text(threadInfo.chat.title ?? "")
+              Text(threadInfo.chat.humanReadableTitle ?? "")
                 .font(.body)
                   
                 .lineLimit(1)
