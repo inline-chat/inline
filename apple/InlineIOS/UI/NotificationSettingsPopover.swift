@@ -107,6 +107,7 @@ struct NotificationSettingsButton: View {
             iconFontSize: 14
           )
 
+          /*
           NotificationSettingsItem(
             systemImage: "apple.meditate",
             title: "Zen",
@@ -119,6 +120,7 @@ struct NotificationSettingsButton: View {
               close()
             },
           )
+          */
 
           NotificationSettingsItem(
             systemImage: "bell.slash.fill",
