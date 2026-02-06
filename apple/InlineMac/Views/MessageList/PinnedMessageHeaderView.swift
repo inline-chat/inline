@@ -37,6 +37,7 @@ final class PinnedMessageHeaderView: NSView {
     let view = EmbedMessageView()
     view.translatesAutoresizingMaskIntoConstraints = false
     view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    view.setContentHuggingPriority(.defaultLow, for: .horizontal)
     view.showsBackground = false
     view.showsLeadingBar = false
     view.textLeadingPadding = Constants.horizontalPadding
@@ -86,7 +87,7 @@ final class PinnedMessageHeaderView: NSView {
     super.init(frame: .zero)
     setupView()
     setupConstraints()
-    setVisible(false, animate: false)
+    applyHiddenState()
   }
 
   @available(*, unavailable)
@@ -122,8 +123,8 @@ final class PinnedMessageHeaderView: NSView {
       backgroundViewBottomConstraint!,
 
       embedView.leadingAnchor.constraint(equalTo: backgroundContentView.leadingAnchor, constant: Constants.horizontalPadding),
+      embedView.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -Constants.contentSpacing),
       embedView.centerYAnchor.constraint(equalTo: backgroundContentView.centerYAnchor),
-      closeButton.leadingAnchor.constraint(greaterThanOrEqualTo: embedView.trailingAnchor, constant: Constants.contentSpacing),
       closeButtonTrailingConstraint,
       closeButton.centerYAnchor.constraint(equalTo: embedView.centerYAnchor),
       closeButton.widthAnchor.constraint(equalToConstant: Constants.closeButtonSize),
