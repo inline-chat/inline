@@ -107,7 +107,7 @@ struct ChatListItem: View {
     switch type {
       case let .chat(chat, spaceName):
         HStack(spacing: 0) {
-          Text(chat.title ?? "Unknown Chat")
+          Text(chat.humanReadableTitle ?? "Unknown Chat")
             .font(Self.titleFont)
             .foregroundColor(Self.titleColor)
             .lineLimit(1)
