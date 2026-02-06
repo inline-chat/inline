@@ -869,7 +869,9 @@ async function main() {
     },
   });
 
-  const githubEnabled = Boolean(opts.releaseTag && !opts.skipGithubRelease);
+  // `github` is controllable via both `--skip-github-release` and `--skip github`.
+  // Keep the `enabled` computation consistent with other tasks by also checking `taskEnabled`.
+  const githubEnabled = Boolean(opts.releaseTag && !opts.skipGithubRelease && taskEnabled(opts, "github"));
   tasks.push({
     id: "github",
     title: "Update GitHub tag/release and upload DMG",
