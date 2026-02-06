@@ -16,7 +16,9 @@ use rand::{RngCore, rngs::OsRng};
 use serde::Serialize;
 use std::cmp::Reverse;
 use std::collections::HashMap;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 use std::{env, fs, io};
 use tokio::io::AsyncWriteExt;
 
@@ -223,6 +225,20 @@ struct ChatsListArgs {
 
     #[arg(long, help = "Offset into the chat list")]
     offset: Option<usize>,
+
+    #[arg(long, help = "Filter chats by name, space, or id")]
+    filter: Option<String>,
+
+    #[arg(long, help = "Print only chat ids (one per line)")]
+    ids: bool,
+
+    #[arg(
+        long,
+        help = "Require exactly one match and print only its chat id",
+        conflicts_with = "ids",
+        requires = "filter"
+    )]
+    id: bool,
 }
 
 #[derive(Args)]
@@ -345,6 +361,17 @@ enum UsersCommand {
 struct UsersListArgs {
     #[arg(long, help = "Filter users by name, username, email, or phone")]
     filter: Option<String>,
+
+    #[arg(long, help = "Print only user ids (one per line)")]
+    ids: bool,
+
+    #[arg(
+        long,
+        help = "Require exactly one match and print only its user id",
+        conflicts_with = "ids",
+        requires = "filter"
+    )]
+    id: bool,
 }
 
 #[derive(Args)]
@@ -832,6 +859,7 @@ fn is_broken_pipe_panic(info: &std::panic::PanicHookInfo<'_>) -> bool {
 }
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let started_at = Instant::now();
     let cli = Cli::parse();
     let json_format = output::resolve_json_format(cli.pretty, cli.compact);
     let config = Config::load();
@@ -845,7 +873,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         } | Command::Update
             | Command::Doctor
     );
-    let update_handle = if skip_update_check {
+    let update_handle = if skip_update_check || cli.json || !io::stdout().is_terminal() {
         None
     } else {
         update::spawn_update_check(&config, &local_db, cli.json)
@@ -901,6 +929,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     match result {
                         proto::rpc_result::Result::GetChats(payload) => {
                             if cli.json {
+                                if args.filter.is_some() || args.ids || args.id {
+                                    return Err("--filter/--ids/--id are only supported in table output mode (omit --json)".into());
+                                }
                                 if args.limit.is_some() || args.offset.is_some() {
                                     let payload =
                                         apply_chat_list_limits(payload, args.limit, args.offset);
@@ -912,13 +943,30 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 let current_user = local_db.load()?.current_user;
                                 let output = build_chat_list(
                                     payload,
-                                    &mut realtime,
                                     current_user.as_ref(),
                                     args.limit,
                                     args.offset,
+                                    args.filter.as_deref(),
                                 )
-                                .await?;
-                                output::print_chat_list(&output, false, json_format)?;
+                                ?;
+                                if args.ids {
+                                    for item in &output.items {
+                                        println!("{}", item.chat.id);
+                                    }
+                                } else if args.id {
+                                    if output.items.len() != 1 {
+                                        return Err(format!(
+                                            "Expected exactly 1 match for --id, got {}",
+                                            output.items.len()
+                                        )
+                                        .into());
+                                    }
+                                    if let Some(item) = output.items.first() {
+                                        println!("{}", item.chat.id);
+                                    }
+                                } else {
+                                    output::print_chat_list(&output, false, json_format)?;
+                                }
                             }
                         }
                         _ => {
@@ -1251,9 +1299,29 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             let mut output = build_user_list(&payload);
                             filter_users_output(&mut output, args.filter.as_deref());
                             if cli.json {
+                                if args.ids || args.id {
+                                    return Err("--ids/--id are only supported in table output mode (omit --json)".into());
+                                }
                                 output::print_json(&output, json_format)?;
                             } else {
-                                output::print_users(&output, false, json_format)?;
+                                if args.ids {
+                                    for user in &output.users {
+                                        println!("{}", user.user.id);
+                                    }
+                                } else if args.id {
+                                    if output.users.len() != 1 {
+                                        return Err(format!(
+                                            "Expected exactly 1 match for --id, got {}",
+                                            output.users.len()
+                                        )
+                                        .into());
+                                    }
+                                    if let Some(user) = output.users.first() {
+                                        println!("{}", user.user.id);
+                                    }
+                                } else {
+                                    output::print_users(&output, false, json_format)?;
+                                }
                             }
                         }
                         _ => {
@@ -2110,7 +2178,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     .await;
 
-    update::finish_update_check(update_handle).await;
+    // Auto-update check is informational. Only wait for it when:
+    // - stdout is a TTY (interactive use)
+    // - the command already took "long enough" (avoid a latency tax on fast commands)
+    if update_handle.is_some()
+        && !cli.json
+        && io::stdout().is_terminal()
+        && started_at.elapsed() >= Duration::from_millis(900)
+    {
+        update::finish_update_check(update_handle).await;
+    }
     result
 }
 
@@ -2937,20 +3014,21 @@ fn apply_chat_list_limits(
     payload
 }
 
-async fn build_chat_list(
+fn build_chat_list(
     result: proto::GetChatsResult,
-    realtime: &mut RealtimeClient,
     current_user: Option<&proto::User>,
     limit: Option<usize>,
     offset: Option<usize>,
+    filter: Option<&str>,
 ) -> Result<ChatListOutput, Box<dyn std::error::Error>> {
-    struct MissingLastMessage {
-        index: usize,
-        peer: proto::InputPeer,
-    }
-
     let now = current_epoch_seconds() as i64;
     let current_user_id = current_user.map(|user| user.id);
+
+    let needle = filter
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_lowercase());
+
     let mut users_by_id: HashMap<i64, proto::User> = HashMap::new();
     for user in &result.users {
         users_by_id.insert(user.id, user.clone());
@@ -2995,8 +3073,19 @@ async fn build_chat_list(
         }
     }
 
-    let mut items = Vec::with_capacity(result.chats.len());
-    let mut missing_last_messages: Vec<MissingLastMessage> = Vec::new();
+    struct DraftItem {
+        chat: proto::Chat,
+        dialog: Option<proto::Dialog>,
+        peer: PeerSummary,
+        display_name: String,
+        space: Option<SpaceSummary>,
+        space_name: Option<String>,
+        unread_count: Option<i32>,
+        last_message: Option<proto::Message>,
+        last_message_date: i64,
+    }
+
+    let mut drafts = Vec::with_capacity(result.chats.len());
     for chat in &result.chats {
         let peer_key = chat.peer_id.as_ref().and_then(peer_key_from_peer);
         let dialog = peer_key
@@ -3016,17 +3105,61 @@ async fn build_chat_list(
                     .cloned()
             })
         });
-        if last_message.is_none() {
-            if let Some(peer) = chat.peer_id.as_ref().and_then(input_peer_from_peer) {
-                missing_last_messages.push(MissingLastMessage {
-                    index: items.len(),
-                    peer,
-                });
+        let last_message_date = last_message.as_ref().map(|msg| msg.date).unwrap_or(0);
+
+        let display_name = chat_display_name(chat, &users_by_id);
+        let space = chat
+            .space_id
+            .and_then(|space_id| spaces_by_id.get(&space_id))
+            .map(space_summary);
+        let space_name = space.as_ref().map(|space| space.display_name.clone());
+
+        let peer = chat
+            .peer_id
+            .as_ref()
+            .and_then(peer_summary_from_peer)
+            .unwrap_or(PeerSummary {
+                peer_type: "unknown".to_string(),
+                id: chat.id,
+            });
+
+        if let Some(needle) = needle.as_deref() {
+            let mut haystacks = Vec::with_capacity(5);
+            haystacks.push(display_name.to_lowercase());
+            if let Some(space_name) = space_name.as_deref() {
+                haystacks.push(space_name.to_lowercase());
+            }
+            haystacks.push(chat.id.to_string());
+            haystacks.push(peer.id.to_string());
+            if !haystacks.iter().any(|value| value.contains(needle)) {
+                continue;
             }
         }
-        let last_message_summary = last_message
-            .as_ref()
-            .map(|message| message_summary(message, &users_by_id, current_user_id, now, None));
+
+        drafts.push(DraftItem {
+            chat: chat.clone(),
+            dialog,
+            peer,
+            display_name,
+            space,
+            space_name,
+            unread_count,
+            last_message,
+            last_message_date,
+        });
+    }
+
+    drafts.sort_by_key(|item| (Reverse(item.last_message_date), Reverse(item.chat.id)));
+
+    let offset = offset.unwrap_or(0);
+    let limit = limit.unwrap_or(drafts.len());
+    let drafts = drafts.into_iter().skip(offset).take(limit);
+
+    let mut items = Vec::new();
+    for draft in drafts {
+        let last_message_summary = draft.last_message.as_ref().map(|message| {
+            message_summary(message, &users_by_id, current_user_id, now, None)
+        });
         let last_message_line = last_message_summary.as_ref().map(|summary| {
             if summary.preview.is_empty() {
                 summary.sender_name.clone()
@@ -3038,76 +3171,19 @@ async fn build_chat_list(
             .as_ref()
             .map(|summary| summary.relative_date.clone());
 
-        let display_name = chat_display_name(chat, &users_by_id);
-        let space = chat
-            .space_id
-            .and_then(|space_id| spaces_by_id.get(&space_id))
-            .map(space_summary);
-        let space_name = space.as_ref().map(|space| space.display_name.clone());
-        let peer = chat
-            .peer_id
-            .as_ref()
-            .and_then(peer_summary_from_peer)
-            .unwrap_or(PeerSummary {
-                peer_type: "unknown".to_string(),
-                id: chat.id,
-            });
-
         items.push(ChatListItem {
-            chat: chat.clone(),
-            dialog,
-            peer,
-            display_name,
-            space,
-            space_name,
-            unread_count,
+            chat: draft.chat,
+            dialog: draft.dialog,
+            peer: draft.peer,
+            display_name: draft.display_name,
+            space: draft.space,
+            space_name: draft.space_name,
+            unread_count: draft.unread_count,
             last_message: last_message_summary,
             last_message_line,
             last_message_relative_date,
         });
     }
-
-    if !missing_last_messages.is_empty() {
-        let peers: Vec<proto::InputPeer> = missing_last_messages
-            .iter()
-            .map(|missing| missing.peer.clone())
-            .collect();
-        match fetch_last_messages(realtime, &peers).await {
-            Ok(messages) => {
-                for (missing, message) in missing_last_messages.iter().zip(messages) {
-                    let Some(message) = message else { continue };
-                    let summary =
-                        message_summary(&message, &users_by_id, current_user_id, now, None);
-                    let line = if summary.preview.is_empty() {
-                        summary.sender_name.clone()
-                    } else {
-                        format!("{}: {}", summary.sender_name, summary.preview)
-                    };
-                    if let Some(item) = items.get_mut(missing.index) {
-                        item.last_message = Some(summary.clone());
-                        item.last_message_line = Some(line);
-                        item.last_message_relative_date = Some(summary.relative_date.clone());
-                    }
-                }
-            }
-            Err(error) => {
-                eprintln!("Failed to load last messages: {error}");
-            }
-        }
-    }
-
-    items.sort_by_key(|item| {
-        Reverse(
-            item.last_message
-                .as_ref()
-                .map(|message| message.message.date)
-                .unwrap_or(0),
-        )
-    });
-
-    let offset = offset.unwrap_or(0);
-    let limit = limit.unwrap_or(items.len());
-    let items = items.into_iter().skip(offset).take(limit).collect();
 
     Ok(ChatListOutput { items, raw: result })
 }
@@ -3993,43 +4069,6 @@ fn format_bytes(bytes: i64) -> String {
     format!("{:.1}GB", gb)
 }
 
-async fn fetch_last_messages(
-    realtime: &mut RealtimeClient,
-    peers: &[proto::InputPeer],
-) -> Result<Vec<Option<proto::Message>>, Box<dyn std::error::Error>> {
-    if peers.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let calls = peers
-        .iter()
-        .cloned()
-        .map(|peer| {
-            let input = proto::GetChatHistoryInput {
-                peer_id: Some(peer),
-                offset_id: None,
-                limit: Some(1),
-            };
-            (
-                proto::Method::GetChatHistory,
-                proto::rpc_call::Input::GetChatHistory(input),
-            )
-        })
-        .collect();
-
-    let results = realtime.call_rpc_batch(calls).await?;
-    let mut messages = Vec::with_capacity(results.len());
-    for result in results {
-        match result {
-            proto::rpc_result::Result::GetChatHistory(payload) => {
-                messages.push(payload.messages.into_iter().next());
-            }
-            _ => return Err("Unexpected RPC result for getChatHistory".into()),
-        }
-    }
-    Ok(messages)
-}
-
 async fn fetch_message_by_id(
     realtime: &mut RealtimeClient,
     peer: &proto::InputPeer,
@@ -4169,22 +4208,6 @@ fn sanitize_file_name(name: &str) -> Option<String> {
         .and_then(|value| value.to_str())
         .unwrap_or(trimmed);
     Some(file_name.to_string())
-}
-
-fn input_peer_from_peer(peer: &proto::Peer) -> Option<proto::InputPeer> {
-    match &peer.r#type {
-        Some(proto::peer::Type::Chat(chat)) => Some(proto::InputPeer {
-            r#type: Some(proto::input_peer::Type::Chat(proto::InputPeerChat {
-                chat_id: chat.chat_id,
-            })),
-        }),
-        Some(proto::peer::Type::User(user)) => Some(proto::InputPeer {
-            r#type: Some(proto::input_peer::Type::User(proto::InputPeerUser {
-                user_id: user.user_id,
-            })),
-        }),
-        None => None,
-    }
 }
 
 fn peer_summary_from_peer(peer: &proto::Peer) -> Option<PeerSummary> {
