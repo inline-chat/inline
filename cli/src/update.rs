@@ -18,6 +18,7 @@ use crate::state::{LocalDb, StateError};
 
 const UPDATE_CHECK_INTERVAL_SECS: i64 = 6 * 60 * 60;
 const UPDATE_CHECK_TIMEOUT_SECS: u64 = 4;
+const UPDATE_CHECK_FINISH_TIMEOUT_MS: u64 = 150;
 
 #[derive(Debug, Error)]
 pub enum UpdateError {
@@ -156,6 +157,22 @@ pub fn spawn_update_check(config: &Config, local_db: &LocalDb, json: bool) -> Op
     let local_db = local_db.clone();
     let current_version = env!("CARGO_PKG_VERSION").to_string();
 
+    // If we're not due for a check, avoid spawning a task at all. This keeps fast CLI
+    // invocations fast (no task scheduling + join timeout).
+    if current_target() == "unknown" {
+        return None;
+    }
+    let now = current_epoch_seconds();
+    if let Ok(state) = local_db.load() {
+        if state.release_manifest_url.as_deref() == Some(&manifest_url) {
+            if let Some(last_attempt) = state.last_update_attempt_at {
+                if now.saturating_sub(last_attempt) < UPDATE_CHECK_INTERVAL_SECS {
+                    return None;
+                }
+            }
+        }
+    }
+
     Some(tokio::spawn(async move {
         if let Err(error) = check_for_update(
             manifest_url,
@@ -175,7 +192,7 @@ pub fn spawn_update_check(config: &Config, local_db: &LocalDb, json: bool) -> Op
 
 pub async fn finish_update_check(handle: Option<JoinHandle<()>>) {
     if let Some(handle) = handle {
-        let _ = tokio::time::timeout(Duration::from_millis(400), handle).await;
+        let _ = tokio::time::timeout(Duration::from_millis(UPDATE_CHECK_FINISH_TIMEOUT_MS), handle).await;
     }
 }
 
@@ -195,15 +212,21 @@ async fn check_for_update(
     let mut state = local_db.load()?;
     if state.release_manifest_url.as_deref() != Some(&manifest_url) {
         state.last_update_check_at = None;
+        state.last_update_attempt_at = None;
         state.last_update_notified_version = None;
         state.last_seen_release_version = None;
     }
 
-    if let Some(last_check) = state.last_update_check_at {
-        if now.saturating_sub(last_check) < UPDATE_CHECK_INTERVAL_SECS {
+    if let Some(last_attempt) = state.last_update_attempt_at {
+        if now.saturating_sub(last_attempt) < UPDATE_CHECK_INTERVAL_SECS {
             return Ok(());
         }
     }
+
+    // Mark attempt early so we don't keep spawning checks if the CLI exits quickly.
+    state.release_manifest_url = Some(manifest_url.clone());
+    state.last_update_attempt_at = Some(now);
+    let _ = local_db.save(&state);
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(UPDATE_CHECK_TIMEOUT_SECS))
@@ -212,7 +235,6 @@ async fn check_for_update(
     let payload = response.text().await?;
     let manifest: UpdateManifest = serde_json::from_str(&payload)?;
 
-    state.release_manifest_url = Some(manifest_url);
     state.last_update_check_at = Some(now);
     state.last_seen_release_version = Some(manifest.version.clone());
 

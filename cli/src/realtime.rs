@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use futures_util::{SinkExt, StreamExt};
 use prost::Message;
 use tokio_tungstenite::connect_async;
@@ -94,70 +92,6 @@ impl RealtimeClient {
                 _ => {}
             }
         }
-    }
-
-    pub async fn call_rpc_batch(
-        &mut self,
-        calls: Vec<(proto::Method, proto::rpc_call::Input)>,
-    ) -> Result<Vec<proto::rpc_result::Result>, RealtimeError> {
-        if calls.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let total = calls.len();
-        let mut results: Vec<Option<proto::rpc_result::Result>> = vec![None; total];
-        let mut pending: HashMap<u64, usize> = HashMap::with_capacity(total);
-
-        for (index, (method, input)) in calls.into_iter().enumerate() {
-            let rpc_call = proto::RpcCall {
-                method: method as i32,
-                input: Some(input),
-            };
-            let message_id = self.next_id();
-            let message = proto::ClientMessage {
-                id: message_id,
-                seq: self.next_seq(),
-                body: Some(proto::client_message::Body::RpcCall(rpc_call)),
-            };
-            self.send_client_message(message).await?;
-            pending.insert(message_id, index);
-        }
-
-        while !pending.is_empty() {
-            let message = self.read_server_message().await?;
-            match message.body {
-                Some(proto::server_protocol_message::Body::RpcResult(result))
-                    if pending.contains_key(&result.req_msg_id) =>
-                {
-                    if let Some(index) = pending.remove(&result.req_msg_id) {
-                        let value = result.result.ok_or(RealtimeError::MissingResult)?;
-                        results[index] = Some(value);
-                    }
-                }
-                Some(proto::server_protocol_message::Body::RpcError(error))
-                    if pending.contains_key(&error.req_msg_id) =>
-                {
-                    let message = error.message;
-                    let friendly = format_rpc_error(error.error_code, &message, error.code);
-                    return Err(RealtimeError::RpcError {
-                        code: error.code,
-                        error_code: error.error_code,
-                        message,
-                        friendly,
-                    });
-                }
-                Some(proto::server_protocol_message::Body::ConnectionError(_)) => {
-                    return Err(RealtimeError::ConnectionError)
-                }
-                _ => {}
-            }
-        }
-
-        let mut output = Vec::with_capacity(total);
-        for result in results {
-            output.push(result.ok_or(RealtimeError::MissingResult)?);
-        }
-        Ok(output)
     }
 
     async fn send_connection_init(&mut self, token: &str) -> Result<(), RealtimeError> {

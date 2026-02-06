@@ -22,6 +22,8 @@ pub struct LocalState {
     pub api_base_url: Option<String>,
     pub updated_at: Option<i64>,
     pub release_manifest_url: Option<String>,
+    // Used to throttle update checks even if the process exits before the check finishes.
+    pub last_update_attempt_at: Option<i64>,
     pub last_update_check_at: Option<i64>,
     pub last_update_notified_version: Option<String>,
     pub last_seen_release_version: Option<String>,
