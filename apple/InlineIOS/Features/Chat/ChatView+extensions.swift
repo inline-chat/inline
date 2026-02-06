@@ -42,7 +42,7 @@ struct ChatToolbarLeadingView: View {
       isCurrentUser ? "Saved Message" : fullChatViewModel.peerUser?.firstName ?? fullChatViewModel.peerUser?
         .username ?? fullChatViewModel.peerUser?.email ?? fullChatViewModel.peerUser?.phoneNumber ?? "Invited User"
     } else {
-      fullChatViewModel.chat?.title ?? "Not Loaded Title"
+      fullChatViewModel.chat?.humanReadableTitle ?? "Not Loaded Title"
     }
   }
 
