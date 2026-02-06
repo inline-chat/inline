@@ -12,7 +12,7 @@ final class PinnedMessageHeaderView: NSView {
     static let horizontalPadding: CGFloat = 8
     static let verticalPadding: CGFloat = 16
     static let contentSpacing: CGFloat = 8
-    static let closeButtonSize: CGFloat = 32
+    static let closeButtonSize: CGFloat = EmbedMessageView.height
     static let fadeDuration: TimeInterval = 0.12
   }
 
@@ -326,6 +326,7 @@ private final class HoverHighlightButton: NSButton {
     }
   }
 
+  private let hoverLayer = CALayer()
   private let normalTintColor: NSColor = .secondaryLabelColor
   private let hoverTintColor: NSColor = .labelColor
 
@@ -343,8 +344,19 @@ private final class HoverHighlightButton: NSButton {
     wantsLayer = true
     layer?.cornerRadius = pinnedHeaderCornerRadius
     layer?.cornerCurve = .continuous
-    layer?.masksToBounds = true
+    layer?.masksToBounds = false
+
+    hoverLayer.cornerRadius = pinnedHeaderCornerRadius
+    hoverLayer.cornerCurve = .continuous
+    hoverLayer.backgroundColor = NSColor.clear.cgColor
+    layer?.addSublayer(hoverLayer)
+
     updateAppearance()
+  }
+
+  override func layout() {
+    super.layout()
+    hoverLayer.frame = bounds
   }
 
   override func updateTrackingAreas() {
@@ -381,7 +393,7 @@ private final class HoverHighlightButton: NSButton {
     let isDarkMode = effectiveAppearance.isDarkMode
     let hoverAlpha: CGFloat = isDarkMode ? 0.24 : 0.12
     let backgroundColor = isHovered ? NSColor.systemGray.withAlphaComponent(hoverAlpha) : .clear
-    layer?.backgroundColor = backgroundColor.cgColor
+    hoverLayer.backgroundColor = backgroundColor.cgColor
     contentTintColor = isHovered ? hoverTintColor : normalTintColor
   }
 }
