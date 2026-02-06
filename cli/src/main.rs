@@ -335,7 +335,7 @@ struct ChatsDeleteArgs {
 
 #[derive(Subcommand)]
 enum UsersCommand {
-    #[command(about = "List users that appear in your chats")]
+    #[command(about = "List users that appear in your chats", alias = "search", alias = "find")]
     List(UsersListArgs),
     #[command(about = "Fetch a user by id from the chat list payload")]
     Get(UserGetArgs),
@@ -343,7 +343,7 @@ enum UsersCommand {
 
 #[derive(Args)]
 struct UsersListArgs {
-    #[arg(long, help = "Filter users by name, username, email, or phone")]
+    #[arg(help = "Filter users by name, username, email, or phone")]
     filter: Option<String>,
 }
 
@@ -468,6 +468,10 @@ struct MessagesSendArgs {
 
     #[arg(long, help = "Message text (used as caption for attachments)")]
     text: Option<String>,
+
+    /// Message text as trailing positional args (alternative to --text)
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
+    text_positional: Vec<String>,
 
     #[arg(long, help = "Reply to message id")]
     reply_to: Option<i64>,
@@ -1527,7 +1531,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let token = require_token(&auth_store)?;
                     let peer = input_peer_from_args(args.chat_id, args.user_id)?;
                     let reply_to = args.reply_to;
-                    let caption = resolve_message_caption(args.text, args.stdin)?;
+                    let text = args.text.or_else(|| {
+                        if args.text_positional.is_empty() {
+                            None
+                        } else {
+                            Some(args.text_positional.join(" "))
+                        }
+                    });
+                    let caption = resolve_message_caption(text, args.stdin)?;
                     let attachments = prepare_attachments(
                         &args.attachments,
                         &config.data_dir,
