@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import InlineKit
 import InlineMacWindow
 import Logger
@@ -67,6 +68,7 @@ class MainSplitView: NSViewController {
   private var quickSearchArrowUnsubscriber: (() -> Void)?
   private var quickSearchVimUnsubscriber: (() -> Void)?
   private var quickSearchReturnUnsubscriber: (() -> Void)?
+  private var settingsCancellable: AnyCancellable?
 
   private var quickSearchWidthConstraint: NSLayoutConstraint?
   private var quickSearchHeightConstraint: NSLayoutConstraint?
@@ -199,6 +201,7 @@ class MainSplitView: NSViewController {
     super.viewWillAppear()
     setupQuickSearchObserver()
     setupAppActiveObserver()
+    setupSettingsObserver()
   }
 
   override func viewDidAppear() {
@@ -235,6 +238,19 @@ class MainSplitView: NSViewController {
       self.trafficLightPresenceObserver = nil
     }
     removeQuickSearchClickMonitor()
+    settingsCancellable?.cancel()
+    settingsCancellable = nil
+  }
+
+  private func setupSettingsObserver() {
+    guard settingsCancellable == nil else { return }
+    settingsCancellable = AppSettings.shared.$translationUIEnabled
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] _ in
+        guard let self, let nav2 = self.dependencies.nav2 else { return }
+        let toolbar = self.toolbar(for: nav2.currentRoute)
+        self.toolbarArea.update(with: toolbar)
+      }
   }
 
   private func setupAppActiveObserver() {
@@ -694,7 +710,9 @@ class ContentAreaView: NSView {
   }
 
   override func updateLayer() {
-    layer?.backgroundColor = Theme.windowContentBackgroundColor.cgColor
+    layer?.backgroundColor = Theme.windowContentBackgroundColor
+      .resolvedColor(with: effectiveAppearance)
+      .cgColor
     super.updateLayer()
   }
 }
