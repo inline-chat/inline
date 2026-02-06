@@ -235,26 +235,79 @@ if [[ -z "${SKIP_NOTARIZE:-}" ]]; then
       exit 1
     fi
     echo "${APPLE_NOTARIZATION_KEY}" > "${OUTPUT_DIR}/notarization_key.p8"
-    xcrun notarytool store-credentials "${NOTARY_PROFILE}" \
-      --key "${OUTPUT_DIR}/notarization_key.p8" \
-      --key-id "${APPLE_NOTARIZATION_KEY_ID}" \
-      --issuer "${APPLE_NOTARIZATION_ISSUER}"
+    set +e
+    store_output=$(
+      xcrun notarytool store-credentials "${NOTARY_PROFILE}" \
+        --key "${OUTPUT_DIR}/notarization_key.p8" \
+        --key-id "${APPLE_NOTARIZATION_KEY_ID}" \
+        --issuer "${APPLE_NOTARIZATION_ISSUER}" 2>&1
+    )
+    store_ec=$?
+    set -e
     rm -f "${OUTPUT_DIR}/notarization_key.p8"
+    if [[ "${store_ec}" -ne 0 ]]; then
+      echo "Notarization failed: unable to store notarytool credentials (API key auth)." >&2
+      echo "${store_output}" >&2
+      exit 1
+    fi
   else
     if [[ -z "${APPLE_ID:-}" || -z "${APPLE_PASSWORD:-}" || -z "${APPLE_TEAM_ID:-}" ]]; then
       echo "Notarization requires either API key vars (APPLE_NOTARIZATION_KEY, APPLE_NOTARIZATION_KEY_ID, APPLE_NOTARIZATION_ISSUER) or Apple ID vars (APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID)" >&2
       exit 1
     fi
-    xcrun notarytool store-credentials "${NOTARY_PROFILE}" \
-      --apple-id "${APPLE_ID}" \
-      --password "${APPLE_PASSWORD}" \
-      --team-id "${APPLE_TEAM_ID}"
+    set +e
+    store_output=$(
+      xcrun notarytool store-credentials "${NOTARY_PROFILE}" \
+        --apple-id "${APPLE_ID}" \
+        --password "${APPLE_PASSWORD}" \
+        --team-id "${APPLE_TEAM_ID}" 2>&1
+    )
+    store_ec=$?
+    set -e
+    if [[ "${store_ec}" -ne 0 ]]; then
+      echo "Notarization failed: unable to store notarytool credentials (Apple ID auth)." >&2
+      echo "${store_output}" >&2
+      exit 1
+    fi
   fi
 
-  submit_output=$(xcrun notarytool submit "${DMG_PATH}" --keychain-profile "${NOTARY_PROFILE}" --wait --output-format json 2>&1)
+  # With `set -e`, a failing command inside `$(...)` can terminate the script
+  # before we get a chance to print the underlying notarytool error. Capture
+  # exit status explicitly so failures never "silently exit".
+  set +e
+  submit_output=$(
+    xcrun notarytool submit "${DMG_PATH}" \
+      --keychain-profile "${NOTARY_PROFILE}" \
+      --wait \
+      --output-format json 2>&1
+  )
+  submit_ec=$?
+  set -e
   echo "${submit_output}"
+  if [[ "${submit_ec}" -ne 0 ]]; then
+    echo "Notarization failed: notarytool submit exited with code ${submit_ec}." >&2
+    exit 1
+  fi
 
-  submit_parse=$(python3 -c 'import json,sys; text=sys.stdin.read(); start=text.rfind("{"); end=text.rfind("}"); payload=text[start:end+1] if start != -1 and end != -1 and end >= start else ""; data=json.loads(payload) if payload else {}; print("{} {}".format(data.get("status",""), data.get("id","")))' <<<"${submit_output}")
+  submit_parse=$(python3 -c '
+import json, sys
+
+text = sys.stdin.read()
+start = text.rfind("{")
+end = text.rfind("}")
+payload = text[start:end + 1] if start != -1 and end != -1 and end >= start else ""
+
+status = ""
+_id = ""
+try:
+  data = json.loads(payload) if payload else {}
+  status = str(data.get("status", "") or "")
+  _id = str(data.get("id", "") or "")
+except Exception:
+  pass
+
+print((status + " " + _id).strip())
+' <<<"${submit_output}")
   submit_status=${submit_parse%% *}
   submit_id=${submit_parse#* }
   if [[ "${submit_id}" == "${submit_status}" ]]; then
@@ -262,7 +315,7 @@ if [[ -z "${SKIP_NOTARIZE:-}" ]]; then
   fi
 
   if [[ "${submit_status}" != "Accepted" ]]; then
-    echo "Notarization failed with status: ${submit_status}" >&2
+    echo "Notarization failed with status: ${submit_status:-"(unknown)"}" >&2
     if [[ -n "${submit_id}" ]]; then
       xcrun notarytool log "${submit_id}" --keychain-profile "${NOTARY_PROFILE}" || true
     fi

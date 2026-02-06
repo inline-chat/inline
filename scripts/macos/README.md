@@ -33,6 +33,7 @@ with Sparkle (non-TestFlight) and preparing DMG artifacts.
 - `validate_appcast.py`: validates Sparkle appcasts before upload.
 - `release-direct.ts`: uploads DMG and/or appcast to R2 with cache headers.
 - `release-local.sh`: runs a full local release (build → upload DMG → update appcast → upload appcast).
+- `release-app.ts`: runs the same local release pipeline, but with an interactive TUI (shows progress, skipped steps, and failures clearly).
 - `update-version.ts`: bumps the InlineMac marketing version, creates a `macos-vX.Y.Z` tag, and pushes to trigger CI.
 - `appcast-only.sh`: updates the appcast only (no rebuild), with validation.
 
@@ -168,6 +169,31 @@ The local release script uses the **same env var list as CI** (plus optional
 bash scripts/macos/release-local.sh --channel stable
 # or
 bash scripts/macos/release-local.sh --channel beta
+```
+
+TUI version (recommended for local terminal usage):
+
+```bash
+cd scripts
+bun run macos:release-app -- --channel beta
+# or
+bun run macos:release-app -- --channel stable
+```
+
+If you omit `--channel` in an interactive terminal, it will prompt you to choose (default: `beta`).
+
+Skip steps (they remain visible as disabled in the UI):
+
+```bash
+cd scripts
+bun run macos:release-app -- --channel beta --skip build,github
+```
+
+Dry run:
+
+```bash
+cd scripts
+bun run macos:release-app -- --dry-run
 ```
 
 Local release artifacts (signing key, sign_update output, appcast files) are
