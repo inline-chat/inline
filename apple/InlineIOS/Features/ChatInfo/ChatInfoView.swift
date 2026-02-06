@@ -103,7 +103,7 @@ struct ChatInfoView: View {
   }
 
   var chatTitle: String {
-    currentChat?.title ?? chatItem.chat?.title ?? "Chat"
+    currentChat?.humanReadableTitle ?? chatItem.chat?.humanReadableTitle ?? "Chat"
   }
 
   var chatProfileColors: [Color] {
