@@ -46,25 +46,34 @@ public enum HomeSearchResultItem: Identifiable, Sendable, Hashable, Equatable {
 @MainActor
 public final class HomeSearchViewModel: ObservableObject {
   @Published public private(set) var results: [HomeSearchResultItem] = []
+  @Published public private(set) var isSearching: Bool = false
 
   private var db: AppDatabase
+  private var searchToken = UUID()
 
   public init(db: AppDatabase) {
     self.db = db
   }
 
   public func search(query: String) {
-    guard !query.isEmpty else {
+    let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    searchToken = UUID()
+    let token = searchToken
+
+    guard !trimmedQuery.isEmpty else {
       results = []
+      isSearching = false
       return
     }
+
+    isSearching = true
 
     Task {
       do {
         let chats = try await db.reader.read { db in
           let threads = try Chat
             .filter {
-              $0.title.like("%\(query)%") &&
+              $0.title.like("%\(trimmedQuery)%") &&
                 $0.type == ChatType.thread.rawValue
             }
             .including(optional: Chat.space)
@@ -73,10 +82,10 @@ public final class HomeSearchViewModel: ObservableObject {
 
           let users = try User
             .filter {
-              $0.firstName.like("%\(query)%") ||
-                $0.lastName.like("%\(query)%") ||
-                $0.email == query ||
-                $0.username == query
+              $0.firstName.like("%\(trimmedQuery)%") ||
+                $0.lastName.like("%\(trimmedQuery)%") ||
+                $0.email == trimmedQuery ||
+                $0.username == trimmedQuery
             }
             .fetchAll(db)
 
@@ -84,9 +93,13 @@ public final class HomeSearchViewModel: ObservableObject {
             users.map { HomeSearchResultItem.user($0) }
         }
 
+        guard searchToken == token else { return }
         results = chats.sorted(by: { $0.title ?? "" < $1.title ?? "" })
+        isSearching = false
       } catch {
         Log.shared.error("Failed to search home items: \(error)")
+        guard searchToken == token else { return }
+        isSearching = false
       }
     }
   }
