@@ -13,7 +13,7 @@ final class PinnedMessageHeaderView: NSView {
     static let verticalPadding: CGFloat = 16
     static let contentSpacing: CGFloat = 8
     static let closeButtonSize: CGFloat = EmbedMessageView.height
-    static let fadeDuration: TimeInterval = 0.12
+    static let fadeDuration: TimeInterval = 0.2
   }
 
   static let preferredHeight: CGFloat = EmbedMessageView.height + (Constants.verticalPadding * 2)
@@ -109,6 +109,11 @@ final class PinnedMessageHeaderView: NSView {
     backgroundViewTopConstraint = backgroundView.topAnchor.constraint(equalTo: topAnchor, constant: Constants.verticalPadding)
     backgroundViewBottomConstraint = backgroundView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Constants.verticalPadding)
     closeButtonHeightConstraint = closeButton.heightAnchor.constraint(equalToConstant: Constants.closeButtonSize)
+    let closeButtonTrailingConstraint = closeButton.trailingAnchor.constraint(
+      equalTo: backgroundContentView.trailingAnchor,
+      constant: -Constants.horizontalPadding
+    )
+    closeButtonTrailingConstraint.priority = .defaultHigh
 
     NSLayoutConstraint.activate([
       backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Constants.horizontalPadding),
@@ -118,8 +123,8 @@ final class PinnedMessageHeaderView: NSView {
 
       embedView.leadingAnchor.constraint(equalTo: backgroundContentView.leadingAnchor, constant: Constants.horizontalPadding),
       embedView.centerYAnchor.constraint(equalTo: backgroundContentView.centerYAnchor),
-      closeButton.leadingAnchor.constraint(equalTo: embedView.trailingAnchor, constant: Constants.contentSpacing),
-      closeButton.trailingAnchor.constraint(equalTo: backgroundContentView.trailingAnchor, constant: -Constants.horizontalPadding),
+      closeButton.leadingAnchor.constraint(greaterThanOrEqualTo: embedView.trailingAnchor, constant: Constants.contentSpacing),
+      closeButtonTrailingConstraint,
       closeButton.centerYAnchor.constraint(equalTo: embedView.centerYAnchor),
       closeButton.widthAnchor.constraint(equalToConstant: Constants.closeButtonSize),
       closeButtonHeightConstraint!,
@@ -270,6 +275,7 @@ final class PinnedMessageHeaderView: NSView {
       embedView.setCollapsed(false)
       closeButtonHeightConstraint?.constant = Constants.closeButtonSize
       onHeightChange?(Self.preferredHeight)
+      superview?.layoutSubtreeIfNeeded()
 
       guard canAnimate else { return }
       NSAnimationContext.runAnimationGroup { context in
@@ -284,6 +290,7 @@ final class PinnedMessageHeaderView: NSView {
         return
       }
 
+      alphaValue = 1
       NSAnimationContext.runAnimationGroup { context in
         context.duration = Constants.fadeDuration
         context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
