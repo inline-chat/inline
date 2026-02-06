@@ -124,6 +124,11 @@ class ChatTitleToolbar: NSToolbarItem {
     doubleClick.numberOfClicksRequired = 2
     doubleClick.delaysPrimaryMouseButtonEvents = false
     nameLabel.addGestureRecognizer(doubleClick)
+
+    let rightClick = NSClickGestureRecognizer(target: self, action: #selector(handleTitleRightClick))
+    rightClick.buttonMask = 2
+    nameLabel.addGestureRecognizer(rightClick)
+
     nameLabel.isSelectable = false
   }
 
@@ -134,6 +139,24 @@ class ChatTitleToolbar: NSToolbarItem {
 
   @objc private func handleTitleDoubleClick() {
     beginTitleEditing()
+  }
+
+  @objc private func handleTitleRightClick() {
+    guard let event = NSApp.currentEvent else { return }
+
+    let menu = NSMenu()
+    let renameItem = NSMenuItem(title: "Rename Chat...", action: #selector(handleRenameMenu), keyEquivalent: "")
+    renameItem.target = self
+    renameItem.image = NSImage(systemSymbolName: "pencil", accessibilityDescription: nil)
+    renameItem.isEnabled = isRenameAllowed()
+    menu.addItem(renameItem)
+
+    NSMenu.popUpContextMenu(menu, with: event, for: nameLabel)
+  }
+
+  @objc private func handleRenameMenu() {
+    guard isRenameAllowed() else { return }
+    NotificationCenter.default.post(name: .renameThread, object: nil)
   }
 
   @objc private func commitTitleEdit() {
