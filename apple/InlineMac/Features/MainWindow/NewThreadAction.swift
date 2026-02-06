@@ -3,8 +3,11 @@ import RealtimeV2
 
 @MainActor
 enum NewThreadAction {
-  static func start(dependencies: AppDependencies, spaceId: Int64?) {
+  static func start(dependencies: AppDependencies, spaceId: Int64?, title: String = "") {
     ToastCenter.shared.showLoading("Creating thread")
+
+    let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+    let resolvedTitle = trimmedTitle.isEmpty ? "" : trimmedTitle
 
     Task {
       guard let currentUserId = dependencies.auth.currentUserId else {
@@ -18,7 +21,7 @@ enum NewThreadAction {
       do {
         let result = try await dependencies.realtimeV2.send(
           .createChat(
-            title: "",
+            title: resolvedTitle,
             emoji: nil,
             isPublic: false,
             spaceId: spaceId,
