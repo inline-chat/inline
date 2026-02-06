@@ -74,6 +74,33 @@ describe("getChats", () => {
     expect(returnedChat?.spaceId).toBeUndefined()
   })
 
+  test("includes each chat's last message in result.messages", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("LastMsg Space", [
+      "lastmsg-a@example.com",
+      "lastmsg-b@example.com",
+    ])
+    const [userA, userB] = users
+
+    const { chat } = await testUtils.createThreadWithDialogAndMessage({
+      spaceId: space.id,
+      user: userA,
+      otherUsers: [userB],
+      title: "Thread With Msg",
+      isPublic: true,
+      messageText: "hello",
+      messageFromUser: userB,
+    })
+
+    const result = await getChats({}, makeHandlerContext(userA.id))
+    const returnedChat = result.chats.find((c) => Number(c.id) === chat.id)
+    expect(returnedChat).toBeDefined()
+    expect(returnedChat?.lastMsgId).toBeDefined()
+
+    const lastMsgId = Number(returnedChat!.lastMsgId!)
+    const hasLastMsg = result.messages.some((m) => Number(m.chatId) === chat.id && Number(m.id) === lastMsgId)
+    expect(hasLastMsg).toBe(true)
+  })
+
   // test("auto-creates private chats and dialogs for all space members", async () => {
   //   const { space, users } = await testUtils.createSpaceWithMembers("Test Space", [
   //     "user1@example.com",
