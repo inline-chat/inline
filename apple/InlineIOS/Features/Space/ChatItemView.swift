@@ -164,7 +164,7 @@ struct ChatItemView: View {
 
   @ViewBuilder
   var title: some View {
-    Text(chat?.title ?? "")
+    Text(chat?.humanReadableTitle ?? "")
       .font(.body)
         
   }
