@@ -56,7 +56,7 @@ class AppDataUpdater {
                 title = "Unknown User"
               }
             }
-          } else if let chatTitle = item.chat?.title, !chatTitle.isEmpty {
+          } else if let chatTitle = item.chat?.humanReadableTitle, !chatTitle.isEmpty {
             title = chatTitle
           } else {
             title = "Untitled Chat"
