@@ -57,7 +57,7 @@ class MessageViewAppKit: NSView {
       }
     } catch {
       log.error("Failed to read pinned message state", error: error)
-      return false
+      return message.pinned == true
     }
   }
 
@@ -1832,7 +1832,9 @@ class MessageViewAppKit: NSView {
   // MARK: - Context Menu
 
   private func setupContextMenu() {
-    menu = createMenu(context: .message)
+    let newMenu = createMenu(context: .message)
+    newMenu.delegate = self
+    menu = newMenu
   }
 
   private func setupNotionAccessObserver() {
@@ -2682,6 +2684,15 @@ extension MessageViewAppKit: NSMenuDelegate {
   enum MenuContext {
     case message
     case textView
+  }
+
+  func menuNeedsUpdate(_ menu: NSMenu) {
+    guard menu === self.menu else { return }
+    let updatedMenu = createMenu(context: .message)
+    menu.removeAllItems()
+    for item in updatedMenu.items {
+      menu.addItem(item)
+    }
   }
 
   func createMenu(context: MenuContext, nativeMenu: NSMenu? = nil, linkURL: URL? = nil) -> NSMenu {
