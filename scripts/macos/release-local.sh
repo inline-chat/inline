@@ -17,11 +17,12 @@ DMG_PATH="${DMG_PATH:-""}"
 SPARKLE_DIR="${SPARKLE_DIR:-"${ROOT_DIR}/.action/sparkle"}"
 RELEASE_TAG="${RELEASE_TAG:-""}"
 SKIP_GITHUB_RELEASE="${SKIP_GITHUB_RELEASE:-0}"
+SKIP_BUILD="${SKIP_BUILD:-0}"
 TEMP_ROOT="${ROOT_DIR}/build/macos-release-tmp"
 
 usage() {
   cat <<'EOF'
-Usage: release-local.sh [--channel stable|beta] [--app-path <path>] [--dmg-path <path>] [--derived-data <path>]
+Usage: release-local.sh [--channel stable|beta] [--app-path <path>] [--dmg-path <path>] [--derived-data <path>] [--skip-build]
 EOF
 }
 
@@ -42,6 +43,10 @@ while [[ $# -gt 0 ]]; do
     --derived-data)
       DERIVED_DATA="${2:-}"
       shift 2
+      ;;
+    --skip-build)
+      SKIP_BUILD="1"
+      shift 1
       ;;
     -h|--help)
       usage
@@ -107,23 +112,26 @@ if [[ -z "${SPARKLE_PRIVATE_KEY:-}" && -n "${MACOS_SPARKLE_PRIVATE_KEY:-}" ]]; t
   SPARKLE_PRIVATE_KEY="${MACOS_SPARKLE_PRIVATE_KEY}"
 fi
 
-require_env SPARKLE_PUBLIC_KEY
 require_env SPARKLE_PRIVATE_KEY
-require_env MACOS_CERTIFICATE_NAME
 require_env PUBLIC_RELEASES_R2_ACCESS_KEY_ID
 require_env PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY
 require_env PUBLIC_RELEASES_R2_BUCKET
 require_env PUBLIC_RELEASES_R2_ENDPOINT
 require_env PUBLIC_RELEASES_R2_PUBLIC_BASE_URL
 
-if [[ -z "${MACOS_PROVISIONING_PROFILE_BASE64:-}" && -z "${MACOS_PROVISIONING_PROFILE_PATH:-}" ]]; then
-  echo "MACOS_PROVISIONING_PROFILE_BASE64 or MACOS_PROVISIONING_PROFILE_PATH is required." >&2
-  exit 1
+if [[ "${SKIP_BUILD}" != "1" ]]; then
+  # Build-only requirements; appcast/upload-only flows should not require signing env.
+  require_env SPARKLE_PUBLIC_KEY
+  require_env MACOS_CERTIFICATE_NAME
 fi
 
-echo "• Building DMG (channel: ${CHANNEL})"
-CHANNEL="${CHANNEL}" DERIVED_DATA="${DERIVED_DATA}" DMG_PATH="${DMG_PATH}" \
-  bash "${ROOT_DIR}/scripts/macos/build-direct.sh"
+if [[ "${SKIP_BUILD}" != "1" ]]; then
+  echo "• Building DMG (channel: ${CHANNEL})"
+  CHANNEL="${CHANNEL}" DERIVED_DATA="${DERIVED_DATA}" DMG_PATH="${DMG_PATH}" \
+    bash "${ROOT_DIR}/scripts/macos/build-direct.sh"
+else
+  echo "• Skipping build (using existing APP/DMG)"
+fi
 
 if [[ ! -d "${APP_PATH}" ]]; then
   echo "App not found at ${APP_PATH}" >&2
@@ -134,7 +142,7 @@ if [[ ! -f "${DMG_PATH}" ]]; then
   exit 1
 fi
 
-BUILD_NUMBER=$(git -C "${ROOT_DIR}" rev-list --count HEAD)
+BUILD_NUMBER=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "${APP_PATH}/Contents/Info.plist")
 export BUILD_NUMBER
 BASE_URL="${PUBLIC_RELEASES_R2_PUBLIC_BASE_URL%/}"
 DMG_URL="${BASE_URL}/mac/${CHANNEL}/${BUILD_NUMBER}/Inline.dmg"
@@ -195,9 +203,8 @@ if [[ -n "${RELEASE_TAG}" && "${SKIP_GITHUB_RELEASE}" != "1" ]]; then
   require_cmd gh
 
   echo "• Update GitHub tag (${RELEASE_TAG})"
-  git -C "${ROOT_DIR}" config user.name "github-actions[bot]"
-  git -C "${ROOT_DIR}" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-  git -C "${ROOT_DIR}" tag -fa "${RELEASE_TAG}" -m "Latest Sparkle release" HEAD
+  git -C "${ROOT_DIR}" -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+    tag -fa "${RELEASE_TAG}" -m "Latest Sparkle release" HEAD
   git -C "${ROOT_DIR}" push --force origin "${RELEASE_TAG}"
 
   echo "• Upload artifacts to GitHub Release (${RELEASE_TAG})"
