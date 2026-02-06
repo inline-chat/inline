@@ -36,6 +36,7 @@ fileprivate enum QuickSearchLocalItem: Identifiable, Hashable {
   case user(User)
   case space(Space)
   case command(QuickSearchCommand)
+  case createThread(title: String, spaceId: Int64, spaceName: String?)
 
   var id: String {
     switch self {
@@ -47,6 +48,8 @@ fileprivate enum QuickSearchLocalItem: Identifiable, Hashable {
         "space-\(space.id)"
       case let .command(command):
         "command-\(command.id)"
+      case let .createThread(title, spaceId, _):
+        "create-thread-\(spaceId)-\(title.lowercased())"
     }
   }
 }
@@ -200,6 +203,7 @@ final class QuickSearchViewModel: ObservableObject {
 
   private let dependencies: AppDependencies
   @Published private var spaceResults: [Space] = []
+  @Published private var isSpaceSearching: Bool = false
   @Published private var commandContext = QuickSearchCommandContext()
   private var spaceSearchToken = UUID()
   private var cancellables = Set<AnyCancellable>()
@@ -225,7 +229,13 @@ final class QuickSearchViewModel: ObservableObject {
       .sorted(by: { $0.displayName < $1.displayName })
       .map { QuickSearchLocalItem.space($0) }
     let commands = commandResults.map { QuickSearchLocalItem.command($0) }
-    return locals + spaces + commands
+    var items = locals
+    if let createThreadResult {
+      items.append(createThreadResult)
+    }
+    items.append(contentsOf: spaces)
+    items.append(contentsOf: commands)
+    return items
   }
 
   var globalResults: [GlobalSearchResult] {
@@ -326,6 +336,8 @@ final class QuickSearchViewModel: ObservableObject {
         dependencies.nav2?.openSpace(space)
       case let .command(command):
         runCommand(command)
+      case let .createThread(title, spaceId, _):
+        NewThreadAction.start(dependencies: dependencies, spaceId: spaceId, title: title)
     }
   }
 
@@ -396,14 +408,47 @@ final class QuickSearchViewModel: ObservableObject {
       .filter { $0.matches(trimmedQuery) }
   }
 
+  private var createThreadResult: QuickSearchLocalItem? {
+    let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmedQuery.isEmpty == false else { return nil }
+    guard let spaceContext = activeSpaceContext else { return nil }
+    guard isSearchComplete else { return nil }
+    guard hasAnySearchResults == false else { return nil }
+    return .createThread(title: trimmedQuery, spaceId: spaceContext.id, spaceName: spaceContext.name)
+  }
+
+  private var hasAnySearchResults: Bool {
+    if localSearch.results.isEmpty == false { return true }
+    if spaceResults.isEmpty == false { return true }
+    if renderedGlobalResults.isEmpty == false { return true }
+    if commandResults.isEmpty == false { return true }
+    return false
+  }
+
+  private var isSearchComplete: Bool {
+    localSearch.isSearching == false &&
+      isSpaceSearching == false &&
+      globalSearch.isLoading == false &&
+      error == nil
+  }
+
+  private var activeSpaceContext: (id: Int64, name: String?)? {
+    guard let activeTab = commandContext.activeTab else { return nil }
+    guard case let .space(id, name) = activeTab else { return nil }
+    return (id: id, name: name)
+  }
+
   private func searchSpaces(query: String) {
     let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
     spaceSearchToken = UUID()
     let token = spaceSearchToken
     guard !trimmedQuery.isEmpty else {
       spaceResults = []
+      isSpaceSearching = false
       return
     }
+
+    isSpaceSearching = true
 
     Task { @MainActor in
       do {
@@ -416,10 +461,12 @@ final class QuickSearchViewModel: ObservableObject {
         }
         guard spaceSearchToken == token else { return }
         spaceResults = spaces
+        isSpaceSearching = false
       } catch {
         Log.shared.error("Failed to search spaces", error: error)
         guard spaceSearchToken == token else { return }
         spaceResults = []
+        isSpaceSearching = false
       }
     }
   }
@@ -851,6 +898,27 @@ private struct QuickSearchRow: View {
                   .lineLimit(1)
                 Spacer(minLength: 0)
                 Text(command.typeLabel)
+                  .foregroundStyle(.secondary)
+                  .lineLimit(1)
+              }
+
+            case let .createThread(title, _, spaceName):
+              InitialsCircle(name: title, size: QuickSearchLayout.iconSize, symbol: "plus.bubble.fill")
+                .frame(
+                  width: QuickSearchLayout.iconContainerSize,
+                  height: QuickSearchLayout.iconContainerSize,
+                  alignment: .center
+                )
+              HStack(spacing: QuickSearchLayout.itemTextSpacing) {
+                Text("Create \"\(title)\"")
+                  .lineLimit(1)
+                if let spaceName {
+                  Text(spaceName)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Text("New Thread")
                   .foregroundStyle(.secondary)
                   .lineLimit(1)
               }
