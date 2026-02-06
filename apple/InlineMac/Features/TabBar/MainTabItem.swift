@@ -411,10 +411,8 @@ class TabCollectionViewItem: NSCollectionViewItem, TabBarItemHoverDelegate {
     updateBackgroundShape()
 
     let isDarkMode = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-    let activeBackgroundColor = resolvedColor(
-      Theme.windowContentBackgroundColor,
-      for: view.effectiveAppearance
-    )
+    let activeBackgroundColor = Theme.windowContentBackgroundColor
+      .resolvedColor(with: view.effectiveAppearance)
 
     let shadowAlpha: CGFloat
     let backgroundAlpha: CGFloat
@@ -502,10 +500,6 @@ class TabCollectionViewItem: NSCollectionViewItem, TabBarItemHoverDelegate {
 
     layer.mask = titleMaskLayer
   }
-}
-
-private func resolvedColor(_ color: NSColor, for appearance: NSAppearance) -> NSColor {
-  color.resolvedColor(with: appearance)
 }
 
 private class TabSelectedBackgroundView: NSView {
