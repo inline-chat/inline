@@ -10,7 +10,7 @@ final class PinnedMessageHeaderView: UIView, UIGestureRecognizerDelegate {
     static let horizontalPadding: CGFloat = 6
     static let verticalPadding: CGFloat = 10
     static let contentSpacing: CGFloat = 6
-    static let closeButtonSize: CGFloat = 24
+    static let closeButtonSize: CGFloat = 32
   }
 
   static let preferredHeight: CGFloat = EmbedMessageView.height + (Constants.verticalPadding * 2)
