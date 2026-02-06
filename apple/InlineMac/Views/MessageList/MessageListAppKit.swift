@@ -50,6 +50,8 @@ class MessageListAppKit: NSViewController {
   // Debugging
   private var debug_slowAnimation = false
 
+  private var suppressResizeScrollMaintenance = false
+
   private var eventMonitorTask: Task<Void, Never>?
   private var cancellables: Set<AnyCancellable> = []
 
@@ -361,6 +363,9 @@ class MessageListAppKit: NSViewController {
     if scrollView.contentInsets.top != topInset {
       log.trace("Adjusting view's insets")
 
+      let wasAtBottom = isAtBottom
+      suppressResizeScrollMaintenance = true
+
       scrollView.contentInsets = NSEdgeInsets(
         top: topInset,
         left: 0,
@@ -375,6 +380,14 @@ class MessageListAppKit: NSViewController {
       )
 
       updateToolbar()
+
+      if wasAtBottom, !needsInitialScroll {
+        scrollToBottom(animated: false)
+      }
+
+      DispatchQueue.main.async { [weak self] in
+        self?.suppressResizeScrollMaintenance = false
+      }
     }
   }
 
@@ -723,6 +736,10 @@ class MessageListAppKit: NSViewController {
 
   @objc func scrollViewFrameChanged(notification: Notification) {
     updateMessageViewColors()
+
+    if suppressResizeScrollMaintenance {
+      return
+    }
 
     // keep scroll view anchored from the bottom
     guard feature_maintainsScrollFromBottomOnResize else { return }
