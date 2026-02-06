@@ -136,6 +136,8 @@ struct SettingsDetailView: View {
       switch category {
         case .general:
           GeneralSettingsDetailView()
+        case .hotkeys:
+          HotkeysSettingsDetailView()
         #if SPARKLE
         case .updates:
           UpdatesSettingsDetailView()

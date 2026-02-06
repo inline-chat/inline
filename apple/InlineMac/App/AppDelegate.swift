@@ -3,6 +3,7 @@ import Auth
 import Combine
 import InlineConfig
 import InlineKit
+import InlineMacUI
 import Logger
 import Sentry
 import SwiftUI
@@ -17,6 +18,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   // Common Dependencies
   @MainActor private var dependencies = AppDependencies()
 
+  @MainActor private var globalFocusHotkeyController: GlobalFocusHotkeyController?
 
   private let launchAtLoginController = LaunchAtLoginController()
 
@@ -50,6 +52,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     setupAppearanceSetting()
     setupMainWindow()
     setupMainMenu()
+    setupGlobalFocusHotkey()
     setupNotificationsSoundSetting()
     launchAtLoginController.start()
 #if SPARKLE
@@ -144,6 +147,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     controller.showWindow(nil)
     mainWindowController = controller
+  }
+
+  /// Bring Inline to the front and ensure the main window is visible/focused.
+  @MainActor func showAndFocusMainWindow() {
+    NSApp.activate(ignoringOtherApps: true)
+    setupMainWindow()
+    mainWindowController?.window?.makeKeyAndOrderFront(nil)
+  }
+
+  @MainActor private func setupGlobalFocusHotkey() {
+    if globalFocusHotkeyController == nil {
+      globalFocusHotkeyController = GlobalFocusHotkeyController { [weak self] in
+        guard let self else { return }
+        Task { @MainActor in
+          self.showAndFocusMainWindow()
+        }
+      }
+    }
+
+    let apply: (HotkeySettingsStore.GlobalFocusHotkey) -> Void = { [weak self] settings in
+      guard let self else { return }
+      self.globalFocusHotkeyController?.applyHotkey(enabled: settings.enabled, hotkey: settings.hotkey)
+    }
+
+    apply(HotkeySettingsStore.shared.globalFocusHotkey)
+
+    HotkeySettingsStore.shared.$globalFocusHotkey
+      .removeDuplicates()
+      .debounce(for: .milliseconds(150), scheduler: RunLoop.main)
+      .sink { settings in
+        apply(settings)
+      }
+      .store(in: &cancellables)
   }
 
   func applicationShouldHandleReopen(_: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
