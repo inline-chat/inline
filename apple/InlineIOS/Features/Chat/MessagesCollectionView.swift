@@ -645,7 +645,7 @@ private extension MessagesCollectionView {
         }
       } catch {
         Log.shared.error("Failed to read pinned message state", error: error)
-        return false
+        return message.pinned == true
       }
     }
 
