@@ -132,6 +132,20 @@ class MessageListAppKit: NSViewController {
       // applyUpdate(.reload(animated: true))
       applyUpdate(.reload(animated: false))
     }.store(in: &cancellables)
+
+    AppSettings.shared.$translationUIEnabled
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] enabled in
+        guard let self else { return }
+        if !enabled {
+          // Stop any pending work and clear "already analyzed" flags so re-enabling works.
+          deferredTranslationTask?.cancel()
+          deferredTranslationTask = nil
+          hasAnalyzedInitialMessages = false
+          hasDeferredInitialTranslation = false
+        }
+      }
+      .store(in: &cancellables)
   }
 
   @available(*, unavailable)
@@ -1484,6 +1498,7 @@ class MessageListAppKit: NSViewController {
   // MARK: - Translation
 
   private func handleTranslationForUpdate(_ update: MessagesProgressiveViewModel.MessagesChangeSet) {
+    guard AppSettings.shared.translationUIEnabled else { return }
     switch update {
       case .reload:
         // Trigger translation on all current messages
@@ -1508,6 +1523,7 @@ class MessageListAppKit: NSViewController {
   }
 
   private func scheduleTranslationWork(messages: [FullMessage], analyzeForDetection: Bool) {
+    guard AppSettings.shared.translationUIEnabled else { return }
     guard !messages.isEmpty else { return }
 
     deferredTranslationTask?.cancel()
@@ -1518,6 +1534,7 @@ class MessageListAppKit: NSViewController {
   }
 
   private func performTranslationWork(messages: [FullMessage], analyzeForDetection: Bool) async {
+    guard AppSettings.shared.translationUIEnabled else { return }
     // Avoid competing with initial layout/scroll. Translation work is safe to delay.
     if needsInitialScroll, !hasDeferredInitialTranslation {
       await MainActor.run {

@@ -97,6 +97,15 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  // MARK: - Translation
+
+  /// Global kill-switch for translation UI and related background work on macOS.
+  @Published var translationUIEnabled: Bool {
+    didSet {
+      UserDefaults.standard.set(translationUIEnabled, forKey: "translationUIEnabled")
+    }
+  }
+
   // MARK: - Appearance
 
   @Published var appearance: AppAppearance {
@@ -154,6 +163,8 @@ final class AppSettings: ObservableObject {
     automaticSpellCorrection = UserDefaults.standard.object(forKey: "automaticSpellCorrection") as? Bool ?? true
     checkSpellingWhileTyping = UserDefaults.standard.object(forKey: "checkSpellingWhileTyping") as? Bool ?? true
     launchAtLogin = UserDefaults.standard.bool(forKey: "launchAtLogin")
+    translationUIEnabled = UserDefaults.standard.object(forKey: "translationUIEnabled") as? Bool ?? true
+
     if let storedAppearance = UserDefaults.standard.string(forKey: "appAppearance"),
        let appearanceValue = AppAppearance(rawValue: storedAppearance) {
       appearance = appearanceValue
