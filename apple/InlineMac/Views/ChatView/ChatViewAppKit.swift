@@ -67,6 +67,7 @@ class ChatViewAppKit: NSViewController {
 
   override func loadView() {
     view = ChatDropView()
+    view.translatesAutoresizingMaskIntoConstraints = false
     view.wantsLayer = true
 
     transitionFromInitialState()
