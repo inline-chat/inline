@@ -109,7 +109,7 @@ struct ChatListView: View {
     .swipeActions(edge: .leading, allowsFullSwipe: false) {
       readUnreadButton(for: item)
     }
-    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
       archiveButton(for: item)
       if showPinAction {
         pinButton(for: item)
