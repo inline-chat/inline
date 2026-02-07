@@ -10,6 +10,10 @@ fn main() {
         proto_dir.join("server.proto"),
     ];
 
+    for proto in protos.iter() {
+        println!("cargo:rerun-if-changed={}", proto.display());
+    }
+
     let proto_paths: Vec<_> = protos
         .iter()
         .map(|path| path.to_string_lossy().to_string())
