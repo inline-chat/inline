@@ -19,7 +19,11 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
   private var receiveLoopTask: Task<Void, Never>?
   private var connectionToken: UInt64 = 0
 
-  private lazy var session: URLSession = { [unowned self] in
+  // Avoid a lazy-closure initializer here: Swift 6.2.3 has been observed to crash in SIL verification
+  // for this pattern. Keeping it as a regular method avoids the compiler bug.
+  private lazy var session: URLSession = makeSession()
+
+  private func makeSession() -> URLSession {
     let configuration = URLSessionConfiguration.default
     configuration.shouldUseExtendedBackgroundIdleMode = true
     configuration.timeoutIntervalForResource = 300
@@ -35,7 +39,7 @@ public actor WebSocketTransport: NSObject, Transport, URLSessionWebSocketDelegat
     delegateQueue.maxConcurrentOperationCount = 1
     delegateQueue.name = "WebSocketTransport.delegate"
     return URLSession(configuration: configuration, delegate: self, delegateQueue: delegateQueue)
-  }()
+  }
 
   private static var defaultURL: URL {
     URL(string: InlineConfig.realtimeServerURL)!
