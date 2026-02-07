@@ -16,6 +16,7 @@ use rand::{RngCore, rngs::OsRng};
 use serde::Serialize;
 use std::cmp::Reverse;
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -40,6 +41,177 @@ use crate::realtime::RealtimeClient;
 use crate::state::LocalDb;
 
 const MAX_ATTACHMENT_BYTES: u64 = 200 * 1024 * 1024;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonErrorEnvelope {
+    error: JsonCliError,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonCliError {
+    code: String,
+    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hint: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    examples: Vec<String>,
+}
+
+#[derive(Debug)]
+struct CliError {
+    code: &'static str,
+    message: String,
+    hint: Option<String>,
+    examples: Vec<String>,
+}
+
+impl CliError {
+    fn invalid_args(message: impl Into<String>) -> Self {
+        Self {
+            code: "invalid_args",
+            message: message.into(),
+            hint: Some("Run with --help to see valid usage.".to_string()),
+            examples: Vec::new(),
+        }
+    }
+
+    fn missing_peer() -> Self {
+        Self {
+            code: "missing_peer",
+            message: "Missing required argument: provide --chat-id or --user-id".to_string(),
+            hint: Some(
+                "Use `inline chats list` to find chat IDs, or `inline users list` for DM user IDs."
+                    .to_string(),
+            ),
+            examples: vec![
+                "inline messages list --chat-id 123".to_string(),
+                "inline messages list --user-id 42".to_string(),
+            ],
+        }
+    }
+
+    fn missing_text_or_stdin() -> Self {
+        Self {
+            code: "missing_text",
+            message: "Missing required argument: provide --text/--message/--msg or --stdin"
+                .to_string(),
+            hint: Some(
+                "Use --text (or its aliases) for inline content, or --stdin to read from standard input."
+                    .to_string(),
+            ),
+            examples: vec![
+                "inline messages edit --chat-id 123 --message-id 456 --text \"updated\"".to_string(),
+                "echo \"updated\" | inline messages edit --chat-id 123 --message-id 456 --stdin"
+                    .to_string(),
+            ],
+        }
+    }
+
+    fn mentions_require_text() -> Self {
+        Self {
+            code: "invalid_mentions",
+            message:
+                "Invalid usage: --mention requires message text via --text/--message/--msg or --stdin"
+                    .to_string(),
+            hint: Some(
+                "Mentions are UTF-16 offsets into the message text; provide the same text you calculated offsets against."
+                    .to_string(),
+            ),
+            examples: vec![
+                "inline messages send --chat-id 123 --text \"@Sam hello\" --mention 42:0:4"
+                    .to_string(),
+            ],
+        }
+    }
+
+    fn missing_query() -> Self {
+        Self {
+            code: "missing_query",
+            message: "Missing required argument: provide --query with search terms".to_string(),
+            hint: Some("--query is repeatable; pass one or more queries to search.".to_string()),
+            examples: vec![
+                "inline messages search --chat-id 123 --query \"onboarding\"".to_string(),
+                "inline search --user-id 42 --query \"bug\" --query \"broken\"".to_string(),
+            ],
+        }
+    }
+
+    fn invalid_time_range() -> Self {
+        Self {
+            code: "invalid_time_range",
+            message: "Invalid time range: --until must be on or after --since".to_string(),
+            hint: Some("Time flows from --since to --until (e.g. --since \"2d ago\" --until \"1d ago\").".to_string()),
+            examples: vec![
+                "inline messages list --chat-id 123 --since \"2d ago\" --until \"1d ago\"".to_string(),
+            ],
+        }
+    }
+
+    fn missing_translate_language() -> Self {
+        Self {
+            code: "missing_translate_language",
+            message: "Missing value: --translate requires a language code".to_string(),
+            hint: Some("Use a language code like en, es, de.".to_string()),
+            examples: vec!["inline messages list --chat-id 123 --translate en".to_string()],
+        }
+    }
+
+    fn not_found_user_id(user_id: i64) -> Self {
+        Self {
+            code: "not_found",
+            message: format!("Not found: user id {user_id} does not exist in your chat list"),
+            hint: Some("Run `inline users list` to see available user IDs.".to_string()),
+            examples: vec!["inline users list".to_string()],
+        }
+    }
+}
+
+impl std::fmt::Display for CliError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "{}", self.message)?;
+        if let Some(hint) = &self.hint {
+            writeln!(f)?;
+            writeln!(f, "Hint: {hint}")?;
+        }
+        if !self.examples.is_empty() {
+            writeln!(f)?;
+            writeln!(f, "Examples:")?;
+            for example in &self.examples {
+                writeln!(f, "  {example}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for CliError {}
+
+#[derive(Clone, Copy)]
+struct DetectedGlobalFlags {
+    json: bool,
+    json_format: output::JsonFormat,
+}
+
+fn detect_global_flags(argv: &[OsString]) -> DetectedGlobalFlags {
+    let mut json = false;
+    let mut pretty = false;
+    let mut compact = false;
+    for arg in argv {
+        if arg == "--json" {
+            json = true;
+        } else if arg == "--pretty" {
+            pretty = true;
+        } else if arg == "--compact" {
+            compact = true;
+        }
+    }
+    DetectedGlobalFlags {
+        json,
+        json_format: output::resolve_json_format(pretty, compact),
+    }
+}
 
 #[derive(Parser)]
 #[command(
@@ -171,6 +343,18 @@ enum Command {
         #[command(subcommand)]
         command: TasksCommand,
     },
+
+    // Read-only shortcuts (desire paths).
+    #[command(about = "Show current user (shortcut for auth me)", alias = "whoami")]
+    Me,
+    #[command(about = "Search messages (shortcut for messages search)")]
+    Search(MessagesSearchArgs),
+
+    #[command(about = "Show local API schema info")]
+    Schema {
+        #[command(subcommand)]
+        command: SchemaCommand,
+    },
 }
 
 #[derive(Subcommand)]
@@ -185,11 +369,17 @@ enum AuthCommand {
 
 #[derive(Args)]
 struct AuthLoginArgs {
-    #[arg(long, help = "Email address to send the login code to")]
+    #[arg(long, help = "Email address to send the login code to", conflicts_with = "phone")]
     email: Option<String>,
 
-    #[arg(long, help = "Phone number to send the login code to")]
+    #[arg(long, help = "Phone number to send the login code to", conflicts_with = "email")]
     phone: Option<String>,
+}
+
+#[derive(Subcommand)]
+enum SchemaCommand {
+    #[command(about = "Print the bundled protobuf schema (.proto sources)")]
+    Proto,
 }
 
 #[derive(Subcommand)]
@@ -243,10 +433,10 @@ struct ChatsListArgs {
 
 #[derive(Args)]
 struct ChatsGetArgs {
-    #[arg(long, help = "Chat id")]
+    #[arg(long, help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
 
-    #[arg(long, help = "User id (for DMs)")]
+    #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
     user_id: Option<i64>,
 }
 
@@ -321,19 +511,19 @@ struct ChatsUpdateVisibilityArgs {
 
 #[derive(Args)]
 struct ChatsMarkUnreadArgs {
-    #[arg(long, help = "Chat id")]
+    #[arg(long, help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
 
-    #[arg(long, help = "User id (for DMs)")]
+    #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
     user_id: Option<i64>,
 }
 
 #[derive(Args)]
 struct ChatsMarkReadArgs {
-    #[arg(long, help = "Chat id")]
+    #[arg(long, help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
 
-    #[arg(long, help = "User id (for DMs)")]
+    #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
     user_id: Option<i64>,
 
     #[arg(long, help = "Max message id to mark as read")]
@@ -351,7 +541,7 @@ struct ChatsDeleteArgs {
 
 #[derive(Subcommand)]
 enum UsersCommand {
-    #[command(about = "List users that appear in your chats")]
+    #[command(about = "List users that appear in your chats", alias = "search", alias = "find")]
     List(UsersListArgs),
     #[command(about = "Fetch a user by id from the chat list payload")]
     Get(UserGetArgs),
@@ -406,10 +596,10 @@ enum MessagesCommand {
 
 #[derive(Args)]
 struct MessagesListArgs {
-    #[arg(long, help = "Chat id")]
+    #[arg(long, help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
 
-    #[arg(long, help = "User id (for DMs)")]
+    #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
     user_id: Option<i64>,
 
     #[arg(long, help = "Maximum number of messages to return")]
@@ -442,10 +632,10 @@ struct MessagesListArgs {
 
 #[derive(Args)]
 struct MessagesSearchArgs {
-    #[arg(long, help = "Chat id")]
+    #[arg(long, help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
 
-    #[arg(long, help = "User id (for DMs)")]
+    #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
     user_id: Option<i64>,
 
     #[arg(long, help = "Search query (repeatable)")]
@@ -487,13 +677,19 @@ struct MessagesGetArgs {
 
 #[derive(Args)]
 struct MessagesSendArgs {
-    #[arg(long, help = "Chat id")]
+    #[arg(long, help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
 
-    #[arg(long, help = "User id (for DMs)")]
+    #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
     user_id: Option<i64>,
 
-    #[arg(long, help = "Message text (used as caption for attachments)")]
+    #[arg(
+        long,
+        short = 'm',
+        alias = "message",
+        alias = "msg",
+        help = "Message text (used as caption for attachments)"
+    )]
     text: Option<String>,
 
     #[arg(long, help = "Reply to message id")]
@@ -527,10 +723,10 @@ struct MessagesSendArgs {
 
 #[derive(Args)]
 struct MessagesExportArgs {
-    #[arg(long, help = "Chat id")]
+    #[arg(long, help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
 
-    #[arg(long, help = "User id (for DMs)")]
+    #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
     user_id: Option<i64>,
 
     #[arg(long, help = "Maximum number of messages to return")]
@@ -559,28 +755,36 @@ struct MessagesExportArgs {
 
 #[derive(Args)]
 struct MessagesDownloadArgs {
-    #[arg(long, help = "Chat id")]
+    #[arg(long, help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
 
-    #[arg(long, help = "User id (for DMs)")]
+    #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
     user_id: Option<i64>,
 
     #[arg(long, help = "Message id containing the attachment")]
     message_id: i64,
 
-    #[arg(long, help = "Output file path (defaults to current directory)")]
+    #[arg(
+        long,
+        help = "Output file path (defaults to current directory)",
+        conflicts_with = "dir"
+    )]
     output: Option<PathBuf>,
 
-    #[arg(long, help = "Output directory (defaults to current directory)")]
+    #[arg(
+        long,
+        help = "Output directory (defaults to current directory)",
+        conflicts_with = "output"
+    )]
     dir: Option<PathBuf>,
 }
 
 #[derive(Args)]
 struct MessagesDeleteArgs {
-    #[arg(long, help = "Chat id")]
+    #[arg(long, help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
 
-    #[arg(long, help = "User id (for DMs)")]
+    #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
     user_id: Option<i64>,
 
     #[arg(
@@ -598,16 +802,16 @@ struct MessagesDeleteArgs {
 
 #[derive(Args)]
 struct MessagesEditArgs {
-    #[arg(long, help = "Chat id")]
+    #[arg(long, help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
 
-    #[arg(long, help = "User id (for DMs)")]
+    #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
     user_id: Option<i64>,
 
     #[arg(long, help = "Message id")]
     message_id: i64,
 
-    #[arg(long, help = "New message text")]
+    #[arg(long, short = 'm', alias = "message", alias = "msg", help = "New message text")]
     text: Option<String>,
 
     #[arg(long, help = "Read message text from stdin")]
@@ -616,10 +820,10 @@ struct MessagesEditArgs {
 
 #[derive(Args)]
 struct MessagesReactionArgs {
-    #[arg(long, help = "Chat id")]
+    #[arg(long, help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
 
-    #[arg(long, help = "User id (for DMs)")]
+    #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
     user_id: Option<i64>,
 
     #[arg(long, help = "Message id")]
@@ -755,13 +959,13 @@ struct SpacesInviteArgs {
     #[arg(long, help = "Space id")]
     space_id: i64,
 
-    #[arg(long, help = "User id to invite")]
+    #[arg(long, help = "User id to invite", conflicts_with_all = ["email", "phone"])]
     user_id: Option<i64>,
 
-    #[arg(long, help = "Email address to invite")]
+    #[arg(long, help = "Email address to invite", conflicts_with_all = ["user_id", "phone"])]
     email: Option<String>,
 
-    #[arg(long, help = "Phone number to invite")]
+    #[arg(long, help = "Phone number to invite", conflicts_with_all = ["user_id", "email"])]
     phone: Option<String>,
 
     #[arg(long, help = "Invite as space admin")]
@@ -836,8 +1040,64 @@ struct TasksCreateNotionArgs {
 #[tokio::main]
 async fn main() {
     install_broken_pipe_handler();
-    if let Err(error) = run().await {
-        eprintln!("{error}");
+    let argv: Vec<OsString> = env::args_os().collect();
+    let flags = detect_global_flags(&argv);
+
+    let started_at = Instant::now();
+    let cli = match Cli::try_parse_from(&argv) {
+        Ok(cli) => cli,
+        Err(err) => {
+            if flags.json {
+                let payload = JsonErrorEnvelope {
+                    error: JsonCliError {
+                        code: "invalid_args".to_string(),
+                        message: err.to_string(),
+                        hint: Some("Run with --help to see valid usage.".to_string()),
+                        examples: Vec::new(),
+                    },
+                };
+                if let Ok(text) = output::json_string(&payload, flags.json_format) {
+                    eprintln!("{text}");
+                } else {
+                    eprintln!("{}", err);
+                }
+            } else {
+                eprintln!("{}", err);
+            }
+            std::process::exit(2);
+        }
+    };
+
+    if let Err(error) = run(cli, started_at).await {
+        if flags.json {
+            let payload = if let Some(cli_error) = error.downcast_ref::<CliError>() {
+                JsonErrorEnvelope {
+                    error: JsonCliError {
+                        code: cli_error.code.to_string(),
+                        message: cli_error.message.clone(),
+                        hint: cli_error.hint.clone(),
+                        examples: cli_error.examples.clone(),
+                    },
+                }
+            } else {
+                JsonErrorEnvelope {
+                    error: JsonCliError {
+                        code: "error".to_string(),
+                        message: error.to_string(),
+                        hint: None,
+                        examples: Vec::new(),
+                    },
+                }
+            };
+
+            if let Ok(text) = output::json_string(&payload, flags.json_format) {
+                eprintln!("{text}");
+            } else {
+                eprintln!("{}", error);
+            }
+        } else {
+            eprintln!("{error}");
+        }
         std::process::exit(1);
     }
 }
@@ -858,9 +1118,7 @@ fn is_broken_pipe_panic(info: &std::panic::PanicHookInfo<'_>) -> bool {
         && (message.contains("Broken pipe") || message.contains("broken pipe"))
 }
 
-async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let started_at = Instant::now();
-    let cli = Cli::parse();
+async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Error>> {
     let json_format = output::resolve_json_format(cli.pretty, cli.compact);
     let config = Config::load();
     let auth_store = AuthStore::new(config.secrets_path.clone(), config.api_base_url.clone());
@@ -914,6 +1172,100 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     print_doctor(&output);
                 }
             }
+            Command::Me => {
+                let token = require_token(&auth_store)?;
+                let mut realtime = RealtimeClient::connect(&config.realtime_url, &token).await?;
+                let me = fetch_me(&mut realtime).await?;
+                local_db.set_current_user(me.clone())?;
+                if cli.json {
+                    output::print_json(&me, json_format)?;
+                } else {
+                    print_auth_user(&me);
+                }
+            }
+            Command::Search(args) => {
+                // Shortcut for `inline messages search ...`
+                let token = require_token(&auth_store)?;
+                let peer = input_peer_from_args(args.chat_id, args.user_id)?;
+                let queries = normalize_search_queries(&args.query)?;
+                let peer_summary = peer_summary_from_input(&peer);
+                let mut realtime = RealtimeClient::connect(&config.realtime_url, &token).await?;
+
+                let input = proto::SearchMessagesInput {
+                    peer_id: Some(peer.clone()),
+                    queries,
+                    limit: args.limit,
+                    offset_id: None,
+                    filter: None,
+                };
+                let result = realtime
+                    .call_rpc(
+                        proto::Method::SearchMessages,
+                        proto::rpc_call::Input::SearchMessages(input),
+                    )
+                    .await?;
+                match result {
+                    proto::rpc_result::Result::SearchMessages(mut payload) => {
+                        let (since_ts, until_ts) = parse_time_filters(
+                            args.since.as_deref(),
+                            args.until.as_deref(),
+                            Utc::now(),
+                        )?;
+                        filter_messages_by_time(&mut payload.messages, since_ts, until_ts);
+                        if cli.json {
+                            output::print_json(&payload, json_format)?;
+                        } else {
+                            let chats_result = realtime
+                                .call_rpc(
+                                    proto::Method::GetChats,
+                                    proto::rpc_call::Input::GetChats(proto::GetChatsInput {}),
+                                )
+                                .await?;
+                            let (users_by_id, chats_by_id) = match chats_result {
+                                proto::rpc_result::Result::GetChats(chats_payload) => {
+                                    let users = chats_payload
+                                        .users
+                                        .into_iter()
+                                        .map(|user| (user.id, user))
+                                        .collect();
+                                    let chats = chats_payload
+                                        .chats
+                                        .into_iter()
+                                        .map(|chat| (chat.id, chat))
+                                        .collect();
+                                    (users, chats)
+                                }
+                                _ => return Err("Unexpected RPC result for getChats".into()),
+                            };
+                            let current_user_id = local_db.load()?.current_user.map(|user| user.id);
+                            let output = build_message_list_from_messages(
+                                &payload.messages,
+                                &users_by_id,
+                                current_user_id,
+                                peer_summary,
+                                peer_name_from_input(&peer, &users_by_id, &chats_by_id),
+                                None,
+                            );
+                            output::print_messages(&output, false, json_format)?;
+                        }
+                    }
+                    _ => return Err("Unexpected RPC result for searchMessages".into()),
+                }
+            }
+            Command::Schema { command } => match command {
+                SchemaCommand::Proto => {
+                    let bundle = bundled_proto_sources();
+                    if cli.json {
+                        output::print_json(&bundle, json_format)?;
+                    } else {
+                        for file in bundle.files {
+                            println!("# {}", file.name);
+                            println!("{}", file.contents);
+                            println!();
+                        }
+                    }
+                }
+            },
             Command::Chats { command } => match command {
                 ChatsCommand::List(args) => {
                     let token = require_token(&auth_store)?;
@@ -1296,14 +1648,17 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                     match result {
                         proto::rpc_result::Result::GetChats(payload) => {
-                            let mut output = build_user_list(&payload);
-                            filter_users_output(&mut output, args.filter.as_deref());
                             if cli.json {
-                                if args.ids || args.id {
-                                    return Err("--ids/--id are only supported in table output mode (omit --json)".into());
+                                if args.filter.is_some() || args.ids || args.id {
+                                    return Err(CliError::invalid_args(
+                                        "--filter/--ids/--id are only supported in table output mode (omit --json)",
+                                    )
+                                    .into());
                                 }
-                                output::print_json(&output, json_format)?;
+                                output::print_json(&payload, json_format)?;
                             } else {
+                                let mut output = build_user_list(&payload);
+                                filter_users_output(&mut output, args.filter.as_deref());
                                 if args.ids {
                                     for user in &output.users {
                                         println!("{}", user.user.id);
@@ -1348,7 +1703,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 {
                                     output::print_json(user, json_format)?;
                                 } else {
-                                    return Err("User not found in getChats users list".into());
+                                    return Err(CliError::not_found_user_id(args.id).into());
                                 }
                             } else {
                                 let output = build_user_list(&payload);
@@ -1363,7 +1718,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                                         json_format,
                                     )?;
                                 } else {
-                                    return Err("User not found in getChats users list".into());
+                                    return Err(CliError::not_found_user_id(args.id).into());
                                 }
                             }
                         }
@@ -1605,13 +1960,17 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                     let mention_entities = parse_mention_entities(&args.mentions)?;
                     if mention_entities.is_some() && caption.is_none() {
-                        return Err("Mentions require --text or --stdin".into());
+                        return Err(CliError::mentions_require_text().into());
                     }
                     let mut realtime =
                         RealtimeClient::connect(&config.realtime_url, &token).await?;
                     if attachments.is_empty() {
                         let text = caption
-                            .ok_or_else(|| "Provide --text, --stdin, or --attach".to_string())?;
+                            .ok_or_else(|| {
+                                CliError::invalid_args(
+                                    "Missing required argument: provide --text/--message/--msg, --stdin, or --attach",
+                                )
+                            })?;
                         let payload = send_message(
                             &mut realtime,
                             &peer,
@@ -1701,9 +2060,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 MessagesCommand::Download(args) => {
                     let token = require_token(&auth_store)?;
-                    if args.output.is_some() && args.dir.is_some() {
-                        return Err("Provide only one of --output or --dir".into());
-                    }
                     let peer = input_peer_from_args(args.chat_id, args.user_id)?;
                     let mut realtime =
                         RealtimeClient::connect(&config.realtime_url, &token).await?;
@@ -1765,7 +2121,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let token = require_token(&auth_store)?;
                     let peer = input_peer_from_args(args.chat_id, args.user_id)?;
                     let text = resolve_message_caption(args.text, args.stdin)?
-                        .ok_or_else(|| "Provide --text or --stdin".to_string())?;
+                        .ok_or_else(|| CliError::missing_text_or_stdin())?;
                     let mut realtime =
                         RealtimeClient::connect(&config.realtime_url, &token).await?;
                     let input = proto::EditMessageInput {
@@ -2762,7 +3118,39 @@ fn input_peer_from_args(
                 user_id,
             })),
         }),
-        (None, None) => Err("Provide --chat-id or --user-id".into()),
+        (None, None) => Err(CliError::missing_peer().into()),
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProtoSchemaFile {
+    name: &'static str,
+    contents: &'static str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProtoSchemaBundle {
+    files: Vec<ProtoSchemaFile>,
+}
+
+fn bundled_proto_sources() -> ProtoSchemaBundle {
+    ProtoSchemaBundle {
+        files: vec![
+            ProtoSchemaFile {
+                name: "core.proto",
+                contents: include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../proto/core.proto")),
+            },
+            ProtoSchemaFile {
+                name: "client.proto",
+                contents: include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../proto/client.proto")),
+            },
+            ProtoSchemaFile {
+                name: "server.proto",
+                contents: include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../proto/server.proto")),
+            },
+        ],
     }
 }
 
@@ -3317,7 +3705,7 @@ fn normalize_search_queries(queries: &[String]) -> Result<Vec<String>, Box<dyn s
         .collect();
 
     if normalized.is_empty() {
-        return Err("Provide --query (repeatable)".into());
+        return Err(CliError::missing_query().into());
     }
 
     Ok(normalized)
@@ -3339,7 +3727,7 @@ fn parse_time_filters(
 
     if let (Some(s), Some(u)) = (since_ts, until_ts) {
         if u < s {
-            return Err("--until must be on or after --since".into());
+            return Err(CliError::invalid_time_range().into());
         }
     }
 
@@ -3366,7 +3754,7 @@ fn filter_messages_by_time(
 fn normalize_translation_language(language: &str) -> Result<String, Box<dyn std::error::Error>> {
     let trimmed = language.trim();
     if trimmed.is_empty() {
-        return Err("Provide a language code for --translate".into());
+        return Err(CliError::missing_translate_language().into());
     }
     Ok(trimmed.to_string())
 }
@@ -4490,5 +4878,143 @@ fn print_auth_error(error: &ApiError) {
         ApiError::Io(err) => {
             eprintln!("Local IO error while verifying code: {err}");
         }
+    }
+}
+
+#[cfg(test)]
+mod cli_parsing_tests {
+    use super::*;
+
+    #[test]
+    fn parses_whoami_and_me_shortcuts() {
+        let cli = Cli::try_parse_from(["inline", "me"]).unwrap();
+        assert!(matches!(cli.command, Command::Me));
+
+        let cli = Cli::try_parse_from(["inline", "whoami"]).unwrap();
+        assert!(matches!(cli.command, Command::Me));
+    }
+
+    #[test]
+    fn parses_search_shortcut() {
+        let cli = Cli::try_parse_from(["inline", "search", "--chat-id", "1", "--query", "foo"])
+            .unwrap();
+        match cli.command {
+            Command::Search(args) => {
+                assert_eq!(args.chat_id, Some(1));
+                assert_eq!(args.user_id, None);
+                assert_eq!(args.query, vec!["foo".to_string()]);
+            }
+            _ => panic!("expected Command::Search"),
+        }
+    }
+
+    #[test]
+    fn parses_schema_proto() {
+        let cli = Cli::try_parse_from(["inline", "schema", "proto"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Schema {
+                command: SchemaCommand::Proto
+            }
+        ));
+    }
+
+    #[test]
+    fn users_search_aliases_to_list() {
+        let cli = Cli::try_parse_from(["inline", "users", "search"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Users {
+                command: UsersCommand::List(_)
+            }
+        ));
+    }
+
+    #[test]
+    fn message_text_aliases_parse_for_send_and_edit() {
+        let cli = Cli::try_parse_from([
+            "inline",
+            "messages",
+            "send",
+            "--chat-id",
+            "1",
+            "--message",
+            "hi",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Messages {
+                command: MessagesCommand::Send(args),
+            } => assert_eq!(args.text.as_deref(), Some("hi")),
+            _ => panic!("expected messages send"),
+        }
+
+        let cli = Cli::try_parse_from([
+            "inline",
+            "messages",
+            "send",
+            "--chat-id",
+            "1",
+            "--msg",
+            "hi2",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Messages {
+                command: MessagesCommand::Send(args),
+            } => assert_eq!(args.text.as_deref(), Some("hi2")),
+            _ => panic!("expected messages send"),
+        }
+
+        let cli = Cli::try_parse_from(["inline", "messages", "send", "--chat-id", "1", "-m", "h"])
+            .unwrap();
+        match cli.command {
+            Command::Messages {
+                command: MessagesCommand::Send(args),
+            } => assert_eq!(args.text.as_deref(), Some("h")),
+            _ => panic!("expected messages send"),
+        }
+
+        let cli = Cli::try_parse_from([
+            "inline",
+            "messages",
+            "edit",
+            "--chat-id",
+            "1",
+            "--message-id",
+            "2",
+            "--msg",
+            "updated",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Messages {
+                command: MessagesCommand::Edit(args),
+            } => assert_eq!(args.text.as_deref(), Some("updated")),
+            _ => panic!("expected messages edit"),
+        }
+    }
+
+    #[test]
+    fn peer_args_conflict_at_parse_time() {
+        let err = Cli::try_parse_from([
+            "inline",
+            "messages",
+            "list",
+            "--chat-id",
+            "1",
+            "--user-id",
+            "2",
+        ])
+        .err()
+        .unwrap();
+        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn missing_query_errors_are_structured() {
+        let err = normalize_search_queries(&[]).unwrap_err();
+        let cli_err = err.downcast_ref::<CliError>().unwrap();
+        assert_eq!(cli_err.code, "missing_query");
     }
 }
