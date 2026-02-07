@@ -7,7 +7,9 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 
 ## Global flags
 
-- `--json`: Output JSON instead of human tables/details (available on all commands). This greatly increases the verbosity and information you can get. Most of the data is either not included or truncated/redacted in the default human readable mode. Use JSON mode when you need exact details of a chat, message, etc. You can start with default mode and switch to json mode for more details and form your response.
+- `--json`: Output raw JSON payloads (proto/RPC results) to stdout (available on all commands).
+  - When `--json` is set and a command fails, the CLI prints a structured error JSON to stderr: `{"error":{"code","message","hint","examples"}}` and exits non-zero.
+  - Some table-only filters (e.g. `--filter/--ids/--id`) are disabled in `--json` mode to keep the payload raw; use `jq` to filter instead.
 - `--pretty`: Pretty-print JSON output (default).
 - `--compact`: Compact JSON output (no whitespace).
 
@@ -25,6 +27,7 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 
 ### chats
 
+- Top-level aliases: `inline chat ...`, `inline thread ...`, `inline threads ...` all map to `inline chats ...`.
 - `inline chats list`
   - List chats with human-readable names, unread count, and last message preview (sender + text in one column).
 - `inline chats get [--chat-id 123 | --user-id 42]`
@@ -39,12 +42,30 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
   - Create a new chat or thread. If `--public` is set, participants must be empty.
 - `inline chats create-dm --user-id 42`
   - Create a private chat (DM).
+- `inline chats rename --chat-id 123 --title "New title" [--emoji "🚀"]`
+  - Rename a chat or thread.
 - `inline chats mark-unread [--chat-id 123 | --user-id 42]`
   - Mark a chat or DM as unread.
 - `inline chats mark-read [--chat-id 123 | --user-id 42] [--max-id 456]`
   - Mark a chat or DM as read. If `--max-id` is omitted, marks through the latest message.
 - `inline chats delete --chat-id 123`
   - Delete a chat (space thread). Prompts for confirmation unless `--yes` is provided.
+
+### bots
+
+- `inline bots list [--filter "name"] [--ids | --id]`
+  - List bots you can access.
+- `inline bots create --name "Build Bot" --username build_bot [--add-to-space 31]`
+  - Create a bot. Prints the token in table output; JSON includes the token too.
+- `inline bots reveal-token --bot-user-id 42`
+  - Print (or JSON-return) an existing bot token by bot user id.
+
+### typing
+
+- `inline typing start [--chat-id 123 | --user-id 42]`
+  - Send a "typing" compose action.
+- `inline typing stop [--chat-id 123 | --user-id 42]`
+  - Clear the compose action (stop typing).
 
 ### users
 
@@ -98,14 +119,17 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
   - `--since` and `--until` accept relative time expressions like `yesterday`, `2h ago`, `monday`, `2024-01-15`, or RFC3339.
 - `inline messages get --chat-id 123 --message-id 456 [--translate en]`
   - Fetch one full message by id (includes media + attachments).
-- `inline messages send [--chat-id 123 | --user-id 42] [--text "hi"] [--stdin] [--reply-to 456] [--mention USER_ID:OFFSET:LENGTH ...] [--attach PATH ...] [--force-file]`
+- `inline messages send [--chat-id 123 | --user-id 42] [--text "hi" | --message "hi" | --msg "hi" | -m "hi"] [--stdin] [--reply-to 456] [--mention USER_ID:OFFSET:LENGTH ...] [--attach PATH ...] [--force-file]`
   - Send a message (markdown parsing enabled). Mentions are provided via `--mention` with UTF-16 offsets.
   - `--stdin` reads message text from stdin.
   - `--attach` is repeatable. Each attachment is sent as its own message; `--text` is reused as the caption.
   - Folders are zipped before upload. Attachments over 200MB are rejected.
   - `--force-file` uploads photos/videos as files (documents).
   - `--mention` is repeatable and must match the message text (`user_id:offset:length` with UTF-16 units).
-- `inline messages edit [--chat-id 123 | --user-id 42] --message-id 456 [--text "updated" | --stdin]`
+- `inline messages forward --from-chat-id 123 --message-id 456 --to-chat-id 789 [--no-header]`
+  - Forward one or more messages between chats or DMs.
+  - Repeat `--message-id` to forward multiple messages.
+- `inline messages edit [--chat-id 123 | --user-id 42] --message-id 456 [--text "updated" | --message "updated" | --msg "updated" | -m "updated" | --stdin]`
   - Edit a message by id.
 - `inline messages delete [--chat-id 123 | --user-id 42] --message-id 456 [--message-id 789]`
   - Delete one or more messages (prompts for confirmation; use `--yes` to skip).
@@ -122,8 +146,12 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
   - `inline auth login` (prompts for email/phone + code, then prints welcome name)
 - Verify who you are:
   - `inline auth me`
+  - Shortcut: `inline me`
 - Check diagnostics:
   - `inline doctor`
+- List chats/threads:
+  - `inline chats list`
+  - Alias: `inline thread list`
 - Search messages in a chat:
   - `inline messages search --chat-id 123 --query "design review"`
   - JSON: `inline messages search --chat-id 123 --query "design review" --json`
@@ -139,10 +167,21 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
   - `inline messages send --chat-id 123 --text "FYI" --attach ./photo.jpg --attach ./spec.pdf`
 - Reply to a message:
   - `inline messages send --chat-id 123 --reply-to 456 --text "on it"`
+- Forward a message:
+  - `inline messages forward --from-chat-id 123 --message-id 456 --to-chat-id 789`
 - Send a message with a mention entity:
   - `inline messages send --chat-id 123 --text "@Sam hello" --mention 42:0:4`
 - Download an attachment:
   - `inline messages download --chat-id 123 --message-id 456 --dir ./downloads`
+- Rename a thread:
+  - `inline chats rename --chat-id 123 --title "New title"`
+- Bots:
+  - `inline bots list`
+  - `inline bots create --name "Build Bot" --username build_bot`
+  - `inline bots reveal-token --bot-user-id 42`
+- Typing:
+  - `inline typing start --chat-id 123`
+  - `inline typing stop --chat-id 123`
 - Edit and delete a message:
   - `inline messages edit --chat-id 123 --message-id 456 --text "updated"`
   - `inline messages delete --chat-id 123 --message-id 456`
@@ -155,6 +194,7 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 - `inline chats list --json | jq -r '.chats[] | "\(.id)\t\(.title // "")\tspace:\(if .space_id == null then "dm" else (.space_id | tostring) end)"'`
 - `inline chats list --json | jq -r '.dialogs[] | select(.unread_count > 0) | "\(.chat_id)\tunread:\(.unread_count)"'`
 - `inline messages list --chat-id 123 --json | jq -r '.messages[] | "\(.id)\t\(.from_id)\t\((.message // "") | gsub("\n"; " ") | .[0:80])"'`
+- `inline schema proto --json --compact | jq -r '.files[].name'`
 
 ## Agent Tips
 
@@ -165,6 +205,23 @@ inline users list | grep -i "partial_name"
 ```
 
 Faster than parsing JSON when you just need user ID.
+
+### DM: last 5 messages + download media
+
+```bash
+# Find the DM user id by name/email/username
+USER_ID="$(inline users list --filter "sam" --id)"
+
+# Read the last 5 messages
+inline messages list --user-id "$USER_ID" --limit 5 --json --compact
+
+# Download media from the last 50 messages
+inline messages list --user-id "$USER_ID" --limit 50 --json --compact \
+  | jq -r '.messages[] | select(.media != null) | .id' \
+  | while read -r MESSAGE_ID; do
+      inline messages download --user-id "$USER_ID" --message-id "$MESSAGE_ID" --dir ./downloads
+    done
+```
 
 ### Filtering messages with jq
 
