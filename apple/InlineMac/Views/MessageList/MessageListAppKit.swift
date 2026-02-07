@@ -364,6 +364,7 @@ class MessageListAppKit: NSViewController {
       log.trace("Adjusting view's insets")
 
       let wasAtBottom = isAtBottom
+      let topAnchor = captureTopAnchor()
       suppressResizeScrollMaintenance = true
 
       scrollView.contentInsets = NSEdgeInsets(
@@ -381,14 +382,48 @@ class MessageListAppKit: NSViewController {
 
       updateToolbar()
 
-      if wasAtBottom, !needsInitialScroll {
-        scrollToBottom(animated: false)
+      if !needsInitialScroll {
+        if wasAtBottom {
+          scrollToBottom(animated: false)
+        } else if let topAnchor {
+          restoreTopAnchor(topAnchor)
+        }
       }
 
       DispatchQueue.main.async { [weak self] in
         self?.suppressResizeScrollMaintenance = false
       }
     }
+  }
+
+  private struct TopAnchorSnapshot {
+    let row: Int
+    let offset: CGFloat
+  }
+
+  private func captureTopAnchor() -> TopAnchorSnapshot? {
+    let visibleRect = tableView.visibleRect
+    let range = tableView.rows(in: visibleRect)
+    guard range.location != NSNotFound, range.length > 0 else { return nil }
+
+    let row = range.location
+    let rowRect = tableView.rect(ofRow: row)
+    return TopAnchorSnapshot(row: row, offset: rowRect.minY - visibleRect.minY)
+  }
+
+  private func restoreTopAnchor(_ anchor: TopAnchorSnapshot) {
+    scrollView.layoutSubtreeIfNeeded()
+    let rowRect = tableView.rect(ofRow: anchor.row)
+    let targetVisibleMinY = rowRect.minY - anchor.offset
+    let clamped = clampScrollOffset(targetVisibleMinY)
+    scrollView.contentView.updateBounds(NSPoint(x: 0, y: clamped), cancel: true)
+  }
+
+  private func clampScrollOffset(_ offset: CGFloat) -> CGFloat {
+    let contentHeight = scrollView.documentView?.bounds.height ?? 0
+    let viewportHeight = scrollView.contentView.bounds.height
+    let maxOffset = max(0, contentHeight - viewportHeight)
+    return min(max(offset, 0), maxOffset)
   }
 
   private func isAtTop() -> Bool {
