@@ -5,6 +5,7 @@ import { and, eq, gte, isNull, lt, or, sql, desc } from "drizzle-orm"
 import { setup } from "@in/server/setup"
 import { db } from "@in/server/db"
 import {
+  chats,
   loginCodes,
   messages,
   sessions,
@@ -1555,6 +1556,13 @@ const getAppMetrics = async () => {
 
   const wau = wauRows.reduce((count, row) => (row.activeDays >= 3 ? count + 1 : count), 0)
 
+  const [threadsTodayRow] = await db
+    .select({
+      count: sql<number>`count(*)::int`,
+    })
+    .from(chats)
+    .where(and(eq(chats.type, "thread"), gte(chats.date, startOfDay), lt(chats.date, nextDay)))
+
   const [totalUsersRow] = await db
     .select({
       count: sql<number>`count(*)::int`,
@@ -1582,6 +1590,7 @@ const getAppMetrics = async () => {
     messagesToday: messagesTodayRow?.count ?? 0,
     activeUsersToday: dauRow?.count ?? 0,
     activeUsersLast7d: activeUsersLast7dRow?.count ?? 0,
+    threadsCreatedToday: threadsTodayRow?.count ?? 0,
     totals: {
       totalUsers: totalUsersRow?.count ?? 0,
       verifiedUsers: verifiedUsersRow?.count ?? 0,

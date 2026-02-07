@@ -9,6 +9,7 @@ type AppMetrics = {
   messagesToday: number
   activeUsersToday: number
   activeUsersLast7d: number
+  threadsCreatedToday: number
   totals: {
     totalUsers: number
     verifiedUsers: number
@@ -66,6 +67,12 @@ export const AppMetricsPage = () => {
             <CardTitle>Messages today</CardTitle>
           </CardHeader>
           <CardContent className="text-xl font-semibold">{metrics.messagesToday}</CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Threads created today (UTC)</CardTitle>
+          </CardHeader>
+          <CardContent className="text-xl font-semibold">{metrics.threadsCreatedToday}</CardContent>
         </Card>
         <Card>
           <CardHeader>
