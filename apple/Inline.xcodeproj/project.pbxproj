@@ -100,6 +100,7 @@
 		CD3AF2F92EE731EB001DA73E /* InlineNotificationExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = InlineNotificationExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD5326842CE113CD00EC348D /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		CD5326862CE1149700EC348D /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
+		CD82F7F52F3618650012BA81 /* InlineIOSUI */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineIOSUI; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -301,6 +302,7 @@
 				C3CC99172CCE9A7E007F7F77 /* InlineUI */,
 				C3AA8E4E2CB942BF00800A03 /* InlineKit */,
 				CD092C4B2EDC6D8200E867E5 /* InlineMacUI */,
+				CD82F7F52F3618650012BA81 /* InlineIOSUI */,
 				CD2661662CA01E3E00EB186F /* InlineMac */,
 				B7020C432DCE1534007099D9 /* InlineShareExtension */,
 				C38A28382CA5AB8F00D3DFB8 /* InlineIOS */,
