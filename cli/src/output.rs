@@ -152,9 +152,10 @@ pub struct ChatParticipantsOutput {
 pub fn resolve_json_format(pretty: bool, compact: bool) -> JsonFormat {
     if compact {
         JsonFormat::Compact
-    } else if pretty {
-        JsonFormat::Pretty
     } else {
+        // Pretty is the default even when neither --pretty nor --compact are provided.
+        // Keep `pretty` parameter for clarity and potential future behavior changes.
+        let _ = pretty;
         JsonFormat::Pretty
     }
 }

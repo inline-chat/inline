@@ -240,18 +240,21 @@ async fn check_for_update(
 
     let latest = Version::parse(&manifest.version)?;
     let current = Version::parse(&current_version)?;
-    if latest > current {
-        if manifest.targets.contains_key(target) {
-            let should_notify = state
-                .last_update_notified_version
-                .as_deref()
-                .map(|version| version != manifest.version.as_str())
-                .unwrap_or(true);
-            if should_notify {
-                let install_url = manifest.install_url.clone().or(install_url);
-                print_update_notice(&current_version, &manifest.version, install_url.as_deref(), json);
-                state.last_update_notified_version = Some(manifest.version.clone());
-            }
+    if latest > current && manifest.targets.contains_key(target) {
+        let should_notify = state
+            .last_update_notified_version
+            .as_deref()
+            .map(|version| version != manifest.version.as_str())
+            .unwrap_or(true);
+        if should_notify {
+            let install_url = manifest.install_url.clone().or(install_url);
+            print_update_notice(
+                &current_version,
+                &manifest.version,
+                install_url.as_deref(),
+                json,
+            );
+            state.last_update_notified_version = Some(manifest.version.clone());
         }
     }
 

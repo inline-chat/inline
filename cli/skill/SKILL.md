@@ -10,6 +10,7 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 - `--json`: Output raw JSON payloads (proto/RPC results) to stdout (available on all commands).
   - When `--json` is set and a command fails, the CLI prints a structured error JSON to stderr: `{"error":{"code","message","hint","examples"}}` and exits non-zero.
   - Some table-only filters (e.g. `--filter/--ids/--id`) are disabled in `--json` mode to keep the payload raw; use `jq` to filter instead.
+  - Destructive commands never prompt in `--json` mode; pass `--yes` explicitly.
 - `--pretty`: Pretty-print JSON output (default).
 - `--compact`: Compact JSON output (no whitespace).
 
@@ -49,7 +50,7 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 - `inline chats mark-read [--chat-id 123 | --user-id 42] [--max-id 456]`
   - Mark a chat or DM as read. If `--max-id` is omitted, marks through the latest message.
 - `inline chats delete --chat-id 123`
-  - Delete a chat (space thread). Prompts for confirmation unless `--yes` is provided.
+  - Delete a chat (space thread). Prompts for confirmation unless `--yes` is provided (`--json` requires `--yes`).
 
 ### bots
 
@@ -85,7 +86,7 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 - `inline spaces invite --space-id 31 [--user-id 42 | --email you@x.com | --phone +15551234567] [--admin] [--public-chats]`
   - Invite a user to a space (role is optional; defaults to server behavior).
 - `inline spaces delete-member --space-id 31 --user-id 42`
-  - Remove a member from a space (prompts for confirmation; use `--yes` to skip).
+  - Remove a member from a space (prompts for confirmation; use `--yes` to skip; `--json` requires `--yes`).
 - `inline spaces update-member-access --space-id 31 --user-id 42 [--admin | --member] [--public-chats]`
   - Update a member's access/role. Provide `--admin` or `--member` (and optional `--public-chats`).
 
@@ -132,7 +133,7 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 - `inline messages edit [--chat-id 123 | --user-id 42] --message-id 456 [--text "updated" | --message "updated" | --msg "updated" | -m "updated" | --stdin]`
   - Edit a message by id.
 - `inline messages delete [--chat-id 123 | --user-id 42] --message-id 456 [--message-id 789]`
-  - Delete one or more messages (prompts for confirmation; use `--yes` to skip).
+  - Delete one or more messages (prompts for confirmation; use `--yes` to skip; `--json` requires `--yes`).
 - `inline messages add-reaction [--chat-id 123 | --user-id 42] --message-id 456 --emoji "👍"`
   - Add an emoji reaction to a message (emoji characters only, no `:shortcode:`).
 - `inline messages delete-reaction [--chat-id 123 | --user-id 42] --message-id 456 --emoji "👍"`
