@@ -92,6 +92,55 @@ impl CliError {
         }
     }
 
+    fn missing_forward_source() -> Self {
+        Self {
+            code: "missing_forward_source",
+            message:
+                "Missing required argument: provide --from-chat-id or --from-user-id".to_string(),
+            hint: Some(
+                "Use `inline chats list` to find chat IDs, or `inline users list --filter ... --id` for DM user IDs."
+                    .to_string(),
+            ),
+            examples: vec![
+                "inline messages forward --from-chat-id 123 --message-id 456 --to-chat-id 789"
+                    .to_string(),
+                "inline messages forward --from-user-id 42 --message-id 456 --to-chat-id 789"
+                    .to_string(),
+            ],
+        }
+    }
+
+    fn missing_forward_destination() -> Self {
+        Self {
+            code: "missing_forward_destination",
+            message: "Missing required argument: provide --to-chat-id or --to-user-id".to_string(),
+            hint: Some(
+                "Use `inline chats list` to find chat IDs, or `inline users list --filter ... --id` for DM user IDs."
+                    .to_string(),
+            ),
+            examples: vec![
+                "inline messages forward --from-chat-id 123 --message-id 456 --to-chat-id 789"
+                    .to_string(),
+                "inline messages forward --from-chat-id 123 --message-id 456 --to-user-id 42"
+                    .to_string(),
+            ],
+        }
+    }
+
+    fn missing_message_ids() -> Self {
+        Self {
+            code: "missing_message_ids",
+            message: "Missing required argument: provide one or more --message-id values"
+                .to_string(),
+            hint: Some("Repeat --message-id to act on multiple messages.".to_string()),
+            examples: vec![
+                "inline messages delete --chat-id 123 --message-id 456".to_string(),
+                "inline messages forward --from-chat-id 123 --message-id 456 --message-id 789 --to-chat-id 321"
+                    .to_string(),
+            ],
+        }
+    }
+
     fn missing_text_or_stdin() -> Self {
         Self {
             code: "missing_text",
@@ -227,13 +276,16 @@ fn detect_global_flags(argv: &[OsString]) -> DetectedGlobalFlags {
 Examples:
   inline auth login --email you@example.com
   inline auth me
+  inline me
   inline doctor
   inline chats list
+  inline thread list
   inline chats participants --chat-id 123
   inline chats create --title "Launch" --space-id 31 --participant 42
   inline chats create-dm --user-id 42
   inline chats update-visibility --chat-id 123 --public
   inline chats update-visibility --chat-id 123 --private --participant 42 --participant 99
+  inline chats rename --chat-id 123 --title "New title"
   inline chats mark-unread --chat-id 123
   inline chats mark-read --chat-id 123
   inline notifications get
@@ -241,6 +293,12 @@ Examples:
   inline spaces list
   inline spaces members --space-id 31
   inline spaces invite --space-id 31 --email you@example.com
+  inline bots list
+  inline bots create --name "Build Bot" --username build_bot
+  inline bots reveal-token --bot-user-id 42
+  inline typing start --chat-id 123
+  inline typing stop --chat-id 123
+  inline schema proto
   inline users list --json
   inline messages list --chat-id 123
   inline messages list --chat-id 123 --since "yesterday"
@@ -254,6 +312,7 @@ Examples:
   inline messages send --chat-id 123 --text "hello"
   inline messages send --chat-id 123 --reply-to 456 --text "on it"
   inline messages send --chat-id 123 --text "@Sam hello" --mention 42:0:4
+  inline messages forward --from-chat-id 123 --message-id 456 --to-chat-id 789
   inline messages edit --chat-id 123 --message-id 456 --text "updated"
   inline messages delete --chat-id 123 --message-id 456
   inline messages add-reaction --chat-id 123 --message-id 456 --emoji "👍"
@@ -268,7 +327,9 @@ JQ examples:
   inline users list --json | jq -r '.users[] | select((.first_name + " " + (.last_name // "") + " " + (.username // "") + " " + (.email // "")) | ascii_downcase | contains("mo")) | "\(.id)\t\(.first_name) \(.last_name)"'
   inline chats list --json | jq -r '.chats[] | "\(.id)\t\(.title // "")\tspace:\(if .space_id == null then "dm" else (.space_id | tostring) end)"'
   inline chats list --json | jq -r '.dialogs[] | select(.unread_count > 0) | "\(.chat_id)\tunread:\(.unread_count)"'
-  inline messages list --chat-id 123 --json | jq -r '.messages[] | "\(.id)\t\(.from_id)\t\((.message // "") | gsub("\n"; " ") | .[0:80])"'
+  inline messages list --chat-id 123 --json --compact | jq -r '.messages[] | "\(.id)\t\(.from_id)\t\((.message // "") | gsub("\n"; " ") | .[0:80])"'
+  inline messages list --user-id 42 --limit 20 --json --compact | jq -r '.messages[] | select(.media != null) | .id'
+  inline schema proto --json --compact | jq -r '.files[].name'
 "#
 )]
 struct Cli {
@@ -313,7 +374,7 @@ enum Command {
     Update,
     #[command(about = "Print diagnostic information about this CLI")]
     Doctor,
-    #[command(about = "List chats and threads")]
+    #[command(about = "List chats and threads", alias = "chat", alias = "thread", alias = "threads")]
     Chats {
         #[command(subcommand)]
         command: ChatsCommand,
@@ -342,6 +403,18 @@ enum Command {
     Tasks {
         #[command(subcommand)]
         command: TasksCommand,
+    },
+
+    #[command(about = "Bot operations", alias = "bot")]
+    Bots {
+        #[command(subcommand)]
+        command: BotsCommand,
+    },
+
+    #[command(about = "Send typing (compose) actions")]
+    Typing {
+        #[command(subcommand)]
+        command: TypingCommand,
     },
 
     // Read-only shortcuts (desire paths).
@@ -400,12 +473,32 @@ enum ChatsCommand {
     CreateDm(ChatsCreateDmArgs),
     #[command(about = "Update chat visibility (public/private)")]
     UpdateVisibility(ChatsUpdateVisibilityArgs),
+    #[command(about = "Rename a chat or thread")]
+    Rename(ChatsRenameArgs),
     #[command(about = "Mark a chat or DM as unread")]
     MarkUnread(ChatsMarkUnreadArgs),
     #[command(about = "Mark a chat or DM as read")]
     MarkRead(ChatsMarkReadArgs),
     #[command(about = "Delete a chat (space thread)")]
     Delete(ChatsDeleteArgs),
+}
+
+#[derive(Subcommand)]
+enum BotsCommand {
+    #[command(about = "List bots you can access")]
+    List(BotsListArgs),
+    #[command(about = "Create a new bot")]
+    Create(BotsCreateArgs),
+    #[command(about = "Reveal a bot token by bot user id")]
+    RevealToken(BotsRevealTokenArgs),
+}
+
+#[derive(Subcommand)]
+enum TypingCommand {
+    #[command(about = "Start typing")]
+    Start(TypingArgs),
+    #[command(about = "Stop typing (clear compose action)")]
+    Stop(TypingArgs),
 }
 
 #[derive(Args)]
@@ -510,6 +603,18 @@ struct ChatsUpdateVisibilityArgs {
 }
 
 #[derive(Args)]
+struct ChatsRenameArgs {
+    #[arg(long, help = "Chat id (space thread)")]
+    chat_id: i64,
+
+    #[arg(long, help = "New chat/thread title")]
+    title: String,
+
+    #[arg(long, help = "Optional emoji for the chat icon")]
+    emoji: Option<String>,
+}
+
+#[derive(Args)]
 struct ChatsMarkUnreadArgs {
     #[arg(long, help = "Chat id", conflicts_with = "user_id")]
     chat_id: Option<i64>,
@@ -570,6 +675,50 @@ struct UserGetArgs {
     id: i64,
 }
 
+#[derive(Args)]
+struct BotsListArgs {
+    #[arg(long, help = "Filter bots by name or username")]
+    filter: Option<String>,
+
+    #[arg(long, help = "Print only bot user ids (one per line)")]
+    ids: bool,
+
+    #[arg(
+        long,
+        help = "Require exactly one match and print only its user id",
+        conflicts_with = "ids",
+        requires = "filter"
+    )]
+    id: bool,
+}
+
+#[derive(Args)]
+struct BotsCreateArgs {
+    #[arg(long, help = "Bot display name")]
+    name: String,
+
+    #[arg(long, help = "Bot username (without @)")]
+    username: String,
+
+    #[arg(long, help = "Optional space id to add the bot to")]
+    add_to_space: Option<i64>,
+}
+
+#[derive(Args)]
+struct BotsRevealTokenArgs {
+    #[arg(long, help = "Bot user id")]
+    bot_user_id: i64,
+}
+
+#[derive(Args)]
+struct TypingArgs {
+    #[arg(long, help = "Chat id", conflicts_with = "user_id")]
+    chat_id: Option<i64>,
+
+    #[arg(long, help = "User id (for DMs)", conflicts_with = "chat_id")]
+    user_id: Option<i64>,
+}
+
 #[derive(Subcommand)]
 enum MessagesCommand {
     #[command(about = "List messages for a chat or user")]
@@ -580,6 +729,8 @@ enum MessagesCommand {
     Get(MessagesGetArgs),
     #[command(about = "Send a message to a chat or user")]
     Send(MessagesSendArgs),
+    #[command(about = "Forward messages between chats or DMs")]
+    Forward(MessagesForwardArgs),
     #[command(about = "Export messages to a JSON file")]
     Export(MessagesExportArgs),
     #[command(about = "Download a message attachment (photo/video/file)")]
@@ -719,6 +870,33 @@ struct MessagesSendArgs {
 
     #[arg(long, help = "Read message text/caption from stdin")]
     stdin: bool,
+}
+
+#[derive(Args)]
+struct MessagesForwardArgs {
+    #[arg(long, help = "Source chat id", conflicts_with = "from_user_id")]
+    from_chat_id: Option<i64>,
+
+    #[arg(long, help = "Source user id (for DMs)", conflicts_with = "from_chat_id")]
+    from_user_id: Option<i64>,
+
+    #[arg(
+        long = "message-id",
+        value_name = "ID",
+        num_args = 1..,
+        action = ArgAction::Append,
+        help = "Message id to forward (repeatable)"
+    )]
+    message_ids: Vec<i64>,
+
+    #[arg(long, help = "Destination chat id", conflicts_with = "to_user_id")]
+    to_chat_id: Option<i64>,
+
+    #[arg(long, help = "Destination user id (for DMs)", conflicts_with = "to_chat_id")]
+    to_user_id: Option<i64>,
+
+    #[arg(long, help = "Do not include forward header")]
+    no_header: bool,
 }
 
 #[derive(Args)]
@@ -1266,6 +1444,154 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     }
                 }
             },
+            Command::Bots { command } => match command {
+                BotsCommand::List(args) => {
+                    let token = require_token(&auth_store)?;
+                    let mut realtime = RealtimeClient::connect(&config.realtime_url, &token).await?;
+                    let result = realtime
+                        .call_rpc(
+                            proto::Method::ListBots,
+                            proto::rpc_call::Input::ListBots(proto::ListBotsInput {}),
+                        )
+                        .await?;
+                    match result {
+                        proto::rpc_result::Result::ListBots(payload) => {
+                            if cli.json {
+                                if args.filter.is_some() || args.ids || args.id {
+                                    return Err(CliError::invalid_args(
+                                        "--filter/--ids/--id are only supported in table output mode (omit --json)",
+                                    )
+                                    .into());
+                                }
+                                output::print_json(&payload, json_format)?;
+                            } else {
+                                let mut output = UserListOutput {
+                                    users: payload.bots.iter().map(user_summary).collect(),
+                                };
+                                filter_users_output(&mut output, args.filter.as_deref());
+                                if args.ids {
+                                    for user in &output.users {
+                                        println!("{}", user.user.id);
+                                    }
+                                } else if args.id {
+                                    if output.users.len() != 1 {
+                                        return Err(CliError::invalid_args(format!(
+                                            "Expected exactly 1 match for --id, got {}",
+                                            output.users.len()
+                                        ))
+                                        .into());
+                                    }
+                                    if let Some(user) = output.users.first() {
+                                        println!("{}", user.user.id);
+                                    }
+                                } else {
+                                    output::print_users(&output, false, json_format)?;
+                                }
+                            }
+                        }
+                        _ => return Err("Unexpected RPC result for listBots".into()),
+                    }
+                }
+                BotsCommand::Create(args) => {
+                    let name = args.name.trim();
+                    if name.is_empty() {
+                        return Err(CliError::invalid_args("Bot name cannot be empty").into());
+                    }
+                    let username = args.username.trim().trim_start_matches('@');
+                    if username.is_empty() {
+                        return Err(CliError::invalid_args("Bot username cannot be empty").into());
+                    }
+
+                    let token = require_token(&auth_store)?;
+                    let mut realtime = RealtimeClient::connect(&config.realtime_url, &token).await?;
+                    let input = proto::CreateBotInput {
+                        name: name.to_string(),
+                        username: username.to_string(),
+                        add_to_space: args.add_to_space,
+                    };
+                    let result = realtime
+                        .call_rpc(
+                            proto::Method::CreateBot,
+                            proto::rpc_call::Input::CreateBot(input),
+                        )
+                        .await?;
+                    match result {
+                        proto::rpc_result::Result::CreateBot(payload) => {
+                            if cli.json {
+                                output::print_json(&payload, json_format)?;
+                            } else {
+                                if let Some(bot) = payload.bot.as_ref() {
+                                    println!(
+                                        "Created bot {} (id {}).",
+                                        user_display_name(bot),
+                                        bot.id
+                                    );
+                                } else {
+                                    println!("Created bot.");
+                                }
+                                println!("token: {}", payload.token);
+                            }
+                        }
+                        _ => return Err("Unexpected RPC result for createBot".into()),
+                    }
+                }
+                BotsCommand::RevealToken(args) => {
+                    let token = require_token(&auth_store)?;
+                    let mut realtime = RealtimeClient::connect(&config.realtime_url, &token).await?;
+                    let input = proto::RevealBotTokenInput {
+                        bot_user_id: args.bot_user_id,
+                    };
+                    let result = realtime
+                        .call_rpc(
+                            proto::Method::RevealBotToken,
+                            proto::rpc_call::Input::RevealBotToken(input),
+                        )
+                        .await?;
+                    match result {
+                        proto::rpc_result::Result::RevealBotToken(payload) => {
+                            if cli.json {
+                                output::print_json(&payload, json_format)?;
+                            } else {
+                                println!("{}", payload.token);
+                            }
+                        }
+                        _ => return Err("Unexpected RPC result for revealBotToken".into()),
+                    }
+                }
+            },
+            Command::Typing { command } => {
+                let token = require_token(&auth_store)?;
+                let mut realtime = RealtimeClient::connect(&config.realtime_url, &token).await?;
+                let (label, args, action) = match command {
+                    TypingCommand::Start(args) => (
+                        "started",
+                        args,
+                        Some(proto::update_compose_action::ComposeAction::Typing as i32),
+                    ),
+                    TypingCommand::Stop(args) => ("stopped", args, None),
+                };
+                let peer = input_peer_from_args(args.chat_id, args.user_id)?;
+                let input = proto::SendComposeActionInput {
+                    peer_id: Some(peer.clone()),
+                    action,
+                };
+                let result = realtime
+                    .call_rpc(
+                        proto::Method::SendComposeAction,
+                        proto::rpc_call::Input::SendComposeAction(input),
+                    )
+                    .await?;
+                match result {
+                    proto::rpc_result::Result::SendComposeAction(payload) => {
+                        if cli.json {
+                            output::print_json(&payload, json_format)?;
+                        } else {
+                            println!("Typing {label} for {}.", peer_label_from_input(&peer));
+                        }
+                    }
+                    _ => return Err("Unexpected RPC result for sendComposeAction".into()),
+                }
+            }
             Command::Chats { command } => match command {
                 ChatsCommand::List(args) => {
                     let token = require_token(&auth_store)?;
@@ -1558,6 +1884,48 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                             }
                         }
                         _ => return Err("Unexpected RPC result for updateChatVisibility".into()),
+                    }
+                }
+                ChatsCommand::Rename(args) => {
+                    let title = args.title.trim();
+                    if title.is_empty() {
+                        return Err(CliError::invalid_args("Chat/thread title cannot be empty").into());
+                    }
+                    let emoji = args.emoji.and_then(|value| {
+                        let trimmed = value.trim();
+                        if trimmed.is_empty() {
+                            None
+                        } else {
+                            Some(trimmed.to_string())
+                        }
+                    });
+
+                    let token = require_token(&auth_store)?;
+                    let mut realtime = RealtimeClient::connect(&config.realtime_url, &token).await?;
+                    let input = proto::UpdateChatInfoInput {
+                        chat_id: args.chat_id,
+                        title: Some(title.to_string()),
+                        emoji,
+                    };
+                    let result = realtime
+                        .call_rpc(
+                            proto::Method::UpdateChatInfo,
+                            proto::rpc_call::Input::UpdateChatInfo(input),
+                        )
+                        .await?;
+                    match result {
+                        proto::rpc_result::Result::UpdateChatInfo(payload) => {
+                            if cli.json {
+                                output::print_json(&payload, json_format)?;
+                            } else {
+                                if let Some(chat) = payload.chat.as_ref() {
+                                    println!("Renamed chat {} to \"{}\".", chat.id, chat.title);
+                                } else {
+                                    println!("Renamed chat {}.", args.chat_id);
+                                }
+                            }
+                        }
+                        _ => return Err("Unexpected RPC result for updateChatInfo".into()),
                     }
                 }
                 ChatsCommand::MarkUnread(args) => {
@@ -2006,6 +2374,97 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         }
                     }
                 }
+                MessagesCommand::Forward(args) => {
+                    let MessagesForwardArgs {
+                        from_chat_id,
+                        from_user_id,
+                        message_ids,
+                        to_chat_id,
+                        to_user_id,
+                        no_header,
+                    } = args;
+
+                    if message_ids.is_empty() {
+                        return Err(CliError::missing_message_ids().into());
+                    }
+
+                    let from_peer = match (from_chat_id, from_user_id) {
+                        (Some(_), Some(_)) => {
+                            return Err(CliError::invalid_args(
+                                "Provide only one of --from-chat-id or --from-user-id",
+                            )
+                            .into());
+                        }
+                        (Some(chat_id), None) => proto::InputPeer {
+                            r#type: Some(proto::input_peer::Type::Chat(proto::InputPeerChat {
+                                chat_id,
+                            })),
+                        },
+                        (None, Some(user_id)) => proto::InputPeer {
+                            r#type: Some(proto::input_peer::Type::User(proto::InputPeerUser {
+                                user_id,
+                            })),
+                        },
+                        (None, None) => return Err(CliError::missing_forward_source().into()),
+                    };
+
+                    let to_peer = match (to_chat_id, to_user_id) {
+                        (Some(_), Some(_)) => {
+                            return Err(CliError::invalid_args(
+                                "Provide only one of --to-chat-id or --to-user-id",
+                            )
+                            .into());
+                        }
+                        (Some(chat_id), None) => proto::InputPeer {
+                            r#type: Some(proto::input_peer::Type::Chat(proto::InputPeerChat {
+                                chat_id,
+                            })),
+                        },
+                        (None, Some(user_id)) => proto::InputPeer {
+                            r#type: Some(proto::input_peer::Type::User(proto::InputPeerUser {
+                                user_id,
+                            })),
+                        },
+                        (None, None) => return Err(CliError::missing_forward_destination().into()),
+                    };
+
+                    let from_label = peer_label_from_input(&from_peer);
+                    let to_label = peer_label_from_input(&to_peer);
+                    let message_count = message_ids.len();
+                    let share_forward_header = if no_header { Some(false) } else { None };
+
+                    let token = require_token(&auth_store)?;
+                    let mut realtime =
+                        RealtimeClient::connect(&config.realtime_url, &token).await?;
+                    let input = proto::ForwardMessagesInput {
+                        from_peer_id: Some(from_peer),
+                        message_ids,
+                        to_peer_id: Some(to_peer),
+                        share_forward_header,
+                    };
+                    let result = realtime
+                        .call_rpc(
+                            proto::Method::ForwardMessages,
+                            proto::rpc_call::Input::ForwardMessages(input),
+                        )
+                        .await?;
+                    match result {
+                        proto::rpc_result::Result::ForwardMessages(payload) => {
+                            if cli.json {
+                                output::print_json(&payload, json_format)?;
+                            } else {
+                                println!(
+                                    "Forwarded {} message(s) from {} to {} (updates: {}).",
+                                    message_count,
+                                    from_label,
+                                    to_label,
+                                    payload.updates.len()
+                                );
+                            }
+                        }
+                        _ => return Err("Unexpected RPC result for forwardMessages".into()),
+                    }
+                }
                 MessagesCommand::Export(args) => {
                     let token = require_token(&auth_store)?;
                     let peer = input_peer_from_args(args.chat_id, args.user_id)?;
@@ -2080,6 +2539,9 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 MessagesCommand::Delete(args) => {
                     let token = require_token(&auth_store)?;
                     let peer = input_peer_from_args(args.chat_id, args.user_id)?;
+                    if args.message_ids.is_empty() {
+                        return Err(CliError::missing_message_ids().into());
+                    }
                     let message_count = args.message_ids.len();
                     let prompt = format!(
                         "Delete {} message(s) from {}?",
@@ -4915,6 +5377,135 @@ mod cli_parsing_tests {
             cli.command,
             Command::Schema {
                 command: SchemaCommand::Proto
+            }
+        ));
+    }
+
+    #[test]
+    fn parses_thread_aliases_to_chats() {
+        for alias in ["chat", "thread", "threads"] {
+            let cli = Cli::try_parse_from(["inline", alias, "list"]).unwrap();
+            assert!(matches!(
+                cli.command,
+                Command::Chats {
+                    command: ChatsCommand::List(_)
+                }
+            ));
+        }
+    }
+
+    #[test]
+    fn parses_chats_rename() {
+        let cli = Cli::try_parse_from([
+            "inline",
+            "chats",
+            "rename",
+            "--chat-id",
+            "12",
+            "--title",
+            "New title",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Chats {
+                command: ChatsCommand::Rename(args),
+            } => {
+                assert_eq!(args.chat_id, 12);
+                assert_eq!(args.title, "New title");
+                assert_eq!(args.emoji, None);
+            }
+            _ => panic!("expected chats rename"),
+        }
+    }
+
+    #[test]
+    fn parses_messages_forward() {
+        let cli = Cli::try_parse_from([
+            "inline",
+            "messages",
+            "forward",
+            "--from-chat-id",
+            "1",
+            "--message-id",
+            "10",
+            "--message-id",
+            "11",
+            "--to-chat-id",
+            "2",
+            "--no-header",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Messages {
+                command: MessagesCommand::Forward(args),
+            } => {
+                assert_eq!(args.from_chat_id, Some(1));
+                assert_eq!(args.from_user_id, None);
+                assert_eq!(args.message_ids, vec![10, 11]);
+                assert_eq!(args.to_chat_id, Some(2));
+                assert_eq!(args.to_user_id, None);
+                assert!(args.no_header);
+            }
+            _ => panic!("expected messages forward"),
+        }
+    }
+
+    #[test]
+    fn parses_typing_commands() {
+        let cli = Cli::try_parse_from(["inline", "typing", "start", "--chat-id", "1"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Typing {
+                command: TypingCommand::Start(_)
+            }
+        ));
+
+        let cli = Cli::try_parse_from(["inline", "typing", "stop", "--user-id", "2"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Typing {
+                command: TypingCommand::Stop(_)
+            }
+        ));
+    }
+
+    #[test]
+    fn parses_bots_commands() {
+        let cli = Cli::try_parse_from(["inline", "bots", "list"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Bots {
+                command: BotsCommand::List(_)
+            }
+        ));
+
+        let cli = Cli::try_parse_from([
+            "inline",
+            "bot",
+            "create",
+            "--name",
+            "My Bot",
+            "--username",
+            "my_bot",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Bots {
+                command: BotsCommand::Create(args),
+            } => {
+                assert_eq!(args.name, "My Bot");
+                assert_eq!(args.username, "my_bot");
+                assert_eq!(args.add_to_space, None);
+            }
+            _ => panic!("expected bots create"),
+        }
+
+        let cli = Cli::try_parse_from(["inline", "bots", "reveal-token", "--bot-user-id", "9"])
+            .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Bots {
+                command: BotsCommand::RevealToken(_)
             }
         ));
     }
