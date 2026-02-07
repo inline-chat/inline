@@ -141,6 +141,22 @@ impl CliError {
         }
     }
 
+    fn confirmation_required() -> Self {
+        Self {
+            code: "confirmation_required",
+            message: "Confirmation required: re-run with --yes to proceed".to_string(),
+            hint: Some(
+                "This command is destructive. In --json mode, the CLI never prompts; pass --yes explicitly."
+                    .to_string(),
+            ),
+            examples: vec![
+                "inline chats delete --chat-id 123 --yes --json".to_string(),
+                "inline messages delete --chat-id 123 --message-id 456 --yes --json".to_string(),
+                "inline spaces delete-member --space-id 31 --user-id 42 --yes --json".to_string(),
+            ],
+        }
+    }
+
     fn missing_text_or_stdin() -> Self {
         Self {
             code: "missing_text",
@@ -321,6 +337,9 @@ Examples:
   inline messages send --user-id 42 --stdin
   inline tasks create-linear --chat-id 123 --message-id 456
   inline tasks create-notion --chat-id 123 --message-id 456 --space-id 31
+
+Notes:
+  Destructive commands prompt unless --yes is provided. In --json mode, the CLI never prompts; pass --yes explicitly.
 
 JQ examples:
   inline users list --json | jq -r '.users[] | "\(.id)\t\(.first_name) \(.last_name)\t@\(.username // "")\t\(.email // "")"'
@@ -1815,12 +1834,10 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         proto::rpc_result::Result::CreateChat(payload) => {
                             if cli.json {
                                 output::print_json(&payload, json_format)?;
+                            } else if let Some(chat) = payload.chat.as_ref() {
+                                println!("Created chat {}.", chat.id);
                             } else {
-                                if let Some(chat) = payload.chat.as_ref() {
-                                    println!("Created chat {}.", chat.id);
-                                } else {
-                                    println!("Created chat.");
-                                }
+                                println!("Created chat.");
                             }
                         }
                         _ => return Err("Unexpected RPC result for createChat".into()),
@@ -1917,12 +1934,10 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         proto::rpc_result::Result::UpdateChatInfo(payload) => {
                             if cli.json {
                                 output::print_json(&payload, json_format)?;
+                            } else if let Some(chat) = payload.chat.as_ref() {
+                                println!("Renamed chat {} to \"{}\".", chat.id, chat.title);
                             } else {
-                                if let Some(chat) = payload.chat.as_ref() {
-                                    println!("Renamed chat {} to \"{}\".", chat.id, chat.title);
-                                } else {
-                                    println!("Renamed chat {}.", args.chat_id);
-                                }
+                                println!("Renamed chat {}.", args.chat_id);
                             }
                         }
                         _ => return Err("Unexpected RPC result for updateChatInfo".into()),
@@ -1973,11 +1988,14 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 }
                 ChatsCommand::Delete(args) => {
                     let prompt = format!("Delete chat {}? This cannot be undone.", args.chat_id);
+                    let token = require_token(&auth_store)?;
+                    if cli.json && !args.yes {
+                        return Err(CliError::confirmation_required().into());
+                    }
                     if !confirm_action(&prompt, args.yes)? {
                         println!("Cancelled.");
                         return Ok(());
                     }
-                    let token = require_token(&auth_store)?;
                     let mut realtime =
                         RealtimeClient::connect(&config.realtime_url, &token).await?;
                     let peer = input_peer_from_args(Some(args.chat_id), None)?;
@@ -2497,7 +2515,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                             }
                             fs::write(&output_path, payload_text.as_bytes())?;
                             let message_count = payload.messages.len();
-                            let bytes = payload_text.as_bytes().len();
+                            let bytes = payload_text.len();
                             if cli.json {
                                 let output = ExportOutput {
                                     path: output_path.display().to_string(),
@@ -2548,6 +2566,9 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         message_count,
                         peer_label_from_input(&peer)
                     );
+                    if cli.json && !args.yes {
+                        return Err(CliError::confirmation_required().into());
+                    }
                     if !confirm_action(&prompt, args.yes)? {
                         println!("Cancelled.");
                         return Ok(());
@@ -2583,7 +2604,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     let token = require_token(&auth_store)?;
                     let peer = input_peer_from_args(args.chat_id, args.user_id)?;
                     let text = resolve_message_caption(args.text, args.stdin)?
-                        .ok_or_else(|| CliError::missing_text_or_stdin())?;
+                        .ok_or_else(CliError::missing_text_or_stdin)?;
                     let mut realtime =
                         RealtimeClient::connect(&config.realtime_url, &token).await?;
                     let input = proto::EditMessageInput {
@@ -2759,11 +2780,14 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                 SpacesCommand::DeleteMember(args) => {
                     let prompt =
                         format!("Remove user {} from space {}?", args.user_id, args.space_id);
+                    let token = require_token(&auth_store)?;
+                    if cli.json && !args.yes {
+                        return Err(CliError::confirmation_required().into());
+                    }
                     if !confirm_action(&prompt, args.yes)? {
                         println!("Cancelled.");
                         return Ok(());
                     }
-                    let token = require_token(&auth_store)?;
                     let mut realtime =
                         RealtimeClient::connect(&config.realtime_url, &token).await?;
                     let input = proto::DeleteMemberInput {
@@ -3365,7 +3389,7 @@ fn prepare_file_attachment(
     let file_name = path
         .file_name()
         .and_then(|value| value.to_str())
-        .ok_or_else(|| "Attachment file name is invalid")?
+        .ok_or("Attachment file name is invalid")?
         .to_string();
 
     let mime_type = mime_guess::from_path(path)
@@ -4039,7 +4063,7 @@ fn build_chat_list(
 }
 
 fn build_user_list(result: &proto::GetChatsResult) -> UserListOutput {
-    let users = result.users.iter().map(|user| user_summary(user)).collect();
+    let users = result.users.iter().map(user_summary).collect();
     UserListOutput { users }
 }
 
@@ -4047,7 +4071,7 @@ fn build_space_list(result: &proto::GetChatsResult) -> SpaceListOutput {
     let spaces = result
         .spaces
         .iter()
-        .map(|space| space_summary(space))
+        .map(space_summary)
         .collect();
     SpaceListOutput { spaces }
 }
@@ -4207,8 +4231,8 @@ fn filter_messages_by_time(
 
     messages.retain(|msg| {
         let msg_ts = msg.date;
-        let after_since = since_ts.map_or(true, |ts| msg_ts >= ts);
-        let before_until = until_ts.map_or(true, |ts| msg_ts <= ts);
+        let after_since = since_ts.is_none_or(|ts| msg_ts >= ts);
+        let before_until = until_ts.is_none_or(|ts| msg_ts <= ts);
         after_since && before_until
     });
 }
@@ -4658,8 +4682,7 @@ fn message_preview(
 
 fn normalize_preview_text(value: &str) -> String {
     value
-        .replace('\n', " ")
-        .replace('\r', " ")
+        .replace(['\n', '\r'], " ")
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
@@ -4840,7 +4863,7 @@ fn best_photo_size(
             continue;
         }
         let area = size.w as i64 * size.h as i64;
-        if best.map_or(true, |(_, best_area)| area > best_area) {
+        if best.is_none_or(|(_, best_area)| area > best_area) {
             best = Some((size, area));
         }
     }
@@ -5607,5 +5630,13 @@ mod cli_parsing_tests {
         let err = normalize_search_queries(&[]).unwrap_err();
         let cli_err = err.downcast_ref::<CliError>().unwrap();
         assert_eq!(cli_err.code, "missing_query");
+    }
+
+    #[test]
+    fn destructive_confirmation_errors_are_structured() {
+        let err = CliError::confirmation_required();
+        assert_eq!(err.code, "confirmation_required");
+        assert!(err.hint.is_some());
+        assert!(!err.examples.is_empty());
     }
 }
