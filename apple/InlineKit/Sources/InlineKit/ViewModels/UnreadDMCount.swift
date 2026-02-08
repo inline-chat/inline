@@ -40,6 +40,7 @@ public enum UnreadDMCount {
   /// - `unreadCount` NULL is treated as 0.
   public static func publisher(db: AppDatabase = .shared) -> AnyPublisher<Int, Never> {
     let log = Log.scoped("UnreadDMCount", enableTracing: false)
+    db.warnIfInMemoryDatabaseForObservation("UnreadDMCount.publisher")
 
     return ValueObservation
       .tracking { database in

@@ -78,6 +78,9 @@ public extension ObjectCache {
     guard observingUsers.contains(userId) == false else { return }
     log.trace("Observing user \(userId)")
     observingUsers.insert(userId)
+#if DEBUG
+    db.warnIfInMemoryDatabaseForObservation("ObjectCache.user")
+#endif
     let cancellable = ValueObservation.tracking { db in
       try User
         .filter(id: userId)
@@ -109,6 +112,9 @@ public extension ObjectCache {
     guard observingChats.contains(chatId) == false else { return }
     log.trace("Observing chat \(chatId)")
     observingChats.insert(chatId)
+#if DEBUG
+    db.warnIfInMemoryDatabaseForObservation("ObjectCache.chat")
+#endif
     let cancellable = ValueObservation.tracking { db in
       try Chat
         .filter(id: chatId)
@@ -138,6 +144,9 @@ public extension ObjectCache {
     guard observingSpaces.contains(spaceId) == false else { return }
     log.trace("Observing space \(spaceId)")
     observingSpaces.insert(spaceId)
+#if DEBUG
+    db.warnIfInMemoryDatabaseForObservation("ObjectCache.space")
+#endif
     let cancellable = ValueObservation.tracking { db in
       try Space
         .filter(id: spaceId)

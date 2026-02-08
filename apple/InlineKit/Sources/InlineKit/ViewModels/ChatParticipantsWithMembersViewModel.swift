@@ -35,6 +35,7 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
     log.debug("🔍 Fetching participants for chatId: \(chatId)")
 
     let chatId = chatId
+    db.warnIfInMemoryDatabaseForObservation("ChatParticipantsWithMembersViewModel.participants")
 
     participantsCancellable = ValueObservation
       .tracking { db in

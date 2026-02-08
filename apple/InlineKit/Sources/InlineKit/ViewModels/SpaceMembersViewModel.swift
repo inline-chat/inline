@@ -18,6 +18,7 @@ public final class SpaceMembersViewModel: ObservableObject {
   
   public func fetchMembers() {
     let spaceId = spaceId
+    db.warnIfInMemoryDatabaseForObservation("SpaceMembersViewModel.members")
     membersCancellable = ValueObservation
       .tracking { db in
         try Member

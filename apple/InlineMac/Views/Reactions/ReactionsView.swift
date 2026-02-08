@@ -29,7 +29,7 @@ class ReactionsViewModel: ObservableObject {
     self.width = width
     self.height = height
 
-    currentUserId = Auth.shared.currentUserId
+    currentUserId = Auth.shared.getCurrentUserId()
   }
 }
 

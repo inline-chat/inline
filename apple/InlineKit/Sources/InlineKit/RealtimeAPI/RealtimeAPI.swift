@@ -199,7 +199,8 @@ public actor RealtimeAPI: Sendable {
         log.error("No token available")
         throw RealtimeAPIError.notAuthorized
       }
-      log.debug("sending connection init with token \(token)")
+      // Do not log the token (sensitive).
+      log.debug("sending connection init")
       let msg = wrapMessage(body: .connectionInit(.with {
         $0.token = token
         $0.buildNumber = getBuildNumber()

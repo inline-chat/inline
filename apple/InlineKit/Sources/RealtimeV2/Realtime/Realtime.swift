@@ -19,7 +19,7 @@ public enum RealtimeDirectRpcError: Error {
 public actor RealtimeV2 {
   // MARK: - Core Components
 
-  private var auth: Auth
+  private var auth: AuthHandle
   private var session: ProtocolSession
   private var connectionManager: ConnectionManager
   private var sync: Sync
@@ -53,7 +53,7 @@ public actor RealtimeV2 {
 
   public init(
     transport: Transport,
-    auth: Auth,
+    auth: AuthHandle,
     applyUpdates: ApplyUpdates,
     syncStorage: SyncStorage,
     persistenceHandler: TransactionPersistenceHandler? = nil,
@@ -61,7 +61,8 @@ public actor RealtimeV2 {
     self.auth = auth
     session = ProtocolSession(transport: transport, auth: auth)
     let initialConstraints = ConnectionConstraints(
-      authAvailable: auth.getIsLoggedIn() == true || auth.getToken() != nil,
+      // Realtime handshake requires a token; userId alone is not enough.
+      authAvailable: auth.token() != nil,
       networkAvailable: true,
       appActive: true,
       userWantsConnection: true
@@ -105,7 +106,7 @@ public actor RealtimeV2 {
     await session.start()
     await connectionManager.start()
     authAdapter?.start()
-    if auth.getIsLoggedIn() == true || auth.getToken() != nil {
+    if auth.token() != nil {
       await connectionManager.setAuthAvailable(true)
       await connectionManager.connectNow()
     }
@@ -195,7 +196,7 @@ public actor RealtimeV2 {
   /// Ensure the transport is started when credentials are available.
   /// This is intentionally light-weight so callers can pre-warm the connection without using transactions.
   public func connectIfNeeded() async {
-    if auth.getIsLoggedIn() == true || auth.getToken() != nil {
+    if auth.token() != nil {
       await connectionManager.setAuthAvailable(true)
       await startTransport()
     }

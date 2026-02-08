@@ -17,6 +17,7 @@ public final class UserDataViewModel: ObservableObject {
 
   func getUserData() {
     let userId = userId
+    db.warnIfInMemoryDatabaseForObservation("UserDataViewModel.user")
     cancellable =
       ValueObservation
         .tracking { db in

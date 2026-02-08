@@ -101,6 +101,7 @@ public final class FullSpaceViewModel: ObservableObject {
 
   func fetchSpace() {
     let spaceId = spaceId
+    db.warnIfInMemoryDatabaseForObservation("FullSpaceViewModel.space")
     spaceSancellable =
       ValueObservation
         .tracking { db in
@@ -119,6 +120,7 @@ public final class FullSpaceViewModel: ObservableObject {
 
   public func fetchMembersChats() {
     let spaceId = spaceId
+    db.warnIfInMemoryDatabaseForObservation("FullSpaceViewModel.memberChats")
     membersChatsSancellable =
       ValueObservation
         .tracking { db in
@@ -145,6 +147,7 @@ public final class FullSpaceViewModel: ObservableObject {
 
   public func fetchMembers() {
     let spaceId = spaceId
+    db.warnIfInMemoryDatabaseForObservation("FullSpaceViewModel.members")
     membersSancellable =
       ValueObservation
         .tracking { db in
@@ -165,6 +168,7 @@ public final class FullSpaceViewModel: ObservableObject {
 
   func fetchChats() {
     let spaceId = spaceId
+    db.warnIfInMemoryDatabaseForObservation("FullSpaceViewModel.chats")
     chatsSancellable =
       ValueObservation
         .tracking { db in

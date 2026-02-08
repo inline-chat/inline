@@ -196,6 +196,9 @@ public final class HomeViewModel: ObservableObject {
   }
 
   private func fetchChats() {
+#if DEBUG
+    db.warnIfInMemoryDatabaseForObservation("HomeViewModel.chats")
+#endif
     chatsCancellable = ValueObservation
       .tracking { db in
         try HomeChatItem
@@ -241,6 +244,9 @@ public final class HomeViewModel: ObservableObject {
   }
 
   private func fetchSpaces() {
+#if DEBUG
+    db.warnIfInMemoryDatabaseForObservation("HomeViewModel.spaces")
+#endif
     spacesCancellable = ValueObservation
       .tracking { db in
         try Space

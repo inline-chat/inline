@@ -18,6 +18,7 @@ public final class ChatParticipantsViewModel: ObservableObject, @unchecked Senda
   }
 
   private func fetchParticipants() {
+    db.warnIfInMemoryDatabaseForObservation("ChatParticipantsViewModel.participants")
     participantsCancellable = ValueObservation
       .tracking { db in
         try ChatParticipant

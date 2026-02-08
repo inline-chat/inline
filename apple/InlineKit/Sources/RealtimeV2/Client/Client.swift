@@ -8,7 +8,7 @@ import Logger
 actor ProtocolSession: ProtocolSessionType {
   private let log = Log.scoped("RealtimeV2.ProtocolSession")
   private let transport: Transport
-  private let auth: Auth
+  private let auth: AuthHandle
 
   // Events
   nonisolated let events = AsyncChannel<ProtocolSessionEvent>()
@@ -27,7 +27,7 @@ actor ProtocolSession: ProtocolSessionType {
 
   private var listenerTask: Task<Void, Never>?
 
-  init(transport: Transport, auth: Auth) {
+  init(transport: Transport, auth: AuthHandle) {
     self.transport = transport
     self.auth = auth
   }
@@ -166,10 +166,10 @@ actor ProtocolSession: ProtocolSessionType {
   func sendConnectionInit() async throws {
     log.trace("sending connection init")
 
-    var token = auth.getToken()
+    var token = auth.token()
     if token == nil {
       await auth.refreshFromStorage()
-      token = auth.getToken()
+      token = auth.token()
     }
 
     guard let token else {

@@ -158,6 +158,7 @@ final class PinnedMessageHeaderView: NSView {
   }
 
   private func observePinnedMessages() {
+    AppDatabase.shared.warnIfInMemoryDatabaseForObservation("PinnedMessageHeaderView.pinnedMessage")
     pinnedMessageObservation = ValueObservation
       .tracking { [chatId] db in
         try PinnedMessage
@@ -225,6 +226,7 @@ final class PinnedMessageHeaderView: NSView {
   }
 
   private func observePinnedMessageContent(messageId: Int64) {
+    AppDatabase.shared.warnIfInMemoryDatabaseForObservation("PinnedMessageHeaderView.pinnedMessageContent")
     messageObservation = ValueObservation
       .tracking { [chatId] db in
         try FullMessage.queryRequest()

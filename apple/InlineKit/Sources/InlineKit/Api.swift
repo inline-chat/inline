@@ -33,7 +33,7 @@ struct StubSyncStorage: SyncStorage {
 public enum Api {
   public static let realtime = RealtimeV2(
     transport: WebSocketTransport2(),
-    auth: Auth.shared,
+    auth: Auth.shared.handle,
     applyUpdates: InlineApplyUpdates(),
     syncStorage: GRDBSyncStorage(),
     persistenceHandler: DefaultTransactionPersistenceHandler()

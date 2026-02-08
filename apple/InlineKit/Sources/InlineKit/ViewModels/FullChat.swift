@@ -326,6 +326,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
 
   func fetchChat() {
     let peerId = peer
+    db.warnIfInMemoryDatabaseForObservation("FullChatViewModel.chatItem")
     chatCancellable =
       ValueObservation
         .tracking { db in

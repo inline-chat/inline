@@ -86,6 +86,7 @@ public final class ChatLinksViewModel: ObservableObject, @unchecked Sendable {
   }
 
   private func fetchLinkMessages() {
+    db.warnIfInMemoryDatabaseForObservation("ChatLinksViewModel.links")
     cancellable = ValueObservation
       .tracking { [chatId] db -> [LinkMessage] in
         let previewMessages: [LinkMessage] = try LinkMessage.queryRequest(chatId: chatId)
@@ -118,7 +119,7 @@ public final class ChatLinksViewModel: ObservableObject, @unchecked Sendable {
       )
   }
 
-  private static func fallbackLinkMessage(from message: Message) -> LinkMessage {
+  private nonisolated static func fallbackLinkMessage(from message: Message) -> LinkMessage {
     var attachment = Attachment(
       messageId: message.globalId,
       externalTaskId: nil,
@@ -133,7 +134,7 @@ public final class ChatLinksViewModel: ObservableObject, @unchecked Sendable {
     )
   }
 
-  private static func fallbackAttachmentId(messageId: Int64) -> Int64 {
+  private nonisolated static func fallbackAttachmentId(messageId: Int64) -> Int64 {
     let baseId = messageId == 0 ? 1 : messageId
     return baseId > 0 ? -baseId : baseId
   }

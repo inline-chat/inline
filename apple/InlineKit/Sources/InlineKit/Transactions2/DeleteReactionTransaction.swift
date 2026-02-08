@@ -52,12 +52,13 @@ public struct DeleteReactionTransaction: Transaction2 {
   public func optimistic() async {
     log.debug("Optimistic delete reaction \(messageId) \(peerId) \(chatId)")
     do {
+      let currentUserId = Auth.shared.getCurrentUserId()
       try await AppDatabase.shared.dbWriter.write { db in
         _ = try Reaction
           .filter(Column("messageId") == messageId)
           .filter(Column("chatId") == chatId)
           .filter(Column("emoji") == emoji)
-          .filter(Column("userId") == Auth.shared.currentUserId)
+          .filter(Column("userId") == currentUserId)
           .deleteAll(db)
       }
 

@@ -36,6 +36,7 @@ public final class SpaceListViewModel: ObservableObject {
   }
 
   public func start() {
+    db.warnIfInMemoryDatabaseForObservation("SpaceListViewModel.spaces")
     ValueObservation
       .tracking { db in
         try Space.fetchAll(db)

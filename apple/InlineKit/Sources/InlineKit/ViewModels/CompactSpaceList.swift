@@ -16,6 +16,9 @@ public final class CompactSpaceList: ObservableObject, @unchecked Sendable {
   }
 
   public func start() {
+#if DEBUG
+    db.warnIfInMemoryDatabaseForObservation("CompactSpaceList.spaces")
+#endif
     ValueObservation
       .tracking { db in
         try Space.fetchAll(db)

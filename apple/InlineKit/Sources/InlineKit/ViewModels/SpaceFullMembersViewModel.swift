@@ -33,6 +33,7 @@ public final class SpaceFullMembersViewModel: ObservableObject {
   
   private func fetchSpace() {
     let spaceId = spaceId
+    db.warnIfInMemoryDatabaseForObservation("SpaceFullMembersViewModel.space")
     spaceCancellable =
     ValueObservation
       .tracking { db in
@@ -51,6 +52,7 @@ public final class SpaceFullMembersViewModel: ObservableObject {
   
   public func fetchMembers() {
     let spaceId = spaceId
+    db.warnIfInMemoryDatabaseForObservation("SpaceFullMembersViewModel.members")
     membersCancellable = ValueObservation
       .tracking { db in
         try Member

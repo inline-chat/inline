@@ -8,6 +8,7 @@ import SwiftUI
 public final class ParticipantSearchViewModel: ObservableObject {
   @Published public private(set) var results: [UserInfo] = []
 
+  private let log = Log.scoped("ParticipantSearch")
   private var db: AppDatabase
   var spaceId: Int64?
 
@@ -17,7 +18,7 @@ public final class ParticipantSearchViewModel: ObservableObject {
   }
 
   public func search(query: String) {
-    print("🥥 searching for \(query)")
+    log.debug("Searching for query: \(query)")
     guard !query.isEmpty else {
       results = []
       return
@@ -26,7 +27,7 @@ public final class ParticipantSearchViewModel: ObservableObject {
     Task {
       do {
         if let spaceId {
-          print("🥥 spaceId: \(spaceId)")
+          log.debug("Using spaceId: \(spaceId)")
           let spaceMembers = try await db.reader.read { db in
             try Member.filter(Column("spaceId") == spaceId)
               .including(
@@ -41,7 +42,7 @@ public final class ParticipantSearchViewModel: ObservableObject {
               .fetchAll(db)
           }
 
-          print("🥥 spaceMembers: \(spaceMembers)")
+          log.debug("Fetched \(spaceMembers.count) space members")
           results = spaceMembers.sorted(by: {
             $0.user.displayName < $1.user.displayName
           })
@@ -49,7 +50,6 @@ public final class ParticipantSearchViewModel: ObservableObject {
           results = []
         }
       } catch {
-        print("🥥 error: \(error)")
         Log.shared.error("Failed to search space members: \(error)")
         results = []
       }

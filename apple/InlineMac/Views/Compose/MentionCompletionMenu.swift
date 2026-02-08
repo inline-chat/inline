@@ -26,7 +26,7 @@ class MentionCompletionMenu: NSView {
 
   private var heightConstraint: NSLayoutConstraint!
   private var currentUserId: Int64? {
-    Auth.shared.currentUserId
+    Auth.shared.getCurrentUserId()
   }
 
   // Extract size constants
