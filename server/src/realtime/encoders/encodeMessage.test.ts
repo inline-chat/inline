@@ -1,8 +1,9 @@
-import { describe, expect, it } from "bun:test"
+import { beforeEach, describe, expect, it } from "bun:test"
 import type { DbMessage, DbUser } from "@in/server/db/schema"
 import type { DbFullMessage } from "@in/server/db/models/messages"
 import { encodeFullMessage, encodeMessage } from "@in/server/realtime/encoders/encodeMessage"
-import type { Peer } from "@in/protocol/core"
+import { MessageEntities, MessageEntity_Type, type Peer } from "@in/protocol/core"
+import { encryptBinary } from "@in/server/modules/encryption/encryption"
 
 const peer: Peer = {
   type: {
@@ -10,6 +11,11 @@ const peer: Peer = {
     user: { userId: 100n },
   },
 }
+
+beforeEach(() => {
+  // Needed for encryptBinary() when building encrypted entities for encodeMessage tests.
+  process.env["ENCRYPTION_KEY"] = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+})
 
 const baseMessage: DbMessage = {
   globalId: 1n,
@@ -145,5 +151,64 @@ describe("encodeFullMessage nudge", () => {
     })
 
     expect(result.media?.media.oneofKind).not.toBe("nudge")
+  })
+})
+
+describe("mentioned", () => {
+  const mentionedEntities: MessageEntities = {
+    entities: [
+      {
+        type: MessageEntity_Type.MENTION,
+        offset: 0n,
+        length: 3n,
+        entity: { oneofKind: "mention", mention: { userId: 123n } },
+      },
+    ],
+  }
+
+  it("sets mentioned=true when entities mention the encoding user (encodeFullMessage)", () => {
+    const result = encodeFullMessage({
+      message: buildFullMessage({ entities: mentionedEntities }),
+      encodingForUserId: 123,
+      encodingForPeer: { peer },
+    })
+
+    expect(result.mentioned).toBe(true)
+  })
+
+  it("sets mentioned=false when entities do not mention the encoding user (encodeFullMessage)", () => {
+    const result = encodeFullMessage({
+      message: buildFullMessage({ entities: mentionedEntities }),
+      encodingForUserId: 999,
+      encodingForPeer: { peer },
+    })
+
+    expect(result.mentioned).toBe(false)
+  })
+
+  it("sets mentioned=true when entities mention the encoding user (encodeMessage, encrypted entities)", () => {
+    const encryptedEntities = encryptBinary(MessageEntities.toBinary(mentionedEntities))
+
+    const result = encodeMessage({
+      message: buildMessage({
+        entitiesEncrypted: encryptedEntities.encrypted,
+        entitiesIv: encryptedEntities.iv,
+        entitiesTag: encryptedEntities.authTag,
+      }),
+      encodingForUserId: 123,
+      encodingForPeer: { peer },
+    })
+
+    expect(result.mentioned).toBe(true)
+  })
+
+  it("sets mentioned=false when there are no entities (encodeMessage)", () => {
+    const result = encodeMessage({
+      message: buildMessage(),
+      encodingForUserId: 123,
+      encodingForPeer: { peer },
+    })
+
+    expect(result.mentioned).toBe(false)
   })
 })
