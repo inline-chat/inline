@@ -35,7 +35,7 @@ class MessageViewAppKit: NSView {
     if Self.isDebugBuild {
       return true
     }
-    guard let currentUserId = Auth.shared.currentUserId else { return false }
+    guard let currentUserId = Auth.shared.getCurrentUserId() else { return false }
     return currentUserId == 1_900 || currentUserId == 1_600
   }
 
@@ -650,26 +650,78 @@ class MessageViewAppKit: NSView {
 
   @objc private func handleEntityClick(_ gesture: NSClickGestureRecognizer) {
     guard gesture.state == .ended else { return }
-    guard let layoutManager = textView.layoutManager,
-          let textContainer = textView.textContainer
-    else { return }
 
     let location = gesture.location(in: textView)
-    let characterIndex = layoutManager.characterIndex(
-      for: location,
-      in: textContainer,
-      fractionOfDistanceBetweenInsertionPoints: nil
-    )
 
-    guard characterIndex != NSNotFound,
-          let textStorage = textView.textStorage,
-          characterIndex < textStorage.length
-    else { return }
+    // Default path: preserve previous behavior when NSTextView exposes layoutManager/textContainer/textStorage.
+    if let layoutManager = textView.layoutManager,
+       let textContainer = textView.textContainer,
+       let textStorage = textView.textStorage
+    {
+      let characterIndex = layoutManager.characterIndex(
+        for: location,
+        in: textContainer,
+        fractionOfDistanceBetweenInsertionPoints: nil
+      )
+
+      guard characterIndex != NSNotFound, characterIndex < textStorage.length else { return }
+
+      if let messageTextView = textView as? MessageTextView,
+         let codeRange = messageTextView.codeBlockRange(at: location)
+      {
+        let codeText = (textStorage.string as NSString).substring(with: codeRange)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(codeText, forType: .string)
+        ToastCenter.shared.showSuccess("Copied code")
+        performProgressiveHaptic()
+        return
+      }
+
+      var inlineCodeRange = NSRange(location: 0, length: 0)
+      if let isInlineCode = textStorage.attribute(
+        .inlineCode,
+        at: characterIndex,
+        effectiveRange: &inlineCodeRange
+      ) as? Bool, isInlineCode {
+        let inlineCodeText = (textStorage.string as NSString).substring(with: inlineCodeRange)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(inlineCodeText, forType: .string)
+        ToastCenter.shared.showSuccess("Copied code")
+        performProgressiveHaptic()
+        return
+      }
+
+      if let email = textStorage.attribute(.emailAddress, at: characterIndex, effectiveRange: nil) as? String {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(email, forType: .string)
+        ToastCenter.shared.showSuccess("Copied email")
+        performProgressiveHaptic()
+      } else if let phoneNumber = textStorage
+        .attribute(.phoneNumber, at: characterIndex, effectiveRange: nil) as? String
+      {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(phoneNumber, forType: .string)
+        ToastCenter.shared.showSuccess("Copied number")
+        performProgressiveHaptic()
+      }
+
+      return
+    }
+
+    // Fallback path (TextKit2 w/out layoutManager/textContainer/textStorage).
+    //
+    // TODO: If we need pixel-perfect link/entity hit testing in TextKit2, use NSTextLayoutManager APIs
+    // to resolve the exact character at point (instead of insertion index heuristics).
+    let characterIndex = textView.characterIndexForInsertion(at: location)
+    let attributed = textView.attributedString()
+    guard characterIndex != NSNotFound, characterIndex < attributed.length else { return }
 
     if let messageTextView = textView as? MessageTextView,
        let codeRange = messageTextView.codeBlockRange(at: location)
     {
-      let codeText = (textStorage.string as NSString).substring(with: codeRange)
+      // TODO: If TextKit2 ever stops providing a coherent .attributedString() here,
+      // switch to reading from NSTextContentStorage/NSTextContentManager.
+      let codeText = (attributed.string as NSString).substring(with: codeRange)
       NSPasteboard.general.clearContents()
       NSPasteboard.general.setString(codeText, forType: .string)
       ToastCenter.shared.showSuccess("Copied code")
@@ -678,12 +730,12 @@ class MessageViewAppKit: NSView {
     }
 
     var inlineCodeRange = NSRange(location: 0, length: 0)
-    if let isInlineCode = textStorage.attribute(
+    if let isInlineCode = attributed.attribute(
       .inlineCode,
       at: characterIndex,
       effectiveRange: &inlineCodeRange
     ) as? Bool, isInlineCode {
-      let inlineCodeText = (textStorage.string as NSString).substring(with: inlineCodeRange)
+      let inlineCodeText = (attributed.string as NSString).substring(with: inlineCodeRange)
       NSPasteboard.general.clearContents()
       NSPasteboard.general.setString(inlineCodeText, forType: .string)
       ToastCenter.shared.showSuccess("Copied code")
@@ -691,12 +743,12 @@ class MessageViewAppKit: NSView {
       return
     }
 
-    if let email = textStorage.attribute(.emailAddress, at: characterIndex, effectiveRange: nil) as? String {
+    if let email = attributed.attribute(.emailAddress, at: characterIndex, effectiveRange: nil) as? String {
       NSPasteboard.general.clearContents()
       NSPasteboard.general.setString(email, forType: .string)
       ToastCenter.shared.showSuccess("Copied email")
       performProgressiveHaptic()
-    } else if let phoneNumber = textStorage
+    } else if let phoneNumber = attributed
       .attribute(.phoneNumber, at: characterIndex, effectiveRange: nil) as? String
     {
       NSPasteboard.general.clearContents()
@@ -787,7 +839,10 @@ class MessageViewAppKit: NSView {
       if reactionsOutsideBubble {
         addSubview(reactionsView!)
       } else {
-        contentView.addSubview(reactionsView!, positioned: .below, relativeTo: textView)
+        // Keep reaction chips above the (transparent) NSTextView for reliable hit-testing.
+        // When the textView overlaps the reactions area (even slightly due to layout rounding),
+        // placing reactions "below" makes them appear visible but prevents clicks from reaching them.
+        contentView.addSubview(reactionsView!, positioned: .above, relativeTo: textView)
       }
     } else {
       if reactionsOutsideBubble {
@@ -942,14 +997,12 @@ class MessageViewAppKit: NSView {
     // Provide haptic feedback
     NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .default)
 
-    guard let currentUserId = Auth.shared.currentUserId else { return }
-    let weReacted = fullMessage.groupedReactions.contains { reaction in
-      reaction.reactions.contains { fullReaction in
-        fullReaction.reaction.userId == currentUserId
-      }
-    }
-
+    guard let currentUserId = Auth.shared.getCurrentUserId() else { return }
     let emoji = "✔️"
+    let weReacted = fullMessage.groupedReactions
+      .first(where: { $0.emoji == emoji })?
+      .reactions
+      .contains(where: { $0.reaction.userId == currentUserId }) ?? false
 
     // Set reaction
     if weReacted {
@@ -987,7 +1040,7 @@ class MessageViewAppKit: NSView {
 
     var forwardPeer: Peer?
     if let peerUserId = message.forwardFromPeerUserId {
-      let currentUserId = Auth.shared.currentUserId
+      let currentUserId = Auth.shared.getCurrentUserId()
       if let senderId = message.forwardFromUserId, senderId != currentUserId {
         forwardPeer = .user(id: senderId)
       } else {
