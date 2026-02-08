@@ -3,7 +3,7 @@ import type { HandlerContext } from "@in/server/realtime/types"
 import { Functions } from "@in/server/functions"
 import { Method } from "@in/protocol/core"
 
-export const method = Method.CREATE_CHAT
+export const method = Method.GET_UPDATES_STATE
 
 export const getUpdatesState = async (
   input: GetUpdatesStateInput,
