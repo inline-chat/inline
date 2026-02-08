@@ -32,7 +32,8 @@ export const realtime = new Elysia().ws("/realtime", {
   close(ws) {
     const connectionId = connectionManager.getConnectionIdFromWs(ws)
     log.debug("connection closed", connectionId)
-    connectionManager.closeConnection(connectionId)
+    // Socket is already closed here; don't attempt to close it again.
+    connectionManager.removeConnection(connectionId)
   },
 
   async message(ws, message) {
@@ -51,7 +52,20 @@ export const realtime = new Elysia().ws("/realtime", {
 
     log.debug("ws connectionId", connectionId)
 
-    const parsed = ClientMessage.fromBinary(message as Uint8Array)
-    handleMessage(parsed, { ws: ws as unknown as ElysiaWS<ServerWebSocket<any>>, connectionId })
+    let parsed: ClientMessage
+    try {
+      parsed = ClientMessage.fromBinary(message as Uint8Array)
+    } catch (e) {
+      log.error("Failed to decode client message", e, { connectionId })
+      ws.close()
+      return
+    }
+
+    try {
+      await handleMessage(parsed, { ws: ws as unknown as ElysiaWS<ServerWebSocket<any>>, connectionId })
+    } catch (e) {
+      log.error("Unhandled error in realtime message handler", e, { connectionId })
+      ws.close()
+    }
   },
 })

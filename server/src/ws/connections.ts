@@ -4,7 +4,6 @@
  * - Registers incoming websocket connections and manages users presence via Presence Manager
  */
 
-import { getSpaceIdsForUser } from "@in/server/db/models/spaces"
 import { filterFalsy } from "@in/server/utils/filter"
 import { Log } from "@in/server/utils/log"
 import { presenceManager } from "@in/server/ws/presence"
@@ -28,6 +27,9 @@ interface Connection {
   ws: WS
 
   version: ConnVersion
+
+  /** Close unauthenticated connections after a grace period. Cleared on auth or close. */
+  unauthenticatedCloseTimeoutId?: ReturnType<typeof setTimeout>
 
   // For authenticated connections
   userId?: number
@@ -94,10 +96,11 @@ class ConnectionManager {
     log.debug("Adding new connection")
     //const id = nanoid()
     const id = this.getConnectionIdFromWs(ws)
-    this.connections.set(id, { ws, version })
+    const connection: Connection = { ws, version }
+    this.connections.set(id, connection)
 
     // Start timeout, if not authenticated in 20 seconds, close the connection
-    setTimeout(() => {
+    connection.unauthenticatedCloseTimeoutId = setTimeout(() => {
       const connection = this.connections.get(id)
       if (connection && !connection.userId) {
         log.debug(`Connection ${id} not authenticated, closing`)
@@ -112,16 +115,23 @@ class ConnectionManager {
     log.debug(`Authenticating connection ${id} for user ${userId}`)
     const connection = this.connections.get(id)
     if (connection) {
+      clearTimeout(connection.unauthenticatedCloseTimeoutId)
+      connection.unauthenticatedCloseTimeoutId = undefined
+
       connection.userId = userId
       connection.sessionId = sessionId
       connection.layer = layer
 
-      presenceManager.handleConnectionOpen({ userId, sessionId })
+      void presenceManager.handleConnectionOpen({ userId, sessionId }).catch((e) => {
+        log.error("presenceManager.handleConnectionOpen failed", { userId, sessionId, error: e })
+      })
 
       if (!this.authenticatedUsers.has(userId)) {
         // User is connecting for the first time, populate the cache
         this.authenticatedUsers.set(userId, new Set())
-        this.subscribeUserToSpaceIds(userId)
+        void this.subscribeUserToSpaceIds(userId).catch((e) => {
+          log.error("Failed to subscribe user to spaces", { userId, error: e })
+        })
       }
       this.authenticatedUsers.get(userId)?.add(id)
     }
@@ -162,15 +172,42 @@ class ConnectionManager {
     log.debug(`Removing connection ${id}`)
     const connection = this.connections.get(id)
     if (connection) {
+      clearTimeout(connection.unauthenticatedCloseTimeoutId)
+      connection.unauthenticatedCloseTimeoutId = undefined
+
       this.connections.delete(id)
       if (connection.userId && connection.sessionId) {
-        // if logged out there is no point in calling presenceManager.handleConnectionClose
-        if (!context.loggedOut) {
-          presenceManager.handleConnectionClose({ userId: connection.userId, sessionId: connection.sessionId })
-        }
-
         const userConnections = this.authenticatedUsers.get(connection.userId)
         userConnections?.delete(id)
+
+        const hasOtherConnectionsForSession = (() => {
+          if (userConnections) {
+            for (const otherId of userConnections) {
+              const other = this.connections.get(otherId)
+              if (other?.sessionId === connection.sessionId) return true
+            }
+            return false
+          }
+
+          // Fallback scan: shouldn't happen, but keeps presence state correct.
+          for (const other of this.connections.values()) {
+            if (other.userId === connection.userId && other.sessionId === connection.sessionId) return true
+          }
+          return false
+        })()
+
+        // Only mark a session inactive when the last connection for that session closes.
+        // If logged out there is no point in calling presenceManager.handleConnectionClose.
+        if (!context.loggedOut && !hasOtherConnectionsForSession) {
+          void presenceManager.handleConnectionClose({ userId: connection.userId, sessionId: connection.sessionId }).catch((e) => {
+            log.error("presenceManager.handleConnectionClose failed", {
+              userId: connection.userId,
+              sessionId: connection.sessionId,
+              error: e,
+            })
+          })
+        }
+
         if (userConnections && userConnections.size === 0) {
           this.authenticatedUsers.delete(connection.userId)
         }
@@ -229,6 +266,8 @@ class ConnectionManager {
   // ------------------------------------------------------------------------------------------------
 
   private async getUserSpaceIds(userId: number): Promise<number[]> {
+    // Lazy import so this module doesn't eagerly load db/env at startup.
+    const { getSpaceIdsForUser } = await import("@in/server/db/models/spaces")
     return await getSpaceIdsForUser(userId)
   }
 
