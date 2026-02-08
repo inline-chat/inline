@@ -56,6 +56,7 @@ class MainSidebar: NSViewController {
   private var spacePickerPresenter: SpacePickerOverlayPresenter?
   private var spacePickerClickMonitor: Any?
   private var spacePickerEscapeUnsubscriber: (() -> Void)?
+  private var spaceSwitcherCommandNumberUnsubscriber: (() -> Void)?
   private var didDismissSpacePickerFromHeaderMouseDown: Bool = false
   private var archiveEscapeUnsubscriber: (() -> Void)?
 
@@ -255,6 +256,9 @@ class MainSidebar: NSViewController {
     ) { [weak self] _ in
       self?.setContent(for: .inbox)
     }
+
+    // Cmd+1...9: switch to Home / spaces (always active, doesn't require the picker to be open).
+    installSpaceSwitcherCommandNumberHandlerIfNeeded()
   }
 
   override func viewWillDisappear() {
@@ -262,6 +266,8 @@ class MainSidebar: NSViewController {
     hideSpacePicker()
     archiveEscapeUnsubscriber?()
     archiveEscapeUnsubscriber = nil
+    spaceSwitcherCommandNumberUnsubscriber?()
+    spaceSwitcherCommandNumberUnsubscriber = nil
   }
 
   deinit {
@@ -270,6 +276,39 @@ class MainSidebar: NSViewController {
     }
     archiveEscapeUnsubscriber?()
     archiveEscapeUnsubscriber = nil
+    spaceSwitcherCommandNumberUnsubscriber?()
+    spaceSwitcherCommandNumberUnsubscriber = nil
+  }
+
+  private func installSpaceSwitcherCommandNumberHandlerIfNeeded() {
+    guard spaceSwitcherCommandNumberUnsubscriber == nil else { return }
+    guard let keyMonitor = dependencies.keyMonitor else { return }
+
+    spaceSwitcherCommandNumberUnsubscriber = keyMonitor.addHandler(
+      for: .commandNumber,
+      key: "sidebar_space_switcher"
+    ) { [weak self] event in
+      guard let self else { return }
+      guard self.dependencies.nav2 != nil else { return }
+
+      guard let char = event.charactersIgnoringModifiers?.first,
+            let digit = Int(String(char)),
+            (1...9).contains(digit)
+      else { return }
+
+      // Match the picker's labeling:
+      // Cmd+1 = Home, Cmd+2...9 = spaces in the same order as the picker list.
+      let items = self.spacePickerItems()
+      let index = digit - 1
+      guard items.indices.contains(index) else { return }
+
+      self.handleSpacePickerSelection(items[index])
+
+      // If the picker is open, close it so the UI state stays coherent.
+      if self.spacePickerState.isVisible {
+        self.hideSpacePicker()
+      }
+    }
   }
 
   private func setContent(for mode: MainSidebarMode) {
