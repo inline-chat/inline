@@ -49,6 +49,18 @@ public final class AppDatabase: @unchecked Sendable {
       "DB_INMEMORY_OBSERVATION context=\(context) site=\(file):\(line)\n\(stack)"
     )
   }
+#else
+  @inlinable
+  public func warnIfInMemoryDatabaseForObservation(
+    _ context: StaticString,
+    file: StaticString = #fileID,
+    line: UInt = #line
+  ) {
+    // Debug-only logging; intentionally a no-op in Release.
+    _ = context
+    _ = file
+    _ = line
+  }
 #endif
   static let log = Log.scoped(
     "AppDatabase",
