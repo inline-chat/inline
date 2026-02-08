@@ -7,6 +7,9 @@ RUN mkdir -p /temp/dev
 COPY package.json bun.lock /temp/dev/
 COPY admin/package.json /temp/dev/admin/
 COPY server/package.json /temp/dev/server/
+COPY server/packages/email-preview/package.json /temp/dev/server/packages/email-preview/
+COPY server/packages/email-templates/package.json /temp/dev/server/packages/email-templates/
+COPY server/packages/protocol/package.json /temp/dev/server/packages/protocol/
 COPY web/package.json /temp/dev/web/
 COPY web/packages/auth/package.json /temp/dev/web/packages/auth/
 COPY web/packages/client/package.json /temp/dev/web/packages/client/
@@ -22,6 +25,9 @@ RUN mkdir -p /temp/prod
 COPY package.json bun.lock /temp/prod/
 COPY admin/package.json /temp/prod/admin/
 COPY server/package.json /temp/prod/server/
+COPY server/packages/email-preview/package.json /temp/prod/server/packages/email-preview/
+COPY server/packages/email-templates/package.json /temp/prod/server/packages/email-templates/
+COPY server/packages/protocol/package.json /temp/prod/server/packages/protocol/
 COPY web/package.json /temp/prod/web/
 COPY web/packages/auth/package.json /temp/prod/web/packages/auth/
 COPY web/packages/client/package.json /temp/prod/web/packages/client/
