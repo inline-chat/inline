@@ -58,6 +58,7 @@ class MainSidebar: NSViewController, NSMenuDelegate {
   private var spacePickerWindow: SpacePickerOverlayWindow?
   private var spacePickerClickMonitor: Any?
   private var spacePickerEscapeUnsubscriber: (() -> Void)?
+  private var archiveEscapeUnsubscriber: (() -> Void)?
 
   private lazy var footerView: NSView = {
     let view = NSView()
@@ -467,11 +468,14 @@ class MainSidebar: NSViewController, NSMenuDelegate {
     if let switchToInboxObserver {
       NotificationCenter.default.removeObserver(switchToInboxObserver)
     }
+    archiveEscapeUnsubscriber?()
+    archiveEscapeUnsubscriber = nil
   }
 
   private func setContent(for mode: MainSidebarMode) {
     activeMode = mode
     updateArchiveButton()
+    updateArchiveEscapeHandler()
 
     switch mode {
       case .archive:
@@ -483,6 +487,29 @@ class MainSidebar: NSViewController, NSMenuDelegate {
         listView.setMode(.inbox)
         archiveEmptyView.isHidden = true
         updateArchiveTitle(archiveCount: 0)
+    }
+  }
+
+
+  private func updateArchiveEscapeHandler() {
+    if activeMode == .archive {
+      guard archiveEscapeUnsubscriber == nil else { return }
+      guard let keyMonitor = dependencies.keyMonitor else { return }
+      archiveEscapeUnsubscriber = keyMonitor.addHandler(
+        for: .escape,
+        key: "sidebar_archive_escape"
+      ) { [weak self] _ in
+        self?.setContent(for: .inbox)
+      }
+
+      // Keep the space picker ESC handler most-specific when it's visible.
+      if spacePickerState.isVisible {
+        removeSpacePickerKeyHandlers()
+        installSpacePickerKeyHandlers()
+      }
+    } else {
+      archiveEscapeUnsubscriber?()
+      archiveEscapeUnsubscriber = nil
     }
   }
 
