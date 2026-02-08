@@ -65,7 +65,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     // Send timezone to server
     Task {
-      if Auth.shared.isLoggedIn {
+      if Auth.shared.getIsLoggedIn() {
         try? await DataManager.shared.updateTimezone()
       }
     }

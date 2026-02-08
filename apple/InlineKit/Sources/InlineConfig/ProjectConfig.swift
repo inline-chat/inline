@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 public enum ProjectConfig {
   enum ConfigurationKey: String {
@@ -49,19 +50,40 @@ public enum ProjectConfig {
   public static func getArgumentValue(for key: KnownArgumentKeys) -> String? {
     let args = CommandLine.arguments
     let keyPrefix = "--\(key.rawValue)"
-    if let index = args.firstIndex(where: { $0.starts(with: keyPrefix) }),
-       index + 1 < args.count
-    {
-      return args[index]
-        // For flags with value
-        .replacingOccurrences(of: "\(keyPrefix)=", with: "")
-        // For booleans flags without value
-        .replacingOccurrences(of: "\(keyPrefix)", with: "")
+    guard let index = args.firstIndex(where: { $0.starts(with: keyPrefix) }) else {
+      return nil
     }
-    return nil
+
+    let current = args[index]
+
+    // Support: `--key=value`
+    if current.starts(with: "\(keyPrefix)=") {
+      return current.replacingOccurrences(of: "\(keyPrefix)=", with: "")
+    }
+
+    // Support: `--key value`
+    if current == keyPrefix, index + 1 < args.count {
+      return args[index + 1]
+    }
+
+    // Support: `--key` (boolean flag)
+    if current == keyPrefix {
+      return ""
+    }
+
+    // Support legacy: `--key<value>` (should not happen, but keep compatibility)
+    return current.replacingOccurrences(of: keyPrefix, with: "")
   }
 
   public static var userProfile: String? {
-    getArgumentValue(for: .userProfile)
+    if let env = getenv("INLINE_USER_PROFILE"),
+       let value = String(validatingCString: env),
+       value.isEmpty == false
+    {
+      return value
+    }
+
+    let arg = getArgumentValue(for: .userProfile)
+    return arg?.isEmpty == true ? nil : arg
   }
 }
