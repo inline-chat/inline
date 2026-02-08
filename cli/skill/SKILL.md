@@ -57,7 +57,7 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 - `inline bots list [--filter "name"] [--ids | --id]`
   - List bots you can access.
 - `inline bots create --name "Build Bot" --username build_bot [--add-to-space 31]`
-  - Create a bot. Prints the token in table output; JSON includes the token too.
+  - Create a bot. Token is not printed in table output; use `inline bots reveal-token` explicitly. JSON includes the token.
 - `inline bots reveal-token --bot-user-id 42`
   - Print (or JSON-return) an existing bot token by bot user id.
 
@@ -179,7 +179,7 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 - Bots:
   - `inline bots list`
   - `inline bots create --name "Build Bot" --username build_bot`
-  - `inline bots reveal-token --bot-user-id 42`
+  - `inline bots reveal-token --bot-user-id 42` (token is not printed by default)
 - Typing:
   - `inline typing start --chat-id 123`
   - `inline typing stop --chat-id 123`
