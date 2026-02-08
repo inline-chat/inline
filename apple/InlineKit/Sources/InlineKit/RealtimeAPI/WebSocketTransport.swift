@@ -34,6 +34,7 @@ actor WebSocketTransport: NSObject, Sendable {
   private var pingPongTask: Task<Void, Never>? = nil
   private var msgTask: Task<Void, Never>? = nil
   private var connectionTimeoutTask: Task<Void, Never>? = nil
+  private var reconnectionTask: Task<Void, Never>? = nil
 
   // State
   private var running = false
@@ -66,8 +67,9 @@ actor WebSocketTransport: NSObject, Sendable {
   private var messageHandler: ((ServerProtocolMessage) -> Void)? = nil
   private var log = Log.scoped("Realtime_TransportWS", enableTracing: false)
   private var pathMonitor: NWPathMonitor?
-  private let reconnectionInProgress = ManagedAtomic<Bool>(false)
   private let pingInFlight = ManagedAtomic<Bool>(false)
+  private var reconnectionToken: UInt64 = 0
+  private var scheduledReconnectDelay: TimeInterval? = nil
 
   // Ping timeouts (in seconds)
   private let pingTimeoutNormal: TimeInterval = 6.0 // Wi-Fi / LTE
@@ -92,12 +94,13 @@ actor WebSocketTransport: NSObject, Sendable {
 
     super.init()
 
-    // Initialize session with self as delegate
-    session = URLSession(
-      configuration: configuration,
-      delegate: self,
-      delegateQueue: nil // Using nil lets URLSession create its own queue
-    )
+    // Initialize session with a serial delegate queue to keep callbacks
+    // predictable and reduce races across connect/disconnect swaps.
+    let delegateQueue = OperationQueue()
+    delegateQueue.maxConcurrentOperationCount = 1
+    delegateQueue.name = "WebSocketTransport.delegate"
+
+    session = URLSession(configuration: configuration, delegate: self, delegateQueue: delegateQueue)
   }
 
   private func startBackgroundObservers() {
@@ -233,6 +236,11 @@ actor WebSocketTransport: NSObject, Sendable {
   // MARK: - Connection Management
 
   private func handleConnected() {
+    // If we connected, any pending reconnect timer is obsolete.
+    reconnectionTask?.cancel()
+    reconnectionTask = nil
+    scheduledReconnectDelay = nil
+
     // Update state
     connectionState = .connected
     notifyStateChange()
@@ -268,6 +276,11 @@ actor WebSocketTransport: NSObject, Sendable {
       return
     }
 
+    // If a reconnect was scheduled, we're connecting now; cancel it.
+    reconnectionTask?.cancel()
+    reconnectionTask = nil
+    scheduledReconnectDelay = nil
+
     // Cancel existing tasks before changing state
     await cancelTasks()
 
@@ -298,9 +311,6 @@ actor WebSocketTransport: NSObject, Sendable {
 
     // Cancel all tasks
     await cancelTasks()
-
-    // Clear reconnection state
-    reconnectionInProgress.store(false, ordering: .releasing)
 
     // Cancel the connection timeout task
     connectionTimeoutTask?.cancel()
@@ -556,7 +566,7 @@ actor WebSocketTransport: NSObject, Sendable {
 
   private func cancelTasks() async {
     // Cancel all tasks first
-    let tasks = [pingPongTask, msgTask, connectionTimeoutTask].compactMap { $0 }
+    let tasks = [pingPongTask, msgTask, connectionTimeoutTask, reconnectionTask].compactMap { $0 }
     tasks.forEach { $0.cancel() }
 
     // Then nullify references
@@ -565,6 +575,8 @@ actor WebSocketTransport: NSObject, Sendable {
     pingPongTask = nil
     msgTask = nil
     connectionTimeoutTask = nil
+    reconnectionTask = nil
+    scheduledReconnectDelay = nil
   }
 
   private func handleDisconnection(
@@ -572,6 +584,9 @@ actor WebSocketTransport: NSObject, Sendable {
     reason: Data? = nil,
     error: Error? = nil
   ) async {
+    let priorState = connectionState
+    let priorTaskState = webSocketTask?.state
+
     // Proceed with cleanup regardless of the task's current state. URLSession
     // sometimes still reports `.running` when the connection is actually
     // defunct, so we avoid early-returning here.
@@ -579,7 +594,42 @@ actor WebSocketTransport: NSObject, Sendable {
     notifyStateChange()
 
     if let error {
-      log.error("Disconnected with error", error: error)
+      // Capture details for diagnostics. Avoid including secrets; URLs are ok.
+      let nsError = error as NSError
+      var details = "domain=\(nsError.domain) code=\(nsError.code)"
+      details += " priorState=\(priorState) running=\(running) net=\(networkAvailable) bg=\(isInBackground)"
+      if let priorTaskState {
+        details += " wsTaskState=\(priorTaskState.rawValue)"
+      }
+      if let closeCode {
+        details += " closeCode=\(closeCode.rawValue)"
+      }
+      if let reason {
+        details += " reasonBytes=\(reason.count)"
+      }
+      if let failingURL = nsError.userInfo[NSURLErrorFailingURLErrorKey] as? URL {
+        details += " failingURL=\(failingURL.absoluteString)"
+      } else if let failingURLString = nsError.userInfo[NSURLErrorFailingURLStringErrorKey] as? String {
+        details += " failingURL=\(failingURLString)"
+      }
+      if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
+        details += " underlying=\(underlying.domain):\(underlying.code)"
+      }
+      // These keys are commonly present for URLSession / CFNetwork failures and
+      // are crucial for decoding opaque NSURLErrorDomain codes.
+      if let streamDomain = nsError.userInfo["_kCFStreamErrorDomainKey"] {
+        details += " streamDomain=\(streamDomain)"
+      }
+      if let streamCode = nsError.userInfo["_kCFStreamErrorCodeKey"] {
+        details += " streamCode=\(streamCode)"
+      }
+      if let failureReason = nsError.userInfo[NSLocalizedFailureReasonErrorKey] as? String {
+        details += " failureReason=\(failureReason)"
+      }
+      if let recoverySuggestion = nsError.userInfo[NSLocalizedRecoverySuggestionErrorKey] as? String {
+        details += " recoverySuggestion=\(recoverySuggestion)"
+      }
+      log.error("Disconnected with error (\(details))", error: error)
     }
 
     if let closeCode {
@@ -614,13 +664,8 @@ actor WebSocketTransport: NSObject, Sendable {
   private func attemptReconnection(immediate: Bool = false) {
     guard running else { return }
 
-    // Atomic check and set for reconnection state
-    guard reconnectionInProgress.compareExchange(
-      expected: false,
-      desired: true,
-      ordering: .acquiring
-    ).exchanged else {
-      log.trace("Reconnection already in progress")
+    guard connectionState == .disconnected else {
+      log.trace("Not scheduling reconnection because state is \(connectionState)")
       return
     }
 
@@ -637,31 +682,47 @@ actor WebSocketTransport: NSObject, Sendable {
       delay = baseDelay + jitter
     }
 
-    log.trace("Attempting reconnection after \(delay) seconds")
+    if let existingDelay = scheduledReconnectDelay, reconnectionTask != nil {
+      if immediate, delay < existingDelay {
+        log.trace("Rescheduling reconnection earlier (old \(existingDelay)s, new \(delay)s)")
+        reconnectionTask?.cancel()
+        reconnectionTask = nil
+        scheduledReconnectDelay = nil
+      } else {
+        log.trace("Reconnection already scheduled after \(existingDelay)s")
+        return
+      }
+    }
 
-    // Task is important here
-    Task {
+    scheduledReconnectDelay = delay
+    reconnectionToken = reconnectionToken &+ 1
+    let token = reconnectionToken
+
+    log.trace("Scheduling reconnection after \(delay) seconds")
+
+    reconnectionTask = Task { [token] in
       defer {
-        reconnectionInProgress.store(false, ordering: .releasing)
+        reconnectionTaskFinished(token: token)
       }
 
       do {
-        // try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
         try await Task.sleep(for: .seconds(delay))
-
-        if Task.isCancelled {
-          return
-        }
-
-        // if still needed
-        if connectionState == .disconnected, running {
-          await connect(foregroundTransition: immediate)
-        }
       } catch {
-        log.error("Reconnection attempt failed", error: error)
-        await handleDisconnection(error: error)
+        return
+      }
+
+      if Task.isCancelled { return }
+
+      if connectionState == .disconnected, running {
+        await connect(foregroundTransition: immediate)
       }
     }
+  }
+
+  private func reconnectionTaskFinished(token: UInt64) {
+    guard token == reconnectionToken else { return }
+    reconnectionTask = nil
+    scheduledReconnectDelay = nil
   }
 
   // MARK: - Helpers
@@ -726,7 +787,7 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
     webSocketTask: URLSessionWebSocketTask,
     didOpenWithProtocol protocol: String?
   ) {
-    Task { await handleConnected() }
+    Task { await self.handleConnectedIfCurrent(task: webSocketTask) }
   }
 
   nonisolated func urlSession(
@@ -735,7 +796,7 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
     didCloseWith closeCode: URLSessionWebSocketTask.CloseCode,
     reason: Data?
   ) {
-    Task { await handleDisconnection(closeCode: closeCode, reason: reason) }
+    Task { await self.handleDisconnectionIfCurrent(task: webSocketTask, closeCode: closeCode, reason: reason) }
   }
 
   nonisolated func urlSession(
@@ -743,6 +804,48 @@ extension WebSocketTransport: URLSessionWebSocketDelegate {
     task: URLSessionTask,
     didCompleteWithError error: Error?
   ) {
-    Task { await handleDisconnection(error: error) }
+    // Ignore nil completion. We rely on didClose for clean shutdown and
+    // explicit errors for failure cases. Treating nil as a disconnect can
+    // create spurious reconnects and amplify race conditions.
+    guard let error else { return }
+    let httpStatus = (task.response as? HTTPURLResponse)?.statusCode
+    Task { await self.handleCompletionIfCurrent(task: task, error: error, httpStatus: httpStatus) }
+  }
+}
+
+// MARK: - Delegate Filtering (stale callback protection)
+
+extension WebSocketTransport {
+  private func handleConnectedIfCurrent(task: URLSessionWebSocketTask) async {
+    guard let current = webSocketTask, current === task else {
+      log.trace("Ignoring didOpen for stale WebSocket task")
+      return
+    }
+    handleConnected()
+  }
+
+  private func handleDisconnectionIfCurrent(
+    task: URLSessionWebSocketTask,
+    closeCode: URLSessionWebSocketTask.CloseCode,
+    reason: Data?
+  ) async {
+    guard let current = webSocketTask, current === task else {
+      log.trace("Ignoring didClose for stale WebSocket task")
+      return
+    }
+    await handleDisconnection(closeCode: closeCode, reason: reason)
+  }
+
+  private func handleCompletionIfCurrent(task: URLSessionTask, error: Error, httpStatus: Int?) async {
+    // URLSession delivers completion for URLSessionTask; ensure it matches the
+    // current WebSocket task before mutating state.
+    guard let current = webSocketTask, current === task else {
+      log.trace("Ignoring didCompleteWithError for stale WebSocket task")
+      return
+    }
+    if let httpStatus {
+      log.error("WebSocket task completed with HTTP status \(httpStatus)")
+    }
+    await handleDisconnection(error: error)
   }
 }
