@@ -20,15 +20,41 @@ concurrency:
 jobs:
   test:
     name: Swift Tests
-    runs-on: macos-latest
+    runs-on: macos-26
     timeout-minutes: 10
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Preflight
+        id: preflight
+        env:
+          XCODE_PATH: ${{ vars.MACOS_XCODE_PATH }}
+        run: |
+          set -euo pipefail
+          sw_vers
+          echo "Available Xcodes:"
+          ls -d /Applications/Xcode*.app 2>/dev/null || true
+          if [[ -n "${XCODE_PATH:-}" ]]; then
+            xcode_path="${XCODE_PATH}"
+          else
+            # Pick the newest installed Xcode by default (future-proof across runner image updates).
+            # Prefer versioned installs (Xcode_*.app) when available; fall back to Xcode.app.
+            xcode_path="$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -n 1 || true)"
+            if [[ -z "${xcode_path}" && -d "/Applications/Xcode.app" ]]; then
+              xcode_path="/Applications/Xcode.app"
+            fi
+          fi
+          if [[ -z "${xcode_path}" ]]; then
+            echo "No suitable Xcode found on runner." >&2
+            exit 1
+          fi
+          echo "Using Xcode path: ${xcode_path}"
+          echo "xcode_path=${xcode_path}" >> "${GITHUB_OUTPUT}"
+
       - name: Set Xcode version
-        run: sudo xcode-select -s /Applications/Xcode_26.0.app
+        run: sudo xcode-select -s "${{ steps.preflight.outputs.xcode_path }}"
 
       - name: Swift Version
         run: swift --version
