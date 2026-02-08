@@ -2,9 +2,10 @@
   "name": "inline-scripts",
   "private": true,
   "scripts": {
-    "proto:generate-ts": "npx protoc --plugin=./node_modules/.bin/protoc-gen-ts --ts_out=../server/packages/protocol/src --proto_path ../proto/ ../proto/core.proto ../proto/server.proto",
-    "proto:generate-web": "npx protoc --plugin=./node_modules/.bin/protoc-gen-ts --ts_out=../web/packages/protocol/src --proto_path ../proto/ ../proto/core.proto ../proto/client.proto",
-    "proto:generate-swift": "npx protoc --swift_opt=Visibility=Public --swift_out ../apple/InlineKit/Sources/InlineProtocol/ --proto_path ../proto/ ../proto/core.proto ../proto/client.proto",
+    "proto:ensure-swift-plugin": "bash tools/ensure-protoc-gen-swift.sh",
+    "proto:generate-ts": "./node_modules/.bin/protoc --plugin=./node_modules/.bin/protoc-gen-ts --ts_out=../server/packages/protocol/src --proto_path ../proto/ ../proto/core.proto ../proto/server.proto",
+    "proto:generate-web": "./node_modules/.bin/protoc --plugin=./node_modules/.bin/protoc-gen-ts --ts_out=../web/packages/protocol/src --proto_path ../proto/ ../proto/core.proto ../proto/client.proto",
+    "proto:generate-swift": "if [ \"${SKIP_SWIFT_PROTO:-0}\" = \"1\" ]; then echo \"Skipping Swift proto generation (SKIP_SWIFT_PROTO=1)\"; exit 0; fi; bun run proto:ensure-swift-plugin && ./node_modules/.bin/protoc --plugin=protoc-gen-swift=./.tools/protoc-gen-swift --swift_opt=Visibility=Public --swift_out ../apple/InlineKit/Sources/InlineProtocol/ --proto_path ../proto/ ../proto/core.proto ../proto/client.proto",
     "generate": "bun run proto:generate-ts && bun run proto:generate-web && bun run proto:generate-swift",
     "release:cli": "bun run release-cli.ts",
     "release:cli:install": "bun run release-cli.ts upload-install",
@@ -19,7 +20,7 @@
   },
   "dependencies": {},
   "devDependencies": {
-    "@protobuf-ts/plugin": "^2.9.4",
-    "protoc-gen-ts": "^0.8.7"
+    "@protobuf-ts/plugin": "2.9.4",
+    "protoc": "33.4.0"
   }
 }
