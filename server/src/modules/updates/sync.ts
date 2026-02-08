@@ -129,6 +129,8 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
       messageIds.add(serverUpdate.editMessage.msgId)
     } else if (serverUpdate.oneofKind === "newChat") {
       needsChat = true
+    } else if (serverUpdate.oneofKind === "chatMoved") {
+      needsChat = true
     }
   }
 
@@ -267,6 +269,25 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
             newChat: {
               chat: Encoders.chat(chatRecord, { encodingForUserId: userId }),
               user: otherUser ? Encoders.user({ user: otherUser.user, photoFile: otherUser.photoFile }) : undefined,
+            },
+          },
+        })
+        break
+
+      case "chatMoved":
+        if (!chatRecord) {
+          log.warn("Skipping chatMoved update due to missing chat record", { chatId })
+          break
+        }
+        inflatedUpdates.push({
+          seq: update.seq,
+          date: encodeDateStrict(update.date),
+          update: {
+            oneofKind: "chatMoved",
+            chatMoved: {
+              chat: Encoders.chat(chatRecord, { encodingForUserId: userId }),
+              oldSpaceId: serverUpdate.update.chatMoved.oldSpaceId,
+              newSpaceId: serverUpdate.update.chatMoved.newSpaceId,
             },
           },
         })
@@ -432,6 +453,33 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
           joinSpace: {
             space: payload.userJoinSpace.space,
             member: payload.userJoinSpace.member,
+          },
+        },
+      }
+
+    case "userReadMaxId":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "updateReadMaxId",
+          updateReadMaxId: {
+            peerId: payload.userReadMaxId.peerId,
+            readMaxId: payload.userReadMaxId.readMaxId,
+            unreadCount: payload.userReadMaxId.unreadCount,
+          },
+        },
+      }
+
+    case "userMarkAsUnread":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "markAsUnread",
+          markAsUnread: {
+            peerId: payload.userMarkAsUnread.peerId,
+            unreadMark: payload.userMarkAsUnread.unreadMark,
           },
         },
       }
