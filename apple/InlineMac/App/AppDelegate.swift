@@ -149,20 +149,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     mainWindowController = controller
   }
 
-  /// Bring Inline to the front and ensure the main window is visible/focused.
+  /// Bring Inline to the front and ensure the main window exists.
   @MainActor func showAndFocusMainWindow() {
-    NSApp.activate(ignoringOtherApps: true)
+    let app = NSRunningApplication.current
+    if app.isHidden {
+      _ = app.unhide()
+    }
+    _ = app.activate(options: [.activateIgnoringOtherApps, .activateAllWindows])
     setupMainWindow()
-    mainWindowController?.window?.makeKeyAndOrderFront(nil)
+  }
+
+  /// Global hotkey should act as an app-level toggle: show when backgrounded, hide when foregrounded.
+  /// Keep this simple and rely on AppKit to restore focus.
+  @MainActor func toggleAppFromGlobalHotkey() {
+    let app = NSRunningApplication.current
+    if app.isActive {
+      _ = app.hide()
+      return
+    }
+    showAndFocusMainWindow()
   }
 
   @MainActor private func setupGlobalFocusHotkey() {
     if globalFocusHotkeyController == nil {
       globalFocusHotkeyController = GlobalFocusHotkeyController { [weak self] in
         guard let self else { return }
-        Task { @MainActor in
-          self.showAndFocusMainWindow()
-        }
+        self.toggleAppFromGlobalHotkey()
       }
     }
 

@@ -14,9 +14,9 @@ final class GlobalFocusHotkeyController {
   private let signature: OSType = 0x494E4C4E // 'INLN'
   private let hotKeyID: UInt32 = 1
 
-  private let onPress: () -> Void
+  private let onPress: @MainActor () -> Void
 
-  init(onPress: @escaping () -> Void) {
+  init(onPress: @escaping @MainActor () -> Void) {
     self.onPress = onPress
     installHandlerIfNeeded()
   }
@@ -95,7 +95,8 @@ final class GlobalFocusHotkeyController {
       guard status == noErr else { return noErr }
       guard hkID.signature == controller.signature, hkID.id == controller.hotKeyID else { return noErr }
 
-      DispatchQueue.main.async {
+      // Run after the hotkey event returns to avoid re-entrancy issues with AppKit focus changes.
+      DispatchQueue.main.async { @MainActor in
         controller.onPress()
       }
 
