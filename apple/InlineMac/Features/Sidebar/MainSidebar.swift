@@ -3,7 +3,7 @@ import Combine
 import InlineKit
 import SwiftUI
 
-class MainSidebar: NSViewController, NSMenuDelegate {
+class MainSidebar: NSViewController {
   private let dependencies: AppDependencies
   private let listView: MainSidebarList
   private let homeViewModel: HomeViewModel
@@ -53,16 +53,17 @@ class MainSidebar: NSViewController, NSMenuDelegate {
     return view
   }()
 
-  private static let spacePickerWidth: CGFloat = 240
-
-  private var spacePickerWindow: SpacePickerOverlayWindow?
+  private var spacePickerPresenter: SpacePickerOverlayPresenter?
   private var spacePickerClickMonitor: Any?
   private var spacePickerEscapeUnsubscriber: (() -> Void)?
+  private var didDismissSpacePickerFromHeaderMouseDown: Bool = false
   private var archiveEscapeUnsubscriber: (() -> Void)?
 
   private lazy var footerView: NSView = {
     let view = NSView()
     view.translatesAutoresizingMaskIntoConstraints = false
+    view.wantsLayer = true
+    view.layer?.masksToBounds = true
     return view
   }()
 
@@ -80,187 +81,10 @@ class MainSidebar: NSViewController, NSMenuDelegate {
 
   private var updateOverlayCancellable: AnyCancellable?
 
-  private lazy var footerStack: NSStackView = {
-    let stack = NSStackView()
-    stack.orientation = .horizontal
-    stack.spacing = MainSidebarFooterStyle.minimumSpacing
-    stack.alignment = .centerY
-    stack.distribution = .equalSpacing
-    stack.translatesAutoresizingMaskIntoConstraints = false
-    return stack
-  }()
-
-  private lazy var archiveButton: MainSidebarArchiveButton = {
-    let button = MainSidebarArchiveButton()
-    button.translatesAutoresizingMaskIntoConstraints = false
-    button.target = self
-    button.action = #selector(handleArchiveButton)
-    return button
-  }()
-
-  private lazy var searchButton: MainSidebarFooterIconButton = {
-    let button = MainSidebarFooterIconButton(
-      symbolName: "magnifyingglass",
-      accessibilityLabel: "Search"
-    )
-    button.translatesAutoresizingMaskIntoConstraints = false
-    button.target = self
-    button.action = #selector(handleSearchButton)
-    button.toolTip = "Search"
-    return button
-  }()
-
-  private lazy var plusButton: MainSidebarFooterIconButton = {
-    let button = MainSidebarFooterIconButton(
-      symbolName: "plus",
-      accessibilityLabel: "New"
-    )
-    button.translatesAutoresizingMaskIntoConstraints = false
-    button.target = self
-    button.action = #selector(handlePlusButton)
-    button.toolTip = "New"
-    return button
-  }()
-
-  private lazy var notificationsButton: MainSidebarFooterHostingButton = {
-    let hostingView = NSHostingView(
-      rootView: AnyView(
-        NotificationSettingsButton(style: .sidebarFooter)
-          .environmentObject(dependencies.userSettings.notification)
-      )
-    )
-    hostingView.translatesAutoresizingMaskIntoConstraints = false
-    let container = MainSidebarFooterHostingButton(contentView: hostingView)
-    container.translatesAutoresizingMaskIntoConstraints = false
-    return container
-  }()
-
-  private lazy var viewOptionsButton: MainSidebarFooterIconButton = {
-    let button = MainSidebarFooterIconButton(
-      symbolName: "line.3.horizontal.decrease",
-      accessibilityLabel: "View options"
-    )
-    button.translatesAutoresizingMaskIntoConstraints = false
-    button.target = self
-    button.action = #selector(handleViewOptionsButton)
-    button.toolTip = "View options"
-    return button
-  }()
-
-  private lazy var newSpaceMenuItem: NSMenuItem = {
-    let item = NSMenuItem(
-      title: "New Space",
-      action: #selector(handleNewSpace),
-      keyEquivalent: ""
-    )
-    item.target = self
-    item.image = menuIcon(named: "plus")
-    return item
-  }()
-
-  private lazy var inviteMenuItem: NSMenuItem = {
-    let item = NSMenuItem(
-      title: "Invite",
-      action: #selector(handleInvite),
-      keyEquivalent: ""
-    )
-    item.target = self
-    item.image = menuIcon(named: "person.badge.plus")
-    return item
-  }()
-
-  private lazy var newThreadMenuItem: NSMenuItem = {
-    let item = NSMenuItem(
-      title: "New Thread",
-      action: #selector(handleNewThread),
-      keyEquivalent: ""
-    )
-    item.target = self
-    item.image = menuIcon(named: "bubble.left.and.bubble.right")
-    return item
-  }()
-
-  private lazy var plusMenu: NSMenu = {
-    let menu = NSMenu()
-    menu.items = [newSpaceMenuItem, inviteMenuItem, newThreadMenuItem]
-    return menu
-  }()
-
-  private lazy var sortHeaderMenuItem: NSMenuItem = {
-    let item = NSMenuItem(title: "Sort", action: nil, keyEquivalent: "")
-    item.isEnabled = false
-    return item
-  }()
-
-  private lazy var sortByLastActivityMenuItem: NSMenuItem = {
-    let item = NSMenuItem(
-      title: "Last activity",
-      action: #selector(handleSortByLastActivity),
-      keyEquivalent: ""
-    )
-    item.target = self
-    return item
-  }()
-
-  private lazy var sortByCreationDateMenuItem: NSMenuItem = {
-    let item = NSMenuItem(
-      title: "Creation date",
-      action: #selector(handleSortByCreationDate),
-      keyEquivalent: ""
-    )
-    item.target = self
-    return item
-  }()
-
-  private lazy var displayModeHeaderMenuItem: NSMenuItem = {
-    let item = NSMenuItem(title: "Display Mode", action: nil, keyEquivalent: "")
-    item.isEnabled = false
-    return item
-  }()
-
-  private lazy var displayModeCompactMenuItem: NSMenuItem = {
-    let item = NSMenuItem(
-      title: "Compact",
-      action: #selector(handleDisplayModeCompact),
-      keyEquivalent: ""
-    )
-    item.target = self
-    item.image = menuIcon(named: "rectangle.compress.vertical")
-    item.attributedTitle = displayModeTitle(
-      title: "Compact",
-      subtitle: "Single line, smaller avatars"
-    )
-    return item
-  }()
-
-  private lazy var displayModePreviewMenuItem: NSMenuItem = {
-    let item = NSMenuItem(
-      title: "Show previews",
-      action: #selector(handleDisplayModePreview),
-      keyEquivalent: ""
-    )
-    item.target = self
-    item.image = menuIcon(named: "rectangle.expand.vertical")
-    item.attributedTitle = displayModeTitle(
-      title: "Show previews",
-      subtitle: "Preview line, larger avatars"
-    )
-    return item
-  }()
-
-  private lazy var viewOptionsMenu: NSMenu = {
-    let menu = NSMenu()
-    menu.delegate = self
-    menu.items = [
-      // sortHeaderMenuItem,
-      // sortByLastActivityMenuItem,
-      // sortByCreationDateMenuItem,
-      // .separator(),
-      displayModeHeaderMenuItem,
-      displayModeCompactMenuItem,
-      displayModePreviewMenuItem,
-    ]
-    return menu
+  private lazy var footerHostingView: NSHostingView<AnyView> = {
+    let view = NSHostingView(rootView: makeFooterRootView())
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
   }()
 
   private lazy var archiveEmptyView: NSStackView = {
@@ -316,8 +140,7 @@ class MainSidebar: NSViewController, NSMenuDelegate {
   private var archiveTitleTopConstraint: NSLayoutConstraint?
   private var archiveTitleBottomConstraint: NSLayoutConstraint?
   private var switchToInboxObserver: NSObjectProtocol?
-  private static let footerHeight: CGFloat = MainSidebarFooterStyle.buttonSize
-    + (MainSidebarFooterStyle.verticalPadding * 2)
+  private static let footerHeight: CGFloat = MainSidebarFooterMetrics.height
   private static let archiveTitleHeight: CGFloat = 16
   private static let archiveTitleTopSpacing: CGFloat = 12
   private static let archiveTitleBottomSpacing: CGFloat = 4
@@ -335,14 +158,8 @@ class MainSidebar: NSViewController, NSMenuDelegate {
     view.addSubview(listView)
     view.addSubview(footerView)
     view.addSubview(updateOverlayView)
-    footerView.addSubview(footerStack)
+    footerView.addSubview(footerHostingView)
     view.addSubview(archiveEmptyView)
-
-    footerStack.addArrangedSubview(archiveButton)
-    footerStack.addArrangedSubview(searchButton)
-    footerStack.addArrangedSubview(plusButton)
-    footerStack.addArrangedSubview(viewOptionsButton)
-    footerStack.addArrangedSubview(notificationsButton)
 
     headerTopConstraint = headerView.topAnchor.constraint(
       equalTo: view.topAnchor,
@@ -390,21 +207,10 @@ class MainSidebar: NSViewController, NSMenuDelegate {
         constant: -Self.outerEdgeInsets
       ),
 
-      footerStack.leadingAnchor.constraint(equalTo: footerView.leadingAnchor, constant: Self.edgeInsets),
-      footerStack.trailingAnchor.constraint(equalTo: footerView.trailingAnchor, constant: -Self.edgeInsets),
-      footerStack.topAnchor.constraint(equalTo: footerView.topAnchor, constant: MainSidebarFooterStyle.verticalPadding),
-      footerStack.bottomAnchor.constraint(equalTo: footerView.bottomAnchor, constant: -MainSidebarFooterStyle.verticalPadding),
-
-      archiveButton.widthAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
-      archiveButton.heightAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
-      searchButton.widthAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
-      searchButton.heightAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
-      plusButton.widthAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
-      plusButton.heightAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
-      viewOptionsButton.widthAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
-      viewOptionsButton.heightAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
-      notificationsButton.widthAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
-      notificationsButton.heightAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
+      footerHostingView.leadingAnchor.constraint(equalTo: footerView.leadingAnchor),
+      footerHostingView.trailingAnchor.constraint(equalTo: footerView.trailingAnchor),
+      footerHostingView.topAnchor.constraint(equalTo: footerView.topAnchor),
+      footerHostingView.bottomAnchor.constraint(equalTo: footerView.bottomAnchor),
 
       archiveEmptyView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
       archiveEmptyView.centerYAnchor.constraint(equalTo: listView.centerYAnchor),
@@ -423,19 +229,6 @@ class MainSidebar: NSViewController, NSMenuDelegate {
     self.archiveTitleBottomConstraint = archiveTitleBottomConstraint
 
     archiveEmptyView.isHidden = true
-
-    [
-      archiveButton,
-      searchButton,
-      plusButton,
-      viewOptionsButton,
-      notificationsButton,
-    ].forEach { button in
-      button.setContentHuggingPriority(.required, for: .horizontal)
-      button.setContentHuggingPriority(.required, for: .vertical)
-      button.setContentCompressionResistancePriority(.required, for: .horizontal)
-      button.setContentCompressionResistancePriority(.required, for: .vertical)
-    }
 
     listView.onChatCountChanged = { [weak self] mode, count in
       guard let self else { return }
@@ -464,6 +257,13 @@ class MainSidebar: NSViewController, NSMenuDelegate {
     }
   }
 
+  override func viewWillDisappear() {
+    super.viewWillDisappear()
+    hideSpacePicker()
+    archiveEscapeUnsubscriber?()
+    archiveEscapeUnsubscriber = nil
+  }
+
   deinit {
     if let switchToInboxObserver {
       NotificationCenter.default.removeObserver(switchToInboxObserver)
@@ -474,7 +274,7 @@ class MainSidebar: NSViewController, NSMenuDelegate {
 
   private func setContent(for mode: MainSidebarMode) {
     activeMode = mode
-    updateArchiveButton()
+    refreshFooter()
     updateArchiveEscapeHandler()
 
     switch mode {
@@ -489,7 +289,6 @@ class MainSidebar: NSViewController, NSMenuDelegate {
         updateArchiveTitle(archiveCount: 0)
     }
   }
-
 
   private func updateArchiveEscapeHandler() {
     if activeMode == .archive {
@@ -513,9 +312,26 @@ class MainSidebar: NSViewController, NSMenuDelegate {
     }
   }
 
-  private func updateArchiveButton() {
-    archiveButton.isActive = activeMode == .archive
-    archiveButton.toolTip = activeMode == .archive ? "Show inbox" : "Show archives"
+  private func refreshFooter() {
+    footerHostingView.rootView = makeFooterRootView()
+  }
+
+  private func makeFooterRootView() -> AnyView {
+    AnyView(
+      MainSidebarFooterView(
+        isArchiveActive: activeMode == .archive,
+        isPreviewEnabled: AppSettings.shared.showSidebarMessagePreview,
+        horizontalPadding: Self.edgeInsets,
+        onToggleArchive: { [weak self] in self?.handleArchiveButton() },
+        onSearch: { [weak self] in self?.handleSearchButton() },
+        onNewSpace: { [weak self] in self?.handleNewSpace() },
+        onInvite: { [weak self] in self?.handleInvite() },
+        onNewThread: { [weak self] in self?.handleNewThread() },
+        onSetCompact: { [weak self] in self?.handleDisplayModeCompact() },
+        onSetPreview: { [weak self] in self?.handleDisplayModePreview() }
+      )
+      .environmentObject(dependencies.userSettings.notification)
+    )
   }
 
   private func updateArchiveTitle(archiveCount: Int) {
@@ -526,17 +342,12 @@ class MainSidebar: NSViewController, NSMenuDelegate {
     archiveTitleBottomConstraint?.constant = shouldShow ? Self.archiveTitleBottomSpacing : 0
   }
 
-  @objc private func handleArchiveButton() {
+  private func handleArchiveButton() {
     let nextMode: MainSidebarMode = activeMode == .archive ? .inbox : .archive
     setContent(for: nextMode)
   }
 
-  @objc private func handlePlusButton(_ sender: NSButton) {
-    let point = NSPoint(x: 0, y: sender.bounds.maxY + 6)
-    plusMenu.popUp(positioning: nil, at: point, in: sender)
-  }
-
-  @objc private func handleSearchButton() {
+  private func handleSearchButton() {
     NotificationCenter.default.post(name: .focusSearch, object: nil)
   }
 
@@ -549,54 +360,50 @@ class MainSidebar: NSViewController, NSMenuDelegate {
   }
 
   private func showSpacePicker() {
-    guard let parentWindow = view.window else { return }
-    let window = ensureSpacePickerWindow()
-
-    if window.parent != parentWindow {
-      parentWindow.addChildWindow(window, ordered: .above)
+    guard let hostView = view.window?.contentView else {
+      if spacePickerState.isVisible { spacePickerState.isVisible = false }
+      return
     }
 
-    let headerRectInWindow = headerView.convert(headerView.bounds, to: nil)
-    let headerRectInScreen = parentWindow.convertToScreen(headerRectInWindow)
-    let size = window.frame.size
-    let insetX = SpacePickerOverlayWindow.contentInsetX
-    let insetY = SpacePickerOverlayWindow.contentInsetY
-    var origin = NSPoint(
-      x: headerRectInScreen.minX - insetX,
-      y: headerRectInScreen.minY - size.height - 6 + insetY
+    let rootView = makeSpacePickerRootView()
+    let presenter: SpacePickerOverlayPresenter
+    if let existing = spacePickerPresenter {
+      existing.update(rootView: rootView)
+      presenter = existing
+    } else {
+      let new = SpacePickerOverlayPresenter(
+        rootView: rootView,
+        preferredWidth: SpacePickerOverlayStyle.preferredWidth
+      )
+      spacePickerPresenter = new
+      presenter = new
+    }
+
+    presenter.show(
+      in: hostView,
+      anchorView: headerView.spacePickerAnchorView,
+      xOffset: -(Self.outerEdgeInsets + 3)
     )
-
-    if let screen = parentWindow.screen {
-      let visible = screen.visibleFrame
-      let maxX = visible.maxX - size.width
-      origin.x = min(max(origin.x, visible.minX), maxX)
-      if origin.y < visible.minY {
-        origin.y = visible.minY
-      }
-    }
-
-    window.setFrameOrigin(origin)
-    window.orderFront(nil)
     installSpacePickerClickMonitor()
     installSpacePickerKeyHandlers()
   }
 
-  private func hideSpacePicker() {
-    if let window = spacePickerWindow {
-      window.orderOut(nil)
-      window.parent?.removeChildWindow(window)
-    }
+  private func hideSpacePicker(keepClickMonitorInstalled: Bool = false) {
+    spacePickerPresenter?.hide()
     if spacePickerState.isVisible {
       spacePickerState.isVisible = false
     }
-    removeSpacePickerClickMonitor()
+    let shouldKeepClickMonitor = keepClickMonitorInstalled || didDismissSpacePickerFromHeaderMouseDown
+    if shouldKeepClickMonitor == false {
+      removeSpacePickerClickMonitor()
+    }
     removeSpacePickerKeyHandlers()
   }
 
-  private func ensureSpacePickerWindow() -> SpacePickerOverlayWindow {
+  private func makeSpacePickerRootView() -> SpacePickerOverlayView {
     let items = spacePickerItems()
     let activeTab = dependencies.nav2?.activeTab ?? .home
-    let rootView = SpacePickerOverlayView(
+    return SpacePickerOverlayView(
       items: items,
       activeTab: activeTab,
       onSelect: { [weak self] item in
@@ -608,15 +415,6 @@ class MainSidebar: NSViewController, NSMenuDelegate {
         self?.hideSpacePicker()
       }
     )
-
-    if let window = spacePickerWindow {
-      window.update(rootView: rootView)
-      return window
-    }
-
-    let window = SpacePickerOverlayWindow(rootView: rootView, preferredWidth: Self.spacePickerWidth)
-    spacePickerWindow = window
-    return window
   }
 
   private func spacePickerItems() -> [SpaceHeaderItem] {
@@ -639,19 +437,46 @@ class MainSidebar: NSViewController, NSMenuDelegate {
 
   private func installSpacePickerClickMonitor() {
     guard spacePickerClickMonitor == nil else { return }
-    spacePickerClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
+    spacePickerClickMonitor = NSEvent.addLocalMonitorForEvents(
+      matching: [.leftMouseDown, .leftMouseUp, .rightMouseDown, .otherMouseDown]
+    ) { [weak self] event in
       guard let self else { return event }
-      guard let window = spacePickerWindow, window.isVisible else { return event }
-      if let parentWindow = view.window, event.window === parentWindow {
-        let pointInHeader = headerView.convert(event.locationInWindow, from: nil)
-        if headerView.bounds.contains(pointInHeader) {
-          return event
+      guard let window = view.window, event.window === window else { return event }
+
+      // If we closed the picker on mouseDown in the header, swallow the corresponding mouseUp
+      // so the header control doesn't immediately toggle it open again.
+      if event.type == .leftMouseUp, didDismissSpacePickerFromHeaderMouseDown {
+        didDismissSpacePickerFromHeaderMouseDown = false
+        removeSpacePickerClickMonitor()
+        return nil
+      }
+
+      guard let presenter = spacePickerPresenter, presenter.isVisible else { return event }
+      guard let hostView = window.contentView else { return event }
+
+      // While open, treat the header as a "toggle": any click in the header closes the picker.
+      // This also avoids a subtle issue where clicking near the right edge of the picker control
+      // might not close if hit-testing gets weird due to overlay positioning/clamping.
+      let headerRectInWindow = headerView.convert(headerView.bounds, to: nil)
+      if event.type != .leftMouseUp, headerRectInWindow.contains(event.locationInWindow) {
+        didDismissSpacePickerFromHeaderMouseDown = true
+        DispatchQueue.main.async { [weak self] in
+          self?.hideSpacePicker(keepClickMonitorInstalled: true)
         }
+        return nil
       }
-      if event.window !== window {
-        hideSpacePicker()
+
+      let pointInHost = hostView.convert(event.locationInWindow, from: nil)
+      if presenter.containsPointInHostView(pointInHost) {
+        return event
       }
-      return event
+
+      // Don't allow interacting with underlying UI while the picker is open.
+      // We dismiss and swallow the event so nothing else receives the click.
+      DispatchQueue.main.async { [weak self] in
+        self?.hideSpacePicker()
+      }
+      return nil
     }
   }
 
@@ -678,84 +503,26 @@ class MainSidebar: NSViewController, NSMenuDelegate {
     spacePickerEscapeUnsubscriber = nil
   }
 
-  @objc private func handleViewOptionsButton(_ sender: NSButton) {
-    updateViewOptionsMenuState()
-    let point = NSPoint(x: 0, y: sender.bounds.maxY + 6)
-    viewOptionsMenu.popUp(positioning: nil, at: point, in: sender)
-  }
-
-  @objc private func handleSortByLastActivity() {
-    listView.setSortStrategy(.lastActivity)
-    updateViewOptionsMenuState()
-  }
-
-  @objc private func handleSortByCreationDate() {
-    listView.setSortStrategy(.creationDate)
-    updateViewOptionsMenuState()
-  }
-
-  @objc private func handleDisplayModeCompact() {
+  private func handleDisplayModeCompact() {
     AppSettings.shared.showSidebarMessagePreview = false
-    updateViewOptionsMenuState()
+    refreshFooter()
   }
 
-  @objc private func handleDisplayModePreview() {
+  private func handleDisplayModePreview() {
     AppSettings.shared.showSidebarMessagePreview = true
-    updateViewOptionsMenuState()
+    refreshFooter()
   }
 
-  @objc private func handleNewSpace() {
+  private func handleNewSpace() {
     dependencies.nav2?.navigate(to: .createSpace)
   }
 
-  @objc private func handleInvite() {
+  private func handleInvite() {
     dependencies.nav2?.navigate(to: .inviteToSpace)
   }
 
-  @objc private func handleNewThread() {
+  private func handleNewThread() {
     NewThreadAction.start(dependencies: dependencies, spaceId: dependencies.nav2?.activeSpaceId)
-  }
-
-  private func updateViewOptionsMenuState() {
-    // let currentSort = listView.currentSortStrategy
-    // sortByLastActivityMenuItem.state = currentSort == .lastActivity ? .on : .off
-    // sortByCreationDateMenuItem.state = currentSort == .creationDate ? .on : .off
-    let showPreview = AppSettings.shared.showSidebarMessagePreview
-    displayModeCompactMenuItem.state = showPreview ? .off : .on
-    displayModePreviewMenuItem.state = showPreview ? .on : .off
-  }
-
-  func menuWillOpen(_ menu: NSMenu) {
-    guard menu == viewOptionsMenu else { return }
-    updateViewOptionsMenuState()
-  }
-
-  private func displayModeTitle(title: String, subtitle: String) -> NSAttributedString {
-    let paragraph = NSMutableParagraphStyle()
-    paragraph.alignment = .left
-    paragraph.lineBreakMode = .byTruncatingTail
-    paragraph.lineSpacing = 0
-
-    let titleAttributes: [NSAttributedString.Key: Any] = [
-      .font: NSFont.systemFont(ofSize: 13, weight: .regular),
-      .foregroundColor: NSColor.labelColor,
-      .paragraphStyle: paragraph,
-    ]
-    let subtitleAttributes: [NSAttributedString.Key: Any] = [
-      .font: NSFont.systemFont(ofSize: 11, weight: .regular),
-      .foregroundColor: NSColor.secondaryLabelColor,
-      .paragraphStyle: paragraph,
-    ]
-
-    let combined = NSMutableAttributedString(string: title, attributes: titleAttributes)
-    combined.append(NSAttributedString(string: "\n\(subtitle)", attributes: subtitleAttributes))
-    return combined
-  }
-
-  private func menuIcon(named symbolName: String) -> NSImage? {
-    let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
-    return NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
-      .withSymbolConfiguration(config)
   }
 
   private func headerTopInset() -> CGFloat {
@@ -771,6 +538,9 @@ class MainSidebar: NSViewController, NSMenuDelegate {
   override func viewDidLayout() {
     super.viewDidLayout()
     headerTopConstraint?.constant = headerTopInset()
+    if spacePickerState.isVisible {
+      spacePickerPresenter?.repositionIfPossible()
+    }
   }
 
   func setTrafficLightsVisible(_ isVisible: Bool) {
@@ -784,308 +554,4 @@ class MainSidebar: NSViewController, NSMenuDelegate {
 private enum MainSidebarMode {
   case archive
   case inbox
-}
-
-private enum MainSidebarFooterStyle {
-  static let buttonSize: CGFloat = 24
-  static let cornerRadius: CGFloat = 8
-  static let iconSize: CGFloat = 15
-  static let hoverColor = NSColor.black.withAlphaComponent(0.08)
-  static let pressedColor = NSColor.black.withAlphaComponent(0.12)
-  static let verticalPadding: CGFloat = 6
-  static let minimumSpacing: CGFloat = 8
-}
-
-private final class MainSidebarArchiveButton: NSButton {
-  private static let cornerRadius: CGFloat = MainSidebarFooterStyle.cornerRadius
-  private static let iconSize: CGFloat = MainSidebarFooterStyle.iconSize
-  private static let hoverColor = MainSidebarFooterStyle.hoverColor
-  private static let pressedColor = MainSidebarFooterStyle.pressedColor
-  private static let activeTint = NSColor.controlAccentColor
-  private static let inactiveTint = NSColor.tertiaryLabelColor
-
-  private var trackingArea: NSTrackingArea?
-
-  private var isHovering = false {
-    didSet { updateBackground() }
-  }
-
-  var isActive: Bool = false {
-    didSet { updateAppearance() }
-  }
-
-  override init(frame: NSRect) {
-    super.init(frame: frame)
-    setup()
-  }
-
-  convenience init() {
-    self.init(frame: .zero)
-  }
-
-  @available(*, unavailable)
-  required init?(coder _: NSCoder) {
-    fatalError("init(coder:) has not been implemented")
-  }
-
-  override var isHighlighted: Bool {
-    didSet { updateBackground() }
-  }
-
-  override func updateTrackingAreas() {
-    super.updateTrackingAreas()
-    if let trackingArea {
-      removeTrackingArea(trackingArea)
-    }
-    let options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect]
-    let area = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
-    trackingArea = area
-    addTrackingArea(area)
-  }
-
-  override func mouseEntered(with event: NSEvent) {
-    super.mouseEntered(with: event)
-    isHovering = true
-  }
-
-  override func mouseExited(with event: NSEvent) {
-    super.mouseExited(with: event)
-    isHovering = false
-  }
-
-  private func setup() {
-    wantsLayer = true
-    layer?.cornerRadius = Self.cornerRadius
-    layer?.cornerCurve = .continuous
-    setButtonType(.momentaryChange)
-    isBordered = false
-    bezelStyle = .regularSquare
-    imagePosition = .imageOnly
-    focusRingType = .none
-    updateAppearance()
-  }
-
-  private func updateAppearance() {
-    let symbolName = isActive ? "archivebox.fill" : "archivebox"
-    let config = NSImage.SymbolConfiguration(pointSize: Self.iconSize, weight: .semibold)
-    image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Archive")?
-      .withSymbolConfiguration(config)
-    contentTintColor = isActive ? Self.activeTint : Self.inactiveTint
-    updateBackground()
-  }
-
-  private func updateBackground() {
-    let color: NSColor = if isHighlighted {
-      Self.pressedColor
-    } else if isHovering {
-      Self.hoverColor
-    } else {
-      .clear
-    }
-    layer?.backgroundColor = color.cgColor
-  }
-
-  override func accessibilityLabel() -> String? {
-    "Archive"
-  }
-}
-
-private final class MainSidebarFooterIconButton: NSButton {
-  private static let cornerRadius: CGFloat = MainSidebarFooterStyle.cornerRadius
-  private static let iconSize: CGFloat = MainSidebarFooterStyle.iconSize
-  private static let hoverColor = MainSidebarFooterStyle.hoverColor
-  private static let pressedColor = MainSidebarFooterStyle.pressedColor
-  private static let tint = NSColor.tertiaryLabelColor
-
-  private var trackingArea: NSTrackingArea?
-  private let symbolName: String
-  private let labelText: String
-
-  private var isHovering = false {
-    didSet { updateBackground() }
-  }
-
-  init(symbolName: String, accessibilityLabel: String) {
-    self.symbolName = symbolName
-    labelText = accessibilityLabel
-    super.init(frame: .zero)
-    setup()
-  }
-
-  @available(*, unavailable)
-  required init?(coder _: NSCoder) {
-    fatalError("init(coder:) has not been implemented")
-  }
-
-  override var isHighlighted: Bool {
-    didSet { updateBackground() }
-  }
-
-  override func updateTrackingAreas() {
-    super.updateTrackingAreas()
-    if let trackingArea {
-      removeTrackingArea(trackingArea)
-    }
-    let options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect]
-    let area = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
-    trackingArea = area
-    addTrackingArea(area)
-  }
-
-  override func mouseEntered(with event: NSEvent) {
-    super.mouseEntered(with: event)
-    isHovering = true
-  }
-
-  override func mouseExited(with event: NSEvent) {
-    super.mouseExited(with: event)
-    isHovering = false
-  }
-
-  private func setup() {
-    wantsLayer = true
-    layer?.cornerRadius = Self.cornerRadius
-    layer?.cornerCurve = .continuous
-    setButtonType(.momentaryChange)
-    isBordered = false
-    bezelStyle = .regularSquare
-    imagePosition = .imageOnly
-    focusRingType = .none
-    updateAppearance()
-  }
-
-  private func updateAppearance() {
-    let config = NSImage.SymbolConfiguration(pointSize: Self.iconSize, weight: .semibold)
-    image = NSImage(systemSymbolName: symbolName, accessibilityDescription: labelText)?
-      .withSymbolConfiguration(config)
-    contentTintColor = Self.tint
-    updateBackground()
-  }
-
-  override func accessibilityLabel() -> String? {
-    labelText
-  }
-
-  private func updateBackground() {
-    let color: NSColor = if isHighlighted {
-      Self.pressedColor
-    } else if isHovering {
-      Self.hoverColor
-    } else {
-      .clear
-    }
-    layer?.backgroundColor = color.cgColor
-  }
-}
-
-private final class MainSidebarFooterHostingButton: NSView {
-  private var trackingArea: NSTrackingArea?
-  private var mouseMonitor: Any?
-  private let contentView: NSView
-
-  private var isHovering = false {
-    didSet { updateBackground() }
-  }
-
-  private var isPressed = false {
-    didSet { updateBackground() }
-  }
-
-  init(contentView: NSView) {
-    self.contentView = contentView
-    super.init(frame: .zero)
-    setup()
-  }
-
-  @available(*, unavailable)
-  required init?(coder _: NSCoder) {
-    fatalError("init(coder:) has not been implemented")
-  }
-
-  override func updateTrackingAreas() {
-    super.updateTrackingAreas()
-    if let trackingArea {
-      removeTrackingArea(trackingArea)
-    }
-    let options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect]
-    let area = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
-    trackingArea = area
-    addTrackingArea(area)
-  }
-
-  override func mouseEntered(with event: NSEvent) {
-    super.mouseEntered(with: event)
-    isHovering = true
-  }
-
-  override func mouseExited(with event: NSEvent) {
-    super.mouseExited(with: event)
-    isHovering = false
-  }
-
-  override func viewDidMoveToWindow() {
-    super.viewDidMoveToWindow()
-    if window == nil {
-      removeMouseMonitor()
-    } else if mouseMonitor == nil {
-      installMouseMonitor()
-    }
-  }
-
-  deinit {
-    removeMouseMonitor()
-  }
-
-  private func setup() {
-    wantsLayer = true
-    layer?.cornerRadius = MainSidebarFooterStyle.cornerRadius
-    layer?.cornerCurve = .continuous
-    addSubview(contentView)
-
-    NSLayoutConstraint.activate([
-      contentView.centerXAnchor.constraint(equalTo: centerXAnchor),
-      contentView.centerYAnchor.constraint(equalTo: centerYAnchor),
-      contentView.widthAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
-      contentView.heightAnchor.constraint(equalToConstant: MainSidebarFooterStyle.buttonSize),
-    ])
-
-    updateBackground()
-  }
-
-  private func installMouseMonitor() {
-    mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] event in
-      guard let self else { return event }
-      let location = convert(event.locationInWindow, from: nil)
-      let containsPoint = bounds.contains(location)
-      switch event.type {
-        case .leftMouseDown:
-          if containsPoint {
-            isPressed = true
-          }
-        case .leftMouseUp:
-          isPressed = false
-        default:
-          break
-      }
-      return event
-    }
-  }
-
-  private func removeMouseMonitor() {
-    if let mouseMonitor {
-      NSEvent.removeMonitor(mouseMonitor)
-      self.mouseMonitor = nil
-    }
-  }
-
-  private func updateBackground() {
-    let color: NSColor = if isPressed {
-      MainSidebarFooterStyle.pressedColor
-    } else if isHovering {
-      MainSidebarFooterStyle.hoverColor
-    } else {
-      .clear
-    }
-    layer?.backgroundColor = color.cgColor
-  }
 }
