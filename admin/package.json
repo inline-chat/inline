@@ -6,7 +6,8 @@
     "dev": "vite dev",
     "build": "vite build",
     "start": "bun run serve.ts",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
+    "lint": "bunx oxlint --ignore-path ../.eslintignore"
   },
   "dependencies": {
     "@tanstack/react-router": "^1.132.27",
@@ -18,8 +19,9 @@
     "tailwind-merge": "^2.5.4"
   },
   "devDependencies": {
-    "@types/react": "^19.0.1",
-    "@types/react-dom": "^19.0.1",
+    "@types/node": "^20",
+    "@types/react": "^19.2.9",
+    "@types/react-dom": "^19.2.3",
     "@tanstack/router-plugin": "^1.132.27",
     "@tailwindcss/vite": "^4.1.13",
     "@vitejs/plugin-react": "^5.0.4",
