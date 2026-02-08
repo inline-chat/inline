@@ -1684,6 +1684,12 @@ export interface RpcCall {
          */
         revealBotToken: RevealBotTokenInput;
     } | {
+        oneofKind: "moveThread";
+        /**
+         * @generated from protobuf field: MoveThreadInput moveThread = 36;
+         */
+        moveThread: MoveThreadInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1902,6 +1908,12 @@ export interface RpcResult {
          * @generated from protobuf field: RevealBotTokenResult revealBotToken = 35;
          */
         revealBotToken: RevealBotTokenResult;
+    } | {
+        oneofKind: "moveThread";
+        /**
+         * @generated from protobuf field: MoveThreadResult moveThread = 36;
+         */
+        moveThread: MoveThreadResult;
     } | {
         oneofKind: undefined;
     };
@@ -3118,6 +3130,12 @@ export interface Update {
          */
         pinnedMessages: UpdatePinnedMessages;
     } | {
+        oneofKind: "chatMoved";
+        /**
+         * @generated from protobuf field: UpdateChatMoved chat_moved = 32;
+         */
+        chatMoved: UpdateChatMoved;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -3224,6 +3242,35 @@ export interface UpdatePinnedMessages {
      * @generated from protobuf field: repeated int64 message_ids = 2;
      */
     messageIds: bigint[];
+}
+/**
+ * Update when a thread is moved between home and a space.
+ *
+ * NOTE: v1 only supports private threads and only home <-> space moves.
+ * Keep this payload flexible for future:
+ * - moving across spaces
+ * - moving public threads out of a space (would likely convert members to participants)
+ * - allowing external participants in space threads
+ *
+ * @generated from protobuf message UpdateChatMoved
+ */
+export interface UpdateChatMoved {
+    /**
+     * Updated chat record (includes new space_id if moved into a space).
+     *
+     * @generated from protobuf field: Chat chat = 1;
+     */
+    chat?: Chat;
+    /**
+     * Optional old/new space IDs for convenience. new_space_id is unset when moved to home.
+     *
+     * @generated from protobuf field: optional int64 old_space_id = 2;
+     */
+    oldSpaceId?: bigint;
+    /**
+     * @generated from protobuf field: optional int64 new_space_id = 3;
+     */
+    newSpaceId?: bigint;
 }
 /**
  * @generated from protobuf message UpdateNewMessageNotification
@@ -3912,6 +3959,33 @@ export interface UpdateChatInfoResult {
     chat?: Chat;
 }
 /**
+ * Move a private thread between home (space_id unset) and a space (space_id set).
+ * v1 does NOT support cross-space moves or public threads.
+ *
+ * @generated from protobuf message MoveThreadInput
+ */
+export interface MoveThreadInput {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * Target space. If unset, moves to home.
+     *
+     * @generated from protobuf field: optional int64 space_id = 2;
+     */
+    spaceId?: bigint;
+}
+/**
+ * @generated from protobuf message MoveThreadResult
+ */
+export interface MoveThreadResult {
+    /**
+     * @generated from protobuf field: Chat chat = 1;
+     */
+    chat?: Chat;
+}
+/**
  * Pin or unpin a message for everyone
  *
  * @generated from protobuf message PinMessageInput
@@ -4110,7 +4184,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: REVEAL_BOT_TOKEN = 34;
      */
-    REVEAL_BOT_TOKEN = 34
+    REVEAL_BOT_TOKEN = 34,
+    /**
+     * @generated from protobuf enum value: MOVE_THREAD = 35;
+     */
+    MOVE_THREAD = 35
 }
 /**
  * @generated from protobuf enum SearchMessagesFilter
@@ -7490,7 +7568,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 32, name: "pinMessage", kind: "message", oneof: "input", T: () => PinMessageInput },
             { no: 33, name: "updateChatInfo", kind: "message", oneof: "input", T: () => UpdateChatInfoInput },
             { no: 34, name: "listBots", kind: "message", oneof: "input", T: () => ListBotsInput },
-            { no: 35, name: "revealBotToken", kind: "message", oneof: "input", T: () => RevealBotTokenInput }
+            { no: 35, name: "revealBotToken", kind: "message", oneof: "input", T: () => RevealBotTokenInput },
+            { no: 36, name: "moveThread", kind: "message", oneof: "input", T: () => MoveThreadInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -7713,6 +7792,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         revealBotToken: RevealBotTokenInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).revealBotToken)
                     };
                     break;
+                case /* MoveThreadInput moveThread */ 36:
+                    message.input = {
+                        oneofKind: "moveThread",
+                        moveThread: MoveThreadInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).moveThread)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -7830,6 +7915,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* RevealBotTokenInput revealBotToken = 35; */
         if (message.input.oneofKind === "revealBotToken")
             RevealBotTokenInput.internalBinaryWrite(message.input.revealBotToken, writer.tag(35, WireType.LengthDelimited).fork(), options).join();
+        /* MoveThreadInput moveThread = 36; */
+        if (message.input.oneofKind === "moveThread")
+            MoveThreadInput.internalBinaryWrite(message.input.moveThread, writer.tag(36, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -7878,7 +7966,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 32, name: "pinMessage", kind: "message", oneof: "result", T: () => PinMessageResult },
             { no: 33, name: "updateChatInfo", kind: "message", oneof: "result", T: () => UpdateChatInfoResult },
             { no: 34, name: "listBots", kind: "message", oneof: "result", T: () => ListBotsResult },
-            { no: 35, name: "revealBotToken", kind: "message", oneof: "result", T: () => RevealBotTokenResult }
+            { no: 35, name: "revealBotToken", kind: "message", oneof: "result", T: () => RevealBotTokenResult },
+            { no: 36, name: "moveThread", kind: "message", oneof: "result", T: () => MoveThreadResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -8101,6 +8190,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         revealBotToken: RevealBotTokenResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).revealBotToken)
                     };
                     break;
+                case /* MoveThreadResult moveThread */ 36:
+                    message.result = {
+                        oneofKind: "moveThread",
+                        moveThread: MoveThreadResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).moveThread)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -8218,6 +8313,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* RevealBotTokenResult revealBotToken = 35; */
         if (message.result.oneofKind === "revealBotToken")
             RevealBotTokenResult.internalBinaryWrite(message.result.revealBotToken, writer.tag(35, WireType.LengthDelimited).fork(), options).join();
+        /* MoveThreadResult moveThread = 36; */
+        if (message.result.oneofKind === "moveThread")
+            MoveThreadResult.internalBinaryWrite(message.result.moveThread, writer.tag(36, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -11503,7 +11601,8 @@ class Update$Type extends MessageType<Update> {
             { no: 28, name: "chat_visibility", kind: "message", oneof: "update", T: () => UpdateChatVisibility },
             { no: 29, name: "dialog_archived", kind: "message", oneof: "update", T: () => UpdateDialogArchived },
             { no: 30, name: "chat_info", kind: "message", oneof: "update", T: () => UpdateChatInfo },
-            { no: 31, name: "pinned_messages", kind: "message", oneof: "update", T: () => UpdatePinnedMessages }
+            { no: 31, name: "pinned_messages", kind: "message", oneof: "update", T: () => UpdatePinnedMessages },
+            { no: 32, name: "chat_moved", kind: "message", oneof: "update", T: () => UpdateChatMoved }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -11692,6 +11791,12 @@ class Update$Type extends MessageType<Update> {
                         pinnedMessages: UpdatePinnedMessages.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).pinnedMessages)
                     };
                     break;
+                case /* UpdateChatMoved chat_moved */ 32:
+                    message.update = {
+                        oneofKind: "chatMoved",
+                        chatMoved: UpdateChatMoved.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).chatMoved)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -11794,6 +11899,9 @@ class Update$Type extends MessageType<Update> {
         /* UpdatePinnedMessages pinned_messages = 31; */
         if (message.update.oneofKind === "pinnedMessages")
             UpdatePinnedMessages.internalBinaryWrite(message.update.pinnedMessages, writer.tag(31, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateChatMoved chat_moved = 32; */
+        if (message.update.oneofKind === "chatMoved")
+            UpdateChatMoved.internalBinaryWrite(message.update.chatMoved, writer.tag(32, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -12146,6 +12254,66 @@ class UpdatePinnedMessages$Type extends MessageType<UpdatePinnedMessages> {
  * @generated MessageType for protobuf message UpdatePinnedMessages
  */
 export const UpdatePinnedMessages = new UpdatePinnedMessages$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateChatMoved$Type extends MessageType<UpdateChatMoved> {
+    constructor() {
+        super("UpdateChatMoved", [
+            { no: 1, name: "chat", kind: "message", T: () => Chat },
+            { no: 2, name: "old_space_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "new_space_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateChatMoved>): UpdateChatMoved {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<UpdateChatMoved>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateChatMoved): UpdateChatMoved {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Chat chat */ 1:
+                    message.chat = Chat.internalBinaryRead(reader, reader.uint32(), options, message.chat);
+                    break;
+                case /* optional int64 old_space_id */ 2:
+                    message.oldSpaceId = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 new_space_id */ 3:
+                    message.newSpaceId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateChatMoved, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Chat chat = 1; */
+        if (message.chat)
+            Chat.internalBinaryWrite(message.chat, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 old_space_id = 2; */
+        if (message.oldSpaceId !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.oldSpaceId);
+        /* optional int64 new_space_id = 3; */
+        if (message.newSpaceId !== undefined)
+            writer.tag(3, WireType.Varint).int64(message.newSpaceId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateChatMoved
+ */
+export const UpdateChatMoved = new UpdateChatMoved$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class UpdateNewMessageNotification$Type extends MessageType<UpdateNewMessageNotification> {
     constructor() {
@@ -14351,6 +14519,106 @@ class UpdateChatInfoResult$Type extends MessageType<UpdateChatInfoResult> {
  * @generated MessageType for protobuf message UpdateChatInfoResult
  */
 export const UpdateChatInfoResult = new UpdateChatInfoResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MoveThreadInput$Type extends MessageType<MoveThreadInput> {
+    constructor() {
+        super("MoveThreadInput", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "space_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MoveThreadInput>): MoveThreadInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<MoveThreadInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MoveThreadInput): MoveThreadInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 space_id */ 2:
+                    message.spaceId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MoveThreadInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* optional int64 space_id = 2; */
+        if (message.spaceId !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.spaceId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MoveThreadInput
+ */
+export const MoveThreadInput = new MoveThreadInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MoveThreadResult$Type extends MessageType<MoveThreadResult> {
+    constructor() {
+        super("MoveThreadResult", [
+            { no: 1, name: "chat", kind: "message", T: () => Chat }
+        ]);
+    }
+    create(value?: PartialMessage<MoveThreadResult>): MoveThreadResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<MoveThreadResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MoveThreadResult): MoveThreadResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Chat chat */ 1:
+                    message.chat = Chat.internalBinaryRead(reader, reader.uint32(), options, message.chat);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MoveThreadResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Chat chat = 1; */
+        if (message.chat)
+            Chat.internalBinaryWrite(message.chat, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MoveThreadResult
+ */
+export const MoveThreadResult = new MoveThreadResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class PinMessageInput$Type extends MessageType<PinMessageInput> {
     constructor() {

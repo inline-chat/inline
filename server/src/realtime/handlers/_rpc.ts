@@ -37,6 +37,7 @@ import { forwardMessagesHandler } from "@in/server/realtime/handlers/messages.fo
 import { updateChatVisibilityHandler } from "@in/server/realtime/handlers/messages.updateChatVisibility"
 import { updateChatInfoHandler } from "@in/server/realtime/handlers/messages.updateChatInfo"
 import { pinMessageHandler } from "@in/server/realtime/handlers/messages.pinMessage"
+import { moveThreadHandler } from "@in/server/realtime/handlers/messages.moveThread"
 
 const log = new Log("rpc")
 
@@ -302,6 +303,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await updateChatInfoHandler(call.input.updateChatInfo, handlerContext)
       return { oneofKind: "updateChatInfo", updateChatInfo: result }
+    }
+
+    case Method.MOVE_THREAD: {
+      if (call.input.oneofKind !== "moveThread") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      let result = await moveThreadHandler(call.input.moveThread, handlerContext)
+      return { oneofKind: "moveThread", moveThread: result }
     }
 
     case Method.PIN_MESSAGE: {

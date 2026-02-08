@@ -24,7 +24,7 @@ final class ChatsViewModel: ObservableObject {
 
   private let source: Source
   private let db: AppDatabase
-  private let log = Log.scoped("SidebarDebug")
+  private let log = Log.scoped("ChatsViewModel")
 
   private var threadItems: [ChatListItem] = []
   private var contactItems: [ChatListItem] = []
@@ -64,6 +64,7 @@ final class ChatsViewModel: ObservableObject {
   }
 
   private func bindHomeChats() {
+    db.warnIfInMemoryDatabaseForObservation("ChatsViewModel.homeChats")
     threadsCancellable =
       ValueObservation
         .tracking { db in
@@ -79,7 +80,7 @@ final class ChatsViewModel: ObservableObject {
               case .finished:
                 break
               case let .failure(error):
-                self.log.error("[SidebarDebug] home observation failed: \(error.localizedDescription)")
+                self.log.error("Home observation failed: \(error.localizedDescription)")
             }
           },
           receiveValue: { [weak self] chats in
@@ -89,12 +90,12 @@ final class ChatsViewModel: ObservableObject {
             let filtered = HomeViewModel.filterEmptyChats(spaceScoped)
             threadItems = filtered.map(ChatListItem.init(chatItem:))
             updateItems()
-            log.debug("[SidebarDebug] home chats total=\(chats.count) spaceNil=\(spaceScoped.count)")
           }
         )
   }
 
   private func bindSpaceChats(spaceId: Int64) {
+    db.warnIfInMemoryDatabaseForObservation("ChatsViewModel.spaceChats")
     threadsCancellable =
       ValueObservation
         .tracking { db in
@@ -116,6 +117,7 @@ final class ChatsViewModel: ObservableObject {
   }
 
   private func bindSpaceContacts(spaceId: Int64) {
+    db.warnIfInMemoryDatabaseForObservation("ChatsViewModel.spaceContacts")
     contactsCancellable =
       ValueObservation
         .tracking { db in

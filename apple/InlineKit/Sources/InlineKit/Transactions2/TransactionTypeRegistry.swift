@@ -23,6 +23,7 @@ public enum TransactionTypeRegistry {
       case is RemoveChatParticipantTransaction: "remove_chat_participant"
       case is UpdateChatVisibilityTransaction: "update_chat_visibility"
       case is UpdateChatInfoTransaction: "update_chat_info"
+      case is MoveThreadTransaction: "move_thread"
       case is PinMessageTransaction: "pin_message"
       case is TranslateMessagesTransaction: "translate_messages"
       case is UpdateUserSettingsTransaction: "update_user_settings"
@@ -57,6 +58,7 @@ public enum TransactionTypeRegistry {
       case "remove_chat_participant": return try decoder.decode(RemoveChatParticipantTransaction.self, from: data)
       case "update_chat_visibility": return try decoder.decode(UpdateChatVisibilityTransaction.self, from: data)
       case "update_chat_info": return try decoder.decode(UpdateChatInfoTransaction.self, from: data)
+      case "move_thread": return try decoder.decode(MoveThreadTransaction.self, from: data)
       case "pin_message": return try decoder.decode(PinMessageTransaction.self, from: data)
       case "translate_messages": return try decoder.decode(TranslateMessagesTransaction.self, from: data)
       case "update_user_settings": return try decoder.decode(UpdateUserSettingsTransaction.self, from: data)

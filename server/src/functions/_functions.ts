@@ -16,6 +16,7 @@ import { removeChatParticipant } from "./messages.removeChatParticipant"
 import { addChatParticipant } from "./messages.addChatParticipant"
 import { updateChatVisibility } from "./messages.updateChatVisibility"
 import { updateChatInfo } from "./messages.updateChatInfo"
+import { moveThread } from "./messages.moveThread"
 import { pinMessage } from "./messages.pinMessage"
 import { getUserSettings } from "./user.getUserSettings"
 import { updateUserSettings } from "./user.updateUserSettings"
@@ -45,6 +46,7 @@ export const Functions = {
     removeChatParticipant: removeChatParticipant,
     updateChatVisibility: updateChatVisibility,
     updateChatInfo: updateChatInfo,
+    moveThread: moveThread,
     pinMessage: pinMessage,
     forwardMessages: forwardMessages,
     // until we make tests pass
