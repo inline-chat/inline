@@ -3,6 +3,7 @@ import { styleText } from "node:util"
 
 // cannot depend on env.ts
 const isProd = process.env.NODE_ENV === "production"
+const isTest = process.env.NODE_ENV === "test"
 
 export enum LogLevel {
   NONE = -1,
@@ -23,16 +24,18 @@ const globalLogLevel: Record<string, LogLevel> = {
 export class Log {
   static shared = new Log("shared")
 
-  private disableLogging = process.env.NODE_ENV === "test" && !process.env["DEBUG"]
+  private disableLogging = isTest && !process.env["DEBUG"]
   private static logLevel = (() => {
     let defaultLevel =
-      process.env.NODE_ENV === "test" && !process.env["DEBUG"]
+      isTest && !process.env["DEBUG"]
         ? LogLevel.ERROR
         : isProd
         ? LogLevel.WARN
         : LogLevel.DEBUG
     const scopeColored = styleText("green", "logger")
-    console.info(scopeColored, "Initialized with default level:", LogLevel[defaultLevel])
+    if (!(isTest && !process.env["DEBUG"])) {
+      console.info(scopeColored, "Initialized with default level:", LogLevel[defaultLevel])
+    }
     return defaultLevel
   })()
 
