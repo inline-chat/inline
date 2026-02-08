@@ -11,5 +11,5 @@
     }
   ],
 
-  "include": ["src", "scripts"]
+  "include": ["src", "scripts", "drizzle.config.ts"]
 }
