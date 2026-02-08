@@ -29,7 +29,13 @@ describe("Message nudge serialization", () => {
     const encoded = Message.toBinary(message)
     const decoded = Message.fromBinary(encoded)
 
-    expect(decoded.media?.media.oneofKind).toBe("nudge")
-    expect(decoded.media?.media.nudge).toBeDefined()
+    const decodedMedia = decoded.media?.media
+    expect(decodedMedia?.oneofKind).toBe("nudge")
+
+    if (!decodedMedia || decodedMedia.oneofKind !== "nudge") {
+      throw new Error("Expected decoded message media to be a nudge")
+    }
+
+    expect(decodedMedia.nudge).toBeDefined()
   })
 })
