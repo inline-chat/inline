@@ -1,5 +1,1 @@
-import CoreGraphics
-
-extension SpacePickerOverlayStyle {
-  static let preferredWidth: CGFloat = 240
-}
+// Kept for history: `preferredWidth` now lives in `SpacePickerOverlayStyle.swift`.
