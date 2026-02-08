@@ -22,6 +22,7 @@ import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { encodeReaction } from "@in/server/realtime/encoders/encodeReaction"
 import { decryptBinary } from "@in/server/modules/encryption/encryption"
 import { detectHasLink } from "@in/server/modules/message/linkDetection"
+import { isUserMentioned } from "@in/server/modules/message/helpers"
 
 export const encodeMessage = ({
   message,
@@ -148,7 +149,7 @@ export const encodeMessage = ({
     message: text,
     out: encodingForUserId === message.fromId,
     date: encodeDateStrict(message.date),
-    mentioned: undefined,
+    mentioned: entities ? isUserMentioned(entities, encodingForUserId) : false,
     replyToMsgId: message.replyToMsgId ? BigInt(message.replyToMsgId) : undefined,
     media: media,
     isSticker: message.isSticker || undefined,
@@ -305,7 +306,7 @@ export const encodeFullMessage = ({
     message: message.text ?? undefined,
     out: encodingForUserId === message.fromId,
     date: encodeDateStrict(message.date),
-    mentioned: false,
+    mentioned: message.entities ? isUserMentioned(message.entities, encodingForUserId) : false,
     replyToMsgId: message.replyToMsgId ? BigInt(message.replyToMsgId) : undefined,
     media: media,
     isSticker: message.isSticker ?? false,
