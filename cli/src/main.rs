@@ -15,7 +15,7 @@ use futures_util::StreamExt;
 use rand::{RngCore, rngs::OsRng};
 use serde::Serialize;
 use std::cmp::Reverse;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -340,6 +340,7 @@ Examples:
 
 Notes:
   Destructive commands prompt unless --yes is provided. In --json mode, the CLI never prompts; pass --yes explicitly.
+  Bot tokens are not printed by default. Use: inline bots reveal-token --bot-user-id <ID>
 
 JQ examples:
   inline users list --json | jq -r '.users[] | "\(.id)\t\(.first_name) \(.last_name)\t@\(.username // "")\t\(.email // "")"'
@@ -1545,10 +1546,13 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                                         user_display_name(bot),
                                         bot.id
                                     );
+                                    println!(
+                                        "To reveal token: inline bots reveal-token --bot-user-id {}",
+                                        bot.id
+                                    );
                                 } else {
                                     println!("Created bot.");
                                 }
-                                println!("token: {}", payload.token);
                             }
                         }
                         _ => return Err("Unexpected RPC result for createBot".into()),
@@ -1627,7 +1631,10 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         proto::rpc_result::Result::GetChats(payload) => {
                             if cli.json {
                                 if args.filter.is_some() || args.ids || args.id {
-                                    return Err("--filter/--ids/--id are only supported in table output mode (omit --json)".into());
+                                    return Err(CliError::invalid_args(
+                                        "--filter/--ids/--id are only supported in table output mode (omit --json)",
+                                    )
+                                    .into());
                                 }
                                 if args.limit.is_some() || args.offset.is_some() {
                                     let payload =
@@ -3884,7 +3891,86 @@ fn apply_chat_list_limits(
 ) -> proto::GetChatsResult {
     let offset = offset.unwrap_or(0);
     let limit = limit.unwrap_or(payload.chats.len());
-    payload.chats = payload.chats.into_iter().skip(offset).take(limit).collect();
+
+    payload.chats = payload
+        .chats
+        .into_iter()
+        .skip(offset)
+        .take(limit)
+        .collect();
+
+    // In JSON mode, callers may apply limit/offset to reduce payload size for agent pipelines.
+    // `GetChatsResult` is a denormalized payload, so we aggressively trim referenced lists too.
+    let kept_chat_ids: HashSet<i64> = payload.chats.iter().map(|chat| chat.id).collect();
+
+    // `GetChatsResult` includes both chat peers and user peers (DMs). When trimming, we need to keep
+    // both or we'll drop DM dialogs/messages.
+    let mut kept_peers: HashSet<PeerKey> = HashSet::new();
+    for chat in &payload.chats {
+        kept_peers.insert(PeerKey::Chat(chat.id));
+        if let Some(peer) = chat.peer_id.as_ref().and_then(peer_key_from_peer) {
+            kept_peers.insert(peer);
+        }
+    }
+
+    payload.dialogs.retain(|dialog| {
+        if let Some(chat_id) = dialog.chat_id {
+            if kept_chat_ids.contains(&chat_id) {
+                return true;
+            }
+        }
+        dialog
+            .peer
+            .as_ref()
+            .and_then(peer_key_from_peer)
+            .is_some_and(|peer| kept_peers.contains(&peer))
+    });
+
+    payload.messages.retain(|message| {
+        message
+            .peer_id
+            .as_ref()
+            .and_then(peer_key_from_peer)
+            .is_some_and(|peer| kept_peers.contains(&peer))
+            || (message.chat_id != 0 && kept_peers.contains(&PeerKey::Chat(message.chat_id)))
+    });
+
+    let mut kept_space_ids: HashSet<i64> = HashSet::new();
+    for chat in &payload.chats {
+        if let Some(space_id) = chat.space_id {
+            kept_space_ids.insert(space_id);
+        }
+    }
+    for dialog in &payload.dialogs {
+        if let Some(space_id) = dialog.space_id {
+            kept_space_ids.insert(space_id);
+        }
+    }
+    payload.spaces.retain(|space| kept_space_ids.contains(&space.id));
+
+    let mut kept_user_ids: HashSet<i64> = HashSet::new();
+    for message in &payload.messages {
+        kept_user_ids.insert(message.from_id);
+    }
+    for chat in &payload.chats {
+        if let Some(created_by) = chat.created_by {
+            kept_user_ids.insert(created_by);
+        }
+        if let Some(peer) = chat.peer_id.as_ref().and_then(peer_key_from_peer) {
+            if let PeerKey::User(user_id) = peer {
+                kept_user_ids.insert(user_id);
+            }
+        }
+    }
+    for dialog in &payload.dialogs {
+        if let Some(peer) = dialog.peer.as_ref().and_then(peer_key_from_peer) {
+            if let PeerKey::User(user_id) = peer {
+                kept_user_ids.insert(user_id);
+            }
+        }
+    }
+    payload.users.retain(|user| kept_user_ids.contains(&user.id));
+
     payload
 }
 
@@ -5638,5 +5724,53 @@ mod cli_parsing_tests {
         assert_eq!(err.code, "confirmation_required");
         assert!(err.hint.is_some());
         assert!(!err.examples.is_empty());
+    }
+
+    #[test]
+    fn chat_list_limit_trims_payload_but_keeps_dm_messages() {
+        let dm_peer = proto::Peer {
+            r#type: Some(proto::peer::Type::User(proto::PeerUser { user_id: 42 })),
+        };
+
+        let payload = proto::GetChatsResult {
+            dialogs: vec![proto::Dialog {
+                peer: Some(dm_peer.clone()),
+                chat_id: None,
+                ..Default::default()
+            }],
+            chats: vec![proto::Chat {
+                id: 10,
+                peer_id: Some(dm_peer.clone()),
+                ..Default::default()
+            }],
+            users: vec![
+                proto::User {
+                    id: 42,
+                    first_name: Some("Sam".to_string()),
+                    ..Default::default()
+                },
+                proto::User {
+                    id: 99,
+                    first_name: Some("Other".to_string()),
+                    ..Default::default()
+                },
+            ],
+            messages: vec![proto::Message {
+                id: 1,
+                from_id: 42,
+                peer_id: Some(dm_peer),
+                chat_id: 0,
+                message: Some("hi".to_string()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let trimmed = apply_chat_list_limits(payload, Some(1), Some(0));
+        assert_eq!(trimmed.chats.len(), 1);
+        assert_eq!(trimmed.dialogs.len(), 1);
+        assert_eq!(trimmed.messages.len(), 1);
+        assert_eq!(trimmed.users.len(), 1);
+        assert_eq!(trimmed.users[0].id, 42);
     }
 }
