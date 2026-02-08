@@ -1,4 +1,5 @@
 import Combine
+import Foundation
 import InlineKit
 import SwiftUI
 import Logger
@@ -106,6 +107,7 @@ class NavigationModel: ObservableObject {
 
   private func setupSubscriptions() {
     $activeSpaceId
+      .receive(on: DispatchQueue.main)
       .sink { [weak self] newValue in
         guard let self, let spaceId = newValue else { return }
         guard let w = windowManager, w.topLevelRoute == .main else { return }
@@ -113,11 +115,13 @@ class NavigationModel: ObservableObject {
       }
       .store(in: &cancellables)
 
-    $homePath.sink { [weak self] newValue in
-      guard let self else { return }
-      guard let w = windowManager, w.topLevelRoute == .main else { return }
-      setUpForRoute(newValue.last ?? homeSelection)
-    }.store(in: &cancellables)
+    $homePath
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] newValue in
+        guard let self else { return }
+        guard let w = windowManager, w.topLevelRoute == .main else { return }
+        setUpForRoute(newValue.last ?? homeSelection)
+      }.store(in: &cancellables)
   }
 
   private func prepareForCurrentRoute() {

@@ -106,6 +106,17 @@ class MainWindowController: NSWindowController, NSWindowDelegate {
     window?.minSize = minSize
   }
 
+  private func setupLoading() {
+    autoCollapsedSidebar = false
+    mainSplitView = nil
+    switchViewController(to: LoadingViewController())
+
+    window?.isMovableByWindowBackground = true
+    window?.backgroundColor = .clear
+    window?.setContentSize(defaultSize)
+    window?.minSize = minSize
+  }
+
   private func setupMainSplitView() {
     log.debug("Setting up main split view")
 
@@ -131,6 +142,8 @@ class MainWindowController: NSWindowController, NSWindowDelegate {
   private func switchTopLevel(_ route: TopLevelRoute) {
     currentTopLevelRoute = route
     switch route {
+      case .loading:
+        setupLoading()
       case .onboarding:
         setupOnboarding()
       case .main:
@@ -190,7 +203,8 @@ class MainWindowController: NSWindowController, NSWindowDelegate {
   }
 
   private func injectDependencies() {
-    dependencies.rootData = RootData(db: dependencies.database, auth: dependencies.auth)
+    // RootData depends on `Auth` + persistent DB. It is created when switching to `.main`,
+    // after protected-data/keychain timing has settled.
   }
 
   private func setupWindowFor(route _: NavEntry.Route) {
@@ -392,6 +406,18 @@ class LegacyMainWindowController: NSWindowController {
     reloadToolbar()
   }
 
+  private func setupLoading() {
+    switchViewController(to: LoadingViewController())
+
+    window?.titlebarAppearsTransparent = true
+    window?.isMovableByWindowBackground = true
+    window?.titleVisibility = .hidden
+    window?.backgroundColor = .clear
+    window?.setContentSize(NSSize(width: 780, height: 500))
+
+    reloadToolbar()
+  }
+
   private var titlebarAppearsTransparent: Bool {
     if #available(macOS 26.0, *) {
       false
@@ -449,6 +475,8 @@ class LegacyMainWindowController: NSWindowController {
   private func switchTopLevel(_ route: TopLevelRoute) {
     currentTopLevelRoute = route
     switch route {
+      case .loading:
+        setupLoading()
       case .onboarding:
         setupOnboarding()
       case .main:
@@ -513,7 +541,8 @@ class LegacyMainWindowController: NSWindowController {
   }
 
   private func injectDependencies() {
-    dependencies.rootData = RootData(db: dependencies.database, auth: dependencies.auth)
+    // RootData depends on `Auth` + persistent DB. It is created when switching to `.main`,
+    // after protected-data/keychain timing has settled.
   }
 
   private func setupWindowFor(route: NavEntry.Route) {
@@ -683,7 +712,7 @@ extension LegacyMainWindowController {
     let nav = dependencies.nav
     var items: [NSToolbarItem.Identifier] = []
 
-    if topLevelRoute == .onboarding {
+    if topLevelRoute == .onboarding || topLevelRoute == .loading {
       return items
     }
 
@@ -836,6 +865,7 @@ extension NSToolbarItem.Identifier {
 // MARK: - Top level router
 
 enum TopLevelRoute {
+  case loading
   case onboarding
   case main
 }
@@ -843,16 +873,82 @@ enum TopLevelRoute {
 class MainWindowViewModel: ObservableObject {
   @Published var topLevelRoute: TopLevelRoute
 
+  private var cancellables: Set<AnyCancellable> = []
+  private var transitionTask: Task<Void, Never>?
+
   init() {
-    if Auth.shared.isLoggedIn {
-      topLevelRoute = .main
-    } else {
-      topLevelRoute = .onboarding
+    topLevelRoute = Self.initialRoute(for: Auth.shared.getStatus())
+
+    // `Auth.status` is main actor-isolated; set up the subscription on the main actor.
+    Task { @MainActor [weak self] in
+      guard let self else { return }
+      Auth.shared.$status
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] status in
+          self?.handle(status: status)
+        }
+        .store(in: &cancellables)
     }
   }
 
   func navigate(_ route: TopLevelRoute) {
+    transitionTask?.cancel()
+    transitionTask = nil
     topLevelRoute = route
+  }
+
+  private static func initialRoute(for status: AuthStatus) -> TopLevelRoute {
+    switch status {
+    case .authenticated:
+      return .main
+    case .unauthenticated, .reauthRequired:
+      return .onboarding
+    case .hydrating, .locked:
+      return .loading
+    }
+  }
+
+  private func handle(status: AuthStatus) {
+    switch topLevelRoute {
+    case .loading:
+      switch status {
+      case .hydrating, .locked:
+        break
+
+      case .authenticated:
+        transitionTask?.cancel()
+        transitionTask = Task { @MainActor [weak self] in
+          _ = await AppDatabase.promoteSharedToPersistentIfPossible()
+          guard !Task.isCancelled else { return }
+          self?.topLevelRoute = .main
+        }
+
+      case .unauthenticated, .reauthRequired:
+        transitionTask?.cancel()
+        transitionTask = Task { @MainActor [weak self] in
+          _ = await AppDatabase.promoteSharedToPersistentIfPossible()
+          guard !Task.isCancelled else { return }
+          self?.topLevelRoute = .onboarding
+        }
+      }
+
+    case .main:
+      // Don't downgrade to onboarding on transient locked states; only on explicit logout.
+      switch status {
+      case .unauthenticated, .reauthRequired:
+        transitionTask?.cancel()
+        transitionTask = nil
+        topLevelRoute = .onboarding
+      case .authenticated, .hydrating, .locked:
+        break
+      }
+
+    case .onboarding:
+      // Onboarding drives navigation to `.main` after login/profile completion.
+      transitionTask?.cancel()
+      transitionTask = nil
+      break
+    }
   }
 }
 
