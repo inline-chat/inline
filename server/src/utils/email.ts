@@ -1,9 +1,7 @@
-import { EMAIL_PROVIDER } from "@in/server/config"
-
 import { sendEmail as sendEmailViaSES } from "@in/server/libs/ses"
 import { sendEmail as sendEmailViaResend } from "@in/server/libs/resend"
 import { CodeEmail } from "@inline-chat/email-templates"
-import { isProd } from "@in/server/env"
+import { EMAIL_PROVIDER, SEND_EMAIL, isProd } from "@in/server/env"
 import { styleText } from "node:util"
 import { Log } from "@in/server/utils/log"
 import type { UserName } from "@in/server/modules/cache/userNames"
@@ -25,7 +23,7 @@ type SendEmailContent = CodeTemplateInput | InvitedToSpaceTemplateInput | AdminA
 export const sendEmail = async (input: SendEmailInput) => {
   const template = await getTemplate(input.content)
 
-  if (!isProd && !process.env["SEND_EMAIL"]) {
+  if (!isProd && !SEND_EMAIL) {
     // let's log the email beautifully with formatting, subject, email, from and text so it's easy to read and matches the email
 
     Log.shared.info(

@@ -6,6 +6,25 @@ export const MAX_LOGIN_ATTEMPTS = 5
 export const USER_TOKEN_PREFIX = "IN"
 export const USER_TOKEN_LENGTH = 32
 
+/**
+ * Accepts either a raw token (`"123:IN..."`) or an Authorization header value
+ * (`"Bearer 123:IN..."`) and returns the raw token.
+ */
+export function normalizeToken(token: unknown): string | null {
+  if (typeof token !== "string") return null
+
+  const trimmed = token.trim()
+  if (!trimmed) return null
+
+  // Case-insensitive "Bearer <token>" (allow extra whitespace).
+  if (/^bearer\b/i.test(trimmed)) {
+    const withoutPrefix = trimmed.slice("bearer".length).trim()
+    return withoutPrefix || null
+  }
+
+  return trimmed
+}
+
 export function secureRandomSixDigitNumber() {
   return crypto.randomInt(100000, 1000000)
 }
