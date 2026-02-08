@@ -21,6 +21,7 @@ message ServerUpdate {
     ServerChatUpdateVisibility chat_visibility = 13;
     ServerChatUpdateInfo chat_info = 15;
     ServerChatUpdatePinnedMessages pinned_messages = 16;
+    ServerChatUpdateMoved chat_moved = 21;
 
     // Space updates
     ServerSpaceUpdateRemoveMember space_remove_member = 9;
@@ -32,6 +33,8 @@ message ServerUpdate {
     ServerUserUpdateChatParticipantDelete user_chat_participant_delete = 11;
     ServerUserUpdateDialogArchived user_dialog_archived = 14;
     ServerUserUpdateJoinSpace user_join_space = 17;
+    ServerUserUpdateReadMaxId user_read_max_id = 20;
+    ServerUserUpdateMarkAsUnread user_mark_as_unread = 22;
   }
 }
 
@@ -88,6 +91,16 @@ message ServerChatUpdateInfo {
   optional string emoji = 3;
 }
 
+// Update for a chat when the thread moves between home and a space.
+//
+// NOTE: v1 supports only private threads and only home <-> space moves.
+// Keep the old/new space IDs for future cross-space moves.
+message ServerChatUpdateMoved {
+  int64 chat_id = 1;
+  optional int64 old_space_id = 2;
+  optional int64 new_space_id = 3;
+}
+
 // ------------------------------------------------------------
 // Space updates
 // ------------------------------------------------------------
@@ -127,4 +140,19 @@ message ServerUserUpdateDialogArchived {
 message ServerUserUpdateJoinSpace {
   Space space = 1;
   Member member = 2;
+}
+
+// Update for a user when they read messages up to a certain ID in a dialog.
+//
+// This is stored in the user bucket so read state can be repaired via catch-up after reconnect.
+message ServerUserUpdateReadMaxId {
+  Peer peer_id = 1;
+  int64 read_max_id = 2;
+  int32 unread_count = 3;
+}
+
+// Update for a user when a dialog is marked/unmarked as unread.
+message ServerUserUpdateMarkAsUnread {
+  Peer peer_id = 1;
+  bool unread_mark = 2;
 }

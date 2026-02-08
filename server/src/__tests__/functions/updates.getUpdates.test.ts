@@ -7,6 +7,9 @@ import { GetUpdatesResult_ResultType, InputPeer } from "@in/protocol/core"
 import type { ServerUpdate } from "@in/protocol/server"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { UpdatesModel } from "@in/server/db/models/updates"
+import { dialogs } from "@in/server/db/schema"
+import { handler as readMessages } from "@in/server/methods/readMessages"
+import { and, desc, eq } from "drizzle-orm"
 
 const insertServerUpdate = async (params: {
   bucket: UpdateBucket
@@ -180,5 +183,241 @@ describe("getUpdates", () => {
     expect(result.seq).toBe(1n)
     expect(result.final).toBe(true)
     expect(result.resultType).toBe(GetUpdatesResult_ResultType.EMPTY)
+  })
+
+  test("inflates userReadMaxId to updateReadMaxId in user bucket", async () => {
+    const user = await testUtils.createUser("read-max@example.com")
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.User,
+      entityId: user.id,
+      seq: 1,
+      payload: {
+        oneofKind: "userReadMaxId",
+        userReadMaxId: {
+          peerId: {
+            type: {
+              oneofKind: "chat",
+              chat: { chatId: 123n },
+            },
+          },
+          readMaxId: 42n,
+          unreadCount: 3,
+        },
+      },
+    })
+
+    const result = await getUpdates(
+      {
+        bucket: { type: { oneofKind: "user", user: {} } },
+        startSeq: 0n,
+        seqEnd: 0n,
+        totalLimit: 1000,
+      },
+      { currentUserId: user.id } as any,
+    )
+
+    expect(result.resultType).toBe(GetUpdatesResult_ResultType.SLICE)
+    expect(result.final).toBe(true)
+    expect(Number(result.seq)).toBe(1)
+    expect(result.updates).toHaveLength(1)
+    const first = result.updates[0]
+    expect(first).toBeDefined()
+    if (!first) throw new Error("Missing first update")
+    expect(first.update.oneofKind).toBe("updateReadMaxId")
+    if (first.update.oneofKind !== "updateReadMaxId") throw new Error("Unexpected update type")
+    expect(first.update.updateReadMaxId.readMaxId).toBe(42n)
+    expect(first.update.updateReadMaxId.unreadCount).toBe(3)
+  })
+
+  test("inflates userMarkAsUnread to markAsUnread in user bucket", async () => {
+    const user = await testUtils.createUser("unread-mark@example.com")
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.User,
+      entityId: user.id,
+      seq: 1,
+      payload: {
+        oneofKind: "userMarkAsUnread",
+        userMarkAsUnread: {
+          peerId: {
+            type: {
+              oneofKind: "chat",
+              chat: { chatId: 123n },
+            },
+          },
+          unreadMark: true,
+        },
+      },
+    })
+
+    const result = await getUpdates(
+      {
+        bucket: { type: { oneofKind: "user", user: {} } },
+        startSeq: 0n,
+        seqEnd: 0n,
+        totalLimit: 1000,
+      },
+      { currentUserId: user.id } as any,
+    )
+
+    expect(result.resultType).toBe(GetUpdatesResult_ResultType.SLICE)
+    expect(result.final).toBe(true)
+    expect(Number(result.seq)).toBe(1)
+    expect(result.updates).toHaveLength(1)
+    const first = result.updates[0]
+    expect(first).toBeDefined()
+    if (!first) throw new Error("Missing first update")
+    expect(first.update.oneofKind).toBe("markAsUnread")
+    if (first.update.oneofKind !== "markAsUnread") throw new Error("Unexpected update type")
+    expect(first.update.markAsUnread.unreadMark).toBe(true)
+  })
+
+  test("integration: readMessages persists userReadMaxId and getUpdates inflates updateReadMaxId", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("ReadState Integration", ["readstate@sync.com"])
+    const user = users[0]
+    if (!space || !user) throw new Error("Fixture creation failed")
+
+    const chat = await testUtils.createChat(space.id, "ReadState Thread", "thread", true)
+    if (!chat) throw new Error("Chat creation failed")
+
+    await db.insert(dialogs).values({ userId: user.id, chatId: chat.id, spaceId: space.id }).execute()
+
+    const [beforeRow] = await db
+      .select()
+      .from(updates)
+      .where(and(eq(updates.bucket, UpdateBucket.User), eq(updates.entityId, user.id)))
+      .orderBy(desc(updates.seq))
+      .limit(1)
+
+    const beforeSeq = beforeRow?.seq ?? 0
+
+    await readMessages(
+      { peerThreadId: chat.id.toString(), maxId: 1 },
+      { currentUserId: user.id, currentSessionId: 1, ip: undefined },
+    )
+
+    const result = await getUpdates(
+      {
+        bucket: { type: { oneofKind: "user", user: {} } },
+        startSeq: BigInt(beforeSeq),
+        seqEnd: 0n,
+        totalLimit: 1000,
+      },
+      { currentUserId: user.id } as any,
+    )
+
+    expect(result.resultType).toBe(GetUpdatesResult_ResultType.SLICE)
+    expect(result.final).toBe(true)
+    expect(Number(result.seq)).toBe(beforeSeq + 1)
+    expect(result.updates.length).toBe(1)
+    const first = result.updates[0]
+    expect(first).toBeDefined()
+    if (!first) throw new Error("Missing first update")
+    expect(first.update.oneofKind).toBe("updateReadMaxId")
+    if (first.update.oneofKind !== "updateReadMaxId") throw new Error("Unexpected update type")
+    expect(first.update.updateReadMaxId.readMaxId).toBe(1n)
+    expect(first.update.updateReadMaxId.unreadCount).toBe(0)
+
+    const peerType = first.update.updateReadMaxId.peerId?.type
+    if (!peerType || peerType.oneofKind !== "chat") throw new Error("Expected chat peer for thread")
+    expect(peerType.chat.chatId).toBe(BigInt(chat.id))
+  })
+
+  test("readMessages does not regress readInboxMaxId when called with a stale smaller maxId", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("ReadState No Regress", ["noregress@sync.com"])
+    const user = users[0]
+    if (!space || !user) throw new Error("Fixture creation failed")
+
+    const chat = await testUtils.createChat(space.id, "No Regress Thread", "thread", true)
+    if (!chat) throw new Error("Chat creation failed")
+
+    await db
+      .insert(dialogs)
+      .values({ userId: user.id, chatId: chat.id, spaceId: space.id, readInboxMaxId: 10, unreadMark: false })
+      .execute()
+
+    const [beforeRow] = await db
+      .select()
+      .from(updates)
+      .where(and(eq(updates.bucket, UpdateBucket.User), eq(updates.entityId, user.id)))
+      .orderBy(desc(updates.seq))
+      .limit(1)
+    const beforeSeq = beforeRow?.seq ?? 0
+
+    await readMessages(
+      { peerThreadId: chat.id.toString(), maxId: 1 },
+      { currentUserId: user.id, currentSessionId: 1, ip: undefined },
+    )
+
+    const [dialogRow] = await db
+      .select({ readInboxMaxId: dialogs.readInboxMaxId, unreadMark: dialogs.unreadMark })
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, user.id)))
+      .limit(1)
+
+    expect(dialogRow?.readInboxMaxId).toBe(10)
+    expect(dialogRow?.unreadMark).toBe(false)
+
+    const [afterRow] = await db
+      .select()
+      .from(updates)
+      .where(and(eq(updates.bucket, UpdateBucket.User), eq(updates.entityId, user.id)))
+      .orderBy(desc(updates.seq))
+      .limit(1)
+    const afterSeq = afterRow?.seq ?? 0
+    expect(afterSeq).toBe(beforeSeq)
+  })
+
+  test("readMessages clears unreadMark without regressing readInboxMaxId when maxId is stale", async () => {
+    const { space, users } = await testUtils.createSpaceWithMembers("ReadState Clear Mark", ["clearmark@sync.com"])
+    const user = users[0]
+    if (!space || !user) throw new Error("Fixture creation failed")
+
+    const chat = await testUtils.createChat(space.id, "Clear Mark Thread", "thread", true)
+    if (!chat) throw new Error("Chat creation failed")
+
+    await db
+      .insert(dialogs)
+      .values({ userId: user.id, chatId: chat.id, spaceId: space.id, readInboxMaxId: 10, unreadMark: true })
+      .execute()
+
+    const [beforeRow] = await db
+      .select()
+      .from(updates)
+      .where(and(eq(updates.bucket, UpdateBucket.User), eq(updates.entityId, user.id)))
+      .orderBy(desc(updates.seq))
+      .limit(1)
+    const beforeSeq = beforeRow?.seq ?? 0
+
+    await readMessages(
+      { peerThreadId: chat.id.toString(), maxId: 1 },
+      { currentUserId: user.id, currentSessionId: 1, ip: undefined },
+    )
+
+    const [dialogRow] = await db
+      .select({ readInboxMaxId: dialogs.readInboxMaxId, unreadMark: dialogs.unreadMark })
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, user.id)))
+      .limit(1)
+
+    expect(dialogRow?.readInboxMaxId).toBe(10)
+    expect(dialogRow?.unreadMark).toBe(false)
+
+    const [afterRow] = await db
+      .select()
+      .from(updates)
+      .where(and(eq(updates.bucket, UpdateBucket.User), eq(updates.entityId, user.id)))
+      .orderBy(desc(updates.seq))
+      .limit(1)
+
+    expect(afterRow).toBeTruthy()
+    expect(afterRow!.seq).toBeGreaterThan(beforeSeq)
+
+    const decrypted = UpdatesModel.decrypt(afterRow!)
+    expect(decrypted.payload.update.oneofKind).toBe("userMarkAsUnread")
+    if (decrypted.payload.update.oneofKind === "userMarkAsUnread") {
+      expect(decrypted.payload.update.userMarkAsUnread.unreadMark).toBe(false)
+    }
   })
 })

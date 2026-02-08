@@ -6,7 +6,9 @@ import { dialogs } from "@in/server/db/schema"
 import { and, eq } from "drizzle-orm"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer"
-import {  updatesModule } from "@in/server/modules/updates/updates"
+import { RealtimeUpdates } from "@in/server/realtime/message"
+import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
+import type { ServerUpdate } from "@in/protocol/server"
 
 type Input = {
   peer: InputPeer
@@ -18,6 +20,18 @@ type Output = {
 
 export const markAsUnread = async (input: Input, context: FunctionContext): Promise<Output> => {
   const chatId = await ChatModel.getChatIdFromInputPeer(input.peer, context)
+
+  const existing = await db
+    .select({ unreadMark: dialogs.unreadMark })
+    .from(dialogs)
+    .where(and(eq(dialogs.chatId, chatId), eq(dialogs.userId, context.currentUserId)))
+    .limit(1)
+    .then((rows) => rows[0])
+
+  // No-op if already marked unread.
+  if (existing?.unreadMark === true) {
+    return { updates: [] }
+  }
 
   // Update the dialog to mark as unread
   const result = await db
@@ -50,8 +64,17 @@ export const markAsUnread = async (input: Input, context: FunctionContext): Prom
 
   const updates: Update[] = [update]
 
-  // Push update to connected clients using dynamic import to avoid circular dependency
-  await updatesModule.pushUpdate(updates, { peerId: input.peer, currentUserId: context.currentUserId })
+  const userUpdatePayload: ServerUpdate["update"] = {
+    oneofKind: "userMarkAsUnread",
+    userMarkAsUnread: {
+      peerId: peer,
+      unreadMark: true,
+    },
+  }
+  await UserBucketUpdates.enqueue({ userId: context.currentUserId, update: userUpdatePayload })
+
+  // Mark-as-unread is per-user; push to all sessions for this user (skip the initiating session).
+  RealtimeUpdates.pushToUser(context.currentUserId, updates, { skipSessionId: context.currentSessionId })
 
   return { updates }
 } 

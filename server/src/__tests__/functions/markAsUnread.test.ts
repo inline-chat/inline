@@ -5,9 +5,10 @@ import { markAsUnread } from "@in/server/functions/messages.markAsUnread"
 import type { DbChat, DbUser, DbDialog } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { db } from "@in/server/db"
-import { dialogs } from "@in/server/db/schema"
-import { and, eq } from "drizzle-orm"
+import { dialogs, updates, UpdateBucket } from "@in/server/db/schema"
+import { and, desc, eq } from "drizzle-orm"
 import { handler as readMessagesHandler } from "@in/server/methods/readMessages"
+import { UpdatesModel } from "@in/server/db/models/updates"
 
 // Test state
 let currentUser: DbUser
@@ -136,5 +137,46 @@ describe("markAsUnread", () => {
       .limit(1)
     
     expect(readDialog?.unreadMark).toBe(false)
+  })
+
+  test("readMessages (empty chat) should persist unreadMark cleared in user bucket", async () => {
+    // Ensure unreadMark is true.
+    await markAsUnread({ peer: privateChatPeerId }, context)
+
+    // Capture current latest user update seq after markAsUnread persistence.
+    const [beforeRow] = await db
+      .select()
+      .from(updates)
+      .where(and(eq(updates.bucket, UpdateBucket.User), eq(updates.entityId, currentUser.id)))
+      .orderBy(desc(updates.seq))
+      .limit(1)
+
+    const beforeSeq = beforeRow?.seq ?? 0
+
+    // Call readMessages without maxId; for an empty chat, this hits the branch that clears unreadMark.
+    await readMessagesHandler(
+      { peerThreadId: privateChat.id.toString() },
+      {
+        currentUserId: currentUser.id,
+        currentSessionId: 1,
+        ip: undefined,
+      },
+    )
+
+    const [afterRow] = await db
+      .select()
+      .from(updates)
+      .where(and(eq(updates.bucket, UpdateBucket.User), eq(updates.entityId, currentUser.id)))
+      .orderBy(desc(updates.seq))
+      .limit(1)
+
+    expect(afterRow).toBeTruthy()
+    expect(afterRow!.seq).toBeGreaterThan(beforeSeq)
+
+    const decrypted = UpdatesModel.decrypt(afterRow!)
+    expect(decrypted.payload.update.oneofKind).toBe("userMarkAsUnread")
+    if (decrypted.payload.update.oneofKind === "userMarkAsUnread") {
+      expect(decrypted.payload.update.userMarkAsUnread.unreadMark).toBe(false)
+    }
   })
 }) 
