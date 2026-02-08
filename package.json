@@ -17,18 +17,27 @@
     "dev:emails": "cd server/packages/email-preview && bun run dev",
     "dev:desktop": "cd desktop && bun run dev",
     "typecheck": "cd server && bun run typecheck",
+    "typecheck:web": "cd web && bun run typecheck:all",
+    "typecheck:admin": "cd admin && bun run typecheck",
+    "typecheck:all": "bun run typecheck && bun run typecheck:web && bun run typecheck:admin",
     "db:migrate": "cd server && bun run db:migrate",
     "db:generate": "cd server && bun run db:generate",
     "dev": "cd server && bun run dev",
-    "test": "cd server && bun test",
-    "lint": "bunx oxlint@latest",
+    "test": "cd server && NODE_ENV=test bun test",
+    "test:web": "cd web && bun run test:all",
+    "test:all": "bun run test && bun run test:web",
+    "lint": "bunx oxlint --ignore-path .eslintignore",
+    "lint:server": "cd server && bun run lint",
+    "lint:web": "cd web && bun run lint",
+    "lint:admin": "cd admin && bun run lint",
+    "lint:all": "bun run lint:server && bun run lint:web && bun run lint:admin",
     "release:cli": "cd scripts && bun run release:cli",
     "release:cli:install": "cd scripts && bun run release:cli:install",
     "release:macos": "cd scripts && bun run macos:release-app"
   },
   "devDependencies": {
     "@types/bun": "^1.3.5",
-    "oxlint": "^0.16.0"
+    "oxlint": "^1.39.0"
   },
   "dependencies": {
     "zustand": "^5.0.9"
