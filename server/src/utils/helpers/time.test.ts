@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach, setSystemTime, mock } from "bun:test"
+import { describe, expect, it, beforeEach, afterEach, setSystemTime } from "bun:test"
 import { delay, debugDelay } from "./time"
 
 describe("time helpers", () => {
@@ -36,6 +36,11 @@ describe("time helpers", () => {
     })
 
     afterEach(() => {
+      if (originalEnv === undefined) {
+        Reflect.deleteProperty(process.env, "NODE_ENV")
+      } else {
+        process.env.NODE_ENV = originalEnv
+      }
       setSystemTime()
     })
 
