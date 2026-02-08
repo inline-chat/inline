@@ -15,11 +15,13 @@ export const getUpdatesState = async (
   input: GetUpdatesStateInput,
   context: FunctionContext,
 ): Promise<GetUpdatesStateFnResult> => {
+  const nowEncoded = encodeDateStrict(new Date())
+
   // Safeguard: If client sends 0 (uninitialized), just return current date
   // to avoid pushing all updates ever.
   if (input.date === 0n) {
     return {
-      date: encodeDateStrict(new Date()),
+      date: nowEncoded,
     }
   }
 
@@ -51,8 +53,17 @@ export const getUpdatesState = async (
   }, 0)
 
   let latestUpdateTs = Math.max(latestChatUpdateTs, latestSpaceUpdateTs)
+  // If there are no updates, advance the cursor to (at least) "now" to avoid
+  // repeatedly re-scanning from an old date on every reconnect.
+  if (latestUpdateTs === 0) {
+    return {
+      date: nowEncoded > input.date ? nowEncoded : input.date,
+    }
+  }
   let latestUpdateDate = new Date(latestUpdateTs)
   let latestUpdateDateEncoded = encodeDateStrict(latestUpdateDate)
+
+  const updatesToPush: Parameters<typeof RealtimeUpdates.pushToUser>[1] = []
 
   // Publish updates for chats
   for (let chat of chats) {
@@ -60,21 +71,19 @@ export const getUpdatesState = async (
       continue
     }
 
-    RealtimeUpdates.pushToUser(context.currentUserId, [
-      {
-        update: {
-          oneofKind: "chatHasNewUpdates",
-          chatHasNewUpdates: {
-            chatId: BigInt(chat.id),
-            // PTS should not be null here
-            updateSeq: chat.updateSeq ?? 0,
-            peerId: Encoders.peerFromChat(chat, {
-              currentUserId: context.currentUserId,
-            }),
-          },
+    updatesToPush.push({
+      update: {
+        oneofKind: "chatHasNewUpdates",
+        chatHasNewUpdates: {
+          chatId: BigInt(chat.id),
+          // PTS should not be null here
+          updateSeq: chat.updateSeq ?? 0,
+          peerId: Encoders.peerFromChat(chat, {
+            currentUserId: context.currentUserId,
+          }),
         },
       },
-    ])
+    })
   }
 
   // Publish updates for spaces
@@ -85,17 +94,19 @@ export const getUpdatesState = async (
     if (typeof space.updateSeq !== "number") {
       continue
     }
-    RealtimeUpdates.pushToUser(context.currentUserId, [
-      {
-        update: {
-          oneofKind: "spaceHasNewUpdates",
-          spaceHasNewUpdates: {
-            spaceId: BigInt(space.id),
-            updateSeq: space.updateSeq,
-          },
+    updatesToPush.push({
+      update: {
+        oneofKind: "spaceHasNewUpdates",
+        spaceHasNewUpdates: {
+          spaceId: BigInt(space.id),
+          updateSeq: space.updateSeq,
         },
       },
-    ])
+    })
+  }
+
+  if (updatesToPush.length > 0) {
+    RealtimeUpdates.pushToUser(context.currentUserId, updatesToPush)
   }
 
   return {
