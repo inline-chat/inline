@@ -7,6 +7,7 @@ import { sql, count } from "drizzle-orm"
 import { ipinfo } from "@in/server/libs/ipinfo"
 import { getIp } from "@in/server/utils/ip"
 import { Log } from "@in/server/utils/log"
+import { TELEGRAM_TOKEN } from "@in/server/env"
 
 export const waitlist = new Elysia({ prefix: "/waitlist" })
   .use(setup)
@@ -21,7 +22,7 @@ export const waitlist = new Elysia({ prefix: "/waitlist" })
 
       try {
         // Send user data to Telegram API
-        const telegramToken = process.env["TELEGRAM_TOKEN"]
+        const telegramToken = TELEGRAM_TOKEN
         const chatId = "-1002262866594"
 
         let location: string | undefined

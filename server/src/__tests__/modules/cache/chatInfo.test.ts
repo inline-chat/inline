@@ -1,7 +1,10 @@
-import { describe, test, expect, beforeAll, afterAll, beforeEach } from "bun:test"
+import { describe, test, expect, beforeAll, afterAll, beforeEach, afterEach, setSystemTime } from "bun:test"
 import { setupTestDatabase, teardownTestDatabase, testUtils, cleanDatabase } from "../../setup"
 import { clearChatInfoCache, getCachedChatInfo } from "@in/server/modules/cache/chatInfo"
 import { db, schema } from "@in/server/db"
+import { eq } from "drizzle-orm"
+
+const BASE_TIME = 1 // Bun's setSystemTime treats 0 as "reset to real time".
 
 describe("Chat Info Cache", () => {
   beforeAll(async () => {
@@ -15,6 +18,11 @@ describe("Chat Info Cache", () => {
   beforeEach(async () => {
     clearChatInfoCache()
     await cleanDatabase()
+    setSystemTime(new Date(BASE_TIME))
+  })
+
+  afterEach(() => {
+    setSystemTime()
   })
 
   test("should return undefined for non-existent chat", async () => {
@@ -83,15 +91,16 @@ describe("Chat Info Cache", () => {
   })
 
   test("should return cached result on second call", async () => {
-    const { space, users } = await testUtils.createSpaceWithMembers("Test Space", ["user@test.com"])
+    const { space } = await testUtils.createSpaceWithMembers("Test Space", ["user@test.com"])
     const chat = await testUtils.createChat(space.id, "Test Chat", "thread", true)
 
     // First call - should fetch from database
     const result1 = await getCachedChatInfo(chat!.id)
     const cacheDate1 = result1!.cacheDate
 
-    // Wait a tiny bit to ensure different timestamps if fetched again
-    await new Promise((resolve) => setTimeout(resolve, 1))
+    // Update the DB, then advance time slightly. Cached result should still be returned.
+    await db.update(schema.chats).set({ title: "Updated Chat" }).where(eq(schema.chats.id, chat!.id))
+    setSystemTime(new Date(Date.now() + 1))
 
     // Second call - should return cached result
     const result2 = await getCachedChatInfo(chat!.id)
@@ -102,21 +111,24 @@ describe("Chat Info Cache", () => {
   })
 
   test("should refresh cache after TTL expires", async () => {
-    const { space, users } = await testUtils.createSpaceWithMembers("Test Space", ["user@test.com"])
+    const { space } = await testUtils.createSpaceWithMembers("Test Space", ["user@test.com"])
     const chat = await testUtils.createChat(space.id, "Test Chat", "thread", true)
 
     // Get initial cached result
     const result1 = await getCachedChatInfo(chat!.id)
+    const cacheDate1 = result1!.cacheDate
 
-    // Wait a bit and call again - should still be cached
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    // Update DB and move time past cache validity (10 minutes).
+    await db.update(schema.chats).set({ title: "Updated Chat" }).where(eq(schema.chats.id, chat!.id))
+    setSystemTime(new Date(cacheDate1 + 10 * 60 * 1000 + 1))
     const result2 = await getCachedChatInfo(chat!.id)
 
-    // Both results should be valid (this tests the basic caching functionality)
+    // Cache should be refreshed.
     expect(result1).toBeDefined()
     expect(result2).toBeDefined()
     expect(result2!.type).toBe("thread")
-    expect(result2!.title).toBe("Test Chat")
+    expect(result2!.title).toBe("Updated Chat")
+    expect(result2!.cacheDate).toBeGreaterThan(cacheDate1)
   })
 
   test("should handle chat with null title", async () => {
@@ -198,8 +210,7 @@ describe("Chat Info Cache", () => {
     // The cache dates should be close (within a reasonable time window)
     const firstCacheDate = results[0]!.cacheDate
     for (let i = 1; i < results.length; i++) {
-      const timeDiff = Math.abs(results[i]!.cacheDate - firstCacheDate)
-      expect(timeDiff).toBeLessThan(100) // Within 100ms
+      expect(results[i]!.cacheDate).toBe(firstCacheDate)
     }
   })
 

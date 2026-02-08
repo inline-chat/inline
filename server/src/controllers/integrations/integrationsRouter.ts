@@ -2,6 +2,7 @@ import { Elysia, t } from "elysia"
 import * as arctic from "arctic"
 import { getUserIdFromToken } from "../plugins"
 import { Log } from "@in/server/utils/log"
+import { isProd } from "@in/server/env"
 import { getLinearAuthUrl } from "@in/server/libs/linear"
 import { handleLinearCallback } from "./handleLinearCallback"
 import { getNotionAuthUrl, handleNotionCallback } from "@in/server/libs/notion"
@@ -25,7 +26,7 @@ export const integrationsRouter = new Elysia({ prefix: "/integrations" })
       }
 
       const state = arctic.generateState()
-      const secure = process.env.NODE_ENV === "production" ? true : false
+      const secure = isProd
 
       cookieState.set({
         secure,
@@ -76,7 +77,7 @@ export const integrationsRouter = new Elysia({ prefix: "/integrations" })
   .get(
     "/linear/callback",
     async ({ query, cookie: { token: cookieToken, state: cookieState, spaceId: cookieSpaceId } }) => {
-      const secure = process.env.NODE_ENV === "production" ? true : false
+      const secure = isProd
 
       const clearCookies = () => {
         cookieState.set({ secure, path: "/", httpOnly: true, maxAge: 0, value: "", sameSite: "lax" })
@@ -159,7 +160,7 @@ export const integrationsRouter = new Elysia({ prefix: "/integrations" })
       }
 
       const state = arctic.generateState()
-      const secure = process.env.NODE_ENV === "production" ? true : false
+      const secure = isProd
 
       cookieState.set({
         secure,
@@ -210,7 +211,7 @@ export const integrationsRouter = new Elysia({ prefix: "/integrations" })
   .get(
     "/notion/callback",
     async ({ query, cookie: { token: cookieToken, state: cookieState, spaceId: cookieSpaceId } }) => {
-      const secure = process.env.NODE_ENV === "production" ? true : false
+      const secure = isProd
 
       const clearCookies = () => {
         cookieState.set({ secure, path: "/", httpOnly: true, maxAge: 0, value: "", sameSite: "lax" })

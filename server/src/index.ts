@@ -1,12 +1,11 @@
-// trigger ci 2
 import * as Sentry from "@sentry/bun"
-import { SENTRY_DSN } from "@in/server/env"
+import { API_BASE_URL, NODE_ENV, PORT, SENTRY_DSN } from "@in/server/env"
 import { gitCommitHash, version } from "@in/server/buildEnv"
 
 Sentry.init({
   dsn: SENTRY_DSN,
   tracesSampleRate: 1.0,
-  enabled: process.env.NODE_ENV !== "development",
+  enabled: NODE_ENV !== "development",
   enableLogs: true,
 })
 
@@ -26,13 +25,13 @@ import { admin } from "./controllers/admin"
 import type { Server } from "bun"
 import { EventEmitter } from "events"
 
-const port = process.env["PORT"] || 8000
+const port = PORT
 const log = new Log("server", LogLevel.INFO)
 
 // To fix a bug where 11 max listeners trigger a warning in production console
 EventEmitter.defaultMaxListeners = 20
 
-if (process.env.NODE_ENV === "production") {
+if (NODE_ENV === "production") {
   process.on("warning", (warning) => {
     if (
       warning?.name === "MaxListenersExceededWarning" &&
@@ -44,8 +43,8 @@ if (process.env.NODE_ENV === "production") {
   })
 }
 
-if (process.env.NODE_ENV !== "development") {
-  Log.shared.info(`🚧 Starting server • ${process.env.NODE_ENV} • ${version} • ${gitCommitHash}`)
+if (NODE_ENV !== "development") {
+  Log.shared.info(`🚧 Starting server • ${NODE_ENV} • ${version} • ${gitCommitHash}`)
 }
 
 export const app = new Elysia()
@@ -64,7 +63,7 @@ export const app = new Elysia()
       scalarConfig: {
         servers: [
           {
-            url: process.env["NODE_ENV"] === "production" ? "https://api.inline.chat" : "http://localhost:8000",
+            url: API_BASE_URL,
             description: "Production API server",
           },
         ],

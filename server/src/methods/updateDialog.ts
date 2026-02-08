@@ -76,11 +76,15 @@ export const handler = async (
 
     previousArchived = existingDialog.archived
 
-    const [updatedDialog] = await tx
-      .update(dialogs)
-      .set({ pinned: input.pinned ?? null, draft: input.draft ?? null, archived: input.archived ?? null })
-      .where(whereClause)
-      .returning()
+    const updateSet: Partial<typeof dialogs.$inferInsert> = {}
+    if (input.pinned !== undefined) updateSet.pinned = input.pinned
+    if (input.draft !== undefined) updateSet.draft = input.draft
+    if (input.archived !== undefined) updateSet.archived = input.archived
+
+    const updatedDialog =
+      Object.keys(updateSet).length > 0
+        ? (await tx.update(dialogs).set(updateSet).where(whereClause).returning())[0]
+        : (await tx.select().from(dialogs).where(whereClause).limit(1))[0]
 
     if (!updatedDialog) {
       throw new InlineError(InlineError.ApiError.INTERNAL)

@@ -1,18 +1,19 @@
 import APN from "apn"
 import { Log } from "@in/server/utils/log"
+import { APN_KEY, APN_KEY_ID, APN_TEAM_ID, isProd, isTest } from "@in/server/env"
 
 // Configure APN provider
 let apnProvider: APN.Provider | undefined
 
 export const getApnProvider = () => {
-  if (process.env["NODE_ENV"] === "test") {
+  if (isTest) {
     return undefined
   }
 
   if (!apnProvider) {
-    const rawKey = process.env["APN_KEY"]
-    const keyId = process.env["APN_KEY_ID"]
-    const teamId = process.env["APN_TEAM_ID"]
+    const rawKey = APN_KEY
+    const keyId = APN_KEY_ID
+    const teamId = APN_TEAM_ID
 
     if (!rawKey || !keyId || !teamId) {
       Log.shared.warn("APN credentials are missing", {
@@ -33,7 +34,7 @@ export const getApnProvider = () => {
           keyId,
           teamId,
         },
-        production: process.env["NODE_ENV"] === "production",
+        production: isProd,
       })
     } catch (error) {
       Log.shared.error("Failed to initialize APN provider", { error })

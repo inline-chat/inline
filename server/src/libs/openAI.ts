@@ -1,10 +1,11 @@
 import OpenAI from "openai"
+import { OPENAI_API_KEY } from "@in/server/env"
 
 export let openaiClient: OpenAI | undefined = undefined
 
-if (process.env.OPENAI_API_KEY) {
+if (OPENAI_API_KEY) {
   openaiClient = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
+    apiKey: OPENAI_API_KEY,
     baseURL: "https://api.openai.com/v1",
   })
 }
