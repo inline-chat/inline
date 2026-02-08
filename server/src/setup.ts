@@ -29,11 +29,6 @@ export const setup = new Elysia({ name: "setup" })
     const requestId = getRequestId(request)
     store.requestId = requestId
     set.headers[REQUEST_ID_HEADER] = requestId
-    Log.shared.debug("request", {
-      requestId,
-      method: request.method,
-      url: request.url,
-    })
   })
   // setup cors
   .use(
