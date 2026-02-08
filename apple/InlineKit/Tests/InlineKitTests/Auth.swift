@@ -7,5 +7,5 @@ import Testing
   
   #expect(auth.getToken() != nil)
   #expect(auth.getCurrentUserId() != nil)
-  #expect(auth.isLoggedIn == true)
+  #expect(auth.getIsLoggedIn() == true)
 }

@@ -6,8 +6,50 @@ import Logger
 
 // MARK: - DB main class
 
-public final class AppDatabase: Sendable {
-  public let dbWriter: any DatabaseWriter
+public final class AppDatabase: @unchecked Sendable {
+  private let writerLock = NSLock()
+  private var _dbWriter: any DatabaseWriter
+#if DEBUG
+  private static let warnLock = NSLock()
+  nonisolated(unsafe) private static var warnedInMemoryObservationSites: Set<String> = []
+#endif
+
+  public var dbWriter: any DatabaseWriter {
+    writerLock.withLock { _dbWriter }
+  }
+
+  public var isPersistent: Bool {
+    dbWriter is DatabasePool
+  }
+
+#if DEBUG
+  /// Debug helper to detect GRDB observations being created while `AppDatabase` is using the
+  /// in-memory fallback. Observations capture the provided reader/writer; if they bind to the
+  /// in-memory DB before promotion, they will not automatically "follow" the promoted DB.
+  ///
+  /// Call this immediately before creating a `ValueObservation.publisher(in:)` / `.start(in:)`.
+  public func warnIfInMemoryDatabaseForObservation(
+    _ context: StaticString,
+    file: StaticString = #fileID,
+    line: UInt = #line
+  ) {
+    guard isPersistent == false else { return }
+    guard dbWriter is DatabaseQueue else { return }
+
+    let key = "\(file):\(line):\(context)"
+    let shouldLog = Self.warnLock.withLock {
+      if Self.warnedInMemoryObservationSites.contains(key) { return false }
+      Self.warnedInMemoryObservationSites.insert(key)
+      return true
+    }
+    guard shouldLog else { return }
+
+    let stack = Thread.callStackSymbols.prefix(18).joined(separator: "\n")
+    AppDatabase.log.warning(
+      "DB_INMEMORY_OBSERVATION context=\(context) site=\(file):\(line)\n\(stack)"
+    )
+  }
+#endif
   static let log = Log.scoped(
     "AppDatabase",
     // Enable tracing for seeing all SQL statements
@@ -15,8 +57,12 @@ public final class AppDatabase: Sendable {
   )
 
   public init(_ dbWriter: any GRDB.DatabaseWriter) throws {
-    self.dbWriter = dbWriter
+    _dbWriter = dbWriter
     try migrator.migrate(dbWriter)
+  }
+
+  internal func swapWriter(_ newWriter: any DatabaseWriter) {
+    writerLock.withLock { _dbWriter = newWriter }
   }
 }
 
@@ -642,29 +688,37 @@ public extension AppDatabase {
 public extension AppDatabase {
   /// - parameter base: A base configuration.
   static func makeConfiguration(_ base: Configuration = Configuration()) -> Configuration {
+    // Default configuration: prefer the stable database key if available; fall back to legacy "123".
+    let passphrase: String = switch DatabaseKeyStore.load() {
+    case .available(let key):
+      key
+    default:
+      "123"
+    }
+    return makeConfiguration(passphrase: passphrase, base)
+  }
+
+  static func makeConfiguration(passphrase: String, _ base: Configuration = Configuration()) -> Configuration {
     var config = base
 
     config.prepareDatabase { db in
       db.trace(options: .statement) { log.trace($0.expandedDescription) }
-
-      if let token = Auth.shared.getToken() {
-        #if DEBUG
-        log.debug("Database passphrase: \(token)")
-        #endif
-        try db.usePassphrase(token)
-      } else {
-        try db.usePassphrase("123")
-      }
+      try db.usePassphrase(passphrase)
     }
 
     return config
   }
 
   static func authenticated() async throws {
-    if let token = Auth.shared.getToken() {
-      try AppDatabase.changePassphrase(token)
-    } else {
-      log.warning("AppDatabase.authenticated called without token")
+    switch DatabaseKeyStore.getOrCreate() {
+    case .available(let key):
+      try AppDatabase.changePassphrase(key)
+    case .locked:
+      log.warning("AppDatabase.authenticated called while keychain is locked")
+    case .notFound:
+      log.warning("AppDatabase.authenticated called without database key")
+    case .error(let status):
+      log.error("AppDatabase.authenticated failed to get database key status=\(status)")
     }
   }
 
@@ -708,7 +762,12 @@ public extension AppDatabase {
     try clearDB()
 
     // Reset the database passphrase to a default value
-    try AppDatabase.changePassphrase("123")
+    switch DatabaseKeyStore.getOrCreate() {
+    case .available(let key):
+      try AppDatabase.changePassphrase(key)
+    default:
+      try AppDatabase.changePassphrase("123")
+    }
   }
 
   internal static func changePassphrase(_ passphrase: String) throws {
@@ -793,86 +852,147 @@ public extension AppDatabase {
   }
 
   private static func makeShared() -> AppDatabase {
-    do {
-      let databaseUrl = getDatabaseUrl()
-      let databasePath = databaseUrl.path
-      let config = AppDatabase.makeConfiguration()
-      //      let dbPool = try DatabaseQueue(path: databasePath, configuration: config)
-      let dbPool = try DatabasePool(path: databasePath, configuration: config)
+    let databaseUrl = getDatabaseUrl()
+    let databasePath = databaseUrl.path
+    let fileManager = FileManager.default
+    let fileExists = fileManager.fileExists(atPath: databasePath)
 
-      var path = databasePath
-      path.replace(" ", with: "\\ ")
-      log.debug("Database path: \(path)")
+    var pathForLog = databasePath
+    pathForLog.replace(" ", with: "\\ ")
+    log.debug("Database path: \(pathForLog)")
 
-      // Create the AppDatabase
-      let appDatabase = try AppDatabase(dbPool)
+    func openPersistent(passphrase: String) throws -> (db: AppDatabase, pool: DatabasePool) {
+      let config = AppDatabase.makeConfiguration(passphrase: passphrase)
+      let pool = try DatabasePool(path: databasePath, configuration: config)
+      let db = try AppDatabase(pool)
+      return (db: db, pool: pool)
+    }
 
-      return appDatabase
-    } catch {
-      // Replace this implementation with code to handle the error appropriately.
-      // fatalError() causes the application to generate a crash log and terminate.
-      //
-      // Typical reasons for an error here include:
-      // * The parent directory cannot be created, or disallows writing.
-      // * The database is not accessible, due to permissions or data protection when the device is locked.
-      // * The device is out of space.
-      // * The database could not be migrated to its latest schema version.
-      // Check the error message to determine what the actual problem was.
-      log.error("Unresolved error", error: error)
-
-      // handle db password issue and create a new one
-      log.error("Database initialization error", error: error)
-
-      // Handle different error scenarios
-      if error.localizedDescription.contains("SQLite error 26") {
-        // Password/encryption error
-        log.info("Re-creating database because token was lost")
-        do {
-          try AppDatabase.deleteDatabaseFile()
-          return AppDatabase.makeShared()
-        } catch {
-          log.error("Failed to recreate database after encryption error", error: error)
-        }
-      } else if error.localizedDescription.contains("FOREIGN KEY constraint violation") {
-        // Foreign key constraint violation
-        log.info("Attempting to recover from foreign key constraint violation")
-        do {
-          // try recoverFromConstraintViolation()
-          try AppDatabase.deleteDatabaseFile()
-          return AppDatabase.makeShared()
-        } catch {
-          log.error("Failed to recover from constraint violation", error: error)
-        }
-      } else if error.localizedDescription.contains("database disk image is malformed") {
-        // Corrupted database
-        log.info("Database appears to be corrupted, recreating")
-        do {
-          try AppDatabase.deleteDatabaseFile()
-          return AppDatabase.makeShared()
-        } catch {
-          log.error("Failed to recreate corrupted database", error: error)
-        }
-      }
-
-      // Create a new empty database as last resort
-      log.warning("Creating new empty database as fallback")
+    func openInMemory() -> AppDatabase {
       do {
-        try AppDatabase.deleteDatabaseFile()
-        return AppDatabase.makeShared()
-      } catch {
-        // If we still can't create a database, we have a serious problem
-        log.error("Fatal database error: \(error.localizedDescription)")
-
-        // Instead of crashing, create an in-memory database to allow app to function
-        do {
-          let dbQueue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration())
-          return try AppDatabase(dbQueue)
-        } catch {
-          // At this point we have no choice but to crash
-          fatalError("Completely unable to initialize database: \(error)")
+        // Prefer dbKey if available; fall back to legacy.
+        let passphrase: String = switch DatabaseKeyStore.load() {
+        case .available(let key):
+          key
+        default:
+          "123"
         }
+        let dbQueue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: passphrase))
+        return try AppDatabase(dbQueue)
+      } catch {
+        // At this point we have no choice but to crash
+        fatalError("Completely unable to initialize in-memory database: \(error)")
       }
     }
+
+    func rotatePassphrase(pool: DatabasePool, to newPassphrase: String) throws {
+      try pool.barrierWriteWithoutTransaction { db in
+        try db.changePassphrase(newPassphrase)
+        pool.invalidateReadOnlyConnections()
+      }
+    }
+
+    // If the database file doesn't exist yet, only create it when the keychain is available.
+    if fileExists == false {
+      switch DatabaseKeyStore.getOrCreate() {
+      case .available(let key):
+        do {
+          return try openPersistent(passphrase: key).db
+        } catch {
+          log.error("Failed to create persistent database with dbKey; using in-memory", error: error)
+          return openInMemory()
+        }
+      case .locked:
+        log.warning("Keychain locked; using in-memory database until credentials are available")
+        return openInMemory()
+      case .notFound, .error:
+        log.warning("No database key available; using in-memory database")
+        return openInMemory()
+      }
+    }
+
+    let dbKey: String? = switch DatabaseKeyStore.load() {
+    case .available(let key):
+      key
+    default:
+      nil
+    }
+
+    let token = Auth.shared.getToken()
+
+    var candidates: [(label: String, passphrase: String)] = []
+    if let dbKey { candidates.append((label: "dbKey", passphrase: dbKey)) }
+    if let token, token != dbKey { candidates.append((label: "token", passphrase: token)) }
+    candidates.append((label: "legacy123", passphrase: "123"))
+
+    var lastError: (any Error)?
+
+    for candidate in candidates {
+      do {
+        let opened = try openPersistent(passphrase: candidate.passphrase)
+
+        // Migrate legacy DB encryption (token / "123") to dbKey once we can.
+        if candidate.label != "dbKey" {
+          switch DatabaseKeyStore.getOrCreate() {
+          case .available(let newKey) where newKey != candidate.passphrase:
+            do {
+              try rotatePassphrase(pool: opened.pool, to: newKey)
+              // Drop the old pool (wrong config) and reopen with the new key.
+              return try openPersistent(passphrase: newKey).db
+            } catch {
+              log.error("Failed to rotate DB passphrase to dbKey; continuing with legacy key", error: error)
+            }
+          default:
+            break
+          }
+        }
+
+        return opened.db
+      } catch {
+        lastError = error
+        continue
+      }
+    }
+
+    // IMPORTANT: Do not delete the database file here.
+    // A transient keychain failure (or auth token unavailable at launch) must not cause data loss.
+    if let lastError {
+      log.error("Failed to open persistent database; using in-memory fallback", error: lastError)
+    } else {
+      log.error("Failed to open persistent database; using in-memory fallback")
+    }
+    return openInMemory()
+  }
+
+  /// If `AppDatabase.shared` was initialized while the keychain was unavailable (common on iOS before
+  /// first unlock), it may have fallen back to an in-memory database. This method attempts to reopen
+  /// the persistent database and swap `shared`'s writer in-place so callers that hold on to the
+  /// `AppDatabase` instance can recover without a process restart.
+  ///
+  /// Note: any observers that captured the old `DatabaseReader`/`DatabaseWriter` instance directly
+  /// (e.g. GRDB `ValueObservation.publisher(in:)`) must be created *after* this promotion runs.
+  @discardableResult
+  static func promoteSharedToPersistentIfPossible() async -> Bool {
+    // Already persistent.
+    if shared.dbWriter is DatabasePool {
+      return false
+    }
+
+    let newWriter: (any DatabaseWriter)? = await Task.detached(priority: .userInitiated) {
+      let reopened = makeShared()
+      guard reopened.dbWriter is DatabasePool else {
+        return nil
+      }
+      return reopened.dbWriter
+    }.value
+
+    guard let newWriter else {
+      return false
+    }
+
+    shared.swapWriter(newWriter)
+    log.info("Promoted in-memory database to persistent database writer")
+    return true
   }
 
   /// Creates an empty database for SwiftUI previews

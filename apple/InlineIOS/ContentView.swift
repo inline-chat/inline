@@ -9,10 +9,6 @@ struct ContentView2: View {
   @Environment(\.scenePhase) private var scene
   @Environment(\.realtime) var realtime
 
-  @EnvironmentStateObject private var data: DataManager
-  @EnvironmentStateObject private var home: HomeViewModel
-  @EnvironmentStateObject private var compactSpaceList: CompactSpaceList
-
   @StateObject private var onboardingNav = OnboardingNavigation()
   @StateObject var api = ApiClient()
   @StateObject var userData = UserData()
@@ -21,20 +17,6 @@ struct ContentView2: View {
   @StateObject private var tabsManager = TabsManager()
 
   @Environment(Router.self) private var router
-
-  init() {
-    _data = EnvironmentStateObject { env in
-      DataManager(database: env.appDatabase)
-    }
-
-    _home = EnvironmentStateObject { env in
-      HomeViewModel(db: env.appDatabase)
-    }
-
-    _compactSpaceList = EnvironmentStateObject { env in
-      CompactSpaceList(db: env.appDatabase)
-    }
-  }
 
   var body: some View {
     Group {
@@ -45,43 +27,73 @@ struct ContentView2: View {
     .environmentObject(Api.realtime.stateObject)
     .environmentObject(api)
     .environmentObject(userData)
-    .environmentObject(data)
     .environmentObject(mainViewRouter)
-    .environmentObject(home)
     .environmentObject(fileUploadViewModel)
     .environmentObject(tabsManager)
-    .environmentObject(compactSpaceList)
     .toastView()
   }
 
   @ViewBuilder
   var content: some View {
-    @Bindable var bindableRouter = router
-
     switch mainViewRouter.route {
-    case .main:
-      TabView(selection: $bindableRouter.selectedTab) {
-        ForEach(AppTab.allCases) { tab in
-          NavigationStack(path: $bindableRouter[tab]) {
-            tabContentView(for: tab)
-              .navigationDestination(for: Destination.self) { destination in
-                destinationView(for: destination)
-              }
-          }
-          .tabItem {
-            Label(tab.rawValue.capitalized, systemImage: tab.icon)
-          }
-          .tag(tab)
-        }
+    case .loading:
+      VStack(spacing: 12) {
+        ProgressView()
+        Text("Unlocking...")
+          .font(.headline)
+          .foregroundStyle(.secondary)
       }
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
       .background(Color(.systemBackground))
-      //Accent()
-      .sheet(item: $bindableRouter.presentedSheet) { sheet in
-        sheetView(for: sheet)
-      }
+    case .main:
+      AuthedAppRoot(database: AppDatabase.shared)
+        .appDatabase(AppDatabase.shared)
     case .onboarding:
       OnboardingView()
     }
+  }
+}
+
+private struct AuthedAppRoot: View {
+  @Environment(Router.self) private var router
+
+  private let database: AppDatabase
+
+  @StateObject private var data: DataManager
+  @StateObject private var home: HomeViewModel
+  @StateObject private var compactSpaceList: CompactSpaceList
+
+  init(database: AppDatabase) {
+    self.database = database
+    _data = StateObject(wrappedValue: DataManager(database: database))
+    _home = StateObject(wrappedValue: HomeViewModel(db: database))
+    _compactSpaceList = StateObject(wrappedValue: CompactSpaceList(db: database))
+  }
+
+  var body: some View {
+    @Bindable var bindableRouter = router
+
+    TabView(selection: $bindableRouter.selectedTab) {
+      ForEach(AppTab.allCases) { tab in
+        NavigationStack(path: $bindableRouter[tab]) {
+          tabContentView(for: tab)
+            .navigationDestination(for: Destination.self) { destination in
+              destinationView(for: destination)
+            }
+        }
+        .tabItem {
+          Label(tab.rawValue.capitalized, systemImage: tab.icon)
+        }
+        .tag(tab)
+      }
+    }
+    .background(Color(.systemBackground))
+    .sheet(item: $bindableRouter.presentedSheet) { sheet in
+      sheetView(for: sheet)
+    }
+    .environmentObject(data)
+    .environmentObject(home)
+    .environmentObject(compactSpaceList)
   }
 
   @ViewBuilder
@@ -141,7 +153,6 @@ struct ContentView2: View {
       }
 
     case let .addMember(spaceId):
-      // AddMember(showSheet: showSheet, spaceId: spaceId)
       InviteToSpaceView(spaceId: spaceId)
     }
   }
