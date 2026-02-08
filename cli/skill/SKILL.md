@@ -31,6 +31,8 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 - Top-level aliases: `inline chat ...`, `inline thread ...`, `inline threads ...` all map to `inline chats ...`.
 - `inline chats list`
   - List chats with human-readable names, unread count, and last message preview (sender + text in one column).
+- `inline chats list --json --filter "launch"`
+  - Same `GetChatsResult` JSON payload, but pre-filtered by chat name/space/id for agent pipelines.
 - `inline chats get [--chat-id 123 | --user-id 42]`
   - Fetch a chat (thread or DM) by id.
 - `inline chats participants --chat-id 123`

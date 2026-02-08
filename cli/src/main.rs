@@ -295,6 +295,8 @@ Examples:
   inline me
   inline doctor
   inline chats list
+  inline chats list --filter "launch"
+  inline chats list --filter "launch" --id
   inline thread list
   inline chats participants --chat-id 123
   inline chats create --title "Launch" --space-id 31 --participant 42
@@ -316,6 +318,7 @@ Examples:
   inline typing stop --chat-id 123
   inline schema proto
   inline users list --json
+  inline chats list --json --filter "launch"
   inline messages list --chat-id 123
   inline messages list --chat-id 123 --since "yesterday"
   inline messages list --chat-id 123 --since "2h ago" --until "1h ago"
@@ -1630,12 +1633,13 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                     match result {
                         proto::rpc_result::Result::GetChats(payload) => {
                             if cli.json {
-                                if args.filter.is_some() || args.ids || args.id {
+                                if args.ids || args.id {
                                     return Err(CliError::invalid_args(
-                                        "--filter/--ids/--id are only supported in table output mode (omit --json)",
+                                        "--ids/--id are only supported in table output mode (omit --json)",
                                     )
                                     .into());
                                 }
+                                let payload = apply_chat_list_filter(payload, args.filter.as_deref());
                                 if args.limit.is_some() || args.offset.is_some() {
                                     let payload =
                                         apply_chat_list_limits(payload, args.limit, args.offset);
@@ -3970,6 +3974,62 @@ fn apply_chat_list_limits(
         }
     }
     payload.users.retain(|user| kept_user_ids.contains(&user.id));
+
+    payload
+}
+
+fn apply_chat_list_filter(
+    mut payload: proto::GetChatsResult,
+    filter: Option<&str>,
+) -> proto::GetChatsResult {
+    let needle = filter
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_lowercase());
+
+    let Some(needle) = needle.as_deref() else {
+        return payload;
+    };
+
+    let mut users_by_id: HashMap<i64, proto::User> = HashMap::new();
+    for user in &payload.users {
+        users_by_id.insert(user.id, user.clone());
+    }
+
+    let mut spaces_by_id: HashMap<i64, proto::Space> = HashMap::new();
+    for space in &payload.spaces {
+        spaces_by_id.insert(space.id, space.clone());
+    }
+
+    payload.chats.retain(|chat| {
+        let display_name = chat_display_name(chat, &users_by_id);
+        if display_name.to_lowercase().contains(needle) {
+            return true;
+        }
+
+        if let Some(space_id) = chat.space_id {
+            if let Some(space) = spaces_by_id.get(&space_id) {
+                if space.name.to_lowercase().contains(needle) {
+                    return true;
+                }
+            }
+        }
+
+        if chat.id.to_string().contains(needle) {
+            return true;
+        }
+
+        let peer_id = chat
+            .peer_id
+            .as_ref()
+            .and_then(peer_key_from_peer)
+            .map(|peer| match peer {
+                PeerKey::Chat(id) => id,
+                PeerKey::User(id) => id,
+            });
+
+        peer_id.is_some_and(|id| id.to_string().contains(needle))
+    });
 
     payload
 }
