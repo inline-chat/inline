@@ -21,13 +21,16 @@ import { normalizeEmail } from "@in/server/utils/normalize"
 import { MAX_LOGIN_ATTEMPTS, generateToken, hashToken, secureRandomSixDigitNumber } from "@in/server/utils/auth"
 import { sendEmail } from "@in/server/utils/email"
 import { Log } from "@in/server/utils/log"
+import { ADMIN_PUBLIC_API_ORIGIN, isProd } from "@in/server/env"
 import { sendBotEvent } from "@in/server/modules/bot-events"
 import { encrypt, decrypt } from "@in/server/modules/encryption/encryption"
 import { buildOtpAuthUrl, generateTotpSecret, verifyTotpCode } from "@in/server/utils/totp"
 import { connectionManager } from "@in/server/ws/connections"
 import { getErrorStats } from "@in/server/utils/metrics"
 import { gitCommitHash, version } from "@in/server/buildEnv"
-import { getCachedUserProfilePhotoUrl } from "@in/server/modules/cache/userPhotos"
+import { FILES_PATH_PREFIX } from "@in/server/modules/files/path"
+import { getR2 } from "@in/server/libs/r2"
+import { UsersModel } from "@in/server/db/models/users"
 
 const ADMIN_COOKIE_NAME = "inline_admin_session" as const
 const ADMIN_IDLE_MS = 1000 * 60 * 60 * 24
@@ -204,7 +207,7 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
       const userAgent = request.headers.get("user-agent") ?? ""
       const { token } = await createAdminSession({ userId: user.id, ip, userAgent })
 
-      const secure = process.env.NODE_ENV === "production"
+      const secure = isProd
       const adminCookie = cookie as AdminCookieStore
       adminCookie[ADMIN_COOKIE_NAME].set({
         value: token,
@@ -367,7 +370,7 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
         stepUpAt: totpEnabled ? new Date() : null,
       })
 
-      const secure = process.env.NODE_ENV === "production"
+      const secure = isProd
       const adminCookie = cookie as AdminCookieStore
       adminCookie[ADMIN_COOKIE_NAME].set({
         value: token,
@@ -937,6 +940,7 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
               createdAt: users.date,
               deleted: users.deleted,
               bot: users.bot,
+              photoFileId: users.photoFileId,
             })
             .from(users)
             .where(whereClause)
@@ -954,25 +958,88 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
               createdAt: users.date,
               deleted: users.deleted,
               bot: users.bot,
+              photoFileId: users.photoFileId,
             })
             .from(users)
 
       const rows = await queryBuilder.orderBy(desc(users.id)).limit(50)
 
-      const usersWithAvatars = await Promise.all(
-        rows.map(async (user) => ({
-          ...user,
-          lastOnline: user.lastOnline ? user.lastOnline.toISOString() : null,
-          createdAt: user.createdAt ? user.createdAt.toISOString() : null,
-          avatarUrl: await getCachedUserProfilePhotoUrl(user.id),
-        })),
-      )
+      const origin = ADMIN_PUBLIC_API_ORIGIN ?? new URL(request.url).origin
+      const usersWithAvatars = rows.map((user) => ({
+        ...user,
+        lastOnline: user.lastOnline ? user.lastOnline.toISOString() : null,
+        createdAt: user.createdAt ? user.createdAt.toISOString() : null,
+        avatarUrl: user.photoFileId ? `${origin}/admin/users/${user.id}/avatar` : null,
+      }))
 
       return { ok: true, users: usersWithAvatars }
     },
     {
       query: t.Object({
         query: t.Optional(t.String()),
+      }),
+      cookie: adminCookieSchema,
+    },
+  )
+  .get(
+    "/users/:id/avatar",
+    async ({ params, cookie, request, server, set }) => {
+      const session = await requireAdminSession(cookie as AdminCookieStore, request, server, set)
+      if (!session) {
+        return new Response(null, { status: 401 })
+      }
+
+      if (!requireSetupComplete(session, set)) {
+        return new Response(null, { status: 403 })
+      }
+
+      const userId = Number(params.id)
+      if (!Number.isFinite(userId)) {
+        return new Response(null, { status: 400 })
+      }
+
+      const user = await UsersModel.getUserWithProfile(userId)
+      const photoFile = user?.photoFile ?? null
+      if (!photoFile || !photoFile.pathEncrypted || !photoFile.pathIv || !photoFile.pathTag) {
+        return new Response(null, { status: 404 })
+      }
+
+      let path: string | null = null
+      try {
+        path = decrypt({
+          encrypted: photoFile.pathEncrypted,
+          iv: photoFile.pathIv,
+          authTag: photoFile.pathTag,
+        })
+      } catch (err) {
+        // Corrupt ciphertext/tag (or key mismatch) should not take down the admin handler.
+        Log.shared.warn(`Failed to decrypt user avatar path for userId=${userId}`, err)
+        return new Response(null, { status: 404 })
+      }
+
+      if (!path) {
+        return new Response(null, { status: 404 })
+      }
+
+      const r2 = getR2()
+      if (!r2) {
+        return new Response(null, { status: 503 })
+      }
+
+      const file = r2.file(`${FILES_PATH_PREFIX}/${path}`)
+      if (!(await file.exists())) {
+        return new Response(null, { status: 404 })
+      }
+
+      const body = file.stream()
+      const headers = new Headers()
+      headers.set("content-type", photoFile.mimeType ?? "image/jpeg")
+      headers.set("cache-control", "private, max-age=300")
+      return new Response(body, { headers })
+    },
+    {
+      params: t.Object({
+        id: t.String(),
       }),
       cookie: adminCookieSchema,
     },
@@ -1022,8 +1089,8 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
         .limit(50)
 
       const connections = connectionManager.getUserConnectionSummary(userId)
-      const avatarUrl = await getCachedUserProfilePhotoUrl(userId)
 
+      const origin = ADMIN_PUBLIC_API_ORIGIN ?? new URL(request.url).origin
       return {
         ok: true,
         user: {
@@ -1032,7 +1099,7 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
           firstName: user.firstName,
           lastName: user.lastName,
           emailVerified: user.emailVerified,
-          avatarUrl,
+          avatarUrl: user.photoFileId ? `${origin}/admin/users/${user.id}/avatar` : null,
         },
         sessions: userSessions.map((sessionRow) => ({
           id: sessionRow.id,
@@ -1162,11 +1229,11 @@ const isAllowedAdminOrigin = (request: Request) => {
     }
   }
 
-  return process.env.NODE_ENV !== "production"
+  return !isProd
 }
 
 const clearAdminCookie = (cookie: AdminCookieStore) => {
-  const secure = process.env.NODE_ENV === "production"
+  const secure = isProd
   cookie[ADMIN_COOKIE_NAME].set({
     secure,
     path: "/",
