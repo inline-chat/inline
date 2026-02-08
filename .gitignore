@@ -17,6 +17,9 @@ yarn.lock
 
 .index-build
 
+# Local temp
+.tmp/
+
 # React
 /build
 /dist
