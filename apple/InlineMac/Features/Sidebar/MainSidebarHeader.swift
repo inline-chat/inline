@@ -1,25 +1,49 @@
 import AppKit
+import Combine
 import InlineKit
 import InlineMacUI
-import InlineUI
-import SwiftUI
+import Observation
 
-class MainSidebarHeaderView: NSView {
+final class MainSidebarHeaderView: NSView {
   private static let defaultHeight: CGFloat = MainSidebar.itemHeight
 
   private let dependencies: AppDependencies
+  private let nav2: Nav2
   private let spacePickerState: SpacePickerState
-  private var heightConstraint: NSLayoutConstraint?
-  private var hostingView: NSHostingView<SidebarHeaderRootView>?
+
   // MainSidebar hosts the overlay; header reports visibility for positioning.
   var onSpacePickerChange: ((Bool) -> Void)?
 
+  private var cancellables: Set<AnyCancellable> = []
+  private var didSetupNavObservation: Bool = false
+
+  private lazy var rowView: MainSidebarHeaderRowView = {
+    let view = MainSidebarHeaderRowView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.onToggleSpacePicker = { [weak self] in
+      guard let self else { return }
+      self.spacePickerState.isVisible.toggle()
+    }
+    view.onOpenMenu = { [weak self] in
+      self?.presentSpaceMenu()
+    }
+    return view
+  }()
+
+  var spacePickerAnchorView: NSView {
+    rowView.spacePickerAnchorView
+  }
+
   init(dependencies: AppDependencies, spacePickerState: SpacePickerState) {
     self.dependencies = dependencies
+    self.nav2 = dependencies.nav2 ?? Nav2()
     self.spacePickerState = spacePickerState
     super.init(frame: .zero)
     translatesAutoresizingMaskIntoConstraints = false
-    setupHosting()
+    setupView()
+    setupBindings()
+    updateUI()
+    setupNavObservation()
   }
 
   @available(*, unavailable)
@@ -27,92 +51,56 @@ class MainSidebarHeaderView: NSView {
     fatalError("init(coder:) has not been implemented")
   }
 
-  private func setupHosting() {
-    let nav2 = dependencies.nav2 ?? Nav2()
-    let rootView = SidebarHeaderRootView(
-      nav2: nav2,
-      spacePickerState: spacePickerState,
-      onHeightChange: { [weak self] height in
-        guard let self else { return }
-        let clamped = max(Self.defaultHeight, height)
-        if heightConstraint?.constant != clamped {
-          heightConstraint?.constant = clamped
-          invalidateIntrinsicContentSize()
-        }
-      },
-      onSpacePickerChange: { [weak self] isVisible in
-        self?.onSpacePickerChange?(isVisible)
-      }
-    )
-
-    let hostingView = NSHostingView(rootView: rootView)
-    hostingView.translatesAutoresizingMaskIntoConstraints = false
-
-    addSubview(hostingView)
+  private func setupView() {
+    addSubview(rowView)
 
     NSLayoutConstraint.activate([
-      hostingView.leadingAnchor.constraint(equalTo: leadingAnchor),
-      hostingView.trailingAnchor.constraint(equalTo: trailingAnchor),
-      hostingView.topAnchor.constraint(equalTo: topAnchor),
-      hostingView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      rowView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      rowView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      rowView.topAnchor.constraint(equalTo: topAnchor),
+      rowView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      heightAnchor.constraint(equalToConstant: Self.defaultHeight),
     ])
-
-    heightConstraint = heightAnchor.constraint(equalToConstant: Self.defaultHeight)
-    heightConstraint?.isActive = true
-
-    self.hostingView = hostingView
-  }
-}
-
-private struct SidebarHeaderRootView: View {
-  let nav2: Nav2
-  @ObservedObject var spacePickerState: SpacePickerState
-  let onHeightChange: (CGFloat) -> Void
-  let onSpacePickerChange: (Bool) -> Void
-
-  init(
-    nav2: Nav2,
-    spacePickerState: SpacePickerState,
-    onHeightChange: @escaping (CGFloat) -> Void,
-    onSpacePickerChange: @escaping (Bool) -> Void
-  ) {
-    self.nav2 = nav2
-    self.spacePickerState = spacePickerState
-    self.onHeightChange = onHeightChange
-    self.onSpacePickerChange = onSpacePickerChange
   }
 
-  var body: some View {
-    @Bindable var nav2 = nav2
-    let activeTab = nav2.activeTab
-    let item = item(for: activeTab)
+  private func setupBindings() {
+    spacePickerState.$isVisible
+      .removeDuplicates()
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] isVisible in
+        guard let self else { return }
+        self.rowView.setExpanded(isVisible)
+        self.onSpacePickerChange?(isVisible)
+      }
+      .store(in: &cancellables)
+  }
 
-    VStack(spacing: MainSidebar.itemSpacing) {
-      SidebarHeaderRow(
-        item: item,
-        isActive: true,
-        showsArrow: true,
-        showsMenu: item.kind == .space && item.spaceId == activeTab.spaceId,
-        isExpanded: spacePickerState.isVisible,
-        onSelect: {
-          spacePickerState.isVisible.toggle()
-        },
-        menuContent: {
-          if let spaceId = item.spaceId {
-            Button("Members") { nav2.navigate(to: .members(spaceId: spaceId)) }
-            Button("Invite") { nav2.navigate(to: .inviteToSpace) }
-            Button("Integrations") { nav2.navigate(to: .spaceIntegrations(spaceId: spaceId)) }
-          }
-        }
-      )
+  private func setupNavObservation() {
+    guard didSetupNavObservation == false else { return }
+    didSetupNavObservation = true
+    observeNav2()
+  }
+
+  private func observeNav2() {
+    withObservationTracking { [weak self] in
+      guard let self else { return }
+      _ = nav2.activeTab
+    } onChange: { [weak self] in
+      // Re-arm observation immediately to avoid missing rapid successive changes.
+      self?.observeNav2()
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        // Mirror the previous SwiftUI behavior: switching tabs collapses the picker.
+        self.spacePickerState.isVisible = false
+        self.updateUI()
+      }
     }
-    .background(HeightReader(onHeightChange: onHeightChange))
-    .onChange(of: nav2.activeTab) { _ in
-      spacePickerState.isVisible = false
-    }
-    .onChange(of: spacePickerState.isVisible) { isVisible in
-      onSpacePickerChange(isVisible)
-    }
+  }
+
+  private func updateUI() {
+    let item = item(for: nav2.activeTab)
+    rowView.configure(item: item, showsManageButton: item.kind == .space)
+    rowView.setExpanded(spacePickerState.isVisible)
   }
 
   private func item(for activeTab: TabId) -> SpaceHeaderItem {
@@ -125,117 +113,467 @@ private struct SidebarHeaderRootView: View {
     }
   }
 
-  private func select(_ item: SpaceHeaderItem) {
-    switch item.kind {
-      case .home:
-        if let index = nav2.tabs.firstIndex(of: .home) {
-          nav2.setActiveTab(index: index)
-        }
-      case .space:
-        if let space = item.space {
-          nav2.openSpace(space)
-        }
+  private func presentSpaceMenu() {
+    guard case let .space(spaceId, _) = nav2.activeTab else { return }
+    let menu = NSMenu()
+
+    // Section header so it's obvious the actions apply to the active space.
+    let spaceTitle = item(for: nav2.activeTab).title
+    let headerItem = NSMenuItem(title: spaceTitle, action: nil, keyEquivalent: "")
+    headerItem.isEnabled = false
+    headerItem.attributedTitle = NSAttributedString(
+      string: spaceTitle,
+      attributes: [
+        .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+        .foregroundColor: NSColor.secondaryLabelColor,
+      ]
+    )
+
+    let membersItem = NSMenuItem(title: "Members", action: #selector(menuMembers), keyEquivalent: "")
+    membersItem.target = self
+    membersItem.representedObject = spaceId
+
+    let inviteItem = NSMenuItem(title: "Invite", action: #selector(menuInvite), keyEquivalent: "")
+    inviteItem.target = self
+    inviteItem.representedObject = spaceId
+
+    let integrationsItem = NSMenuItem(title: "Integrations", action: #selector(menuIntegrations), keyEquivalent: "")
+    integrationsItem.target = self
+    integrationsItem.representedObject = spaceId
+
+    menu.items = [headerItem, .separator(), membersItem, inviteItem, integrationsItem]
+
+    // Pop up relative to the click event when possible so positioning feels native.
+    let anchorView = rowView.menuButtonAnchorView ?? rowView
+    if let event = NSApp.currentEvent {
+      NSMenu.popUpContextMenu(menu, with: event, for: anchorView)
+    } else {
+      let point = NSPoint(x: 0, y: anchorView.bounds.maxY + 6)
+      menu.popUp(positioning: nil, at: point, in: anchorView)
     }
   }
 
+  @objc private func menuMembers(_ sender: NSMenuItem) {
+    guard let spaceId = sender.representedObject as? Int64 else { return }
+    nav2.navigate(to: .members(spaceId: spaceId))
+  }
+
+  @objc private func menuInvite(_ sender: NSMenuItem) {
+    _ = sender.representedObject as? Int64
+    nav2.navigate(to: .inviteToSpace)
+  }
+
+  @objc private func menuIntegrations(_ sender: NSMenuItem) {
+    guard let spaceId = sender.representedObject as? Int64 else { return }
+    nav2.navigate(to: .spaceIntegrations(spaceId: spaceId))
+  }
 }
 
-// Intentionally no anchor reporting: MainSidebar positions overlay under headerView.
+private final class MainSidebarHeaderRowView: NSView {
+  private enum Metrics {
+    static let rowHeight: CGFloat = MainSidebar.itemHeight
+    static let rowCornerRadius: CGFloat = 10
 
-private struct SidebarHeaderRow<MenuContent: View>: View {
-  let item: SpaceHeaderItem
-  let isActive: Bool
-  let showsArrow: Bool
-  let showsMenu: Bool
-  let isExpanded: Bool
-  let onSelect: () -> Void
-  @ViewBuilder let menuContent: () -> MenuContent
+    static let trailingPadding: CGFloat = MainSidebar.innerEdgeInsets
+    static let pickerVerticalPadding: CGFloat = 0
 
-  @State private var isHovered = false
+    static let iconSize: CGFloat = Theme.sidebarTitleIconSize
+    static let iconTrailingPadding: CGFloat = MainSidebar.iconTrailingPadding
 
-  var body: some View {
-    HStack(spacing: MainSidebar.iconTrailingPadding) {
-      tappableContent
-
-      if showsMenu && isHovered {
-        Menu {
-          menuContent()
-        } label: {
-          Image(systemName: "ellipsis")
-            .font(.system(size: 13, weight: .medium))
-            .foregroundColor(textColor)
-            .padding(4)
-            .background(Circle().fill(Color.black.opacity(0.08)))
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .focusable(false)
-      }
-    }
-    .frame(height: MainSidebar.itemHeight)
-    .padding(.horizontal, MainSidebar.innerEdgeInsets)
-    .background(backgroundView)
-    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-    .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-    .onHover { hovering in
-      isHovered = hovering
-    }
+    static let manageButtonSize: CGFloat = 24
+    static let manageButtonCornerRadius: CGFloat = 8
+    static let manageButtonIconSize: CGFloat = 14
   }
 
-  private var tappableContent: some View {
-    HStack(spacing: MainSidebar.iconTrailingPadding) {
-      iconView
-      Text(item.title)
-        .font(Font(MainSidebar.font))
-        .foregroundColor(textColor)
-        .lineLimit(1)
-      if showsArrow {
-        Image(systemName: "chevron.down")
-          .font(.system(size: 12, weight: .semibold))
-          .foregroundColor(textColor)
-          .rotationEffect(.degrees(isExpanded ? 180 : 0))
-      }
-      Spacer(minLength: 0)
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .contentShape(Rectangle())
-    .onTapGesture {
-      onSelect()
-    }
+  var onToggleSpacePicker: (() -> Void)?
+  var onOpenMenu: (() -> Void)?
+
+  private var item: SpaceHeaderItem = .home
+
+  private let pickerControl = MainSidebarHeaderPickerControl()
+
+  private let spacer: NSView = {
+    let view = NSView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    return view
+  }()
+
+  private let manageButton = MainSidebarHeaderIconButton(
+    symbolName: "ellipsis.circle",
+    accessibilityLabel: "Space settings"
+  )
+
+  var menuButtonAnchorView: NSView? { manageButton }
+  var spacePickerAnchorView: NSView { pickerControl }
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    translatesAutoresizingMaskIntoConstraints = false
+    setupView()
   }
 
-  private var iconView: some View {
-    Group {
-      switch item.kind {
-        case .home:
-          Image(systemName: "house.fill")
-            .font(.system(size: Theme.sidebarTitleIconSize * 0.7, weight: .semibold))
-            .foregroundColor(textColor)
-            .frame(width: Theme.sidebarTitleIconSize, height: Theme.sidebarTitleIconSize)
-        case .space:
-          if let space = item.space {
-            SpaceAvatar(space: space, size: Theme.sidebarTitleIconSize)
-          }
-      }
-    }
+  @available(*, unavailable)
+  required init?(coder _: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
   }
 
-  private var backgroundView: some View {
-    Group {
-      if isExpanded && isActive {
-        Color(nsColor: Theme.windowContentBackgroundColor)
-      } else if isHovered && !(isActive && !isExpanded) {
-        Color.white.opacity(0.2)
-      } else {
-        Color.clear
-      }
-    }
+  func configure(item: SpaceHeaderItem, showsManageButton: Bool) {
+    self.item = item
+    pickerControl.configure(item: item)
+    manageButton.isHidden = !showsManageButton
   }
 
-  private var textColor: Color {
-    (isExpanded && isActive) || (isHovered && !(isActive && !isExpanded))
-      ? Color(nsColor: .labelColor)
-      : Color(nsColor: .secondaryLabelColor)
+  func setExpanded(_ expanded: Bool) {
+    pickerControl.isExpanded = expanded
+  }
+
+  private func setupView() {
+    let content = NSStackView()
+    content.translatesAutoresizingMaskIntoConstraints = false
+    content.orientation = .horizontal
+    content.alignment = .centerY
+    content.spacing = 8
+
+    pickerControl.translatesAutoresizingMaskIntoConstraints = false
+    pickerControl.target = self
+    pickerControl.action = #selector(handlePicker)
+    pickerControl.setContentHuggingPriority(.required, for: .horizontal)
+    // Allow truncation when the sidebar gets narrow (future resizable sidebar).
+    pickerControl.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+    manageButton.translatesAutoresizingMaskIntoConstraints = false
+    manageButton.target = self
+    manageButton.action = #selector(handleMenuButton)
+    manageButton.setContentHuggingPriority(.required, for: .horizontal)
+    manageButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+    content.addArrangedSubview(pickerControl)
+    content.addArrangedSubview(spacer)
+    content.addArrangedSubview(manageButton)
+
+    addSubview(content)
+    NSLayoutConstraint.activate([
+      // Match the old insets: headerView is already inset by outerEdgeInsets.
+      // Picker control has its own internal padding; avoid double-insetting on the leading edge.
+      content.leadingAnchor.constraint(equalTo: leadingAnchor),
+      content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.trailingPadding),
+      content.topAnchor.constraint(equalTo: topAnchor),
+      content.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+      manageButton.widthAnchor.constraint(equalToConstant: Metrics.manageButtonSize),
+      manageButton.heightAnchor.constraint(equalToConstant: Metrics.manageButtonSize),
+    ])
+  }
+
+  @objc private func handlePicker() {
+    onToggleSpacePicker?()
+  }
+
+  @objc private func handleMenuButton() {
+    onOpenMenu?()
+  }
+}
+
+private final class MainSidebarHeaderPickerControl: NSControl {
+  private enum Metrics {
+    static let cornerRadius: CGFloat = 10
+    static let iconSize: CGFloat = Theme.sidebarTitleIconSize
+    static let iconTrailingPadding: CGFloat = MainSidebar.iconTrailingPadding
+    static let horizontalPadding: CGFloat = 8
+    static let height: CGFloat = MainSidebar.itemHeight
+  }
+
+  var isExpanded: Bool = false {
+    didSet { updateAppearance() }
+  }
+
+  private var isHovering: Bool = false {
+    didSet { updateAppearance() }
+  }
+
+  private var isPressed: Bool = false {
+    didSet { updateAppearance() }
+  }
+
+  private var trackingAreaRef: NSTrackingArea?
+
+  private let iconContainer = NSView()
+  private let homeIconView = NSImageView()
+  private let spaceAvatarView = SpaceAvatarView(space: nil, size: Metrics.iconSize)
+
+  private let titleLabel: NSTextField = {
+    let label = NSTextField(labelWithString: "")
+    label.font = MainSidebar.font
+    label.lineBreakMode = .byTruncatingTail
+    label.usesSingleLineMode = true
+    label.translatesAutoresizingMaskIntoConstraints = false
+    return label
+  }()
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    translatesAutoresizingMaskIntoConstraints = false
+    setupView()
+    updateAppearance()
+  }
+
+  @available(*, unavailable)
+  required init?(coder _: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override var intrinsicContentSize: NSSize {
+    // Width should be as small as possible while fitting icon+title.
+    let titleWidth = titleLabel.intrinsicContentSize.width
+    let contentWidth = Metrics.iconSize
+      + Metrics.iconTrailingPadding
+      + titleWidth
+      + (Metrics.horizontalPadding * 2)
+    return NSSize(width: contentWidth, height: Metrics.height)
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    updateAppearance()
+  }
+
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    if let trackingAreaRef {
+      removeTrackingArea(trackingAreaRef)
+    }
+    let options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect]
+    let area = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
+    addTrackingArea(area)
+    trackingAreaRef = area
+  }
+
+  override func mouseEntered(with _: NSEvent) {
+    isHovering = true
+  }
+
+  override func mouseExited(with _: NSEvent) {
+    isHovering = false
+  }
+
+  override func mouseDown(with _: NSEvent) {
+    isPressed = true
+  }
+
+  override func mouseDragged(with event: NSEvent) {
+    let point = convert(event.locationInWindow, from: nil)
+    isPressed = bounds.contains(point)
+  }
+
+  override func mouseUp(with event: NSEvent) {
+    defer { isPressed = false }
+    let point = convert(event.locationInWindow, from: nil)
+    guard bounds.contains(point) else { return }
+    _ = sendAction(action, to: target)
+  }
+
+  func configure(item: SpaceHeaderItem) {
+    titleLabel.stringValue = item.title
+
+    switch item.kind {
+      case .home:
+        homeIconView.isHidden = false
+        spaceAvatarView.isHidden = true
+      case .space:
+        homeIconView.isHidden = true
+        spaceAvatarView.isHidden = false
+        spaceAvatarView.configure(space: item.space, size: Metrics.iconSize)
+    }
+
+    invalidateIntrinsicContentSize()
+    updateAppearance()
+  }
+
+  private func setupView() {
+    wantsLayer = true
+    layer?.cornerRadius = Metrics.cornerRadius
+    layer?.cornerCurve = .continuous
+    layer?.masksToBounds = true
+
+    iconContainer.translatesAutoresizingMaskIntoConstraints = false
+    iconContainer.wantsLayer = true
+
+    let homeConfig = NSImage.SymbolConfiguration(
+      pointSize: Metrics.iconSize * 0.7,
+      weight: .semibold
+    )
+    homeIconView.image = NSImage(systemSymbolName: "house.fill", accessibilityDescription: nil)?
+      .withSymbolConfiguration(homeConfig)
+    homeIconView.translatesAutoresizingMaskIntoConstraints = false
+
+    spaceAvatarView.translatesAutoresizingMaskIntoConstraints = false
+
+    iconContainer.addSubview(homeIconView)
+    iconContainer.addSubview(spaceAvatarView)
+    NSLayoutConstraint.activate([
+      iconContainer.widthAnchor.constraint(equalToConstant: Metrics.iconSize),
+      iconContainer.heightAnchor.constraint(equalToConstant: Metrics.iconSize),
+
+      homeIconView.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
+      homeIconView.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
+
+      spaceAvatarView.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
+      spaceAvatarView.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
+    ])
+
+    let content = NSStackView()
+    content.translatesAutoresizingMaskIntoConstraints = false
+    content.orientation = .horizontal
+    content.alignment = .centerY
+    content.spacing = Metrics.iconTrailingPadding
+
+    content.addArrangedSubview(iconContainer)
+    content.addArrangedSubview(titleLabel)
+
+    titleLabel.setContentHuggingPriority(.required, for: .horizontal)
+    titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+    addSubview(content)
+    NSLayoutConstraint.activate([
+      content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalPadding),
+      content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalPadding),
+      content.topAnchor.constraint(equalTo: topAnchor),
+      content.bottomAnchor.constraint(equalTo: bottomAnchor),
+    ])
+  }
+
+  private func updateAppearance() {
+    let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    let hoverColor: NSColor = isDark
+      ? NSColor.white.withAlphaComponent(0.18)
+      : NSColor.black.withAlphaComponent(0.06)
+    let pressedColor: NSColor = isDark
+      ? NSColor.white.withAlphaComponent(0.24)
+      : NSColor.black.withAlphaComponent(0.10)
+
+    let backgroundColor: NSColor = if isExpanded {
+      Theme.windowContentBackgroundColor.resolvedColor(with: effectiveAppearance)
+    } else if isPressed {
+      pressedColor
+    } else if isHovering {
+      hoverColor
+    } else {
+      NSColor.clear
+    }
+
+    let textColor: NSColor = (isExpanded || isHovering || isPressed) ? .labelColor : .secondaryLabelColor
+    layer?.backgroundColor = backgroundColor.cgColor
+    titleLabel.textColor = textColor
+    homeIconView.contentTintColor = textColor
+  }
+}
+
+private final class MainSidebarHeaderIconButton: NSButton {
+  private enum Metrics {
+    static let cornerRadius: CGFloat = 8
+    static let iconSize: CGFloat = 15
+  }
+
+  private let symbolName: String
+  private let labelText: String
+  private var trackingAreaRef: NSTrackingArea?
+  private var isHovering: Bool = false {
+    didSet { updateBackground() }
+  }
+
+  init(symbolName: String, accessibilityLabel: String) {
+    self.symbolName = symbolName
+    labelText = accessibilityLabel
+    super.init(frame: .zero)
+    setup()
+  }
+
+  @available(*, unavailable)
+  required init?(coder _: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override var isHighlighted: Bool {
+    didSet { updateBackground() }
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    updateAppearance()
+    updateBackground()
+  }
+
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    if let trackingAreaRef {
+      removeTrackingArea(trackingAreaRef)
+    }
+    let options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect]
+    let area = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
+    addTrackingArea(area)
+    trackingAreaRef = area
+  }
+
+  override func mouseEntered(with event: NSEvent) {
+    super.mouseEntered(with: event)
+    isHovering = true
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    super.mouseExited(with: event)
+    isHovering = false
+  }
+
+  private func setup() {
+    wantsLayer = true
+    layer?.cornerRadius = Metrics.cornerRadius
+    layer?.cornerCurve = .continuous
+    setButtonType(.momentaryChange)
+    isBordered = false
+    bezelStyle = .regularSquare
+    imagePosition = .imageOnly
+    imageScaling = .scaleProportionallyDown
+    focusRingType = .none
+    updateAppearance()
+    updateBackground()
+  }
+
+  private func updateAppearance() {
+    let config = NSImage.SymbolConfiguration(pointSize: Metrics.iconSize, weight: .semibold)
+    image = NSImage(systemSymbolName: symbolName, accessibilityDescription: labelText)?
+      .withSymbolConfiguration(config)
+    // Tint is finalized in updateBackground() so hover/pressed can feel more "active".
+  }
+
+  override func accessibilityLabel() -> String? {
+    labelText
+  }
+
+  private func updateBackground() {
+    let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    let hoverColor: NSColor = isDark
+      ? NSColor.white.withAlphaComponent(0.18)
+      : NSColor.black.withAlphaComponent(0.06)
+    let pressedColor: NSColor = isDark
+      ? NSColor.white.withAlphaComponent(0.24)
+      : NSColor.black.withAlphaComponent(0.10)
+
+    let color: NSColor = if isHighlighted {
+      pressedColor
+    } else if isHovering {
+      hoverColor
+    } else {
+      .clear
+    }
+    layer?.backgroundColor = color.cgColor
+
+    if isHighlighted || isHovering {
+      contentTintColor = .labelColor
+    } else {
+      contentTintColor = .tertiaryLabelColor
+    }
   }
 }
 
@@ -289,26 +627,5 @@ struct SpaceHeaderItem: Identifiable, Hashable {
       case .space:
         return spaceId != nil && spaceId == self.spaceId
     }
-  }
-}
-
-private struct HeightReader: View {
-  let onHeightChange: (CGFloat) -> Void
-
-  var body: some View {
-    GeometryReader { proxy in
-      Color.clear
-        .preference(key: HeightPreferenceKey.self, value: proxy.size.height)
-    }
-    .onPreferenceChange(HeightPreferenceKey.self) { height in
-      onHeightChange(height)
-    }
-  }
-}
-
-private enum HeightPreferenceKey: PreferenceKey {
-  static var defaultValue: CGFloat = 0
-  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-    value = max(value, nextValue())
   }
 }

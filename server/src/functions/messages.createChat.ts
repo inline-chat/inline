@@ -1,7 +1,7 @@
 import { db } from "@in/server/db"
 import { chats, chatParticipants } from "@in/server/db/schema/chats"
 import { Log } from "@in/server/utils/log"
-import { and, eq, isNull, sql } from "drizzle-orm"
+import { and, eq, sql } from "drizzle-orm"
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import { Chat, Dialog } from "@in/protocol/core"
 import { encodeChat } from "@in/server/realtime/encoders/encodeChat"
@@ -85,7 +85,9 @@ export async function createChat(
   }
 
   const trimmedTitle = input.title?.trim()
-  if (trimmedTitle) {
+  // Only enforce title uniqueness within a space.
+  // Home threads are intentionally NOT unique.
+  if (trimmedTitle && hasSpaceId) {
     const titleLower = trimmedTitle.toLowerCase()
     const duplicate = await db
       .select({ id: chats.id })
@@ -93,9 +95,7 @@ export async function createChat(
       .where(
         and(
           eq(chats.type, "thread"),
-          hasSpaceId
-            ? eq(chats.spaceId, resolvedSpaceId)
-            : and(isNull(chats.spaceId), eq(chats.createdBy, context.currentUserId)),
+          eq(chats.spaceId, resolvedSpaceId),
           sql`lower(trim(${chats.title})) = ${titleLower}`,
         ),
       )

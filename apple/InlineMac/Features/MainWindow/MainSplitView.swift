@@ -313,11 +313,10 @@ class MainSplitView: NSViewController {
       _ = nav2.activeTab
       // updateContent(for: nav2.currentRoute)
     } onChange: { [weak self] in
+      // Re-arm observation immediately to avoid missing rapid successive changes.
+      // `onChange` is not guaranteed to run on the main actor.
       Task { @MainActor [weak self] in
-        guard let self, let nav2 = dependencies.nav2 else { return }
-        updateContent(for: nav2.currentRoute)
-        updateEscapeHandler(for: nav2)
-        setupNav()
+        self?.setupNav()
       }
     }
   }

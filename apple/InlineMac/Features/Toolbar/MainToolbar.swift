@@ -8,6 +8,7 @@ import InlineMacWindow
 import InlineUI
 import SwiftUI
 import Translation
+import Logger
 
 enum MainToolbarItemIdentifier: Hashable, Sendable {
   case navigationButtons
@@ -400,20 +401,24 @@ private final class ChatToolbarMenuModel: ObservableObject {
   @Published private(set) var isPinned: Bool = false
   @Published private(set) var isArchived: Bool = false
   @Published private(set) var canRename: Bool = false
+  @Published private(set) var chatSpaceId: Int64? = nil
 
   private let peer: Peer
   private let db: AppDatabase
   private var dialogCancellable: AnyCancellable?
   private var renameCancellable: AnyCancellable?
+  private var chatCancellable: AnyCancellable?
 
   init(peer: Peer, db: AppDatabase) {
     self.peer = peer
     self.db = db
     bindDialog()
     bindRenameEligibility()
+    bindChat()
   }
 
   private func bindDialog() {
+    db.warnIfInMemoryDatabaseForObservation("ChatToolbarMenuModel.dialog")
     dialogCancellable = ValueObservation
       .tracking { db in
         try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: self.peer))
@@ -440,6 +445,7 @@ private final class ChatToolbarMenuModel: ObservableObject {
       return
     }
 
+    db.warnIfInMemoryDatabaseForObservation("ChatToolbarMenuModel.renameEligibility")
     renameCancellable = ValueObservation
       .tracking { db in
         if let chat = try Chat.fetchOne(db, id: chatId),
@@ -467,6 +473,27 @@ private final class ChatToolbarMenuModel: ObservableObject {
         }
       )
   }
+
+  private func bindChat() {
+    guard case let .thread(chatId) = peer else {
+      chatSpaceId = nil
+      return
+    }
+
+    db.warnIfInMemoryDatabaseForObservation("ChatToolbarMenuModel.chat")
+    chatCancellable = ValueObservation
+      .tracking { db in
+        try Chat.fetchOne(db, id: chatId)
+      }
+      .publisher(in: db.dbWriter, scheduling: .immediate)
+      .receive(on: DispatchQueue.main)
+      .sink(
+        receiveCompletion: { _ in },
+        receiveValue: { [weak self] chat in
+          self?.chatSpaceId = chat?.spaceId
+        }
+      )
+  }
 }
 
 private struct ChatToolbarMenu: View {
@@ -474,8 +501,12 @@ private struct ChatToolbarMenu: View {
   let spaceId: Int64?
   let dependencies: AppDependencies
 
+  @Environment(\.realtimeV2) private var realtimeV2
+
   @StateObject private var model: ChatToolbarMenuModel
   @State private var showRenameSheet = false
+  @State private var showMoveToSpaceSheet = false
+  @State private var showMoveOutConfirm = false
 
   init(peer: Peer, database: AppDatabase, spaceId: Int64?, dependencies: AppDependencies) {
     self.peer = peer
@@ -493,6 +524,18 @@ private struct ChatToolbarMenu: View {
       if peer.isThread, model.canRename {
         Button("Rename Chat...", systemImage: "pencil") {
           showRenameSheet = true
+        }
+      }
+
+      if peer.isThread {
+        if model.chatSpaceId != nil {
+          Button("Move Out of Space...", systemImage: "tray.and.arrow.up") {
+            showMoveOutConfirm = true
+          }
+        } else {
+          Button("Move to Space...", systemImage: "tray.and.arrow.down") {
+            showMoveToSpaceSheet = true
+          }
         }
       }
 
@@ -536,6 +579,48 @@ private struct ChatToolbarMenu: View {
     }
     .sheet(isPresented: $showRenameSheet) {
       RenameChatSheet(peer: peer)
+    }
+    .sheet(isPresented: $showMoveToSpaceSheet) {
+      if let chatId = peer.asThreadId() {
+        MoveThreadToSpaceSheet(chatId: chatId, nav2: dependencies.nav2)
+      }
+    }
+    .confirmationDialog(
+      "Move this thread out of the space?",
+      isPresented: $showMoveOutConfirm,
+      titleVisibility: .visible
+    ) {
+      Button("Move to Home") {
+        guard let chatId = peer.asThreadId() else { return }
+        showMoveOutConfirm = false
+        Task(priority: .userInitiated) {
+          await MainActor.run {
+            ToastCenter.shared.showLoading("Moving thread…")
+          }
+          do {
+            _ = try await realtimeV2.send(.moveThread(chatID: chatId, spaceID: nil))
+            await MainActor.run {
+              ToastCenter.shared.dismiss()
+              ToastCenter.shared.showSuccess("Moved to Home")
+            }
+            if let nav2 = dependencies.nav2 {
+              // Switching tabs from a `Menu`/confirmation action is timing-sensitive (menu dismissal,
+              // transaction optimistic DB write, sidebar observations). Delay slightly, then use Nav2's
+              // own resolver to pick the correct tab based on the updated DB state.
+              Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                await nav2.openChat(peer: peer, database: dependencies.database)
+              }
+            }
+          } catch {
+            await MainActor.run {
+              ToastCenter.shared.dismiss()
+              ToastCenter.shared.showError("Failed to move thread")
+            }
+          }
+        }
+      }
+      Button("Cancel", role: .cancel) {}
     }
   }
 

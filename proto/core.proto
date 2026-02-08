@@ -616,6 +616,7 @@ enum Method {
   UPDATE_CHAT_INFO = 32;
   LIST_BOTS = 33;
   REVEAL_BOT_TOKEN = 34;
+  MOVE_THREAD = 35;
 }
 
 message RpcCall {
@@ -655,6 +656,7 @@ message RpcCall {
     UpdateChatInfoInput updateChatInfo = 33;
     ListBotsInput listBots = 34;
     RevealBotTokenInput revealBotToken = 35;
+    MoveThreadInput moveThread = 36;
   }
 }
 
@@ -696,6 +698,7 @@ message RpcResult {
     UpdateChatInfoResult updateChatInfo = 33;
     ListBotsResult listBots = 34;
     RevealBotTokenResult revealBotToken = 35;
+    MoveThreadResult moveThread = 36;
   }
 }
 
@@ -1158,6 +1161,7 @@ message Update {
     UpdateDialogArchived dialog_archived = 29;
     UpdateChatInfo chat_info = 30;
     UpdatePinnedMessages pinned_messages = 31;
+    UpdateChatMoved chat_moved = 32;
   }
 }
 
@@ -1203,6 +1207,22 @@ message UpdatePinnedMessages {
 
   // Ordered list of pinned message IDs (latest first)
   repeated int64 message_ids = 2;
+}
+
+// Update when a thread is moved between home and a space.
+//
+// NOTE: v1 only supports private threads and only home <-> space moves.
+// Keep this payload flexible for future:
+// - moving across spaces
+// - moving public threads out of a space (would likely convert members to participants)
+// - allowing external participants in space threads
+message UpdateChatMoved {
+  // Updated chat record (includes new space_id if moved into a space).
+  Chat chat = 1;
+
+  // Optional old/new space IDs for convenience. new_space_id is unset when moved to home.
+  optional int64 old_space_id = 2;
+  optional int64 new_space_id = 3;
 }
 
 message UpdateNewMessageNotification {
@@ -1469,6 +1489,17 @@ message UpdateChatInfoInput {
 }
 
 message UpdateChatInfoResult { Chat chat = 1; }
+
+// Move a private thread between home (space_id unset) and a space (space_id set).
+// v1 does NOT support cross-space moves or public threads.
+message MoveThreadInput {
+  int64 chat_id = 1;
+
+  // Target space. If unset, moves to home.
+  optional int64 space_id = 2;
+}
+
+message MoveThreadResult { Chat chat = 1; }
 
 // Pin or unpin a message for everyone
 message PinMessageInput {

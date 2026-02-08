@@ -152,6 +152,38 @@ describe("messages.createChat", () => {
     expect(participantIds).toEqual([currentUser.id, otherUser.id].sort())
   })
 
+  test("allows duplicate home thread titles (not unique)", async () => {
+    const currentUser = await testUtils.createUser("home-dup-owner@example.com")
+    const otherUser = await testUtils.createUser("home-dup-participant@example.com")
+
+    await createChat(
+      {
+        title: "Same Title",
+        isPublic: false,
+        participants: [{ userId: BigInt(otherUser.id) }],
+      },
+      {
+        ...mockFunctionContext,
+        currentUserId: currentUser.id,
+      },
+    )
+
+    // Should not reject duplicates in home.
+    await expect(
+      createChat(
+        {
+          title: "Same Title",
+          isPublic: false,
+          participants: [{ userId: BigInt(otherUser.id) }],
+        },
+        {
+          ...mockFunctionContext,
+          currentUserId: currentUser.id,
+        },
+      ),
+    ).resolves.toBeTruthy()
+  })
+
   test("rejects public home thread creation", async () => {
     const currentUser = await testUtils.createUser("home-public-owner@example.com")
     if (!currentUser) throw new Error("Failed to create current user")
