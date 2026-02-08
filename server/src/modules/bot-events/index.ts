@@ -1,8 +1,9 @@
 import { Log } from "@in/server/utils/log"
+import { TELEGRAM_TOKEN } from "@in/server/env"
 
 export const sendBotEvent = (text: string) => {
   try {
-    const telegramToken = process.env["TELEGRAM_TOKEN"]
+    const telegramToken = TELEGRAM_TOKEN
     const chatId = "-1002262866594"
     fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
       method: "POST",

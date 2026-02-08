@@ -154,6 +154,8 @@ export class SessionsModel {
 
   // Update session's last active timestamp
   static async setActiveBulk(ids: number[], active: boolean): Promise<void> {
+    if (ids.length === 0) return
+
     try {
       await db.update(sessions).set({ active, lastActive: new Date() }).where(inArray(sessions.id, ids))
     } catch (error) {

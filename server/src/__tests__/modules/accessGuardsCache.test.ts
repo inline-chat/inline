@@ -1,19 +1,17 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test"
+import { describe, it, expect, beforeEach, afterEach, setSystemTime } from "bun:test"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 
 const TEN_MINUTES_MS = 10 * 60 * 1000
 
-const realNow = Date.now
-
 describe("AccessGuardsCache", () => {
   beforeEach(() => {
     AccessGuardsCache.resetAll()
-    Date.now = realNow
+    setSystemTime()
   })
 
   afterEach(() => {
     AccessGuardsCache.resetAll()
-    Date.now = realNow
+    setSystemTime()
   })
 
   it("caches positive space membership", () => {
@@ -30,11 +28,15 @@ describe("AccessGuardsCache", () => {
   })
 
   it("expires entries after ttl", () => {
-    const base = realNow()
-    Date.now = () => base
+    const base = 1 // Bun's setSystemTime treats 0 as "reset to real time".
+    setSystemTime(new Date(base))
     AccessGuardsCache.setSpaceMember(3, 4)
 
-    Date.now = () => base + TEN_MINUTES_MS + 1
+    setSystemTime(new Date(base + TEN_MINUTES_MS - 1))
+    expect(AccessGuardsCache.getSpaceMember(3, 4)).toBe(true)
+
+    // TTL boundary is inclusive: expires when `now >= expiresAt`.
+    setSystemTime(new Date(base + TEN_MINUTES_MS))
     expect(AccessGuardsCache.getSpaceMember(3, 4)).toBeUndefined()
   })
 
@@ -63,4 +65,3 @@ describe("AccessGuardsCache", () => {
     expect(AccessGuardsCache.getChatParticipant(11, 8)).toBe(true)
   })
 })
-

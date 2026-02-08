@@ -3,11 +3,38 @@ import cors from "@elysiajs/cors"
 import { helmet } from "elysia-helmet"
 import { ApiError, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
-import { rateLimit, type Generator } from "elysia-rate-limit"
+import { rateLimit } from "elysia-rate-limit"
 import { nanoid } from "nanoid/non-secure"
+
+const REQUEST_ID_HEADER = "x-request-id"
+const MAX_REQUEST_ID_LENGTH = 128
+const REQUEST_ID_PATTERN = /^[a-zA-Z0-9._-]+$/
+
+const getRequestId = (request: Request) => {
+  const raw = request.headers.get(REQUEST_ID_HEADER)
+  if (raw) {
+    const value = raw.trim()
+    if (value.length > 0 && value.length <= MAX_REQUEST_ID_LENGTH && REQUEST_ID_PATTERN.test(value)) {
+      return value
+    }
+  }
+
+  return nanoid()
+}
 
 // Composed of various plugins to be used as a Service Locator
 export const setup = new Elysia({ name: "setup" })
+  .state("requestId", "")
+  .onRequest(({ request, set, store }) => {
+    const requestId = getRequestId(request)
+    store.requestId = requestId
+    set.headers[REQUEST_ID_HEADER] = requestId
+    Log.shared.debug("request", {
+      requestId,
+      method: request.method,
+      url: request.url,
+    })
+  })
   // setup cors
   .use(
     cors({

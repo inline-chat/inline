@@ -1,9 +1,9 @@
 import { Elysia, t } from "elysia"
-import { ErrorCodes, InlineError } from "@in/server/types/errors"
+import { InlineError } from "@in/server/types/errors"
 import { db } from "@in/server/db"
 import { and, eq, isNull } from "drizzle-orm"
 import { sessions } from "@in/server/db/schema"
-import { hashToken } from "@in/server/utils/auth"
+import { hashToken, normalizeToken } from "@in/server/utils/auth"
 
 export const authenticate = new Elysia({ name: "authenticate-post" })
   .state("currentUserId", 0)
@@ -12,7 +12,8 @@ export const authenticate = new Elysia({ name: "authenticate-post" })
     as: "scoped",
 
     headers: t.Object({
-      authorization: t.Optional(t.TemplateLiteral("Bearer ${string}")),
+      // Normalize in `beforeHandle` so we can accept case-insensitive `bearer` and extra whitespace.
+      authorization: t.Optional(t.String()),
     }),
 
     beforeHandle: async ({ headers, store }) => {
@@ -51,13 +52,6 @@ export const authenticateGet = new Elysia({ name: "authenticate-get" })
     },
   })
 
-const normalizeToken = (token: unknown): string | null => {
-  if (typeof token !== "string") {
-    return null
-  }
-  return token.replace("Bearer ", "").trim()
-}
-
 export const getUserIdFromToken = async (token: string): Promise<{ userId: number; sessionId: number }> => {
   let supposedUserId = token.split(":")[0]
   let tokenHash = hashToken(token)
@@ -74,6 +68,18 @@ export const getUserIdFromToken = async (token: string): Promise<{ userId: numbe
   if (session.userId !== parseInt(supposedUserId, 10)) {
     console.error("userId mismatch", session.userId, supposedUserId)
     throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
+  }
+
+  const now = new Date()
+  const shouldTouchLastActive =
+    !session.lastActive || now.getTime() - session.lastActive.getTime() > 60_000 /* 60s */
+  if (shouldTouchLastActive) {
+    // Best-effort update; auth should not fail if last-active cannot be updated.
+    void db
+      .update(sessions)
+      .set({ lastActive: now })
+      .where(eq(sessions.id, session.id))
+      .catch(() => {})
   }
 
   return { userId: session.userId, sessionId: session.id }

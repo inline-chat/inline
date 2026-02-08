@@ -1,6 +1,7 @@
-export const IS_PROD = process.env.NODE_ENV === "production"
+import { EMAIL_PROVIDER, isProd } from "@in/server/env"
 
-export const EMAIL_PROVIDER: "SES" | "RESEND" = process.env["EMAIL_PROVIDER"] === "SES" ? "SES" : "RESEND"
+export const IS_PROD = isProd
+export { EMAIL_PROVIDER }
 
 export const MAX_FILE_SIZE = 500 * 1024 * 1024 // 500 MB
 

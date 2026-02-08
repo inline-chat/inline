@@ -13,6 +13,7 @@ import { encodeUserInfo, TUserInfo } from "@in/server/api-types"
 import { ipinfo, type IPInfoResponse } from "@in/server/libs/ipinfo"
 import { SessionsModel } from "@in/server/db/models/sessions"
 import { sendBotEvent } from "@in/server/modules/bot-events"
+import { DEMO_CODE, DEMO_EMAIL } from "@in/server/env"
 
 export const Input = Type.Object({
   email: Type.String(),
@@ -120,7 +121,7 @@ export const handler = async (
 /// HELPER FUNCTIONS ///
 
 const verifyCode = async (email: string, code: string): Promise<true> => {
-  if (email && code && email === process.env["DEMO_EMAIL"] && code === process.env["DEMO_CODE"]) {
+  if (email && code && email === DEMO_EMAIL && code === DEMO_CODE) {
     sendTelegramEventForDemoAccount()
     return true
   }
