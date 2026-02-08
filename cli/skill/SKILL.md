@@ -9,7 +9,7 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 
 - `--json`: Output raw JSON payloads (proto/RPC results) to stdout (available on all commands).
   - When `--json` is set and a command fails, the CLI prints a structured error JSON to stderr: `{"error":{"code","message","hint","examples"}}` and exits non-zero.
-  - Some table-only filters (e.g. `--filter/--ids/--id`) are disabled in `--json` mode to keep the payload raw; use `jq` to filter instead.
+  - Some table-only convenience flags that change the output shape (e.g. `inline chats list --ids/--id`, `inline bots list --ids/--id`) are disabled in `--json` mode; use `jq` to filter instead.
   - Destructive commands never prompt in `--json` mode; pass `--yes` explicitly.
 - `--pretty`: Pretty-print JSON output (default).
 - `--compact`: Compact JSON output (no whitespace).
