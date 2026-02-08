@@ -590,10 +590,11 @@ class MainSidebarList: NSView {
       _ = nav2?.activeTab
       _ = nav2?.tabs
     } onChange: { [weak self] in
+      // Re-arm observation immediately to avoid missing rapid successive changes.
+      self?.observeNav()
       Task { @MainActor [weak self] in
         self?.bindActiveChatsViewModel()
         self?.applySnapshot()
-        self?.observeNav()
       }
     }
   }

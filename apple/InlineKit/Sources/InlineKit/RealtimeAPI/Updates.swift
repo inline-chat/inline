@@ -3,6 +3,7 @@ import Foundation
 import GRDB
 import InlineProtocol
 import Logger
+import RealtimeV2
 
 public actor UpdatesEngine: Sendable {
   public static let shared = UpdatesEngine()
@@ -10,7 +11,12 @@ public actor UpdatesEngine: Sendable {
   private let database: AppDatabase = .shared
   private let log = Log.scoped("RealtimeUpdates")
 
-  public nonisolated func apply(update: InlineProtocol.Update, db: Database) {
+  public nonisolated func apply(
+    update: InlineProtocol.Update,
+    db: Database,
+    source: UpdateApplySource,
+    reloadPeers: inout Set<Peer>
+  ) {
     log.trace("apply realtime update")
     // log.debug("Received update type: \(update.update)")
 
@@ -18,7 +24,12 @@ public actor UpdatesEngine: Sendable {
       switch update.update {
         case let .newMessage(newMessageUpdate):
           log.trace("apply new message update")
-          try newMessageUpdate.apply(db)
+          if source == .syncCatchup {
+            try newMessageUpdate.apply(db, publishChanges: false, suppressNotifications: true)
+            reloadPeers.insert(newMessageUpdate.message.peerID.toPeer())
+          } else {
+            try newMessageUpdate.apply(db, publishChanges: true, suppressNotifications: false)
+          }
 
         case let .updateMessageID(updateMessageId):
           log.trace("apply update message id")
@@ -31,7 +42,12 @@ public actor UpdatesEngine: Sendable {
           updateComposeAction.apply()
 
         case let .deleteMessages(deleteMessages):
-          try deleteMessages.apply(db)
+          if source == .syncCatchup {
+            try deleteMessages.apply(db, publishChanges: false)
+            reloadPeers.insert(deleteMessages.peerID.toPeer())
+          } else {
+            try deleteMessages.apply(db, publishChanges: true)
+          }
 
         case let .messageAttachment(updateMessageAttachment):
           try updateMessageAttachment.apply(db)
@@ -43,7 +59,12 @@ public actor UpdatesEngine: Sendable {
           try deleteReaction.apply(db)
 
         case let .editMessage(editMessage):
-          try editMessage.apply(db)
+          if source == .syncCatchup {
+            try editMessage.apply(db, publishChanges: false)
+            reloadPeers.insert(editMessage.message.peerID.toPeer())
+          } else {
+            try editMessage.apply(db, publishChanges: true)
+          }
 
         case let .newChat(newChat):
           try newChat.apply(db)
@@ -75,6 +96,9 @@ public actor UpdatesEngine: Sendable {
         case let .chatInfo(chatInfo):
           try chatInfo.apply(db)
 
+        case let .chatMoved(chatMoved):
+          try chatMoved.apply(db)
+
         case let .pinnedMessages(pinnedMessages):
           try pinnedMessages.apply(db)
 
@@ -105,16 +129,32 @@ public actor UpdatesEngine: Sendable {
   }
 
   public func applyBatch(updates: [InlineProtocol.Update]) async {
-    log.debug("applying \(updates.count) updates \(updates.map(\.update))")
+    await applyBatch(updates: updates, source: .realtime)
+  }
+
+  public func applyBatch(updates: [InlineProtocol.Update], source: UpdateApplySource) async {
+    log.debug("applying \(updates.count) updates (source=\(source))")
+    let reloadPeers: Set<Peer>
     do {
-      try await database.dbWriter.write { db in
+      reloadPeers = try await database.dbWriter.write { db in
+        var reloadPeers = Set<Peer>()
         for update in updates {
-          self.apply(update: update, db: db)
+          self.apply(update: update, db: db, source: source, reloadPeers: &reloadPeers)
         }
+        return reloadPeers
       }
     } catch {
       // handle error
       log.error("Failed to apply updates", error: error)
+      reloadPeers = []
+    }
+
+    if source == .syncCatchup, !reloadPeers.isEmpty {
+      await MainActor.run {
+        for peer in reloadPeers {
+          MessagesPublisher.shared.messagesReload(peer: peer, animated: false)
+        }
+      }
     }
   }
 }
@@ -159,23 +199,32 @@ extension InlineProtocol.UpdateDeleteChat {
 
 extension InlineProtocol.UpdateNewMessage {
   func apply(_ db: Database) throws {
+    try apply(db, publishChanges: true, suppressNotifications: false)
+  }
+
+  func apply(_ db: Database, publishChanges: Bool, suppressNotifications: Bool) throws {
+    // Avoid double-applying side effects when the same message is replayed (eg. sync catch-up,
+    // duplicate delivery, history prefill).
+    let hadMessage =
+      (try? Message.fetchOne(db, key: ["messageId": message.id, "chatId": message.chatID])) != nil
+
     let msg = try Message.save(
       db,
       protocolMessage: message,
-      publishChanges: true
+      publishChanges: publishChanges
     )
 
     try Chat.updateLastMsgId(db, chatId: message.chatID, lastMsgId: msg.messageId, date: msg.date)
 
-    // increase unread count if message is not ours
-    if var dialog = try? Dialog.get(peerId: msg.peerId).fetchOne(db) {
-      dialog.unreadCount = (dialog.unreadCount ?? 0) + (msg.out == false ? 1 : 0)
+    // Increase unread count only when this message is newly inserted and not ours.
+    if !hadMessage, msg.out == false, var dialog = try? Dialog.get(peerId: msg.peerId).fetchOne(db) {
+      dialog.unreadCount = (dialog.unreadCount ?? 0) + 1
       try dialog.update(db)
     }
 
     #if os(macOS)
-    // Show notification for incoming messages
-    if msg.out == false {
+    // Show notifications only for newly-inserted incoming messages, never for catch-up replays.
+    if !suppressNotifications, !hadMessage, msg.out == false {
       Task { @MainActor in
         let mode = INUserSettings.current.notification.mode
         // Only show notification if mode is all
@@ -214,7 +263,7 @@ extension InlineProtocol.UpdateNewMessageNotification {
 extension InlineProtocol.UpdateMessageId {
   func apply(_ db: Database) throws {
     Log.shared.debug("update message id \(randomID) \(messageID)")
-    let currentUserId = Auth.shared.currentUserId
+    let currentUserId = Auth.shared.getCurrentUserId()
     // FIXME: optimize this to update in one go OR to make a faster fetch
     let message = try Message
       .fetchOne(db, key: ["fromId": currentUserId, "randomId": randomID])
@@ -286,6 +335,10 @@ extension InlineProtocol.UpdateComposeAction {
 
 extension InlineProtocol.UpdateDeleteMessages {
   func apply(_ db: Database) throws {
+    try apply(db, publishChanges: true)
+  }
+
+  func apply(_ db: Database, publishChanges: Bool) throws {
     guard let chat = try Chat.getByPeerId(peerId: peerID.toPeer()) else {
       Log.shared.error("Failed to find chat for peer \(peerID.toPeer())")
       return
@@ -321,8 +374,10 @@ extension InlineProtocol.UpdateDeleteMessages {
           .deleteAll(db)
       }
 
-      Task(priority: .userInitiated) { @MainActor in
-        MessagesPublisher.shared.messagesDeleted(messageIds: messageIds, peer: peerID.toPeer())
+      if publishChanges {
+        Task(priority: .userInitiated) { @MainActor in
+          MessagesPublisher.shared.messagesDeleted(messageIds: messageIds, peer: peerID.toPeer())
+        }
       }
 
     } catch {
@@ -448,22 +503,28 @@ extension InlineProtocol.UpdateDeleteReaction {
 
 extension InlineProtocol.UpdateEditMessage {
   func apply(_ db: Database) throws {
+    try apply(db, publishChanges: true)
+  }
+
+  func apply(_ db: Database, publishChanges: Bool) throws {
     // Delete stale translations for this message since the text has changed
     try Translation
       .filter(Column("messageId") == message.id)
       .filter(Column("chatId") == message.chatID)
       .deleteAll(db)
 
-    _ = try Message.save(db, protocolMessage: message, publishChanges: true)
+    _ = try Message.save(db, protocolMessage: message, publishChanges: publishChanges)
 
-    db.afterNextTransaction { _ in
-      Task { @MainActor in
-        MessagesPublisher.shared.messageUpdatedWithId(
-          messageId: message.id,
-          chatId: message.chatID,
-          peer: message.peerID.toPeer(),
-          animated: false
-        )
+    if publishChanges {
+      db.afterNextTransaction { _ in
+        Task { @MainActor in
+          MessagesPublisher.shared.messageUpdatedWithId(
+            messageId: message.id,
+            chatId: message.chatID,
+            peer: message.peerID.toPeer(),
+            animated: false
+          )
+        }
       }
     }
   }
@@ -743,6 +804,26 @@ extension InlineProtocol.UpdateChatInfo {
       }
     } catch {
       Log.shared.error("Failed to update chat info", error: error)
+    }
+  }
+}
+
+extension InlineProtocol.UpdateChatMoved {
+  func apply(_ db: Database) throws {
+    do {
+      let updatedChat = Chat(from: chat)
+      try updatedChat.save(db)
+
+      let peer: Peer = .thread(id: updatedChat.id)
+      if var dialog = try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: peer)) {
+        dialog.spaceId = updatedChat.spaceId
+        try dialog.save(db)
+      } else {
+        let newDialog = Dialog(optimisticForChat: updatedChat)
+        try newDialog.save(db, onConflict: .replace)
+      }
+    } catch {
+      Log.shared.error("Failed to apply chat moved update", error: error)
     }
   }
 }
