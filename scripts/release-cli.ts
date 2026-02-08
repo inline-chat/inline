@@ -101,8 +101,23 @@ async function runCommand(command: string, args: string[], options: { cwd?: stri
   });
   const exitCode = await proc.exited;
   if (exitCode !== 0) {
-    throw new Error(`Command failed: ${command} ${args.join(" ")}`);
+    throw new Error(`Command failed: ${command} ${redactArgs(args).join(" ")}`);
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function redactArgs(args: string[]): string[] {
+  const out = [...args];
+  for (let i = 0; i < out.length; i += 1) {
+    const current = out[i];
+    if (current === "--password" && i + 1 < out.length) {
+      out[i + 1] = "<redacted>";
+    }
+  }
+  return out;
 }
 
 async function runCommandCapture(
@@ -119,6 +134,11 @@ async function runCommandCapture(
   const stderr = await new Response(proc.stderr).text();
   const exitCode = await proc.exited;
   return { stdout, stderr, exitCode };
+}
+
+function shouldRetryNotarize(output: string): boolean {
+  // Observed: "Error: HTTPClientError.connectTimeout"
+  return /(connecttimeout|econnreset|enotfound|timed out|tls|network)/i.test(output);
 }
 
 async function uploadFile(
@@ -245,6 +265,19 @@ async function signAndNotarize(context: ReleaseContext) {
     );
   }
 
+  const notarizeRetries = Number.parseInt(process.env.INLINE_NOTARY_RETRIES ?? "4", 10);
+  const notarizeMaxAttempts = Number.isFinite(notarizeRetries)
+    ? Math.max(1, notarizeRetries + 1)
+    : 5;
+  const notarizeBaseDelayMs = Number.parseInt(
+    process.env.INLINE_NOTARY_RETRY_BASE_DELAY_MS ?? "30000",
+    10,
+  );
+  const notarizeMaxDelayMs = Number.parseInt(
+    process.env.INLINE_NOTARY_RETRY_MAX_DELAY_MS ?? "300000",
+    10,
+  );
+
   for (const target of context.targets) {
     const binaryPath = join(cliDir, "target", target, "release", "inline");
     const zipName = `inline-cli-${context.version}-${target}-notarize.zip`;
@@ -266,22 +299,52 @@ async function signAndNotarize(context: ReleaseContext) {
 
     await runCommand("zip", ["-j", "-X", zipPath, binaryPath], { cwd: cliDir });
 
-    await runCommand(
-      "xcrun",
-      [
-        "notarytool",
-        "submit",
-        zipPath,
-        "--apple-id",
-        appleId,
-        "--password",
-        applePassword,
-        "--team-id",
-        appleTeamId,
-        "--wait",
-      ],
-      { cwd: cliDir },
-    );
+    const args = [
+      "notarytool",
+      "submit",
+      zipPath,
+      "--apple-id",
+      appleId,
+      "--password",
+      applePassword,
+      "--team-id",
+      appleTeamId,
+      "--wait",
+      "--timeout",
+      "60m",
+      "--no-s3-acceleration",
+    ];
+
+    for (let attempt = 1; attempt <= notarizeMaxAttempts; attempt += 1) {
+      const { stdout, stderr, exitCode } = await runCommandCapture("xcrun", args, {
+        cwd: cliDir,
+      });
+      if (stdout) process.stdout.write(stdout);
+      if (stderr) process.stderr.write(stderr);
+
+      if (exitCode === 0) {
+        break;
+      }
+
+      const combined = `${stdout}\n${stderr}`;
+      const retryable = shouldRetryNotarize(combined);
+      const isLastAttempt = attempt === notarizeMaxAttempts;
+
+      if (!retryable || isLastAttempt) {
+        throw new Error(`Command failed: xcrun ${redactArgs(args).join(" ")}`);
+      }
+
+      const exp = attempt - 1;
+      const baseDelay = Number.isFinite(notarizeBaseDelayMs) ? notarizeBaseDelayMs : 30000;
+      const maxDelay = Number.isFinite(notarizeMaxDelayMs) ? notarizeMaxDelayMs : 300000;
+      const delay = Math.min(maxDelay, baseDelay * 2 ** exp);
+      console.warn(
+        `Notarization upload failed (attempt ${attempt}/${notarizeMaxAttempts}); retrying in ${Math.round(
+          delay / 1000,
+        )}s...`,
+      );
+      await sleep(delay);
+    }
 
     await runCommand("codesign", ["--verify", "--strict", "--verbose=2", binaryPath], {
       cwd: cliDir,
