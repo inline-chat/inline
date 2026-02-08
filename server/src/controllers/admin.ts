@@ -712,6 +712,25 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
     },
   )
   .get(
+    "/metrics/spaces",
+    async ({ cookie, request, server, set }) => {
+      const session = await requireAdminSession(cookie as AdminCookieStore, request, server, set)
+      if (!session) {
+        return { ok: false, error: "unauthorized" }
+      }
+
+      if (!requireSetupComplete(session, set)) {
+        return { ok: false, error: "setup_required" }
+      }
+
+      const metrics = await getSpaceThreadMetricsToday()
+      return { ok: true, metrics }
+    },
+    {
+      cookie: adminCookieSchema,
+    },
+  )
+  .get(
     "/metrics/overview",
     async ({ cookie, request, server, set }) => {
       const session = await requireAdminSession(cookie as AdminCookieStore, request, server, set)
@@ -1596,5 +1615,31 @@ const getAppMetrics = async () => {
       verifiedUsers: verifiedUsersRow?.count ?? 0,
       onlineUsers: onlineUsersRow?.count ?? 0,
     },
+  }
+}
+
+const getSpaceThreadMetricsToday = async () => {
+  const now = new Date()
+  const startOfDay = getStartOfUtcDay(now)
+  const nextDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000)
+
+  const rows = await db
+    .select({
+      spaceId: spaces.id,
+      name: spaces.name,
+      handle: spaces.handle,
+      threadsCreatedToday: sql<number>`count(${chats.id})::int`,
+    })
+    .from(chats)
+    .innerJoin(spaces, eq(chats.spaceId, spaces.id))
+    .where(and(isNull(spaces.deleted), eq(chats.type, "thread"), gte(chats.date, startOfDay), lt(chats.date, nextDay)))
+    .groupBy(spaces.id, spaces.name, spaces.handle)
+    .orderBy(desc(sql`count(${chats.id})`))
+    .limit(200)
+
+  return {
+    startOfDayUtc: startOfDay.toISOString(),
+    nextDayUtc: nextDay.toISOString(),
+    spaces: rows,
   }
 }
