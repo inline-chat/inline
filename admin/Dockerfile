@@ -34,7 +34,18 @@ RUN cd /temp/prod && bun install --frozen-lockfile --production
 # Build stage
 FROM base AS build
 COPY --from=development-dependencies /temp/dev/node_modules node_modules
-COPY . .
+# Copy only what is needed to build the admin app, so unrelated changes in the
+# monorepo don't invalidate the Docker build cache (and trigger redeploys).
+COPY package.json bun.lock bunfig.toml ./
+COPY admin ./admin
+COPY server/package.json ./server/package.json
+COPY web/package.json ./web/package.json
+COPY web/packages/auth/package.json ./web/packages/auth/package.json
+COPY web/packages/client/package.json ./web/packages/client/package.json
+COPY web/packages/config/package.json ./web/packages/config/package.json
+COPY web/packages/log/package.json ./web/packages/log/package.json
+COPY web/packages/protocol/package.json ./web/packages/protocol/package.json
+COPY scripts/package.json ./scripts/package.json
 RUN cd admin && bun run build
 
 # Final stage
