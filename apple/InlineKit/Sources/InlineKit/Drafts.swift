@@ -22,7 +22,10 @@ public final class Drafts: Sendable {
   public func update(peerId: Peer, text: String, entities: MessageEntities?) {
     let draft = MessageDraft(text: text, entities: entities)
 
-    print("🌴 Draft message in update", draft)
+    log.debug("Draft update for peer \(peerId): \(draft)")
+
+    // Avoid capturing `self` in detached tasks (Swift 6 requires explicit capture semantics).
+    let log = self.log
 
     // See if it introduces any race conditions
     Task.detached(priority: .utility) {
@@ -36,7 +39,7 @@ public final class Drafts: Sendable {
               }
             }
             dialog.draftMessage = protocolDraft
-            print("🌴 Draft message in protocolDraft", protocolDraft)
+            log.debug("Draft protocol payload for peer \(peerId): \(protocolDraft)")
             try dialog.save(db)
           }
         }

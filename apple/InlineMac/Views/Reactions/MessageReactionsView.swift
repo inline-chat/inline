@@ -10,7 +10,7 @@ final class MessageReactionsView: NSView {
 
   private var fullMessage: FullMessage?
   private var currentUserId: Int64? {
-    Auth.shared.currentUserId
+    Auth.shared.getCurrentUserId()
   }
 
   private static let animationDuration: TimeInterval = 0.14

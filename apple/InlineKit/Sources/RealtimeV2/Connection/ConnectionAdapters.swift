@@ -11,11 +11,11 @@ import AppKit
 #endif
 
 final class AuthConnectionAdapter {
-  private let auth: Auth
+  private let auth: AuthHandle
   private let manager: ConnectionManager
   private var task: Task<Void, Never>?
 
-  init(auth: Auth, manager: ConnectionManager) {
+  init(auth: AuthHandle, manager: ConnectionManager) {
     self.auth = auth
     self.manager = manager
   }

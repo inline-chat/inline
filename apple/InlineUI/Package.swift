@@ -7,6 +7,10 @@ let baseDependencies: [PackageDescription.Target.Dependency] = [
   "InlineKit",
 ]
 
+let swiftSettings: [SwiftSetting] = [
+  .swiftLanguageMode(.v6),
+]
+
 let package = Package(
   name: "InlineUI",
 
@@ -37,32 +41,38 @@ let package = Package(
         .product(name: "NukeUI", package: "Nuke"),
         .product(name: "Kingfisher", package: "Kingfisher"),
       ],
+      swiftSettings: swiftSettings
     ),
 
     .target(
       name: "ContextMenuAccessoryStructs",
       dependencies: [],
-      publicHeadersPath: "include"
+      publicHeadersPath: "include",
+      swiftSettings: swiftSettings
     ),
 
     .target(
       name: "TextProcessing",
       dependencies: baseDependencies,
+      swiftSettings: swiftSettings
     ),
 
     .target(
       name: "Translation",
       dependencies: baseDependencies,
+      swiftSettings: swiftSettings
     ),
 
     .target(
       name: "Invite",
       dependencies: baseDependencies + ["InlineUI"],
+      swiftSettings: swiftSettings
     ),
 
     .testTarget(
       name: "InlineUITests",
-      dependencies: ["InlineUI", "TextProcessing"]
+      dependencies: ["InlineUI", "TextProcessing"],
+      swiftSettings: swiftSettings
     ),
   ]
 )

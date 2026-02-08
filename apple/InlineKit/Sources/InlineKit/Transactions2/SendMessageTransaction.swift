@@ -164,10 +164,15 @@ public struct SendMessageTransaction: Transaction2 {
   public func optimistic() async {
     log.debug("Optimistic send message")
 
+    guard let fromId = Auth.shared.getCurrentUserId() else {
+      log.error("Optimistic send message called without a current user id")
+      return
+    }
+
     let message = Message(
       messageId: context.temporaryMessageId,
       randomId: context.randomId,
-      fromId: Auth.shared.currentUserId!,
+      fromId: fromId,
       date: Date(), // Date here?
       text: context.text,
       peerUserId: peerUserId,

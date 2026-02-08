@@ -38,6 +38,7 @@ public final class SpaceMembershipStatusViewModel: ObservableObject {
     guard let currentUserId = Auth.getCurrentUserId() else { return }
 
     let spaceId_ = spaceId
+    db.warnIfInMemoryDatabaseForObservation("SpaceMembershipStatusViewModel.membership")
 
     cancellable =
       ValueObservation

@@ -28,6 +28,7 @@ public struct TransactionDeleteReaction: Transaction {
   public func optimistic() {
     Log.shared.debug("Optimistic delete reaction \(message.messageId) \(peerId) \(message.chatId)")
     Task(priority: .userInitiated) {
+      let currentUserId = Auth.shared.getCurrentUserId()
       do {
         try AppDatabase.shared.dbWriter.write { db in
           _ = try Reaction
@@ -36,7 +37,7 @@ public struct TransactionDeleteReaction: Transaction {
             )
             .filter(Column("chatId") == message.chatId)
             .filter(Column("emoji") == emoji)
-            .filter(Column("userId") == Auth.shared.currentUserId)
+            .filter(Column("userId") == currentUserId)
             .deleteAll(db)
         }
       } catch {

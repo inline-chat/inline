@@ -6,6 +6,7 @@ final class SpacePickerOverlayWindow: NSPanel {
   static var contentInsetY: CGFloat { SpacePickerOverlayStyle.shadowInsetY }
 
   private let hostingView: SpacePickerHostingView
+  private let effectView = NSVisualEffectView()
   private let contentContainer = NSView()
   private let preferredWidth: CGFloat
 
@@ -39,11 +40,22 @@ final class SpacePickerOverlayWindow: NSPanel {
     contentContainer.layer?.backgroundColor = NSColor.clear.cgColor
     contentContainer.layer?.masksToBounds = false
 
+    effectView.translatesAutoresizingMaskIntoConstraints = false
+    effectView.material = .popover
+    effectView.blendingMode = .behindWindow
+    // This panel never becomes key; keep the material visually "active".
+    effectView.state = .active
+    effectView.wantsLayer = true
+    effectView.layer?.backgroundColor = NSColor.clear.cgColor
+    effectView.layer?.cornerRadius = SpacePickerOverlayStyle.cornerRadius
+    effectView.layer?.masksToBounds = true
+
     hostingView.translatesAutoresizingMaskIntoConstraints = false
     hostingView.wantsLayer = true
     hostingView.layer?.backgroundColor = NSColor.clear.cgColor
     hostingView.layer?.masksToBounds = false
 
+    contentContainer.addSubview(effectView)
     contentContainer.addSubview(hostingView)
     contentView = contentContainer
 
@@ -65,6 +77,11 @@ final class SpacePickerOverlayWindow: NSPanel {
         constant: -Self.contentInsetY
       ),
       hostingView.widthAnchor.constraint(equalToConstant: preferredWidth),
+
+      effectView.leadingAnchor.constraint(equalTo: hostingView.leadingAnchor),
+      effectView.trailingAnchor.constraint(equalTo: hostingView.trailingAnchor),
+      effectView.topAnchor.constraint(equalTo: hostingView.topAnchor),
+      effectView.bottomAnchor.constraint(equalTo: hostingView.bottomAnchor),
     ])
 
     updateContentSize()

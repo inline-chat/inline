@@ -1,5 +1,6 @@
 import Auth
 import InlineConfig
+import Logger
 import Sentry
 
 public final class Analytics: Sendable {
@@ -18,7 +19,7 @@ public final class Analytics: Sendable {
   /// Starts Sentry
   public static func start() {
     if debugBuild, !runInDebugBuilds {
-      print("ANALYTICS: DEBUG BUILD, SKIPPING")
+      Log.shared.debug("Analytics: debug build, skipping start")
       return
     }
 
@@ -30,12 +31,12 @@ public final class Analytics: Sendable {
       options.experimental.enableLogs = true
     }
 
-    print("ANALYTICS: STARTING")
+    Log.shared.info("Analytics: starting")
 
     // IF AUTHed
-    if Auth.shared.isLoggedIn {
+    if Auth.shared.getIsLoggedIn() {
       Task {
-        print("ANALYTICS: IDENTIFYING USER")
+        Log.shared.debug("Analytics: identifying user")
         await Self.identify()
       }
     }
@@ -58,13 +59,13 @@ public final class Analytics: Sendable {
       identify(userId: userId, email: nil, name: nil, username: nil)
     }
 
-    print("ANALYTICS: IDENTIFIED USER ✔︎")
+    Log.shared.debug("Analytics: identified user")
   }
 
   /// Clears the user from Sentry
   public static func logout() {
     SentrySDK.setUser(nil)
-    print("ANALYTICS: LOGGED OUT")
+    Log.shared.debug("Analytics: logged out")
   }
 
   /// Identifies the user in Sentry

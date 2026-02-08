@@ -54,6 +54,7 @@ public final class ChatPhotosViewModel: ObservableObject, @unchecked Sendable {
   // MARK: – Private helpers
 
   private func fetchPhotoMessages() {
+    db.warnIfInMemoryDatabaseForObservation("ChatPhotosViewModel.photoMessages")
     messagesCancellable = ValueObservation
       .tracking { [chatId] db in
         try PhotoMessage.queryRequest()

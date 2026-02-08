@@ -4,24 +4,40 @@ import InlineUI
 import SwiftUI
 
 struct SpacePickerOverlayView: View {
-  private static let cornerRadius: CGFloat = 12
   private static let maxListHeight: CGFloat = 260
-  private static let preferredWidth: CGFloat = 240
 
   let items: [SpaceHeaderItem]
   let activeTab: TabId
   let onSelect: (SpaceHeaderItem) -> Void
   let onCreateSpace: () -> Void
 
-  @Environment(\.colorScheme) private var colorScheme
+  private var shortcutByItemId: [String: String] {
+    var dict: [String: String] = [:]
+    dict[SpaceHeaderItem.home.id] = "⌘1"
+
+    var i = 2
+    for item in items where item.kind == .space {
+      if i <= 9 {
+        dict[item.id] = "⌘\(i)"
+      }
+      i += 1
+    }
+    return dict
+  }
 
   var body: some View {
-    let shape = RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+    let shape = RoundedRectangle(cornerRadius: SpacePickerOverlayStyle.cornerRadius, style: .continuous)
     let content = VStack(spacing: 8) {
       ScrollView {
         VStack(spacing: 0) {
           ForEach(pickerEntries) { entry in
-            SpacePickerRow(entry: entry, activeTab: activeTab, onSelect: onSelect, onCreateSpace: onCreateSpace)
+            SpacePickerRow(
+              entry: entry,
+              activeTab: activeTab,
+              shortcutLabel: shortcutLabel(for: entry),
+              onSelect: onSelect,
+              onCreateSpace: onCreateSpace
+            )
           }
         }
       }
@@ -29,17 +45,18 @@ struct SpacePickerOverlayView: View {
       .contentMargins(.horizontal, MainSidebar.innerEdgeInsets, for: .scrollContent)
       .frame(maxHeight: Self.maxListHeight)
     }
-    .frame(width: Self.preferredWidth)
-    .background(shape.fill(tint))
+    .frame(width: SpacePickerOverlayStyle.preferredWidth)
 
     Group {
       if #available(macOS 26.0, *) {
         content.glassEffect(.regular, in: shape)
       } else {
         content
+          .background(VisualEffectView(material: .popover, blendingMode: .withinWindow))
+          .clipShape(shape)
       }
     }
-    .compositingGroup()
+    .overlay(shape.strokeBorder(Color.primary.opacity(0.08)))
     .shadow(
       color: Color.black.opacity(SpacePickerOverlayStyle.shadowOpacity),
       radius: SpacePickerOverlayStyle.shadowRadius,
@@ -48,15 +65,15 @@ struct SpacePickerOverlayView: View {
     )
   }
 
-  private var tint: Color {
-    let opacity = colorScheme == .dark ? 0.14 : 0.18
-    return colorScheme == .dark ? Color.black.opacity(opacity) : Color.white.opacity(opacity)
-  }
-
   private var pickerEntries: [SpacePickerEntry] {
     var entries = items.map { SpacePickerEntry.space($0) }
     entries.append(.createSpace)
     return entries
+  }
+
+  private func shortcutLabel(for entry: SpacePickerEntry) -> String? {
+    guard case let .space(item) = entry else { return nil }
+    return shortcutByItemId[item.id]
   }
 }
 
@@ -77,6 +94,7 @@ private enum SpacePickerEntry: Identifiable, Hashable {
 private struct SpacePickerRow: View {
   let entry: SpacePickerEntry
   let activeTab: TabId
+  let shortcutLabel: String?
   let onSelect: (SpaceHeaderItem) -> Void
   let onCreateSpace: () -> Void
 
@@ -90,6 +108,12 @@ private struct SpacePickerRow: View {
         .foregroundColor(textColor)
         .lineLimit(1)
       Spacer(minLength: 0)
+      if let shortcutLabel {
+        Text(shortcutLabel)
+          .font(.system(size: 12, weight: .semibold, design: .monospaced))
+          .foregroundStyle(.tertiary)
+          .frame(minWidth: 30, alignment: .trailing)
+      }
     }
     .frame(height: MainSidebar.itemHeight)
     .padding(.horizontal, MainSidebar.innerEdgeInsets)
@@ -131,9 +155,9 @@ private struct SpacePickerRow: View {
   private var backgroundView: some View {
     Group {
       if isActive {
-        Color(nsColor: Theme.windowContentBackgroundColor)
+        Color.primary.opacity(0.10)
       } else if isHovered {
-        Color.white.opacity(0.2)
+        Color.primary.opacity(0.05)
       } else {
         Color.clear
       }

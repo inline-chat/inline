@@ -175,8 +175,8 @@ public extension User {
     Date(timeIntervalSince1970: Double(from))
   }
 
-  @MainActor func isCurrentUser() -> Bool {
-    id == Auth.shared.currentUserId
+  func isCurrentUser() -> Bool {
+    id == Auth.shared.getCurrentUserId()
   }
 }
 

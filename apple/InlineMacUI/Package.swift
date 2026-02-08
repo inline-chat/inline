@@ -8,6 +8,10 @@ let baseDependencies: [PackageDescription.Target.Dependency] = [
   "InlineUI",
 ]
 
+let swiftSettings: [SwiftSetting] = [
+  .swiftLanguageMode(.v6),
+]
+
 let package = Package(
   name: "InlineMacUI",
 
@@ -32,32 +36,38 @@ let package = Package(
   targets: [
     .target(
       name: "InlineMacUI",
-      dependencies: baseDependencies + ["InlineMacHotkeys"]
+      dependencies: baseDependencies + ["InlineMacHotkeys"],
+      swiftSettings: swiftSettings
     ),
 
     .target(
       name: "InlineMacHotkeys",
-      dependencies: []
+      dependencies: [],
+      swiftSettings: swiftSettings
     ),
 
     .target(
       name: "InlineMacWindow",
-      dependencies: []
+      dependencies: [],
+      swiftSettings: swiftSettings
     ),
 
     .target(
       name: "MacTheme",
-      dependencies: []
+      dependencies: [],
+      swiftSettings: swiftSettings
     ),
 
     .testTarget(
       name: "InlineMacUITests",
-      dependencies: ["InlineMacUI"]
+      dependencies: ["InlineMacUI"],
+      swiftSettings: swiftSettings
     ),
 
     .testTarget(
       name: "InlineMacHotkeysTests",
-      dependencies: ["InlineMacHotkeys"]
+      dependencies: ["InlineMacHotkeys"],
+      swiftSettings: swiftSettings
     ),
   ]
 )

@@ -77,6 +77,7 @@ public final class ChatDocumentsViewModel: ObservableObject, @unchecked Sendable
   // MARK: – Private helpers
 
   private func fetchDocuments() {
+    db.warnIfInMemoryDatabaseForObservation("ChatDocumentsViewModel.documents")
     cancellable = ValueObservation
       .tracking { [chatId] db in
         // 1. Pick all messages from the chat that have an associated document.
@@ -114,6 +115,7 @@ public final class ChatDocumentsViewModel: ObservableObject, @unchecked Sendable
   }
 
   private func fetchDocumentMessages() {
+    db.warnIfInMemoryDatabaseForObservation("ChatDocumentsViewModel.documentMessages")
     messagesCancellable = ValueObservation
       .tracking { [chatId] db in
         try DocumentMessage.queryRequest()

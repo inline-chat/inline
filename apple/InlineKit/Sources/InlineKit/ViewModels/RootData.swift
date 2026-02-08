@@ -27,6 +27,9 @@ public class RootData: ObservableObject {
 
     let userId = self.auth.getCurrentUserId()
 
+#if DEBUG
+    db.warnIfInMemoryDatabaseForObservation("RootData.currentUser")
+#endif
     observationCancellable =
       ValueObservation
         .tracking(

@@ -109,6 +109,7 @@ public final class ChatMediaViewModel: ObservableObject, @unchecked Sendable {
   }
 
   private func fetchMediaMessages() {
+    db.warnIfInMemoryDatabaseForObservation("ChatMediaViewModel.mediaMessages")
     messagesCancellable = ValueObservation
       .tracking { [chatId] db in
         try MediaMessage

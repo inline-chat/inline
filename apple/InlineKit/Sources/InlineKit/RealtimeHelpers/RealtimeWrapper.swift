@@ -35,7 +35,7 @@ public final actor Realtime: Sendable {
     api = RealtimeAPI()
 
     Task {
-      if Auth.shared.isLoggedIn {
+      if Auth.shared.getIsLoggedIn() {
         await ensureStarted()
       }
     }
@@ -116,9 +116,9 @@ public final actor Realtime: Sendable {
         }
 
         // Retry after delay if still logged in
-        if Auth.shared.isLoggedIn {
+        if Auth.shared.getIsLoggedIn() {
           try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
-          if Auth.shared.isLoggedIn {
+          if Auth.shared.getIsLoggedIn() {
             self.start()
           }
         }

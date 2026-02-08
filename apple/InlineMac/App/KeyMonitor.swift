@@ -16,6 +16,7 @@ public class KeyMonitor: Sendable {
   private var arrowKeyHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
   private var returnKeyHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
   private var vimNavHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
+  private var commandNumberHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
 
   private var localEventMonitor: Any?
   private var window: NSWindow
@@ -34,6 +35,7 @@ public class KeyMonitor: Sendable {
     case arrowKeys
     case returnKey
     case vimNavigation
+    case commandNumber
   }
 
   /// Add a handler for a specific event type
@@ -53,6 +55,8 @@ public class KeyMonitor: Sendable {
         returnKeyHandlers[key] = handler
       case .vimNavigation:
         vimNavHandlers[key] = handler
+      case .commandNumber:
+        commandNumberHandlers[key] = handler
     }
 
     return { [weak self] in
@@ -70,6 +74,8 @@ public class KeyMonitor: Sendable {
           self?.returnKeyHandlers.removeValue(forKey: key)
         case .vimNavigation:
           self?.vimNavHandlers.removeValue(forKey: key)
+        case .commandNumber:
+          self?.commandNumberHandlers.removeValue(forKey: key)
       }
     }
   }
@@ -89,6 +95,8 @@ public class KeyMonitor: Sendable {
         returnKeyHandlers.removeValue(forKey: key)
       case .vimNavigation:
         vimNavHandlers.removeValue(forKey: key)
+      case .commandNumber:
+        commandNumberHandlers.removeValue(forKey: key)
     }
   }
 
@@ -102,6 +110,16 @@ public class KeyMonitor: Sendable {
       // Is this really needed?
       guard event.window == window else {
         return event
+      }
+
+      // Cmd+1...9 (space/tab switching).
+      let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+      if modifiers == [.command],
+         let char = event.charactersIgnoringModifiers?.first,
+         "123456789".contains(char)
+      {
+        let handled = callHandler(for: .commandNumber, event: event)
+        if handled { return nil }
       }
 
       if event.keyCode == ESCAPE_KEY_CODE {
@@ -229,6 +247,13 @@ public class KeyMonitor: Sendable {
         }
       case .vimNavigation:
         if let last = vimNavHandlers.values.last {
+          last(event)
+          return true
+        } else {
+          return false
+        }
+      case .commandNumber:
+        if let last = commandNumberHandlers.values.last {
           last(event)
           return true
         } else {

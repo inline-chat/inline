@@ -91,6 +91,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   public var hasLink: Bool?
   public var entities: MessageEntities?
 
+  private static let log = Log.scoped("Message")
   private static let allowedLinkSchemes: Set<String> = ["http", "https"]
   private static let linkDetector: NSDataDetector? = {
     try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
@@ -720,7 +721,7 @@ public extension Message {
 
       if protocolMessage.hasReactions {
         for reaction in protocolMessage.reactions.reactions {
-          print("saving reaction", reaction)
+          Self.log.debug("Saving reaction: \(reaction)")
           try Reaction.save(db, protocolMessage: reaction)
         }
       }

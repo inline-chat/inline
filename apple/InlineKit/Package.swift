@@ -3,6 +3,10 @@
 
 import PackageDescription
 
+let swiftSettings: [SwiftSetting] = [
+  .swiftLanguageMode(.v6),
+]
+
 let package = Package(
   name: "InlineKit",
   defaultLocalization: "en",
@@ -65,7 +69,8 @@ let package = Package(
       name: "Logger",
       dependencies: [
         .product(name: "Sentry", package: "sentry-cocoa"),
-      ]
+      ],
+      swiftSettings: swiftSettings
     ),
 
     .target(
@@ -87,13 +92,12 @@ let package = Package(
         "Auth",
         "RealtimeV2",
       ],
-      swiftSettings: [
-        .swiftLanguageMode(.v6),
-      ]
+      swiftSettings: swiftSettings
     ),
 
     .target(
-      name: "InlineConfig"
+      name: "InlineConfig",
+      swiftSettings: swiftSettings
     ),
 
     .target(
@@ -103,7 +107,8 @@ let package = Package(
         .product(name: "AsyncAlgorithms", package: "swift-async-algorithms"),
         "InlineConfig",
         "Logger",
-      ]
+      ],
+      swiftSettings: swiftSettings
     ),
 
     .target(
@@ -111,7 +116,8 @@ let package = Package(
       dependencies: [
         .product(name: "SwiftProtobuf", package: "swift-protobuf"),
         "Logger",
-      ]
+      ],
+      swiftSettings: swiftSettings
     ),
 
     .target(
@@ -119,7 +125,8 @@ let package = Package(
       dependencies: [
         "InlineKit",
         "Logger",
-      ]
+      ],
+      swiftSettings: swiftSettings
     ),
 
     .target(
@@ -134,12 +141,14 @@ let package = Package(
       ],
       exclude: [
         "README.md",
-      ]
+      ],
+      swiftSettings: swiftSettings
     ),
 
     .testTarget(
       name: "InlineKitTests",
-      dependencies: ["InlineKit"]
+      dependencies: ["InlineKit"],
+      swiftSettings: swiftSettings
     ),
   ]
 )

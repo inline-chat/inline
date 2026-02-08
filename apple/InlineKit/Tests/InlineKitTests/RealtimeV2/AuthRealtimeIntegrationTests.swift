@@ -16,7 +16,7 @@ final class AuthRealtimeIntegrationTests {
 
     let realtime = RealtimeV2(
       transport: transport,
-      auth: auth,
+      auth: auth.handle,
       applyUpdates: apply,
       syncStorage: storage
     )
@@ -28,9 +28,6 @@ final class AuthRealtimeIntegrationTests {
     let token = "1:integrationToken"
     let userId: Int64 = 42
     await auth.saveCredentials(token: token, userId: userId)
-    Task {
-      await auth.events.send(.login(userId: userId, token: token))
-    }
 
     let didSend = await waitForCondition {
       let messages = await transport.sentMessages
