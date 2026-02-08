@@ -84,6 +84,12 @@ export interface ServerUpdate {
          */
         pinnedMessages: ServerChatUpdatePinnedMessages;
     } | {
+        oneofKind: "chatMoved";
+        /**
+         * @generated from protobuf field: server.ServerChatUpdateMoved chat_moved = 21;
+         */
+        chatMoved: ServerChatUpdateMoved;
+    } | {
         oneofKind: "spaceRemoveMember";
         /**
          * Space updates
@@ -129,6 +135,18 @@ export interface ServerUpdate {
          * @generated from protobuf field: server.ServerUserUpdateJoinSpace user_join_space = 17;
          */
         userJoinSpace: ServerUserUpdateJoinSpace;
+    } | {
+        oneofKind: "userReadMaxId";
+        /**
+         * @generated from protobuf field: server.ServerUserUpdateReadMaxId user_read_max_id = 20;
+         */
+        userReadMaxId: ServerUserUpdateReadMaxId;
+    } | {
+        oneofKind: "userMarkAsUnread";
+        /**
+         * @generated from protobuf field: server.ServerUserUpdateMarkAsUnread user_mark_as_unread = 22;
+         */
+        userMarkAsUnread: ServerUserUpdateMarkAsUnread;
     } | {
         oneofKind: undefined;
     };
@@ -268,6 +286,28 @@ export interface ServerChatUpdateInfo {
      */
     emoji?: string;
 }
+/**
+ * Update for a chat when the thread moves between home and a space.
+ *
+ * NOTE: v1 supports only private threads and only home <-> space moves.
+ * Keep the old/new space IDs for future cross-space moves.
+ *
+ * @generated from protobuf message server.ServerChatUpdateMoved
+ */
+export interface ServerChatUpdateMoved {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: optional int64 old_space_id = 2;
+     */
+    oldSpaceId?: bigint;
+    /**
+     * @generated from protobuf field: optional int64 new_space_id = 3;
+     */
+    newSpaceId?: bigint;
+}
 // ------------------------------------------------------------
 // Space updates
 // ------------------------------------------------------------
@@ -369,6 +409,42 @@ export interface ServerUserUpdateJoinSpace {
      */
     member?: Member;
 }
+/**
+ * Update for a user when they read messages up to a certain ID in a dialog.
+ *
+ * This is stored in the user bucket so read state can be repaired via catch-up after reconnect.
+ *
+ * @generated from protobuf message server.ServerUserUpdateReadMaxId
+ */
+export interface ServerUserUpdateReadMaxId {
+    /**
+     * @generated from protobuf field: Peer peer_id = 1;
+     */
+    peerId?: Peer;
+    /**
+     * @generated from protobuf field: int64 read_max_id = 2;
+     */
+    readMaxId: bigint;
+    /**
+     * @generated from protobuf field: int32 unread_count = 3;
+     */
+    unreadCount: number;
+}
+/**
+ * Update for a user when a dialog is marked/unmarked as unread.
+ *
+ * @generated from protobuf message server.ServerUserUpdateMarkAsUnread
+ */
+export interface ServerUserUpdateMarkAsUnread {
+    /**
+     * @generated from protobuf field: Peer peer_id = 1;
+     */
+    peerId?: Peer;
+    /**
+     * @generated from protobuf field: bool unread_mark = 2;
+     */
+    unreadMark: boolean;
+}
 // @generated message type with reflection information, may provide speed optimized methods
 class ServerUpdate$Type extends MessageType<ServerUpdate> {
     constructor() {
@@ -384,13 +460,16 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
             { no: 13, name: "chat_visibility", kind: "message", oneof: "update", T: () => ServerChatUpdateVisibility },
             { no: 15, name: "chat_info", kind: "message", oneof: "update", T: () => ServerChatUpdateInfo },
             { no: 16, name: "pinned_messages", kind: "message", oneof: "update", T: () => ServerChatUpdatePinnedMessages },
+            { no: 21, name: "chat_moved", kind: "message", oneof: "update", T: () => ServerChatUpdateMoved },
             { no: 9, name: "space_remove_member", kind: "message", oneof: "update", T: () => ServerSpaceUpdateRemoveMember },
             { no: 12, name: "space_member_update", kind: "message", oneof: "update", T: () => ServerSpaceUpdateMemberUpdate },
             { no: 19, name: "space_member_add", kind: "message", oneof: "update", T: () => ServerSpaceUpdateMemberAdd },
             { no: 10, name: "user_space_member_delete", kind: "message", oneof: "update", T: () => ServerUserUpdateSpaceMemberDelete },
             { no: 11, name: "user_chat_participant_delete", kind: "message", oneof: "update", T: () => ServerUserUpdateChatParticipantDelete },
             { no: 14, name: "user_dialog_archived", kind: "message", oneof: "update", T: () => ServerUserUpdateDialogArchived },
-            { no: 17, name: "user_join_space", kind: "message", oneof: "update", T: () => ServerUserUpdateJoinSpace }
+            { no: 17, name: "user_join_space", kind: "message", oneof: "update", T: () => ServerUserUpdateJoinSpace },
+            { no: 20, name: "user_read_max_id", kind: "message", oneof: "update", T: () => ServerUserUpdateReadMaxId },
+            { no: 22, name: "user_mark_as_unread", kind: "message", oneof: "update", T: () => ServerUserUpdateMarkAsUnread }
         ]);
     }
     create(value?: PartialMessage<ServerUpdate>): ServerUpdate {
@@ -467,6 +546,12 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
                         pinnedMessages: ServerChatUpdatePinnedMessages.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).pinnedMessages)
                     };
                     break;
+                case /* server.ServerChatUpdateMoved chat_moved */ 21:
+                    message.update = {
+                        oneofKind: "chatMoved",
+                        chatMoved: ServerChatUpdateMoved.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).chatMoved)
+                    };
+                    break;
                 case /* server.ServerSpaceUpdateRemoveMember space_remove_member */ 9:
                     message.update = {
                         oneofKind: "spaceRemoveMember",
@@ -507,6 +592,18 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
                     message.update = {
                         oneofKind: "userJoinSpace",
                         userJoinSpace: ServerUserUpdateJoinSpace.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userJoinSpace)
+                    };
+                    break;
+                case /* server.ServerUserUpdateReadMaxId user_read_max_id */ 20:
+                    message.update = {
+                        oneofKind: "userReadMaxId",
+                        userReadMaxId: ServerUserUpdateReadMaxId.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userReadMaxId)
+                    };
+                    break;
+                case /* server.ServerUserUpdateMarkAsUnread user_mark_as_unread */ 22:
+                    message.update = {
+                        oneofKind: "userMarkAsUnread",
+                        userMarkAsUnread: ServerUserUpdateMarkAsUnread.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userMarkAsUnread)
                     };
                     break;
                 default:
@@ -554,6 +651,9 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* server.ServerChatUpdatePinnedMessages pinned_messages = 16; */
         if (message.update.oneofKind === "pinnedMessages")
             ServerChatUpdatePinnedMessages.internalBinaryWrite(message.update.pinnedMessages, writer.tag(16, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerChatUpdateMoved chat_moved = 21; */
+        if (message.update.oneofKind === "chatMoved")
+            ServerChatUpdateMoved.internalBinaryWrite(message.update.chatMoved, writer.tag(21, WireType.LengthDelimited).fork(), options).join();
         /* server.ServerSpaceUpdateRemoveMember space_remove_member = 9; */
         if (message.update.oneofKind === "spaceRemoveMember")
             ServerSpaceUpdateRemoveMember.internalBinaryWrite(message.update.spaceRemoveMember, writer.tag(9, WireType.LengthDelimited).fork(), options).join();
@@ -575,6 +675,12 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* server.ServerUserUpdateJoinSpace user_join_space = 17; */
         if (message.update.oneofKind === "userJoinSpace")
             ServerUserUpdateJoinSpace.internalBinaryWrite(message.update.userJoinSpace, writer.tag(17, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerUserUpdateReadMaxId user_read_max_id = 20; */
+        if (message.update.oneofKind === "userReadMaxId")
+            ServerUserUpdateReadMaxId.internalBinaryWrite(message.update.userReadMaxId, writer.tag(20, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerUserUpdateMarkAsUnread user_mark_as_unread = 22; */
+        if (message.update.oneofKind === "userMarkAsUnread")
+            ServerUserUpdateMarkAsUnread.internalBinaryWrite(message.update.userMarkAsUnread, writer.tag(22, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -1087,6 +1193,67 @@ class ServerChatUpdateInfo$Type extends MessageType<ServerChatUpdateInfo> {
  */
 export const ServerChatUpdateInfo = new ServerChatUpdateInfo$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class ServerChatUpdateMoved$Type extends MessageType<ServerChatUpdateMoved> {
+    constructor() {
+        super("server.ServerChatUpdateMoved", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "old_space_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "new_space_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ServerChatUpdateMoved>): ServerChatUpdateMoved {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<ServerChatUpdateMoved>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerChatUpdateMoved): ServerChatUpdateMoved {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 old_space_id */ 2:
+                    message.oldSpaceId = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 new_space_id */ 3:
+                    message.newSpaceId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerChatUpdateMoved, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* optional int64 old_space_id = 2; */
+        if (message.oldSpaceId !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.oldSpaceId);
+        /* optional int64 new_space_id = 3; */
+        if (message.newSpaceId !== undefined)
+            writer.tag(3, WireType.Varint).int64(message.newSpaceId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerChatUpdateMoved
+ */
+export const ServerChatUpdateMoved = new ServerChatUpdateMoved$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class ServerSpaceUpdateRemoveMember$Type extends MessageType<ServerSpaceUpdateRemoveMember> {
     constructor() {
         super("server.ServerSpaceUpdateRemoveMember", [
@@ -1441,3 +1608,119 @@ class ServerUserUpdateJoinSpace$Type extends MessageType<ServerUserUpdateJoinSpa
  * @generated MessageType for protobuf message server.ServerUserUpdateJoinSpace
  */
 export const ServerUserUpdateJoinSpace = new ServerUserUpdateJoinSpace$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerUserUpdateReadMaxId$Type extends MessageType<ServerUserUpdateReadMaxId> {
+    constructor() {
+        super("server.ServerUserUpdateReadMaxId", [
+            { no: 1, name: "peer_id", kind: "message", T: () => Peer },
+            { no: 2, name: "read_max_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "unread_count", kind: "scalar", T: 5 /*ScalarType.INT32*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ServerUserUpdateReadMaxId>): ServerUserUpdateReadMaxId {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.readMaxId = 0n;
+        message.unreadCount = 0;
+        if (value !== undefined)
+            reflectionMergePartial<ServerUserUpdateReadMaxId>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerUserUpdateReadMaxId): ServerUserUpdateReadMaxId {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Peer peer_id */ 1:
+                    message.peerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* int64 read_max_id */ 2:
+                    message.readMaxId = reader.int64().toBigInt();
+                    break;
+                case /* int32 unread_count */ 3:
+                    message.unreadCount = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerUserUpdateReadMaxId, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Peer peer_id = 1; */
+        if (message.peerId)
+            Peer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* int64 read_max_id = 2; */
+        if (message.readMaxId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.readMaxId);
+        /* int32 unread_count = 3; */
+        if (message.unreadCount !== 0)
+            writer.tag(3, WireType.Varint).int32(message.unreadCount);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerUserUpdateReadMaxId
+ */
+export const ServerUserUpdateReadMaxId = new ServerUserUpdateReadMaxId$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerUserUpdateMarkAsUnread$Type extends MessageType<ServerUserUpdateMarkAsUnread> {
+    constructor() {
+        super("server.ServerUserUpdateMarkAsUnread", [
+            { no: 1, name: "peer_id", kind: "message", T: () => Peer },
+            { no: 2, name: "unread_mark", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ServerUserUpdateMarkAsUnread>): ServerUserUpdateMarkAsUnread {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.unreadMark = false;
+        if (value !== undefined)
+            reflectionMergePartial<ServerUserUpdateMarkAsUnread>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerUserUpdateMarkAsUnread): ServerUserUpdateMarkAsUnread {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Peer peer_id */ 1:
+                    message.peerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* bool unread_mark */ 2:
+                    message.unreadMark = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerUserUpdateMarkAsUnread, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Peer peer_id = 1; */
+        if (message.peerId)
+            Peer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* bool unread_mark = 2; */
+        if (message.unreadMark !== false)
+            writer.tag(2, WireType.Varint).bool(message.unreadMark);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerUserUpdateMarkAsUnread
+ */
+export const ServerUserUpdateMarkAsUnread = new ServerUserUpdateMarkAsUnread$Type();
