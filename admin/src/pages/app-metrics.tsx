@@ -70,7 +70,7 @@ export const AppMetricsPage = () => {
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Threads created today (UTC)</CardTitle>
+            <CardTitle>Threads created today</CardTitle>
           </CardHeader>
           <CardContent className="text-xl font-semibold">{metrics.threadsCreatedToday}</CardContent>
         </Card>
