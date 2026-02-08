@@ -1517,6 +1517,15 @@ const getStartOfUtcDay = (date: Date) => {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()))
 }
 
+// Use the DB clock to compute the UTC day window. This avoids issues where the
+// app process timezone/clock differs across deploys/instances and subtly shifts
+// "today" boundaries when passing JS Dates as SQL params.
+const getUtcDayWindowSql = () => {
+  const start = sql<Date>`date_trunc('day', timezone('utc', now()))`
+  const next = sql<Date>`${start} + interval '1 day'`
+  return { start, next }
+}
+
 const countConnectedUsersToday = async () => {
   const start = getStartOfUtcDay(new Date())
   const rows = await db
@@ -1575,12 +1584,13 @@ const getAppMetrics = async () => {
 
   const wau = wauRows.reduce((count, row) => (row.activeDays >= 3 ? count + 1 : count), 0)
 
+  const { start: startOfDayUtcSql, next: nextDayUtcSql } = getUtcDayWindowSql()
   const [threadsTodayRow] = await db
     .select({
       count: sql<number>`count(*)::int`,
     })
     .from(chats)
-    .where(and(eq(chats.type, "thread"), gte(chats.date, startOfDay), lt(chats.date, nextDay)))
+    .where(and(eq(chats.type, "thread"), gte(chats.date, startOfDayUtcSql), lt(chats.date, nextDayUtcSql)))
 
   const [totalUsersRow] = await db
     .select({
@@ -1623,6 +1633,7 @@ const getSpaceThreadMetricsToday = async () => {
   const startOfDay = getStartOfUtcDay(now)
   const nextDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000)
 
+  const { start: startOfDayUtcSql, next: nextDayUtcSql } = getUtcDayWindowSql()
   const rows = await db
     .select({
       spaceId: spaces.id,
@@ -1632,7 +1643,14 @@ const getSpaceThreadMetricsToday = async () => {
     })
     .from(chats)
     .innerJoin(spaces, eq(chats.spaceId, spaces.id))
-    .where(and(isNull(spaces.deleted), eq(chats.type, "thread"), gte(chats.date, startOfDay), lt(chats.date, nextDay)))
+    .where(
+      and(
+        isNull(spaces.deleted),
+        eq(chats.type, "thread"),
+        gte(chats.date, startOfDayUtcSql),
+        lt(chats.date, nextDayUtcSql),
+      ),
+    )
     .groupBy(spaces.id, spaces.name, spaces.handle)
     .orderBy(desc(sql`count(${chats.id})`))
     .limit(200)
