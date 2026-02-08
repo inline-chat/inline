@@ -19,6 +19,15 @@ struct NotificationSettingsButton: View {
     self.style = style
   }
 
+  private var buttonSize: CGFloat {
+    switch style {
+      case .standard:
+        Theme.sidebarTitleIconSize
+      case .sidebarFooter:
+        MainSidebarFooterMetrics.buttonSize
+    }
+  }
+
   var body: some View {
     button
       .popover(isPresented: $presented, arrowEdge: .trailing) {
@@ -35,8 +44,8 @@ struct NotificationSettingsButton: View {
     } label: {
       iconImage
         .frame(
-          width: Theme.sidebarTitleIconSize,
-          height: Theme.sidebarTitleIconSize,
+          width: buttonSize,
+          height: buttonSize,
           alignment: .center
         )
         .transition(.asymmetric(
@@ -58,7 +67,7 @@ struct NotificationSettingsButton: View {
           .foregroundStyle(.tertiary)
       case .sidebarFooter:
         image
-          .font(.system(size: 15, weight: .semibold))
+          .font(MainSidebarFooterMetrics.iconFont)
           .foregroundStyle(Color(NSColor.tertiaryLabelColor))
     }
   }
