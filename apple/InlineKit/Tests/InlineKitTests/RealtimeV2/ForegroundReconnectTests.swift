@@ -32,7 +32,7 @@ final class ConnectionManagerTests {
     await manager.connectNow()
 
     session.emit(.transportConnected)
-    let didHandshake = await waitForCondition { await session.startHandshakeCount == 1 }
+    let didHandshake = await waitForCondition(timeout: .seconds(3)) { await session.startHandshakeCount == 1 }
     #expect(didHandshake)
 
     await manager.shutdownForTesting()
