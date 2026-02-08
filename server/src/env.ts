@@ -1,9 +1,56 @@
 import { Log } from "@in/server/utils/log"
 
-export const isProd = process.env.NODE_ENV === "production"
+export const NODE_ENV = process.env.NODE_ENV ?? "development"
+export const isProd = NODE_ENV === "production"
+export const isDev = NODE_ENV === "development"
+export const isTest = NODE_ENV === "test"
 
-// REQUIRED FOR DEV AND PROD
-export const DATABASE_URL = process.env["DATABASE_URL"] as string
+export const PORT = Number(process.env["PORT"] ?? 8000)
+export const API_BASE_URL = isProd ? "https://api.inline.chat" : `http://localhost:${PORT}`
+
+export const EMAIL_PROVIDER: "SES" | "RESEND" = process.env["EMAIL_PROVIDER"] === "SES" ? "SES" : "RESEND"
+export const SEND_EMAIL = process.env["SEND_EMAIL"]
+
+const rawDatabaseUrl = process.env["DATABASE_URL"]
+const rawTestDatabaseUrl = process.env["TEST_DATABASE_URL"]
+
+const ensureLocalDatabaseUrl = (databaseUrl: string): string => {
+  let parsed: URL
+  try {
+    parsed = new URL(databaseUrl)
+  } catch {
+    throw new Error("Database URL must be a valid URL.")
+  }
+
+  const host = parsed.hostname
+  if (host !== "localhost" && host !== "127.0.0.1") {
+    throw new Error(`Refusing to use database URL with non-local host '${host}'.`)
+  }
+
+  return databaseUrl
+}
+
+export const DATABASE_URL = (() => {
+  if (isProd) {
+    return rawDatabaseUrl
+  }
+
+  if (isTest) {
+    // Tests must never run against remote DBs. Prefer TEST_DATABASE_URL when present,
+    // otherwise fall back to DATABASE_URL (so local dev doesn't need extra env for tests).
+    const baseUrl = rawTestDatabaseUrl ?? rawDatabaseUrl
+    if (!baseUrl) {
+      throw new Error("DATABASE_URL (or TEST_DATABASE_URL) is required when NODE_ENV=test.")
+    }
+    return ensureLocalDatabaseUrl(baseUrl)
+  }
+
+  // Non-test environments should never accidentally use TEST_DATABASE_URL.
+  if (!rawDatabaseUrl) {
+    throw new Error("DATABASE_URL is required when NODE_ENV is not test/production.")
+  }
+  return rawDatabaseUrl
+})() as string
 
 // REQUIRED FOR PROD
 export const AMAZON_ACCESS_KEY = process.env["AMAZON_ACCESS_KEY"] as string
@@ -28,6 +75,11 @@ export const PRELUDE_API_TOKEN = process.env["PRELUDE_API_TOKEN"] as string
 // OPTIONAL
 export const IPINFO_TOKEN = process.env["IPINFO_TOKEN"]
 export const OPENAI_API_KEY = process.env["OPENAI_API_KEY"]
+export const ANTHROPIC_API_KEY = process.env["ANTHROPIC_API_KEY"]
+export const TELEGRAM_TOKEN = process.env["TELEGRAM_TOKEN"]
+export const ADMIN_PUBLIC_API_ORIGIN = process.env["ADMIN_PUBLIC_API_ORIGIN"]
+export const DEMO_EMAIL = process.env["DEMO_EMAIL"]
+export const DEMO_CODE = process.env["DEMO_CODE"]
 
 export const LINEAR_CLIENT_ID = process.env["LINEAR_CLIENT_ID"]
 export const LINEAR_CLIENT_SECRET = process.env["LINEAR_CLIENT_SECRET"]
@@ -62,7 +114,7 @@ for (const variable of requiredProductionVariables) {
   if (!process.env[variable]) {
     if (isProd) {
       throw new Error(`Required production variable ${variable} is not defined.`)
-    } else {
+    } else if (!isTest) {
       Log.shared.warn(`Env variable ${variable} is not defined.`)
     }
   }
@@ -76,6 +128,7 @@ const optionalVariables = [
   "SENTRY_DSN",
   "IPINFO_TOKEN",
   "OPENAI_API_KEY",
+  "ANTHROPIC_API_KEY",
   "LINEAR_CLIENT_ID",
   "LINEAR_CLIENT_SECRET",
   "HARDCODED_TRANSLATION_CONTEXT",

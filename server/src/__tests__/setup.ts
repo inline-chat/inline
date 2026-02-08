@@ -1,4 +1,4 @@
-import { db, schema } from "../db"
+import { closeDb, db, initDb, schema } from "../db"
 import { migrateDb } from "../../scripts/helpers/migrate-db"
 import postgres from "postgres"
 import { beforeEach, afterEach, beforeAll, afterAll } from "bun:test"
@@ -10,10 +10,34 @@ import type { FunctionContext } from "@in/server/functions/_types"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 
 // Test database configuration
-const TEST_DB_NAME = "test_db"
-let originalDbUrl: string
-let testDbUrl: string
-let adminDb: postgres.Sql
+const BASE_TEST_DB_NAME = "test_db"
+
+// Bun can execute test files concurrently within the same process. The existing per-file
+// beforeAll/afterAll setup/teardown is not concurrency-safe (it can drop/close the DB while
+// other files are still running), which surfaces as postgres.js CONNECTION_ENDED errors.
+//
+// We keep one test DB per process and reference-count all test files that call setup/teardown.
+type GlobalTestDbState = {
+  refCount: number
+  setupPromise?: Promise<void>
+  teardownPromise?: Promise<void>
+  testDbName: string
+  originalDatabaseUrl?: string
+  provisioningDbUrl?: string
+  testDbUrl?: string
+}
+
+const getGlobalTestDbState = (): GlobalTestDbState => {
+  const key = Symbol.for("inline.testDbState")
+  const globalAny = globalThis as any
+  if (!globalAny[key]) {
+    globalAny[key] = {
+      refCount: 0,
+      testDbName: `${BASE_TEST_DB_NAME}_${process.pid}`,
+    } satisfies GlobalTestDbState
+  }
+  return globalAny[key] as GlobalTestDbState
+}
 
 // Test context type
 export interface TestContext {
@@ -31,93 +55,152 @@ export const defaultTestContext: TestContext = {
 
 // Database setup and teardown functions
 export const setupTestDatabase = async () => {
-  try {
-    // Store original database URL
-    originalDbUrl = process.env.DATABASE_URL!
+  const state = getGlobalTestDbState()
+  state.refCount += 1
 
-    // Create test database URL
-    const parts = originalDbUrl.split("/")
-    const databaseWithoutDb = parts.slice(0, -1).join("/")
-    testDbUrl = `${databaseWithoutDb}/${TEST_DB_NAME}`
-
-    // Create admin connection to create/drop the test database
-    adminDb = postgres(databaseWithoutDb, {
-      max: 1,
-      database: "postgres",
-      idle_timeout: 10,
-    })
-
-    // Check if database exists before trying to drop it
-    const dbExists = await adminDb`
-      SELECT 1 FROM pg_database WHERE datname = ${TEST_DB_NAME}
-    `
-
-    if (dbExists.length > 0) {
-      // Disconnect all connections to the test database
-      await adminDb.unsafe(`
-        SELECT pg_terminate_backend(pg_stat_activity.pid)
-        FROM pg_stat_activity
-        WHERE pg_stat_activity.datname = '${TEST_DB_NAME}'
-        AND pid <> pg_backend_pid()
-      `)
-
-      // Drop existing test database
-      await adminDb.unsafe(`DROP DATABASE IF EXISTS ${TEST_DB_NAME} WITH (FORCE)`)
-    }
-
-    // Create fresh test database
-    await adminDb.unsafe(`CREATE DATABASE ${TEST_DB_NAME}`)
-
-    // Close admin connection
-    await adminDb.end()
-
-    // Set test database URL for the test run
-    process.env.DATABASE_URL = testDbUrl
-
-    // Run migrations on the new database
-    await migrateDb()
-  } catch (error) {
-    console.error("Test database setup failed:", error)
-    throw error
+  if (state.setupPromise) {
+    return await state.setupPromise
   }
+
+  state.setupPromise = (async () => {
+    try {
+      const envDbUrl = process.env["TEST_DATABASE_URL"] ?? process.env["DATABASE_URL"]
+      if (!envDbUrl) {
+        throw new Error("TEST_DATABASE_URL (or DATABASE_URL) is required to run DB tests")
+      }
+
+      const parsed = new URL(envDbUrl)
+      const host = parsed.hostname
+      if (host !== "localhost" && host !== "127.0.0.1") {
+        throw new Error(`Refusing to run DB tests against non-local host '${host}'.`)
+      }
+
+      state.originalDatabaseUrl = process.env["DATABASE_URL"]
+      state.provisioningDbUrl = envDbUrl
+
+      const adminUrl = new URL(envDbUrl)
+      adminUrl.pathname = "/postgres"
+
+      const testUrl = new URL(envDbUrl)
+      testUrl.pathname = `/${state.testDbName}`
+      state.testDbUrl = testUrl.toString()
+
+      // Close any existing DB connections before we drop/create the database.
+      await closeDb().catch(() => {})
+
+      // Create admin connection to create/drop the test database
+      const adminDb = postgres(adminUrl.toString(), {
+        max: 1,
+        idle_timeout: 10,
+      })
+
+      // Check if database exists before trying to drop it
+      const dbExists = await adminDb`
+        SELECT 1 FROM pg_database WHERE datname = ${state.testDbName}
+      `
+
+      if (dbExists.length > 0) {
+        // Disconnect all connections to the test database
+        await adminDb.unsafe(`
+          SELECT pg_terminate_backend(pg_stat_activity.pid)
+          FROM pg_stat_activity
+          WHERE pg_stat_activity.datname = '${state.testDbName}'
+          AND pid <> pg_backend_pid()
+        `)
+
+        // Drop existing test database
+        await adminDb.unsafe(`DROP DATABASE IF EXISTS ${state.testDbName} WITH (FORCE)`)
+      }
+
+      // Create fresh test database
+      await adminDb.unsafe(`CREATE DATABASE ${state.testDbName}`)
+
+      // Close admin connection
+      await adminDb.end()
+
+      // Set test database URL for the test run (once per process).
+      process.env.DATABASE_URL = state.testDbUrl
+      initDb(state.testDbUrl)
+
+      // Run migrations on the new database
+      await migrateDb()
+    } catch (error) {
+      console.error("Test database setup failed:", error)
+      throw error
+    }
+  })()
+
+  return await state.setupPromise
 }
 
 export const teardownTestDatabase = async () => {
-  try {
-    // Create admin connection again for cleanup
-    const parts = originalDbUrl.split("/")
-    const databaseWithoutDb = parts.slice(0, -1).join("/")
-    adminDb = postgres(databaseWithoutDb, {
-      max: 1,
-      database: "postgres",
-      idle_timeout: 10,
-    })
+  const state = getGlobalTestDbState()
+  state.refCount = Math.max(0, state.refCount - 1)
 
-    // Check if database exists before trying to drop it
-    const dbExists = await adminDb`
-      SELECT 1 FROM pg_database WHERE datname = ${TEST_DB_NAME}
-    `
-
-    if (dbExists.length > 0) {
-      // Disconnect all connections to the test database
-      await adminDb.unsafe(`
-        SELECT pg_terminate_backend(pg_stat_activity.pid)
-        FROM pg_stat_activity
-        WHERE pg_stat_activity.datname = '${TEST_DB_NAME}'
-        AND pid <> pg_backend_pid()
-      `)
-
-      // Drop test database
-      await adminDb.unsafe(`DROP DATABASE IF EXISTS ${TEST_DB_NAME} WITH (FORCE)`)
-    }
-
-    await adminDb.end()
-
-    // Restore original database URL
-    process.env.DATABASE_URL = originalDbUrl
-  } catch (error) {
-    console.error("Test cleanup failed:", error)
+  if (state.refCount > 0) {
+    return
   }
+
+  if (state.teardownPromise) {
+    return await state.teardownPromise
+  }
+
+  state.teardownPromise = (async () => {
+    try {
+      await closeDb().catch(() => {})
+
+      const provisioningDbUrl = state.provisioningDbUrl
+      if (!provisioningDbUrl) {
+        return
+      }
+
+      // Create admin connection again for cleanup
+      const adminUrl = new URL(provisioningDbUrl)
+      adminUrl.pathname = "/postgres"
+      const adminDb = postgres(adminUrl.toString(), {
+        max: 1,
+        idle_timeout: 10,
+      })
+
+      // Check if database exists before trying to drop it
+      const dbExists = await adminDb`
+        SELECT 1 FROM pg_database WHERE datname = ${state.testDbName}
+      `
+
+      if (dbExists.length > 0) {
+        // Disconnect all connections to the test database
+        await adminDb.unsafe(`
+          SELECT pg_terminate_backend(pg_stat_activity.pid)
+          FROM pg_stat_activity
+          WHERE pg_stat_activity.datname = '${state.testDbName}'
+          AND pid <> pg_backend_pid()
+        `)
+
+        // Drop test database
+        await adminDb.unsafe(`DROP DATABASE IF EXISTS ${state.testDbName} WITH (FORCE)`)
+      }
+
+      await adminDb.end()
+
+      // Restore original database URL
+      if (state.originalDatabaseUrl) {
+        process.env.DATABASE_URL = state.originalDatabaseUrl
+      } else {
+        process.env.DATABASE_URL = provisioningDbUrl
+      }
+    } catch (error) {
+      console.error("Test cleanup failed:", error)
+    } finally {
+      // Reset so a subsequent test run in the same process can reinitialize.
+      state.setupPromise = undefined
+      state.teardownPromise = undefined
+      state.originalDatabaseUrl = undefined
+      state.provisioningDbUrl = undefined
+      state.testDbUrl = undefined
+    }
+  })()
+
+  return await state.teardownPromise
 }
 
 export const cleanDatabase = async () => {
@@ -159,8 +242,11 @@ export const cleanDatabase = async () => {
 // Utility functions for tests
 export const testUtils = {
   // Create a test user
-  async createUser(email: string = "test@example.com") {
+  async createUser(email: string = "test@example.com"): Promise<schema.DbUser> {
     const [user] = await db.insert(schema.users).values({ email }).returning()
+    if (!user) {
+      throw new Error("Failed to create test user")
+    }
     return user
   },
 
