@@ -2751,7 +2751,11 @@ extension MessageViewAppKit: NSMenuDelegate {
     let updatedMenu = createMenu(context: .message)
     menu.removeAllItems()
     for item in updatedMenu.items {
-      menu.addItem(item)
+      // NSMenuItem can only belong to one NSMenu. Copy before inserting to avoid:
+      // "Item to be inserted into menu already is in another menu".
+      if let copied = item.copy() as? NSMenuItem {
+        menu.addItem(copied)
+      }
     }
   }
 
