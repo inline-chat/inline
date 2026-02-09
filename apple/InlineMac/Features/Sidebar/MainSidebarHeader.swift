@@ -495,9 +495,10 @@ private final class MainSidebarHeaderPickerControl: NSControl {
 
   private func updateAppearance() {
     let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    // Match `MainSidebarItemCell` hover in the new main sidebar list.
     let hoverColor: NSColor = isDark
-      ? NSColor.white.withAlphaComponent(0.18)
-      : NSColor.black.withAlphaComponent(0.06)
+      ? NSColor.white.withAlphaComponent(0.07)
+      : NSColor.white.withAlphaComponent(0.20)
     let pressedColor: NSColor = isDark
       ? NSColor.white.withAlphaComponent(0.24)
       : NSColor.black.withAlphaComponent(0.10)
