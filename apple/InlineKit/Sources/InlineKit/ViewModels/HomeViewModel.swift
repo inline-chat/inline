@@ -251,6 +251,9 @@ public final class HomeViewModel: ObservableObject {
       .tracking { db in
         try Space
           .including(all: Space.members)
+          // Don't rely on SQLite's undefined row ordering. This keeps space lists (and Cmd+1...9 mapping)
+          // deterministic across observation updates.
+          .order(Space.Columns.id)
           .asRequest(of: HomeSpaceItem.self)
           .fetchAll(db)
       }
