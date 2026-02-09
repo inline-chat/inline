@@ -256,8 +256,12 @@ class MainSidebar: NSViewController {
     ) { [weak self] _ in
       self?.setContent(for: .inbox)
     }
+  }
 
+  override func viewWillAppear() {
+    super.viewWillAppear()
     // Cmd+1...9: switch to Home / spaces (always active, doesn't require the picker to be open).
+    // Install here (not viewDidLoad) so it reliably reattaches if the sidebar VC is ever removed/re-added.
     installSpaceSwitcherCommandNumberHandlerIfNeeded()
   }
 
@@ -284,23 +288,20 @@ class MainSidebar: NSViewController {
     guard spaceSwitcherCommandNumberUnsubscriber == nil else { return }
     guard let keyMonitor = dependencies.keyMonitor else { return }
 
-    spaceSwitcherCommandNumberUnsubscriber = keyMonitor.addHandler(
-      for: .commandNumber,
-      key: "sidebar_space_switcher"
-    ) { [weak self] event in
-      guard let self else { return }
-      guard self.dependencies.nav2 != nil else { return }
+    spaceSwitcherCommandNumberUnsubscriber = keyMonitor.addCommandNumberHandler(key: "sidebar_space_switcher") { [weak self] event in
+      guard let self else { return false }
+      guard self.dependencies.nav2 != nil else { return false }
 
       guard let char = event.charactersIgnoringModifiers?.first,
             let digit = Int(String(char)),
             (1...9).contains(digit)
-      else { return }
+      else { return false }
 
       // Match the picker's labeling:
       // Cmd+1 = Home, Cmd+2...9 = spaces in the same order as the picker list.
       let items = self.spacePickerItems()
       let index = digit - 1
-      guard items.indices.contains(index) else { return }
+      guard items.indices.contains(index) else { return false }
 
       self.handleSpacePickerSelection(items[index])
 
@@ -308,6 +309,7 @@ class MainSidebar: NSViewController {
       if self.spacePickerState.isVisible {
         self.hideSpacePicker()
       }
+      return true
     }
   }
 
