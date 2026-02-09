@@ -1,23 +1,56 @@
 import { Log } from "@in/server/utils/log"
-import { TELEGRAM_TOKEN } from "@in/server/env"
+import { API_BASE_URL, INLINE_ALERTS_BOT_TOKEN, INLINE_ALERTS_CHAT_ID, TELEGRAM_ALERTS_CHAT_ID, TELEGRAM_TOKEN } from "@in/server/env"
 
 export const sendBotEvent = (text: string) => {
+  // Fire-and-forget. These notifications are best-effort and should never affect the caller.
+  void sendTelegramBotEvent(text)
+  void sendInlineBotEvent(text)
+}
+
+const DEFAULT_TELEGRAM_ALERTS_CHAT_ID = "-1002262866594"
+
+async function sendTelegramBotEvent(text: string) {
+  const telegramToken = TELEGRAM_TOKEN
+  if (!telegramToken) return
+
+  const chatId = TELEGRAM_ALERTS_CHAT_ID ?? DEFAULT_TELEGRAM_ALERTS_CHAT_ID
+
   try {
-    const telegramToken = TELEGRAM_TOKEN
-    const chatId = "-1002262866594"
-    fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
+    await fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+      }),
+    })
+  } catch (error) {
+    Log.shared.error("Failed to send Telegram bot event", { error })
+  }
+}
+
+async function sendInlineBotEvent(text: string) {
+  const botToken = INLINE_ALERTS_BOT_TOKEN
+  const chatId = INLINE_ALERTS_CHAT_ID ? Number(INLINE_ALERTS_CHAT_ID) : null
+  if (!botToken || !chatId || !Number.isFinite(chatId) || chatId <= 0) return
+
+  // Random 64-bit integer string is preferred (matches API semantics).
+  const randomId = (BigInt(Date.now()) * 1000n + BigInt(Math.floor(Math.random() * 1000))).toString()
+
+  try {
+    await fetch(`${API_BASE_URL}/v1/sendMessage`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        authorization: `Bearer ${botToken}`,
       },
       body: JSON.stringify({
-        chat_id: chatId,
-        text: text,
+        peerThreadId: chatId,
+        text,
+        randomId,
       }),
-    }).catch((error) => {
-      Log.shared.error("Failed to send bot event", error)
     })
   } catch (error) {
-    Log.shared.error("Failed to send bot event", error)
+    Log.shared.error("Failed to send Inline bot event", { error })
   }
 }
