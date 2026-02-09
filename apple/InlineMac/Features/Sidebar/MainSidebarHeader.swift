@@ -174,8 +174,13 @@ private final class MainSidebarHeaderRowView: NSView {
     static let rowHeight: CGFloat = MainSidebar.itemHeight
     static let rowCornerRadius: CGFloat = 10
 
-    static let trailingPadding: CGFloat = MainSidebar.innerEdgeInsets
+    // Picker background should align with the list rows below (which are inset by outerEdgeInsets only).
+    // HeaderView itself is already inset by outerEdgeInsets, so the picker can go flush to this view.
+    static let pickerTrailingPadding: CGFloat = 0
+    // Keep the dots button aligned with other trailing accessory buttons in the sidebar (inset).
+    static let manageButtonTrailingPadding: CGFloat = MainSidebar.innerEdgeInsets
     static let pickerVerticalPadding: CGFloat = 0
+    static let pickerTrailingOverlaySpacing: CGFloat = 6
 
     static let iconSize: CGFloat = Theme.sidebarTitleIconSize
     static let iconTrailingPadding: CGFloat = MainSidebar.iconTrailingPadding
@@ -189,19 +194,14 @@ private final class MainSidebarHeaderRowView: NSView {
   var onOpenMenu: (() -> Void)?
 
   private var item: SpaceHeaderItem = .home
+  private var showsManageButton: Bool = false
+  private var isHovering: Bool = false { didSet { updateManageButtonVisibility() } }
+  private var trackingAreaRef: NSTrackingArea?
 
   private let pickerControl = MainSidebarHeaderPickerControl()
 
-  private let spacer: NSView = {
-    let view = NSView()
-    view.translatesAutoresizingMaskIntoConstraints = false
-    view.setContentHuggingPriority(.defaultLow, for: .horizontal)
-    view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-    return view
-  }()
-
   private let manageButton = MainSidebarHeaderIconButton(
-    symbolName: "ellipsis.circle",
+    symbolName: "ellipsis",
     accessibilityLabel: "Space settings"
   )
 
@@ -221,26 +221,49 @@ private final class MainSidebarHeaderRowView: NSView {
 
   func configure(item: SpaceHeaderItem, showsManageButton: Bool) {
     self.item = item
+    self.showsManageButton = showsManageButton
     pickerControl.configure(item: item)
-    manageButton.isHidden = !showsManageButton
+    pickerControl.trailingAccessoryInset = showsManageButton
+      ? (
+        Metrics.manageButtonTrailingPadding
+          + Metrics.manageButtonSize
+          + Metrics.pickerTrailingOverlaySpacing
+      )
+      : 0
+    updateManageButtonVisibility()
   }
 
   func setExpanded(_ expanded: Bool) {
     pickerControl.isExpanded = expanded
   }
 
-  private func setupView() {
-    let content = NSStackView()
-    content.translatesAutoresizingMaskIntoConstraints = false
-    content.orientation = .horizontal
-    content.alignment = .centerY
-    content.spacing = 8
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    if let trackingAreaRef {
+      removeTrackingArea(trackingAreaRef)
+    }
+    let options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect]
+    let area = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
+    addTrackingArea(area)
+    trackingAreaRef = area
+  }
 
+  override func mouseEntered(with event: NSEvent) {
+    super.mouseEntered(with: event)
+    isHovering = true
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    super.mouseExited(with: event)
+    isHovering = false
+  }
+
+  private func setupView() {
     pickerControl.translatesAutoresizingMaskIntoConstraints = false
     pickerControl.target = self
     pickerControl.action = #selector(handlePicker)
-    pickerControl.setContentHuggingPriority(.required, for: .horizontal)
-    // Allow truncation when the sidebar gets narrow (future resizable sidebar).
+    // We want the control to stretch full-width like sidebar rows.
+    pickerControl.setContentHuggingPriority(.defaultLow, for: .horizontal)
     pickerControl.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
     manageButton.translatesAutoresizingMaskIntoConstraints = false
@@ -249,22 +272,27 @@ private final class MainSidebarHeaderRowView: NSView {
     manageButton.setContentHuggingPriority(.required, for: .horizontal)
     manageButton.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-    content.addArrangedSubview(pickerControl)
-    content.addArrangedSubview(spacer)
-    content.addArrangedSubview(manageButton)
-
-    addSubview(content)
+    addSubview(pickerControl)
+    addSubview(manageButton)
     NSLayoutConstraint.activate([
       // Match the old insets: headerView is already inset by outerEdgeInsets.
       // Picker control has its own internal padding; avoid double-insetting on the leading edge.
-      content.leadingAnchor.constraint(equalTo: leadingAnchor),
-      content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.trailingPadding),
-      content.topAnchor.constraint(equalTo: topAnchor),
-      content.bottomAnchor.constraint(equalTo: bottomAnchor),
+      pickerControl.leadingAnchor.constraint(equalTo: leadingAnchor),
+      pickerControl.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.pickerTrailingPadding),
+      pickerControl.centerYAnchor.constraint(equalTo: centerYAnchor),
+      pickerControl.heightAnchor.constraint(equalToConstant: Metrics.rowHeight),
 
+      // Place the "more" button on top of the picker, aligned to the trailing edge.
+      manageButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.manageButtonTrailingPadding),
+      manageButton.centerYAnchor.constraint(equalTo: centerYAnchor),
       manageButton.widthAnchor.constraint(equalToConstant: Metrics.manageButtonSize),
       manageButton.heightAnchor.constraint(equalToConstant: Metrics.manageButtonSize),
     ])
+  }
+
+  private func updateManageButtonVisibility() {
+    // Only show the dots menu affordance on hover (and only for space tabs).
+    manageButton.isHidden = !(showsManageButton && isHovering)
   }
 
   @objc private func handlePicker() {
@@ -283,6 +311,13 @@ private final class MainSidebarHeaderPickerControl: NSControl {
     static let iconTrailingPadding: CGFloat = MainSidebar.iconTrailingPadding
     static let horizontalPadding: CGFloat = 8
     static let height: CGFloat = MainSidebar.itemHeight
+  }
+
+  /// Extra trailing space reserved for an overlaid accessory (e.g. the "more" button).
+  /// This keeps the title from rendering underneath the overlay while allowing the control
+  /// background to extend to the trailing edge.
+  var trailingAccessoryInset: CGFloat = 0 {
+    didSet { updateContentInsets() }
   }
 
   var isExpanded: Bool = false {
@@ -312,6 +347,8 @@ private final class MainSidebarHeaderPickerControl: NSControl {
     return label
   }()
 
+  private var contentTrailingConstraint: NSLayoutConstraint?
+
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     translatesAutoresizingMaskIntoConstraints = false
@@ -331,6 +368,7 @@ private final class MainSidebarHeaderPickerControl: NSControl {
       + Metrics.iconTrailingPadding
       + titleWidth
       + (Metrics.horizontalPadding * 2)
+      + trailingAccessoryInset
     return NSSize(width: contentWidth, height: Metrics.height)
   }
 
@@ -436,12 +474,23 @@ private final class MainSidebarHeaderPickerControl: NSControl {
     titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
     addSubview(content)
+    let trailing = content.trailingAnchor.constraint(
+      equalTo: trailingAnchor,
+      constant: -(Metrics.horizontalPadding + trailingAccessoryInset)
+    )
+    contentTrailingConstraint = trailing
     NSLayoutConstraint.activate([
       content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Metrics.horizontalPadding),
-      content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Metrics.horizontalPadding),
+      trailing,
       content.topAnchor.constraint(equalTo: topAnchor),
       content.bottomAnchor.constraint(equalTo: bottomAnchor),
     ])
+  }
+
+  private func updateContentInsets() {
+    contentTrailingConstraint?.constant = -(Metrics.horizontalPadding + trailingAccessoryInset)
+    invalidateIntrinsicContentSize()
+    needsLayout = true
   }
 
   private func updateAppearance() {
@@ -463,7 +512,8 @@ private final class MainSidebarHeaderPickerControl: NSControl {
       NSColor.clear
     }
 
-    let textColor: NSColor = (isExpanded || isHovering || isPressed) ? .labelColor : .secondaryLabelColor
+    // Keep icon/text color stable on hover; only show "active" text when expanded (or pressed).
+    let textColor: NSColor = (isExpanded || isPressed) ? .labelColor : .secondaryLabelColor
     layer?.backgroundColor = backgroundColor.cgColor
     titleLabel.textColor = textColor
     homeIconView.contentTintColor = textColor
@@ -473,15 +523,12 @@ private final class MainSidebarHeaderPickerControl: NSControl {
 private final class MainSidebarHeaderIconButton: NSButton {
   private enum Metrics {
     static let cornerRadius: CGFloat = 8
-    static let iconSize: CGFloat = 15
+    // Match sidebar footer icon sizing.
+    static let iconSize: CGFloat = 13
   }
 
   private let symbolName: String
   private let labelText: String
-  private var trackingAreaRef: NSTrackingArea?
-  private var isHovering: Bool = false {
-    didSet { updateBackground() }
-  }
 
   init(symbolName: String, accessibilityLabel: String) {
     self.symbolName = symbolName
@@ -505,27 +552,6 @@ private final class MainSidebarHeaderIconButton: NSButton {
     updateBackground()
   }
 
-  override func updateTrackingAreas() {
-    super.updateTrackingAreas()
-    if let trackingAreaRef {
-      removeTrackingArea(trackingAreaRef)
-    }
-    let options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect]
-    let area = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
-    addTrackingArea(area)
-    trackingAreaRef = area
-  }
-
-  override func mouseEntered(with event: NSEvent) {
-    super.mouseEntered(with: event)
-    isHovering = true
-  }
-
-  override func mouseExited(with event: NSEvent) {
-    super.mouseExited(with: event)
-    isHovering = false
-  }
-
   private func setup() {
     wantsLayer = true
     layer?.cornerRadius = Metrics.cornerRadius
@@ -541,10 +567,12 @@ private final class MainSidebarHeaderIconButton: NSButton {
   }
 
   private func updateAppearance() {
-    let config = NSImage.SymbolConfiguration(pointSize: Metrics.iconSize, weight: .semibold)
+    // Keep it subtle: smaller and thinner than the default header glyph.
+    let config = NSImage.SymbolConfiguration(pointSize: Metrics.iconSize, weight: .regular)
     image = NSImage(systemSymbolName: symbolName, accessibilityDescription: labelText)?
       .withSymbolConfiguration(config)
-    // Tint is finalized in updateBackground() so hover/pressed can feel more "active".
+    // Keep the icon tint stable; the picker underneath already has hover affordance.
+    contentTintColor = .tertiaryLabelColor
   }
 
   override func accessibilityLabel() -> String? {
@@ -553,27 +581,16 @@ private final class MainSidebarHeaderIconButton: NSButton {
 
   private func updateBackground() {
     let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-    let hoverColor: NSColor = isDark
-      ? NSColor.white.withAlphaComponent(0.18)
-      : NSColor.black.withAlphaComponent(0.06)
     let pressedColor: NSColor = isDark
       ? NSColor.white.withAlphaComponent(0.24)
       : NSColor.black.withAlphaComponent(0.10)
 
     let color: NSColor = if isHighlighted {
       pressedColor
-    } else if isHovering {
-      hoverColor
     } else {
       .clear
     }
     layer?.backgroundColor = color.cgColor
-
-    if isHighlighted || isHovering {
-      contentTintColor = .labelColor
-    } else {
-      contentTintColor = .tertiaryLabelColor
-    }
   }
 }
 
