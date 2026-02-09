@@ -56,14 +56,24 @@ public struct ParticipantsToolbarButton: View {
       .frame(width: 180, height: 240)
     }
     .sheet(isPresented: $showAddParticipants) {
-      if let chat, let spaceId = chat.spaceId {
-        AddParticipantsSheet(
-          chatId: chat.id,
-          spaceId: spaceId,
-          currentParticipants: participantsViewModel.participants,
-          db: dependencies.database,
-          isPresented: $showAddParticipants
-        )
+      if let chat {
+        if let spaceId = chat.spaceId {
+          AddParticipantsSheet(
+            chatId: chat.id,
+            spaceId: spaceId,
+            currentParticipants: participantsViewModel.participants,
+            db: dependencies.database,
+            isPresented: $showAddParticipants
+          )
+        } else {
+          AddHomeParticipantsSheet(
+            chatId: chat.id,
+            currentUserId: dependencies.auth.currentUserId,
+            currentParticipants: participantsViewModel.participants,
+            db: dependencies.database,
+            isPresented: $showAddParticipants
+          )
+        }
       }
     }
     .task {

@@ -16,6 +16,8 @@ public struct ParticipantsPopoverView: View {
   @State private var chat: Chat?
   @State private var isOwnerOrAdmin = false
   @State private var isCreator = false
+  @State private var showRemoveConfirmation = false
+  @State private var participantPendingRemoval: UserInfo?
   @State private var showVisibilityPicker = false
   @State private var selectedParticipantIds: Set<Int64> = []
   @State private var chatSubscription: AnyCancellable?
@@ -56,15 +58,18 @@ public struct ParticipantsPopoverView: View {
     participants.count >= 5
   }
 
-  private var canAddParticipants: Bool {
+  private var canManageParticipants: Bool {
     guard case .thread = peer,
           let chat,
-          chat.isPublic == false,
-          chat.spaceId != nil
+          chat.isPublic == false
     else {
       return false
     }
-    return true
+    return isOwnerOrAdmin || isCreator
+  }
+
+  private var canAddParticipants: Bool {
+    canManageParticipants
   }
 
   private var canToggleVisibility: Bool {
@@ -135,7 +140,12 @@ public struct ParticipantsPopoverView: View {
           ForEach(filteredParticipants, id: \.id) { participant in
             ParticipantRow(
               participant: participant,
-              isCurrentUser: participant.id == currentUserId
+              isCurrentUser: participant.id == currentUserId,
+              canManageParticipants: canManageParticipants,
+              onRequestRemove: {
+                participantPendingRemoval = participant
+                showRemoveConfirmation = true
+              }
             )
             .padding(.horizontal, 10)
           }
@@ -149,6 +159,20 @@ public struct ParticipantsPopoverView: View {
       subscribeToChatUpdates()
       await loadChat()
     }
+    .confirmationDialog(
+      "Remove participant?",
+      isPresented: $showRemoveConfirmation,
+      presenting: participantPendingRemoval,
+      actions: { participant in
+        Button("Cancel", role: .cancel) {}
+        Button("Remove", role: .destructive) {
+          removeParticipant(userId: participant.user.id)
+        }
+      },
+      message: { participant in
+        Text("Remove \(participant.user.shortDisplayName) from this chat?")
+      }
+    )
     .sheet(isPresented: $showVisibilityPicker) {
       if let chat, let spaceId = chat.spaceId {
         ChatVisibilityParticipantsSheet(
@@ -173,10 +197,17 @@ public struct ParticipantsPopoverView: View {
       }
       chat = loadedChat
 
-      if let loadedChat,
-         let spaceId = loadedChat.spaceId,
-         let currentUserId = dependencies.auth.currentUserId
-      {
+      guard let loadedChat, let currentUserId = dependencies.auth.currentUserId else {
+        isOwnerOrAdmin = false
+        isCreator = false
+        return
+      }
+
+      // Creator status shouldn't depend on the chat having a space.
+      isCreator = loadedChat.createdBy == currentUserId
+
+      // Owner/admin only makes sense for space-backed chats.
+      if let spaceId = loadedChat.spaceId {
         let member = try await dependencies.database.dbWriter.read { db in
           try Member
             .filter(Column("spaceId") == spaceId)
@@ -184,10 +215,8 @@ public struct ParticipantsPopoverView: View {
             .fetchOne(db)
         }
         isOwnerOrAdmin = member?.role == .owner || member?.role == .admin
-        isCreator = loadedChat.createdBy == currentUserId
       } else {
         isOwnerOrAdmin = false
-        isCreator = false
       }
     } catch {
       Log.shared.error("Failed to load chat for participants", error: error)
@@ -227,11 +256,32 @@ public struct ParticipantsPopoverView: View {
       }
     }
   }
+
+  private func removeParticipant(userId: Int64) {
+    guard case let .thread(chatId) = peer else { return }
+    if let currentUserId, currentUserId == userId { return }
+
+    Task {
+      do {
+        _ = try await Api.realtime.send(.removeChatParticipant(chatID: chatId, userID: userId))
+        do {
+          try await Api.realtime.send(.getChatParticipants(chatID: chatId))
+        } catch {
+          Log.shared.error("Failed to refetch chat participants after removal", error: error)
+        }
+      } catch {
+        Log.shared.error("Failed to remove participant", error: error)
+      }
+    }
+  }
 }
 
 private struct ParticipantRow: View {
   let participant: UserInfo
   let isCurrentUser: Bool
+  let canManageParticipants: Bool
+  let onRequestRemove: () -> Void
+  @State private var isHovered = false
 
   var body: some View {
     HStack(spacing: 8) {
@@ -251,9 +301,31 @@ private struct ParticipantRow: View {
       }
 
       Spacer()
+
+      if canManageParticipants, !isCurrentUser {
+        Button(action: onRequestRemove) {
+          Image(systemName: "minus.circle.fill")
+            .font(.system(size: 14))
+            .foregroundColor(.red)
+            .opacity(isHovered ? 0.9 : 0.0)
+        }
+        .buttonStyle(.plain)
+        .allowsHitTesting(isHovered)
+        .accessibilityLabel("Remove participant")
+      }
     }
     .padding(.vertical, 3)
     .contentShape(Rectangle())
+    .onHover { hovering in
+      isHovered = hovering
+    }
+    .contextMenu {
+      if canManageParticipants, !isCurrentUser {
+        Button(role: .destructive, action: onRequestRemove) {
+          Label("Remove Participant", systemImage: "minus.circle")
+        }
+      }
+    }
   }
 
   private var displayName: String {
