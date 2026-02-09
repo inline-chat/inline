@@ -7,7 +7,7 @@ import { sql, count } from "drizzle-orm"
 import { ipinfo } from "@in/server/libs/ipinfo"
 import { getIp } from "@in/server/utils/ip"
 import { Log } from "@in/server/utils/log"
-import { TELEGRAM_TOKEN } from "@in/server/env"
+import { sendBotEvent } from "@in/server/modules/bot-events"
 
 export const waitlist = new Elysia({ prefix: "/waitlist" })
   .use(setup)
@@ -21,10 +21,6 @@ export const waitlist = new Elysia({ prefix: "/waitlist" })
       await insertIntoWaitlist(body)
 
       try {
-        // Send user data to Telegram API
-        const telegramToken = TELEGRAM_TOKEN
-        const chatId = "-1002262866594"
-
         let location: string | undefined
         try {
           let ip = await getIp(request, server)
@@ -35,19 +31,9 @@ export const waitlist = new Elysia({ prefix: "/waitlist" })
         }
 
         const message = `New Waitlist Subscriber: \n${body.email} \n(${location}, ${body.timeZone})`
-
-        await fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            chat_id: chatId,
-            text: message,
-          }),
-        })
+        sendBotEvent(message)
       } catch (error) {
-        Log.shared.error("Error sending message to Telegram:", { error })
+        Log.shared.error("Error sending waitlist alert:", { error })
       }
 
       return {
