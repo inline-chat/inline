@@ -183,6 +183,21 @@ codesign_path() {
   /usr/bin/codesign --verbose -f -s "${MACOS_CERTIFICATE_NAME}" -o runtime --timestamp "${path}"
 }
 
+if command -v rg >/dev/null 2>&1; then
+  GREP_CMD=(rg -q)
+else
+  GREP_CMD=(grep -q)
+fi
+
+verify_codesign_timestamp() {
+  local path="$1"
+  /usr/bin/codesign --verify --deep --strict --verbose=2 "${path}"
+  if ! /usr/bin/codesign -dv --verbose=4 "${path}" 2>&1 | "${GREP_CMD[@]}" "Timestamp="; then
+    echo "Code signature missing timestamp: ${path}" >&2
+    exit 1
+  fi
+}
+
 codesign_path "${SPARKLE_FRAMEWORK}/Versions/B/XPCServices/Downloader.xpc"
 codesign_path "${SPARKLE_FRAMEWORK}/Versions/B/XPCServices/Installer.xpc"
 codesign_path "${SPARKLE_FRAMEWORK}/Versions/B/Autoupdate"
@@ -198,6 +213,13 @@ done
 /usr/bin/codesign --verbose -f -s "${MACOS_CERTIFICATE_NAME}" -o runtime --timestamp \
   --entitlements "${EFFECTIVE_ENTITLEMENTS_PATH}" \
   "${APP_PATH}"
+
+# Fail fast before we spend time notarizing: verify codesign + timestamp on the app and embedded bundles.
+verify_codesign_timestamp "${APP_PATH}"
+find "${APP_PATH}/Contents" -type d \( -name "*.framework" -o -name "*.app" -o -name "*.xpc" -o -name "*.appex" \) -print0 \
+  | while IFS= read -r -d '' bundle; do
+      verify_codesign_timestamp "${bundle}"
+    done
 
 mkdir -p "${OUTPUT_DIR}"
 CREATE_DMG_OUTPUT_DIR="${OUTPUT_DIR}"
