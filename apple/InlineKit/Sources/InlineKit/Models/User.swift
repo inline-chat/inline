@@ -17,6 +17,7 @@ public struct ApiUser: Codable, Hashable, Sendable {
   public var username: String?
   public var photo: [ApiPhoto]?
   public var timeZone: String?
+  public var bot: Bool? = nil
   public static let preview = Self(
     id: 1,
     email: "mo@inline.chat",
@@ -49,6 +50,7 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var profileCdnUrl: String?
   public var profileLocalPath: String?
   public var profileFileUniqueId: String?
+  public var bot: Bool = false
 
   public enum Columns {
     static let id = Column(CodingKeys.id)
@@ -66,6 +68,7 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     static let profileCdnUrl = Column(CodingKeys.profileCdnUrl)
     static let profileLocalPath = Column(CodingKeys.profileLocalPath)
     static let profileFileUniqueId = Column(CodingKeys.profileFileUniqueId)
+    static let bot = Column(CodingKeys.bot)
   }
 
   // Add hasMany for all files (including historical profile photos)
@@ -133,6 +136,7 @@ public struct User: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     self.lastName = lastName
     date = Date.now
     self.username = username
+    bot = false
   }
 
   // MARK: - Computed
@@ -169,6 +173,7 @@ public extension User {
     pendingSetup = apiUser.pendingSetup ?? false
     phoneNumber = apiUser.phoneNumber ?? nil
     timeZone = apiUser.timeZone ?? nil
+    bot = apiUser.bot ?? false
   }
 
   static func fromTimestamp(from: Int) -> Date {
@@ -241,6 +246,7 @@ public extension ApiUser {
       user.email = user.email ?? existing.email
       user.pendingSetup = user.pendingSetup ?? existing.pendingSetup
       user.timeZone = user.timeZone ?? existing.timeZone
+      user.bot = bot ?? existing.bot
       user.profileCdnUrl = profileCdnUrl ?? existing.profileCdnUrl
       user.profileLocalPath = shouldClearCache ? nil : existing.profileLocalPath
       user.profileFileUniqueId = profileFileUniqueId ?? existing.profileFileUniqueId
@@ -279,6 +285,7 @@ public extension User {
     timeZone = user.hasTimeZone ? user.timeZone : nil
     date = Date() // unused field
     // don't preserve pendingSetup
+    bot = user.hasBot ? user.bot : false
 
     if !min {
       email = user.hasEmail ? user.email : nil
@@ -325,6 +332,10 @@ public extension User {
       user.profileCdnUrl = user.profileCdnUrl ?? existing.profileCdnUrl
       user.profileLocalPath = shouldClearCache ? nil : existing.profileLocalPath
       user.profileFileUniqueId = user.profileFileUniqueId ?? existing.profileFileUniqueId
+      // Preserve bot flag if not present in the update payload.
+      if protocolUser.hasBot == false {
+        user.bot = existing.bot
+      }
 
       // Remove old cached file from disk if cache is being invalidated
       if shouldClearCache, let localURL = existing.getLocalURL() {

@@ -42,12 +42,17 @@ public struct MemberManagementView: View {
 
   private var inlineStaffCount: Int {
     displayedMembers.count(where: { member in
-      member.userInfo.user.email?.lowercased().hasSuffix("@inline.chat") == true
+      let user = member.userInfo.user
+      return user.bot == false && user.email?.lowercased().hasSuffix("@inline.chat") == true
     })
   }
 
-  private var memberCountExcludingStaff: Int {
-    max(0, displayedMembers.count - inlineStaffCount)
+  private var botCount: Int {
+    displayedMembers.count(where: { $0.userInfo.user.bot == true })
+  }
+
+  private var memberCountExcludingStaffAndBots: Int {
+    max(0, displayedMembers.count - inlineStaffCount - botCount)
   }
 
   private static let joinedFormatter: DateFormatter = {
@@ -113,7 +118,7 @@ public struct MemberManagementView: View {
           .fontWeight(.semibold)
 
         let spaceName = membersViewModel.space?.displayName ?? "Space"
-        let total = memberCountExcludingStaff
+        let total = memberCountExcludingStaffAndBots
         let inlineCount = inlineStaffCount
         let base = "\(total) member\(total == 1 ? "" : "s")"
         let detail = inlineCount > 0 ? " (and \(inlineCount) Inline staff)" : ""
@@ -212,6 +217,10 @@ public struct MemberManagementView: View {
             inlineStaffBadge
           }
 
+          if member.userInfo.user.bot == true {
+            botBadge
+          }
+
           if member.userInfo.user.pendingSetup == true {
             pendingInviteBadge
           }
@@ -288,8 +297,21 @@ public struct MemberManagementView: View {
       .foregroundStyle(Color.blue)
   }
 
+  private var botBadge: some View {
+    Text("Bot")
+      .font(.caption2)
+      .fontWeight(.semibold)
+      .padding(.horizontal, 6)
+      .padding(.vertical, 2)
+      .background(
+        Capsule()
+          .fill(Color.orange.opacity(0.18))
+      )
+      .foregroundStyle(Color.orange)
+  }
+
   private func isInlineStaff(_ user: User) -> Bool {
-    user.email?.lowercased().hasSuffix("@inline.chat") == true
+    user.bot == false && user.email?.lowercased().hasSuffix("@inline.chat") == true
   }
 
   private func isRestricted(_ member: FullMemberItem) -> Bool {

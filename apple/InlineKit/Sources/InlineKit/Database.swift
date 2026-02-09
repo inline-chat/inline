@@ -688,6 +688,12 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("user bot") { db in
+      try db.alter(table: "user") { t in
+        t.add(column: "bot", .boolean).notNull().defaults(to: false)
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage
