@@ -6,11 +6,11 @@ import type { FunctionContext } from "@in/server/functions/_types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { UpdatesModel } from "@in/server/db/models/updates"
 import { UpdateBucket } from "@in/server/db/schema/updates"
-import type { ServerUpdate } from "@in/protocol/server"
+import type { ServerUpdate } from "@inline-chat/protocol/server"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
-import type { Update } from "@in/protocol/core"
+import type { Update } from "@inline-chat/protocol/core"
 import { getUpdateGroup, type UpdateGroup } from "@in/server/modules/updates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
@@ -184,22 +184,18 @@ export async function updateChatVisibility(
 
       // NOTE: We only enqueue user-bucket updates for removals. Newly added participants
       // (or newly eligible public members) discover chats via getChats.
-      for (const userId of removedUserIds) {
-        const userUpdatePayload: ServerUpdate["update"] = {
-          oneofKind: "userChatParticipantDelete",
-          userChatParticipantDelete: {
-            chatId: BigInt(chat.id),
+      await UserBucketUpdates.enqueueMany(
+        removedUserIds.map((userId) => ({
+          userId,
+          update: {
+            oneofKind: "userChatParticipantDelete",
+            userChatParticipantDelete: {
+              chatId: BigInt(chat.id),
+            },
           },
-        }
-
-        await UserBucketUpdates.enqueue(
-          {
-            userId,
-            update: userUpdatePayload,
-          },
-          { tx },
-        )
-      }
+        })),
+        { tx },
+      )
 
       return { chat: chatRecord, removedUserIds, update }
     })

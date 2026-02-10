@@ -1,9 +1,9 @@
 import { db } from "@in/server/db"
 import type { Transaction } from "@in/server/db/types"
 import { UpdatesModel } from "@in/server/db/models/updates"
-import { updates, UpdateBucket } from "@in/server/db/schema"
-import { sql } from "drizzle-orm"
-import type { ServerUpdate } from "@in/protocol/server"
+import { updates, UpdateBucket, users } from "@in/server/db/schema"
+import { eq, sql } from "drizzle-orm"
+import type { ServerUpdate } from "@inline-chat/protocol/server"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 
@@ -22,28 +22,68 @@ export const UserBucketUpdates = {
       return await insertUserUpdate(tx, input)
     })
   },
+
+  /**
+   * Enqueue multiple user-bucket updates in a single transaction.
+   * Sorts by `userId` to provide a consistent lock order and avoid deadlocks.
+   */
+  async enqueueMany(
+    inputs: EnqueueUserUpdateInput[],
+    options?: { tx?: Transaction },
+  ): Promise<UpdateSeqAndDate[]> {
+    if (inputs.length === 0) return []
+
+    if (options?.tx) {
+      return await insertUserUpdates(options.tx, inputs)
+    }
+
+    return await db.transaction(async (tx) => {
+      return await insertUserUpdates(tx, inputs)
+    })
+  },
 }
 
-const selectLatestSeq = async (tx: Transaction, userId: number): Promise<number> => {
-  const [result] = await tx.execute<{ seq: number }>(
-    sql`
-      SELECT ${updates.seq} AS seq
-      FROM ${updates}
-      WHERE ${updates.bucket} = ${UpdateBucket.User}
-        AND ${updates.entityId} = ${userId}
-      ORDER BY ${updates.seq} DESC
-      LIMIT 1
-      FOR UPDATE
-    `,
-  )
+const allocateNextSeq = async (tx: Transaction, userId: number, now: Date): Promise<number> => {
+  // Use the query builder so Postgres doesn't see a qualified SET target like `"users"."update_seq"`,
+  // which is invalid syntax in UPDATE SET lists.
+  const nextSeqExpr = sql<number>`
+    CASE
+      WHEN ${users.updateSeq} IS NULL THEN (
+        COALESCE(
+          (
+            SELECT ${updates.seq}
+            FROM ${updates}
+            WHERE ${updates.bucket} = ${UpdateBucket.User}
+              AND ${updates.entityId} = ${userId}
+            ORDER BY ${updates.seq} DESC
+            LIMIT 1
+          ),
+          0
+        ) + 1
+      )
+      ELSE ${users.updateSeq} + 1
+    END
+  `
 
-  return result?.seq ?? 0
+  const [result] = await tx
+    .update(users)
+    .set({
+      updateSeq: nextSeqExpr,
+      lastUpdateDate: now,
+    })
+    .where(eq(users.id, userId))
+    .returning({ seq: users.updateSeq })
+
+  if (result?.seq === null || result?.seq === undefined) {
+    throw new Error(`Failed to allocate user-bucket seq: ${userId}`)
+  }
+
+  return result.seq
 }
 
 const insertUserUpdate = async (tx: Transaction, input: EnqueueUserUpdateInput): Promise<UpdateSeqAndDate> => {
-  const currentSeq = await selectLatestSeq(tx, input.userId)
-  const nextSeq = currentSeq + 1
   const now = new Date()
+  const nextSeq = await allocateNextSeq(tx, input.userId, now)
 
   const serverUpdate: ServerUpdate = {
     seq: nextSeq,
@@ -62,4 +102,20 @@ const insertUserUpdate = async (tx: Transaction, input: EnqueueUserUpdateInput):
   })
 
   return { seq: nextSeq, date: now }
+}
+
+const insertUserUpdates = async (tx: Transaction, inputs: EnqueueUserUpdateInput[]): Promise<UpdateSeqAndDate[]> => {
+  const indexed = inputs.map((input, index) => ({ input, index }))
+  // Deterministic ordering:
+  // - Sort by userId to avoid deadlocks when multiple users are updated in one tx
+  // - Tie-break by original index so updates for the same user keep their caller order
+  indexed.sort((a, b) => a.input.userId - b.input.userId || a.index - b.index)
+
+  const results: UpdateSeqAndDate[] = new Array(inputs.length)
+
+  for (const { input, index } of indexed) {
+    results[index] = await insertUserUpdate(tx, input)
+  }
+
+  return results
 }

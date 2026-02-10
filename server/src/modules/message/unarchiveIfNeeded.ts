@@ -1,5 +1,5 @@
-import type { Update } from "@in/protocol/core"
-import type { ServerUpdate } from "@in/protocol/server"
+import type { Update } from "@inline-chat/protocol/core"
+import type { ServerUpdate } from "@inline-chat/protocol/server"
 import { db } from "@in/server/db"
 import { dialogs } from "@in/server/db/schema"
 import type { DbChat } from "@in/server/db/schema"
@@ -60,23 +60,19 @@ export const unarchiveIfNeeded = async (input: UnarchiveIfNeededInput): Promise<
         ),
       )
 
-    for (const target of targets) {
-      const userUpdate: ServerUpdate["update"] = {
-        oneofKind: "userDialogArchived",
-        userDialogArchived: {
-          peerId: target.peerId,
-          archived: false,
+    await UserBucketUpdates.enqueueMany(
+      targets.map((target) => ({
+        userId: target.userId,
+        update: {
+          oneofKind: "userDialogArchived",
+          userDialogArchived: {
+            peerId: target.peerId,
+            archived: false,
+          },
         },
-      }
-
-      await UserBucketUpdates.enqueue(
-        {
-          userId: target.userId,
-          update: userUpdate,
-        },
-        { tx },
-      )
-    }
+      })),
+      { tx },
+    )
   })
 
   const updates = targets.map((target) => ({

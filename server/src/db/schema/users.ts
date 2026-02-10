@@ -51,6 +51,16 @@ export const users = pgTable(
     // bot
     bot: boolean("bot").default(false),
     botCreatorId: integer("bot_creator_id").references((): AnyPgColumn => users.id),
+
+    /**
+     * Sequence of the updates for the user-bucket.
+     *
+     * Nullable to allow lazy initialization from existing rows in `updates` after deployments that add this column.
+     */
+    updateSeq: integer("update_seq").default(0),
+
+    /** Date of the last user-bucket update */
+    lastUpdateDate: timestamp("last_update_date", { mode: "date", precision: 3 }),
   },
   (table) => ({
     users_username_unique: uniqueIndex("users_username_unique").on(lower(table.username)),
