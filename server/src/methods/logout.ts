@@ -6,6 +6,7 @@ import { Log } from "@in/server/utils/log"
 import { type Static, Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import { connectionManager } from "../ws/connections"
+import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 
 export const Input = Type.Object({})
 
@@ -17,6 +18,9 @@ export const handler = async (
 ): Promise<Static<typeof Response>> => {
   try {
     await db.delete(sessions).where(eq(sessions.id, context.currentSessionId))
+
+    // Best-effort internal alert (should never affect the user action).
+    BotAlerts.logout({ userId: context.currentUserId })
 
     setTimeout(() => {
       connectionManager.sessionLoggedOut(context.currentUserId, context.currentSessionId)
