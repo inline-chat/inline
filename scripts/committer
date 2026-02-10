@@ -85,7 +85,7 @@ for file in "${files[@]}"; do
 done
 
 git restore --staged :/
-git add --force -- "${files[@]}"
+git add -- "${files[@]}"
 
 if git diff --staged --quiet; then
   printf 'Warning: no staged changes detected for: %s\n' "${files[*]}" >&2
@@ -115,4 +115,3 @@ if [ "$committed" = false ]; then
 fi
 
 printf 'Committed "%s" with %d files\n' "$commit_message" "${#files[@]}"
-

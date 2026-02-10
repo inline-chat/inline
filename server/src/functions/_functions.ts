@@ -23,6 +23,8 @@ import { updateUserSettings } from "./user.updateUserSettings"
 import { createBot } from "./createBot"
 import { listBots } from "./bot.listBots"
 import { revealBotToken } from "./bot.revealToken"
+import { rotateBotToken } from "./bot.rotateToken"
+import { updateBotProfile } from "./bot.updateProfile"
 import { deleteMember } from "@in/server/functions/space.deleteMember"
 import { markAsUnread } from "./messages.markAsUnread"
 import { getUpdatesState } from "./updates.getUpdatesState"
@@ -66,6 +68,8 @@ export const Functions = {
     createBot: createBot,
     listBots: listBots,
     revealBotToken: revealBotToken,
+    rotateBotToken: rotateBotToken,
+    updateBotProfile: updateBotProfile,
   },
   updates: {
     getUpdatesState: getUpdatesState,
