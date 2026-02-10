@@ -1,4 +1,4 @@
-import type { InputPeer, Peer, Update } from "@in/protocol/core"
+import type { InputPeer, Peer, Update } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import { chats, chatParticipants } from "@in/server/db/schema/chats"
 import { dialogs } from "@in/server/db/schema/dialogs"
@@ -11,7 +11,7 @@ import { and, eq } from "drizzle-orm"
 import { ModelError } from "@in/server/db/models/_errors"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { UpdateBucket } from "@in/server/db/schema/updates"
-import type { ServerUpdate } from "@in/protocol/server"
+import type { ServerUpdate } from "@inline-chat/protocol/server"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
@@ -155,21 +155,18 @@ export async function deleteChat(input: { peer: InputPeer }, context: FunctionCo
 
         persistedUpdate = update
 
-        for (const userId of recipientIds) {
-          const userServerUpdatePayload: ServerUpdate["update"] = {
-            oneofKind: "userChatParticipantDelete",
-            userChatParticipantDelete: {
-              chatId: BigInt(lockedChat.id),
+        await UserBucketUpdates.enqueueMany(
+          recipientIds.map((userId) => ({
+            userId,
+            update: {
+              oneofKind: "userChatParticipantDelete",
+              userChatParticipantDelete: {
+                chatId: BigInt(lockedChat.id),
+              },
             },
-          }
-          await UserBucketUpdates.enqueue(
-            {
-              userId,
-              update: userServerUpdatePayload,
-            },
-            { tx },
-          )
-        }
+          })),
+          { tx },
+        )
 
         await tx.delete(chatParticipants).where(eq(chatParticipants.chatId, chat.id))
         await tx.delete(dialogs).where(eq(dialogs.chatId, chat.id))

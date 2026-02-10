@@ -393,6 +393,20 @@
       "when": 1770138161604,
       "tag": "0055_bot_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1770653794709,
+      "tag": "0056_add-users-update-seq",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1770665621924,
+      "tag": "0057_users-update-seq-default",
+      "breakpoints": true
     }
   ]
 }

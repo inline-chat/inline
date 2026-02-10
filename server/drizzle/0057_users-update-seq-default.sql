@@ -1,0 +1,1 @@
+ALTER TABLE "users" ALTER COLUMN "update_seq" SET DEFAULT 0;
