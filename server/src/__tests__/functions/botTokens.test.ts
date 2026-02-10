@@ -4,6 +4,9 @@ import type { FunctionContext } from "../../functions/_types"
 import { createBot } from "../../functions/createBot"
 import { listBots } from "../../functions/bot.listBots"
 import { revealBotToken } from "../../functions/bot.revealToken"
+import { rotateBotToken } from "../../functions/bot.rotateToken"
+import { db, schema } from "../../db"
+import { eq } from "drizzle-orm"
 
 describe("bot tokens", () => {
   setupTestLifecycle()
@@ -50,5 +53,34 @@ describe("bot tokens", () => {
     const created = await createBot({ name: "Private Bot", username: "privatebot" }, creatorContext)
 
     await expect(revealBotToken({ botUserId: created.bot?.id ?? 0n }, otherContext)).rejects.toThrow()
+  })
+
+  test("rotateBotToken returns a new token and revokes the previous session", async () => {
+    const created = await createBot({ name: "Rotate Bot", username: "rotatebot" }, creatorContext)
+    const botUserId = Number(created.bot?.id ?? 0n)
+
+    const [before] = await db
+      .select({ sessionId: schema.botTokens.sessionId })
+      .from(schema.botTokens)
+      .where(eq(schema.botTokens.botUserId, botUserId))
+      .limit(1)
+
+    const rotated = await rotateBotToken({ botUserId: created.bot?.id ?? 0n }, creatorContext)
+
+    expect(rotated.token).toBeDefined()
+    expect(rotated.token).not.toBe(created.token)
+
+    const revealed = await revealBotToken({ botUserId: created.bot?.id ?? 0n }, creatorContext)
+    expect(revealed.token).toBe(rotated.token)
+
+    if (before?.sessionId) {
+      const [oldSession] = await db
+        .select()
+        .from(schema.sessions)
+        .where(eq(schema.sessions.id, before.sessionId))
+        .limit(1)
+
+      expect(oldSession?.revoked).not.toBeNull()
+    }
   })
 })

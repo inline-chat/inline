@@ -34,6 +34,8 @@ public enum TransactionTypeRegistry {
       case is CreateBotTransaction: "create_bot"
       case is ListBotsTransaction: "list_bots"
       case is RevealBotTokenTransaction: "reveal_bot_token"
+      case is RotateBotTokenTransaction: "rotate_bot_token"
+      case is UpdateBotProfileTransaction: "update_bot_profile"
       default: "unknown"
     }
   }
@@ -69,6 +71,8 @@ public enum TransactionTypeRegistry {
       case "create_bot": return try decoder.decode(CreateBotTransaction.self, from: data)
       case "list_bots": return try decoder.decode(ListBotsTransaction.self, from: data)
       case "reveal_bot_token": return try decoder.decode(RevealBotTokenTransaction.self, from: data)
+      case "rotate_bot_token": return try decoder.decode(RotateBotTokenTransaction.self, from: data)
+      case "update_bot_profile": return try decoder.decode(UpdateBotProfileTransaction.self, from: data)
       default: throw TransactionTypeError.unknownTransactionType(type)
     }
   }

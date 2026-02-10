@@ -1,4 +1,4 @@
-import { Method, type ConnectionInit, type ConnectionOpen, type RpcCall, type RpcResult } from "@in/protocol/core"
+import { Method, type ConnectionInit, type ConnectionOpen, type RpcCall, type RpcResult } from "@inline-chat/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { getUserIdFromToken } from "@in/server/controllers/plugins"
 import { connectionManager } from "@in/server/ws/connections"
@@ -28,6 +28,8 @@ import { sendComposeActionHandler } from "./messages.sendComposeAction"
 import { createBotHandler } from "./createBot"
 import { listBotsHandler } from "./listBots"
 import { revealBotTokenHandler } from "./revealBotToken"
+import { rotateBotTokenHandler } from "./rotateBotToken"
+import { updateBotProfileHandler } from "./updateBotProfile"
 import { deleteMemberHandler } from "@in/server/realtime/handlers/space.deleteMember"
 import { updateMemberAccessHandler } from "@in/server/realtime/handlers/space.updateMemberAccess"
 import { markAsUnread } from "./messages.markAsUnread"
@@ -239,6 +241,22 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await revealBotTokenHandler(call.input.revealBotToken, handlerContext)
       return { oneofKind: "revealBotToken", revealBotToken: result }
+    }
+
+    case Method.ROTATE_BOT_TOKEN: {
+      if (call.input.oneofKind !== "rotateBotToken") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      let result = await rotateBotTokenHandler(call.input.rotateBotToken, handlerContext)
+      return { oneofKind: "rotateBotToken", rotateBotToken: result }
+    }
+
+    case Method.UPDATE_BOT_PROFILE: {
+      if (call.input.oneofKind !== "updateBotProfile") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      let result = await updateBotProfileHandler(call.input.updateBotProfile, handlerContext)
+      return { oneofKind: "updateBotProfile", updateBotProfile: result }
     }
 
     case Method.DELETE_MEMBER: {

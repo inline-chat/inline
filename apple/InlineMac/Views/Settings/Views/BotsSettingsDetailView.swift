@@ -14,6 +14,9 @@ struct BotsSettingsDetailView: View {
   @State private var username = ""
   @FocusState private var focusedField: Field?
 
+  @State private var botToEdit: BotEditItem?
+  @State private var rotateConfirmBotId: Int64?
+
   var body: some View {
     Form {
       Section("Create Bot") {
@@ -86,6 +89,12 @@ struct BotsSettingsDetailView: View {
             .foregroundStyle(.red)
         }
 
+        if let rotateError = viewModel.rotateError {
+          Text(rotateError)
+            .font(.caption)
+            .foregroundStyle(.red)
+        }
+
         if viewModel.bots.isEmpty, !viewModel.isLoading {
           Text("No bots yet.")
             .foregroundStyle(.secondary)
@@ -95,11 +104,18 @@ struct BotsSettingsDetailView: View {
               bot: bot,
               token: viewModel.revealedTokens[bot.id],
               isRevealing: viewModel.revealingBots.contains(bot.id),
+              isRotating: viewModel.rotatingBots.contains(bot.id),
               onReveal: {
                 Task { await viewModel.revealToken(for: bot.id, realtimeV2: realtimeV2) }
               },
               onHide: {
                 viewModel.hideToken(for: bot.id)
+              },
+              onRotateRequested: {
+                rotateConfirmBotId = bot.id
+              },
+              onEditProfile: {
+                botToEdit = BotEditItem(bot: bot)
               },
               onCopy: { token in
                 copyToken(token)
@@ -117,6 +133,32 @@ struct BotsSettingsDetailView: View {
         currentUserId: auth.currentUserId,
         force: false
       )
+    }
+    .sheet(item: $botToEdit) { item in
+      BotProfileEditorSheet(bot: item.bot) { updatedBot in
+        viewModel.upsertBot(updatedBot)
+      }
+    }
+    .confirmationDialog(
+      "Rotate Token",
+      isPresented: .init(
+        get: { rotateConfirmBotId != nil },
+        set: { if !$0 { rotateConfirmBotId = nil } }
+      ),
+      titleVisibility: .visible
+    ) {
+      Button("Rotate Token", role: .destructive) {
+        guard let botId = rotateConfirmBotId else { return }
+        rotateConfirmBotId = nil
+        Task {
+          await viewModel.rotateToken(for: botId, realtimeV2: realtimeV2)
+        }
+      }
+      Button("Cancel", role: .cancel) {
+        rotateConfirmBotId = nil
+      }
+    } message: {
+      Text("This will revoke the existing token. Any integrations using the old token will stop working until updated.")
     }
   }
 
@@ -164,6 +206,11 @@ struct BotsSettingsDetailView: View {
   }
 }
 
+private struct BotEditItem: Identifiable {
+  let bot: InlineProtocol.User
+  var id: Int64 { bot.id }
+}
+
 private enum Field: Hashable {
   case name
   case username
@@ -180,6 +227,8 @@ final class BotsSettingsViewModel: ObservableObject {
   @Published var revealingBots: Set<Int64> = []
   @Published var lastCreatedToken: String?
   @Published var revealError: String?
+  @Published var rotatingBots: Set<Int64> = []
+  @Published var rotateError: String?
 
   let maxBots = 5
 
@@ -233,6 +282,7 @@ final class BotsSettingsViewModel: ObservableObject {
     createError = nil
     loadError = nil
     revealError = nil
+    rotateError = nil
     lastCreatedToken = nil
 
     do {
@@ -265,6 +315,7 @@ final class BotsSettingsViewModel: ObservableObject {
 
     revealingBots.insert(botId)
     revealError = nil
+    rotateError = nil
 
     do {
       let result = try await realtimeV2.send(.revealBotToken(botUserId: botId))
@@ -281,6 +332,28 @@ final class BotsSettingsViewModel: ObservableObject {
     revealingBots.remove(botId)
   }
 
+  func rotateToken(for botId: Int64, realtimeV2: RealtimeV2) async {
+    guard rotatingBots.contains(botId) == false else { return }
+
+    rotatingBots.insert(botId)
+    rotateError = nil
+    revealError = nil
+
+    do {
+      let result = try await realtimeV2.send(.rotateBotToken(botUserId: botId))
+      guard case let .rotateBotToken(response) = result else {
+        throw TransactionExecutionError.invalid
+      }
+
+      revealedTokens[botId] = response.token
+    } catch {
+      log.error("Failed to rotate bot token", error: error)
+      rotateError = "Failed to rotate token."
+    }
+
+    rotatingBots.remove(botId)
+  }
+
   func hideToken(for botId: Int64) {
     revealedTokens[botId] = nil
   }
@@ -288,19 +361,33 @@ final class BotsSettingsViewModel: ObservableObject {
   func clearLastCreatedToken() {
     lastCreatedToken = nil
   }
+
+  func upsertBot(_ bot: InlineProtocol.User) {
+    if let idx = bots.firstIndex(where: { $0.id == bot.id }) {
+      bots[idx] = bot
+    } else {
+      bots.append(bot)
+      bots.sort { $0.id < $1.id }
+    }
+  }
 }
 
 private struct BotRow: View {
   let bot: InlineProtocol.User
   let token: String?
   let isRevealing: Bool
+  let isRotating: Bool
   let onReveal: () -> Void
   let onHide: () -> Void
+  let onRotateRequested: () -> Void
+  let onEditProfile: () -> Void
   let onCopy: (String) -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
       HStack {
+        actionsMenu
+
         VStack(alignment: .leading, spacing: 2) {
           Text(displayName)
             .font(.body)
@@ -312,13 +399,6 @@ private struct BotRow: View {
         }
 
         Spacer()
-
-        if token == nil {
-          Button(isRevealing ? "Revealing..." : "Reveal Token") {
-            onReveal()
-          }
-          .disabled(isRevealing)
-        }
       }
 
       if let token {
@@ -331,6 +411,40 @@ private struct BotRow: View {
       }
     }
     .padding(.vertical, 4)
+  }
+
+  private var actionsMenu: some View {
+    Menu {
+      if token == nil {
+        Button(isRevealing ? "Revealing..." : "Reveal Token") {
+          onReveal()
+        }
+        .disabled(isRevealing)
+      } else {
+        Button("Hide Token") {
+          onHide()
+        }
+      }
+
+      Divider()
+
+      Button(isRotating ? "Rotating..." : "Rotate Token...") {
+        onRotateRequested()
+      }
+      .disabled(isRotating)
+
+      Button("Edit Profile...") {
+        onEditProfile()
+      }
+    } label: {
+      Image(systemName: "ellipsis.circle")
+        .foregroundStyle(.secondary)
+        .contentShape(.circle)
+        .frame(width: 18, height: 18)
+    }
+    .menuStyle(.button)
+    .buttonStyle(.plain)
+    .accessibilityLabel("Bot actions")
   }
 
   private var displayName: String {

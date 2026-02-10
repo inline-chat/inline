@@ -617,6 +617,8 @@ enum Method {
   LIST_BOTS = 33;
   REVEAL_BOT_TOKEN = 34;
   MOVE_THREAD = 35;
+  ROTATE_BOT_TOKEN = 36;
+  UPDATE_BOT_PROFILE = 37;
 }
 
 message RpcCall {
@@ -657,6 +659,8 @@ message RpcCall {
     ListBotsInput listBots = 34;
     RevealBotTokenInput revealBotToken = 35;
     MoveThreadInput moveThread = 36;
+    RotateBotTokenInput rotateBotToken = 37;
+    UpdateBotProfileInput updateBotProfile = 38;
   }
 }
 
@@ -699,6 +703,8 @@ message RpcResult {
     ListBotsResult listBots = 34;
     RevealBotTokenResult revealBotToken = 35;
     MoveThreadResult moveThread = 36;
+    RotateBotTokenResult rotateBotToken = 37;
+    UpdateBotProfileResult updateBotProfile = 38;
   }
 }
 
@@ -839,6 +845,25 @@ message ListBotsResult { repeated User bots = 1; }
 message RevealBotTokenInput { int64 bot_user_id = 1; }
 
 message RevealBotTokenResult { string token = 1; }
+
+message RotateBotTokenInput { int64 bot_user_id = 1; }
+
+message RotateBotTokenResult {
+  // New token to use for the bot. Previous token will be revoked.
+  string token = 1;
+}
+
+message UpdateBotProfileInput {
+  int64 bot_user_id = 1;
+
+  // Full display name for the bot.
+  optional string name = 2;
+
+  // Profile photo to use for the bot, from the /uploadFile REST API.
+  optional string photo_file_unique_id = 3;
+}
+
+message UpdateBotProfileResult { User bot = 1; }
 
 message GetUserSettingsInput {}
 

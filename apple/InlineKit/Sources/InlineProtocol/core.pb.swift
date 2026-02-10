@@ -93,6 +93,8 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case listBots // = 33
   case revealBotToken // = 34
   case moveThread // = 35
+  case rotateBotToken // = 36
+  case updateBotProfile // = 37
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -137,6 +139,8 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 33: self = .listBots
     case 34: self = .revealBotToken
     case 35: self = .moveThread
+    case 36: self = .rotateBotToken
+    case 37: self = .updateBotProfile
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -179,6 +183,8 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .listBots: return 33
     case .revealBotToken: return 34
     case .moveThread: return 35
+    case .rotateBotToken: return 36
+    case .updateBotProfile: return 37
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -221,6 +227,8 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .listBots,
     .revealBotToken,
     .moveThread,
+    .rotateBotToken,
+    .updateBotProfile,
   ]
 
 }
@@ -2598,6 +2606,22 @@ public struct RpcCall: Sendable {
     set {input = .moveThread(newValue)}
   }
 
+  public var rotateBotToken: RotateBotTokenInput {
+    get {
+      if case .rotateBotToken(let v)? = input {return v}
+      return RotateBotTokenInput()
+    }
+    set {input = .rotateBotToken(newValue)}
+  }
+
+  public var updateBotProfile: UpdateBotProfileInput {
+    get {
+      if case .updateBotProfile(let v)? = input {return v}
+      return UpdateBotProfileInput()
+    }
+    set {input = .updateBotProfile(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Input: Equatable, Sendable {
@@ -2636,6 +2660,8 @@ public struct RpcCall: Sendable {
     case listBots(ListBotsInput)
     case revealBotToken(RevealBotTokenInput)
     case moveThread(MoveThreadInput)
+    case rotateBotToken(RotateBotTokenInput)
+    case updateBotProfile(UpdateBotProfileInput)
 
   }
 
@@ -2937,6 +2963,22 @@ public struct RpcResult: @unchecked Sendable {
     set {_uniqueStorage()._result = .moveThread(newValue)}
   }
 
+  public var rotateBotToken: RotateBotTokenResult {
+    get {
+      if case .rotateBotToken(let v)? = _storage._result {return v}
+      return RotateBotTokenResult()
+    }
+    set {_uniqueStorage()._result = .rotateBotToken(newValue)}
+  }
+
+  public var updateBotProfile: UpdateBotProfileResult {
+    get {
+      if case .updateBotProfile(let v)? = _storage._result {return v}
+      return UpdateBotProfileResult()
+    }
+    set {_uniqueStorage()._result = .updateBotProfile(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Result: Equatable, Sendable {
@@ -2975,6 +3017,8 @@ public struct RpcResult: @unchecked Sendable {
     case listBots(ListBotsResult)
     case revealBotToken(RevealBotTokenResult)
     case moveThread(MoveThreadResult)
+    case rotateBotToken(RotateBotTokenResult)
+    case updateBotProfile(UpdateBotProfileResult)
 
   }
 
@@ -3463,6 +3507,87 @@ public struct RevealBotTokenResult: Sendable {
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+}
+
+public struct RotateBotTokenInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var botUserID: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct RotateBotTokenResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// New token to use for the bot. Previous token will be revoked.
+  public var token: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct UpdateBotProfileInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var botUserID: Int64 = 0
+
+  /// Full display name for the bot.
+  public var name: String {
+    get {return _name ?? String()}
+    set {_name = newValue}
+  }
+  /// Returns true if `name` has been explicitly set.
+  public var hasName: Bool {return self._name != nil}
+  /// Clears the value of `name`. Subsequent reads from it will return its default value.
+  public mutating func clearName() {self._name = nil}
+
+  /// Profile photo to use for the bot, from the /uploadFile REST API.
+  public var photoFileUniqueID: String {
+    get {return _photoFileUniqueID ?? String()}
+    set {_photoFileUniqueID = newValue}
+  }
+  /// Returns true if `photoFileUniqueID` has been explicitly set.
+  public var hasPhotoFileUniqueID: Bool {return self._photoFileUniqueID != nil}
+  /// Clears the value of `photoFileUniqueID`. Subsequent reads from it will return its default value.
+  public mutating func clearPhotoFileUniqueID() {self._photoFileUniqueID = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _name: String? = nil
+  fileprivate var _photoFileUniqueID: String? = nil
+}
+
+public struct UpdateBotProfileResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var bot: User {
+    get {return _bot ?? User()}
+    set {_bot = newValue}
+  }
+  /// Returns true if `bot` has been explicitly set.
+  public var hasBot: Bool {return self._bot != nil}
+  /// Clears the value of `bot`. Subsequent reads from it will return its default value.
+  public mutating func clearBot() {self._bot = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _bot: User? = nil
 }
 
 public struct GetUserSettingsInput: Sendable {
@@ -6285,6 +6410,8 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     33: .same(proto: "LIST_BOTS"),
     34: .same(proto: "REVEAL_BOT_TOKEN"),
     35: .same(proto: "MOVE_THREAD"),
+    36: .same(proto: "ROTATE_BOT_TOKEN"),
+    37: .same(proto: "UPDATE_BOT_PROFILE"),
   ]
 }
 
@@ -9261,6 +9388,8 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     34: .same(proto: "listBots"),
     35: .same(proto: "revealBotToken"),
     36: .same(proto: "moveThread"),
+    37: .same(proto: "rotateBotToken"),
+    38: .same(proto: "updateBotProfile"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -9725,6 +9854,32 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
           self.input = .moveThread(v)
         }
       }()
+      case 37: try {
+        var v: RotateBotTokenInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .rotateBotToken(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .rotateBotToken(v)
+        }
+      }()
+      case 38: try {
+        var v: UpdateBotProfileInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .updateBotProfile(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .updateBotProfile(v)
+        }
+      }()
       default: break
       }
     }
@@ -9879,6 +10034,14 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       guard case .moveThread(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 36)
     }()
+    case .rotateBotToken?: try {
+      guard case .rotateBotToken(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 37)
+    }()
+    case .updateBotProfile?: try {
+      guard case .updateBotProfile(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 38)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -9931,6 +10094,8 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     34: .same(proto: "listBots"),
     35: .same(proto: "revealBotToken"),
     36: .same(proto: "moveThread"),
+    37: .same(proto: "rotateBotToken"),
+    38: .same(proto: "updateBotProfile"),
   ]
 
   fileprivate class _StorageClass {
@@ -10426,6 +10591,32 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
             _storage._result = .moveThread(v)
           }
         }()
+        case 37: try {
+          var v: RotateBotTokenResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .rotateBotToken(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .rotateBotToken(v)
+          }
+        }()
+        case 38: try {
+          var v: UpdateBotProfileResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .updateBotProfile(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .updateBotProfile(v)
+          }
+        }()
         default: break
         }
       }
@@ -10581,6 +10772,14 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
       case .moveThread?: try {
         guard case .moveThread(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 36)
+      }()
+      case .rotateBotToken?: try {
+        guard case .rotateBotToken(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 37)
+      }()
+      case .updateBotProfile?: try {
+        guard case .updateBotProfile(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 38)
       }()
       case nil: break
       }
@@ -11554,6 +11753,154 @@ extension RevealBotTokenResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
 
   public static func ==(lhs: RevealBotTokenResult, rhs: RevealBotTokenResult) -> Bool {
     if lhs.token != rhs.token {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension RotateBotTokenInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "RotateBotTokenInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "bot_user_id"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.botUserID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.botUserID != 0 {
+      try visitor.visitSingularInt64Field(value: self.botUserID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: RotateBotTokenInput, rhs: RotateBotTokenInput) -> Bool {
+    if lhs.botUserID != rhs.botUserID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension RotateBotTokenResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "RotateBotTokenResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "token"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.token) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.token.isEmpty {
+      try visitor.visitSingularStringField(value: self.token, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: RotateBotTokenResult, rhs: RotateBotTokenResult) -> Bool {
+    if lhs.token != rhs.token {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateBotProfileInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateBotProfileInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "bot_user_id"),
+    2: .same(proto: "name"),
+    3: .standard(proto: "photo_file_unique_id"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.botUserID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self._name) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._photoFileUniqueID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.botUserID != 0 {
+      try visitor.visitSingularInt64Field(value: self.botUserID, fieldNumber: 1)
+    }
+    try { if let v = self._name {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    } }()
+    try { if let v = self._photoFileUniqueID {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateBotProfileInput, rhs: UpdateBotProfileInput) -> Bool {
+    if lhs.botUserID != rhs.botUserID {return false}
+    if lhs._name != rhs._name {return false}
+    if lhs._photoFileUniqueID != rhs._photoFileUniqueID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateBotProfileResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateBotProfileResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "bot"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._bot) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._bot {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateBotProfileResult, rhs: UpdateBotProfileResult) -> Bool {
+    if lhs._bot != rhs._bot {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
