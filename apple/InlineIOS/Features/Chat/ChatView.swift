@@ -64,7 +64,7 @@ struct ChatView: View {
     .toolbarColorScheme(colorScheme == .dark ? .dark : .light, for: .navigationBar)
     .toolbarBackground(.hidden, for: .navigationBar)
     .toolbarTitleDisplayMode(.inline)
-    .toolbar(.hidden, for: .tabBar)
+    .hideTabBarIfNeeded()
     .toolbarRole(.editor)
     .toolbar {
       if peerId.isPrivate {

@@ -178,6 +178,9 @@
     "Archive" : {
 
     },
+    "Archived" : {
+
+    },
     "Are you sure you want to logout? This will clear your local data and return you to the welcome screen." : {
 
     },
@@ -259,6 +262,9 @@
       }
     },
     "Chat Type" : {
+
+    },
+    "Chats" : {
 
     },
     "Clear" : {
@@ -650,6 +656,9 @@
     "Global Search" : {
 
     },
+    "Home" : {
+
+    },
     "Integration Options" : {
 
     },
@@ -730,6 +739,15 @@
     "Mark Unread" : {
 
     },
+    "Members" : {
+
+    },
+    "Message" : {
+
+    },
+    "More" : {
+
+    },
     "name@example.com" : {
       "comment" : "Email placeholder",
       "extractionState" : "stale",
@@ -747,6 +765,9 @@
           }
         }
       }
+    },
+    "New Chat" : {
+
     },
     "New Group Chat" : {
       "localizations" : {
@@ -879,6 +900,9 @@
     "Public" : {
 
     },
+    "Refresh" : {
+
+    },
     "Remove" : {
 
     },
@@ -886,9 +910,6 @@
 
     },
     "Retry" : {
-
-    },
-    "Return to previous UI" : {
 
     },
     "Save" : {
@@ -1109,9 +1130,6 @@
           }
         }
       }
-    },
-    "WIP" : {
-
     },
     "xxxxxx" : {
       "comment" : "Code input placeholder",

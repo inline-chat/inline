@@ -68,7 +68,7 @@ struct CreateSpaceView: View {
       }
     }
     .navigationTitle("Create New Space")
-    .toolbar(.hidden, for: .tabBar)
+    .hideTabBarIfNeeded()
     .toolbar {
       ToolbarItem(placement: .topBarTrailing) {
         if !name.isEmpty {

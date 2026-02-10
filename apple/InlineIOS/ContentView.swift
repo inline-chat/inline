@@ -154,6 +154,9 @@ private struct AuthedAppRoot: View {
 
     case let .addMember(spaceId):
       InviteToSpaceView(spaceId: spaceId)
+
+    case let .members(spaceId):
+      ExperimentalMembersSheetView(spaceId: spaceId)
     }
   }
 }

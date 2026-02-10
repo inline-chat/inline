@@ -87,7 +87,7 @@ struct CreateChatView: View {
       }
     }
     .navigationTitle(navigationTitle)
-    .toolbar(.hidden, for: .tabBar)
+    .hideTabBarIfNeeded()
   }
 
   private func createChat() {
