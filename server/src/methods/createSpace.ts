@@ -15,6 +15,7 @@ import { ErrorCodes, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { Type } from "@sinclair/typebox"
 import type { Static } from "elysia"
+import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 
 export const Input = Type.Object({
   name: Type.String(),
@@ -92,6 +93,14 @@ export const handler = async (
         spaceId: space.id,
       })
       .returning()
+
+    // Best-effort internal alert (should never affect the user action).
+    BotAlerts.spaceCreated({
+      creatorUserId: context.currentUserId,
+      spaceId: space.id,
+      spaceName: space.name,
+      handle: space.handle,
+    })
 
     const output = { space, member, chats: [mainChat], dialogs: [newDialog] }
     return {

@@ -10,8 +10,9 @@ import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { SpaceModel } from "@in/server/db/models/spaces"
 import { BotTokensModel } from "@in/server/db/models/botTokens"
 import { and, eq, isNull, or, sql } from "drizzle-orm"
+import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 
-import { type CreateBotInput, type CreateBotResult } from "@in/protocol/core"
+import { type CreateBotInput, type CreateBotResult } from "@inline-chat/protocol/core"
 import type { FunctionContext } from "@in/server/functions/_types"
 
 const log = new Log("createBot")
@@ -76,6 +77,9 @@ export const createBot = async (input: CreateBotInput, context: FunctionContext)
   }
 
   const bot = botUser[0]
+
+  // Best-effort internal alert (should never affect the user action).
+  BotAlerts.botCreated({ creatorUserId: context.currentUserId, botUserId: bot.id })
 
   // Generate token for the bot
   const { token } = await generateToken(bot.id)

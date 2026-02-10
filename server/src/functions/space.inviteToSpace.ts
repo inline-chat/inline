@@ -3,7 +3,7 @@ import { UsersModel } from "@in/server/db/models/users"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import type { FunctionContext } from "@in/server/functions/_types"
 
-import { Update, type InviteToSpaceInput, type InviteToSpaceResult } from "@in/protocol/core"
+import { Update, type InviteToSpaceInput, type InviteToSpaceResult } from "@inline-chat/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { isValidEmail, isValidSpaceId } from "@in/server/utils/validate"
 import { Authorize } from "@in/server/utils/authorize"
@@ -17,12 +17,13 @@ import { getUpdateGroupForSpace } from "@in/server/modules/updates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { UpdateBucket } from "@in/server/db/schema/updates"
-import type { ServerUpdate } from "@in/protocol/server"
+import type { ServerUpdate } from "@inline-chat/protocol/server"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { db } from "@in/server/db"
 import { spaces } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
+import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 
 const log = new Log("space.inviteToSpace")
 
@@ -79,6 +80,14 @@ export const inviteToSpace = async (
   // Create member (no chat/dialog auto-creation)
   let member = await createMember(spaceId, inviteInfo.user.id, input, context)
   // NOTE: We intentionally do not auto-create a DM chat/dialog during space invite.
+
+  // Best-effort internal alert (should never affect the user action).
+  BotAlerts.spaceInvite({
+    inviterUserId: context.currentUserId,
+    invitedUserId: inviteInfo.user.id,
+    spaceId: space.id,
+    spaceName: space.name,
+  })
 
   // Send invite
   sendInvite(inviteInfo.user, space, input, context)
