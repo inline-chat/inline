@@ -28,6 +28,26 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
     fetchParticipants()
   }
 
+  private static func filterMentionCandidates(_ users: [UserInfo]) -> [UserInfo] {
+    let currentUserId = Auth.shared.getCurrentUserId()
+    return users.filter { userInfo in
+      if userInfo.user.pendingSetup == true {
+        return false
+      }
+      if let currentUserId {
+        return userInfo.user.id != currentUserId
+      }
+      return true
+    }
+  }
+
+  private static func fetchAllKnownUsers(_ db: Database) throws -> [UserInfo] {
+    try User
+      .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
+      .asRequest(of: UserInfo.self)
+      .fetchAll(db)
+  }
+
   private func fetchParticipants() {
     let purpose = purpose
     let log = log
@@ -51,7 +71,8 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
             .asRequest(of: UserInfo.self)
             .fetchOne(db)
 
-          return peer.map { [$0] } ?? []
+          let users = peer.map { [$0] } ?? []
+          return purpose == .mentionCandidates ? Self.filterMentionCandidates(users) : users
         }
 
         if let chat {
@@ -64,7 +85,7 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
                 .filter(Column("spaceId") == spaceId)
                 .fetchAll(db)
 
-              return spaceMembers.map(\.userInfo)
+              return Self.filterMentionCandidates(spaceMembers.map(\.userInfo))
 
             case .participantsList:
               if chat.isPublic == true {
@@ -89,6 +110,12 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
             }
           }
 
+          if purpose == .mentionCandidates {
+            // Non-space threads: users use @mentions to add new participants, so show all known users.
+            log.debug("🔍 Home thread mention candidates, fetching all known users")
+            return Self.filterMentionCandidates(try Self.fetchAllKnownUsers(db))
+          }
+
           log.debug("🔍 Home thread, fetching chat participants")
           let participants = try ChatParticipant
             .including(
@@ -99,57 +126,12 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
             .asRequest(of: UserInfo.self)
             .fetchAll(db)
 
-          if purpose == .mentionCandidates {
-            let currentUserId = Auth.shared.getCurrentUserId()
-            let nonSelfParticipants = participants.filter { participant in
-              if participant.user.pendingSetup == true {
-                return false
-              }
-              if let currentUserId {
-                return participant.user.id != currentUserId
-              }
-              return true
-            }
-
-            if nonSelfParticipants.isEmpty {
-              log.debug("🔍 Home thread mention candidates empty, falling back to local users")
-              let users = try User
-                .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
-                .asRequest(of: UserInfo.self)
-                .fetchAll(db)
-
-              return users.filter { userInfo in
-                if userInfo.user.pendingSetup == true {
-                  return false
-                }
-                if let currentUserId {
-                  return userInfo.user.id != currentUserId
-                }
-                return true
-              }
-            }
-          }
-
           return participants
         }
 
         if purpose == .mentionCandidates {
           log.debug("🔍 Missing chat, falling back to local users for mention candidates")
-          let users = try User
-            .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
-            .asRequest(of: UserInfo.self)
-            .fetchAll(db)
-
-          let currentUserId = Auth.shared.getCurrentUserId()
-          return users.filter { userInfo in
-            if userInfo.user.pendingSetup == true {
-              return false
-            }
-            if let currentUserId {
-              return userInfo.user.id != currentUserId
-            }
-            return true
-          }
+          return Self.filterMentionCandidates(try Self.fetchAllKnownUsers(db))
         }
 
         return []
