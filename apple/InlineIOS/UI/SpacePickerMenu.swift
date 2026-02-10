@@ -5,43 +5,62 @@ import SwiftUI
 struct SpacePickerMenu: View {
   @EnvironmentObject private var compactSpaceList: CompactSpaceList
   @Environment(Router.self) private var router
-  @State private var selectedSpaceId: Int64?
+  var selectedSpaceId: Binding<Int64?>? = nil
+  var onSelectHome: (() -> Void)? = nil
+  var onSelectSpace: ((Space) -> Void)? = nil
+  var onCreateSpace: (() -> Void)? = nil
+
+  @State private var localSelectedSpaceId: Int64?
   @State private var isPickerVisible = false
 
   var body: some View {
+    let selectedSpaceId = selectedSpaceId ?? $localSelectedSpaceId
+    let createSpace = onCreateSpace ?? { router.push(.createSpace) }
+    let space = selectedSpace(selectedSpaceId.wrappedValue)
+    let title = space?.displayName ?? ((onSelectHome == nil) ? "Spaces" : "Home")
+
     Button {
       isPickerVisible.toggle()
     } label: {
-      SpacePickerMenuLabel(space: selectedSpace)
+      SpacePickerMenuLabel(space: space, title: title)
     }
     .buttonStyle(.plain)
     .popover(isPresented: $isPickerVisible, arrowEdge: .top) {
       SpacePickerOverlayView(
         spaces: compactSpaceList.spaces,
-        selectedSpaceId: selectedSpace?.id,
+        selectedSpaceId: selectedSpace(selectedSpaceId.wrappedValue)?.id,
+        onSelectHome: onSelectHome,
         onSelect: { space in
-          selectedSpaceId = space.id
           isPickerVisible = false
+          onSelectSpace?(space)
+          selectedSpaceId.wrappedValue = space.id
         },
         onCreateSpace: {
           isPickerVisible = false
-          router.push(.createSpace)
+          createSpace()
         }
       )
       .presentationCompactAdaptation(.none)
     }
   }
 
-  private var selectedSpace: Space? {
+  private func selectedSpace(_ selectedSpaceId: Int64?) -> Space? {
     if let selectedSpaceId {
-      return compactSpaceList.spaces.first { $0.id == selectedSpaceId }
+      return compactSpaceList.spaces.first(where: { $0.id == selectedSpaceId })
     }
-    return compactSpaceList.spaces.first
+
+    // Legacy behavior: default to the first space when nothing is selected.
+    if selectedSpaceId == nil, onSelectHome == nil {
+      return compactSpaceList.spaces.first
+    }
+
+    return nil
   }
 }
 
 private struct SpacePickerMenuLabel: View {
   let space: Space?
+  let title: String
 
 
   var body: some View {
@@ -54,7 +73,7 @@ private struct SpacePickerMenuLabel: View {
           .frame(width: 24, height: 24)
       }
 
-      Text(space?.displayName ?? "Spaces")
+      Text(title)
         .font(.headline)
         .lineLimit(1)
         .truncationMode(.tail)
@@ -75,6 +94,7 @@ private struct SpacePickerOverlayView: View {
 
   let spaces: [Space]
   let selectedSpaceId: Int64?
+  let onSelectHome: (() -> Void)?
   let onSelect: (Space) -> Void
   let onCreateSpace: () -> Void
 
@@ -85,6 +105,34 @@ private struct SpacePickerOverlayView: View {
     let content = VStack(spacing: 8) {
       ScrollView {
         VStack(spacing: 0) {
+          if let onSelectHome {
+            Button {
+              onSelectHome()
+            } label: {
+              HStack(spacing: 8) {
+                Image(systemName: "house.fill")
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+                  .frame(width: 22, height: 22)
+
+                Text("Home")
+                  .font(.body)
+                  .foregroundStyle(.primary)
+                  .lineLimit(1)
+
+                Spacer(minLength: 0)
+              }
+              .padding(.vertical, 8)
+              .padding(.horizontal, 10)
+              .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+
+            Divider()
+              .opacity(0.6)
+              .padding(.vertical, 4)
+          }
+
           if spaces.isEmpty {
             SpacePickerEmptyRow()
           } else {

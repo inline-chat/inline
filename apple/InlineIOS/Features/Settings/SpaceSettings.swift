@@ -91,7 +91,7 @@ struct SpaceSettingsView: View {
     .listStyle(.insetGrouped)
     .navigationBarTitleDisplayMode(.inline)
     .toolbarRole(.editor)
-    .toolbar(.hidden, for: .tabBar)
+    .hideTabBarIfNeeded()
     .toolbar {
       ToolbarItem(id: "settings", placement: .principal) {
         HStack {

@@ -98,7 +98,7 @@ struct SettingsView: View {
     .navigationBarTitleDisplayMode(.inline)
     .navigationBarBackButtonHidden(true)
     .toolbarRole(.editor)
-    .toolbar(.hidden, for: .tabBar)
+    .hideTabBarIfNeeded()
     .toolbar {
       ToolbarItem(id: "settings", placement: .principal) {
         HStack {

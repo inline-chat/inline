@@ -1,94 +1,15 @@
+import Combine
+import GRDB
 import InlineKit
+import InlineUI
+import Invite
+import Logger
 import SwiftUI
 
 @MainActor
 @Observable
 final class ExperimentalNavigationModel {
-  var path: [Destination] = []
-  var presentedSheet: Sheet?
-
-  func push(_ destination: Destination) {
-    path.append(destination)
-  }
-
-  func pop() {
-    _ = path.popLast()
-  }
-
-  func popToRoot() {
-    path.removeAll(keepingCapacity: true)
-  }
-
-  func presentSheet(_ sheet: Sheet) {
-    presentedSheet = sheet
-  }
-
-  func dismissSheet() {
-    presentedSheet = nil
-  }
-
-  func reset() {
-    popToRoot()
-    dismissSheet()
-  }
-}
-
-private struct ExperimentalHomeView: View {
-  @Bindable var nav: ExperimentalNavigationModel
-
-  var body: some View {
-    VStack(spacing: 0) {
-      Spacer(minLength: 0)
-    }
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(Color(.systemBackground))
-    .navigationBarTitleDisplayMode(.inline)
-    .toolbar {
-      ToolbarItem(placement: .principal) {
-        SpacePickerMenu(
-          onSelectSpace: { space in
-            nav.push(.space(id: space.id))
-          },
-          onCreateSpace: {
-            nav.push(.createSpace)
-          }
-        )
-      }
-    }
-  }
-}
-
-private struct ExperimentalSpacesView: View {
-  var body: some View {
-    EmptyView()
-      .navigationTitle("Spaces")
-  }
-}
-
-private struct ExperimentalSpaceView: View {
-  let spaceId: Int64
-
-  var body: some View {
-    EmptyView()
-      .navigationTitle("Space \(spaceId)")
-  }
-}
-
-private struct ExperimentalPlaceholderView: View {
-  let title: String
-
-  var body: some View {
-    VStack(spacing: 12) {
-      Text(title)
-        .font(.title3)
-        .fontWeight(.semibold)
-      Text("Experimental destination placeholder")
-        .font(.subheadline)
-        .foregroundStyle(.secondary)
-    }
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(Color(.systemBackground))
-  }
+  var activeSpaceId: Int64?
 }
 
 struct ExperimentalDestinationView: View {
@@ -96,31 +17,36 @@ struct ExperimentalDestinationView: View {
   let destination: Destination
 
   var body: some View {
+    content
+  }
+
+  @ViewBuilder
+  private var content: some View {
     switch destination {
     case .chats:
-      ExperimentalHomeView(nav: nav)
+      ExperimentalHomeView(nav: nav, initialTab: .inbox)
     case .archived:
-      ExperimentalPlaceholderView(title: "Archived")
+      ExperimentalHomeView(nav: nav, initialTab: .archived)
     case .spaces:
-      ExperimentalSpacesView()
+      SpacesView()
     case let .space(id):
-      ExperimentalSpaceView(spaceId: id)
+      SpaceView(spaceId: id)
     case let .chat(peer):
-      ExperimentalPlaceholderView(title: "Chat \(peer)")
+      ChatView(peer: peer)
     case let .chatInfo(chatItem):
-      ExperimentalPlaceholderView(title: "Chat Info \(chatItem.id)")
+      ChatInfoView(chatItem: chatItem)
     case let .spaceSettings(spaceId):
-      ExperimentalPlaceholderView(title: "Space Settings \(spaceId)")
+      SpaceSettingsView(spaceId: spaceId)
     case let .spaceIntegrations(spaceId):
-      ExperimentalPlaceholderView(title: "Space Integrations \(spaceId)")
+      SpaceIntegrationsView(spaceId: spaceId)
     case let .integrationOptions(spaceId, provider):
-      ExperimentalPlaceholderView(title: "Integration \(provider) \(spaceId)")
+      IntegrationOptionsView(spaceId: spaceId, provider: provider)
     case .createSpaceChat:
-      ExperimentalPlaceholderView(title: "Create Space Chat")
+      CreateChatView(spaceId: nil)
     case let .createThread(spaceId):
-      ExperimentalPlaceholderView(title: "Create Thread \(spaceId)")
+      CreateChatView(spaceId: spaceId)
     case .createSpace:
-      ExperimentalPlaceholderView(title: "Create Space")
+      CreateSpaceView()
     }
   }
 }
@@ -135,11 +61,535 @@ struct ExperimentalSheetView: View {
         SettingsView()
       }
     case .createSpace:
-      ExperimentalPlaceholderView(title: "Create Space (Sheet)")
+      CreateSpace()
     case .alphaSheet:
-      ExperimentalPlaceholderView(title: "Alpha Sheet")
+      AlphaSheet()
     case let .addMember(spaceId):
-      ExperimentalPlaceholderView(title: "Add Member \(spaceId)")
+      InviteToSpaceView(spaceId: spaceId)
+    case let .members(spaceId):
+      ExperimentalMembersSheetView(spaceId: spaceId)
     }
+  }
+}
+
+// MARK: - Home
+
+private enum ExperimentalHomeTab: Hashable {
+  case inbox
+  case archived
+}
+
+private struct ExperimentalHomeView: View {
+  @Bindable var nav: ExperimentalNavigationModel
+  let initialTab: ExperimentalHomeTab
+
+  @Environment(Router.self) private var router
+  @EnvironmentObject private var compactSpaceList: CompactSpaceList
+  @EnvironmentObject private var data: DataManager
+  @EnvironmentStateObject private var chatsModel: ExperimentalSpaceChatsViewModel
+
+  @State private var lastFetchedSpaceId: Int64?
+
+  init(nav: ExperimentalNavigationModel, initialTab: ExperimentalHomeTab) {
+    self.nav = nav
+    self.initialTab = initialTab
+    _chatsModel = EnvironmentStateObject { env in
+      ExperimentalSpaceChatsViewModel(db: env.appDatabase)
+    }
+  }
+
+  var body: some View {
+    Group {
+      switch initialTab {
+      case .inbox:
+        ExperimentalChatListView(
+          items: inboxItems,
+          emptyTitle: "No chats",
+          emptySubtitle: "Start a new chat with the plus button.",
+          onTapItem: openChat
+        )
+      case .archived:
+        ExperimentalChatListView(
+          items: archivedItems,
+          emptyTitle: "No archived chats",
+          emptySubtitle: "Archived chats will show up here.",
+          onTapItem: openChat
+        )
+      }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .background(Color(.systemBackground))
+    .navigationBarTitleDisplayMode(.inline)
+    .task {
+      ensureActiveSpaceSelected()
+      chatsModel.setSpaceId(nav.activeSpaceId)
+      await fetchDialogsIfNeeded(spaceId: nav.activeSpaceId)
+    }
+    .onChange(of: compactSpaceList.spaces) { _, _ in
+      ensureActiveSpaceSelected()
+      chatsModel.setSpaceId(nav.activeSpaceId)
+      Task { await fetchDialogsIfNeeded(spaceId: nav.activeSpaceId) }
+    }
+    .onChange(of: nav.activeSpaceId) { _, newValue in
+      chatsModel.setSpaceId(newValue)
+      Task { await fetchDialogsIfNeeded(spaceId: newValue) }
+    }
+  }
+
+  private var visibleChats: [HomeChatItem] {
+    chatsModel.items
+  }
+
+  private var inboxItems: [HomeChatItem] {
+    visibleChats.filter { $0.dialog.archived != true }
+  }
+
+  private var archivedItems: [HomeChatItem] {
+    visibleChats.filter { $0.dialog.archived == true }
+  }
+
+  private func ensureActiveSpaceSelected() {
+    if nav.activeSpaceId == nil {
+      nav.activeSpaceId = compactSpaceList.spaces.first?.id
+    }
+  }
+
+  private func openChat(_ item: HomeChatItem) {
+    router.push(.chat(peer: item.peerId))
+  }
+
+  private func fetchDialogsIfNeeded(spaceId: Int64?) async {
+    guard let spaceId else { return }
+    guard lastFetchedSpaceId != spaceId else { return }
+    lastFetchedSpaceId = spaceId
+    do {
+      try await data.getDialogs(spaceId: spaceId)
+    } catch {
+      Log.shared.error("Failed to get dialogs", error: error)
+    }
+  }
+}
+
+@MainActor
+private final class ExperimentalSpaceChatsViewModel: ObservableObject {
+  @Published private(set) var items: [HomeChatItem] = []
+
+  private let db: AppDatabase
+  private let log = Log.scoped("ExperimentalSpaceChatsViewModel")
+  private var cancellable: AnyCancellable?
+  private var activeSpaceId: Int64?
+
+  init(db: AppDatabase) {
+    self.db = db
+  }
+
+  func setSpaceId(_ spaceId: Int64?) {
+    guard activeSpaceId != spaceId else { return }
+    activeSpaceId = spaceId
+    bind()
+  }
+
+  private func bind() {
+    cancellable?.cancel()
+
+    guard let spaceId = activeSpaceId else {
+      items = []
+      return
+    }
+
+    let spaceIdValue = spaceId
+
+    cancellable = ValueObservation
+      .tracking { db in
+        let space = try Space.fetchOne(db, id: spaceIdValue)
+
+        let threads = try Dialog
+          .spaceChatItemQuery()
+          .filter(Column("spaceId") == spaceIdValue)
+          .fetchAll(db)
+
+        let contacts = try Dialog
+          .spaceChatItemQueryForUser()
+          .filter(
+            sql: "dialog.peerUserId IN (SELECT userId FROM member WHERE spaceId = ?)",
+            arguments: StatementArguments([spaceIdValue])
+          )
+          .fetchAll(db)
+
+        return ExperimentalSpaceChatsSnapshot(
+          space: space,
+          threadItems: threads,
+          contactItems: contacts
+        )
+      }
+      .publisher(in: db.dbWriter, scheduling: .immediate)
+      .sink(
+        receiveCompletion: { [weak self] completion in
+          guard let self else { return }
+          if case let .failure(error) = completion {
+            log.error("Failed to fetch experimental space chats for spaceId=\(spaceIdValue): \(error)")
+          }
+        },
+        receiveValue: { [weak self] snapshot in
+          guard let self else { return }
+
+          let mapped = Self.mergeUnique(
+            (snapshot.threadItems + snapshot.contactItems).map { item in
+              HomeChatItem(
+                dialog: item.dialog,
+                user: item.userInfo,
+                chat: item.chat,
+                lastMessage: Self.embeddedMessage(for: item),
+                space: snapshot.space
+              )
+            }
+          )
+          .filter { $0.chat != nil || $0.user != nil }
+
+          items = HomeViewModel.sortChats(mapped)
+        }
+      )
+  }
+
+  private static func embeddedMessage(for item: SpaceChatItem) -> EmbeddedMessage? {
+    guard let message = item.message else { return nil }
+    return EmbeddedMessage(
+      message: message,
+      senderInfo: item.from,
+      translations: item.translations,
+      photoInfo: item.photoInfo,
+      videoInfo: nil
+    )
+  }
+
+  private static func mergeUnique(_ items: [HomeChatItem]) -> [HomeChatItem] {
+    var seen = Set<Int64>()
+    return items.filter { item in
+      seen.insert(item.id).inserted
+    }
+  }
+
+  private struct ExperimentalSpaceChatsSnapshot: Sendable {
+    let space: Space?
+    let threadItems: [SpaceChatItem]
+    let contactItems: [SpaceChatItem]
+  }
+}
+
+private struct ExperimentalChatListView: View {
+  let items: [HomeChatItem]
+  let emptyTitle: String
+  let emptySubtitle: String
+  let onTapItem: (HomeChatItem) -> Void
+
+  @EnvironmentObject private var data: DataManager
+
+  var body: some View {
+    if items.isEmpty {
+      ExperimentalEmptyStateView(title: emptyTitle, subtitle: emptySubtitle)
+    } else {
+      List {
+        ForEach(items, id: \.id) { item in
+          Button {
+            onTapItem(item)
+          } label: {
+            rowContent(for: item)
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .contentShape(.rect)
+          }
+          .buttonStyle(.plain)
+          .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            archiveButton(for: item)
+          }
+          .listRowInsets(EdgeInsets(
+            top: 8,
+            leading: 16,
+            bottom: 8,
+            trailing: 16
+          ))
+        }
+      }
+      .listStyle(.plain)
+    }
+  }
+
+  @ViewBuilder
+  private func archiveButton(for item: HomeChatItem) -> some View {
+    let isArchived = item.dialog.archived == true
+
+    Button(role: isArchived ? nil : .destructive) {
+      Task {
+        try await data.updateDialog(
+          peerId: item.peerId,
+          archived: !isArchived
+        )
+      }
+    } label: {
+      Label(
+        isArchived ? "Unarchive" : "Archive",
+        systemImage: isArchived ? "tray.and.arrow.up.fill" : "tray.and.arrow.down.fill"
+      )
+    }
+    .tint(Color(.systemPurple))
+  }
+
+  @ViewBuilder
+  private func rowContent(for item: HomeChatItem) -> some View {
+    if let user = item.user {
+      ChatListItem(
+        type: .user(user, chat: item.chat),
+        dialog: item.dialog,
+        lastMessage: item.lastMessage?.message,
+        lastMessageSender: item.lastMessage?.senderInfo,
+        embeddedLastMessage: item.lastMessage
+      )
+    } else if let chat = item.chat {
+      ChatListItem(
+        type: .chat(chat, spaceName: item.space?.nameWithoutEmoji),
+        dialog: item.dialog,
+        lastMessage: item.lastMessage?.message,
+        lastMessageSender: item.lastMessage?.senderInfo,
+        embeddedLastMessage: item.lastMessage
+      )
+    } else {
+      EmptyView()
+    }
+  }
+}
+
+private struct ExperimentalEmptyStateView: View {
+  let title: String
+  let subtitle: String
+
+  var body: some View {
+    VStack(spacing: 10) {
+      Text(title)
+        .font(.title3)
+        .fontWeight(.semibold)
+
+      Text(subtitle)
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
+        .padding(.horizontal, 24)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .background(Color(.systemBackground))
+  }
+}
+
+// MARK: - Members Sheet
+
+struct ExperimentalMembersSheetView: View {
+  let spaceId: Int64
+
+  @Environment(Router.self) private var router
+  @EnvironmentStateObject private var viewModel: SpaceFullMembersViewModel
+
+  init(spaceId: Int64) {
+    self.spaceId = spaceId
+    _viewModel = EnvironmentStateObject { env in
+      SpaceFullMembersViewModel(db: env.appDatabase, spaceId: spaceId)
+    }
+  }
+
+  var body: some View {
+    NavigationStack {
+      List {
+        ForEach(viewModel.filteredMembers) { member in
+          ExperimentalMemberRow(
+            member: member,
+            onMessage: {
+              router.dismissSheet()
+              router.push(.chat(peer: .user(id: member.userInfo.user.id)))
+            }
+          )
+          .listRowSeparator(.hidden)
+          .listRowBackground(Color.clear)
+        }
+      }
+      .listStyle(.plain)
+      .navigationTitle("Members")
+      .toolbar {
+        ToolbarItem(placement: .topBarTrailing) {
+          Button {
+            Task {
+              await viewModel.refetchMembers()
+            }
+          } label: {
+            if viewModel.isLoading {
+              ProgressView()
+            } else {
+              Image(systemName: "arrow.clockwise")
+            }
+          }
+          .accessibilityLabel("Refresh")
+        }
+      }
+    }
+  }
+}
+
+private struct ExperimentalMemberRow: View {
+  let member: FullMemberItem
+  let onMessage: () -> Void
+
+  @Environment(\.colorScheme) private var colorScheme
+
+  private var buttonFill: Color {
+    colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.045)
+  }
+
+  private var borderColor: Color {
+    colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.07)
+  }
+
+  var body: some View {
+    HStack(spacing: 12) {
+      UserAvatar(userInfo: member.userInfo, size: 34)
+
+      Text(member.userInfo.user.displayName)
+        .font(.system(size: 16, weight: .medium))
+        .foregroundStyle(.primary)
+        .lineLimit(1)
+
+      Spacer(minLength: 0)
+
+      Button(action: onMessage) {
+        Image(systemName: "bubble.left.and.bubble.right.fill")
+          .font(.system(size: 14, weight: .semibold))
+          .foregroundStyle(.primary)
+          .frame(width: 34, height: 34)
+          .background(buttonFill, in: Circle())
+          .overlay(
+            Circle().stroke(borderColor, lineWidth: 0.5)
+          )
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel("Message")
+    }
+    .padding(.vertical, 6)
+  }
+}
+
+// MARK: - Avatars (synced with macOS experimental UI)
+
+private struct ExperimentalSidebarChatIcon: View, Equatable {
+  enum PeerType: Equatable {
+    case chat(Chat)
+    case user(UserInfo)
+
+    static func == (lhs: PeerType, rhs: PeerType) -> Bool {
+      switch (lhs, rhs) {
+      case let (.chat(lhsChat), .chat(rhsChat)):
+        return lhsChat.id == rhsChat.id
+          && lhsChat.title == rhsChat.title
+          && lhsChat.emoji == rhsChat.emoji
+
+      case let (.user(lhsUserInfo), .user(rhsUserInfo)):
+        return userNameSignature(lhsUserInfo.user) == userNameSignature(rhsUserInfo.user)
+          && profilePhotoId(lhsUserInfo) == profilePhotoId(rhsUserInfo)
+
+      default:
+        return false
+      }
+    }
+
+    private static func userNameSignature(_ user: User) -> UserNameSignature {
+      UserNameSignature(
+        firstName: user.firstName,
+        lastName: user.lastName,
+        username: user.username,
+        phoneNumber: user.phoneNumber,
+        email: user.email
+      )
+    }
+
+    private static func profilePhotoId(_ userInfo: UserInfo) -> String? {
+      userInfo.profilePhoto?.first?.id ?? userInfo.user.profileFileId
+    }
+
+    private struct UserNameSignature: Hashable {
+      let firstName: String?
+      let lastName: String?
+      let username: String?
+      let phoneNumber: String?
+      let email: String?
+    }
+  }
+
+  var peer: PeerType
+  var size: CGFloat = 34
+
+  static func == (lhs: ExperimentalSidebarChatIcon, rhs: ExperimentalSidebarChatIcon) -> Bool {
+    lhs.peer == rhs.peer && lhs.size == rhs.size
+  }
+
+  var body: some View {
+    switch peer {
+    case let .chat(chat):
+      ExperimentalThreadIcon(emoji: normalizedEmoji(chat.emoji), size: size)
+    case let .user(userInfo):
+      UserAvatar(userInfo: userInfo, size: size)
+    }
+  }
+
+  private func normalizedEmoji(_ emoji: String?) -> String? {
+    guard let emoji else { return nil }
+    let trimmed = emoji.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
+  }
+}
+
+private struct ExperimentalThreadIcon: View {
+  let emoji: String?
+  let size: CGFloat
+
+  @Environment(\.colorScheme) private var colorScheme
+
+  private static let lightTop = Color(.sRGB, red: 241 / 255, green: 239 / 255, blue: 239 / 255, opacity: 0.5)
+  private static let lightBottom = Color(.sRGB, red: 229 / 255, green: 229 / 255, blue: 229 / 255, opacity: 0.5)
+  private static let darkTop = Color(.sRGB, red: 58 / 255, green: 58 / 255, blue: 58 / 255, opacity: 0.5)
+  private static let darkBottom = Color(.sRGB, red: 44 / 255, green: 44 / 255, blue: 44 / 255, opacity: 0.5)
+  private static let symbolForeground = Color(.sRGB, red: 0.35, green: 0.35, blue: 0.35, opacity: 1)
+
+  private var backgroundGradient: LinearGradient {
+    let colors = colorScheme == .dark
+      ? [Self.darkTop, Self.darkBottom]
+      : [Self.lightTop, Self.lightBottom]
+
+    return LinearGradient(
+      colors: colors,
+      startPoint: .top,
+      endPoint: .bottom
+    )
+  }
+
+  private var borderColor: Color {
+    colorScheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.06)
+  }
+
+  private var emojiPointSize: CGFloat { size * 0.5 }
+  private var symbolPointSize: CGFloat { size * 0.5 }
+
+  var body: some View {
+    Circle()
+      .fill(backgroundGradient)
+      .overlay(
+        Circle()
+          .stroke(borderColor, lineWidth: 0.5)
+      )
+      .overlay {
+        if let emoji {
+          Text(emoji)
+            .font(.system(size: emojiPointSize, weight: .regular))
+        } else {
+          Image(systemName: "number")
+            .font(.system(size: symbolPointSize, weight: .medium))
+            .foregroundColor(Self.symbolForeground)
+        }
+      }
+      .frame(width: size, height: size)
+      .fixedSize()
   }
 }
