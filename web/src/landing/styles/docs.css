@@ -1,0 +1,641 @@
+/* Docs-only layout and a few markdown affordances. Keep this minimal. */
+
+.docs-page {
+  /* Keep docs readable on both schemes without depending on global styles. */
+  color-scheme: light dark;
+
+  --docs-text: rgba(0, 0, 0, 0.86);
+  --docs-muted: rgba(0, 0, 0, 0.62);
+  --docs-faint: rgba(0, 0, 0, 0.18);
+
+  --docs-panel: rgba(0, 0, 0, 0.028);
+  --docs-hover: rgba(0, 0, 0, 0.05);
+  --docs-active: rgba(0, 0, 0, 0.07);
+  --docs-indicator: rgba(0, 0, 0, 0.22);
+
+  --docs-link: rgba(0, 0, 0, 0.84);
+  --docs-link-hover: rgba(0, 0, 0, 1);
+
+  --docs-code-bg: rgba(0, 0, 0, 0.045);
+  --docs-table-border: rgba(0, 0, 0, 0.09);
+
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  color: var(--docs-text);
+}
+
+.docs-container {
+  margin: 0 auto;
+  max-width: 1100px;
+  width: 100%;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+@media (max-width: 1000px) {
+  .docs-container {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+}
+
+.docs-body {
+  flex: 1;
+  padding-top: 14px;
+  padding-bottom: 26px;
+}
+
+.docs-topbar {
+  padding-top: 14px;
+  padding-bottom: 6px;
+}
+
+.docs-topbar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.docs-topbar-home {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  opacity: 1;
+  border-radius: 10px;
+  padding: 6px;
+  margin-left: -6px;
+}
+
+.docs-topbar-home:hover {
+  opacity: 1;
+}
+
+.docs-topbar-home:focus-visible {
+  outline: 2px solid var(--docs-faint);
+  outline-offset: 2px;
+}
+
+.docs-topbar-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.docs-topbar-icon--dark {
+  display: none;
+}
+
+.docs-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.docs-theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  border: 1px solid var(--docs-faint);
+  color: var(--docs-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.docs-theme-toggle:hover {
+  color: var(--docs-text);
+  background: var(--docs-panel);
+}
+
+.docs-theme-toggle:focus-visible {
+  outline: 2px solid var(--docs-faint);
+  outline-offset: 2px;
+}
+
+/* Theme toggle icon is provided via React (Lucide SVG). */
+
+.docs-topbar-wordmark {
+  font-family: "Days One", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial,
+    "Noto Sans", sans-serif;
+  font-size: 18px;
+  letter-spacing: 0.01em;
+  color: #000;
+}
+
+.docs-layout {
+  display: flex;
+  gap: 44px;
+  align-items: flex-start;
+}
+
+.docs-sidebar {
+  width: 230px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 14px;
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 10px;
+  margin-left: -10px;
+  border-radius: 16px;
+  background: var(--docs-panel);
+}
+
+.docs-sidebar-group {
+  margin-bottom: 14px;
+}
+
+.docs-sidebar-title {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--docs-muted);
+  margin-bottom: 6px;
+  padding: 0 6px;
+}
+
+.docs-sidebar-link {
+  display: block;
+  font-size: 14px;
+  text-decoration: none;
+  padding: 5px 8px;
+  border-radius: 12px;
+  opacity: 0.86;
+  position: relative;
+  line-height: 1.25;
+}
+
+.docs-sidebar-link:hover {
+  opacity: 1;
+  background: var(--docs-hover);
+}
+
+.docs-sidebar-link-active {
+  opacity: 1;
+  background: var(--docs-active);
+}
+
+.docs-sidebar-link-active::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--docs-indicator);
+}
+
+.docs-sidebar-link:focus-visible {
+  outline: 2px solid var(--docs-faint);
+  outline-offset: 2px;
+}
+
+.docs-main {
+  min-width: 0;
+  max-width: 860px;
+  width: 100%;
+}
+
+.docs-footer {
+  padding: 14px 0 18px 0;
+}
+
+.docs-footer-inner {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.docs-footer-brand {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.docs-footer-wordmark {
+  font-family: "Days One", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial,
+    "Noto Sans", sans-serif;
+  font-size: 15px;
+  letter-spacing: 0.01em;
+  opacity: 0.9;
+}
+
+.docs-footer-muted {
+  font-size: 13px;
+  color: var(--docs-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docs-footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: flex-end;
+  font-size: 13px;
+}
+
+.docs-footer-links a {
+  color: var(--docs-muted);
+  text-decoration: none;
+}
+
+.docs-footer-links a:hover {
+  color: var(--docs-text);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.docs-footer-copy {
+  color: var(--docs-muted);
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.docs-footer-copy:hover {
+  color: var(--docs-text);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.docs-footer-copy:focus-visible {
+  outline: 2px solid var(--docs-faint);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (max-width: 760px) {
+  .docs-footer-inner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .docs-footer-links {
+    justify-content: flex-start;
+  }
+}
+
+/* Typography tuned for docs (don't leak into other longform pages like /privacy). */
+.docs-content.page-content {
+  font-size: 17px;
+  line-height: 1.55;
+}
+
+.docs-content.page-content h1 {
+  font-size: 1.7rem;
+  margin-bottom: 1.1rem;
+  font-weight: 700;
+  scroll-margin-top: 16px;
+}
+
+.docs-content.page-content h2 {
+  font-size: 1.25rem;
+  margin-top: 2.1rem;
+  margin-bottom: 0.6rem;
+  padding-bottom: 0;
+  font-weight: 650;
+  scroll-margin-top: 16px;
+}
+
+.docs-content.page-content h3 {
+  font-size: 1.05rem;
+  margin-top: 1.2rem;
+  margin-bottom: 0.5rem;
+  font-weight: 650;
+  scroll-margin-top: 16px;
+}
+
+.docs-content.page-content h4 {
+  scroll-margin-top: 16px;
+}
+
+.docs-content.page-content p {
+  margin-bottom: 0.9rem;
+  line-height: 1.64;
+}
+
+.docs-content.page-content ul,
+.docs-content.page-content ol {
+  padding-left: 1.35rem;
+  margin-top: 0.3rem;
+  margin-bottom: 1rem;
+}
+
+.docs-content.page-content ul li {
+  list-style-type: disc;
+}
+
+.docs-content.page-content ol li {
+  list-style-type: decimal;
+}
+
+.docs-content.page-content li {
+  margin-bottom: 0.35rem;
+}
+
+.docs-content.page-content blockquote {
+  margin: 1rem 0 1.1rem 0;
+  padding: 10px 12px;
+  border-left: 2px solid var(--docs-faint);
+  background: var(--docs-panel);
+  border-radius: 12px;
+  color: var(--docs-text);
+}
+
+.docs-content.page-content :not(pre) > code {
+  background: var(--docs-panel);
+  border: 1px solid var(--docs-faint);
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+
+.docs-content.page-content pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  border-radius: 0;
+}
+
+.docs-content.page-content hr {
+  height: 1px;
+  background: var(--docs-faint);
+  border: none;
+  margin: 1.25rem 0;
+}
+
+/* Make heading links subtle; clicking a heading should update the hash. */
+.docs-content.page-content .docs-heading-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.docs-content .docs-heading-link:hover::after {
+  content: "  #";
+  opacity: 0.35;
+  font-weight: 400;
+}
+
+.docs-content.page-content a {
+  color: var(--docs-link);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.docs-content.page-content a:hover {
+  color: var(--docs-link-hover);
+}
+
+.docs-content.page-content .docs-email-copy {
+  color: var(--docs-link);
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.docs-content.page-content .docs-email-copy:hover {
+  color: var(--docs-link-hover);
+}
+
+.docs-content.page-content .docs-email-copy[data-copied="true"] {
+  text-decoration: none;
+}
+
+.docs-content.page-content .docs-email-copy:focus-visible {
+  outline: 2px solid var(--docs-faint);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .docs-page {
+    --docs-text: rgba(255, 255, 255, 0.88);
+    --docs-muted: rgba(255, 255, 255, 0.62);
+    --docs-faint: rgba(255, 255, 255, 0.16);
+
+    --docs-panel: rgba(255, 255, 255, 0.04);
+    --docs-hover: rgba(255, 255, 255, 0.06);
+    --docs-active: rgba(255, 255, 255, 0.08);
+    --docs-indicator: rgba(255, 255, 255, 0.22);
+
+    --docs-link: rgba(255, 255, 255, 0.9);
+    --docs-link-hover: rgba(255, 255, 255, 1);
+
+    --docs-code-bg: rgba(255, 255, 255, 0.06);
+    --docs-table-border: rgba(255, 255, 255, 0.14);
+  }
+
+  .page-content pre {
+    background: var(--docs-code-bg);
+  }
+
+  .page-content th,
+  .page-content td {
+    border-bottom: 1px solid var(--docs-table-border);
+  }
+
+  /* If no explicit theme is set, match system preference for icons. */
+  html:not([data-theme]) .docs-topbar-icon--light {
+    display: none;
+  }
+
+  html:not([data-theme]) .docs-topbar-icon--dark {
+    display: inline;
+  }
+
+  html:not([data-theme]) .docs-topbar-wordmark {
+    color: #fff;
+  }
+
+}
+
+/* Explicit theme overrides (also controls icon + toggle glyph). */
+html[data-theme="dark"] .docs-topbar-icon--light {
+  display: none;
+}
+
+html[data-theme="dark"] .docs-topbar-icon--dark {
+  display: inline;
+}
+
+html[data-theme="dark"] .docs-topbar-wordmark {
+  color: #fff;
+}
+
+html[data-theme="light"] .docs-topbar-icon--light {
+  display: inline;
+}
+
+html[data-theme="light"] .docs-topbar-icon--dark {
+  display: none;
+}
+
+html[data-theme="light"] .docs-topbar-wordmark {
+  color: #000;
+}
+
+/* Make the toggle actually affect the page (not just the icons). */
+html[data-theme="dark"],
+html[data-theme="dark"] body {
+  background-color: #303845;
+  background-image: linear-gradient(180deg, #303845 0%, #1c2025 100%);
+  background-attachment: fixed;
+}
+
+html[data-theme="light"],
+html[data-theme="light"] body {
+  background: #f2f2f2;
+}
+
+html[data-theme="dark"] .docs-page {
+  --docs-text: rgba(255, 255, 255, 0.88);
+  --docs-muted: rgba(255, 255, 255, 0.62);
+  --docs-faint: rgba(255, 255, 255, 0.16);
+
+  --docs-panel: rgba(255, 255, 255, 0.04);
+  --docs-hover: rgba(255, 255, 255, 0.06);
+  --docs-active: rgba(255, 255, 255, 0.08);
+  --docs-indicator: rgba(255, 255, 255, 0.22);
+
+  --docs-link: rgba(255, 255, 255, 0.9);
+  --docs-link-hover: rgba(255, 255, 255, 1);
+
+  --docs-code-bg: rgba(255, 255, 255, 0.06);
+  --docs-table-border: rgba(255, 255, 255, 0.14);
+}
+
+html[data-theme="light"] .docs-page {
+  --docs-text: rgba(0, 0, 0, 0.86);
+  --docs-muted: rgba(0, 0, 0, 0.62);
+  --docs-faint: rgba(0, 0, 0, 0.18);
+
+  --docs-panel: rgba(0, 0, 0, 0.028);
+  --docs-hover: rgba(0, 0, 0, 0.05);
+  --docs-active: rgba(0, 0, 0, 0.07);
+  --docs-indicator: rgba(0, 0, 0, 0.22);
+
+  --docs-link: rgba(0, 0, 0, 0.84);
+  --docs-link-hover: rgba(0, 0, 0, 1);
+
+  --docs-code-bg: rgba(0, 0, 0, 0.045);
+  --docs-table-border: rgba(0, 0, 0, 0.09);
+}
+
+/* Markdown bits we want to look decent everywhere. */
+.page-content img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 12px;
+}
+
+.docs-codeblock {
+  position: relative;
+  margin-bottom: 16px;
+}
+
+.docs-codeblock pre {
+  margin-bottom: 0;
+  padding-top: 36px;
+}
+
+.docs-codeblock-copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 6px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: var(--docs-muted);
+  cursor: pointer;
+  opacity: 0.8;
+}
+
+.docs-codeblock-copy:hover {
+  color: var(--docs-text);
+  opacity: 1;
+}
+
+@media (prefers-color-scheme: dark) {
+  /* no chrome in dark mode either */
+}
+
+.docs-codeblock-copy:focus-visible {
+  outline: 2px solid var(--docs-faint);
+  outline-offset: 2px;
+}
+
+.page-content pre {
+  background: var(--docs-code-bg);
+  border-radius: 12px;
+  padding: 12px 14px;
+  overflow: auto;
+  margin-bottom: 16px;
+}
+
+.page-content code {
+  font-family: "Reddit Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  font-size: 0.95em;
+}
+
+.page-content pre code {
+  font-size: 12.5px;
+  line-height: 1.38;
+}
+
+.page-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 16px;
+}
+
+.page-content th,
+.page-content td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--docs-table-border);
+  vertical-align: top;
+}
+
+.page-content th {
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+@media (max-width: 920px) {
+  .docs-layout {
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .docs-sidebar {
+    position: relative;
+    top: auto;
+    width: 100%;
+    max-height: none;
+    padding: 10px;
+    margin-left: 0;
+    border-bottom: 1px solid var(--docs-faint);
+    padding-bottom: 12px;
+    border-radius: 14px;
+  }
+}
