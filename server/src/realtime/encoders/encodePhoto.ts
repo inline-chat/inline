@@ -1,7 +1,7 @@
 import type { DbFile } from "@in/server/db/schema"
 import { decrypt } from "@in/server/modules/encryption/encryption"
 import { getSignedUrl } from "@in/server/modules/files/path"
-import { Photo_Format, PhotoSize, type Photo } from "@in/protocol/core"
+import { Photo_Format, PhotoSize, type Photo } from "@inline-chat/protocol/core"
 import type { DbFullPhoto, DbFullPhotoSize } from "@in/server/db/models/files"
 import { encodeDate, encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 

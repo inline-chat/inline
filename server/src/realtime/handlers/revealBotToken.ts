@@ -1,4 +1,4 @@
-import type { RevealBotTokenInput, RevealBotTokenResult } from "@in/protocol/core"
+import type { RevealBotTokenInput, RevealBotTokenResult } from "@inline-chat/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { revealBotToken } from "@in/server/functions/bot.revealToken"
 

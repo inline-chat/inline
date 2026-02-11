@@ -1,4 +1,4 @@
-import type { Chat, Dialog, InputPeer, Message, MessageAttachment, Space, User } from "@in/protocol/core"
+import type { Chat, Dialog, InputPeer, Message, MessageAttachment, Space, User } from "@inline-chat/protocol/core"
 import { ModelError } from "@in/server/db/models/_errors"
 import { MessageModel } from "@in/server/db/models/messages"
 import type { FunctionContext } from "@in/server/functions/_types"

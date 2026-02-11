@@ -14,7 +14,7 @@ export type UpdateGroup =
 
 import type { TPeerInfo } from "@in/server/api-types"
 import invariant from "tiny-invariant"
-import type { InputPeer } from "@in/protocol/core"
+import type { InputPeer } from "@inline-chat/protocol/core"
 
 /**
  * Get the group of users that need to receive an update for an event

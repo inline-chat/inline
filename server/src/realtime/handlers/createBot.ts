@@ -1,4 +1,4 @@
-import type { CreateBotInput, CreateBotResult } from "@in/protocol/core"
+import type { CreateBotInput, CreateBotResult } from "@inline-chat/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { createBot } from "@in/server/functions/createBot"
 

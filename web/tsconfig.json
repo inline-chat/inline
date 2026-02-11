@@ -19,8 +19,8 @@
       "@inline/log/*": ["./packages/log/src/*"],
       "@inline/config": ["./packages/config/src/index.ts"],
       "@inline/config/*": ["./packages/config/src/*"],
-      "@in/protocol": ["./packages/protocol/src/index.ts"],
-      "@in/protocol/*": ["./packages/protocol/src/*"],
+      "@inline-chat/protocol": ["../packages/protocol/src/index.ts"],
+      "@inline-chat/protocol/*": ["../packages/protocol/src/*"],
       "@in/server": ["../server/src"],
       "@in/server/*": ["../server/src/*"]
     },

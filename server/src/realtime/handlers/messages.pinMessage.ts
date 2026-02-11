@@ -1,4 +1,4 @@
-import { PinMessageInput, PinMessageResult } from "@in/protocol/core"
+import { PinMessageInput, PinMessageResult } from "@inline-chat/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { pinMessage } from "@in/server/functions/messages.pinMessage"

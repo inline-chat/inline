@@ -1,4 +1,4 @@
-import { Method, type RpcCall, type RpcResult } from "@in/protocol/core"
+import { Method, type RpcCall, type RpcResult } from "@inline-chat/protocol/core"
 import type { Db } from "../../database"
 import { Mutation, type LocalTransaction, type LocalTransactionContext } from "./transaction"
 

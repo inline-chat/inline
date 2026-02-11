@@ -1,4 +1,4 @@
-import { MessageEntity_Type, type MessageEntities } from "@in/protocol/core"
+import { MessageEntity_Type, type MessageEntities } from "@inline-chat/protocol/core"
 import { MessageModel, type ProcessedMessage } from "@in/server/db/models/messages"
 import { UserSettingsNotificationsMode, type UserSettingsGeneral } from "@in/server/db/models/userSettings/types"
 import type { DbMessage } from "@in/server/db/schema"

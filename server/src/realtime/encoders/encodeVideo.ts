@@ -1,5 +1,5 @@
 import { getSignedUrl } from "@in/server/modules/files/path"
-import { Video } from "@in/protocol/core"
+import { Video } from "@inline-chat/protocol/core"
 import type { DbFullVideo } from "@in/server/db/models/files"
 import { encodePhoto } from "@in/server/realtime/encoders/encodePhoto"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"

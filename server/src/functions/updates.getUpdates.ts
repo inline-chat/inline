@@ -1,5 +1,5 @@
-import type { GetUpdatesInput, GetUpdatesResult, InputPeer, Peer } from "@in/protocol/core"
-import { GetUpdatesResult_ResultType } from "@in/protocol/core"
+import type { GetUpdatesInput, GetUpdatesResult, InputPeer, Peer } from "@inline-chat/protocol/core"
+import { GetUpdatesResult_ResultType } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import type { UpdateBoxInput } from "@in/server/db/models/updates"
 import type { DbChat } from "@in/server/db/schema"

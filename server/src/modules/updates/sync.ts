@@ -1,4 +1,4 @@
-import type { Message, Peer, Update } from "@in/protocol/core"
+import type { Message, Peer, Update } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import { MessageModel } from "@in/server/db/models/messages"
 import { UsersModel } from "@in/server/db/models/users"

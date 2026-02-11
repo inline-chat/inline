@@ -4,7 +4,7 @@ import { getUserSettingsHandler } from "@in/server/realtime/handlers/user.getUse
 import { updateUserSettingsHandler } from "@in/server/realtime/handlers/user.updateUserSettings"
 import { UserSettingsNotificationsMode } from "@in/server/db/models/userSettings/types"
 import { UserSettingsModel } from "@in/server/db/models/userSettings/userSettings"
-import { NotificationSettings_Mode } from "@in/protocol/core"
+import { NotificationSettings_Mode } from "@inline-chat/protocol/core"
 
 describe("User Settings RPC", () => {
   let userId: number

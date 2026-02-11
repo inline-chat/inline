@@ -1,4 +1,4 @@
-import { MessageEntities, MessageEntity_Type } from "@in/protocol/core"
+import { MessageEntities, MessageEntity_Type } from "@inline-chat/protocol/core"
 
 type DetectHasLinkInput = {
   entities?: MessageEntities | null

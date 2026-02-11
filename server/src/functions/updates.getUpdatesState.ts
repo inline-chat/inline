@@ -1,4 +1,4 @@
-import type { GetUpdatesStateInput } from "@in/protocol/core"
+import type { GetUpdatesStateInput } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { SpaceModel } from "@in/server/db/models/spaces"
 import { Encoders } from "@in/server/realtime/encoders/encoders"

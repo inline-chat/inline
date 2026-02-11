@@ -11,7 +11,7 @@ import {
   type Peer,
   MessageEntities,
   MessageSendMode,
-} from "@in/protocol/core"
+} from "@inline-chat/protocol/core"
 import { encodePeer, encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer"
 import { encodePhoto, encodePhotoLegacy } from "@in/server/realtime/encoders/encodePhoto"
 import type { DbFullDocument, DbFullPhoto, DbFullVideo } from "@in/server/db/models/files"

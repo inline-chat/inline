@@ -3,10 +3,10 @@ import {
   AddChatParticipantResult,
   RemoveChatParticipantResult,
   RemoveChatParticipantInput,
-} from "@in/protocol/core"
+} from "@inline-chat/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { Functions } from "@in/server/functions"
-import { Method } from "@in/protocol/core"
+import { Method } from "@inline-chat/protocol/core"
 
 export const method = Method.REMOVE_CHAT_PARTICIPANT
 

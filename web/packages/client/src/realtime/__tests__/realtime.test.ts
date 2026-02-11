@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { ServerProtocolMessage } from "@in/protocol/core"
+import { ServerProtocolMessage } from "@inline-chat/protocol/core"
 import { AuthStore, Db, DbObjectKind, RealtimeClient } from "../../index"
 import { getChats, getMe, logOut } from "../transactions"
 import { MockTransport } from "../transport/mock-transport"

@@ -1,6 +1,6 @@
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { translateMessages } from "@in/server/functions/translateMessages"
-import { InputPeer, TranslateMessagesInput, TranslateMessagesResult } from "@in/protocol/core"
+import { InputPeer, TranslateMessagesInput, TranslateMessagesResult } from "@inline-chat/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 import type { FunctionContext } from "@in/server/functions/_types"
 

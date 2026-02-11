@@ -1,5 +1,5 @@
-import { type UserSettings } from "@in/protocol/core"
-import { NotificationSettings_Mode } from "@in/protocol/core"
+import { type UserSettings } from "@inline-chat/protocol/core"
+import { NotificationSettings_Mode } from "@inline-chat/protocol/core"
 import { UserSettingsNotificationsMode } from "@in/server/db/models/userSettings/types"
 import type { UserSettingsGeneralInput } from "@in/server/db/models/userSettings/types"
 

@@ -1,4 +1,4 @@
-import type { RpcError, RpcResult, ServerProtocolMessage, UpdatesPayload } from "@in/protocol/core"
+import type { RpcError, RpcResult, ServerProtocolMessage, UpdatesPayload } from "@inline-chat/protocol/core"
 
 export type ClientState = "connecting" | "open"
 

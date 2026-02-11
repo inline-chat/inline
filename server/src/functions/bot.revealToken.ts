@@ -6,7 +6,7 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { generateToken, hashToken } from "@in/server/utils/auth"
 import { and, eq } from "drizzle-orm"
 import type { FunctionContext } from "@in/server/functions/_types"
-import type { RevealBotTokenInput, RevealBotTokenResult } from "@in/protocol/core"
+import type { RevealBotTokenInput, RevealBotTokenResult } from "@inline-chat/protocol/core"
 
 export const revealBotToken = async (
   input: RevealBotTokenInput,

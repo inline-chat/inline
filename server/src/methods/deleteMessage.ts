@@ -7,7 +7,7 @@ import { type Static, Type } from "@sinclair/typebox"
 import { TPeerInfo } from "@in/server/api-types"
 import { TInputId } from "@in/server/types/methods"
 import { getUpdateGroup } from "../modules/updates"
-import type { Update } from "@in/protocol/core"
+import type { Update } from "@inline-chat/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 

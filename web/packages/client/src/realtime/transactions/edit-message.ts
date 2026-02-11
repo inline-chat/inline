@@ -1,5 +1,5 @@
-import type { EditMessageInput, InputPeer, MessageEntities, RpcCall, RpcResult } from "@in/protocol/core"
-import { Method } from "@in/protocol/core"
+import type { EditMessageInput, InputPeer, MessageEntities, RpcCall, RpcResult } from "@inline-chat/protocol/core"
+import { Method } from "@inline-chat/protocol/core"
 import type { Db } from "../../database"
 import type { AuthStore } from "../../auth"
 import { DbObjectKind } from "../../database/models"

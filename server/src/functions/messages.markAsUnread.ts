@@ -1,4 +1,4 @@
-import type { InputPeer, Update } from "@in/protocol/core"
+import type { InputPeer, Update } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { db } from "@in/server/db"
@@ -8,7 +8,7 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
-import type { ServerUpdate } from "@in/protocol/server"
+import type { ServerUpdate } from "@inline-chat/protocol/server"
 
 type Input = {
   peer: InputPeer

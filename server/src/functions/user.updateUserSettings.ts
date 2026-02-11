@@ -3,7 +3,7 @@ import { getCachedUserSettings, invalidateUserSettingsCache } from "@in/server/m
 import type { FunctionContext } from "@in/server/functions/_types"
 import type { UserSettingsGeneral, UserSettingsGeneralInput } from "@in/server/db/models/userSettings/types"
 import { UserSettingsGeneralSchema } from "@in/server/db/models/userSettings/types"
-import type { Update } from "@in/protocol/core"
+import type { Update } from "@inline-chat/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 

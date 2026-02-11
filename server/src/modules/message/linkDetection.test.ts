@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { MessageEntity_Type } from "@in/protocol/core"
+import { MessageEntity_Type } from "@inline-chat/protocol/core"
 import { detectHasLink } from "./linkDetection"
 
 const entity = (type: MessageEntity_Type) => ({

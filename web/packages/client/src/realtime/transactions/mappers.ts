@@ -1,4 +1,4 @@
-import type { Chat, Dialog, Message, Peer, User } from "@in/protocol/core"
+import type { Chat, Dialog, Message, Peer, User } from "@inline-chat/protocol/core"
 import type { Db } from "../../database"
 import {
   DbObjectKind,

@@ -1,4 +1,4 @@
-import type { ClientMessage } from "@in/protocol/core"
+import type { ClientMessage } from "@inline-chat/protocol/core"
 import type { AsyncChannel } from "../../utils/async-channel"
 import type { TransportEvent } from "../types"
 

@@ -1,4 +1,4 @@
-import { Member_Role, Space } from "@in/protocol/core"
+import { Member_Role, Space } from "@inline-chat/protocol/core"
 import type { DbSpace } from "@in/server/db/schema"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 

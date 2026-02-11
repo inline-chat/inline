@@ -1,7 +1,7 @@
 import {
   MarkAsUnreadInput,
   MarkAsUnreadResult,
-} from "@in/protocol/core"
+} from "@inline-chat/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { markAsUnread as markAsUnreadFunction } from "@in/server/functions/messages.markAsUnread"

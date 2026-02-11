@@ -1,4 +1,4 @@
-import { EditMessageInput, EditMessageResult } from "@in/protocol/core"
+import { EditMessageInput, EditMessageResult } from "@inline-chat/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { Functions } from "@in/server/functions"

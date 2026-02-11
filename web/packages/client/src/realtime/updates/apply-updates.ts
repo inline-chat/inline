@@ -1,4 +1,4 @@
-import type { Peer, Update } from "@in/protocol/core"
+import type { Peer, Update } from "@inline-chat/protocol/core"
 import type { Db } from "../../database"
 import { DbObjectKind } from "../../database/models"
 import { DbQueryPlanType } from "../../database/types"

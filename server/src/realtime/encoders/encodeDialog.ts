@@ -1,4 +1,4 @@
-import { Dialog, Member_Role, Peer, type Member } from "@in/protocol/core"
+import { Dialog, Member_Role, Peer, type Member } from "@inline-chat/protocol/core"
 import type { DbDialog, DbMember } from "@in/server/db/schema"
 import { encodeDate } from "@in/server/realtime/encoders/helpers"
 import { Log } from "@in/server/utils/log"

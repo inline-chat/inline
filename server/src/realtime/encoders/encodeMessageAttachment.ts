@@ -1,5 +1,5 @@
 import { getSignedUrl } from "@in/server/modules/files/path"
-import { Document, InputPeer, MessageAttachment, Peer, Update, UpdateMessageAttachment } from "@in/protocol/core"
+import { Document, InputPeer, MessageAttachment, Peer, Update, UpdateMessageAttachment } from "@inline-chat/protocol/core"
 import type { DbFullDocument } from "@in/server/db/models/files"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { TPeerInfo } from "@in/server/api-types"

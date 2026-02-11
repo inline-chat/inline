@@ -1,4 +1,4 @@
-import { MessageEntity, MessageEntity_Type } from "@in/protocol/core"
+import { MessageEntity, MessageEntity_Type } from "@inline-chat/protocol/core"
 
 export type ParsedMarkdown = {
   text: string

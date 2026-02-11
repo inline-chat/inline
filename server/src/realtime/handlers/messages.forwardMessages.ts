@@ -1,4 +1,4 @@
-import { ForwardMessagesInput, ForwardMessagesResult } from "@in/protocol/core"
+import { ForwardMessagesInput, ForwardMessagesResult } from "@inline-chat/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { forwardMessages } from "@in/server/functions/messages.forwardMessages"
 import { RealtimeRpcError } from "@in/server/realtime/errors"

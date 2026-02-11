@@ -1,4 +1,4 @@
-import { GetChatInput, GetChatResult } from "@in/protocol/core"
+import { GetChatInput, GetChatResult } from "@inline-chat/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { Functions } from "@in/server/functions"

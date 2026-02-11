@@ -1,4 +1,4 @@
-import type { DeleteMemberInput, DeleteMemberResult } from "@in/protocol/core"
+import type { DeleteMemberInput, DeleteMemberResult } from "@inline-chat/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { Functions } from "@in/server/functions"
 import { Cause, Effect } from "effect"

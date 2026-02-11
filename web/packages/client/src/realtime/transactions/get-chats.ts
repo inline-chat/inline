@@ -1,4 +1,4 @@
-import { GetChatsInput, Method, type RpcResult } from "@in/protocol/core"
+import { GetChatsInput, Method, type RpcResult } from "@inline-chat/protocol/core"
 import type { Db } from "../../database"
 import { Query } from "./transaction"
 import type { Transaction } from "./transaction"

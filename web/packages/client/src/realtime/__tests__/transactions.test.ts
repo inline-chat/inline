@@ -7,7 +7,7 @@ import {
   type UpdateDeleteMessages,
   type UpdateEditMessage,
   type UpdateMessageId,
-} from "@in/protocol/core"
+} from "@inline-chat/protocol/core"
 import { AuthStore, Db, DbObjectKind, RealtimeClient } from "../../index"
 import {
   deleteMessages,
