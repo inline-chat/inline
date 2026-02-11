@@ -5,6 +5,7 @@
     "admin",
     "server",
     "web",
+    "packages/*",
     "server/packages/*",
     "web/packages/*",
     "scripts"

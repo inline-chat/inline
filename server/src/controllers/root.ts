@@ -82,7 +82,8 @@ export const root = new Elysia({ scoped: true, name: "root", prefix: "/" })
           <ul>
           <li><a href="https://inline.chat">inline.chat</a></li>
           <li><a href="https://status.inline.chat">is inline down?</a></li>
-          <li><a href="https://api.inline.chat/v1/docs">API docs (preview)</a></li>
+          <li><a href="https://inline.chat/docs">docs</a></li>
+          <li><a href="https://inline.chat/docs/developers">developer docs</a></li>
           <li><a href="mailto:hi@inline.chat">hi@inline.chat</a></li>
           </ul>
           </footer>
