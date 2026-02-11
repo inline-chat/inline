@@ -72,6 +72,7 @@ const COPY = {
       twitter: "Follow updates on X (Twitter)",
       github: "GitHub",
       status: "Status",
+      docs: "Docs",
       privacy: "Privacy",
       email: "hey@inline.chat",
     },
@@ -511,6 +512,11 @@ export function Landing() {
               {...stylex.props(styles.footerLink)}
             >
               {COPY.footer.links.status}
+            </a>
+          </div>
+          <div>
+            <a href="/docs" {...stylex.props(styles.footerLink)}>
+              {COPY.footer.links.docs}
             </a>
           </div>
           <div>
