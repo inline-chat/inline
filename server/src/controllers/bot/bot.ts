@@ -16,7 +16,7 @@ import {
 } from "./types"
 import { handler as getMeHandler } from "@in/server/methods/getMe"
 import { sendMessage as sendMessageFn } from "@in/server/functions/messages.sendMessage"
-import type { InputPeer, Peer } from "@in/protocol/core"
+import type { InputPeer, Peer } from "@inline-chat/protocol/core"
 import { getChat as getChatFn } from "@in/server/functions/messages.getChat"
 import { getChatHistory as getChatHistoryFn } from "@in/server/functions/messages.getChatHistory"
 import { deleteMessage as deleteMessageFn } from "@in/server/functions/messages.deleteMessage"
