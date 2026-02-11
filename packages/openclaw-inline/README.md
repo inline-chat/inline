@@ -4,6 +4,9 @@ OpenClaw channel plugin for interacting with an OpenClaw agent via **Inline**.
 
 Status: **beta** (solid foundation; expect iteration).
 
+Quick setup guide: `docs/openclaw-setup.md`.
+Create bot/token guide: `docs/create-inline-bot.md`.
+
 Supports:
 
 - Inline DMs (`ChatType=direct`)
@@ -22,6 +25,13 @@ From npm (once published):
 
 ```sh
 openclaw plugins install @inline-chat/openclaw-inline
+```
+
+If the plugin is already installed, update in place:
+
+```sh
+openclaw config set plugins.installs.openclaw-inline.spec '"@inline-chat/openclaw-inline@latest"'
+openclaw plugins update openclaw-inline
 ```
 
 From a local checkout (dev):
@@ -46,6 +56,18 @@ plugins:
       enabled: true
 ```
 
+Minimal setup (token field only):
+
+```yaml
+channels:
+  inline:
+    enabled: true
+    token: "<INLINE_BOT_TOKEN>"
+```
+
+`baseUrl` defaults to `https://api.inline.chat`.
+`dmPolicy` defaults to `pairing` (recommended starting point).
+
 Example:
 
 ```yaml
@@ -67,6 +89,8 @@ channels:
     requireMention: true
 ```
 
+If you set `dmPolicy: "open"`, set `allowFrom: ["*"]`.
+
 Multi-account:
 
 ```yaml
@@ -80,3 +104,14 @@ channels:
         baseUrl: "https://api.inline.chat"
         token: "<BOT_TOKEN_B>"
 ```
+
+## Quick Troubleshooting
+
+- `plugin not found: inline`
+  - Use `plugins.entries.openclaw-inline`, not `plugins.entries.inline`.
+- `doctor --fix` suggests Inline changes even though channel is healthy
+  - Keep plugin entry id as `openclaw-inline`.
+  - If `doctor --fix` writes `plugins.entries.inline`, change it back to `plugins.entries.openclaw-inline`.
+- `Inline: SETUP / no token`
+  - Ensure `channels.inline.token` is set and plugin is updated (`openclaw plugins update openclaw-inline`).
+  - If using `dmPolicy: "open"`, ensure `allowFrom: ["*"]`.

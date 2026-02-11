@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { InlineAccountSchema, InlineConfigSchema } from "./config-schema"
+import { InlineAccountSchema, InlineConfigSchema, InlineRuntimeConfigSchema } from "./config-schema"
 
 describe("inline/config-schema", () => {
   it("accepts dmPolicy=open only when allowFrom includes *", () => {
@@ -19,5 +19,10 @@ describe("inline/config-schema", () => {
       InlineAccountSchema.safeParse({ dmPolicy: "open", allowFrom: ["2"] }).success,
     ).toBe(false)
   })
-})
 
+  it("runtime schema remains lenient so token-only setup does not get dropped", () => {
+    expect(
+      InlineRuntimeConfigSchema.safeParse({ token: "t", dmPolicy: "open" }).success,
+    ).toBe(true)
+  })
+})
