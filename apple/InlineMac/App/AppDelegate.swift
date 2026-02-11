@@ -5,6 +5,7 @@ import InlineConfig
 import InlineKit
 import InlineMacUI
 import Logger
+import RealtimeV2
 import Sentry
 import SwiftUI
 import UserNotifications
@@ -32,6 +33,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   let log = Log.scoped("AppDelegate")
 
   private var cancellables = Set<AnyCancellable>()
+  // Session-scoped guard: show the realtime connection failure alert at most once per app run.
+  private var didShowRealtimeConnectionFailureAlert = false
 
   func applicationWillFinishLaunching(_: Notification) {
     // Disable native tabbing
@@ -52,6 +55,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     setupAppearanceSetting()
     setupMainWindow()
     setupMainMenu()
+    setupRealtimeConnectionFailureObserver()
     setupGlobalFocusHotkey()
     setupNotificationsSoundSetting()
     launchAtLoginController.start()
@@ -260,6 +264,73 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Register for notifications
     // notifications.setup()
   }
+
+  private func setupRealtimeConnectionFailureObserver() {
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleRealtimeConnectionFailureNotification),
+      name: .realtimeV2ConnectionInitFailed,
+      object: nil
+    )
+  }
+
+  @objc private func handleRealtimeConnectionFailureNotification() {
+    Task { @MainActor [weak self] in
+      self?.presentRealtimeConnectionFailureAlertIfNeeded()
+    }
+  }
+
+  @MainActor private func presentRealtimeConnectionFailureAlertIfNeeded() {
+    guard !didShowRealtimeConnectionFailureAlert else { return }
+    didShowRealtimeConnectionFailureAlert = true
+
+    let alert = NSAlert()
+    alert.alertStyle = .warning
+    alert.messageText = "Connection Error"
+
+#if SPARKLE
+    if shouldShowRestartAction {
+      alert.informativeText = "Inline couldn't complete a secure connection to your account. Please restart the app."
+      alert.addButton(withTitle: "Restart Inline")
+      alert.addButton(withTitle: "Close")
+      let response = alert.runModal()
+      if response == .alertFirstButtonReturn {
+        restartApplication()
+      }
+    } else {
+      alert.informativeText = "Inline couldn't complete a secure connection to your account. Please restart the app manually."
+      alert.addButton(withTitle: "Close")
+      _ = alert.runModal()
+    }
+#else
+    alert.informativeText = "Inline couldn't complete a secure connection to your account. Please restart the app."
+    alert.addButton(withTitle: "Close")
+    _ = alert.runModal()
+#endif
+  }
+
+#if SPARKLE
+  private var shouldShowRestartAction: Bool {
+    !isSandboxedRuntime
+  }
+
+  private var isSandboxedRuntime: Bool {
+    ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
+  }
+
+  @MainActor private func restartApplication() {
+    let appURL = Bundle.main.bundleURL
+    let configuration = NSWorkspace.OpenConfiguration()
+    configuration.activates = true
+    NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { [weak self] _, error in
+      if let error {
+        self?.log.error("Failed to relaunch app after realtime connection error", error: error)
+        return
+      }
+      NSApp.terminate(nil)
+    }
+  }
+#endif
 
   @MainActor private func setupNotificationsSoundSetting() {
     // Set initial sound setting
