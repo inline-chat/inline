@@ -19,6 +19,8 @@ See: [Realtime API](/docs/realtime-api)
 ## Quick Start
 
 - Method reference: [Bot API](/docs/bot-api)
+- OpenClaw integration: [OpenClaw](/docs/openclaw)
+- Bot token guide: [Creating a Bot](/docs/creating-a-bot)
 
 ## Repository
 
