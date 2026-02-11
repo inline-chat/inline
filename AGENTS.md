@@ -95,13 +95,16 @@
 - Testing/linting/typecheck from `server/`: `bun test`, `bun run lint`, `bun run typecheck`; set `DEBUG=1` for verbose output.
 - External services: APN (`src/libs/apn.ts`), R2 storage (`src/libs/r2.ts`), AI (Anthropic/OpenAI), Linear/Notion/Loom integrations; ensure env vars handled via `src/env.ts`.
 
-## Web
+## Web & Docs
 
-- TanStack router app under `web/app`; styling uses Tailwind 4 + StyleX; animations via Framer Motion/Motion; built with Vite.
-- Scripts from `web/`: `bun run dev`, `bun run build`, `bun run typecheck`; ensure Bun runtime available.
-- Keep routing with TanStack conventions; prefer StyleX/Tailwind utilities over ad-hoc CSS; maintain SSR compatibility (Nitro).
-- When touching protocol-bound code, regenerate protos first (`bun run generate:proto`) to keep TS definitions synced.
-- Use StyleX variables for colors, fontSizes, fonts, radiuses, etc; Follow naming of Apple system variables for theming; Support dark and light theme; Check Theme for macOS/iOS if you are unsure about a variable;
+- Stack: TanStack Router + Vite + StyleX/Tailwind (+ Motion where needed); keep SSR-safe patterns.
+- Commands: from `web/` use `bun run dev`, `bun run build`, `bun run typecheck`.
+- Web styling: prefer existing StyleX tokens/utilities over ad-hoc CSS; preserve light/dark behavior.
+- Protocol-bound web changes: run `bun run generate:proto` when types/contracts are affected.
+- Docs architecture: routes in `web/src/routes/docs/`, markdown in `web/src/docs/content/`, nav in `web/src/docs/nav.ts`.
+- New docs page flow: add `content/<page>.md` + matching `routes/docs/<page>.tsx` + nav entry.
+- Docs structure/tone: minimal sections, short paragraphs, practical bullets, explicit links; avoid filler/meta language.
+- Developer docs positioning: `Realtime API` = full two-way/live integrations, `Bot API` = simpler workflows/alerts.
 
 ## Admin
 
