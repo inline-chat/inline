@@ -9,13 +9,18 @@ COPY admin/package.json /temp/dev/admin/
 COPY server/package.json /temp/dev/server/
 COPY server/packages/email-preview/package.json /temp/dev/server/packages/email-preview/
 COPY server/packages/email-templates/package.json /temp/dev/server/packages/email-templates/
-COPY server/packages/protocol/package.json /temp/dev/server/packages/protocol/
 COPY web/package.json /temp/dev/web/
 COPY web/packages/auth/package.json /temp/dev/web/packages/auth/
 COPY web/packages/client/package.json /temp/dev/web/packages/client/
 COPY web/packages/config/package.json /temp/dev/web/packages/config/
 COPY web/packages/log/package.json /temp/dev/web/packages/log/
 COPY web/packages/protocol/package.json /temp/dev/web/packages/protocol/
+COPY packages/bot-api-types/package.json /temp/dev/packages/bot-api-types/
+COPY packages/bot-api/package.json /temp/dev/packages/bot-api/
+COPY packages/mcp/package.json /temp/dev/packages/mcp/
+COPY packages/openclaw-inline/package.json /temp/dev/packages/openclaw-inline/
+COPY packages/protocol/package.json /temp/dev/packages/protocol/
+COPY packages/sdk/package.json /temp/dev/packages/sdk/
 COPY scripts/package.json /temp/dev/scripts/
 RUN cd /temp/dev && bun install --frozen-lockfile
 
@@ -27,13 +32,18 @@ COPY admin/package.json /temp/prod/admin/
 COPY server/package.json /temp/prod/server/
 COPY server/packages/email-preview/package.json /temp/prod/server/packages/email-preview/
 COPY server/packages/email-templates/package.json /temp/prod/server/packages/email-templates/
-COPY server/packages/protocol/package.json /temp/prod/server/packages/protocol/
 COPY web/package.json /temp/prod/web/
 COPY web/packages/auth/package.json /temp/prod/web/packages/auth/
 COPY web/packages/client/package.json /temp/prod/web/packages/client/
 COPY web/packages/config/package.json /temp/prod/web/packages/config/
 COPY web/packages/log/package.json /temp/prod/web/packages/log/
 COPY web/packages/protocol/package.json /temp/prod/web/packages/protocol/
+COPY packages/bot-api-types/package.json /temp/prod/packages/bot-api-types/
+COPY packages/bot-api/package.json /temp/prod/packages/bot-api/
+COPY packages/mcp/package.json /temp/prod/packages/mcp/
+COPY packages/openclaw-inline/package.json /temp/prod/packages/openclaw-inline/
+COPY packages/protocol/package.json /temp/prod/packages/protocol/
+COPY packages/sdk/package.json /temp/prod/packages/sdk/
 COPY scripts/package.json /temp/prod/scripts/
 RUN cd /temp/prod && bun install --frozen-lockfile --production
 
@@ -51,6 +61,12 @@ COPY web/packages/client/package.json ./web/packages/client/package.json
 COPY web/packages/config/package.json ./web/packages/config/package.json
 COPY web/packages/log/package.json ./web/packages/log/package.json
 COPY web/packages/protocol/package.json ./web/packages/protocol/package.json
+COPY packages/bot-api-types/package.json ./packages/bot-api-types/package.json
+COPY packages/bot-api/package.json ./packages/bot-api/package.json
+COPY packages/mcp/package.json ./packages/mcp/package.json
+COPY packages/openclaw-inline/package.json ./packages/openclaw-inline/package.json
+COPY packages/protocol/package.json ./packages/protocol/package.json
+COPY packages/sdk/package.json ./packages/sdk/package.json
 COPY scripts/package.json ./scripts/package.json
 RUN cd admin && bun run build
 
