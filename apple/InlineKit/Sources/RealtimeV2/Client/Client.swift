@@ -115,6 +115,10 @@ actor ProtocolSession: ProtocolSessionType {
       log.trace("Received pong: \(pong.nonce)")
       await events.send(.pong(nonce: pong.nonce))
 
+    case .connectionError:
+      log.error("Protocol session: server rejected connection init")
+      await events.send(.connectionError)
+
     default:
       log.trace("Protocol session: unhandled message type: \(String(describing: message.body))")
     }

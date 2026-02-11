@@ -15,6 +15,7 @@ actor Transactions {
 
   /// Make of transport RPC msgId to transactionId
   var transactionRpcMap: [UInt64: TransactionId] = [:]
+  private var pendingAckMsgIds: Set<UInt64> = []
 
   /// Async stream to signal run loop to check the transaction queue
   var queueStream: AsyncChannel<Void> = AsyncChannel()
@@ -34,10 +35,33 @@ actor Transactions {
   }
 
   func queue(transaction: some Transaction) -> TransactionId {
-    let wrapper = TransactionWrapper(transaction: transaction)
+    let transactionId = TransactionId.generate()
+    enqueue(transaction: transaction, transactionId: transactionId)
+    Task(priority: .userInitiated) {
+      await queueStream.send(())
+    }
+    return transactionId
+  }
+
+  /// Queue without notifying the run-loop yet.
+  /// Useful when callers must atomically register continuations before execution starts.
+  func enqueue(transaction: some Transaction) -> TransactionId {
+    let transactionId = TransactionId.generate()
+    enqueue(transaction: transaction, transactionId: transactionId)
+    return transactionId
+  }
+
+  /// Queue without notifying the run-loop yet, using a caller-provided transaction ID.
+  /// Useful when the caller must register state keyed by transaction ID before execution starts.
+  func enqueue(transaction: some Transaction, transactionId: TransactionId) {
+    let wrapper = TransactionWrapper(id: transactionId, date: Date(), transaction: transaction)
+    enqueue(wrapper)
+  }
+
+  private func enqueue(_ wrapper: TransactionWrapper) {
     let transactionId = wrapper.id
 
-    log.trace("Queuing transaction \(transactionId): \(transaction.debugDescription)")
+    log.trace("Queuing transaction \(transactionId): \(wrapper.transaction.debugDescription)")
 
     // add to queue
     _queue[transactionId] = wrapper
@@ -47,13 +71,10 @@ actor Transactions {
       // persist
       saveToDisk(transaction: wrapper)
     }
+  }
 
-    Task(priority: .userInitiated) {
-      // send to stream
-      await queueStream.send(())
-    }
-
-    return transactionId
+  func signalQueue() async {
+    await queueStream.send(())
   }
 
   /// Dequeue next transaction from the queue and mark it as in-flight.
@@ -80,12 +101,18 @@ actor Transactions {
 
     // map rpc msgId to transactionId
     transactionRpcMap[rpcMsgId] = transactionId
+
+    // ACK can arrive before `running` registration on fast transports.
+    if pendingAckMsgIds.remove(rpcMsgId) != nil {
+      ack(transactionId: transactionId)
+    }
   }
 
   /// Acknowledge a transaction by the rpc message ID. It deletes the transaction from the system.
   func ack(rpcMsgId: UInt64) {
     guard let transactionId = transactionRpcMap[rpcMsgId] else {
-      // if not found, it means it was already completed or discarded
+      // ACK can race ahead of running() registration; keep it pending.
+      pendingAckMsgIds.insert(rpcMsgId)
       return
     }
 
@@ -110,6 +137,7 @@ actor Transactions {
   /// It deletes the transaction from the system.
   func complete(rpcMsgId: UInt64) -> TransactionWrapper? {
     guard let transactionId = transactionRpcMap[rpcMsgId] else {
+      pendingAckMsgIds.remove(rpcMsgId)
       log.trace("Complete called for unknown rpcMsgId \(rpcMsgId) - transaction already completed or discarded")
       return nil
     }
@@ -126,6 +154,7 @@ actor Transactions {
 
     // remove from rpc map
     transactionRpcMap.removeValue(forKey: rpcMsgId)
+    pendingAckMsgIds.remove(rpcMsgId)
 
     // delete from disk because we no longer need to retry it
     deleteFromDisk(transactionId: transactionId)
@@ -143,6 +172,7 @@ actor Transactions {
 
     // remove from in-flight
     inFlight.removeValue(forKey: transactionId)
+    removeRpcMappings(for: [transactionId])
 
     // re-add to queue
     _queue[transactionId] = wrapper
@@ -153,16 +183,38 @@ actor Transactions {
     }
   }
 
-  func requeueAll() {
+  @discardableResult
+  func requeueAll() -> [TransactionWrapper] {
+    var requeuedIds = Set<TransactionId>()
+    var dropped = [TransactionWrapper]()
+    var droppedIds = Set<TransactionId>()
+
     for (transactionId, wrapper) in inFlight {
       _queue[transactionId] = wrapper
+      requeuedIds.insert(transactionId)
     }
     inFlight.removeAll()
 
-    // signal the run loop
+    for (transactionId, wrapper) in sent {
+      if shouldRetryAfterAck(transaction: wrapper) {
+        _queue[transactionId] = wrapper
+        requeuedIds.insert(transactionId)
+      } else {
+        dropped.append(wrapper)
+        droppedIds.insert(transactionId)
+      }
+    }
+    sent.removeAll()
+
+    removeRpcMappings(for: requeuedIds.union(droppedIds))
+
+    guard !requeuedIds.isEmpty else { return dropped }
+
     Task {
       await queueStream.send(())
     }
+
+    return dropped
   }
 
   // MARK: - Helpers
@@ -177,6 +229,13 @@ actor Transactions {
 
   func transactionIdFrom(msgId: UInt64) -> TransactionId? {
     transactionRpcMap[msgId]
+  }
+
+  /// Called when a transport/session disconnect happens.
+  /// RPC message IDs are session-scoped and must not survive reconnect boundaries.
+  func connectionLost() {
+    transactionRpcMap.removeAll()
+    pendingAckMsgIds.removeAll()
   }
 
   /// Cancel all transactions that match the predicate from the queue.
@@ -200,6 +259,22 @@ actor Transactions {
         false
       case let .mutation(config):
         config.transient ? false : true
+    }
+  }
+
+  private func shouldRetryAfterAck(transaction: TransactionWrapper) -> Bool {
+    switch transaction.transaction.type {
+      case .query:
+        false
+      case let .mutation(config):
+        config.retryAfterAck
+    }
+  }
+
+  private func removeRpcMappings(for transactionIds: Set<TransactionId>) {
+    guard !transactionIds.isEmpty else { return }
+    transactionRpcMap = transactionRpcMap.filter { _, transactionId in
+      !transactionIds.contains(transactionId)
     }
   }
 
