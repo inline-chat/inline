@@ -51,7 +51,7 @@ RUN cd /temp/prod && bun install --frozen-lockfile --production
 FROM base AS build
 COPY --from=development-dependencies /temp/dev/node_modules node_modules
 COPY . .
-RUN cd web && bun run build
+RUN cd packages/protocol && bun run build && cd /usr/src/app/web && bun run build
 
 # Final stage
 FROM base AS release
