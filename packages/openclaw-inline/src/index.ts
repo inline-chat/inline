@@ -12,7 +12,7 @@ const plugin: {
   configSchema: unknown
   register: (api: OpenClawPluginApi) => void
 } = {
-  id: "inline",
+  id: "openclaw-inline",
   name: "Inline",
   description: "Inline Chat channel plugin (realtime RPC)",
   configSchema: emptyPluginConfigSchema(),

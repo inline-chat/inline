@@ -36,6 +36,16 @@ openclaw plugins install --link /path/to/inline/packages/openclaw-inline
 
 Channel config lives under `channels.inline` (the plugin config schema is intentionally empty).
 
+Plugin id is `openclaw-inline` (for `plugins.entries.*`), while channel id stays `inline`.
+If you enable explicitly, use:
+
+```yaml
+plugins:
+  entries:
+    openclaw-inline:
+      enabled: true
+```
+
 Example:
 
 ```yaml

@@ -8,8 +8,7 @@ describe("plugin manifest", () => {
     const raw = await readFile(manifestPath, "utf8")
     const json = JSON.parse(raw) as { id?: unknown; channels?: unknown }
 
-    expect(json.id).toBe("inline")
+    expect(json.id).toBe("openclaw-inline")
     expect(json.channels).toEqual(["inline"])
   })
 })
-
