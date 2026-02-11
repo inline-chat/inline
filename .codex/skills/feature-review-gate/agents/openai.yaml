@@ -1,0 +1,5 @@
+interface:
+  display_name: "Feature Review Gate"
+  short_description: "Interactive review before coding"
+  default_prompt: "Use $feature-review-gate to review a change before editing code."
+
