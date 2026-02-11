@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "bun:test"
 import type { DbMessage, DbUser } from "@in/server/db/schema"
 import type { DbFullMessage } from "@in/server/db/models/messages"
 import { encodeFullMessage, encodeMessage } from "@in/server/realtime/encoders/encodeMessage"
-import { MessageEntities, MessageEntity_Type, type Peer } from "@in/protocol/core"
+import { MessageEntities, MessageEntity_Type, type Peer } from "@inline-chat/protocol/core"
 import { encryptBinary } from "@in/server/modules/encryption/encryption"
 
 const peer: Peer = {
@@ -66,6 +66,8 @@ const baseUser: DbUser = {
   timeZone: null,
   bot: null,
   botCreatorId: null,
+  updateSeq: null,
+  lastUpdateDate: null,
 }
 
 const buildMessage = (overrides: Partial<DbMessage> = {}): DbMessage => ({
