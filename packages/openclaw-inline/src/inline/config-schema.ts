@@ -22,6 +22,8 @@ export const InlineAccountSchemaBase = z
   })
   .strict()
 
+export const InlineRuntimeAccountSchema = InlineAccountSchemaBase.passthrough()
+
 export const InlineAccountSchema = InlineAccountSchemaBase.superRefine((value, ctx) => {
   requireOpenAllowFrom({
     policy: value.dmPolicy,
@@ -32,6 +34,10 @@ export const InlineAccountSchema = InlineAccountSchemaBase.superRefine((value, c
       'channels.inline.dmPolicy="open" requires channels.inline.allowFrom to include "*"',
   })
 })
+
+export const InlineRuntimeConfigSchema = InlineRuntimeAccountSchema.extend({
+  accounts: z.record(z.string(), InlineRuntimeAccountSchema.optional()).optional(),
+}).passthrough()
 
 export const InlineConfigSchema = InlineAccountSchemaBase.extend({
   accounts: z.record(z.string(), InlineAccountSchema.optional()).optional(),
@@ -48,3 +54,4 @@ export const InlineConfigSchema = InlineAccountSchemaBase.extend({
 
 export type InlineConfig = z.infer<typeof InlineConfigSchema>
 export type InlineAccountConfig = z.infer<typeof InlineAccountSchema>
+export type InlineRuntimeConfig = z.infer<typeof InlineRuntimeConfigSchema>

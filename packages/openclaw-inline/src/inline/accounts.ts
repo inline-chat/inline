@@ -1,9 +1,8 @@
 import { DEFAULT_ACCOUNT_ID } from "openclaw/plugin-sdk"
 import type { OpenClawConfig } from "openclaw/plugin-sdk"
 import { readFile } from "node:fs/promises"
-import path from "node:path"
-import type { InlineConfig } from "./config-schema.js"
-import { InlineConfigSchema } from "./config-schema.js"
+import type { InlineRuntimeConfig } from "./config-schema.js"
+import { InlineRuntimeConfigSchema } from "./config-schema.js"
 
 export type ResolvedInlineAccount = {
   accountId: string
@@ -13,23 +12,16 @@ export type ResolvedInlineAccount = {
   baseUrl: string | null
   token: string | null
   tokenFile: string | null
-  config: InlineConfig
+  config: InlineRuntimeConfig
 }
 
 const DEFAULT_BASE_URL = "https://api.inline.chat"
 
-function isDotEnvPath(filePath: string): boolean {
-  const base = path.basename(filePath.trim())
-  return base === ".env" || base.startsWith(".env.")
-}
-
-function readInlineConfig(cfg: OpenClawConfig): InlineConfig {
+function readInlineConfig(cfg: OpenClawConfig): InlineRuntimeConfig {
   const raw = (cfg.channels?.inline ?? {}) as unknown
-  const result = InlineConfigSchema.safeParse(raw)
+  const result = InlineRuntimeConfigSchema.safeParse(raw)
   if (!result.success) {
-    // OpenClaw validates config against channel schema before calling adapters,
-    // but keep a defensive fallback for programmatic usage.
-    return InlineConfigSchema.parse({})
+    return InlineRuntimeConfigSchema.parse({})
   }
   return result.data
 }
@@ -67,7 +59,9 @@ export function resolveInlineAccount(params: {
 
   const accountOverride = config.accounts?.[requested] ?? null
   const { accounts: _accounts, ...base } = config
-  const effective: InlineConfig = accountOverride ? ({ ...base, ...accountOverride } as InlineConfig) : config
+  const effective: InlineRuntimeConfig = accountOverride
+    ? ({ ...base, ...accountOverride } as InlineRuntimeConfig)
+    : config
 
   const enabled = effective.enabled ?? true
 
@@ -94,11 +88,6 @@ export async function resolveInlineToken(account: ResolvedInlineAccount): Promis
 
   const tokenFile = (account.tokenFile ?? "").trim()
   if (!tokenFile) throw new Error("Inline token missing (set channels.inline.token or channels.inline.tokenFile)")
-
-  if (isDotEnvPath(tokenFile)) {
-    // AGENTS.md: never read .env contents.
-    throw new Error(`Refusing to read tokenFile from ${tokenFile} (disallowed: .env)`)
-  }
 
   const raw = await readFile(tokenFile, "utf8")
   const token = raw.trim()
