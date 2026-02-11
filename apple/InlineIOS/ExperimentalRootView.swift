@@ -112,13 +112,7 @@ struct ExperimentalRootView: View {
         }
 
         ToolbarItem(placement: .topBarLeading) {
-          Button {
-            ensureActiveSpaceSelected()
-            createChat()
-          } label: {
-            Image(systemName: "plus")
-          }
-          .accessibilityLabel("New Chat")
+          NotificationSettingsButton()
         }
 
         ToolbarItem(placement: .topBarTrailing) {
@@ -133,7 +127,13 @@ struct ExperimentalRootView: View {
             Button {
               bindableRouter.push(.createSpace, for: bindableRouter.selectedTab)
             } label: {
-              Label("Create Space", systemImage: "building.2")
+              Label("Create Space", systemImage: "building")
+            }
+
+            Button {
+              bindableRouter.push(.createSpaceChat, for: bindableRouter.selectedTab)
+            } label: {
+              Label("New Group Chat", systemImage: "plus.message")
             }
 
             Button {
@@ -197,20 +197,6 @@ struct ExperimentalRootView: View {
     @Bindable var bindableNav = nav
 
     return ExperimentalDestinationView(nav: bindableNav, destination: root)
-  }
-
-  private func ensureActiveSpaceSelected() {
-    if nav.activeSpaceId == nil {
-      nav.activeSpaceId = compactSpaceList.spaces.first?.id
-    }
-  }
-
-  private func createChat() {
-    if let spaceId = nav.activeSpaceId {
-      router.push(.createThread(spaceId: spaceId))
-    } else {
-      router.push(.createSpaceChat)
-    }
   }
 
   private func presentMembers() {
