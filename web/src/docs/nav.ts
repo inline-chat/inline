@@ -23,6 +23,13 @@ export const DOCS_NAV: DocsNavGroup[] = [
       { title: "Overview", to: "/docs/developers" },
       { title: "Realtime API", to: "/docs/realtime-api" },
       { title: "Bot API", to: "/docs/bot-api" },
+      { title: "Creating a Bot", to: "/docs/creating-a-bot" },
+    ],
+  },
+  {
+    title: "Integrations",
+    items: [
+      { title: "OpenClaw", to: "/docs/openclaw" },
     ],
   },
   {
