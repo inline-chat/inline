@@ -6,7 +6,6 @@ import { LargeButton } from "~/components/form/LargeButton"
 import { LargeTextField } from "~/components/form/LargeTextField"
 import { ApiClient, ApiError } from "~/modules/api"
 import { useAuthActions } from "@inline/client"
-import { colors } from "~/theme/tokens.stylex"
 
 type LoginMethod = "email" | "phone"
 
@@ -214,7 +213,7 @@ const styles = stylex.create({
 
   helperText: {
     fontSize: 14,
-    color: colors.secondaryText,
+    color: "gray",
     textAlign: "center",
   },
 
@@ -236,7 +235,7 @@ const styles = stylex.create({
   textButton: {
     border: "none",
     background: "transparent",
-    color: colors.accent,
+    color: "blue",
     fontSize: 14,
     cursor: "pointer",
     padding: 0,
