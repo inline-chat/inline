@@ -1,6 +1,5 @@
 import * as React from "react"
 import * as stylex from "@stylexjs/stylex"
-import { colors } from "~/theme/tokens.stylex"
 
 type LargeTextFieldProps = React.InputHTMLAttributes<HTMLInputElement>
 
@@ -18,18 +17,18 @@ const styles = stylex.create({
     maxWidth: 420,
     height: 44,
     borderRadius: 12,
-    border: `1px solid ${colors.lineColor}`,
+    border: "1px solid gray",
     paddingLeft: 14,
     paddingRight: 14,
     fontSize: 16,
-    color: colors.primaryText,
-    backgroundColor: colors.primaryBg,
+    color: "black",
+    backgroundColor: "white",
     transitionProperty: "border-color, box-shadow, transform",
     transitionDuration: "120ms",
 
     ":focus-visible": {
       outline: "none",
-      borderColor: colors.accent,
+      borderColor: "blue",
       boxShadow: `0 0 0 3px rgba(0, 0, 0, 0.06)`,
       transform: "translateY(-1px)",
     },

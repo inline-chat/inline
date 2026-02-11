@@ -1,5 +1,4 @@
 import * as stylex from "@stylexjs/stylex"
-import { colors } from "~/theme/tokens.stylex"
 import { FileRouteTypes } from "~/routeTree.gen"
 import { Link } from "@tanstack/react-router"
 
@@ -17,8 +16,8 @@ export const LargeButton = (props: LargeButtonProps) => {
 
 const styles = stylex.create({
   largeButton: {
-    backgroundColor: colors.accent,
-    color: colors.whiteText,
+    backgroundColor: "blue",
+    color: "white",
     height: 40,
     lineHeight: "40px",
     borderRadius: 14,
@@ -29,11 +28,11 @@ const styles = stylex.create({
     cursor: "pointer",
 
     ":hover": {
-      backgroundColor: colors.accent,
+      backgroundColor: "blue",
       opacity: 0.9,
     },
     ":active": {
-      backgroundColor: colors.accent,
+      backgroundColor: "blue",
       opacity: 1,
     },
   },
