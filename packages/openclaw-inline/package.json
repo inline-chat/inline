@@ -1,0 +1,62 @@
+{
+  "name": "@inline-chat/openclaw-inline",
+  "version": "0.0.1",
+  "type": "module",
+  "files": [
+    "dist",
+    "openclaw.plugin.json"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "bun run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@inline-chat/realtime-sdk": "^0.0.1",
+    "zod": "^4.1.5"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.2.9"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "@vitest/coverage-v8": "4.0.16",
+    "openclaw": "^2026.2.9",
+    "typescript": "^5.8.3",
+    "vitest": "^4.0.16"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "channel": {
+      "id": "inline",
+      "label": "Inline",
+      "selectionLabel": "Inline (realtime bot)",
+      "docsPath": "/channels/inline",
+      "docsLabel": "inline",
+      "blurb": "Interact with OpenClaw via Inline DMs and chats.",
+      "order": 115,
+      "aliases": [
+        "inline-chat"
+      ]
+    },
+    "install": {
+      "npmSpec": "@inline-chat/openclaw-inline",
+      "localPath": "packages/openclaw-inline",
+      "defaultChoice": "npm"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
