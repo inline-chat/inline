@@ -56,6 +56,14 @@
 - Create commits with `scripts/committer "<msg>" <file...>`; avoid manual `git add`/`git commit` so staging stays scoped.
 - Keep commands inside package dirs when running Swift or Bun tooling to avoid path issues.
 
+## NPM SDK Releases
+
+- Public SDK packages for realtime + bot API are: `@inline-chat/protocol`, `@inline-chat/realtime-sdk`, `@inline-chat/bot-api-types`, `@inline-chat/bot-api`.
+- Publish these when external SDK consumers need new runtime behavior or new/updated public types (server-only internal changes do not require publish).
+- Publish in dependency order: `protocol` -> `realtime-sdk`, and `bot-api-types` -> `bot-api`; if both tracks changed, publish both base packages before dependents.
+- Use prerelease channel for rollout testing: `npm publish --access public --tag alpha` from each package directory.
+- If npm 2FA is enabled, include OTP on each publish command: `npm publish --access public --tag alpha --otp=<code>`.
+
 ## CLI
 
 - Source lives in `cli/` (Rust); binary name is `inline`, release artifacts are `inline-cli-<version>-<target>.tar.gz`.

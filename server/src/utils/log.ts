@@ -5,6 +5,64 @@ import { styleText } from "node:util"
 const isProd = process.env.NODE_ENV === "production"
 const isTest = process.env.NODE_ENV === "test"
 
+type Redacted = "<redacted>"
+const REDACTED: Redacted = "<redacted>"
+
+const BOT_TOKEN_SEGMENT_RE = /\bbot[^\/\s]*(?::|%3A|%3a)[^\/\s]+\b/g // matches "bot<userId>:IN...." (raw or url-encoded ':')
+const BEARER_RE = /\bBearer\s+[^\s]+/gi
+
+export const redactString = (value: string): string => {
+  // Avoid leaking tokens in path (e.g. /bot<token>/sendMessage) or in auth headers.
+  return value.replace(BEARER_RE, `Bearer ${REDACTED}`).replace(BOT_TOKEN_SEGMENT_RE, `bot${REDACTED}`)
+}
+
+const shouldRedactKey = (key: string): boolean => {
+  const k = key.toLowerCase()
+  return (
+    k.includes("authorization") ||
+    k === "token" ||
+    k.endsWith("token") ||
+    k.includes("secret") ||
+    k.includes("password")
+  )
+}
+
+export const redactValue = (value: unknown, depth = 0): unknown => {
+  if (depth > 6) return value
+  if (value === null || value === undefined) return value
+
+  if (typeof value === "string") return redactString(value)
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") return value
+
+  if (value instanceof Error) {
+    // Preserve the Error object, but redact the message (common place for request paths).
+    const next = new Error(redactString(value.message))
+    next.name = value.name
+    // Redact stack too because it includes the original message on the first line.
+    const stack = (value as any).stack
+    ;(next as any).stack = typeof stack === "string" ? redactString(stack) : stack
+    ;(next as any).cause = redactValue((value as any).cause, depth + 1)
+    return next
+  }
+
+  if (Array.isArray(value)) return value.map((v) => redactValue(v, depth + 1))
+
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(obj)) {
+      if (shouldRedactKey(k)) {
+        out[k] = REDACTED
+      } else {
+        out[k] = redactValue(v, depth + 1)
+      }
+    }
+    return out
+  }
+
+  return value
+}
+
 export enum LogLevel {
   NONE = -1,
   ERROR = 0,
@@ -60,23 +118,27 @@ export class Log {
 
     const scopeColored = styleText("red", this.scope)
     if (typeof messageOrError === "string") {
-      const args: unknown[] = [scopeColored, messageOrError]
-      if (errorOrMetadata !== undefined) args.push(errorOrMetadata)
-      if (metadata !== undefined) args.push(metadata)
+      const args: unknown[] = [scopeColored, redactValue(messageOrError)]
+      if (errorOrMetadata !== undefined) args.push(redactValue(errorOrMetadata))
+      if (metadata !== undefined) args.push(redactValue(metadata))
       console.error(...args)
 
       // Check if second argument is an Error - support both log.error("desc", error) and log.error(error, "desc")
       if (this.isError(errorOrMetadata)) {
-        Sentry.captureException(errorOrMetadata, { extra: { message: messageOrError, metadata } })
+        Sentry.captureException(redactValue(errorOrMetadata) as Error, {
+          extra: redactValue({ message: messageOrError, metadata }) as Record<string, unknown>,
+        })
       } else {
-        Sentry.captureException(new Error(messageOrError), { extra: errorOrMetadata as Record<string, unknown> })
+        Sentry.captureException(new Error(redactString(messageOrError)), {
+          extra: redactValue(errorOrMetadata) as Record<string, unknown>,
+        })
       }
     } else {
-      const args: unknown[] = [scopeColored, messageOrError]
-      if (errorOrMetadata !== undefined) args.push(errorOrMetadata)
-      if (metadata !== undefined) args.push(metadata)
+      const args: unknown[] = [scopeColored, redactValue(messageOrError)]
+      if (errorOrMetadata !== undefined) args.push(redactValue(errorOrMetadata))
+      if (metadata !== undefined) args.push(redactValue(metadata))
       console.error(...args)
-      Sentry.captureException(messageOrError)
+      Sentry.captureException(redactValue(messageOrError) as any)
     }
   }
 
@@ -90,11 +152,11 @@ export class Log {
 
     const scopeColored = styleText("yellow", this.scope)
     if (typeof messageOrError === "string") {
-      console.warn(scopeColored, messageOrError, error)
-      Sentry.captureMessage(messageOrError, "warning")
+      console.warn(scopeColored, redactValue(messageOrError), redactValue(error))
+      Sentry.captureMessage(redactString(messageOrError), "warning")
     } else {
-      console.warn(scopeColored, messageOrError)
-      Sentry.captureMessage(String(messageOrError), "warning")
+      console.warn(scopeColored, redactValue(messageOrError))
+      Sentry.captureMessage(redactString(String(messageOrError)), "warning")
     }
   }
 
@@ -103,7 +165,7 @@ export class Log {
     if (this.logLevel < LogLevel.INFO) return
 
     const scopeColored = styleText("cyan", this.scope)
-    console.info(scopeColored, ...args)
+    console.info(scopeColored, ...args.map((a) => redactValue(a)))
   }
 
   debug(...args: any[]): void {
@@ -111,7 +173,7 @@ export class Log {
     if (this.logLevel < LogLevel.DEBUG) return
 
     const scopeColored = styleText("blue", this.scope)
-    console.debug(scopeColored, ...args)
+    console.debug(scopeColored, ...args.map((a) => redactValue(a)))
   }
 
   trace(...args: any[]): void {
@@ -119,6 +181,6 @@ export class Log {
     if (this.logLevel < LogLevel.TRACE) return
 
     const scopeColored = styleText("magenta", this.scope)
-    console.trace(scopeColored, ...args)
+    console.trace(scopeColored, ...args.map((a) => redactValue(a)))
   }
 }
