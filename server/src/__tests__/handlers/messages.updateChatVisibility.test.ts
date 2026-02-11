@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { and, eq } from "drizzle-orm"
-import type { Peer } from "@in/protocol/core"
+import type { Peer } from "@inline-chat/protocol/core"
 import { UpdateBucket, updates } from "@in/server/db/schema/updates"
 import { chats, chatParticipants, dialogs, members } from "@in/server/db/schema"
 import { db } from "@in/server/db"

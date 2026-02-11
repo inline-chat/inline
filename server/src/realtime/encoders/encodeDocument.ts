@@ -1,5 +1,5 @@
 import { getSignedUrl } from "@in/server/modules/files/path"
-import { Document } from "@in/protocol/core"
+import { Document } from "@inline-chat/protocol/core"
 import type { DbFullDocument } from "@in/server/db/models/files"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 

@@ -5,7 +5,7 @@ import { db } from "../../db"
 import * as schema from "../../db/schema"
 import { eq } from "drizzle-orm"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
-import type { InputPeer } from "@in/protocol/core"
+import type { InputPeer } from "@inline-chat/protocol/core"
 
 const makeHandlerContext = (userId: number): any => ({
   currentUserId: userId,

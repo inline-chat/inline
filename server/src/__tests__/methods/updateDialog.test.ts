@@ -5,7 +5,7 @@ import type { HandlerContext } from "../../controllers/helpers"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import { UpdatesModel, type DecryptedUpdate } from "@in/server/db/models/updates"
 import { db } from "../../db"
-import type { ServerUpdate } from "@in/protocol/server"
+import type { ServerUpdate } from "@inline-chat/protocol/server"
 
 describe("updateDialog", () => {
   setupTestLifecycle()

@@ -6,7 +6,7 @@ import {
   DeleteMessagesResult,
   type GetMeInput,
   type GetMeResult,
-} from "@in/protocol/core"
+} from "@inline-chat/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeRpcError } from "@in/server/realtime/errors"

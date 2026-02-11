@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test"
 import { processMessageText } from "./processText"
 import { parseMarkdown } from "./parseMarkdown"
-import { MessageEntity_Type } from "@in/protocol/core"
+import { MessageEntity_Type } from "@inline-chat/protocol/core"
 
 describe("parseMarkdown", () => {
   describe("basic patterns", () => {

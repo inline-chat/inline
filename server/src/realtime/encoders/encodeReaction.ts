@@ -1,5 +1,5 @@
 import type { DbReaction } from "@in/server/db/schema"
-import type { Reaction } from "@in/protocol/core"
+import type { Reaction } from "@inline-chat/protocol/core"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 
 export const encodeReaction = ({ reaction }: { reaction: DbReaction }): Reaction => {

@@ -5,11 +5,11 @@ import { UpdateBucket } from "@in/server/db/schema/updates"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { Log } from "@in/server/utils/log"
 import { and, eq, inArray, sql } from "drizzle-orm"
-import type { Update } from "@in/protocol/core"
+import type { Update } from "@inline-chat/protocol/core"
 import { getUpdateGroup, type UpdateGroup } from "@in/server/modules/updates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
-import type { ServerUpdate } from "@in/protocol/server"
+import type { ServerUpdate } from "@inline-chat/protocol/server"
 import type { FunctionContext } from "@in/server/functions/_types"
 
 const log = new Log("functions.moveThread")

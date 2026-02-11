@@ -13,13 +13,13 @@ import {
   type Update,
   type MessageAttachment,
   type InputPeer,
-} from "@in/protocol/core"
+} from "@inline-chat/protocol/core"
 import { RealtimeUpdates } from "../../realtime/message"
 import { Notifications } from "../../modules/notifications/notifications"
 import { decrypt, encrypt, type EncryptedData } from "@in/server/modules/encryption/encryption"
 import { decryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { encodeMessageAttachmentUpdate } from "../../realtime/encoders/encodeMessageAttachment"
-import { ProtocolConvertors } from "../../types/protocolConvertors"
+import { ProtocolConvertors } from "@in/server/types/protocolConvertors"
 
 export const Input = Type.Object({
   spaceId: Type.Number(),

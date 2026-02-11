@@ -5,7 +5,7 @@ import {
   MessageSendMode,
   Update,
   UpdateNewMessageNotification_Reason,
-} from "@in/protocol/core"
+} from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { FileModel, type DbFullPhoto, type DbFullVideo } from "@in/server/db/models/files"
 import type { DbFullDocument } from "@in/server/db/models/files"

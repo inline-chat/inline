@@ -4,7 +4,7 @@ import { members } from "@in/server/db/schema"
 import { UsersModel } from "@in/server/db/models/users"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import type { FunctionContext } from "@in/server/functions/_types"
-import type { GetSpaceMembersInput, GetSpaceMembersResult } from "@in/protocol/core"
+import type { GetSpaceMembersInput, GetSpaceMembersResult } from "@inline-chat/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 
 export const getSpaceMembers = async (

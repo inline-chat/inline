@@ -1,4 +1,4 @@
-import { Member_Role, type Member } from "@in/protocol/core"
+import { Member_Role, type Member } from "@inline-chat/protocol/core"
 import type { DbMember } from "@in/server/db/schema"
 import { encodeDate } from "@in/server/realtime/encoders/helpers"
 

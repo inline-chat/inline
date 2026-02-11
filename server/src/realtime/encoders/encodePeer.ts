@@ -1,5 +1,5 @@
 import type { TPeerInfo } from "@in/server/api-types"
-import type { InputPeer, Peer } from "@in/protocol/core"
+import type { InputPeer, Peer } from "@inline-chat/protocol/core"
 import type { DbChat } from "@in/server/db/schema"
 
 export const encodePeer = (peer: TPeerInfo): Peer => {

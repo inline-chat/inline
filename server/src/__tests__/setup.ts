@@ -5,7 +5,7 @@ import { beforeEach, afterEach, beforeAll, afterAll } from "bun:test"
 import { sql, eq } from "drizzle-orm"
 import { chats, messages, type DbChat, type DbMessage } from "@in/server/db/schema"
 import { encrypt, encryptBinary } from "@in/server/modules/encryption/encryption"
-import { MessageEntities, MessageEntity_Type } from "@in/protocol/core"
+import { MessageEntities, MessageEntity_Type } from "@inline-chat/protocol/core"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 

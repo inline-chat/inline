@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, mock } from "bun:test"
-import { UpdateComposeAction_ComposeAction } from "@in/protocol/core"
+import { UpdateComposeAction_ComposeAction } from "@inline-chat/protocol/core"
 import { sendComposeAction } from "@in/server/functions/messages.sendComposeAction"
 import { setupTestDatabase, testUtils } from "../setup"
 import { RealtimeUpdates } from "@in/server/realtime/message"

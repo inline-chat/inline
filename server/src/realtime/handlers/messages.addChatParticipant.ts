@@ -1,7 +1,7 @@
-import { AddChatParticipantInput, AddChatParticipantResult } from "@in/protocol/core"
+import { AddChatParticipantInput, AddChatParticipantResult } from "@inline-chat/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { Functions } from "@in/server/functions"
-import { Method } from "@in/protocol/core"
+import { Method } from "@inline-chat/protocol/core"
 
 export const method = Method.ADD_CHAT_PARTICIPANT
 

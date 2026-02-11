@@ -1,4 +1,4 @@
-import { MessageEntities } from "@in/protocol/core"
+import { MessageEntities } from "@inline-chat/protocol/core"
 import { parseMarkdown } from "@in/server/modules/message/parseMarkdown"
 
 type ProcessMessageTextInput = {

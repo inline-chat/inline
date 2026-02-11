@@ -1,4 +1,4 @@
-import type { SendComposeActionInput, SendComposeActionResult } from "@in/protocol/core"
+import type { SendComposeActionInput, SendComposeActionResult } from "@inline-chat/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { sendComposeAction } from "@in/server/functions/messages.sendComposeAction"

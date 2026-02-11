@@ -1,4 +1,4 @@
-import { MessageEntities } from "@in/protocol/core"
+import { MessageEntities } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import type { ProcessedMessageTranslation } from "@in/server/db/models/messages"
 import { translations, users, type DbNewTranslation } from "@in/server/db/schema"

@@ -12,7 +12,7 @@ import { ApiError, InlineError } from "@in/server/types/errors"
 import { Log, LogLevel } from "@in/server/utils/log"
 import { connectionManager } from "@in/server/ws/connections"
 import { Value } from "@sinclair/typebox/value"
-import { Update, UpdateComposeAction_ComposeAction, UserStatus_Status } from "@in/protocol/core"
+import { Update, UpdateComposeAction_ComposeAction, UserStatus_Status } from "@inline-chat/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 

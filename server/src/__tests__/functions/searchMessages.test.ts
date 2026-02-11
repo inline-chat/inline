@@ -4,7 +4,7 @@ import { testUtils, setupTestLifecycle } from "../setup"
 import { db } from "../../db"
 import * as schema from "../../db/schema"
 import { encrypt } from "../../modules/encryption/encryption"
-import { SearchMessagesFilter } from "@in/protocol/core"
+import { SearchMessagesFilter } from "@inline-chat/protocol/core"
 
 const makeFunctionContext = (userId: number): any => ({
   currentUserId: userId,

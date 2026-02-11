@@ -1,4 +1,4 @@
-import { InputPeer, Update } from "@in/protocol/core"
+import { InputPeer, Update } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { FileModel } from "@in/server/db/models/files"
 import { MessageModel } from "@in/server/db/models/messages"

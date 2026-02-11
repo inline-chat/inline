@@ -2,7 +2,7 @@ import type { ChatModel } from "openai/resources/shared.mjs"
 import { zodResponseFormat } from "openai/helpers/zod.mjs"
 import invariant from "tiny-invariant"
 import { z } from "zod"
-import { MessageEntities } from "@in/protocol/core"
+import { MessageEntities } from "@inline-chat/protocol/core"
 import { openaiClient } from "@in/server/libs/openAI"
 import { Log } from "@in/server/utils/log"
 

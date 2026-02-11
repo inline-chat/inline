@@ -1,4 +1,4 @@
-import type { Method, RpcCall, RpcResult } from "@in/protocol/core"
+import type { Method, RpcCall, RpcResult } from "@inline-chat/protocol/core"
 import type { Db } from "../../database"
 import type { AuthStore } from "../../auth"
 import type { TransactionError } from "./transaction-errors"

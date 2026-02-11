@@ -5,7 +5,7 @@ import { chats, dialogs, messages, type DbChat, type DbDialog } from "@in/server
 import { InlineError } from "@in/server/types/errors"
 import { TPeerInfo } from "@in/server/api-types"
 import { ModelError } from "@in/server/db/models/_errors"
-import type { InputPeer } from "@in/protocol/core"
+import type { InputPeer } from "@inline-chat/protocol/core"
 import { Log } from "@in/server/utils/log"
 import type { PgTransaction } from "drizzle-orm/pg-core"
 import type { PostgresJsQueryResultHKT } from "drizzle-orm/postgres-js"

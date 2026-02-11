@@ -1,4 +1,4 @@
-import type { InputPeer, Update } from "@in/protocol/core"
+import type { InputPeer, Update } from "@inline-chat/protocol/core"
 import { getUpdateGroupFromInputPeer } from "@in/server/modules/updates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 

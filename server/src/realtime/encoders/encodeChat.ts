@@ -1,4 +1,4 @@
-import { Chat, Dialog, Peer, PeerChat } from "@in/protocol/core"
+import { Chat, Dialog, Peer, PeerChat } from "@inline-chat/protocol/core"
 import type { chats, DbChat } from "@in/server/db/schema"
 import { encodePeer } from "@in/server/realtime/encoders/encodePeer"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"

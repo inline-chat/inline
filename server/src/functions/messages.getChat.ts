@@ -1,4 +1,4 @@
-import type { Chat, Dialog, InputPeer } from "@in/protocol/core"
+import type { Chat, Dialog, InputPeer } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { UsersModel } from "@in/server/db/models/users"
 import { DialogsModel } from "@in/server/db/models/dialogs"

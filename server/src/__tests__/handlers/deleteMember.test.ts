@@ -3,7 +3,7 @@ import { deleteMemberHandler } from "../../realtime/handlers/space.deleteMember"
 import { setupTestLifecycle, testUtils } from "../setup"
 import { db, schema } from "../../db"
 import type { HandlerContext } from "../../realtime/types"
-import type { DeleteMemberInput } from "@in/protocol/core"
+import type { DeleteMemberInput } from "@inline-chat/protocol/core"
 import { and, eq } from "drizzle-orm"
 import type { DbSpace, DbUser } from "@in/server/db/schema"
 

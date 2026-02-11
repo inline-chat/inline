@@ -1,4 +1,4 @@
-import type { InputPeer, Message } from "@in/protocol/core"
+import type { InputPeer, Message } from "@inline-chat/protocol/core"
 import { ModelError } from "@in/server/db/models/_errors"
 import { MessageModel, type DbFullMessage } from "@in/server/db/models/messages"
 import { ChatModel } from "@in/server/db/models/chats"

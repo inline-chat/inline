@@ -1,8 +1,8 @@
-import { CreateChatInput, CreateChatResult } from "@in/protocol/core"
+import { CreateChatInput, CreateChatResult } from "@inline-chat/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { Functions } from "@in/server/functions"
-import { Method } from "@in/protocol/core"
+import { Method } from "@inline-chat/protocol/core"
 
 export const method = Method.CREATE_CHAT
 

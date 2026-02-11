@@ -2,7 +2,7 @@ import { describe, expect, test, beforeEach } from "bun:test"
 import { createBotHandler } from "../../realtime/handlers/createBot"
 import { setupTestLifecycle, testUtils } from "../setup"
 import type { HandlerContext } from "../../realtime/types"
-import type { CreateBotInput } from "@in/protocol/core"
+import type { CreateBotInput } from "@inline-chat/protocol/core"
 
 describe("createBotHandler", () => {
   setupTestLifecycle()

@@ -1,4 +1,4 @@
-import { type GetUserSettingsInput, type GetUserSettingsResult } from "@in/protocol/core"
+import { type GetUserSettingsInput, type GetUserSettingsResult } from "@inline-chat/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { Functions } from "@in/server/functions"
 import { Encoders } from "@in/server/realtime/encoders/encoders"

@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, beforeAll } from "bun:test"
-import { InputPeer, Message, MessageEntity_Type, SendMessageResult } from "@in/protocol/core"
+import { InputPeer, Message, MessageEntity_Type, SendMessageResult } from "@inline-chat/protocol/core"
 import { setupTestDatabase, testUtils } from "../setup"
 import { sendMessage } from "@in/server/functions/messages.sendMessage"
 import type { DbChat, DbUser } from "@in/server/db/schema"

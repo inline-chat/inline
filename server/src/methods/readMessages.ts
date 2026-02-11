@@ -6,13 +6,13 @@ import { Optional, type Static, Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import { TInputId } from "@in/server/types/methods"
 import { getLastMessageId } from "@in/server/db/models/chats"
-import type { InputPeer, Update } from "@in/protocol/core"
+import type { InputPeer, Update } from "@inline-chat/protocol/core"
 import { encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { DialogsModel } from "@in/server/db/models/dialogs"
 import { Notifications } from "@in/server/modules/notifications/notifications"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
-import type { ServerUpdate } from "@in/protocol/server"
+import type { ServerUpdate } from "@inline-chat/protocol/server"
 
 export const Input = Type.Object({
   peerUserId: Optional(TInputId),

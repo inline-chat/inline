@@ -1,8 +1,8 @@
-import type { UpdateChatInfoInput, UpdateChatInfoResult } from "@in/protocol/core"
+import type { UpdateChatInfoInput, UpdateChatInfoResult } from "@inline-chat/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { Functions } from "@in/server/functions"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
-import { Method } from "@in/protocol/core"
+import { Method } from "@inline-chat/protocol/core"
 
 export const method = Method.UPDATE_CHAT_INFO
 

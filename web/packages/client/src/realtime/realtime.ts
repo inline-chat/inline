@@ -1,4 +1,4 @@
-import type { ConnectionInit, RpcError, RpcResult } from "@in/protocol/core"
+import type { ConnectionInit, RpcError, RpcResult } from "@inline-chat/protocol/core"
 import { Log, type LogLevel } from "@inline/log"
 import { getRealtimeUrl } from "@inline/config"
 import { AsyncChannel } from "../utils/async-channel"

@@ -1,5 +1,5 @@
-import type { GetChatHistoryInput, InputPeer, RpcCall, RpcResult } from "@in/protocol/core"
-import { Method } from "@in/protocol/core"
+import type { GetChatHistoryInput, InputPeer, RpcCall, RpcResult } from "@inline-chat/protocol/core"
+import { Method } from "@inline-chat/protocol/core"
 import type { Db } from "../../database"
 import { upsertMessage } from "./mappers"
 import { Query, type Transaction } from "./transaction"

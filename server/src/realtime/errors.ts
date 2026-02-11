@@ -1,4 +1,4 @@
-import { RpcError as RpcErrorProtocol, RpcError_Code } from "@in/protocol/core"
+import { RpcError as RpcErrorProtocol, RpcError_Code } from "@inline-chat/protocol/core"
 import type { InlineError } from "@in/server/types/errors"
 
 export class RealtimeRpcError extends Error {

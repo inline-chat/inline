@@ -18,7 +18,7 @@
   "dependencies": {
     "@inline/auth": "workspace:*",
     "react": "^19.1.1",
-    "@in/protocol": "workspace:*",
+    "@inline-chat/protocol": "workspace:*",
     "@inline/config": "workspace:*",
     "@inline/log": "workspace:*"
   },

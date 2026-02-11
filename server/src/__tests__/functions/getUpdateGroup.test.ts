@@ -5,7 +5,7 @@ import { db } from "../../db"
 import * as schema from "../../db/schema"
 import { and, eq } from "drizzle-orm"
 import type { TPeerInfo } from "@in/server/api-types"
-import type { InputPeer } from "@in/protocol/core"
+import type { InputPeer } from "@inline-chat/protocol/core"
 
 function makeInputPeerUser(userId: number): InputPeer {
   return { type: { oneofKind: "user", user: { userId: BigInt(userId) } } }

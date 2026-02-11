@@ -3,7 +3,7 @@ import { messages, translations } from "@in/server/db/schema"
 import { eq, and, gt, desc, inArray, lt } from "drizzle-orm"
 import { decryptBinary, encrypt } from "@in/server/modules/encryption/encryption"
 import { Log } from "@in/server/utils/log"
-import { MessageEntities, type InputPeer, type MessageTranslation } from "@in/protocol/core"
+import { MessageEntities, type InputPeer, type MessageTranslation } from "@inline-chat/protocol/core"
 import {
   MessageModel,
   type ProcessedMessage,

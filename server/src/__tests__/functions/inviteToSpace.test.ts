@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test"
 import { inviteToSpace } from "@in/server/functions/space.inviteToSpace"
 import { testUtils, setupTestLifecycle } from "../setup"
-import { InviteToSpaceInput, Member_Role } from "@in/protocol/core"
+import { InviteToSpaceInput, Member_Role } from "@inline-chat/protocol/core"
 import { schema } from "@in/server/db/relations"
 import { db } from "@in/server/db"
 import { and, eq } from "drizzle-orm"

@@ -1,4 +1,4 @@
-import type { InputPeer, MessageEntities, Update } from "@in/protocol/core"
+import type { InputPeer, MessageEntities, Update } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { MessageModel } from "@in/server/db/models/messages"
 import type { FunctionContext } from "@in/server/functions/_types"

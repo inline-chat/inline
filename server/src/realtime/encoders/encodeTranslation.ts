@@ -1,5 +1,5 @@
 import type { DbTranslation } from "@in/server/db/schema"
-import { MessageEntities, type MessageTranslation } from "@in/protocol/core"
+import { MessageEntities, type MessageTranslation } from "@inline-chat/protocol/core"
 import { decrypt } from "@in/server/modules/encryption/encryption"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import type { InputTranslation } from "@in/server/db/models/translations"

@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, beforeAll } from "bun:test"
-import { InputPeer } from "@in/protocol/core"
+import { InputPeer } from "@inline-chat/protocol/core"
 import { setupTestDatabase, testUtils } from "../setup"
 import { markAsUnread } from "@in/server/functions/messages.markAsUnread"
 import type { DbChat, DbUser, DbDialog } from "@in/server/db/schema"

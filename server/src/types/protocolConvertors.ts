@@ -1,4 +1,4 @@
-import { InputPeer, Member_Role } from "@in/protocol/core"
+import { InputPeer, Member_Role } from "@inline-chat/protocol/core"
 import { type DbMemberRole } from "@in/server/db/schema"
 import type { TPeerInfo } from "../api-types"
 

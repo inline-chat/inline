@@ -1,5 +1,5 @@
-import type { InputPeer, Update } from "@in/protocol/core"
-import { UpdateComposeAction_ComposeAction } from "@in/protocol/core"
+import type { InputPeer, Update } from "@inline-chat/protocol/core"
+import { UpdateComposeAction_ComposeAction } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { Updates } from "@in/server/modules/updates/updates"

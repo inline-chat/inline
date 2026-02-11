@@ -1,5 +1,5 @@
-import type { DeleteReactionInput, InputPeer, RpcCall, RpcResult } from "@in/protocol/core"
-import { Method } from "@in/protocol/core"
+import type { DeleteReactionInput, InputPeer, RpcCall, RpcResult } from "@inline-chat/protocol/core"
+import { Method } from "@inline-chat/protocol/core"
 import type { Db } from "../../database"
 import { applyUpdates } from "../updates"
 import { Mutation, type Transaction } from "./transaction"

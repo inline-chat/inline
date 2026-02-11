@@ -1,5 +1,5 @@
-import type { InputPeer, Update } from "@in/protocol/core"
-import type { ServerUpdate } from "@in/protocol/server"
+import type { InputPeer, Update } from "@inline-chat/protocol/core"
+import type { ServerUpdate } from "@inline-chat/protocol/server"
 import { db } from "@in/server/db"
 import { ChatModel } from "@in/server/db/models/chats"
 import { UpdatesModel } from "@in/server/db/models/updates"

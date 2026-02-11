@@ -1,5 +1,5 @@
-import { ClientMessage, ConnectionInit, ServerProtocolMessage } from "@in/protocol/core"
-import type { Method, RpcCall, RpcError, RpcResult } from "@in/protocol/core"
+import { ClientMessage, ConnectionInit, ServerProtocolMessage } from "@inline-chat/protocol/core"
+import type { Method, RpcCall, RpcError, RpcResult } from "@inline-chat/protocol/core"
 import { Log, type LogLevel } from "@inline/log"
 import { AsyncChannel } from "../../utils/async-channel"
 import { PingPongService } from "./ping-pong"

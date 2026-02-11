@@ -3,7 +3,7 @@
 import Elysia, { t } from "elysia"
 
 import { Log, LogLevel } from "@in/server/utils/log"
-import { ClientMessage } from "@in/protocol/core"
+import { ClientMessage } from "@inline-chat/protocol/core"
 import { handleMessage } from "@in/server/realtime/message"
 import type { ServerWebSocket } from "bun"
 import type { ElysiaWS } from "elysia/ws"

@@ -1,5 +1,5 @@
 import type { DbFile, DbUser } from "@in/server/db/schema"
-import { User, UserStatus_Status } from "@in/protocol/core"
+import { User, UserStatus_Status } from "@inline-chat/protocol/core"
 import { encodeDate } from "@in/server/realtime/encoders/helpers"
 import { decrypt } from "@in/server/modules/encryption/encryption"
 import { getSignedUrl } from "@in/server/modules/files/path"

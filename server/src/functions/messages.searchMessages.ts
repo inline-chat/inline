@@ -1,4 +1,4 @@
-import { SearchMessagesFilter, type InputPeer, type Message } from "@in/protocol/core"
+import { SearchMessagesFilter, type InputPeer, type Message } from "@inline-chat/protocol/core"
 import { ModelError } from "@in/server/db/models/_errors"
 import { MessageModel, type DbFullMessage, type MessageMediaFilter } from "@in/server/db/models/messages"
 import { ChatModel } from "@in/server/db/models/chats"
