@@ -1,6 +1,6 @@
 {
   "name": "@inline-chat/openclaw-inline",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "type": "module",
   "files": [
     "dist",
@@ -55,6 +55,11 @@
       "localPath": "packages/openclaw-inline",
       "defaultChoice": "npm"
     }
+  },
+  "moltbot": {
+    "extensions": [
+      "./dist/index.js"
+    ]
   },
   "publishConfig": {
     "access": "public"
