@@ -31,8 +31,10 @@
     "paths": {
       "@in/server": ["./src"],
       "@in/server/*": ["./src/*"],
-      "@in/protocol": ["./packages/protocol/src"],
-      "@in/protocol/*": ["./packages/protocol/src/*"],
+      "@in/protocol": ["../packages/protocol/src"],
+      "@in/protocol/*": ["../packages/protocol/src/*"],
+      "@inline-chat/protocol": ["../packages/protocol/src"],
+      "@inline-chat/protocol/*": ["../packages/protocol/src/*"],
       "@inline-chat/bot-api-types": ["../packages/bot-api-types/src/index.ts"],
       "@inline-chat/bot-api-types/*": ["../packages/bot-api-types/src/*"]
     }

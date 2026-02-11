@@ -1,6 +1,6 @@
 import { InlineError } from "@in/server/types/errors"
 import { t } from "elysia"
-import { MessageEntities, MessageEntity_Type, type MessageEntity } from "@in/protocol/core"
+import { MessageEntities, MessageEntity_Type, type MessageEntity } from "@inline-chat/protocol/core"
 import type { BotMessageEntityOutput, BotUser } from "@inline-chat/bot-api-types"
 
 const TInt64 = t.Union([t.Number(), t.String()])

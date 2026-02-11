@@ -7,7 +7,7 @@
 
   "references": [
     {
-      "path": "./packages/protocol"
+      "path": "../packages/protocol"
     },
     {
       "path": "../packages/bot-api-types"
