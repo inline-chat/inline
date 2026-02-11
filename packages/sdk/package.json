@@ -1,0 +1,36 @@
+{
+  "name": "@inline-chat/realtime-sdk",
+  "version": "0.0.1",
+  "private": false,
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@inline-chat/protocol": "^0.0.1",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "@types/ws": "^8.5.12",
+    "@vitest/coverage-v8": "4.0.16",
+    "typescript": "^5.8.3",
+    "vitest": "^4.0.16"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
