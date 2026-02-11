@@ -1,4 +1,4 @@
-import { InlineSdkClient } from "@inline-chat/sdk"
+import { InlineSdkClient } from "@inline-chat/realtime-sdk"
 import {
   GetChatHistoryInput,
   GetChatsInput,
