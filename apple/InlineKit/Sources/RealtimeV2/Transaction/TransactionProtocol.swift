@@ -12,9 +12,11 @@ public struct QueryConfig: Sendable {
 
 public struct MutationConfig: Sendable {
   public var transient: Bool = false
+  public var retryAfterAck: Bool = false
 
-  public init(transient: Bool = false) {
+  public init(transient: Bool = false, retryAfterAck: Bool = false) {
     self.transient = transient
+    self.retryAfterAck = retryAfterAck
   }
 }
 

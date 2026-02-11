@@ -41,6 +41,7 @@ public actor RealtimeV2 {
   private var connectionStateContinuations: [UUID: AsyncStream<RealtimeConnectionState>.Continuation] = [:]
   private var currentConnectionState: RealtimeConnectionState = .connecting
   private var lastSnapshotState: ConnectionState = .stopped
+  private var didNotifyConnectionInitFailure = false
 
   // Transaction execution
   private var transactionContinuations: [TransactionId: CheckedContinuation<
@@ -130,7 +131,12 @@ public actor RealtimeV2 {
         let mapped = self.mapConnectionState(snapshot.state)
         await self.updateConnectionState(mapped)
 
+        if snapshot.state != .open && self.lastSnapshotState == .open {
+          await self.transactions.connectionLost()
+        }
+
         if snapshot.state == .open && self.lastSnapshotState != .open {
+          self.didNotifyConnectionInitFailure = false
           await self.restartTransactions()
         }
         self.lastSnapshotState = snapshot.state
@@ -159,6 +165,10 @@ public actor RealtimeV2 {
         case let .updates(updates):
           self.log.trace("Received updates \(updates)")
           await self.sync.process(updates: updates.updates)
+
+        case .connectionError:
+          self.log.error("Received server connection error during handshake")
+          self.notifyConnectionInitFailureIfNeeded()
 
         default:
           break
@@ -284,7 +294,21 @@ public actor RealtimeV2 {
 
   private func restartTransactions() async {
     // FIXME: probably wait a little before requeuing the inflight list as ack may come soon after a quick intermittent connection loss
-    await transactions.requeueAll()
+    let dropped = await transactions.requeueAll()
+
+    guard !dropped.isEmpty else { return }
+
+    for wrapper in dropped {
+      let transaction = wrapper.transaction
+      let transactionId = wrapper.id
+      log.warning(
+        "Failing acked transaction without retryAfterAck after reconnect: \(transactionId) \(transaction.debugDescription)"
+      )
+      Task.detached {
+        await transaction.failed(error: .ackedButNoResultAfterReconnect)
+      }
+      getAndRemoveContinuation(for: transactionId)?.resume(throwing: TransactionError.ackedButNoResultAfterReconnect)
+    }
   }
 
   /// Store the continuation for a transaction from actor context
@@ -305,14 +329,14 @@ public actor RealtimeV2 {
     // Note(@mo): Do not put this in a task or it may run after the execution of the transaction
     await transaction.optimistic()
 
-    // add to execution queue
-    let transactionId = await transactions.queue(transaction: transaction)
-    log.trace("Queued transaction \(transaction.debugDescription)")
-
-    // optionally if they want to wait for the result
+    // Register continuation before we signal execution, so fast responses cannot race ahead.
     return try await withCheckedThrowingContinuation { continuation in
       Task {
+        let transactionId = TransactionId.generate()
         await storeContinuation(for: transactionId, continuation: continuation)
+        await transactions.enqueue(transaction: transaction, transactionId: transactionId)
+        log.trace("Queued transaction \(transaction.debugDescription)")
+        await transactions.signalQueue()
       }
     }
   }
@@ -429,6 +453,12 @@ public actor RealtimeV2 {
 
   private func removeConnectionStateContinuation(_ id: UUID) {
     connectionStateContinuations.removeValue(forKey: id)
+  }
+
+  private func notifyConnectionInitFailureIfNeeded() {
+    guard !didNotifyConnectionInitFailure else { return }
+    didNotifyConnectionInitFailure = true
+    NotificationCenter.default.post(name: .realtimeV2ConnectionInitFailed, object: nil)
   }
 
   private func syncConfig(for enableMessageUpdates: Bool) -> SyncConfig {
