@@ -76,7 +76,7 @@ struct SpaceView: View {
       contentView
     }
     .navigationBarTitleDisplayMode(.inline)
-    .navigationTitle("")
+    .navigationTitle(space?.displayName ?? "Space")
     .toolbar { toolbarContent }
     .task { await loadData() }
   }

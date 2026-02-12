@@ -32,7 +32,7 @@ struct ArchivedChatsView: View {
     }
     .background(Color(.systemBackground))
     .navigationBarTitleDisplayMode(.inline)
-    .navigationTitle("")
+    .navigationTitle("Archived chats")
     .toolbar {
       ToolbarItem(placement: .principal) {
         header

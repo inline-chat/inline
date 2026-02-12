@@ -87,6 +87,7 @@ struct ExperimentalRootView: View {
       }
       .background(Color(.systemBackground))
       .navigationBarTitleDisplayMode(.inline)
+      .navigationTitle(rootTab == .archived ? "Archived" : "Chats")
       // Put the toolbar on the TabView root. Toolbars declared inside TabView pages can fail to
       // render reliably; attaching here keeps the top bar consistent.
       .toolbar {

@@ -123,7 +123,7 @@ struct HomeView: View {
       .onAppear {
         initalFetch()
       }
-      .navigationTitle("")
+      .navigationTitle("Chats")
   }
 
   @ViewBuilder
