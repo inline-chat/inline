@@ -46,23 +46,24 @@ export const UserBucketUpdates = {
 const allocateNextSeq = async (tx: Transaction, userId: number, now: Date): Promise<number> => {
   // Use the query builder so Postgres doesn't see a qualified SET target like `"users"."update_seq"`,
   // which is invalid syntax in UPDATE SET lists.
+  // BAND-AID: We defensively reconcile against the latest persisted user-bucket seq in `updates`.
+  // `users.update_seq` should be the source of truth, but if it drifts behind in production data,
+  // trusting it alone can re-emit an already used seq and hit `updates_unique`.
   const nextSeqExpr = sql<number>`
-    CASE
-      WHEN ${users.updateSeq} IS NULL THEN (
-        COALESCE(
-          (
-            SELECT ${updates.seq}
-            FROM ${updates}
-            WHERE ${updates.bucket} = ${UpdateBucket.User}
-              AND ${updates.entityId} = ${userId}
-            ORDER BY ${updates.seq} DESC
-            LIMIT 1
-          ),
-          0
-        ) + 1
+    GREATEST(
+      COALESCE(${users.updateSeq}, 0),
+      COALESCE(
+        (
+          SELECT ${updates.seq}
+          FROM ${updates}
+          WHERE ${updates.bucket} = ${UpdateBucket.User}
+            AND ${updates.entityId} = ${userId}
+          ORDER BY ${updates.seq} DESC
+          LIMIT 1
+        ),
+        0
       )
-      ELSE ${users.updateSeq} + 1
-    END
+    ) + 1
   `
 
   const [result] = await tx
