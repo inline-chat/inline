@@ -120,6 +120,7 @@ private struct ExperimentalHomeView: View {
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(Color(.systemBackground))
     .navigationBarTitleDisplayMode(.inline)
+    .navigationTitle(initialTab == .archived ? "Archived" : "Chats")
     .task {
       ensureActiveSpaceSelected()
       chatsModel.setSpaceId(nav.activeSpaceId)

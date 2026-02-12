@@ -47,6 +47,7 @@ struct SpacesView: View {
       }
     }
     .navigationBarTitleDisplayMode(.inline)
+    .navigationTitle("Spaces")
     .toolbar {
       toolbarContent
     }

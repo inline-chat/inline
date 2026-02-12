@@ -181,6 +181,9 @@
     "Archived" : {
 
     },
+    "Archived chats" : {
+
+    },
     "Are you sure you want to logout? This will clear your local data and return you to the welcome screen." : {
 
     },
@@ -766,9 +769,6 @@
         }
       }
     },
-    "New Chat" : {
-
-    },
     "New Group Chat" : {
       "localizations" : {
         "fa" : {
@@ -1022,6 +1022,9 @@
 
     },
     "Space name" : {
+
+    },
+    "Spaces" : {
 
     },
     "Start a chat" : {
