@@ -82,6 +82,55 @@ describe("UserBucketUpdates", () => {
     expect(rows.map((r) => r.seq).sort((a, b) => a - b)).toEqual([10, 11])
   })
 
+  test("recovers when users.updateSeq is non-null but stale behind persisted updates", async () => {
+    const user = await testUtils.createUser("user-bucket-stale-counter@example.com")
+    if (!user) throw new Error("Failed to create user")
+
+    const seed = async (seq: number) => {
+      const now = new Date()
+      const serverUpdate: ServerUpdate = {
+        seq,
+        date: encodeDateStrict(now),
+        update: {
+          oneofKind: "userMarkAsUnread",
+          userMarkAsUnread: {
+            peerId: { type: { oneofKind: "chat", chat: { chatId: 321n } } },
+            unreadMark: false,
+          },
+        },
+      }
+      const record = UpdatesModel.build(serverUpdate)
+      await db.insert(updates).values({
+        bucket: UpdateBucket.User,
+        entityId: user.id,
+        seq,
+        payload: record.encrypted,
+        date: now,
+      })
+    }
+
+    await seed(1)
+    await seed(7)
+    await db.update(users).set({ updateSeq: 2 }).where(eq(users.id, user.id))
+
+    const result = await UserBucketUpdates.enqueue({
+      userId: user.id,
+      update: {
+        oneofKind: "userReadMaxId",
+        userReadMaxId: {
+          peerId: { type: { oneofKind: "chat", chat: { chatId: 321n } } },
+          readMaxId: 8n,
+          unreadCount: 0,
+        },
+      },
+    })
+
+    expect(result.seq).toBe(8)
+
+    const [after] = await db.select({ updateSeq: users.updateSeq }).from(users).where(eq(users.id, user.id)).limit(1)
+    expect(after?.updateSeq).toBe(8)
+  })
+
   test("concurrent enqueues don't create duplicate seq", async () => {
     const user = await testUtils.createUser("user-bucket-concurrency@example.com")
     if (!user) throw new Error("Failed to create user")
