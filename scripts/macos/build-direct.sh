@@ -22,7 +22,8 @@ ENTITLEMENTS_PATH=${ENTITLEMENTS_PATH:-"${ROOT_DIR}/apple/InlineMac/InlineMacDir
 MACOS_PROVISIONING_PROFILE_BASE64=${MACOS_PROVISIONING_PROFILE_BASE64:-""}
 MACOS_PROVISIONING_PROFILE_PATH=${MACOS_PROVISIONING_PROFILE_PATH:-""}
 OVERWRITE_DMG=${OVERWRITE_DMG:-0}
-EFFECTIVE_ENTITLEMENTS_PATH="${ENTITLEMENTS_PATH}"
+SIGN_RETRY_COUNT=${SIGN_RETRY_COUNT:-3}
+SIGN_RETRY_DELAY_SECONDS=${SIGN_RETRY_DELAY_SECONDS:-2}
 
 if [[ -z "${SPARKLE_PUBLIC_KEY:-}" && -n "${MACOS_SPARKLE_PUBLIC_KEY:-}" ]]; then
   SPARKLE_PUBLIC_KEY="${MACOS_SPARKLE_PUBLIC_KEY}"
@@ -140,86 +141,16 @@ if [[ ! -d "${SPARKLE_FRAMEWORK}" ]]; then
   exit 1
 fi
 
-if [[ -n "${MACOS_PROVISIONING_PROFILE_BASE64}" || -n "${MACOS_PROVISIONING_PROFILE_PATH}" ]]; then
-  mkdir -p "${OUTPUT_DIR}"
-  PROFILE_PATH="${OUTPUT_DIR}/embedded.provisionprofile"
-  if [[ -n "${MACOS_PROVISIONING_PROFILE_BASE64}" ]]; then
-    if base64 -D >/dev/null 2>&1 <<<""; then
-      echo "${MACOS_PROVISIONING_PROFILE_BASE64}" | base64 -D > "${PROFILE_PATH}"
-    else
-      echo "${MACOS_PROVISIONING_PROFILE_BASE64}" | base64 --decode > "${PROFILE_PATH}"
-    fi
-  else
-    cp "${MACOS_PROVISIONING_PROFILE_PATH}" "${PROFILE_PATH}"
-  fi
-
-  PROFILE_PLIST=$(mktemp)
-  security cms -D -i "${PROFILE_PATH}" > "${PROFILE_PLIST}"
-  PROFILE_UUID=$(/usr/libexec/PlistBuddy -c "Print :UUID" "${PROFILE_PLIST}")
-  PROFILE_TEAM_ID=$(/usr/libexec/PlistBuddy -c "Print :Entitlements:com.apple.developer.team-identifier" "${PROFILE_PLIST}")
-  PROFILE_APS_ENV=$(/usr/libexec/PlistBuddy -c "Print :Entitlements:com.apple.developer.aps-environment" "${PROFILE_PLIST}" 2>/dev/null || true)
-  rm -f "${PROFILE_PLIST}"
-  if [[ -z "${PROFILE_UUID}" || -z "${PROFILE_TEAM_ID}" ]]; then
-    echo "Provisioning profile is missing UUID or team identifier." >&2
-    exit 1
-  fi
-
-  mkdir -p "${HOME}/Library/MobileDevice/Provisioning Profiles"
-  cp "${PROFILE_PATH}" "${HOME}/Library/MobileDevice/Provisioning Profiles/${PROFILE_UUID}.provisionprofile"
-  cp "${PROFILE_PATH}" "${APP_PATH}/Contents/embedded.provisionprofile"
-
-  EFFECTIVE_ENTITLEMENTS_PATH="${OUTPUT_DIR}/InlineMacDirect.entitlements"
-  cp "${ENTITLEMENTS_PATH}" "${EFFECTIVE_ENTITLEMENTS_PATH}"
-  APP_PREFIX="${PROFILE_TEAM_ID}."
-  perl -pi -e "s/\\$\\(TeamIdentifierPrefix\\)/${APP_PREFIX}/g; s/\\$\\(AppIdentifierPrefix\\)/${APP_PREFIX}/g" "${EFFECTIVE_ENTITLEMENTS_PATH}"
-  if [[ -n "${PROFILE_APS_ENV}" ]]; then
-    /usr/libexec/PlistBuddy -c "Set :com.apple.developer.aps-environment ${PROFILE_APS_ENV}" "${EFFECTIVE_ENTITLEMENTS_PATH}" \
-      || /usr/libexec/PlistBuddy -c "Add :com.apple.developer.aps-environment string ${PROFILE_APS_ENV}" "${EFFECTIVE_ENTITLEMENTS_PATH}"
-  fi
-fi
-
-codesign_path() {
-  local path="$1"
-  /usr/bin/codesign --verbose -f -s "${MACOS_CERTIFICATE_NAME}" -o runtime --timestamp "${path}"
-}
-
-if command -v rg >/dev/null 2>&1; then
-  GREP_CMD=(rg -q)
-else
-  GREP_CMD=(grep -q)
-fi
-
-verify_codesign_timestamp() {
-  local path="$1"
-  /usr/bin/codesign --verify --deep --strict --verbose=2 "${path}"
-  if ! /usr/bin/codesign -dv --verbose=4 "${path}" 2>&1 | "${GREP_CMD[@]}" "Timestamp="; then
-    echo "Code signature missing timestamp: ${path}" >&2
-    exit 1
-  fi
-}
-
-codesign_path "${SPARKLE_FRAMEWORK}/Versions/B/XPCServices/Downloader.xpc"
-codesign_path "${SPARKLE_FRAMEWORK}/Versions/B/XPCServices/Installer.xpc"
-codesign_path "${SPARKLE_FRAMEWORK}/Versions/B/Autoupdate"
-codesign_path "${SPARKLE_FRAMEWORK}/Versions/B/Updater.app"
-codesign_path "${SPARKLE_FRAMEWORK}"
-
-for framework in "${FRAMEWORKS_DIR}"/*.framework; do
-  if [[ -d "${framework}" && "${framework}" != "${SPARKLE_FRAMEWORK}" ]]; then
-    codesign_path "${framework}"
-  fi
-done
-
-/usr/bin/codesign --verbose -f -s "${MACOS_CERTIFICATE_NAME}" -o runtime --timestamp \
-  --entitlements "${EFFECTIVE_ENTITLEMENTS_PATH}" \
-  "${APP_PATH}"
-
-# Fail fast before we spend time notarizing: verify codesign + timestamp on the app and embedded bundles.
-verify_codesign_timestamp "${APP_PATH}"
-find "${APP_PATH}/Contents" -type d \( -name "*.framework" -o -name "*.app" -o -name "*.xpc" -o -name "*.appex" \) -print0 \
-  | while IFS= read -r -d '' bundle; do
-      verify_codesign_timestamp "${bundle}"
-    done
+mkdir -p "${OUTPUT_DIR}"
+MACOS_CERTIFICATE_NAME="${MACOS_CERTIFICATE_NAME}" \
+MACOS_PROVISIONING_PROFILE_BASE64="${MACOS_PROVISIONING_PROFILE_BASE64}" \
+MACOS_PROVISIONING_PROFILE_PATH="${MACOS_PROVISIONING_PROFILE_PATH}" \
+SIGN_RETRY_COUNT="${SIGN_RETRY_COUNT}" \
+SIGN_RETRY_DELAY_SECONDS="${SIGN_RETRY_DELAY_SECONDS}" \
+  bash "${ROOT_DIR}/scripts/macos/sign-direct.sh" \
+    --app-path "${APP_PATH}" \
+    --entitlements-path "${ENTITLEMENTS_PATH}" \
+    --output-dir "${OUTPUT_DIR}"
 
 mkdir -p "${OUTPUT_DIR}"
 CREATE_DMG_OUTPUT_DIR="${OUTPUT_DIR}"
