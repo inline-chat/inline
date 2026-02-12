@@ -112,9 +112,11 @@ struct ChatToolbarLeadingView: View {
         Text(subtitle.shouldKeepOriginalCase ? subtitle.text : subtitle.text.lowercased())
           .font(.caption)
           .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .truncationMode(.tail)
+          .allowsTightening(true)
       }
       .padding(.top, -2)
-      .fixedSize()
     }
   }
 
@@ -158,11 +160,15 @@ struct ChatToolbarLeadingView: View {
         Text(title)
           .font(.body)
           .fontWeight(.medium)
+          .lineLimit(1)
+          .truncationMode(.tail)
+          .allowsTightening(true)
         subtitleView
       }
     }
-    .scaledToFill()
-    .fixedSize()
+    // Important: do not use `fixedSize()` here. In a navigation bar toolbar item (principal/leading),
+    // `fixedSize()` makes this view resist width constraints, so long titles can overlap the system
+    // navigation buttons instead of truncating within the available space.
     .opacity(isChatHeaderPressed ? 0.7 : 1.0)
     .onTapGesture {
       if let chatItem = fullChatViewModel.chatItem {
