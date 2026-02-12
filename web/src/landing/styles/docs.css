@@ -495,8 +495,8 @@ html[data-theme="light"] .docs-topbar-wordmark {
 /* Make the toggle actually affect the page (not just the icons). */
 html[data-theme="dark"],
 html[data-theme="dark"] body {
-  background-color: #303845;
-  background-image: linear-gradient(180deg, #303845 0%, #1c2025 100%);
+  background-color: #0E141B;
+  background-image: linear-gradient(180deg, #111B24 0%, #0E141B 100%);
   background-attachment: fixed;
 }
 
