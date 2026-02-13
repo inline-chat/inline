@@ -185,4 +185,72 @@ describe("getChatHistory", () => {
     })
     expect(chatsAfter.length).toBe(1)
   })
+
+  test("supports offset pagination for batched history loading", async () => {
+    const userA = (await testUtils.createUser("userA7@example.com"))!
+    const userB = (await testUtils.createUser("userB7@example.com"))!
+
+    const chat = (await testUtils.createPrivateChat(userA, userB))!
+    await db
+      .insert(schema.dialogs)
+      .values([
+        { chatId: chat.id, userId: userA.id, peerUserId: userB.id },
+        { chatId: chat.id, userId: userB.id, peerUserId: userA.id },
+      ])
+      .execute()
+
+    for (let messageId = 1; messageId <= 130; messageId += 1) {
+      await testUtils.createTestMessage({
+        messageId,
+        chatId: chat.id,
+        fromId: userA.id,
+        text: `Message ${messageId}`,
+      })
+    }
+
+    await db.update(schema.chats).set({ lastMsgId: 130 }).where(eq(schema.chats.id, chat.id)).execute()
+
+    const peerId = {
+      type: {
+        oneofKind: "user" as const,
+        user: { userId: BigInt(userB.id) },
+      },
+    }
+    const context = makeFunctionContext(userA.id)
+
+    const firstBatch = await getChatHistory(
+      {
+        peerId,
+        limit: 50,
+      },
+      context,
+    )
+    expect(firstBatch.messages).toHaveLength(50)
+    expect(firstBatch.messages[0]?.id).toBe(130n)
+    expect(firstBatch.messages[49]?.id).toBe(81n)
+
+    const secondBatch = await getChatHistory(
+      {
+        peerId,
+        offsetId: firstBatch.messages[firstBatch.messages.length - 1]?.id,
+        limit: 50,
+      },
+      context,
+    )
+    expect(secondBatch.messages).toHaveLength(50)
+    expect(secondBatch.messages[0]?.id).toBe(80n)
+    expect(secondBatch.messages[49]?.id).toBe(31n)
+
+    const thirdBatch = await getChatHistory(
+      {
+        peerId,
+        offsetId: secondBatch.messages[secondBatch.messages.length - 1]?.id,
+        limit: 50,
+      },
+      context,
+    )
+    expect(thirdBatch.messages).toHaveLength(30)
+    expect(thirdBatch.messages[0]?.id).toBe(30n)
+    expect(thirdBatch.messages[29]?.id).toBe(1n)
+  })
 })

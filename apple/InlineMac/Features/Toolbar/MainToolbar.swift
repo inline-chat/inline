@@ -507,6 +507,7 @@ private struct ChatToolbarMenu: View {
   @State private var showRenameSheet = false
   @State private var showMoveToSpaceSheet = false
   @State private var showMoveOutConfirm = false
+  @State private var loadHistoryTask: Task<Void, Never>?
 
   init(peer: Peer, database: AppDatabase, spaceId: Int64?, dependencies: AppDependencies) {
     self.peer = peer
@@ -538,6 +539,11 @@ private struct ChatToolbarMenu: View {
           }
         }
       }
+
+      Button("Load chat history", systemImage: "arrow.down.circle") {
+        loadLast1000Messages()
+      }
+      .disabled(loadHistoryTask != nil)
 
       Divider()
 
@@ -631,4 +637,108 @@ private struct ChatToolbarMenu: View {
       dependencies.nav.open(.chatInfo(peer: peer))
     }
   }
+
+  @MainActor
+  private func loadLast1000Messages() {
+    guard loadHistoryTask == nil else { return }
+
+    let targetMessageCount = 1_000
+    let batchSize: Int32 = 100
+
+    loadHistoryTask = Task(priority: .userInitiated) { @MainActor in
+      defer {
+        loadHistoryTask = nil
+      }
+
+      ToastCenter.shared.showLoading(
+        loadingHistoryMessage(loaded: 0, target: targetMessageCount),
+        actionTitle: "Cancel",
+        action: { cancelHistoryLoad() }
+      )
+
+      do {
+        let loadedMessages = try await fetchHistoryInBatches(
+          targetCount: targetMessageCount,
+          batchSize: batchSize
+        )
+        try Task.checkCancellation()
+
+        ToastCenter.shared.dismiss()
+        if loadedMessages > 0 {
+          ToastCenter.shared.showSuccess("Loaded \(loadedMessages) messages")
+        } else {
+          ToastCenter.shared.showSuccess("No older messages to load")
+        }
+      } catch is CancellationError {
+        ToastCenter.shared.dismiss()
+        ToastCenter.shared.showSuccess("History loading canceled")
+      } catch {
+        ToastCenter.shared.dismiss()
+        ToastCenter.shared.showError("Failed to load chat history")
+      }
+    }
+  }
+
+  @MainActor
+  private func cancelHistoryLoad() {
+    loadHistoryTask?.cancel()
+  }
+
+  @MainActor
+  private func fetchHistoryInBatches(targetCount: Int, batchSize: Int32) async throws -> Int {
+    var loadedCount = 0
+    var offsetID: Int64?
+    var previousOldestMessageID: Int64?
+
+    while loadedCount < targetCount {
+      try Task.checkCancellation()
+
+      let remaining = targetCount - loadedCount
+      let requestedLimit = Int32(min(Int(batchSize), remaining))
+
+      guard requestedLimit > 0 else { break }
+
+      let rpcResult = try await realtimeV2.send(
+        .getChatHistory(peer: peer, offsetID: offsetID, limit: requestedLimit)
+      )
+      try Task.checkCancellation()
+
+      guard let rpcResult, case let .getChatHistory(result) = rpcResult else {
+        throw HistoryLoadError.invalidResponse
+      }
+
+      let batchMessages = result.messages
+      guard !batchMessages.isEmpty else { break }
+
+      loadedCount += batchMessages.count
+
+      ToastCenter.shared.showLoading(
+        loadingHistoryMessage(loaded: min(loadedCount, targetCount), target: targetCount),
+        actionTitle: "Cancel",
+        action: { cancelHistoryLoad() }
+      )
+
+      guard let oldestMessageID = batchMessages.last?.id else { break }
+      if let previousOldestMessageID, oldestMessageID >= previousOldestMessageID {
+        break
+      }
+
+      previousOldestMessageID = oldestMessageID
+      offsetID = oldestMessageID
+
+      if batchMessages.count < Int(requestedLimit) {
+        break
+      }
+    }
+
+    return min(loadedCount, targetCount)
+  }
+
+  private func loadingHistoryMessage(loaded: Int, target: Int) -> String {
+    "Loading chat history… \(loaded)/\(target)"
+  }
+}
+
+private enum HistoryLoadError: Error {
+  case invalidResponse
 }

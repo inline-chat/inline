@@ -35,13 +35,13 @@ final class OverlayManager: ObservableObject, ToastPresenting {
     ToastCenter.shared.presenter = self
   }
 
-  func showLoading(_ message: String) {
+  func showLoading(_ message: String, actionTitle: String?, action: (@MainActor () -> Void)?) {
     showToast(
       message: message,
       style: .info,
       showsSpinner: true,
-      actionTitle: nil,
-      action: nil,
+      actionTitle: actionTitle,
+      action: action,
       autoDismissAfter: nil
     )
   }
