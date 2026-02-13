@@ -245,9 +245,6 @@ describe("inline/actions", () => {
           },
         }
       }
-      throw new Error(`unexpected method ${String(method)}`)
-    })
-    const invokeUncheckedRaw = vi.fn(async (method: number) => {
       if (method === 38) {
         return {
           oneofKind: "getMessages",
@@ -256,7 +253,7 @@ describe("inline/actions", () => {
           },
         }
       }
-      return invokeRaw(method)
+      throw new Error(`unexpected method ${String(method)}`)
     })
 
     vi.doMock("@inline-chat/realtime-sdk", () => ({
@@ -292,7 +289,6 @@ describe("inline/actions", () => {
         getMe = getMe
         sendMessage = sendMessage
         invokeRaw = invokeRaw
-        invokeUncheckedRaw = invokeUncheckedRaw
       },
     }))
 
@@ -495,7 +491,7 @@ describe("inline/actions", () => {
         oneofKind: "updateMemberAccess",
       }),
     )
-    expect(invokeUncheckedRaw).toHaveBeenCalledWith(
+    expect(invokeRaw).toHaveBeenCalledWith(
       38,
       expect.objectContaining({
         oneofKind: "getMessages",
@@ -510,6 +506,9 @@ describe("inline/actions", () => {
     vi.resetModules()
 
     const invokeRaw = vi.fn(async (method: number) => {
+      if (method === 38) {
+        throw new Error("method not supported")
+      }
       if (method === 5) {
         return {
           oneofKind: "getChatHistory",
@@ -539,9 +538,6 @@ describe("inline/actions", () => {
       }
       throw new Error(`unexpected method ${String(method)}`)
     })
-    const invokeUncheckedRaw = vi.fn(async () => {
-      throw new Error("method not supported")
-    })
 
     vi.doMock("@inline-chat/realtime-sdk", () => ({
       Method: {
@@ -553,7 +549,6 @@ describe("inline/actions", () => {
         connect = vi.fn(async () => {})
         close = vi.fn(async () => {})
         invokeRaw = invokeRaw
-        invokeUncheckedRaw = invokeUncheckedRaw
       },
     }))
 
@@ -575,7 +570,7 @@ describe("inline/actions", () => {
       params: { to: "7", messageId: "10" },
     } as any)
 
-    expect(invokeUncheckedRaw).toHaveBeenCalledWith(
+    expect(invokeRaw).toHaveBeenCalledWith(
       38,
       expect.objectContaining({
         oneofKind: "getMessages",
