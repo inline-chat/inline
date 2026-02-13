@@ -17,6 +17,9 @@ import type { Transport } from "../realtime/transport.js"
 export type InlineSdkClientOptions = {
   baseUrl?: string // e.g. https://api.inline.chat
   token: string
+  // Default timeout used by response-waiting RPC calls.
+  // Defaults to 30_000 ms. Set to `null`, `Infinity`, or `<= 0` for no timeout.
+  rpcTimeoutMs?: number | null
   logger?: InlineSdkLogger
   state?: InlineSdkStateStore
   transport?: Transport

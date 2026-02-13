@@ -83,6 +83,7 @@ export class InlineSdkClient {
         clientVersion: getSdkVersion(),
       }),
       logger: options.logger,
+      defaultRpcTimeoutMs: options.rpcTimeoutMs,
     })
 
     void this.startListeners()
@@ -242,7 +243,7 @@ export class InlineSdkClient {
   async invokeRaw(
     method: Method,
     input: RpcCall["input"] = { oneofKind: undefined },
-    options?: { timeoutMs?: number },
+    options?: { timeoutMs?: number | null },
   ): Promise<RpcResult["result"]> {
     if (hasMethodMapping(method)) {
       this.assertMethodInputMatch(method, input)
@@ -259,7 +260,7 @@ export class InlineSdkClient {
   async invokeUncheckedRaw(
     method: Method,
     input: RpcCall["input"] = { oneofKind: undefined },
-    options?: { timeoutMs?: number },
+    options?: { timeoutMs?: number | null },
   ): Promise<RpcResult["result"]> {
     return await this.protocol.callRpc(method, input, options)
   }
@@ -267,7 +268,7 @@ export class InlineSdkClient {
   async invoke<M extends MappedMethod>(
     method: M,
     input: RpcInputForMethod<M>,
-    options?: { timeoutMs?: number },
+    options?: { timeoutMs?: number | null },
   ): Promise<RpcResultForMethod<M>> {
     this.assertMethodInputMatch(method, input)
     const result = await this.protocol.callRpc(method, input, options)

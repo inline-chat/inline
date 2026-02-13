@@ -10,15 +10,20 @@ export type ProtocolClientOptions = {
   transport: Transport
   getConnectionInit: () => ConnectionInit | null
   logger?: InlineSdkLogger
+  defaultRpcTimeoutMs?: number | null
 }
 
-type RpcContinuation = {
+type PendingRpcRequest = {
+  message: ClientMessage
   resolve: (value: RpcResult["result"]) => void
   reject: (error: Error) => void
   timeout?: ReturnType<typeof setTimeout>
+  timeoutMs: number | null
+  sending: boolean
 }
 
 const emptyRpcInput: RpcCall["input"] = { oneofKind: undefined }
+const defaultRpcTimeoutMs = 30_000
 
 export class ProtocolClient {
   readonly events = new AsyncChannel<ClientEvent>()
@@ -29,8 +34,9 @@ export class ProtocolClient {
 
   private readonly log: InlineSdkLogger
   private readonly getConnectionInit: () => ConnectionInit | null
+  private readonly defaultRpcTimeoutMs: number | null
 
-  private rpcContinuations = new Map<bigint, RpcContinuation>()
+  private pendingRpcRequests = new Map<bigint, PendingRpcRequest>()
 
   private seq = 0
   private lastTimestamp = 0
@@ -46,6 +52,7 @@ export class ProtocolClient {
     this.transport = options.transport
     this.log = options.logger ?? {}
     this.getConnectionInit = options.getConnectionInit
+    this.defaultRpcTimeoutMs = normalizeRpcTimeoutMs(options.defaultRpcTimeoutMs, defaultRpcTimeoutMs)
 
     this.pingPong = new PingPongService({ logger: this.log })
     this.pingPong.configure(this)
@@ -92,28 +99,31 @@ export class ProtocolClient {
   async callRpc(
     method: Method,
     input: RpcCall["input"] = emptyRpcInput,
-    options?: { timeoutMs?: number },
+    options?: { timeoutMs?: number | null },
   ): Promise<RpcResult["result"]> {
-    this.ensureOpenForRpc()
     const message = this.wrapMessage({
       oneofKind: "rpcCall",
       rpcCall: { method, input },
     })
 
     return await new Promise<RpcResult["result"]>((resolve, reject) => {
-      const continuation: RpcContinuation = { resolve, reject }
-      this.rpcContinuations.set(message.id, continuation)
-
-      void this.transport.send(message).catch((error) => {
-        this.failRpcContinuation(message.id, error instanceof Error ? error : new Error("send-failed"))
-      })
-
-      const timeoutMs = options?.timeoutMs ?? 15_000
-      if (timeoutMs > 0) {
-        continuation.timeout = setTimeout(() => {
-          this.failRpcContinuation(message.id, new ProtocolClientError("timeout"))
-        }, timeoutMs)
+      const pending: PendingRpcRequest = {
+        message,
+        resolve,
+        reject,
+        timeoutMs: this.resolveRpcTimeoutMs(options?.timeoutMs),
+        sending: false,
       }
+
+      this.pendingRpcRequests.set(message.id, pending)
+
+      if (pending.timeoutMs !== null) {
+        pending.timeout = setTimeout(() => {
+          this.failPendingRpcRequest(message.id, new ProtocolClientError("timeout"))
+        }, pending.timeoutMs)
+      }
+
+      this.trySendPendingRpcRequest(message.id)
     })
   }
 
@@ -215,6 +225,7 @@ export class ProtocolClient {
     }
     this.connectionAttemptNo = 0
     this.pingPong.start()
+    this.resendPendingRpcRequests()
   }
 
   private async connecting() {
@@ -225,7 +236,7 @@ export class ProtocolClient {
   private async reset() {
     this.pingPong.stop()
     this.stopAuthenticationTimeout()
-    this.cancelAllRpcContinuations(new ProtocolClientError("stopped"))
+    this.cancelAllPendingRpcRequests(new ProtocolClientError("stopped"))
     this.state = "connecting"
   }
 
@@ -245,8 +256,8 @@ export class ProtocolClient {
 
   private handleClientFailure() {
     this.pingPong.stop()
-    this.cancelAllRpcContinuations(new ProtocolClientError("not-connected"))
     this.stopAuthenticationTimeout()
+    this.state = "connecting"
 
     if (this.reconnectionTimer) {
       clearTimeout(this.reconnectionTimer)
@@ -294,8 +305,8 @@ export class ProtocolClient {
   }
 
   private completeRpcResult(msgId: bigint, rpcResult: RpcResult["result"]) {
-    const continuation = this.getAndRemoveRpcContinuation(msgId)
-    continuation?.resolve(rpcResult)
+    const pending = this.getAndRemovePendingRpcRequest(msgId)
+    pending?.resolve(rpcResult)
   }
 
   private ensureOpenForRpc() {
@@ -306,30 +317,67 @@ export class ProtocolClient {
 
   private completeRpcError(msgId: bigint, rpcError: RpcError) {
     const error = new ProtocolClientError("rpc-error", { code: rpcError.code, message: rpcError.message })
-    const continuation = this.getAndRemoveRpcContinuation(msgId)
-    continuation?.reject(error)
+    const pending = this.getAndRemovePendingRpcRequest(msgId)
+    pending?.reject(error)
   }
 
-  private failRpcContinuation(msgId: bigint, error: Error) {
-    const continuation = this.getAndRemoveRpcContinuation(msgId)
-    continuation?.reject(error)
+  private failPendingRpcRequest(msgId: bigint, error: Error) {
+    const pending = this.getAndRemovePendingRpcRequest(msgId)
+    pending?.reject(error)
   }
 
-  private getAndRemoveRpcContinuation(msgId: bigint) {
-    const continuation = this.rpcContinuations.get(msgId)
-    if (!continuation) return null
-    if (continuation.timeout) clearTimeout(continuation.timeout)
-    this.rpcContinuations.delete(msgId)
-    return continuation
+  private getAndRemovePendingRpcRequest(msgId: bigint) {
+    const pending = this.pendingRpcRequests.get(msgId)
+    if (!pending) return null
+    if (pending.timeout) clearTimeout(pending.timeout)
+    this.pendingRpcRequests.delete(msgId)
+    return pending
   }
 
-  private cancelAllRpcContinuations(error: Error) {
-    for (const continuation of this.rpcContinuations.values()) {
-      continuation.reject(error)
-      if (continuation.timeout) clearTimeout(continuation.timeout)
+  private cancelAllPendingRpcRequests(error: Error) {
+    for (const pending of this.pendingRpcRequests.values()) {
+      pending.reject(error)
+      if (pending.timeout) clearTimeout(pending.timeout)
     }
-    this.rpcContinuations.clear()
+    this.pendingRpcRequests.clear()
   }
+
+  private resolveRpcTimeoutMs(timeoutMs: number | null | undefined): number | null {
+    return normalizeRpcTimeoutMs(timeoutMs, this.defaultRpcTimeoutMs)
+  }
+
+  private resendPendingRpcRequests() {
+    for (const msgId of this.pendingRpcRequests.keys()) {
+      this.trySendPendingRpcRequest(msgId)
+    }
+  }
+
+  private trySendPendingRpcRequest(msgId: bigint) {
+    const pending = this.pendingRpcRequests.get(msgId)
+    if (!pending) return
+    if (this.state !== "open") return
+    if (pending.sending) return
+
+    pending.sending = true
+    void this.transport
+      .send(pending.message)
+      .catch((error) => {
+        this.log.warn?.("Failed to send RPC request; waiting for reconnect", error)
+        this.handleClientFailure()
+      })
+      .finally(() => {
+        pending.sending = false
+      })
+  }
+}
+
+const normalizeRpcTimeoutMs = (timeoutMs: number | null | undefined, fallback: number | null): number | null => {
+  const resolved = timeoutMs === undefined ? fallback : timeoutMs
+  if (resolved == null) return null
+  if (resolved === Number.POSITIVE_INFINITY) return null
+  if (!Number.isFinite(resolved)) return null
+  if (resolved <= 0) return null
+  return Math.floor(resolved)
 }
 
 export class ProtocolClientError extends Error {
