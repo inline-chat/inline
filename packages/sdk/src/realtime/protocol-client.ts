@@ -79,6 +79,7 @@ export class ProtocolClient {
   }
 
   async sendRpc(method: Method, input: RpcCall["input"] = emptyRpcInput): Promise<bigint> {
+    this.ensureOpenForRpc()
     const message = this.wrapMessage({
       oneofKind: "rpcCall",
       rpcCall: { method, input },
@@ -93,6 +94,7 @@ export class ProtocolClient {
     input: RpcCall["input"] = emptyRpcInput,
     options?: { timeoutMs?: number },
   ): Promise<RpcResult["result"]> {
+    this.ensureOpenForRpc()
     const message = this.wrapMessage({
       oneofKind: "rpcCall",
       rpcCall: { method, input },
@@ -294,6 +296,12 @@ export class ProtocolClient {
   private completeRpcResult(msgId: bigint, rpcResult: RpcResult["result"]) {
     const continuation = this.getAndRemoveRpcContinuation(msgId)
     continuation?.resolve(rpcResult)
+  }
+
+  private ensureOpenForRpc() {
+    if (this.state !== "open") {
+      throw new ProtocolClientError("not-connected")
+    }
   }
 
   private completeRpcError(msgId: bigint, rpcError: RpcError) {
