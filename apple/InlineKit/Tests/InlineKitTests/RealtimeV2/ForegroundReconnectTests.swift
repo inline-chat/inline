@@ -37,6 +37,74 @@ final class ConnectionManagerTests {
 
     await manager.shutdownForTesting()
   }
+
+  @Test("authFailed disables auth constraint and stops reconnect attempts")
+  func testAuthFailedDisablesAuthConstraintAndStopsReconnect() async throws {
+    let session = FakeProtocolSession()
+    let manager = ConnectionManager(session: session, constraints: .initial)
+
+    await manager.start()
+    await manager.setAuthAvailable(true)
+    await manager.connectNow()
+
+    session.emit(.transportConnected)
+    let enteredAuthenticating = await waitForCondition(timeout: .seconds(1)) {
+      let snapshot = await manager.currentSnapshot()
+      return snapshot.state == .authenticating
+    }
+    #expect(enteredAuthenticating)
+
+    session.emit(.authFailed)
+
+    let transitionedToWaiting = await waitForCondition(timeout: .seconds(1)) {
+      let snapshot = await manager.currentSnapshot()
+      return snapshot.state == .waitingForConstraints && snapshot.constraints.authAvailable == false
+    }
+    #expect(transitionedToWaiting)
+
+    try? await Task.sleep(for: .milliseconds(800))
+    #expect(await session.startTransportCount == 1)
+
+    await manager.shutdownForTesting()
+  }
+
+  @Test("authFailed recovers when auth becomes available again")
+  func testAuthFailedRecoversWhenAuthBecomesAvailableAgain() async throws {
+    let session = FakeProtocolSession()
+    let manager = ConnectionManager(session: session, constraints: .initial)
+
+    await manager.start()
+    await manager.setAuthAvailable(true)
+    await manager.connectNow()
+
+    session.emit(.transportConnected)
+    let firstHandshake = await waitForCondition(timeout: .seconds(1)) {
+      await session.startHandshakeCount == 1
+    }
+    #expect(firstHandshake)
+
+    session.emit(.authFailed)
+    let pausedForMissingAuth = await waitForCondition(timeout: .seconds(1)) {
+      let snapshot = await manager.currentSnapshot()
+      return snapshot.state == .waitingForConstraints && snapshot.constraints.authAvailable == false
+    }
+    #expect(pausedForMissingAuth)
+
+    // Simulate later token recovery (e.g. re-login / fresh app start with valid credentials).
+    await manager.setAuthAvailable(true)
+    let restartedTransport = await waitForCondition(timeout: .seconds(1)) {
+      await session.startTransportCount == 2
+    }
+    #expect(restartedTransport)
+
+    session.emit(.transportConnected)
+    let secondHandshake = await waitForCondition(timeout: .seconds(1)) {
+      await session.startHandshakeCount == 2
+    }
+    #expect(secondHandshake)
+
+    await manager.shutdownForTesting()
+  }
 }
 
 // MARK: - Test Helpers

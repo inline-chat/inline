@@ -286,7 +286,8 @@ actor ConnectionManager {
       eventContinuation.yield(.protocolOpen)
 
     case .authFailed:
-      eventContinuation.yield(.protocolAuthFailed)
+      eventContinuation.yield(.authLost)
+      await forwardSessionEvent(event)
 
     case let .pong(nonce):
       handlePong(nonce: nonce)

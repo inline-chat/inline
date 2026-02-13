@@ -166,9 +166,13 @@ public actor RealtimeV2 {
           self.log.trace("Received updates \(updates)")
           await self.sync.process(updates: updates.updates)
 
+        case .authFailed:
+          self.log.error("Realtime handshake failed due to missing auth token")
+          await self.handleMissingAuthTokenHandshakeFailure()
+
         case .connectionError:
           self.log.error("Received server connection error during handshake")
-          self.notifyConnectionInitFailureIfNeeded()
+          await self.handleConnectionErrorDuringHandshake()
 
         default:
           break
@@ -459,6 +463,33 @@ public actor RealtimeV2 {
     guard !didNotifyConnectionInitFailure else { return }
     didNotifyConnectionInitFailure = true
     NotificationCenter.default.post(name: .realtimeV2ConnectionInitFailed, object: nil)
+  }
+
+  /// Server-side `connectionError` is generic; only treat it as a restart-worthy failure
+  /// when local auth refresh confirms the token is actually missing.
+  private func handleConnectionErrorDuringHandshake() async {
+    await auth.refreshFromStorage()
+
+    guard isMissingAuthToken() else { return }
+
+    log.error("Realtime handshake connectionError mapped to missing auth token")
+    await handleMissingAuthTokenHandshakeFailure()
+  }
+
+  private func handleMissingAuthTokenHandshakeFailure() async {
+    await connectionManager.setAuthAvailable(false)
+    notifyConnectionInitFailureIfNeeded()
+  }
+
+  private func isMissingAuthToken() -> Bool {
+    switch auth.snapshot().status {
+    case .reauthRequired:
+      return true
+    case .authenticated(let credentials):
+      return credentials.token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    case .hydrating, .unauthenticated, .locked:
+      return false
+    }
   }
 
   private func syncConfig(for enableMessageUpdates: Bool) -> SyncConfig {
