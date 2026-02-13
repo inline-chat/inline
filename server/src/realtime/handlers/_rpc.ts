@@ -8,6 +8,7 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { deleteMessage } from "@in/server/realtime/handlers/messages.deleteMessage"
 import { sendMessage } from "@in/server/realtime/handlers/messages.sendMessage"
 import { getChatHistory } from "@in/server/realtime/handlers/messages.getChatHistory"
+import { getMessages } from "@in/server/realtime/handlers/messages.getMessages"
 import { getChat } from "@in/server/realtime/handlers/messages.getChat"
 import { searchMessages } from "@in/server/realtime/handlers/messages.searchMessages"
 import { addReaction } from "./messages.addReactions"
@@ -78,6 +79,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await getChatHistory(call.input.getChatHistory, handlerContext)
       return { oneofKind: "getChatHistory", getChatHistory: result }
+    }
+
+    case Method.GET_MESSAGES: {
+      if (call.input.oneofKind !== "getMessages") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      let result = await getMessages(call.input.getMessages, handlerContext)
+      return { oneofKind: "getMessages", getMessages: result }
     }
 
     case Method.SEARCH_MESSAGES: {
