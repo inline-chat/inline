@@ -178,6 +178,9 @@ final class PinnedMessageHeaderView: UIView, UIGestureRecognizerDelegate {
           style: .replyBubble,
           messageText: "Pinned message unavailable"
         )
+        Task {
+          await TargetMessagesFetcher.shared.ensureCached(peer: peerId, chatId: chatId, messageIds: [messageId])
+        }
       }
       observePinnedMessageContent(messageId: messageId)
     } else {
