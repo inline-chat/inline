@@ -1,6 +1,6 @@
 {
   "name": "@inline-openclaw/inline",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "type": "module",
   "files": [
     "dist",
@@ -23,7 +23,7 @@
     "check": "bun run typecheck && bun run test && bun run build"
   },
   "dependencies": {
-    "@inline-chat/realtime-sdk": "^0.0.2",
+    "@inline-chat/realtime-sdk": "^0.0.4",
     "zod": "^4.1.5"
   },
   "peerDependencies": {

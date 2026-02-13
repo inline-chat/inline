@@ -46,12 +46,6 @@ const BOT_MESSAGE_CACHE_LIMIT = 500
 const REACTION_TARGET_LOOKUP_LIMIT = 8
 const REPLY_TARGET_LOOKUP_LIMIT = 8
 
-function getMessagesMethodId(): Method {
-  // Keep GET_MESSAGES resolution lazy so partial test mocks that omit Method don't fail at module import time.
-  const method = Method as unknown as { GET_MESSAGES?: number } | undefined
-  return ((method?.GET_MESSAGES ?? 38) as unknown as Method)
-}
-
 function normalizeAllowEntry(raw: string): string {
   return raw.trim().replace(/^inline:/i, "").replace(/^user:/i, "")
 }
@@ -183,16 +177,14 @@ async function findChatMessageById(params: {
   meId: bigint
   botMessageIdsByChat: Map<string, string[]>
 }): Promise<Message | null> {
-  // Preferred lookup path: direct-by-id RPC.
-  // Use unchecked raw so plugin remains compatible while SDK method mappings catch up.
   const directResult = await params.client
-    .invokeUncheckedRaw(getMessagesMethodId(), {
+    .invokeRaw(Method.GET_MESSAGES, {
       oneofKind: "getMessages",
       getMessages: {
         peerId: buildChatPeer(params.chatId),
         messageIds: [params.messageId],
       },
-    } as any)
+    })
     .catch(() => null)
   if (directResult?.oneofKind === "getMessages") {
     const directMessages = directResult.getMessages.messages ?? []

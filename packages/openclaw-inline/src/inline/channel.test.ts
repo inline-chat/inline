@@ -3,6 +3,16 @@ import path from "node:path"
 import { describe, expect, it, vi } from "vitest"
 import type { OpenClawConfig, PluginRuntime } from "openclaw/plugin-sdk"
 
+function mockRealtimeSdk(overrides: Record<string, unknown>): void {
+  vi.doMock("@inline-chat/realtime-sdk", async () => {
+    const actual = await vi.importActual<Record<string, unknown>>("@inline-chat/realtime-sdk")
+    return {
+      ...actual,
+      ...overrides,
+    }
+  })
+}
+
 describe("inline/channel", () => {
   it("declares minimal capabilities (no subthreads/parents)", async () => {
     vi.resetModules()
@@ -101,14 +111,14 @@ describe("inline/channel", () => {
     const sendMessage = vi.fn(async () => ({ messageId: null }))
     const close = vi.fn(async () => {})
 
-    vi.doMock("@inline-chat/realtime-sdk", () => ({
+    mockRealtimeSdk({
       InlineSdkClient: class {
         constructor(_opts: unknown) {}
         connect = connect
         sendMessage = sendMessage
         close = close
       },
-    }))
+    })
 
     // The channel plugin uses getInlineRuntime() for state dir + chunker.
     const runtimeMod = await import("../runtime")
@@ -151,14 +161,14 @@ describe("inline/channel", () => {
     const sendMessage = vi.fn(async () => ({ messageId: null }))
     const close = vi.fn(async () => {})
 
-    vi.doMock("@inline-chat/realtime-sdk", () => ({
+    mockRealtimeSdk({
       InlineSdkClient: class {
         constructor(_opts: unknown) {}
         connect = connect
         sendMessage = sendMessage
         close = close
       },
-    }))
+    })
 
     const runtimeMod = await import("../runtime")
     runtimeMod.setInlineRuntime({
@@ -219,7 +229,7 @@ describe("inline/channel", () => {
     const sendMessage = vi.fn(async () => ({ messageId: 55n }))
     const close = vi.fn(async () => {})
 
-    vi.doMock("@inline-chat/realtime-sdk", () => ({
+    mockRealtimeSdk({
       InlineSdkClient: class {
         constructor(_opts: unknown) {}
         connect = connect
@@ -227,7 +237,7 @@ describe("inline/channel", () => {
         sendMessage = sendMessage
         close = close
       },
-    }))
+    })
 
     vi.doMock("openclaw/plugin-sdk", async () => {
       const actual = await vi.importActual<Record<string, unknown>>("openclaw/plugin-sdk")
@@ -299,7 +309,7 @@ describe("inline/channel", () => {
     const sendMessage = vi.fn(async () => ({ messageId: 55n }))
     const close = vi.fn(async () => {})
 
-    vi.doMock("@inline-chat/realtime-sdk", () => ({
+    mockRealtimeSdk({
       InlineSdkClient: class {
         constructor(_opts: unknown) {}
         connect = connect
@@ -307,7 +317,7 @@ describe("inline/channel", () => {
         sendMessage = sendMessage
         close = close
       },
-    }))
+    })
 
     vi.doMock("openclaw/plugin-sdk", async () => {
       const actual = await vi.importActual<Record<string, unknown>>("openclaw/plugin-sdk")
@@ -385,7 +395,7 @@ describe("inline/channel", () => {
       }
     })
 
-    vi.doMock("@inline-chat/realtime-sdk", () => ({
+    mockRealtimeSdk({
       InlineSdkClient: class {
         constructor(_opts: unknown) {}
         connect = connect
@@ -393,7 +403,7 @@ describe("inline/channel", () => {
         sendMessage = sendMessage
         close = close
       },
-    }))
+    })
 
     vi.doMock("openclaw/plugin-sdk", async () => {
       const actual = await vi.importActual<Record<string, unknown>>("openclaw/plugin-sdk")
@@ -460,7 +470,7 @@ describe("inline/channel", () => {
     const sendMessage = vi.fn(async () => ({ messageId: 55n }))
     const close = vi.fn(async () => {})
 
-    vi.doMock("@inline-chat/realtime-sdk", () => ({
+    mockRealtimeSdk({
       InlineSdkClient: class {
         constructor(_opts: unknown) {}
         connect = connect
@@ -468,7 +478,7 @@ describe("inline/channel", () => {
         sendMessage = sendMessage
         close = close
       },
-    }))
+    })
 
     vi.doMock("openclaw/plugin-sdk", async () => {
       const actual = await vi.importActual<Record<string, unknown>>("openclaw/plugin-sdk")
@@ -578,19 +588,14 @@ describe("inline/channel", () => {
       throw new Error(`unexpected method ${String(method)}`)
     })
 
-    vi.doMock("@inline-chat/realtime-sdk", () => ({
-      Method: {
-        GET_ME: 1,
-        GET_CHATS: 17,
-        GET_CHAT_PARTICIPANTS: 13,
-      },
+    mockRealtimeSdk({
       InlineSdkClient: class {
         constructor(_opts: unknown) {}
         connect = connect
         close = close
         invokeRaw = invokeRaw
       },
-    }))
+    })
 
     const runtimeMod = await import("../runtime")
     runtimeMod.setInlineRuntime({
@@ -689,14 +694,14 @@ describe("inline/channel", () => {
     const sendMessage = vi.fn(async () => ({ messageId: null }))
     const close = vi.fn(async () => {})
 
-    vi.doMock("@inline-chat/realtime-sdk", () => ({
+    mockRealtimeSdk({
       InlineSdkClient: class {
         constructor(_opts: unknown) {}
         connect = connect
         sendMessage = sendMessage
         close = close
       },
-    }))
+    })
 
     const runtimeMod = await import("../runtime")
     runtimeMod.setInlineRuntime({
