@@ -107,6 +107,25 @@ public class MessagesSectionedViewModel {
     sections = groupMessagesByDay(messages)
   }
 
+  // Keep section sorting aligned with MessagesProgressiveViewModel so same-second
+  // messages remain deterministic across reloads and incremental updates.
+  static func sortMessagesForSection(_ messages: [FullMessage]) -> [FullMessage] {
+    MessagesProgressiveViewModel.stableSortedMessages(messages, reversed: true)
+  }
+
+  private static func isNewerMessage(_ lhs: FullMessage, than rhs: FullMessage) -> Bool {
+    let lhsKey = MessagesProgressiveViewModel.messageKey(for: lhs)
+    let rhsKey = MessagesProgressiveViewModel.messageKey(for: rhs)
+
+    if lhsKey.date != rhsKey.date {
+      return lhsKey.date > rhsKey.date
+    }
+    if lhsKey.globalId != rhsKey.globalId {
+      return lhsKey.globalId > rhsKey.globalId
+    }
+    return lhsKey.messageId > rhsKey.messageId
+  }
+
   private func groupMessagesByDay(_ messages: [FullMessage]) -> [MessageSection] {
     let grouped = Dictionary(grouping: messages) { message in
       Self.calendar.startOfDay(for: message.message.date)
@@ -119,7 +138,7 @@ public class MessagesSectionedViewModel {
       let dayString = formatDateForSection(dayStart)
 
       // Sort messages within the day (newest first for reversed collection)
-      let sortedMessages = dayMessages.sorted { $0.message.date > $1.message.date }
+      let sortedMessages = Self.sortMessagesForSection(dayMessages)
 
       return MessageSection(
         date: dayStart,
@@ -191,13 +210,14 @@ public class MessagesSectionedViewModel {
         } else {
           // All messages fit into existing sections, add incrementally
           var affectedSections: Set<Int> = []
+          var requiresFullReload = false
 
           for (dayStart, dayMessages) in newMessagesByDay {
             if let sectionIndex = sections.firstIndex(where: { Self.calendar.isDate($0.date, inSameDayAs: dayStart) }),
                sectionIndex >= 0, sectionIndex < sections.count
             {
               // Add messages to existing section with bounds checking
-              let sortedMessages = dayMessages.sorted { $0.message.date > $1.message.date }
+              let sortedMessages = Self.sortMessagesForSection(dayMessages)
 
               // Determine insertion point based on message dates
               // For reversed collection view: newest messages go at index 0
@@ -207,17 +227,21 @@ public class MessagesSectionedViewModel {
                 sections[sectionIndex].messages = sortedMessages
               } else {
                 // Check if new messages are newer or older than existing ones
-                let newestNewMessage = sortedMessages.first?.message.date ?? Date.distantPast
-                let newestExistingMessage = existingMessages.first?.message.date ?? Date.distantPast
+                let newestNewMessage = sortedMessages.first
+                let newestExistingMessage = existingMessages.first
 
-                if newestNewMessage > newestExistingMessage {
+                if let newestNewMessage, let newestExistingMessage,
+                   Self.isNewerMessage(newestNewMessage, than: newestExistingMessage)
+                {
                   // New messages are newer, insert at beginning
                   sections[sectionIndex].messages.insert(contentsOf: sortedMessages, at: 0)
                 } else {
-                  // New messages are older, append at end
+                  // New messages are older than the section head. The collection-view incremental
+                  // path only supports prepending for `.messagesAdded`, so trigger a full reload
+                  // instead of risking snapshot/model order drift.
                   sections[sectionIndex].messages.append(contentsOf: sortedMessages)
-                  // Re-sort to maintain proper order within the section
-                  sections[sectionIndex].messages.sort { $0.message.date > $1.message.date }
+                  sections[sectionIndex].messages = Self.sortMessagesForSection(sections[sectionIndex].messages)
+                  requiresFullReload = true
                 }
               }
 
@@ -227,9 +251,16 @@ public class MessagesSectionedViewModel {
             }
           }
 
+          if requiresFullReload {
+            return .multiSectionUpdate(sections: sections)
+          }
+
           if affectedSections.count == 1, let singleSection = affectedSections.first {
             // Single section affected - use specific changeset
-            let messageIds = newMessages.map(\.id)
+            let newIds = Set(newMessages.map(\.id))
+            let messageIds = sections[singleSection].messages
+              .filter { newIds.contains($0.id) }
+              .map(\.id)
             return .messagesAdded(sectionIndex: singleSection, messageIds: messageIds)
           } else if affectedSections.count > 1 {
             // Multiple sections affected - use multi-section update

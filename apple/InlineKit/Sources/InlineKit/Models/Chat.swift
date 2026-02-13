@@ -258,7 +258,31 @@ public extension Chat {
 public extension Chat {
   struct ChatWithLastMessage: FetchableRecord, PersistableRecord, Codable, Hashable, Sendable {
     public var id: Int64
+    public var lastMsgId: Int64?
     public var lastMsgDate: Date?
+  }
+
+  static func shouldAdvanceLastMessage(
+    currentLastMsgId: Int64?,
+    currentLastMsgDate: Date?,
+    newLastMsgId: Int64,
+    newDate: Date
+  ) -> Bool {
+    guard let currentLastMsgDate else { return true }
+
+    if newDate > currentLastMsgDate {
+      return true
+    }
+
+    if newDate < currentLastMsgDate {
+      return false
+    }
+
+    // Same second: advance only if the incoming message id is newer.
+    guard let currentLastMsgId else {
+      return true
+    }
+    return newLastMsgId > currentLastMsgId
   }
 
   static func updateLastMsgId(_ db: Database, chatId: Int64, lastMsgId: Int64, date: Date) throws {
@@ -278,7 +302,12 @@ public extension Chat {
       .asRequest(of: ChatWithLastMessage.self)
       .fetchOne(db)
 
-    if let chat, chat.lastMsgDate == nil || chat.lastMsgDate! <= date {
+    if let chat, shouldAdvanceLastMessage(
+      currentLastMsgId: chat.lastMsgId,
+      currentLastMsgDate: chat.lastMsgDate,
+      newLastMsgId: lastMsgId,
+      newDate: date
+    ) {
       Log.shared.debug(
         "Updating lastMsgId for chat \(chatId) to \(lastMsgId) with date \(String(describing: chat.lastMsgDate))"
       )

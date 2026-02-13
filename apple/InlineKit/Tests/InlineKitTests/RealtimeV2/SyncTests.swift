@@ -607,6 +607,347 @@ class SyncTests {
     #expect(bucketState.seq == 2)
   }
 
+  @Test("realtime updates do not overtake pending catch-up batch")
+  func testRealtimeDoesNotOvertakePendingCatchupBatch() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+
+    let update1 = makeNewMessageUpdate(seq: 1, date: 80)
+    let firstSlice = makeGetUpdatesResult(
+      seq: 1,
+      date: 80,
+      updates: [update1],
+      final: false,
+      resultType: .slice
+    )
+    let finalSlice = makeGetUpdatesResult(
+      seq: 1,
+      date: 80,
+      updates: [],
+      final: true,
+      resultType: .empty
+    )
+
+    let client = FakeProtocolClient(
+      responses: [firstSlice, finalSlice],
+      gateCallNumbers: [2]
+    )
+    let config = SyncConfig(enableMessageUpdates: true, lastSyncSafetyGapSeconds: 15)
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+
+    let peer = makeChatPeer(chatId: 1)
+    var payload = InlineProtocol.UpdateChatHasNewUpdates()
+    payload.peerID = peer
+    payload.updateSeq = 2
+
+    var signal = InlineProtocol.Update()
+    signal.update = .chatHasNewUpdates(payload)
+
+    Task { await sync.process(updates: [signal]) }
+    await client.waitForCallStarted(2)
+
+    let realtime1 = makeNewMessageUpdate(seq: 1, date: 80)
+    let realtime2 = makeNewMessageUpdate(seq: 2, date: 90)
+    await sync.process(updates: [realtime1, realtime2])
+
+    await client.releaseCall(2)
+
+    _ = await waitForCondition {
+      await apply.appliedUpdates.count == 2
+    }
+
+    let applied = await apply.appliedUpdates
+    let seqs = applied.map { Int($0.seq) }
+    #expect(seqs == [1, 2])
+
+    let bucketState = await storage.getBucketState(for: .chat(peer: peer))
+    #expect(bucketState.seq == 2)
+  }
+
+  @Test("realtime structural updates do not overtake pending catch-up batch when message sync is disabled")
+  func testRealtimeDoesNotOvertakePendingCatchupBatchWhenMessageSyncDisabled() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+
+    let update1 = makeChatInfoUpdate(seq: 1, date: 80)
+    let firstSlice = makeGetUpdatesResult(
+      seq: 1,
+      date: 80,
+      updates: [update1],
+      final: false,
+      resultType: .slice
+    )
+    let finalSlice = makeGetUpdatesResult(
+      seq: 1,
+      date: 80,
+      updates: [],
+      final: true,
+      resultType: .empty
+    )
+
+    let client = FakeProtocolClient(
+      responses: [firstSlice, finalSlice],
+      gateCallNumbers: [2]
+    )
+    let config = SyncConfig(enableMessageUpdates: false, lastSyncSafetyGapSeconds: 15)
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+
+    let peer = makeChatPeer(chatId: 1)
+    var payload = InlineProtocol.UpdateChatHasNewUpdates()
+    payload.peerID = peer
+    payload.updateSeq = 2
+
+    var signal = InlineProtocol.Update()
+    signal.update = .chatHasNewUpdates(payload)
+
+    Task { await sync.process(updates: [signal]) }
+    await client.waitForCallStarted(2)
+
+    let realtime2 = makeChatInfoUpdate(seq: 2, date: 90)
+    await sync.process(updates: [realtime2])
+
+    await client.releaseCall(2)
+
+    _ = await waitForCondition {
+      await apply.appliedUpdates.count == 2
+    }
+
+    let applied = await apply.appliedUpdates
+    let seqs = applied.map { Int($0.seq) }
+    #expect(seqs == [1, 2])
+
+    let bucketState = await storage.getBucketState(for: .chat(peer: peer))
+    #expect(bucketState.seq == 2)
+  }
+
+  @Test("stale getUpdates seq behind local does not loop and realtime can continue")
+  func testStaleServerSeqDoesNotLoopAndRealtimeContinues() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+
+    let stale = makeGetUpdatesResult(
+      seq: 4,
+      date: 120,
+      updates: [],
+      final: true,
+      resultType: .empty
+    )
+    let client = FakeProtocolClient(responses: [stale])
+    let config = SyncConfig(enableMessageUpdates: true, lastSyncSafetyGapSeconds: 15)
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+
+    let peer = makeChatPeer(chatId: 1)
+    await storage.setBucketState(for: .chat(peer: peer), state: BucketState(date: 100, seq: 5))
+
+    var payload = InlineProtocol.UpdateChatHasNewUpdates()
+    payload.peerID = peer
+    payload.updateSeq = 6
+
+    var signal = InlineProtocol.Update()
+    signal.update = .chatHasNewUpdates(payload)
+
+    await sync.process(updates: [signal])
+    _ = await waitForCondition {
+      await client.getCallCount() == 1
+    }
+
+    // Ensure stale server cursor does not trigger repeated fetch attempts.
+    let looped = await waitForCondition(timeout: .milliseconds(200)) {
+      await client.getCallCount() > 1
+    }
+    #expect(looped == false)
+
+    let realtime6 = makeNewMessageUpdate(seq: 6, date: 130)
+    await sync.process(updates: [realtime6])
+
+    _ = await waitForCondition {
+      await apply.appliedUpdates.count == 1
+    }
+    let applied = await apply.appliedUpdates
+    #expect(applied.map { Int($0.seq) } == [6])
+
+    let bucketState = await storage.getBucketState(for: .chat(peer: peer))
+    #expect(bucketState.seq == 6)
+  }
+
+  @Test("non-progress getUpdates response does not spin fetch loop")
+  func testNonProgressGetUpdatesDoesNotSpin() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+
+    let nonProgress = makeGetUpdatesResult(
+      seq: 5,
+      date: 120,
+      updates: [],
+      final: false,
+      resultType: .empty
+    )
+    let client = FakeProtocolClient(responses: [nonProgress])
+    let config = SyncConfig(enableMessageUpdates: true, lastSyncSafetyGapSeconds: 15)
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+
+    let peer = makeChatPeer(chatId: 1)
+    await storage.setBucketState(for: .chat(peer: peer), state: BucketState(date: 100, seq: 5))
+
+    var payload = InlineProtocol.UpdateChatHasNewUpdates()
+    payload.peerID = peer
+    payload.updateSeq = 6
+
+    var signal = InlineProtocol.Update()
+    signal.update = .chatHasNewUpdates(payload)
+
+    await sync.process(updates: [signal])
+    _ = await waitForCondition {
+      await client.getCallCount() == 1
+    }
+
+    let spun = await waitForCondition(timeout: .milliseconds(250)) {
+      await client.getCallCount() > 1
+    }
+    #expect(spun == false)
+
+    let applied = await apply.appliedUpdates
+    #expect(applied.isEmpty)
+
+    let bucketState = await storage.getBucketState(for: .chat(peer: peer))
+    #expect(bucketState.seq == 5)
+  }
+
+  @Test("non-progress getUpdates with buffered realtime does not busy-loop")
+  func testNonProgressWithBufferedRealtimeDoesNotBusyLoop() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+
+    let nonProgress = makeGetUpdatesResult(
+      seq: 0,
+      date: 120,
+      updates: [],
+      final: false,
+      resultType: .empty
+    )
+    let client = FakeProtocolClient(responses: [nonProgress])
+    let config = SyncConfig(enableMessageUpdates: true, lastSyncSafetyGapSeconds: 15)
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+
+    let realtime2 = makeNewMessageUpdate(seq: 2, date: 130)
+    await sync.process(updates: [realtime2])
+
+    _ = await waitForCondition {
+      await client.getCallCount() == 1
+    }
+
+    let spun = await waitForCondition(timeout: .milliseconds(250)) {
+      await client.getCallCount() > 1
+    }
+    #expect(spun == false)
+
+    let applied = await apply.appliedUpdates
+    #expect(applied.isEmpty)
+  }
+
+  @Test("buffered realtime applies after multi-slice catch-up in order")
+  func testBufferedRealtimeAppliesAfterMultiSliceCatchup() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+
+    let update1 = makeNewMessageUpdate(seq: 1, date: 80)
+    let update2 = makeNewMessageUpdate(seq: 2, date: 90)
+    let update3 = makeNewMessageUpdate(seq: 3, date: 100)
+    let firstSlice = makeGetUpdatesResult(
+      seq: 3,
+      date: 100,
+      updates: [update1, update2, update3],
+      final: false,
+      resultType: .slice
+    )
+    let secondSlice = makeGetUpdatesResult(
+      seq: 3,
+      date: 100,
+      updates: [],
+      final: true,
+      resultType: .empty
+    )
+
+    let client = FakeProtocolClient(
+      responses: [firstSlice, secondSlice],
+      gateCallNumbers: [2]
+    )
+    let config = SyncConfig(enableMessageUpdates: true, lastSyncSafetyGapSeconds: 15)
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+
+    let peer = makeChatPeer(chatId: 1)
+    var payload = InlineProtocol.UpdateChatHasNewUpdates()
+    payload.peerID = peer
+    payload.updateSeq = 5
+
+    var signal = InlineProtocol.Update()
+    signal.update = .chatHasNewUpdates(payload)
+
+    Task { await sync.process(updates: [signal]) }
+    await client.waitForCallStarted(2)
+
+    let realtime4 = makeNewMessageUpdate(seq: 4, date: 110)
+    let realtime5 = makeNewMessageUpdate(seq: 5, date: 120)
+    await sync.process(updates: [realtime4, realtime5])
+
+    await client.releaseCall(2)
+
+    _ = await waitForCondition {
+      await apply.appliedUpdates.count == 5
+    }
+    let applied = await apply.appliedUpdates
+    #expect(applied.map { Int($0.seq) } == [1, 2, 3, 4, 5])
+
+    let bucketState = await storage.getBucketState(for: .chat(peer: peer))
+    #expect(bucketState.seq == 5)
+  }
+
+  @Test("catch-up skips seqs already applied by realtime")
+  func testCatchupSkipsAlreadyAppliedRealtimeSeqs() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+
+    let catchup1 = makeNewMessageUpdate(seq: 1, date: 80)
+    let catchup2 = makeNewMessageUpdate(seq: 2, date: 90)
+    let catchup3 = makeNewMessageUpdate(seq: 3, date: 100)
+    let catchup4 = makeNewMessageUpdate(seq: 4, date: 110)
+    let catchup = makeGetUpdatesResult(
+      seq: 4,
+      date: 110,
+      updates: [catchup1, catchup2, catchup3, catchup4],
+      final: true,
+      resultType: .slice
+    )
+    let client = FakeProtocolClient(responses: [catchup])
+    let config = SyncConfig(enableMessageUpdates: true, lastSyncSafetyGapSeconds: 15)
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+
+    let realtime1 = makeNewMessageUpdate(seq: 1, date: 80)
+    let realtime2 = makeNewMessageUpdate(seq: 2, date: 90)
+    await sync.process(updates: [realtime1, realtime2])
+
+    let peer = makeChatPeer(chatId: 1)
+    var payload = InlineProtocol.UpdateChatHasNewUpdates()
+    payload.peerID = peer
+    payload.updateSeq = 4
+
+    var signal = InlineProtocol.Update()
+    signal.update = .chatHasNewUpdates(payload)
+    await sync.process(updates: [signal])
+
+    _ = await waitForCondition {
+      await apply.appliedUpdates.count == 4
+    }
+    let applied = await apply.appliedUpdates
+    #expect(applied.map { Int($0.seq) } == [1, 2, 3, 4])
+
+    let stats = await sync.getStats()
+    #expect(stats.bucketUpdatesDuplicateSkipped == 2)
+
+    let bucketState = await storage.getBucketState(for: .chat(peer: peer))
+    #expect(bucketState.seq == 4)
+  }
+
   @Test("fetch does not regress bucket state behind newer realtime updates")
   func testFetchDoesNotRegressAfterRealtimeAdvance() async throws {
     let storage = InMemorySyncStorage()
@@ -728,18 +1069,23 @@ final actor FakeProtocolClient: ProtocolClientType {
   private var callCount = 0
   private var methods: [InlineProtocol.Method] = []
 
-  private var firstCallStarted = false
-  private var firstCallWaiters: [CheckedContinuation<Void, Never>] = []
-  private var firstCallGate: CheckedContinuation<Void, Never>?
-  private let gateFirstCall: Bool
+  private let gatedCalls: Set<Int>
+  private var startedCalls: Set<Int> = []
+  private var callStartWaiters: [Int: [CheckedContinuation<Void, Never>]] = [:]
+  private var callGates: [Int: CheckedContinuation<Void, Never>] = [:]
 
   init(
     responses: [InlineProtocol.RpcResult.OneOf_Result?],
     gateFirstCall: Bool = false,
+    gateCallNumbers: Set<Int> = [],
     methodResponses: [InlineProtocol.Method: [InlineProtocol.RpcResult.OneOf_Result?]]? = nil
   ) {
     self.responses = responses
-    self.gateFirstCall = gateFirstCall
+    var gates = gateCallNumbers
+    if gateFirstCall {
+      gates.insert(1)
+    }
+    gatedCalls = gates
     self.methodResponses = methodResponses
   }
 
@@ -761,11 +1107,12 @@ final actor FakeProtocolClient: ProtocolClientType {
     timeout: Duration?
   ) async throws -> InlineProtocol.RpcResult.OneOf_Result? {
     callCount += 1
+    let callNumber = callCount
     methods.append(method)
-    if callCount == 1, gateFirstCall {
-      signalFirstCallStarted()
+    signalCallStarted(callNumber)
+    if gatedCalls.contains(callNumber) {
       await withCheckedContinuation { continuation in
-        firstCallGate = continuation
+        callGates[callNumber] = continuation
       }
     }
 
@@ -783,17 +1130,25 @@ final actor FakeProtocolClient: ProtocolClientType {
   }
 
   func waitForFirstCallStarted() async {
-    if firstCallStarted {
-      return
-    }
-    await withCheckedContinuation { continuation in
-      firstCallWaiters.append(continuation)
-    }
+    await waitForCallStarted(1)
   }
 
   func releaseFirstCall() {
-    firstCallGate?.resume()
-    firstCallGate = nil
+    releaseCall(1)
+  }
+
+  func waitForCallStarted(_ callNumber: Int) async {
+    if startedCalls.contains(callNumber) {
+      return
+    }
+    await withCheckedContinuation { continuation in
+      callStartWaiters[callNumber, default: []].append(continuation)
+    }
+  }
+
+  func releaseCall(_ callNumber: Int) {
+    guard let gate = callGates.removeValue(forKey: callNumber) else { return }
+    gate.resume()
   }
 
   func getCallCount() -> Int {
@@ -804,13 +1159,13 @@ final actor FakeProtocolClient: ProtocolClientType {
     methods
   }
 
-  private func signalFirstCallStarted() {
-    guard !firstCallStarted else { return }
-    firstCallStarted = true
-    for continuation in firstCallWaiters {
+  private func signalCallStarted(_ callNumber: Int) {
+    let inserted = startedCalls.insert(callNumber).inserted
+    guard inserted else { return }
+    for continuation in callStartWaiters[callNumber] ?? [] {
       continuation.resume()
     }
-    firstCallWaiters.removeAll()
+    callStartWaiters[callNumber] = nil
   }
 }
 
@@ -916,5 +1271,17 @@ private func makeUpdateReadMaxIdUpdate(
   update.seq = Int32(seq)
   update.date = date
   update.update = .updateReadMaxID(payload)
+  return update
+}
+
+private func makeChatInfoUpdate(seq: Int64, date: Int64, chatId: Int64 = 1) -> InlineProtocol.Update {
+  var payload = InlineProtocol.UpdateChatInfo()
+  payload.chatID = chatId
+  payload.title = "chat-\(seq)"
+
+  var update = InlineProtocol.Update()
+  update.seq = Int32(seq)
+  update.date = date
+  update.update = .chatInfo(payload)
   return update
 }

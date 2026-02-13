@@ -643,6 +643,13 @@ actor BucketActor {
       bufferedRealtimeUpdates[incomingSeq] = update
     }
 
+    // If catch-up has already fetched a pending batch, defer realtime draining until
+    // that batch is committed to preserve monotonic per-bucket apply order.
+    if isFetching, !pendingUpdates.isEmpty {
+      log.trace("deferring realtime drain for bucket \(key) while catch-up batch is pending")
+      return
+    }
+
     await drainBufferedRealtimeUpdates()
 
     // If we still have buffered updates, we're missing at least one seq and must fetch history.
@@ -831,6 +838,16 @@ actor BucketActor {
 
         let totalCount = payload.updates.count
 
+        // Defensive guard: if the server reports non-final but does not advance seq,
+        // we'd spin this loop forever and keep the sync actor busy.
+        if !payload.final, payload.seq == currentSeq {
+          log.error(
+            "non-progress getUpdates response for bucket \(key) (seq=\(payload.seq), total=\(totalCount), result=\(payload.resultType)); aborting fetch loop"
+          )
+          // Treat as transient and let outer loop schedule backoff retry.
+          return false
+        }
+
         // Handle gaps (TOO_LONG)
         if payload.resultType == .tooLong {
           log.warning(
@@ -932,7 +949,8 @@ actor BucketActor {
 
       // Apply all accumulated updates in one batch, ordered by seq
       if !pendingUpdates.isEmpty {
-        // TODO: Ensure ordering between catch-up batches and realtime updates for the same bucket.
+        // Realtime draining is deferred while this batch is pending so we preserve
+        // monotonic per-bucket ordering.
         let orderedUpdates = orderUpdatesBySeq(pendingUpdates)
         log.debug("applying \(orderedUpdates.count) updates for bucket \(key)")
         await sync.applyUpdatesFromBucket(orderedUpdates)
