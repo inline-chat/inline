@@ -13,13 +13,11 @@ struct ArchivedChatsView: View {
   @EnvironmentObject private var home: HomeViewModel
   @Environment(Router.self) private var router
   @EnvironmentObject var data: DataManager
-  @Environment(\.realtime) var realtime
   @Environment(\.realtimeV2) var realtimeV2
   @Environment(\.appDatabase) private var database
   @EnvironmentObject private var fullSpaceViewModel: FullSpaceViewModel
 
   @EnvironmentObject var realtimeState: RealtimeState
-  @State var shouldShow = false
 
   var body: some View {
     Group {
@@ -42,41 +40,23 @@ struct ArchivedChatsView: View {
 
   @ViewBuilder
   private var header: some View {
+    let displayedState = realtimeState.displayedConnectionState
+    let title = displayedState?.title ?? "Archived chats"
+
     HStack(spacing: 8) {
-      if realtimeState.connectionState != .connected {
+      if displayedState != nil {
         Spinner(size: 16)
           .padding(.trailing, 4)
       }
 
       VStack(alignment: .leading, spacing: 0) {
-        Text(shouldShow ? realtimeState.connectionState.title : "Archived chats")
+        Text(title)
           .font(.title3)
           .fontWeight(.semibold)
-            
           .contentTransition(.numericText())
-          .animation(.spring(duration: 0.5), value: realtimeState.connectionState.title)
-          .animation(.spring(duration: 0.5), value: shouldShow)
+          .animation(.spring(duration: 0.5), value: title)
       }
     }
-
-    .onAppear {
-      if realtimeState.connectionState != .connected {
-        shouldShow = true
-      }
-    }
-    .onReceive(realtimeState.connectionStatePublisher, perform: { nextConnectionState in
-      if nextConnectionState == .connected {
-        Task { @MainActor in
-          try await Task.sleep(for: .seconds(1))
-          if nextConnectionState == .connected {
-            // second check
-            shouldShow = false
-          }
-        }
-      } else {
-        shouldShow = true
-      }
-    })
   }
 
   private var homeArchivedView: some View {

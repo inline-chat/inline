@@ -290,6 +290,8 @@ struct HomeSidebar: View {
 
   @ViewBuilder
   var topArea: some View {
+    let displayedConnectionState = realtimeState.displayedConnectionState
+
     HStack(spacing: 0) {
       // Home icon
       Circle()
@@ -320,8 +322,8 @@ struct HomeSidebar: View {
         .padding(.trailing, Theme.sidebarIconSpacing)
 
       // Text("Home")
-      if realtimeState.connectionState != .connected {
-        Text(realtimeState.connectionState.title)
+      if let displayedConnectionState {
+        Text(displayedConnectionState.title)
       } else if tab == .archive {
         Text("Archive")
       } else {
