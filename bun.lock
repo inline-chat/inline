@@ -74,7 +74,7 @@
       },
     },
     "packages/openclaw-inline": {
-      "name": "@inline-chat/openclaw-inline",
+      "name": "@inline-openclaw/inline",
       "version": "0.0.1",
       "dependencies": {
         "@inline-chat/realtime-sdk": "^0.0.1",
@@ -614,7 +614,7 @@
 
     "@inline-chat/mcp": ["@inline-chat/mcp@workspace:packages/mcp"],
 
-    "@inline-chat/openclaw-inline": ["@inline-chat/openclaw-inline@workspace:packages/openclaw-inline"],
+    "@inline-openclaw/inline": ["@inline-openclaw/inline@workspace:packages/openclaw-inline"],
 
     "@inline-chat/protocol": ["@inline-chat/protocol@workspace:packages/protocol"],
 

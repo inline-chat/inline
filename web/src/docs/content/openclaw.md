@@ -5,9 +5,9 @@ Need a bot token first? See [Creating a Bot](/docs/creating-a-bot).
 ## Install / Update
 
 ```bash
-openclaw plugins install @inline-chat/openclaw-inline
-openclaw config set plugins.installs.openclaw-inline.spec '"@inline-chat/openclaw-inline@latest"'
-openclaw plugins update openclaw-inline
+openclaw plugins install @inline-openclaw/inline
+openclaw config set plugins.installs.inline.spec '"@inline-openclaw/inline@latest"'
+openclaw plugins update inline
 ```
 
 ## Configure
@@ -19,12 +19,12 @@ channels:
     token: "<INLINE_BOT_TOKEN>"
 ```
 
-Plugin entry id is `openclaw-inline`:
+Plugin entry id is `inline`:
 
 ```yaml
 plugins:
   entries:
-    openclaw-inline:
+    inline:
       enabled: true
 ```
 
@@ -36,4 +36,4 @@ openclaw plugins list
 openclaw status --deep
 ```
 
-If a stale config appears, keep `plugins.entries.openclaw-inline` (not `plugins.entries.inline`).
+If a stale config appears, keep `plugins.entries.inline`.
