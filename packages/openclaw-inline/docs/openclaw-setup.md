@@ -7,14 +7,14 @@ Need a bot token first? See `docs/create-inline-bot.md`.
 ## 1) Install Plugin
 
 ```sh
-openclaw plugins install @inline-chat/openclaw-inline
+openclaw plugins install @inline-openclaw/inline
 ```
 
 If already installed, update to latest:
 
 ```sh
-openclaw config set plugins.installs.openclaw-inline.spec '"@inline-chat/openclaw-inline@latest"'
-openclaw plugins update openclaw-inline
+openclaw config set plugins.installs.inline.spec '"@inline-openclaw/inline@latest"'
+openclaw plugins update inline
 ```
 
 ## 2) Configure Inline Channel
@@ -30,7 +30,7 @@ channels:
 
 Notes:
 - `baseUrl` defaults to `https://api.inline.chat`.
-- Plugin id is `openclaw-inline` (not `inline`).
+- Plugin id is `inline`.
 
 ## 3) Start Gateway
 
@@ -53,18 +53,18 @@ openclaw status --deep
 ```
 
 Expected:
-- Plugin `openclaw-inline` is loaded.
+- Plugin `inline` is loaded.
 - Channel `Inline` is `ON / OK`.
 
 ## 5) Common Fixes
 
 - `Config validation failed: plugins.entries.inline: plugin not found: inline`
-  - Use `plugins.entries.openclaw-inline`, not `plugins.entries.inline`.
+  - Ensure the plugin is installed and discovered (`openclaw plugins list`).
 - `Inline: SETUP / no token`
   - Ensure `channels.inline.token` is set.
   - Update plugin to latest (commands above).
 - `doctor --fix` rewrites inline plugin entry
-  - Keep plugin entry id as `openclaw-inline`.
+  - Plugin entry id should be `inline`.
 
 ## Recommended Hardening (After Basic Setup)
 
@@ -77,6 +77,6 @@ Add plugin allowlist to reduce extension loading risk:
 ```yaml
 plugins:
   allow:
-    - openclaw-inline
+    - inline
     # add other plugin ids you trust
 ```

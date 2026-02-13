@@ -1,5 +1,5 @@
 {
-  "name": "@inline-chat/openclaw-inline",
+  "name": "@inline-openclaw/inline",
   "version": "0.0.3",
   "type": "module",
   "files": [
@@ -51,7 +51,7 @@
       ]
     },
     "install": {
-      "npmSpec": "@inline-chat/openclaw-inline",
+      "npmSpec": "@inline-openclaw/inline",
       "localPath": "packages/openclaw-inline",
       "defaultChoice": "npm"
     }

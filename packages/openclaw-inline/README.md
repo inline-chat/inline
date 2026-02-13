@@ -1,4 +1,4 @@
-# @inline-chat/openclaw-inline
+# @inline-openclaw/inline
 
 OpenClaw channel plugin for interacting with an OpenClaw agent via **Inline**.
 
@@ -24,14 +24,14 @@ Requires OpenClaw `2026.2.9` or newer.
 From npm (once published):
 
 ```sh
-openclaw plugins install @inline-chat/openclaw-inline
+openclaw plugins install @inline-openclaw/inline
 ```
 
 If the plugin is already installed, update in place:
 
 ```sh
-openclaw config set plugins.installs.openclaw-inline.spec '"@inline-chat/openclaw-inline@latest"'
-openclaw plugins update openclaw-inline
+openclaw config set plugins.installs.inline.spec '"@inline-openclaw/inline@latest"'
+openclaw plugins update inline
 ```
 
 From a local checkout (dev):
@@ -46,13 +46,13 @@ openclaw plugins install --link /path/to/inline/packages/openclaw-inline
 
 Channel config lives under `channels.inline` (the plugin config schema is intentionally empty).
 
-Plugin id is `openclaw-inline` (for `plugins.entries.*`), while channel id stays `inline`.
+Plugin id is `inline` (for `plugins.entries.*`).
 If you enable explicitly, use:
 
 ```yaml
 plugins:
   entries:
-    openclaw-inline:
+    inline:
       enabled: true
 ```
 
@@ -107,11 +107,10 @@ channels:
 
 ## Quick Troubleshooting
 
-- `plugin not found: inline`
-  - Use `plugins.entries.openclaw-inline`, not `plugins.entries.inline`.
+- `plugin not found: inline` / `plugins.entries.inline: plugin not found: inline`
+  - Ensure the plugin is installed and discovered (`openclaw plugins list`).
 - `doctor --fix` suggests Inline changes even though channel is healthy
-  - Keep plugin entry id as `openclaw-inline`.
-  - If `doctor --fix` writes `plugins.entries.inline`, change it back to `plugins.entries.openclaw-inline`.
+  - Plugin entry id should be `inline`.
 - `Inline: SETUP / no token`
-  - Ensure `channels.inline.token` is set and plugin is updated (`openclaw plugins update openclaw-inline`).
+  - Ensure `channels.inline.token` is set and plugin is updated (`openclaw plugins update inline`).
   - If using `dmPolicy: "open"`, ensure `allowFrom: ["*"]`.

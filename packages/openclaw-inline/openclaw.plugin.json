@@ -1,5 +1,5 @@
 {
-  "id": "openclaw-inline",
+  "id": "inline",
   "name": "Inline",
   "description": "Inline channel plugin (realtime RPC bot token; DMs + chats).",
   "channels": ["inline"],
