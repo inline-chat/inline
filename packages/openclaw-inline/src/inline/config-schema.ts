@@ -1,9 +1,34 @@
 import {
+  BlockStreamingCoalesceSchema,
   DmPolicySchema,
   GroupPolicySchema,
+  ToolPolicySchema,
   requireOpenAllowFrom,
 } from "openclaw/plugin-sdk"
 import { z } from "zod"
+
+const InlineActionsSchema = z
+  .object({
+    reply: z.boolean().optional(),
+    reactions: z.boolean().optional(),
+    read: z.boolean().optional(),
+    search: z.boolean().optional(),
+    edit: z.boolean().optional(),
+    channels: z.boolean().optional(),
+    participants: z.boolean().optional(),
+    delete: z.boolean().optional(),
+    pins: z.boolean().optional(),
+    permissions: z.boolean().optional(),
+  })
+  .strict()
+
+const InlineGroupSchema = z
+  .object({
+    requireMention: z.boolean().optional(),
+    tools: ToolPolicySchema,
+    toolsBySender: z.record(z.string(), ToolPolicySchema).optional(),
+  })
+  .strict()
 
 export const InlineAccountSchemaBase = z
   .object({
@@ -16,9 +41,18 @@ export const InlineAccountSchemaBase = z
     allowFrom: z.array(z.string()).optional(),
     groupAllowFrom: z.array(z.string()).optional(),
     groupPolicy: GroupPolicySchema.optional().default("allowlist"),
+    groups: z.record(z.string(), InlineGroupSchema.optional()).optional(),
     requireMention: z.boolean().optional(),
+    replyToBotWithoutMention: z.boolean().optional(),
+    historyLimit: z.number().int().min(0).optional(),
+    dmHistoryLimit: z.number().int().min(0).optional(),
     parseMarkdown: z.boolean().optional(),
+    mediaMaxMb: z.number().positive().optional(),
+    actions: InlineActionsSchema.optional(),
     textChunkLimit: z.number().int().positive().optional(),
+    chunkMode: z.enum(["length", "newline"]).optional(),
+    blockStreaming: z.boolean().optional(),
+    blockStreamingCoalesce: BlockStreamingCoalesceSchema.optional(),
   })
   .strict()
 

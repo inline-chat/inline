@@ -9,9 +9,11 @@ import {
   type OpenClawConfig,
   type RuntimeEnv,
 } from "openclaw/plugin-sdk"
-import { InlineSdkClient, JsonFileStateStore, type Message } from "@inline-chat/realtime-sdk"
+import { InlineSdkClient, JsonFileStateStore, Method, type Message } from "@inline-chat/realtime-sdk"
 import { resolveInlineToken, type ResolvedInlineAccount } from "./accounts.js"
+import { resolveInlineGroupRequireMention } from "./policy.js"
 import { getInlineRuntime } from "../runtime.js"
+import { uploadInlineMediaFromUrl } from "./media.js"
 
 const CHANNEL_ID = "inline" as const
 
@@ -25,6 +27,22 @@ type CachedChatInfo = {
   kind: "direct" | "group"
   title: string | null
 }
+
+type SenderProfile = {
+  name?: string
+  username?: string
+}
+
+type HistoryContext = {
+  historyText: string | null
+  repliedToBot: boolean
+}
+
+const DEFAULT_GROUP_HISTORY_LIMIT = 12
+const DEFAULT_DM_HISTORY_LIMIT = 6
+const HISTORY_LINE_MAX_CHARS = 280
+const BOT_MESSAGE_CACHE_LIMIT = 500
+const REACTION_TARGET_LOOKUP_LIMIT = 8
 
 function normalizeAllowEntry(raw: string): string {
   return raw.trim().replace(/^inline:/i, "").replace(/^user:/i, "")
@@ -61,6 +79,202 @@ async function resolveChatInfo(
 
 function messageText(message: Message): string {
   return (message.message ?? "").trim()
+}
+
+function normalizeInlineUsername(raw: string | undefined): string | undefined {
+  const trimmed = raw?.trim()
+  if (!trimmed) return undefined
+  return trimmed.startsWith("@") ? trimmed.slice(1) : trimmed
+}
+
+function buildInlineSenderName(params: {
+  firstName: string | undefined
+  lastName: string | undefined
+}): string | undefined {
+  const name = [params.firstName, params.lastName].filter(Boolean).join(" ").trim()
+  return name || undefined
+}
+
+function rewriteNumericMentionsToUsernames(text: string, senderProfilesById: Map<string, SenderProfile>): string {
+  if (!text.includes("@")) return text
+  return text.replace(/(^|[^\w])@([0-9]+)\b/g, (full, prefix: string, userId: string) => {
+    const username = senderProfilesById.get(userId)?.username
+    if (!username) return full
+    return `${prefix}@${username}`
+  })
+}
+
+function rememberBotMessageId(cache: Map<string, string[]>, chatId: bigint, messageId: bigint): void {
+  const key = String(chatId)
+  const list = cache.get(key) ?? []
+  const nextId = String(messageId)
+  if (!list.includes(nextId)) list.push(nextId)
+  if (list.length > BOT_MESSAGE_CACHE_LIMIT) {
+    list.splice(0, list.length - BOT_MESSAGE_CACHE_LIMIT)
+  }
+  cache.set(key, list)
+}
+
+function hasBotMessageId(cache: Map<string, string[]>, chatId: bigint, messageId: bigint): boolean {
+  const key = String(chatId)
+  return (cache.get(key) ?? []).includes(String(messageId))
+}
+
+async function isReactionTargetBotMessage(params: {
+  client: InlineSdkClient
+  chatId: bigint
+  messageId: bigint
+  meId: bigint
+  botMessageIdsByChat: Map<string, string[]>
+}): Promise<boolean> {
+  if (hasBotMessageId(params.botMessageIdsByChat, params.chatId, params.messageId)) {
+    return true
+  }
+
+  const result = await params.client.invokeRaw(Method.GET_CHAT_HISTORY, {
+    oneofKind: "getChatHistory",
+    getChatHistory: {
+      peerId: {
+        type: {
+          oneofKind: "chat",
+          chat: { chatId: params.chatId },
+        },
+      },
+      offsetId: params.messageId + 1n,
+      limit: REACTION_TARGET_LOOKUP_LIMIT,
+    },
+  })
+  if (result.oneofKind !== "getChatHistory") {
+    return false
+  }
+
+  const messages = result.getChatHistory.messages ?? []
+  for (const item of messages) {
+    if (item.fromId === params.meId) {
+      rememberBotMessageId(params.botMessageIdsByChat, params.chatId, item.id)
+    }
+  }
+  const target = messages.find((item) => item.id === params.messageId)
+  if (!target) return false
+  return target.fromId === params.meId
+}
+
+function normalizeHistoryText(raw: string | undefined): string {
+  const compact = (raw ?? "").replace(/\s+/g, " ").trim()
+  if (!compact) return ""
+  if (compact.length <= HISTORY_LINE_MAX_CHARS) return compact
+  return `${compact.slice(0, HISTORY_LINE_MAX_CHARS - 1)}…`
+}
+
+function resolveHistorySenderLabel(params: {
+  senderId: bigint
+  meId: bigint
+  senderProfilesById: Map<string, SenderProfile>
+}): string {
+  if (params.senderId === params.meId) return "assistant"
+  const senderId = String(params.senderId)
+  const profile = params.senderProfilesById.get(senderId)
+  if (profile?.username) return `@${profile.username}`
+  if (profile?.name) return profile.name
+  return `user:${senderId}`
+}
+
+function resolveHistoryLimit(params: {
+  isGroup: boolean
+  historyLimit: number | undefined
+  dmHistoryLimit: number | undefined
+}): number {
+  if (params.isGroup) {
+    return params.historyLimit ?? DEFAULT_GROUP_HISTORY_LIMIT
+  }
+  return params.dmHistoryLimit ?? params.historyLimit ?? DEFAULT_DM_HISTORY_LIMIT
+}
+
+async function buildHistoryContext(params: {
+  client: InlineSdkClient
+  chatId: bigint
+  currentMessageId: bigint
+  replyToMsgId: bigint | undefined
+  senderProfilesById: Map<string, SenderProfile>
+  meId: bigint
+  historyLimit: number
+  botMessageIdsByChat: Map<string, string[]>
+}): Promise<HistoryContext> {
+  if (params.historyLimit <= 0) {
+    return {
+      historyText: null,
+      repliedToBot:
+        params.replyToMsgId != null &&
+        hasBotMessageId(params.botMessageIdsByChat, params.chatId, params.replyToMsgId),
+    }
+  }
+
+  const result = await params.client.invokeRaw(Method.GET_CHAT_HISTORY, {
+    oneofKind: "getChatHistory",
+    getChatHistory: {
+      peerId: {
+        type: {
+          oneofKind: "chat",
+          chat: { chatId: params.chatId },
+        },
+      },
+      offsetId: params.currentMessageId,
+      limit: params.historyLimit,
+    },
+  })
+  if (result.oneofKind !== "getChatHistory") {
+    return {
+      historyText: null,
+      repliedToBot:
+        params.replyToMsgId != null &&
+        hasBotMessageId(params.botMessageIdsByChat, params.chatId, params.replyToMsgId),
+    }
+  }
+
+  const messages = [...(result.getChatHistory.messages ?? [])]
+    .filter((item) => item.id !== params.currentMessageId)
+    .sort((a, b) => {
+      const byDate = Number(a.date - b.date)
+      if (byDate !== 0) return byDate
+      if (a.id === b.id) return 0
+      return a.id < b.id ? -1 : 1
+    })
+
+  const lines: string[] = []
+  let repliedToBot =
+    params.replyToMsgId != null &&
+    hasBotMessageId(params.botMessageIdsByChat, params.chatId, params.replyToMsgId)
+
+  for (const item of messages) {
+    if (item.fromId === params.meId) {
+      rememberBotMessageId(params.botMessageIdsByChat, params.chatId, item.id)
+    }
+    if (
+      params.replyToMsgId != null &&
+      item.id === params.replyToMsgId &&
+      item.fromId === params.meId
+    ) {
+      repliedToBot = true
+    }
+
+    const text = normalizeHistoryText(item.message)
+    if (!text) continue
+    const label = resolveHistorySenderLabel({
+      senderId: item.fromId,
+      meId: params.meId,
+      senderProfilesById: params.senderProfilesById,
+    })
+    const replySuffix = item.replyToMsgId != null ? ` ->${String(item.replyToMsgId)}` : ""
+    lines.push(`#${String(item.id)}${replySuffix} ${label}: ${text}`)
+  }
+
+  if (!lines.length) {
+    return { historyText: null, repliedToBot }
+  }
+  return {
+    historyText: `Recent thread messages (oldest -> newest):\n${lines.join("\n")}`,
+    repliedToBot,
+  }
 }
 
 export async function monitorInlineProvider(params: {
@@ -102,19 +316,127 @@ export async function monitorInlineProvider(params: {
   log?.info(`[${account.accountId}] inline connected (me=${String(me.userId)})`)
 
   const chatCache = new Map<bigint, CachedChatInfo>()
+  const senderProfilesById = new Map<string, SenderProfile>()
+  const botMessageIdsByChat = new Map<string, string[]>()
+  const hydratedParticipantChats = new Set<string>()
+  const participantFetches = new Map<string, Promise<void>>()
+
+  const hydrateChatParticipants = async (chatId: bigint): Promise<void> => {
+    const chatKey = String(chatId)
+    if (hydratedParticipantChats.has(chatKey)) return
+    const existing = participantFetches.get(chatKey)
+    if (existing) return existing
+
+    const run = (async () => {
+      const result = await client.invokeRaw(Method.GET_CHAT_PARTICIPANTS, {
+        oneofKind: "getChatParticipants",
+        getChatParticipants: { chatId },
+      })
+      if (result.oneofKind !== "getChatParticipants") return
+
+      for (const user of result.getChatParticipants.users ?? []) {
+        const userId = String(user.id)
+        if (!userId) continue
+        const nextName = buildInlineSenderName({ firstName: user.firstName, lastName: user.lastName })
+        const nextUsername = normalizeInlineUsername(user.username)
+        const previous = senderProfilesById.get(userId)
+        const mergedName = nextName ?? previous?.name
+        const mergedUsername = nextUsername ?? previous?.username
+        senderProfilesById.set(userId, {
+          ...(mergedName ? { name: mergedName } : {}),
+          ...(mergedUsername ? { username: mergedUsername } : {}),
+        })
+      }
+
+      hydratedParticipantChats.add(chatKey)
+    })()
+      .catch((err) => {
+        statusSink?.({ lastError: `getChatParticipants failed: ${String(err)}` })
+      })
+      .finally(() => {
+        participantFetches.delete(chatKey)
+      })
+
+    participantFetches.set(chatKey, run)
+    await run
+  }
 
   const loop = (async () => {
     try {
       for await (const event of client.events()) {
         if (abortSignal.aborted) break
-        if (event.kind !== "message.new") continue
+        let msg: Message
+        let rawBody = ""
+        let reactionEvent: { action: "added" | "removed"; emoji: string; targetMessageId: bigint } | null = null
 
-        const msg = event.message
-        const rawBody = messageText(msg)
-        if (!rawBody) continue
+        if (event.kind === "message.new") {
+          msg = event.message
+          rawBody = messageText(msg)
+          if (!rawBody) continue
 
-        // Ignore echoes / our own outbound messages.
-        if (msg.out || msg.fromId === me.userId) continue
+          // Ignore echoes / our own outbound messages.
+          if (msg.out || msg.fromId === me.userId) continue
+        } else if (event.kind === "reaction.add") {
+          if (event.reaction.userId === me.userId) continue
+          const onBotMessage = await isReactionTargetBotMessage({
+            client,
+            chatId: event.chatId,
+            messageId: event.reaction.messageId,
+            meId: me.userId,
+            botMessageIdsByChat,
+          }).catch((err) => {
+            statusSink?.({ lastError: `getChatHistory (reaction target) failed: ${String(err)}` })
+            return false
+          })
+          if (!onBotMessage) continue
+
+          reactionEvent = {
+            action: "added",
+            emoji: event.reaction.emoji,
+            targetMessageId: event.reaction.messageId,
+          }
+          msg = {
+            id: event.reaction.messageId,
+            chatId: event.chatId,
+            date: event.date,
+            fromId: event.reaction.userId,
+            message: "",
+            out: false,
+            mentioned: false,
+            replyToMsgId: event.reaction.messageId,
+          } as Message
+        } else if (event.kind === "reaction.delete") {
+          if (event.userId === me.userId) continue
+          const onBotMessage = await isReactionTargetBotMessage({
+            client,
+            chatId: event.chatId,
+            messageId: event.messageId,
+            meId: me.userId,
+            botMessageIdsByChat,
+          }).catch((err) => {
+            statusSink?.({ lastError: `getChatHistory (reaction target) failed: ${String(err)}` })
+            return false
+          })
+          if (!onBotMessage) continue
+
+          reactionEvent = {
+            action: "removed",
+            emoji: event.emoji,
+            targetMessageId: event.messageId,
+          }
+          msg = {
+            id: event.messageId,
+            chatId: event.chatId,
+            date: event.date,
+            fromId: event.userId,
+            message: "",
+            out: false,
+            mentioned: false,
+            replyToMsgId: event.messageId,
+          } as Message
+        } else {
+          continue
+        }
 
         const chatId = event.chatId
         statusSink?.({ lastInboundAt: Date.now() })
@@ -130,6 +452,23 @@ export async function monitorInlineProvider(params: {
 
         const isGroup = chatInfo.kind !== "direct"
         const senderId = String(msg.fromId)
+        await hydrateChatParticipants(chatId)
+        const senderProfile = senderProfilesById.get(senderId)
+        const senderUsername = senderProfile?.username
+        const senderName = senderProfile?.name ?? (!isGroup ? chatInfo.title ?? undefined : undefined)
+        if (reactionEvent) {
+          const actor =
+            senderUsername != null && senderUsername.length > 0
+              ? `@${senderUsername}`
+              : senderName ?? `user:${senderId}`
+          const emoji = reactionEvent.emoji.trim() || "a reaction"
+          const messageId = String(reactionEvent.targetMessageId)
+          if (reactionEvent.action === "added") {
+            rawBody = `${actor} reacted with ${emoji} to your message #${messageId}`
+          } else {
+            rawBody = `${actor} removed ${emoji} from your message #${messageId}`
+          }
+        }
 
         const dmPolicy = account.config.dmPolicy ?? "pairing"
         const defaultGroupPolicy = cfg.channels?.defaults?.groupPolicy
@@ -242,13 +581,45 @@ export async function monitorInlineProvider(params: {
             : mentionRegexes.length
               ? core.channel.mentions.matchesMentionPatterns(rawBody, mentionRegexes)
               : false
+        const historyLimit = resolveHistoryLimit({
+          isGroup,
+          historyLimit: account.config.historyLimit,
+          dmHistoryLimit: account.config.dmHistoryLimit,
+        })
+        const historyContext = await buildHistoryContext({
+          client,
+          chatId,
+          currentMessageId: msg.id,
+          replyToMsgId: msg.replyToMsgId,
+          senderProfilesById,
+          meId: me.userId,
+          historyLimit,
+          botMessageIdsByChat,
+        }).catch((err) => {
+          statusSink?.({ lastError: `getChatHistory failed: ${String(err)}` })
+          return { historyText: null, repliedToBot: false }
+        })
+        const implicitMention =
+          (reactionEvent != null && isGroup) ||
+          (isGroup &&
+            (account.config.replyToBotWithoutMention ?? false) &&
+            msg.replyToMsgId != null &&
+            historyContext.repliedToBot)
 
-        const requireMention = isGroup ? (account.config.requireMention ?? true) : false
+        const requireMention = isGroup
+          ? resolveInlineGroupRequireMention({
+              cfg,
+              groupId: String(chatId),
+              accountId: account.accountId,
+              requireMentionDefault: account.config.requireMention ?? false,
+            })
+          : false
         const mentionGate = resolveMentionGatingWithBypass({
           isGroup,
           requireMention,
           canDetectMention: typeof msg.mentioned === "boolean" || mentionRegexes.length > 0,
           wasMentioned,
+          implicitMention,
           allowTextCommands,
           hasControlCommand,
           commandAuthorized,
@@ -270,7 +641,9 @@ export async function monitorInlineProvider(params: {
           timestamp,
           ...(previousTimestamp != null ? { previousTimestamp } : {}),
           envelope: envelopeOptions,
-          body: rawBody,
+          body: historyContext.historyText
+            ? `${historyContext.historyText}\n\nCurrent message:\n${rawBody}`
+            : rawBody,
         })
 
         const ctxPayload = core.channel.reply.finalizeInboundContext({
@@ -285,6 +658,8 @@ export async function monitorInlineProvider(params: {
           ConversationLabel: fromLabel,
           ...(isGroup ? { GroupSubject: chatInfo.title ?? String(chatId) } : {}),
           SenderId: senderId,
+          ...(senderName ? { SenderName: senderName } : {}),
+          ...(senderUsername ? { SenderUsername: senderUsername } : {}),
           Provider: CHANNEL_ID,
           Surface: CHANNEL_ID,
           MessageSid: String(msg.id),
@@ -313,21 +688,42 @@ export async function monitorInlineProvider(params: {
           onRecordError: (err) => runtime.error?.(`inline: failed updating session meta: ${String(err)}`),
         })
 
-        const { onModelSelected, ...prefixOptions } = createReplyPrefixOptions({
-          cfg,
-          agentId: route.agentId,
-          channel: CHANNEL_ID,
-          accountId: account.accountId,
-        })
+        const prefixConfig = (
+          typeof createReplyPrefixOptions === "function"
+            ? createReplyPrefixOptions({
+                cfg,
+                agentId: route.agentId,
+                channel: CHANNEL_ID,
+                accountId: account.accountId,
+              })
+            : {}
+        ) as { onModelSelected?: unknown } & Record<string, unknown>
+        const onModelSelected =
+          typeof prefixConfig.onModelSelected === "function"
+            ? (prefixConfig.onModelSelected as (ctx: unknown) => void)
+            : undefined
+        const { onModelSelected: _ignoredOnModelSelected, ...prefixOptions } = prefixConfig
 
-        const typingCallbacks = createTypingCallbacks({
-          start: () => client.sendTyping({ chatId, typing: true }),
-          stop: () => client.sendTyping({ chatId, typing: false }),
-          onStartError: (err) => runtime.error?.(`inline typing start failed: ${String(err)}`),
-          onStopError: (err) => runtime.error?.(`inline typing stop failed: ${String(err)}`),
-        })
+        const typingCallbacks =
+          typeof createTypingCallbacks === "function"
+            ? createTypingCallbacks({
+                start: () => client.sendTyping({ chatId, typing: true }),
+                stop: () => client.sendTyping({ chatId, typing: false }),
+                onStartError: (err) => runtime.error?.(`inline typing start failed: ${String(err)}`),
+                onStopError: (err) => runtime.error?.(`inline typing stop failed: ${String(err)}`),
+              })
+            : {}
 
         const parseMarkdown = account.config.parseMarkdown ?? true
+        const disableBlockStreaming =
+          typeof account.config.blockStreaming === "boolean"
+            ? !account.config.blockStreaming
+            : undefined
+        const replyOptions = {
+          ...(onModelSelected ? { onModelSelected } : {}),
+          blockReplyTimeoutMs: 25_000,
+          ...(typeof disableBlockStreaming === "boolean" ? { disableBlockStreaming } : {}),
+        }
 
         await core.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
           ctx: ctxPayload,
@@ -336,20 +732,13 @@ export async function monitorInlineProvider(params: {
             ...prefixOptions,
             ...typingCallbacks,
             deliver: async (payload) => {
-              const text = (payload.text ?? "").trim()
+              const rawText = (payload.text ?? "").trim()
               const mediaList = payload.mediaUrls?.length
                 ? payload.mediaUrls
                 : payload.mediaUrl
                   ? [payload.mediaUrl]
                   : []
-              const mediaBlock = mediaList.length ? mediaList.map((url) => `Attachment: ${url}`).join("\n") : ""
-              const combined = text
-                ? mediaBlock
-                  ? `${text}\n\n${mediaBlock}`
-                  : text
-                : mediaBlock
-
-              if (!combined.trim()) return
+              const outboundText = rewriteNumericMentionsToUsernames(rawText, senderProfilesById)
 
               let replyToMsgId: bigint | undefined
               if (payload.replyToId != null) {
@@ -359,20 +748,69 @@ export async function monitorInlineProvider(params: {
                   // ignore
                 }
               }
-              await client.sendMessage({
-                chatId,
-                text: combined,
-                ...(replyToMsgId != null ? { replyToMsgId } : {}),
-                parseMarkdown,
-              })
+              // Keep reply chains threaded when inbound is a reply in group chats.
+              if (replyToMsgId == null && isGroup && msg.replyToMsgId != null) {
+                replyToMsgId = msg.id
+              }
+
+              const rememberSent = (messageId: bigint | null) => {
+                if (messageId != null) {
+                  rememberBotMessageId(botMessageIdsByChat, chatId, messageId)
+                }
+              }
+
+              const sendTextFallback = async (text: string, includeReplyTo: boolean): Promise<void> => {
+                if (!text.trim()) return
+                const sent = await client.sendMessage({
+                  chatId,
+                  text,
+                  ...(includeReplyTo && replyToMsgId != null ? { replyToMsgId } : {}),
+                  parseMarkdown,
+                })
+                rememberSent(sent.messageId)
+              }
+
+              if (mediaList.length === 0) {
+                if (!outboundText.trim()) return
+                await sendTextFallback(outboundText, true)
+                statusSink?.({ lastOutboundAt: Date.now() })
+                return
+              }
+
+              for (let index = 0; index < mediaList.length; index++) {
+                const mediaUrl = mediaList[index]
+                if (!mediaUrl?.trim()) continue
+                const isFirst = index === 0
+                const caption = isFirst ? outboundText : ""
+                try {
+                  const media = await uploadInlineMediaFromUrl({
+                    client,
+                    cfg,
+                    accountId: account.accountId,
+                    mediaUrl,
+                  })
+                  const sent = await client.sendMessage({
+                    chatId,
+                    ...(caption ? { text: caption } : {}),
+                    media,
+                    ...(isFirst && replyToMsgId != null ? { replyToMsgId } : {}),
+                    ...(caption ? { parseMarkdown } : {}),
+                  })
+                  rememberSent(sent.messageId)
+                } catch (error) {
+                  runtime.error?.(`inline media upload failed; falling back to url text (${String(error)})`)
+                  const fallbackText = caption
+                    ? `${caption}\n\nAttachment: ${mediaUrl}`
+                    : `Attachment: ${mediaUrl}`
+                  await sendTextFallback(fallbackText, isFirst)
+                }
+              }
+
               statusSink?.({ lastOutboundAt: Date.now() })
             },
             onError: (err, info) => runtime.error?.(`inline ${info.kind} reply failed: ${String(err)}`),
           },
-          replyOptions: {
-            onModelSelected,
-            blockReplyTimeoutMs: 25_000,
-          },
+          replyOptions,
         })
       }
     } catch (err) {

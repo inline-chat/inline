@@ -31,6 +31,12 @@ channels:
 Notes:
 - `baseUrl` defaults to `https://api.inline.chat`.
 - Plugin id is `inline`.
+- For multi-bubble replies, enable `channels.inline.blockStreaming: true`.
+- For reply-driven group flows, set `channels.inline.replyToBotWithoutMention: true`.
+- Group mention requirement is off by default; set `channels.inline.requireMention: true` if you want strict mentions.
+- To include recent thread context for the agent, set `channels.inline.historyLimit`.
+- Message actions include reply/read/search/edit/reactions/channel and participant management; gate groups via `channels.inline.actions.*`.
+- Media uploads (image/video/document) are enabled by default for `mediaUrl` sends; set `channels.inline.mediaMaxMb` if you need a lower cap.
 
 ## 3) Start Gateway
 

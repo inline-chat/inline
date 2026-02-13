@@ -6,6 +6,7 @@ type MonitorHarness = {
   monitorInlineProvider: typeof import("./monitor")["monitorInlineProvider"]
   calls: {
     sendMessage: ReturnType<typeof vi.fn>
+    uploadFile: ReturnType<typeof vi.fn>
     resolveAgentRoute: ReturnType<typeof vi.fn>
     recordInboundSession: ReturnType<typeof vi.fn>
     finalizeInboundContext: ReturnType<typeof vi.fn>
@@ -17,21 +18,54 @@ type MonitorHarness = {
 }
 
 type MonitorSetup = {
-  events: Array<{
-    kind: "message.new"
-    chatId: bigint
-    message: {
-      id: bigint
-      date: bigint
-      fromId: bigint
-      message: string
-      out?: boolean
-      mentioned?: boolean
-      replyToMsgId?: bigint
-    }
-    seq?: number
-  }>
+  events: Array<
+    | {
+        kind: "message.new"
+        chatId: bigint
+        message: {
+          id: bigint
+          date: bigint
+          fromId: bigint
+          message: string
+          out?: boolean
+          mentioned?: boolean
+          replyToMsgId?: bigint
+        }
+        seq?: number
+      }
+    | {
+        kind: "reaction.add"
+        chatId: bigint
+        reaction: {
+          emoji: string
+          userId: bigint
+          messageId: bigint
+          chatId: bigint
+          date: bigint
+        }
+        seq?: number
+        date?: bigint
+      }
+    | {
+        kind: "reaction.delete"
+        chatId: bigint
+        emoji: string
+        userId: bigint
+        messageId: bigint
+        seq?: number
+        date?: bigint
+      }
+  >
   chats: Record<string, { kind: "direct" | "group"; title?: string }>
+  participants?: Record<string, Array<{ id: bigint; username?: string; firstName?: string; lastName?: string }>>
+  historyByChat?: Record<string, Array<{
+    id: bigint
+    date: bigint
+    fromId: bigint
+    message?: string
+    out?: boolean
+    replyToMsgId?: bigint
+  }>>
   dispatchReplyPayload?: { text?: string; replyToId?: string; mediaUrl?: string; mediaUrls?: string[] }
 }
 
@@ -41,7 +75,11 @@ function buildAccount(overrides?: {
   allowFrom?: string[]
   groupAllowFrom?: string[]
   requireMention?: boolean
+  replyToBotWithoutMention?: boolean
+  historyLimit?: number
+  dmHistoryLimit?: number
   parseMarkdown?: boolean
+  blockStreaming?: boolean
 }) {
   return {
     accountId: "default",
@@ -61,7 +99,11 @@ function buildAccount(overrides?: {
       groupPolicy: overrides?.groupPolicy ?? "allowlist",
       groupAllowFrom: overrides?.groupAllowFrom ?? [],
       requireMention: overrides?.requireMention ?? true,
+      replyToBotWithoutMention: overrides?.replyToBotWithoutMention,
+      historyLimit: overrides?.historyLimit,
+      dmHistoryLimit: overrides?.dmHistoryLimit,
       parseMarkdown: overrides?.parseMarkdown ?? true,
+      blockStreaming: overrides?.blockStreaming,
       textChunkLimit: 4000,
     },
   } as any
@@ -86,6 +128,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
   vi.resetModules()
 
   const sendMessage = vi.fn(async () => ({ messageId: 1n }))
+  const uploadFile = vi.fn(async () => ({ fileUniqueId: "INP_1", photoId: 200n }))
   const resolveAgentRoute = vi.fn((input: any) => ({
     agentId: "main",
     channel: "inline",
@@ -107,15 +150,39 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
   vi.doMock("@inline-chat/realtime-sdk", () => {
     async function* eventsGenerator() {
       for (const event of setup.events) {
+        if (event.kind === "message.new") {
+          yield {
+            kind: event.kind,
+            chatId: event.chatId,
+            message: {
+              ...event.message,
+              out: event.message.out ?? false,
+            },
+            seq: event.seq ?? 1,
+            date: event.message.date,
+          }
+          continue
+        }
+
+        if (event.kind === "reaction.add") {
+          yield {
+            kind: event.kind,
+            chatId: event.chatId,
+            reaction: event.reaction,
+            seq: event.seq ?? 1,
+            date: event.date ?? event.reaction.date,
+          }
+          continue
+        }
+
         yield {
           kind: event.kind,
           chatId: event.chatId,
-          message: {
-            ...event.message,
-            out: event.message.out ?? false,
-          },
+          emoji: event.emoji,
+          userId: event.userId,
+          messageId: event.messageId,
           seq: event.seq ?? 1,
-          date: event.message.date,
+          date: event.date ?? 1_700_000_000n,
         }
       }
     }
@@ -123,6 +190,10 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     return {
       JsonFileStateStore: class {
         constructor(_path: string) {}
+      },
+      Method: {
+        GET_CHAT_HISTORY: 5,
+        GET_CHAT_PARTICIPANTS: 13,
       },
       InlineSdkClient: class {
         constructor(_opts: unknown) {}
@@ -145,7 +216,37 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
           }
         })
         sendMessage = sendMessage
+        uploadFile = uploadFile
         sendTyping = vi.fn(async () => {})
+        invokeRaw = vi.fn(async (
+          method: number,
+          input: {
+            oneofKind?: string
+            getChatParticipants?: { chatId?: bigint }
+            getChatHistory?: { peerId?: { type?: { oneofKind?: string; chat?: { chatId?: bigint } } } }
+          },
+        ) => {
+          if (method === 13 && input?.oneofKind === "getChatParticipants") {
+            const chatId = String(input.getChatParticipants?.chatId ?? "")
+            return {
+              oneofKind: "getChatParticipants",
+              getChatParticipants: {
+                participants: [],
+                users: setup.participants?.[chatId] ?? [],
+              },
+            }
+          }
+          if (method === 5 && input?.oneofKind === "getChatHistory") {
+            const chatId = String(input.getChatHistory?.peerId?.type?.chat?.chatId ?? "")
+            return {
+              oneofKind: "getChatHistory",
+              getChatHistory: {
+                messages: setup.historyByChat?.[chatId] ?? [],
+              },
+            }
+          }
+          return { oneofKind: undefined }
+        })
         close = vi.fn(async () => {})
         events = vi.fn(() => eventsGenerator())
       },
@@ -158,11 +259,23 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       ...actual,
       createReplyPrefixOptions: vi.fn(() => ({ onModelSelected: vi.fn() })),
       createTypingCallbacks: vi.fn(() => ({})),
+      loadWebMedia: vi.fn(async () => ({
+        buffer: Buffer.from([1, 2, 3]),
+        contentType: "image/png",
+        kind: "image",
+        fileName: "image.png",
+      })),
+      detectMime: vi.fn(async () => "image/png"),
       logInboundDrop: vi.fn(),
       resolveControlCommandGate: vi.fn(() => ({ shouldBlock: false, commandAuthorized: true })),
       resolveMentionGatingWithBypass: vi.fn((params: any) => ({
-        shouldSkip: Boolean(params.isGroup && params.requireMention && !params.wasMentioned),
-        effectiveWasMentioned: Boolean(params.wasMentioned),
+        shouldSkip: Boolean(
+          params.isGroup &&
+          params.requireMention &&
+          !params.wasMentioned &&
+          !params.implicitMention,
+        ),
+        effectiveWasMentioned: Boolean(params.wasMentioned || params.implicitMention),
       })),
     }
   })
@@ -211,6 +324,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     monitorInlineProvider: mod.monitorInlineProvider,
     calls: {
       sendMessage,
+      uploadFile,
       resolveAgentRoute,
       recordInboundSession,
       finalizeInboundContext,
@@ -284,6 +398,111 @@ describe("inline/monitor", () => {
           text: "agent reply",
           replyToMsgId: 555n,
           parseMarkdown: true,
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("uploads media in reply payloads and sends as Inline attachments", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1201n,
+            date: 1_700_000_000n,
+            fromId: 42n,
+            message: "send image",
+          },
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyPayload: {
+        text: "here it is",
+        mediaUrl: "https://example.com/image.png",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.uploadFile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "photo",
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 7n,
+          text: "here it is",
+          media: {
+            kind: "photo",
+            photoId: 200n,
+          },
+          parseMarkdown: true,
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("hydrates sender username and rewrites @id mentions to @username", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 17n,
+          message: {
+            id: 1100n,
+            date: 1_700_000_100n,
+            fromId: 42n,
+            message: "hello",
+          },
+        },
+      ],
+      chats: {
+        "17": { kind: "direct", title: "Alice" },
+      },
+      participants: {
+        "17": [{ id: 42n, username: "alice", firstName: "Alice" }],
+      },
+      dispatchReplyPayload: {
+        text: "cc @42 thanks",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          SenderId: "42",
+          SenderName: "Alice",
+          SenderUsername: "alice",
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 17n,
+          text: "cc @alice thanks",
         }),
       )
     })
@@ -451,6 +670,354 @@ describe("inline/monitor", () => {
         }),
       )
     })
+
+    await handle.stop()
+  })
+
+  it("maps account.blockStreaming=false to disableBlockStreaming=true", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 77n,
+          message: {
+            id: 5555n,
+            date: 1_700_000_004n,
+            fromId: 42n,
+            message: "dm",
+          },
+        },
+      ],
+      chats: {
+        "77": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyPayload: {
+        text: "ok",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        dmPolicy: "open",
+        blockStreaming: false,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalled()
+      const args = harness.calls.dispatchReply.mock.calls[0]?.[0]
+      expect(args?.replyOptions?.disableBlockStreaming).toBe(true)
+    })
+
+    await handle.stop()
+  })
+
+  it("honors channels.inline.groups.*.requireMention overrides", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 6001n,
+            date: 1_700_000_005n,
+            fromId: 51n,
+            message: "no mention but allowed",
+            mentioned: false,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      dispatchReplyPayload: {
+        text: "group reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        channels: {
+          inline: {
+            groups: {
+              "88": {
+                requireMention: false,
+              },
+            },
+          },
+        },
+      } as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalled()
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 88n,
+          text: "group reply",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("can bypass mention gate on replies to bot messages and keeps reply threaded", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 7001n,
+            date: 1_700_000_100n,
+            fromId: 51n,
+            message: "follow up",
+            mentioned: false,
+            replyToMsgId: 5000n,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      historyByChat: {
+        "88": [
+          {
+            id: 5000n,
+            date: 1_700_000_099n,
+            fromId: 777n,
+            message: "earlier bot message",
+            out: true,
+          },
+        ],
+      },
+      dispatchReplyPayload: {
+        text: "threaded reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+        replyToBotWithoutMention: true,
+        historyLimit: 10,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalled()
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 88n,
+          text: "threaded reply",
+          replyToMsgId: 7001n,
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: expect.stringContaining("Recent thread messages (oldest -> newest):"),
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("does not bypass mention gate for replies when replyToBotWithoutMention=false", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 7101n,
+            date: 1_700_000_101n,
+            fromId: 51n,
+            message: "follow up",
+            mentioned: false,
+            replyToMsgId: 5000n,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      historyByChat: {
+        "88": [
+          {
+            id: 5000n,
+            date: 1_700_000_099n,
+            fromId: 777n,
+            message: "earlier bot message",
+            out: true,
+          },
+        ],
+      },
+      dispatchReplyPayload: {
+        text: "threaded reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+        replyToBotWithoutMention: false,
+        historyLimit: 10,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+      expect(harness.calls.sendMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 88n,
+          text: "threaded reply",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("routes reaction events on bot messages as inbound context and replies in-thread", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "reaction.add",
+          chatId: 88n,
+          reaction: {
+            emoji: "🔥",
+            userId: 51n,
+            messageId: 5000n,
+            chatId: 88n,
+            date: 1_700_000_110n,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      participants: {
+        "88": [{ id: 51n, username: "alice", firstName: "Alice" }],
+      },
+      historyByChat: {
+        "88": [
+          {
+            id: 5000n,
+            date: 1_700_000_099n,
+            fromId: 777n,
+            message: "earlier bot message",
+            out: true,
+          },
+        ],
+      },
+      dispatchReplyPayload: {
+        text: "noted",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalled()
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: expect.stringContaining("@alice reacted with 🔥 to your message #5000"),
+          ReplyToId: "5000",
+          MessageSid: "5000",
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 88n,
+          text: "noted",
+          replyToMsgId: 5000n,
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("ignores reaction events that target non-bot messages", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "reaction.add",
+          chatId: 88n,
+          reaction: {
+            emoji: "🔥",
+            userId: 51n,
+            messageId: 5001n,
+            chatId: 88n,
+            date: 1_700_000_120n,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      historyByChat: {
+        "88": [
+          {
+            id: 5001n,
+            date: 1_700_000_119n,
+            fromId: 51n,
+            message: "user message",
+            out: false,
+          },
+        ],
+      },
+      dispatchReplyPayload: {
+        text: "noted",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+    expect(harness.calls.sendMessage).not.toHaveBeenCalled()
 
     await handle.stop()
   })

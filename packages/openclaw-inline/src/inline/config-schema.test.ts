@@ -25,4 +25,32 @@ describe("inline/config-schema", () => {
       InlineRuntimeConfigSchema.safeParse({ token: "t", dmPolicy: "open" }).success,
     ).toBe(true)
   })
+
+  it("accepts streaming and group tool-policy fields", () => {
+    expect(
+      InlineConfigSchema.safeParse({
+        mediaMaxMb: 10,
+        actions: {
+          read: true,
+          channels: true,
+          permissions: false,
+        },
+        blockStreaming: true,
+        chunkMode: "newline",
+        blockStreamingCoalesce: { minChars: 600, idleMs: 700, maxChars: 2_200 },
+        replyToBotWithoutMention: true,
+        historyLimit: 12,
+        dmHistoryLimit: 6,
+        groups: {
+          "123": {
+            requireMention: false,
+            tools: { allow: ["message", "web.search"] },
+            toolsBySender: {
+              "42": { allow: ["message"] },
+            },
+          },
+        },
+      }).success,
+    ).toBe(true)
+  })
 })

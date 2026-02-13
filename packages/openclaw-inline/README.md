@@ -12,6 +12,9 @@ Supports:
 - Inline DMs (`ChatType=direct`)
 - Inline chats (including top-level thread-style chats) as conversations (`ChatType=group`)
 - Message replies: OpenClaw `replyToId` is mapped to Inline `replyToMsgId` (message id).
+- Native media upload/send for images, videos, and documents from `mediaUrl` payloads.
+- Emoji reactions via message tool actions (`react`, `reactions`).
+- Reaction events on bot-authored messages are surfaced back to the agent as inbound context.
 
 Non-goals (for now):
 
@@ -44,7 +47,7 @@ openclaw plugins install --link /path/to/inline/packages/openclaw-inline
 
 ## Configure
 
-Channel config lives under `channels.inline` (the plugin config schema is intentionally empty).
+Channel config lives under `channels.inline` (supports account settings, block streaming/chunking, and group tool policy).
 
 Plugin id is `inline` (for `plugins.entries.*`).
 If you enable explicitly, use:
@@ -67,6 +70,7 @@ channels:
 
 `baseUrl` defaults to `https://api.inline.chat`.
 `dmPolicy` defaults to `pairing` (recommended starting point).
+`requireMention` defaults to `false` for groups (set `true` to require explicit mentions).
 
 Example:
 
@@ -86,10 +90,67 @@ channels:
     groupPolicy: "allowlist" # allowlist|open|disabled
     groupAllowFrom:
       - "inline:123" # or "user:123" or just "123"
-    requireMention: true
+    requireMention: true # optional: default is false
+    replyToBotWithoutMention: true # if true, replies to bot messages can bypass mention requirement
+
+    # Inbound context history (used to build richer thread context for the agent):
+    historyLimit: 12      # group chats
+    dmHistoryLimit: 6     # direct messages
+
+    # Streaming + chunking:
+    mediaMaxMb: 20
+    blockStreaming: true
+    chunkMode: "newline" # length|newline
+    blockStreamingCoalesce:
+      minChars: 600
+      idleMs: 700
+      maxChars: 2200
+
+    # Group-level tool policy (for agent tool access in group sessions):
+    groups:
+      "88":
+        requireMention: false
+        tools:
+          allow: ["message", "web.search"]
+        toolsBySender:
+          "42":
+            allow: ["message"]
 ```
 
 If you set `dmPolicy: "open"`, set `allowFrom: ["*"]`.
+
+## Message Tool RPC Actions
+
+The plugin exposes Inline RPC-backed actions through OpenClaw's `message` tool.
+All actions use a numeric Inline chat id via `to`, `chatId`, or `channelId`.
+
+- Replying: `reply`, `thread-reply`
+- Reactions: `react`, `reactions`
+- Reading/searching: `read`, `search`
+- Editing: `edit`
+- Channels/threads: `channel-info`, `channel-edit`, `channel-list`, `channel-create`, `channel-delete`, `channel-move`, `thread-list`, `thread-create`
+- Participants: `addParticipant`, `removeParticipant`, `leaveGroup`, `member-info`
+- Message lifecycle: `delete`, `unsend`
+- Pins: `pin`, `unpin`, `list-pins`
+- Space permissions: `permissions`
+
+You can gate action groups from config:
+
+```yaml
+channels:
+  inline:
+    actions:
+      reply: true
+      reactions: true
+      read: true
+      search: true
+      edit: true
+      channels: true
+      participants: true
+      delete: true
+      pins: true
+      permissions: true
+```
 
 Multi-account:
 
