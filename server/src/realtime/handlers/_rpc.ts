@@ -41,6 +41,7 @@ import { updateChatVisibilityHandler } from "@in/server/realtime/handlers/messag
 import { updateChatInfoHandler } from "@in/server/realtime/handlers/messages.updateChatInfo"
 import { pinMessageHandler } from "@in/server/realtime/handlers/messages.pinMessage"
 import { moveThreadHandler } from "@in/server/realtime/handlers/messages.moveThread"
+import { updateDialogNotificationSettings } from "@in/server/realtime/handlers/messages.updateDialogNotificationSettings"
 
 const log = new Log("rpc")
 
@@ -346,6 +347,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await pinMessageHandler(call.input.pinMessage, handlerContext)
       return { oneofKind: "pinMessage", pinMessage: result }
+    }
+
+    case Method.UPDATE_DIALOG_NOTIFICATION_SETTINGS: {
+      if (call.input.oneofKind !== "updateDialogNotificationSettings") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      let result = await updateDialogNotificationSettings(call.input.updateDialogNotificationSettings, handlerContext)
+      return { oneofKind: "updateDialogNotificationSettings", updateDialogNotificationSettings: result }
     }
 
     default:

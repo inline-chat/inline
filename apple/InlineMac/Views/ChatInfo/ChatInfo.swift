@@ -6,6 +6,7 @@ import SwiftUI
 
 struct ChatInfo: View {
   @Environment(\.dependencies) private var dependencies
+  @Environment(\.realtimeV2) private var realtimeV2
   @EnvironmentStateObject var fullChat: FullChatViewModel
   @EnvironmentStateObject private var documentsState: ChatInfoDocumentsState
 
@@ -46,6 +47,10 @@ struct ChatInfo: View {
       return "Private"
     }
     return "Chat"
+  }
+
+  private var notificationSelection: DialogNotificationSettingSelection {
+    fullChat.chatItem?.dialog.notificationSelection ?? .global
   }
 
   private var visibilityLabel: String {
@@ -191,6 +196,25 @@ struct ChatInfo: View {
 
       ChatInfoDetailRow(title: "Chat Type") {
         Text(chatTypeLabel)
+      }
+
+      Divider()
+
+      ChatInfoDetailRow(title: "Notifications") {
+        Picker("Notifications", selection: Binding(
+          get: { notificationSelection },
+          set: { newSelection in
+            updateNotificationSettings(newSelection)
+          }
+        )) {
+          Text(DialogNotificationSettingSelection.global.title).tag(DialogNotificationSettingSelection.global)
+          Text(DialogNotificationSettingSelection.all.title).tag(DialogNotificationSettingSelection.all)
+          Text(DialogNotificationSettingSelection.mentions.title).tag(DialogNotificationSettingSelection.mentions)
+          Text(DialogNotificationSettingSelection.none.title).tag(DialogNotificationSettingSelection.none)
+        }
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .frame(maxWidth: 180)
       }
 
       if shouldShowVisibilityRow {
@@ -353,6 +377,18 @@ struct ChatInfo: View {
         }
       } catch {
         Log.shared.error("Failed to update chat visibility", error: error)
+      }
+    }
+  }
+
+  private func updateNotificationSettings(_ selection: DialogNotificationSettingSelection) {
+    guard selection != notificationSelection else { return }
+
+    Task {
+      do {
+        _ = try await realtimeV2.send(.updateDialogNotificationSettings(peerId: peerId, selection: selection))
+      } catch {
+        Log.shared.error("Failed to update dialog notification settings", error: error)
       }
     }
   }

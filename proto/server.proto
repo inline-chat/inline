@@ -35,6 +35,7 @@ message ServerUpdate {
     ServerUserUpdateJoinSpace user_join_space = 17;
     ServerUserUpdateReadMaxId user_read_max_id = 20;
     ServerUserUpdateMarkAsUnread user_mark_as_unread = 22;
+    ServerUserUpdateDialogNotificationSettings user_dialog_notification_settings = 23;
   }
 }
 
@@ -155,4 +156,10 @@ message ServerUserUpdateReadMaxId {
 message ServerUserUpdateMarkAsUnread {
   Peer peer_id = 1;
   bool unread_mark = 2;
+}
+
+// Update for a user when per-chat notification settings change.
+message ServerUserUpdateDialogNotificationSettings {
+  Peer peer_id = 1;
+  optional DialogNotificationSettings notification_settings = 2;
 }

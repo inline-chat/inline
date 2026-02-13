@@ -30,6 +30,7 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
   public var archived: Bool?
   public var chatId: Int64?
   public var unreadMark: Bool?
+  public var notificationSettings: DialogNotificationSettings?
 
   public enum Columns {
     public static let id = Column(CodingKeys.id)
@@ -44,6 +45,7 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
     public static let archived = Column(CodingKeys.archived)
     public static let chatId = Column(CodingKeys.chatId)
     public static let unreadMark = Column(CodingKeys.unreadMark)
+    public static let notificationSettings = Column(CodingKeys.notificationSettings)
   }
 
   public static let space = belongsTo(Space.self)
@@ -100,6 +102,7 @@ public extension Dialog {
     pinned = from.pinned
     archived = from.archived
     unreadCount = from.unreadCount
+    notificationSettings = nil
   }
 
   // Called when user clicks a user for the first time
@@ -119,6 +122,7 @@ public extension Dialog {
     unreadMark = nil
     unreadCount = nil
     chatId = nil
+    notificationSettings = nil
   }
 
   init(optimisticForChat chat: Chat) {
@@ -140,6 +144,7 @@ public extension Dialog {
     unreadMark = nil
     unreadCount = nil
     chatId = chat.id
+    notificationSettings = nil
   }
 
   init(from: InlineProtocol.Dialog) {
@@ -165,6 +170,7 @@ public extension Dialog {
     unreadMark = from.unreadMark
     draftMessage = nil
     chatId = from.hasChatID ? from.chatID : nil
+    notificationSettings = from.hasNotificationSettings ? from.notificationSettings : nil
   }
 
   static func getDialogId(peerUserId: Int64) -> Int64 {
@@ -213,7 +219,8 @@ public extension Dialog {
       draftMessage: nil,
       archived: false,
       chatId: nil,
-      unreadMark: nil
+      unreadMark: nil,
+      notificationSettings: nil
     )
   }
 
@@ -230,7 +237,8 @@ public extension Dialog {
       draftMessage: nil,
       archived: false,
       chatId: nil,
-      unreadMark: nil
+      unreadMark: nil,
+      notificationSettings: nil
     )
   }
 }
@@ -250,6 +258,7 @@ public extension ApiDialog {
 
     if let existing {
       dialog.draftMessage = existing.draftMessage
+      dialog.notificationSettings = existing.notificationSettings
       try dialog.save(db)
     } else {
       try dialog.save(db, onConflict: .replace)

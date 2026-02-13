@@ -422,6 +422,10 @@ export interface Dialog {
      * @generated from protobuf field: optional bool unread_mark = 8;
      */
     unreadMark?: boolean;
+    /**
+     * @generated from protobuf field: optional DialogNotificationSettings notification_settings = 9;
+     */
+    notificationSettings?: DialogNotificationSettings;
 }
 /**
  * A thread
@@ -1708,6 +1712,12 @@ export interface RpcCall {
          */
         getMessages: GetMessagesInput;
     } | {
+        oneofKind: "updateDialogNotificationSettings";
+        /**
+         * @generated from protobuf field: UpdateDialogNotificationSettingsInput updateDialogNotificationSettings = 40;
+         */
+        updateDialogNotificationSettings: UpdateDialogNotificationSettingsInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1950,6 +1960,12 @@ export interface RpcResult {
          * @generated from protobuf field: GetMessagesResult getMessages = 39;
          */
         getMessages: GetMessagesResult;
+    } | {
+        oneofKind: "updateDialogNotificationSettings";
+        /**
+         * @generated from protobuf field: UpdateDialogNotificationSettingsResult updateDialogNotificationSettings = 40;
+         */
+        updateDialogNotificationSettings: UpdateDialogNotificationSettingsResult;
     } | {
         oneofKind: undefined;
     };
@@ -2439,6 +2455,36 @@ export enum NotificationSettings_Mode {
     ONLY_MENTIONS = 5
 }
 /**
+ * @generated from protobuf message DialogNotificationSettings
+ */
+export interface DialogNotificationSettings {
+    /**
+     * @generated from protobuf field: optional DialogNotificationSettings.Mode mode = 1;
+     */
+    mode?: DialogNotificationSettings_Mode;
+}
+/**
+ * @generated from protobuf enum DialogNotificationSettings.Mode
+ */
+export enum DialogNotificationSettings_Mode {
+    /**
+     * @generated from protobuf enum value: MODE_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: MODE_ALL = 1;
+     */
+    ALL = 1,
+    /**
+     * @generated from protobuf enum value: MODE_MENTIONS = 2;
+     */
+    MENTIONS = 2,
+    /**
+     * @generated from protobuf enum value: MODE_NONE = 3;
+     */
+    NONE = 3
+}
+/**
  * @generated from protobuf message UpdateUserSettingsInput
  */
 export interface UpdateUserSettingsInput {
@@ -2451,6 +2497,32 @@ export interface UpdateUserSettingsInput {
  * @generated from protobuf message UpdateUserSettingsResult
  */
 export interface UpdateUserSettingsResult {
+    /**
+     * @generated from protobuf field: repeated Update updates = 1;
+     */
+    updates: Update[];
+}
+/**
+ * @generated from protobuf message UpdateDialogNotificationSettingsInput
+ */
+export interface UpdateDialogNotificationSettingsInput {
+    /**
+     * Peer to update settings for
+     *
+     * @generated from protobuf field: InputPeer peer_id = 1;
+     */
+    peerId?: InputPeer;
+    /**
+     * If unset, chat follows global notification settings
+     *
+     * @generated from protobuf field: optional DialogNotificationSettings notification_settings = 2;
+     */
+    notificationSettings?: DialogNotificationSettings;
+}
+/**
+ * @generated from protobuf message UpdateDialogNotificationSettingsResult
+ */
+export interface UpdateDialogNotificationSettingsResult {
     /**
      * @generated from protobuf field: repeated Update updates = 1;
      */
@@ -3246,6 +3318,12 @@ export interface Update {
          */
         chatMoved: UpdateChatMoved;
     } | {
+        oneofKind: "dialogNotificationSettings";
+        /**
+         * @generated from protobuf field: UpdateDialogNotificationSettings dialog_notification_settings = 33;
+         */
+        dialogNotificationSettings: UpdateDialogNotificationSettings;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -3550,6 +3628,25 @@ export interface UpdateDialogArchived {
      * @generated from protobuf field: bool archived = 2;
      */
     archived: boolean;
+}
+/**
+ * Update when per-chat notification settings change
+ *
+ * @generated from protobuf message UpdateDialogNotificationSettings
+ */
+export interface UpdateDialogNotificationSettings {
+    /**
+     * Peer ID of the dialog that changed
+     *
+     * @generated from protobuf field: Peer peer_id = 1;
+     */
+    peerId?: Peer;
+    /**
+     * If unset, chat follows global notification settings
+     *
+     * @generated from protobuf field: optional DialogNotificationSettings notification_settings = 2;
+     */
+    notificationSettings?: DialogNotificationSettings;
 }
 /**
  * Update when a new chat is created either in space or a private chat
@@ -4310,7 +4407,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: GET_MESSAGES = 38;
      */
-    GET_MESSAGES = 38
+    GET_MESSAGES = 38,
+    /**
+     * @generated from protobuf enum value: UPDATE_DIALOG_NOTIFICATION_SETTINGS = 39;
+     */
+    UPDATE_DIALOG_NOTIFICATION_SETTINGS = 39
 }
 /**
  * @generated from protobuf enum SearchMessagesFilter
@@ -5456,7 +5557,8 @@ class Dialog$Type extends MessageType<Dialog> {
             { no: 5, name: "read_max_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 6, name: "unread_count", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 7, name: "chat_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 8, name: "unread_mark", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 8, name: "unread_mark", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 9, name: "notification_settings", kind: "message", T: () => DialogNotificationSettings }
         ]);
     }
     create(value?: PartialMessage<Dialog>): Dialog {
@@ -5494,6 +5596,9 @@ class Dialog$Type extends MessageType<Dialog> {
                 case /* optional bool unread_mark */ 8:
                     message.unreadMark = reader.bool();
                     break;
+                case /* optional DialogNotificationSettings notification_settings */ 9:
+                    message.notificationSettings = DialogNotificationSettings.internalBinaryRead(reader, reader.uint32(), options, message.notificationSettings);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -5530,6 +5635,9 @@ class Dialog$Type extends MessageType<Dialog> {
         /* optional bool unread_mark = 8; */
         if (message.unreadMark !== undefined)
             writer.tag(8, WireType.Varint).bool(message.unreadMark);
+        /* optional DialogNotificationSettings notification_settings = 9; */
+        if (message.notificationSettings)
+            DialogNotificationSettings.internalBinaryWrite(message.notificationSettings, writer.tag(9, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -7694,7 +7802,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 36, name: "moveThread", kind: "message", oneof: "input", T: () => MoveThreadInput },
             { no: 37, name: "rotateBotToken", kind: "message", oneof: "input", T: () => RotateBotTokenInput },
             { no: 38, name: "updateBotProfile", kind: "message", oneof: "input", T: () => UpdateBotProfileInput },
-            { no: 39, name: "getMessages", kind: "message", oneof: "input", T: () => GetMessagesInput }
+            { no: 39, name: "getMessages", kind: "message", oneof: "input", T: () => GetMessagesInput },
+            { no: 40, name: "updateDialogNotificationSettings", kind: "message", oneof: "input", T: () => UpdateDialogNotificationSettingsInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -7941,6 +8050,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         getMessages: GetMessagesInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getMessages)
                     };
                     break;
+                case /* UpdateDialogNotificationSettingsInput updateDialogNotificationSettings */ 40:
+                    message.input = {
+                        oneofKind: "updateDialogNotificationSettings",
+                        updateDialogNotificationSettings: UpdateDialogNotificationSettingsInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).updateDialogNotificationSettings)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -8070,6 +8185,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* GetMessagesInput getMessages = 39; */
         if (message.input.oneofKind === "getMessages")
             GetMessagesInput.internalBinaryWrite(message.input.getMessages, writer.tag(39, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateDialogNotificationSettingsInput updateDialogNotificationSettings = 40; */
+        if (message.input.oneofKind === "updateDialogNotificationSettings")
+            UpdateDialogNotificationSettingsInput.internalBinaryWrite(message.input.updateDialogNotificationSettings, writer.tag(40, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -8122,7 +8240,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 36, name: "moveThread", kind: "message", oneof: "result", T: () => MoveThreadResult },
             { no: 37, name: "rotateBotToken", kind: "message", oneof: "result", T: () => RotateBotTokenResult },
             { no: 38, name: "updateBotProfile", kind: "message", oneof: "result", T: () => UpdateBotProfileResult },
-            { no: 39, name: "getMessages", kind: "message", oneof: "result", T: () => GetMessagesResult }
+            { no: 39, name: "getMessages", kind: "message", oneof: "result", T: () => GetMessagesResult },
+            { no: 40, name: "updateDialogNotificationSettings", kind: "message", oneof: "result", T: () => UpdateDialogNotificationSettingsResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -8369,6 +8488,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         getMessages: GetMessagesResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getMessages)
                     };
                     break;
+                case /* UpdateDialogNotificationSettingsResult updateDialogNotificationSettings */ 40:
+                    message.result = {
+                        oneofKind: "updateDialogNotificationSettings",
+                        updateDialogNotificationSettings: UpdateDialogNotificationSettingsResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).updateDialogNotificationSettings)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -8498,6 +8623,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* GetMessagesResult getMessages = 39; */
         if (message.result.oneofKind === "getMessages")
             GetMessagesResult.internalBinaryWrite(message.result.getMessages, writer.tag(39, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateDialogNotificationSettingsResult updateDialogNotificationSettings = 40; */
+        if (message.result.oneofKind === "updateDialogNotificationSettings")
+            UpdateDialogNotificationSettingsResult.internalBinaryWrite(message.result.updateDialogNotificationSettings, writer.tag(40, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -10039,6 +10167,52 @@ class NotificationSettings$Type extends MessageType<NotificationSettings> {
  */
 export const NotificationSettings = new NotificationSettings$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class DialogNotificationSettings$Type extends MessageType<DialogNotificationSettings> {
+    constructor() {
+        super("DialogNotificationSettings", [
+            { no: 1, name: "mode", kind: "enum", opt: true, T: () => ["DialogNotificationSettings.Mode", DialogNotificationSettings_Mode, "MODE_"] }
+        ]);
+    }
+    create(value?: PartialMessage<DialogNotificationSettings>): DialogNotificationSettings {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<DialogNotificationSettings>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: DialogNotificationSettings): DialogNotificationSettings {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* optional DialogNotificationSettings.Mode mode */ 1:
+                    message.mode = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: DialogNotificationSettings, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* optional DialogNotificationSettings.Mode mode = 1; */
+        if (message.mode !== undefined)
+            writer.tag(1, WireType.Varint).int32(message.mode);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message DialogNotificationSettings
+ */
+export const DialogNotificationSettings = new DialogNotificationSettings$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class UpdateUserSettingsInput$Type extends MessageType<UpdateUserSettingsInput> {
     constructor() {
         super("UpdateUserSettingsInput", [
@@ -10131,6 +10305,106 @@ class UpdateUserSettingsResult$Type extends MessageType<UpdateUserSettingsResult
  * @generated MessageType for protobuf message UpdateUserSettingsResult
  */
 export const UpdateUserSettingsResult = new UpdateUserSettingsResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateDialogNotificationSettingsInput$Type extends MessageType<UpdateDialogNotificationSettingsInput> {
+    constructor() {
+        super("UpdateDialogNotificationSettingsInput", [
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 2, name: "notification_settings", kind: "message", T: () => DialogNotificationSettings }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateDialogNotificationSettingsInput>): UpdateDialogNotificationSettingsInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<UpdateDialogNotificationSettingsInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateDialogNotificationSettingsInput): UpdateDialogNotificationSettingsInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* optional DialogNotificationSettings notification_settings */ 2:
+                    message.notificationSettings = DialogNotificationSettings.internalBinaryRead(reader, reader.uint32(), options, message.notificationSettings);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateDialogNotificationSettingsInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional DialogNotificationSettings notification_settings = 2; */
+        if (message.notificationSettings)
+            DialogNotificationSettings.internalBinaryWrite(message.notificationSettings, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateDialogNotificationSettingsInput
+ */
+export const UpdateDialogNotificationSettingsInput = new UpdateDialogNotificationSettingsInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateDialogNotificationSettingsResult$Type extends MessageType<UpdateDialogNotificationSettingsResult> {
+    constructor() {
+        super("UpdateDialogNotificationSettingsResult", [
+            { no: 1, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateDialogNotificationSettingsResult>): UpdateDialogNotificationSettingsResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.updates = [];
+        if (value !== undefined)
+            reflectionMergePartial<UpdateDialogNotificationSettingsResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateDialogNotificationSettingsResult): UpdateDialogNotificationSettingsResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Update updates */ 1:
+                    message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateDialogNotificationSettingsResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Update updates = 1; */
+        for (let i = 0; i < message.updates.length; i++)
+            Update.internalBinaryWrite(message.updates[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateDialogNotificationSettingsResult
+ */
+export const UpdateDialogNotificationSettingsResult = new UpdateDialogNotificationSettingsResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class SendComposeActionInput$Type extends MessageType<SendComposeActionInput> {
     constructor() {
@@ -12094,7 +12368,8 @@ class Update$Type extends MessageType<Update> {
             { no: 29, name: "dialog_archived", kind: "message", oneof: "update", T: () => UpdateDialogArchived },
             { no: 30, name: "chat_info", kind: "message", oneof: "update", T: () => UpdateChatInfo },
             { no: 31, name: "pinned_messages", kind: "message", oneof: "update", T: () => UpdatePinnedMessages },
-            { no: 32, name: "chat_moved", kind: "message", oneof: "update", T: () => UpdateChatMoved }
+            { no: 32, name: "chat_moved", kind: "message", oneof: "update", T: () => UpdateChatMoved },
+            { no: 33, name: "dialog_notification_settings", kind: "message", oneof: "update", T: () => UpdateDialogNotificationSettings }
         ]);
     }
     create(value?: PartialMessage<Update>): Update {
@@ -12289,6 +12564,12 @@ class Update$Type extends MessageType<Update> {
                         chatMoved: UpdateChatMoved.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).chatMoved)
                     };
                     break;
+                case /* UpdateDialogNotificationSettings dialog_notification_settings */ 33:
+                    message.update = {
+                        oneofKind: "dialogNotificationSettings",
+                        dialogNotificationSettings: UpdateDialogNotificationSettings.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).dialogNotificationSettings)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -12394,6 +12675,9 @@ class Update$Type extends MessageType<Update> {
         /* UpdateChatMoved chat_moved = 32; */
         if (message.update.oneofKind === "chatMoved")
             UpdateChatMoved.internalBinaryWrite(message.update.chatMoved, writer.tag(32, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateDialogNotificationSettings dialog_notification_settings = 33; */
+        if (message.update.oneofKind === "dialogNotificationSettings")
+            UpdateDialogNotificationSettings.internalBinaryWrite(message.update.dialogNotificationSettings, writer.tag(33, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -13283,6 +13567,59 @@ class UpdateDialogArchived$Type extends MessageType<UpdateDialogArchived> {
  * @generated MessageType for protobuf message UpdateDialogArchived
  */
 export const UpdateDialogArchived = new UpdateDialogArchived$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateDialogNotificationSettings$Type extends MessageType<UpdateDialogNotificationSettings> {
+    constructor() {
+        super("UpdateDialogNotificationSettings", [
+            { no: 1, name: "peer_id", kind: "message", T: () => Peer },
+            { no: 2, name: "notification_settings", kind: "message", T: () => DialogNotificationSettings }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateDialogNotificationSettings>): UpdateDialogNotificationSettings {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<UpdateDialogNotificationSettings>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateDialogNotificationSettings): UpdateDialogNotificationSettings {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Peer peer_id */ 1:
+                    message.peerId = Peer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* optional DialogNotificationSettings notification_settings */ 2:
+                    message.notificationSettings = DialogNotificationSettings.internalBinaryRead(reader, reader.uint32(), options, message.notificationSettings);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateDialogNotificationSettings, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Peer peer_id = 1; */
+        if (message.peerId)
+            Peer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional DialogNotificationSettings notification_settings = 2; */
+        if (message.notificationSettings)
+            DialogNotificationSettings.internalBinaryWrite(message.notificationSettings, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateDialogNotificationSettings
+ */
+export const UpdateDialogNotificationSettings = new UpdateDialogNotificationSettings$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class UpdateNewChat$Type extends MessageType<UpdateNewChat> {
     constructor() {

@@ -59,6 +59,7 @@ extension MainSplitView {
           .navigationButtons,
           .chatTitle(peer: peer),
           .spacer,
+          .notifications(peer: peer),
           .participants(peer: peer),
         ]
 

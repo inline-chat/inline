@@ -1,4 +1,4 @@
-import { pgTable, boolean, unique, integer, text } from "drizzle-orm/pg-core"
+import { pgTable, boolean, unique, integer, text, bytea } from "drizzle-orm/pg-core"
 import { users } from "./users"
 import { spaces } from "./spaces"
 import { relations } from "drizzle-orm/_relations"
@@ -50,6 +50,9 @@ export const dialogs = pgTable(
 
     /** manually marked as unread */
     unreadMark: boolean("unread_mark").default(false),
+
+    /** Per-chat notification settings override as protobuf bytes (null => inherit global settings) */
+    notificationSettings: bytea("notification_settings"),
   },
   (table) => ({
     chatIdUserIdUnique: unique("chat_id_user_id_unique").on(table.chatId, table.userId),

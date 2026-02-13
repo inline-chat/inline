@@ -31,12 +31,14 @@ struct ChatInfoView: View {
   @State  var selectedVisibilityParticipants: Set<Int64> = []
   @State  var chat: Chat?
   @State  var chatSubscription: AnyCancellable?
+  @State  var dialogNotificationSubscription: AnyCancellable?
   @State  var isEditingInfo = false
   @State  var draftTitle = ""
   @State  var draftEmoji = ""
   @State  var isEmojiPickerPresented = false
   @State  var isSavingInfo = false
   @FocusState  var isTitleFocused: Bool
+  @State  var notificationSelection: DialogNotificationSettingSelection
 
   @Environment(\.appDatabase) var database
   @Environment(\.colorScheme) var colorScheme
@@ -154,6 +156,7 @@ struct ChatInfoView: View {
       db: AppDatabase.shared,
       spaceId: chatItem.chat?.spaceId ?? 0
     ))
+    _notificationSelection = State(initialValue: chatItem.dialog.notificationSelection)
 
     // Default tab based on chat type
     // DMs have no info tab
@@ -218,6 +221,7 @@ struct ChatInfoView: View {
                     participants: participantsWithMembersViewModel.participants,
                     chatId: currentChatId,
                     chatItem: chatItem,
+                    notificationSelection: notificationSelection,
                     spaceMembersViewModel: spaceMembersViewModel,
                     space: space,
                     removeParticipant: { userInfo in
@@ -239,6 +243,9 @@ struct ChatInfoView: View {
                     openParticipantChat: { userInfo in
                       UIImpactFeedbackGenerator(style: .light).impactOccurred()
                       nav.push(.chat(peer: Peer.user(id: userInfo.user.id)))
+                    },
+                    updateNotificationSelection: { selection in
+                      updateNotificationSelection(selection)
                     },
                     requestMakePublic: {
                       showMakePublicAlert = true
@@ -277,6 +284,7 @@ struct ChatInfoView: View {
     }
     .onAppear {
       subscribeToChatUpdates()
+      subscribeToDialogNotificationUpdates()
       Task {
         if let spaceId = chatItem.chat?.spaceId {
           await spaceMembersViewModel.refetchMembers()
@@ -296,6 +304,12 @@ struct ChatInfoView: View {
           selectedTab = availableTabs.first ?? .files
         }
       }
+    }
+    .onDisappear {
+      chatSubscription?.cancel()
+      chatSubscription = nil
+      dialogNotificationSubscription?.cancel()
+      dialogNotificationSubscription = nil
     }
     .onReceive(
       NotificationCenter.default
@@ -401,6 +415,49 @@ struct ChatInfoView: View {
         }
       }
   }
+
+  @MainActor
+  private func subscribeToDialogNotificationUpdates() {
+    guard dialogNotificationSubscription == nil else { return }
+
+    database.warnIfInMemoryDatabaseForObservation("ChatInfoView.dialogNotificationSettings")
+    dialogNotificationSubscription = ValueObservation
+      .tracking { [chatPeer = chatItem.peerId] db in
+        try Dialog.get(peerId: chatPeer).fetchOne(db)
+      }
+      .publisher(in: database.dbWriter, scheduling: .immediate)
+      .receive(on: DispatchQueue.main)
+      .sink(
+        receiveCompletion: { completion in
+          if case let .failure(error) = completion {
+            Log.shared.error("Dialog notification settings observation failed", error: error)
+          }
+        },
+        receiveValue: { dialog in
+          self.notificationSelection = dialog?.notificationSelection ?? .global
+        }
+      )
+  }
+
+  private func updateNotificationSelection(_ selection: DialogNotificationSettingSelection) {
+    guard selection != notificationSelection else { return }
+    let previousSelection = notificationSelection
+    notificationSelection = selection
+
+    Task {
+      do {
+        _ = try await Api.realtime.send(.updateDialogNotificationSettings(
+          peerId: chatItem.peerId,
+          selection: selection
+        ))
+      } catch {
+        Log.shared.error("Failed to update dialog notification settings", error: error)
+        await MainActor.run {
+          notificationSelection = previousSelection
+        }
+      }
+    }
+  }
 }
 
 struct InfoTabView: View {
@@ -408,65 +465,19 @@ struct InfoTabView: View {
   @State  var participantToRemove: UserInfo?
   @State  var showRemoveAlert = false
 
+  private var cardBackgroundColor: Color {
+    Color(uiColor: .secondarySystemGroupedBackground)
+  }
+
+  private var rowDivider: some View {
+    Divider()
+      .padding(.horizontal, 16)
+  }
+
   var body: some View {
-    VStack(spacing: 16) {
-      VStack {
-        HStack {
-          Text("Type")
-
-          Spacer()
-          Image(systemName: chatInfoView.isPrivate ? "lock.fill" : "person.2.fill")
-            .foregroundStyle(Color(ThemeManager.shared.selected.accent))
-
-          Text(chatInfoView.isPrivate ? "Private" : "Public")
-            .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-
-        if chatInfoView.isOwnerOrAdmin, !chatInfoView.isDM {
-          Divider()
-            .padding(.horizontal, 16)
-
-          Button(action: {
-            if chatInfoView.isPrivate {
-              chatInfoView.requestMakePublic()
-            } else {
-              chatInfoView.requestMakePrivate()
-            }
-          }) {
-            HStack {
-              Image(systemName: chatInfoView.isPrivate ? "person.2.fill" : "lock.fill")
-              Text(chatInfoView.isPrivate ? "Make Public" : "Make Private")
-                .font(.callout)
-              Spacer()
-            }
-            .foregroundColor(Color(ThemeManager.shared.selected.accent))
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-          }
-          .buttonStyle(.plain)
-        }
-      }
-      .background(Color(UIColor { traitCollection in
-        if traitCollection.userInterfaceStyle == .dark {
-          UIColor(hex: "#141414") ?? UIColor.systemGray6
-        } else {
-          UIColor(hex: "#F8F8F8") ?? UIColor.systemGray6
-        }
-      }))
-      .clipShape(RoundedRectangle(cornerRadius: 10))
-      .padding(.bottom, 14)
-
-      if !chatInfoView.isDM, chatInfoView.isPrivate {
-        participantsGrid
-      } else {
-        Text(
-          "\(chatInfoView.spaceMembersViewModel.members.count) \(chatInfoView.spaceMembersViewModel.members.count == 1 ? "member" : "members") of \(chatInfoView.space?.displayName ?? "this space") are participants of this chat. New members will have access by default."
-        )
-        .foregroundColor(.secondary)
-        .font(.callout)
-      }
+    VStack(spacing: 12) {
+      settingsCard
+      participantsSection
     }
     .padding(.horizontal, 16)
     .alert("Remove Participant", isPresented: $showRemoveAlert) {
@@ -483,8 +494,140 @@ struct InfoTabView: View {
     }
   }
 
+  private var settingsCard: some View {
+    VStack(spacing: 0) {
+      LabeledContent {
+        Label {
+          Text(chatInfoView.isPrivate ? "Private" : "Public")
+            .foregroundStyle(.secondary)
+        } icon: {
+          Image(systemName: chatInfoView.isPrivate ? "lock.fill" : "person.2.fill")
+            .foregroundStyle(.secondary)
+        }
+        .labelStyle(.titleAndIcon)
+      } label: {
+        Text("Type")
+      }
+      .padding(.horizontal, 16)
+      .padding(.vertical, 12)
+
+      rowDivider
+
+      LabeledContent {
+        Picker("Notifications", selection: notificationSelectionBinding) {
+          ForEach(DialogNotificationSettingSelection.allCases, id: \.self) { option in
+            Text(option.title)
+              .tag(option)
+          }
+        }
+        .pickerStyle(.menu)
+        .labelsHidden()
+        .tint(.primary)
+      } label: {
+        Text("Notifications")
+      }
+      .padding(.horizontal, 16)
+      .padding(.vertical, 12)
+
+      Text("Use Global follows your app-wide notification settings.")
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
+
+      if chatInfoView.isOwnerOrAdmin, !chatInfoView.isDM {
+        rowDivider
+
+        Button {
+          if chatInfoView.isPrivate {
+            chatInfoView.requestMakePublic()
+          } else {
+            chatInfoView.requestMakePrivate()
+          }
+        } label: {
+          LabeledContent {
+            HStack(spacing: 8) {
+              Image(systemName: chatInfoView.isPrivate ? "person.2.fill" : "lock.fill")
+                .foregroundStyle(.secondary)
+              Text(chatInfoView.isPrivate ? "Make Public" : "Make Private")
+                .foregroundStyle(.primary)
+              Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.tertiary)
+            }
+          } label: {
+            Text("Visibility")
+          }
+          .padding(.horizontal, 16)
+          .padding(.vertical, 12)
+          .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+      }
+    }
+    .background(cardBackgroundColor)
+    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+  }
+
   @ViewBuilder
-  var participantsGrid: some View {
+  private var participantsSection: some View {
+    if !chatInfoView.isDM, chatInfoView.isPrivate {
+      participantsCard
+    } else {
+      participantsSummaryCard
+    }
+  }
+
+  private var participantsCard: some View {
+    VStack(spacing: 0) {
+      LabeledContent {
+        Text("\(chatInfoView.participants.count)")
+          .foregroundStyle(.secondary)
+      } label: {
+        Text("Participants")
+      }
+      .padding(.horizontal, 16)
+      .padding(.vertical, 12)
+
+      rowDivider
+
+      participantsGrid
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+    .background(cardBackgroundColor)
+    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+  }
+
+  private var participantsSummaryCard: some View {
+    VStack(spacing: 0) {
+      LabeledContent {
+        Text("\(chatInfoView.spaceMembersViewModel.members.count)")
+          .foregroundStyle(.secondary)
+      } label: {
+        Text("Participants")
+      }
+      .padding(.horizontal, 16)
+      .padding(.vertical, 12)
+
+      rowDivider
+
+      Text(
+        "\(chatInfoView.spaceMembersViewModel.members.count) \(chatInfoView.spaceMembersViewModel.members.count == 1 ? "member" : "members") of \(chatInfoView.space?.displayName ?? "this space") are participants of this chat. New members will have access by default."
+      )
+      .font(.footnote)
+      .foregroundStyle(.secondary)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.horizontal, 16)
+      .padding(.vertical, 12)
+    }
+    .background(cardBackgroundColor)
+    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+  }
+
+  @ViewBuilder
+  private var participantsGrid: some View {
     LazyVGrid(columns: [
       GridItem(.flexible()),
       GridItem(.flexible()),
@@ -544,8 +687,14 @@ struct InfoTabView: View {
         ))
       }
     }
-    .padding(.top, 8)
     .animation(.easeInOut(duration: 0.2), value: chatInfoView.participants.count)
+  }
+
+  private var notificationSelectionBinding: Binding<DialogNotificationSettingSelection> {
+    Binding(
+      get: { chatInfoView.notificationSelection },
+      set: { chatInfoView.updateNotificationSelection($0) }
+    )
   }
 }
 
