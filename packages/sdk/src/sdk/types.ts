@@ -1,5 +1,6 @@
 import type {
   Message,
+  MessageEntities,
   Method,
   Peer,
   Reaction,
@@ -9,7 +10,7 @@ import type {
   UpdateBucket,
   UpdatesPayload,
 } from "@inline-chat/protocol/core"
-import type { InlineId } from "../ids.js"
+import type { InlineId, InlineIdLike } from "../ids.js"
 import type { InlineUnixSeconds } from "../time.js"
 import type { InlineSdkLogger } from "./logger.js"
 import type { Transport } from "../realtime/transport.js"
@@ -23,6 +24,74 @@ export type InlineSdkClientOptions = {
   logger?: InlineSdkLogger
   state?: InlineSdkStateStore
   transport?: Transport
+  fetch?: typeof fetch
+}
+
+export type InlineSdkSendMessageMedia =
+  | { kind: "photo"; photoId: InlineIdLike }
+  | { kind: "video"; videoId: InlineIdLike }
+  | { kind: "document"; documentId: InlineIdLike }
+
+export type InlineSdkSendMessageParams =
+  | {
+      chatId: InlineIdLike
+      userId?: never
+      text?: string
+      media?: InlineSdkSendMessageMedia
+      replyToMsgId?: InlineIdLike
+      parseMarkdown?: boolean
+      sendMode?: "silent"
+      entities?: MessageEntities
+    }
+  | {
+      userId: InlineIdLike
+      chatId?: never
+      text?: string
+      media?: InlineSdkSendMessageMedia
+      replyToMsgId?: InlineIdLike
+      parseMarkdown?: boolean
+      sendMode?: "silent"
+      entities?: MessageEntities
+    }
+
+export type InlineSdkGetMessagesParams =
+  | {
+      chatId: InlineIdLike
+      userId?: never
+      messageIds: InlineIdLike[]
+    }
+  | {
+      userId: InlineIdLike
+      chatId?: never
+      messageIds: InlineIdLike[]
+    }
+
+export type InlineSdkBinaryInput =
+  | Blob
+  | Uint8Array
+  | ArrayBuffer
+  | SharedArrayBuffer
+
+export type InlineSdkUploadFileType = "photo" | "video" | "document"
+
+export type InlineSdkUploadFileParams = {
+  type: InlineSdkUploadFileType
+  file: InlineSdkBinaryInput
+  fileName?: string
+  contentType?: string
+  thumbnail?: InlineSdkBinaryInput
+  thumbnailFileName?: string
+  thumbnailContentType?: string
+  width?: number
+  height?: number
+  duration?: number
+}
+
+export type InlineSdkUploadFileResult = {
+  fileUniqueId: string
+  photoId?: bigint
+  videoId?: bigint
+  documentId?: bigint
 }
 
 export type InlineInboundEvent =
@@ -85,6 +154,9 @@ export const rpcInputKindByMethod = {
   33: "listBots",
   34: "revealBotToken",
   35: "moveThread",
+  36: "rotateBotToken",
+  37: "updateBotProfile",
+  38: "getMessages",
 } as const satisfies Record<number, RpcInputKind | undefined>
 
 export const rpcResultKindByMethod = {
@@ -124,6 +196,9 @@ export const rpcResultKindByMethod = {
   33: "listBots",
   34: "revealBotToken",
   35: "moveThread",
+  36: "rotateBotToken",
+  37: "updateBotProfile",
+  38: "getMessages",
 } as const satisfies Record<number, RpcResultKind | undefined>
 
 type RpcInputKindByMethod = typeof rpcInputKindByMethod

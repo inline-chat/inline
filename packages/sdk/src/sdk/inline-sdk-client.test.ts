@@ -247,6 +247,147 @@ describe("InlineSdkClient", () => {
     await client.close()
   })
 
+  it("getMessages() accepts chatId target and returns messages", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+    })
+
+    await connectAndOpen(client, transport)
+
+    const p = client.getMessages({ chatId: 7, messageIds: [11, 12n] })
+
+    await waitFor(() => transport.sent.some((m) => m.body.oneofKind === "rpcCall"))
+    const rpc = transport.sent.find(
+      (m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.GET_MESSAGES,
+    )
+    if (!rpc || rpc.body.oneofKind !== "rpcCall") throw new Error("missing rpc")
+    expect(rpc.body.rpcCall.input.oneofKind).toBe("getMessages")
+    if (rpc.body.rpcCall.input.oneofKind !== "getMessages") throw new Error("missing getMessages")
+    expect(rpc.body.rpcCall.input.getMessages.peerId?.type.oneofKind).toBe("chat")
+    if (rpc.body.rpcCall.input.getMessages.peerId?.type.oneofKind === "chat") {
+      expect(rpc.body.rpcCall.input.getMessages.peerId.type.chat.chatId).toBe(7n)
+    }
+    expect(rpc.body.rpcCall.input.getMessages.messageIds).toEqual([11n, 12n])
+
+    const messages = [
+      {
+        id: 11n,
+        fromId: 42n,
+        peerId: { type: { oneofKind: "chat", chat: { chatId: 7n } } },
+        chatId: 7n,
+        out: false,
+        date: 100n,
+        message: "a",
+      },
+      {
+        id: 12n,
+        fromId: 43n,
+        peerId: { type: { oneofKind: "chat", chat: { chatId: 7n } } },
+        chatId: 7n,
+        out: true,
+        date: 101n,
+        message: "b",
+      },
+    ]
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 4n,
+        body: {
+          oneofKind: "rpcResult",
+          rpcResult: {
+            reqMsgId: rpc.id,
+            result: {
+              oneofKind: "getMessages",
+              getMessages: {
+                messages,
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    await expect(p).resolves.toEqual({ messages })
+    await client.close()
+  })
+
+  it("getMessages() accepts userId target", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+    })
+
+    await connectAndOpen(client, transport)
+
+    const p = client.getMessages({ userId: 42, messageIds: [77] })
+
+    await waitFor(() => transport.sent.some((m) => m.body.oneofKind === "rpcCall"))
+    const rpc = transport.sent.find(
+      (m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.GET_MESSAGES,
+    )
+    if (!rpc || rpc.body.oneofKind !== "rpcCall") throw new Error("missing rpc")
+    if (rpc.body.rpcCall.input.oneofKind !== "getMessages") throw new Error("missing getMessages")
+    expect(rpc.body.rpcCall.input.getMessages.peerId?.type.oneofKind).toBe("user")
+    if (rpc.body.rpcCall.input.getMessages.peerId?.type.oneofKind === "user") {
+      expect(rpc.body.rpcCall.input.getMessages.peerId.type.user.userId).toBe(42n)
+    }
+    expect(rpc.body.rpcCall.input.getMessages.messageIds).toEqual([77n])
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 5n,
+        body: {
+          oneofKind: "rpcResult",
+          rpcResult: {
+            reqMsgId: rpc.id,
+            result: {
+              oneofKind: "getMessages",
+              getMessages: {
+                messages: [],
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    await expect(p).resolves.toEqual({ messages: [] })
+    await client.close()
+  })
+
+  it("getMessages() rejects invalid target selection", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+    })
+
+    await connectAndOpen(client, transport)
+
+    await expect(
+      client.getMessages({
+        chatId: 7,
+        userId: 42,
+        messageIds: [1],
+      } as any),
+    ).rejects.toThrow(/exactly one of `chatId` or `userId`/)
+
+    await expect(
+      client.getMessages({
+        messageIds: [1],
+      } as any),
+    ).rejects.toThrow(/exactly one of `chatId` or `userId`/)
+
+    await client.close()
+  })
+
   it("sendMessage() accepts number chatId and uses sendMode", async () => {
     const transport = new MockTransport()
     const client = new InlineSdkClient({
