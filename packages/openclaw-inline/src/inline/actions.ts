@@ -37,7 +37,7 @@ const ACTION_GROUPS: Array<{
   defaultEnabled: boolean
   actions: ChannelMessageActionName[]
 }> = [
-  { key: "reply", defaultEnabled: true, actions: ["reply", "thread-reply"] },
+  { key: "reply", defaultEnabled: true, actions: ["reply"] },
   { key: "reactions", defaultEnabled: true, actions: ["react", "reactions"] },
   { key: "read", defaultEnabled: true, actions: ["read"] },
   { key: "search", defaultEnabled: true, actions: ["search"] },
@@ -165,6 +165,136 @@ function parseInlineIdListFromParams(params: Record<string, unknown>, key: strin
     return parseInlineIdList(direct, key)
   }
   return []
+}
+
+function parseInlineListValue(raw: unknown, label: string): string[] {
+  if (raw == null) return []
+  if (Array.isArray(raw)) {
+    return raw.flatMap((entry) => parseInlineListValue(entry, label))
+  }
+  if (typeof raw === "bigint") return [raw.toString()]
+  if (typeof raw === "number") {
+    if (!Number.isFinite(raw) || !Number.isInteger(raw) || raw < 0) {
+      throw new Error(`inline action: invalid ${label} "${String(raw)}"`)
+    }
+    return [String(raw)]
+  }
+  if (typeof raw === "string") {
+    const trimmed = raw.trim()
+    if (!trimmed) return []
+    return trimmed
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+  }
+  throw new Error(`inline action: invalid ${label}`)
+}
+
+function parseInlineListValuesFromParams(params: Record<string, unknown>, keys: string[]): string[] {
+  const entries = keys.flatMap((key) => parseInlineListValue(params[key], key))
+  return Array.from(new Set(entries.map((entry) => entry.trim()).filter(Boolean)))
+}
+
+function normalizeInlineUserLookupToken(raw: string): string {
+  return raw
+    .trim()
+    .replace(/^inline:/i, "")
+    .replace(/^user:/i, "")
+    .replace(/^@/, "")
+    .trim()
+}
+
+function parseInlineIdIfNumericToken(raw: string): bigint | undefined {
+  const normalized = normalizeInlineUserLookupToken(raw)
+  if (!/^[0-9]+$/.test(normalized)) return undefined
+  return BigInt(normalized)
+}
+
+function buildInlineUserHaystack(user: User): string {
+  return [
+    String(user.id),
+    buildInlineUserDisplayName(user),
+    user.firstName ?? "",
+    user.lastName ?? "",
+    user.username ?? "",
+  ]
+    .join("\n")
+    .toLowerCase()
+}
+
+function resolveInlineUsersByToken(params: { users: User[]; token: string }): User[] {
+  const normalized = normalizeInlineUserLookupToken(params.token)
+  if (!normalized) return []
+  const lowered = normalized.toLowerCase()
+
+  const numericId = parseInlineIdIfNumericToken(normalized)
+  if (numericId != null) {
+    return params.users.filter((user) => user.id === numericId)
+  }
+
+  const byUsername = params.users.filter((user) => (user.username ?? "").trim().toLowerCase() === lowered)
+  if (byUsername.length > 0) {
+    return byUsername
+  }
+
+  const byExactName = params.users.filter(
+    (user) => buildInlineUserDisplayName(user).trim().toLowerCase() === lowered,
+  )
+  if (byExactName.length > 0) {
+    return byExactName
+  }
+
+  return params.users.filter((user) => buildInlineUserHaystack(user).includes(lowered))
+}
+
+async function fetchInlineUsersForResolution(client: InlineSdkClient): Promise<User[]> {
+  const result = await client.invokeRaw(Method.GET_CHATS, {
+    oneofKind: "getChats",
+    getChats: {},
+  })
+  if (result.oneofKind !== "getChats") {
+    throw new Error(`inline action: expected getChats result, got ${String(result.oneofKind)}`)
+  }
+  return result.getChats.users ?? []
+}
+
+async function resolveInlineUserIdsFromParams(params: {
+  client: InlineSdkClient
+  values: string[]
+  label: string
+}): Promise<bigint[]> {
+  if (params.values.length === 0) return []
+
+  const resolved: bigint[] = []
+  const unresolved: string[] = []
+  for (const value of params.values) {
+    const numericId = parseInlineIdIfNumericToken(value)
+    if (numericId != null) {
+      resolved.push(numericId)
+      continue
+    }
+    unresolved.push(value)
+  }
+
+  if (unresolved.length > 0) {
+    const users = await fetchInlineUsersForResolution(params.client)
+    for (const token of unresolved) {
+      const matches = resolveInlineUsersByToken({ users, token })
+      if (matches.length === 0) {
+        throw new Error(`inline action: could not resolve ${params.label} "${token}"`)
+      }
+      if (matches.length > 1) {
+        throw new Error(`inline action: ambiguous ${params.label} "${token}"`)
+      }
+      const match = matches[0]
+      if (!match) {
+        throw new Error(`inline action: could not resolve ${params.label} "${token}"`)
+      }
+      resolved.push(match.id)
+    }
+  }
+
+  return Array.from(new Set(resolved.map((id) => id.toString()))).map((id) => BigInt(id))
 }
 
 function resolveChatIdFromParams(params: Record<string, unknown>): bigint {
@@ -460,7 +590,7 @@ export const inlineMessageActions: ChannelMessageActionAdapter = {
       throw new Error(`inline action: ${action} is disabled by channels.inline.actions`)
     }
 
-    const normalizedAction: ChannelMessageActionName = action === "thread-reply" ? "reply" : action
+    const normalizedAction: ChannelMessageActionName = action
 
     if (normalizedAction === "reply") {
       const parseMarkdown =
@@ -721,6 +851,7 @@ export const inlineMessageActions: ChannelMessageActionAdapter = {
           const title =
             readStringParam(params, "title") ??
             readStringParam(params, "name") ??
+            readStringParam(params, "threadName") ??
             readStringParam(params, "message", { required: true })
           const result = await client.invokeRaw(Method.UPDATE_CHAT_INFO, {
             oneofKind: "updateChatInfo",
@@ -805,6 +936,7 @@ export const inlineMessageActions: ChannelMessageActionAdapter = {
           const title =
             readStringParam(params, "title") ??
             readStringParam(params, "name") ??
+            readStringParam(params, "threadName") ??
             readStringParam(params, "message", { required: true })
           const description = readStringParam(params, "description")
           const emoji = readStringParam(params, "emoji")
@@ -813,15 +945,19 @@ export const inlineMessageActions: ChannelMessageActionAdapter = {
             "spaceId",
           )
           const isPublic = readBooleanParam(params, "isPublic") ?? false
-          const participantIds = [
-            ...parseInlineIdListFromParams(params, "participants"),
-            ...parseInlineIdListFromParams(params, "participantIds"),
-            ...parseInlineIdListFromParams(params, "userIds"),
-            ...parseInlineIdListFromParams(params, "userId"),
-          ]
-          const dedupedParticipants = Array.from(new Set(participantIds.map((id) => id.toString()))).map(
-            (id) => BigInt(id),
-          )
+          const participantRefs = parseInlineListValuesFromParams(params, [
+            "participants",
+            "participantIds",
+            "participantId",
+            "participant",
+            "userIds",
+            "userId",
+          ])
+          const dedupedParticipants = await resolveInlineUserIdsFromParams({
+            client,
+            values: participantRefs,
+            label: "participant",
+          })
 
           const result = await client.invokeRaw(Method.CREATE_CHAT, {
             oneofKind: "createChat",
@@ -922,13 +1058,30 @@ export const inlineMessageActions: ChannelMessageActionAdapter = {
         accountId,
         fn: async (client) => {
           const chatId = resolveChatIdFromParams(params)
-          const userId = parseInlineId(
-            readFlexibleId(params, "userId") ??
-              readFlexibleId(params, "participant") ??
-              readFlexibleId(params, "memberId") ??
-              readStringParam(params, "userId", { required: true }),
+          const participantRefs = parseInlineListValuesFromParams(params, [
             "userId",
-          )
+            "participant",
+            "participantId",
+            "memberId",
+          ])
+          if (participantRefs.length === 0) {
+            readStringParam(params, "userId", { required: true })
+          }
+          const participantIds = await resolveInlineUserIdsFromParams({
+            client,
+            values: participantRefs,
+            label: "user",
+          })
+          if (participantIds.length === 0) {
+            throw new Error("inline action: missing user")
+          }
+          if (participantIds.length > 1) {
+            throw new Error("inline action: addParticipant accepts exactly one user")
+          }
+          const userId = participantIds[0]
+          if (!userId) {
+            throw new Error("inline action: missing user")
+          }
           const result = await client.invokeRaw(Method.ADD_CHAT_PARTICIPANT, {
             oneofKind: "addChatParticipant",
             addChatParticipant: {
@@ -959,13 +1112,30 @@ export const inlineMessageActions: ChannelMessageActionAdapter = {
         accountId,
         fn: async (client) => {
           const chatId = resolveChatIdFromParams(params)
-          const userId = parseInlineId(
-            readFlexibleId(params, "userId") ??
-              readFlexibleId(params, "participant") ??
-              readFlexibleId(params, "memberId") ??
-              readStringParam(params, "userId", { required: true }),
+          const participantRefs = parseInlineListValuesFromParams(params, [
             "userId",
-          )
+            "participant",
+            "participantId",
+            "memberId",
+          ])
+          if (participantRefs.length === 0) {
+            readStringParam(params, "userId", { required: true })
+          }
+          const participantIds = await resolveInlineUserIdsFromParams({
+            client,
+            values: participantRefs,
+            label: "user",
+          })
+          if (participantIds.length === 0) {
+            throw new Error("inline action: missing user")
+          }
+          if (participantIds.length > 1) {
+            throw new Error("inline action: removeParticipant accepts exactly one user")
+          }
+          const userId = participantIds[0]
+          if (!userId) {
+            throw new Error("inline action: missing user")
+          }
           const result = await client.invokeRaw(Method.REMOVE_CHAT_PARTICIPANT, {
             oneofKind: "removeChatParticipant",
             removeChatParticipant: {

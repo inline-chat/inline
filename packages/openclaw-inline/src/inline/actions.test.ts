@@ -22,7 +22,7 @@ describe("inline/actions", () => {
       }) ?? []
 
     expect(configured).toContain("reply")
-    expect(configured).toContain("thread-reply")
+    expect(configured).not.toContain("thread-reply")
     expect(configured).toContain("channel-list")
     expect(configured).toContain("channel-create")
     expect(configured).toContain("removeParticipant")
@@ -312,13 +312,6 @@ describe("inline/actions", () => {
 
     await inlineMessageActions.handleAction?.({
       channel: "inline",
-      action: "thread-reply",
-      cfg,
-      params: { to: "7", messageId: "10", message: "reply body" },
-    } as any)
-
-    await inlineMessageActions.handleAction?.({
-      channel: "inline",
       action: "delete",
       cfg,
       params: { to: "7", messageIds: ["10", "11"] },
@@ -377,7 +370,14 @@ describe("inline/actions", () => {
       channel: "inline",
       action: "thread-create",
       cfg,
-      params: { title: "New Thread", participants: ["99"], spaceId: "22" },
+      params: { threadName: "Alias Thread", participant: "@new-user", spaceId: "22" },
+    } as any)
+
+    await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "channel-edit",
+      cfg,
+      params: { to: "7", threadName: "Alias Rename" },
     } as any)
 
     await inlineMessageActions.handleAction?.({
@@ -398,14 +398,14 @@ describe("inline/actions", () => {
       channel: "inline",
       action: "addParticipant",
       cfg,
-      params: { to: "7", userId: "99" },
+      params: { to: "7", participant: "@new-user" },
     } as any)
 
     await inlineMessageActions.handleAction?.({
       channel: "inline",
       action: "removeParticipant",
       cfg,
-      params: { to: "7", userId: "99" },
+      params: { to: "7", participant: "@new-user" },
     } as any)
 
     await inlineMessageActions.handleAction?.({
@@ -465,6 +465,26 @@ describe("inline/actions", () => {
       9,
       expect.objectContaining({
         oneofKind: "createChat",
+      }),
+    )
+    expect(invokeRaw).toHaveBeenCalledWith(
+      9,
+      expect.objectContaining({
+        oneofKind: "createChat",
+        createChat: expect.objectContaining({
+          title: "Alias Thread",
+          participants: [{ userId: 99n }],
+        }),
+      }),
+    )
+    expect(invokeRaw).toHaveBeenCalledWith(
+      32,
+      expect.objectContaining({
+        oneofKind: "updateChatInfo",
+        updateChatInfo: expect.objectContaining({
+          chatId: 7n,
+          title: "Alias Rename",
+        }),
       }),
     )
     expect(invokeRaw).toHaveBeenCalledWith(
