@@ -86,9 +86,12 @@ private struct ExperimentalHomeView: View {
   @Environment(Router.self) private var router
   @EnvironmentObject private var compactSpaceList: CompactSpaceList
   @EnvironmentObject private var data: DataManager
+  @EnvironmentObject private var home: HomeViewModel
   @EnvironmentStateObject private var chatsModel: ExperimentalSpaceChatsViewModel
 
-  @State private var lastFetchedSpaceId: Int64?
+  @AppStorage(ExperimentalHomePreferenceKeys.chatScope) private var homeChatScopeRaw: String = ExperimentalHomeChatScope.all.rawValue
+  @State private var didInitialFetch = false
+  @State private var fetchedSpaceIds = Set<Int64>()
 
   init(nav: ExperimentalNavigationModel, initialTab: ExperimentalHomeTab) {
     self.nav = nav
@@ -106,6 +109,8 @@ private struct ExperimentalHomeView: View {
           items: inboxItems,
           emptyTitle: "No chats",
           emptySubtitle: "Start a new chat with the plus button.",
+          sectionHeader: nil,
+          showsSpaceNameInRows: nav.activeSpaceId == nil,
           onTapItem: openChat
         )
       case .archived:
@@ -113,6 +118,8 @@ private struct ExperimentalHomeView: View {
           items: archivedItems,
           emptyTitle: "No archived chats",
           emptySubtitle: "Archived chats will show up here.",
+          sectionHeader: "Archived Chats",
+          showsSpaceNameInRows: nav.activeSpaceId == nil,
           onTapItem: openChat
         )
       }
@@ -120,38 +127,59 @@ private struct ExperimentalHomeView: View {
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(Color(.systemBackground))
     .navigationBarTitleDisplayMode(.inline)
-    .navigationTitle(initialTab == .archived ? "Archived" : "Chats")
+    .navigationTitle("")
     .task {
-      ensureActiveSpaceSelected()
-      chatsModel.setSpaceId(nav.activeSpaceId)
-      await fetchDialogsIfNeeded(spaceId: nav.activeSpaceId)
+      guard !didInitialFetch else { return }
+      didInitialFetch = true
+      await initialFetch()
     }
     .onChange(of: compactSpaceList.spaces) { _, _ in
-      ensureActiveSpaceSelected()
+      ensureActiveSpaceExists()
       chatsModel.setSpaceId(nav.activeSpaceId)
-      Task { await fetchDialogsIfNeeded(spaceId: nav.activeSpaceId) }
+      Task { await refreshDialogsForCurrentSelection() }
     }
     .onChange(of: nav.activeSpaceId) { _, newValue in
       chatsModel.setSpaceId(newValue)
-      Task { await fetchDialogsIfNeeded(spaceId: newValue) }
+      Task { await refreshDialogsForCurrentSelection() }
     }
   }
 
-  private var visibleChats: [HomeChatItem] {
-    chatsModel.items
+  private var homeChatScope: ExperimentalHomeChatScope {
+    ExperimentalHomeChatScope(rawValue: homeChatScopeRaw) ?? .all
+  }
+
+  private var visibleChats: [HomeChatItem] { chatsModel.items }
+
+  private var currentChats: [HomeChatItem] {
+    if nav.activeSpaceId == nil {
+      let sorted = HomeViewModel.sortChats(home.chats)
+      return sorted.filter { item in
+        switch homeChatScope {
+        case .all:
+          true
+        case .home:
+          item.space == nil
+        case .spaces:
+          item.space != nil
+        }
+      }
+    } else {
+      return visibleChats
+    }
   }
 
   private var inboxItems: [HomeChatItem] {
-    visibleChats.filter { $0.dialog.archived != true }
+    currentChats.filter { $0.dialog.archived != true }
   }
 
   private var archivedItems: [HomeChatItem] {
-    visibleChats.filter { $0.dialog.archived == true }
+    currentChats.filter { $0.dialog.archived == true }
   }
 
-  private func ensureActiveSpaceSelected() {
-    if nav.activeSpaceId == nil {
-      nav.activeSpaceId = compactSpaceList.spaces.first?.id
+  private func ensureActiveSpaceExists() {
+    guard let activeSpaceId = nav.activeSpaceId else { return }
+    if !compactSpaceList.spaces.contains(where: { $0.id == activeSpaceId }) {
+      nav.activeSpaceId = nil
     }
   }
 
@@ -159,10 +187,29 @@ private struct ExperimentalHomeView: View {
     router.push(.chat(peer: item.peerId))
   }
 
-  private func fetchDialogsIfNeeded(spaceId: Int64?) async {
-    guard let spaceId else { return }
-    guard lastFetchedSpaceId != spaceId else { return }
-    lastFetchedSpaceId = spaceId
+  private func initialFetch() async {
+    do {
+      _ = try await data.getSpaces()
+    } catch {
+      Log.shared.error("Failed to getSpaces", error: error)
+    }
+    chatsModel.setSpaceId(nav.activeSpaceId)
+    await refreshDialogsForCurrentSelection()
+  }
+
+  private func refreshDialogsForCurrentSelection() async {
+    if let spaceId = nav.activeSpaceId {
+      await fetchDialogsIfNeeded(spaceId: spaceId)
+    } else {
+      // Home: show chats from all spaces, so ensure each space has at least one dialogs fetch.
+      for space in compactSpaceList.spaces {
+        await fetchDialogsIfNeeded(spaceId: space.id)
+      }
+    }
+  }
+
+  private func fetchDialogsIfNeeded(spaceId: Int64) async {
+    guard fetchedSpaceIds.insert(spaceId).inserted else { return }
     do {
       try await data.getDialogs(spaceId: spaceId)
     } catch {
@@ -281,6 +328,8 @@ private struct ExperimentalChatListView: View {
   let items: [HomeChatItem]
   let emptyTitle: String
   let emptySubtitle: String
+  let sectionHeader: String?
+  let showsSpaceNameInRows: Bool
   let onTapItem: (HomeChatItem) -> Void
 
   @EnvironmentObject private var data: DataManager
@@ -290,27 +339,40 @@ private struct ExperimentalChatListView: View {
       ExperimentalEmptyStateView(title: emptyTitle, subtitle: emptySubtitle)
     } else {
       List {
-        ForEach(items, id: \.id) { item in
-          Button {
-            onTapItem(item)
-          } label: {
-            rowContent(for: item)
-              .frame(maxWidth: .infinity, alignment: .leading)
-              .contentShape(.rect)
+        if let sectionHeader {
+          Section {
+            rows
+          } header: {
+            Text(sectionHeader)
+              .textCase(nil)
           }
-          .buttonStyle(.plain)
-          .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            archiveButton(for: item)
-          }
-          .listRowInsets(EdgeInsets(
-            top: 8,
-            leading: 16,
-            bottom: 8,
-            trailing: 16
-          ))
+        } else {
+          rows
         }
       }
       .listStyle(.plain)
+    }
+  }
+
+  private var rows: some View {
+    ForEach(items, id: \.id) { item in
+      Button {
+        onTapItem(item)
+      } label: {
+        rowContent(for: item)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .contentShape(.rect)
+      }
+      .buttonStyle(.plain)
+      .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+        archiveButton(for: item)
+      }
+      .listRowInsets(EdgeInsets(
+        top: 8,
+        leading: 16,
+        bottom: 8,
+        trailing: 16
+      ))
     }
   }
 
@@ -346,7 +408,7 @@ private struct ExperimentalChatListView: View {
       )
     } else if let chat = item.chat {
       ChatListItem(
-        type: .chat(chat, spaceName: item.space?.nameWithoutEmoji),
+        type: .chat(chat, spaceName: showsSpaceNameInRows ? item.space?.nameWithoutEmoji : nil),
         dialog: item.dialog,
         lastMessage: item.lastMessage?.message,
         lastMessageSender: item.lastMessage?.senderInfo,

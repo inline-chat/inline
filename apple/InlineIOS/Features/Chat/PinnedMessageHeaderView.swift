@@ -309,7 +309,7 @@ private struct PinnedMessageGlassView: View {
   var body: some View {
     Color.clear
       .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+      .glassEffect(.regular.interactive(), in: .rect(cornerRadius: cornerRadius))
       .allowsHitTesting(false)
   }
 }

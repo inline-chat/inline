@@ -23,6 +23,7 @@ struct ExperimentalRootView: View {
   @EnvironmentStateObject private var data: DataManager
   @EnvironmentStateObject private var home: HomeViewModel
   @EnvironmentStateObject private var compactSpaceList: CompactSpaceList
+  @AppStorage(ExperimentalHomePreferenceKeys.chatScope) private var homeChatScopeRaw: String = ExperimentalHomeChatScope.all.rawValue
 
   init() {
     _data = EnvironmentStateObject { env in
@@ -87,66 +88,29 @@ struct ExperimentalRootView: View {
       }
       .background(Color(.systemBackground))
       .navigationBarTitleDisplayMode(.inline)
-      .navigationTitle(rootTab == .archived ? "Archived" : "Chats")
+      .navigationTitle("")
       // Put the toolbar on the TabView root. Toolbars declared inside TabView pages can fail to
       // render reliably; attaching here keeps the top bar consistent.
       .toolbar {
         ToolbarItem(placement: .principal) {
-          SpacePickerMenu(
-            selectedSpaceId: $bindableNav.activeSpaceId,
-            onSelectHome: {
-              if bindableNav.activeSpaceId != nil {
-                bindableNav.activeSpaceId = nil
-              }
-              bindableRouter.popToRoot(for: bindableRouter.selectedTab)
-            },
-            onSelectSpace: { space in
-              if bindableNav.activeSpaceId != space.id {
-                bindableNav.activeSpaceId = space.id
-              }
-              bindableRouter.popToRoot(for: bindableRouter.selectedTab)
-            },
-            onCreateSpace: {
-              bindableRouter.push(.createSpace, for: bindableRouter.selectedTab)
-            }
-          )
+          activeSpacePicker(selectedSpaceId: $bindableNav.activeSpaceId)
         }
 
-        ToolbarItem(placement: .topBarLeading) {
-          NotificationSettingsButton()
-        }
-
-        ToolbarItem(placement: .topBarTrailing) {
-          Menu {
-            Button {
-              presentMembers()
-            } label: {
-              Label("Members", systemImage: "person.2")
-            }
-            .disabled(nav.activeSpaceId == nil)
-
-            Button {
-              bindableRouter.push(.createSpace, for: bindableRouter.selectedTab)
-            } label: {
-              Label("Create Space", systemImage: "building")
-            }
-
-            Button {
-              bindableRouter.push(.createSpaceChat, for: bindableRouter.selectedTab)
-            } label: {
-              Label("New Group Chat", systemImage: "plus.message")
-            }
-
-            Button {
-              bindableRouter.presentSheet(.settings)
-            } label: {
-              Label("Settings", systemImage: "gearshape")
-            }
-          } label: {
-            Image(systemName: "ellipsis")
-              .contentShape(Rectangle())
+        if #available(iOS 26.0, *) {
+          ToolbarItem(placement: .topBarTrailing) {
+            createThreadButton(activeSpaceId: bindableNav.activeSpaceId)
           }
-          .accessibilityLabel("More")
+          ToolbarSpacer(.fixed, placement: .topBarTrailing)
+          ToolbarItem(placement: .topBarTrailing) {
+            trailingButtonGroup
+          }
+        } else {
+          ToolbarItem(placement: .topBarTrailing) {
+            HStack(spacing: 10) {
+              createThreadButton(activeSpaceId: bindableNav.activeSpaceId)
+              trailingButtonGroup
+            }
+          }
         }
       }
       // Match the app's translucent styling for the system tab bar.
@@ -203,5 +167,108 @@ struct ExperimentalRootView: View {
   private func presentMembers() {
     guard let spaceId = nav.activeSpaceId else { return }
     router.presentSheet(.members(spaceId: spaceId))
+  }
+
+  // MARK: - Toolbar
+
+  private var homeChatScope: ExperimentalHomeChatScope {
+    ExperimentalHomeChatScope(rawValue: homeChatScopeRaw) ?? .all
+  }
+
+  private var homeChatScopeBinding: Binding<ExperimentalHomeChatScope> {
+    Binding(
+      get: { homeChatScope },
+      set: { homeChatScopeRaw = $0.rawValue }
+    )
+  }
+
+  @ViewBuilder
+  private func activeSpacePicker(
+    selectedSpaceId: Binding<Int64?>
+  ) -> some View {
+    let picker = SpacePickerMenu(
+      selectedSpaceId: selectedSpaceId,
+      onSelectHome: {
+        selectedSpaceId.wrappedValue = nil
+        router.popToRoot(for: router.selectedTab)
+      },
+      onSelectSpace: { space in
+        if selectedSpaceId.wrappedValue != space.id {
+          selectedSpaceId.wrappedValue = space.id
+        }
+        router.popToRoot(for: router.selectedTab)
+      },
+      onCreateSpace: {
+        router.push(.createSpace, for: router.selectedTab)
+      }
+    )
+
+    picker
+      .contentShape(Capsule())
+      // Ensure the toolbar gives the label enough width to show the active space name.
+      .frame(minWidth: 140, idealWidth: 180, maxWidth: 240, alignment: .leading)
+  }
+
+  @ViewBuilder
+  private func createThreadButton(
+    activeSpaceId: Int64?
+  ) -> some View {
+    Button {
+      if let spaceId = activeSpaceId {
+        router.push(.createThread(spaceId: spaceId), for: router.selectedTab)
+      } else {
+        router.push(.createSpaceChat, for: router.selectedTab)
+      }
+    } label: {
+      Image(systemName: "plus")
+        .font(.system(size: 14, weight: .semibold))
+        .foregroundStyle(.secondary)
+        .frame(width: 36, height: 36)
+        .contentShape(Circle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel("New Chat")
+  }
+
+  private var trailingButtonGroup: some View {
+    HStack(spacing: 0) {
+      NotificationSettingsButton()
+        .frame(width: 36, height: 36)
+
+      Divider()
+        .opacity(0.35)
+        .padding(.vertical, 8)
+
+      Menu {
+        if nav.activeSpaceId == nil {
+          Picker("View", selection: homeChatScopeBinding) {
+            ForEach(ExperimentalHomeChatScope.allCases) { scope in
+              Label(scope.title, systemImage: scope.systemImage)
+                .tag(scope)
+            }
+          }
+        }
+
+        Button {
+          presentMembers()
+        } label: {
+          Label("Members", systemImage: "person.2")
+        }
+        .disabled(nav.activeSpaceId == nil)
+
+        Button {
+          router.presentSheet(.settings)
+        } label: {
+          Label("Settings", systemImage: "gearshape")
+        }
+      } label: {
+        Image(systemName: "ellipsis")
+          .font(.system(size: 14, weight: .semibold))
+          .foregroundStyle(.secondary)
+          .frame(width: 36, height: 36)
+          .contentShape(Rectangle())
+      }
+      .accessibilityLabel("More")
+    }
   }
 }
