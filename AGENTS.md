@@ -18,6 +18,7 @@
 - Multi-agent safety: do not create/apply/drop git stash entries unless explicitly requested (this includes `git pull --rebase --autostash`). Assume other agents may be working; keep unrelated WIP untouched and avoid cross-cutting state changes.
 - Multi-agent safety: when the user says "push", you may `git pull --rebase` to integrate latest changes (never discard other agents' work; if a rebase hits conflicts, stop and ask before resolving). When the user says "commit", scope to your changes only. When the user says "commit all", commit everything in grouped chunks.
 - Multi-agent safety: do not create/remove/modify git worktree checkouts (or edit `.worktrees/*`) unless explicitly requested.
+- Multi-agent safety: never clone this repo to commit/push changes from outside the main GitHub worktree unless the user explicitly confirms first.
 - Multi-agent safety: do not switch branches / check out a different branch unless explicitly requested.
 - Multi-agent safety: running multiple agents is OK as long as each agent has its own session.
 - Multi-agent safety: when you see unrecognized files, keep going; focus on your changes and commit only those.
