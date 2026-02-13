@@ -136,6 +136,12 @@ class ComposeTextView: UITextView {
       return
     }
 
+    // Attachment replacement characters are transient during drag/drop.
+    // Avoid normalizing the entire string here because it can wipe user text styling.
+    if attributedText.string.contains("\u{FFFC}") {
+      return
+    }
+
     var needsFix = false
     attributedText.enumerateAttribute(
       .font,
@@ -180,17 +186,56 @@ class ComposeTextView: UITextView {
     if !rangesToProcess.isEmpty {
       DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
         guard let self else { return }
+        var droppedAttachmentImages: [UIImage] = []
+        var droppedAttachmentRanges: [NSRange] = []
+
         for range in rangesToProcess {
           if range.location < attributedText.length {
             let attributes = attributedText.attributes(
               at: range.location,
               effectiveRange: nil
             )
-            processReplacementCharacter(at: range, attributes: attributes)
+            if let droppedImage = self.imageFromTextAttachment(attributes: attributes) {
+              droppedAttachmentImages.append(droppedImage)
+              droppedAttachmentRanges.append(range)
+              continue
+            }
+
+            self.processReplacementCharacter(at: range, attributes: attributes)
           }
+        }
+
+        guard let composeView = self.composeView else { return }
+        guard !droppedAttachmentImages.isEmpty else { return }
+
+        // Remove replacement characters from end to start so range offsets stay valid.
+        for range in droppedAttachmentRanges.sorted(by: { $0.location > $1.location }) {
+          self.safelyRemoveAttachment(at: range)
+        }
+
+        if droppedAttachmentImages.count == 1 {
+          composeView.handleDroppedImage(droppedAttachmentImages[0])
+        } else {
+          composeView.handleMultipleDroppedImages(droppedAttachmentImages)
         }
       }
     }
+  }
+
+  private func imageFromTextAttachment(attributes: [NSAttributedString.Key: Any]) -> UIImage? {
+    guard let attachment = attributes[.attachment] as? NSTextAttachment else { return nil }
+
+    if let image = attachment.image {
+      return image
+    }
+
+    if let data = attachment.fileWrapper?.regularFileContents,
+       let image = UIImage(data: data)
+    {
+      return image
+    }
+
+    return nil
   }
 
   private func processReplacementCharacter(
@@ -447,17 +492,10 @@ class ComposeTextView: UITextView {
 
     if validRange.length > 0 {
       attributedString.replaceCharacters(in: validRange, with: "")
-      attributedString.addAttribute(
-        .font,
-        value: UIFont.systemFont(ofSize: 17),
-        range: NSRange(
-          location: 0,
-          length: attributedString.length
-        )
-      )
 
       DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
         self?.attributedText = attributedString
+        self?.updateTypingAttributesIfNeeded()
       }
     }
   }
@@ -632,13 +670,7 @@ extension ComposeTextView {
 
     if let composeView {
       Task(priority: .userInitiated) { @MainActor in
-        // Use the actor with async/await
-//        let (optimizedImage, _) = await ImageProcessor.shared.processImage(image)
-//        composeView.sendSticker(optimizedImage)
-        composeView.sendSticker(image)
-
-        // ??
-        self.fixFontSizeAfterStickerInsertion()
+        composeView.handleDroppedImage(image)
       }
       return
     }

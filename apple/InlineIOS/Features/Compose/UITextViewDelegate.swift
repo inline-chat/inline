@@ -13,11 +13,19 @@ extension ComposeView: UITextViewDelegate {
 
     // processBoldTextIfNeeded(in: textView)
 
+    let rawText = textView.text ?? ""
+    let hasAttachmentReplacementCharacter = rawText.contains("\u{FFFC}") ||
+      (textView.attributedText?.string.contains("\u{FFFC}") == true)
+    let textWithoutAttachmentMarkers = rawText.replacingOccurrences(of: "\u{FFFC}", with: "")
+    let isEmpty = textWithoutAttachmentMarkers.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
     // Height Management
-    UIView.animate(withDuration: 0.1) { self.updateHeight() }
+    // Text attachment replacement chars are transient during drag/drop and should not resize compose.
+    if !hasAttachmentReplacementCharacter {
+      UIView.animate(withDuration: 0.1) { self.updateHeight() }
+    }
 
     // Placeholder Visibility & Attachment Checks
-    let isEmpty = textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     (textView as? ComposeTextView)?.showPlaceholder(isEmpty)
     updateSendButtonVisibility()
 

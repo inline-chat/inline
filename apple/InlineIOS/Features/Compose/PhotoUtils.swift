@@ -6,6 +6,27 @@ import UIKit
 import UniformTypeIdentifiers
 
 extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+  private func resetComposeStateAfterPreviewSend() {
+    if let attributed = textView.attributedText?.mutableCopy() as? NSMutableAttributedString {
+      let marker = "\u{FFFC}" as NSString
+      var range = (attributed.string as NSString).range(of: marker as String)
+      while range.location != NSNotFound {
+        attributed.replaceCharacters(in: range, with: "")
+        range = (attributed.string as NSString).range(of: marker as String)
+      }
+      textView.attributedText = attributed
+    }
+
+    textView.resetTypingAttributesToDefault()
+    textView.font = .systemFont(ofSize: 17)
+    textView.typingAttributes[.font] = UIFont.systemFont(ofSize: 17)
+
+    let normalizedText = (textView.text ?? "").replacingOccurrences(of: "\u{FFFC}", with: "")
+    let isEmpty = normalizedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    (textView as? ComposeTextView)?.showPlaceholder(isEmpty)
+    updateSendButtonVisibility()
+  }
+
   // MARK: - UIImagePickerControllerDelegate
 
   func presentPicker() {
@@ -79,6 +100,8 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
   }
 
   func handleDroppedImage(_ image: UIImage) {
+    guard !previewViewModel.isPresented, !multiPhotoPreviewViewModel.isPresented else { return }
+
     // For dropped single images, use single photo preview
     selectedImage = image
     previewViewModel.isPresented = true
@@ -120,6 +143,7 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
 
   func handleMultipleDroppedImages(_ images: [UIImage]) {
     guard !images.isEmpty else { return }
+    guard !previewViewModel.isPresented, !multiPhotoPreviewViewModel.isPresented else { return }
 
     if images.count == 1 {
       handleDroppedImage(images[0])
@@ -227,7 +251,7 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     guard let peerId else { return }
 
     sendButton.configuration?.showsActivityIndicator = true
-    attachmentItems.removeAll()
+    clearAttachments()
 
     do {
       let photoInfo = try FileCache.savePhoto(image: image)
@@ -246,15 +270,18 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
             peerId: peerId,
             chatId: chatId ?? 0,
             mediaItems: [attachment],
-            replyToMsgId: ChatState.shared.getState(peer: peerId).replyingMessageId
+            replyToMsgId: ChatState.shared.getState(peer: peerId).replyingMessageId,
+            isSticker: nil,
+            entities: nil
           )
         )
       )
     }
 
+    resetComposeStateAfterPreviewSend()
     dismissPreview()
     sendButton.configuration?.showsActivityIndicator = false
-    attachmentItems.removeAll()
+    clearAttachments()
     // sendMessageHaptic()
   }
 
@@ -298,8 +325,10 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     }
 
     // Clear state and dismiss
+    resetComposeStateAfterPreviewSend()
     dismissMultiPreview()
     sendButton.configuration?.showsActivityIndicator = false
+    clearAttachments()
     ChatState.shared.clearReplyingMessageId(peer: peerId)
     // sendMessageHaptic()
   }
