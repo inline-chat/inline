@@ -80,6 +80,13 @@ public final class LinkDetector: Sendable {
     "ai", "io", "me", "fm", "ly", "to",
   ]
 
+  /// Bare-domain TLDs to skip to reduce common false positives in chat text.
+  /// `.md` is intentionally excluded because markdown file names like `README.md`
+  /// are frequently shared and should not be auto-linkified as web domains.
+  private static let excludedBareDomainTLDs: Set<String> = [
+    "md",
+  ]
+
   // Note: With the introduction of `fullURLRegex`, we no longer need a dedicated whitelisted TLD
   // regex for URLs that already include a protocol. We still keep bare-domain detection below.
 
@@ -271,6 +278,17 @@ public final class LinkDetector: Sendable {
       // Adjust range length if we trimmed characters
       let trimmedCount = match.range.length - urlSubstring.utf16.count
       let adjustedRange = NSRange(location: match.range.location, length: match.range.length - trimmedCount)
+
+      let hostCandidate = urlSubstring
+        .split(whereSeparator: { $0 == "/" || $0 == "?" || $0 == "#" })
+        .first
+        .map(String.init)?
+        .lowercased()
+      let tld = hostCandidate?.split(separator: ".").last.map(String.init)
+      if let tld, Self.excludedBareDomainTLDs.contains(tld) {
+        log.debug("🔍 Skipping bare domain due to excluded TLD: \(tld)")
+        return nil
+      }
 
       log.debug("🔍 Found bare domain with optional path: '\(urlSubstring)' at range \(adjustedRange)")
 
