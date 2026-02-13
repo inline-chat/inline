@@ -1,9 +1,9 @@
 import AsyncAlgorithms
-import Auth
 import Foundation
 import InlineProtocol
 import Testing
 
+@testable import Auth
 @testable import RealtimeV2
 
 @Suite("RealtimeV2.Send")
@@ -168,6 +168,55 @@ final class RealtimeSendTests {
     }
     #expect(received)
   }
+
+  @Test("connectionError posts restart alert notification when auth refresh shows missing token")
+  func testConnectionErrorPostsRestartAlertNotificationWhenTokenMissing() async throws {
+    let authDriver = AuthSnapshotDriver(
+      AuthSnapshot(
+        status: .authenticated(AuthCredentials(userId: 1, token: "1:initialToken")),
+        didHydrate: true
+      )
+    )
+    let auth = makeTestAuthHandle(snapshotDriver: authDriver)
+    let transport = MockTransport()
+    let storage = SendTestSyncStorage()
+    let apply = SendTestApplyUpdates()
+    let realtime = RealtimeV2(
+      transport: transport,
+      auth: auth,
+      applyUpdates: apply,
+      syncStorage: storage
+    )
+
+    let didPostNotification = SendTestFlag()
+    let observer = NotificationCenter.default.addObserver(
+      forName: .realtimeV2ConnectionInitFailed,
+      object: nil,
+      queue: nil
+    ) { _ in
+      Task {
+        await didPostNotification.set()
+      }
+    }
+    defer { NotificationCenter.default.removeObserver(observer) }
+
+    authDriver.set(
+      AuthSnapshot(
+        status: .reauthRequired(userIdHint: 1),
+        didHydrate: true
+      )
+    )
+
+    try? await Task.sleep(for: .milliseconds(50))
+    await transport.emit(.message(connectionErrorMessage()))
+
+    let notified = await waitForCondition(timeout: .seconds(1)) {
+      await didPostNotification.get()
+    }
+    #expect(notified)
+
+    withExtendedLifetime(realtime) {}
+  }
 }
 
 private struct SendTestTransaction: Transaction, Codable {
@@ -238,6 +287,34 @@ private actor SendTestFlag {
   func get() -> Bool {
     value
   }
+}
+
+private final class AuthSnapshotDriver: @unchecked Sendable {
+  private let lock = NSLock()
+  private var snapshot: AuthSnapshot
+
+  init(_ initialSnapshot: AuthSnapshot) {
+    snapshot = initialSnapshot
+  }
+
+  func get() -> AuthSnapshot {
+    lock.withLock { snapshot }
+  }
+
+  func set(_ nextSnapshot: AuthSnapshot) {
+    lock.withLock { snapshot = nextSnapshot }
+  }
+}
+
+private func makeTestAuthHandle(snapshotDriver: AuthSnapshotDriver) -> AuthHandle {
+  let cache = AuthSnapshotCache(initial: AuthSnapshot(status: .hydrating, didHydrate: false))
+  let store = AuthStore(
+    cache: cache,
+    mocked: true,
+    namespace: UUID().uuidString,
+    readSnapshot: { _, _, _ in snapshotDriver.get() }
+  )
+  return AuthHandle(cache: cache, store: store, events: store.events)
 }
 
 private actor ImmediateRoundTripTransport: Transport {
