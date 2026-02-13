@@ -55,7 +55,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   var attachmentItems: [String: FileMediaItem] = [:]
 
   var canSend: Bool {
-    let hasText = !(textView.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+    let normalizedText = (textView.text ?? "").replacingOccurrences(of: "\u{FFFC}", with: "")
+    let hasText = !normalizedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     let hasAttachments = !attachmentItems.isEmpty
     let hasForward = peerId.map { ChatState.shared.getState(peer: $0).forwardContext != nil } ?? false
     return hasText || hasAttachments || hasForward
@@ -335,7 +336,9 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     let forwardContext = state.forwardContext
     guard let chatId else { return }
 
-    let rawText = textView.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let rawText = (textView.text ?? "")
+      .replacingOccurrences(of: "\u{FFFC}", with: "")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
     let hasText = !rawText.isEmpty
     let attachmentItemsSnapshot = attachmentItems
     let hasAttachments = !attachmentItemsSnapshot.isEmpty
@@ -821,7 +824,11 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   func updateSendButtonVisibility() {
-    if canSend {
+    let shouldEnableSend = canSend
+    sendButton.isEnabled = shouldEnableSend
+    sendButton.isUserInteractionEnabled = shouldEnableSend
+
+    if shouldEnableSend {
       buttonAppear()
     } else {
       buttonDisappear()
