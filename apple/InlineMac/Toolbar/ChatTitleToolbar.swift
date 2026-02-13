@@ -271,9 +271,9 @@ final class ChatStatusView: NSView {
   private var dependencies: AppDependencies
 
   // Connection state tracking
-  private var connectionState: RealtimeConnectionState = .connected {
+  private var displayedConnectionState: RealtimeConnectionState? {
     didSet {
-      if oldValue != connectionState {
+      if oldValue != displayedConnectionState {
         DispatchQueue.main.async {
           self.updateLabel()
         }
@@ -346,10 +346,10 @@ final class ChatStatusView: NSView {
     Task {
       let stateObject = await Api.realtime.stateObject
       await MainActor.run {
-        self.connectionState = stateObject.connectionState
-        self.connectionStateSubscription = stateObject.connectionStatePublisher
+        self.displayedConnectionState = stateObject.displayedConnectionState
+        self.connectionStateSubscription = stateObject.displayedConnectionStatePublisher
           .sink { [weak self] state in
-            self?.connectionState = state
+            self?.displayedConnectionState = state
           }
       }
     }
@@ -438,8 +438,8 @@ final class ChatStatusView: NSView {
 
   private var statusState: StatusState {
     // Check connection state first
-    if connectionState != .connected {
-      return .connecting(connectionState.title.lowercased())
+    if let displayedConnectionState {
+      return .connecting(displayedConnectionState.title.lowercased())
     }
 
     // Check for typing text first (synchronously)

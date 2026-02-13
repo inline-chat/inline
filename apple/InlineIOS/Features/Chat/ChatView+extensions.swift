@@ -67,8 +67,8 @@ struct ChatToolbarLeadingView: View {
   }
 
   private func getCurrentSubtitle() -> ChatSubtitle {
-    if realtimeState.connectionState != .connected {
-      return .connectionState(realtimeState.connectionState)
+    if let displayedConnectionState = realtimeState.displayedConnectionState {
+      return .connectionState(displayedConnectionState)
     } else if isPrivateChat {
       if let composeAction = currentComposeAction() {
         if composeAction == .typing {

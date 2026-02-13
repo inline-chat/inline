@@ -6,12 +6,9 @@ import SwiftUI
 
 struct SpacesView: View {
   @Environment(Router.self) private var router
-  @Environment(\.realtime) var realtime
   @EnvironmentObject var realtimeState: RealtimeState
 
   @EnvironmentObject var homeViewModel: HomeViewModel
-
-  @State var shouldShow = false
 
   var sortedSpaces: [HomeSpaceItem] {
     homeViewModel.spaces.sorted { s1, s2 in
@@ -88,40 +85,23 @@ struct SpacesView: View {
 
   @ViewBuilder
   private var header: some View {
+    let displayedState = realtimeState.displayedConnectionState
+    let title = displayedState?.title ?? "Spaces"
+
     HStack(spacing: 8) {
-      if realtimeState.connectionState != .connected {
+      if displayedState != nil {
         Spinner(size: 16)
           .padding(.trailing, 4)
       }
 
       VStack(alignment: .leading, spacing: 0) {
-        Text(shouldShow ? realtimeState.connectionState.title : "Spaces")
+        Text(title)
           .font(.title3)
           .fontWeight(.semibold)
           .contentTransition(.numericText())
-          .animation(.spring(duration: 0.5), value: realtimeState.connectionState.title)
-          .animation(.spring(duration: 0.5), value: shouldShow)
+          .animation(.spring(duration: 0.5), value: title)
       }
     }
-
-    .onAppear {
-      if realtimeState.connectionState != .connected {
-        shouldShow = true
-      }
-    }
-    .onReceive(realtimeState.connectionStatePublisher, perform: { nextConnectionState in
-      if nextConnectionState == .connected {
-        Task { @MainActor in
-          try await Task.sleep(for: .seconds(1))
-          if nextConnectionState == .connected {
-            // second check
-            shouldShow = false
-          }
-        }
-      } else {
-        shouldShow = true
-      }
-    })
   }
 }
 
