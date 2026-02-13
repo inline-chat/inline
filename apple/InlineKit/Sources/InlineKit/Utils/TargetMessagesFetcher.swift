@@ -5,6 +5,10 @@ import Logger
 public actor TargetMessagesFetcher {
   public static let shared = TargetMessagesFetcher()
 
+  public typealias MissingMessageIDsProvider = @Sendable (_ chatId: Int64, _ messageIds: Set<Int64>) async throws ->
+    Set<Int64>
+  public typealias FetchMessagesOperation = @Sendable (_ peer: Peer, _ messageIds: [Int64]) async throws -> Void
+
   private struct FetchTarget: Hashable, Sendable {
     let peer: Peer
     let chatId: Int64
@@ -18,39 +22,57 @@ public actor TargetMessagesFetcher {
 
   private let log = Log.scoped("TargetMessagesFetcher")
   private let maxBatchSize = 200
+  private let resolveMissingIds: MissingMessageIDsProvider
+  private let fetchMessages: FetchMessagesOperation
 
   private var targets: [FetchTarget: TargetState] = [:]
 
-  public init() {}
+  public init() {
+    resolveMissingIds = TargetMessagesFetcher.defaultResolveMissingIds
+    fetchMessages = TargetMessagesFetcher.defaultFetchMessages
+  }
+
+  init(
+    resolveMissingIds: @escaping MissingMessageIDsProvider,
+    fetchMessages: @escaping FetchMessagesOperation
+  ) {
+    self.resolveMissingIds = resolveMissingIds
+    self.fetchMessages = fetchMessages
+  }
 
   public func ensureCached(peer: Peer, chatId: Int64, messageIds: [Int64]) async {
     let requestedIds = Set(messageIds.filter { $0 > 0 })
     guard !requestedIds.isEmpty else { return }
 
-    let missingIds = await getMissingMessageIds(chatId: chatId, messageIds: requestedIds)
+    let missingIds: Set<Int64>
+    do {
+      missingIds = try await resolveMissingIds(chatId, requestedIds)
+    } catch {
+      log.error("Failed to check cached target messages", error: error)
+      missingIds = requestedIds
+    }
     guard !missingIds.isEmpty else { return }
 
     enqueue(target: FetchTarget(peer: peer, chatId: chatId), messageIds: missingIds)
   }
 
-  private func getMissingMessageIds(chatId: Int64, messageIds: Set<Int64>) async -> Set<Int64> {
-    do {
-      let ids = Array(messageIds)
-      guard !ids.isEmpty else { return [] }
+  private static func defaultResolveMissingIds(chatId: Int64, messageIds: Set<Int64>) async throws -> Set<Int64> {
+    let ids = Array(messageIds)
+    guard !ids.isEmpty else { return [] }
 
-      let existingMessages = try await AppDatabase.shared.dbWriter.read { db in
-        try Message
-          .filter(Message.Columns.chatId == chatId)
-          .filter(ids.contains(Message.Columns.messageId))
-          .fetchAll(db)
-      }
-
-      let existingIds = Set(existingMessages.map(\.messageId))
-      return messageIds.subtracting(existingIds)
-    } catch {
-      log.error("Failed to check cached target messages", error: error)
-      return messageIds
+    let existingMessages = try await AppDatabase.shared.dbWriter.read { db in
+      try Message
+        .filter(Message.Columns.chatId == chatId)
+        .filter(ids.contains(Message.Columns.messageId))
+        .fetchAll(db)
     }
+
+    let existingIds = Set(existingMessages.map(\.messageId))
+    return messageIds.subtracting(existingIds)
+  }
+
+  private static func defaultFetchMessages(peer: Peer, messageIds: [Int64]) async throws {
+    _ = try await Api.realtime.send(.getMessages(peer: peer, messageIds: messageIds))
   }
 
   private func enqueue(target: FetchTarget, messageIds: Set<Int64>) {
@@ -91,7 +113,7 @@ public actor TargetMessagesFetcher {
       targets[target] = state
 
       do {
-        _ = try await Api.realtime.send(.getMessages(peer: target.peer, messageIds: batchIds.sorted()))
+        try await fetchMessages(target.peer, batchIds.sorted())
       } catch {
         log.error("Failed to fetch target messages for \(target.peer.toString())", error: error)
       }
