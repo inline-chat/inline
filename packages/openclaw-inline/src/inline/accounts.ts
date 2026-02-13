@@ -1,4 +1,4 @@
-import { DEFAULT_ACCOUNT_ID } from "openclaw/plugin-sdk"
+import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "openclaw/plugin-sdk"
 import type { OpenClawConfig } from "openclaw/plugin-sdk"
 import { readFile } from "node:fs/promises"
 import type { InlineRuntimeConfig } from "./config-schema.js"
@@ -17,6 +17,10 @@ export type ResolvedInlineAccount = {
 
 const DEFAULT_BASE_URL = "https://api.inline.chat"
 
+function normalizeInlineAccountId(raw: string | null | undefined): string {
+  return normalizeAccountId(raw ?? DEFAULT_ACCOUNT_ID)
+}
+
 function readInlineConfig(cfg: OpenClawConfig): InlineRuntimeConfig {
   const raw = (cfg.channels?.inline ?? {}) as unknown
   const result = InlineRuntimeConfigSchema.safeParse(raw)
@@ -31,17 +35,16 @@ export function listInlineAccountIds(cfg: OpenClawConfig): string[] {
   const ids = new Set<string>()
   const hasBase = Boolean(
     (config.token ?? "").trim() ||
-      (config.tokenFile ?? "").trim() ||
-      (config.baseUrl ?? "").trim(),
+      (config.tokenFile ?? "").trim(),
   )
   if (hasBase) {
     ids.add(DEFAULT_ACCOUNT_ID)
   }
   for (const key of Object.keys(config.accounts ?? {})) {
-    const normalized = key.trim()
+    const normalized = normalizeInlineAccountId(key)
     if (normalized) ids.add(normalized)
   }
-  return [...ids]
+  return [...ids].sort((a, b) => a.localeCompare(b))
 }
 
 export function resolveDefaultInlineAccountId(cfg: OpenClawConfig): string {
@@ -55,9 +58,19 @@ export function resolveInlineAccount(params: {
   accountId?: string | null
 }): ResolvedInlineAccount {
   const config = readInlineConfig(params.cfg)
-  const requested = (params.accountId ?? DEFAULT_ACCOUNT_ID).trim() || DEFAULT_ACCOUNT_ID
+  const requested =
+    params.accountId == null
+      ? resolveDefaultInlineAccountId(params.cfg)
+      : normalizeInlineAccountId(params.accountId)
 
-  const accountOverride = config.accounts?.[requested] ?? null
+  let accountOverride: InlineRuntimeConfig | null = null
+  for (const [key, value] of Object.entries(config.accounts ?? {})) {
+    if (!value) continue
+    if (normalizeInlineAccountId(key) !== requested) continue
+    accountOverride = value as InlineRuntimeConfig
+    break
+  }
+
   const { accounts: _accounts, ...base } = config
   const effective: InlineRuntimeConfig = accountOverride
     ? ({ ...base, ...accountOverride } as InlineRuntimeConfig)

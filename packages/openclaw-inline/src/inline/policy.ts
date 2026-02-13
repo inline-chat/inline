@@ -1,4 +1,4 @@
-import { DEFAULT_ACCOUNT_ID, type OpenClawConfig } from "openclaw/plugin-sdk"
+import { normalizeAccountId as normalizePluginAccountId, type OpenClawConfig } from "openclaw/plugin-sdk"
 
 type InlineToolPolicy = Record<string, unknown>
 
@@ -11,8 +11,7 @@ type InlineGroupConfig = {
 type InlineGroups = Record<string, InlineGroupConfig | undefined>
 
 function normalizeAccountId(raw: string | null | undefined): string {
-  const trimmed = (raw ?? DEFAULT_ACCOUNT_ID).trim()
-  return (trimmed || DEFAULT_ACCOUNT_ID).toLowerCase()
+  return normalizePluginAccountId(raw)
 }
 
 function resolveInlineGroups(cfg: OpenClawConfig, accountId: string | null | undefined): InlineGroups | undefined {

@@ -58,6 +58,31 @@ describe("inline/actions", () => {
     expect(gated).not.toContain("permissions")
   })
 
+  it("lists actions when only a non-default inline account is configured", async () => {
+    vi.resetModules()
+    const { inlineMessageActions } = await import("./actions")
+
+    const actions =
+      inlineMessageActions.listActions?.({
+        cfg: {
+          channels: {
+            inline: {
+              accounts: {
+                work: {
+                  token: "token",
+                  baseUrl: "https://api.inline.chat",
+                },
+              },
+            },
+          },
+        } as OpenClawConfig,
+      }) ?? []
+
+    expect(actions).toContain("reply")
+    expect(actions).toContain("read")
+    expect(actions.length).toBeGreaterThan(0)
+  })
+
   it("dispatches expanded rpc action set via Inline RPC", async () => {
     vi.resetModules()
 
@@ -65,6 +90,24 @@ describe("inline/actions", () => {
     const close = vi.fn(async () => {})
     const sendMessage = vi.fn(async () => ({ messageId: 88n }))
     const getMe = vi.fn(async () => ({ userId: 500n, firstName: "Inline", username: "inline-bot" }))
+    const sampleMessageWithReaction = {
+      id: 10n,
+      fromId: 42n,
+      date: 1_700_000_000n,
+      message: "older",
+      out: false,
+      reactions: {
+        reactions: [
+          {
+            emoji: "🔥",
+            userId: 42n,
+            messageId: 10n,
+            chatId: 7n,
+            date: 1_700_000_001n,
+          },
+        ],
+      },
+    }
     const invokeRaw = vi.fn(async (method: number) => {
       if (method === 4) {
         return { oneofKind: "deleteMessages", deleteMessages: { updates: [] } }
@@ -73,26 +116,7 @@ describe("inline/actions", () => {
         return {
           oneofKind: "getChatHistory",
           getChatHistory: {
-            messages: [
-              {
-                id: 10n,
-                fromId: 42n,
-                date: 1_700_000_000n,
-                message: "older",
-                out: false,
-                reactions: {
-                  reactions: [
-                    {
-                      emoji: "🔥",
-                      userId: 42n,
-                      messageId: 10n,
-                      chatId: 7n,
-                      date: 1_700_000_001n,
-                    },
-                  ],
-                },
-              },
-            ],
+            messages: [sampleMessageWithReaction],
           },
         }
       }
@@ -223,6 +247,17 @@ describe("inline/actions", () => {
       }
       throw new Error(`unexpected method ${String(method)}`)
     })
+    const invokeUncheckedRaw = vi.fn(async (method: number) => {
+      if (method === 38) {
+        return {
+          oneofKind: "getMessages",
+          getMessages: {
+            messages: [sampleMessageWithReaction],
+          },
+        }
+      }
+      return invokeRaw(method)
+    })
 
     vi.doMock("@inline-chat/realtime-sdk", () => ({
       Member_Role: {
@@ -248,6 +283,7 @@ describe("inline/actions", () => {
         PIN_MESSAGE: 31,
         UPDATE_CHAT_INFO: 32,
         MOVE_THREAD: 35,
+        GET_MESSAGES: 38,
       },
       InlineSdkClient: class {
         constructor(_opts: unknown) {}
@@ -256,6 +292,7 @@ describe("inline/actions", () => {
         getMe = getMe
         sendMessage = sendMessage
         invokeRaw = invokeRaw
+        invokeUncheckedRaw = invokeUncheckedRaw
       },
     }))
 
@@ -396,6 +433,13 @@ describe("inline/actions", () => {
       params: { to: "7", userId: "99", role: "member", canAccessPublicChats: true },
     } as any)
 
+    await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "reactions",
+      cfg,
+      params: { to: "7", messageId: "10" },
+    } as any)
+
     expect(sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: 7n,
@@ -451,9 +495,98 @@ describe("inline/actions", () => {
         oneofKind: "updateMemberAccess",
       }),
     )
+    expect(invokeUncheckedRaw).toHaveBeenCalledWith(
+      38,
+      expect.objectContaining({
+        oneofKind: "getMessages",
+      }),
+    )
     expect(getMe).toHaveBeenCalled()
     expect(connect).toHaveBeenCalled()
     expect(close).toHaveBeenCalled()
+  })
+
+  it("falls back to getChatHistory for reactions when getMessages is unavailable", async () => {
+    vi.resetModules()
+
+    const invokeRaw = vi.fn(async (method: number) => {
+      if (method === 5) {
+        return {
+          oneofKind: "getChatHistory",
+          getChatHistory: {
+            messages: [
+              {
+                id: 10n,
+                fromId: 42n,
+                date: 1_700_000_000n,
+                message: "older",
+                out: false,
+                reactions: {
+                  reactions: [
+                    {
+                      emoji: "🔥",
+                      userId: 42n,
+                      messageId: 10n,
+                      chatId: 7n,
+                      date: 1_700_000_001n,
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        }
+      }
+      throw new Error(`unexpected method ${String(method)}`)
+    })
+    const invokeUncheckedRaw = vi.fn(async () => {
+      throw new Error("method not supported")
+    })
+
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {
+        GET_CHAT_HISTORY: 5,
+        GET_MESSAGES: 38,
+      },
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = vi.fn(async () => {})
+        close = vi.fn(async () => {})
+        invokeRaw = invokeRaw
+        invokeUncheckedRaw = invokeUncheckedRaw
+      },
+    }))
+
+    const { inlineMessageActions } = await import("./actions")
+
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+        },
+      },
+    } satisfies OpenClawConfig
+
+    await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "reactions",
+      cfg,
+      params: { to: "7", messageId: "10" },
+    } as any)
+
+    expect(invokeUncheckedRaw).toHaveBeenCalledWith(
+      38,
+      expect.objectContaining({
+        oneofKind: "getMessages",
+      }),
+    )
+    expect(invokeRaw).toHaveBeenCalledWith(
+      5,
+      expect.objectContaining({
+        oneofKind: "getChatHistory",
+      }),
+    )
   })
 
   it("rejects disabled actions from config", async () => {
