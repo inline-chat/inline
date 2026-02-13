@@ -2,10 +2,16 @@ import AppKit
 
 @MainActor
 protocol ToastPresenting: AnyObject {
-  func showLoading(_ message: String)
+  func showLoading(_ message: String, actionTitle: String?, action: (@MainActor () -> Void)?)
   func showSuccess(_ message: String, actionTitle: String?, action: (@MainActor () -> Void)?)
   func showError(_ message: String)
   func dismissToast()
+}
+
+extension ToastPresenting {
+  func showLoading(_ message: String) {
+    showLoading(message, actionTitle: nil, action: nil)
+  }
 }
 
 /// Global access point for showing toasts on the active window.
@@ -17,8 +23,8 @@ final class ToastCenter {
 
   weak var presenter: (any ToastPresenting)?
 
-  func showLoading(_ message: String) {
-    presenter?.showLoading(message)
+  func showLoading(_ message: String, actionTitle: String? = nil, action: (@MainActor () -> Void)? = nil) {
+    presenter?.showLoading(message, actionTitle: actionTitle, action: action)
   }
 
   func showSuccess(_ message: String, actionTitle: String? = nil, action: (@MainActor () -> Void)? = nil) {
@@ -33,4 +39,3 @@ final class ToastCenter {
     presenter?.dismissToast()
   }
 }
-
