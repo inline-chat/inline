@@ -194,6 +194,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       Method: {
         GET_CHAT_HISTORY: 5,
         GET_CHAT_PARTICIPANTS: 13,
+        GET_MESSAGES: 38,
       },
       InlineSdkClient: class {
         constructor(_opts: unknown) {}
@@ -224,6 +225,10 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
             oneofKind?: string
             getChatParticipants?: { chatId?: bigint }
             getChatHistory?: { peerId?: { type?: { oneofKind?: string; chat?: { chatId?: bigint } } } }
+            getMessages?: {
+              peerId?: { type?: { oneofKind?: string; chat?: { chatId?: bigint } } }
+              messageIds?: bigint[]
+            }
           },
         ) => {
           if (method === 13 && input?.oneofKind === "getChatParticipants") {
@@ -245,8 +250,23 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
               },
             }
           }
+          if (method === 38 && input?.oneofKind === "getMessages") {
+            const chatId = String(input.getMessages?.peerId?.type?.chat?.chatId ?? "")
+            const messageIds = input.getMessages?.messageIds ?? []
+            const known = setup.historyByChat?.[chatId] ?? []
+            const byId = new Map(known.map((message) => [String(message.id), message]))
+            return {
+              oneofKind: "getMessages",
+              getMessages: {
+                messages: messageIds
+                  .map((id) => byId.get(String(id)))
+                  .filter((message): message is NonNullable<typeof message> => Boolean(message)),
+              },
+            }
+          }
           return { oneofKind: undefined }
         })
+        invokeUncheckedRaw = this.invokeRaw
         close = vi.fn(async () => {})
         events = vi.fn(() => eventsGenerator())
       },
@@ -833,6 +853,147 @@ describe("inline/monitor", () => {
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
           Body: expect.stringContaining("Recent thread messages (oldest -> newest):"),
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("can bypass mention gate on replies to bot messages when historyLimit=0 via reply target lookup", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 7201n,
+            date: 1_700_000_102n,
+            fromId: 51n,
+            message: "follow up",
+            mentioned: false,
+            replyToMsgId: 5000n,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      historyByChat: {
+        "88": [
+          {
+            id: 5000n,
+            date: 1_700_000_099n,
+            fromId: 777n,
+            message: "earlier bot message",
+            out: true,
+          },
+        ],
+      },
+      dispatchReplyPayload: {
+        text: "threaded reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+        replyToBotWithoutMention: true,
+        historyLimit: 0,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 88n,
+          text: "threaded reply",
+          replyToMsgId: 7201n,
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ReplyToSenderId: "777",
+          ReplyToWasBot: true,
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("does not bypass mention gate when reply target lookup resolves to a non-bot sender", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 7000n,
+            date: 1_700_000_050n,
+            fromId: 51n,
+            message: "ping @bot",
+            mentioned: true,
+          },
+        },
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 7001n,
+            date: 1_700_000_051n,
+            fromId: 52n,
+            message: "replying to teammate",
+            mentioned: false,
+            replyToMsgId: 1n,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      historyByChat: {
+        "88": [
+          {
+            id: 1n,
+            date: 1_700_000_001n,
+            fromId: 52n,
+            message: "teammate message",
+            out: false,
+          },
+        ],
+      },
+      dispatchReplyPayload: {
+        text: "group reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+        replyToBotWithoutMention: true,
+        historyLimit: 0,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.sendMessage).toHaveBeenCalledTimes(1)
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 88n,
+          text: "group reply",
         }),
       )
     })

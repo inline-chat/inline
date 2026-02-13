@@ -36,6 +36,7 @@ type SenderProfile = {
 type HistoryContext = {
   historyText: string | null
   repliedToBot: boolean
+  replyToSenderId: string | null
 }
 
 const DEFAULT_GROUP_HISTORY_LIMIT = 12
@@ -43,6 +44,13 @@ const DEFAULT_DM_HISTORY_LIMIT = 6
 const HISTORY_LINE_MAX_CHARS = 280
 const BOT_MESSAGE_CACHE_LIMIT = 500
 const REACTION_TARGET_LOOKUP_LIMIT = 8
+const REPLY_TARGET_LOOKUP_LIMIT = 8
+
+function getMessagesMethodId(): Method {
+  // Keep GET_MESSAGES resolution lazy so partial test mocks that omit Method don't fail at module import time.
+  const method = Method as unknown as { GET_MESSAGES?: number } | undefined
+  return ((method?.GET_MESSAGES ?? 38) as unknown as Method)
+}
 
 function normalizeAllowEntry(raw: string): string {
   return raw.trim().replace(/^inline:/i, "").replace(/^user:/i, "")
@@ -120,6 +128,107 @@ function hasBotMessageId(cache: Map<string, string[]>, chatId: bigint, messageId
   return (cache.get(key) ?? []).includes(String(messageId))
 }
 
+function rememberBotMessagesFromList(params: {
+  messages: Message[]
+  meId: bigint
+  chatId: bigint
+  botMessageIdsByChat: Map<string, string[]>
+}): void {
+  for (const item of params.messages) {
+    if (item.fromId === params.meId) {
+      rememberBotMessageId(params.botMessageIdsByChat, params.chatId, item.id)
+    }
+  }
+}
+
+function buildChatPeer(chatId: bigint): {
+  type: {
+    oneofKind: "chat"
+    chat: { chatId: bigint }
+  }
+} {
+  return {
+    type: {
+      oneofKind: "chat",
+      chat: { chatId },
+    },
+  }
+}
+
+async function loadChatHistoryMessages(params: {
+  client: InlineSdkClient
+  chatId: bigint
+  limit: number
+  offsetId?: bigint
+}): Promise<Message[] | null> {
+  const result = await params.client.invokeRaw(Method.GET_CHAT_HISTORY, {
+    oneofKind: "getChatHistory",
+    getChatHistory: {
+      peerId: buildChatPeer(params.chatId),
+      ...(params.offsetId != null ? { offsetId: params.offsetId } : {}),
+      limit: params.limit,
+    },
+  })
+  if (result.oneofKind !== "getChatHistory") {
+    return null
+  }
+  return result.getChatHistory.messages ?? []
+}
+
+async function findChatMessageById(params: {
+  client: InlineSdkClient
+  chatId: bigint
+  messageId: bigint
+  limit: number
+  meId: bigint
+  botMessageIdsByChat: Map<string, string[]>
+}): Promise<Message | null> {
+  // Preferred lookup path: direct-by-id RPC.
+  // Use unchecked raw so plugin remains compatible while SDK method mappings catch up.
+  const directResult = await params.client
+    .invokeUncheckedRaw(getMessagesMethodId(), {
+      oneofKind: "getMessages",
+      getMessages: {
+        peerId: buildChatPeer(params.chatId),
+        messageIds: [params.messageId],
+      },
+    } as any)
+    .catch(() => null)
+  if (directResult?.oneofKind === "getMessages") {
+    const directMessages = directResult.getMessages.messages ?? []
+    rememberBotMessagesFromList({
+      messages: directMessages,
+      meId: params.meId,
+      chatId: params.chatId,
+      botMessageIdsByChat: params.botMessageIdsByChat,
+    })
+    const directTarget = directMessages.find((item) => item.id === params.messageId) ?? null
+    if (directTarget) {
+      return directTarget
+    }
+  }
+
+  // Compatibility fallback for older servers without GET_MESSAGES.
+  const historyMessages = await loadChatHistoryMessages({
+    client: params.client,
+    chatId: params.chatId,
+    offsetId: params.messageId + 1n,
+    limit: params.limit,
+  })
+  if (!historyMessages) {
+    return null
+  }
+
+  rememberBotMessagesFromList({
+    messages: historyMessages,
+    meId: params.meId,
+    chatId: params.chatId,
+    botMessageIdsByChat: params.botMessageIdsByChat,
+  })
+
+  return historyMessages.find((item) => item.id === params.messageId) ?? null
+}
+
 async function isReactionTargetBotMessage(params: {
   client: InlineSdkClient
   chatId: bigint
@@ -127,35 +236,17 @@ async function isReactionTargetBotMessage(params: {
   meId: bigint
   botMessageIdsByChat: Map<string, string[]>
 }): Promise<boolean> {
-  if (hasBotMessageId(params.botMessageIdsByChat, params.chatId, params.messageId)) {
-    return true
-  }
-
-  const result = await params.client.invokeRaw(Method.GET_CHAT_HISTORY, {
-    oneofKind: "getChatHistory",
-    getChatHistory: {
-      peerId: {
-        type: {
-          oneofKind: "chat",
-          chat: { chatId: params.chatId },
-        },
-      },
-      offsetId: params.messageId + 1n,
-      limit: REACTION_TARGET_LOOKUP_LIMIT,
-    },
+  const target = await findChatMessageById({
+    client: params.client,
+    chatId: params.chatId,
+    messageId: params.messageId,
+    limit: REACTION_TARGET_LOOKUP_LIMIT,
+    meId: params.meId,
+    botMessageIdsByChat: params.botMessageIdsByChat,
   })
-  if (result.oneofKind !== "getChatHistory") {
-    return false
+  if (!target) {
+    return hasBotMessageId(params.botMessageIdsByChat, params.chatId, params.messageId)
   }
-
-  const messages = result.getChatHistory.messages ?? []
-  for (const item of messages) {
-    if (item.fromId === params.meId) {
-      rememberBotMessageId(params.botMessageIdsByChat, params.chatId, item.id)
-    }
-  }
-  const target = messages.find((item) => item.id === params.messageId)
-  if (!target) return false
   return target.fromId === params.meId
 }
 
@@ -200,80 +291,82 @@ async function buildHistoryContext(params: {
   historyLimit: number
   botMessageIdsByChat: Map<string, string[]>
 }): Promise<HistoryContext> {
-  if (params.historyLimit <= 0) {
-    return {
-      historyText: null,
-      repliedToBot:
-        params.replyToMsgId != null &&
-        hasBotMessageId(params.botMessageIdsByChat, params.chatId, params.replyToMsgId),
-    }
-  }
-
-  const result = await params.client.invokeRaw(Method.GET_CHAT_HISTORY, {
-    oneofKind: "getChatHistory",
-    getChatHistory: {
-      peerId: {
-        type: {
-          oneofKind: "chat",
-          chat: { chatId: params.chatId },
-        },
-      },
-      offsetId: params.currentMessageId,
-      limit: params.historyLimit,
-    },
-  })
-  if (result.oneofKind !== "getChatHistory") {
-    return {
-      historyText: null,
-      repliedToBot:
-        params.replyToMsgId != null &&
-        hasBotMessageId(params.botMessageIdsByChat, params.chatId, params.replyToMsgId),
-    }
-  }
-
-  const messages = [...(result.getChatHistory.messages ?? [])]
-    .filter((item) => item.id !== params.currentMessageId)
-    .sort((a, b) => {
-      const byDate = Number(a.date - b.date)
-      if (byDate !== 0) return byDate
-      if (a.id === b.id) return 0
-      return a.id < b.id ? -1 : 1
-    })
-
-  const lines: string[] = []
-  let repliedToBot =
+  const cachedReplyToBot =
     params.replyToMsgId != null &&
     hasBotMessageId(params.botMessageIdsByChat, params.chatId, params.replyToMsgId)
+  let repliedToBot = cachedReplyToBot
+  let replyToSenderId: string | null = null
+  let foundReplyTargetInHistory = false
+  const lines: string[] = []
 
-  for (const item of messages) {
-    if (item.fromId === params.meId) {
-      rememberBotMessageId(params.botMessageIdsByChat, params.chatId, item.id)
-    }
-    if (
-      params.replyToMsgId != null &&
-      item.id === params.replyToMsgId &&
-      item.fromId === params.meId
-    ) {
-      repliedToBot = true
-    }
-
-    const text = normalizeHistoryText(item.message)
-    if (!text) continue
-    const label = resolveHistorySenderLabel({
-      senderId: item.fromId,
-      meId: params.meId,
-      senderProfilesById: params.senderProfilesById,
+  if (params.historyLimit > 0) {
+    const messages = await loadChatHistoryMessages({
+      client: params.client,
+      chatId: params.chatId,
+      offsetId: params.currentMessageId,
+      limit: params.historyLimit,
     })
-    const replySuffix = item.replyToMsgId != null ? ` ->${String(item.replyToMsgId)}` : ""
-    lines.push(`#${String(item.id)}${replySuffix} ${label}: ${text}`)
+
+    if (messages) {
+      for (const item of messages) {
+        if (item.fromId === params.meId) {
+          rememberBotMessageId(params.botMessageIdsByChat, params.chatId, item.id)
+        }
+      }
+
+      const sortedMessages = messages
+        .filter((item) => item.id !== params.currentMessageId)
+        .sort((a, b) => {
+          const byDate = Number(a.date - b.date)
+          if (byDate !== 0) return byDate
+          if (a.id === b.id) return 0
+          return a.id < b.id ? -1 : 1
+        })
+
+      for (const item of sortedMessages) {
+        if (params.replyToMsgId != null && item.id === params.replyToMsgId) {
+          foundReplyTargetInHistory = true
+          replyToSenderId = String(item.fromId)
+          repliedToBot = item.fromId === params.meId
+        }
+
+        const text = normalizeHistoryText(item.message)
+        if (!text) continue
+        const label = resolveHistorySenderLabel({
+          senderId: item.fromId,
+          meId: params.meId,
+          senderProfilesById: params.senderProfilesById,
+        })
+        const replySuffix = item.replyToMsgId != null ? ` ->${String(item.replyToMsgId)}` : ""
+        lines.push(`#${String(item.id)}${replySuffix} ${label}: ${text}`)
+      }
+    }
+  }
+
+  if (params.replyToMsgId != null && !foundReplyTargetInHistory) {
+    const replyTarget = await findChatMessageById({
+      client: params.client,
+      chatId: params.chatId,
+      messageId: params.replyToMsgId,
+      limit: REPLY_TARGET_LOOKUP_LIMIT,
+      meId: params.meId,
+      botMessageIdsByChat: params.botMessageIdsByChat,
+    })
+    if (replyTarget) {
+      replyToSenderId = String(replyTarget.fromId)
+      repliedToBot = replyTarget.fromId === params.meId
+    } else if (!cachedReplyToBot) {
+      repliedToBot = false
+    }
   }
 
   if (!lines.length) {
-    return { historyText: null, repliedToBot }
+    return { historyText: null, repliedToBot, replyToSenderId }
   }
   return {
     historyText: `Recent thread messages (oldest -> newest):\n${lines.join("\n")}`,
     repliedToBot,
+    replyToSenderId,
   }
 }
 
@@ -597,7 +690,7 @@ export async function monitorInlineProvider(params: {
           botMessageIdsByChat,
         }).catch((err) => {
           statusSink?.({ lastError: `getChatHistory failed: ${String(err)}` })
-          return { historyText: null, repliedToBot: false }
+          return { historyText: null, repliedToBot: false, replyToSenderId: null }
         })
         const implicitMention =
           (reactionEvent != null && isGroup) ||
@@ -664,6 +757,8 @@ export async function monitorInlineProvider(params: {
           Surface: CHANNEL_ID,
           MessageSid: String(msg.id),
           ...(msg.replyToMsgId != null ? { ReplyToId: String(msg.replyToMsgId) } : {}),
+          ...(historyContext.replyToSenderId != null ? { ReplyToSenderId: historyContext.replyToSenderId } : {}),
+          ...(msg.replyToMsgId != null ? { ReplyToWasBot: historyContext.repliedToBot } : {}),
           Timestamp: timestamp || Date.now(),
           WasMentioned: mentionGate.effectiveWasMentioned,
           CommandAuthorized: commandAuthorized,

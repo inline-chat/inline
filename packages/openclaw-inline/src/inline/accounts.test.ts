@@ -42,6 +42,38 @@ describe("inline/accounts", () => {
     expect(resolveDefaultInlineAccountId(cfg)).toBe("default")
   })
 
+  it("uses the first configured account as default when base config is absent", () => {
+    const cfg = {
+      channels: {
+        inline: {
+          accounts: { work: { token: "work-token" } },
+        },
+      },
+    } satisfies OpenClawConfig
+
+    expect(resolveDefaultInlineAccountId(cfg)).toBe("work")
+    const account = resolveInlineAccount({ cfg, accountId: null })
+    expect(account.accountId).toBe("work")
+    expect(account.configured).toBe(true)
+    expect(account.token).toBe("work-token")
+  })
+
+  it("does not prioritize default account when only baseUrl is set on base config", () => {
+    const cfg = {
+      channels: {
+        inline: {
+          baseUrl: "https://api.inline.chat",
+          accounts: { work: { token: "work-token" } },
+        },
+      },
+    } satisfies OpenClawConfig
+
+    expect(resolveDefaultInlineAccountId(cfg)).toBe("work")
+    const account = resolveInlineAccount({ cfg, accountId: null })
+    expect(account.accountId).toBe("work")
+    expect(account.token).toBe("work-token")
+  })
+
   it("merges base config into account overrides", () => {
     const cfg = {
       channels: {
@@ -63,6 +95,26 @@ describe("inline/accounts", () => {
     expect(a.baseUrl).toBe("https://api.inline.chat")
     expect(a.token).toBe("a-token")
     expect(a.config.parseMarkdown).toBe(false)
+  })
+
+  it("normalizes account ids and resolves account overrides case-insensitively", () => {
+    const cfg = {
+      channels: {
+        inline: {
+          accounts: {
+            "Work Bot": { token: "a-token", name: "Work Bot" },
+          },
+        },
+      },
+    } satisfies OpenClawConfig
+
+    expect(listInlineAccountIds(cfg)).toEqual(["work-bot"])
+
+    const account = resolveInlineAccount({ cfg, accountId: "work bot" })
+    expect(account.accountId).toBe("work-bot")
+    expect(account.configured).toBe(true)
+    expect(account.token).toBe("a-token")
+    expect(account.name).toBe("Work Bot")
   })
 
   it("keeps token-based setup available even when dmPolicy=open has no allowFrom", () => {

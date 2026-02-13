@@ -8,7 +8,15 @@ import {
   type ChannelMessageActionName,
   type OpenClawConfig,
 } from "openclaw/plugin-sdk"
-import { InlineSdkClient, Method, Member_Role, type Chat, type Dialog, type User } from "@inline-chat/realtime-sdk"
+import {
+  InlineSdkClient,
+  Method,
+  Member_Role,
+  type Chat,
+  type Dialog,
+  type Message,
+  type User,
+} from "@inline-chat/realtime-sdk"
 import { resolveInlineAccount, resolveInlineToken } from "./accounts.js"
 import { normalizeInlineTarget } from "./normalize.js"
 
@@ -66,6 +74,9 @@ for (const group of ACTION_GROUPS) {
 }
 
 const SUPPORTED_ACTIONS = Array.from(ACTION_TO_GATE_KEY.keys())
+const METHOD_GET_MESSAGES = (
+  ((Method as unknown as { GET_MESSAGES?: number }).GET_MESSAGES ?? 38) as unknown as Method
+)
 
 function normalizeChatId(raw: string): string {
   const normalized = normalizeInlineTarget(raw) ?? raw.trim()
@@ -273,20 +284,11 @@ async function loadMessageReactions(params: {
   chatId: bigint
   messageId: bigint
 }): Promise<Array<{ emoji: string; count: number; userIds: string[] }>> {
-  const result = await params.client.invokeRaw(Method.GET_CHAT_HISTORY, {
-    oneofKind: "getChatHistory",
-    getChatHistory: {
-      peerId: buildChatPeer(params.chatId),
-      offsetId: params.messageId + 1n,
-      limit: 8,
-    },
+  const target = await findMessageById({
+    client: params.client,
+    chatId: params.chatId,
+    messageId: params.messageId,
   })
-  if (result.oneofKind !== "getChatHistory") {
-    throw new Error(`inline action: expected getChatHistory result, got ${String(result.oneofKind)}`)
-  }
-
-  const target =
-    (result.getChatHistory.messages ?? []).find((message) => message.id === params.messageId) ?? null
   if (!target) {
     return []
   }
@@ -308,6 +310,41 @@ async function loadMessageReactions(params: {
     })
   }
   return Array.from(byEmoji.values())
+}
+
+async function findMessageById(params: {
+  client: InlineSdkClient
+  chatId: bigint
+  messageId: bigint
+}): Promise<Message | null> {
+  if (typeof params.client.invokeUncheckedRaw === "function") {
+    const getMessagesInput: Parameters<InlineSdkClient["invokeUncheckedRaw"]>[1] = {
+      oneofKind: "getMessages",
+      getMessages: {
+        peerId: buildChatPeer(params.chatId),
+        messageIds: [params.messageId],
+      },
+    }
+    const directResult = await params.client
+      .invokeUncheckedRaw(METHOD_GET_MESSAGES, getMessagesInput)
+      .catch(() => null)
+    if (directResult?.oneofKind === "getMessages") {
+      return (directResult.getMessages.messages ?? []).find((message) => message.id === params.messageId) ?? null
+    }
+  }
+
+  const result = await params.client.invokeRaw(Method.GET_CHAT_HISTORY, {
+    oneofKind: "getChatHistory",
+    getChatHistory: {
+      peerId: buildChatPeer(params.chatId),
+      offsetId: params.messageId + 1n,
+      limit: 8,
+    },
+  })
+  if (result.oneofKind !== "getChatHistory") {
+    throw new Error(`inline action: expected getChatHistory result, got ${String(result.oneofKind)}`)
+  }
+  return (result.getChatHistory.messages ?? []).find((message) => message.id === params.messageId) ?? null
 }
 
 async function withInlineClient<T>(params: {
