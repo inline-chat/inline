@@ -140,6 +140,123 @@ describe("ProtocolClient", () => {
     vi.useRealTimers()
   })
 
+  it("supports configurable default timeout and infinite timeout", async () => {
+    vi.useFakeTimers()
+
+    const shortTimeoutTransport = new MockTransport()
+    const shortTimeoutClient = new ProtocolClient({
+      transport: shortTimeoutTransport,
+      getConnectionInit: () => ({ token: "t" }),
+      defaultRpcTimeoutMs: 25,
+    })
+    await shortTimeoutClient.startTransport()
+
+    const shortTimeoutCall = shortTimeoutClient.callRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} })
+    const shortTimeoutSettled = shortTimeoutCall.then(
+      () => ({ ok: true as const }),
+      (error) => ({ ok: false as const, error }),
+    )
+    await vi.advanceTimersByTimeAsync(30)
+    const shortTimeoutResult = await shortTimeoutSettled
+    expect(shortTimeoutResult.ok).toBe(false)
+    if (shortTimeoutResult.ok) throw new Error("expected timeout")
+    expect(shortTimeoutResult.error).toBeInstanceOf(ProtocolClientError)
+
+    const infiniteTimeoutTransport = new MockTransport()
+    const infiniteTimeoutClient = new ProtocolClient({
+      transport: infiniteTimeoutTransport,
+      getConnectionInit: () => ({ token: "t" }),
+      defaultRpcTimeoutMs: null,
+    })
+    await infiniteTimeoutClient.startTransport()
+
+    let settled = false
+    const infiniteTimeoutCall = infiniteTimeoutClient.callRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} })
+    const infiniteTimeoutSettled = infiniteTimeoutCall.then(
+      () => ({ ok: true as const }),
+      (error) => ({ ok: false as const, error }),
+    )
+    infiniteTimeoutSettled.finally(() => {
+      settled = true
+    })
+
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(settled).toBe(false)
+
+    await infiniteTimeoutTransport.stop()
+    const infiniteTimeoutResult = await infiniteTimeoutSettled
+    expect(infiniteTimeoutResult.ok).toBe(false)
+    if (infiniteTimeoutResult.ok) throw new Error("expected stop rejection")
+    expect(infiniteTimeoutResult.error).toBeInstanceOf(ProtocolClientError)
+
+    vi.useRealTimers()
+  })
+
+  it("uses 30s default timeout when timeout is not specified", async () => {
+    vi.useFakeTimers()
+
+    const transport = new MockTransport()
+    const client = new ProtocolClient({
+      transport,
+      getConnectionInit: () => ({ token: "t" }),
+    })
+    await client.startTransport()
+
+    let settled = false
+    const p = client.callRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} })
+    const pSettled = p.then(
+      () => ({ ok: true as const }),
+      (error) => ({ ok: false as const, error }),
+    )
+    pSettled.finally(() => {
+      settled = true
+    })
+
+    await vi.advanceTimersByTimeAsync(29_999)
+    expect(settled).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(1)
+    const out = await pSettled
+    expect(out.ok).toBe(false)
+    if (out.ok) throw new Error("expected default timeout")
+    expect(out.error).toBeInstanceOf(ProtocolClientError)
+
+    vi.useRealTimers()
+  })
+
+  it("allows per-call infinite timeout override", async () => {
+    vi.useFakeTimers()
+
+    const transport = new MockTransport()
+    const client = new ProtocolClient({
+      transport,
+      getConnectionInit: () => ({ token: "t" }),
+      defaultRpcTimeoutMs: 25,
+    })
+    await client.startTransport()
+
+    let settled = false
+    const p = client.callRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} }, { timeoutMs: null })
+    const pSettled = p.then(
+      () => ({ ok: true as const }),
+      (error) => ({ ok: false as const, error }),
+    )
+    pSettled.finally(() => {
+      settled = true
+    })
+
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(settled).toBe(false)
+
+    await transport.stop()
+    const out = await pSettled
+    expect(out.ok).toBe(false)
+    if (out.ok) throw new Error("expected stop rejection")
+    expect(out.error).toBeInstanceOf(ProtocolClientError)
+
+    vi.useRealTimers()
+  })
+
   it("emits ack and updates events", async () => {
     const transport = new MockTransport()
     const client = new ProtocolClient({
@@ -204,6 +321,53 @@ describe("ProtocolClient", () => {
 
     await transport.stop()
     await expect(p).rejects.toBeInstanceOf(ProtocolClientError)
+  })
+
+  it("retries pending RPCs after reconnect and auth open", async () => {
+    const transport = new MockTransport()
+    const client = new ProtocolClient({
+      transport,
+      getConnectionInit: () => ({ token: "t" }),
+    })
+
+    await client.startTransport()
+    await transport.connect()
+    await transport.emitMessage(ServerProtocolMessage.create({ id: 1n, body: { oneofKind: "connectionOpen", connectionOpen: {} } }))
+    await waitForOpen(client)
+
+    const p = client.callRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} }, { timeoutMs: 10_000 })
+    await waitFor(() => transport.sent.filter((m) => m.body.oneofKind === "rpcCall").length >= 1)
+    const firstRpc = transport.sent.find((m) => m.body.oneofKind === "rpcCall")
+    if (!firstRpc || firstRpc.body.oneofKind !== "rpcCall") throw new Error("missing first rpc")
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 2n,
+        body: { oneofKind: "connectionError", connectionError: {} },
+      }),
+    )
+
+    // attemptNo=1 => delay ~0.6s
+    await waitFor(() => transport.state === "connecting", 1_500)
+    await transport.connect()
+    await waitFor(() => transport.sent.filter((m) => m.body.oneofKind === "connectionInit").length >= 2)
+    await transport.emitMessage(ServerProtocolMessage.create({ id: 3n, body: { oneofKind: "connectionOpen", connectionOpen: {} } }))
+
+    await waitFor(() => transport.sent.filter((m) => m.body.oneofKind === "rpcCall").length >= 2)
+    const resent = transport.sent.filter((m) => m.body.oneofKind === "rpcCall")[1]
+    expect(resent.id).toBe(firstRpc.id)
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 4n,
+        body: {
+          oneofKind: "rpcResult",
+          rpcResult: { reqMsgId: firstRpc.id, result: { oneofKind: "getMe", getMe: { user: { id: 7n } } } },
+        },
+      }),
+    )
+
+    await expect(p).resolves.toEqual({ oneofKind: "getMe", getMe: { user: { id: 7n } } })
   })
 
   it("schedules reconnect when authentication fails (no token)", async () => {
@@ -386,17 +550,46 @@ describe("ProtocolClient", () => {
     vi.useRealTimers()
   })
 
-  it("getAndRemoveRpcContinuation returns null when missing", async () => {
+  it("getAndRemovePendingRpcRequest returns null when missing", async () => {
     const transport = new MockTransport()
     const client = new ProtocolClient({
       transport,
       getConnectionInit: () => ({ token: "t" }),
     })
 
-    expect((client as any).getAndRemoveRpcContinuation(999n)).toBeNull()
+    expect((client as any).getAndRemovePendingRpcRequest(999n)).toBeNull()
   })
 
-  it("covers callRpc send failure when send rejects with a non-Error", async () => {
+  it("covers timeout normalization and pending-request helper guards", async () => {
+    const transport = new MockTransport()
+    const client = new ProtocolClient({
+      transport,
+      getConnectionInit: () => ({ token: "t" }),
+    })
+
+    expect((client as any).resolveRpcTimeoutMs(Number.POSITIVE_INFINITY)).toBeNull()
+    expect((client as any).resolveRpcTimeoutMs(Number.NaN)).toBeNull()
+
+    ;(client as any).state = "open"
+    ;(client as any).trySendPendingRpcRequest(123n)
+
+    const timeout = setTimeout(() => {}, 1_000)
+    ;(client as any).pendingRpcRequests.set(123n, {
+      message: ClientMessage.create({ id: 123n, seq: 1, body: { oneofKind: "rpcCall", rpcCall: { method: Method.GET_ME, input: { oneofKind: "getMe", getMe: {} } } } }),
+      resolve: () => {},
+      reject: () => {},
+      timeout,
+      timeoutMs: 1_000,
+      sending: false,
+    })
+
+    const removed = (client as any).getAndRemovePendingRpcRequest(123n)
+    expect(removed).not.toBeNull()
+  })
+
+  it("keeps pending RPC when send fails with a non-Error and times out later", async () => {
+    vi.useFakeTimers()
+
     class WeirdTransport implements Transport {
       readonly events = new AsyncChannel<TransportEvent>()
       async start() {}
@@ -415,7 +608,20 @@ describe("ProtocolClient", () => {
     })
 
     ;(client as any).state = "open"
-    await expect(client.callRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} }, { timeoutMs: 0 })).rejects.toThrow(/send-failed/)
+    const p = client.callRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} }, { timeoutMs: 10 })
+    const settled = p.then(
+      () => ({ ok: true as const }),
+      (error) => ({ ok: false as const, error }),
+    )
+
+    await vi.advanceTimersByTimeAsync(20)
+    const out = await settled
+    expect(out.ok).toBe(false)
+    if (out.ok) throw new Error("expected timeout")
+    expect(out.error).toBeInstanceOf(ProtocolClientError)
+
+    vi.runOnlyPendingTimers()
+    vi.useRealTimers()
   })
 
   it("covers callRpc timeout callback no-op when rpc already settled", async () => {
@@ -448,7 +654,7 @@ describe("ProtocolClient", () => {
     )
     await expect(p).resolves.toBeDefined()
 
-    // Advance past timeout; callback should see continuation missing and no-op.
+    // Advance past timeout; callback should see pending request missing and no-op.
     await vi.advanceTimersByTimeAsync(20)
 
     vi.useRealTimers()
@@ -504,7 +710,7 @@ describe("ProtocolClient", () => {
     vi.useRealTimers()
   })
 
-  it("rejects rpc calls before protocol connection is open", async () => {
+  it("queues callRpc before open and sends after auth open (while sendRpc still rejects)", async () => {
     const transport = new MockTransport()
     const client = new ProtocolClient({
       transport,
@@ -512,14 +718,33 @@ describe("ProtocolClient", () => {
     })
 
     await client.startTransport()
-    await transport.connect()
 
     await expect(client.sendRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} })).rejects.toBeInstanceOf(ProtocolClientError)
-    await expect(client.callRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} })).rejects.toBeInstanceOf(ProtocolClientError)
+
+    const p = client.callRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} }, { timeoutMs: 5_000 })
     expect(transport.sent.some((message) => message.body.oneofKind === "rpcCall")).toBe(false)
+
+    await transport.connect()
+    await waitFor(() => transport.sent.some((m) => m.body.oneofKind === "connectionInit"))
+    await transport.emitMessage(ServerProtocolMessage.create({ id: 1n, body: { oneofKind: "connectionOpen", connectionOpen: {} } }))
+
+    await waitFor(() => transport.sent.some((message) => message.body.oneofKind === "rpcCall"))
+    const rpc = transport.sent.find((message) => message.body.oneofKind === "rpcCall")
+    if (!rpc || rpc.body.oneofKind !== "rpcCall") throw new Error("missing rpc")
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 2n,
+        body: {
+          oneofKind: "rpcResult",
+          rpcResult: { reqMsgId: rpc.id, result: { oneofKind: "getMe", getMe: { user: { id: 2n } } } },
+        },
+      }),
+    )
+    await expect(p).resolves.toEqual({ oneofKind: "getMe", getMe: { user: { id: 2n } } })
   })
 
-  it("covers connecting/stopping events, pong handling, send-failed rpc rejection, and reconnection delay branch", async () => {
+  it("covers connecting/stopping events, pong handling, send-failed rpc timeout, and reconnection delay branch", async () => {
     vi.useFakeTimers()
 
     const transport = new MockTransport()
@@ -546,15 +771,18 @@ describe("ProtocolClient", () => {
     await transport.emitMessage(ServerProtocolMessage.create({ id: 2n, body: { oneofKind: "pong", pong: { nonce: 123n } } }))
     expect(pongSpy).toHaveBeenCalledWith(123n)
 
-    // Create a client with a transport that fails sends so callRpc rejects via send-failed.
+    // Create a client with a transport that fails sends so callRpc eventually times out.
     class FailSendTransport implements Transport {
       readonly events = new AsyncChannel<TransportEvent>()
+      reconnectCalls = 0
       async start() {
         await this.events.send({ type: "connected" })
       }
       async stop() {}
       async stopConnection() {}
-      async reconnect() {}
+      async reconnect() {
+        this.reconnectCalls++
+      }
       async send(_message: ClientMessage) {
         throw new Error("send boom")
       }
@@ -565,10 +793,20 @@ describe("ProtocolClient", () => {
       transport: failTransport,
       getConnectionInit: () => ({ token: "t" }),
     })
-    await client2.startTransport()
+
     ;(client2 as any).state = "open"
 
-    await expect(client2.callRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} }, { timeoutMs: 0 })).rejects.toThrow(/send-failed|send boom/)
+    const rpcWithFailingSend = client2.callRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} }, { timeoutMs: 20 })
+    const rpcWithFailingSendSettled = rpcWithFailingSend.then(
+      () => ({ ok: true as const }),
+      (error) => ({ ok: false as const, error }),
+    )
+    await vi.advanceTimersByTimeAsync(700)
+    const failingSendResult = await rpcWithFailingSendSettled
+    expect(failingSendResult.ok).toBe(false)
+    if (failingSendResult.ok) throw new Error("expected timeout")
+    expect(failingSendResult.error).toBeInstanceOf(ProtocolClientError)
+    expect(failTransport.reconnectCalls).toBeGreaterThanOrEqual(1)
 
     // Reconnection delay branch for >=8 attempts.
     ;(client as any).connectionAttemptNo = 8
