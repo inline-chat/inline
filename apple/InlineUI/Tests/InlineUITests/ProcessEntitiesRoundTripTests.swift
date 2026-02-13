@@ -121,6 +121,18 @@ struct ProcessEntitiesRoundTripTests {
     #expect(entities.entities[0].offset == 16) // After "Check this out:\n"
     #expect(entities.entities[0].length == 9) // "let x = 1"
   }
+
+  @Test("Inline embedded pre block is normalized onto separate lines")
+  func testInlineEmbeddedPreBlockNormalization() {
+    let input = "hi how ```are``` you"
+    let (text, entities) = ProcessEntities.fromAttributedString(NSAttributedString(string: input))
+
+    #expect(text == "hi how\nare\nyou")
+    #expect(entities.entities.count == 1)
+    #expect(entities.entities[0].type == .pre)
+    #expect(entities.entities[0].offset == 7)
+    #expect(entities.entities[0].length == 3)
+  }
   
   @Test("Round trip compatibility - simple text")
   func testRoundTripSimpleText() {
