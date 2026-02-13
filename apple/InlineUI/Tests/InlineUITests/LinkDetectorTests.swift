@@ -219,4 +219,44 @@ struct LinkDetectorTests {
     #expect(matches.count == 1, "Should detect the Wikipedia URL with parentheses")
     #expect(matches.first?.url.absoluteString == url, "Should detect the complete URL including parentheses")
   }
+
+  @Test("Does not detect markdown file names with .md extension as bare links")
+  func doesNotDetectMarkdownFileNames() async throws {
+    let text = "Please check README.md and release-notes.md before shipping."
+    let matches = detector.detectLinks(in: text)
+    #expect(matches.isEmpty, "Markdown file names should not be treated as links")
+  }
+
+  @Test("Still detects explicit https URLs that use .md TLD")
+  func stillDetectsExplicitMdTldURLs() async throws {
+    let url = "https://example.md/docs"
+    let text = "Open: \(url)"
+    let matches = detector.detectLinks(in: text)
+
+    #expect(matches.count == 1, "Explicit protocol URLs should still be detected")
+    #expect(matches.first?.url.absoluteString == url)
+  }
+
+  @Test("Does not detect bare .md domains when path and query are present")
+  func doesNotDetectBareMdDomainWithPathAndQuery() async throws {
+    let text = "Reference docs.example.md/guide?lang=en for setup."
+    let matches = detector.detectLinks(in: text)
+    #expect(matches.isEmpty, "Bare .md domains should be excluded even with path/query")
+  }
+
+  @Test("Does not detect uppercase .MD bare domains")
+  func doesNotDetectUppercaseMdBareDomain() async throws {
+    let text = "See EXAMPLE.MD for notes."
+    let matches = detector.detectLinks(in: text)
+    #expect(matches.isEmpty, "Bare .MD domains should be excluded case-insensitively")
+  }
+
+  @Test("Still detects non-md bare domains after md exclusion")
+  func stillDetectsNonMdBareDomain() async throws {
+    let text = "Open example.me for profile."
+    let matches = detector.detectLinks(in: text)
+
+    #expect(matches.count == 1, "Non-.md bare domains should still be detected")
+    #expect(matches.first?.url.absoluteString == "https://example.me")
+  }
 }
