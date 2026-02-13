@@ -19,6 +19,7 @@ import { updateChatVisibility } from "./messages.updateChatVisibility"
 import { updateChatInfo } from "./messages.updateChatInfo"
 import { moveThread } from "./messages.moveThread"
 import { pinMessage } from "./messages.pinMessage"
+import { updateDialogNotificationSettings } from "./messages.updateDialogNotificationSettings"
 import { getUserSettings } from "./user.getUserSettings"
 import { updateUserSettings } from "./user.updateUserSettings"
 import { createBot } from "./createBot"
@@ -52,6 +53,7 @@ export const Functions = {
     updateChatInfo: updateChatInfo,
     moveThread: moveThread,
     pinMessage: pinMessage,
+    updateDialogNotificationSettings: updateDialogNotificationSettings,
     forwardMessages: forwardMessages,
     // until we make tests pass
     //markAsUnread: markAsUnread,

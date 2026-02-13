@@ -6,14 +6,13 @@ import {
   MessageEntity_Type,
   MessageSendMode,
   Update,
-  UpdateNewMessageNotification_Reason,
 } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { FileModel, type DbFullPhoto, type DbFullVideo } from "@in/server/db/models/files"
 import type { DbFullDocument } from "@in/server/db/models/files"
 import { MessageModel } from "@in/server/db/models/messages"
 import { db } from "@in/server/db"
-import { lower, messageAttachments, users, type DbChat, type DbMessage } from "@in/server/db/schema"
+import { dialogs, lower, messageAttachments, users, type DbChat, type DbMessage } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { getCachedUserName, UserNamesCache, type UserName } from "@in/server/modules/cache/userNames"
 import { decryptMessage, encryptMessage } from "@in/server/modules/encryption/encryptMessage"
@@ -32,6 +31,12 @@ import { encryptBinary } from "@in/server/modules/encryption/encryption"
 import { processMessageText } from "@in/server/modules/message/processText"
 import { isUserMentioned } from "@in/server/modules/message/helpers"
 import { detectHasLink } from "@in/server/modules/message/linkDetection"
+import { decideNotification } from "@in/server/modules/notifications/decision"
+import {
+  decodeDialogNotificationSettings,
+  normalizeGlobalNotificationMode,
+  resolveEffectiveNotificationMode,
+} from "@in/server/modules/notifications/dialogNotificationSettings"
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -40,7 +45,7 @@ import { connectionManager } from "@in/server/ws/connections"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { getCachedUserProfilePhotoUrl } from "@in/server/modules/cache/userPhotos"
 import { processAttachments } from "@in/server/db/models/messages"
-import { eq, inArray } from "drizzle-orm"
+import { and, eq, inArray } from "drizzle-orm"
 import { unarchiveIfNeeded } from "@in/server/modules/message/unarchiveIfNeeded"
 
 type Input = {
@@ -880,6 +885,25 @@ async function sendNotifications(input: SendPushForMsgInput) {
   const senderNameInfo = await getCachedUserName(messageInfo.message.fromId)
   const senderProfilePhotoUrl = await getCachedUserProfilePhotoUrl(messageInfo.message.fromId)
 
+  const recipientUserIds = updateGroup.userIds.filter((userId) => userId !== currentUserId)
+  const dialogNotificationSettingsByUserId = new Map<number, ReturnType<typeof decodeDialogNotificationSettings>>()
+  if (recipientUserIds.length > 0) {
+    const dialogRows = await db
+      .select({
+        userId: dialogs.userId,
+        notificationSettings: dialogs.notificationSettings,
+      })
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, chat.id), inArray(dialogs.userId, recipientUserIds)))
+
+    dialogRows.forEach((dialogRow) => {
+      dialogNotificationSettingsByUserId.set(
+        dialogRow.userId,
+        decodeDialogNotificationSettings(dialogRow.notificationSettings),
+      )
+    })
+  }
+
   // TODO: send to users who have it set to All immediately
   // Handle DMs and threads
   for (let userId of updateGroup.userIds) {
@@ -903,6 +927,7 @@ async function sendNotifications(input: SendPushForMsgInput) {
       currentUserId,
       senderNameInfo,
       senderProfilePhotoUrl,
+      dialogNotificationSettings: dialogNotificationSettingsByUserId.get(userId),
     })
   }
 }
@@ -923,6 +948,7 @@ async function sendNotificationToUser({
   currentUserId,
   senderNameInfo,
   senderProfilePhotoUrl,
+  dialogNotificationSettings,
 }: {
   userId: number
   messageInfo: MessageInfo
@@ -939,69 +965,37 @@ async function sendNotificationToUser({
   currentUserId: number
   senderNameInfo?: UserName
   senderProfilePhotoUrl?: string
+  dialogNotificationSettings?: ReturnType<typeof decodeDialogNotificationSettings>
 }) {
   // FIRST, check if we should notify this user or not ---------------------------------
-  let needsExplicitMacNotification = false
-  let reason = UpdateNewMessageNotification_Reason.UNSPECIFIED
-  let userSettings = await getCachedUserSettings(userId)
-  const rawMode = userSettings?.notifications.mode
-  const legacyOnlyMentions =
-    rawMode === UserSettingsNotificationsMode.OnlyMentions ||
-    (rawMode === UserSettingsNotificationsMode.Mentions && userSettings?.notifications.disableDmNotifications)
-  const effectiveMode = legacyOnlyMentions ? UserSettingsNotificationsMode.OnlyMentions : rawMode
-
-  if (effectiveMode === UserSettingsNotificationsMode.None && !isUrgentNudge) {
-    // Do not notify
-    return
-  }
+  const userSettings = await getCachedUserSettings(userId)
+  const globalMode = normalizeGlobalNotificationMode(userSettings)
+  const effectiveMode = resolveEffectiveNotificationMode({
+    globalMode,
+    dialogNotificationSettings,
+  })
 
   // TODO: evaluate reply to a user as a mention
   const isDM = inputPeer.type.oneofKind === "user"
   const isReplyToUser = repliedToSenderId === userId
   const isExplicitlyMentioned = messageEntities ? isUserMentioned(messageEntities, userId) : false
 
-  if (
-    isDM &&
-    effectiveMode === UserSettingsNotificationsMode.OnlyMentions &&
-    !isNudge &&
-    !isExplicitlyMentioned
-  ) {
+  const decision = decideNotification({
+    mode: effectiveMode,
+    isUrgentNudge,
+    isNudge,
+    isDM,
+    isReplyToUser,
+    isExplicitlyMentioned,
+    aiRequiresNotification: evalResult?.notifyUserIds?.includes(userId) ?? false,
+  })
+
+  if (!decision.shouldNotify) {
     return
   }
 
-  const countsDmAsMention = effectiveMode !== UserSettingsNotificationsMode.OnlyMentions
-  const isMentioned = isExplicitlyMentioned || isReplyToUser || (countsDmAsMention && isDM)
-  const requiresNotification = isNudge || evalResult?.notifyUserIds?.includes(userId)
-
-  // Mentions
-  if (
-    effectiveMode === UserSettingsNotificationsMode.Mentions ||
-    effectiveMode === UserSettingsNotificationsMode.OnlyMentions
-  ) {
-    if (
-      // Not mentioned
-      !isMentioned &&
-      // Not notified
-      !requiresNotification &&
-      // Not DMs - always send for DMs if it's set to "Mentions"
-      !(effectiveMode === UserSettingsNotificationsMode.Mentions && isDM)
-    ) {
-      // Do not notify
-      return
-    }
-    needsExplicitMacNotification = true
-    reason = UpdateNewMessageNotification_Reason.MENTION
-  }
-
-  // Important only
-  if (effectiveMode === UserSettingsNotificationsMode.ImportantOnly) {
-    if (!isMentioned || !requiresNotification) {
-      // Do not notify
-      return
-    }
-    needsExplicitMacNotification = true
-    reason = UpdateNewMessageNotification_Reason.IMPORTANT
-  }
+  const needsExplicitMacNotification = decision.needsExplicitMacNotification
+  const reason = decision.reason
 
   // THEN, send notification ------------------------------------------------------------
 

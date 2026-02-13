@@ -484,6 +484,19 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
         },
       }
 
+    case "userDialogNotificationSettings":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "dialogNotificationSettings",
+          dialogNotificationSettings: {
+            peerId: payload.userDialogNotificationSettings.peerId,
+            notificationSettings: payload.userDialogNotificationSettings.notificationSettings,
+          },
+        },
+      }
+
     default:
       log.warn("Unhandled user update", { type: payload.oneofKind })
       return null

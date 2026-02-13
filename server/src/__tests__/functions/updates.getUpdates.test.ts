@@ -3,7 +3,7 @@ import { getUpdates } from "@in/server/functions/updates.getUpdates"
 import { testUtils, setupTestLifecycle } from "../setup"
 import { db } from "../../db"
 import { updates, UpdateBucket } from "../../db/schema/updates"
-import { GetUpdatesResult_ResultType, InputPeer } from "@inline-chat/protocol/core"
+import { DialogNotificationSettings_Mode, GetUpdatesResult_ResultType, InputPeer } from "@inline-chat/protocol/core"
 import type { ServerUpdate } from "@inline-chat/protocol/server"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { UpdatesModel } from "@in/server/db/models/updates"
@@ -271,6 +271,53 @@ describe("getUpdates", () => {
     expect(first.update.oneofKind).toBe("markAsUnread")
     if (first.update.oneofKind !== "markAsUnread") throw new Error("Unexpected update type")
     expect(first.update.markAsUnread.unreadMark).toBe(true)
+  })
+
+  test("inflates userDialogNotificationSettings to dialogNotificationSettings in user bucket", async () => {
+    const user = await testUtils.createUser("dialog-settings@sync.com")
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.User,
+      entityId: user.id,
+      seq: 1,
+      payload: {
+        oneofKind: "userDialogNotificationSettings",
+        userDialogNotificationSettings: {
+          peerId: {
+            type: {
+              oneofKind: "chat",
+              chat: { chatId: 123n },
+            },
+          },
+          notificationSettings: {
+            mode: DialogNotificationSettings_Mode.MENTIONS,
+          },
+        },
+      },
+    })
+
+    const result = await getUpdates(
+      {
+        bucket: { type: { oneofKind: "user", user: {} } },
+        startSeq: 0n,
+        seqEnd: 0n,
+        totalLimit: 1000,
+      },
+      { currentUserId: user.id } as any,
+    )
+
+    expect(result.resultType).toBe(GetUpdatesResult_ResultType.SLICE)
+    expect(result.final).toBe(true)
+    expect(Number(result.seq)).toBe(1)
+    expect(result.updates).toHaveLength(1)
+    const first = result.updates[0]
+    expect(first).toBeDefined()
+    if (!first) throw new Error("Missing first update")
+    expect(first.update.oneofKind).toBe("dialogNotificationSettings")
+    if (first.update.oneofKind !== "dialogNotificationSettings") throw new Error("Unexpected update type")
+    expect(first.update.dialogNotificationSettings.notificationSettings?.mode).toBe(
+      DialogNotificationSettings_Mode.MENTIONS,
+    )
   })
 
   test("integration: readMessages persists userReadMaxId and getUpdates inflates updateReadMaxId", async () => {

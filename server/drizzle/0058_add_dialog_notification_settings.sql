@@ -1,0 +1,1 @@
+ALTER TABLE "dialogs" ADD COLUMN "notification_settings" "bytea";

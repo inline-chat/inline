@@ -9,10 +9,12 @@ class ChatInfoViewEnvironment: ObservableObject {
   let participants: [UserInfo]
   let chatId: Int64
   let chatItem: SpaceChatItem
+  let notificationSelection: DialogNotificationSettingSelection
   let spaceMembersViewModel: SpaceMembersViewModel
   let space: Space?
   let removeParticipant: (UserInfo) -> Void
   let openParticipantChat: (UserInfo) -> Void
+  let updateNotificationSelection: (DialogNotificationSettingSelection) -> Void
   let requestMakePublic: () -> Void
   let requestMakePrivate: () -> Void
 
@@ -24,10 +26,12 @@ class ChatInfoViewEnvironment: ObservableObject {
     participants: [UserInfo],
     chatId: Int64,
     chatItem: SpaceChatItem,
+    notificationSelection: DialogNotificationSettingSelection,
     spaceMembersViewModel: SpaceMembersViewModel,
     space: Space?,
     removeParticipant: @escaping (UserInfo) -> Void,
     openParticipantChat: @escaping (UserInfo) -> Void,
+    updateNotificationSelection: @escaping (DialogNotificationSettingSelection) -> Void,
     requestMakePublic: @escaping () -> Void,
     requestMakePrivate: @escaping () -> Void
   ) {
@@ -38,10 +42,12 @@ class ChatInfoViewEnvironment: ObservableObject {
     self.participants = participants
     self.chatId = chatId
     self.chatItem = chatItem
+    self.notificationSelection = notificationSelection
     self.spaceMembersViewModel = spaceMembersViewModel
     self.space = space
     self.removeParticipant = removeParticipant
     self.openParticipantChat = openParticipantChat
+    self.updateNotificationSelection = updateNotificationSelection
     self.requestMakePublic = requestMakePublic
     self.requestMakePrivate = requestMakePrivate
   }

@@ -407,6 +407,13 @@
       "when": 1770665621924,
       "tag": "0057_users-update-seq-default",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1771015559074,
+      "tag": "0058_add_dialog_notification_settings",
+      "breakpoints": true
     }
   ]
 }

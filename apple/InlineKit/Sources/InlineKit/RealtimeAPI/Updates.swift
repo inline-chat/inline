@@ -120,6 +120,9 @@ public actor UpdatesEngine: Sendable {
         case let .dialogArchived(dialogArchived):
           try dialogArchived.apply(db)
 
+        case let .dialogNotificationSettings(dialogNotificationSettings):
+          try dialogNotificationSettings.apply(db)
+
         default:
           break
       }
@@ -239,10 +242,13 @@ extension InlineProtocol.UpdateNewMessage {
     #if os(macOS)
     // Show notifications only for newly-inserted incoming messages, never for catch-up replays.
     if !suppressNotifications, !hadMessage, msg.out == false {
+      let dialogSelection = (try? Dialog.get(peerId: msg.peerId).fetchOne(db)?.notificationSelection) ?? .global
       Task { @MainActor in
-        let mode = INUserSettings.current.notification.mode
-        // Only show notification if mode is all
-        guard mode == .all else { return }
+        let effectiveMode = dialogSelection.resolveEffectiveMode(
+          globalMode: INUserSettings.current.notification.mode
+        )
+        // Realtime newMessage notifications are the "all messages" path.
+        guard effectiveMode == .all else { return }
         guard message.sendMode != .modeSilent else { return }
         Task.detached {
           // Handle notification
@@ -259,10 +265,14 @@ extension InlineProtocol.UpdateNewMessageNotification {
     #if os(macOS)
     // Show notification for incoming messages
     if message.out == false {
+      let dialogSelection = (try? Dialog.get(peerId: message.peerID.toPeer()).fetchOne(db)?.notificationSelection)
+        ?? .global
       Task { @MainActor in
-        let mode = INUserSettings.current.notification.mode
-        // Only show notification if mode is all
-        guard mode != .all else { return }
+        let effectiveMode = dialogSelection.resolveEffectiveMode(
+          globalMode: INUserSettings.current.notification.mode
+        )
+        // Explicit notification updates are for mention/important style flows.
+        guard effectiveMode != .all && effectiveMode != .none else { return }
         guard message.sendMode != .modeSilent else { return }
         Task.detached {
           // Handle notification
@@ -907,6 +917,20 @@ extension InlineProtocol.UpdateDialogArchived {
       Log.shared.debug("Updated dialog archived to \(archived)")
     } else {
       Log.shared.warning("Could not find dialog for peer \(peerID.toPeer()) to update archived state")
+    }
+  }
+}
+
+extension InlineProtocol.UpdateDialogNotificationSettings {
+  func apply(_ db: Database) throws {
+    Log.shared.debug("update dialog notification settings for peer \(peerID.toPeer())")
+
+    if var dialog = try Dialog.get(peerId: peerID.toPeer()).fetchOne(db) {
+      dialog.notificationSettings = hasNotificationSettings ? notificationSettings : nil
+      try dialog.update(db)
+      Log.shared.debug("Updated dialog notification settings")
+    } else {
+      Log.shared.warning("Could not find dialog for peer \(peerID.toPeer()) to update notification settings")
     }
   }
 }

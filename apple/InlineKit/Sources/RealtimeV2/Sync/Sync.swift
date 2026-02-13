@@ -467,7 +467,7 @@ actor Sync {
         .space(id: payload.member.spaceID)
       case .joinSpace:
         .user
-      case .updateUserStatus, .updateUserSettings, .dialogArchived:
+      case .updateUserStatus, .updateUserSettings, .dialogArchived, .dialogNotificationSettings:
         .user
       case let .newChat(payload):
         .chat(peer: payload.chat.peerID)
@@ -605,6 +605,8 @@ actor BucketActor {
       case .spaceMemberAdd:
         true
       case .dialogArchived:
+        true
+      case .dialogNotificationSettings:
         true
       case .pinnedMessages:
         true

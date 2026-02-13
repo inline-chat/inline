@@ -18,6 +18,7 @@ enum MainToolbarItemIdentifier: Hashable, Sendable {
   case participants(peer: Peer)
   case chatTitle(peer: Peer)
   case nudge(peer: Peer)
+  case notifications(peer: Peer)
   case menu(peer: Peer)
 }
 
@@ -170,6 +171,9 @@ class MainToolbarView: NSView {
             .buttonStyle(ToolbarButtonStyle())
             .id(peer.id)
         )
+
+      case let .notifications(peer):
+        return DialogNotificationToolbarButton(peer: peer, db: dependencies.database)
 
       case let .participants(peer):
         return makeHostingView(
@@ -393,6 +397,184 @@ private struct ToolbarHostingContainer<Content: View>: View {
       Spacer(minLength: 0)
     }
     .frame(height: Theme.toolbarHeight)
+  }
+}
+
+@MainActor
+private final class DialogNotificationToolbarButton: NSButton {
+  private let peer: Peer
+  private let db: AppDatabase
+  private var dialogCancellable: AnyCancellable?
+  private lazy var optionsMenu = buildMenu()
+
+  private var selection: DialogNotificationSettingSelection = .global {
+    didSet {
+      guard oldValue != selection else { return }
+      updateIcon()
+      updateMenuSelectionState()
+    }
+  }
+
+  init(peer: Peer, db: AppDatabase) {
+    self.peer = peer
+    self.db = db
+    super.init(frame: .zero)
+    configure()
+    bindDialog()
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  private func configure() {
+    translatesAutoresizingMaskIntoConstraints = false
+    isBordered = false
+    bezelStyle = .regularSquare
+    imagePosition = .imageOnly
+    setButtonType(.momentaryChange)
+    contentTintColor = .secondaryLabelColor
+    imageScaling = .scaleProportionallyDown
+    target = self
+    action = #selector(showMenu)
+    toolTip = "Notifications"
+
+    widthAnchor.constraint(equalToConstant: 28).isActive = true
+    heightAnchor.constraint(equalToConstant: 28).isActive = true
+
+    updateIcon()
+    updateMenuSelectionState()
+    updateAlpha()
+  }
+
+  private func bindDialog() {
+    db.warnIfInMemoryDatabaseForObservation("DialogNotificationToolbarButton.dialog")
+    dialogCancellable = ValueObservation
+      .tracking { db in
+        try Dialog.fetchOne(db, id: Dialog.getDialogId(peerId: self.peer))
+      }
+      .publisher(in: db.dbWriter, scheduling: .immediate)
+      .receive(on: DispatchQueue.main)
+      .sink(
+        receiveCompletion: { _ in },
+        receiveValue: { [weak self] dialog in
+          self?.selection = dialog?.notificationSelection ?? .global
+        }
+      )
+  }
+
+  @objc
+  private func showMenu() {
+    updateMenuSelectionState()
+    optionsMenu.popUp(positioning: nil, at: NSPoint(x: 0, y: bounds.height + 2), in: self)
+  }
+
+  @objc
+  private func handleMenuSelection(_ sender: NSMenuItem) {
+    guard
+      let rawValue = sender.representedObject as? String,
+      let selected = DialogNotificationSettingSelection(rawValue: rawValue),
+      selected != selection
+    else {
+      return
+    }
+
+    let previousSelection = selection
+    selection = selected
+
+    Task(priority: .userInitiated) {
+      do {
+        _ = try await Api.realtime.send(.updateDialogNotificationSettings(peerId: peer, selection: selected))
+      } catch {
+        Log.shared.error("Failed to update dialog notification settings", error: error)
+        await MainActor.run {
+          self.selection = previousSelection
+        }
+      }
+    }
+  }
+
+  private func updateIcon() {
+    let symbolName = switch selection {
+      case .global:
+        "bell"
+      case .all:
+        "bell.fill"
+      case .mentions:
+        "bell.badge"
+      case .none:
+        "bell.slash"
+    }
+
+    if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Notifications") {
+      let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .semibold, scale: .medium)
+      self.image = image.withSymbolConfiguration(config)
+    }
+  }
+
+  private func buildMenu() -> NSMenu {
+    let menu = NSMenu()
+    for option in DialogNotificationSettingSelection.allCases {
+      let item = NSMenuItem(title: "", action: #selector(handleMenuSelection(_:)), keyEquivalent: "")
+      item.target = self
+      item.representedObject = option.rawValue
+      item.image = menuItemImage(for: option)
+      item.attributedTitle = menuItemTitle(for: option)
+      menu.addItem(item)
+    }
+    return menu
+  }
+
+  private func updateMenuSelectionState() {
+    for item in optionsMenu.items {
+      guard
+        let rawValue = item.representedObject as? String,
+        let option = DialogNotificationSettingSelection(rawValue: rawValue)
+      else {
+        continue
+      }
+      item.state = option == selection ? .on : .off
+    }
+  }
+
+  private func menuItemImage(for option: DialogNotificationSettingSelection) -> NSImage? {
+    guard let image = NSImage(systemSymbolName: option.iconName, accessibilityDescription: option.title) else {
+      return nil
+    }
+    return image.withSymbolConfiguration(.init(pointSize: 13, weight: .regular, scale: .medium))
+  }
+
+  private func menuItemTitle(for option: DialogNotificationSettingSelection) -> NSAttributedString {
+    let titleAttributes: [NSAttributedString.Key: Any] = [
+      .font: NSFont.menuFont(ofSize: 13),
+      .foregroundColor: NSColor.labelColor,
+    ]
+    let descriptionAttributes: [NSAttributedString.Key: Any] = [
+      .font: NSFont.systemFont(ofSize: 11),
+      .foregroundColor: NSColor.secondaryLabelColor,
+    ]
+
+    let attributed = NSMutableAttributedString(string: option.title, attributes: titleAttributes)
+    attributed.append(NSAttributedString(string: "\n"))
+    attributed.append(NSAttributedString(string: option.menuDescription, attributes: descriptionAttributes))
+    return attributed
+  }
+
+  override var isHighlighted: Bool {
+    didSet { updateAlpha() }
+  }
+
+  override var isEnabled: Bool {
+    didSet { updateAlpha() }
+  }
+
+  private func updateAlpha() {
+    if isHighlighted {
+      alphaValue = 0.7
+    } else {
+      alphaValue = isEnabled ? 1 : 0.35
+    }
   }
 }
 

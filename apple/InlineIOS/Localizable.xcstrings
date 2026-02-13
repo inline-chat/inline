@@ -1097,6 +1097,9 @@
     "Unsupported message" : {
 
     },
+    "Use Global follows your app-wide notification settings." : {
+
+    },
     "Username" : {
 
     },
@@ -1118,6 +1121,9 @@
       }
     },
     "View" : {
+
+    },
+    "Visibility" : {
 
     },
     "Welcome to Inline" : {
