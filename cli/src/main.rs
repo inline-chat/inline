@@ -4,6 +4,7 @@ mod config;
 mod dates;
 mod output;
 mod protocol;
+mod query;
 mod realtime;
 mod state;
 mod update;
@@ -34,6 +35,7 @@ use crate::output::{
     UserSummary,
 };
 use crate::protocol::proto;
+use crate::query::JsonQueryOptions;
 use crate::realtime::RealtimeClient;
 use crate::state::LocalDb;
 
@@ -95,6 +97,21 @@ JQ examples:
   inline chats list --json | jq -r '.chats[] | "\(.id)\t\(.title // "")\tspace:\(if .space_id == null then "dm" else (.space_id | tostring) end)"'
   inline chats list --json | jq -r '.dialogs[] | select(.unread_count > 0) | "\(.chat_id)\tunread:\(.unread_count)"'
   inline messages list --chat-id 123 --json | jq -r '.messages[] | "\(.id)\t\(.from_id)\t\((.message // "") | gsub("\n"; " ") | .[0:80])"'
+
+Alias-aware query/path examples:
+  inline doctor --json --query-path config.apiBaseUrl
+  inline doctor --json --query-path cfg.apiBaseUrl
+  inline doctor --json --query-path 'cfg["apiBaseUrl"]'
+  inline users list --json --query-path 'u[].fn'
+  inline users list --json --query-path u --sort-path fn --field id --field fn
+
+Key aliases (query/path only; payload keys stay canonical):
+  au=auth at=attachments c=chats cfg=config cid=chat_id d=dialogs dn=display_name em=email
+  fid=from_id fn=first_name it=items lm=last_message lmd=last_message_relative_date lml=last_message_line
+  ln=last_name m=message mb=member mbs=members md=media mid=message_id ms=messages
+  par=participant ph=phone_number pid=peer_id ps=participants pt=peer_type pth=paths
+  rd=relative_date rmi=read_max_id s=spaces sid=space_id sn=sender_name sys=system
+  ti=title u=users uc=unread_count uid=user_id um=unread_mark un=username
 "#
 )]
 struct Cli {
@@ -126,6 +143,63 @@ struct Cli {
         conflicts_with = "pretty"
     )]
     compact: bool,
+
+    #[arg(
+        long = "query-path",
+        global = true,
+        value_name = "PATH",
+        num_args = 1..,
+        action = ArgAction::Append,
+        conflicts_with = "jsonpath",
+        help = "Select value(s) with a dot/bracket path (repeatable, alias-aware)"
+    )]
+    query_paths: Vec<String>,
+
+    #[arg(
+        long = "field",
+        global = true,
+        value_name = "PATH",
+        num_args = 1..,
+        action = ArgAction::Append,
+        help = "Project field paths from each item in an array (repeatable, alias-aware)"
+    )]
+    fields: Vec<String>,
+
+    #[arg(
+        long,
+        global = true,
+        value_name = "PATH",
+        num_args = 1..,
+        action = ArgAction::Append,
+        conflicts_with = "query_paths",
+        help = "Select value(s) using JSONPath-like dot/bracket expressions (repeatable, alias-aware)"
+    )]
+    jsonpath: Vec<String>,
+
+    #[arg(
+        long = "sort-path",
+        global = true,
+        value_name = "PATH",
+        help = "Sort current JSON array by the given path (alias-aware)"
+    )]
+    sort_path: Option<String>,
+
+    #[arg(
+        long,
+        global = true,
+        requires = "sort_path",
+        help = "Sort descending (use with --sort-path)"
+    )]
+    sort_desc: bool,
+
+    #[arg(
+        long,
+        global = true,
+        value_name = "FILTER",
+        conflicts_with_all = ["query_paths", "fields", "jsonpath", "sort_path"],
+        help = "Apply jq filter to JSON output (requires jq binary; alias-aware for path tokens)"
+    )]
+    jq: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -335,7 +409,11 @@ struct ChatsDeleteArgs {
 
 #[derive(Subcommand)]
 enum UsersCommand {
-    #[command(about = "List users that appear in your chats", alias = "search", alias = "find")]
+    #[command(
+        about = "List users that appear in your chats",
+        alias = "search",
+        alias = "find"
+    )]
     List(UsersListArgs),
     #[command(about = "Fetch a user by id from the chat list payload")]
     Get(UserGetArgs),
@@ -838,6 +916,15 @@ fn is_broken_pipe_panic(info: &std::panic::PanicHookInfo<'_>) -> bool {
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let json_format = output::resolve_json_format(cli.pretty, cli.compact);
+    let json_query_options = JsonQueryOptions {
+        jq_filter: cli.jq.clone(),
+        query_paths: cli.query_paths.clone(),
+        fields: cli.fields.clone(),
+        jsonpaths: cli.jsonpath.clone(),
+        sort_path: cli.sort_path.clone(),
+        sort_desc: cli.sort_desc,
+    };
+    let json_output = cli.json || json_query_options.has_transforms();
     let config = Config::load();
     let auth_store = AuthStore::new(config.secrets_path.clone(), config.api_base_url.clone());
     let local_db = LocalDb::new(config.state_path.clone(), config.api_base_url.clone());
@@ -852,7 +939,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let update_handle = if skip_update_check {
         None
     } else {
-        update::spawn_update_check(&config, &local_db, cli.json)
+        update::spawn_update_check(&config, &local_db, json_output)
     };
 
     let result = async {
@@ -867,8 +954,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         RealtimeClient::connect(&config.realtime_url, &token).await?;
                     let me = fetch_me(&mut realtime).await?;
                     local_db.set_current_user(me.clone())?;
-                    if cli.json {
-                        output::print_json(&me, json_format)?;
+                    if json_output {
+                        print_json_with_query(&me, json_format, &json_query_options)?;
                     } else {
                         print_auth_user(&me);
                     }
@@ -880,12 +967,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             },
             Command::Update => {
-                update::run_update(&config, cli.json).await?;
+                update::run_update(&config, json_output).await?;
             }
             Command::Doctor => {
                 let output = build_doctor_output(&config, &auth_store, &local_db);
-                if cli.json {
-                    output::print_json(&output, json_format)?;
+                if json_output {
+                    print_json_with_query(&output, json_format, &json_query_options)?;
                 } else {
                     print_doctor(&output);
                 }
@@ -904,13 +991,21 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                     match result {
                         proto::rpc_result::Result::GetChats(payload) => {
-                            if cli.json {
+                            if json_output {
                                 if args.limit.is_some() || args.offset.is_some() {
                                     let payload =
                                         apply_chat_list_limits(payload, args.limit, args.offset);
-                                    output::print_json(&payload, json_format)?;
+                                    print_json_with_query(
+                                        &payload,
+                                        json_format,
+                                        &json_query_options,
+                                    )?;
                                 } else {
-                                    output::print_json(&payload, json_format)?;
+                                    print_json_with_query(
+                                        &payload,
+                                        json_format,
+                                        &json_query_options,
+                                    )?;
                                 }
                             } else {
                                 let current_user = local_db.load()?.current_user;
@@ -946,8 +1041,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .await?;
                     match result {
                         proto::rpc_result::Result::GetChat(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
+                            if json_output {
+                                print_json_with_query(&payload, json_format, &json_query_options)?;
                             } else if let Some(chat) = payload.chat.as_ref() {
                                 print_chat_details(chat, payload.dialog.as_ref());
                             } else {
@@ -972,8 +1067,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .await?;
                     match result {
                         proto::rpc_result::Result::GetChatParticipants(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
+                            if json_output {
+                                print_json_with_query(&payload, json_format, &json_query_options)?;
                             } else {
                                 let output = build_chat_participants_output(payload);
                                 output::print_chat_participants(&output, false, json_format)?;
@@ -998,8 +1093,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .await?;
                     match result {
                         proto::rpc_result::Result::AddChatParticipant(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
+                            if json_output {
+                                print_json_with_query(&payload, json_format, &json_query_options)?;
                             } else {
                                 println!("Added user {} to chat {}.", args.user_id, args.chat_id);
                             }
@@ -1023,8 +1118,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .await?;
                     match result {
                         proto::rpc_result::Result::RemoveChatParticipant(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
+                            if json_output {
+                                print_json_with_query(&payload, json_format, &json_query_options)?;
                             } else {
                                 println!(
                                     "Removed user {} from chat {}.",
@@ -1048,7 +1143,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             return Err("Public home threads are not supported yet.".into());
                         }
                         if args.participants.is_empty() {
-                            return Err("Provide at least one --participant for a home thread.".into());
+                            return Err(
+                                "Provide at least one --participant for a home thread.".into()
+                            );
                         }
                     }
                     let token = require_token(&auth_store)?;
@@ -1091,8 +1188,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .await?;
                     match result {
                         proto::rpc_result::Result::CreateChat(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
+                            if json_output {
+                                print_json_with_query(&payload, json_format, &json_query_options)?;
                             } else {
                                 if let Some(chat) = payload.chat.as_ref() {
                                     println!("Created chat {}.", chat.id);
@@ -1107,8 +1204,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 ChatsCommand::CreateDm(args) => {
                     let token = require_token(&auth_store)?;
                     let payload = api.create_private_chat(&token, args.user_id).await?;
-                    if cli.json {
-                        output::print_json(&payload, json_format)?;
+                    if json_output {
+                        print_json_with_query(&payload, json_format, &json_query_options)?;
                     } else {
                         let chat_id = payload.chat.get("id").and_then(|value| value.as_i64());
                         if let Some(chat_id) = chat_id {
@@ -1150,8 +1247,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .await?;
                     match result {
                         proto::rpc_result::Result::UpdateChatVisibility(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
+                            if json_output {
+                                print_json_with_query(&payload, json_format, &json_query_options)?;
                             } else {
                                 let label = if args.public { "public" } else { "private" };
                                 if let Some(chat) = payload.chat.as_ref() {
@@ -1180,8 +1277,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .await?;
                     match result {
                         proto::rpc_result::Result::MarkAsUnread(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
+                            if json_output {
+                                print_json_with_query(&payload, json_format, &json_query_options)?;
                             } else {
                                 println!("Marked as unread (updates: {}).", payload.updates.len());
                             }
@@ -1199,8 +1296,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         max_id: args.max_id,
                     };
                     let payload = api.read_messages(&token, input).await?;
-                    if cli.json {
-                        output::print_json(&payload, json_format)?;
+                    if json_output {
+                        print_json_with_query(&payload, json_format, &json_query_options)?;
                     } else if let Some(max_id) = args.max_id {
                         println!("Marked {label} as read (max id {max_id}).");
                     } else {
@@ -1228,8 +1325,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .await?;
                     match result {
                         proto::rpc_result::Result::DeleteChat(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
+                            if json_output {
+                                print_json_with_query(&payload, json_format, &json_query_options)?;
                             } else {
                                 println!("Deleted chat {}.", args.chat_id);
                             }
@@ -1254,8 +1351,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         proto::rpc_result::Result::GetChats(payload) => {
                             let mut output = build_user_list(&payload);
                             filter_users_output(&mut output, args.filter.as_deref());
-                            if cli.json {
-                                output::print_json(&output, json_format)?;
+                            if json_output {
+                                print_json_with_query(&output, json_format, &json_query_options)?;
                             } else {
                                 output::print_users(&output, false, json_format)?;
                             }
@@ -1278,11 +1375,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                     match result {
                         proto::rpc_result::Result::GetChats(payload) => {
-                            if cli.json {
+                            if json_output {
                                 if let Some(user) =
                                     payload.users.iter().find(|user| user.id == args.id)
                                 {
-                                    output::print_json(user, json_format)?;
+                                    print_json_with_query(user, json_format, &json_query_options)?;
                                 } else {
                                     return Err("User not found in getChats users list".into());
                                 }
@@ -1339,8 +1436,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             )?;
                             filter_messages_by_time(&mut payload.messages, since_ts, until_ts);
 
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
+                            if json_output {
+                                print_json_with_query(&payload, json_format, &json_query_options)?;
                             } else {
                                 let translation_language = args
                                     .translate
@@ -1432,8 +1529,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             )?;
                             filter_messages_by_time(&mut payload.messages, since_ts, until_ts);
 
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
+                            if json_output {
+                                print_json_with_query(&payload, json_format, &json_query_options)?;
                             } else {
                                 let chats_result = realtime
                                     .call_rpc(
@@ -1482,8 +1579,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         RealtimeClient::connect(&config.realtime_url, &token).await?;
                     let message =
                         fetch_message_by_id(&mut realtime, &peer, args.message_id).await?;
-                    if cli.json {
-                        output::print_json(&message, json_format)?;
+                    if json_output {
+                        print_json_with_query(&message, json_format, &json_query_options)?;
                     } else {
                         let translation_language = args
                             .translate
@@ -1543,7 +1640,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         &args.attachments,
                         &config.data_dir,
                         args.force_file,
-                        cli.json,
+                        json_output,
                     )?;
 
                     let mention_entities = parse_mention_entities(&args.mentions)?;
@@ -1565,8 +1662,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             mention_entities,
                         )
                         .await?;
-                        if cli.json {
-                            output::print_json(&payload, json_format)?;
+                        if json_output {
+                            print_json_with_query(&payload, json_format, &json_query_options)?;
                         } else {
                             println!("Message sent (updates: {}).", payload.updates.len());
                         }
@@ -1582,11 +1679,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             mention_entities,
                             attachments,
                             peer_summary,
-                            cli.json,
+                            json_output,
                         )
                         .await?;
-                        if cli.json {
-                            output::print_json(&output, json_format)?;
+                        if json_output {
+                            print_json_with_query(&output, json_format, &json_query_options)?;
                         }
                     }
                 }
@@ -1623,14 +1720,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             fs::write(&output_path, payload_text.as_bytes())?;
                             let message_count = payload.messages.len();
                             let bytes = payload_text.as_bytes().len();
-                            if cli.json {
+                            if json_output {
                                 let output = ExportOutput {
                                     path: output_path.display().to_string(),
                                     format: "json".to_string(),
                                     messages: message_count,
                                     bytes,
                                 };
-                                output::print_json(&output, json_format)?;
+                                print_json_with_query(&output, json_format, &json_query_options)?;
                             } else {
                                 println!(
                                     "Exported {} message(s) to {}.",
@@ -1654,12 +1751,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         fetch_message_by_id(&mut realtime, &peer, args.message_id).await?;
                     let output_path = resolve_download_path(&message, args.output, args.dir)?;
                     let bytes = download_message_media(&message, &output_path).await?;
-                    if cli.json {
+                    if json_output {
                         let output = DownloadOutput {
                             path: output_path.display().to_string(),
                             bytes,
                         };
-                        output::print_json(&output, json_format)?;
+                        print_json_with_query(&output, json_format, &json_query_options)?;
                     } else {
                         println!("Downloaded to {}", output_path.display());
                     }
@@ -1691,8 +1788,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .await?;
                     match result {
                         proto::rpc_result::Result::DeleteMessages(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
+                            if json_output {
+                                print_json_with_query(&payload, json_format, &json_query_options)?;
                             } else {
                                 println!(
                                     "Deleted {} message(s) (updates: {}).",
@@ -1725,8 +1822,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .await?;
                     match result {
                         proto::rpc_result::Result::EditMessage(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
+                            if json_output {
+                                print_json_with_query(&payload, json_format, &json_query_options)?;
                             } else {
                                 println!("Message edited (updates: {}).", payload.updates.len());
                             }
@@ -1756,8 +1853,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .await?;
                     match result {
                         proto::rpc_result::Result::AddReaction(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
+                            if json_output {
+                                print_json_with_query(&payload, json_format, &json_query_options)?;
                             } else {
                                 println!("Reaction added (updates: {}).", payload.updates.len());
                             }
@@ -1787,8 +1884,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .await?;
                     match result {
                         proto::rpc_result::Result::DeleteReaction(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
+                            if json_output {
+                                print_json_with_query(&payload, json_format, &json_query_options)?;
                             } else {
                                 println!("Reaction deleted (updates: {}).", payload.updates.len());
                             }
@@ -1811,8 +1908,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                     match result {
                         proto::rpc_result::Result::GetChats(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
+                            if json_output {
+                                print_json_with_query(&payload, json_format, &json_query_options)?;
                             } else {
                                 let output = build_space_list(&payload);
                                 output::print_spaces(&output, false, json_format)?;
@@ -1838,8 +1935,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .await?;
                     match result {
                         proto::rpc_result::Result::GetSpaceMembers(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
+                            if json_output {
+                                print_json_with_query(&payload, json_format, &json_query_options)?;
                             } else {
                                 let output = build_space_members_output(payload);
                                 output::print_space_members(&output, false, json_format)?;
@@ -1867,8 +1964,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .await?;
                     match result {
                         proto::rpc_result::Result::InviteToSpace(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
+                            if json_output {
+                                print_json_with_query(&payload, json_format, &json_query_options)?;
                             } else {
                                 let name = payload
                                     .user
@@ -1903,8 +2000,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .await?;
                     match result {
                         proto::rpc_result::Result::DeleteMember(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
+                            if json_output {
+                                print_json_with_query(&payload, json_format, &json_query_options)?;
                             } else {
                                 println!("Member removed (updates: {}).", payload.updates.len());
                             }
@@ -1931,8 +2028,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .await?;
                     match result {
                         proto::rpc_result::Result::UpdateMemberAccess(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
+                            if json_output {
+                                print_json_with_query(&payload, json_format, &json_query_options)?;
                             } else {
                                 println!(
                                     "Updated member access (updates: {}).",
@@ -1952,15 +2049,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let result = realtime
                         .call_rpc(
                             proto::Method::GetUserSettings,
-                            proto::rpc_call::Input::GetUserSettings(
-                                proto::GetUserSettingsInput {},
-                            ),
+                            proto::rpc_call::Input::GetUserSettings(proto::GetUserSettingsInput {}),
                         )
                         .await?;
                     match result {
                         proto::rpc_result::Result::GetUserSettings(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
+                            if json_output {
+                                print_json_with_query(&payload, json_format, &json_query_options)?;
                             } else {
                                 print_notification_settings(payload.user_settings.as_ref());
                             }
@@ -1970,9 +2065,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 NotificationsCommand::Set(args) => {
                     if args.mode.is_none() && !args.silent && !args.sound {
-                        return Err(
-                            "Provide at least one of --mode, --silent, or --sound".into(),
-                        );
+                        return Err("Provide at least one of --mode, --silent, or --sound".into());
                     }
                     let token = require_token(&auth_store)?;
                     let mut realtime =
@@ -2016,8 +2109,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .await?;
                     match result {
                         proto::rpc_result::Result::UpdateUserSettings(payload) => {
-                            if cli.json {
-                                output::print_json(&payload, json_format)?;
+                            if json_output {
+                                print_json_with_query(&payload, json_format, &json_query_options)?;
                             } else {
                                 println!(
                                     "Notification settings updated (updates: {}).",
@@ -2083,8 +2176,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                     let result = api.create_linear_issue(&token, api_input).await?;
 
-                    if cli.json {
-                        output::print_json(&result, json_format)?;
+                    if json_output {
+                        print_json_with_query(&result, json_format, &json_query_options)?;
                     } else if let Some(link) = result.link {
                         println!("Created Linear issue: {}", link);
                     } else {
@@ -2104,8 +2197,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                     let result = api.create_notion_task(&token, api_input).await?;
 
-                    if cli.json {
-                        output::print_json(&result, json_format)?;
+                    if json_output {
+                        print_json_with_query(&result, json_format, &json_query_options)?;
                     } else {
                         let title_display = result
                             .task_title
@@ -2123,6 +2216,22 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     update::finish_update_check(update_handle).await;
     result
+}
+
+fn print_json_with_query<T: Serialize + ?Sized>(
+    value: &T,
+    json_format: output::JsonFormat,
+    options: &JsonQueryOptions,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if !options.has_transforms() {
+        output::print_json(value, json_format)?;
+        return Ok(());
+    }
+
+    let payload = serde_json::to_value(value)?;
+    let transformed = query::apply_json_transforms(payload, options).map_err(io::Error::other)?;
+    output::print_json(&transformed, json_format)?;
+    Ok(())
 }
 
 async fn handle_login(
@@ -2886,17 +2995,13 @@ fn notification_settings_values(
     }
 }
 
-fn notification_mode_from_arg(
-    mode: NotificationModeArg,
-) -> proto::notification_settings::Mode {
+fn notification_mode_from_arg(mode: NotificationModeArg) -> proto::notification_settings::Mode {
     match mode {
         NotificationModeArg::All => proto::notification_settings::Mode::All,
         NotificationModeArg::None => proto::notification_settings::Mode::None,
         NotificationModeArg::Mentions => proto::notification_settings::Mode::Mentions,
         NotificationModeArg::OnlyMentions => proto::notification_settings::Mode::OnlyMentions,
-        NotificationModeArg::ImportantOnly => {
-            proto::notification_settings::Mode::ImportantOnly
-        }
+        NotificationModeArg::ImportantOnly => proto::notification_settings::Mode::ImportantOnly,
     }
 }
 
@@ -2920,15 +3025,27 @@ fn print_notification_settings(settings: Option<&proto::UserSettings>) {
     println!("  silent: {}", if values.silent { "yes" } else { "no" });
     println!(
         "  disable dm notifications: {}",
-        if values.disable_dm_notifications { "yes" } else { "no" }
+        if values.disable_dm_notifications {
+            "yes"
+        } else {
+            "no"
+        }
     );
     println!(
         "  zen requires mention: {}",
-        if values.zen_requires_mention { "yes" } else { "no" }
+        if values.zen_requires_mention {
+            "yes"
+        } else {
+            "no"
+        }
     );
     println!(
         "  zen uses default rules: {}",
-        if values.zen_uses_default_rules { "yes" } else { "no" }
+        if values.zen_uses_default_rules {
+            "yes"
+        } else {
+            "no"
+        }
     );
     if values.zen_custom_rules.is_empty() {
         println!("  zen custom rules: -");
@@ -3530,7 +3647,9 @@ fn filter_users_output(output: &mut UserListOutput, filter: Option<&str>) {
         return;
     };
     let needle = filter.to_lowercase();
-    output.users.retain(|user| user_matches_filter(user, &needle));
+    output
+        .users
+        .retain(|user| user_matches_filter(user, &needle));
 }
 
 fn user_matches_filter(user: &UserSummary, needle: &str) -> bool {
@@ -3691,10 +3810,7 @@ fn print_chat_details(chat: &proto::Chat, dialog: Option<&proto::Dialog>) {
             println!("  read max id: {}", read_max_id);
         }
         if let Some(unread_mark) = dialog.unread_mark {
-            println!(
-                "  unread mark: {}",
-                if unread_mark { "yes" } else { "no" }
-            );
+            println!("  unread mark: {}", if unread_mark { "yes" } else { "no" });
         }
     }
 }

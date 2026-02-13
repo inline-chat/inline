@@ -30,7 +30,9 @@ pub enum RealtimeError {
 }
 
 pub struct RealtimeClient {
-    ws: tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    ws: tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
     seq: u32,
     id_gen: IdGenerator,
 }
@@ -89,7 +91,7 @@ impl RealtimeClient {
                     });
                 }
                 Some(proto::server_protocol_message::Body::ConnectionError(_)) => {
-                    return Err(RealtimeError::ConnectionError)
+                    return Err(RealtimeError::ConnectionError);
                 }
                 _ => {}
             }
@@ -147,7 +149,7 @@ impl RealtimeClient {
                     });
                 }
                 Some(proto::server_protocol_message::Body::ConnectionError(_)) => {
-                    return Err(RealtimeError::ConnectionError)
+                    return Err(RealtimeError::ConnectionError);
                 }
                 _ => {}
             }
@@ -183,14 +185,17 @@ impl RealtimeClient {
             match message.body {
                 Some(proto::server_protocol_message::Body::ConnectionOpen(_)) => return Ok(()),
                 Some(proto::server_protocol_message::Body::ConnectionError(_)) => {
-                    return Err(RealtimeError::ConnectionError)
+                    return Err(RealtimeError::ConnectionError);
                 }
                 _ => {}
             }
         }
     }
 
-    async fn send_client_message(&mut self, message: proto::ClientMessage) -> Result<(), RealtimeError> {
+    async fn send_client_message(
+        &mut self,
+        message: proto::ClientMessage,
+    ) -> Result<(), RealtimeError> {
         let bytes = message.encode_to_vec();
         self.ws.send(WsMessage::Binary(bytes)).await?;
         Ok(())
@@ -198,9 +203,15 @@ impl RealtimeClient {
 
     async fn read_server_message(&mut self) -> Result<proto::ServerProtocolMessage, RealtimeError> {
         loop {
-            let message = self.ws.next().await.ok_or(RealtimeError::ConnectionError)??;
+            let message = self
+                .ws
+                .next()
+                .await
+                .ok_or(RealtimeError::ConnectionError)??;
             match message {
-                WsMessage::Binary(data) => return Ok(proto::ServerProtocolMessage::decode(&*data)?),
+                WsMessage::Binary(data) => {
+                    return Ok(proto::ServerProtocolMessage::decode(&*data)?);
+                }
                 WsMessage::Text(_) => continue,
                 WsMessage::Close(_) => return Err(RealtimeError::ConnectionError),
                 WsMessage::Ping(_) | WsMessage::Pong(_) => continue,

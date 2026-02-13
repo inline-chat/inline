@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
 fn main() {
-    let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let manifest_dir =
+        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let proto_dir = manifest_dir.join("..").join("proto");
 
     let protos = [
@@ -19,5 +20,7 @@ fn main() {
 
     let mut config = prost_build::Config::new();
     config.type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]");
-    config.compile_protos(&proto_paths, &include_paths).expect("compile protos");
+    config
+        .compile_protos(&proto_paths, &include_paths)
+        .expect("compile protos");
 }

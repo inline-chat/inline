@@ -10,6 +10,64 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 - `--json`: Output JSON instead of human tables/details (available on all commands). This greatly increases the verbosity and information you can get. Most of the data is either not included or truncated/redacted in the default human readable mode. Use JSON mode when you need exact details of a chat, message, etc. You can start with default mode and switch to json mode for more details and form your response.
 - `--pretty`: Pretty-print JSON output (default).
 - `--compact`: Compact JSON output (no whitespace).
+- `--query-path <PATH>`: Select value(s) via dot/bracket path (repeatable, alias-aware).
+- `--field <PATH>`: Project field paths from each item in the current JSON array (repeatable, alias-aware).
+- `--jsonpath <PATH>`: Select value(s) via JSONPath-like dot/bracket path (repeatable, alias-aware).
+- `--sort-path <PATH>`: Sort current JSON array by the provided path (alias-aware).
+- `--sort-desc`: Sort descending when using `--sort-path`.
+- `--jq <FILTER>`: Apply jq filter to JSON output (requires `jq` installed; alias-aware for path tokens).
+
+## Query alias rules
+
+- Alias rewriting happens only in query/path strings (`--query-path`, `--field`, `--jsonpath`, `--sort-path`, `--jq`).
+- API payload JSON keys are never mutated.
+- Canonical long-form keys always remain valid.
+- Mixed-case tokens are not rewritten.
+- Quoted bracket keys are treated as literals and not rewritten (for example: `users["fn"]`).
+
+## Query key aliases
+
+| Alias | Canonical key |
+| --- | --- |
+| `au` | `auth` |
+| `at` | `attachments` |
+| `c` | `chats` |
+| `cfg` | `config` |
+| `cid` | `chat_id` |
+| `d` | `dialogs` |
+| `dn` | `display_name` |
+| `em` | `email` |
+| `fid` | `from_id` |
+| `fn` | `first_name` |
+| `it` | `items` |
+| `lm` | `last_message` |
+| `lmd` | `last_message_relative_date` |
+| `lml` | `last_message_line` |
+| `ln` | `last_name` |
+| `m` | `message` |
+| `mb` | `member` |
+| `mbs` | `members` |
+| `md` | `media` |
+| `mid` | `message_id` |
+| `ms` | `messages` |
+| `par` | `participant` |
+| `ph` | `phone_number` |
+| `pid` | `peer_id` |
+| `ps` | `participants` |
+| `pt` | `peer_type` |
+| `pth` | `paths` |
+| `rd` | `relative_date` |
+| `rmi` | `read_max_id` |
+| `s` | `spaces` |
+| `sid` | `space_id` |
+| `sn` | `sender_name` |
+| `sys` | `system` |
+| `ti` | `title` |
+| `u` | `users` |
+| `uc` | `unread_count` |
+| `uid` | `user_id` |
+| `um` | `unread_mark` |
+| `un` | `username` |
 
 ## Subcommands
 
@@ -124,6 +182,15 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
   - `inline auth me`
 - Check diagnostics:
   - `inline doctor`
+- Query-path canonical vs alias (same result):
+  - `inline doctor --json --query-path config.apiBaseUrl`
+  - `inline doctor --json --query-path cfg.apiBaseUrl`
+- Project and sort with canonical keys:
+  - `inline users list --json --query-path users --sort-path first_name --field id --field first_name`
+- Project and sort with short aliases:
+  - `inline users list --json --query-path u --sort-path fn --field id --field fn`
+- Preserve literal keys using quoted bracket syntax:
+  - `inline users list --json --query-path 'u["fn"]'`
 - Search messages in a chat:
   - `inline messages search --chat-id 123 --query "design review"`
   - JSON: `inline messages search --chat-id 123 --query "design review" --json`

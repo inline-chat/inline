@@ -1,9 +1,9 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use thiserror::Error;
+use serde_json::{Value, json};
 use std::fs;
 use std::path::PathBuf;
+use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ApiError {
@@ -85,7 +85,11 @@ impl ApiClient {
         self.post(url, payload).await
     }
 
-    pub async fn upload_file(&self, token: &str, input: UploadFileInput) -> Result<UploadFileResult, ApiError> {
+    pub async fn upload_file(
+        &self,
+        token: &str,
+        input: UploadFileInput,
+    ) -> Result<UploadFileResult, ApiError> {
         let url = format!("{}/uploadFile", self.base_url);
         let mut form = reqwest::multipart::Form::new().text("type", input.file_type.as_str());
         let bytes = fs::read(&input.path)?;
@@ -118,9 +122,7 @@ impl ApiClient {
         match api_response {
             ApiResponse::Ok { result, .. } => Ok(result),
             ApiResponse::Err {
-                error,
-                description,
-                ..
+                error, description, ..
             } => Err(ApiError::Api {
                 error,
                 description: description.unwrap_or_else(|| "Unknown error".to_string()),
@@ -221,9 +223,7 @@ impl ApiClient {
         match api_response {
             ApiResponse::Ok { result, .. } => Ok(result),
             ApiResponse::Err {
-                error,
-                description,
-                ..
+                error, description, ..
             } => Err(ApiError::Api {
                 error,
                 description: description.unwrap_or_else(|| "Unknown error".to_string()),
@@ -252,9 +252,7 @@ impl ApiClient {
         match api_response {
             ApiResponse::Ok { result, .. } => Ok(result),
             ApiResponse::Err {
-                error,
-                description,
-                ..
+                error, description, ..
             } => Err(ApiError::Api {
                 error,
                 description: description.unwrap_or_else(|| "Unknown error".to_string()),

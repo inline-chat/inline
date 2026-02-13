@@ -45,14 +45,24 @@ impl Config {
 
         let release_base_url = env::var("INLINE_RELEASE_BASE_URL")
             .ok()
-            .or_else(|| if debug { None } else { Some(DEFAULT_RELEASE_BASE_URL.to_string()) })
+            .or_else(|| {
+                if debug {
+                    None
+                } else {
+                    Some(DEFAULT_RELEASE_BASE_URL.to_string())
+                }
+            })
             .map(|url| url.trim_end_matches('/').to_string());
-        let release_manifest_url = env::var("INLINE_RELEASE_MANIFEST_URL")
-            .ok()
-            .or_else(|| release_base_url.as_ref().map(|base| format!("{base}/manifest.json")));
-        let release_install_url = env::var("INLINE_RELEASE_INSTALL_URL")
-            .ok()
-            .or_else(|| release_base_url.as_ref().map(|base| format!("{base}/install.sh")));
+        let release_manifest_url = env::var("INLINE_RELEASE_MANIFEST_URL").ok().or_else(|| {
+            release_base_url
+                .as_ref()
+                .map(|base| format!("{base}/manifest.json"))
+        });
+        let release_install_url = env::var("INLINE_RELEASE_INSTALL_URL").ok().or_else(|| {
+            release_base_url
+                .as_ref()
+                .map(|base| format!("{base}/install.sh"))
+        });
 
         Self {
             api_base_url,

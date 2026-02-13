@@ -159,7 +159,10 @@ pub fn resolve_json_format(pretty: bool, compact: bool) -> JsonFormat {
     }
 }
 
-pub fn json_string<T: Serialize + ?Sized>(value: &T, format: JsonFormat) -> Result<String, OutputError> {
+pub fn json_string<T: Serialize + ?Sized>(
+    value: &T,
+    format: JsonFormat,
+) -> Result<String, OutputError> {
     let payload = match format {
         JsonFormat::Pretty => serde_json::to_string_pretty(value)?,
         JsonFormat::Compact => serde_json::to_string(value)?,
@@ -208,15 +211,15 @@ pub fn print_chat_list(
     );
 
     for item in &output.items {
-        let preview = item
-            .last_message_line
-            .as_deref()
-            .unwrap_or("<no messages>");
+        let preview = item.last_message_line.as_deref().unwrap_or("<no messages>");
         let space = item.space_name.as_deref().unwrap_or("-");
         println!(
             "{}  {}  {}  {}  {}",
             pad_left(&item.chat.id.to_string(), 6),
-            pad_right(&truncate_display(&item.display_name, name_width), name_width),
+            pad_right(
+                &truncate_display(&item.display_name, name_width),
+                name_width
+            ),
             pad_right(&truncate_display(space, space_width), space_width),
             pad_left(&item.unread_count.unwrap_or(0).to_string(), 6),
             pad_right(&truncate_display(preview, last_width), last_width),
@@ -262,7 +265,10 @@ pub fn print_users(
         println!(
             "{}  {}  {}  {}  {}  {}",
             pad_left(&user.user.id.to_string(), 6),
-            pad_right(&truncate_display(&user.display_name, name_width), name_width),
+            pad_right(
+                &truncate_display(&user.display_name, name_width),
+                name_width
+            ),
             pad_right(&truncate_display(username, username_width), username_width),
             pad_right(&truncate_display(email, 22), 22),
             pad_right(&truncate_display(phone, 16), 16),
@@ -297,7 +303,10 @@ pub fn print_spaces(
         println!(
             "{}  {}  {}",
             pad_left(&space.space.id.to_string(), 6),
-            pad_right(&truncate_display(&space.display_name, name_width), name_width),
+            pad_right(
+                &truncate_display(&space.display_name, name_width),
+                name_width
+            ),
             pad_right(if space.space.creator { "yes" } else { "no" }, 7),
         );
     }
@@ -335,9 +344,19 @@ pub fn print_space_members(
             "{}  {}  {}  {}  {}",
             pad_left(&member.member.user_id.to_string(), 6),
             pad_left(&member.member.id.to_string(), 6),
-            pad_right(&truncate_display(&member.display_name, name_width), name_width),
+            pad_right(
+                &truncate_display(&member.display_name, name_width),
+                name_width
+            ),
             pad_right(&truncate_display(&member.role, role_width), role_width),
-            pad_right(if member.can_access_public_chats { "yes" } else { "no" }, 6),
+            pad_right(
+                if member.can_access_public_chats {
+                    "yes"
+                } else {
+                    "no"
+                },
+                6
+            ),
         );
     }
     Ok(())
@@ -392,7 +411,10 @@ pub fn print_messages(
 
     if let Some(peer_name) = &output.peer_name {
         if let Some(peer) = &output.peer {
-            println!("Messages for {} ({} {})", peer_name, peer.peer_type, peer.id);
+            println!(
+                "Messages for {} ({} {})",
+                peer_name, peer.peer_type, peer.id
+            );
         } else {
             println!("Messages for {}", peer_name);
         }

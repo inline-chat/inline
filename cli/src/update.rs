@@ -150,21 +150,19 @@ async fn run_update_inner(
     Ok(())
 }
 
-pub fn spawn_update_check(config: &Config, local_db: &LocalDb, json: bool) -> Option<JoinHandle<()>> {
+pub fn spawn_update_check(
+    config: &Config,
+    local_db: &LocalDb,
+    json: bool,
+) -> Option<JoinHandle<()>> {
     let manifest_url = config.release_manifest_url.clone()?;
     let install_url = config.release_install_url.clone();
     let local_db = local_db.clone();
     let current_version = env!("CARGO_PKG_VERSION").to_string();
 
     Some(tokio::spawn(async move {
-        if let Err(error) = check_for_update(
-            manifest_url,
-            install_url,
-            local_db,
-            current_version,
-            json,
-        )
-        .await
+        if let Err(error) =
+            check_for_update(manifest_url, install_url, local_db, current_version, json).await
         {
             if cfg!(debug_assertions) {
                 eprintln!("update check failed: {error}");
@@ -227,7 +225,12 @@ async fn check_for_update(
                 .unwrap_or(true);
             if should_notify {
                 let install_url = manifest.install_url.clone().or(install_url);
-                print_update_notice(&current_version, &manifest.version, install_url.as_deref(), json);
+                print_update_notice(
+                    &current_version,
+                    &manifest.version,
+                    install_url.as_deref(),
+                    json,
+                );
                 state.last_update_notified_version = Some(manifest.version.clone());
             }
         }
@@ -297,7 +300,9 @@ async fn download_file(url: &str, path: &Path) -> Result<(), UpdateError> {
 }
 
 fn create_temp_dir() -> Result<PathBuf, UpdateError> {
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
     let dir = std::env::temp_dir().join(format!("inline-update-{}", timestamp.as_secs()));
     fs::create_dir_all(&dir)?;
     Ok(dir)
@@ -365,9 +370,7 @@ fn install_binary(staged_path: &Path, install_path: &Path) -> Result<InstallOutc
                     if let Err(sudo_error) = install_binary_with_sudo(staged_path, install_path) {
                         let combined = io::Error::new(
                             io::ErrorKind::PermissionDenied,
-                            format!(
-                                "install failed: {error}; sudo install failed: {sudo_error}"
-                            ),
+                            format!("install failed: {error}; sudo install failed: {sudo_error}"),
                         );
                         return Err(UpdateError::Io(combined));
                     }
@@ -421,10 +424,7 @@ fn install_binary_with_sudo(staged_path: &Path, install_path: &Path) -> Result<(
         if status.success() {
             return Ok(());
         }
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            "sudo install failed",
-        ));
+        return Err(io::Error::new(io::ErrorKind::Other, "sudo install failed"));
     }
 
     let status = Command::new("sudo")
@@ -433,10 +433,7 @@ fn install_binary_with_sudo(staged_path: &Path, install_path: &Path) -> Result<(
         .arg(install_path)
         .status()?;
     if !status.success() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            "sudo copy failed",
-        ));
+        return Err(io::Error::new(io::ErrorKind::Other, "sudo copy failed"));
     }
     let status = Command::new("sudo")
         .arg("chmod")
@@ -444,10 +441,7 @@ fn install_binary_with_sudo(staged_path: &Path, install_path: &Path) -> Result<(
         .arg(install_path)
         .status()?;
     if !status.success() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            "sudo chmod failed",
-        ));
+        return Err(io::Error::new(io::ErrorKind::Other, "sudo chmod failed"));
     }
     Ok(())
 }
