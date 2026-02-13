@@ -1,6 +1,6 @@
 {
   "name": "@inline-openclaw/inline",
-  "version": "0.0.3",
+  "version": "0.0.5",
   "type": "module",
   "files": [
     "dist",
@@ -17,11 +17,13 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "prepack": "bun run build",
+    "pretest": "rm -rf coverage",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --coverage"
+    "test": "vitest run --coverage",
+    "check": "bun run typecheck && bun run test && bun run build"
   },
   "dependencies": {
-    "@inline-chat/realtime-sdk": "^0.0.1",
+    "@inline-chat/realtime-sdk": "^0.0.2",
     "zod": "^4.1.5"
   },
   "peerDependencies": {
