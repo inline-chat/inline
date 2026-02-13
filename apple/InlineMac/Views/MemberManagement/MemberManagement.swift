@@ -137,7 +137,7 @@ public struct MemberManagementView: View {
           .frame(maxWidth: 180)
 
         Button {
-          if let nav2 = dependencies.nav2 {
+          if let nav2 = dependencies?.nav2 {
             // Nav2's invite route depends on the active space tab.
             if nav2.activeSpaceId != spaceId,
               let spaceTabIndex = nav2.tabs.firstIndex(where: { tab in
