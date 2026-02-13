@@ -1,13 +1,14 @@
 import {
   GetChatInput,
+  GetMessagesInput,
   GetMeInput,
   GetUpdatesInput,
   GetUpdatesResult_ResultType,
   GetUpdatesStateInput,
   InputPeer,
-  MessageEntities,
   MessageSendMode,
   Method,
+  type Message,
   type Peer,
   type RpcCall,
   type RpcResult,
@@ -23,7 +24,12 @@ import type { Transport } from "../realtime/transport.js"
 import type {
   InlineSdkClientOptions,
   InlineInboundEvent,
+  InlineSdkGetMessagesParams,
+  InlineSdkSendMessageMedia,
+  InlineSdkSendMessageParams,
   InlineSdkState,
+  InlineSdkUploadFileParams,
+  InlineSdkUploadFileResult,
   MappedMethod,
   RpcInputForMethod,
   RpcResultForMethod,
@@ -34,6 +40,10 @@ import { getSdkVersion } from "./sdk-version.js"
 
 const nowSeconds = () => BigInt(Math.floor(Date.now() / 1000))
 const sdkLayer = 1
+const defaultApiBaseUrl = "https://api.inline.chat"
+const defaultVideoWidth = 1280
+const defaultVideoHeight = 720
+const defaultVideoDuration = 1
 
 function extractFirstMessageId(updates: Update[] | undefined): bigint | null {
   for (const update of updates ?? []) {
@@ -45,13 +55,11 @@ function extractFirstMessageId(updates: Update[] | undefined): bigint | null {
   return null
 }
 
-type SendMessageTarget =
-  | { chatId: InlineIdLike; userId?: never }
-  | { userId: InlineIdLike; chatId?: never }
-
 export class InlineSdkClient {
   private readonly options: InlineSdkClientOptions
   private readonly log: InlineSdkLogger
+  private readonly httpBaseUrl: string
+  private readonly fetchImpl: typeof fetch
 
   private readonly transport: Transport
   private readonly protocol: ProtocolClient
@@ -72,8 +80,10 @@ export class InlineSdkClient {
     this.options = options
     this.log = options.logger ?? noopLogger
 
-    const baseUrl = options.baseUrl ?? "https://api.inline.chat"
-    const url = resolveRealtimeUrl(baseUrl)
+    this.httpBaseUrl = normalizeHttpBaseUrl(options.baseUrl ?? defaultApiBaseUrl)
+    this.fetchImpl = options.fetch ?? fetch
+
+    const url = resolveRealtimeUrl(this.httpBaseUrl)
     this.transport = options.transport ?? new WebSocketTransport({ url, logger: options.logger })
     this.protocol = new ProtocolClient({
       transport: this.transport,
@@ -192,27 +202,46 @@ export class InlineSdkClient {
     return { chatId: chat.id, peer: chat.peerId, title: chat.title }
   }
 
-  async sendMessage(
-    params: SendMessageTarget & {
-      text: string
-      replyToMsgId?: InlineIdLike
-      parseMarkdown?: boolean
-      sendMode?: "silent"
-      // Optional explicit entities. Mutually exclusive with parseMarkdown for now.
-      entities?: MessageEntities
-    },
-  ): Promise<{ messageId: bigint | null }> {
+  async getMessages(params: InlineSdkGetMessagesParams): Promise<{ messages: Message[] }> {
+    const peerId = this.inputPeerFromTarget(params, "getMessages")
+    const messageIds = params.messageIds.map((messageId, index) => asInlineId(messageId, `messageIds[${index}]`))
+
+    const result = await this.invoke(Method.GET_MESSAGES, {
+      oneofKind: "getMessages",
+      getMessages: GetMessagesInput.create({
+        peerId,
+        messageIds,
+      }),
+    })
+
+    return { messages: result.getMessages.messages }
+  }
+
+  async sendMessage(params: InlineSdkSendMessageParams): Promise<{ messageId: bigint | null }> {
     if (params.entities != null && params.parseMarkdown != null) {
       throw new Error("sendMessage: provide either `entities` or `parseMarkdown`, not both")
     }
 
+    const hasText = typeof params.text === "string" && params.text.length > 0
+    if (!hasText && params.media == null) {
+      throw new Error("sendMessage: provide `text` and/or `media`")
+    }
+    if (params.parseMarkdown != null && !hasText) {
+      throw new Error("sendMessage: `parseMarkdown` requires non-empty `text`")
+    }
+    if (params.entities != null && !hasText) {
+      throw new Error("sendMessage: `entities` requires non-empty `text`")
+    }
+
     const peerId = this.inputPeerFromTarget(params, "sendMessage")
+    const media = params.media != null ? toInputMedia(params.media) : undefined
 
     const result = await this.invoke(Method.SEND_MESSAGE, {
       oneofKind: "sendMessage",
       sendMessage: {
         peerId,
-        message: params.text,
+        ...(hasText ? { message: params.text } : {}),
+        ...(media != null ? { media } : {}),
         ...(params.replyToMsgId != null ? { replyToMsgId: asInlineId(params.replyToMsgId, "replyToMsgId") } : {}),
         ...(params.parseMarkdown != null ? { parseMarkdown: params.parseMarkdown } : {}),
         ...(params.entities != null ? { entities: params.entities } : {}),
@@ -222,6 +251,72 @@ export class InlineSdkClient {
 
     const messageId = extractFirstMessageId(result.sendMessage.updates)
     return { messageId }
+  }
+
+  async uploadFile(params: InlineSdkUploadFileParams): Promise<InlineSdkUploadFileResult> {
+    const form = new FormData()
+    form.set("type", params.type)
+
+    const fileName = normalizeUploadFileName(params.fileName, params.type)
+    const fileContentType = resolveUploadContentType(params.type, params.contentType)
+    form.set("file", toBlob(params.file, fileContentType), fileName)
+
+    if (params.thumbnail != null) {
+      const thumbnailName = normalizeUploadFileName(
+        params.thumbnailFileName,
+        "photo",
+      )
+      const thumbnailContentType = resolveUploadContentType(
+        "photo",
+        params.thumbnailContentType,
+      )
+      form.set("thumbnail", toBlob(params.thumbnail, thumbnailContentType), thumbnailName)
+    }
+
+    if (params.type === "video") {
+      const width = normalizePositiveInt(params.width, "width") ?? defaultVideoWidth
+      const height = normalizePositiveInt(params.height, "height") ?? defaultVideoHeight
+      const duration = normalizePositiveInt(params.duration, "duration") ?? defaultVideoDuration
+      form.set("width", String(width))
+      form.set("height", String(height))
+      form.set("duration", String(duration))
+    }
+
+    const response = await this.fetchImpl(new URL("uploadFile", `${this.httpBaseUrl}/`), {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${this.options.token}`,
+      },
+      body: form,
+    })
+
+    const payload = await parseJsonResponse(response)
+    if (!response.ok) {
+      const detail = describeUploadFailure(payload)
+      throw new Error(`uploadFile: request failed with status ${response.status}${detail ? ` (${detail})` : ""}`)
+    }
+    if (!isRecord(payload) || payload.ok !== true) {
+      const detail = describeUploadFailure(payload)
+      throw new Error(`uploadFile: API error${detail ? ` (${detail})` : ""}`)
+    }
+    const result = payload.result
+    if (!isRecord(result)) {
+      throw new Error("uploadFile: malformed success payload")
+    }
+    const fileUniqueId = typeof result.fileUniqueId === "string" ? result.fileUniqueId.trim() : ""
+    if (!fileUniqueId) {
+      throw new Error("uploadFile: response missing fileUniqueId")
+    }
+    const photoId = parseOptionalBigInt(result.photoId, "photoId")
+    const videoId = parseOptionalBigInt(result.videoId, "videoId")
+    const documentId = parseOptionalBigInt(result.documentId, "documentId")
+
+    return {
+      fileUniqueId,
+      ...(photoId != null ? { photoId } : {}),
+      ...(videoId != null ? { videoId } : {}),
+      ...(documentId != null ? { documentId } : {}),
+    }
   }
 
   async sendTyping(params: { chatId: InlineIdLike; typing: boolean }): Promise<void> {
@@ -640,6 +735,142 @@ export class InlineSdkClient {
 
     await this.saveInFlight
   }
+}
+
+function toInputMedia(media: InlineSdkSendMessageMedia): {
+  media:
+    | { oneofKind: "photo"; photo: { photoId: bigint } }
+    | { oneofKind: "video"; video: { videoId: bigint } }
+    | { oneofKind: "document"; document: { documentId: bigint } }
+} {
+  switch (media.kind) {
+    case "photo":
+      return {
+        media: {
+          oneofKind: "photo",
+          photo: {
+            photoId: asInlineId(media.photoId, "photoId"),
+          },
+        },
+      }
+    case "video":
+      return {
+        media: {
+          oneofKind: "video",
+          video: {
+            videoId: asInlineId(media.videoId, "videoId"),
+          },
+        },
+      }
+    case "document":
+      return {
+        media: {
+          oneofKind: "document",
+          document: {
+            documentId: asInlineId(media.documentId, "documentId"),
+          },
+        },
+      }
+  }
+}
+
+function normalizeHttpBaseUrl(baseUrl: string): string {
+  const url = new URL(baseUrl)
+  const path = url.pathname.replace(/\/+$/, "")
+  url.pathname = path || "/"
+  return url.toString().replace(/\/$/, "")
+}
+
+function normalizeUploadFileName(raw: string | undefined, type: "photo" | "video" | "document"): string {
+  const trimmed = raw?.trim()
+  if (trimmed) return trimmed
+  switch (type) {
+    case "photo":
+      return "photo.jpg"
+    case "video":
+      return "video.mp4"
+    case "document":
+      return "document.bin"
+  }
+}
+
+function resolveUploadContentType(type: "photo" | "video" | "document", explicit: string | undefined): string {
+  const trimmed = explicit?.trim()
+  if (trimmed) return trimmed
+  switch (type) {
+    case "photo":
+      return "image/jpeg"
+    case "video":
+      return "video/mp4"
+    case "document":
+      return "application/octet-stream"
+  }
+}
+
+function toBlob(input: InlineSdkUploadFileParams["file"], type: string): Blob {
+  if (input instanceof Blob) {
+    return input.type === type ? input : new Blob([input], { type })
+  }
+  return new Blob([input], { type })
+}
+
+function normalizePositiveInt(value: number | undefined, field: string): number | undefined {
+  if (value == null) return undefined
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value <= 0) {
+    throw new Error(`uploadFile: ${field} must be a positive integer`)
+  }
+  return value
+}
+
+async function parseJsonResponse(response: Response): Promise<unknown> {
+  const contentType = response.headers.get("content-type") ?? ""
+  if (!contentType.includes("application/json")) {
+    const text = await response.text()
+    return text
+  }
+  try {
+    return await response.json()
+  } catch {
+    return null
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function describeUploadFailure(payload: unknown): string {
+  if (typeof payload === "string") {
+    const trimmed = payload.trim()
+    return trimmed ? trimmed : ""
+  }
+  if (!isRecord(payload)) return ""
+  const description = typeof payload.description === "string" ? payload.description.trim() : ""
+  if (description) return description
+  const error = typeof payload.error === "string" ? payload.error.trim() : ""
+  if (error) return error
+  return ""
+}
+
+function parseOptionalBigInt(value: unknown, field: string): bigint | undefined {
+  if (value == null) return undefined
+  if (typeof value === "bigint") return value
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || !Number.isInteger(value) || !Number.isSafeInteger(value)) {
+      throw new Error(`uploadFile: invalid ${field} in response`)
+    }
+    return BigInt(value)
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim()
+    if (!trimmed) return undefined
+    try {
+      return BigInt(trimmed)
+    } catch {
+      throw new Error(`uploadFile: invalid ${field} in response`)
+    }
+  }
+  throw new Error(`uploadFile: invalid ${field} in response`)
 }
 
 const resolveRealtimeUrl = (baseUrl: string): string => {
