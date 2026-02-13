@@ -2,6 +2,8 @@ import {
   InputPeer,
   MessageAttachment,
   MessageEntities,
+  type MessageEntity,
+  MessageEntity_Type,
   MessageSendMode,
   Update,
   UpdateNewMessageNotification_Reason,
@@ -11,7 +13,7 @@ import { FileModel, type DbFullPhoto, type DbFullVideo } from "@in/server/db/mod
 import type { DbFullDocument } from "@in/server/db/models/files"
 import { MessageModel } from "@in/server/db/models/messages"
 import { db } from "@in/server/db"
-import { messageAttachments, type DbChat, type DbMessage } from "@in/server/db/schema"
+import { lower, messageAttachments, users, type DbChat, type DbMessage } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { getCachedUserName, UserNamesCache, type UserName } from "@in/server/modules/cache/userNames"
 import { decryptMessage, encryptMessage } from "@in/server/modules/encryption/encryptMessage"
@@ -38,7 +40,7 @@ import { connectionManager } from "@in/server/ws/connections"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { getCachedUserProfilePhotoUrl } from "@in/server/modules/cache/userPhotos"
 import { processAttachments } from "@in/server/db/models/messages"
-import { eq } from "drizzle-orm"
+import { eq, inArray } from "drizzle-orm"
 import { unarchiveIfNeeded } from "@in/server/modules/message/unarchiveIfNeeded"
 
 type Input = {
@@ -103,6 +105,11 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     text = textContent?.text
     entities = textContent?.entities
   }
+
+  entities = await parseMissingMentionEntitiesByUsername({
+    text,
+    entities,
+  })
 
   const hasLink =
     detectHasLink({ entities }) ||
@@ -295,6 +302,175 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
 
   // return new updates
   return { updates: selfUpdates }
+}
+
+type MentionCandidate = {
+  offset: number
+  length: number
+  username: string
+}
+
+const isMentionChar = (char: string): boolean => {
+  const code = char.charCodeAt(0)
+  return (
+    (code >= 48 && code <= 57) || // 0-9
+    (code >= 65 && code <= 90) || // A-Z
+    (code >= 97 && code <= 122) || // a-z
+    code === 95 // _
+  )
+}
+
+const extractMentionCandidates = (text: string): MentionCandidate[] => {
+  const candidates: MentionCandidate[] = []
+
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== "@") {
+      continue
+    }
+
+    if (i > 0 && isMentionChar(text[i - 1]!)) {
+      // Skip things like email addresses (foo@bar.com)
+      continue
+    }
+
+    let end = i + 1
+    while (end < text.length && isMentionChar(text[end]!)) {
+      end += 1
+    }
+
+    const username = text.slice(i + 1, end)
+    if (username.length < 2) {
+      continue
+    }
+
+    candidates.push({
+      offset: i,
+      length: end - i,
+      username,
+    })
+
+    i = end - 1
+  }
+
+  return candidates
+}
+
+const getClientEntityRanges = (entities: MessageEntities | undefined): Array<{ start: number; end: number }> => {
+  if (!entities || entities.entities.length === 0) {
+    return []
+  }
+
+  return entities.entities
+    .filter((entity): entity is MessageEntity => entity !== undefined)
+    .map((entity) => {
+      const start = Number(entity.offset)
+      const end = Number(entity.offset + entity.length)
+      return { start, end }
+    })
+}
+
+const isRangeOverlappingClientEntity = (
+  range: { start: number; end: number },
+  clientEntityRanges: Array<{ start: number; end: number }>,
+): boolean => {
+  return clientEntityRanges.some((clientRange) => {
+    return range.start < clientRange.end && clientRange.start < range.end
+  })
+}
+
+const parseMissingMentionEntitiesByUsername = async ({
+  text,
+  entities,
+}: {
+  text: string | undefined
+  entities: MessageEntities | undefined
+}): Promise<MessageEntities | undefined> => {
+  if (!text || !text.includes("@")) {
+    return entities
+  }
+
+  const mentionCandidates = extractMentionCandidates(text)
+  if (mentionCandidates.length === 0) {
+    return entities
+  }
+
+  const clientEntityRanges = getClientEntityRanges(entities)
+
+  const unresolvedMentionCandidates = mentionCandidates.filter((candidate) => {
+    return !isRangeOverlappingClientEntity(
+      { start: candidate.offset, end: candidate.offset + candidate.length },
+      clientEntityRanges,
+    )
+  })
+
+  if (unresolvedMentionCandidates.length === 0) {
+    return entities
+  }
+
+  const normalizedUsernames = [...new Set(unresolvedMentionCandidates.map((candidate) => candidate.username.toLowerCase()))]
+  if (normalizedUsernames.length === 0) {
+    return entities
+  }
+
+  const matchedUsers = await db
+    .select({
+      id: users.id,
+      username: users.username,
+    })
+    .from(users)
+    .where(inArray(lower(users.username), normalizedUsernames))
+
+  if (matchedUsers.length === 0) {
+    return entities
+  }
+
+  const userIdByUsername = new Map<string, number>()
+  for (const matchedUser of matchedUsers) {
+    if (!matchedUser.username) {
+      continue
+    }
+    userIdByUsername.set(matchedUser.username.toLowerCase(), matchedUser.id)
+  }
+
+  const parsedMentionEntities: MessageEntity[] = []
+  for (const candidate of unresolvedMentionCandidates) {
+    const userId = userIdByUsername.get(candidate.username.toLowerCase())
+    if (!userId) {
+      continue
+    }
+
+    parsedMentionEntities.push({
+      type: MessageEntity_Type.MENTION,
+      offset: BigInt(candidate.offset),
+      length: BigInt(candidate.length),
+      entity: {
+        oneofKind: "mention",
+        mention: {
+          userId: BigInt(userId),
+        },
+      },
+    })
+  }
+
+  if (parsedMentionEntities.length === 0) {
+    return entities
+  }
+
+  const existingEntities = (entities?.entities ?? []).filter((entity): entity is MessageEntity => entity !== undefined)
+  const combinedEntities = [...existingEntities, ...parsedMentionEntities]
+  combinedEntities.sort((a, b) => {
+    if (a.offset === b.offset) {
+      if (a.length === b.length) {
+        return 0
+      }
+      return a.length < b.length ? -1 : 1
+    }
+    return a.offset < b.offset ? -1 : 1
+  })
+
+  return {
+    entities: combinedEntities,
+  }
 }
 
 type EncodeMessageInput = Parameters<typeof Encoders.message>[0]
