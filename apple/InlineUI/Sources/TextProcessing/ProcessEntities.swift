@@ -826,6 +826,12 @@ public class ProcessEntities {
     let length: Int
   }
 
+  private struct OffsetAdjustment {
+    let position: Int
+    let delta: Int
+    let includeAtPosition: Bool
+  }
+
   private static let emailRegex: NSRegularExpression = {
     let pattern = "\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}\\b"
     return try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
@@ -927,6 +933,38 @@ public class ProcessEntities {
       let adjustment = totalRemovedCharacters(before: entityOffset, removals: removals)
       entities[i].offset = Int64(max(0, entityOffset - adjustment))
     }
+  }
+
+  private static func totalOffsetAdjustment(before offset: Int, adjustments: [OffsetAdjustment]) -> Int {
+    var total = 0
+    for adjustment in adjustments {
+      if adjustment.includeAtPosition {
+        if offset >= adjustment.position {
+          total += adjustment.delta
+        }
+      } else if offset > adjustment.position {
+        total += adjustment.delta
+      }
+    }
+    return total
+  }
+
+  private static func applyOffsetAdjustments(_ entities: inout [MessageEntity], adjustments: [OffsetAdjustment]) {
+    guard !adjustments.isEmpty else { return }
+
+    for i in 0 ..< entities.count {
+      let entityOffset = Int(entities[i].offset)
+      let adjustment = totalOffsetAdjustment(before: entityOffset, adjustments: adjustments)
+      entities[i].offset = Int64(max(0, entityOffset + adjustment))
+    }
+  }
+
+  private static func isLineBreakCharacter(_ character: unichar) -> Bool {
+    character == 10 || character == 13
+  }
+
+  private static func isInlineWhitespaceCharacter(_ character: unichar) -> Bool {
+    character == 32 || character == 9
   }
 
   private static func createBoldFont(from font: PlatformFont) -> PlatformFont {
@@ -1145,8 +1183,8 @@ public class ProcessEntities {
       let nsText = text as NSString
       let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsText.length))
 
-      // Process matches in reverse order to avoid offset issues when removing ``` markers
-      var removals: [OffsetRemoval] = []
+      // Process matches in reverse order to avoid index invalidation while editing the text.
+      var adjustments: [OffsetAdjustment] = []
 
       for match in matches.reversed() {
         // Get the full match range (including ``` and language)
@@ -1167,8 +1205,7 @@ public class ProcessEntities {
 
         if fullRange.location != NSNotFound, contentRange.location != NSNotFound {
           // Convert NSRange to Range<String.Index> safely
-          guard let swiftFullRange = Range(fullRange, in: text),
-                let swiftContentRange = Range(contentRange, in: text)
+          guard let swiftContentRange = Range(contentRange, in: text)
           else {
             continue // Skip this match if range conversion fails
           }
@@ -1193,21 +1230,70 @@ public class ProcessEntities {
           let adjustedContentLocation = contentRange.location + leadingTrimLength
           let adjustedContentLength = max(0, contentRange.length - leadingTrimLength - trailingTrimLength)
           let adjustedContentRange = NSRange(location: adjustedContentLocation, length: adjustedContentLength)
+          let contentRangeEnd = adjustedContentRange.location + adjustedContentRange.length
           let contentText = adjustedContentLength > 0 ? nsText.substring(with: adjustedContentRange) : ""
 
-          // Replace the full match with just the content
-          text.replaceSubrange(swiftFullRange, with: contentText)
+          let fullRangeEnd = fullRange.location + fullRange.length
+          let needsLeadingLineBreak = fullRange.location > 0 &&
+            !isLineBreakCharacter(nsText.character(at: fullRange.location - 1))
+          let needsTrailingLineBreak = fullRangeEnd < nsText.length &&
+            !isLineBreakCharacter(nsText.character(at: fullRangeEnd))
+
+          var replacementRange = fullRange
+          if needsLeadingLineBreak, fullRange.location > 0 {
+            let previousCharacter = nsText.character(at: fullRange.location - 1)
+            if isInlineWhitespaceCharacter(previousCharacter) {
+              replacementRange.location -= 1
+              replacementRange.length += 1
+              adjustments.append(
+                OffsetAdjustment(position: fullRange.location - 1, delta: -1, includeAtPosition: false)
+              )
+            }
+          }
+
+          if needsTrailingLineBreak, fullRangeEnd < nsText.length {
+            let nextCharacter = nsText.character(at: fullRangeEnd)
+            if isInlineWhitespaceCharacter(nextCharacter) {
+              replacementRange.length += 1
+              adjustments.append(
+                OffsetAdjustment(position: fullRangeEnd, delta: -1, includeAtPosition: false)
+              )
+            }
+          }
+
+          guard let swiftReplacementRange = Range(replacementRange, in: text) else {
+            continue
+          }
+
+          var replacementText = contentText
+          if needsLeadingLineBreak {
+            replacementText = "\n" + replacementText
+            adjustments.append(
+              OffsetAdjustment(position: adjustedContentRange.location, delta: 1, includeAtPosition: true)
+            )
+          }
+          if needsTrailingLineBreak {
+            replacementText += "\n"
+            adjustments.append(
+              OffsetAdjustment(position: contentRangeEnd, delta: 1, includeAtPosition: true)
+            )
+          }
+
+          // Replace the full match with normalized block content.
+          text.replaceSubrange(swiftReplacementRange, with: replacementText)
 
           let prefixRemovedLength = adjustedContentRange.location - fullRange.location
-          let fullRangeEnd = fullRange.location + fullRange.length
-          let contentRangeEnd = adjustedContentRange.location + adjustedContentRange.length
           let suffixRemovedLength = fullRangeEnd - contentRangeEnd
 
           if prefixRemovedLength > 0 {
-            removals.append(OffsetRemoval(position: fullRange.location, length: prefixRemovedLength))
+            adjustments.append(
+              OffsetAdjustment(position: fullRange.location, delta: -prefixRemovedLength, includeAtPosition: false)
+            )
           }
           if suffixRemovedLength > 0 {
-            removals.append(OffsetRemoval(position: contentRangeEnd, length: suffixRemovedLength))
+            adjustments.append(
+              OffsetAdjustment(position: contentRangeEnd, delta: -suffixRemovedLength, includeAtPosition: false)
+            )
           }
 
           // Store the entity position in pre-removal coordinates; map after applying removals.
@@ -1219,8 +1305,8 @@ public class ProcessEntities {
         }
       }
 
-      applyOffsetRemovals(&allEntities, removals: removals)
-      applyOffsetRemovals(&preEntities, removals: removals)
+      applyOffsetAdjustments(&allEntities, adjustments: adjustments)
+      applyOffsetAdjustments(&preEntities, adjustments: adjustments)
 
       // Add pre entities to the list
       allEntities.append(contentsOf: preEntities)

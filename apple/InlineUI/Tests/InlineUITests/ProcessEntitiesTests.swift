@@ -1126,13 +1126,79 @@ struct ProcessEntitiesTests {
     ], range: mentionRange)
 
     let result = ProcessEntities.fromAttributedString(attributedString)
-    #expect(result.text == "🙂 let x = 1 @john")
+    #expect(result.text == "🙂\nlet x = 1\n@john")
 
     let resultMentionRange = rangeOfSubstring("@john", in: result.text)
     #expect(resultMentionRange.location != NSNotFound)
 
     let preEntity = result.entities.entities.first { $0.type == .pre }
     #expect(preEntity != nil)
+
+    let mentionEntity = result.entities.entities.first { $0.type == .mention }
+    #expect(mentionEntity != nil)
+    #expect(mentionEntity!.offset == Int64(resultMentionRange.location))
+    #expect(mentionEntity!.length == Int64(resultMentionRange.length))
+  }
+
+  @Test("Inline embedded pre block keeps correct offsets for following entities")
+  func testInlineEmbeddedPreBlockOffsetsForFollowingEntities() {
+    let text = "hi how ```are``` @john"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let mentionRange = rangeOfSubstring("@john", in: text)
+    #expect(mentionRange.location != NSNotFound)
+    attributedString.addAttributes([
+      .mentionUserId: Int64(123),
+      .foregroundColor: testConfiguration.linkColor,
+      .link: "inline://user/123",
+    ], range: mentionRange)
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+    #expect(result.text == "hi how\nare\n@john")
+
+    let resultMentionRange = rangeOfSubstring("@john", in: result.text)
+    #expect(resultMentionRange.location != NSNotFound)
+
+    let preEntity = result.entities.entities.first { $0.type == .pre }
+    #expect(preEntity != nil)
+    #expect(preEntity!.offset == 7)
+    #expect(preEntity!.length == 3)
+
+    let mentionEntity = result.entities.entities.first { $0.type == .mention }
+    #expect(mentionEntity != nil)
+    #expect(mentionEntity!.offset == Int64(resultMentionRange.location))
+    #expect(mentionEntity!.length == Int64(resultMentionRange.length))
+  }
+
+  @Test("Inline embedded pre block with language keeps correct offsets")
+  func testInlineEmbeddedPreBlockWithLanguageOffsets() {
+    let text = "hi ```swift\nlet x = 1\n``` @john"
+    let attributedString = NSMutableAttributedString(
+      string: text,
+      attributes: [.font: testConfiguration.font, .foregroundColor: testConfiguration.textColor]
+    )
+
+    let mentionRange = rangeOfSubstring("@john", in: text)
+    #expect(mentionRange.location != NSNotFound)
+    attributedString.addAttributes([
+      .mentionUserId: Int64(123),
+      .foregroundColor: testConfiguration.linkColor,
+      .link: "inline://user/123",
+    ], range: mentionRange)
+
+    let result = ProcessEntities.fromAttributedString(attributedString)
+    #expect(result.text == "hi\nlet x = 1\n@john")
+
+    let resultMentionRange = rangeOfSubstring("@john", in: result.text)
+    #expect(resultMentionRange.location != NSNotFound)
+
+    let preEntity = result.entities.entities.first { $0.type == .pre }
+    #expect(preEntity != nil)
+    #expect(preEntity!.offset == 3)
+    #expect(preEntity!.length == 9)
 
     let mentionEntity = result.entities.entities.first { $0.type == .mention }
     #expect(mentionEntity != nil)
