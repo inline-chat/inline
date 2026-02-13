@@ -16,6 +16,10 @@ const waitFor = async (predicate: () => boolean, timeoutMs = 300) => {
   throw new Error("Timed out waiting for condition")
 }
 
+const waitForOpen = async (client: ProtocolClient) => {
+  await waitFor(() => client.state === "open")
+}
+
 describe("ProtocolClient", () => {
   const flushMicrotasks = async (count = 10) => {
     for (let i = 0; i < count; i++) await Promise.resolve()
@@ -75,6 +79,7 @@ describe("ProtocolClient", () => {
     await transport.emitMessage(
       ServerProtocolMessage.create({ id: 1n, body: { oneofKind: "connectionOpen", connectionOpen: {} } }),
     )
+    await waitForOpen(client)
 
     const p = client.callRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} })
     await waitFor(() => transport.sent.some((m) => m.body.oneofKind === "rpcCall"))
@@ -119,6 +124,7 @@ describe("ProtocolClient", () => {
     await transport.emitMessage(
       ServerProtocolMessage.create({ id: 1n, body: { oneofKind: "connectionOpen", connectionOpen: {} } }),
     )
+    ;(client as any).state = "open"
 
     const p = client.callRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} }, { timeoutMs: 10 })
     const settled = p.then(
@@ -191,6 +197,7 @@ describe("ProtocolClient", () => {
     await client.startTransport()
     await transport.connect()
     await transport.emitMessage(ServerProtocolMessage.create({ id: 1n, body: { oneofKind: "connectionOpen", connectionOpen: {} } }))
+    await waitForOpen(client)
 
     const p = client.callRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} }, { timeoutMs: 0 })
     await waitFor(() => transport.sent.some((m) => m.body.oneofKind === "rpcCall"))
@@ -407,6 +414,7 @@ describe("ProtocolClient", () => {
       getConnectionInit: () => ({ token: "t" }),
     })
 
+    ;(client as any).state = "open"
     await expect(client.callRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} }, { timeoutMs: 0 })).rejects.toThrow(/send-failed/)
   })
 
@@ -422,6 +430,7 @@ describe("ProtocolClient", () => {
     await client.startTransport()
     await transport.connect()
     await transport.emitMessage(ServerProtocolMessage.create({ id: 1n, body: { oneofKind: "connectionOpen", connectionOpen: {} } }))
+    ;(client as any).state = "open"
 
     const p = client.callRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} }, { timeoutMs: 10 })
     for (let i = 0; i < 20; i++) {
@@ -484,6 +493,8 @@ describe("ProtocolClient", () => {
 
     await client.startTransport()
     await transport.connect()
+    await transport.emitMessage(ServerProtocolMessage.create({ id: 1n, body: { oneofKind: "connectionOpen", connectionOpen: {} } }))
+    ;(client as any).state = "open"
 
     const id1 = await client.sendRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} })
     const id2 = await client.sendRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} })
@@ -491,6 +502,21 @@ describe("ProtocolClient", () => {
     expect(id2).toBe(id1 + 1n)
 
     vi.useRealTimers()
+  })
+
+  it("rejects rpc calls before protocol connection is open", async () => {
+    const transport = new MockTransport()
+    const client = new ProtocolClient({
+      transport,
+      getConnectionInit: () => ({ token: "t" }),
+    })
+
+    await client.startTransport()
+    await transport.connect()
+
+    await expect(client.sendRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} })).rejects.toBeInstanceOf(ProtocolClientError)
+    await expect(client.callRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} })).rejects.toBeInstanceOf(ProtocolClientError)
+    expect(transport.sent.some((message) => message.body.oneofKind === "rpcCall")).toBe(false)
   })
 
   it("covers connecting/stopping events, pong handling, send-failed rpc rejection, and reconnection delay branch", async () => {
@@ -540,6 +566,7 @@ describe("ProtocolClient", () => {
       getConnectionInit: () => ({ token: "t" }),
     })
     await client2.startTransport()
+    ;(client2 as any).state = "open"
 
     await expect(client2.callRpc(Method.GET_ME, { oneofKind: "getMe", getMe: {} }, { timeoutMs: 0 })).rejects.toThrow(/send-failed|send boom/)
 
