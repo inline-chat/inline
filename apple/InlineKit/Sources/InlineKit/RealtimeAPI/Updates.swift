@@ -134,19 +134,33 @@ public actor UpdatesEngine: Sendable {
 
   public func applyBatch(updates: [InlineProtocol.Update], source: UpdateApplySource) async {
     log.debug("applying \(updates.count) updates (source=\(source))")
-    let reloadPeers: Set<Peer>
-    do {
-      reloadPeers = try await database.dbWriter.write { db in
-        var reloadPeers = Set<Peer>()
-        for update in updates {
-          self.apply(update: update, db: db, source: source, reloadPeers: &reloadPeers)
+    // Keep catch-up writes bounded so a very large reconnect batch does not monopolize
+    // the writer lock long enough to visibly stall chat UI reads.
+    let chunkSize = source == .syncCatchup ? 200 : max(updates.count, 1)
+    var reloadPeers = Set<Peer>()
+
+    var start = updates.startIndex
+    while start < updates.endIndex {
+      let end = updates.index(start, offsetBy: chunkSize, limitedBy: updates.endIndex) ?? updates.endIndex
+      let chunk = updates[start ..< end]
+
+      do {
+        let chunkReloadPeers = try await database.dbWriter.write { db in
+          var chunkReloadPeers = Set<Peer>()
+          for update in chunk {
+            self.apply(update: update, db: db, source: source, reloadPeers: &chunkReloadPeers)
+          }
+          return chunkReloadPeers
         }
-        return reloadPeers
+        reloadPeers.formUnion(chunkReloadPeers)
+      } catch {
+        log.error("Failed to apply updates chunk", error: error)
       }
-    } catch {
-      // handle error
-      log.error("Failed to apply updates", error: error)
-      reloadPeers = []
+
+      if source == .syncCatchup, end < updates.endIndex {
+        await Task.yield()
+      }
+      start = end
     }
 
     if source == .syncCatchup, !reloadPeers.isEmpty {
@@ -280,10 +294,7 @@ extension InlineProtocol.UpdateMessageId {
           publishChanges: true
         )
 
-      try Chat.filter(id: message.chatId).updateAll(
-        db,
-        [Column("lastMsgId").set(to: message.messageId)]
-      )
+      try Chat.updateLastMsgId(db, chatId: message.chatId, lastMsgId: message.messageId, date: message.date)
     }
   }
 }
@@ -355,7 +366,7 @@ extension InlineProtocol.UpdateDeleteMessages {
         if prevChatLastMsgId == messageId {
           let previousMessage = try Message
             .filter(Column("chatId") == chat.id)
-            .order(Column("date").desc)
+            .order(Column("date").desc, Column("messageId").desc)
             .limit(1, offset: 1)
             .fetchOne(db)
 
@@ -363,8 +374,9 @@ extension InlineProtocol.UpdateDeleteMessages {
           updatedChat.lastMsgId = previousMessage?.messageId
           try updatedChat.save(db)
 
-          // update so if next message is deleted, we can use it to update again
-          prevChatLastMsgId = messageId
+          // Track the newly promoted last message so consecutive deletions
+          // keep advancing the chat tail correctly.
+          prevChatLastMsgId = previousMessage?.messageId
         }
 
         // TODO: Optimize this to use keys
