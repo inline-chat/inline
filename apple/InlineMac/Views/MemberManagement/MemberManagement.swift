@@ -5,6 +5,7 @@ import SwiftUI
 
 public struct MemberManagementView: View {
   @EnvironmentObject var nav: Nav
+  @Environment(\.dependencies) private var dependencies
 
   @StateObject private var membersViewModel: SpaceFullMembersViewModel
   @StateObject private var membershipStatusViewModel: SpaceMembershipStatusViewModel
@@ -136,7 +137,21 @@ public struct MemberManagementView: View {
           .frame(maxWidth: 180)
 
         Button {
-          nav.open(.inviteToSpace(spaceId: spaceId))
+          if let nav2 = dependencies.nav2 {
+            // Nav2's invite route depends on the active space tab.
+            if nav2.activeSpaceId != spaceId,
+              let spaceTabIndex = nav2.tabs.firstIndex(where: { tab in
+                if case let .space(id: id, name: _) = tab { return id == spaceId }
+                return false
+              })
+            {
+              nav2.setActiveTab(index: spaceTabIndex)
+            }
+
+            nav2.navigate(to: .inviteToSpace)
+          } else {
+            nav.open(.inviteToSpace(spaceId: spaceId))
+          }
         } label: {
           Label("Invite", systemImage: "person.badge.plus")
         }
