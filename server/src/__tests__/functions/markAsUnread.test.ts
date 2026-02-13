@@ -1,8 +1,8 @@
-import { describe, test, expect, beforeEach, beforeAll } from "bun:test"
+import { describe, test, expect, beforeEach } from "bun:test"
 import { InputPeer } from "@inline-chat/protocol/core"
-import { setupTestDatabase, testUtils } from "../setup"
+import { setupTestLifecycle, testUtils } from "../setup"
 import { markAsUnread } from "@in/server/functions/messages.markAsUnread"
-import type { DbChat, DbUser, DbDialog } from "@in/server/db/schema"
+import type { DbChat, DbUser } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { db } from "@in/server/db"
 import { dialogs, updates, UpdateBucket } from "@in/server/db/schema"
@@ -16,12 +16,19 @@ let otherUser: DbUser
 let privateChat: DbChat
 let privateChatPeerId: InputPeer
 let context: FunctionContext
+let userCounter = 0
+
+const nextEmail = (prefix: string) => {
+  userCounter += 1
+  return `${prefix}-${process.pid}-${userCounter}@example.com`
+}
 
 describe("markAsUnread", () => {
-  beforeAll(async () => {
-    await setupTestDatabase()
-    currentUser = (await testUtils.createUser("test@example.com"))!
-    otherUser = (await testUtils.createUser("other@example.com"))!
+  setupTestLifecycle()
+
+  beforeEach(async () => {
+    currentUser = (await testUtils.createUser(nextEmail("mark-unread-current-user")))!
+    otherUser = (await testUtils.createUser(nextEmail("mark-unread-other-user")))!
     const chatResult = await testUtils.createPrivateChatWithOptionalDialog({
       userA: currentUser,
       userB: otherUser,
