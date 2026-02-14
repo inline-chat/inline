@@ -46,15 +46,16 @@ public enum ProjectConfig {
     case userProfile = "user-profile"
   }
 
-  // Helper function to get named arguments
-  public static func getArgumentValue(for key: KnownArgumentKeys) -> String? {
-    let args = CommandLine.arguments
+  static func getArgumentValue(
+    for key: KnownArgumentKeys,
+    in arguments: [String]
+  ) -> String? {
     let keyPrefix = "--\(key.rawValue)"
-    guard let index = args.firstIndex(where: { $0.starts(with: keyPrefix) }) else {
+    guard let index = arguments.firstIndex(where: { $0.starts(with: keyPrefix) }) else {
       return nil
     }
 
-    let current = args[index]
+    let current = arguments[index]
 
     // Support: `--key=value`
     if current.starts(with: "\(keyPrefix)=") {
@@ -62,8 +63,8 @@ public enum ProjectConfig {
     }
 
     // Support: `--key value`
-    if current == keyPrefix, index + 1 < args.count {
-      return args[index + 1]
+    if current == keyPrefix, index + 1 < arguments.count {
+      return arguments[index + 1]
     }
 
     // Support: `--key` (boolean flag)
@@ -73,6 +74,11 @@ public enum ProjectConfig {
 
     // Support legacy: `--key<value>` (should not happen, but keep compatibility)
     return current.replacingOccurrences(of: keyPrefix, with: "")
+  }
+
+  // Helper function to get named arguments
+  public static func getArgumentValue(for key: KnownArgumentKeys) -> String? {
+    getArgumentValue(for: key, in: CommandLine.arguments)
   }
 
   public static var userProfile: String? {

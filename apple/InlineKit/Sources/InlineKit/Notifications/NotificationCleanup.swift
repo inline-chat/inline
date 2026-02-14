@@ -2,6 +2,34 @@ import Foundation
 @preconcurrency import UserNotifications
 
 enum NotificationCleanup {
+  static func shouldRemove(
+    content: UNNotificationContent,
+    threadId: String,
+    upToMessageId: Int64?
+  ) -> Bool {
+    if content.threadIdentifier != threadId {
+      let payloadThreadId = content.userInfo["threadId"] as? String
+      if payloadThreadId != threadId { return false }
+    }
+
+    guard let upToMessageId else { return true }
+
+    let messageId: Int64? = if let raw = content.userInfo["messageId"] as? String {
+      Int64(raw)
+    } else if let raw = content.userInfo["messageId"] as? Int64 {
+      raw
+    } else if let raw = content.userInfo["messageId"] as? Int {
+      Int64(raw)
+    } else if let raw = content.userInfo["messageId"] as? NSNumber {
+      raw.int64Value
+    } else {
+      nil
+    }
+
+    guard let messageId else { return false }
+    return messageId <= upToMessageId
+  }
+
   static func removeNotifications(
     threadId: String,
     upToMessageId: Int64?
@@ -10,27 +38,7 @@ enum NotificationCleanup {
     let upToMessageId = upToMessageId
 
     let shouldRemove: @Sendable (UNNotificationContent) -> Bool = { content in
-      if content.threadIdentifier != threadId {
-        let payloadThreadId = content.userInfo["threadId"] as? String
-        if payloadThreadId != threadId { return false }
-      }
-
-      guard let upToMessageId else { return true }
-
-      let messageId: Int64? = if let raw = content.userInfo["messageId"] as? String {
-        Int64(raw)
-      } else if let raw = content.userInfo["messageId"] as? Int64 {
-        raw
-      } else if let raw = content.userInfo["messageId"] as? Int {
-        Int64(raw)
-      } else if let raw = content.userInfo["messageId"] as? NSNumber {
-        raw.int64Value
-      } else {
-        nil
-      }
-
-      guard let messageId else { return false }
-      return messageId <= upToMessageId
+      self.shouldRemove(content: content, threadId: threadId, upToMessageId: upToMessageId)
     }
 
     UNUserNotificationCenter.current().getDeliveredNotifications { delivered in
