@@ -691,7 +691,8 @@ describe("InlineSdkClient", () => {
   })
 
   it("uploadFile() sends multipart payload and returns ids", async () => {
-    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
+      expect(String(input)).toBe("https://api.inline.chat/v1/uploadFile")
       const body = init?.body
       if (!(body instanceof FormData)) throw new Error("missing form-data body")
       expect(body.get("type")).toBe("photo")
@@ -727,6 +728,40 @@ describe("InlineSdkClient", () => {
     expect(result).toEqual({
       fileUniqueId: "INP_123",
       photoId: 77n,
+    })
+  })
+
+  it("uploadFile() preserves custom base path before /v1/uploadFile", async () => {
+    const fetchMock = vi.fn(async (input: unknown) => {
+      expect(String(input)).toBe("https://example.com/custom-prefix/v1/uploadFile")
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          result: {
+            fileUniqueId: "INP_path",
+            photoId: 44,
+          },
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      )
+    })
+    const client = new InlineSdkClient({
+      token: "test-token",
+      baseUrl: "https://example.com/custom-prefix",
+      fetch: fetchMock as any,
+    })
+
+    const result = await client.uploadFile({
+      type: "photo",
+      file: new Uint8Array([1]),
+    })
+
+    expect(result).toEqual({
+      fileUniqueId: "INP_path",
+      photoId: 44n,
     })
   })
 
@@ -767,6 +802,46 @@ describe("InlineSdkClient", () => {
     expect(result).toEqual({
       fileUniqueId: "INP_blob",
       photoId: 12n,
+    })
+  })
+
+  it("uploadFile() sanitizes path-like filenames to a leaf name", async () => {
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      const body = init?.body
+      if (!(body instanceof FormData)) throw new Error("missing form-data body")
+      const file = body.get("file")
+      if (!(file instanceof File)) throw new Error("missing file")
+      expect(file.name).toBe("latest-download.jpeg")
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          result: {
+            fileUniqueId: "INP_name",
+            photoId: 5,
+          },
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      )
+    })
+    const client = new InlineSdkClient({
+      token: "test-token",
+      baseUrl: "https://api.inline.chat",
+      fetch: fetchMock as any,
+    })
+
+    const result = await client.uploadFile({
+      type: "photo",
+      file: new Uint8Array([1, 2, 3]),
+      fileName: "/Users/mo/.openclaw/workspace/tmp/latest-download.jpeg?token=abc",
+      contentType: "image/jpeg",
+    })
+
+    expect(result).toEqual({
+      fileUniqueId: "INP_name",
+      photoId: 5n,
     })
   })
 

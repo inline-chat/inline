@@ -154,6 +154,57 @@ describe("inline/channel", () => {
     expect(close).toHaveBeenCalled()
   })
 
+  it("outbound sendText supports explicit user targets", async () => {
+    vi.resetModules()
+
+    const connect = vi.fn(async () => {})
+    const sendMessage = vi.fn(async () => ({ messageId: null }))
+    const close = vi.fn(async () => {})
+
+    mockRealtimeSdk({
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = connect
+        sendMessage = sendMessage
+        close = close
+      },
+    })
+
+    const runtimeMod = await import("../runtime")
+    runtimeMod.setInlineRuntime({
+      version: "test",
+      state: { resolveStateDir: () => "/tmp" },
+      channel: { text: { chunkMarkdownText: (t: string) => [t] } },
+    } as unknown as PluginRuntime)
+
+    const { inlineChannelPlugin } = await import("./channel")
+
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+          parseMarkdown: true,
+        },
+      },
+    } satisfies OpenClawConfig
+
+    await inlineChannelPlugin.outbound.sendText?.({
+      cfg,
+      to: "user:42",
+      text: "hi",
+      accountId: "default",
+    } as any)
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 42n, text: "hi", parseMarkdown: true }),
+    )
+    expect(sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: 42n }),
+    )
+    expect(close).toHaveBeenCalled()
+  })
+
   it("outbound uses replyToId (not threadId) for Inline replyToMsgId", async () => {
     vi.resetModules()
 
@@ -297,6 +348,79 @@ describe("inline/channel", () => {
         },
         parseMarkdown: true,
       }),
+    )
+    expect(close).toHaveBeenCalled()
+  })
+
+  it("outbound sendMedia supports explicit user targets", async () => {
+    vi.resetModules()
+
+    const connect = vi.fn(async () => {})
+    const uploadFile = vi.fn(async () => ({ fileUniqueId: "INP_1", photoId: 101n }))
+    const sendMessage = vi.fn(async () => ({ messageId: 55n }))
+    const close = vi.fn(async () => {})
+
+    mockRealtimeSdk({
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = connect
+        uploadFile = uploadFile
+        sendMessage = sendMessage
+        close = close
+      },
+    })
+
+    vi.doMock("openclaw/plugin-sdk", async () => {
+      const actual = await vi.importActual<Record<string, unknown>>("openclaw/plugin-sdk")
+      return {
+        ...actual,
+        loadWebMedia: vi.fn(async () => ({
+          buffer: Buffer.from([1, 2, 3]),
+          contentType: "image/png",
+          kind: "image",
+          fileName: "image.png",
+        })),
+        detectMime: vi.fn(async () => "image/png"),
+      }
+    })
+
+    const runtimeMod = await import("../runtime")
+    runtimeMod.setInlineRuntime({
+      version: "test",
+      state: { resolveStateDir: () => "/tmp" },
+      channel: { text: { chunkMarkdownText: (t: string) => [t] } },
+    } as unknown as PluginRuntime)
+
+    const { inlineChannelPlugin } = await import("./channel")
+
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+          parseMarkdown: true,
+        },
+      },
+    } satisfies OpenClawConfig
+
+    await inlineChannelPlugin.outbound.sendMedia?.({
+      cfg,
+      to: "inline:user:42",
+      text: "caption",
+      mediaUrl: "https://example.com/image.png",
+      accountId: "default",
+      replyToId: "9",
+    } as any)
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 42n,
+        text: "caption",
+        replyToMsgId: 9n,
+      }),
+    )
+    expect(sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: 42n }),
     )
     expect(close).toHaveBeenCalled()
   })

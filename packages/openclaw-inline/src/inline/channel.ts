@@ -59,6 +59,47 @@ function parseInlineId(raw: unknown): bigint | undefined {
   return undefined
 }
 
+function parseInlineOutboundTarget(params: {
+  raw: string
+  context: "sendText" | "sendMedia"
+}): {
+  targetId: bigint
+  kind: "chat" | "user"
+  normalizedNumeric: string
+} {
+  let normalizedTarget = params.raw.trim()
+  if (/^inline:/i.test(normalizedTarget)) {
+    normalizedTarget = normalizedTarget.replace(/^inline:/i, "").trim()
+  }
+  if (!normalizedTarget) {
+    throw new Error(`inline ${params.context}: missing target`)
+  }
+
+  let kind: "chat" | "user" = "chat"
+  if (/^chat:/i.test(normalizedTarget)) {
+    kind = "chat"
+    normalizedTarget = normalizedTarget.replace(/^chat:/i, "").trim()
+  } else if (/^user:/i.test(normalizedTarget)) {
+    kind = "user"
+    normalizedTarget = normalizedTarget.replace(/^user:/i, "").trim()
+  }
+  // Keep backward compatibility for existing bare numeric ids that
+  // historically mapped to chat ids.
+  normalizedTarget = normalizeInlineTarget(normalizedTarget) ?? normalizedTarget
+
+  if (!/^[0-9]+$/.test(normalizedTarget)) {
+    throw new Error(
+      `inline ${params.context}: invalid target "${params.raw}" (expected chat id or user id)`,
+    )
+  }
+
+  return {
+    targetId: BigInt(normalizedTarget),
+    kind,
+    normalizedNumeric: normalizedTarget,
+  }
+}
+
 function buildInlineDisplayName(params: {
   firstName?: string
   lastName?: string
@@ -199,15 +240,10 @@ async function sendMessageInline(params: {
   }
   const token = await resolveInlineToken(account)
 
-  const normalizedTarget = normalizeInlineTarget(params.to) ?? params.to.trim()
-  if (!normalizedTarget) {
-    throw new Error("inline sendText: missing target")
-  }
-  if (!/^[0-9]+$/.test(normalizedTarget)) {
-    throw new Error(`inline sendText: invalid target "${params.to}" (expected chat id)`)
-  }
-
-  const chatId = BigInt(normalizedTarget)
+  const target = parseInlineOutboundTarget({
+    raw: params.to,
+    context: "sendText",
+  })
 
   const client = new InlineSdkClient({
     baseUrl: account.baseUrl,
@@ -221,14 +257,17 @@ async function sendMessageInline(params: {
     const replyToMsgId = parseInlineId(params.replyToId)
 
     const result = await client.sendMessage({
-      chatId,
+      ...(target.kind === "user" ? { userId: target.targetId } : { chatId: target.targetId }),
       text: params.text,
       ...(replyToMsgId != null ? { replyToMsgId } : {}),
       parseMarkdown: account.config.parseMarkdown ?? true,
     })
     const bestEffort =
       result.messageId != null ? String(result.messageId) : BigInt(Date.now()).toString()
-    return { messageId: bestEffort, chatId: normalizedTarget }
+    return {
+      messageId: bestEffort,
+      chatId: target.normalizedNumeric,
+    }
   } finally {
     await client.close().catch(() => {})
   }
@@ -248,15 +287,10 @@ async function sendMediaInline(params: {
   }
   const token = await resolveInlineToken(account)
 
-  const normalizedTarget = normalizeInlineTarget(params.to) ?? params.to.trim()
-  if (!normalizedTarget) {
-    throw new Error("inline sendMedia: missing target")
-  }
-  if (!/^[0-9]+$/.test(normalizedTarget)) {
-    throw new Error(`inline sendMedia: invalid target "${params.to}" (expected chat id)`)
-  }
-
-  const chatId = BigInt(normalizedTarget)
+  const target = parseInlineOutboundTarget({
+    raw: params.to,
+    context: "sendMedia",
+  })
   const replyToMsgId = parseInlineId(params.replyToId)
   const caption = params.text.trim()
 
@@ -275,7 +309,7 @@ async function sendMediaInline(params: {
     })
 
     const result = await client.sendMessage({
-      chatId,
+      ...(target.kind === "user" ? { userId: target.targetId } : { chatId: target.targetId }),
       ...(caption ? { text: caption } : {}),
       media,
       ...(replyToMsgId != null ? { replyToMsgId } : {}),
@@ -283,7 +317,10 @@ async function sendMediaInline(params: {
     })
     const bestEffort =
       result.messageId != null ? String(result.messageId) : BigInt(Date.now()).toString()
-    return { messageId: bestEffort, chatId: normalizedTarget }
+    return {
+      messageId: bestEffort,
+      chatId: target.normalizedNumeric,
+    }
   } finally {
     await client.close().catch(() => {})
   }
