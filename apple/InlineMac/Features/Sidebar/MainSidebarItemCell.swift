@@ -453,7 +453,7 @@ class MainSidebarItemCell: NSView {
   }
 
   override func menu(for event: NSEvent) -> NSMenu? {
-    guard let item, let dependencies, item.dialog != nil else { return nil }
+    guard let item, item.dialog != nil else { return nil }
 
     let menu = NSMenu()
 
@@ -490,6 +490,19 @@ class MainSidebarItemCell: NSView {
     )
     menu.addItem(archiveItem)
 
+    if canMoveToHome {
+      menu.addItem(.separator())
+
+      let moveOutOfSpaceItem = NSMenuItem(
+        title: "Move Out of Space...",
+        action: #selector(handleMoveOutOfSpaceAction),
+        keyEquivalent: ""
+      )
+      moveOutOfSpaceItem.target = self
+      moveOutOfSpaceItem.image = NSImage(systemSymbolName: "tray.and.arrow.up", accessibilityDescription: nil)
+      menu.addItem(moveOutOfSpaceItem)
+    }
+
     return menu
   }
 
@@ -516,6 +529,49 @@ class MainSidebarItemCell: NSView {
         }
       } catch {
         Log.shared.error("Failed to update read/unread status", error: error)
+      }
+    }
+  }
+
+  @objc private func handleMoveOutOfSpaceAction() {
+    let alert = NSAlert()
+    alert.alertStyle = .informational
+    alert.messageText = "Move this thread out of the space?"
+    alert.addButton(withTitle: "Move to Home")
+    alert.addButton(withTitle: "Cancel")
+
+    guard alert.runModal() == .alertFirstButtonReturn else { return }
+    moveThreadToHome()
+  }
+
+  private func moveThreadToHome() {
+    guard canMoveToHome, let item, let dependencies, let chatId = item.chat?.id, let peer = item.peerId else { return }
+    let nav2 = nav2
+
+    Task(priority: .userInitiated) {
+      await MainActor.run {
+        ToastCenter.shared.showLoading("Moving thread…")
+      }
+
+      do {
+        _ = try await dependencies.realtimeV2.send(.moveThread(chatID: chatId, spaceID: nil))
+        await MainActor.run {
+          ToastCenter.shared.dismiss()
+          ToastCenter.shared.showSuccess("Moved to Home")
+        }
+
+        if let nav2 {
+          Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            await nav2.openChat(peer: peer, database: dependencies.database)
+          }
+        }
+      } catch {
+        await MainActor.run {
+          ToastCenter.shared.dismiss()
+          ToastCenter.shared.showError("Failed to move thread")
+        }
+        Log.shared.error("Failed to move thread to home", error: error)
       }
     }
   }
@@ -583,6 +639,11 @@ class MainSidebarItemCell: NSView {
   private var isArchived: Bool {
     guard let dialog = item?.dialog else { return false }
     return dialog.archived ?? false
+  }
+
+  private var canMoveToHome: Bool {
+    guard let item else { return false }
+    return item.kind == .thread && item.spaceId != nil && item.chat != nil
   }
 
   private func setupEventListeners() {
