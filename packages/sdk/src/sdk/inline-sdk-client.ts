@@ -236,18 +236,30 @@ export class InlineSdkClient {
     const peerId = this.inputPeerFromTarget(params, "sendMessage")
     const media = params.media != null ? toInputMedia(params.media) : undefined
 
-    const result = await this.invoke(Method.SEND_MESSAGE, {
-      oneofKind: "sendMessage",
-      sendMessage: {
-        peerId,
-        ...(hasText ? { message: params.text } : {}),
-        ...(media != null ? { media } : {}),
-        ...(params.replyToMsgId != null ? { replyToMsgId: asInlineId(params.replyToMsgId, "replyToMsgId") } : {}),
-        ...(params.parseMarkdown != null ? { parseMarkdown: params.parseMarkdown } : {}),
-        ...(params.entities != null ? { entities: params.entities } : {}),
-        ...(params.sendMode === "silent" ? { sendMode: MessageSendMode.MODE_SILENT } : {}),
-      },
-    })
+    let result: RpcResultForMethod<Method.SEND_MESSAGE>
+    try {
+      result = await this.invoke(Method.SEND_MESSAGE, {
+        oneofKind: "sendMessage",
+        sendMessage: {
+          peerId,
+          ...(hasText ? { message: params.text } : {}),
+          ...(media != null ? { media } : {}),
+          ...(params.replyToMsgId != null ? { replyToMsgId: asInlineId(params.replyToMsgId, "replyToMsgId") } : {}),
+          ...(params.parseMarkdown != null ? { parseMarkdown: params.parseMarkdown } : {}),
+          ...(params.entities != null ? { entities: params.entities } : {}),
+          ...(params.sendMode === "silent" ? { sendMode: MessageSendMode.MODE_SILENT } : {}),
+        },
+      })
+    } catch (error) {
+      const target = "chatId" in params ? `chat:${String(params.chatId)}` : `user:${String(params.userId)}`
+      const mediaKind = params.media?.kind ?? "none"
+      const textLen = hasText ? params.text!.length : 0
+      const detail = extractErrorMessage(error)
+      throw new Error(
+        `sendMessage: request failed (${detail}; target=${target}; media=${mediaKind}; textLen=${textLen}; replyTo=${params.replyToMsgId != null ? String(params.replyToMsgId) : "none"})`,
+        { cause: error as Error },
+      )
+    }
 
     const messageId = extractFirstMessageId(result.sendMessage.updates)
     return { messageId }
@@ -259,18 +271,27 @@ export class InlineSdkClient {
 
     const fileName = normalizeUploadFileName(params.fileName, params.type)
     const fileContentType = resolveUploadContentType(params.type, params.contentType)
-    form.set("file", toBlob(params.file, fileContentType), fileName)
+    form.set("file", toUploadMultipartFile(params.file, fileName, fileContentType), fileName)
+    const fileSize = getBinaryInputSize(params.file)
 
+    let thumbnailName: string | undefined
+    let thumbnailContentType: string | undefined
+    let thumbnailSize: number | undefined
     if (params.thumbnail != null) {
-      const thumbnailName = normalizeUploadFileName(
+      thumbnailName = normalizeUploadFileName(
         params.thumbnailFileName,
         "photo",
       )
-      const thumbnailContentType = resolveUploadContentType(
+      thumbnailContentType = resolveUploadContentType(
         "photo",
         params.thumbnailContentType,
       )
-      form.set("thumbnail", toBlob(params.thumbnail, thumbnailContentType), thumbnailName)
+      thumbnailSize = getBinaryInputSize(params.thumbnail)
+      form.set(
+        "thumbnail",
+        toUploadMultipartFile(params.thumbnail, thumbnailName, thumbnailContentType),
+        thumbnailName,
+      )
     }
 
     if (params.type === "video") {
@@ -282,30 +303,58 @@ export class InlineSdkClient {
       form.set("duration", String(duration))
     }
 
-    const response = await this.fetchImpl(new URL("uploadFile", `${this.httpBaseUrl}/`), {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${this.options.token}`,
-      },
-      body: form,
+    const uploadUrl = resolveUploadFileUrl(this.httpBaseUrl)
+    const requestContext = describeUploadContext({
+      type: params.type,
+      fileName,
+      fileContentType,
+      fileSize,
+      ...(thumbnailName ? { thumbnailName } : {}),
+      ...(thumbnailContentType ? { thumbnailContentType } : {}),
+      ...(thumbnailSize != null ? { thumbnailSize } : {}),
+      ...(params.type === "video"
+        ? {
+            width: params.width ?? defaultVideoWidth,
+            height: params.height ?? defaultVideoHeight,
+            duration: params.duration ?? defaultVideoDuration,
+          }
+        : {}),
+      uploadUrl: uploadUrl.toString(),
     })
+    let response: Response
+    try {
+      response = await this.fetchImpl(uploadUrl, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${this.options.token}`,
+        },
+        body: form,
+      })
+    } catch (error) {
+      const detail = extractErrorMessage(error)
+      throw new Error(`uploadFile: network request failed (${detail}; ${requestContext})`, {
+        cause: error as Error,
+      })
+    }
 
     const payload = await parseJsonResponse(response)
     if (!response.ok) {
       const detail = describeUploadFailure(payload)
-      throw new Error(`uploadFile: request failed with status ${response.status}${detail ? ` (${detail})` : ""}`)
+      throw new Error(
+        `uploadFile: request failed with status ${response.status}${detail ? ` (${detail})` : ""}; ${requestContext}`,
+      )
     }
     if (!isRecord(payload) || payload.ok !== true) {
       const detail = describeUploadFailure(payload)
-      throw new Error(`uploadFile: API error${detail ? ` (${detail})` : ""}`)
+      throw new Error(`uploadFile: API error${detail ? ` (${detail})` : ""}; ${requestContext}`)
     }
     const result = payload.result
     if (!isRecord(result)) {
-      throw new Error("uploadFile: malformed success payload")
+      throw new Error(`uploadFile: malformed success payload; ${requestContext}`)
     }
     const fileUniqueId = typeof result.fileUniqueId === "string" ? result.fileUniqueId.trim() : ""
     if (!fileUniqueId) {
-      throw new Error("uploadFile: response missing fileUniqueId")
+      throw new Error(`uploadFile: response missing fileUniqueId; ${requestContext}`)
     }
     const photoId = parseOptionalBigInt(result.photoId, "photoId")
     const videoId = parseOptionalBigInt(result.videoId, "videoId")
@@ -782,7 +831,7 @@ function normalizeHttpBaseUrl(baseUrl: string): string {
 }
 
 function normalizeUploadFileName(raw: string | undefined, type: "photo" | "video" | "document"): string {
-  const trimmed = raw?.trim()
+  const trimmed = sanitizeUploadFileName(raw)
   if (trimmed) return trimmed
   switch (type) {
     case "photo":
@@ -812,6 +861,65 @@ function toBlob(input: InlineSdkUploadFileParams["file"], type: string): Blob {
     return input.type === type ? input : new Blob([input], { type })
   }
   return new Blob([input], { type })
+}
+
+function toUploadMultipartFile(
+  input: InlineSdkUploadFileParams["file"],
+  fileName: string,
+  type: string,
+): Blob | File {
+  const blob = toBlob(input, type)
+  if (typeof File === "undefined") return blob
+  return new File([blob], fileName, { type })
+}
+
+function sanitizeUploadFileName(raw: string | undefined): string {
+  const trimmed = raw?.trim()
+  if (!trimmed) return ""
+  const normalized = trimmed.replace(/\\/g, "/")
+  const leaf = normalized.split("/").pop() ?? normalized
+  const noQuery = leaf.split(/[?#]/, 1)[0] ?? leaf
+  return noQuery.trim()
+}
+
+function getBinaryInputSize(input: InlineSdkUploadFileParams["file"]): number {
+  if (input instanceof Blob) return input.size
+  if (input instanceof Uint8Array) return input.byteLength
+  return input.byteLength
+}
+
+function describeUploadContext(params: {
+  type: "photo" | "video" | "document"
+  fileName: string
+  fileContentType: string
+  fileSize: number
+  thumbnailName?: string
+  thumbnailContentType?: string
+  thumbnailSize?: number
+  width?: number
+  height?: number
+  duration?: number
+  uploadUrl: string
+}): string {
+  const parts = [
+    `type=${params.type}`,
+    `fileName=${params.fileName}`,
+    `fileContentType=${params.fileContentType}`,
+    `fileSize=${params.fileSize}`,
+    `uploadUrl=${params.uploadUrl}`,
+  ]
+  if (params.thumbnailName) parts.push(`thumbnailName=${params.thumbnailName}`)
+  if (params.thumbnailContentType) parts.push(`thumbnailContentType=${params.thumbnailContentType}`)
+  if (params.thumbnailSize != null) parts.push(`thumbnailSize=${params.thumbnailSize}`)
+  if (params.width != null) parts.push(`width=${params.width}`)
+  if (params.height != null) parts.push(`height=${params.height}`)
+  if (params.duration != null) parts.push(`duration=${params.duration}`)
+  return parts.join(", ")
+}
+
+function extractErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return String(error)
 }
 
 function normalizePositiveInt(value: number | undefined, field: string): number | undefined {
@@ -879,6 +987,13 @@ const resolveRealtimeUrl = (baseUrl: string): string => {
   url.protocol = isSecure ? "wss:" : "ws:"
   url.pathname = url.pathname.replace(/\/+$/, "") + "/realtime"
   return url.toString()
+}
+
+const resolveUploadFileUrl = (baseUrl: string): URL => {
+  const url = new URL(baseUrl)
+  const basePath = url.pathname.replace(/\/+$/, "")
+  url.pathname = `${basePath}/v1/uploadFile`
+  return url
 }
 
 const hasMethodMapping = (method: Method): method is MappedMethod =>

@@ -78,8 +78,9 @@ function ensureUploadFileName(params: {
 }): string {
   const trimmed = params.fileName?.trim()
   if (trimmed) {
-    const ext = normalizeExt(trimmed)
-    if (ext) return trimmed
+    const baseName = sanitizeUploadFileName(trimmed)
+    const ext = normalizeExt(baseName)
+    if (ext) return baseName
   }
 
   const inferredExt = params.ext ?? extensionForMime(params.mime) ?? undefined
@@ -87,6 +88,62 @@ function ensureUploadFileName(params: {
     inferredExt ??
     (params.uploadType === "photo" ? "jpg" : params.uploadType === "video" ? "mp4" : "bin")
   return `attachment.${fallbackExt}`
+}
+
+function sanitizeUploadFileName(raw: string): string {
+  const normalized = raw.trim().replace(/\\/g, "/")
+  const leaf = normalized.split("/").pop() ?? normalized
+  const noQuery = leaf.split(/[?#]/, 1)[0] ?? leaf
+  const safe = noQuery.trim()
+  return safe || "attachment"
+}
+
+function redactMediaSource(raw: string): string {
+  const trimmed = raw.trim()
+  if (!trimmed) return "<empty>"
+  if (!/^https?:\/\//i.test(trimmed)) {
+    const normalized = trimmed.replace(/\\/g, "/")
+    const leaf = normalized.split("/").pop() ?? normalized
+    return leaf || "<local>"
+  }
+  try {
+    const url = new URL(trimmed)
+    url.search = ""
+    url.hash = ""
+    return url.toString()
+  } catch {
+    return trimmed.split(/[?#]/, 1)[0] ?? trimmed
+  }
+}
+
+function describeInlineMediaContext(params: {
+  accountId?: string | null
+  mediaUrl: string
+  maxBytes: number
+  loadKind?: string
+  loadedFileName?: string
+  loadedSize?: number
+  detectedMime?: string
+  uploadType?: InlineUploadType
+  uploadFileName?: string
+}): string {
+  const parts = [
+    `accountId=${params.accountId ?? "default"}`,
+    `mediaUrl=${redactMediaSource(params.mediaUrl)}`,
+    `maxBytes=${params.maxBytes}`,
+  ]
+  if (params.loadKind) parts.push(`loadKind=${params.loadKind}`)
+  if (params.loadedFileName) parts.push(`loadedFileName=${params.loadedFileName}`)
+  if (params.loadedSize != null) parts.push(`loadedSize=${params.loadedSize}`)
+  if (params.detectedMime) parts.push(`detectedMime=${params.detectedMime}`)
+  if (params.uploadType) parts.push(`uploadType=${params.uploadType}`)
+  if (params.uploadFileName) parts.push(`uploadFileName=${params.uploadFileName}`)
+  return parts.join(", ")
+}
+
+function extractErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return String(error)
 }
 
 function resolveMediaMaxBytes(params: {
@@ -135,57 +192,81 @@ export async function uploadInlineMediaFromUrl(params: {
     cfg: params.cfg,
     accountId: params.accountId ?? null,
   })
-  let loaded: Awaited<ReturnType<typeof loadWebMedia>>
+  let loaded: Awaited<ReturnType<typeof loadWebMedia>> | undefined
+  let detectedMime: string | undefined
+  let uploadType: InlineUploadType | undefined
+  let fileName: string | undefined
   try {
-    loaded = await loadWebMedia(params.mediaUrl, maxBytes)
-  } catch (error) {
-    const message = String(error)
-    const deniedLocalPath = /not under an allowed directory/i.test(message)
-    if (!deniedLocalPath || !looksLikeLocalMediaSource(params.mediaUrl)) {
-      throw error
+    try {
+      loaded = await loadWebMedia(params.mediaUrl, maxBytes)
+    } catch (error) {
+      const message = String(error)
+      const deniedLocalPath = /not under an allowed directory/i.test(message)
+      if (!deniedLocalPath || !looksLikeLocalMediaSource(params.mediaUrl)) {
+        throw error
+      }
+      // Match OpenClaw's message-action-runner pattern:
+      // localRoots: "any" is used only after sandbox path normalization upstream.
+      loaded = await loadWebMediaCompat(params.mediaUrl, maxBytes, {
+        localRoots: "any",
+      })
     }
-    // Match OpenClaw's message-action-runner pattern:
-    // localRoots: "any" is used only after sandbox path normalization upstream.
-    loaded = await loadWebMediaCompat(params.mediaUrl, maxBytes, {
-      localRoots: "any",
+    if (!loaded) {
+      throw new Error("inline media upload: media load returned no data")
+    }
+
+    detectedMime = normalizeMime(
+      loaded.contentType ??
+        (await detectMime({
+          buffer: loaded.buffer,
+          ...(loaded.fileName ? { filePath: loaded.fileName } : {}),
+        })),
+    )
+    const normalizedExt = normalizeExt(loaded.fileName)
+    uploadType = chooseUploadType({
+      kind: loaded.kind,
+      ...(detectedMime ? { mime: detectedMime } : {}),
+      ...(normalizedExt ? { ext: normalizedExt } : {}),
+    })
+
+    fileName = ensureUploadFileName({
+      ...(loaded.fileName ? { fileName: loaded.fileName } : {}),
+      uploadType,
+      ...(detectedMime ? { mime: detectedMime } : {}),
+      ...(normalizedExt ? { ext: normalizedExt } : {}),
+    })
+    const upload = await params.client.uploadFile({
+      type: uploadType,
+      file: loaded.buffer,
+      fileName,
+      ...(detectedMime ? { contentType: detectedMime } : {}),
+      ...(uploadType === "video"
+        ? {
+            width: DEFAULT_VIDEO_WIDTH,
+            height: DEFAULT_VIDEO_HEIGHT,
+            duration: DEFAULT_VIDEO_DURATION,
+          }
+        : {}),
+    })
+
+    return mediaFromUploadResult({
+      uploadType,
+      result: upload,
+    })
+  } catch (error) {
+    const context = describeInlineMediaContext({
+      ...(params.accountId !== undefined ? { accountId: params.accountId } : {}),
+      mediaUrl: params.mediaUrl,
+      maxBytes,
+      ...(loaded?.kind ? { loadKind: loaded.kind } : {}),
+      ...(loaded?.fileName ? { loadedFileName: sanitizeUploadFileName(loaded.fileName) } : {}),
+      ...(loaded?.buffer ? { loadedSize: loaded.buffer.byteLength } : {}),
+      ...(detectedMime ? { detectedMime } : {}),
+      ...(uploadType ? { uploadType } : {}),
+      ...(fileName ? { uploadFileName: fileName } : {}),
+    })
+    throw new Error(`inline media upload failed (${extractErrorMessage(error)}; ${context})`, {
+      cause: error as Error,
     })
   }
-  const detectedMime = normalizeMime(
-    loaded.contentType ??
-      (await detectMime({
-        buffer: loaded.buffer,
-        ...(loaded.fileName ? { filePath: loaded.fileName } : {}),
-      })),
-  )
-  const normalizedExt = normalizeExt(loaded.fileName)
-  const uploadType = chooseUploadType({
-    kind: loaded.kind,
-    ...(detectedMime ? { mime: detectedMime } : {}),
-    ...(normalizedExt ? { ext: normalizedExt } : {}),
-  })
-
-  const fileName = ensureUploadFileName({
-    ...(loaded.fileName ? { fileName: loaded.fileName } : {}),
-    uploadType,
-    ...(detectedMime ? { mime: detectedMime } : {}),
-    ...(normalizedExt ? { ext: normalizedExt } : {}),
-  })
-  const upload = await params.client.uploadFile({
-    type: uploadType,
-    file: loaded.buffer,
-    fileName,
-    ...(detectedMime ? { contentType: detectedMime } : {}),
-    ...(uploadType === "video"
-      ? {
-          width: DEFAULT_VIDEO_WIDTH,
-          height: DEFAULT_VIDEO_HEIGHT,
-          duration: DEFAULT_VIDEO_DURATION,
-        }
-      : {}),
-  })
-
-  return mediaFromUploadResult({
-    uploadType,
-    result: upload,
-  })
 }
