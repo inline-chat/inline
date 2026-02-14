@@ -181,6 +181,7 @@ else
 fi
 
 if [[ -z "${SKIP_NOTARIZE:-}" ]]; then
+  echo "Starting notarization for DMG: ${DMG_PATH}"
   NOTARY_PROFILE="inline-notarytool"
   if [[ -n "${APPLE_NOTARIZATION_KEY:-}" ]]; then
     if [[ -z "${APPLE_NOTARIZATION_KEY_ID:-}" || -z "${APPLE_NOTARIZATION_ISSUER:-}" ]]; then
@@ -224,19 +225,18 @@ if [[ -z "${SKIP_NOTARIZE:-}" ]]; then
     fi
   fi
 
-  # With `set -e`, a failing command inside `$(...)` can terminate the script
-  # before we get a chance to print the underlying notarytool error. Capture
-  # exit status explicitly so failures never "silently exit".
+  echo "Submitting DMG to Apple notarization (this may take a few minutes)..."
+  # Stream output while still capturing it for status parsing.
+  submit_output_file=$(mktemp "${OUTPUT_DIR}/notary-submit.XXXXXX")
   set +e
-  submit_output=$(
-    xcrun notarytool submit "${DMG_PATH}" \
-      --keychain-profile "${NOTARY_PROFILE}" \
-      --wait \
-      --output-format json 2>&1
-  )
-  submit_ec=$?
+  xcrun notarytool submit "${DMG_PATH}" \
+    --keychain-profile "${NOTARY_PROFILE}" \
+    --wait \
+    --output-format json 2>&1 | tee "${submit_output_file}"
+  submit_ec=${PIPESTATUS[0]}
   set -e
-  echo "${submit_output}"
+  submit_output=$(cat "${submit_output_file}")
+  rm -f "${submit_output_file}"
   if [[ "${submit_ec}" -ne 0 ]]; then
     echo "Notarization failed: notarytool submit exited with code ${submit_ec}." >&2
     exit 1

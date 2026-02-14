@@ -623,7 +623,6 @@ async function main() {
         cwd: ctx.rootDir,
         env: {
           DMG_PATH: ctx.dmgPath,
-          APP_PATH: ctx.appPath,
         },
       });
     },
