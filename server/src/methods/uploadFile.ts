@@ -8,17 +8,20 @@ import { FileTypes, type UploadFileResult } from "@in/server/modules/files/types
 import { uploadPhoto } from "@in/server/modules/files/uploadPhoto"
 import { uploadDocument } from "@in/server/modules/files/uploadDocument"
 import { uploadVideo } from "@in/server/modules/files/uploadVideo"
+import { ApiError, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 
 const log = new Log("methods/uploadFile")
 
 export const Input = Type.Object({
   type: Type.Enum(FileTypes),
-  file: t.File({
-    maxItems: 1,
-    maxSize: MAX_FILE_SIZE,
-    description: "File, photo or video to upload",
-  }),
+  file: Optional(
+    t.File({
+      maxItems: 1,
+      maxSize: MAX_FILE_SIZE,
+      description: "File, photo or video to upload",
+    }),
+  ),
   thumbnail: Optional(
     t.File({
       maxItems: 1,
@@ -44,26 +47,37 @@ export const Response = Type.Object({
 })
 
 const handler = async (input: Static<typeof Input>, context: HandlerContext): Promise<Static<typeof Response>> => {
+  const requestDiagnostics = describeUploadRequest(input, context)
   try {
-    log.info("Starting file upload request", {
-      type: input.type,
-      fileSize: input.file.size,
-      userId: context.currentUserId,
-    })
+    log.info("Starting file upload request", requestDiagnostics)
 
-    const width = parseOptionalInt("width", input.width)
-    const height = parseOptionalInt("height", input.height)
-    const duration = parseOptionalInt("duration", input.duration)
+    const file = requireUploadFile(input.file)
 
-    // Validate video metadata if present
+    const width = input.type === FileTypes.VIDEO ? parseOptionalInt("width", input.width, 1) : undefined
+    const height = input.type === FileTypes.VIDEO ? parseOptionalInt("height", input.height, 1) : undefined
+    const duration =
+      input.type === FileTypes.VIDEO ? parseOptionalInt("duration", input.duration, 0) : undefined
+
+    if (input.thumbnail?.size === 0) {
+      throw uploadBadRequest("Uploaded thumbnail is empty")
+    }
+    if (input.thumbnail && input.thumbnail.size > MAX_FILE_SIZE) {
+      throw new InlineError(ApiError.FILE_TOO_LARGE)
+    }
+    if (input.thumbnail != null && !input.thumbnail.type?.trim()) {
+      throw uploadBadRequest("Uploaded thumbnail is missing MIME type")
+    }
+
+    // Validate required video metadata
     if (input.type === FileTypes.VIDEO) {
-      if (!width || !height || !duration) {
+      if (width === undefined || height === undefined || duration === undefined) {
         log.error("Missing video metadata", {
-          hasWidth: !!width,
-          hasHeight: !!height,
-          hasDuration: !!duration,
+          ...requestDiagnostics,
+          hasWidth: width !== undefined,
+          hasHeight: height !== undefined,
+          hasDuration: duration !== undefined,
         })
-        throw new Error("Missing required video metadata")
+        throw uploadBadRequest("Video upload requires width, height, and duration")
       }
     }
 
@@ -73,7 +87,7 @@ const handler = async (input: Static<typeof Input>, context: HandlerContext): Pr
     try {
       switch (input.type) {
         case FileTypes.PHOTO:
-          result = await uploadPhoto(input.file, { userId: context.currentUserId })
+          result = await uploadPhoto(file, { userId: context.currentUserId })
           break
         case FileTypes.VIDEO:
           // Upload optional thumbnail first so we can associate it with the video row
@@ -83,7 +97,7 @@ const handler = async (input: Static<typeof Input>, context: HandlerContext): Pr
           }
 
           result = await uploadVideo(
-            input.file,
+            file,
             {
               width: width ?? 1280,
               height: height ?? 720,
@@ -94,18 +108,17 @@ const handler = async (input: Static<typeof Input>, context: HandlerContext): Pr
           )
           break
         case FileTypes.DOCUMENT:
-          result = await uploadDocument(input.file, undefined, { userId: context.currentUserId })
+          result = await uploadDocument(file, undefined, { userId: context.currentUserId })
           break
       }
     } catch (error) {
-      log.error("File upload failed", { error, type: input.type, userId: context.currentUserId })
+      log.error("File upload failed", { error, ...requestDiagnostics })
       throw error
     }
 
     log.info("File upload completed successfully", {
-      type: input.type,
+      ...requestDiagnostics,
       fileUniqueId: result.fileUniqueId,
-      userId: context.currentUserId,
     })
 
     return {
@@ -115,7 +128,7 @@ const handler = async (input: Static<typeof Input>, context: HandlerContext): Pr
       documentId: result.documentId,
     }
   } catch (error) {
-    log.error("File upload request failed", { error, type: input.type, userId: context.currentUserId })
+    log.error("File upload request failed", { error, ...requestDiagnostics })
     throw error
   }
 }
@@ -125,13 +138,13 @@ const response = TMakeApiResponse(Response)
 export const uploadFileRoute = new Elysia({ tags: ["POST"] }).use(authenticate).post(
   "/uploadFile",
   async ({ body: input, store, server, request }) => {
-    try {
-      const ip =
-        request.headers.get("x-forwarded-for") ??
-        request.headers.get("cf-connecting-ip") ??
-        request.headers.get("x-real-ip") ??
-        server?.requestIP(request)?.address
+    const ip =
+      request.headers.get("x-forwarded-for") ??
+      request.headers.get("cf-connecting-ip") ??
+      request.headers.get("x-real-ip") ??
+      server?.requestIP(request)?.address
 
+    try {
       const context = {
         currentUserId: store.currentUserId,
         currentSessionId: store.currentSessionId,
@@ -141,7 +154,16 @@ export const uploadFileRoute = new Elysia({ tags: ["POST"] }).use(authenticate).
       let result = await handler(input, context)
       return { ok: true, result } as any
     } catch (error) {
-      log.error("Upload file route error", { error })
+      log.error("Upload file route error", {
+        error,
+        userId: store.currentUserId,
+        sessionId: store.currentSessionId,
+        ip,
+        type: input?.type,
+        fileName: input?.file?.name,
+        fileSize: input?.file?.size,
+        fileMimeType: input?.file?.type,
+      })
       throw error
     }
   },
@@ -152,12 +174,61 @@ export const uploadFileRoute = new Elysia({ tags: ["POST"] }).use(authenticate).
   },
 )
 
-function parseOptionalInt(name: string, value?: string): number | undefined {
+function parseOptionalInt(name: string, value: string | undefined, min: number): number | undefined {
   if (value === undefined) return undefined
-  const parsed = Number(value)
-  if (!Number.isFinite(parsed)) {
-    log.error(`Invalid numeric value for ${name}`, { value })
-    return undefined
+  const trimmed = value.trim()
+  if (!trimmed) {
+    log.error("Invalid numeric upload metadata", { name, value, reason: "empty" })
+    throw uploadBadRequest(`Invalid ${name}: expected a number`)
   }
+
+  const parsed = Number(trimmed)
+  if (!Number.isInteger(parsed) || parsed < min) {
+    log.error("Invalid numeric upload metadata", { name, value, min, parsed })
+    throw uploadBadRequest(`Invalid ${name}: expected integer >= ${min}`)
+  }
+
   return parsed
+}
+
+function requireUploadFile(file: File | undefined): File {
+  if (!file) {
+    throw uploadBadRequest("Missing multipart file field `file`")
+  }
+  if (file.size === 0) {
+    throw uploadBadRequest("Uploaded file is empty")
+  }
+  if (file.size > MAX_FILE_SIZE) {
+    throw new InlineError(ApiError.FILE_TOO_LARGE)
+  }
+  if (!file.type?.trim()) {
+    throw uploadBadRequest("Uploaded file is missing MIME type")
+  }
+  return file
+}
+
+function uploadBadRequest(description: string): InlineError {
+  const error = new InlineError(ApiError.BAD_REQUEST)
+  error.description = description
+  return error
+}
+
+function describeUploadRequest(input: Static<typeof Input>, context: HandlerContext) {
+  return {
+    type: input.type,
+    userId: context.currentUserId,
+    sessionId: context.currentSessionId,
+    ip: context.ip,
+    filePresent: input.file != null,
+    fileName: input.file?.name,
+    fileSize: input.file?.size,
+    fileMimeType: input.file?.type,
+    thumbnailPresent: input.thumbnail != null,
+    thumbnailName: input.thumbnail?.name,
+    thumbnailSize: input.thumbnail?.size,
+    thumbnailMimeType: input.thumbnail?.type,
+    width: input.width,
+    height: input.height,
+    duration: input.duration,
+  }
 }
