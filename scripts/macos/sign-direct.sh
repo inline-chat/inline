@@ -179,10 +179,36 @@ prepare_effective_entitlements() {
 
 codesign_path() {
   local path="$1"
+  shift
   local attempts=0
+  local sign_output
+  local sign_ec
+  local -a sign_cmd=(/usr/bin/codesign --verbose -f -s "${MACOS_CERTIFICATE_NAME}" -o runtime --timestamp)
+
+  if [[ "$#" -gt 0 ]]; then
+    sign_cmd+=("$@")
+  fi
+  sign_cmd+=("${path}")
 
   while [[ "${attempts}" -lt "${SIGN_RETRY_COUNT}" ]]; do
-    /usr/bin/codesign --verbose -f -s "${MACOS_CERTIFICATE_NAME}" -o runtime --timestamp "${path}"
+    set +e
+    sign_output=$("${sign_cmd[@]}" 2>&1)
+    sign_ec=$?
+    set -e
+
+    if [[ "${sign_ec}" -ne 0 ]]; then
+      attempts=$((attempts + 1))
+      if [[ "${attempts}" -lt "${SIGN_RETRY_COUNT}" ]]; then
+        echo "codesign failed for ${path}; retrying (${attempts}/${SIGN_RETRY_COUNT})..." >&2
+        echo "${sign_output}" >&2
+        sleep "${SIGN_RETRY_DELAY_SECONDS}"
+        continue
+      fi
+      echo "Failed to codesign after ${SIGN_RETRY_COUNT} attempts: ${path}" >&2
+      echo "${sign_output}" >&2
+      exit 1
+    fi
+
     if signature_has_timestamp "${path}"; then
       return 0
     fi
@@ -236,9 +262,7 @@ if [[ -d "${FRAMEWORKS_DIR}" ]]; then
   done
 fi
 
-/usr/bin/codesign --verbose -f -s "${MACOS_CERTIFICATE_NAME}" -o runtime --timestamp \
-  --entitlements "${EFFECTIVE_ENTITLEMENTS_PATH}" \
-  "${APP_PATH}"
+codesign_path "${APP_PATH}" --entitlements "${EFFECTIVE_ENTITLEMENTS_PATH}"
 
 verify_codesign_timestamp "${APP_PATH}"
 find "${APP_PATH}/Contents" -type d \( -name "*.framework" -o -name "*.app" -o -name "*.xpc" -o -name "*.appex" \) -print0 \

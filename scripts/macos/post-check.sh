@@ -37,11 +37,16 @@ need_cmd spctl
 need_cmd python3
 need_cmd lipo
 
-if command -v rg >/dev/null 2>&1; then
-  GREP_CMD=("rg" "-q")
-else
-  GREP_CMD=("grep" "-q")
-fi
+signature_has_timestamp() {
+  local path="$1"
+  local signature_details
+  signature_details=$(/usr/bin/codesign -dv --verbose=4 "${path}" 2>&1 || true)
+  if [[ "${signature_details}" == *"Timestamp="* ]]; then
+    return 0
+  fi
+  echo "${signature_details}" >&2
+  return 1
+}
 
 if [[ ! -f "${DMG_PATH}" ]]; then
   die "DMG not found: ${DMG_PATH}"
@@ -52,7 +57,7 @@ info "DMG: ${DMG_PATH}"
 MOUNT_PLIST=$(mktemp)
 cleanup() {
   if [[ -n "${MOUNT_POINT:-}" ]]; then
-    hdiutil detach "${MOUNT_POINT}" >/dev/null 2>&1 || true
+    hdiutil detach -force "${MOUNT_POINT}" >/dev/null 2>&1 || true
   fi
   rm -f "${MOUNT_PLIST}"
 }
@@ -104,7 +109,7 @@ info "Code signature verification (deep)"
 codesign --verify --deep --strict --verbose=2 "${APP_PATH}"
 
 info "Check app signature timestamp"
-if ! codesign -dv --verbose=4 "${APP_PATH}" 2>&1 | "${GREP_CMD[@]}" "Timestamp="; then
+if ! signature_has_timestamp "${APP_PATH}"; then
   die "App signature missing timestamp"
 fi
 
@@ -112,7 +117,7 @@ info "Check embedded bundles signatures + timestamps"
 find "${APP_PATH}/Contents" -type d \( -name "*.framework" -o -name "*.app" -o -name "*.xpc" -o -name "*.appex" \) -print0 \
   | while IFS= read -r -d '' bundle; do
       codesign --verify --strict --verbose=2 "${bundle}"
-      if ! codesign -dv --verbose=4 "${bundle}" 2>&1 | "${GREP_CMD[@]}" "Timestamp="; then
+      if ! signature_has_timestamp "${bundle}"; then
         die "Missing timestamp: ${bundle}"
       fi
     done
