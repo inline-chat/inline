@@ -2,6 +2,7 @@ import { ApiError, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import sharp from "sharp"
 
+const log = new Log("modules/files/metadata")
 const validPhotoMimeTypes = ["image/jpeg", "image/png", "image/gif"]
 const validPhotoExtensions = ["jpg", "jpeg", "png", "gif"]
 const maxFileSize = 40_000_000 // 40MB
@@ -10,24 +11,22 @@ const maxFileSize = 40_000_000 // 40MB
 export const getPhotoMetadataAndValidate = async (
   file: File,
 ): Promise<{ width: number; height: number; mimeType: string; fileName: string; extension: string }> => {
-  // Get original metadata including orientation
-  const pipeline = sharp(await file.arrayBuffer())
-  const originalMetadata = await pipeline.metadata()
+  const fileName = file.name || "photo"
+  const size = file.size
+  const mimeType = file.type.trim()
+  let extension = fileName.split(".").pop()?.toLowerCase()
 
-  // Swap dimensions if needed based on EXIF orientation
-  const shouldSwap =
-    originalMetadata.orientation && originalMetadata.orientation >= 5 && originalMetadata.orientation <= 8
-  const width = shouldSwap ? originalMetadata.height : originalMetadata.width
-  const height = shouldSwap ? originalMetadata.width : originalMetadata.height
+  if (size === 0) {
+    throw badRequest("Uploaded photo is empty")
+  }
 
-  // Continue processing with auto-orientation
-  await pipeline.rotate().toBuffer() // Ensures image data is properly oriented
+  if (size > maxFileSize) {
+    throw new InlineError(InlineError.ApiError.FILE_TOO_LARGE)
+  }
 
-  // TODO: Filter of the sensitive characters
-  let fileName = file.name
-  let size = file.size
-  let mimeType = file.type
-  let extension = fileName.split(".").pop()
+  if (!mimeType) {
+    throw badRequest("Uploaded photo is missing MIME type")
+  }
 
   // Validate the extension
   if (extension && !validPhotoExtensions.includes(extension)) {
@@ -35,8 +34,40 @@ export const getPhotoMetadataAndValidate = async (
   }
   extension = extension ?? "jpg"
 
-  if (size > 40_000_000) {
-    throw new InlineError(InlineError.ApiError.FILE_TOO_LARGE)
+  // Validate the mime type
+  if (!mimeType.startsWith("image/")) {
+    throw new InlineError(InlineError.ApiError.PHOTO_INVALID_TYPE)
+  }
+
+  if (!validPhotoMimeTypes.includes(mimeType)) {
+    throw new InlineError(InlineError.ApiError.PHOTO_INVALID_TYPE)
+  }
+
+  let width: number | undefined
+  let height: number | undefined
+
+  // Get original metadata including orientation
+  try {
+    const pipeline = sharp(await file.arrayBuffer())
+    const originalMetadata = await pipeline.metadata()
+
+    // Swap dimensions if needed based on EXIF orientation
+    const shouldSwap =
+      originalMetadata.orientation && originalMetadata.orientation >= 5 && originalMetadata.orientation <= 8
+    width = shouldSwap ? originalMetadata.height : originalMetadata.width
+    height = shouldSwap ? originalMetadata.width : originalMetadata.height
+
+    // Continue processing with auto-orientation
+    await pipeline.rotate().toBuffer() // Ensures image data is properly oriented
+  } catch (error) {
+    log.error("Photo metadata extraction failed", {
+      error,
+      fileName,
+      fileSize: size,
+      mimeType,
+      extension,
+    })
+    throw new InlineError(ApiError.PHOTO_INVALID_TYPE)
   }
 
   // Validate the dimensions
@@ -52,15 +83,6 @@ export const getPhotoMetadataAndValidate = async (
   const ratio = Math.max(width / height, height / width)
   if (ratio > 20) {
     throw new InlineError(InlineError.ApiError.PHOTO_INVALID_DIMENSIONS)
-  }
-
-  // Validate the mime type
-  if (!mimeType.startsWith("image/")) {
-    throw new InlineError(InlineError.ApiError.PHOTO_INVALID_TYPE)
-  }
-
-  if (!validPhotoMimeTypes.includes(mimeType)) {
-    throw new InlineError(InlineError.ApiError.PHOTO_INVALID_TYPE)
   }
 
   return { width, height, mimeType, fileName, extension }
@@ -86,10 +108,28 @@ export const getVideoMetadataAndValidate = async (
   // TODO: Implement video metadata extraction using ffmpeg or similar
   // For now, we'll do basic file validation
 
-  let fileName = file.name
+  let fileName = file.name || "video"
   let size = file.size
-  let mimeType = file.type
+  let mimeType = file.type.trim()
   let extension = fileName.split(".").pop()?.toLowerCase()
+
+  if (size === 0) {
+    throw badRequest("Uploaded video is empty")
+  }
+
+  if (!mimeType) {
+    throw badRequest("Uploaded video is missing MIME type")
+  }
+
+  if (!Number.isInteger(width) || width <= 0 || !Number.isInteger(height) || height <= 0) {
+    log.error("Invalid video dimensions", { width, height, duration, fileName, size, mimeType })
+    throw new InlineError(InlineError.ApiError.VIDEO_INVALID_DIMENSIONS)
+  }
+
+  if (!Number.isInteger(duration) || duration < 0) {
+    log.error("Invalid video duration", { width, height, duration, fileName, size, mimeType })
+    throw badRequest("Invalid video duration: expected integer >= 0")
+  }
 
   // Validate the extension
   if (extension && !validVideoExtensions.includes(extension)) {
@@ -122,11 +162,19 @@ export const getDocumentMetadataAndValidate = async (
   file: File,
 ): Promise<{ mimeType: string; fileName: string; extension: string }> => {
   // it contains %20 stuff so we need to decode it
-  let fileName = file.name ? decodeURIComponent(file.name) : "document"
+  let fileName = decodeFileName(file.name, "document")
 
   let size = file.size
-  let mimeType = file.type
+  let mimeType = file.type.trim()
   let extension = fileName.split(".").pop()?.toLowerCase()
+
+  if (size === 0) {
+    throw badRequest("Uploaded document is empty")
+  }
+
+  if (!mimeType) {
+    throw badRequest("Uploaded document is missing MIME type")
+  }
 
   if (!extension) {
     throw new InlineError(InlineError.ApiError.DOCUMENT_INVALID_EXTENSION)
@@ -138,4 +186,21 @@ export const getDocumentMetadataAndValidate = async (
   }
 
   return { mimeType, fileName, extension }
+}
+
+function decodeFileName(fileName: string | undefined, fallback: string): string {
+  const raw = fileName?.trim()
+  if (!raw) return fallback
+  try {
+    return decodeURIComponent(raw)
+  } catch (error) {
+    log.error("Failed to decode filename", { error, raw })
+    return raw
+  }
+}
+
+function badRequest(description: string): InlineError {
+  const error = new InlineError(ApiError.BAD_REQUEST)
+  error.description = description
+  return error
 }

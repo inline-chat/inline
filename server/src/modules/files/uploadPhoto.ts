@@ -3,6 +3,7 @@ import { FileTypes, type UploadFileResult } from "@in/server/modules/files/types
 import { photos, photoSizes } from "@in/server/db/schema"
 import { db } from "@in/server/db"
 import { uploadFile } from "./uploadAFile"
+import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 
 const log = new Log("modules/files/uploadPhoto")
@@ -21,8 +22,16 @@ export async function uploadPhoto(file: File, context: { userId: number }): Prom
         mimeType: metadata.mimeType,
       })
     } catch (error) {
-      log.error("Failed to validate photo metadata", { error })
-      throw new Error("Invalid photo file")
+      log.error("Failed to validate photo metadata", {
+        error,
+        fileName: file.name,
+        fileSize: file.size,
+        mimeType: file.type,
+      })
+      if (error instanceof InlineError) {
+        throw error
+      }
+      throw new Error("Invalid photo file", { cause: error as Error })
     }
 
     const { dbFile, fileUniqueId } = await uploadFile(file, FileTypes.PHOTO, metadata, context)
@@ -51,7 +60,7 @@ export async function uploadPhoto(file: File, context: { userId: number }): Prom
       log.info("Photo metadata saved successfully", { photoId: photo.id })
     } catch (error) {
       log.error("Failed to save photo metadata", { error, fileUniqueId })
-      throw new Error("Failed to save photo metadata")
+      throw new Error("Failed to save photo metadata", { cause: error as Error })
     }
 
     let photoSizes_
@@ -73,7 +82,7 @@ export async function uploadPhoto(file: File, context: { userId: number }): Prom
       log.info("Photo sizes saved successfully", { photoId: photo.id })
     } catch (error) {
       log.error("Failed to save photo sizes", { error, photoId: photo.id })
-      throw new Error("Failed to save photo sizes")
+      throw new Error("Failed to save photo sizes", { cause: error as Error })
     }
 
     log.info("Photo upload completed successfully", {
@@ -83,7 +92,13 @@ export async function uploadPhoto(file: File, context: { userId: number }): Prom
     })
     return { fileUniqueId, photoId: photo.id }
   } catch (error) {
-    log.error("Photo upload failed", { error, userId: context.userId })
+    log.error("Photo upload failed", {
+      error,
+      userId: context.userId,
+      fileName: file.name,
+      fileSize: file.size,
+      mimeType: file.type,
+    })
     throw error
   }
 }

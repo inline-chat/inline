@@ -14,6 +14,12 @@ export async function uploadToBucket(file: File, { path, type }: { path: string;
   if (!r2) {
     throw new Error("R2 is not initialized")
   }
+  if (file.size === 0) {
+    throw new Error("Cannot upload empty file to bucket")
+  }
+  if (!type.trim()) {
+    throw new Error("Missing content type for bucket upload")
+  }
 
   let destinationFile = r2.file(path)
 
