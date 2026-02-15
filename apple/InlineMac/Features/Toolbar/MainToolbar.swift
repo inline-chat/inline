@@ -40,6 +40,13 @@ extension MainToolbarItems {
 }
 
 class MainToolbarView: NSView {
+  private enum ToolbarLayoutMetrics {
+    static let defaultItemSpacing: CGFloat = 12
+    // Keep the trailing action cluster tighter regardless of which optional
+    // buttons are present (notifications/nudge/translation/menu).
+    static let trailingActionSpacing: CGFloat = 8
+  }
+
   private var dependencies: AppDependencies
   private var contentLeadingConstraint: NSLayoutConstraint?
   private let backgroundView = MainToolbarBackgroundView()
@@ -113,7 +120,7 @@ class MainToolbarView: NSView {
     contentStackView.translatesAutoresizingMaskIntoConstraints = false
     contentStackView.orientation = .horizontal
     contentStackView.alignment = .centerY
-    contentStackView.spacing = 12
+    contentStackView.spacing = ToolbarLayoutMetrics.defaultItemSpacing
     contentStackView.setContentHuggingPriority(.defaultLow, for: .horizontal)
     addSubview(contentStackView)
 
@@ -147,10 +154,27 @@ class MainToolbarView: NSView {
       view.removeFromSuperview()
     }
 
+    var arrangedItems: [(item: MainToolbarItemIdentifier, view: NSView)] = []
     for item in currentItems {
       guard let view = makeView(for: item) else { continue }
       contentStackView.addArrangedSubview(view)
+      arrangedItems.append((item, view))
     }
+
+    for (index, current) in arrangedItems.dropLast().enumerated() {
+      let next = arrangedItems[index + 1]
+      contentStackView.setCustomSpacing(spacing(after: current.item, before: next.item), after: current.view)
+    }
+  }
+
+  private func spacing(
+    after currentItem: MainToolbarItemIdentifier,
+    before nextItem: MainToolbarItemIdentifier
+  ) -> CGFloat {
+    if currentItem.isTrailingActionItem, nextItem.isTrailingActionItem {
+      return ToolbarLayoutMetrics.trailingActionSpacing
+    }
+    return ToolbarLayoutMetrics.defaultItemSpacing
   }
 
   private func makeView(for item: MainToolbarItemIdentifier) -> NSView? {
@@ -271,6 +295,17 @@ class MainToolbarView: NSView {
 
   @objc private func handleForward() {
     dependencies.nav2?.goForward()
+  }
+}
+
+private extension MainToolbarItemIdentifier {
+  var isTrailingActionItem: Bool {
+    switch self {
+      case .notifications, .participants, .nudge, .translationIcon, .menu:
+        return true
+      case .navigationButtons, .title, .spacer, .chatTitle:
+        return false
+    }
   }
 }
 

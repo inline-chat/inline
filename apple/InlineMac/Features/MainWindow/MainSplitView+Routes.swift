@@ -60,8 +60,11 @@ extension MainSplitView {
           .chatTitle(peer: peer),
           .spacer,
           .notifications(peer: peer),
-          .participants(peer: peer),
         ]
+
+        if case .thread = peer {
+          items.append(.participants(peer: peer))
+        }
 
         if case .user = peer {
           items.append(.nudge(peer: peer))
