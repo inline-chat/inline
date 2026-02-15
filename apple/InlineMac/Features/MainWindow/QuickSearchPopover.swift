@@ -543,17 +543,21 @@ struct QuickSearchOverlayView: View {
       }
     }
     .frame(width: QuickSearchLayout.preferredWidth)
-    .background(shape.fill(tint))
-    .overlay(shape.strokeBorder(Color.primary.opacity(0.08)))
-    .shadow(color: Color.black.opacity(0.18), radius: 24, x: 0, y: 10)
 
     Group {
       if #available(macOS 26.0, *) {
-        content.glassEffect(.regular, in: shape)
+        content
+          .background(shape.fill(tint))
+          .glassEffect(.regular, in: shape)
       } else {
         content
+          .background(VisualEffectView(material: .popover, blendingMode: .withinWindow))
+          .background(shape.fill(tint))
+          .clipShape(shape)
       }
     }
+    .overlay(shape.strokeBorder(Color.primary.opacity(0.08)))
+    .shadow(color: Color.black.opacity(0.18), radius: 24, x: 0, y: 10)
     .onAppear {
       isFocused = true
       notifySizeChange()
