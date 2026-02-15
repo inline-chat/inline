@@ -199,9 +199,9 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
           }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
-      .contentShape(Rectangle())
 
       if let menuContent {
         Menu {
