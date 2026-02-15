@@ -44,5 +44,16 @@ export const getApnProvider = () => {
   return apnProvider
 }
 
-// Shutdown provider TODO: call on server close
-// apnProvider.shutdown()
+export const shutdownApnProvider = (): void => {
+  if (!apnProvider) {
+    return
+  }
+
+  try {
+    apnProvider.shutdown()
+  } catch (error) {
+    Log.shared.error("Failed to shutdown APN provider", { error })
+  } finally {
+    apnProvider = undefined
+  }
+}

@@ -8,6 +8,8 @@ import { encrypt, encryptBinary } from "@in/server/modules/encryption/encryption
 import { MessageEntities, MessageEntity_Type } from "@inline-chat/protocol/core"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
+import { generateToken } from "@in/server/utils/auth"
+import { SessionsModel } from "@in/server/db/models/sessions"
 
 // Test database configuration
 const BASE_TEST_DB_NAME = "test_db"
@@ -248,6 +250,30 @@ export const testUtils = {
       throw new Error("Failed to create test user")
     }
     return user
+  },
+
+  // Create a valid auth session and return the raw token for API/realtime tests.
+  async createSessionForUser(
+    userId: number,
+    options?: {
+      clientType?: "ios" | "macos" | "web" | "api" | "cli"
+      deviceId?: string
+      osVersion?: string
+      clientVersion?: string
+    },
+  ): Promise<{ token: string; tokenHash: string; session: Awaited<ReturnType<typeof SessionsModel.create>> }> {
+    const { token, tokenHash } = await generateToken(userId)
+    const session = await SessionsModel.create({
+      userId,
+      tokenHash,
+      personalData: {},
+      clientType: options?.clientType ?? "web",
+      deviceId: options?.deviceId,
+      osVersion: options?.osVersion,
+      clientVersion: options?.clientVersion,
+    })
+
+    return { token, tokenHash, session }
   },
 
   // Create a test space

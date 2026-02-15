@@ -204,7 +204,27 @@ export function cleanupUserSettingsCache(): void {
   userSettingsCache.cleanup()
 }
 
+const CLEANUP_INTERVAL_MS = 10 * 60 * 1000
+let cleanupIntervalId: ReturnType<typeof setInterval> | null = null
+
+export function startUserSettingsCacheCleanup(): void {
+  if (cleanupIntervalId) {
+    return
+  }
+
+  cleanupIntervalId = setInterval(() => {
+    userSettingsCache.cleanup()
+  }, CLEANUP_INTERVAL_MS)
+}
+
+export function stopUserSettingsCacheCleanup(): void {
+  if (!cleanupIntervalId) {
+    return
+  }
+
+  clearInterval(cleanupIntervalId)
+  cleanupIntervalId = null
+}
+
 // Periodic cleanup (run every 10 minutes)
-setInterval(() => {
-  userSettingsCache.cleanup()
-}, 10 * 60 * 1000)
+startUserSettingsCacheCleanup()
