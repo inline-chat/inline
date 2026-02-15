@@ -92,6 +92,7 @@
 ## Backend
 
 - Runs on Bun (not Node); entry at `server/src/index.ts`; business logic in `src/functions`, RPC handlers in `src/realtime/handlers`, encoders in `src/realtime/encoders`, schema in `src/db/schema`, models in `src/db/models`.
+- Central graceful termination cleanup lives in `server/src/lifecycle/gracefulShutdown.ts`; add new shutdown cleanup hooks there.
 - Use Drizzle for DB; follow add-table flow: create schema, export in `schema/index.ts`, `bun run db:generate <migration>`, migrate, then add model/tests. Never hand-write migrations.
 - REST endpoints (legacy) in `src/methods`; realtime is primary; keep auth via `src/utils/authorize.ts`; secure data via `src/modules/encryption/encryption2.ts`.
 - Any user-sensitive information or user content stored in the server database must be encrypted at rest; follow existing server encryption patterns (`src/modules/encryption/encryption2.ts`) instead of writing plaintext.

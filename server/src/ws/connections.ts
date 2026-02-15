@@ -215,6 +215,34 @@ class ConnectionManager {
     }
   }
 
+  async shutdown(): Promise<void> {
+    const totalConnections = this.connections.size
+    if (totalConnections === 0) {
+      this.authenticatedUsers.clear()
+      this.usersBySpaceId.clear()
+      this.userSpaceIds.clear()
+      return
+    }
+
+    log.info("Shutting down websocket connections", { totalConnections })
+
+    for (const connection of this.connections.values()) {
+      clearTimeout(connection.unauthenticatedCloseTimeoutId)
+      connection.unauthenticatedCloseTimeoutId = undefined
+
+      try {
+        connection.ws.close()
+      } catch (error) {
+        log.error("Failed to close websocket during shutdown", { error })
+      }
+    }
+
+    this.connections.clear()
+    this.authenticatedUsers.clear()
+    this.usersBySpaceId.clear()
+    this.userSpaceIds.clear()
+  }
+
   getUserConnections(userId: number): Connection[] {
     const userConnections = this.authenticatedUsers.get(userId) ?? new Set<string>()
     return [...userConnections].map((conId) => this.connections.get(conId)).filter(filterFalsy)

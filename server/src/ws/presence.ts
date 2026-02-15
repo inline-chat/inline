@@ -32,10 +32,11 @@ class PresenceManager {
 
   private readonly evaluateOfflineTimeout = 1000 * 10 // 10 seconds
   private readonly evaluateOfflineTimeoutIds: Map<number, ReturnType<typeof setTimeout>> = new Map() // userId -> timeoutId
+  private heartbeatIntervalId: ReturnType<typeof setInterval> | null = null
 
   constructor() {
     // Keep active sessions active so we won't assume they're stuck inactive
-    setInterval(() => {
+    this.heartbeatIntervalId = setInterval(() => {
       const ids = Array.from(this.currentlyActiveSessions)
       if (ids.length === 0) return
 
@@ -44,6 +45,31 @@ class PresenceManager {
         this.log.error("Failed to heartbeat active sessions", { error: e })
       })
     }, this.sessionHeartbeatInterval)
+  }
+
+  async shutdown(): Promise<void> {
+    if (this.heartbeatIntervalId) {
+      clearInterval(this.heartbeatIntervalId)
+      this.heartbeatIntervalId = null
+    }
+
+    for (const timeoutId of this.evaluateOfflineTimeoutIds.values()) {
+      clearTimeout(timeoutId)
+    }
+    this.evaluateOfflineTimeoutIds.clear()
+
+    const sessionIds = Array.from(this.currentlyActiveSessions)
+    this.currentlyActiveSessions.clear()
+
+    if (sessionIds.length === 0) {
+      return
+    }
+
+    try {
+      await SessionsModel.setActiveBulk(sessionIds, false)
+    } catch (e) {
+      this.log.error("Failed to mark active sessions inactive during shutdown", { error: e, sessionIds })
+    }
   }
 
   /** Called when a new authenticated connection is made. It marks session as active and re-evaluates user's online status */

@@ -12,8 +12,11 @@ Sentry.init({
 // Main app
 // Entry point for your Elysia server, ideal place for setting global plugin
 import { root } from "@in/server/controllers/root"
+import { health } from "@in/server/controllers/health"
+import { startDatabaseHealthMonitor } from "@in/server/modules/monitoring/databaseHealthMonitor"
+import { registerGracefulShutdown } from "@in/server/lifecycle/gracefulShutdown"
 import { waitlist } from "@in/server/controllers/extra/waitlist"
-import { Elysia, t } from "elysia"
+import { Elysia } from "elysia"
 import { there } from "./controllers/extra/there"
 import swagger from "@elysiajs/swagger"
 import { apiV1 } from "@in/server/controllers/v1"
@@ -49,6 +52,7 @@ if (NODE_ENV !== "development") {
 }
 
 export const app = new Elysia()
+  .use(health)
   .use(root)
   .use(apiV1)
   .use(botApi)
@@ -154,5 +158,7 @@ export const app = new Elysia()
 // Run
 app.listen(port, (server: Server<unknown>) => {
   connectionManager.setServer(server)
+  startDatabaseHealthMonitor()
+  registerGracefulShutdown(server)
   log.info(`Running on http://${server.hostname}:${server.port}`)
 })
