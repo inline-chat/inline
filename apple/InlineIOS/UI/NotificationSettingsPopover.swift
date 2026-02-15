@@ -50,7 +50,7 @@ struct NotificationSettingsButton: View {
       case .none: "bell.slash"
       case .mentions: "at"
       case .importantOnly: "apple.meditate"
-      case .onlyMentions: "at"
+      case .onlyMentions: "bubble.left.and.bubble.right"
     }
   }
 
