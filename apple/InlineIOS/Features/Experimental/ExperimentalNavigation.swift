@@ -355,7 +355,7 @@ private struct ExperimentalChatListView: View {
   }
 
   private var rows: some View {
-    ForEach(items, id: \.id) { item in
+    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
       Button {
         onTapItem(item)
       } label: {
@@ -367,6 +367,7 @@ private struct ExperimentalChatListView: View {
       .swipeActions(edge: .trailing, allowsFullSwipe: true) {
         archiveButton(for: item)
       }
+      .listRowSeparator(index == 0 ? .hidden : .visible, edges: .top)
       .listRowInsets(EdgeInsets(
         top: 8,
         leading: 16,
