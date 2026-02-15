@@ -15,6 +15,7 @@ extension UIMessageView {
     UIView.performWithoutAnimation {
       view.layer.cornerRadius = 18
     }
+    view.clipsToBounds = true
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }
