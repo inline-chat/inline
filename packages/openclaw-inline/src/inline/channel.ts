@@ -59,16 +59,23 @@ function parseInlineId(raw: unknown): bigint | undefined {
   return undefined
 }
 
-function parseInlineOutboundTarget(params: {
-  raw: string
-  context: "sendText" | "sendMedia"
-}): {
+type InlineOutboundContext = "sendText" | "sendMedia"
+
+type InlineParsedOutboundTarget = {
   targetId: bigint
   kind: "chat" | "user"
   normalizedNumeric: string
-} {
+  explicitKind: boolean
+  raw: string
+}
+
+function parseInlineOutboundTarget(params: {
+  raw: string
+  context: InlineOutboundContext
+}): InlineParsedOutboundTarget {
   let normalizedTarget = params.raw.trim()
-  if (/^inline:/i.test(normalizedTarget)) {
+  const hadInlinePrefix = /^inline:/i.test(normalizedTarget)
+  if (hadInlinePrefix) {
     normalizedTarget = normalizedTarget.replace(/^inline:/i, "").trim()
   }
   if (!normalizedTarget) {
@@ -76,12 +83,20 @@ function parseInlineOutboundTarget(params: {
   }
 
   let kind: "chat" | "user" = "chat"
+  let explicitKind = false
   if (/^chat:/i.test(normalizedTarget)) {
     kind = "chat"
+    explicitKind = true
     normalizedTarget = normalizedTarget.replace(/^chat:/i, "").trim()
   } else if (/^user:/i.test(normalizedTarget)) {
     kind = "user"
+    explicitKind = true
     normalizedTarget = normalizedTarget.replace(/^user:/i, "").trim()
+  }
+  // Session-derived targets are persisted as `inline:<chatId>`.
+  // Treat that shape as an explicit chat target so current-chat sends stay stable.
+  if (hadInlinePrefix && !explicitKind) {
+    explicitKind = true
   }
   // Keep backward compatibility for existing bare numeric ids that
   // historically mapped to chat ids.
@@ -97,7 +112,106 @@ function parseInlineOutboundTarget(params: {
     targetId: BigInt(normalizedTarget),
     kind,
     normalizedNumeric: normalizedTarget,
+    explicitKind,
+    raw: params.raw,
   }
+}
+
+async function listInlineTargetIds(client: InlineSdkClient): Promise<{ chatIds: Set<string>; userIds: Set<string> }> {
+  const result = await client.invokeRaw(Method.GET_CHATS, {
+    oneofKind: "getChats",
+    getChats: {},
+  })
+  if (result.oneofKind !== "getChats") {
+    throw new Error(`inline target resolve: expected getChats result, got ${String(result.oneofKind)}`)
+  }
+  return {
+    chatIds: new Set((result.getChats.chats ?? []).map((chat) => String(chat.id))),
+    userIds: new Set((result.getChats.users ?? []).map((user) => String(user.id))),
+  }
+}
+
+async function resolveInlineOutboundTarget(params: {
+  client: InlineSdkClient
+  context: InlineOutboundContext
+  target: InlineParsedOutboundTarget
+}): Promise<InlineParsedOutboundTarget> {
+  const { target } = params
+  if (target.explicitKind || target.kind === "user") {
+    return target
+  }
+
+  let ids: { chatIds: Set<string>; userIds: Set<string> } | null = null
+  try {
+    ids = await listInlineTargetIds(params.client)
+  } catch {
+    // Keep legacy chat-target behavior if live lookup is unavailable.
+    return target
+  }
+
+  const matchesChat = ids.chatIds.has(target.normalizedNumeric)
+  const matchesUser = ids.userIds.has(target.normalizedNumeric)
+  if (matchesChat && matchesUser) {
+    throw new Error(
+      `inline ${params.context}: ambiguous numeric target "${target.raw}" matches both chat and user ids. Use chat:${target.normalizedNumeric} or user:${target.normalizedNumeric}.`,
+    )
+  }
+  if (!matchesChat && matchesUser) {
+    return {
+      ...target,
+      kind: "user",
+    }
+  }
+  return target
+}
+
+function isChatInvalidError(error: unknown): boolean {
+  if (error == null) return false
+  const text = error instanceof Error ? error.message : String(error)
+  return text.toUpperCase().includes("CHAT_INVALID")
+}
+
+function wrapInlineTargetError(params: {
+  error: unknown
+  context: InlineOutboundContext
+  target: InlineParsedOutboundTarget
+  resolvedTarget: InlineParsedOutboundTarget
+}): Error {
+  if (
+    isChatInvalidError(params.error) &&
+    params.resolvedTarget.kind === "chat" &&
+    !params.target.explicitKind
+  ) {
+    return new Error(
+      `inline ${params.context}: target "${params.target.raw}" was sent as chatId ${params.target.normalizedNumeric} and failed with CHAT_INVALID. If this is a user id, use user:${params.target.normalizedNumeric}.`,
+      { cause: params.error instanceof Error ? params.error : undefined },
+    )
+  }
+  if (
+    isChatInvalidError(params.error) &&
+    params.resolvedTarget.kind === "user" &&
+    params.target.explicitKind
+  ) {
+    return new Error(
+      `inline ${params.context}: user target "${params.target.raw}" failed with CHAT_INVALID. This usually means no direct chat exists yet for that user.`,
+      { cause: params.error instanceof Error ? params.error : undefined },
+    )
+  }
+  return params.error instanceof Error ? params.error : new Error(String(params.error))
+}
+
+function buildInlineSendTarget(target: InlineParsedOutboundTarget): { chatId: bigint } | { userId: bigint } {
+  if (target.kind === "user") {
+    return { userId: target.targetId }
+  }
+  return { chatId: target.targetId }
+}
+
+function formatInlineResultChatId(target: InlineParsedOutboundTarget): string {
+  if (target.kind === "user") {
+    return `user:${target.normalizedNumeric}`
+  }
+  return target.normalizedNumeric
 }
 
 function buildInlineDisplayName(params: {
@@ -124,6 +238,18 @@ function toInlineUserDirectoryEntry(user: User) {
       phoneNumber: user.phoneNumber ?? null,
       bot: user.bot ?? false,
     },
+  }
+}
+
+function toInlineUserTargetId(userId: string): string {
+  return `user:${userId}`
+}
+
+function toInlineUserTargetDirectoryEntry(user: User) {
+  const base = toInlineUserDirectoryEntry(user)
+  return {
+    ...base,
+    id: toInlineUserTargetId(base.id),
   }
 }
 
@@ -255,18 +381,31 @@ async function sendMessageInline(params: {
     // Inline "threads" are modeled as chats (chatId). OpenClaw's threadId is not a message id.
     // Only map OpenClaw replyToId -> Inline replyToMsgId.
     const replyToMsgId = parseInlineId(params.replyToId)
-
-    const result = await client.sendMessage({
-      ...(target.kind === "user" ? { userId: target.targetId } : { chatId: target.targetId }),
-      text: params.text,
-      ...(replyToMsgId != null ? { replyToMsgId } : {}),
-      parseMarkdown: account.config.parseMarkdown ?? true,
+    const resolvedTarget = await resolveInlineOutboundTarget({
+      client,
+      context: "sendText",
+      target,
     })
+    const result = await client
+      .sendMessage({
+        ...buildInlineSendTarget(resolvedTarget),
+        text: params.text,
+        ...(replyToMsgId != null ? { replyToMsgId } : {}),
+        parseMarkdown: account.config.parseMarkdown ?? true,
+      })
+      .catch((error: unknown) => {
+        throw wrapInlineTargetError({
+          error,
+          context: "sendText",
+          target,
+          resolvedTarget,
+        })
+      })
     const bestEffort =
       result.messageId != null ? String(result.messageId) : BigInt(Date.now()).toString()
     return {
       messageId: bestEffort,
-      chatId: target.normalizedNumeric,
+      chatId: formatInlineResultChatId(resolvedTarget),
     }
   } finally {
     await client.close().catch(() => {})
@@ -301,25 +440,38 @@ async function sendMediaInline(params: {
 
   await client.connect()
   try {
+    const resolvedTarget = await resolveInlineOutboundTarget({
+      client,
+      context: "sendMedia",
+      target,
+    })
     const media = await uploadInlineMediaFromUrl({
       client,
       cfg: params.cfg,
       accountId: account.accountId,
       mediaUrl: params.mediaUrl,
     })
-
-    const result = await client.sendMessage({
-      ...(target.kind === "user" ? { userId: target.targetId } : { chatId: target.targetId }),
-      ...(caption ? { text: caption } : {}),
-      media,
-      ...(replyToMsgId != null ? { replyToMsgId } : {}),
-      ...(caption ? { parseMarkdown: account.config.parseMarkdown ?? true } : {}),
-    })
+    const result = await client
+      .sendMessage({
+        ...buildInlineSendTarget(resolvedTarget),
+        ...(caption ? { text: caption } : {}),
+        media,
+        ...(replyToMsgId != null ? { replyToMsgId } : {}),
+        ...(caption ? { parseMarkdown: account.config.parseMarkdown ?? true } : {}),
+      })
+      .catch((error: unknown) => {
+        throw wrapInlineTargetError({
+          error,
+          context: "sendMedia",
+          target,
+          resolvedTarget,
+        })
+      })
     const bestEffort =
       result.messageId != null ? String(result.messageId) : BigInt(Date.now()).toString()
     return {
       messageId: bestEffort,
-      chatId: target.normalizedNumeric,
+      chatId: formatInlineResultChatId(resolvedTarget),
     }
   } finally {
     await client.close().catch(() => {})
@@ -526,11 +678,18 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       }),
   },
 
+  agentPrompt: {
+    messageToolHints: () => [
+      "- Inline targeting: omit `target` to reply in the current chat.",
+      "- Inline explicit targets: `chat:<chatId>` for chats and `user:<userId>` for direct users. Prefer `user:` for DM user targets.",
+    ],
+  },
+
   messaging: {
     normalizeTarget: normalizeInlineTarget,
     targetResolver: {
       looksLikeId: looksLikeInlineTargetId,
-      hint: "<chatId>",
+      hint: "<chatId | chat:<chatId> | user:<userId>>",
     },
   },
 
@@ -561,7 +720,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       const normalizedQuery = normalizeSearchQuery(query)
       const maxItems = resolveDirectoryLimit(limit)
       return snapshot.users
-        .map((user) => toInlineUserDirectoryEntry(user))
+        .map((user) => toInlineUserTargetDirectoryEntry(user))
         .filter((user) => {
           if (!normalizedQuery) return true
           const haystack = [user.id, user.name ?? "", user.handle ?? ""].join("\n").toLowerCase()
@@ -611,7 +770,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
           return (result.getChatParticipants.participants ?? [])
             .map((participant) => usersById.get(String(participant.userId)))
             .filter((user): user is User => Boolean(user))
-            .map((user) => toInlineUserDirectoryEntry(user))
+            .map((user) => toInlineUserTargetDirectoryEntry(user))
             .slice(0, maxItems)
         },
       }),
@@ -657,7 +816,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
           return {
             input,
             resolved: true,
-            id: candidate.id,
+            id: toInlineUserTargetId(candidate.id),
             ...(candidate.name ? { name: candidate.name } : {}),
           }
         }

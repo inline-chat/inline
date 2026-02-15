@@ -189,7 +189,7 @@ describe("inline/channel", () => {
       },
     } satisfies OpenClawConfig
 
-    await inlineChannelPlugin.outbound.sendText?.({
+    const result = await inlineChannelPlugin.outbound.sendText?.({
       cfg,
       to: "user:42",
       text: "hi",
@@ -202,6 +202,234 @@ describe("inline/channel", () => {
     expect(sendMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({ chatId: 42n }),
     )
+    expect(result).toEqual(expect.objectContaining({ chatId: "user:42" }))
+    expect(close).toHaveBeenCalled()
+  })
+
+  it("outbound sendText disambiguates bare numeric targets to user ids when needed", async () => {
+    vi.resetModules()
+
+    const connect = vi.fn(async () => {})
+    const invokeRaw = vi.fn(async () => ({
+      oneofKind: "getChats",
+      getChats: {
+        chats: [{ id: 7n, title: "general" }],
+        users: [{ id: 1600n, firstName: "Mo" }],
+        dialogs: [],
+      },
+    }))
+    const sendMessage = vi.fn(async () => ({ messageId: null }))
+    const close = vi.fn(async () => {})
+
+    mockRealtimeSdk({
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = connect
+        invokeRaw = invokeRaw
+        sendMessage = sendMessage
+        close = close
+      },
+    })
+
+    const runtimeMod = await import("../runtime")
+    runtimeMod.setInlineRuntime({
+      version: "test",
+      state: { resolveStateDir: () => "/tmp" },
+      channel: { text: { chunkMarkdownText: (t: string) => [t] } },
+    } as unknown as PluginRuntime)
+
+    const { inlineChannelPlugin } = await import("./channel")
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+          parseMarkdown: true,
+        },
+      },
+    } satisfies OpenClawConfig
+
+    const result = await inlineChannelPlugin.outbound.sendText?.({
+      cfg,
+      to: "1600",
+      text: "hi",
+      accountId: "default",
+    } as any)
+
+    expect(invokeRaw).toHaveBeenCalled()
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 1600n, text: "hi", parseMarkdown: true }),
+    )
+    expect(sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: 1600n }),
+    )
+    expect(result).toEqual(expect.objectContaining({ chatId: "user:1600" }))
+    expect(close).toHaveBeenCalled()
+  })
+
+  it("outbound sendText treats inline:<id> targets as explicit chat ids", async () => {
+    vi.resetModules()
+
+    const connect = vi.fn(async () => {})
+    const invokeRaw = vi.fn(async () => ({
+      oneofKind: "getChats",
+      getChats: { chats: [], users: [], dialogs: [] },
+    }))
+    const sendMessage = vi.fn(async () => ({ messageId: null }))
+    const close = vi.fn(async () => {})
+
+    mockRealtimeSdk({
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = connect
+        invokeRaw = invokeRaw
+        sendMessage = sendMessage
+        close = close
+      },
+    })
+
+    const runtimeMod = await import("../runtime")
+    runtimeMod.setInlineRuntime({
+      version: "test",
+      state: { resolveStateDir: () => "/tmp" },
+      channel: { text: { chunkMarkdownText: (t: string) => [t] } },
+    } as unknown as PluginRuntime)
+
+    const { inlineChannelPlugin } = await import("./channel")
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+          parseMarkdown: true,
+        },
+      },
+    } satisfies OpenClawConfig
+
+    await inlineChannelPlugin.outbound.sendText?.({
+      cfg,
+      to: "inline:1600",
+      text: "hi",
+      accountId: "default",
+    } as any)
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: 1600n, text: "hi", parseMarkdown: true }),
+    )
+    expect(invokeRaw).not.toHaveBeenCalled()
+    expect(close).toHaveBeenCalled()
+  })
+
+  it("outbound sendText rejects ambiguous bare numeric targets", async () => {
+    vi.resetModules()
+
+    const connect = vi.fn(async () => {})
+    const invokeRaw = vi.fn(async () => ({
+      oneofKind: "getChats",
+      getChats: {
+        chats: [{ id: 1600n, title: "project" }],
+        users: [{ id: 1600n, firstName: "Mo" }],
+        dialogs: [],
+      },
+    }))
+    const sendMessage = vi.fn(async () => ({ messageId: null }))
+    const close = vi.fn(async () => {})
+
+    mockRealtimeSdk({
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = connect
+        invokeRaw = invokeRaw
+        sendMessage = sendMessage
+        close = close
+      },
+    })
+
+    const runtimeMod = await import("../runtime")
+    runtimeMod.setInlineRuntime({
+      version: "test",
+      state: { resolveStateDir: () => "/tmp" },
+      channel: { text: { chunkMarkdownText: (t: string) => [t] } },
+    } as unknown as PluginRuntime)
+
+    const { inlineChannelPlugin } = await import("./channel")
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+        },
+      },
+    } satisfies OpenClawConfig
+
+    await expect(
+      inlineChannelPlugin.outbound.sendText?.({
+        cfg,
+        to: "1600",
+        text: "hi",
+        accountId: "default",
+      } as any),
+    ).rejects.toThrow(/ambiguous numeric target/)
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(close).toHaveBeenCalled()
+  })
+
+  it("outbound sendText surfaces a clear hint for chat/user target mixups", async () => {
+    vi.resetModules()
+
+    const connect = vi.fn(async () => {})
+    const invokeRaw = vi.fn(async () => ({
+      oneofKind: "getChats",
+      getChats: {
+        chats: [],
+        users: [],
+        dialogs: [],
+      },
+    }))
+    const sendMessage = vi.fn(async () => {
+      throw new Error(
+        "sendMessage: request failed (CHAT_INVALID; target=chat:1600; media=none; textLen=2; replyTo=none)",
+      )
+    })
+    const close = vi.fn(async () => {})
+
+    mockRealtimeSdk({
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = connect
+        invokeRaw = invokeRaw
+        sendMessage = sendMessage
+        close = close
+      },
+    })
+
+    const runtimeMod = await import("../runtime")
+    runtimeMod.setInlineRuntime({
+      version: "test",
+      state: { resolveStateDir: () => "/tmp" },
+      channel: { text: { chunkMarkdownText: (t: string) => [t] } },
+    } as unknown as PluginRuntime)
+
+    const { inlineChannelPlugin } = await import("./channel")
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+          parseMarkdown: true,
+        },
+      },
+    } satisfies OpenClawConfig
+
+    await expect(
+      inlineChannelPlugin.outbound.sendText?.({
+        cfg,
+        to: "1600",
+        text: "hi",
+        accountId: "default",
+      } as any),
+    ).rejects.toThrow(/If this is a user id, use user:1600/)
+    expect(sendMessage).toHaveBeenCalled()
     expect(close).toHaveBeenCalled()
   })
 
@@ -753,7 +981,7 @@ describe("inline/channel", () => {
       limit: 10,
       runtime: {} as any,
     } as any)
-    expect(peers?.[0]?.id).toBe("42")
+    expect(peers?.[0]?.id).toBe("user:42")
 
     const groups = await inlineChannelPlugin.directory?.listGroups?.({
       cfg,
@@ -771,7 +999,7 @@ describe("inline/channel", () => {
       limit: 10,
       runtime: {} as any,
     } as any)
-    expect(members?.[0]?.id).toBe("42")
+    expect(members?.[0]?.id).toBe("user:42")
 
     const resolvedUser = await inlineChannelPlugin.resolver?.resolveTargets?.({
       cfg,
@@ -783,7 +1011,7 @@ describe("inline/channel", () => {
     expect(resolvedUser?.[0]).toEqual(
       expect.objectContaining({
         resolved: true,
-        id: "42",
+        id: "user:42",
       }),
     )
 

@@ -119,10 +119,24 @@ channels:
 
 If you set `dmPolicy: "open"`, set `allowFrom: ["*"]`.
 
+## Outbound Target Semantics
+
+For `message send`/plugin outbound sends:
+
+- `chat:<id>` targets a chat id.
+- `user:<id>` targets a user id (DM peer).
+- `inline:user:<id>` and `inline:chat:<id>` are accepted and normalized.
+- User directory IDs and `channels resolve --kind user` outputs are returned as `user:<id>` to keep DM targets explicit.
+- Bare numeric ids are disambiguated against Inline directory data:
+  - matches chat only -> sent as chat id
+  - matches user only -> sent as user id
+  - matches both -> rejected (use explicit `chat:` or `user:`)
+  - matches neither -> treated as chat id (legacy behavior)
+
 ## Message Tool RPC Actions
 
 The plugin exposes Inline RPC-backed actions through OpenClaw's `message` tool.
-All actions use a numeric Inline chat id via `to`, `chatId`, or `channelId`.
+Inline RPC-backed actions use a numeric chat id via `to`, `chatId`, or `channelId`.
 
 - Replying: `reply`, `thread-reply`
 - Reactions: `react`, `reactions`
