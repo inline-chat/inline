@@ -9,7 +9,7 @@ mod state;
 mod update;
 
 use chrono::{DateTime, Utc};
-use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum, error::ErrorKind};
 use dialoguer::{Confirm, Input, Select};
 use futures_util::StreamExt;
 use rand::{RngCore, rngs::OsRng};
@@ -1248,6 +1248,11 @@ async fn main() {
     let cli = match Cli::try_parse_from(&argv) {
         Ok(cli) => cli,
         Err(err) => {
+            if matches!(err.kind(), ErrorKind::DisplayHelp | ErrorKind::DisplayVersion) {
+                let _ = err.print();
+                std::process::exit(err.exit_code());
+            }
+
             if flags.json {
                 let payload = JsonErrorEnvelope {
                     error: JsonCliError {
@@ -1263,9 +1268,9 @@ async fn main() {
                     eprintln!("{}", err);
                 }
             } else {
-                eprintln!("{}", err);
+                let _ = err.print();
             }
-            std::process::exit(2);
+            std::process::exit(err.exit_code());
         }
     };
 
@@ -5523,6 +5528,17 @@ mod cli_parsing_tests {
 
         let cli = Cli::try_parse_from(["inline", "whoami"]).unwrap();
         assert!(matches!(cli.command, Command::Me));
+    }
+
+    #[test]
+    fn help_and_version_exit_successfully() {
+        let help_err = Cli::try_parse_from(["inline", "--help"]).err().unwrap();
+        assert_eq!(help_err.kind(), clap::error::ErrorKind::DisplayHelp);
+        assert_eq!(help_err.exit_code(), 0);
+
+        let version_err = Cli::try_parse_from(["inline", "--version"]).err().unwrap();
+        assert_eq!(version_err.kind(), clap::error::ErrorKind::DisplayVersion);
+        assert_eq!(version_err.exit_code(), 0);
     }
 
     #[test]
