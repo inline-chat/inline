@@ -1,4 +1,5 @@
 import Auth
+import Foundation
 import GRDB
 import InlineProtocol
 import Logger
