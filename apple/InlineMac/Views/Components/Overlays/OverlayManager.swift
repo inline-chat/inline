@@ -46,6 +46,17 @@ final class OverlayManager: ObservableObject, ToastPresenting {
     )
   }
 
+  func showInfo(_ message: String) {
+    showToast(
+      message: message,
+      style: .info,
+      showsSpinner: false,
+      actionTitle: nil,
+      action: nil,
+      autoDismissAfter: 1.4
+    )
+  }
+
   func showSuccess(_ message: String, actionTitle: String?, action: (@MainActor () -> Void)?) {
     showToast(
       message: message,
