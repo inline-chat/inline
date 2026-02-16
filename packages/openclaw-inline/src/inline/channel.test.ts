@@ -30,6 +30,80 @@ describe("inline/channel", () => {
     })
   })
 
+  it("keeps gateway startAccount pending until monitor completion", async () => {
+    vi.resetModules()
+
+    const stop = vi.fn(async () => {})
+    let resolveDone: (() => void) | null = null
+    const done = new Promise<void>((resolve) => {
+      resolveDone = resolve
+    })
+    const monitorInlineProvider = vi.fn(async () => ({ stop, done }))
+    vi.doMock("./monitor", () => ({
+      monitorInlineProvider,
+    }))
+
+    const { inlineChannelPlugin } = await import("./channel")
+
+    const abortController = new AbortController()
+    let status = {
+      accountId: "default",
+      running: false,
+      configured: true,
+      lastStartAt: null as number | null,
+      lastStopAt: null as number | null,
+      lastError: null as string | null,
+    }
+    const startPromise = inlineChannelPlugin.gateway?.startAccount?.({
+      cfg: {
+        channels: {
+          inline: {
+            token: "token",
+            baseUrl: "https://api.inline.chat",
+          },
+        },
+      } satisfies OpenClawConfig,
+      account: {
+        accountId: "default",
+        name: "Default",
+        enabled: true,
+        configured: true,
+        baseUrl: "https://api.inline.chat",
+        token: "token",
+        tokenFile: null,
+        config: {},
+      },
+      runtime: {} as any,
+      abortSignal: abortController.signal,
+      log: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      },
+      getStatus: () => status,
+      setStatus: (next) => {
+        status = {
+          ...status,
+          ...next,
+        }
+      },
+    } as any)
+
+    let settled = false
+    void startPromise?.then(() => {
+      settled = true
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(settled).toBe(false)
+    expect(monitorInlineProvider).toHaveBeenCalled()
+
+    resolveDone?.()
+    await startPromise
+
+    expect(stop).toHaveBeenCalled()
+  })
+
   it("resolves group mention + tool policy from channels.inline.groups", async () => {
     vi.resetModules()
     const { inlineChannelPlugin } = await import("./channel")

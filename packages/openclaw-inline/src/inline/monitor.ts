@@ -19,6 +19,7 @@ const CHANNEL_ID = "inline" as const
 
 type InlineMonitorHandle = {
   stop: () => Promise<void>
+  done: Promise<void>
 }
 
 type StatusSink = (patch: { lastInboundAt?: number; lastOutboundAt?: number; lastError?: string }) => void
@@ -906,9 +907,17 @@ export async function monitorInlineProvider(params: {
     }
   })()
 
+  let stopPromise: Promise<void> | null = null
   const stop = async () => {
-    await client.close().catch(() => {})
-    await loop.catch(() => {})
+    if (stopPromise) {
+      await stopPromise
+      return
+    }
+    stopPromise = (async () => {
+      await client.close().catch(() => {})
+      await loop.catch(() => {})
+    })()
+    await stopPromise
   }
 
   abortSignal.addEventListener(
@@ -919,5 +928,5 @@ export async function monitorInlineProvider(params: {
     { once: true },
   )
 
-  return { stop }
+  return { stop, done: loop.catch(() => {}) }
 }
