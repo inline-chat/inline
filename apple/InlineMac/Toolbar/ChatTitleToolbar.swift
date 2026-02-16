@@ -32,9 +32,10 @@ class ChatTitleToolbar: NSToolbarItem {
     }
   }
 
-  private let nameLabel: NSTextField = {
-    let tf = NSTextField(labelWithString: "")
+  private let nameLabel: ToolbarTitleLabel = {
+    let tf = ToolbarTitleLabel(labelWithString: "")
     tf.font = .systemFont(ofSize: 13, weight: .semibold)
+    tf.isEnabled = true
     tf.maximumNumberOfLines = 1
     tf.usesSingleLineMode = true
     tf.lineBreakMode = .byTruncatingTail
@@ -115,33 +116,27 @@ class ChatTitleToolbar: NSToolbarItem {
   }
 
   private func setupInteraction() {
-    let click = NSClickGestureRecognizer(target: self, action: #selector(handleClick))
-    containerView.addGestureRecognizer(click)
-
-    let doubleClick = NSClickGestureRecognizer(target: self, action: #selector(handleTitleDoubleClick))
-    doubleClick.numberOfClicksRequired = 2
-    doubleClick.delaysPrimaryMouseButtonEvents = false
-    nameLabel.addGestureRecognizer(doubleClick)
-
-    let rightClick = NSClickGestureRecognizer(target: self, action: #selector(handleTitleRightClick))
-    rightClick.buttonMask = 2
-    nameLabel.addGestureRecognizer(rightClick)
-
+    nameLabel.onSingleClick = { [weak self] in
+      self?.handleTitleClick()
+    }
+    nameLabel.onDoubleClick = { [weak self] in
+      self?.handleTitleDoubleClick()
+    }
+    nameLabel.onSecondaryClick = { [weak self] event in
+      self?.handleTitleRightClick(event: event)
+    }
     nameLabel.isSelectable = false
   }
 
-  @objc private func handleClick() {
-    // Handle title click to show chat info
-    // NSApp.sendAction(#selector(ChatWindowController.showChatInfo(_:)), to: nil, from: self)
+  @objc private func handleTitleClick() {
+    beginTitleEditing()
   }
 
   @objc private func handleTitleDoubleClick() {
     beginTitleEditing()
   }
 
-  @objc private func handleTitleRightClick() {
-    guard let event = NSApp.currentEvent else { return }
-
+  private func handleTitleRightClick(event: NSEvent) {
     let menu = NSMenu()
     let renameItem = NSMenuItem(title: "Rename Chat...", action: #selector(handleRenameMenu), keyEquivalent: "")
     renameItem.target = self
@@ -261,6 +256,61 @@ class ChatTitleToolbar: NSToolbarItem {
           self?.configure()
         }
       }
+  }
+}
+
+final class ToolbarTitleLabel: NSTextField {
+  var onSingleClick: (() -> Void)?
+  var onDoubleClick: (() -> Void)?
+  var onSecondaryClick: ((NSEvent) -> Void)?
+
+  private var pendingSingleClick: DispatchWorkItem?
+
+  override var mouseDownCanMoveWindow: Bool {
+    false
+  }
+
+  override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+    true
+  }
+
+  override func mouseDown(with event: NSEvent) {
+    if event.modifierFlags.contains(.control) {
+      pendingSingleClick?.cancel()
+      onSecondaryClick?(event)
+      return
+    }
+
+    if event.clickCount >= 2 {
+      pendingSingleClick?.cancel()
+      pendingSingleClick = nil
+      onDoubleClick?()
+      return
+    }
+
+    let singleClick = DispatchWorkItem { [weak self] in
+      self?.onSingleClick?()
+    }
+    pendingSingleClick?.cancel()
+    pendingSingleClick = singleClick
+    DispatchQueue.main.asyncAfter(
+      deadline: .now() + NSEvent.doubleClickInterval,
+      execute: singleClick
+    )
+  }
+
+  override func rightMouseDown(with event: NSEvent) {
+    pendingSingleClick?.cancel()
+    onSecondaryClick?(event)
+  }
+
+  override func otherMouseDown(with event: NSEvent) {
+    if event.buttonNumber == 2 {
+      pendingSingleClick?.cancel()
+      onSecondaryClick?(event)
+      return
+    }
+    super.otherMouseDown(with: event)
   }
 }
 
