@@ -22,7 +22,7 @@ import { inlineMessageActions } from "./actions.js"
 import { getInlineRuntime } from "../runtime.js"
 import { uploadInlineMediaFromUrl } from "./media.js"
 
-const activeMonitors = new Map<string, { stop: () => Promise<void> }>()
+const activeMonitors = new Map<string, { stop: () => Promise<void>; done: Promise<void> }>()
 
 const meta = {
   id: "inline",
@@ -992,7 +992,12 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       })
 
       activeMonitors.set(account.accountId, handle)
-      return handle
+      try {
+        await handle.done
+      } finally {
+        activeMonitors.delete(account.accountId)
+        await handle.stop().catch(() => {})
+      }
     },
 
     stopAccount: async (ctx) => {
