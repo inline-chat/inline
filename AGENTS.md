@@ -27,6 +27,7 @@
 ## Working Rules
 
 - Do requested work only; mirror existing patterns; add comments only when clarifying non-obvious logic; never touch `.env` or delete others’ work.
+- When Mo says "memorize", treat it as "persist this rule in AGENTS.md" (not just conversational memory).
 - When answering questions, respond with high-confidence answers only: verify in code; do not guess.
 - Bug investigations: read source code of relevant npm dependencies and all related local code before concluding; aim for high-confidence root cause.
 - Code style: add brief comments for tricky logic; aim to keep files under ~700 LOC (guideline only, not a hard guardrail). Split/refactor when it improves clarity or testability.
@@ -64,6 +65,8 @@
 - Publish in dependency order: `protocol` -> `realtime-sdk`, and `bot-api-types` -> `bot-api`; if both tracks changed, publish both base packages before dependents.
 - Use prerelease channel for rollout testing: `npm publish --access public --tag alpha` from each package directory.
 - If npm 2FA is enabled, include OTP on each publish command: `npm publish --access public --tag alpha --otp=<code>`.
+- When Mo asks to publish, always provide a copy-paste publish command that includes OTP placeholder and package directory, e.g. `cd /Users/mo/dev/inline/packages/openclaw-inline && npm publish --access public --otp=<YOUR_OTP_CODE>`.
+- For prerelease publish requests, provide the copy-paste alpha variant with OTP too: `cd /Users/mo/dev/inline/packages/openclaw-inline && npm publish --access public --tag alpha --otp=<YOUR_OTP_CODE>`.
 
 ## CLI
 
