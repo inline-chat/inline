@@ -76,7 +76,7 @@ class ReactionOverlayWindow: NSPanel {
 
     let windowSize = hostingView.fittingSize
     let cursorLocation = NSEvent.mouseLocation
-    let bottomGapFromCursor: CGFloat = 24
+    let bottomGapFromCursor: CGFloat = 6
 
     let preferredX = cursorLocation.x - (windowSize.width / 2)
     let preferredY = cursorLocation.y + bottomGapFromCursor
