@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/inline-chat/GRDB.swift",
       "state" : {
-        "revision" : "c1389c114efef9fc04e572906bd1535b382200f6",
-        "version" : "3.2.0"
+        "revision" : "37fa975af1f81d3b89f76cba3d69147d66256d1c",
+        "version" : "7.10.0"
       }
     },
     {
@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/inline-chat/GRDBQuery",
       "state" : {
-        "revision" : "048bb49372f95036d3eee482c657b30a469e66cb",
-        "version" : "0.11.4"
+        "revision" : "61c12a8c00a2da3dd8fa0c925e358663fcef47a0",
+        "version" : "0.11.5"
       }
     },
     {
@@ -71,6 +71,15 @@
       "state" : {
         "revision" : "16cd512711375fa73f25ae5e373f596bdf4251ae",
         "version" : "8.58.0"
+      }
+    },
+    {
+      "identity" : "sqlcipher.swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/sqlcipher/SQLCipher.swift.git",
+      "state" : {
+        "revision" : "7da3c29da67ef5f6dac915647087d966451f00d3",
+        "version" : "4.13.0"
       }
     },
     {
