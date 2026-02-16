@@ -84,7 +84,7 @@ xcodebuild \
   -scheme "${SCHEME}" \
   -configuration Release \
   -derivedDataPath "${DERIVED_DATA}" \
-  SWIFT_ACTIVE_COMPILATION_CONDITIONS="SPARKLE" \
+  SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) SPARKLE' \
   FRAMEWORK_SEARCH_PATHS="${SPARKLE_FRAMEWORK_PATH}" \
   OTHER_LDFLAGS="-framework Sparkle" \
   CODE_SIGN_ENTITLEMENTS="InlineMac/InlineMacDirect.entitlements" \
