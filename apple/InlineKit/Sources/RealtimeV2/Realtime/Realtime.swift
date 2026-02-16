@@ -300,6 +300,11 @@ public actor RealtimeV2 {
     // FIXME: probably wait a little before requeuing the inflight list as ack may come soon after a quick intermittent connection loss
     let dropped = await transactions.requeueAll()
 
+    // Queue signals emitted while disconnected are consumed and skipped. On reconnect,
+    // wake the transaction loop so previously queued work (e.g. chat history refetches)
+    // is drained even if no in-flight transactions were requeued.
+    await transactions.signalQueue()
+
     guard !dropped.isEmpty else { return }
 
     for wrapper in dropped {

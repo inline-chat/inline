@@ -143,6 +143,56 @@ final class RealtimeSendTests {
     withExtendedLifetime(realtime) {}
   }
 
+  @Test("queued transactions created while disconnected run after reconnect")
+  func testQueuedTransactionsCreatedWhileDisconnectedRunAfterReconnect() async throws {
+    let auth = Auth.mocked(authenticated: true)
+    let transport = DropAndRecoverTransport()
+    let storage = SendTestSyncStorage()
+    let apply = SendTestApplyUpdates()
+    let realtime = RealtimeV2(
+      transport: transport,
+      auth: auth.handle,
+      applyUpdates: apply,
+      syncStorage: storage
+    )
+
+    let initiallyConnected = await waitForCondition(timeout: .seconds(2)) {
+      let stateObject = realtime.stateObject
+      return await MainActor.run {
+        stateObject.connectionState == .connected
+      }
+    }
+    #expect(initiallyConnected)
+
+    await transport.simulateDisconnect()
+
+    let becameDisconnected = await waitForCondition(timeout: .seconds(1)) {
+      let stateObject = realtime.stateObject
+      return await MainActor.run {
+        stateObject.connectionState != .connected
+      }
+    }
+    #expect(becameDisconnected)
+
+    let transactionID = UUID()
+    _ = await realtime.sendQueued(ReconnectQueueTransaction(id: transactionID))
+
+    let reconnected = await waitForCondition(timeout: .seconds(3)) {
+      let stateObject = realtime.stateObject
+      return await MainActor.run {
+        stateObject.connectionState == .connected
+      }
+    }
+    #expect(reconnected)
+
+    let appliedAfterReconnect = await waitForCondition(timeout: .seconds(1)) {
+      await ReconnectQueueRecorder.shared.didRunApply(transactionID)
+    }
+    #expect(appliedAfterReconnect)
+
+    withExtendedLifetime(realtime) {}
+  }
+
   @Test("protocol session emits connectionError event")
   func testProtocolSessionEmitsConnectionErrorEvent() async throws {
     let auth = Auth.mocked(authenticated: true)
@@ -459,6 +509,45 @@ private actor OptimisticOrderingTransport: Transport {
 
 private let sendOrderingMethod: InlineProtocol.Method = .UNRECOGNIZED(9_999_991)
 
+private struct ReconnectQueueTransaction: Transaction, Codable {
+  struct Context: Sendable, Codable {
+    let id: UUID
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case context
+  }
+
+  var method: InlineProtocol.Method = reconnectQueueMethod
+  var type: TransactionKindType = .query()
+  var context: Context
+
+  init(id: UUID) {
+    context = Context(id: id)
+  }
+
+  func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
+    nil
+  }
+
+  func apply(_ rpcResult: InlineProtocol.RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {
+    await ReconnectQueueRecorder.shared.markApply(context.id)
+  }
+}
+
+private actor ReconnectQueueRecorder {
+  static let shared = ReconnectQueueRecorder()
+  private var applied: Set<UUID> = []
+
+  func markApply(_ id: UUID) {
+    applied.insert(id)
+  }
+
+  func didRunApply(_ id: UUID) -> Bool {
+    applied.contains(id)
+  }
+}
+
 private struct AckNoRetryTransaction: Transaction, Codable {
   struct Context: Sendable, Codable {
     let id: UUID
@@ -540,7 +629,55 @@ private actor AckThenDisconnectTransport: Transport {
   }
 }
 
+private actor DropAndRecoverTransport: Transport {
+  nonisolated var events: AsyncChannel<TransportEvent> { channel }
+
+  private var started = false
+  private let channel = AsyncChannel<TransportEvent>()
+
+  func start() async {
+    guard !started else { return }
+    started = true
+    await channel.send(.connecting)
+    await channel.send(.connected)
+  }
+
+  func stop() async {
+    guard started else { return }
+    started = false
+    await channel.send(.disconnected(errorDescription: "stopped"))
+  }
+
+  func send(_ message: ClientMessage) async throws {
+    switch message.body {
+    case .connectionInit:
+      var open = ServerProtocolMessage()
+      open.id = message.id
+      open.body = .connectionOpen(.init())
+      await channel.send(.message(open))
+
+    case .rpcCall:
+      var rpcResult = InlineProtocol.RpcResult()
+      rpcResult.reqMsgID = message.id
+      var response = ServerProtocolMessage()
+      response.id = message.id
+      response.body = .rpcResult(rpcResult)
+      await channel.send(.message(response))
+
+    default:
+      break
+    }
+  }
+
+  func simulateDisconnect() async {
+    guard started else { return }
+    started = false
+    await channel.send(.disconnected(errorDescription: "simulated_disconnect"))
+  }
+}
+
 private let ackNoRetryMethod: InlineProtocol.Method = .UNRECOGNIZED(9_999_992)
+private let reconnectQueueMethod: InlineProtocol.Method = .UNRECOGNIZED(9_999_993)
 
 private enum SendTestTimeoutError: Error {
   case timedOut
