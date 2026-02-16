@@ -71,26 +71,33 @@ class ReactionOverlayWindow: NSPanel {
       self.close()
     }
   }
-    
-
   private func positionWindow() {
-    guard let screen = messageView.window?.screen else { return }
+    guard let hostingView else { return }
 
-    // Convert message view frame to screen coordinates
-    let messageFrame = messageView.convert(messageView.bounds, to: nil)
-    let windowFrame = messageView.window?.convertPoint(toScreen: messageFrame.origin) ?? .zero
+    let windowSize = hostingView.fittingSize
+    let cursorLocation = NSEvent.mouseLocation
+    let bottomGapFromCursor: CGFloat = 24
 
-    // Position above the message
-    let windowSize = hostingView!.fittingSize
-    let x = windowFrame.x - (windowSize.width - messageFrame.width) / 2
-    let y = windowFrame.y + messageFrame.height + 5 // 5 points gap
+    let preferredX = cursorLocation.x - (windowSize.width / 2)
+    let preferredY = cursorLocation.y + bottomGapFromCursor
 
-    // Ensure window stays on screen
-    let screenFrame = screen.visibleFrame
-    let finalX = min(max(x, screenFrame.minX), screenFrame.maxX - windowSize.width)
-    let finalY = min(max(y, screenFrame.minY), screenFrame.maxY - windowSize.height)
+    let targetScreen = screen(containing: cursorLocation)
+      ?? messageView.window?.screen
+      ?? NSScreen.main
+    guard let visibleFrame = targetScreen?.visibleFrame else { return }
 
-    setFrame(NSRect(x: finalX, y: finalY, width: windowSize.width, height: windowSize.height), display: true)
+    // Clamp into the current screen so the picker stays fully visible near edges.
+    let finalX = min(max(preferredX, visibleFrame.minX), visibleFrame.maxX - windowSize.width)
+    let finalY = min(max(preferredY, visibleFrame.minY), visibleFrame.maxY - windowSize.height)
+
+    setFrame(
+      NSRect(x: finalX, y: finalY, width: windowSize.width, height: windowSize.height),
+      display: true
+    )
+  }
+
+  private func screen(containing point: NSPoint) -> NSScreen? {
+    NSScreen.screens.first { $0.frame.contains(point) }
   }
 
   private func setupMouseDownMonitor() {
