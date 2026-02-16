@@ -3,6 +3,7 @@ import AppKit
 @MainActor
 protocol ToastPresenting: AnyObject {
   func showLoading(_ message: String, actionTitle: String?, action: (@MainActor () -> Void)?)
+  func showInfo(_ message: String)
   func showSuccess(_ message: String, actionTitle: String?, action: (@MainActor () -> Void)?)
   func showError(_ message: String)
   func dismissToast()
@@ -25,6 +26,10 @@ final class ToastCenter {
 
   func showLoading(_ message: String, actionTitle: String? = nil, action: (@MainActor () -> Void)? = nil) {
     presenter?.showLoading(message, actionTitle: actionTitle, action: action)
+  }
+
+  func showInfo(_ message: String) {
+    presenter?.showInfo(message)
   }
 
   func showSuccess(_ message: String, actionTitle: String? = nil, action: (@MainActor () -> Void)? = nil) {

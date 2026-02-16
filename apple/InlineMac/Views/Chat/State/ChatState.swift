@@ -12,6 +12,37 @@ class ChatState {
   struct ChatStateData: Codable {
     var replyingToMsgId: Int64?
     var forwardContext: ForwardContext?
+    var sendSilently: Bool
+
+    enum CodingKeys: String, CodingKey {
+      case replyingToMsgId
+      case forwardContext
+      case sendSilently
+    }
+
+    init(
+      replyingToMsgId: Int64? = nil,
+      forwardContext: ForwardContext? = nil,
+      sendSilently: Bool = false
+    ) {
+      self.replyingToMsgId = replyingToMsgId
+      self.forwardContext = forwardContext
+      self.sendSilently = sendSilently
+    }
+
+    init(from decoder: Decoder) throws {
+      let container = try decoder.container(keyedBy: CodingKeys.self)
+      replyingToMsgId = try container.decodeIfPresent(Int64.self, forKey: .replyingToMsgId)
+      forwardContext = try container.decodeIfPresent(ForwardContext.self, forKey: .forwardContext)
+      sendSilently = try container.decodeIfPresent(Bool.self, forKey: .sendSilently) ?? false
+    }
+
+    func encode(to encoder: Encoder) throws {
+      var container = encoder.container(keyedBy: CodingKeys.self)
+      try container.encodeIfPresent(replyingToMsgId, forKey: .replyingToMsgId)
+      try container.encodeIfPresent(forwardContext, forKey: .forwardContext)
+      try container.encode(sendSilently, forKey: .sendSilently)
+    }
   }
 
   // Static
@@ -32,10 +63,14 @@ class ChatState {
   public var forwardContext: ForwardContext? {
     data.forwardContext
   }
+  public var sendSilently: Bool {
+    data.sendSilently
+  }
 
   public let replyingToMsgIdPublisher = PassthroughSubject<Int64?, Never>()
   public let editingMsgIdPublisher = PassthroughSubject<Int64?, Never>()
   public let forwardContextPublisher = PassthroughSubject<ForwardContext?, Never>()
+  public let sendSilentlyPublisher = PassthroughSubject<Bool, Never>()
 
   struct ForwardContext: Codable {
     var fromPeerId: Peer
@@ -117,6 +152,17 @@ class ChatState {
     data.forwardContext = nil
     forwardContextPublisher.send(nil)
     save()
+  }
+
+  public func setSendSilently(_ enabled: Bool) {
+    guard data.sendSilently != enabled else { return }
+    data.sendSilently = enabled
+    sendSilentlyPublisher.send(enabled)
+    save()
+  }
+
+  public func toggleSendSilently() {
+    setSendSilently(!data.sendSilently)
   }
 
   // MARK: - Persistance

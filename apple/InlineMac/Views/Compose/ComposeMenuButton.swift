@@ -10,6 +10,8 @@ class ComposeMenuButton: NSView {
   private var isHovering = false
 
   weak var delegate: ComposeMenuButtonDelegate?
+  var isSendSilentlyEnabledProvider: (() -> Bool)?
+  var onToggleSendSilently: (() -> Void)?
   private var cameraWindow: NSWindow?
   private var cameraViewController: CameraViewController?
 
@@ -29,7 +31,6 @@ class ComposeMenuButton: NSView {
 
     super.init(frame: .zero)
     setupView()
-    setupMenu()
   }
 
   @available(*, unavailable)
@@ -59,7 +60,7 @@ class ComposeMenuButton: NSView {
     button.action = #selector(handleClick)
   }
 
-  private func setupMenu() {
+  private func makeMenu() -> NSMenu {
     let menu = NSMenu()
 
     // Photo Library Item
@@ -92,17 +93,44 @@ class ComposeMenuButton: NSView {
     fileItem.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
     menu.addItem(fileItem)
 
-    button.menu = menu
+    menu.addItem(.separator())
+
+    let sectionTitle = NSMenuItem(title: "Options", action: nil, keyEquivalent: "")
+    sectionTitle.isEnabled = false
+    sectionTitle.attributedTitle = NSAttributedString(
+      string: "Options",
+      attributes: [
+        .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+        .foregroundColor: NSColor.secondaryLabelColor,
+      ]
+    )
+    menu.addItem(sectionTitle)
+
+    let sendSilentlyEnabled = isSendSilentlyEnabledProvider?() ?? false
+    let silentItem = NSMenuItem(
+      title: "Send as Silent",
+      action: #selector(toggleSendSilently),
+      keyEquivalent: ""
+    )
+    silentItem.target = self
+    silentItem.image = NSImage(systemSymbolName: "bell.slash", accessibilityDescription: nil)
+    silentItem.state = sendSilentlyEnabled ? .on : .off
+    menu.addItem(silentItem)
+
+    return menu
   }
 
   // MARK: - Actions
 
   @objc private func handleClick() {
     // Show menu
-    if let menu = button.menu {
-      let point = NSPoint(x: 0, y: bounds.height)
-      menu.popUp(positioning: nil, at: point, in: self)
-    }
+    let menu = makeMenu()
+    let point = NSPoint(x: 0, y: bounds.height)
+    menu.popUp(positioning: nil, at: point, in: self)
+  }
+
+  @objc private func toggleSendSilently() {
+    onToggleSendSilently?()
   }
 
   @objc private func openMediaPicker() {

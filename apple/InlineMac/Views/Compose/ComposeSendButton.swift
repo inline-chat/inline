@@ -6,7 +6,7 @@ class ComposeSendButton: NSView {
   var state = ComposeSendButtonState()
 
   var onSend: (() -> Void)?
-  var onSendWithoutNotification: (() -> Void)?
+  var onToggleSendSilently: (() -> Void)?
 
   // MARK: - Views
 
@@ -16,8 +16,8 @@ class ComposeSendButton: NSView {
       action: { [weak self] in
         self?.onSend?()
       },
-      sendWithoutNotification: { [weak self] in
-        self?.onSendWithoutNotification?()
+      toggleSendSilently: { [weak self] in
+        self?.onToggleSendSilently?()
       }
     )
     let hostingView = NSHostingView(rootView: sendButton)
@@ -29,9 +29,9 @@ class ComposeSendButton: NSView {
 
   // MARK: - Initialization
 
-  init(frame: NSRect = .zero, onSend: (() -> Void)? = nil, onSendWithoutNotification: (() -> Void)? = nil) {
+  init(frame: NSRect = .zero, onSend: (() -> Void)? = nil, onToggleSendSilently: (() -> Void)? = nil) {
     self.onSend = onSend
-    self.onSendWithoutNotification = onSendWithoutNotification
+    self.onToggleSendSilently = onToggleSendSilently
     super.init(frame: frame)
     setupView()
   }
@@ -67,12 +67,27 @@ class ComposeSendButton: NSView {
   // MARK: - Actions
 
   func updateCanSend(_ canSend: Bool) {
-    DispatchQueue.main.async {
+    if Thread.isMainThread {
       self.state.canSend = canSend
+    } else {
+      DispatchQueue.main.async {
+        self.state.canSend = canSend
+      }
+    }
+  }
+
+  func updateSendSilently(_ sendSilently: Bool) {
+    if Thread.isMainThread {
+      self.state.sendSilently = sendSilently
+    } else {
+      DispatchQueue.main.async {
+        self.state.sendSilently = sendSilently
+      }
     }
   }
 }
 
 class ComposeSendButtonState: ObservableObject {
   @Published var canSend = false
+  @Published var sendSilently = false
 }

@@ -82,6 +82,11 @@ class ComposeAppKit: NSView {
   private var isHandlingStickerInsertion = false
   private let stickerDetector = ComposeStickerDetector()
   private let rightButtonSpacing: CGFloat = 6
+  private var silentModeButtonWidthConstraint: NSLayoutConstraint?
+  private var silentModeToEmojiConstraint: NSLayoutConstraint?
+  private var silentModeButtonBottomSpacing: CGFloat {
+    buttonsBottomSpacing + (Theme.composeButtonSize - ComposeSilentModeButton.controlSize) / 2
+  }
 
   // MARK: Views
 
@@ -97,10 +102,19 @@ class ComposeAppKit: NSView {
       onSend: { [weak self] in
         self?.send()
       },
-      onSendWithoutNotification: { [weak self] in
-        self?.send(sendMode: .modeSilent)
+      onToggleSendSilently: { [weak self] in
+        self?.state.toggleSendSilently()
       }
     )
+    return view
+  }()
+
+  private lazy var silentModeButton: ComposeSilentModeButton = {
+    let view = ComposeSilentModeButton()
+    view.onClick = { [weak self] in
+      self?.state.setSendSilently(false)
+    }
+    view.isHidden = true
     return view
   }()
 
@@ -114,6 +128,12 @@ class ComposeAppKit: NSView {
   private lazy var menuButton: ComposeMenuButton = {
     let view = ComposeMenuButton()
     view.delegate = self
+    view.onToggleSendSilently = { [weak self] in
+      self?.state.toggleSendSilently()
+    }
+    view.isSendSilentlyEnabledProvider = { [weak self] in
+      self?.state.sendSilently ?? false
+    }
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -219,12 +239,14 @@ class ComposeAppKit: NSView {
 
     // to bottom
     addSubview(sendButton)
+    addSubview(silentModeButton)
     addSubview(emojiButton)
     addSubview(menuButton)
     addSubview(textEditor)
 
     setupReplyingView()
     setUpConstraints()
+    updateSilentModeUI()
     setupTextEditor()
     setupMentionCompletion()
   }
@@ -251,6 +273,12 @@ class ComposeAppKit: NSView {
     let attachmentsHorizontalInset = horizontalOuterSpacing + Theme.composeButtonSize + textViewHorizontalPadding
     attachments.setHorizontalContentInset(attachmentsHorizontalInset)
 
+    silentModeButtonWidthConstraint = silentModeButton.widthAnchor.constraint(equalToConstant: 0)
+    silentModeToEmojiConstraint = silentModeButton.trailingAnchor.constraint(
+      equalTo: emojiButton.leadingAnchor,
+      constant: 0
+    )
+
     NSLayoutConstraint.activate([
       heightConstraint,
 
@@ -265,6 +293,12 @@ class ComposeAppKit: NSView {
         equalTo: trailingAnchor, constant: -horizontalOuterSpacing
       ),
       sendButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -buttonsBottomSpacing),
+
+      // send silently indicator
+      silentModeButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -silentModeButtonBottomSpacing),
+      silentModeButtonWidthConstraint!,
+      silentModeButton.heightAnchor.constraint(equalToConstant: ComposeSilentModeButton.controlSize),
+      silentModeToEmojiConstraint!,
 
       // emoji
       emojiButton.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor, constant: -rightButtonSpacing),
@@ -285,7 +319,7 @@ class ComposeAppKit: NSView {
 
       // text editor
       textEditor.leadingAnchor.constraint(equalTo: menuButton.trailingAnchor),
-      textEditor.trailingAnchor.constraint(equalTo: emojiButton.leadingAnchor),
+      textEditor.trailingAnchor.constraint(equalTo: silentModeButton.leadingAnchor),
       textHeightConstraint,
       textEditor.bottomAnchor.constraint(equalTo: bottomAnchor),
 
@@ -341,6 +375,28 @@ class ComposeAppKit: NSView {
         updateSendButtonIfNeeded()
         focus()
       }.store(in: &cancellables)
+
+    state.sendSilentlyPublisher
+      .sink { [weak self] isEnabled in
+        self?.updateSilentModeUI()
+        ToastCenter.shared.showInfo(
+          isEnabled ? "Send silently enabled" : "Send silently disabled"
+        )
+      }.store(in: &cancellables)
+  }
+
+  private func updateSilentModeUI() {
+    let isEnabled = state.sendSilently
+    sendButton.updateSendSilently(isEnabled)
+    silentModeButton.isHidden = !isEnabled
+    silentModeButtonWidthConstraint?.constant = isEnabled ? ComposeSilentModeButton.controlSize : 0
+    silentModeToEmojiConstraint?.constant = isEnabled ? -rightButtonSpacing : 0
+
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = 0.16
+      context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+      self.layoutSubtreeIfNeeded()
+    }
   }
 
   private func setupTextEditor() {
@@ -868,6 +924,7 @@ class ComposeAppKit: NSView {
     } else {
       rawText
     }
+    let effectiveSendMode = sendMode ?? (state.sendSilently ? .modeSilent : nil)
 
     func enqueueAttachments(replyToMessageId: Int64?) {
       for (index, (_, attachment)) in attachmentItemsSnapshot.enumerated() {
@@ -883,7 +940,7 @@ class ComposeAppKit: NSView {
               replyToMsgId: isFirst ? replyToMessageId : nil,
               isSticker: nil,
               entities: isFirst ? entities : nil,
-              sendMode: sendMode
+              sendMode: effectiveSendMode
             )
           )
         )
@@ -931,7 +988,7 @@ class ComposeAppKit: NSView {
               replyToMsgId: nil,
               isSticker: nil,
               entities: entities,
-              sendMode: sendMode
+              sendMode: effectiveSendMode
             )
           )
         }
@@ -968,7 +1025,7 @@ class ComposeAppKit: NSView {
             replyToMsgId: replyToMsgId,
             isSticker: nil,
             entities: entities,
-            sendMode: sendMode
+            sendMode: effectiveSendMode
           )
         )
       }
@@ -1028,6 +1085,7 @@ class ComposeAppKit: NSView {
 
   func sendSticker(_ image: NSImage) {
     let replyToMsgId = state.replyingToMsgId
+    let sendMode: MessageSendMode? = state.sendSilently ? .modeSilent : nil
 
     Task.detached(priority: .userInitiated) { [weak self] in
       guard let self else { return }
@@ -1044,7 +1102,8 @@ class ComposeAppKit: NSView {
               mediaItems: [mediaItem],
               replyToMsgId: replyToMsgId,
               isSticker: true,
-              entities: nil
+              entities: nil,
+              sendMode: sendMode
             )
           )
         )
