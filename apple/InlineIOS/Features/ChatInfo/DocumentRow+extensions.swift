@@ -117,91 +117,11 @@ extension DocumentRow {
   // MARK: - Computed Properties
 
   var fileTypeIconName: String {
-    if let mimeType = document.mimeType {
-      if mimeType.hasPrefix("image/") {
-        return "photo.fill"
-      } else if mimeType.hasPrefix("video/") {
-        return "video.fill"
-      } else if mimeType.hasPrefix("audio/") {
-        return "music.note"
-      } else if mimeType == "application/pdf" {
-        return "text.document.fill"
-      } else if mimeType == "application/zip" || mimeType == "application/x-rar-compressed" {
-        return "archivebox.fill"
-      }
-    }
-
-    if let fileName = document.fileName,
-       let fileExtension = fileName.components(separatedBy: ".").last?.lowercased()
-    {
-      return iconName(for: fileExtension)
-    }
-
-    return "document.fill"
-  }
-
-  func iconName(for fileExtension: String) -> String {
-    switch fileExtension {
-      // Documents
-      case "pdf": "doc.richtext.fill"
-      case "doc", "docx": "text.document.fill"
-      case "rtf", "txt": "text.alignleft"
-      case "pages": "text.document.fill"
-      // Spreadsheets
-      case "xls", "xlsx": "tablecells.fill"
-      case "csv": "tablecells"
-      case "numbers": "tablecells.fill"
-      // Presentations
-      case "ppt", "pptx": "rectangle.on.rectangle.fill"
-      case "key", "keynote": "rectangle.on.rectangle.fill"
-      // Images
-      case "jpg", "jpeg", "png", "gif", "heic", "heif": "photo.fill"
-      case "svg": "photo.artframe"
-      case "bmp", "tiff", "tif": "photo.fill"
-      case "webp": "photo.fill"
-      case "ico": "app.fill"
-      case "psd": "photo.stack.fill"
-      case "ai", "eps": "paintbrush.pointed.fill"
-      // Videos
-      case "mp4", "mov", "avi", "mkv", "webm": "video.fill"
-      case "m4v", "3gp", "flv", "wmv": "video.fill"
-      case "mpg", "mpeg", "m2v": "video.fill"
-      // Audio
-      case "mp3", "wav", "aac", "m4a": "music.note"
-      case "flac", "ogg", "wma": "music.note"
-      case "aiff", "au": "music.note"
-      // Archives
-      case "zip", "rar", "7z", "tar": "archivebox.fill"
-      case "gz", "bz2", "xz": "archivebox.fill"
-      case "dmg", "iso": "opticaldiscdrive.fill"
-      // Code & Development
-      case "swift": "swift"
-      case "js", "ts", "jsx", "tsx": "curlybraces"
-      case "html", "htm": "globe"
-      case "css", "scss", "sass": "paintbrush.fill"
-      case "json", "xml", "yaml", "yml": "doc.text.fill"
-      case "py", "java", "cpp", "c", "h": "terminal.fill"
-      case "php", "rb", "go", "rs": "terminal.fill"
-      case "sql": "cylinder.fill"
-      case "sh", "bash", "zsh": "terminal"
-      // Fonts
-      case "ttf", "otf", "woff", "woff2": "textformat"
-      // 3D & CAD
-      case "obj", "fbx", "dae", "3ds": "cube.fill"
-      case "dwg", "dxf": "ruler.fill"
-      // Ebooks
-      case "epub", "mobi", "azw": "book.fill"
-      // Executable
-      case "app", "exe", "msi": "app.badge.fill"
-      case "deb", "rpm": "shippingbox.fill"
-      // Configuration
-      case "plist", "conf", "cfg", "ini": "gearshape.fill"
-      // Logs
-      case "log": "doc.text"
-      // Certificates & Keys
-      case "cer", "crt", "pem", "key": "lock.fill"
-      default: "document.fill"
-    }
+    DocumentIconResolver.symbolName(
+      mimeType: document.mimeType,
+      fileName: document.fileName,
+      style: .filled
+    )
   }
 
   var fileIconName: String {
