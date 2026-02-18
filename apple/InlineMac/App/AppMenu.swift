@@ -1,6 +1,9 @@
 import AppKit
 import InlineKit
 import Translation
+#if SPARKLE
+import Combine
+#endif
 
 extension Notification.Name {
   static let toggleSidebar = Notification.Name("toggleSidebar")
@@ -16,6 +19,11 @@ final class AppMenu: NSObject {
   static let shared = AppMenu()
   private let mainMenu = NSMenu()
   private var dependencies: AppDependencies?
+#if SPARKLE
+  private weak var updateMenuItem: NSMenuItem?
+  private var updateMenuItemEnabled = true
+  private var updateStatusCancellable: AnyCancellable?
+#endif
 
   override private init() {
     super.init()
@@ -50,11 +58,13 @@ final class AppMenu: NSObject {
 #if SPARKLE
     let checkForUpdatesMenuItem = NSMenuItem(
       title: "Check for Updates…",
-      action: #selector(AppDelegate.checkForUpdates(_:)),
+      action: #selector(handleUpdateMenuAction(_:)),
       keyEquivalent: ""
     )
-    checkForUpdatesMenuItem.target = NSApp.delegate
+    checkForUpdatesMenuItem.target = self
     appMenu.addItem(checkForUpdatesMenuItem)
+    updateMenuItem = checkForUpdatesMenuItem
+    bindUpdateMenuItemState()
 #endif
 
     appMenu.addItem(NSMenuItem.separator())
@@ -554,11 +564,43 @@ final class AppMenu: NSObject {
   @objc private func nextChat(_ sender: Any?) {
     NotificationCenter.default.post(name: .nextChat, object: nil)
   }
+
+#if SPARKLE
+  @objc private func handleUpdateMenuAction(_ sender: Any?) {
+    guard let dependencies else { return }
+    if dependencies.updateInstallState.status.isReadyToInstall {
+      dependencies.updateInstallState.install()
+      return
+    }
+    (NSApp.delegate as? AppDelegate)?.checkForUpdates(sender)
+  }
+
+  private func bindUpdateMenuItemState() {
+    guard let dependencies else { return }
+    updateStatusCancellable = dependencies.updateInstallState.$status
+      .receive(on: RunLoop.main)
+      .sink { [weak self] status in
+        self?.applyUpdateMenuItemState(status)
+      }
+    applyUpdateMenuItemState(dependencies.updateInstallState.status)
+  }
+
+  private func applyUpdateMenuItemState(_ status: UpdateStatus) {
+    updateMenuItem?.title = status.menuTitle
+    updateMenuItemEnabled = status.allowsManualAction
+  }
+#endif
 }
 
 extension AppMenu: NSMenuItemValidation {
   func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
     guard let dependencies else { return false }
+
+#if SPARKLE
+    if menuItem == updateMenuItem {
+      return updateMenuItemEnabled
+    }
+#endif
 
     if menuItem.action == #selector(prevChat(_:)) || menuItem.action == #selector(nextChat(_:)) {
       if dependencies.nav2 != nil {

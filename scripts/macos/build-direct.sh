@@ -14,6 +14,7 @@ SPARKLE_VERSION=${SPARKLE_VERSION:-2.7.3}
 SCHEME=${SCHEME:-"Inline (macOS)"}
 CHANNEL=${CHANNEL:-stable}
 APPCAST_URL=${APPCAST_URL:-"https://public-assets.inline.chat/mac/${CHANNEL}/appcast.xml"}
+SPARKLE_SCHEDULED_CHECK_INTERVAL=${SPARKLE_SCHEDULED_CHECK_INTERVAL:-3600}
 SPARKLE_DIR=${SPARKLE_DIR:-"${ROOT_DIR}/.action/sparkle"}
 DERIVED_DATA=${DERIVED_DATA:-"${ROOT_DIR}/build/InlineMacDirect"}
 OUTPUT_DIR=${OUTPUT_DIR:-"${ROOT_DIR}/build/macos-direct"}
@@ -125,11 +126,23 @@ plist_set_bool() {
   fi
 }
 
+plist_set_integer() {
+  local key="$1"
+  local value="$2"
+
+  if /usr/libexec/PlistBuddy -c "Print :${key}" "${PLIST_PATH}" >/dev/null 2>&1; then
+    /usr/libexec/PlistBuddy -c "Set :${key} ${value}" "${PLIST_PATH}"
+  else
+    /usr/libexec/PlistBuddy -c "Add :${key} integer ${value}" "${PLIST_PATH}"
+  fi
+}
+
 plist_set_string "CFBundleVersion" "${BUILD_NUMBER}"
 plist_set_string "InlineCommit" "${INLINE_COMMIT}"
 plist_set_string "SUPublicEDKey" "${SPARKLE_PUBLIC_KEY}"
 plist_set_string "SUFeedURL" "${APPCAST_URL}"
 plist_set_bool "SUEnableAutomaticChecks" "true"
+plist_set_integer "SUScheduledCheckInterval" "${SPARKLE_SCHEDULED_CHECK_INTERVAL}"
 
 FRAMEWORKS_DIR="${APP_PATH}/Contents/Frameworks"
 mkdir -p "${FRAMEWORKS_DIR}"

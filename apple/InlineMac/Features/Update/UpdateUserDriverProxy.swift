@@ -5,6 +5,10 @@ import Sparkle
 final class UpdateUserDriverProxy: NSObject, SPUUserDriver {
   private let baseDriver: SPUStandardUserDriver
   private let installState: UpdateInstallState
+  private var latestUpdateVersion: String?
+  private var latestUpdateBuild: String?
+  private var downloadExpectedLength: Int64?
+  private var downloadReceivedLength: Int64 = 0
 
   init(installState: UpdateInstallState, baseDriver: SPUStandardUserDriver) {
     self.installState = installState
@@ -18,12 +22,23 @@ final class UpdateUserDriverProxy: NSObject, SPUUserDriver {
   }
 
   func showUserInitiatedUpdateCheck(cancellation: @escaping () -> Void) {
+    Task { @MainActor in
+      self.installState.setChecking()
+    }
     baseDriver.showUserInitiatedUpdateCheck(cancellation: cancellation)
   }
 
   func showUpdateFound(with appcastItem: SUAppcastItem,
                        state: SPUUserUpdateState,
                        reply: @escaping @Sendable (SPUUserUpdateChoice) -> Void) {
+    latestUpdateVersion = appcastItem.displayVersionString
+    latestUpdateBuild = appcastItem.versionString
+    Task { @MainActor in
+      self.installState.setUpdateAvailable(
+        version: self.latestUpdateVersion ?? "Unknown",
+        build: self.latestUpdateBuild
+      )
+    }
     baseDriver.showUpdateFound(with: appcastItem, state: state, reply: reply)
   }
 
@@ -36,26 +51,54 @@ final class UpdateUserDriverProxy: NSObject, SPUUserDriver {
   }
 
   func showUpdateNotFoundWithError(_ error: any Error, acknowledgement: @escaping () -> Void) {
+    Task { @MainActor in
+      self.installState.setUpToDate()
+    }
     baseDriver.showUpdateNotFoundWithError(error, acknowledgement: acknowledgement)
   }
 
   func showUpdaterError(_ error: any Error, acknowledgement: @escaping () -> Void) {
+    Task { @MainActor in
+      self.installState.setError(message: error.localizedDescription)
+    }
     baseDriver.showUpdaterError(error, acknowledgement: acknowledgement)
   }
 
   func showDownloadInitiated(cancellation: @escaping () -> Void) {
+    downloadExpectedLength = nil
+    downloadReceivedLength = 0
+    Task { @MainActor in
+      self.installState.setDownloading(receivedBytes: 0, expectedBytes: nil)
+    }
     baseDriver.showDownloadInitiated(cancellation: cancellation)
   }
 
   func showDownloadDidReceiveExpectedContentLength(_ expectedContentLength: UInt64) {
+    downloadExpectedLength = Int64(expectedContentLength)
+    Task { @MainActor in
+      self.installState.setDownloading(
+        receivedBytes: self.downloadReceivedLength,
+        expectedBytes: self.downloadExpectedLength
+      )
+    }
     baseDriver.showDownloadDidReceiveExpectedContentLength(expectedContentLength)
   }
 
   func showDownloadDidReceiveData(ofLength length: UInt64) {
+    downloadReceivedLength += Int64(length)
+    Task { @MainActor in
+      self.installState.setDownloading(
+        receivedBytes: self.downloadReceivedLength,
+        expectedBytes: self.downloadExpectedLength
+      )
+    }
     baseDriver.showDownloadDidReceiveData(ofLength: length)
   }
 
   func showDownloadDidStartExtractingUpdate() {
+    Task { @MainActor in
+      self.installState.setExtracting()
+    }
     baseDriver.showDownloadDidStartExtractingUpdate()
   }
 
@@ -69,13 +112,17 @@ final class UpdateUserDriverProxy: NSObject, SPUUserDriver {
       guard !didReply else { return }
       didReply = true
       Task { @MainActor in
-        self.installState.clear()
+        if choice == .install {
+          self.installState.setInstalling()
+        } else {
+          self.installState.resetToIdle()
+        }
       }
       reply(choice)
     }
 
     Task { @MainActor in
-      self.installState.setReady(install: {
+      self.installState.setReady(version: self.latestUpdateVersion, build: self.latestUpdateBuild, install: {
         wrappedReply(.install)
       })
     }
@@ -86,7 +133,7 @@ final class UpdateUserDriverProxy: NSObject, SPUUserDriver {
   func showInstallingUpdate(withApplicationTerminated applicationTerminated: Bool,
                             retryTerminatingApplication: @escaping () -> Void) {
     Task { @MainActor in
-      self.installState.clear()
+      self.installState.setInstalling()
     }
     baseDriver.showInstallingUpdate(
       withApplicationTerminated: applicationTerminated,
@@ -96,7 +143,7 @@ final class UpdateUserDriverProxy: NSObject, SPUUserDriver {
 
   func showUpdateInstalledAndRelaunched(_ relaunched: Bool, acknowledgement: @escaping () -> Void) {
     Task { @MainActor in
-      self.installState.clear()
+      self.installState.resetToIdle()
     }
     baseDriver.showUpdateInstalledAndRelaunched(relaunched, acknowledgement: acknowledgement)
   }
@@ -107,7 +154,7 @@ final class UpdateUserDriverProxy: NSObject, SPUUserDriver {
 
   func dismissUpdateInstallation() {
     Task { @MainActor in
-      self.installState.clear()
+      self.installState.resetToIdle()
     }
     baseDriver.dismissUpdateInstallation()
   }
