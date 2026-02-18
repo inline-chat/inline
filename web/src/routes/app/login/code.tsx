@@ -23,6 +23,7 @@ function RouteComponent() {
   const search = Route.useSearch() as {
     method?: string
     email?: string
+    challengeToken?: string
     phone?: string
     phoneNumber?: string
   }
@@ -36,17 +37,19 @@ function RouteComponent() {
           : null
 
     const email = method === "email" ? search.email?.trim() : undefined
+    const challengeToken = method === "email" ? search.challengeToken?.trim() : undefined
     const phoneNumber =
       method === "phone" ? (search.phoneNumber ?? search.phone)?.trim() : undefined
 
     return {
       method,
       email,
+      challengeToken,
       phoneNumber,
       contact: email ?? phoneNumber ?? "",
       isMissing: !method || !(email ?? phoneNumber),
     }
-  }, [search.email, search.method, search.phone, search.phoneNumber])
+  }, [search.challengeToken, search.email, search.method, search.phone, search.phoneNumber])
 
   const canSubmit = code.trim().length > 0 && !details.isMissing
 
@@ -78,7 +81,7 @@ function RouteComponent() {
     try {
       const result =
         details.method === "email" && details.email
-          ? await ApiClient.verifyEmailCode(trimmedCode, details.email)
+          ? await ApiClient.verifyEmailCode(trimmedCode, details.email, details.challengeToken)
           : details.phoneNumber
             ? await ApiClient.verifySmsCode(trimmedCode, details.phoneNumber)
             : null
@@ -108,7 +111,16 @@ function RouteComponent() {
     setErrorMessage(null)
     try {
       if (details.method === "email" && details.email) {
-        await ApiClient.sendEmailCode(details.email)
+        const response = await ApiClient.sendEmailCode(details.email)
+        await navigate({
+          to: "/app/login/code",
+          replace: true,
+          search: {
+            method: "email",
+            email: details.email,
+            challengeToken: response.challengeToken,
+          },
+        })
       } else if (details.phoneNumber) {
         await ApiClient.sendSmsCode(details.phoneNumber)
       } else {

@@ -6,6 +6,7 @@ import SwiftUI
 
 struct Code: View {
   var email: String
+  var challengeToken: String?
   var placeHolder: String = NSLocalizedString("xxxxxx", comment: "Code input placeholder")
   let characterLimit = 6
 
@@ -26,8 +27,9 @@ struct Code: View {
   @Environment(\.auth) private var auth
   @Environment(\.realtime) private var realtime
 
-  init(email: String) {
+  init(email: String, challengeToken: String? = nil) {
     self.email = email
+    self.challengeToken = challengeToken
   }
 
   private var focusColor: Color {
@@ -91,7 +93,7 @@ extension Code {
     Task {
       do {
         formState.startLoading()
-        let result = try await api.verifyCode(code: code, email: email)
+        let result = try await api.verifyCode(code: code, email: email, challengeToken: challengeToken)
 
         await auth.saveCredentials(token: result.token, userId: result.userId)
 

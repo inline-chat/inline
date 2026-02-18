@@ -234,10 +234,14 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     )
   }
 
-  public func verifyCode(code: String, email: String) async throws -> VerifyCode {
+  public func verifyCode(code: String, email: String, challengeToken: String? = nil) async throws -> VerifyCode {
     var queryItems: [URLQueryItem] = [
       URLQueryItem(name: "code", value: code), URLQueryItem(name: "email", value: email),
     ]
+
+    if let challengeToken, !challengeToken.isEmpty {
+      queryItems.append(URLQueryItem(name: "challengeToken", value: challengeToken))
+    }
 
     if let sessionInfo = await SessionInfo.get() {
       queryItems.append(URLQueryItem(name: "clientType", value: sessionInfo.clientType))
@@ -980,6 +984,7 @@ public struct VerifyCode: Codable, Sendable {
 
 public struct SendCode: Codable, Sendable {
   public let existingUser: Bool?
+  public let challengeToken: String?
 }
 
 public struct CreateSpace: Codable, Sendable {

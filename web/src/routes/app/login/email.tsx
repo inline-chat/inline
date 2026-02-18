@@ -44,10 +44,14 @@ function RouteComponent() {
     setIsLoading(true)
     setErrorMessage(null)
     try {
-      await ApiClient.sendEmailCode(trimmedEmail)
+      const result = await ApiClient.sendEmailCode(trimmedEmail)
       await navigate({
         to: "/app/login/code",
-        search: { method: "email", email: trimmedEmail },
+        search: {
+          method: "email",
+          email: trimmedEmail,
+          challengeToken: result.challengeToken,
+        },
       })
     } catch (error) {
       setErrorMessage(formatError(error))

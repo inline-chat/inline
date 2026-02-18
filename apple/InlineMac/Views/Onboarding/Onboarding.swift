@@ -98,6 +98,7 @@ class OnboardingViewModel: ObservableObject {
 
   // Email entered in the onboarding
   @Published var email: String = ""
+  @Published var emailChallengeToken: String? = nil
   @Published var phoneNumber: String = ""
 
   // nil = server provided no data, true = login, false = sign up

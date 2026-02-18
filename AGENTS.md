@@ -47,7 +47,13 @@
 - When working on New UI features, do not modify previous UI files (legacy sidebar/old UI). Keep changes scoped to new UI components.
 - For larger tasks, write a comprehensive plan first; if there are multiple design choices or any room for ambiguity, ask clarifying questions; when implementing a large plan (more than a few tasks) save the plan in a markdown file in .agent-docs/ and update it after each task before starting next one.
 - When adding markdown files in `.agent-docs/`, prefix the filename with the date in `YYYY-MM-DD-title-kebab-case.md` format (example: `2026-01-02-title-kebab-case.md`).
+- When finalizing, reviewing, or pushing a feature, explicitly point out any clear security issue or likely attack surface risk.
 - After you're done, write a short note on whether it's ready for production or anything is of concern for further review/tests.
+
+## Reminders
+
+- If any feature needs a deferred follow-up (for example security hardening or legacy removal), add a dated reminder bullet in this section instead of leaving scattered TODO comments.
+- Security (due by 2026-05-18): remove legacy email OTP verify fallback without `challengeToken` in `server/src/modules/auth/emailLoginChallenges.ts` and require challenge-bound verification only.
 
 ## Common Commands
 

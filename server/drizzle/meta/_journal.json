@@ -414,6 +414,27 @@
       "when": 1771015559074,
       "tag": "0058_add_dialog_notification_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1771341025574,
+      "tag": "0059_login-codes-hash",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1771425475407,
+      "tag": "0060_login-codes-integrity-check",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1771426802908,
+      "tag": "0061_login-challenges",
+      "breakpoints": true
     }
   ]
 }

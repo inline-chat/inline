@@ -13,6 +13,7 @@ export const LoginPage = () => {
   const [showEmailCode, setShowEmailCode] = useState(false)
   const [email, setEmail] = useState("")
   const [code, setCode] = useState("")
+  const [challengeToken, setChallengeToken] = useState<string | null>(null)
   const [password, setPassword] = useState("")
   const [totp, setTotp] = useState("")
   const [stage, setStage] = useState<"email" | "code">("email")
@@ -28,12 +29,13 @@ export const LoginPage = () => {
   const sendCode = async () => {
     setIsBusy(true)
     setMessage(null)
-    const data = await apiRequest("/admin/auth/send-email-code", {
+    const data = await apiRequest<{ challengeToken?: string }>("/admin/auth/send-email-code", {
       method: "POST",
       body: JSON.stringify({ email }),
     })
 
     if (data.ok) {
+      setChallengeToken(typeof data.challengeToken === "string" ? data.challengeToken : null)
       setStage("code")
       setMessage("If this email is allowed, a code was sent.")
     } else {
@@ -47,7 +49,7 @@ export const LoginPage = () => {
     setMessage(null)
     const data = await apiRequest("/admin/auth/verify-email-code", {
       method: "POST",
-      body: JSON.stringify({ email, code }),
+      body: JSON.stringify({ email, code, challengeToken }),
     })
 
     if (data.ok) {
@@ -153,7 +155,13 @@ export const LoginPage = () => {
                       <Button onClick={verifyCode} disabled={!code || isBusy}>
                         {isBusy ? "Verifying..." : "Verify"}
                       </Button>
-                      <Button variant="ghost" onClick={() => setStage("email")}>
+                      <Button
+                        variant="ghost"
+                        onClick={() => {
+                          setStage("email")
+                          setChallengeToken(null)
+                        }}
+                      >
                         Use different email
                       </Button>
                     </div>

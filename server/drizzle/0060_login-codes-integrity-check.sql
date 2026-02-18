@@ -1,0 +1,1 @@
+ALTER TABLE "login_codes" ADD CONSTRAINT "login_codes_code_or_hash_present" CHECK ("login_codes"."code" is not null or "login_codes"."code_hash" is not null);

@@ -70,10 +70,12 @@ struct OnboardingEnterEmail: View {
     Task {
       do {
         onboardingViewModel.phoneNumber = ""
+        onboardingViewModel.emailChallengeToken = nil
         
         let data = try await ApiClient.shared.sendCode(email: onboardingViewModel.email)
 
         onboardingViewModel.existingUser = data.existingUser
+        onboardingViewModel.emailChallengeToken = data.challengeToken
         onboardingViewModel.navigate(to: .enterCode)
       } catch {
         formState.failed(error: "Failed: \(error.localizedDescription)")

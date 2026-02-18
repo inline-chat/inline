@@ -3,7 +3,7 @@ import SwiftUI
 enum OnboardingStep: Identifiable, Hashable {
   case welcome
   case email(prevEmail: String? = nil)
-  case code(email: String)
+  case code(email: String, challengeToken: String? = nil)
   case profile
   case main
   case phoneNumber(prevPhoneNumber: String? = nil)
@@ -13,7 +13,7 @@ enum OnboardingStep: Identifiable, Hashable {
     switch self {
       case .welcome: "welcome"
       case let .email(prevEmail): "email-\(prevEmail ?? "")"
-      case let .code(email): "code-\(email)"
+      case let .code(email, challengeToken): "code-\(email)-\(challengeToken ?? "")"
       case .profile: "profile"
       case .main: "main"
       case let .phoneNumber(prevPhoneNumber): "phoneNumber-\(prevPhoneNumber ?? "")"
