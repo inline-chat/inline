@@ -338,9 +338,45 @@ class UIMessageView: UIView {
   }
 
   func handleLinkTap() {
-    linkTapHandler = { url in
-      UIApplication.shared.open(url)
+    linkTapHandler = { [weak self] url in
+      self?.presentLinkActionSheet(for: url)
     }
+  }
+
+  private func presentLinkActionSheet(for url: URL) {
+    guard let viewController = findViewController() else {
+      UIApplication.shared.open(url)
+      return
+    }
+
+    let alert = UIAlertController(
+      title: nil,
+      message: url.absoluteString,
+      preferredStyle: .actionSheet
+    )
+
+    alert.addAction(UIAlertAction(title: "Copy Link", style: .default) { _ in
+      UIPasteboard.general.string = url.absoluteString
+      ToastManager.shared.showToast(
+        "Copied link",
+        type: .success,
+        systemImage: "doc.on.doc"
+      )
+    })
+
+    alert.addAction(UIAlertAction(title: "Open Link", style: .default) { _ in
+      UIApplication.shared.open(url)
+    })
+
+    alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+    if let popover = alert.popoverPresentationController {
+      popover.sourceView = messageLabel
+      popover.sourceRect = messageLabel.bounds
+      popover.permittedArrowDirections = []
+    }
+
+    viewController.present(alert, animated: true)
   }
 
   func setupViews() {
