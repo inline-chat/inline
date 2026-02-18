@@ -6,6 +6,7 @@ import Sparkle
 
 final class UpdateController: NSObject {
   private let updater: SPUUpdater
+  private let installState: UpdateInstallState
   private let updateDelegate: UpdateDelegate
   private let userDriver: UpdateUserDriverProxy
   private var settingsCancellable: AnyCancellable?
@@ -13,6 +14,7 @@ final class UpdateController: NSObject {
   private let log = Log.scoped("UpdateController")
 
   init(installState: UpdateInstallState) {
+    self.installState = installState
     updateDelegate = UpdateDelegate()
     let standardDriver = SPUStandardUserDriver(hostBundle: .main, delegate: nil)
     userDriver = UpdateUserDriverProxy(installState: installState, baseDriver: standardDriver)
@@ -48,6 +50,7 @@ final class UpdateController: NSObject {
   @objc func checkForUpdates() {
     log.info("User initiated update check (started: \(didStart))")
     startIfNeeded()
+    installState.setChecking()
     updater.checkForUpdates()
   }
 

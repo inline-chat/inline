@@ -129,6 +129,9 @@ fi
 if ! /usr/libexec/PlistBuddy -c "Print :SUFeedURL" "${APP_PATH}/Contents/Info.plist" >/dev/null 2>&1; then
   die "Missing SUFeedURL in Info.plist"
 fi
+if ! /usr/libexec/PlistBuddy -c "Print :SUScheduledCheckInterval" "${APP_PATH}/Contents/Info.plist" >/dev/null 2>&1; then
+  die "Missing SUScheduledCheckInterval in Info.plist"
+fi
 
 info "Check app architecture"
 archs=$(python3 - "${APP_PATH}/Contents/MacOS/Inline" <<'PY'

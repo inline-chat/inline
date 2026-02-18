@@ -82,6 +82,7 @@ Choose one of the two auth methods below.
 - `SCHEME` — Xcode scheme for the macOS app (default: `Inline (macOS)`)
 - `CHANNEL` — update channel (`stable` or `beta`, default: `stable`)
 - `APPCAST_URL` — override appcast URL (defaults to `https://public-assets.inline.chat/mac/<channel>/appcast.xml`)
+- `SPARKLE_SCHEDULED_CHECK_INTERVAL` — Sparkle update poll interval in seconds (default: `3600`, i.e. 1 hour)
 - `SPARKLE_DIR` — Sparkle download cache (default: `.action/sparkle`)
 - `DERIVED_DATA` — Xcode derived data path (default: `build/InlineMacDirect`)
 - `OUTPUT_DIR` — DMG output directory (default: `build/macos-direct`)
