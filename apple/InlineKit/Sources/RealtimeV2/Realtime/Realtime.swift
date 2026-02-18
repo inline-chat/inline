@@ -39,7 +39,9 @@ public actor RealtimeV2 {
 
   // Connection state channel for cross-task consumption and the latest cached state
   private var connectionStateContinuations: [UUID: AsyncStream<RealtimeConnectionState>.Continuation] = [:]
+  private var transportConnectionState: RealtimeConnectionState = .connecting
   private var currentConnectionState: RealtimeConnectionState = .connecting
+  private var syncActivityInProgress = false
   private var lastSnapshotState: ConnectionState = .stopped
   private var didNotifyConnectionInitFailure = false
 
@@ -101,6 +103,9 @@ public actor RealtimeV2 {
 
   /// Start core components, register listeners and start run loops.
   private func start() async {
+    await sync.setSyncActivityListener { [weak self] isActive in
+      await self?.syncActivityChanged(isActive)
+    }
     stateObject.start(realtime: self)
     await startListeners()
 
@@ -129,7 +134,7 @@ public actor RealtimeV2 {
         guard !Task.isCancelled else { return }
 
         let mapped = self.mapConnectionState(snapshot.state)
-        await self.updateConnectionState(mapped)
+        await self.updateTransportConnectionState(mapped)
 
         if snapshot.state != .open && self.lastSnapshotState == .open {
           await self.transactions.connectionLost()
@@ -184,8 +189,8 @@ public actor RealtimeV2 {
     Task.detached {
       self.log.trace("Starting transactions listener")
       for await _ in await self.transactions.queueStream {
-        guard await self.currentConnectionState == .connected else {
-          self.log.trace("Skipping transaction queue stream as connection is not connected")
+        guard await self.canExecuteTransactions() else {
+          self.log.trace("Skipping transaction queue stream as connection is not ready for transactions")
           continue
         }
 
@@ -198,7 +203,7 @@ public actor RealtimeV2 {
   }
 
   private func startTransport() async {
-    await updateConnectionState(.connecting)
+    await updateTransportConnectionState(.connecting)
     await connectionManager.start()
     await connectionManager.connectNow()
   }
@@ -443,13 +448,41 @@ public actor RealtimeV2 {
     }
   }
 
-  private func updateConnectionState(_ newState: RealtimeConnectionState) async {
-    guard newState != currentConnectionState else { return }
-    currentConnectionState = newState
-    for continuation in connectionStateContinuations.values {
-      continuation.yield(newState)
-    }
+  private func updateTransportConnectionState(_ newState: RealtimeConnectionState) async {
+    guard newState != transportConnectionState else { return }
+    transportConnectionState = newState
     Task { await sync.connectionStateChanged(state: newState) }
+    await publishConnectionStateIfNeeded()
+  }
+
+  private func syncActivityChanged(_ isActive: Bool) async {
+    guard isActive != syncActivityInProgress else { return }
+    syncActivityInProgress = isActive
+    await publishConnectionStateIfNeeded()
+  }
+
+  private func publishConnectionStateIfNeeded() async {
+    let nextState: RealtimeConnectionState
+    if transportConnectionState == .connected && syncActivityInProgress {
+      nextState = .updating
+    } else {
+      nextState = transportConnectionState
+    }
+
+    guard nextState != currentConnectionState else { return }
+    currentConnectionState = nextState
+    for continuation in connectionStateContinuations.values {
+      continuation.yield(nextState)
+    }
+  }
+
+  private func canExecuteTransactions() -> Bool {
+    switch currentConnectionState {
+    case .connected, .updating:
+      true
+    case .connecting:
+      false
+    }
   }
 
   private func addConnectionStateContinuation(

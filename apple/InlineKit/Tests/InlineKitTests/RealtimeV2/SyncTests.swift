@@ -203,6 +203,133 @@ class SyncTests {
     #expect(applied.count == 1)
   }
 
+  @Test("sync activity callback toggles during full sync fetch")
+  func testSyncActivityCallbackTogglesDuringFullSyncFetch() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    let response = makeGetUpdatesResult(
+      seq: 1,
+      date: 100,
+      updates: [],
+      final: true,
+      resultType: .empty
+    )
+    let client = FakeProtocolClient(responses: [response], gateFirstCall: true)
+    let config = SyncConfig(enableMessageUpdates: true, lastSyncSafetyGapSeconds: 15)
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+    let activity = SyncActivityRecorder()
+    await sync.setSyncActivityListener { isActive in
+      await activity.record(isActive)
+    }
+
+    var payload = InlineProtocol.UpdateChatHasNewUpdates()
+    payload.peerID = makeChatPeer(chatId: 1)
+    payload.updateSeq = 1
+
+    var update = InlineProtocol.Update()
+    update.update = .chatHasNewUpdates(payload)
+
+    await sync.process(updates: [update])
+    await client.waitForFirstCallStarted()
+
+    let didEnterUpdating = await waitForCondition(timeout: .seconds(1)) {
+      await activity.contains(true)
+    }
+    #expect(didEnterUpdating)
+
+    await client.releaseFirstCall()
+    let didLeaveUpdating = await waitForCondition(timeout: .seconds(1)) {
+      await activity.sequence == [true, false]
+    }
+    #expect(didLeaveUpdating)
+  }
+
+  @Test("sync activity callback stays idle when full sync mode is disabled")
+  func testSyncActivityCallbackStaysIdleWhenFullSyncDisabled() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    let response = makeGetUpdatesResult(
+      seq: 1,
+      date: 100,
+      updates: [],
+      final: true,
+      resultType: .empty
+    )
+    let client = FakeProtocolClient(responses: [response], gateFirstCall: true)
+    let config = SyncConfig(enableMessageUpdates: false, lastSyncSafetyGapSeconds: 15)
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+    let activity = SyncActivityRecorder()
+    await sync.setSyncActivityListener { isActive in
+      await activity.record(isActive)
+    }
+
+    var payload = InlineProtocol.UpdateChatHasNewUpdates()
+    payload.peerID = makeChatPeer(chatId: 1)
+    payload.updateSeq = 1
+
+    var update = InlineProtocol.Update()
+    update.update = .chatHasNewUpdates(payload)
+
+    await sync.process(updates: [update])
+    await client.waitForFirstCallStarted()
+
+    let didEmitWhileFetching = await waitForCondition(timeout: .milliseconds(200)) {
+      await !activity.sequence.isEmpty
+    }
+    #expect(didEmitWhileFetching == false)
+
+    await client.releaseFirstCall()
+    let didEmitAfterFetch = await waitForCondition(timeout: .milliseconds(200)) {
+      await !activity.sequence.isEmpty
+    }
+    #expect(didEmitAfterFetch == false)
+  }
+
+  @Test("sync activity callback reacts to config changes while fetch is in flight")
+  func testSyncActivityCallbackReactsToConfigChangesDuringFetch() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    let response = makeGetUpdatesResult(
+      seq: 1,
+      date: 100,
+      updates: [],
+      final: true,
+      resultType: .empty
+    )
+    let client = FakeProtocolClient(responses: [response], gateFirstCall: true)
+    let config = SyncConfig(enableMessageUpdates: true, lastSyncSafetyGapSeconds: 15)
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+    let activity = SyncActivityRecorder()
+    await sync.setSyncActivityListener { isActive in
+      await activity.record(isActive)
+    }
+
+    var payload = InlineProtocol.UpdateChatHasNewUpdates()
+    payload.peerID = makeChatPeer(chatId: 1)
+    payload.updateSeq = 1
+
+    var update = InlineProtocol.Update()
+    update.update = .chatHasNewUpdates(payload)
+
+    await sync.process(updates: [update])
+    await client.waitForFirstCallStarted()
+
+    let didEnterUpdating = await waitForCondition(timeout: .seconds(1)) {
+      await activity.contains(true)
+    }
+    #expect(didEnterUpdating)
+
+    await sync.updateConfig(SyncConfig(enableMessageUpdates: false, lastSyncSafetyGapSeconds: 15))
+    let didLeaveUpdatingAfterConfigChange = await waitForCondition(timeout: .seconds(1)) {
+      await activity.sequence == [true, false]
+    }
+    #expect(didLeaveUpdatingAfterConfigChange)
+
+    await client.releaseFirstCall()
+    let sequenceAfterFetch = await activity.sequence
+    #expect(sequenceAfterFetch == [true, false])
+  }
+
   @Test("TOO_LONG slices within max total and updates bucket state")
   func testTooLongSlicesWhenWarm() async throws {
     let storage = InMemorySyncStorage()
@@ -1174,6 +1301,18 @@ actor RecordingApplyUpdates: ApplyUpdates {
 
   func apply(updates: [InlineProtocol.Update], source: UpdateApplySource) async {
     appliedUpdates.append(contentsOf: updates)
+  }
+}
+
+actor SyncActivityRecorder {
+  private(set) var sequence: [Bool] = []
+
+  func record(_ value: Bool) {
+    sequence.append(value)
+  }
+
+  func contains(_ value: Bool) -> Bool {
+    sequence.contains(value)
   }
 }
 
