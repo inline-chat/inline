@@ -27,8 +27,6 @@ type SendMessagePushPayload = {
   messageId: string
   isUrgentNudge?: boolean
   senderDisplayName?: string
-  senderEmail?: string
-  senderPhone?: string
   senderProfilePhotoUrl?: string
   threadEmoji?: string
 }
@@ -94,8 +92,6 @@ export const sendPushNotificationToUser = async ({ userId, payload }: SendPushTo
         const senderPayload: Record<string, unknown> = { id: payload.senderUserId }
 
         if (payload.senderDisplayName) senderPayload["displayName"] = payload.senderDisplayName
-        if (payload.senderEmail) senderPayload["email"] = payload.senderEmail
-        if (payload.senderPhone) senderPayload["phone"] = payload.senderPhone
         if (payload.senderProfilePhotoUrl) senderPayload["profilePhotoUrl"] = payload.senderProfilePhotoUrl
 
         const apsPayload: Record<string, unknown> = {

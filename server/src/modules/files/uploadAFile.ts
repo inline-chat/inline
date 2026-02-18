@@ -1,4 +1,4 @@
-import { nanoid } from "nanoid/non-secure"
+import { nanoid } from "nanoid"
 import { type FileTypes, type UploadFileResult } from "@in/server/modules/files/types"
 import { generateFileUniqueId } from "@in/server/modules/files/fileId"
 import { uploadToBucket } from "@in/server/modules/files/uploadToBucket"
@@ -36,7 +36,6 @@ export async function uploadFile(
     log.info("Starting file upload", {
       fileType,
       fileSize: file.size,
-      fileName: normalizedMetadata.fileName,
       extension: normalizedMetadata.extension,
       mimeType: normalizedMetadata.mimeType,
       width: normalizedMetadata.width,
@@ -52,15 +51,13 @@ export async function uploadFile(
     // Upload file to bucket
     try {
       await uploadToBucket(file, { path: bucketPath, type: normalizedMetadata.mimeType })
-      log.info("File uploaded to bucket successfully", { bucketPath })
+      log.info("File uploaded to bucket successfully", { fileType, userId: context.userId })
     } catch (error) {
       const storageError = describeStorageError(error)
       log.error("Failed to upload file to bucket", {
         error,
-        bucketPath,
         fileType,
         fileSize: file.size,
-        fileName: normalizedMetadata.fileName,
         mimeType: normalizedMetadata.mimeType,
         extension: normalizedMetadata.extension,
         storageError,
@@ -113,7 +110,6 @@ export async function uploadFile(
       error,
       fileType,
       fileSize: file.size,
-      fileName: normalizedMetadata.fileName,
       mimeType: normalizedMetadata.mimeType,
       extension: normalizedMetadata.extension,
       userId: context.userId,

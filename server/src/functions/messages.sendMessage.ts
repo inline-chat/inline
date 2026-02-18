@@ -1054,9 +1054,6 @@ async function sendNotificationToUser({
     body = `${senderName}: ${body}`
   }
 
-  const senderEmail = senderUserName.email ?? undefined
-  const senderPhone = senderUserName.phone ?? undefined
-
   Notifications.sendToUser({
     userId,
     payload: {
@@ -1069,8 +1066,6 @@ async function sendNotificationToUser({
       body,
       isUrgentNudge: isUrgentNudge,
       senderDisplayName: senderName ?? undefined,
-      senderEmail,
-      senderPhone,
       senderProfilePhotoUrl,
       threadEmoji: chat?.emoji ?? undefined,
     },
