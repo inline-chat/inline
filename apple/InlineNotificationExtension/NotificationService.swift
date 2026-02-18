@@ -65,8 +65,6 @@ private extension NotificationService {
   struct SenderPayload {
     let id: String
     let displayName: String?
-    let email: String?
-    let phone: String?
     let profilePhotoUrl: URL?
 
     init?(userInfo: [AnyHashable: Any]) {
@@ -81,8 +79,6 @@ private extension NotificationService {
       }
 
       displayName = sender["displayName"] as? String
-      email = sender["email"] as? String
-      phone = sender["phone"] as? String
       if let urlString = sender["profilePhotoUrl"] as? String {
         profilePhotoUrl = URL(string: urlString)
       } else {
@@ -153,16 +149,10 @@ private extension NotificationService {
   }
 
   func makePerson(from sender: SenderPayload, image: INImage?) -> INPerson {
-    let handleValue = sender.phone ?? sender.email ?? sender.id
-    let handleType: INPersonHandleType = if sender.phone != nil {
-      .phoneNumber
-    } else if sender.email != nil {
-      .emailAddress
-    } else {
-      .unknown
-    }
-
-    let handle = INPersonHandle(value: handleValue, type: handleType)
+    // TODO(privacy): Enrich from a local user object (cache/DB) so we can provide
+    // stronger contact hints without including email/phone in push payloads.
+    // Replace this when encrypted notification content is available.
+    let handle = INPersonHandle(value: sender.id, type: .unknown)
 
     var nameComponents = PersonNameComponents()
     if let displayName = sender.displayName {
