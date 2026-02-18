@@ -97,7 +97,8 @@ struct OnboardingEnterCode: View {
         let result = if !onboardingViewModel.email.isEmpty {
           try await ApiClient.shared.verifyCode(
             code: code,
-            email: onboardingViewModel.email
+            email: onboardingViewModel.email,
+            challengeToken: onboardingViewModel.emailChallengeToken
           )
         } else if !onboardingViewModel.phoneNumber.isEmpty {
           try await ApiClient.shared.verifySmsCode(

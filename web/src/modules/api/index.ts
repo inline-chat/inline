@@ -46,6 +46,7 @@ export type ApiUser = TUserInfo
 
 export type SendEmailCodeResponse = {
   existingUser?: boolean
+  challengeToken?: string
 }
 
 export type SendSmsCodeResponse = {
@@ -382,13 +383,14 @@ export const ApiClient = {
     })
   },
 
-  verifyEmailCode: async (code: string, email: string, context?: AuthContext) => {
+  verifyEmailCode: async (code: string, email: string, challengeToken?: string, context?: AuthContext) => {
     const authContext = buildAuthContext(context)
     return await requestJson<VerifyCodeResponse>("verifyEmailCode", {
       method: "GET",
       query: {
         code,
         email,
+        challengeToken,
         deviceId: authContext.deviceId,
         clientType: authContext.clientType,
         clientVersion: authContext.clientVersion,

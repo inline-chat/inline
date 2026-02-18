@@ -5,6 +5,8 @@ import { alphanumeric } from "nanoid-dictionary"
 export const MAX_LOGIN_ATTEMPTS = 5
 export const USER_TOKEN_PREFIX = "IN"
 export const USER_TOKEN_LENGTH = 32
+export const LOGIN_CHALLENGE_ID_LENGTH = 40
+const LOGIN_CODE_HASH_PREFIX = "inline-login-code-v1"
 
 /**
  * Accepts either a raw token (`"123:IN..."`) or an Authorization header value
@@ -30,6 +32,7 @@ export function secureRandomSixDigitNumber() {
 }
 
 const nanoid = customAlphabet(alphanumeric, USER_TOKEN_LENGTH)
+const loginChallengeIdGenerator = customAlphabet(alphanumeric, LOGIN_CHALLENGE_ID_LENGTH)
 
 export async function generateToken(userId: number) {
   // Generate a random token
@@ -42,8 +45,37 @@ export async function generateToken(userId: number) {
   return { token, tokenHash }
 }
 
+export function generateLoginChallengeId(): string {
+  return `lc_${loginChallengeIdGenerator()}`
+}
+
 export function hashToken(token: string): string {
   const hasher = new Bun.CryptoHasher("sha256")
   hasher.update(token)
   return hasher.digest("base64")
+}
+
+function normalizeLoginCodeForHash(code: string): string {
+  const normalized = code.trim()
+  return `${LOGIN_CODE_HASH_PREFIX}:${normalized}`
+}
+
+export async function hashLoginCode(code: string): Promise<string> {
+  if (!/^\d{6}$/.test(code)) {
+    throw new Error("Login code must be exactly 6 digits")
+  }
+
+  return Bun.password.hash(normalizeLoginCodeForHash(code))
+}
+
+export async function verifyLoginCode(inputCode: string, codeHash: string): Promise<boolean> {
+  if (!codeHash) {
+    return false
+  }
+
+  try {
+    return await Bun.password.verify(normalizeLoginCodeForHash(inputCode), codeHash)
+  } catch {
+    return false
+  }
 }

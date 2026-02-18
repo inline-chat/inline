@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react"
 type ApiResponse = {
   ok: boolean
   error?: string
+  challengeToken?: string
   user?: {
     id: number
     email: string
@@ -37,6 +38,7 @@ export default function App() {
   const [view, setView] = useState<ViewState>("checking")
   const [email, setEmail] = useState("")
   const [code, setCode] = useState("")
+  const [challengeToken, setChallengeToken] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [currentUser, setCurrentUser] = useState<ApiResponse["user"] | null>(null)
   const [isBusy, setIsBusy] = useState(false)
@@ -50,6 +52,7 @@ export default function App() {
       setView("authed")
     } else {
       setCurrentUser(null)
+      setChallengeToken(null)
       setView("email")
     }
     setIsBusy(false)
@@ -68,6 +71,7 @@ export default function App() {
     })
 
     if (data.ok) {
+      setChallengeToken(typeof data.challengeToken === "string" ? data.challengeToken : null)
       setView("code")
       setMessage("If this email is allowed, a code was sent.")
     } else {
@@ -81,7 +85,7 @@ export default function App() {
     setMessage(null)
     const { data } = await request("/admin/auth/verify-email-code", {
       method: "POST",
-      body: JSON.stringify({ email, code }),
+      body: JSON.stringify({ email, code, challengeToken }),
     })
 
     if (data.ok && data.user) {
@@ -99,6 +103,7 @@ export default function App() {
     setIsBusy(true)
     await request("/admin/auth/logout", { method: "POST" })
     setCurrentUser(null)
+    setChallengeToken(null)
     setView("email")
     setCode("")
     setIsBusy(false)
@@ -159,7 +164,13 @@ export default function App() {
               <button onClick={verifyCode} disabled={!code || isBusy}>
                 {isBusy ? "Verifying..." : "Verify"}
               </button>
-              <button onClick={() => setView("email")} className="ghost">
+              <button
+                onClick={() => {
+                  setChallengeToken(null)
+                  setView("email")
+                }}
+                className="ghost"
+              >
                 Change email
               </button>
             </div>

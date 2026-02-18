@@ -11,8 +11,8 @@ struct OnboardingView: View {
           switch step {
             case let .email(prevEmail):
               Email(prevEmail: prevEmail)
-            case let .code(email):
-              Code(email: email)
+            case let .code(email, challengeToken):
+              Code(email: email, challengeToken: challengeToken)
             case .profile:
               Profile()
             case .welcome:

@@ -5,6 +5,7 @@ import { loginCodes, superadminSessions, superadminUsers, users } from "@in/serv
 import { eq } from "drizzle-orm"
 import { setupTestLifecycle, testUtils } from "../setup"
 import { generateTotpCode } from "@in/server/utils/totp"
+import { hashLoginCode } from "@in/server/utils/auth"
 
 const ADMIN_ORIGIN = "http://localhost:5174"
 const USER_AGENT = "admin-test-agent"
@@ -75,10 +76,35 @@ describe("Admin auth", () => {
     )
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toMatchObject({ ok: true })
+    const firstJson = await response.json()
+    expect(firstJson).toMatchObject({ ok: true })
+    expect(firstJson.challengeToken).toEqual(expect.any(String))
 
     const codes = await db.select().from(loginCodes).where(eq(loginCodes.email, email))
     expect(codes.length).toBe(1)
+    expect(codes[0]?.code).toBeNull()
+    expect(codes[0]?.codeHash).toBeDefined()
+    expect(codes[0]?.challengeId).toBe(firstJson.challengeToken)
+
+    const secondResponse = await app.handle(
+      buildRequest("/admin/auth/send-email-code", {
+        method: "POST",
+        body: { email },
+      }),
+    )
+
+    expect(secondResponse.status).toBe(200)
+    const secondJson = await secondResponse.json()
+    expect(secondJson).toMatchObject({ ok: true })
+    expect(secondJson.challengeToken).toEqual(expect.any(String))
+    expect(secondJson.challengeToken).not.toBe(firstJson.challengeToken)
+
+    const secondCodes = await db.select().from(loginCodes).where(eq(loginCodes.email, email))
+    expect(secondCodes.length).toBe(2)
+    expect(secondCodes.every((row) => row.code === null)).toBe(true)
+    const challengeIds = secondCodes.map((row) => row.challengeId)
+    expect(challengeIds).toContain(firstJson.challengeToken)
+    expect(challengeIds).toContain(secondJson.challengeToken)
   })
 
   it("does not create login code for unknown admin", async () => {
@@ -104,7 +130,8 @@ describe("Admin auth", () => {
 
     await db.insert(loginCodes).values({
       email,
-      code: "123456",
+      code: null,
+      codeHash: await hashLoginCode("123456"),
       expiresAt: new Date(Date.now() + 1000 * 60 * 10),
       attempts: 0,
     })

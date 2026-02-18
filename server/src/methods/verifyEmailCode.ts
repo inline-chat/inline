@@ -1,23 +1,25 @@
 import { db } from "@in/server/db"
-import { loginCodes } from "@in/server/db/schema/loginCodes"
-import { and, eq, gte, lt } from "drizzle-orm"
-import { sessions, users, type DbNewSession } from "@in/server/db/schema"
+import { eq } from "drizzle-orm"
+import { users } from "@in/server/db/schema"
 import { isValidEmail, validateIanaTimezone, validateUpToFourSegementSemver } from "@in/server/utils/validate"
-import { ErrorCodes, InlineError } from "@in/server/types/errors"
+import { InlineError } from "@in/server/types/errors"
 import { normalizeEmail } from "@in/server/utils/normalize"
 import { Log } from "@in/server/utils/log"
-import { generateToken, MAX_LOGIN_ATTEMPTS } from "@in/server/utils/auth"
-import { Optional, type Static, Type } from "@sinclair/typebox"
+import { generateToken } from "@in/server/utils/auth"
+import { type Static, Type } from "@sinclair/typebox"
 import type { UnauthenticatedHandlerContext } from "@in/server/controllers/helpers"
 import { encodeUserInfo, TUserInfo } from "@in/server/api-types"
-import { ipinfo, type IPInfoResponse } from "@in/server/libs/ipinfo"
+import { type IPInfoResponse } from "@in/server/libs/ipinfo"
 import { SessionsModel } from "@in/server/db/models/sessions"
 import { sendBotEvent } from "@in/server/modules/bot-events"
 import { DEMO_CODE, DEMO_EMAIL } from "@in/server/env"
+import { maskEmail } from "@in/server/utils/privacy"
+import { verifyEmailLoginChallenge } from "@in/server/modules/auth/emailLoginChallenges"
 
 export const Input = Type.Object({
   email: Type.String(),
   code: Type.String(),
+  challengeToken: Type.Optional(Type.String()),
   deviceId: Type.Optional(Type.String()),
 
   // optional
@@ -66,7 +68,7 @@ export const handler = async (
   await new Promise((resolve) => setTimeout(resolve, Math.random() * 1000))
 
   // send code to email
-  await verifyCode(email, input.code)
+  await verifyCode(email, input.code, input.challengeToken)
 
   // make session
   //let ipInfo = requestIp ? await ipinfo(requestIp) : undefined
@@ -120,46 +122,18 @@ export const handler = async (
 
 /// HELPER FUNCTIONS ///
 
-const verifyCode = async (email: string, code: string): Promise<true> => {
+const verifyCode = async (email: string, code: string, challengeToken?: string): Promise<true> => {
   if (email && code && email === DEMO_EMAIL && code === DEMO_CODE) {
     sendTelegramEventForDemoAccount()
     return true
   }
 
-  let existingCode = (
-    await db
-      .select()
-      .from(loginCodes)
-      .where(
-        and(
-          eq(loginCodes.email, email),
-          gte(loginCodes.expiresAt, new Date()),
-          lt(loginCodes.attempts, MAX_LOGIN_ATTEMPTS),
-        ),
-      )
-      .limit(1)
-  )[0]
-
-  if (!existingCode) {
-    throw new Error("Invalid code. Try again.")
+  const verified = await verifyEmailLoginChallenge({ email, code, challengeToken })
+  if (!verified) {
+    throw new InlineError(InlineError.ApiError.EMAIL_CODE_INVALID)
   }
 
-  if (existingCode.code !== code) {
-    await db
-      .update(loginCodes)
-      .set({
-        attempts: (existingCode.attempts ?? 0) + 1,
-      })
-      .where(eq(loginCodes.id, existingCode.id))
-
-    throw new Error("Invalid code")
-  } else {
-    // delete and return token
-    await db.delete(loginCodes).where(eq(loginCodes.id, existingCode.id))
-
-    // success!!!
-    return true
-  }
+  return true
 }
 
 const getUserByEmail = async (email: string) => {
@@ -196,7 +170,7 @@ const getUserByEmail = async (email: string) => {
 }
 
 function sendTelegramEvent(email: string) {
-  sendBotEvent(`New user verified email: \n${email}\n\n🍓🫡☕️`)
+  sendBotEvent(`New user verified email: \n${maskEmail(email)}\n\n🍓🫡☕️`)
 }
 
 function sendTelegramEventForDemoAccount() {

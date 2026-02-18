@@ -118,9 +118,9 @@ struct Email: View {
 
     Task {
       do {
-        let _ = try await api.sendCode(email: email)
+        let response = try await api.sendCode(email: email)
         formState.reset()
-        nav.push(.code(email: email))
+        nav.push(.code(email: email, challengeToken: response.challengeToken))
       } catch let error as APIError {
         OnboardingUtils.shared.showError(error: error, errorMsg: $errorMsg, isEmail: true)
         formState.reset()

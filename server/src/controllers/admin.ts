@@ -6,7 +6,6 @@ import { setup } from "@in/server/setup"
 import { db } from "@in/server/db"
 import {
   chats,
-  loginCodes,
   messages,
   sessions,
   superadminSessions,
@@ -18,11 +17,14 @@ import {
 } from "@in/server/db/schema"
 import { isValidEmail } from "@in/server/utils/validate"
 import { normalizeEmail } from "@in/server/utils/normalize"
-import { MAX_LOGIN_ATTEMPTS, generateToken, hashToken, secureRandomSixDigitNumber } from "@in/server/utils/auth"
+import {
+  generateToken,
+  hashToken,
+} from "@in/server/utils/auth"
 import { sendEmail } from "@in/server/utils/email"
 import { Log } from "@in/server/utils/log"
 import { ADMIN_PUBLIC_API_ORIGIN, isProd } from "@in/server/env"
-import { sendBotEvent } from "@in/server/modules/bot-events"
+import { sendInlineOnlyBotEvent } from "@in/server/modules/bot-events"
 import { encrypt, decrypt } from "@in/server/modules/encryption/encryption"
 import { buildOtpAuthUrl, generateTotpSecret, verifyTotpCode } from "@in/server/utils/totp"
 import { connectionManager } from "@in/server/ws/connections"
@@ -31,6 +33,7 @@ import { gitCommitHash, version } from "@in/server/buildEnv"
 import { FILES_PATH_PREFIX } from "@in/server/modules/files/path"
 import { getR2 } from "@in/server/libs/r2"
 import { UsersModel } from "@in/server/db/models/users"
+import { issueEmailLoginChallenge, verifyEmailLoginChallenge } from "@in/server/modules/auth/emailLoginChallenges"
 
 const ADMIN_COOKIE_NAME = "inline_admin_session" as const
 const ADMIN_IDLE_MS = 1000 * 60 * 60 * 24
@@ -140,8 +143,8 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
       }
 
       try {
-        await sendAdminLoginCode(email)
-        return { ok: true }
+        const challengeToken = await sendAdminLoginCode(email)
+        return challengeToken ? { ok: true, challengeToken } : { ok: true }
       } catch (error) {
         Log.shared.error("Admin send email code failed", error)
         set.status = 500
@@ -187,8 +190,8 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
       }
 
       try {
-        await verifyAdminLoginCode(email, body.code)
-      } catch (error) {
+        await verifyAdminLoginCode(email, body.code, body.challengeToken)
+      } catch {
         set.status = 401
         return { ok: false, error: "invalid_code" }
       }
@@ -237,6 +240,7 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
       body: t.Object({
         email: t.String(),
         code: t.String(),
+        challengeToken: t.Optional(t.String()),
       }),
       cookie: adminCookieSchema,
     },
@@ -1257,36 +1261,12 @@ const getTotpSecret = (adminUser: typeof superadminUsers.$inferSelect) => {
   })
 }
 
-const sendAdminLoginCode = async (email: string) => {
+const sendAdminLoginCode = async (email: string): Promise<string> => {
   const existingUsers = await db.select().from(users).where(eq(users.email, email)).limit(1)
   const existingUser = existingUsers[0] ? existingUsers[0].pendingSetup !== true : false
   const firstName = existingUsers[0]?.firstName ?? undefined
 
-  const existingCode = (
-    await db
-      .select()
-      .from(loginCodes)
-      .where(
-        and(
-          eq(loginCodes.email, email),
-          gte(loginCodes.expiresAt, new Date()),
-          lt(loginCodes.attempts, MAX_LOGIN_ATTEMPTS),
-        ),
-      )
-      .limit(1)
-  )?.[0]
-
-  const code = existingCode?.code ?? secureRandomSixDigitNumber().toString()
-
-  if (!existingCode) {
-    await db.delete(loginCodes).where(eq(loginCodes.email, email))
-    await db.insert(loginCodes).values({
-      code,
-      email,
-      expiresAt: new Date(Date.now() + 1000 * 60 * 10),
-      attempts: 0,
-    })
-  }
+  const { code, challengeToken } = await issueEmailLoginChallenge({ email })
 
   await sendEmail({
     to: email,
@@ -1299,41 +1279,18 @@ const sendAdminLoginCode = async (email: string) => {
       },
     },
   })
+
+  return challengeToken
 }
 
-const verifyAdminLoginCode = async (email: string, code: string): Promise<true> => {
+const verifyAdminLoginCode = async (email: string, code: string, challengeToken?: string): Promise<true> => {
   await new Promise((resolve) => setTimeout(resolve, Math.random() * 1000))
 
-  const existingCode = (
-    await db
-      .select()
-      .from(loginCodes)
-      .where(
-        and(
-          eq(loginCodes.email, email),
-          gte(loginCodes.expiresAt, new Date()),
-          lt(loginCodes.attempts, MAX_LOGIN_ATTEMPTS),
-        ),
-      )
-      .limit(1)
-  )[0]
-
-  if (!existingCode) {
+  const verified = await verifyEmailLoginChallenge({ email, code, challengeToken })
+  if (!verified) {
     throw new Error("Invalid code")
   }
 
-  if (existingCode.code !== code) {
-    await db
-      .update(loginCodes)
-      .set({
-        attempts: (existingCode.attempts ?? 0) + 1,
-      })
-      .where(eq(loginCodes.id, existingCode.id))
-
-    throw new Error("Invalid code")
-  }
-
-  await db.delete(loginCodes).where(eq(loginCodes.id, existingCode.id))
   return true
 }
 
@@ -1353,7 +1310,7 @@ const getOrCreateUserByEmail = async (email: string) => {
     )[0]
 
     if (createdUser) {
-      sendBotEvent(`New user verified email: \n${email}`)
+      sendInlineOnlyBotEvent(`Superadmin user provisioned: userId=${createdUser.id}`)
     }
 
     return createdUser
@@ -1396,7 +1353,7 @@ const createAdminSession = async ({ userId, ip, userAgent, stepUpAt }: CreateAdm
   return { token }
 }
 
-const getAdminSession = async (cookie: AdminCookieStore, request: Request, server: BunServer | undefined) => {
+const getAdminSession = async (cookie: AdminCookieStore, request: Request, _server: BunServer | undefined) => {
   const token = cookie[ADMIN_COOKIE_NAME]?.value
   if (!token) return null
 

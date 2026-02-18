@@ -64,6 +64,7 @@ struct OnboardingEnterPhone: View {
         
         onboardingViewModel.phoneNumber = fullPhoneNumber
         onboardingViewModel.email = ""
+        onboardingViewModel.emailChallengeToken = nil
         
         let data = try await ApiClient.shared.sendSmsCode(
           phoneNumber: fullPhoneNumber
