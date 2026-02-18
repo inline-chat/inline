@@ -14,6 +14,7 @@ public class KeyMonitor: Sendable {
   private var textInputCatchAllHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
   private var pasteHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
   private var arrowKeyHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
+  private var verticalArrowKeyHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
   private var returnKeyHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
   private var vimNavHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
   // Cmd+1...9: return true only when the handler actually acted.
@@ -34,6 +35,7 @@ public class KeyMonitor: Sendable {
     case textInputCatchAll
     case paste
     case arrowKeys
+    case verticalArrowKeys
     case returnKey
     case vimNavigation
   }
@@ -51,6 +53,8 @@ public class KeyMonitor: Sendable {
         pasteHandlers[key] = handler
       case .arrowKeys:
         arrowKeyHandlers[key] = handler
+      case .verticalArrowKeys:
+        verticalArrowKeyHandlers[key] = handler
       case .returnKey:
         returnKeyHandlers[key] = handler
       case .vimNavigation:
@@ -68,6 +72,8 @@ public class KeyMonitor: Sendable {
           self?.pasteHandlers.removeValue(forKey: key)
         case .arrowKeys:
           self?.arrowKeyHandlers.removeValue(forKey: key)
+        case .verticalArrowKeys:
+          self?.verticalArrowKeyHandlers.removeValue(forKey: key)
         case .returnKey:
           self?.returnKeyHandlers.removeValue(forKey: key)
         case .vimNavigation:
@@ -87,6 +93,8 @@ public class KeyMonitor: Sendable {
         pasteHandlers.removeValue(forKey: key)
       case .arrowKeys:
         arrowKeyHandlers.removeValue(forKey: key)
+      case .verticalArrowKeys:
+        verticalArrowKeyHandlers.removeValue(forKey: key)
       case .returnKey:
         returnKeyHandlers.removeValue(forKey: key)
       case .vimNavigation:
@@ -138,6 +146,12 @@ public class KeyMonitor: Sendable {
 
       // Check for vertical arrow keys used for list navigation (up/down).
       if event.keyCode == 125 || event.keyCode == 126 {
+        let handledVertical = callHandler(for: .verticalArrowKeys, event: event)
+        if handledVertical { return nil }
+      }
+
+      // Check for all arrow keys.
+      if event.keyCode == 125 || event.keyCode == 126 || event.keyCode == 123 || event.keyCode == 124 {
         let handled = callHandler(for: .arrowKeys, event: event)
         if handled { return nil }
       }
@@ -241,6 +255,14 @@ public class KeyMonitor: Sendable {
       case .arrowKeys:
         // only call the last one as otherwise multiple handlers will fight
         if let last = arrowKeyHandlers.values.last {
+          last(event)
+          return true
+        } else {
+          return false
+        }
+      case .verticalArrowKeys:
+        // only call the last one as otherwise multiple handlers will fight
+        if let last = verticalArrowKeyHandlers.values.last {
           last(event)
           return true
         } else {
