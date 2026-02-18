@@ -47,7 +47,7 @@ final class UpdateController: NSObject {
     }
   }
 
-  @objc func checkForUpdates() {
+  @MainActor @objc func checkForUpdates() {
     log.info("User initiated update check (started: \(didStart))")
     startIfNeeded()
     installState.setChecking()
