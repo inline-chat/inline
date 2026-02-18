@@ -624,7 +624,7 @@ class MainSplitView: NSViewController {
     }
 
     quickSearchArrowUnsubscriber = keyMonitor.addHandler(
-      for: .arrowKeys,
+      for: .verticalArrowKeys,
       key: "quick_search_overlay_arrows"
     ) { [weak self] event in
       guard let self else { return }

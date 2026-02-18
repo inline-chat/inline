@@ -243,7 +243,7 @@ struct HomeSidebar: View {
           }
 
           // Subscribe to arrow keys
-          keyMonitorSearchUnsubscriber = keyMonitor?.addHandler(for: .arrowKeys, key: "home_search_arrows") { event in
+          keyMonitorSearchUnsubscriber = keyMonitor?.addHandler(for: .verticalArrowKeys, key: "home_search_arrows") { event in
             let totalResults = localSearch.results.count + search.results.count
             guard totalResults > 0 else { return }
 
