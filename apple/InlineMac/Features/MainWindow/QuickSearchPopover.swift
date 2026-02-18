@@ -119,6 +119,9 @@ fileprivate enum QuickSearchCommandCondition: Hashable {
 
 fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashable {
   case settings
+#if SPARKLE
+  case checkForUpdates
+#endif
   case newThread
   case renameThread
   case newSpace
@@ -131,6 +134,10 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
     switch self {
       case .settings:
         "Settings"
+#if SPARKLE
+      case .checkForUpdates:
+        "Check for Updates..."
+#endif
       case .newThread:
         "New thread"
       case .renameThread:
@@ -148,6 +155,10 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
     switch self {
       case .settings:
         "gearshape"
+#if SPARKLE
+      case .checkForUpdates:
+        "arrow.triangle.2.circlepath"
+#endif
       case .newThread:
         "bubble.left.and.bubble.right.fill"
       case .renameThread:
@@ -161,6 +172,10 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
     switch self {
       case .settings:
         ["prefs", "preferences", "settings", "config", "configuration"]
+#if SPARKLE
+      case .checkForUpdates:
+        ["check", "update", "updates", "upgrade", "version", "sparkle"]
+#endif
       case .newThread:
         ["new", "thread", "chat", "message", "conversation"]
       case .renameThread:
@@ -174,6 +189,10 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
     switch self {
       case .settings, .newThread, .newSpace:
         .always
+#if SPARKLE
+      case .checkForUpdates:
+        .always
+#endif
       case .renameThread:
         .threadOpen
     }
@@ -475,6 +494,10 @@ final class QuickSearchViewModel: ObservableObject {
     switch command {
       case .settings:
         SettingsWindowController.show(using: dependencies)
+#if SPARKLE
+      case .checkForUpdates:
+        (NSApp.delegate as? AppDelegate)?.checkForUpdates(nil)
+#endif
       case .newThread:
         NewThreadAction.start(dependencies: dependencies, spaceId: dependencies.nav2?.activeSpaceId)
       case .renameThread:
