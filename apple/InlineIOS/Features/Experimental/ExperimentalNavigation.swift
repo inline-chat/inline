@@ -90,6 +90,7 @@ private struct ExperimentalHomeView: View {
   @EnvironmentStateObject private var chatsModel: ExperimentalSpaceChatsViewModel
 
   @AppStorage(ExperimentalHomePreferenceKeys.chatScope) private var homeChatScopeRaw: String = ExperimentalHomeChatScope.all.rawValue
+  @AppStorage(ExperimentalHomePreferenceKeys.chatItemRenderMode) private var chatItemRenderModeRaw: String = ExperimentalHomeChatItemRenderMode.twoLineLastMessage.rawValue
   @State private var didInitialFetch = false
   @State private var fetchedSpaceIds = Set<Int64>()
 
@@ -111,6 +112,7 @@ private struct ExperimentalHomeView: View {
           emptySubtitle: "Start a new chat with the plus button.",
           sectionHeader: nil,
           showsSpaceNameInRows: nav.activeSpaceId == nil,
+          chatItemRenderMode: chatItemRenderMode,
           onTapItem: openChat
         )
       case .archived:
@@ -120,6 +122,7 @@ private struct ExperimentalHomeView: View {
           emptySubtitle: "Archived chats will show up here.",
           sectionHeader: "Archived Chats",
           showsSpaceNameInRows: nav.activeSpaceId == nil,
+          chatItemRenderMode: chatItemRenderMode,
           onTapItem: openChat
         )
       }
@@ -146,6 +149,10 @@ private struct ExperimentalHomeView: View {
 
   private var homeChatScope: ExperimentalHomeChatScope {
     ExperimentalHomeChatScope(rawValue: homeChatScopeRaw) ?? .all
+  }
+
+  private var chatItemRenderMode: ExperimentalHomeChatItemRenderMode {
+    ExperimentalHomeChatItemRenderMode(rawValue: chatItemRenderModeRaw) ?? .twoLineLastMessage
   }
 
   private var visibleChats: [HomeChatItem] { chatsModel.items }
@@ -330,6 +337,7 @@ private struct ExperimentalChatListView: View {
   let emptySubtitle: String
   let sectionHeader: String?
   let showsSpaceNameInRows: Bool
+  let chatItemRenderMode: ExperimentalHomeChatItemRenderMode
   let onTapItem: (HomeChatItem) -> Void
 
   @EnvironmentObject private var data: DataManager
@@ -405,7 +413,8 @@ private struct ExperimentalChatListView: View {
         dialog: item.dialog,
         lastMessage: item.lastMessage?.message,
         lastMessageSender: item.lastMessage?.senderInfo,
-        embeddedLastMessage: item.lastMessage
+        embeddedLastMessage: item.lastMessage,
+        displayMode: chatItemRenderMode.chatListItemDisplayMode
       )
     } else if let chat = item.chat {
       ChatListItem(
@@ -413,10 +422,24 @@ private struct ExperimentalChatListView: View {
         dialog: item.dialog,
         lastMessage: item.lastMessage?.message,
         lastMessageSender: item.lastMessage?.senderInfo,
-        embeddedLastMessage: item.lastMessage
+        embeddedLastMessage: item.lastMessage,
+        displayMode: chatItemRenderMode.chatListItemDisplayMode
       )
     } else {
       EmptyView()
+    }
+  }
+}
+
+private extension ExperimentalHomeChatItemRenderMode {
+  var chatListItemDisplayMode: ChatListItem.DisplayMode {
+    switch self {
+    case .twoLineLastMessage:
+      .twoLineLastMessage
+    case .oneLineLastMessage:
+      .oneLineLastMessage
+    case .noLastMessage:
+      .minimal
     }
   }
 }
