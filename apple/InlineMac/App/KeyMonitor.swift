@@ -136,8 +136,8 @@ public class KeyMonitor: Sendable {
         if handled { return nil }
       }
 
-      // Check for arrow keys
-      if event.keyCode == 125 || event.keyCode == 126 || event.keyCode == 123 || event.keyCode == 124 {
+      // Check for vertical arrow keys used for list navigation (up/down).
+      if event.keyCode == 125 || event.keyCode == 126 {
         let handled = callHandler(for: .arrowKeys, event: event)
         if handled { return nil }
       }
