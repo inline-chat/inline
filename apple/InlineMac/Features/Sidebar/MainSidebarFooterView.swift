@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum MainSidebarFooterMetrics {
@@ -88,26 +89,12 @@ struct MainSidebarFooterView: View {
       }
 
       slot {
-        FooterIconMenu(
-          symbolName: "line.3.horizontal.decrease",
-          accessibilityLabel: "View options",
-          tint: iconTint
-        ) {
-          Button(action: onSetCompact) {
-            menuRow(
-              title: "Compact",
-              systemImage: "rectangle.compress.vertical",
-              isSelected: !isPreviewEnabled
-            )
-          }
-
-          Button(action: onSetPreview) {
-            menuRow(
-              title: "Show previews",
-              systemImage: "rectangle.expand.vertical",
-              isSelected: isPreviewEnabled
-            )
-          }
+        FooterDecoratedControl(accessibilityLabel: "View options") {
+          SidebarViewOptionsButton(
+            isPreviewEnabled: isPreviewEnabled,
+            onSetCompact: onSetCompact,
+            onSetPreview: onSetPreview
+          )
         }
       }
 
@@ -126,21 +113,6 @@ struct MainSidebarFooterView: View {
   private func slot<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
     content()
       .frame(maxWidth: .infinity, alignment: .center)
-  }
-
-  private func menuRow(title: String, systemImage: String, isSelected: Bool) -> some View {
-    HStack(spacing: 8) {
-      Group {
-        if isSelected {
-          Image(systemName: "checkmark")
-        } else {
-          Color.clear
-        }
-      }
-      .frame(width: 12, height: 12, alignment: .center)
-      .accessibilityHidden(true)
-      Label(title, systemImage: systemImage)
-    }
   }
 }
 
@@ -277,5 +249,209 @@ private struct SidebarFooterButtonStyle: ButtonStyle {
           )
         )
       )
+  }
+}
+
+private enum SidebarViewOptionSelection: String, CaseIterable {
+  case compact
+  case preview
+
+  var title: String {
+    switch self {
+      case .compact:
+        "Compact"
+      case .preview:
+        "Show previews"
+    }
+  }
+
+  var menuDescription: String {
+    switch self {
+      case .compact:
+        "Only show chat titles in the sidebar"
+      case .preview:
+        "Show a message preview under each chat title"
+    }
+  }
+
+  var iconName: String {
+    switch self {
+      case .compact:
+        "rectangle.compress.vertical"
+      case .preview:
+        "rectangle.expand.vertical"
+    }
+  }
+}
+
+private struct SidebarViewOptionsButton: NSViewRepresentable {
+  let isPreviewEnabled: Bool
+  let onSetCompact: () -> Void
+  let onSetPreview: () -> Void
+
+  func makeNSView(context: Context) -> SidebarViewOptionsMenuButton {
+    let button = SidebarViewOptionsMenuButton()
+    button.onSelect = { selection in
+      switch selection {
+        case .compact:
+          onSetCompact()
+        case .preview:
+          onSetPreview()
+      }
+    }
+    button.updateSelection(isPreviewEnabled: isPreviewEnabled)
+    return button
+  }
+
+  func updateNSView(_ nsView: SidebarViewOptionsMenuButton, context: Context) {
+    nsView.onSelect = { selection in
+      switch selection {
+        case .compact:
+          onSetCompact()
+        case .preview:
+          onSetPreview()
+      }
+    }
+    nsView.updateSelection(isPreviewEnabled: isPreviewEnabled)
+  }
+}
+
+@MainActor
+private final class SidebarViewOptionsMenuButton: NSButton {
+  var onSelect: ((SidebarViewOptionSelection) -> Void)?
+
+  private var currentSelection: SidebarViewOptionSelection = .compact {
+    didSet {
+      guard oldValue != currentSelection else { return }
+      updateMenuSelectionState()
+    }
+  }
+
+  private lazy var optionsMenu = buildMenu()
+
+  init() {
+    super.init(frame: .zero)
+    configure()
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  func updateSelection(isPreviewEnabled: Bool) {
+    currentSelection = isPreviewEnabled ? .preview : .compact
+  }
+
+  private func configure() {
+    translatesAutoresizingMaskIntoConstraints = false
+    isBordered = false
+    bezelStyle = .regularSquare
+    imagePosition = .imageOnly
+    setButtonType(.momentaryChange)
+    contentTintColor = .tertiaryLabelColor
+    imageScaling = .scaleProportionallyDown
+    target = self
+    action = #selector(showMenu)
+    toolTip = "View options"
+
+    widthAnchor.constraint(equalToConstant: MainSidebarFooterMetrics.buttonSize).isActive = true
+    heightAnchor.constraint(equalToConstant: MainSidebarFooterMetrics.buttonSize).isActive = true
+
+    if let image = NSImage(systemSymbolName: "line.3.horizontal.decrease", accessibilityDescription: "View options")
+    {
+      let configuredImage = image.withSymbolConfiguration(NSImage.SymbolConfiguration(
+        pointSize: MainSidebarFooterMetrics.iconPointSize,
+        weight: .medium,
+        scale: .medium
+      ))
+      self.image = configuredImage
+    }
+
+    updateAlpha()
+    updateMenuSelectionState()
+  }
+
+  @objc
+  private func showMenu() {
+    updateMenuSelectionState()
+    optionsMenu.popUp(positioning: nil, at: NSPoint(x: 0, y: bounds.height + 2), in: self)
+  }
+
+  @objc
+  private func handleMenuSelection(_ sender: NSMenuItem) {
+    guard
+      let rawValue = sender.representedObject as? String,
+      let selection = SidebarViewOptionSelection(rawValue: rawValue)
+    else {
+      return
+    }
+    guard selection != currentSelection else { return }
+    currentSelection = selection
+    onSelect?(selection)
+  }
+
+  private func buildMenu() -> NSMenu {
+    let menu = NSMenu()
+    for option in SidebarViewOptionSelection.allCases {
+      let item = NSMenuItem(title: "", action: #selector(handleMenuSelection(_:)), keyEquivalent: "")
+      item.target = self
+      item.representedObject = option.rawValue
+      item.image = menuItemImage(for: option)
+      item.attributedTitle = menuItemTitle(for: option)
+      menu.addItem(item)
+    }
+    return menu
+  }
+
+  private func updateMenuSelectionState() {
+    for item in optionsMenu.items {
+      guard
+        let rawValue = item.representedObject as? String,
+        let option = SidebarViewOptionSelection(rawValue: rawValue)
+      else {
+        continue
+      }
+      item.state = option == currentSelection ? .on : .off
+    }
+  }
+
+  private func menuItemImage(for option: SidebarViewOptionSelection) -> NSImage? {
+    guard let image = NSImage(systemSymbolName: option.iconName, accessibilityDescription: option.title) else {
+      return nil
+    }
+    return image.withSymbolConfiguration(.init(pointSize: 13, weight: .regular, scale: .medium))
+  }
+
+  private func menuItemTitle(for option: SidebarViewOptionSelection) -> NSAttributedString {
+    let titleAttributes: [NSAttributedString.Key: Any] = [
+      .font: NSFont.menuFont(ofSize: 13),
+      .foregroundColor: NSColor.labelColor,
+    ]
+    let descriptionAttributes: [NSAttributedString.Key: Any] = [
+      .font: NSFont.systemFont(ofSize: 11),
+      .foregroundColor: NSColor.secondaryLabelColor,
+    ]
+
+    let attributed = NSMutableAttributedString(string: option.title, attributes: titleAttributes)
+    attributed.append(NSAttributedString(string: "\n"))
+    attributed.append(NSAttributedString(string: option.menuDescription, attributes: descriptionAttributes))
+    return attributed
+  }
+
+  override var isHighlighted: Bool {
+    didSet { updateAlpha() }
+  }
+
+  override var isEnabled: Bool {
+    didSet { updateAlpha() }
+  }
+
+  private func updateAlpha() {
+    if isHighlighted {
+      alphaValue = 0.7
+    } else {
+      alphaValue = isEnabled ? 1 : 0.35
+    }
   }
 }
