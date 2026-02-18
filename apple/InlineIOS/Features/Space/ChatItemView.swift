@@ -202,8 +202,13 @@ struct ChatItemView: View {
       }
 
     } else if message?.message.documentId != nil {
+      let documentIconName = DocumentIconResolver.symbolName(
+        mimeType: message?.document?.mimeType,
+        fileName: message?.document?.fileName,
+        style: .filled
+      )
       HStack(spacing: 4) {
-        Image(systemName: "document.fill")
+        Image(systemName: documentIconName)
           .font(.caption)
           .foregroundColor(.secondary)
 

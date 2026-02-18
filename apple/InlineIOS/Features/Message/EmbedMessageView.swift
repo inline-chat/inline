@@ -217,6 +217,7 @@ class EmbedMessageView: UIView {
       displayText: embeddedMessage.displayText,
       photoInfo: embeddedMessage.photoInfo,
       videoInfo: embeddedMessage.videoInfo,
+      document: embeddedMessage.document,
       thumbnailReloadMessage: thumbnailReloadMessage ?? embeddedMessage.message,
       kind: kind,
       outgoing: outgoing,
@@ -240,6 +241,7 @@ class EmbedMessageView: UIView {
       displayText: fullMessage.displayText,
       photoInfo: fullMessage.photoInfo,
       videoInfo: fullMessage.videoInfo,
+      document: fullMessage.documentInfo?.document,
       thumbnailReloadMessage: fullMessage.message,
       kind: kind,
       outgoing: outgoing,
@@ -357,6 +359,7 @@ private extension EmbedMessageView {
     displayText: String?,
     photoInfo: PhotoInfo?,
     videoInfo: VideoInfo?,
+    document: Document?,
     thumbnailReloadMessage: Message,
     kind: Kind,
     outgoing: Bool,
@@ -384,7 +387,7 @@ private extension EmbedMessageView {
       kind: kind
     )
 
-    updateIcon(for: message)
+    updateIcon(for: message, document: document)
 
     let previewPhoto = photoInfo ?? videoInfo?.thumbnail
     let overlaySymbol = videoInfo != nil ? "play.circle.fill" : nil
@@ -457,7 +460,7 @@ private extension EmbedMessageView {
     "\(senderName): \(messageText)"
   }
 
-  func updateIcon(for message: Message) {
+  func updateIcon(for message: Message, document: Document?) {
     if message.hasUnsupportedTypes {
       imageIconView.isHidden = true
       return
@@ -472,7 +475,12 @@ private extension EmbedMessageView {
     }
 
     if message.documentId != nil {
-      imageIconView.image = UIImage(systemName: "document.fill", withConfiguration: config)
+      let iconName = DocumentIconResolver.symbolName(
+        mimeType: document?.mimeType,
+        fileName: document?.fileName,
+        style: .filled
+      )
+      imageIconView.image = UIImage(systemName: iconName, withConfiguration: config)
       imageIconView.isHidden = false
       return
     }

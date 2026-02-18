@@ -319,31 +319,11 @@ class DocumentView: NSView {
   }
 
   private func fileTypeSymbolName() -> String {
-    if let mimeType = documentInfo.document.mimeType {
-      if mimeType.hasPrefix("image/") { return "photo" }
-      if mimeType.hasPrefix("video/") { return "video" }
-      if mimeType.hasPrefix("audio/") { return "music.note" }
-      if mimeType == "application/pdf" { return "text.document" }
-      if mimeType == "application/zip" || mimeType == "application/x-rar-compressed" { return "shippingbox" }
-      return "document"
-    }
-
-    if let fileName = documentInfo.document.fileName,
-       let fileExtension = fileName.components(separatedBy: ".").last?.lowercased() {
-      switch fileExtension {
-        case "pdf": return "document"
-        case "jpg", "jpeg", "png", "gif", "heic": return "photo"
-        case "mp4", "mov", "avi": return "video"
-        case "mp3", "wav", "aac": return "music.note"
-        case "zip", "rar", "7z": return "shippingbox"
-        case "doc", "docx": return "text.document"
-        case "xls", "xlsx": return "chart.pie"
-        case "ppt", "pptx": return "videoprojector"
-        default: return "document"
-      }
-    }
-
-    return "document"
+    DocumentIconResolver.symbolName(
+      mimeType: documentInfo.document.mimeType,
+      fileName: documentInfo.document.fileName,
+      style: .regular
+    )
   }
 
   private func updateButtonState() {
