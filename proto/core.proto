@@ -622,6 +622,7 @@ enum Method {
   UPDATE_BOT_PROFILE = 37;
   GET_MESSAGES = 38;
   UPDATE_DIALOG_NOTIFICATION_SETTINGS = 39;
+  READ_MESSAGES = 40;
 }
 
 message RpcCall {
@@ -666,6 +667,7 @@ message RpcCall {
     UpdateBotProfileInput updateBotProfile = 38;
     GetMessagesInput getMessages = 39;
     UpdateDialogNotificationSettingsInput updateDialogNotificationSettings = 40;
+    ReadMessagesInput readMessages = 41;
   }
 }
 
@@ -712,6 +714,7 @@ message RpcResult {
     UpdateBotProfileResult updateBotProfile = 38;
     GetMessagesResult getMessages = 39;
     UpdateDialogNotificationSettingsResult updateDialogNotificationSettings = 40;
+    ReadMessagesResult readMessages = 41;
   }
 }
 
@@ -826,6 +829,17 @@ message MarkAsUnreadInput {
 
 // Mark dialog as unread result
 message MarkAsUnreadResult { repeated Update updates = 1; }
+
+// Read dialog history up to max_id (Telegram-style: peer + optional max_id).
+message ReadMessagesInput {
+  // Peer ID to mark as read
+  InputPeer peer_id = 1;
+
+  // If unset, server resolves to the latest message id for the peer.
+  optional int64 max_id = 2;
+}
+
+message ReadMessagesResult { repeated Update updates = 1; }
 
 message CreateBotInput {
   // Name of the bot

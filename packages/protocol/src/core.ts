@@ -1718,6 +1718,12 @@ export interface RpcCall {
          */
         updateDialogNotificationSettings: UpdateDialogNotificationSettingsInput;
     } | {
+        oneofKind: "readMessages";
+        /**
+         * @generated from protobuf field: ReadMessagesInput readMessages = 41;
+         */
+        readMessages: ReadMessagesInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1966,6 +1972,12 @@ export interface RpcResult {
          * @generated from protobuf field: UpdateDialogNotificationSettingsResult updateDialogNotificationSettings = 40;
          */
         updateDialogNotificationSettings: UpdateDialogNotificationSettingsResult;
+    } | {
+        oneofKind: "readMessages";
+        /**
+         * @generated from protobuf field: ReadMessagesResult readMessages = 41;
+         */
+        readMessages: ReadMessagesResult;
     } | {
         oneofKind: undefined;
     };
@@ -2238,6 +2250,34 @@ export interface MarkAsUnreadInput {
  * @generated from protobuf message MarkAsUnreadResult
  */
 export interface MarkAsUnreadResult {
+    /**
+     * @generated from protobuf field: repeated Update updates = 1;
+     */
+    updates: Update[];
+}
+/**
+ * Read dialog history up to max_id (Telegram-style: peer + optional max_id).
+ *
+ * @generated from protobuf message ReadMessagesInput
+ */
+export interface ReadMessagesInput {
+    /**
+     * Peer ID to mark as read
+     *
+     * @generated from protobuf field: InputPeer peer_id = 1;
+     */
+    peerId?: InputPeer;
+    /**
+     * If unset, server resolves to the latest message id for the peer.
+     *
+     * @generated from protobuf field: optional int64 max_id = 2;
+     */
+    maxId?: bigint;
+}
+/**
+ * @generated from protobuf message ReadMessagesResult
+ */
+export interface ReadMessagesResult {
     /**
      * @generated from protobuf field: repeated Update updates = 1;
      */
@@ -4411,7 +4451,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: UPDATE_DIALOG_NOTIFICATION_SETTINGS = 39;
      */
-    UPDATE_DIALOG_NOTIFICATION_SETTINGS = 39
+    UPDATE_DIALOG_NOTIFICATION_SETTINGS = 39,
+    /**
+     * @generated from protobuf enum value: READ_MESSAGES = 40;
+     */
+    READ_MESSAGES = 40
 }
 /**
  * @generated from protobuf enum SearchMessagesFilter
@@ -7803,7 +7847,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 37, name: "rotateBotToken", kind: "message", oneof: "input", T: () => RotateBotTokenInput },
             { no: 38, name: "updateBotProfile", kind: "message", oneof: "input", T: () => UpdateBotProfileInput },
             { no: 39, name: "getMessages", kind: "message", oneof: "input", T: () => GetMessagesInput },
-            { no: 40, name: "updateDialogNotificationSettings", kind: "message", oneof: "input", T: () => UpdateDialogNotificationSettingsInput }
+            { no: 40, name: "updateDialogNotificationSettings", kind: "message", oneof: "input", T: () => UpdateDialogNotificationSettingsInput },
+            { no: 41, name: "readMessages", kind: "message", oneof: "input", T: () => ReadMessagesInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -8056,6 +8101,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         updateDialogNotificationSettings: UpdateDialogNotificationSettingsInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).updateDialogNotificationSettings)
                     };
                     break;
+                case /* ReadMessagesInput readMessages */ 41:
+                    message.input = {
+                        oneofKind: "readMessages",
+                        readMessages: ReadMessagesInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).readMessages)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -8188,6 +8239,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* UpdateDialogNotificationSettingsInput updateDialogNotificationSettings = 40; */
         if (message.input.oneofKind === "updateDialogNotificationSettings")
             UpdateDialogNotificationSettingsInput.internalBinaryWrite(message.input.updateDialogNotificationSettings, writer.tag(40, WireType.LengthDelimited).fork(), options).join();
+        /* ReadMessagesInput readMessages = 41; */
+        if (message.input.oneofKind === "readMessages")
+            ReadMessagesInput.internalBinaryWrite(message.input.readMessages, writer.tag(41, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -8241,7 +8295,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 37, name: "rotateBotToken", kind: "message", oneof: "result", T: () => RotateBotTokenResult },
             { no: 38, name: "updateBotProfile", kind: "message", oneof: "result", T: () => UpdateBotProfileResult },
             { no: 39, name: "getMessages", kind: "message", oneof: "result", T: () => GetMessagesResult },
-            { no: 40, name: "updateDialogNotificationSettings", kind: "message", oneof: "result", T: () => UpdateDialogNotificationSettingsResult }
+            { no: 40, name: "updateDialogNotificationSettings", kind: "message", oneof: "result", T: () => UpdateDialogNotificationSettingsResult },
+            { no: 41, name: "readMessages", kind: "message", oneof: "result", T: () => ReadMessagesResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -8494,6 +8549,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         updateDialogNotificationSettings: UpdateDialogNotificationSettingsResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).updateDialogNotificationSettings)
                     };
                     break;
+                case /* ReadMessagesResult readMessages */ 41:
+                    message.result = {
+                        oneofKind: "readMessages",
+                        readMessages: ReadMessagesResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).readMessages)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -8626,6 +8687,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* UpdateDialogNotificationSettingsResult updateDialogNotificationSettings = 40; */
         if (message.result.oneofKind === "updateDialogNotificationSettings")
             UpdateDialogNotificationSettingsResult.internalBinaryWrite(message.result.updateDialogNotificationSettings, writer.tag(40, WireType.LengthDelimited).fork(), options).join();
+        /* ReadMessagesResult readMessages = 41; */
+        if (message.result.oneofKind === "readMessages")
+            ReadMessagesResult.internalBinaryWrite(message.result.readMessages, writer.tag(41, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9485,6 +9549,106 @@ class MarkAsUnreadResult$Type extends MessageType<MarkAsUnreadResult> {
  * @generated MessageType for protobuf message MarkAsUnreadResult
  */
 export const MarkAsUnreadResult = new MarkAsUnreadResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ReadMessagesInput$Type extends MessageType<ReadMessagesInput> {
+    constructor() {
+        super("ReadMessagesInput", [
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 2, name: "max_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ReadMessagesInput>): ReadMessagesInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<ReadMessagesInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ReadMessagesInput): ReadMessagesInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* optional int64 max_id */ 2:
+                    message.maxId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ReadMessagesInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 max_id = 2; */
+        if (message.maxId !== undefined)
+            writer.tag(2, WireType.Varint).int64(message.maxId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ReadMessagesInput
+ */
+export const ReadMessagesInput = new ReadMessagesInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ReadMessagesResult$Type extends MessageType<ReadMessagesResult> {
+    constructor() {
+        super("ReadMessagesResult", [
+            { no: 1, name: "updates", kind: "message", repeat: 1 /*RepeatType.PACKED*/, T: () => Update }
+        ]);
+    }
+    create(value?: PartialMessage<ReadMessagesResult>): ReadMessagesResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.updates = [];
+        if (value !== undefined)
+            reflectionMergePartial<ReadMessagesResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ReadMessagesResult): ReadMessagesResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated Update updates */ 1:
+                    message.updates.push(Update.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ReadMessagesResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated Update updates = 1; */
+        for (let i = 0; i < message.updates.length; i++)
+            Update.internalBinaryWrite(message.updates[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ReadMessagesResult
+ */
+export const ReadMessagesResult = new ReadMessagesResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class CreateBotInput$Type extends MessageType<CreateBotInput> {
     constructor() {

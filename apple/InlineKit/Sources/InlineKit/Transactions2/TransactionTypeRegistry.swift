@@ -29,6 +29,7 @@ public enum TransactionTypeRegistry {
       case is TranslateMessagesTransaction: "translate_messages"
       case is UpdateUserSettingsTransaction: "update_user_settings"
       case is MarkAsUnreadTransaction: "mark_as_unread"
+      case is ReadMessagesTransaction: "read_messages"
       case is DeleteMemberTransaction: "delete_member"
       case is UpdateMemberAccessTransaction: "update_member_access"
       case is ForwardMessagesTransaction: "forward_messages"
@@ -68,6 +69,7 @@ public enum TransactionTypeRegistry {
       case "translate_messages": return try decoder.decode(TranslateMessagesTransaction.self, from: data)
       case "update_user_settings": return try decoder.decode(UpdateUserSettingsTransaction.self, from: data)
       case "mark_as_unread": return try decoder.decode(MarkAsUnreadTransaction.self, from: data)
+      case "read_messages": return try decoder.decode(ReadMessagesTransaction.self, from: data)
       case "delete_member": return try decoder.decode(DeleteMemberTransaction.self, from: data)
       case "update_member_access": return try decoder.decode(UpdateMemberAccessTransaction.self, from: data)
       case "forward_messages": return try decoder.decode(ForwardMessagesTransaction.self, from: data)
