@@ -610,13 +610,14 @@ final class QuickSearchViewModel: ObservableObject {
   private var commandResults: [QuickSearchCommand] {
     guard let preparedQuery = QuickSearchRanker.prepareQuery(trimmedQuery) else { return [] }
     let context = commandContext
-    return QuickSearchCommand.allCases
+    let rankedCommands: [RankedCommand] = QuickSearchCommand.allCases
       .filter { $0.isAvailable(in: context) }
-      .compactMap { command in
+      .compactMap { (command: QuickSearchCommand) -> RankedCommand? in
         guard let score = commandScore(for: command, query: preparedQuery) else { return nil }
         return RankedCommand(command: command, score: score)
       }
-      .sorted { lhs, rhs in
+    return rankedCommands
+      .sorted { (lhs: RankedCommand, rhs: RankedCommand) in
         if lhs.score != rhs.score {
           return lhs.score > rhs.score
         }
@@ -756,7 +757,7 @@ final class QuickSearchViewModel: ObservableObject {
   private func localSearchFields(for item: QuickSearchLocalItem) -> [QuickSearchSearchField] {
     switch item {
       case let .thread(threadInfo):
-        [
+        return [
           QuickSearchSearchField(value: threadInfo.chat.humanReadableTitle ?? "", boost: 700),
           QuickSearchSearchField(value: threadInfo.space?.displayName ?? "", boost: 200)
         ]
