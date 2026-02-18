@@ -116,6 +116,9 @@ actor Sync {
   private var client: ProtocolClientType?
   private var config: SyncConfig
   private var stats: SyncStats = .empty
+  private var activeBucketFetches = 0
+  private var isSyncActivityActive = false
+  private var syncActivityListener: (@Sendable (Bool) async -> Void)?
 
   private var buckets: [BucketKey: BucketActor] = [:]
   private let bucketFetchLimiter: FetchLimiter
@@ -199,6 +202,11 @@ actor Sync {
     }
   }
 
+  func setSyncActivityListener(_ listener: (@Sendable (Bool) async -> Void)?) async {
+    syncActivityListener = listener
+    await publishSyncActivityIfNeeded()
+  }
+
   /// Save bucket state to storage after successful update application
   func saveBucketState(for key: BucketKey, seq: Int64, date: Int64) async {
     log.trace("saving bucket state for \(key): seq=\(seq), date=\(date)")
@@ -222,6 +230,7 @@ actor Sync {
       await actor.updateConfig(config)
     }
     log.debug("updated sync config: enableMessageUpdates=\(config.enableMessageUpdates), gap=\(config.lastSyncSafetyGapSeconds)s")
+    await publishSyncActivityIfNeeded()
   }
 
   func clearSyncState() async {
@@ -229,6 +238,8 @@ actor Sync {
     stats = .empty
     buckets.removeAll()
     await syncStorage.clearSyncState()
+    activeBucketFetches = 0
+    await publishSyncActivityIfNeeded()
   }
 
   func getStats() async -> SyncStats {
@@ -413,6 +424,16 @@ actor Sync {
     stats.bucketFetchFollowups += 1
   }
 
+  func bucketFetchActivityStarted() async {
+    activeBucketFetches += 1
+    await publishSyncActivityIfNeeded()
+  }
+
+  func bucketFetchActivityEnded() async {
+    activeBucketFetches = max(0, activeBucketFetches - 1)
+    await publishSyncActivityIfNeeded()
+  }
+
   func recordBucketUpdatesApplied(applied: Int, skipped: Int, duplicates: Int) {
     stats.bucketUpdatesApplied += Int64(applied)
     stats.bucketUpdatesSkipped += Int64(skipped)
@@ -483,6 +504,15 @@ actor Sync {
         .chat(peer: payload.peerID)
       default:
         nil
+    }
+  }
+
+  private func publishSyncActivityIfNeeded() async {
+    let isActive = config.enableMessageUpdates && activeBucketFetches > 0
+    guard isActive != isSyncActivityActive else { return }
+    isSyncActivityActive = isActive
+    if let syncActivityListener {
+      await syncActivityListener(isActive)
     }
   }
 }
@@ -737,6 +767,13 @@ actor BucketActor {
       isFetching = false
     }
 
+    guard let sync else {
+      log.error("sync reference is nil, cannot fetch updates")
+      return
+    }
+
+    await sync.bucketFetchActivityStarted()
+
     // If we had a scheduled retry, cancel it since we're actively attempting a fetch now.
     retryTask?.cancel()
     retryTask = nil
@@ -757,6 +794,8 @@ actor BucketActor {
       guard needsFetch || bufferedRealtimeUpdates.isEmpty == false else { break }
       log.trace("follow-up fetch requested for bucket \(key)")
     }
+
+    await sync.bucketFetchActivityEnded()
   }
 
   private func fetchNewUpdatesOnce() async -> Bool {
