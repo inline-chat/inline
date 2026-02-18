@@ -95,7 +95,6 @@
 - Search for relevant Apple developer documentations for key APIs you want to use. To load the link, replace https://developer.apple.com/ with https://sosumi.ai/ to give you compact markdown versions of the same docs. Read the links via CURL, do not use web search for that. Read the URL.
 - Helpers: Liquid Glass (SwiftUI) — gate with `#available` (iOS/macOS 26+); apply `glassEffect` after layout/appearance; wrap multiple glass views in `GlassEffectContainer`; use `.interactive()` only for tappable elements.
 - macOS local releases should use the JS orchestrator: `bun run release:macos -- --channel <stable|beta>` (or `cd scripts && bun run macos:release-app -- --channel <stable|beta>`).
-- `bash scripts/macos/release-local.sh --channel <stable|beta>` is a lower-level fallback, not the default local release path.
 - macOS TestFlight is a deprecated distribution method; keep it aligned with the stable direct Sparkle build, but the primary path is the direct Sparkle/DMG unsandboxed build.
 
 ## Backend
