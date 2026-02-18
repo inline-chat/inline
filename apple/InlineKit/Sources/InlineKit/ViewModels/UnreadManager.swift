@@ -18,6 +18,19 @@ public final class UnreadManager: Sendable {
   private let apiClient = ApiClient.shared
   private let db = AppDatabase.shared
 
+  private func sendReadMessagesToServer(peerId: Peer, maxId: Int64?) async {
+    do {
+      _ = try await Api.realtime.send(.readMessages(peerId: peerId, maxId: maxId))
+    } catch {
+      log.error("Realtime readMessages failed, falling back to HTTP route", error: error)
+      do {
+        _ = try await apiClient.readMessages(peerId: peerId, maxId: maxId)
+      } catch {
+        log.error("Failed to update remote server", error: error)
+      }
+    }
+  }
+
   // This is called when chat opens initially
   public func readMessages(_ maxId: Int64, in peerId: Peer, chatId: Int64) {
     log.debug("readMessages")
@@ -28,7 +41,7 @@ public final class UnreadManager: Sendable {
     // update server
     // TODO: add throttle
     Task {
-      try? await apiClient.readMessages(peerId: peerId, maxId: maxId)
+      await sendReadMessagesToServer(peerId: peerId, maxId: maxId)
     }
 
 #if os(iOS)
@@ -57,11 +70,7 @@ public final class UnreadManager: Sendable {
 
     // Update remote server
     Task {
-      do {
-        _ = try await apiClient.readMessages(peerId: peerId, maxId: nil)
-      } catch {
-        log.error("Failed to update remote server", error: error)
-      }
+      await sendReadMessagesToServer(peerId: peerId, maxId: nil)
     }
 
 #if os(iOS)

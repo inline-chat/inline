@@ -34,6 +34,7 @@ import { updateBotProfileHandler } from "./updateBotProfile"
 import { deleteMemberHandler } from "@in/server/realtime/handlers/space.deleteMember"
 import { updateMemberAccessHandler } from "@in/server/realtime/handlers/space.updateMemberAccess"
 import { markAsUnread } from "./messages.markAsUnread"
+import { readMessages } from "./messages.readMessages"
 import { getUpdatesState } from "@in/server/realtime/handlers/updates.getUpdatesState"
 import { getUpdates } from "@in/server/realtime/handlers/updates.getUpdates"
 import { forwardMessagesHandler } from "@in/server/realtime/handlers/messages.forwardMessages"
@@ -291,6 +292,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await markAsUnread(call.input.markAsUnread, handlerContext)
       return { oneofKind: "markAsUnread", markAsUnread: result }
+    }
+
+    case Method.READ_MESSAGES: {
+      if (call.input.oneofKind !== "readMessages") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      let result = await readMessages(call.input.readMessages, handlerContext)
+      return { oneofKind: "readMessages", readMessages: result }
     }
     
     case Method.GET_UPDATES_STATE: {

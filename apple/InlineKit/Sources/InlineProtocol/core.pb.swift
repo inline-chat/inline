@@ -97,6 +97,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case updateBotProfile // = 37
   case getMessages // = 38
   case updateDialogNotificationSettings // = 39
+  case readMessages // = 40
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -145,6 +146,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 37: self = .updateBotProfile
     case 38: self = .getMessages
     case 39: self = .updateDialogNotificationSettings
+    case 40: self = .readMessages
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -191,6 +193,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .updateBotProfile: return 37
     case .getMessages: return 38
     case .updateDialogNotificationSettings: return 39
+    case .readMessages: return 40
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -237,6 +240,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .updateBotProfile,
     .getMessages,
     .updateDialogNotificationSettings,
+    .readMessages,
   ]
 
 }
@@ -2656,6 +2660,14 @@ public struct RpcCall: Sendable {
     set {input = .updateDialogNotificationSettings(newValue)}
   }
 
+  public var readMessages: ReadMessagesInput {
+    get {
+      if case .readMessages(let v)? = input {return v}
+      return ReadMessagesInput()
+    }
+    set {input = .readMessages(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Input: Equatable, Sendable {
@@ -2698,6 +2710,7 @@ public struct RpcCall: Sendable {
     case updateBotProfile(UpdateBotProfileInput)
     case getMessages(GetMessagesInput)
     case updateDialogNotificationSettings(UpdateDialogNotificationSettingsInput)
+    case readMessages(ReadMessagesInput)
 
   }
 
@@ -3031,6 +3044,14 @@ public struct RpcResult: @unchecked Sendable {
     set {_uniqueStorage()._result = .updateDialogNotificationSettings(newValue)}
   }
 
+  public var readMessages: ReadMessagesResult {
+    get {
+      if case .readMessages(let v)? = _storage._result {return v}
+      return ReadMessagesResult()
+    }
+    set {_uniqueStorage()._result = .readMessages(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Result: Equatable, Sendable {
@@ -3073,6 +3094,7 @@ public struct RpcResult: @unchecked Sendable {
     case updateBotProfile(UpdateBotProfileResult)
     case getMessages(GetMessagesResult)
     case updateDialogNotificationSettings(UpdateDialogNotificationSettingsResult)
+    case readMessages(ReadMessagesResult)
 
   }
 
@@ -3451,6 +3473,52 @@ public struct MarkAsUnreadInput: Sendable {
 
 /// Mark dialog as unread result
 public struct MarkAsUnreadResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var updates: [Update] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Read dialog history up to max_id (Telegram-style: peer + optional max_id).
+public struct ReadMessagesInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Peer ID to mark as read
+  public var peerID: InputPeer {
+    get {return _peerID ?? InputPeer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {return self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  /// If unset, server resolves to the latest message id for the peer.
+  public var maxID: Int64 {
+    get {return _maxID ?? 0}
+    set {_maxID = newValue}
+  }
+  /// Returns true if `maxID` has been explicitly set.
+  public var hasMaxID: Bool {return self._maxID != nil}
+  /// Clears the value of `maxID`. Subsequent reads from it will return its default value.
+  public mutating func clearMaxID() {self._maxID = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: InputPeer? = nil
+  fileprivate var _maxID: Int64? = nil
+}
+
+public struct ReadMessagesResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6655,6 +6723,7 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     37: .same(proto: "UPDATE_BOT_PROFILE"),
     38: .same(proto: "GET_MESSAGES"),
     39: .same(proto: "UPDATE_DIALOG_NOTIFICATION_SETTINGS"),
+    40: .same(proto: "READ_MESSAGES"),
   ]
 }
 
@@ -9641,6 +9710,7 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     38: .same(proto: "updateBotProfile"),
     39: .same(proto: "getMessages"),
     40: .same(proto: "updateDialogNotificationSettings"),
+    41: .same(proto: "readMessages"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -10157,6 +10227,19 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
           self.input = .updateDialogNotificationSettings(v)
         }
       }()
+      case 41: try {
+        var v: ReadMessagesInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .readMessages(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .readMessages(v)
+        }
+      }()
       default: break
       }
     }
@@ -10327,6 +10410,10 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       guard case .updateDialogNotificationSettings(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 40)
     }()
+    case .readMessages?: try {
+      guard case .readMessages(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 41)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -10383,6 +10470,7 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     38: .same(proto: "updateBotProfile"),
     39: .same(proto: "getMessages"),
     40: .same(proto: "updateDialogNotificationSettings"),
+    41: .same(proto: "readMessages"),
   ]
 
   fileprivate class _StorageClass {
@@ -10930,6 +11018,19 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
             _storage._result = .updateDialogNotificationSettings(v)
           }
         }()
+        case 41: try {
+          var v: ReadMessagesResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .readMessages(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .readMessages(v)
+          }
+        }()
         default: break
         }
       }
@@ -11101,6 +11202,10 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
       case .updateDialogNotificationSettings?: try {
         guard case .updateDialogNotificationSettings(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 40)
+      }()
+      case .readMessages?: try {
+        guard case .readMessages(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 41)
       }()
       case nil: break
       }
@@ -11826,6 +11931,80 @@ extension MarkAsUnreadResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
   }
 
   public static func ==(lhs: MarkAsUnreadResult, rhs: MarkAsUnreadResult) -> Bool {
+    if lhs.updates != rhs.updates {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension ReadMessagesInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ReadMessagesInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "peer_id"),
+    2: .standard(proto: "max_id"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self._maxID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try { if let v = self._maxID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: ReadMessagesInput, rhs: ReadMessagesInput) -> Bool {
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs._maxID != rhs._maxID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension ReadMessagesResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ReadMessagesResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "updates"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.updates) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.updates.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.updates, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: ReadMessagesResult, rhs: ReadMessagesResult) -> Bool {
     if lhs.updates != rhs.updates {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
