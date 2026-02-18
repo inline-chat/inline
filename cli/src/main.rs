@@ -285,74 +285,55 @@ fn detect_global_flags(argv: &[OsString]) -> DetectedGlobalFlags {
     about = "Inline CLI",
     disable_version_flag = true,
     propagate_version = true,
-    after_help = r#"Docs:
+    after_help = r#"Mini skill guide:
+  Identity and setup:
+    inline auth login [--email you@example.com | --phone +15551234567]
+    inline me
+    inline doctor
+    inline update
+
+  Core command groups:
+    chats         list|get|participants|add-participant|remove-participant|create|create-dm|update-visibility|rename|mark-unread|mark-read|delete
+    messages      list|search|get|send|forward|edit|delete|add-reaction|delete-reaction|download|export
+    users         list|get
+    spaces        list|members|invite|delete-member|update-member-access
+    notifications get|set
+    bots          list|create|reveal-token
+    typing        start|stop
+    tasks         create-linear|create-notion
+    schema        proto
+
+  Aliases and shortcuts:
+    inline chat/thread/threads ... -> inline chats ...
+    inline bot ...                  -> inline bots ...
+    inline me, inline whoami        -> inline auth me
+    inline search ...               -> inline messages search ...
+    inline messages send/edit accept: --text | --message | --msg | -m
+
+  JSON mode:
+    --json prints raw RPC payloads (use --pretty or --compact for formatting).
+    In --json mode, these table-only helpers are disabled:
+      inline users list --filter/--ids/--id
+      inline bots list --filter/--ids/--id
+      inline chats list --ids/--id
+    Destructive commands never prompt in --json mode; pass --yes.
+
+  Notes:
+    Bot tokens are not printed in table output; use: inline bots reveal-token --bot-user-id <ID>
+    Mentions use UTF-16 offsets: --mention USER_ID:OFFSET:LENGTH
+
+  Key examples:
+    inline chats list --filter "launch"
+    inline chats update-visibility --chat-id 123 --private --participant 42
+    inline messages send --chat-id 123 --text "@Sam hello" --mention 42:0:4
+    inline messages list --chat-id 123 --since "2h ago" --until "1h ago"
+    inline messages export --chat-id 123 --output ./messages.json
+    inline tasks create-linear --chat-id 123 --message-id 456
+    inline schema proto --json --compact | jq -r '.files[].name'
+
+Docs:
   https://github.com/inline-chat/inline/blob/main/cli/README.md
   https://github.com/inline-chat/inline/blob/main/cli/skill/SKILL.md
-
-Examples:
-  inline auth login --email you@example.com
-  inline auth me
-  inline me
-  inline doctor
-  inline chats list
-  inline chats list --filter "launch"
-  inline chats list --filter "launch" --id
-  inline thread list
-  inline chats participants --chat-id 123
-  inline chats create --title "Launch" --space-id 31 --participant 42
-  inline chats create-dm --user-id 42
-  inline chats update-visibility --chat-id 123 --public
-  inline chats update-visibility --chat-id 123 --private --participant 42 --participant 99
-  inline chats rename --chat-id 123 --title "New title"
-  inline chats mark-unread --chat-id 123
-  inline chats mark-read --chat-id 123
-  inline notifications get
-  inline notifications set --mode mentions
-  inline spaces list
-  inline spaces members --space-id 31
-  inline spaces invite --space-id 31 --email you@example.com
-  inline bots list
-  inline bots create --name "Build Bot" --username build_bot
-  inline bots reveal-token --bot-user-id 42
-  inline typing start --chat-id 123
-  inline typing stop --chat-id 123
-  inline schema proto
-  inline users list --json
-  inline chats list --json --filter "launch"
-  inline messages list --chat-id 123
-  inline messages list --chat-id 123 --since "yesterday"
-  inline messages list --chat-id 123 --since "2h ago" --until "1h ago"
-  inline messages list --chat-id 123 --translate en
-  inline messages export --chat-id 123 --output ./messages.json
-  inline messages export --chat-id 123 --since "1w ago" --output ./recent.json
-  inline messages search --chat-id 123 --query "onboarding"
-  inline messages search --chat-id 123 --query "urgent" --since "today"
-  inline messages get --chat-id 123 --message-id 456
-  inline messages send --chat-id 123 --text "hello"
-  inline messages send --chat-id 123 --reply-to 456 --text "on it"
-  inline messages send --chat-id 123 --text "@Sam hello" --mention 42:0:4
-  inline messages forward --from-chat-id 123 --message-id 456 --to-chat-id 789
-  inline messages edit --chat-id 123 --message-id 456 --text "updated"
-  inline messages delete --chat-id 123 --message-id 456
-  inline messages add-reaction --chat-id 123 --message-id 456 --emoji "👍"
-  inline messages send --chat-id 123 --attach ./photo.jpg --attach ./spec.pdf --text "FYI"
-  inline messages download --chat-id 123 --message-id 456
-  inline messages send --user-id 42 --stdin
-  inline tasks create-linear --chat-id 123 --message-id 456
-  inline tasks create-notion --chat-id 123 --message-id 456 --space-id 31
-
-Notes:
-  Destructive commands prompt unless --yes is provided. In --json mode, the CLI never prompts; pass --yes explicitly.
-  Bot tokens are not printed by default. Use: inline bots reveal-token --bot-user-id <ID>
-
-JQ examples:
-  inline users list --json | jq -r '.users[] | "\(.id)\t\(.first_name) \(.last_name)\t@\(.username // "")\t\(.email // "")"'
-  inline users list --json | jq -r '.users[] | select((.first_name + " " + (.last_name // "") + " " + (.username // "") + " " + (.email // "")) | ascii_downcase | contains("mo")) | "\(.id)\t\(.first_name) \(.last_name)"'
-  inline chats list --json | jq -r '.chats[] | "\(.id)\t\(.title // "")\tspace:\(if .space_id == null then "dm" else (.space_id | tostring) end)"'
-  inline chats list --json | jq -r '.dialogs[] | select(.unread_count > 0) | "\(.chat_id)\tunread:\(.unread_count)"'
-  inline messages list --chat-id 123 --json --compact | jq -r '.messages[] | "\(.id)\t\(.from_id)\t\((.message // "") | gsub("\n"; " ") | .[0:80])"'
-  inline messages list --user-id 42 --limit 20 --json --compact | jq -r '.messages[] | select(.media != null) | .id'
-  inline schema proto --json --compact | jq -r '.files[].name'
 "#
 )]
 struct Cli {
@@ -5539,6 +5520,23 @@ mod cli_parsing_tests {
         let version_err = Cli::try_parse_from(["inline", "--version"]).err().unwrap();
         assert_eq!(version_err.kind(), clap::error::ErrorKind::DisplayVersion);
         assert_eq!(version_err.exit_code(), 0);
+    }
+
+    #[test]
+    fn top_level_help_includes_mini_skill_sections() {
+        use clap::CommandFactory;
+
+        let mut command = Cli::command();
+        let mut output = Vec::new();
+        command.write_long_help(&mut output).unwrap();
+        let help_text = String::from_utf8(output).unwrap();
+
+        assert!(help_text.contains("Mini skill guide:"));
+        assert!(help_text.contains("Aliases and shortcuts:"));
+        assert!(help_text.contains("JSON mode:"));
+        assert!(help_text.contains(
+            "https://github.com/inline-chat/inline/blob/main/cli/skill/SKILL.md"
+        ));
     }
 
     #[test]
