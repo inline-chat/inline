@@ -25,6 +25,7 @@ MACOS_PROVISIONING_PROFILE_PATH=${MACOS_PROVISIONING_PROFILE_PATH:-""}
 OVERWRITE_DMG=${OVERWRITE_DMG:-0}
 SIGN_RETRY_COUNT=${SIGN_RETRY_COUNT:-3}
 SIGN_RETRY_DELAY_SECONDS=${SIGN_RETRY_DELAY_SECONDS:-2}
+PAUSE_BEFORE_NOTARIZE=${PAUSE_BEFORE_NOTARIZE:-0}
 
 if [[ -z "${SPARKLE_PUBLIC_KEY:-}" && -n "${MACOS_SPARKLE_PUBLIC_KEY:-}" ]]; then
   SPARKLE_PUBLIC_KEY="${MACOS_SPARKLE_PUBLIC_KEY}"
@@ -80,6 +81,10 @@ if [[ ! -d "${SPARKLE_FRAMEWORK_PATH}" ]]; then
   exit 1
 fi
 
+mkdir -p "${OUTPUT_DIR}"
+BUILD_LOG_PATH="${OUTPUT_DIR}/xcodebuild.log"
+
+set +e
 xcodebuild \
   -project "${ROOT_DIR}/apple/Inline.xcodeproj" \
   -scheme "${SCHEME}" \
@@ -92,7 +97,18 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
   CODE_SIGN_STYLE=Manual \
-  PROVISIONING_PROFILE_SPECIFIER=""
+  PROVISIONING_PROFILE_SPECIFIER="" 2>&1 | tee "${BUILD_LOG_PATH}"
+xcodebuild_ec=${PIPESTATUS[0]}
+set -e
+if [[ "${xcodebuild_ec}" -ne 0 ]]; then
+  echo "xcodebuild failed with exit code ${xcodebuild_ec}." >&2
+  echo "Filtered build errors:" >&2
+  if ! grep -E "(: error:|^error:|\\*\\* BUILD FAILED \\*\\*)" "${BUILD_LOG_PATH}" >&2; then
+    echo "No explicit error lines found; showing last 80 log lines." >&2
+    tail -n 80 "${BUILD_LOG_PATH}" >&2 || true
+  fi
+  exit "${xcodebuild_ec}"
+fi
 
 APP_PATH="${DERIVED_DATA}/Build/Products/Release/Inline.app"
 PLIST_PATH="${APP_PATH}/Contents/Info.plist"
@@ -191,6 +207,18 @@ if [[ -f "${CREATE_DMG_OUTPUT_DIR}/Inline.dmg" ]]; then
 else
   DMG_SOURCE=$(ls -1 "${CREATE_DMG_OUTPUT_DIR}"/*.dmg | head -n 1)
   mv -f "${DMG_SOURCE}" "${DMG_PATH}"
+fi
+
+if [[ -z "${SKIP_NOTARIZE:-}" && "${PAUSE_BEFORE_NOTARIZE}" == "1" ]]; then
+  if [[ ! -t 0 ]]; then
+    echo "PAUSE_BEFORE_NOTARIZE=1 requires an interactive terminal." >&2
+    exit 1
+  fi
+  echo "Build/sign step complete. App is ready for local checks:"
+  echo "  App: ${APP_PATH}"
+  echo "  DMG: ${DMG_PATH}"
+  echo "Press Enter to continue with notarization, or Ctrl+C to stop here."
+  read -r
 fi
 
 if [[ -z "${SKIP_NOTARIZE:-}" ]]; then
