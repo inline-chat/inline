@@ -389,7 +389,6 @@ const sendPushNotificationToUser = async ({
         from: {
           firstName: currentUser.firstName,
           lastName: currentUser.lastName,
-          email: currentUser.email,
         },
       }
       notification.contentAvailable = true

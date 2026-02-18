@@ -1,20 +1,20 @@
-import { isValidPhoneNumber, validateIanaTimezone, validateUpToFourSegementSemver } from "@in/server/utils/validate"
-import { ErrorCodes, InlineError } from "@in/server/types/errors"
+import { validateIanaTimezone, validateUpToFourSegementSemver } from "@in/server/utils/validate"
+import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 import { Type } from "@sinclair/typebox"
 import type { Static } from "elysia"
 import type { UnauthenticatedHandlerContext } from "@in/server/controllers/helpers"
-import { twilio } from "@in/server/libs/twilio"
 import { db } from "@in/server/db"
 import { eq } from "drizzle-orm"
 import { users } from "@in/server/db/schema"
 import { encodeUserInfo, TUserInfo } from "@in/server/api-types"
-import { ipinfo, type IPInfoResponse } from "@in/server/libs/ipinfo"
+import { type IPInfoResponse } from "@in/server/libs/ipinfo"
 import { generateToken } from "@in/server/utils/auth"
 import { SessionsModel } from "@in/server/db/models/sessions"
 import parsePhoneNumber from "libphonenumber-js"
 import { prelude } from "@in/server/libs/prelude"
 import { sendBotEvent } from "@in/server/modules/bot-events"
+import { maskPhoneNumber } from "@in/server/utils/privacy"
 
 export const Input = Type.Object({
   phoneNumber: Type.String(),
@@ -164,5 +164,5 @@ const getUserByPhoneNumber = async (phoneNumber: string) => {
 }
 
 function sendTelegramEvent(phoneNumber: string) {
-  sendBotEvent(`New user verified phone: \n${phoneNumber}\n\n🍓🫡☕️`)
+  sendBotEvent(`New user verified phone: \n${maskPhoneNumber(phoneNumber)}\n\n🍓🫡☕️`)
 }

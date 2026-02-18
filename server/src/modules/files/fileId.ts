@@ -1,5 +1,5 @@
 import type { FileTypes } from "@in/server/modules/files/types"
-import { nanoid } from "nanoid/non-secure"
+import { nanoid } from "nanoid"
 
 /**
  * Generate a file unique id for the given file type at 24 characters.

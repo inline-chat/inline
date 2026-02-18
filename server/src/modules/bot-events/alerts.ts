@@ -1,7 +1,7 @@
 import { db } from "@in/server/db"
 import { users } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
-import { sendBotEvent } from "@in/server/modules/bot-events"
+import { sendInlineOnlyBotEvent } from "@in/server/modules/bot-events"
 import { Log } from "@in/server/utils/log"
 
 const log = new Log("bot-events.alerts")
@@ -13,8 +13,6 @@ type AlertUser = {
   firstName: string | null
   lastName: string | null
   username: string | null
-  email: string | null
-  phoneNumber: string | null
 }
 
 async function getAlertUser(userId: number): Promise<AlertUser | null> {
@@ -25,8 +23,6 @@ async function getAlertUser(userId: number): Promise<AlertUser | null> {
         firstName: users.firstName,
         lastName: users.lastName,
         username: users.username,
-        email: users.email,
-        phoneNumber: users.phoneNumber,
       })
       .from(users)
       .where(eq(users.id, userId))
@@ -47,18 +43,15 @@ function userLabel(user: AlertUser): string {
       : user.firstName ?? user.lastName ?? null
 
   if (name && user.username) return `${name} (@${user.username})`
-  if (name && user.email) return `${name} (${user.email})`
   if (user.username) return `@${user.username}`
-  if (user.email) return user.email
   if (name) return name
-  if (user.phoneNumber) return user.phoneNumber
-  return "Unknown user"
+  return `User ${user.id}`
 }
 
 function escapeMarkdownLinkLabel(label: string): string {
   // Keep this minimal; our link labels are typically username/email/name.
   // Removing bracket/paren characters avoids breaking `[label](url)` syntax.
-  return label.replace(/[\[\]\(\)]/g, "")
+  return label.replaceAll("[", "").replaceAll("]", "").replaceAll("(", "").replaceAll(")", "")
 }
 
 function adminUserUrl(userId: number): string {
@@ -79,7 +72,7 @@ export const BotAlerts = {
       const invitedText = invited ? adminUserLink(invited) : "someone"
       const spaceName = props.spaceName ?? "Unnamed"
 
-      sendBotEvent(`Space invite: ${inviterText} invited ${invitedText} to "${spaceName}".`)
+      sendInlineOnlyBotEvent(`Space invite: ${inviterText} invited ${invitedText} to "${spaceName}".`)
     })()
   },
 
@@ -90,7 +83,7 @@ export const BotAlerts = {
       const spaceName = props.spaceName ?? "Unnamed"
       const handleSuffix = props.handle ? ` (@${props.handle})` : ""
 
-      sendBotEvent(`Space created: ${creatorText} created "${spaceName}"${handleSuffix}.`)
+      sendInlineOnlyBotEvent(`Space created: ${creatorText} created "${spaceName}"${handleSuffix}.`)
     })()
   },
 
@@ -99,7 +92,7 @@ export const BotAlerts = {
       const [creator, bot] = await Promise.all([getAlertUser(props.creatorUserId), getAlertUser(props.botUserId)])
       const creatorText = creator ? adminUserLink(creator) : "Someone"
       const botText = bot ? adminUserLink(bot) : "a bot"
-      sendBotEvent(`Bot created: ${creatorText} created ${botText}.`)
+      sendInlineOnlyBotEvent(`Bot created: ${creatorText} created ${botText}.`)
     })()
   },
 
@@ -107,7 +100,7 @@ export const BotAlerts = {
     void (async () => {
       const user = await getAlertUser(props.userId)
       const userText = user ? adminUserLink(user) : "Someone"
-      sendBotEvent(`Logout: ${userText} logged out.`)
+      sendInlineOnlyBotEvent(`Logout: ${userText} logged out.`)
     })()
   },
 }

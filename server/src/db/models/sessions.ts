@@ -4,6 +4,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm"
 import { sessions, type DbSession, type DbNewSession } from "@in/server/db/schema/sessions"
 import { encrypt, decrypt, type EncryptedData } from "@in/server/modules/encryption/encryption"
 import { db } from "@in/server/db"
+import { Log } from "@in/server/utils/log"
 
 // Define interfaces for the personal data structure
 export interface SessionPersonalData {
@@ -41,6 +42,8 @@ export interface SessionWithDecryptedData
   personalData: SessionPersonalData
   applePushToken: string | null
 }
+
+const log = new Log("SessionsModel")
 
 export class SessionsModel {
   // Create a new session
@@ -96,7 +99,7 @@ export class SessionsModel {
         let existingDevice = hasExistingDevice[0]
         if (existingDevice) {
           await db.delete(sessions).where(eq(sessions.id, existingDevice.id))
-          console.info(`Deleted previous session with deviceId: ${data.deviceId}`)
+          log.info("Deleted previous session with matching device id", { userId: data.userId, sessionId: existingDevice.id })
         }
       }
 
@@ -250,7 +253,7 @@ export class SessionsModel {
 
       return JSON.parse(decrypted) as SessionPersonalData
     } catch (error) {
-      console.error("Failed to decrypt personal data:", error)
+      log.warn("Failed to decrypt personal data", error)
       return {}
     }
   }
@@ -269,7 +272,7 @@ export class SessionsModel {
         authTag: session.applePushTokenTag,
       })
     } catch (error) {
-      console.error("Failed to decrypt push token:", error)
+      log.warn("Failed to decrypt push token", error)
       return null
     }
   }

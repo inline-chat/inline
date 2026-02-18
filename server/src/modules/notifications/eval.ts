@@ -8,7 +8,7 @@ import { getCachedChatInfo } from "@in/server/modules/cache/chatInfo"
 import { getCachedSpaceInfo } from "@in/server/modules/cache/spaceCache"
 import { getCachedUserName, UserNamesCache, type UserName } from "@in/server/modules/cache/userNames"
 import { filterFalsy } from "@in/server/utils/filter"
-import { Log, LogLevel } from "@in/server/utils/log"
+import { Log } from "@in/server/utils/log"
 import { zodResponseFormat } from "openai/helpers/zod.mjs"
 import type { ChatModel } from "openai/resources/chat/chat.mjs"
 import z from "zod"
@@ -86,7 +86,10 @@ export const batchEvaluate = async (_input: Input): Promise<NotificationEvalResu
   }
 
   try {
-    log.info(`Notification eval result: ${response.choices[0]?.message.content}`)
+    log.debug("Notification eval completed", {
+      finishReason,
+      hasContent: Boolean(response.choices[0]?.message.content),
+    })
     log.debug("AI usage", response.usage)
 
     let inputTokens = response.usage?.prompt_tokens ?? 0
@@ -190,7 +193,6 @@ const getContext = async (input: Input): Promise<string> => {
 
   let date = new Date()
 
-  let rules = await Promise.all(input.participantSettings.map(async (p) => await formatZenModeRules(p.userId, input)))
   let dmParticipants =
     chatInfo?.type === "private"
       ? `direct message chat (DM) between ${await Promise.all(

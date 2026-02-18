@@ -52,6 +52,9 @@ export const DATABASE_URL = (() => {
   return rawDatabaseUrl
 })() as string
 
+const ENCRYPTION_KEY = process.env["ENCRYPTION_KEY"]
+const ENCRYPTION_KEY_HEX_RE = /^[a-fA-F0-9]{64}$/
+
 // REQUIRED FOR PROD
 export const AMAZON_ACCESS_KEY = process.env["AMAZON_ACCESS_KEY"] as string
 export const AMAZON_SECRET_ACCESS_KEY = process.env["AMAZON_SECRET_ACCESS_KEY"] as string
@@ -97,6 +100,7 @@ export const NOTION_CLIENT_SECRET_DEV = process.env["NOTION_CLIENT_SECRET_DEV"]
 // Check required variables
 const requiredProductionVariables = [
   "DATABASE_URL",
+  "ENCRYPTION_KEY",
   "AMAZON_ACCESS_KEY",
   "AMAZON_SECRET_ACCESS_KEY",
   "TWILIO_SID",
@@ -119,6 +123,16 @@ for (const variable of requiredProductionVariables) {
       throw new Error(`Required production variable ${variable} is not defined.`)
     } else if (!isTest) {
       Log.shared.warn(`Env variable ${variable} is not defined.`)
+    }
+  }
+}
+
+if (ENCRYPTION_KEY) {
+  if (!ENCRYPTION_KEY_HEX_RE.test(ENCRYPTION_KEY)) {
+    if (isProd) {
+      throw new Error("ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes).")
+    } else if (!isTest) {
+      Log.shared.warn("ENCRYPTION_KEY should be exactly 64 hex characters (32 bytes).")
     }
   }
 }
