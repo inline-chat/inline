@@ -208,7 +208,8 @@ class EmbedMessageView: UIView {
     outgoing: Bool,
     isOnlyEmoji: Bool,
     style: Style? = nil,
-    senderNameOverride: String? = nil
+    senderNameOverride: String? = nil,
+    thumbnailReloadMessage: Message? = nil
   ) {
     updateView(
       message: embeddedMessage.message,
@@ -216,6 +217,7 @@ class EmbedMessageView: UIView {
       displayText: embeddedMessage.displayText,
       photoInfo: embeddedMessage.photoInfo,
       videoInfo: embeddedMessage.videoInfo,
+      thumbnailReloadMessage: thumbnailReloadMessage ?? embeddedMessage.message,
       kind: kind,
       outgoing: outgoing,
       isOnlyEmoji: isOnlyEmoji,
@@ -238,6 +240,7 @@ class EmbedMessageView: UIView {
       displayText: fullMessage.displayText,
       photoInfo: fullMessage.photoInfo,
       videoInfo: fullMessage.videoInfo,
+      thumbnailReloadMessage: fullMessage.message,
       kind: kind,
       outgoing: outgoing,
       isOnlyEmoji: isOnlyEmoji,
@@ -354,6 +357,7 @@ private extension EmbedMessageView {
     displayText: String?,
     photoInfo: PhotoInfo?,
     videoInfo: VideoInfo?,
+    thumbnailReloadMessage: Message,
     kind: Kind,
     outgoing: Bool,
     isOnlyEmoji: Bool,
@@ -384,7 +388,7 @@ private extension EmbedMessageView {
 
     let previewPhoto = photoInfo ?? videoInfo?.thumbnail
     let overlaySymbol = videoInfo != nil ? "play.circle.fill" : nil
-    updateThumbnail(photoInfo: previewPhoto, overlaySymbol: overlaySymbol, reloadMessage: message)
+    updateThumbnail(photoInfo: previewPhoto, overlaySymbol: overlaySymbol, reloadMessage: thumbnailReloadMessage)
 
     applyAppearance()
   }

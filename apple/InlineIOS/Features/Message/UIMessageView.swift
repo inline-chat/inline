@@ -522,7 +522,8 @@ class UIMessageView: UIView {
         embeddedMessage: embeddedMessage,
         kind: .replyInMessage,
         outgoing: outgoing,
-        isOnlyEmoji: isEmojiOnlyMessage
+        isOnlyEmoji: isEmojiOnlyMessage,
+        thumbnailReloadMessage: fullMessage.message
       )
     } else {
       embedView.showNotLoaded(kind: .replyInMessage, outgoing: outgoing, isOnlyEmoji: isEmojiOnlyMessage)
