@@ -201,13 +201,151 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
   func isAvailable(in context: QuickSearchCommandContext) -> Bool {
     condition.isSatisfied(by: context)
   }
+}
 
-  func matches(_ query: String) -> Bool {
-    let normalized = query.lowercased()
-    if title.lowercased().contains(normalized) {
-      return true
+fileprivate struct QuickSearchSearchField {
+  let value: String
+  let boost: Int
+}
+
+fileprivate enum QuickSearchRanker {
+  struct PreparedQuery {
+    let normalized: String
+    let compact: String
+    let tokens: [String]
+  }
+
+  static func prepareQuery(_ query: String) -> PreparedQuery? {
+    let normalized = normalize(query)
+    guard normalized.isEmpty == false else { return nil }
+    return PreparedQuery(
+      normalized: normalized,
+      compact: normalized.replacingOccurrences(of: " ", with: ""),
+      tokens: tokens(from: normalized)
+    )
+  }
+
+  static func score(preparedQuery: PreparedQuery, fields: [QuickSearchSearchField]) -> Int? {
+    var best: Int?
+    for field in fields {
+      let normalizedField = normalize(field.value)
+      guard normalizedField.isEmpty == false else { continue }
+      guard let fieldScore = scoreField(preparedQuery: preparedQuery, field: normalizedField) else { continue }
+      let boostedScore = fieldScore + field.boost
+      if let best, boostedScore <= best {
+        continue
+      }
+      best = boostedScore
     }
-    return keywords.contains { $0.contains(normalized) }
+    return best
+  }
+
+  private static func scoreField(preparedQuery: PreparedQuery, field: String) -> Int? {
+    var score = 0
+    let fieldTokens = tokens(from: field)
+
+    if field == preparedQuery.normalized {
+      score += 12_000
+    }
+
+    if field.hasPrefix(preparedQuery.normalized) {
+      score += 9_000
+    }
+
+    if let wordPrefixIndex = fieldTokens.firstIndex(where: { $0.hasPrefix(preparedQuery.normalized) }) {
+      score += 7_000 - min(wordPrefixIndex * 120, 600)
+    }
+
+    if let range = field.range(of: preparedQuery.normalized) {
+      let position = field.distance(from: field.startIndex, to: range.lowerBound)
+      score += 5_000 - min(position * 25, 1_000)
+    }
+
+    if preparedQuery.tokens.isEmpty == false {
+      var matchedTokenCount = 0
+      for token in preparedQuery.tokens {
+        if fieldTokens.contains(token) {
+          score += 1_600
+          matchedTokenCount += 1
+          continue
+        }
+
+        if fieldTokens.contains(where: { $0.hasPrefix(token) }) {
+          score += 1_200
+          matchedTokenCount += 1
+          continue
+        }
+
+        if let tokenRange = field.range(of: token) {
+          let position = field.distance(from: field.startIndex, to: tokenRange.lowerBound)
+          score += 800 - min(position * 15, 500)
+          matchedTokenCount += 1
+        }
+      }
+
+      if matchedTokenCount == preparedQuery.tokens.count {
+        score += 1_500
+      } else if matchedTokenCount == 0, score == 0 {
+        return nil
+      }
+    }
+
+    // Fuzzy fallback should only reinforce already-relevant hits.
+    if score > 0, preparedQuery.compact.count >= 3, isSubsequence(preparedQuery.compact, of: field) {
+      score += 180
+    }
+
+    guard score > 0 else { return nil }
+    score -= min(field.count, 180)
+    return max(score, 1)
+  }
+
+  private static func normalize(_ text: String) -> String {
+    let folded = text
+      .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+      .lowercased()
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    return folded
+      .split(whereSeparator: { $0.isWhitespace })
+      .joined(separator: " ")
+  }
+
+  private static func tokens(from text: String) -> [String] {
+    var values: [String] = []
+    var current = ""
+
+    for scalar in text.unicodeScalars {
+      if CharacterSet.alphanumerics.contains(scalar) {
+        current.unicodeScalars.append(scalar)
+      } else if current.isEmpty == false {
+        values.append(current)
+        current = ""
+      }
+    }
+
+    if current.isEmpty == false {
+      values.append(current)
+    }
+
+    return values
+      .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "@#")) }
+      .filter { $0.isEmpty == false }
+  }
+
+  private static func isSubsequence(_ query: String, of text: String) -> Bool {
+    guard query.isEmpty == false, text.isEmpty == false else { return false }
+
+    var textIndex = text.startIndex
+    for queryCharacter in query {
+      while textIndex < text.endIndex, text[textIndex] != queryCharacter {
+        text.formIndex(after: &textIndex)
+      }
+      if textIndex == text.endIndex {
+        return false
+      }
+      text.formIndex(after: &textIndex)
+    }
+    return true
   }
 }
 
@@ -244,17 +382,43 @@ final class QuickSearchViewModel: ObservableObject {
           return QuickSearchLocalItem.user(user)
       }
     }
-    let spaces = spaceResults
-      .sorted(by: { $0.displayName < $1.displayName })
-      .map { QuickSearchLocalItem.space($0) }
+    let spaces = spaceResults.map { QuickSearchLocalItem.space($0) }
     let commands = commandResults.map { QuickSearchLocalItem.command($0) }
     var items = locals
-    if let createThreadResult {
-      items.append(createThreadResult)
-    }
     items.append(contentsOf: spaces)
     items.append(contentsOf: commands)
-    return items
+
+    guard let preparedQuery = QuickSearchRanker.prepareQuery(trimmedQuery) else {
+      if let createThreadResult {
+        items.append(createThreadResult)
+      }
+      return items
+    }
+
+    let rankedItems = items.map { item in
+      RankedLocalItem(
+        item: item,
+        score: localScore(for: item, query: preparedQuery) ?? Int.min,
+        sortTitle: localSortTitle(for: item),
+        tieKey: localTieKey(for: item)
+      )
+    }
+
+    var sorted = rankedItems.sorted { lhs, rhs in
+      if lhs.score != rhs.score {
+        return lhs.score > rhs.score
+      }
+      let titleComparison = lhs.sortTitle.localizedCaseInsensitiveCompare(rhs.sortTitle)
+      if titleComparison != .orderedSame {
+        return titleComparison == .orderedAscending
+      }
+      return lhs.tieKey < rhs.tieKey
+    }.map(\.item)
+
+    if let createThreadResult {
+      sorted.append(createThreadResult)
+    }
+    return sorted
   }
 
   var globalResults: [GlobalSearchResult] {
@@ -268,12 +432,37 @@ final class QuickSearchViewModel: ObservableObject {
       }
       return nil
     })
-    return globalResults.filter { result in
+    let filtered = globalResults.filter { result in
       switch result {
         case let .users(user):
           localUserIds.contains(user.id) == false
       }
     }
+
+    guard let preparedQuery = QuickSearchRanker.prepareQuery(trimmedQuery) else {
+      return filtered
+    }
+
+    return filtered
+      .map { result in
+        RankedGlobalResult(
+          result: result,
+          score: globalScore(for: result, query: preparedQuery) ?? Int.min,
+          sortTitle: globalSortTitle(for: result),
+          tieKey: globalTieKey(for: result)
+        )
+      }
+      .sorted { lhs, rhs in
+        if lhs.score != rhs.score {
+          return lhs.score > rhs.score
+        }
+        let titleComparison = lhs.sortTitle.localizedCaseInsensitiveCompare(rhs.sortTitle)
+        if titleComparison != .orderedSame {
+          return titleComparison == .orderedAscending
+        }
+        return lhs.tieKey < rhs.tieKey
+      }
+      .map(\.result)
   }
 
   var isLoading: Bool {
@@ -419,12 +608,25 @@ final class QuickSearchViewModel: ObservableObject {
   }
 
   private var commandResults: [QuickSearchCommand] {
-    let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard trimmedQuery.isEmpty == false else { return [] }
+    guard let preparedQuery = QuickSearchRanker.prepareQuery(trimmedQuery) else { return [] }
     let context = commandContext
     return QuickSearchCommand.allCases
       .filter { $0.isAvailable(in: context) }
-      .filter { $0.matches(trimmedQuery) }
+      .compactMap { command in
+        guard let score = commandScore(for: command, query: preparedQuery) else { return nil }
+        return RankedCommand(command: command, score: score)
+      }
+      .sorted { lhs, rhs in
+        if lhs.score != rhs.score {
+          return lhs.score > rhs.score
+        }
+        let titleComparison = lhs.command.title.localizedCaseInsensitiveCompare(rhs.command.title)
+        if titleComparison != .orderedSame {
+          return titleComparison == .orderedAscending
+        }
+        return lhs.command.rawValue < rhs.command.rawValue
+      }
+      .map(\.command)
   }
 
   private var createThreadResult: QuickSearchLocalItem? {
@@ -524,6 +726,149 @@ final class QuickSearchViewModel: ObservableObject {
         self?.bindCommandContext()
       }
     }
+  }
+
+  private var trimmedQuery: String {
+    query.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private func localScore(
+    for item: QuickSearchLocalItem,
+    query: QuickSearchRanker.PreparedQuery
+  ) -> Int? {
+    QuickSearchRanker.score(preparedQuery: query, fields: localSearchFields(for: item))
+  }
+
+  private func globalScore(
+    for result: GlobalSearchResult,
+    query: QuickSearchRanker.PreparedQuery
+  ) -> Int? {
+    QuickSearchRanker.score(preparedQuery: query, fields: globalSearchFields(for: result))
+  }
+
+  private func commandScore(
+    for command: QuickSearchCommand,
+    query: QuickSearchRanker.PreparedQuery
+  ) -> Int? {
+    QuickSearchRanker.score(preparedQuery: query, fields: commandSearchFields(for: command))
+  }
+
+  private func localSearchFields(for item: QuickSearchLocalItem) -> [QuickSearchSearchField] {
+    switch item {
+      case let .thread(threadInfo):
+        [
+          QuickSearchSearchField(value: threadInfo.chat.humanReadableTitle ?? "", boost: 700),
+          QuickSearchSearchField(value: threadInfo.space?.displayName ?? "", boost: 200)
+        ]
+      case let .user(user):
+        let fullName = [user.firstName, user.lastName]
+          .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+          .filter { $0.isEmpty == false }
+          .joined(separator: " ")
+        return [
+          QuickSearchSearchField(value: user.displayName, boost: 700),
+          QuickSearchSearchField(value: fullName, boost: 600),
+          QuickSearchSearchField(value: user.username ?? "", boost: 520),
+          QuickSearchSearchField(value: user.email ?? "", boost: 480)
+        ]
+      case let .space(space):
+        return [
+          QuickSearchSearchField(value: space.displayName, boost: 700),
+          QuickSearchSearchField(value: space.name, boost: 620)
+        ]
+      case let .command(command):
+        return commandSearchFields(for: command)
+      case let .createThread(title, _, spaceName):
+        return [
+          QuickSearchSearchField(value: title, boost: 200),
+          QuickSearchSearchField(value: spaceName ?? "", boost: 80)
+        ]
+    }
+  }
+
+  private func globalSearchFields(for result: GlobalSearchResult) -> [QuickSearchSearchField] {
+    switch result {
+      case let .users(user):
+        let fullName = [user.firstName, user.lastName]
+          .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+          .filter { $0.isEmpty == false }
+          .joined(separator: " ")
+        return [
+          QuickSearchSearchField(value: user.anyName, boost: 720),
+          QuickSearchSearchField(value: fullName, boost: 650),
+          QuickSearchSearchField(value: user.username ?? "", boost: 560),
+          QuickSearchSearchField(value: user.email ?? "", boost: 520)
+        ]
+    }
+  }
+
+  private func commandSearchFields(for command: QuickSearchCommand) -> [QuickSearchSearchField] {
+    var fields = [QuickSearchSearchField(value: command.title, boost: 620)]
+    fields.append(contentsOf: command.keywords.map { QuickSearchSearchField(value: $0, boost: 420) })
+    return fields
+  }
+
+  private func localSortTitle(for item: QuickSearchLocalItem) -> String {
+    switch item {
+      case let .thread(threadInfo):
+        threadInfo.chat.humanReadableTitle ?? ""
+      case let .user(user):
+        user.displayName
+      case let .space(space):
+        space.displayName
+      case let .command(command):
+        command.title
+      case let .createThread(title, _, _):
+        title
+    }
+  }
+
+  private func globalSortTitle(for result: GlobalSearchResult) -> String {
+    switch result {
+      case let .users(user):
+        user.firstName ?? user.username ?? user.email ?? ""
+    }
+  }
+
+  private func localTieKey(for item: QuickSearchLocalItem) -> String {
+    switch item {
+      case .thread:
+        return "a-\(item.id)"
+      case .user:
+        return "b-\(item.id)"
+      case .space:
+        return "c-\(item.id)"
+      case .command:
+        return "d-\(item.id)"
+      case .createThread:
+        return "e-\(item.id)"
+    }
+  }
+
+  private func globalTieKey(for result: GlobalSearchResult) -> String {
+    switch result {
+      case let .users(user):
+        return "users-\(user.id)"
+    }
+  }
+
+  private struct RankedLocalItem {
+    let item: QuickSearchLocalItem
+    let score: Int
+    let sortTitle: String
+    let tieKey: String
+  }
+
+  private struct RankedGlobalResult {
+    let result: GlobalSearchResult
+    let score: Int
+    let sortTitle: String
+    let tieKey: String
+  }
+
+  private struct RankedCommand {
+    let command: QuickSearchCommand
+    let score: Int
   }
 }
 
