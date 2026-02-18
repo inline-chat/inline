@@ -29,7 +29,7 @@ final class AppMenu: NSObject {
     super.init()
   }
 
-  func setupMainMenu(dependencies: AppDependencies) {
+  @MainActor func setupMainMenu(dependencies: AppDependencies) {
     self.dependencies = dependencies
     NSApp.mainMenu = mainMenu
 
@@ -41,7 +41,7 @@ final class AppMenu: NSObject {
     setupHelpMenu()
   }
 
-  private func setupApplicationMenu() {
+  @MainActor private func setupApplicationMenu() {
     let appMenu = NSMenu()
     let appName = ProcessInfo.processInfo.processName
 
@@ -566,7 +566,7 @@ final class AppMenu: NSObject {
   }
 
 #if SPARKLE
-  @objc private func handleUpdateMenuAction(_ sender: Any?) {
+  @MainActor @objc private func handleUpdateMenuAction(_ sender: Any?) {
     guard let dependencies else { return }
     if dependencies.updateInstallState.status.isReadyToInstall {
       dependencies.updateInstallState.install()
@@ -575,7 +575,7 @@ final class AppMenu: NSObject {
     (NSApp.delegate as? AppDelegate)?.checkForUpdates(sender)
   }
 
-  private func bindUpdateMenuItemState() {
+  @MainActor private func bindUpdateMenuItemState() {
     guard let dependencies else { return }
     updateStatusCancellable = dependencies.updateInstallState.$status
       .receive(on: RunLoop.main)
