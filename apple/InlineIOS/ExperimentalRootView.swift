@@ -24,6 +24,7 @@ struct ExperimentalRootView: View {
   @EnvironmentStateObject private var home: HomeViewModel
   @EnvironmentStateObject private var compactSpaceList: CompactSpaceList
   @AppStorage(ExperimentalHomePreferenceKeys.chatScope) private var homeChatScopeRaw: String = ExperimentalHomeChatScope.all.rawValue
+  @AppStorage(ExperimentalHomePreferenceKeys.chatItemRenderMode) private var chatItemRenderModeRaw: String = ExperimentalHomeChatItemRenderMode.twoLineLastMessage.rawValue
 
   init() {
     _data = EnvironmentStateObject { env in
@@ -182,6 +183,17 @@ struct ExperimentalRootView: View {
     )
   }
 
+  private var chatItemRenderMode: ExperimentalHomeChatItemRenderMode {
+    ExperimentalHomeChatItemRenderMode(rawValue: chatItemRenderModeRaw) ?? .twoLineLastMessage
+  }
+
+  private var chatItemRenderModeBinding: Binding<ExperimentalHomeChatItemRenderMode> {
+    Binding(
+      get: { chatItemRenderMode },
+      set: { chatItemRenderModeRaw = $0.rawValue }
+    )
+  }
+
   @ViewBuilder
   private func activeSpacePicker(
     selectedSpaceId: Binding<Int64?>
@@ -249,6 +261,13 @@ struct ExperimentalRootView: View {
           }
         }
 
+        Picker("Chat Items", selection: chatItemRenderModeBinding) {
+          ForEach(ExperimentalHomeChatItemRenderMode.allCases) { mode in
+            Label(mode.title, systemImage: mode.systemImage)
+              .tag(mode)
+          }
+        }
+
         Button {
           presentMembers()
         } label: {
@@ -262,7 +281,7 @@ struct ExperimentalRootView: View {
           Label("Settings", systemImage: "gearshape")
         }
       } label: {
-        Image(systemName: "ellipsis")
+        Image(systemName: "line.3.horizontal.decrease")
           .font(.system(size: 14, weight: .semibold))
           .foregroundStyle(.secondary)
           .frame(width: 36, height: 36)
