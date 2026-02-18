@@ -24,6 +24,7 @@ type ReleaseOptions = {
   skipGithubRelease: boolean;
   skip: Set<string>;
   dryRun: boolean;
+  pauseBeforeNotarize: boolean;
 };
 
 type ParsedArgs = Omit<ReleaseOptions, "channel" | "releaseTag"> & {
@@ -62,6 +63,7 @@ function usage(): string {
     "  --skip <ids>                     Skip steps (comma-separated or repeatable)",
     "                                  Known ids: build, post-check, upload-dmg, verify-dmg, gen-appcast, validate-appcast, upload-appcast, github",
     "                                  Aliases: upload (upload-dmg+upload-appcast), appcast (gen+validate+upload)",
+    "  --pause-before-notarize          Pause after app/DMG build so you can test locally, then continue notarization",
     "  --dry-run                         Print what would run, without executing the pipeline",
     "  --skip-build                      Alias for --skip build",
     "  -h, --help                       Show help",
@@ -87,6 +89,7 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   let skipGithubRelease = false;
   const skip = new Set<string>();
   let dryRun = false;
+  let pauseBeforeNotarize = false;
 
   const resolveFromRoot = (p: string): string => {
     if (!p) return p;
@@ -136,6 +139,10 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
       dryRun = true;
       continue;
     }
+    if (arg === "--pause-before-notarize") {
+      pauseBeforeNotarize = true;
+      continue;
+    }
     if (arg === "--skip-build") {
       skip.add("build");
       continue;
@@ -170,6 +177,7 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
     skipGithubRelease,
     skip,
     dryRun,
+    pauseBeforeNotarize,
   };
 }
 
@@ -506,6 +514,7 @@ async function main() {
     skipGithubRelease: parsed0.skipGithubRelease || parsed0.skip.has("github"),
     skip: parsed0.skip,
     dryRun: parsed0.dryRun,
+    pauseBeforeNotarize: parsed0.pauseBeforeNotarize,
   };
 
   // Temp dir is created up-front so we can point to it on failures.
@@ -533,7 +542,7 @@ async function main() {
   };
 
   ui.setHintLine(
-    `Channel: ${opts.channel}${opts.releaseTag ? `  Tag: ${opts.releaseTag}` : ""}${opts.dryRun ? "  Dry run" : ""}`,
+    `Channel: ${opts.channel}${opts.releaseTag ? `  Tag: ${opts.releaseTag}` : ""}${opts.pauseBeforeNotarize ? "  Pause before notarize" : ""}${opts.dryRun ? "  Dry run" : ""}`,
   );
 
   const tasks: Task[] = [];
@@ -555,6 +564,10 @@ async function main() {
     }
     if (!opts.skipGithubRelease && opts.releaseTag) {
       if (!commandExists("gh")) missing.push("gh");
+    }
+    if (ctx.pauseBeforeNotarize && taskEnabled(opts, "build") && !interactive) {
+      if (ctx.dryRun) ui.info("Warning: --pause-before-notarize requires an interactive terminal when executing the build.");
+      else throw new Error("--pause-before-notarize requires an interactive terminal.");
     }
     if (missing.length) {
       if (ctx.dryRun) {
@@ -589,6 +602,7 @@ async function main() {
       ui.info(`  DERIVED_DATA=${ctx.derivedData}`);
       ui.info(`  DMG_PATH=${ctx.dmgPath}`);
       ui.info(`  SPARKLE_DIR=${ctx.sparkleDir}`);
+      ui.info(`  PAUSE_BEFORE_NOTARIZE=${ctx.pauseBeforeNotarize ? "1" : "0"}`);
       ui.info("build-direct.sh enforces signing/notarization env vars.");
     },
     run: async (ctx, ui) => {
@@ -601,6 +615,7 @@ async function main() {
           DERIVED_DATA: ctx.derivedData,
           DMG_PATH: ctx.dmgPath,
           SPARKLE_DIR: ctx.sparkleDir,
+          PAUSE_BEFORE_NOTARIZE: ctx.pauseBeforeNotarize ? "1" : "0",
         },
       });
     },
@@ -891,7 +906,7 @@ async function main() {
       if (!ctx.releaseTag) throw new Error("Internal error: github task enabled without releaseTag");
       if (!existsSync(ctx.dmgPath)) throw new Error(`DMG not found at ${ctx.dmgPath}`);
 
-      // Force-update tag and attach DMG. Matches release-local.sh behavior.
+      // Force-update tag and attach DMG.
       await runStreaming(ui, ["git", "-C", ctx.rootDir, "-c", "user.name=github-actions[bot]", "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com", "tag", "-fa", ctx.releaseTag, "-m", "Latest Sparkle release", "HEAD"], {
         cwd: ctx.rootDir,
       });
