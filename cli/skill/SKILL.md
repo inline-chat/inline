@@ -1,6 +1,6 @@
 ---
 name: inline-cli
-description: Explain and use the Inline CLI (`inline`) for authentication, chats, users, spaces, messages, search, attachments, downloads, JSON output, and configuration. Use when asked how to use the Inline CLI or its commands, flags, outputs, or workflows.
+description: Explain and use the Inline CLI (`inline`) for authentication, chats, users, spaces, messages, search, bots, typing, notifications, tasks, schema, attachments, downloads, JSON output, and configuration. Use when asked how to use the Inline CLI or its commands, flags, outputs, or workflows.
 ---
 
 # Inline CLI
@@ -9,7 +9,8 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 
 - `--json`: Output raw JSON payloads (proto/RPC results) to stdout (available on all commands).
   - When `--json` is set and a command fails, the CLI prints a structured error JSON to stderr: `{"error":{"code","message","hint","examples"}}` and exits non-zero.
-  - Some table-only convenience flags that change the output shape (e.g. `inline chats list --ids/--id`, `inline bots list --ids/--id`) are disabled in `--json` mode; use `jq` to filter instead.
+  - Table-only convenience flags are disabled in `--json` mode. Specifically: `inline users list --filter/--ids/--id`, `inline bots list --filter/--ids/--id`, and `inline chats list --ids/--id`.
+  - `inline chats list --json` still supports `--filter`, `--limit`, and `--offset` for pre-filtered/paginated payloads.
   - Destructive commands never prompt in `--json` mode; pass `--yes` explicitly.
 - `--pretty`: Pretty-print JSON output (default).
 - `--compact`: Compact JSON output (no whitespace).
@@ -26,9 +27,19 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 - `inline auth logout`
   - Clear the stored token and current user.
 
+### shortcuts and aliases
+
+- `inline me` and `inline whoami`
+  - Shortcut for `inline auth me`.
+- `inline search ...`
+  - Shortcut for `inline messages search ...`.
+- `inline chat ...`, `inline thread ...`, `inline threads ...`
+  - Aliases for `inline chats ...`.
+- `inline bot ...`
+  - Alias for `inline bots ...`.
+
 ### chats
 
-- Top-level aliases: `inline chat ...`, `inline thread ...`, `inline threads ...` all map to `inline chats ...`.
 - `inline chats list`
   - List chats with human-readable names, unread count, and last message preview (sender + text in one column).
 - `inline chats list --json --filter "launch"`
@@ -45,6 +56,10 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
   - Create a new chat or thread. If `--public` is set, participants must be empty.
 - `inline chats create-dm --user-id 42`
   - Create a private chat (DM).
+- `inline chats update-visibility --chat-id 123 [--public | --private --participant 42 --participant 99]`
+  - Change a chat between public/private.
+  - `--public` cannot include participants.
+  - `--private` requires one or more `--participant` values.
 - `inline chats rename --chat-id 123 --title "New title" [--emoji "🚀"]`
   - Rename a chat or thread.
 - `inline chats mark-unread [--chat-id 123 | --user-id 42]`
@@ -56,6 +71,7 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 
 ### bots
 
+- Alias: `inline bot ...` maps to `inline bots ...`.
 - `inline bots list [--filter "name"] [--ids | --id]`
   - List bots you can access.
 - `inline bots create --name "Build Bot" --username build_bot [--add-to-space 31]`
@@ -72,10 +88,11 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 
 ### users
 
-- `inline users list`
+- `inline users list [--filter "name"] [--ids | --id]`
   - List users that appear in your chats (derived from getChats).
-- `inline users list --filter "name"`
-  - Filter users by name, username, email, or phone.
+  - `--filter` matches name, username, email, or phone.
+  - `--ids` prints one user id per line.
+  - `--id` requires exactly one match and prints that id.
 - `inline users get --id 42`
   - Fetch one user by id (from the same getChats payload).
 
@@ -96,7 +113,7 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 
 - `inline notifications get`
   - Show current notification settings.
-- `inline notifications set [--mode all|none|mentions|important] [--silent | --sound]`
+- `inline notifications set [--mode all|none|mentions|only-mentions|important] [--silent | --sound]`
   - Update notification settings.
 
 ### update
@@ -108,6 +125,18 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 
 - `inline doctor`
   - Print diagnostic info (system, config, paths, auth state).
+
+### tasks
+
+- `inline tasks create-linear --chat-id 123 --message-id 456 [--space-id 31]`
+  - Create a Linear issue from a message.
+- `inline tasks create-notion --chat-id 123 --message-id 456 --space-id 31`
+  - Create a Notion task from a message.
+
+### schema
+
+- `inline schema proto`
+  - Print bundled protobuf source files.
 
 ### messages
 
@@ -155,9 +184,13 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
 - List chats/threads:
   - `inline chats list`
   - Alias: `inline thread list`
+- Update chat visibility:
+  - `inline chats update-visibility --chat-id 123 --public`
+  - `inline chats update-visibility --chat-id 123 --private --participant 42 --participant 99`
 - Search messages in a chat:
   - `inline messages search --chat-id 123 --query "design review"`
   - JSON: `inline messages search --chat-id 123 --query "design review" --json`
+  - Shortcut: `inline search --chat-id 123 --query "design review"`
 - Translate and list messages:
   - `inline messages list --chat-id 123 --translate en`
 - Filter messages by time:
@@ -182,6 +215,9 @@ description: Explain and use the Inline CLI (`inline`) for authentication, chats
   - `inline bots list`
   - `inline bots create --name "Build Bot" --username build_bot`
   - `inline bots reveal-token --bot-user-id 42` (token is not printed by default)
+- Tasks:
+  - `inline tasks create-linear --chat-id 123 --message-id 456`
+  - `inline tasks create-notion --chat-id 123 --message-id 456 --space-id 31`
 - Typing:
   - `inline typing start --chat-id 123`
   - `inline typing stop --chat-id 123`
