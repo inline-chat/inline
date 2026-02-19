@@ -136,7 +136,7 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
         "Settings"
 #if SPARKLE
       case .checkForUpdates:
-        "Check for Updates..."
+        "Check for Updates…"
 #endif
       case .newThread:
         "New thread"
