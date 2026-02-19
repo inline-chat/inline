@@ -369,7 +369,7 @@ public actor FileCache: Sendable {
     guard durationTime.isValid else { throw FileCacheError.failedToSave }
     let durationSeconds = Int(CMTimeGetSeconds(durationTime).rounded())
 
-    // Persist the video to app cache (transcode non-mp4 videos to mp4)
+    // Persist the video to app cache (compress or transcode to mp4 when needed)
     let directory = FileHelpers.getLocalCacheDirectory(for: .videos)
     let fileManager = FileManager.default
     let sourceExtension = url.pathExtension.lowercased()
@@ -377,12 +377,37 @@ public actor FileCache: Sendable {
     let localPath = UUID().uuidString + ".mp4"
     let localUrl = directory.appendingPathComponent(localPath)
 
-    if needsMp4Transcode {
-      try await exportVideoToMp4(asset: asset, destinationURL: localUrl)
-    } else {
+    var finalWidth = width
+    var finalHeight = height
+    var finalDuration = durationSeconds
+    var fileSize = 0
+
+    do {
+      let options = VideoCompressionOptions.uploadDefault(forceTranscode: needsMp4Transcode)
+      let result = try await VideoCompressor.shared.compressVideo(at: url, options: options)
+      defer {
+        if fileManager.fileExists(atPath: result.url.path) {
+          try? fileManager.removeItem(at: result.url)
+        }
+      }
+      if fileManager.fileExists(atPath: localUrl.path) {
+        try fileManager.removeItem(at: localUrl)
+      }
+      try fileManager.moveItem(at: result.url, to: localUrl)
+      finalWidth = result.width
+      finalHeight = result.height
+      finalDuration = result.duration
+      fileSize = Int(result.fileSize)
+    } catch {
+      if needsMp4Transcode {
+        throw error
+      }
+      if fileManager.fileExists(atPath: localUrl.path) {
+        try fileManager.removeItem(at: localUrl)
+      }
       try fileManager.copyItem(at: url, to: localUrl)
+      fileSize = FileHelpers.getFileSize(at: localUrl)
     }
-    let fileSize = FileHelpers.getFileSize(at: localUrl)
 
     // Generate or reuse thumbnail
     let thumbImage: PlatformImage? = if let thumbnail {
@@ -396,9 +421,9 @@ public actor FileCache: Sendable {
     } else { nil }
 
     let video = try MediaHelpers.shared.createLocalVideo(
-      width: width,
-      height: height,
-      duration: durationSeconds,
+      width: finalWidth,
+      height: finalHeight,
+      duration: finalDuration,
       size: fileSize,
       thumbnail: thumbnailInfo?.photo,
       localPath: localPath
