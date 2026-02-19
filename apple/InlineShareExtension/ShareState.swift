@@ -719,6 +719,42 @@ class ShareState: ObservableObject {
     )
   }
 
+  private nonisolated func prepareVideoForUpload(
+    _ file: SharedFile
+  ) async throws -> (url: URL, fileName: String, mimeType: MIMEType, cleanup: (() -> Void)?) {
+    let needsMp4Transcode = file.url.pathExtension.lowercased() != "mp4"
+    let options = VideoCompressionOptions.uploadDefault(forceTranscode: needsMp4Transcode)
+
+    do {
+      let result = try await VideoCompressor.shared.compressVideo(at: file.url, options: options)
+      let baseName = (file.fileName as NSString).deletingPathExtension
+      let resolvedName = baseName.isEmpty ? "video.mp4" : "\(baseName).mp4"
+      let mimeType = MIMEType(text: FileHelpers.getMimeType(for: result.url))
+      let cleanup: (() -> Void)? = {
+        _ = try? FileManager.default.removeItem(at: result.url)
+      }
+      return (result.url, resolvedName, mimeType, cleanup)
+    } catch VideoCompressionError.compressionNotNeeded, VideoCompressionError.compressionNotEffective {
+      if needsMp4Transcode {
+        throw NSError(
+          domain: "ShareError",
+          code: 11,
+          userInfo: [NSLocalizedDescriptionKey: "Failed to convert video to MP4."]
+        )
+      }
+      return (file.url, file.fileName, file.mimeType, nil)
+    } catch {
+      if needsMp4Transcode {
+        throw NSError(
+          domain: "ShareError",
+          code: 12,
+          userInfo: [NSLocalizedDescriptionKey: "Failed to compress video for upload."]
+        )
+      }
+      return (file.url, file.fileName, file.mimeType, nil)
+    }
+  }
+
   private nonisolated func generateVideoThumbnail(
     from asset: AVAsset,
     durationSeconds: Double
@@ -1175,18 +1211,7 @@ class ShareState: ObservableObject {
 
         for file in content.files {
           self.log.debug(self.tagged("Uploading \(file.fileName) (\(file.fileSize ?? 0) bytes) as \(file.fileType)"))
-          if let fileSize = file.fileSize, fileSize > Self.maxFileSizeBytes {
-            throw NSError(
-              domain: "ShareError",
-              code: 3,
-              userInfo: [
-                NSLocalizedDescriptionKey: "\(file.fileName) is too large. Maximum size is 100MB."
-              ]
-            )
-          }
-
-          let fileData = try Data(contentsOf: file.url, options: .mappedIfSafe)
-          guard fileData.count <= Self.maxFileSizeBytes else {
+          if file.fileType != .video, let fileSize = file.fileSize, fileSize > Self.maxFileSizeBytes {
             throw NSError(
               domain: "ShareError",
               code: 3,
@@ -1206,6 +1231,16 @@ class ShareState: ObservableObject {
           }
           switch file.fileType {
             case .photo:
+              let fileData = try Data(contentsOf: file.url, options: .mappedIfSafe)
+              guard fileData.count <= Self.maxFileSizeBytes else {
+                throw NSError(
+                  domain: "ShareError",
+                  code: 3,
+                  userInfo: [
+                    NSLocalizedDescriptionKey: "\(file.fileName) is too large. Maximum size is 100MB."
+                  ]
+                )
+              }
               uploadResult = try await apiClient.uploadFile(
                 type: .photo,
                 data: fileData,
@@ -1214,6 +1249,16 @@ class ShareState: ObservableObject {
                 progress: progressHandler
               )
             case .document:
+              let fileData = try Data(contentsOf: file.url, options: .mappedIfSafe)
+              guard fileData.count <= Self.maxFileSizeBytes else {
+                throw NSError(
+                  domain: "ShareError",
+                  code: 3,
+                  userInfo: [
+                    NSLocalizedDescriptionKey: "\(file.fileName) is too large. Maximum size is 100MB."
+                  ]
+                )
+              }
               uploadResult = try await apiClient.uploadFile(
                 type: .document,
                 data: fileData,
@@ -1222,12 +1267,24 @@ class ShareState: ObservableObject {
                 progress: progressHandler
               )
             case .video:
-              let videoMetadata = try await buildVideoMetadata(from: file.url)
+              let prepared = try await prepareVideoForUpload(file)
+              defer { prepared.cleanup?() }
+              let fileData = try Data(contentsOf: prepared.url, options: .mappedIfSafe)
+              guard fileData.count <= Self.maxFileSizeBytes else {
+                throw NSError(
+                  domain: "ShareError",
+                  code: 3,
+                  userInfo: [
+                    NSLocalizedDescriptionKey: "\(prepared.fileName) is too large. Maximum size is 100MB."
+                  ]
+                )
+              }
+              let videoMetadata = try await buildVideoMetadata(from: prepared.url)
               uploadResult = try await apiClient.uploadFile(
                 type: .video,
                 data: fileData,
-                filename: file.fileName,
-                mimeType: file.mimeType,
+                filename: prepared.fileName,
+                mimeType: prepared.mimeType,
                 videoMetadata: videoMetadata,
                 progress: progressHandler
               )
