@@ -23,6 +23,9 @@ final class AppMenu: NSObject {
   private weak var updateMenuItem: NSMenuItem?
   private var updateMenuItemEnabled = true
   private var updateStatusCancellable: AnyCancellable?
+#if DEBUG
+  private var lastAppliedUpdateStatus: UpdateStatus?
+#endif
 #endif
 
   override private init() {
@@ -592,7 +595,31 @@ final class AppMenu: NSObject {
   private func applyUpdateMenuItemState(_ status: UpdateStatus) {
     updateMenuItem?.title = status.menuTitle
     updateMenuItemEnabled = status.allowsManualAction
+#if DEBUG
+    assertUpdateMenuItemBinding(status)
+#endif
   }
+
+#if DEBUG
+  private func assertUpdateMenuItemBinding(_ status: UpdateStatus) {
+    if let updateMenuItem {
+      assert(
+        updateMenuItem.title == status.menuTitle,
+        "Update menu title must mirror UpdateStatus.menuTitle"
+      )
+    }
+    if let previousStatus = lastAppliedUpdateStatus {
+      let titleTransitioned = previousStatus.menuTitle != status.menuTitle
+      if titleTransitioned, let updateMenuItem {
+        assert(
+          updateMenuItem.title == status.menuTitle,
+          "Update menu title must refresh when status title changes"
+        )
+      }
+    }
+    lastAppliedUpdateStatus = status
+  }
+#endif
 #endif
 }
 
