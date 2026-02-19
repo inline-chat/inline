@@ -62,6 +62,10 @@ final class AppMenu: NSObject {
       keyEquivalent: ""
     )
     checkForUpdatesMenuItem.target = self
+    checkForUpdatesMenuItem.image = NSImage(
+      systemSymbolName: "arrow.triangle.2.circlepath",
+      accessibilityDescription: nil
+    )
     appMenu.addItem(checkForUpdatesMenuItem)
     updateMenuItem = checkForUpdatesMenuItem
     bindUpdateMenuItemState()
