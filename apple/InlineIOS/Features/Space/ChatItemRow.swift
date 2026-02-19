@@ -47,7 +47,7 @@ struct ChatItemRow: View {
                   )
                   .font(.callout)
                 } else {
-                  Text("💬")
+                  Text("#")
                     .font(.callout)
                 }
               }

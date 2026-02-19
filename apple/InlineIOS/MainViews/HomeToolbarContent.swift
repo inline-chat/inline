@@ -71,7 +71,8 @@ struct HomeToolbarContent: ToolbarContent {
         Label("Settings", systemImage: "gearshape")
       }
     } label: {
-      Image(systemName: "ellipsis")
+      Image(systemName: "line.3.horizontal.decrease")
+        .foregroundStyle(.primary)
         .contentShape(Rectangle())
     }
   }
@@ -87,7 +88,7 @@ struct HomeToolbarContent: ToolbarContent {
       router.push(.createSpace)
     } label: {
       Image(systemName: "plus")
-        .tint(Color.secondary)
+        .foregroundStyle(.primary)
         .contentShape(Rectangle())
     }
   }
@@ -98,7 +99,7 @@ struct HomeToolbarContent: ToolbarContent {
       router.presentSheet(.settings)
     } label: {
       Image(systemName: "gearshape")
-        .tint(Color.secondary)
+        .foregroundStyle(.primary)
         .contentShape(Rectangle())
     }
   }

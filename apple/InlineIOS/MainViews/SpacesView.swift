@@ -78,7 +78,8 @@ struct SpacesView: View {
         Label("Settings", systemImage: "gearshape")
       }
     } label: {
-      Image(systemName: "ellipsis")
+      Image(systemName: "line.3.horizontal.decrease")
+        .foregroundStyle(.primary)
         .contentShape(Rectangle())
     }
   }

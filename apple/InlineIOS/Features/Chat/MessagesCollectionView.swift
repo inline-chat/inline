@@ -1479,7 +1479,6 @@ private extension MessagesCollectionView {
         ) { [weak self] _ in
           self?.togglePinMessage(message, unpin: pinned)
         }
-        actions.append(pinAction)
 
         var editAction: UIAction?
         if message.fromId == Auth.shared.getCurrentUserId() ?? 0, message.hasText {
@@ -1509,6 +1508,7 @@ private extension MessagesCollectionView {
         if let editAction {
           basicActions.append(editAction)
         }
+        basicActions.append(pinAction)
 
         if !basicActions.isEmpty {
           let basicMenu = UIMenu(title: "", options: .displayInline, children: basicActions)

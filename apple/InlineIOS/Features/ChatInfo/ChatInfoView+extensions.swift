@@ -158,7 +158,7 @@ extension ChatInfoView {
                     Text(draftEmoji)
                       .font(.system(size: 40))
                   } else {
-                    Text("💬")
+                    Text("#")
                       .font(.system(size: 40))
                   }
                 }
@@ -196,7 +196,7 @@ extension ChatInfoView {
                   )
                   .font(.system(size: 40))
                 } else {
-                  Text("💬")
+                  Text("#")
                     .font(.system(size: 40))
                 }
               }
