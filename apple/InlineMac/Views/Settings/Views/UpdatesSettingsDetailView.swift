@@ -88,7 +88,7 @@ struct UpdatesSettingsDetailView: View {
     if updateInstallState.status.isReadyToInstall {
       return "Install and Relaunch"
     }
-    return "Check for Updates..."
+    return "Check for Updates…"
   }
 
   private func performPrimaryAction() {
