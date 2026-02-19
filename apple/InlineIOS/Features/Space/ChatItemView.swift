@@ -118,7 +118,7 @@ struct ChatItemView: View {
             )
             .font(.largeTitle)
           } else {
-            Text("💬")
+            Text("#")
               .font(.largeTitle)
           }
         }

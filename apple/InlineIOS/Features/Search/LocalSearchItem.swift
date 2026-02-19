@@ -17,7 +17,7 @@ struct LocalSearchItem: View {
               .fill(Color.blue)
               .frame(width: 34, height: 34)
               .overlay(
-                Text(threadInfo.chat.emoji ?? "💬")
+                Text(threadInfo.chat.emoji ?? "#")
                   .font(.system(size: 16))
               )
 

@@ -1,3 +1,4 @@
+import Auth
 import InlineKit
 import InlineUI
 import Nuke
@@ -8,6 +9,7 @@ import UIKit
 struct ReactionUser {
   let userId: Int64
   let userInfo: UserInfo?
+  let reactedAt: Date
 
   var displayName: String {
     userInfo?.user.firstName ?? userInfo?.user.email?.components(separatedBy: "@").first ?? "User"
@@ -288,17 +290,26 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
       previewProvider: nil
     ) { [weak self] _ in
       guard let self else { return UIMenu(children: []) }
+      let currentUserId = Auth.shared.getCurrentUserId()
+      let sortedReactionUsers = reactionUsers.sorted { $0.reactedAt > $1.reactedAt }
 
       // Create menu items for each user who reacted
-      let userActions = reactionUsers.map { user in
+      let userActions = sortedReactionUsers.map { user in
         let avatarImage: UIImage = if let userInfo = user.userInfo {
           self.createAvatarImage(for: userInfo)
         } else {
           UIImage(systemName: "person.circle") ?? self.createDefaultAvatar()
         }
 
+        let userName = if let currentUserId, user.userId == currentUserId {
+          "You"
+        } else {
+          user.displayName
+        }
+
         return UIAction(
-          title: user.displayName,
+          title: userName,
+          subtitle: self.timestampString(for: user.reactedAt),
           image: avatarImage
         ) { _ in
           Navigation.shared.push(.chat(peer: .user(id: user.userId)))
@@ -313,8 +324,19 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
     _ interaction: UIContextMenuInteraction,
     previewForHighlightingMenuWithConfiguration configuration: UIContextMenuConfiguration
   ) -> UITargetedPreview? {
+    makeContextMenuPreview()
+  }
+
+  func contextMenuInteraction(
+    _ interaction: UIContextMenuInteraction,
+    previewForDismissingMenuWithConfiguration configuration: UIContextMenuConfiguration
+  ) -> UITargetedPreview? {
+    makeContextMenuPreview()
+  }
+
+  private func makeContextMenuPreview() -> UITargetedPreview? {
     let parameters = UIPreviewParameters()
-    parameters.backgroundColor = .clear
+    parameters.backgroundColor = containerView.backgroundColor ?? .secondarySystemFill
     parameters.visiblePath = UIBezierPath(
       roundedRect: containerView.bounds,
       cornerRadius: containerView.bounds.height / 2
@@ -499,6 +521,27 @@ class MessageReactionView: UIView, UIContextMenuInteractionDelegate, UIGestureRe
     // This is a placeholder and should be replaced with the actual implementation
     UIImage(systemName: "person.circle") ?? UIImage()
   }
+
+  private func timestampString(for date: Date) -> String {
+    "\(Self.menuDateFormatter.string(from: date)), \(Self.menuTimeFormatter.string(from: date))"
+  }
+
+  private static let menuDateFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = .autoupdatingCurrent
+    formatter.dateStyle = .medium
+    formatter.timeStyle = .none
+    formatter.doesRelativeDateFormatting = true
+    return formatter
+  }()
+
+  private static let menuTimeFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = .autoupdatingCurrent
+    formatter.dateStyle = .none
+    formatter.timeStyle = .short
+    return formatter
+  }()
 }
 
 // MARK: - UIColor Extension

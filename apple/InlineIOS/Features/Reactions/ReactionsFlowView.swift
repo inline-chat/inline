@@ -99,7 +99,11 @@ class ReactionsFlowView: UIView {
 
         // Create ReactionUser objects from FullReaction
         let reactionUsers = groupedReaction.reactions.map { fullReaction in
-          ReactionUser(userId: fullReaction.reaction.userId, userInfo: fullReaction.userInfo)
+          ReactionUser(
+            userId: fullReaction.reaction.userId,
+            userInfo: fullReaction.userInfo,
+            reactedAt: fullReaction.reaction.date
+          )
         }
 
         let view = MessageReactionView(
@@ -138,7 +142,11 @@ class ReactionsFlowView: UIView {
 
         // Update user information
         let reactionUsers = groupedReaction.reactions.map { fullReaction in
-          ReactionUser(userId: fullReaction.reaction.userId, userInfo: fullReaction.userInfo)
+          ReactionUser(
+            userId: fullReaction.reaction.userId,
+            userInfo: fullReaction.userInfo,
+            reactedAt: fullReaction.reaction.date
+          )
         }
         view.updateReactionUsers(reactionUsers)
       }

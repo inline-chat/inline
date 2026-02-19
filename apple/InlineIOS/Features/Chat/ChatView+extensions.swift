@@ -134,7 +134,7 @@ struct ChatToolbarLeadingView: View {
           .frame(width: toolbarAvatarSize, height: toolbarAvatarSize)
           .overlay {
             Text(
-              String(describing: fullChatViewModel.chat?.emoji ?? "💬")
+              String(describing: fullChatViewModel.chat?.emoji ?? "#")
                 .replacingOccurrences(of: "Optional(\"", with: "")
                 .replacingOccurrences(of: "\")", with: "")
             )

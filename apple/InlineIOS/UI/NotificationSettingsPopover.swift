@@ -34,7 +34,7 @@ struct NotificationSettingsButton: View {
       presented.toggle()
     } label: {
       Image(systemName: notificationIcon)
-        .tint(Color.secondary)
+        .foregroundStyle(.primary)
         .contentShape(Rectangle())
         .transition(.asymmetric(
           insertion: .scale.combined(with: .opacity),
@@ -211,7 +211,7 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
             .frame(width: 28, height: 28)
             .foregroundStyle(Color(.systemGray5))
             .overlay {
-              Image(systemName: "ellipsis")
+              Image(systemName: "line.3.horizontal.decrease")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.secondary)
             }
@@ -225,7 +225,7 @@ private struct NotificationSettingsItem<Value: Equatable>: View {
             .frame(width: 28, height: 28)
             .foregroundStyle(Color(.systemGray5))
             .overlay {
-              Image(systemName: "ellipsis")
+              Image(systemName: "line.3.horizontal.decrease")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.secondary)
             }

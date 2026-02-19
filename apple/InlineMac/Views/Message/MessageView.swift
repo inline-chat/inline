@@ -2773,7 +2773,16 @@ extension MessageViewAppKit: NSMenuDelegate {
       let forwardItem = NSMenuItem(title: "Forward", action: #selector(forwardMessage), keyEquivalent: "")
       forwardItem.image = NSImage(systemSymbolName: "arrowshape.turn.up.right", accessibilityDescription: "Forward")
       menu.addItem(forwardItem)
+    }
 
+    // Edit
+    if message.out == true, message.status == .sent {
+      let editItem = NSMenuItem(title: "Edit", action: #selector(editMessage), keyEquivalent: "e")
+      editItem.image = NSImage(systemSymbolName: "square.and.pencil", accessibilityDescription: "Edit")
+      menu.addItem(editItem)
+    }
+
+    if regularMessage {
       let pinned = isMessagePinned()
       let pinTitle = pinned ? "Unpin" : "Pin"
       let pinAction = pinned ? #selector(unpinMessage) : #selector(pinMessage)
@@ -2783,13 +2792,6 @@ extension MessageViewAppKit: NSMenuDelegate {
         accessibilityDescription: pinTitle
       )
       menu.addItem(pinItem)
-    }
-
-    // Edit
-    if message.out == true, message.status == .sent {
-      let editItem = NSMenuItem(title: "Edit", action: #selector(editMessage), keyEquivalent: "e")
-      editItem.image = NSImage(systemSymbolName: "square.and.pencil", accessibilityDescription: "Edit")
-      menu.addItem(editItem)
     }
 
     if regularMessage {
