@@ -7,10 +7,11 @@ import UIKit
 
 final class PinnedMessageHeaderView: UIView, UIGestureRecognizerDelegate {
   private enum Constants {
-    static let horizontalPadding: CGFloat = 6
-    static let verticalPadding: CGFloat = 10
-    static let contentSpacing: CGFloat = 6
-    static let closeButtonSize: CGFloat = 32
+    static let horizontalPadding: CGFloat = 8
+    static let verticalPadding: CGFloat = 16
+    static let contentSpacing: CGFloat = 8
+    static let closeButtonSize: CGFloat = EmbedMessageView.height
+    static let fadeDuration: TimeInterval = 0.2
   }
 
   static let preferredHeight: CGFloat = EmbedMessageView.height + (Constants.verticalPadding * 2)
@@ -25,10 +26,14 @@ final class PinnedMessageHeaderView: UIView, UIGestureRecognizerDelegate {
   private var pinnedMessageObservation: AnyCancellable?
   private var messageObservation: AnyCancellable?
   private var currentMessageId: Int64?
+  private var isVisible = false
 
   private let backgroundView: UIView
   private let backgroundContentView: UIView
   private var didStartObservation = false
+  private var backgroundViewTopConstraint: NSLayoutConstraint?
+  private var backgroundViewBottomConstraint: NSLayoutConstraint?
+  private var closeButtonHeightConstraint: NSLayoutConstraint?
 
   private lazy var embedView: EmbedMessageView = {
     let view = EmbedMessageView()
@@ -67,6 +72,7 @@ final class PinnedMessageHeaderView: UIView, UIGestureRecognizerDelegate {
     super.init(frame: .zero)
     setupViews()
     setupConstraints()
+    applyHiddenState()
   }
 
   @available(*, unavailable)
@@ -78,6 +84,7 @@ final class PinnedMessageHeaderView: UIView, UIGestureRecognizerDelegate {
     translatesAutoresizingMaskIntoConstraints = false
     backgroundColor = .clear
     isHidden = true
+    alpha = 0
 
     backgroundView.translatesAutoresizingMaskIntoConstraints = false
     addSubview(backgroundView)
@@ -90,11 +97,15 @@ final class PinnedMessageHeaderView: UIView, UIGestureRecognizerDelegate {
   }
 
   private func setupConstraints() {
+    backgroundViewTopConstraint = backgroundView.topAnchor.constraint(equalTo: topAnchor, constant: Constants.verticalPadding)
+    backgroundViewBottomConstraint = backgroundView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Constants.verticalPadding)
+    closeButtonHeightConstraint = closeButton.heightAnchor.constraint(equalToConstant: Constants.closeButtonSize)
+
     NSLayoutConstraint.activate([
       backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Constants.horizontalPadding),
       backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Constants.horizontalPadding),
-      backgroundView.topAnchor.constraint(equalTo: topAnchor, constant: Constants.verticalPadding),
-      backgroundView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Constants.verticalPadding),
+      backgroundViewTopConstraint!,
+      backgroundViewBottomConstraint!,
 
       embedView.leadingAnchor.constraint(equalTo: backgroundContentView.leadingAnchor, constant: Constants.horizontalPadding),
       embedView.centerYAnchor.constraint(equalTo: backgroundContentView.centerYAnchor),
@@ -104,7 +115,7 @@ final class PinnedMessageHeaderView: UIView, UIGestureRecognizerDelegate {
       closeButton.trailingAnchor.constraint(equalTo: backgroundContentView.trailingAnchor, constant: -Constants.horizontalPadding),
       closeButton.centerYAnchor.constraint(equalTo: embedView.centerYAnchor),
       closeButton.widthAnchor.constraint(equalToConstant: Constants.closeButtonSize),
-      closeButton.heightAnchor.constraint(equalToConstant: Constants.closeButtonSize),
+      closeButtonHeightConstraint!,
     ])
   }
 
@@ -242,9 +253,56 @@ final class PinnedMessageHeaderView: UIView, UIGestureRecognizerDelegate {
       )
   }
 
-  private func setVisible(_ visible: Bool) {
-    isHidden = !visible
-    onHeightChange?(visible ? Self.preferredHeight : 0)
+  private func setVisible(_ visible: Bool, animate: Bool = true) {
+    guard visible != isVisible else { return }
+    isVisible = visible
+
+    let canAnimate = animate && window != nil && !UIAccessibility.isReduceMotionEnabled
+
+    if visible {
+      isHidden = false
+      alpha = canAnimate ? 0 : 1
+      backgroundViewTopConstraint?.constant = Constants.verticalPadding
+      backgroundViewBottomConstraint?.constant = -Constants.verticalPadding
+      closeButtonHeightConstraint?.constant = Constants.closeButtonSize
+      onHeightChange?(Self.preferredHeight)
+      superview?.layoutIfNeeded()
+
+      guard canAnimate else { return }
+      UIView.animate(
+        withDuration: Constants.fadeDuration,
+        delay: 0,
+        options: [.curveEaseInOut, .beginFromCurrentState, .allowUserInteraction]
+      ) { [weak self] in
+        self?.alpha = 1
+      }
+    } else {
+      guard canAnimate else {
+        applyHiddenState()
+        return
+      }
+
+      alpha = 1
+      UIView.animate(
+        withDuration: Constants.fadeDuration,
+        delay: 0,
+        options: [.curveEaseInOut, .beginFromCurrentState, .allowUserInteraction]
+      ) { [weak self] in
+        self?.alpha = 0
+      } completion: { [weak self] _ in
+        guard let self, !self.isVisible else { return }
+        self.applyHiddenState()
+      }
+    }
+  }
+
+  private func applyHiddenState() {
+    isHidden = true
+    alpha = 0
+    backgroundViewTopConstraint?.constant = 0
+    backgroundViewBottomConstraint?.constant = 0
+    closeButtonHeightConstraint?.constant = 0
+    onHeightChange?(0)
   }
 
   @objc private func handleTap() {
