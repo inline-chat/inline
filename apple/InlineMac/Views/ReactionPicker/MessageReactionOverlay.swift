@@ -10,6 +10,7 @@ class ReactionOverlayWindow: NSPanel {
   private var hostingView: NSHostingView<ReactionOverlayView>?
   private var messageView: NSView
   private var mouseDownMonitor: Any?
+  private var keyDownMonitor: Any?
   private var fullMessage: FullMessage
 
   init(messageView: NSView, fullMessage: FullMessage) {
@@ -56,6 +57,7 @@ class ReactionOverlayWindow: NSPanel {
 
     // Add mouse down monitor to dismiss on click outside
     setupMouseDownMonitor()
+    setupKeyDownMonitor()
   }
   
   private func closeWithAnimation() {
@@ -115,10 +117,33 @@ class ReactionOverlayWindow: NSPanel {
     }
   }
 
-  deinit {
+  private func setupKeyDownMonitor() {
+    keyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+      guard let self else { return event }
+      guard event.keyCode == 53 else { return event } // Esc
+      closeWithAnimation()
+      return nil
+    }
+  }
+
+  private func removeEventMonitors() {
     if let monitor = mouseDownMonitor {
       NSEvent.removeMonitor(monitor)
+      mouseDownMonitor = nil
     }
+    if let monitor = keyDownMonitor {
+      NSEvent.removeMonitor(monitor)
+      keyDownMonitor = nil
+    }
+  }
+
+  override func close() {
+    removeEventMonitors()
+    super.close()
+  }
+
+  deinit {
+    removeEventMonitors()
   }
 }
 
