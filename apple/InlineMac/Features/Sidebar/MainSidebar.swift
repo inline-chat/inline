@@ -290,20 +290,26 @@ class MainSidebar: NSViewController {
 
     spaceSwitcherCommandNumberUnsubscriber = keyMonitor.addCommandNumberHandler(key: "sidebar_space_switcher") { [weak self] event in
       guard let self else { return false }
-      guard self.dependencies.nav2 != nil else { return false }
+      guard let nav2 = self.dependencies.nav2 else { return false }
 
       guard let char = event.charactersIgnoringModifiers?.first,
             let digit = Int(String(char)),
             (1...9).contains(digit)
       else { return false }
 
-      // Match the picker's labeling:
-      // Cmd+1 = Home, Cmd+2...9 = spaces in the same order as the picker list.
-      let items = self.spacePickerItems()
       let index = digit - 1
-      guard items.indices.contains(index) else { return false }
 
-      self.handleSpacePickerSelection(items[index])
+      if AppSettings.shared.showMainTabStrip {
+        // When tab strip is enabled, map Cmd+1...9 directly to visible tab indexes.
+        guard nav2.tabs.indices.contains(index) else { return false }
+        nav2.setActiveTab(index: index)
+      } else {
+        // Match the space picker's labeling:
+        // Cmd+1 = Home, Cmd+2...9 = spaces in the same order as the picker list.
+        let items = self.spacePickerItems()
+        guard items.indices.contains(index) else { return false }
+        self.handleSpacePickerSelection(items[index])
+      }
 
       // If the picker is open, close it so the UI state stays coherent.
       if self.spacePickerState.isVisible {
