@@ -36,6 +36,7 @@
 - When parking large WIP changes, a git worktree under `../inline-worktrees/` (sibling of this repo) can help keep changes isolated (only create/modify worktrees when explicitly requested).
 - If you need to undo your work in a file, first check whether that file has any other uncommitted changes in git; if it does, ask for explicit permission before undoing anything in that file.
 - Commit style: platform-prefixed, lowercase, scoped messages (e.g., `apple: fix sync`); add a brief description or bullets when extra context is needed.
+- If a change is minimal, clearly within the user's request, and limited in scope without meaningful logic impact, make a focused commit yourself without additional approval.
 - Prefer `rg` for search; keep edits ASCII; strip debug prints; use logging utilities (`Log` in Swift, `server/src/utils/log.ts`).
 - Avoid `Any`/`any`, force unwraps (`!`), `try!`, forced/unsafe casts (e.g. `as!`), and other unsafe patterns that can crash or trigger runtime fatal errors; use safe alternatives whenever possible unless there is no other way.
 - Regenerate protobufs after proto changes with `bun run generate:proto` (or per-language commands in `scripts/`); rebuild Swift `InlineProtocol` target if needed.
@@ -43,6 +44,7 @@
 - When adding new `AppDatabase` migrations in `InlineKit/Sources/InlineKit/Database.swift`, append them at the bottom of the migration list (order matters; newest last).
 - Default test timeout 25s; run focused tests from relevant package roots; avoid heavy/unapproved tooling (e.g., do not run `xcodebuild` full apps).
 - Run tests when a feature is finished or when asked to write tests; follow up with typecheck for TS when relevant.
+- Always add or update tests for new features, and add regression tests for bug fixes to prevent recurrence.
 - Follow the Multi-agent safety rules: never revert/discard/reset/clean unrelated changes or files you have not edited, created, or moved.
 - When working on New UI features, do not modify previous UI files (legacy sidebar/old UI). Keep changes scoped to new UI components.
 - For larger tasks, write a comprehensive plan first; if there are multiple design choices or any room for ambiguity, ask clarifying questions; when implementing a large plan (more than a few tasks) save the plan in a markdown file in .agent-docs/ and update it after each task before starting next one.
@@ -84,6 +86,7 @@
 ## Apple (iOS/macOS)
 
 - Swift 6 targets in `apple/InlineKit` (shared logic/DB/networking), `InlineUI` (shared UI), app targets `InlineIOS` (SwiftUI+UIKit) and `InlineMac` (AppKit+SwiftUI); share protocol via generated `InlineProtocol`.
+- Prefer implementing new iOS/macOS features in `apple/InlineIOSUI` and `apple/InlineMacUI` as self-contained units, and include focused tests with those changes. Only add new feature logic directly to `apple/InlineIOS`, `apple/InlineMac`, or `apple/InlineKit` when it is legacy-coupled or deeply integrated and cannot be extracted cleanly.
 - iOS minimum supported version is 18; macOS min version is 15.
 - Prefer Swift Testing for Apple code (`import Testing`, `@Test`, `@Suite`) instead of XCTest.
 - SwiftUI state management (iOS/macOS): prefer the Observation framework (`@Observable`, `@Bindable`) over `ObservableObject`/`@StateObject`; don’t introduce new `ObservableObject` unless required for compatibility, and migrate existing usages when touching related code.

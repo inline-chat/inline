@@ -1,0 +1,4 @@
+interface:
+  display_name: "Branch Out"
+  short_description: "Isolate selected changes into branch + PR"
+  default_prompt: "From a dirty worktree on main, isolate only the requested changes into a new branch, commit, push, and open a PR."
