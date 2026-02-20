@@ -26,6 +26,11 @@ extension ComposeView: UIDocumentPickerDelegate {
   }
 
   func addFile(_ url: URL) {
+    if isVideoFile(url) {
+      addVideo(url)
+      return
+    }
+
     // Ensure we can access the file
     guard url.startAccessingSecurityScopedResource() else {
       Log.shared.error("Failed to access security-scoped resource for file: \(url)")
@@ -78,5 +83,19 @@ extension ComposeView: UIDocumentPickerDelegate {
 
   func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
     Log.shared.debug("Document picker was cancelled")
+  }
+
+  private func isVideoFile(_ url: URL) -> Bool {
+    if let contentType = try? url.resourceValues(forKeys: [.contentTypeKey]).contentType {
+      if contentType.conforms(to: .movie) || contentType.conforms(to: .video) {
+        return true
+      }
+    }
+
+    if let type = UTType(filenameExtension: url.pathExtension) {
+      return type.conforms(to: .movie) || type.conforms(to: .video)
+    }
+
+    return false
   }
 }
