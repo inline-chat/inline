@@ -3,6 +3,7 @@ import InlineKit
 import InlineUI
 import Logger
 import SwiftUI
+import Translation
 
 struct ChatInfo: View {
   @Environment(\.dependencies) private var dependencies
