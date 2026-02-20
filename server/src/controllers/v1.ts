@@ -1,6 +1,6 @@
 import { Elysia } from "elysia"
 import { setup } from "@in/server/setup"
-import { handleError, makeApiRoute, makeUnauthApiRoute, makeUploadApiRoute } from "@in/server/controllers/helpers"
+import { handleError, makeApiRoute, makeUnauthApiRoute } from "@in/server/controllers/helpers"
 import {
   handler as sendEmailCodeHandler,
   Input as SendEmailCodeInput,
@@ -136,6 +136,7 @@ import {
 } from "@in/server/methods/addMember"
 import { handler as logoutHandler, Input as LogoutInput, Response as LogoutResponse } from "@in/server/methods/logout"
 import { uploadFileRoute } from "@in/server/methods/uploadFile"
+import { uploadVideoMultipartRoute } from "@in/server/methods/uploadVideoMultipart"
 import {
   handler as getDraftHandler,
   Input as GetDraftInput,
@@ -339,6 +340,7 @@ export const apiV1 = new Elysia({ name: "v1" })
       .use(
         makeApiRoute("/deleteAttachment", DeleteNotionTaskInput, DeleteNotionTaskResponse, deleteNotionTaskHandler),
       )
+      .use(uploadVideoMultipartRoute as any)
     ) as any)
       .all("/*", () => {
         // fallback

@@ -27,7 +27,7 @@ export const ApiError = {
   PHOTO_INVALID_DIMENSIONS: ["PHOTO_INVALID_DIMENSIONS", 400, "The photo dimensions are invalid"],
   PHOTO_INVALID_EXTENSION: ["PHOTO_INVALID_EXTENSION", 400, "The photo extension is not supported or invalid"],
   PHOTO_INVALID_TYPE: ["PHOTO_INVALID_TYPE", 400, "The photo type is not supported or invalid"],
-  FILE_TOO_LARGE: ["FILE_TOO_LARGE", 400, "The file exceeds the maximum size of 40MB"],
+  FILE_TOO_LARGE: ["FILE_TOO_LARGE", 400, "The file exceeds the maximum allowed size"],
   FILE_UNIQUE_ID_INVALID: ["FILE_UNIQUE_ID_INVALID", 400, "The file unique id does not exist or is invalid"],
   FILE_NOT_FOUND: ["FILE_NOT_FOUND", 400, "The file does not exist or you don't have access to it"],
   MSG_ID_INVALID: ["MSG_ID_INVALID", 400, "The message id is invalid"],
