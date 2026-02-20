@@ -9,12 +9,15 @@ struct ChatInfo: View {
   @Environment(\.realtimeV2) private var realtimeV2
   @EnvironmentStateObject var fullChat: FullChatViewModel
   @EnvironmentStateObject private var documentsState: ChatInfoDocumentsState
+  @StateObject private var appSettings = AppSettings.shared
 
   let peerId: Peer
   @State private var selectedTab: ChatInfoTab = .files
   @State private var isOwnerOrAdmin = false
   @State private var isCreator = false
   @State private var showVisibilityPicker = false
+  @State private var showTranslationOptions = false
+  @State private var isTranslationEnabled: Bool
   @State private var selectedParticipantIds: Set<Int64> = []
 
   private var chatTitle: String {
@@ -87,6 +90,17 @@ struct ChatInfo: View {
     )
   }
 
+  private var translationBinding: Binding<Bool> {
+    Binding(
+      get: { isTranslationEnabled },
+      set: { newValue in
+        guard newValue != isTranslationEnabled else { return }
+        isTranslationEnabled = newValue
+        TranslationState.shared.setTranslationEnabled(newValue, for: peerId)
+      }
+    )
+  }
+
   private var isPrivateThread: Bool {
     guard case .thread = peerId else { return false }
     guard let isPublic = fullChat.chat?.isPublic else { return false }
@@ -111,6 +125,7 @@ struct ChatInfo: View {
 
   public init(peerId: Peer) {
     self.peerId = peerId
+    _isTranslationEnabled = State(initialValue: TranslationState.shared.isTranslationEnabled(for: peerId))
     _fullChat = EnvironmentStateObject { env in
       FullChatViewModel(db: env.appDatabase, peer: peerId)
     }
@@ -143,6 +158,7 @@ struct ChatInfo: View {
     .onAppear {
       updateDocumentsChatId()
       ensureSelectedTab()
+      syncTranslationState()
     }
     .task(id: permissionsTaskKey) {
       await loadVisibilityPermissions()
@@ -152,6 +168,11 @@ struct ChatInfo: View {
     }
     .onChange(of: availableTabsKey) { _ in
       ensureSelectedTab()
+    }
+    .onReceive(TranslationState.shared.subject) { event in
+      let (eventPeer, enabled) = event
+      guard eventPeer == peerId else { return }
+      isTranslationEnabled = enabled
     }
   }
 
@@ -217,6 +238,25 @@ struct ChatInfo: View {
         .frame(maxWidth: 180)
       }
 
+      if appSettings.translationUIEnabled {
+        Divider()
+
+        ChatInfoDetailRow(title: "Translation") {
+          HStack(spacing: 10) {
+            Toggle("", isOn: translationBinding)
+              .labelsHidden()
+              .toggleStyle(.switch)
+              .accessibilityLabel("Translate messages")
+
+            Button("Options") {
+              showTranslationOptions = true
+            }
+            .foregroundStyle(.secondary)
+            .buttonStyle(.link)
+          }
+        }
+      }
+
       if shouldShowVisibilityRow {
         Divider()
 
@@ -256,6 +296,9 @@ struct ChatInfo: View {
           }
         )
       }
+    }
+    .sheet(isPresented: $showTranslationOptions) {
+      TranslationOptions(peer: peerId)
     }
   }
 
@@ -310,6 +353,10 @@ struct ChatInfo: View {
   private func updateDocumentsChatId() {
     guard let chatId, chatId > 0 else { return }
     documentsState.updateChatId(chatId)
+  }
+
+  private func syncTranslationState() {
+    isTranslationEnabled = TranslationState.shared.isTranslationEnabled(for: peerId)
   }
 
   private func loadVisibilityPermissions() async {
