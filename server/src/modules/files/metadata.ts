@@ -90,7 +90,16 @@ export const getPhotoMetadataAndValidate = async (
 
 const validVideoMimeTypes = ["video/mp4"]
 const validVideoExtensions = ["mp4"]
-const maxVideoFileSize = 200_000_000 // 200MB
+export const maxVideoFileSize = 2_000_000_000 // 2GB (decimal; fits 32-bit DB file_size integer)
+
+type VideoMetadataValidationInput = {
+  width: number
+  height: number
+  duration: number
+  fileName: string
+  size: number
+  mimeType: string
+}
 
 export const getVideoMetadataAndValidate = async (
   file: File,
@@ -108,41 +117,76 @@ export const getVideoMetadataAndValidate = async (
   // TODO: Implement video metadata extraction using ffmpeg or similar
   // For now, we'll do basic file validation
 
-  let fileName = file.name || "video"
-  let size = file.size
-  let mimeType = file.type.trim()
+  const metadata = validateVideoMetadataInput({
+    width,
+    height,
+    duration,
+    fileName: file.name || "video",
+    size: file.size,
+    mimeType: file.type.trim(),
+  })
+
+  // TODO: Extract actual video metadata using ffmpeg
+
+  return metadata
+}
+
+export const validateVideoMetadataInput = (
+  input: VideoMetadataValidationInput,
+): {
+  width: number
+  height: number
+  duration: number
+  mimeType: string
+  fileName: string
+  extension: string
+} => {
+  const fileName = input.fileName || "video"
+  const size = input.size
+  const mimeType = input.mimeType.trim()
   let extension = fileName.split(".").pop()?.toLowerCase()
 
-  if (size === 0) {
-    throw badRequest("Uploaded video is empty")
+  if (!Number.isInteger(size) || size <= 0) {
+    throw badRequest("Invalid video size")
   }
 
   if (!mimeType) {
     throw badRequest("Uploaded video is missing MIME type")
   }
 
-  if (!Number.isInteger(width) || width <= 0 || !Number.isInteger(height) || height <= 0) {
-    log.error("Invalid video dimensions", { width, height, duration, fileName, size, mimeType })
+  if (!Number.isInteger(input.width) || input.width <= 0 || !Number.isInteger(input.height) || input.height <= 0) {
+    log.error("Invalid video dimensions", {
+      width: input.width,
+      height: input.height,
+      duration: input.duration,
+      fileName,
+      size,
+      mimeType,
+    })
     throw new InlineError(InlineError.ApiError.VIDEO_INVALID_DIMENSIONS)
   }
 
-  if (!Number.isInteger(duration) || duration < 0) {
-    log.error("Invalid video duration", { width, height, duration, fileName, size, mimeType })
+  if (!Number.isInteger(input.duration) || input.duration < 0) {
+    log.error("Invalid video duration", {
+      width: input.width,
+      height: input.height,
+      duration: input.duration,
+      fileName,
+      size,
+      mimeType,
+    })
     throw badRequest("Invalid video duration: expected integer >= 0")
   }
 
-  // Validate the extension
   if (extension && !validVideoExtensions.includes(extension)) {
     throw new InlineError(InlineError.ApiError.VIDEO_INVALID_EXTENSION)
   }
   extension = extension ?? "mp4"
 
-  // Validate file size
   if (size > maxVideoFileSize) {
     throw new InlineError(InlineError.ApiError.FILE_TOO_LARGE)
   }
 
-  // Validate the mime type
   if (!mimeType.startsWith("video/")) {
     throw new InlineError(InlineError.ApiError.VIDEO_INVALID_TYPE)
   }
@@ -151,9 +195,14 @@ export const getVideoMetadataAndValidate = async (
     throw new InlineError(InlineError.ApiError.VIDEO_INVALID_TYPE)
   }
 
-  // TODO: Extract actual video metadata using ffmpeg
-
-  return { width, height, duration, mimeType, fileName, extension }
+  return {
+    width: input.width,
+    height: input.height,
+    duration: input.duration,
+    mimeType,
+    fileName,
+    extension,
+  }
 }
 
 const maxDocumentFileSize = 200_000_000 // 200MB

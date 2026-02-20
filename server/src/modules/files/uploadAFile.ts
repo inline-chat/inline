@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid"
-import { type FileTypes, type UploadFileResult } from "@in/server/modules/files/types"
+import { type FileTypes } from "@in/server/modules/files/types"
 import { generateFileUniqueId } from "@in/server/modules/files/fileId"
 import { uploadToBucket } from "@in/server/modules/files/uploadToBucket"
 import { files, type DbNewFile } from "@in/server/db/schema"
@@ -17,6 +17,15 @@ export interface FileMetadata {
   extension: string
   mimeType: string
   fileName: string
+}
+
+type PersistUploadedFileArgs = {
+  fileUniqueId: string
+  fileSize: number
+  path: string
+  fileType: FileTypes
+  metadata: FileMetadata
+  context: { userId: number }
 }
 
 export async function uploadFile(
@@ -65,46 +74,16 @@ export async function uploadFile(
       throw new Error("Failed to upload file to storage", { cause: error as Error })
     }
 
-    let encryptedPath: EncryptedData
-    let encryptedName: EncryptedData
-
-    try {
-      encryptedPath = encrypt(path)
-      encryptedName = encrypt(normalizedMetadata.fileName)
-      log.info("File metadata encrypted successfully")
-    } catch (error) {
-      log.error("Failed to encrypt file metadata", { error })
-      throw new Error("Failed to encrypt file metadata", { cause: error as Error })
-    }
-
-    const dbNewFile: DbNewFile = {
+    const dbFile = await persistUploadedFileRecord({
       fileUniqueId,
-      userId: context.userId,
-      pathEncrypted: encryptedPath.encrypted,
-      pathIv: encryptedPath.iv,
-      pathTag: encryptedPath.authTag,
-      nameEncrypted: encryptedName.encrypted,
-      nameIv: encryptedName.iv,
-      nameTag: encryptedName.authTag,
-      fileType,
       fileSize: file.size,
-      width: normalizedMetadata.width,
-      height: normalizedMetadata.height,
-      mimeType: normalizedMetadata.mimeType,
-    }
+      path,
+      fileType,
+      metadata: normalizedMetadata,
+      context,
+    })
 
-    // Save to DB
-    try {
-      let [dbFile] = await db.insert(files).values(dbNewFile).returning()
-      if (!dbFile) {
-        throw new Error("No file returned from database")
-      }
-      log.info("File saved to database successfully", { fileUniqueId })
-      return { dbFile, fileUniqueId, prefix }
-    } catch (error) {
-      log.error("Failed to save file to database", { error, fileUniqueId })
-      throw new Error("Failed to save file to database", { cause: error as Error })
-    }
+    return { dbFile, fileUniqueId, prefix }
   } catch (error) {
     log.error("File upload failed", {
       error,
@@ -115,6 +94,48 @@ export async function uploadFile(
       userId: context.userId,
     })
     throw error
+  }
+}
+
+export async function persistUploadedFileRecord(args: PersistUploadedFileArgs): Promise<DbNewFile> {
+  let encryptedPath: EncryptedData
+  let encryptedName: EncryptedData
+
+  try {
+    encryptedPath = encrypt(args.path)
+    encryptedName = encrypt(args.metadata.fileName)
+    log.info("File metadata encrypted successfully")
+  } catch (error) {
+    log.error("Failed to encrypt file metadata", { error })
+    throw new Error("Failed to encrypt file metadata", { cause: error as Error })
+  }
+
+  const dbNewFile: DbNewFile = {
+    fileUniqueId: args.fileUniqueId,
+    userId: args.context.userId,
+    pathEncrypted: encryptedPath.encrypted,
+    pathIv: encryptedPath.iv,
+    pathTag: encryptedPath.authTag,
+    nameEncrypted: encryptedName.encrypted,
+    nameIv: encryptedName.iv,
+    nameTag: encryptedName.authTag,
+    fileType: args.fileType,
+    fileSize: args.fileSize,
+    width: args.metadata.width,
+    height: args.metadata.height,
+    mimeType: args.metadata.mimeType,
+  }
+
+  try {
+    const [dbFile] = await db.insert(files).values(dbNewFile).returning()
+    if (!dbFile) {
+      throw new Error("No file returned from database")
+    }
+    log.info("File saved to database successfully", { fileUniqueId: args.fileUniqueId })
+    return dbFile
+  } catch (error) {
+    log.error("Failed to save file to database", { error, fileUniqueId: args.fileUniqueId })
+    throw new Error("Failed to save file to database", { cause: error as Error })
   }
 }
 
