@@ -195,6 +195,36 @@ Decision (Mo, 2026-02-18):
    - when saved scroll position feature ships, open-anchor priority becomes:
    - explicit target (search/reply/jump) -> saved position -> unread anchor -> latest
 
+### Phase 3.1: Targeted jump navigation (pinned/reply/media-files go-to)
+
+Goal:
+
+- For jumps to older uncached messages, do not load all intermediate history.
+- Load a window around target, then scroll/highlight target, then rely on normal bidirectional pagination.
+
+Current macOS new UI entry points (verified):
+
+1. Reply/embedded tap -> `EmbeddedMessageView.handleTap` -> `ChatState.scrollTo(msgId:)`
+2. Forward-header tap -> `MessageView.handleForwardHeaderClick` -> `ChatState.scrollTo(msgId:)` (same peer or after opening other chat)
+3. Pinned header tap (through embedded view in pinned header) -> `ChatState.scrollTo(msgId:)`
+4. Future/adjacent surfaces (chat info files/media/links go-to-message) should call the same path.
+
+Implementation:
+
+1. Add a single jump request path in message list/view model:
+   - input: `targetMessageId`, `reason` (reply, pinned, media, link, forwarded, search)
+2. Local-first check:
+   - if target exists in current window, scroll+highlight immediately
+   - else if target exists in local DB but outside window, rebuild window around target from local cache
+3. Remote fallback:
+   - call `getChatHistory` with explicit `around(anchor_id, before, after, include_anchor=true)`
+   - merge into DB/window, then scroll+highlight
+4. Do not page from current position to target via repeated older batches.
+5. After jump, pagination remains edge-driven (`older`/`newer`) as user scrolls.
+6. Spinner policy for target jumps:
+   - same as anchor policy: blocking spinner only when connected+authed and fetch is in-flight
+   - offline/disconnected: no blocking spinner; keep available cached content
+
 ### Phase 4: Bidirectional load-more (local then remote)
 
 1. Top-edge:
@@ -275,7 +305,10 @@ Reference Inline sync files:
 
 - `apple/InlineMac/Views/ChatView/ChatViewAppKit.swift`
 - `apple/InlineMac/Views/MessageList/MessageListAppKit.swift`
+- `apple/InlineMac/Views/Chat/State/ChatState.swift` (optional: richer jump reason payload)
 - `apple/InlineMac/Views/MessageList/MessageTableRow.swift` (or new separator cell file)
+- `apple/InlineMac/Views/EmbeddedMessage/EmbeddedMessageView.swift` (route jump reason/source)
+- `apple/InlineMac/Views/Message/MessageView.swift` (route jump reason/source)
 - `apple/InlineKit/Sources/InlineKit/ViewModels/FullChatProgressive.swift`
 - `apple/InlineKit/Sources/InlineKit/ViewModels/FullChat.swift` (bootstrap orchestration)
 - `apple/InlineKit/Sources/InlineKit/ViewModels/UnreadManager.swift` (if read timing needs adjustment)
