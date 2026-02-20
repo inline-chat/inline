@@ -85,12 +85,41 @@ class BunSqliteStore implements Store {
         revoked_at_ms integer,
         replaced_by_hash_hex text
       );
+      create table if not exists rate_limits (
+        bucket_key text primary key,
+        count integer not null,
+        reset_at_ms integer not null
+      );
     `)
   }
 
   cleanupExpired(nowMs: number): void {
     this.db.query("delete from auth_requests where expires_at_ms <= ?").run(nowMs)
     this.db.query("delete from auth_codes where expires_at_ms <= ?").run(nowMs)
+    this.db.query("delete from rate_limits where reset_at_ms <= ?").run(nowMs)
+  }
+
+  consumeRateLimit(input: { key: string; nowMs: number; windowMs: number; max: number }): { allowed: boolean; retryAfterSeconds: number } {
+    const run = this.db.transaction((key: string, nowMs: number, windowMs: number, max: number) => {
+      this.db.query("delete from rate_limits where bucket_key = ? and reset_at_ms <= ?").run(key, nowMs)
+
+      const existing = this.db
+        .query<{ count: number; reset_at_ms: number }, [string]>("select count, reset_at_ms from rate_limits where bucket_key = ?")
+        .get(key)
+
+      if (!existing) {
+        this.db.query("insert into rate_limits (bucket_key, count, reset_at_ms) values (?, ?, ?)").run(key, 1, nowMs + windowMs)
+        return { allowed: true, retryAfterSeconds: 0 }
+      }
+
+      const nextCount = existing.count + 1
+      this.db.query("update rate_limits set count = ? where bucket_key = ?").run(nextCount, key)
+      const allowed = nextCount <= max
+      const retryAfterSeconds = allowed ? 0 : Math.max(1, Math.ceil((existing.reset_at_ms - nowMs) / 1000))
+      return { allowed, retryAfterSeconds }
+    })
+
+    return run(input.key, input.nowMs, input.windowMs, input.max)
   }
 
   createClient(input: { redirectUris: string[]; clientName: string | null; nowMs: number }): RegisteredClient {
@@ -284,6 +313,10 @@ class BunSqliteStore implements Store {
     }
   }
 
+  revokeGrant(grantId: string, nowMs: number): void {
+    this.db.query("update grants set revoked_at_ms = ? where id = ? and revoked_at_ms is null").run(nowMs, grantId)
+  }
+
   createAuthCode(input: {
     code: string
     grantId: string
@@ -414,5 +447,21 @@ class BunSqliteStore implements Store {
     this.db
       .query("update refresh_tokens set revoked_at_ms = ?, replaced_by_hash_hex = ? where token_hash_hex = ?")
       .run(nowMs, replacedByHashHex, tokenHashHex)
+  }
+
+  revokeRefreshTokensByGrant(grantId: string, nowMs: number): void {
+    this.db
+      .query("update refresh_tokens set revoked_at_ms = ?, replaced_by_hash_hex = null where grant_id = ? and revoked_at_ms is null")
+      .run(nowMs, grantId)
+  }
+
+  findGrantIdByTokenHash(tokenHashHex: string): string | null {
+    const refresh = this.db.query<{ grant_id: string }, [string]>("select grant_id from refresh_tokens where token_hash_hex = ?").get(tokenHashHex)
+    if (refresh) return refresh.grant_id
+
+    const access = this.db.query<{ grant_id: string }, [string]>("select grant_id from access_tokens where token_hash_hex = ?").get(tokenHashHex)
+    if (access) return access.grant_id
+
+    return null
   }
 }

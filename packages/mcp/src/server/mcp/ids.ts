@@ -24,9 +24,3 @@ export function parseInlineMessageId(id: string): InlineMessageRef {
   if (chatId <= 0n || messageId <= 0n) throw new Error("invalid id")
   return { chatId, messageId }
 }
-
-export function formatInlineMessageUrl(ref: InlineMessageRef): string {
-  // Conservative until web deep links are formalized.
-  return `inline://chat/${ref.chatId.toString()}#message=${ref.messageId.toString()}`
-}
-

@@ -5,7 +5,7 @@ import type { Store } from "./store"
 describe("mcp app", () => {
   it("createApp works without options", async () => {
     const app = createApp()
-    const res = await app.fetch(new Request("http://localhost/health"))
+    const res = await app.fetch(new Request("https://mcp.inline.chat/health"))
     expect(res.status).toBe(200)
   })
 
@@ -26,23 +26,26 @@ describe("mcp app", () => {
 
   it("well-known oauth metadata uses issuer", async () => {
     const app = createApp({ issuer: "https://mcp.inline.chat", dbPath: ":memory:" })
-    const res = await app.fetch(new Request("http://localhost/.well-known/oauth-authorization-server"))
+    const res = await app.fetch(new Request("https://mcp.inline.chat/.well-known/oauth-authorization-server"))
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.issuer).toBe("https://mcp.inline.chat")
     expect(body.authorization_endpoint).toBe("https://mcp.inline.chat/oauth/authorize")
     expect(body.token_endpoint).toBe("https://mcp.inline.chat/oauth/token")
     expect(body.registration_endpoint).toBe("https://mcp.inline.chat/oauth/register")
+    expect(body.revocation_endpoint).toBe("https://mcp.inline.chat/oauth/revoke")
     expect(body.code_challenge_methods_supported).toEqual(["S256"])
   })
 
   it("well-known protected resource points at issuer", async () => {
     const app = createApp({ issuer: "https://mcp.inline.chat", dbPath: ":memory:" })
-    const res = await app.fetch(new Request("http://localhost/.well-known/oauth-protected-resource"))
+    const res = await app.fetch(new Request("https://mcp.inline.chat/.well-known/oauth-protected-resource"))
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.resource).toBe("https://mcp.inline.chat")
     expect(body.authorization_servers).toEqual(["https://mcp.inline.chat"])
+    expect(body.scopes_supported).toEqual(["offline_access", "messages:read", "messages:write", "spaces:read"])
+    expect(body.bearer_methods_supported).toEqual(["header"])
   })
 
   it("oauth placeholder endpoints exist", async () => {
@@ -86,7 +89,7 @@ describe("mcp app", () => {
     process.env.MCP_ISSUER = "http://env-issuer.test"
     try {
       const app = createApp({ dbPath: ":memory:" })
-      const res = await app.fetch(new Request("http://localhost/.well-known/oauth-authorization-server"))
+      const res = await app.fetch(new Request("http://env-issuer.test/.well-known/oauth-authorization-server"))
       const body = await res.json()
       expect(body.issuer).toBe("http://env-issuer.test")
     } finally {
@@ -95,14 +98,14 @@ describe("mcp app", () => {
     }
   })
 
-  it("falls back to localhost issuer when env missing", async () => {
+  it("falls back to production issuer when env missing", async () => {
     const prev = process.env.MCP_ISSUER
     delete process.env.MCP_ISSUER
     try {
       const app = createApp({ dbPath: ":memory:" })
-      const res = await app.fetch(new Request("http://localhost/.well-known/oauth-authorization-server"))
+      const res = await app.fetch(new Request("https://mcp.inline.chat/.well-known/oauth-authorization-server"))
       const body = await res.json()
-      expect(body.issuer).toBe("http://localhost:8791")
+      expect(body.issuer).toBe("https://mcp.inline.chat")
     } finally {
       if (prev != null) process.env.MCP_ISSUER = prev
     }
@@ -114,12 +117,39 @@ describe("mcp app", () => {
     expect(res.status).toBe(404)
   })
 
+  it("rejects requests from disallowed hosts", async () => {
+    const app = createApp({
+      allowedHosts: ["allowed.example"],
+      allowedOriginHosts: ["allowed.example"],
+    })
+    const res = await app.fetch(new Request("http://localhost/health"))
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({ error: "forbidden_host" })
+  })
+
+  it("rejects requests from disallowed origins", async () => {
+    const app = createApp({
+      allowedHosts: ["localhost"],
+      allowedOriginHosts: ["good.example"],
+    })
+    const res = await app.fetch(
+      new Request("http://localhost/health", {
+        headers: { origin: "https://evil.example" },
+      }),
+    )
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({ error: "forbidden_origin" })
+  })
+
   it("uses injected store", async () => {
     let cleanupCalled = 0
     const store: Store = {
       ensureSchema() {},
       cleanupExpired() {
         cleanupCalled++
+      },
+      consumeRateLimit() {
+        return { allowed: true, retryAfterSeconds: 0 }
       },
       createClient() {
         throw new Error("not used")
@@ -143,6 +173,7 @@ describe("mcp app", () => {
       getGrant() {
         return null
       },
+      revokeGrant() {},
       createAuthCode() {
         throw new Error("not used")
       },
@@ -159,6 +190,10 @@ describe("mcp app", () => {
         return null
       },
       revokeRefreshToken() {},
+      revokeRefreshTokensByGrant() {},
+      findGrantIdByTokenHash() {
+        return null
+      },
     }
 
     const app = createApp({ issuer: "http://localhost:1234", store })

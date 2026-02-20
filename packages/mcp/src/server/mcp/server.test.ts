@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js"
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js"
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js"
@@ -37,6 +37,28 @@ async function waitForResponse(sent: Sent[], id: number, timeoutMs = 500): Promi
   throw new Error("missing response")
 }
 
+function lastMessagesSendAuditRecord(infoSpy: ReturnType<typeof vi.spyOn>) {
+  const serialized = infoSpy.mock.calls
+    .map((call: unknown[]) => call[0])
+    .filter((entry: unknown): entry is string => typeof entry === "string")
+    .map((line: string) => {
+      try {
+        return JSON.parse(line) as unknown
+      } catch {
+        return null
+      }
+    })
+    .reverse()
+    .find((entry: unknown) => {
+      if (!entry || typeof entry !== "object") return false
+      const record = entry as Record<string, unknown>
+      return record.event === "mcp.audit" && record.tool === "messages.send"
+    })
+
+  expect(serialized).toBeTruthy()
+  return serialized as Record<string, unknown>
+}
+
 const grant: Grant = {
   id: "g1",
   clientId: "c1",
@@ -49,7 +71,11 @@ const grant: Grant = {
 }
 
 describe("mcp tool server", () => {
-  it("search returns OpenAI-compatible JSON payload", async () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("search returns message snippets with source chat metadata", async () => {
     const inline: InlineApi = {
       async close() {},
       async getEligibleChats() {
@@ -143,9 +169,12 @@ describe("mcp tool server", () => {
     const payload = JSON.parse(text)
     expect(Array.isArray(payload.results)).toBe(true)
     expect(payload.results[0].id).toBe("inline:chat:7:msg:9")
+    expect(payload.results[0].title).toBe("General")
+    expect(payload.results[0].source).toEqual({ chatId: "7", title: "General" })
+    expect(payload.results[0].snippet).toBe("hello world")
   })
 
-  it("fetch returns OpenAI-compatible document payload", async () => {
+  it("fetch returns message text and source chat metadata", async () => {
     const inline: InlineApi = {
       async close() {},
       async getEligibleChats() {
@@ -200,10 +229,13 @@ describe("mcp tool server", () => {
     expect(payload.id).toBe("inline:chat:7:msg:9")
     expect(payload.title).toBe("General")
     expect(payload.text).toBe("hello")
-    expect(payload.url).toContain("inline://chat/7")
+    expect(payload.source).toEqual({ chatId: "7", title: "General" })
+    expect(payload.metadata.chatId).toBe("7")
   })
 
   it("messages.send requires messages:write", async () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {})
+
     const inline: InlineApi = {
       async close() {},
       async getEligibleChats() {
@@ -261,9 +293,23 @@ describe("mcp tool server", () => {
     const res = await waitForResponse(sent, 2)
     expect(res.result.isError).toBe(true)
     expect(res.result.content?.[0]?.text).toContain("messages:write")
+
+    const audit = lastMessagesSendAuditRecord(infoSpy)
+    expect(audit.outcome).toBe("failure")
+    expect(audit.grantId).toBe("g1")
+    expect(audit.inlineUserId).toBe("1")
+    expect(audit.chatId).toBe("7")
+    expect(audit.spaceId).toBeNull()
+    expect(audit.messageId).toBeNull()
+    expect(typeof audit.timestamp).toBe("string")
+    expect(audit).not.toHaveProperty("text")
+    expect(audit).not.toHaveProperty("token")
+    expect(JSON.stringify(audit)).not.toContain("hi")
   })
 
   it("messages.send succeeds with messages:write", async () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {})
+
     const inline: InlineApi = {
       async close() {},
       async getEligibleChats() {
@@ -276,7 +322,7 @@ describe("mcp tool server", () => {
         throw new Error("not needed")
       },
       async sendMessage() {
-        return { messageId: 123n }
+        return { messageId: 123n, spaceId: 10n }
       },
     }
 
@@ -314,5 +360,17 @@ describe("mcp tool server", () => {
     const payload = JSON.parse(res.result.content?.[0]?.text)
     expect(payload.ok).toBe(true)
     expect(payload.messageId).toBe("123")
+
+    const audit = lastMessagesSendAuditRecord(infoSpy)
+    expect(audit.outcome).toBe("success")
+    expect(audit.grantId).toBe("g1")
+    expect(audit.inlineUserId).toBe("1")
+    expect(audit.chatId).toBe("7")
+    expect(audit.spaceId).toBe("10")
+    expect(audit.messageId).toBe("123")
+    expect(typeof audit.timestamp).toBe("string")
+    expect(audit).not.toHaveProperty("text")
+    expect(audit).not.toHaveProperty("token")
+    expect(JSON.stringify(audit)).not.toContain("hi")
   })
 })

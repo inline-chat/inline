@@ -60,9 +60,16 @@ export type StoredRefreshToken = {
   replacedByHashHex: string | null
 }
 
+export type RateLimitResult = {
+  allowed: boolean
+  retryAfterSeconds: number
+}
+
 export type Store = {
   ensureSchema(): void
   cleanupExpired(nowMs: number): void
+
+  consumeRateLimit(input: { key: string; nowMs: number; windowMs: number; max: number }): RateLimitResult
 
   createClient(input: { redirectUris: string[]; clientName: string | null; nowMs: number }): RegisteredClient
   getClient(clientId: string): RegisteredClient | null
@@ -95,6 +102,7 @@ export type Store = {
     nowMs: number
   }): Grant
   getGrant(grantId: string): Grant | null
+  revokeGrant(grantId: string, nowMs: number): void
 
   createAuthCode(input: {
     code: string
@@ -114,4 +122,6 @@ export type Store = {
   createRefreshToken(input: { tokenHashHex: string; grantId: string; nowMs: number; expiresAtMs: number }): void
   getRefreshToken(tokenHashHex: string, nowMs: number): StoredRefreshToken | null
   revokeRefreshToken(tokenHashHex: string, nowMs: number, replacedByHashHex: string | null): void
+  revokeRefreshTokensByGrant(grantId: string, nowMs: number): void
+  findGrantIdByTokenHash(tokenHashHex: string): string | null
 }

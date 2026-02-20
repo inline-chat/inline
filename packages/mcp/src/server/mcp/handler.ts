@@ -6,6 +6,8 @@ import type { McpConfig } from "../config"
 import type { Store } from "../store"
 import { createInlineApi } from "../inline/inline-api"
 
+const DEFAULT_REQUIRED_SCOPE = "messages:read spaces:read"
+
 function json(status: number, body: unknown, headers?: HeadersInit): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -59,6 +61,7 @@ async function buildAuthInfo(config: McpConfig, store: Store, token: string): Pr
           code: "invalid_token",
           desc: "Invalid access token",
           resourceMetadataUrl: `${config.issuer}/.well-known/oauth-protected-resource`,
+          scope: DEFAULT_REQUIRED_SCOPE,
         }),
       },
     }
@@ -75,6 +78,7 @@ async function buildAuthInfo(config: McpConfig, store: Store, token: string): Pr
           code: "insufficient_scope",
           desc: "Grant revoked",
           resourceMetadataUrl: `${config.issuer}/.well-known/oauth-protected-resource`,
+          scope: grant?.scope || DEFAULT_REQUIRED_SCOPE,
         }),
       },
     }
@@ -106,14 +110,16 @@ export const Mcp = {
         try {
           const bearer = getBearerToken(req)
           if (!bearer.ok) {
+            const missing = bearer.error.kind === "missing"
             return json(
               401,
-              { error: "missing_authorization" },
+              { error: missing ? "missing_authorization" : "invalid_authorization" },
               {
                 "www-authenticate": wwwAuthHeader({
                   code: "invalid_token",
-                  desc: "Missing Authorization header",
+                  desc: missing ? "Missing Authorization header" : "Authorization must be Bearer <token>",
                   resourceMetadataUrl: `${params.config.issuer}/.well-known/oauth-protected-resource`,
+                  scope: DEFAULT_REQUIRED_SCOPE,
                 }),
               },
             )
@@ -139,6 +145,7 @@ export const Mcp = {
                     code: "insufficient_scope",
                     desc: "Session does not belong to this grant",
                     resourceMetadataUrl: `${params.config.issuer}/.well-known/oauth-protected-resource`,
+                    scope: authRes.auth.scopes.length > 0 ? authRes.auth.scopes.join(" ") : DEFAULT_REQUIRED_SCOPE,
                   }),
                 },
               )

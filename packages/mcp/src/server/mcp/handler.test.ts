@@ -36,6 +36,7 @@ describe("/mcp", () => {
     const res = await app.fetch(new Request("http://localhost/mcp", { method: "POST" }))
     expect(res.status).toBe(401)
     expect(res.headers.get("www-authenticate")).toContain("Bearer")
+    expect(res.headers.get("www-authenticate")).toContain("scope=\"messages:read spaces:read\"")
   })
 
   it("rejects invalid authorization header format", async () => {
@@ -47,6 +48,7 @@ describe("/mcp", () => {
       }),
     )
     expect(res.status).toBe(401)
+    expect(await res.json()).toEqual({ error: "invalid_authorization" })
   })
 
   it("rejects invalid access tokens", async () => {
@@ -58,6 +60,36 @@ describe("/mcp", () => {
       }),
     )
     expect(res.status).toBe(401)
+  })
+
+  it("rate limits mcp initialization posts", async () => {
+    const app = createApp({
+      issuer: "http://localhost:8791",
+      dbPath: ":memory:",
+      endpointRateLimits: {
+        sendEmailCode: { max: 10, windowMs: 10 * 60_000 },
+        verifyEmailCode: { max: 20, windowMs: 10 * 60_000 },
+        token: { max: 60, windowMs: 60_000 },
+        mcpInitialize: { max: 1, windowMs: 60_000 },
+      },
+    })
+
+    const first = await app.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: { "x-forwarded-for": "10.0.0.1" },
+      }),
+    )
+    expect(first.status).toBe(401)
+
+    const second = await app.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: { "x-forwarded-for": "10.0.0.1" },
+      }),
+    )
+    expect(second.status).toBe(429)
+    expect(second.headers.get("retry-after")).toBeTruthy()
   })
 
   it("rejects requests with unknown session id", async () => {

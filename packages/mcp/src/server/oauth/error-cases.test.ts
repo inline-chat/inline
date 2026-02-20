@@ -21,10 +21,61 @@ function extractHidden(html: string, name: string): string {
   return m[1]!
 }
 
+async function sha256Hex(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input)
+  const digest = await crypto.subtle.digest("SHA-256", data)
+  let out = ""
+  for (const b of new Uint8Array(digest)) out += b.toString(16).padStart(2, "0")
+  return out
+}
+
+const permissiveEndpointRateLimits = {
+  sendEmailCode: { max: 20, windowMs: 10 * 60_000 },
+  verifyEmailCode: { max: 20, windowMs: 10 * 60_000 },
+  token: { max: 60, windowMs: 60_000 },
+  mcpInitialize: { max: 20, windowMs: 60_000 },
+}
+
+const permissiveEmailAbuseRateLimits = {
+  sendPerEmail: { max: 20, windowMs: 10 * 60_000 },
+  sendPerContext: { max: 20, windowMs: 10 * 60_000 },
+  verifyPerEmail: { max: 20, windowMs: 10 * 60_000 },
+  verifyPerContext: { max: 20, windowMs: 10 * 60_000 },
+}
+
+async function createAuthorizeSession(app: { fetch(req: Request): Promise<Response> }): Promise<{
+  clientId: string
+  cookie: string
+  csrf: string
+}> {
+  const reg = await app.fetch(
+    new Request("http://localhost/oauth/register", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ redirect_uris: ["https://example.com/cb"] }),
+    }),
+  )
+  const { client_id } = await reg.json()
+
+  const authUrl = new URL("http://localhost/oauth/authorize")
+  authUrl.searchParams.set("response_type", "code")
+  authUrl.searchParams.set("client_id", String(client_id))
+  authUrl.searchParams.set("redirect_uri", "https://example.com/cb")
+  authUrl.searchParams.set("state", "st")
+  authUrl.searchParams.set("code_challenge", "cc")
+  authUrl.searchParams.set("code_challenge_method", "S256")
+
+  const authRes = await app.fetch(new Request(authUrl.toString()))
+  const cookie = extractSetCookieValue(authRes.headers.get("set-cookie"))
+  const csrf = extractHidden(await authRes.text(), "csrf")
+
+  return { clientId: String(client_id), cookie, csrf }
+}
+
 describe("oauth error cases", () => {
   it("authorize validates request params and client/redirect", async () => {
     const store = createMemoryStore()
-    const app = createApp({ store })
+    const app = createApp({ issuer: "http://localhost:8791", store })
 
     const invalidResponseType = await app.fetch(
       new Request("http://localhost/oauth/authorize?response_type=token&client_id=x&redirect_uri=https://e/cb&state=s&code_challenge=c"),
@@ -70,7 +121,7 @@ describe("oauth error cases", () => {
 
   it("send-email-code validates csrf and email and handles inline failures", async () => {
     const store = createMemoryStore()
-    const app = createApp({ store, inlineApiBaseUrl: "http://inline.test" })
+    const app = createApp({ issuer: "http://localhost:8791", store, inlineApiBaseUrl: "http://inline.test" })
 
     const reg = await app.fetch(
       new Request("http://localhost/oauth/register", {
@@ -126,7 +177,7 @@ describe("oauth error cases", () => {
 
   it("verify-email-code handles missing email, inline failures, and encryption misconfig", async () => {
     const store = createMemoryStore()
-    const app = createApp({ store, inlineApiBaseUrl: "http://inline.test" })
+    const app = createApp({ issuer: "http://localhost:8791", store, inlineApiBaseUrl: "http://inline.test" })
 
     const reg = await app.fetch(
       new Request("http://localhost/oauth/register", {
@@ -304,7 +355,7 @@ describe("oauth error cases", () => {
   })
 
   it("token endpoint: json parsing, unsupported grant, and invalid_grant", async () => {
-    const app = createApp()
+    const app = createApp({ issuer: "http://localhost:8791" })
 
     const invalidJson = await app.fetch(
       new Request("http://localhost/oauth/token", { method: "POST", headers: { "content-type": "application/json" }, body: "{" }),
@@ -352,5 +403,238 @@ describe("oauth error cases", () => {
       }),
     )
     expect(invalidGrant.status).toBe(400)
+  })
+
+  it("send-email-code endpoint rate limits by client ip", async () => {
+    vi.restoreAllMocks()
+
+    const app = createApp({
+      issuer: "http://localhost:8791",
+      inlineApiBaseUrl: "http://inline.test",
+      endpointRateLimits: {
+        ...permissiveEndpointRateLimits,
+        sendEmailCode: { max: 1, windowMs: 60_000 },
+      },
+      emailAbuseRateLimits: permissiveEmailAbuseRateLimits,
+    })
+
+    const { cookie, csrf } = await createAuthorizeSession(app)
+    vi.spyOn(globalThis, "fetch" as any).mockImplementation(async (input: any) => {
+      const u = typeof input === "string" ? input : String(input.url)
+      if (u.endsWith("/v1/sendEmailCode")) return jsonResponse({ existingUser: true })
+      return jsonResponse({ error: "unexpected" }, { status: 500 })
+    })
+
+    const form1 = new FormData()
+    form1.set("csrf", csrf)
+    form1.set("email", "a@example.com")
+    const first = await app.fetch(
+      new Request("http://localhost/oauth/authorize/send-email-code", {
+        method: "POST",
+        headers: { cookie, "x-forwarded-for": "10.1.1.1" },
+        body: form1,
+      }),
+    )
+    expect(first.status).toBe(200)
+
+    const form2 = new FormData()
+    form2.set("csrf", csrf)
+    form2.set("email", "a@example.com")
+    const second = await app.fetch(
+      new Request("http://localhost/oauth/authorize/send-email-code", {
+        method: "POST",
+        headers: { cookie, "x-forwarded-for": "10.1.1.1" },
+        body: form2,
+      }),
+    )
+    expect(second.status).toBe(429)
+    expect(second.headers.get("retry-after")).toBeTruthy()
+  })
+
+  it("send-email-code applies normalized email+context abuse throttling", async () => {
+    vi.restoreAllMocks()
+
+    const app = createApp({
+      issuer: "http://localhost:8791",
+      inlineApiBaseUrl: "http://inline.test",
+      endpointRateLimits: permissiveEndpointRateLimits,
+      emailAbuseRateLimits: {
+        ...permissiveEmailAbuseRateLimits,
+        sendPerContext: { max: 1, windowMs: 60_000 },
+      },
+    })
+
+    const { cookie, csrf } = await createAuthorizeSession(app)
+    vi.spyOn(globalThis, "fetch" as any).mockImplementation(async (input: any) => {
+      const u = typeof input === "string" ? input : String(input.url)
+      if (u.endsWith("/v1/sendEmailCode")) return jsonResponse({ existingUser: true })
+      return jsonResponse({ error: "unexpected" }, { status: 500 })
+    })
+
+    const form1 = new FormData()
+    form1.set("csrf", csrf)
+    form1.set("email", "A@Example.com")
+    const first = await app.fetch(
+      new Request("http://localhost/oauth/authorize/send-email-code", {
+        method: "POST",
+        headers: { cookie, "x-forwarded-for": "10.2.2.2" },
+        body: form1,
+      }),
+    )
+    expect(first.status).toBe(200)
+
+    const form2 = new FormData()
+    form2.set("csrf", csrf)
+    form2.set("email", "a@example.com")
+    const second = await app.fetch(
+      new Request("http://localhost/oauth/authorize/send-email-code", {
+        method: "POST",
+        headers: { cookie, "x-forwarded-for": "10.2.2.2" },
+        body: form2,
+      }),
+    )
+    expect(second.status).toBe(429)
+  })
+
+  it("verify-email-code applies abuse throttling for email+context", async () => {
+    vi.restoreAllMocks()
+
+    const app = createApp({
+      issuer: "http://localhost:8791",
+      inlineApiBaseUrl: "http://inline.test",
+      endpointRateLimits: permissiveEndpointRateLimits,
+      emailAbuseRateLimits: {
+        ...permissiveEmailAbuseRateLimits,
+        verifyPerContext: { max: 1, windowMs: 60_000 },
+      },
+    })
+
+    const { cookie, csrf } = await createAuthorizeSession(app)
+    vi.spyOn(globalThis, "fetch" as any).mockImplementation(async (input: any) => {
+      const u = typeof input === "string" ? input : String(input.url)
+      if (u.endsWith("/v1/sendEmailCode")) return jsonResponse({ existingUser: true })
+      if (u.endsWith("/v1/verifyEmailCode")) return jsonResponse({ error: "invalid" }, { status: 401 })
+      return jsonResponse({ error: "unexpected" }, { status: 500 })
+    })
+
+    const sendForm = new FormData()
+    sendForm.set("csrf", csrf)
+    sendForm.set("email", "a@example.com")
+    const sendRes = await app.fetch(
+      new Request("http://localhost/oauth/authorize/send-email-code", {
+        method: "POST",
+        headers: { cookie, "x-forwarded-for": "10.3.3.3" },
+        body: sendForm,
+      }),
+    )
+    expect(sendRes.status).toBe(200)
+
+    const verify1 = new FormData()
+    verify1.set("csrf", csrf)
+    verify1.set("code", "123456")
+    const first = await app.fetch(
+      new Request("http://localhost/oauth/authorize/verify-email-code", {
+        method: "POST",
+        headers: { cookie, "x-forwarded-for": "10.3.3.3" },
+        body: verify1,
+      }),
+    )
+    expect(first.status).toBe(401)
+
+    const verify2 = new FormData()
+    verify2.set("csrf", csrf)
+    verify2.set("code", "123456")
+    const second = await app.fetch(
+      new Request("http://localhost/oauth/authorize/verify-email-code", {
+        method: "POST",
+        headers: { cookie, "x-forwarded-for": "10.3.3.3" },
+        body: verify2,
+      }),
+    )
+    expect(second.status).toBe(429)
+  })
+
+  it("token endpoint rate limits by client ip", async () => {
+    const app = createApp({
+      issuer: "http://localhost:8791",
+      endpointRateLimits: {
+        ...permissiveEndpointRateLimits,
+        token: { max: 1, windowMs: 60_000 },
+      },
+    })
+
+    const first = await app.fetch(
+      new Request("http://localhost/oauth/token", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-forwarded-for": "10.4.4.4" },
+        body: JSON.stringify({ grant_type: "password" }),
+      }),
+    )
+    expect(first.status).toBe(400)
+
+    const second = await app.fetch(
+      new Request("http://localhost/oauth/token", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-forwarded-for": "10.4.4.4" },
+        body: JSON.stringify({ grant_type: "password" }),
+      }),
+    )
+    expect(second.status).toBe(429)
+    expect(second.headers.get("retry-after")).toBeTruthy()
+  })
+
+  it("revoke endpoint revokes grant and all refresh tokens", async () => {
+    const store = createMemoryStore()
+    const nowMs = Date.now()
+    const client = store.createClient({ redirectUris: ["https://example.com/cb"], clientName: "x", nowMs })
+    const grant = store.createGrant({
+      id: "grant-revoke",
+      clientId: client.clientId,
+      inlineUserId: 1n,
+      scope: "messages:read spaces:read offline_access",
+      spaceIds: [1n],
+      inlineTokenEnc: "enc",
+      nowMs,
+    })
+
+    const refreshTokenA = "mcp_rt_a"
+    const refreshTokenB = "mcp_rt_b"
+    const refreshHashA = await sha256Hex(refreshTokenA)
+    const refreshHashB = await sha256Hex(refreshTokenB)
+
+    store.createRefreshToken({ tokenHashHex: refreshHashA, grantId: grant.id, nowMs, expiresAtMs: nowMs + 120_000 })
+    store.createRefreshToken({ tokenHashHex: refreshHashB, grantId: grant.id, nowMs, expiresAtMs: nowMs + 120_000 })
+
+    const app = createApp({ issuer: "http://localhost:8791", store })
+    const revokeForm = new FormData()
+    revokeForm.set("token", refreshTokenA)
+
+    const revoke = await app.fetch(new Request("http://localhost/oauth/revoke", { method: "POST", body: revokeForm }))
+    expect(revoke.status).toBe(200)
+
+    expect(store.getGrant(grant.id)?.revokedAtMs).not.toBeNull()
+    expect(store.getRefreshToken(refreshHashA, nowMs + 1)).toBeNull()
+    expect(store.getRefreshToken(refreshHashB, nowMs + 1)).toBeNull()
+
+    const alias = await app.fetch(
+      new Request("http://localhost/revoke", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token: "does-not-exist" }),
+      }),
+    )
+    expect(alias.status).toBe(200)
+  })
+
+  it("revoke without token is a no-op success", async () => {
+    const app = createApp({ issuer: "http://localhost:8791" })
+    const res = await app.fetch(
+      new Request("http://localhost/oauth/revoke", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      }),
+    )
+    expect(res.status).toBe(200)
   })
 })

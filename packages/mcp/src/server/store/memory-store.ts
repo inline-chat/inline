@@ -15,6 +15,7 @@ export function createMemoryStore(): Store {
   const authCodes = new Map<string, AuthCode>()
   const accessTokens = new Map<string, StoredAccessToken>()
   const refreshTokens = new Map<string, StoredRefreshToken>()
+  const rateLimits = new Map<string, { count: number; resetAtMs: number }>()
 
   return {
     ensureSchema() {},
@@ -26,6 +27,22 @@ export function createMemoryStore(): Store {
       for (const [code, ac] of authCodes) {
         if (ac.expiresAtMs <= nowMs) authCodes.delete(code)
       }
+      for (const [key, entry] of rateLimits) {
+        if (entry.resetAtMs <= nowMs) rateLimits.delete(key)
+      }
+    },
+
+    consumeRateLimit({ key, nowMs, windowMs, max }) {
+      const existing = rateLimits.get(key)
+      if (!existing || existing.resetAtMs <= nowMs) {
+        rateLimits.set(key, { count: 1, resetAtMs: nowMs + windowMs })
+        return { allowed: true, retryAfterSeconds: 0 }
+      }
+
+      existing.count += 1
+      const allowed = existing.count <= max
+      const retryAfterSeconds = allowed ? 0 : Math.max(1, Math.ceil((existing.resetAtMs - nowMs) / 1000))
+      return { allowed, retryAfterSeconds }
     },
 
     createClient({ redirectUris, clientName, nowMs }) {
@@ -99,6 +116,11 @@ export function createMemoryStore(): Store {
     getGrant(grantId) {
       return grants.get(grantId) ?? null
     },
+    revokeGrant(grantId, nowMs) {
+      const grant = grants.get(grantId)
+      if (!grant) return
+      grant.revokedAtMs = nowMs
+    },
 
     createAuthCode(input) {
       const code: AuthCode = {
@@ -159,6 +181,21 @@ export function createMemoryStore(): Store {
       if (!rt) return
       rt.revokedAtMs = nowMs
       rt.replacedByHashHex = replacedByHashHex
+    },
+    revokeRefreshTokensByGrant(grantId, nowMs) {
+      for (const rt of refreshTokens.values()) {
+        if (rt.grantId !== grantId) continue
+        if (rt.revokedAtMs != null) continue
+        rt.revokedAtMs = nowMs
+        rt.replacedByHashHex = null
+      }
+    },
+    findGrantIdByTokenHash(tokenHashHex) {
+      const refresh = refreshTokens.get(tokenHashHex)
+      if (refresh) return refresh.grantId
+      const access = accessTokens.get(tokenHashHex)
+      if (access) return access.grantId
+      return null
     },
   }
 }

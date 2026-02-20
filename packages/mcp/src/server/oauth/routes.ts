@@ -13,6 +13,7 @@ export const OAuth = {
         authorization_endpoint: `${config.issuer}/oauth/authorize`,
         token_endpoint: `${config.issuer}/oauth/token`,
         registration_endpoint: `${config.issuer}/oauth/register`,
+        revocation_endpoint: `${config.issuer}/oauth/revoke`,
         scopes_supported: ["offline_access", "messages:read", "messages:write", "spaces:read"],
         response_types_supported: ["code"],
         grant_types_supported: ["authorization_code", "refresh_token"],
@@ -26,6 +27,8 @@ export const OAuth = {
       return withJson({
         resource: config.issuer,
         authorization_servers: [config.issuer],
+        scopes_supported: ["offline_access", "messages:read", "messages:write", "spaces:read"],
+        bearer_methods_supported: ["header"],
       })
     }
 
@@ -53,6 +56,10 @@ export const OAuth = {
     if (url.pathname === "/oauth/token" || url.pathname === "/token") {
       if (req.method !== "POST") return notFound()
       return await handleToken(req, config, store)
+    }
+    if (url.pathname === "/oauth/revoke" || url.pathname === "/revoke") {
+      if (req.method !== "POST") return notFound()
+      return await handleRevoke(req, store)
     }
 
     return null
@@ -122,6 +129,100 @@ const AUTH_REQUEST_TTL_MS = 15 * 60_000
 const AUTH_CODE_TTL_MS = 5 * 60_000
 const ACCESS_TOKEN_TTL_MS = 60 * 60_000
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60_000
+
+type ParsedParamsResult = { ok: true; params: Record<string, string> } | { ok: false; response: Response }
+
+function normalizeRateLimitKeyPart(value: string): string {
+  const normalized = value.trim().toLowerCase()
+  if (!normalized) return "unknown"
+  return normalized.slice(0, 200)
+}
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase()
+}
+
+function resolveClientIp(req: Request): string {
+  const forwarded = req.headers.get("x-forwarded-for")
+  if (forwarded) {
+    const first = forwarded.split(",", 1)[0]?.trim()
+    if (first) return normalizeRateLimitKeyPart(first)
+  }
+
+  const realIp = req.headers.get("x-real-ip")
+  if (realIp?.trim()) return normalizeRateLimitKeyPart(realIp)
+
+  const cfConnectingIp = req.headers.get("cf-connecting-ip")
+  if (cfConnectingIp?.trim()) return normalizeRateLimitKeyPart(cfConnectingIp)
+
+  return "unknown"
+}
+
+function consumeRateLimit(
+  store: Store,
+  input: { key: string; nowMs: number; rule: { max: number; windowMs: number } },
+): { allowed: boolean; retryAfterSeconds: number } {
+  return store.consumeRateLimit({
+    key: input.key,
+    nowMs: input.nowMs,
+    max: input.rule.max,
+    windowMs: input.rule.windowMs,
+  })
+}
+
+function rateLimitedJson(retryAfterSeconds: number, description: string): Response {
+  return withJson(
+    { error: "rate_limited", error_description: description },
+    {
+      status: 429,
+      headers: {
+        "retry-after": String(retryAfterSeconds),
+      },
+    },
+  )
+}
+
+function rateLimitedHtml(retryAfterSeconds: number, description: string): Response {
+  return html(
+    429,
+    renderPage("Too many requests", `<div class="error">${escapeHtml(description)}</div>`),
+    {
+      headers: {
+        "retry-after": String(retryAfterSeconds),
+      },
+    },
+  )
+}
+
+async function parseRequestParams(req: Request): Promise<ParsedParamsResult> {
+  const contentType = req.headers.get("content-type") ?? ""
+  const params: Record<string, string> = {}
+
+  if (contentType.includes("application/json")) {
+    let body: unknown
+    try {
+      body = await req.json()
+    } catch {
+      return { ok: false, response: badRequest("invalid_json") }
+    }
+    if (!body || typeof body !== "object") return { ok: false, response: badRequest("invalid_json") }
+    for (const [k, v] of Object.entries(body)) {
+      if (typeof v === "string") params[k] = v
+    }
+    return { ok: true, params }
+  }
+
+  if (contentType.includes("application/x-www-form-urlencoded") || contentType.includes("multipart/form-data")) {
+    const form = await req.formData()
+    for (const [k, v] of form.entries()) {
+      params[k] = String(v)
+    }
+    return { ok: true, params }
+  }
+
+  // Missing/unknown content-type. Treat as empty params.
+  return { ok: true, params }
+}
 
 function authRequestCookieName(config: McpConfig): string {
   return `${config.cookiePrefix}_ar`
@@ -356,18 +457,48 @@ async function handleAuthorizeGet(url: URL, config: McpConfig, store: Store): Pr
 }
 
 async function handleAuthorizeSendEmailCode(req: Request, config: McpConfig, store: Store): Promise<Response> {
+  const nowMs = Date.now()
+  const clientIp = resolveClientIp(req)
+  const endpointRate = consumeRateLimit(store, {
+    key: `endpoint:send-email-code:${clientIp}`,
+    nowMs,
+    rule: config.endpointRateLimits.sendEmailCode,
+  })
+  if (!endpointRate.allowed) {
+    return rateLimitedHtml(endpointRate.retryAfterSeconds, "Too many email-code requests. Try again shortly.")
+  }
+
   const ar = getAuthRequestFromCookie(req, config, store)
   if (!ar) return html(400, renderPage("Error", `<div class="error">Session expired. Please try again.</div>`))
 
   const form = await req.formData()
   const csrf = String(form.get("csrf") ?? "")
-  const email = String(form.get("email") ?? "").trim()
+  const email = normalizeEmail(String(form.get("email") ?? ""))
 
   if (!constantTimeEq(csrf, ar.csrfToken)) {
     return html(400, renderPage("Error", `<div class="error">Invalid CSRF token.</div>`))
   }
   if (!email || !email.includes("@")) {
     return html(400, renderPage("Error", `<div class="error">Invalid email.</div>`))
+  }
+
+  const emailHash = await sha256Hex(email)
+  const perEmail = consumeRateLimit(store, {
+    key: `abuse:send-email:email:${emailHash}`,
+    nowMs,
+    rule: config.emailAbuseRateLimits.sendPerEmail,
+  })
+  if (!perEmail.allowed) {
+    return rateLimitedHtml(perEmail.retryAfterSeconds, "Too many attempts for this email. Try again later.")
+  }
+
+  const perContext = consumeRateLimit(store, {
+    key: `abuse:send-email:context:${emailHash}:${normalizeRateLimitKeyPart(ar.clientId)}:${normalizeRateLimitKeyPart(ar.deviceId)}:${clientIp}`,
+    nowMs,
+    rule: config.emailAbuseRateLimits.sendPerContext,
+  })
+  if (!perContext.allowed) {
+    return rateLimitedHtml(perContext.retryAfterSeconds, "Too many attempts from this client context. Try again later.")
   }
 
   const sendRes = await inlineApiCall<{ existingUser: boolean }>(config, "/v1/sendEmailCode", { email })
@@ -392,6 +523,17 @@ async function handleAuthorizeSendEmailCode(req: Request, config: McpConfig, sto
 }
 
 async function handleAuthorizeVerifyEmailCode(req: Request, config: McpConfig, store: Store): Promise<Response> {
+  const nowMs = Date.now()
+  const clientIp = resolveClientIp(req)
+  const endpointRate = consumeRateLimit(store, {
+    key: `endpoint:verify-email-code:${clientIp}`,
+    nowMs,
+    rule: config.endpointRateLimits.verifyEmailCode,
+  })
+  if (!endpointRate.allowed) {
+    return rateLimitedHtml(endpointRate.retryAfterSeconds, "Too many verification attempts. Try again shortly.")
+  }
+
   const ar = getAuthRequestFromCookie(req, config, store)
   if (!ar) return html(400, renderPage("Error", `<div class="error">Session expired. Please try again.</div>`))
   if (!ar.email) return html(400, renderPage("Error", `<div class="error">Missing email. Start over.</div>`))
@@ -404,6 +546,26 @@ async function handleAuthorizeVerifyEmailCode(req: Request, config: McpConfig, s
   }
   if (!code || code.length < 6) {
     return html(400, renderPage("Error", `<div class="error">Invalid code.</div>`))
+  }
+
+  const normalizedEmail = normalizeEmail(ar.email)
+  const emailHash = await sha256Hex(normalizedEmail)
+  const perEmail = consumeRateLimit(store, {
+    key: `abuse:verify-email:email:${emailHash}`,
+    nowMs,
+    rule: config.emailAbuseRateLimits.verifyPerEmail,
+  })
+  if (!perEmail.allowed) {
+    return rateLimitedHtml(perEmail.retryAfterSeconds, "Too many verification attempts for this email. Try again later.")
+  }
+
+  const perContext = consumeRateLimit(store, {
+    key: `abuse:verify-email:context:${emailHash}:${normalizeRateLimitKeyPart(ar.clientId)}:${normalizeRateLimitKeyPart(ar.deviceId)}:${clientIp}`,
+    nowMs,
+    rule: config.emailAbuseRateLimits.verifyPerContext,
+  })
+  if (!perContext.allowed) {
+    return rateLimitedHtml(perContext.retryAfterSeconds, "Too many attempts from this client context. Try again later.")
   }
 
   const verifyRes = await inlineApiCall<{ token: string; userId: number }>(
@@ -525,29 +687,20 @@ async function handleAuthorizeConsent(req: Request, config: McpConfig, store: St
 }
 
 async function handleToken(req: Request, config: McpConfig, store: Store): Promise<Response> {
-  const contentType = req.headers.get("content-type") ?? ""
   const nowMs = Date.now()
-
-  let params: Record<string, string> = {}
-  if (contentType.includes("application/json")) {
-    let body: any
-    try {
-      body = await req.json()
-    } catch {
-      return badRequest("invalid_json")
-    }
-    if (!body || typeof body !== "object") return badRequest("invalid_json")
-    for (const [k, v] of Object.entries(body)) {
-      if (typeof v === "string") params[k] = v
-    }
-  } else if (contentType.includes("application/x-www-form-urlencoded") || contentType.includes("multipart/form-data")) {
-    const form = await req.formData()
-    for (const [k, v] of form.entries()) {
-      params[k] = String(v)
-    }
-  } else {
-    // Missing/unknown content-type. Treat as empty params.
+  const clientIp = resolveClientIp(req)
+  const endpointRate = consumeRateLimit(store, {
+    key: `endpoint:token:${clientIp}`,
+    nowMs,
+    rule: config.endpointRateLimits.token,
+  })
+  if (!endpointRate.allowed) {
+    return rateLimitedJson(endpointRate.retryAfterSeconds, "Too many token requests.")
   }
+
+  const parsed = await parseRequestParams(req)
+  if (!parsed.ok) return parsed.response
+  const params = parsed.params
 
   const grantType = params["grant_type"]
   if (grantType === "authorization_code") {
@@ -651,4 +804,24 @@ async function handleToken(req: Request, config: McpConfig, store: Store): Promi
   }
 
   return badRequest("unsupported_grant_type")
+}
+
+async function handleRevoke(req: Request, store: Store): Promise<Response> {
+  const parsed = await parseRequestParams(req)
+  if (!parsed.ok) return parsed.response
+
+  const token = parsed.params["token"]
+  if (!token || !token.trim()) {
+    return withJson({}, { headers: { "cache-control": "no-store" } })
+  }
+
+  const tokenHashHex = await sha256Hex(token)
+  const grantId = store.findGrantIdByTokenHash(tokenHashHex)
+  if (grantId) {
+    const nowMs = Date.now()
+    store.revokeGrant(grantId, nowMs)
+    store.revokeRefreshTokensByGrant(grantId, nowMs)
+  }
+
+  return withJson({}, { headers: { "cache-control": "no-store" } })
 }
