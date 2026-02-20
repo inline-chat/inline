@@ -19,6 +19,7 @@ final class AppMenu: NSObject {
   static let shared = AppMenu()
   private let mainMenu = NSMenu()
   private var dependencies: AppDependencies?
+  private weak var tabStripMenuItem: NSMenuItem?
 #if SPARKLE
   private weak var updateMenuItem: NSMenuItem?
   private var updateMenuItemEnabled = true
@@ -394,6 +395,21 @@ final class AppMenu: NSObject {
     toggleSidebarItem.image = NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: nil)
     viewMenu.addItem(toggleSidebarItem)
 
+    let tabStripItem = NSMenuItem(
+      title: "Show Tab Strip",
+      action: #selector(toggleMainTabStrip(_:)),
+      keyEquivalent: "s"
+    )
+    tabStripItem.keyEquivalentModifierMask = [.command, .shift]
+    tabStripItem.target = self
+    tabStripItem.state = AppSettings.shared.showMainTabStrip ? .on : .off
+    tabStripItem.image = NSImage(
+      systemSymbolName: "rectangle.topthird.inset.filled",
+      accessibilityDescription: nil
+    )
+    viewMenu.addItem(tabStripItem)
+    tabStripMenuItem = tabStripItem
+
     viewMenu.addItem(NSMenuItem.separator())
 
     viewMenu.addItem(
@@ -558,6 +574,11 @@ final class AppMenu: NSObject {
     NotificationCenter.default.post(name: .toggleSidebar, object: nil)
   }
 
+  @objc private func toggleMainTabStrip(_ sender: NSMenuItem) {
+    AppSettings.shared.showMainTabStrip.toggle()
+    sender.state = AppSettings.shared.showMainTabStrip ? .on : .off
+  }
+
   @objc private func focusSearch(_ sender: NSMenuItem) {
     NotificationCenter.default.post(name: .focusSearch, object: nil)
   }
@@ -639,6 +660,11 @@ extension AppMenu: NSMenuItemValidation {
       }
       let nav = dependencies.nav
       return nav.selectedTab == .inbox || nav.selectedTab == .archive
+    }
+
+    if menuItem.action == #selector(toggleMainTabStrip(_:)) || menuItem == tabStripMenuItem {
+      menuItem.state = AppSettings.shared.showMainTabStrip ? .on : .off
+      return true
     }
 
     return true
