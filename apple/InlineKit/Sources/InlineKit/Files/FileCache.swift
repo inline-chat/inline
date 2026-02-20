@@ -369,11 +369,14 @@ public actor FileCache: Sendable {
     guard durationTime.isValid else { throw FileCacheError.failedToSave }
     let durationSeconds = Int(CMTimeGetSeconds(durationTime).rounded())
 
-    // Persist the video to app cache (compress or transcode to mp4 when needed)
+    // Persist the video to app cache.
+    // Keep native MP4 as-is for fast attach and Telegram-like UX.
+    // Only transcode non-MP4 inputs to guarantee server-accepted format.
     let directory = FileHelpers.getLocalCacheDirectory(for: .videos)
     let fileManager = FileManager.default
     let sourceExtension = url.pathExtension.lowercased()
     let needsMp4Transcode = sourceExtension != "mp4"
+    let shouldPreprocess = needsMp4Transcode
     let localPath = UUID().uuidString + ".mp4"
     let localUrl = directory.appendingPathComponent(localPath)
 
@@ -382,26 +385,28 @@ public actor FileCache: Sendable {
     var finalDuration = durationSeconds
     var fileSize = 0
 
-    do {
-      let options = VideoCompressionOptions.uploadDefault(forceTranscode: needsMp4Transcode)
-      let result = try await VideoCompressor.shared.compressVideo(at: url, options: options)
-      defer {
-        if fileManager.fileExists(atPath: result.url.path) {
-          try? fileManager.removeItem(at: result.url)
+    if shouldPreprocess {
+      do {
+        let options = VideoCompressionOptions.uploadDefault(forceTranscode: true)
+        let result = try await VideoCompressor.shared.compressVideo(at: url, options: options)
+        defer {
+          if fileManager.fileExists(atPath: result.url.path) {
+            try? fileManager.removeItem(at: result.url)
+          }
         }
-      }
-      if fileManager.fileExists(atPath: localUrl.path) {
-        try fileManager.removeItem(at: localUrl)
-      }
-      try fileManager.moveItem(at: result.url, to: localUrl)
-      finalWidth = result.width
-      finalHeight = result.height
-      finalDuration = result.duration
-      fileSize = Int(result.fileSize)
-    } catch {
-      if needsMp4Transcode {
+        if fileManager.fileExists(atPath: localUrl.path) {
+          try fileManager.removeItem(at: localUrl)
+        }
+        try fileManager.moveItem(at: result.url, to: localUrl)
+        finalWidth = result.width
+        finalHeight = result.height
+        finalDuration = result.duration
+        fileSize = Int(result.fileSize)
+      } catch {
+        // Non-MP4 inputs must become MP4, so surface preprocessing failure.
         throw error
       }
+    } else {
       if fileManager.fileExists(atPath: localUrl.path) {
         try fileManager.removeItem(at: localUrl)
       }

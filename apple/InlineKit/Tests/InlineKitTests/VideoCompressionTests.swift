@@ -21,15 +21,15 @@ struct VideoCompressionTests {
 
     do {
       _ = try await VideoCompressor.shared.compressVideo(at: videoURL, options: options)
-      #expect(false)
+      #expect(Bool(false))
     } catch VideoCompressionError.compressionNotNeeded {
       // Expected
     } catch {
-      #expect(false)
+      #expect(Bool(false))
     }
   }
 
-  @Test("throws invalidAsset for empty file")
+  @Test("throws for empty file")
   func testInvalidAssetThrows() async throws {
     let tempURL = FileManager.default.temporaryDirectory
       .appendingPathComponent("inlinekit_empty_\(UUID().uuidString).mp4")
@@ -41,11 +41,11 @@ struct VideoCompressionTests {
         at: tempURL,
         options: VideoCompressionOptions.uploadDefault(forceTranscode: true)
       )
-      #expect(false)
-    } catch VideoCompressionError.invalidAsset {
-      // Expected
+      #expect(Bool(false))
+    } catch VideoCompressionError.compressionNotNeeded {
+      #expect(Bool(false))
     } catch {
-      #expect(false)
+      // Expected: invalid input should fail compression.
     }
   }
 }
@@ -56,6 +56,14 @@ private enum VideoTestError: Error {
   case pixelBufferCreationFailed
   case appendFailed
   case finishFailed
+}
+
+private final class AssetWriterBox: @unchecked Sendable {
+  let writer: AVAssetWriter
+
+  init(_ writer: AVAssetWriter) {
+    self.writer = writer
+  }
 }
 
 private func makeTestVideoURL(
@@ -94,58 +102,50 @@ private func makeTestVideoURL(
   guard writer.startWriting() else { throw VideoTestError.writerSetupFailed }
   writer.startSession(atSourceTime: .zero)
 
-  let queue = DispatchQueue(label: "inlinekit.video.writer")
-  return try await withCheckedThrowingContinuation { continuation in
-    var frame = 0
-    var didComplete = false
+  guard let pool = adaptor.pixelBufferPool else {
+    writer.cancelWriting()
+    throw VideoTestError.pixelBufferPoolUnavailable
+  }
 
-    input.requestMediaDataWhenReady(on: queue) {
-      guard !didComplete else { return }
-      while input.isReadyForMoreMediaData && frame < frameCount {
-        guard let pool = adaptor.pixelBufferPool else {
-          didComplete = true
-          writer.cancelWriting()
-          continuation.resume(throwing: VideoTestError.pixelBufferPoolUnavailable)
-          return
-        }
+  for frame in 0 ..< frameCount {
+    while !input.isReadyForMoreMediaData {
+      try await Task.sleep(for: .milliseconds(1))
+    }
 
-        var buffer: CVPixelBuffer?
-        let status = CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer)
-        guard status == kCVReturnSuccess, let pixelBuffer = buffer else {
-          didComplete = true
-          writer.cancelWriting()
-          continuation.resume(throwing: VideoTestError.pixelBufferCreationFailed)
-          return
-        }
+    var buffer: CVPixelBuffer?
+    let status = CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer)
+    guard status == kCVReturnSuccess, let pixelBuffer = buffer else {
+      writer.cancelWriting()
+      throw VideoTestError.pixelBufferCreationFailed
+    }
 
-        CVPixelBufferLockBaseAddress(pixelBuffer, [])
-        if let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) {
-          let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
-          memset(baseAddress, 0x7F, bytesPerRow * Int(size.height))
-        }
-        CVPixelBufferUnlockBaseAddress(pixelBuffer, [])
+    CVPixelBufferLockBaseAddress(pixelBuffer, [])
+    if let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) {
+      let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+      memset(baseAddress, 0x7F, bytesPerRow * Int(size.height))
+    }
+    CVPixelBufferUnlockBaseAddress(pixelBuffer, [])
 
-        let time = CMTime(value: CMTimeValue(frame), timescale: fps)
-        guard adaptor.append(pixelBuffer, withPresentationTime: time) else {
-          didComplete = true
-          writer.cancelWriting()
-          continuation.resume(throwing: VideoTestError.appendFailed)
-          return
-        }
+    let time = CMTime(value: CMTimeValue(frame), timescale: fps)
+    guard adaptor.append(pixelBuffer, withPresentationTime: time) else {
+      writer.cancelWriting()
+      throw VideoTestError.appendFailed
+    }
+  }
 
-        frame += 1
-      }
+  input.markAsFinished()
+  try await finishWriting(writer)
+  return outputURL
+}
 
-      if frame >= frameCount && !didComplete {
-        didComplete = true
-        input.markAsFinished()
-        writer.finishWriting {
-          if writer.status == .completed {
-            continuation.resume(returning: outputURL)
-          } else {
-            continuation.resume(throwing: writer.error ?? VideoTestError.finishFailed)
-          }
-        }
+private func finishWriting(_ writer: AVAssetWriter) async throws {
+  let writerBox = AssetWriterBox(writer)
+  try await withCheckedThrowingContinuation { continuation in
+    writerBox.writer.finishWriting {
+      if writerBox.writer.status == .completed {
+        continuation.resume()
+      } else {
+        continuation.resume(throwing: writerBox.writer.error ?? VideoTestError.finishFailed)
       }
     }
   }

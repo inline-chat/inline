@@ -102,7 +102,17 @@ class ShareState: ObservableObject {
   private nonisolated static let maxMedia = 10
   private nonisolated static let maxUrls = 10
   private static let imageCompressionQuality: CGFloat = 0.7
-  private static let maxFileSizeBytes: Int64 = 100 * 1024 * 1024 // 100MB
+  private static let maxFileSizeBytes: Int64 = 100 * 1024 * 1024 // 100MB for photos/documents
+  private static let maxVideoFileSizeBytes: Int64 = 2_000_000_000 // 2GB for multipart video upload
+  private nonisolated static func maxFileSizeDisplay(for bytes: Int64) -> String {
+    if bytes % 1_000_000_000 == 0 {
+      return "\(bytes / 1_000_000_000)GB"
+    }
+    if bytes % 1_000_000 == 0 {
+      return "\(bytes / 1_000_000)MB"
+    }
+    return "\(bytes) bytes"
+  }
 
   @Published var sharedContent: SharedContent? = nil
   @Published var sharedData: SharedData?
@@ -1219,12 +1229,14 @@ class ShareState: ObservableObject {
 
         for file in content.files {
           self.log.debug(self.tagged("Uploading \(file.fileName) (\(file.fileSize ?? 0) bytes) as \(file.fileType)"))
-          if file.fileType != .video, let fileSize = file.fileSize, fileSize > Self.maxFileSizeBytes {
+          let maxAllowedSize = file.fileType == .video ? Self.maxVideoFileSizeBytes : Self.maxFileSizeBytes
+          if let fileSize = file.fileSize, fileSize > maxAllowedSize {
             throw NSError(
               domain: "ShareError",
               code: 3,
               userInfo: [
-                NSLocalizedDescriptionKey: "\(file.fileName) is too large. Maximum size is 100MB."
+                NSLocalizedDescriptionKey:
+                  "\(file.fileName) is too large. Maximum size is \(Self.maxFileSizeDisplay(for: maxAllowedSize))."
               ]
             )
           }
@@ -1245,7 +1257,8 @@ class ShareState: ObservableObject {
                   domain: "ShareError",
                   code: 3,
                   userInfo: [
-                    NSLocalizedDescriptionKey: "\(file.fileName) is too large. Maximum size is 100MB."
+                    NSLocalizedDescriptionKey:
+                      "\(file.fileName) is too large. Maximum size is \(Self.maxFileSizeDisplay(for: Self.maxFileSizeBytes))."
                   ]
                 )
               }
@@ -1263,7 +1276,8 @@ class ShareState: ObservableObject {
                   domain: "ShareError",
                   code: 3,
                   userInfo: [
-                    NSLocalizedDescriptionKey: "\(file.fileName) is too large. Maximum size is 100MB."
+                    NSLocalizedDescriptionKey:
+                      "\(file.fileName) is too large. Maximum size is \(Self.maxFileSizeDisplay(for: Self.maxFileSizeBytes))."
                   ]
                 )
               }
@@ -1277,29 +1291,19 @@ class ShareState: ObservableObject {
             case .video:
               let prepared = try await prepareVideoForUpload(file)
               defer { prepared.cleanup?() }
-              guard prepared.fileSize <= Self.maxFileSizeBytes else {
+              guard prepared.fileSize <= Self.maxVideoFileSizeBytes else {
                 throw NSError(
                   domain: "ShareError",
                   code: 3,
                   userInfo: [
-                    NSLocalizedDescriptionKey: "\(prepared.fileName) is too large. Maximum size is 100MB."
-                  ]
-                )
-              }
-              let fileData = try Data(contentsOf: prepared.url, options: .mappedIfSafe)
-              guard Int64(fileData.count) <= Self.maxFileSizeBytes else {
-                throw NSError(
-                  domain: "ShareError",
-                  code: 3,
-                  userInfo: [
-                    NSLocalizedDescriptionKey: "\(prepared.fileName) is too large. Maximum size is 100MB."
+                    NSLocalizedDescriptionKey:
+                      "\(prepared.fileName) is too large. Maximum size is \(Self.maxFileSizeDisplay(for: Self.maxVideoFileSizeBytes))."
                   ]
                 )
               }
               let videoMetadata = try await buildVideoMetadata(from: prepared.url)
-              uploadResult = try await apiClient.uploadFile(
-                type: .video,
-                data: fileData,
+              uploadResult = try await apiClient.uploadVideoMultipart(
+                fileURL: prepared.url,
                 filename: prepared.fileName,
                 mimeType: prepared.mimeType,
                 videoMetadata: videoMetadata,
