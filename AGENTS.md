@@ -1,142 +1,89 @@
 ## Orientation
-
-- Inline is a multi-client work chat app; repo at https://github.com/inline-chat/inline with backend (Bun/TS), Apple clients (SwiftUI/UIKit/AppKit), web (React/TanStack), and shared protobufs in `proto/`.
-- Primary shared Swift packages live in `apple/InlineKit`, `InlineUI`, `InlineProtocol`, plus app targets under `apple/InlineIOS` and `apple/InlineMac`.
-- Backend lives in `server/` (Bun runtime, Drizzle + Postgres, Elysia REST + WebSocket RPC) with protocol encoders/handlers split across `src/functions`, `src/realtime`, `src/db`.
-- Web client in `web/` uses React Router v7, Tailwind + StyleX, Vite.
-- Use `bun` for JS/TS tooling (not npm/yarn); keep IDs as `Int64` (Swift `Id`, proto `ID`), timestamps in seconds unless host API needs ms.
-- Production URLs: API at `https://api.inline.chat`, web at `https://inline.chat`.
-
+- Inline is a multi-client work chat app: backend (`server/` Bun/TS), Apple clients (`apple/` SwiftUI/UIKit/AppKit), web (`web/` React/TanStack), and shared protobufs (`proto/`).
+- Shared Swift packages: `apple/InlineKit`, `apple/InlineUI`, `apple/InlineProtocol`; app targets: `apple/InlineIOS`, `apple/InlineMac`.
+- Backend structure: `src/functions`, `src/realtime`, `src/db`.
+- Web uses React Router v7 + Vite + Tailwind/StyleX.
+- Use `bun` for JS/TS tooling (not npm/yarn); keep IDs as `Int64` (`Id`/`ID`) and timestamps in seconds unless API requires ms.
+- Production: `https://api.inline.chat` and `https://inline.chat`.
 ## Critical Rules
-
-- Never revert a file; never discard a change yourself; never undo work on any file by destructive shell commands or clearing files unless explicitly given permission to do so. Otherwise keep a copy or comment out, do not do irreversible deletions especially to files you have not made those changes to.
-- Never discard/restore/reset all files (or “start over”) without asking for explicit permission first (e.g., avoid `git restore .`, `git checkout .`, `git reset --hard`).
-- While you are working, if you notice unexpected changes that you didn't make in files you were working on, stop immediately. Otherwise if the changes are in different files, IGNORE those changes and focus on files you DID touch. Don't revert, discard, or restore them: they may be part of another agent's work.
-
-## Multi-agent safety
-
-- Multi-agent safety: do not create/apply/drop git stash entries unless explicitly requested (this includes `git pull --rebase --autostash`). Assume other agents may be working; keep unrelated WIP untouched and avoid cross-cutting state changes.
-- Multi-agent safety: when the user says "push", you may `git pull --rebase` to integrate latest changes (never discard other agents' work; if a rebase hits conflicts, stop and ask before resolving). When the user says "commit", scope to your changes only. When the user says "commit all", commit everything in grouped chunks.
-- Multi-agent safety: do not create/remove/modify git worktree checkouts (or edit `.worktrees/*`) unless explicitly requested.
-- Multi-agent safety: never clone this repo to commit/push changes from outside the main GitHub worktree unless the user explicitly confirms first.
-- Multi-agent safety: do not switch branches / check out a different branch unless explicitly requested.
-- Multi-agent safety: running multiple agents is OK as long as each agent has its own session.
-- Multi-agent safety: when you see unrecognized files, keep going; focus on your changes and commit only those.
-- Multi-agent safety: focus reports on your edits; avoid guard-rail disclaimers unless truly blocked; when multiple agents touch the same file, continue if safe; end with a brief “other files present” note only if relevant.
-
+- Never revert/discard/reset/clean work unless explicitly asked; ask before one-way deletion commands (`rm`, restore/reset/checkout) unless explicitly requested.
+- If unexpected changes appear in a file you are editing, stop and ask. Ignore unrelated file changes.
+- Never touch `.env` files.
+## Multi-agent Safety
+- Do not create/apply/drop stashes (including `--autostash`) unless explicitly requested.
+- Do not switch branches, create/modify worktrees, or clone this repo for commit/push unless explicitly requested.
+- On "push", `git pull --rebase` is allowed; if conflicts occur, stop and ask before resolving.
+- Scope commits to your changes unless user asks for "commit all".
+- When unrecognized files exist, continue and focus only on relevant files.
 ## Working Rules
-
-- Do requested work only; mirror existing patterns; add comments only when clarifying non-obvious logic; never touch `.env` or delete others’ work.
-- When Mo says "memorize", treat it as "persist this rule in AGENTS.md" (not just conversational memory).
-- When answering questions, respond with high-confidence answers only: verify in code; do not guess.
-- Bug investigations: read source code of relevant npm dependencies and all related local code before concluding; aim for high-confidence root cause.
-- Code style: add brief comments for tricky logic; aim to keep files under ~700 LOC (guideline only, not a hard guardrail). Split/refactor when it improves clarity or testability.
-- Avoid destructive git commands; keep commits atomic and scoped; do not amend existing commits; quote paths with special chars; check status before committing.
-- Before committing, verify the staging area contains only the intended files (`git diff --cached --name-only`).
-- When parking large WIP changes, a git worktree under `../inline-worktrees/` (sibling of this repo) can help keep changes isolated (only create/modify worktrees when explicitly requested).
-- If you need to undo your work in a file, first check whether that file has any other uncommitted changes in git; if it does, ask for explicit permission before undoing anything in that file.
-- Commit style: platform-prefixed, lowercase, scoped messages (e.g., `apple: fix sync`); add a brief description or bullets when extra context is needed.
-- If a change is minimal, clearly within the user's request, and limited in scope without meaningful logic impact, make a focused commit yourself without additional approval.
-- Prefer `rg` for search; keep edits ASCII; strip debug prints; use logging utilities (`Log` in Swift, `server/src/utils/log.ts`).
-- Avoid `Any`/`any`, force unwraps (`!`), `try!`, forced/unsafe casts (e.g. `as!`), and other unsafe patterns that can crash or trigger runtime fatal errors; use safe alternatives whenever possible unless there is no other way.
-- Regenerate protobufs after proto changes with `bun run generate:proto` (or per-language commands in `scripts/`); rebuild Swift `InlineProtocol` target if needed.
-- If changes touch a Swift package, run a focused `swift build` for that package before asking the user to build.
-- When adding new `AppDatabase` migrations in `InlineKit/Sources/InlineKit/Database.swift`, append them at the bottom of the migration list (order matters; newest last).
-- Default test timeout 25s; run focused tests from relevant package roots; avoid heavy/unapproved tooling (e.g., do not run `xcodebuild` full apps).
-- Run tests when a feature is finished or when asked to write tests; follow up with typecheck for TS when relevant.
-- Always add or update tests for new features, and add regression tests for bug fixes to prevent recurrence.
-- Follow the Multi-agent safety rules: never revert/discard/reset/clean unrelated changes or files you have not edited, created, or moved.
-- When working on New UI features, do not modify previous UI files (legacy sidebar/old UI). Keep changes scoped to new UI components.
-- For larger tasks, write a comprehensive plan first; if there are multiple design choices or any room for ambiguity, ask clarifying questions; when implementing a large plan (more than a few tasks) save the plan in a markdown file in .agent-docs/ and update it after each task before starting next one.
-- When adding markdown files in `.agent-docs/`, prefix the filename with the date in `YYYY-MM-DD-title-kebab-case.md` format (example: `2026-01-02-title-kebab-case.md`).
-- When finalizing, reviewing, or pushing a feature, explicitly point out any clear security issue or likely attack surface risk.
-- After you're done, write a short note on whether it's ready for production or anything is of concern for further review/tests.
-
+- Do requested work only; mirror existing patterns; add comments only for non-obvious logic.
+- If Mo says "memorize", persist the rule in `AGENTS.md`.
+- Give high-confidence answers only: verify in code and dependencies when needed; do not guess.
+- Prefer `rg`; keep edits ASCII; remove debug prints; use existing logging (`Log`, `server/src/utils/log.ts`).
+- Avoid unsafe Swift patterns (`Any`/`any` where avoidable, force unwraps, `try!`, unsafe casts).
+- Keep commits atomic and scoped; do not amend existing commits.
+- Before committing, verify staged files (`git diff --cached --name-only`); prefer `scripts/committer "<msg>" <file...>`.
+- If undoing your own changes in a file with other uncommitted edits, ask first.
+- Regenerate protobufs when contracts change (`bun run generate:proto`); run focused `swift build` for touched Swift packages.
+- Run focused tests/typechecks for affected areas; add/update tests for new features and regressions.
+- New UI work must stay in new UI components; do not modify legacy sidebar/old UI.
+- For larger tasks, create/update a plan file in `.agent-docs/` named `YYYY-MM-DD-title-kebab-case.md`.
+- In final handoff/review/push, call out security risks and state production readiness.
 ## Reminders
-
-- If any feature needs a deferred follow-up (for example security hardening or legacy removal), add a dated reminder bullet in this section instead of leaving scattered TODO comments.
-- Security (due by 2026-05-18): remove legacy email OTP verify fallback without `challengeToken` in `server/src/modules/auth/emailLoginChallenges.ts` and require challenge-bound verification only.
-
+- Security (due 2026-05-18): remove legacy email OTP verification fallback without `challengeToken` in `server/src/modules/auth/emailLoginChallenges.ts`.
 ## Common Commands
-
-- Root scripts: `bun run dev`/`dev:server` (backend), `bun run dev:web`, `bun run typecheck`, `bun run test` (backend), `bun run lint`.
-- Protos: from root `bun run generate:proto`; from `scripts/` use `bun run generate` for per-language.
-- Database: `cd server && bun run db:migrate`; generate migrations via `bun run db:generate <name>`; inspect with `bun run db:studio`.
-- Targeted backend tests: `cd server && bun test src/__tests__/modules/...`; enable debug via `DEBUG=1`.
-- Create commits with `scripts/committer "<msg>" <file...>`; avoid manual `git add`/`git commit` so staging stays scoped.
-- Keep commands inside package dirs when running Swift or Bun tooling to avoid path issues.
-
+- Root: `bun run dev`, `bun run dev:server`, `bun run dev:web`, `bun run typecheck`, `bun run test`, `bun run lint`.
+- Protos: `bun run generate:proto`; per-language from `scripts/`: `bun run generate`.
+- DB: `cd server && bun run db:migrate`; create migration `bun run db:generate <name>`; inspect `bun run db:studio`.
+- Backend tests: `cd server && bun test src/__tests__/modules/...` (`DEBUG=1` for verbose).
 ## NPM SDK Releases
-
-- Public SDK packages for realtime + bot API are: `@inline-chat/protocol`, `@inline-chat/realtime-sdk`, `@inline-chat/bot-api-types`, `@inline-chat/bot-api`.
-- Publish these when external SDK consumers need new runtime behavior or new/updated public types (server-only internal changes do not require publish).
-- Publish in dependency order: `protocol` -> `realtime-sdk`, and `bot-api-types` -> `bot-api`; if both tracks changed, publish both base packages before dependents.
-- Use prerelease channel for rollout testing: `npm publish --access public --tag alpha` from each package directory.
-- If npm 2FA is enabled, include OTP on each publish command: `npm publish --access public --tag alpha --otp=<code>`.
-- When Mo asks to publish, always provide a copy-paste publish command that includes OTP placeholder and package directory, e.g. `cd /Users/mo/dev/inline/packages/openclaw-inline && npm publish --access public --otp=<YOUR_OTP_CODE>`.
-- For prerelease publish requests, provide the copy-paste alpha variant with OTP too: `cd /Users/mo/dev/inline/packages/openclaw-inline && npm publish --access public --tag alpha --otp=<YOUR_OTP_CODE>`.
-
+- Public SDKs: `@inline-chat/protocol`, `@inline-chat/realtime-sdk`, `@inline-chat/bot-api-types`, `@inline-chat/bot-api`.
+- Publish only when external runtime behavior/public types change.
+- Publish order: `protocol -> realtime-sdk` and `bot-api-types -> bot-api`.
+- Use `--tag alpha` for prerelease rollout; include OTP when needed.
+- For publish requests, provide copy-paste commands with package dir and `--otp=<YOUR_OTP_CODE>`.
 ## CLI
-
-- Source lives in `cli/` (Rust); binary name is `inline`, release artifacts are `inline-cli-<version>-<target>.tar.gz`.
-- Release flow: `cd scripts && bun run release:cli -- release` (builds, packages, uploads, tags `cli-v<version>`, creates GitHub release).
-- Requires `gh` authenticated and release env vars for R2 uploads; release script checks for duplicate tags before starting.
-- Homebrew cask lives in `inline-chat/homebrew-inline` (repo) and pulls from GitHub Releases.
-
+- CLI source: `cli/` (Rust), binary `inline`, release artifacts `inline-cli-<version>-<target>.tar.gz`.
+- Release flow: `cd scripts && bun run release:cli -- release`.
+- Requires authenticated `gh` and release env vars; script checks duplicate tags.
 ## Apple (iOS/macOS)
-
-- Swift 6 targets in `apple/InlineKit` (shared logic/DB/networking), `InlineUI` (shared UI), app targets `InlineIOS` (SwiftUI+UIKit) and `InlineMac` (AppKit+SwiftUI); share protocol via generated `InlineProtocol`.
-- Prefer implementing new iOS/macOS features in `apple/InlineIOSUI` and `apple/InlineMacUI` as self-contained units, and include focused tests with those changes. Only add new feature logic directly to `apple/InlineIOS`, `apple/InlineMac`, or `apple/InlineKit` when it is legacy-coupled or deeply integrated and cannot be extracted cleanly.
-- iOS minimum supported version is 18; macOS min version is 15.
-- Prefer Swift Testing for Apple code (`import Testing`, `@Test`, `@Suite`) instead of XCTest.
-- SwiftUI state management (iOS/macOS): prefer the Observation framework (`@Observable`, `@Bindable`) over `ObservableObject`/`@StateObject`; don’t introduce new `ObservableObject` unless required for compatibility, and migrate existing usages when touching related code.
-- Do not build full apps with `xcodebuild`; ask user to run. Allowed: package tests and builds via e.g. `cd apple/InlineKit && swift test` and `cd apple/InlineUI && swift build`.
-- Database migrations live in `InlineKit/Sources/InlineKit/Database.swift`; models in `Sources/InlineKit/Models/`; transactions in `Sources/InlineKit/Transactions/Methods/`.
-- For embedded protobuf fields stored in local DB blobs, follow the `DraftMessage` pattern: keep typed model properties (not raw `Data`), add matching `ProtocolHelpers` extensions with `Codable` + `DatabaseValueConvertible` using `serializedData()`/`serializedBytes`, and reuse this pattern for future features for consistent type safety.
-- Logging via `Log.scoped`; avoid main-thread heavy work; use Swift concurrency; prefer small composable views/modifiers.
-- Regenerate Swift protos with `bun run proto:generate-swift` (scripts) then rebuild `InlineProtocol` target in Xcode if necessary.
-- Search for relevant Apple developer documentations for key APIs you want to use. To load the link, replace https://developer.apple.com/ with https://sosumi.ai/ to give you compact markdown versions of the same docs. Read the links via CURL, do not use web search for that. Read the URL.
-- Helpers: Liquid Glass (SwiftUI) — gate with `#available` (iOS/macOS 26+); apply `glassEffect` after layout/appearance; wrap multiple glass views in `GlassEffectContainer`; use `.interactive()` only for tappable elements.
-- macOS local releases should use the JS orchestrator: `bun run release:macos -- --channel <stable|beta>` (or `cd scripts && bun run macos:release-app -- --channel <stable|beta>`).
-- macOS TestFlight is a deprecated distribution method; keep it aligned with the stable direct Sparkle build, but the primary path is the direct Sparkle/DMG unsandboxed build.
-
+- Prefer new feature work in `apple/InlineIOSUI` and `apple/InlineMacUI`; use legacy targets only when tightly coupled.
+- Minimum versions: iOS 18, macOS 15.
+- Prefer Swift Testing (`import Testing`, `@Test`, `@Suite`) and Observation (`@Observable`, `@Bindable`).
+- Do not run full app `xcodebuild`; ask user. Allowed: focused package builds/tests (for example `swift test`, `swift build`).
+- `AppDatabase` migrations are in `InlineKit/Sources/InlineKit/Database.swift`; append new migrations at the bottom.
+- For protobuf blobs in DB, follow the `DraftMessage` typed-model + `ProtocolHelpers` + `DatabaseValueConvertible` pattern.
+- Use `Log.scoped`; avoid main-thread heavy work; prefer Swift concurrency and composable views.
+- Regenerate Swift protos with `bun run proto:generate-swift` (from `scripts/`) when needed.
+- For Apple docs, use `https://sosumi.ai/...` mirror of Developer docs via `curl` instead of web search.
+- Liquid Glass: gate with `#available` (iOS/macOS 26+), apply after layout/appearance, wrap related views in `GlassEffectContainer`, use `.interactive()` only for tappable elements.
+- macOS releases: `bun run release:macos -- --channel <stable|beta>` or `cd scripts && bun run macos:release-app -- --channel <stable|beta>`.
+- TestFlight is deprecated for macOS distribution; Sparkle/DMG direct build is primary.
 ## Backend
-
-- Runs on Bun (not Node); entry at `server/src/index.ts`; business logic in `src/functions`, RPC handlers in `src/realtime/handlers`, encoders in `src/realtime/encoders`, schema in `src/db/schema`, models in `src/db/models`.
-- Central graceful termination cleanup lives in `server/src/lifecycle/gracefulShutdown.ts`; add new shutdown cleanup hooks there.
-- Use Drizzle for DB; follow add-table flow: create schema, export in `schema/index.ts`, `bun run db:generate <migration>`, migrate, then add model/tests. Never hand-write migrations.
-- REST endpoints (legacy) in `src/methods`; realtime is primary; keep auth via `src/utils/authorize.ts`; secure data via `src/modules/encryption/encryption2.ts`.
-- Any user-sensitive information or user content stored in the server database must be encrypted at rest; follow existing server encryption patterns (`src/modules/encryption/encryption2.ts`) instead of writing plaintext.
-- Testing/linting/typecheck from `server/`: `bun test`, `bun run lint`, `bun run typecheck`; set `DEBUG=1` for verbose output.
-- External services: APN (`src/libs/apn.ts`), R2 storage (`src/libs/r2.ts`), AI (Anthropic/OpenAI), Linear/Notion/Loom integrations; ensure env vars handled via `src/env.ts`.
-
+- Bun runtime entry: `server/src/index.ts`; logic in `src/functions`, realtime handlers/encoders in `src/realtime`, DB schema/models in `src/db`.
+- Add shutdown cleanup in `server/src/lifecycle/gracefulShutdown.ts`.
+- Use Drizzle flow for schema changes; do not hand-write migrations.
+- Realtime is primary; legacy REST in `src/methods`; auth in `src/utils/authorize.ts`.
+- Encrypt user-sensitive data at rest using existing patterns (`src/modules/encryption/encryption2.ts`).
+- Backend checks from `server/`: `bun test`, `bun run lint`, `bun run typecheck`.
 ## Web & Docs
-
-- Stack: TanStack Router + Vite + StyleX/Tailwind (+ Motion where needed); keep SSR-safe patterns.
-- Commands: from `web/` use `bun run dev`, `bun run build`, `bun run typecheck`.
-- Web styling: prefer existing StyleX tokens/utilities over ad-hoc CSS; preserve light/dark behavior.
-- Protocol-bound web changes: run `bun run generate:proto` when types/contracts are affected.
-- Docs architecture: routes in `web/src/routes/docs/`, markdown in `web/src/docs/content/`, nav in `web/src/docs/nav.ts`.
-- New docs page flow: add `content/<page>.md` + matching `routes/docs/<page>.tsx` + nav entry.
-- Docs structure/tone: minimal sections, short paragraphs, practical bullets, explicit links; avoid filler/meta language.
-- Developer docs positioning: `Realtime API` = full two-way/live integrations, `Bot API` = simpler workflows/alerts.
-
+- Web stack: TanStack Router + Vite + StyleX/Tailwind; keep SSR-safe patterns.
+- Web commands: `cd web && bun run dev|build|typecheck`.
+- Prefer existing tokens/utilities over ad-hoc CSS; keep light/dark behavior consistent.
+- Regenerate protos when protocol-bound contracts change.
+- Docs: routes in `web/src/routes/docs/`, content in `web/src/docs/content/`, nav in `web/src/docs/nav.ts`.
+- Docs additions: add markdown page + route + nav entry; keep writing concise and practical.
 ## Admin
-
-- Admin frontend lives in `admin/` (Vite + TanStack Router file-based routing). Routes are under `admin/src/routes`, pages under `admin/src/pages`, layout under `admin/src/components/layout/app-layout.tsx`.
-- Admin backend lives in `server/src/controllers/admin.ts`; keep new endpoints behind `/admin` with origin allowlist + admin session cookie.
-- Do not load remote assets/scripts/styles/fonts in admin UI. Use local assets from `admin/public` only.
-- Always require a valid admin session (cookie) for admin endpoints. Use step-up checks for sensitive actions (user updates, role changes, exports).
-- Keep admin cookies `httpOnly`, `secure` in prod, `sameSite: "strict"`, and scoped to the admin API domain.
-- Rate-limit or lockout admin auth flows (password + email code) when adding new login/verification paths.
-- Never send decrypted secrets to the client. For session/device data, limit to explicitly needed fields and redact when possible.
-- Maintain separate admin metrics endpoints for UI. For new metrics, exclude deleted users and bots by default.
-
+- Admin frontend: `admin/` (Vite + TanStack Router); backend: `server/src/controllers/admin.ts`.
+- Keep admin endpoints under `/admin` with origin allowlist + admin session cookie.
+- Never load remote assets/scripts/styles/fonts in admin UI.
+- Require valid admin session for all admin endpoints; use step-up checks for sensitive actions.
+- Cookies: `httpOnly`, `secure` in production, `sameSite: "strict"`, scoped to admin API domain.
+- Rate-limit auth flows; never expose decrypted secrets to clients.
+- Admin metrics should exclude deleted users and bots by default.
 ## Glossary
-
-### Area nicknames we use to reference to different files/views on macOS
-
-- New UI: Refers to an alternative all-new UI that starts with a new MainWindowController that is swapped based on a toggle in the settings.
-- New sidebar: Refers to MainSidebar.swift that is used in new sidebar
-- New chat icon: `apple/InlineMac/Views/ChatIcon/SidebarChatIconView.swift` a cleaner version of chat icon used in new UI
-- CMD+K menu: `apple/InlineMac/Features/MainWindow/QuickSearchPopover.swift`
+### Area nicknames we use to reference different macOS views
+- New UI: alternate UI switched by settings toggle with a different `MainWindowController`.
+- New sidebar: `apple/InlineMac/Features/Sidebar/MainSidebar.swift`.
+- New chat icon: `apple/InlineMac/Views/ChatIcon/SidebarChatIconView.swift`.
+- CMD+K menu: `apple/InlineMac/Features/MainWindow/QuickSearchPopover.swift`.
