@@ -144,6 +144,12 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  @Published var showMainTabStrip: Bool {
+    didSet {
+      UserDefaults.standard.set(showMainTabStrip, forKey: "showMainTabStrip")
+    }
+  }
+
   // MARK: - Updates
 
   @Published var autoUpdateChannel: AutoUpdateChannel {
@@ -179,6 +185,7 @@ final class AppSettings: ObservableObject {
     disableNotificationSound = UserDefaults.standard.bool(forKey: "disableNotificationSound")
     showDockBadgeUnreadDMs = UserDefaults.standard.object(forKey: "showDockBadgeUnreadDMs") as? Bool ?? true
     enableNewMacUI = UserDefaults.standard.bool(forKey: "enableNewMacUI")
+    showMainTabStrip = UserDefaults.standard.object(forKey: "showMainTabStrip") as? Bool ?? false
     if let storedChannel = UserDefaults.standard.string(forKey: "autoUpdateChannel"),
        !storedChannel.isEmpty,
        let channel = AutoUpdateChannel(rawValue: storedChannel) {

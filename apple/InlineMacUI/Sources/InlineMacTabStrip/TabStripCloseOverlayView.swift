@@ -1,0 +1,98 @@
+import AppKit
+
+final class TabStripCloseOverlayView: NSView {
+  var onClose: (() -> Void)?
+
+  private let button = TabStripNonDraggableButton()
+  private var trackingArea: NSTrackingArea?
+
+  private var baseColor: NSColor = .white
+  private var isDarkMode = false
+  private var isHovered = false
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    setup()
+  }
+
+  required init?(coder: NSCoder) {
+    super.init(coder: coder)
+    setup()
+  }
+
+  private func setup() {
+    wantsLayer = true
+    layer?.masksToBounds = true
+    layer?.cornerRadius = 8
+
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.isBordered = false
+    button.setButtonType(.momentaryChange)
+    button.imagePosition = .imageOnly
+    button.imageScaling = .scaleNone
+    let symbolConfig = NSImage.SymbolConfiguration(pointSize: 10, weight: .medium)
+    button.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close")?
+      .withSymbolConfiguration(symbolConfig)
+    button.contentTintColor = .tertiaryLabelColor
+    button.target = self
+    button.action = #selector(handleTap)
+    button.wantsLayer = true
+    button.setContentCompressionResistancePriority(.required, for: .horizontal)
+    button.setContentHuggingPriority(.required, for: .horizontal)
+    addSubview(button)
+
+    NSLayoutConstraint.activate([
+      button.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -5),
+      button.centerYAnchor.constraint(equalTo: centerYAnchor),
+      button.widthAnchor.constraint(equalToConstant: 20),
+      button.heightAnchor.constraint(equalToConstant: 20),
+    ])
+
+    updateButtonBackground()
+  }
+
+  override func updateTrackingAreas() {
+    if let trackingArea {
+      removeTrackingArea(trackingArea)
+    }
+    let options: NSTrackingArea.Options = [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect]
+    let area = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
+    addTrackingArea(area)
+    trackingArea = area
+    super.updateTrackingAreas()
+  }
+
+  override func mouseEntered(with event: NSEvent) {
+    super.mouseEntered(with: event)
+    isHovered = true
+    updateButtonBackground()
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    super.mouseExited(with: event)
+    isHovered = false
+    updateButtonBackground()
+  }
+
+  func setBaseColor(_ color: NSColor, isDarkMode: Bool) {
+    baseColor = color
+    self.isDarkMode = isDarkMode
+    updateButtonBackground()
+  }
+
+  func setVisible(_ visible: Bool) {
+    alphaValue = visible ? 1 : 0
+    isHidden = false
+    button.isEnabled = visible
+  }
+
+  private func updateButtonBackground() {
+    let hoverColor = baseColor.withAlphaComponent(isDarkMode ? 0.28 : 0.16)
+    button.layer?.cornerRadius = 6
+    button.layer?.backgroundColor = isHovered ? hoverColor.cgColor : NSColor.clear.cgColor
+  }
+
+  @objc private func handleTap() {
+    onClose?()
+  }
+}

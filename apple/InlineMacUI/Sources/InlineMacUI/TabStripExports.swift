@@ -1,0 +1,5 @@
+import InlineMacTabStrip
+
+public typealias CollectionTabStripViewController = InlineMacTabStrip.CollectionTabStripViewController
+public typealias TabStripItem = InlineMacTabStrip.TabStripItem
+public typealias TabStripItemStyle = InlineMacTabStrip.TabStripItemStyle

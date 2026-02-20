@@ -13,6 +13,8 @@ class MainSplitView: NSViewController {
 
   // Views
 
+  lazy var tabsArea: NSView = .init()
+
   lazy var sideArea: NSView = .init()
 
   lazy var contentContainer: NSView = .init()
@@ -33,6 +35,7 @@ class MainSplitView: NSViewController {
 
   // Constants
 
+  private var tabsHeight: CGFloat = Theme.tabBarHeight
   private var sideWidth: CGFloat = Theme.idealSidebarWidth
   private var innerPadding: CGFloat = Theme.mainSplitViewUseFullBleedContent ? 0 : Theme.mainSplitViewInnerPadding
   private var contentRadius: CGFloat = Theme.mainSplitViewUseFullBleedContent ? 0 : Theme.mainSplitViewContentRadius
@@ -44,6 +47,13 @@ class MainSplitView: NSViewController {
     static let defaultLeadingPadding: CGFloat = 10
     /// Fixed padding when the sidebar is collapsed and traffic lights are visible.
     static let collapsedLeadingPadding: CGFloat = 90
+  }
+
+  private enum TabStripMetrics {
+    /// Baseline pinned action padding in the tab strip.
+    static let defaultLeadingPadding: CGFloat = 12
+    /// Shift pinned actions right when traffic lights overlap with the collapsed sidebar.
+    static let collapsedLeadingPadding: CGFloat = 86
   }
 
   private enum SidebarAnimation {
@@ -68,10 +78,12 @@ class MainSplitView: NSViewController {
   private var quickSearchArrowUnsubscriber: (() -> Void)?
   private var quickSearchVimUnsubscriber: (() -> Void)?
   private var quickSearchReturnUnsubscriber: (() -> Void)?
-  private var settingsCancellable: AnyCancellable?
+  private var settingsCancellables = Set<AnyCancellable>()
 
   private var quickSearchWidthConstraint: NSLayoutConstraint?
   private var quickSearchHeightConstraint: NSLayoutConstraint?
+  private var tabsHeightConstraint: NSLayoutConstraint?
+  private var contentTopConstraint: NSLayoutConstraint?
   private var sidebarWidthConstraint: NSLayoutConstraint?
   private var sidebarLeadingConstraint: NSLayoutConstraint?
   private var contentLeadingToSidebarConstraint: NSLayoutConstraint?
@@ -98,6 +110,10 @@ class MainSplitView: NSViewController {
   private var didPrewarmQuickSearch: Bool = false
   private var quickSearchClickMonitor: Any?
 
+  private var isTabStripEnabled: Bool {
+    AppSettings.shared.showMainTabStrip
+  }
+
   // ....
 
   init(dependencies: AppDependencies) {
@@ -121,16 +137,23 @@ class MainSplitView: NSViewController {
     contentContainer.addSubview(contentArea)
     contentArea.addSubview(toolbarArea)
 
+    // Keep tab strip above content surface so content shadow does not bleed over melting tabs.
+    view.addSubview(tabsArea)
     view.addSubview(sideArea)
 
+    tabsArea.translatesAutoresizingMaskIntoConstraints = false
     sideArea.translatesAutoresizingMaskIntoConstraints = false
     contentContainer.translatesAutoresizingMaskIntoConstraints = false
     contentArea.translatesAutoresizingMaskIntoConstraints = false
 
+    tabsArea.wantsLayer = true
     sideArea.wantsLayer = true
     contentContainer.wantsLayer = true
     contentArea.wantsLayer = true
 
+    tabsArea.layer?.backgroundColor = .clear
+    tabsArea.layer?.masksToBounds = true
+    tabsArea.alphaValue = 0
     sideArea.layer?.backgroundColor = .clear
 
     let shadow = NSShadow()
@@ -153,13 +176,23 @@ class MainSplitView: NSViewController {
     contentArea.layer?.masksToBounds = true
 
     let sideWidthConstraint = sideArea.widthAnchor.constraint(equalToConstant: sideWidth)
+    let tabsHeightConstraint = tabsArea.heightAnchor.constraint(equalToConstant: tabsHeight)
     let sideLeadingConstraint = sideArea.leadingAnchor.constraint(equalTo: view.leadingAnchor)
     let contentLeadingToSidebar = contentContainer.leadingAnchor.constraint(equalTo: sideArea.trailingAnchor)
+    let initialTabStripVisible = AppSettings.shared.showMainTabStrip
+    let hiddenContentTop = innerPadding - tabsHeight
+    let contentTopConstraint = contentContainer.topAnchor.constraint(
+      equalTo: tabsArea.bottomAnchor,
+      constant: initialTabStripVisible ? 0 : hiddenContentTop
+    )
+    self.tabsHeightConstraint = tabsHeightConstraint
+    self.contentTopConstraint = contentTopConstraint
     sidebarWidthConstraint = sideWidthConstraint
     sidebarLeadingConstraint = sideLeadingConstraint
     contentLeadingToSidebarConstraint = contentLeadingToSidebar
 
     NSLayoutConstraint.activate([
+      tabsHeightConstraint,
       sideWidthConstraint,
 
       sideLeadingConstraint,
@@ -168,6 +201,10 @@ class MainSplitView: NSViewController {
 
       contentLeadingToSidebar,
       contentContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -innerPadding),
+
+      tabsArea.leadingAnchor.constraint(equalTo: sideArea.trailingAnchor),
+      tabsArea.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+      tabsArea.topAnchor.constraint(equalTo: view.topAnchor),
 
       toolbarArea
         .leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
@@ -178,7 +215,7 @@ class MainSplitView: NSViewController {
       toolbarArea
         .heightAnchor.constraint(equalToConstant: Theme.toolbarHeight),
 
-      contentContainer.topAnchor.constraint(equalTo: view.topAnchor, constant: innerPadding),
+      contentTopConstraint,
       contentContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -innerPadding),
 
       contentArea.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor),
@@ -188,7 +225,9 @@ class MainSplitView: NSViewController {
     ])
 
     setupQuickSearchOverlay()
+    setTabStrip(viewController: MainTabStripController(dependencies: dependencies))
     setSidebar(viewController: MainSidebar(dependencies: dependencies))
+    applyTabStripVisibility(animated: false)
     setupNav()
   }
 
@@ -208,6 +247,7 @@ class MainSplitView: NSViewController {
     super.viewDidAppear()
     prewarmQuickSearchOverlay()
     setupTrafficLightController()
+    applyTabStripVisibility(animated: false)
     applySidebarVisibility(animated: false)
   }
 
@@ -238,19 +278,28 @@ class MainSplitView: NSViewController {
       self.trafficLightPresenceObserver = nil
     }
     removeQuickSearchClickMonitor()
-    settingsCancellable?.cancel()
-    settingsCancellable = nil
+    settingsCancellables.removeAll()
   }
 
   private func setupSettingsObserver() {
-    guard settingsCancellable == nil else { return }
-    settingsCancellable = AppSettings.shared.$translationUIEnabled
+    guard settingsCancellables.isEmpty else { return }
+
+    AppSettings.shared.$translationUIEnabled
       .receive(on: DispatchQueue.main)
       .sink { [weak self] _ in
         guard let self, let nav2 = self.dependencies.nav2 else { return }
         let toolbar = self.toolbar(for: nav2.currentRoute)
         self.toolbarArea.update(with: toolbar)
       }
+      .store(in: &settingsCancellables)
+
+    AppSettings.shared.$showMainTabStrip
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] _ in
+        self?.applyTabStripVisibility(animated: false)
+        self?.updateTrafficLightLayout(animated: false)
+      }
+      .store(in: &settingsCancellables)
   }
 
   private func setupAppActiveObserver() {
@@ -354,6 +403,7 @@ class MainSplitView: NSViewController {
   // MARK: - Public API
 
   private var sidebarVC: NSViewController?
+  private var tabStripVC: NSViewController?
   private var contentVC: NSViewController?
 
   var isSidebarCollapsed: Bool {
@@ -379,6 +429,25 @@ class MainSplitView: NSViewController {
       viewController.view.trailingAnchor.constraint(equalTo: sideArea.trailingAnchor),
     ])
     updateSidebarTrafficLightPresence(trafficLightsVisible)
+  }
+
+  private func setTabStrip(viewController: NSViewController) {
+    tabStripVC?.removeFromParent()
+    tabStripVC?.view.removeFromSuperview()
+    tabStripVC = viewController
+
+    addChild(viewController)
+    tabsArea.addSubview(viewController.view)
+
+    viewController.view.translatesAutoresizingMaskIntoConstraints = false
+    NSLayoutConstraint.activate([
+      viewController.view.topAnchor.constraint(equalTo: tabsArea.topAnchor),
+      viewController.view.bottomAnchor.constraint(equalTo: tabsArea.bottomAnchor),
+      viewController.view.leadingAnchor.constraint(equalTo: tabsArea.leadingAnchor),
+      viewController.view.trailingAnchor.constraint(equalTo: tabsArea.trailingAnchor),
+    ])
+
+    updateTabStripLeadingPadding(animated: false, duration: 0)
   }
 
   private func setContentArea(viewController: NSViewController) {
@@ -408,6 +477,27 @@ class MainSplitView: NSViewController {
     let toolbar = toolbar(for: route)
     toolbarArea.update(with: toolbar)
     setContentArea(viewController: viewController)
+  }
+
+  private func applyTabStripVisibility(animated _: Bool) {
+    guard let tabsHeightConstraint, let contentTopConstraint else { return }
+
+    let shouldShow = AppSettings.shared.showMainTabStrip
+    let hiddenContentTop = innerPadding - tabsHeight
+    let targetContentTop = shouldShow ? 0 : hiddenContentTop
+
+    tabsArea.isHidden = false
+
+    // Animations disabled by request.
+    // let shouldAnimate = animated
+    //   && view.window != nil
+    //   && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    // NSAnimationContext.runAnimationGroup { ... }
+    tabsHeightConstraint.constant = tabsHeight
+    contentTopConstraint.constant = targetContentTop
+    tabsArea.alphaValue = shouldShow ? 1 : 0
+    tabsArea.isHidden = !shouldShow
+    view.layoutSubtreeIfNeeded()
   }
 
   // MARK: - Quick Search
@@ -495,9 +585,6 @@ class MainSplitView: NSViewController {
     let targetCollapsed = sidebarCollapsed
     let targetLeading = targetCollapsed ? -sideWidth : 0
     let targetContentLeading = targetCollapsed ? innerPadding : 0
-    dependencies.trafficLightController?.setInsetPreset(
-      targetCollapsed ? .sidebarHidden : .sidebarVisible
-    )
 
     guard let sidebarLeadingConstraint, let contentLeadingToSidebarConstraint else { return }
 
@@ -505,7 +592,7 @@ class MainSplitView: NSViewController {
       && view.window != nil
       && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
 
-    updateToolbarLeadingPadding(
+    updateTrafficLightLayout(
       animated: shouldAnimate,
       duration: SidebarAnimation.duration(forCollapsed: targetCollapsed)
     )
@@ -534,13 +621,17 @@ class MainSplitView: NSViewController {
     trafficLightPresenceObserver = controller.addPresenceObserver { [weak self] visible in
       guard let self else { return }
       trafficLightsVisible = visible
-      updateToolbarLeadingPadding(
+      updateTrafficLightLayout(
         animated: false,
         duration: SidebarAnimation.duration(forCollapsed: sidebarCollapsed)
       )
       updateSidebarTrafficLightPresence(visible)
     }
-    controller.setInsetPreset(sidebarCollapsed ? .sidebarHidden : .sidebarVisible)
+    controller.setInsetPreset(currentTrafficLightInsetPreset())
+    updateTrafficLightLayout(
+      animated: false,
+      duration: SidebarAnimation.duration(forCollapsed: sidebarCollapsed)
+    )
   }
 
   private func updateSidebarTrafficLightPresence(_ isVisible: Bool) {
@@ -549,11 +640,27 @@ class MainSplitView: NSViewController {
     }
   }
 
+  private func updateTrafficLightLayout(
+    animated: Bool = false,
+    duration: TimeInterval = 0.2
+  ) {
+    dependencies.trafficLightController?.setInsetPreset(currentTrafficLightInsetPreset())
+    updateToolbarLeadingPadding(animated: animated, duration: duration)
+    updateTabStripLeadingPadding(animated: animated, duration: duration)
+  }
+
+  private func currentTrafficLightInsetPreset() -> TrafficLightInsetPreset {
+    if sidebarCollapsed {
+      return isTabStripEnabled ? .sidebarHiddenWithTabStrip : .sidebarHidden
+    }
+    return isTabStripEnabled ? .sidebarVisibleWithTabStrip : .sidebarVisible
+  }
+
   private func updateToolbarLeadingPadding(
     animated: Bool = false,
     duration: TimeInterval = 0.2
   ) {
-    guard trafficLightsVisible, sidebarCollapsed else {
+    guard trafficLightsVisible, sidebarCollapsed, !isTabStripEnabled else {
       toolbarArea.updateLeadingPadding(
         ToolbarMetrics.defaultLeadingPadding,
         animated: animated,
@@ -566,6 +673,25 @@ class MainSplitView: NSViewController {
       animated: animated,
       duration: duration
     )
+  }
+
+  private func updateTabStripLeadingPadding(
+    animated: Bool = false,
+    duration: TimeInterval = 0.2
+  ) {
+    let padding: CGFloat = if trafficLightsVisible && sidebarCollapsed && isTabStripEnabled {
+      TabStripMetrics.collapsedLeadingPadding
+    } else {
+      TabStripMetrics.defaultLeadingPadding
+    }
+
+    if let tabStrip = tabStripVC as? MainTabStripController {
+      tabStrip.updateLeadingPadding(
+        padding,
+        animated: animated,
+        duration: duration
+      )
+    }
   }
 
   private func toggleQuickSearchOverlay() {
