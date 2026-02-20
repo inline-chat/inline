@@ -63,13 +63,6 @@ public actor VideoCompressor {
     }
 
     let compatiblePresets = AVAssetExportSession.exportPresets(compatibleWith: asset)
-    guard let presetName = selectPreset(
-      maxDimension: maxDimension,
-      targetMaxDimension: options.maxDimension,
-      compatiblePresets: compatiblePresets
-    ) else {
-      throw VideoCompressionError.exportFailed
-    }
 
     let tempURL = FileManager.default.temporaryDirectory
       .appendingPathComponent("compressed_\(UUID().uuidString).mp4")
@@ -83,31 +76,44 @@ public actor VideoCompressor {
       }
     }
 
-    guard let exportSession = AVAssetExportSession(asset: asset, presetName: presetName) else {
+    if shouldAttemptPassthroughTranscode(
+      options: options,
+      maxDimension: maxDimension,
+      sourceFileSize: sourceFileSize,
+      bitrateMbps: bitrateMbps,
+      compatiblePresets: compatiblePresets
+    ) {
+      do {
+        try await export(asset: asset, presetName: AVAssetExportPresetPassthrough, destinationURL: tempURL)
+        let outputSize = fileSize(for: tempURL)
+        let outputMetadata = try await loadMetadata(for: AVURLAsset(url: tempURL))
+        shouldCleanupTemp = false
+
+        log.debug(
+          "Video fast MP4 conversion result: original=\(sourceFileSize) bytes, converted=\(outputSize) bytes"
+        )
+
+        return VideoCompressionResult(
+          url: tempURL,
+          width: outputMetadata.width,
+          height: outputMetadata.height,
+          duration: outputMetadata.duration,
+          fileSize: outputSize
+        )
+      } catch {
+        log.debug("Passthrough MP4 conversion failed, falling back to encoded export")
+      }
+    }
+
+    guard let presetName = selectPreset(
+      maxDimension: maxDimension,
+      targetMaxDimension: options.maxDimension,
+      compatiblePresets: compatiblePresets
+    ) else {
       throw VideoCompressionError.exportFailed
     }
 
-    guard exportSession.supportedFileTypes.contains(.mp4) else {
-      throw VideoCompressionError.unsupportedOutputType
-    }
-
-    exportSession.outputURL = tempURL
-    exportSession.outputFileType = .mp4
-    exportSession.shouldOptimizeForNetworkUse = true
-
-    let sessionBox = ExportSessionBox(exportSession)
-    try await withCheckedThrowingContinuation { continuation in
-      sessionBox.session.exportAsynchronously {
-        switch sessionBox.session.status {
-        case .completed:
-          continuation.resume()
-        case .failed, .cancelled:
-          continuation.resume(throwing: sessionBox.session.error ?? VideoCompressionError.exportFailed)
-        default:
-          continuation.resume(throwing: VideoCompressionError.exportFailed)
-        }
-      }
-    }
+    try await export(asset: asset, presetName: presetName, destinationURL: tempURL)
 
     let outputSize = fileSize(for: tempURL)
     let compressionRatio = Double(outputSize) / Double(max(sourceFileSize, 1))
@@ -130,6 +136,52 @@ public actor VideoCompressor {
       duration: outputMetadata.duration,
       fileSize: outputSize
     )
+  }
+
+  private func shouldAttemptPassthroughTranscode(
+    options: VideoCompressionOptions,
+    maxDimension: Int,
+    sourceFileSize: Int64,
+    bitrateMbps: Double,
+    compatiblePresets: [String]
+  ) -> Bool {
+    guard options.forceTranscode else { return false }
+    guard compatiblePresets.contains(AVAssetExportPresetPassthrough) else { return false }
+    return maxDimension <= options.maxDimension
+      && sourceFileSize < options.minFileSizeBytes
+      && bitrateMbps <= options.maxBitrateMbps
+  }
+
+  private func export(asset: AVAsset, presetName: String, destinationURL: URL) async throws {
+    if FileManager.default.fileExists(atPath: destinationURL.path) {
+      try FileManager.default.removeItem(at: destinationURL)
+    }
+
+    guard let exportSession = AVAssetExportSession(asset: asset, presetName: presetName) else {
+      throw VideoCompressionError.exportFailed
+    }
+
+    guard exportSession.supportedFileTypes.contains(.mp4) else {
+      throw VideoCompressionError.unsupportedOutputType
+    }
+
+    exportSession.outputURL = destinationURL
+    exportSession.outputFileType = .mp4
+    exportSession.shouldOptimizeForNetworkUse = true
+
+    let sessionBox = ExportSessionBox(exportSession)
+    try await withCheckedThrowingContinuation { continuation in
+      sessionBox.session.exportAsynchronously {
+        switch sessionBox.session.status {
+        case .completed:
+          continuation.resume()
+        case .failed, .cancelled:
+          continuation.resume(throwing: sessionBox.session.error ?? VideoCompressionError.exportFailed)
+        default:
+          continuation.resume(throwing: VideoCompressionError.exportFailed)
+        }
+      }
+    }
   }
 
   private func fileSize(for url: URL) -> Int64 {
