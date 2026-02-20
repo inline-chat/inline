@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sync Rebase Push"
+  short_description: "Sync with main via rebase and push safely"
+  default_prompt: "Sync local branch with origin/main using rebase, resolve conflicts if needed, run targeted checks, and push only after all checks pass."
