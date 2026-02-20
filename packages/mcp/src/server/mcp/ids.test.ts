@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { formatInlineMessageId, formatInlineMessageUrl, parseInlineMessageId } from "./ids"
+import { formatInlineMessageId, parseInlineMessageId } from "./ids"
 
 describe("inline message ids", () => {
   it("roundtrips format/parse", () => {
@@ -16,9 +16,4 @@ describe("inline message ids", () => {
     expect(() => parseInlineMessageId("inline:chat:-1:msg:2")).toThrow()
     expect(() => parseInlineMessageId("inline:chat:1:msg:0")).toThrow()
   })
-
-  it("formats a conservative url", () => {
-    expect(formatInlineMessageUrl({ chatId: 7n, messageId: 9n })).toBe("inline://chat/7#message=9")
-  })
 })
-

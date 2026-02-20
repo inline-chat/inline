@@ -3,13 +3,13 @@ import { createApp } from "../app"
 
 describe("oauth register", () => {
   it("rejects non-POST methods", async () => {
-    const app = createApp()
+    const app = createApp({ issuer: "http://localhost:8791" })
     const res = await app.fetch(new Request("http://localhost/oauth/register"))
     expect(res.status).toBe(404)
   })
 
   it("accepts http://localhost redirect uris (dev)", async () => {
-    const app = createApp()
+    const app = createApp({ issuer: "http://localhost:8791" })
     const res = await app.fetch(
       new Request("http://localhost/oauth/register", {
         method: "POST",
@@ -23,7 +23,7 @@ describe("oauth register", () => {
   })
 
   it("rejects invalid json", async () => {
-    const app = createApp()
+    const app = createApp({ issuer: "http://localhost:8791" })
     const res = await app.fetch(
       new Request("http://localhost/oauth/register", {
         method: "POST",
@@ -35,7 +35,7 @@ describe("oauth register", () => {
   })
 
   it("rejects non-object json", async () => {
-    const app = createApp()
+    const app = createApp({ issuer: "http://localhost:8791" })
     const res = await app.fetch(
       new Request("http://localhost/oauth/register", {
         method: "POST",
@@ -47,7 +47,7 @@ describe("oauth register", () => {
   })
 
   it("rejects missing redirect_uris", async () => {
-    const app = createApp()
+    const app = createApp({ issuer: "http://localhost:8791" })
     const res = await app.fetch(
       new Request("http://localhost/oauth/register", {
         method: "POST",
@@ -60,7 +60,7 @@ describe("oauth register", () => {
   })
 
   it("rejects empty redirect_uris", async () => {
-    const app = createApp()
+    const app = createApp({ issuer: "http://localhost:8791" })
     const res = await app.fetch(
       new Request("http://localhost/oauth/register", {
         method: "POST",
@@ -72,7 +72,7 @@ describe("oauth register", () => {
   })
 
   it("rejects non-string redirect_uris", async () => {
-    const app = createApp()
+    const app = createApp({ issuer: "http://localhost:8791" })
     const res = await app.fetch(
       new Request("http://localhost/oauth/register", {
         method: "POST",
@@ -84,7 +84,7 @@ describe("oauth register", () => {
   })
 
   it("rejects empty redirect uri strings", async () => {
-    const app = createApp()
+    const app = createApp({ issuer: "http://localhost:8791" })
     const res = await app.fetch(
       new Request("http://localhost/oauth/register", {
         method: "POST",
@@ -96,7 +96,7 @@ describe("oauth register", () => {
   })
 
   it("rejects invalid and disallowed redirect uris", async () => {
-    const app = createApp()
+    const app = createApp({ issuer: "http://localhost:8791" })
 
     const invalid = await app.fetch(
       new Request("http://localhost/oauth/register", {
@@ -127,7 +127,7 @@ describe("oauth register", () => {
   })
 
   it("trims client_name", async () => {
-    const app = createApp()
+    const app = createApp({ issuer: "http://localhost:8791" })
     const res = await app.fetch(
       new Request("http://localhost/oauth/register", {
         method: "POST",

@@ -39,7 +39,12 @@ export type InlineApi = {
   getEligibleChats(): Promise<InlineEligibleChat[]>
   search(query: string, limit: number): Promise<InlineSearchHit[]>
   fetchMessage(chatId: bigint, messageId: bigint): Promise<InlineFetchResult>
-  sendMessage(params: { chatId: bigint; text: string; sendMode: "normal" | "silent"; parseMarkdown: boolean }): Promise<{ messageId: bigint | null }>
+  sendMessage(params: {
+    chatId: bigint
+    text: string
+    sendMode: "normal" | "silent"
+    parseMarkdown: boolean
+  }): Promise<{ messageId: bigint | null; spaceId?: bigint | null }>
 }
 
 export function createInlineApi(params: {
@@ -172,7 +177,7 @@ export function createInlineApi(params: {
         sendMode: sendMode === "silent" ? "silent" : undefined,
         parseMarkdown,
       })
-      return { messageId: res.messageId }
+      return { messageId: res.messageId, spaceId: chat.spaceId ?? null }
     },
   }
 }

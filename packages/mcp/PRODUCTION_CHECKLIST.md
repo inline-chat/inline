@@ -2,24 +2,29 @@
 
 This package is intentionally a minimal, solid foundation. Before deploying publicly for real users, do the following.
 
-## Must-Haves (Before Public Launch)
+## First-Cohort Baseline (Implemented)
 
 ### Security / Abuse
-- Add rate limiting for:
+- Endpoint rate limiting is implemented for:
   - `POST /oauth/authorize/send-email-code`
   - `POST /oauth/authorize/verify-email-code`
   - `POST /oauth/token`
-  - `POST /mcp` (tool calls)
-- Add bot/abuse protection for email-code flow (IP reputation, per-email throttles, possibly CAPTCHA if needed).
-- Add structured logs with strict redaction (never log:
+  - `POST /mcp` initialization requests
+- Email abuse throttling is implemented for send/verify flows (per-email and per-context).
+- Host/Origin allowlist checks are implemented at the app boundary.
+- Grant revocation endpoint is implemented (`/oauth/revoke`, `/revoke`) and revokes grant + refresh tokens.
+- Write-action audit logging for `messages.send` is implemented (no message body).
+
+## Must-Haves (Before Broad Public Launch)
+
+### Security / Abuse
+- Add stronger anti-automation controls for email-code flow (IP reputation and/or CAPTCHA if abuse appears).
+- Extend structured logging/redaction coverage beyond write audits (never log:
   - Inline session tokens
   - OAuth authorization codes
   - Refresh tokens
   - `Authorization` headers
 ).
-- Validate/lock down allowed `Host` and (when present) `Origin` headers at the edge (DNS rebinding protection).
-- Add a grant revocation endpoint and persistence path:
-  - At minimum: mark `grants.revoked_at` and revoke refresh tokens.
 
 ### Storage / Scaling
 - Decide whether v1 is single-instance only:
@@ -37,9 +42,9 @@ This package is intentionally a minimal, solid foundation. Before deploying publ
   - Dynamic client registration
   - Streamable HTTP MCP at `/mcp`
 - Ensure the `search` and `fetch` tool payloads match OpenAI Deep Research expectations:
-  - `search` returns JSON string: `{ results: [{ id, title, url, snippet? }] }`
-  - `fetch` returns JSON string: `{ id, title, text, url, metadata? }`
-- Replace placeholder `inline://...` URLs with real web deep links once available (or define a stable public URL scheme).
+  - `search` returns JSON string: `{ results: [{ id, title, source, snippet? }] }`
+  - `fetch` returns JSON string: `{ id, title, text, source, metadata? }`
+- Revisit canonical link strategy later if citation-quality public links are needed.
 
 ### Privacy / Authorization
 - Re-confirm the intended authorization boundaries:
@@ -62,4 +67,3 @@ This package is intentionally a minimal, solid foundation. Before deploying publ
 - In-memory MCP sessions (simple, minimal; not HA).
 - Inline access uses realtime WebSocket via the SDK (one WS per MCP session).
 - Minimal tool surface: `search`, `fetch`, `messages.send`.
-

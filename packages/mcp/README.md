@@ -11,15 +11,7 @@ cd packages/mcp
 bun run dev
 ```
 
-## Required Env
-
-- `MCP_ISSUER` (example: `https://mcp.inline.chat`)
-- `MCP_DB_PATH` (example: `./data/inline-mcp.sqlite`)
-- `MCP_TOKEN_ENCRYPTION_KEY_B64` (base64-encoded 32 bytes; used to encrypt Inline session tokens at rest)
-- `INLINE_API_BASE_URL` (default: `https://api.inline.chat`)
-- `MCP_COOKIE_PREFIX` (default: `inline_mcp`)
-
-For production hardening, see `PRODUCTION_CHECKLIST.md`.
+Production readiness checklist: `PRODUCTION_CHECKLIST.md`.
 
 ## Endpoints (v1)
 
@@ -33,6 +25,7 @@ For production hardening, see `PRODUCTION_CHECKLIST.md`.
 - `POST /oauth/authorize/verify-email-code`
 - `POST /oauth/authorize/consent`
 - `POST /oauth/token` (alias: `POST /token`)
+- `POST /oauth/revoke` (alias: `POST /revoke`)
 
 ## MCP Tools (v1)
 
@@ -42,3 +35,16 @@ For production hardening, see `PRODUCTION_CHECKLIST.md`.
 
 ID format used by `search` results (and accepted by `fetch`):
 - `inline:chat:<chatId>:msg:<messageId>`
+
+Current payload contract:
+- `search` returns JSON with `results[]` entries containing:
+  - `id`
+  - `title` (chat title fallback)
+  - `source` (`{ chatId, title }`)
+  - `snippet` (when message text exists)
+- `fetch` returns JSON with:
+  - `id`
+  - `title` (source chat title fallback)
+  - `text` (message text)
+  - `source` (`{ chatId, title }`)
+  - `metadata` (`chatId`, `messageId`, `spaceId`, `fromId`, `date`)
