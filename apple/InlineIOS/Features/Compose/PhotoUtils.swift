@@ -1,3 +1,4 @@
+import AVFoundation
 import InlineKit
 import Logger
 import PhotosUI
@@ -6,6 +7,47 @@ import UIKit
 import UniformTypeIdentifiers
 
 extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+  @objc func attachmentButtonTapped() {
+    presentAttachmentOptionsSheet()
+  }
+
+  private func presentAttachmentOptionsSheet() {
+    guard let windowScene = window?.windowScene,
+          let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow }),
+          let rootVC = keyWindow.rootViewController
+    else { return }
+
+    let sheet = UIHostingController(
+      rootView: AttachmentOptionsSheet { [weak self] option in
+        guard let self else { return }
+        rootVC.dismiss(animated: true) { [weak self] in
+          guard let self else { return }
+          switch option {
+            case .library:
+              presentPicker()
+            case .camera:
+              presentCamera()
+            case .file:
+              presentFileManager()
+          }
+        }
+      }
+    )
+    sheet.modalPresentationStyle = .pageSheet
+
+    if let presentation = sheet.sheetPresentationController {
+      if #available(iOS 16.0, *) {
+        presentation.detents = [.medium()]
+      } else {
+        presentation.detents = [.medium()]
+      }
+      presentation.prefersGrabberVisible = true
+      presentation.preferredCornerRadius = 20
+    }
+
+    rootVC.present(sheet, animated: true)
+  }
+
   private func resetComposeStateAfterPreviewSend() {
     if let attributed = textView.attributedText?.mutableCopy() as? NSMutableAttributedString {
       let marker = "\u{FFFC}" as NSString
@@ -32,10 +74,10 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
   func presentPicker() {
     guard let windowScene = window?.windowScene, !isPickerPresented else { return }
 
-    activePickerMode = .photos
+    activePickerMode = .library
 
     var configuration = PHPickerConfiguration(photoLibrary: .shared())
-    configuration.filter = .images
+    configuration.filter = .any(of: [.images, .videos])
     configuration.selectionLimit = 30
 
     let picker = PHPickerViewController(configuration: configuration)
@@ -48,21 +90,7 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
   }
 
   func presentVideoPicker() {
-    guard let windowScene = window?.windowScene, !isPickerPresented else { return }
-
-    activePickerMode = .videos
-
-    var configuration = PHPickerConfiguration(photoLibrary: .shared())
-    configuration.filter = .videos
-    configuration.selectionLimit = 10
-
-    let picker = PHPickerViewController(configuration: configuration)
-    picker.delegate = self
-    isPickerPresented = true
-
-    let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow })
-    let rootVC = keyWindow?.rootViewController
-    rootVC?.present(picker, animated: true)
+    presentPicker()
   }
 
   func presentCamera() {
@@ -100,7 +128,12 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
   }
 
   func handleDroppedImage(_ image: UIImage) {
-    guard !previewViewModel.isPresented, !multiPhotoPreviewViewModel.isPresented else { return }
+    guard
+      !previewViewModel.isPresented,
+      !multiPhotoPreviewViewModel.isPresented,
+      !videoPreviewViewModel.isPresented,
+      !mixedMediaPreviewViewModel.isPresented
+    else { return }
 
     // For dropped single images, use single photo preview
     selectedImage = image
@@ -143,7 +176,12 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
 
   func handleMultipleDroppedImages(_ images: [UIImage]) {
     guard !images.isEmpty else { return }
-    guard !previewViewModel.isPresented, !multiPhotoPreviewViewModel.isPresented else { return }
+    guard
+      !previewViewModel.isPresented,
+      !multiPhotoPreviewViewModel.isPresented,
+      !videoPreviewViewModel.isPresented,
+      !mixedMediaPreviewViewModel.isPresented
+    else { return }
 
     if images.count == 1 {
       handleDroppedImage(images[0])
@@ -247,6 +285,204 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     }
   }
 
+  private func presentVideoPreview(with videoURLs: [URL], presenter: UIViewController? = nil) {
+    guard let firstVideoURL = videoURLs.first else { return }
+
+    cleanupPendingVideoURLs()
+    pendingVideoURLs = videoURLs
+    videoPreviewViewModel.caption = ""
+    videoPreviewViewModel.isPresented = true
+
+    let previewView = SwiftUIVideoPreviewView(
+      videoURL: firstVideoURL,
+      totalVideos: videoURLs.count,
+      caption: Binding(
+        get: { [weak self] in self?.videoPreviewViewModel.caption ?? "" },
+        set: { [weak self] newValue in self?.videoPreviewViewModel.caption = newValue }
+      ),
+      isPresented: Binding(
+        get: { [weak self] in self?.videoPreviewViewModel.isPresented ?? false },
+        set: { [weak self] newValue in
+          self?.videoPreviewViewModel.isPresented = newValue
+          if !newValue {
+            self?.dismissVideoPreview()
+          }
+        }
+      ),
+      onSend: { [weak self] caption in
+        self?.sendVideos(caption: caption)
+      }
+    )
+
+    let previewVC = UIHostingController(rootView: previewView)
+    previewVC.modalPresentationStyle = .fullScreen
+    previewVC.modalTransitionStyle = .crossDissolve
+
+    if let presenter {
+      presenter.present(previewVC, animated: true)
+      return
+    }
+
+    if let windowScene = window?.windowScene,
+       let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow }),
+       let rootVC = keyWindow.rootViewController
+    {
+      rootVC.present(previewVC, animated: true)
+    }
+  }
+
+  func dismissVideoPreview() {
+    var responder: UIResponder? = self
+    var currentVC: UIViewController?
+
+    while let nextResponder = responder?.next {
+      if let viewController = nextResponder as? UIViewController {
+        currentVC = viewController
+        break
+      }
+      responder = nextResponder
+    }
+
+    guard let currentVC else {
+      cleanupPendingVideoURLs()
+      videoPreviewViewModel.caption = ""
+      videoPreviewViewModel.isPresented = false
+      return
+    }
+
+    var topmostVC = currentVC
+    while let presentedVC = topmostVC.presentedViewController {
+      topmostVC = presentedVC
+    }
+
+    let picker = topmostVC.presentingViewController as? PHPickerViewController
+
+    topmostVC.dismiss(animated: true) { [weak self] in
+      picker?.dismiss(animated: true) {
+        self?.isPickerPresented = false
+      }
+
+      self?.cleanupPendingVideoURLs()
+      self?.videoPreviewViewModel.caption = ""
+      self?.videoPreviewViewModel.isPresented = false
+    }
+  }
+
+  private func cleanupPendingVideoURLs() {
+    cleanupTemporaryVideoURLs(in: pendingVideoURLs)
+    pendingVideoURLs.removeAll()
+  }
+
+  private func presentMixedMediaPreview(
+    with items: [MixedMediaPreviewItem],
+    presenter: UIViewController? = nil
+  ) {
+    guard !items.isEmpty else { return }
+
+    cleanupPendingMixedMediaItems()
+    pendingMixedMediaItems = items
+    mixedMediaPreviewViewModel.caption = ""
+    mixedMediaPreviewViewModel.isPresented = true
+
+    let previewView = SwiftUIMixedMediaPreviewView(
+      items: items,
+      caption: Binding(
+        get: { [weak self] in self?.mixedMediaPreviewViewModel.caption ?? "" },
+        set: { [weak self] newValue in self?.mixedMediaPreviewViewModel.caption = newValue }
+      ),
+      isPresented: Binding(
+        get: { [weak self] in self?.mixedMediaPreviewViewModel.isPresented ?? false },
+        set: { [weak self] newValue in
+          self?.mixedMediaPreviewViewModel.isPresented = newValue
+          if !newValue {
+            self?.dismissMixedMediaPreview()
+          }
+        }
+      ),
+      onSend: { [weak self] caption in
+        self?.sendMixedMedia(caption: caption)
+      }
+    )
+
+    let previewVC = UIHostingController(rootView: previewView)
+    previewVC.modalPresentationStyle = .fullScreen
+    previewVC.modalTransitionStyle = .crossDissolve
+
+    if let presenter {
+      presenter.present(previewVC, animated: true)
+      return
+    }
+
+    if let windowScene = window?.windowScene,
+       let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow }),
+       let rootVC = keyWindow.rootViewController
+    {
+      rootVC.present(previewVC, animated: true)
+    }
+  }
+
+  private func dismissMixedMediaPreview() {
+    var responder: UIResponder? = self
+    var currentVC: UIViewController?
+
+    while let nextResponder = responder?.next {
+      if let viewController = nextResponder as? UIViewController {
+        currentVC = viewController
+        break
+      }
+      responder = nextResponder
+    }
+
+    guard let currentVC else {
+      cleanupPendingMixedMediaItems()
+      mixedMediaPreviewViewModel.caption = ""
+      mixedMediaPreviewViewModel.isPresented = false
+      return
+    }
+
+    var topmostVC = currentVC
+    while let presentedVC = topmostVC.presentedViewController {
+      topmostVC = presentedVC
+    }
+
+    let picker = topmostVC.presentingViewController as? PHPickerViewController
+
+    topmostVC.dismiss(animated: true) { [weak self] in
+      picker?.dismiss(animated: true) {
+        self?.isPickerPresented = false
+      }
+
+      self?.cleanupPendingMixedMediaItems()
+      self?.mixedMediaPreviewViewModel.caption = ""
+      self?.mixedMediaPreviewViewModel.isPresented = false
+    }
+  }
+
+  private func cleanupPendingMixedMediaItems() {
+    let videoURLs = pendingMixedMediaItems.compactMap(\.videoURL)
+    cleanupTemporaryVideoURLs(in: videoURLs)
+    pendingMixedMediaItems.removeAll()
+  }
+
+  private func cleanupTemporaryVideoURLs(in urls: [URL]) {
+    for url in urls where url.lastPathComponent.hasPrefix("inline-video-preview-") {
+      try? FileManager.default.removeItem(at: url)
+    }
+  }
+
+  private func copyVideoToTemporaryPreviewURL(from sourceURL: URL) throws -> URL {
+    let fileExtension = sourceURL.pathExtension.isEmpty ? "mp4" : sourceURL.pathExtension
+    let temporaryURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("inline-video-preview-\(UUID().uuidString)")
+      .appendingPathExtension(fileExtension)
+
+    if FileManager.default.fileExists(atPath: temporaryURL.path) {
+      try FileManager.default.removeItem(at: temporaryURL)
+    }
+    try FileManager.default.copyItem(at: sourceURL, to: temporaryURL)
+    return temporaryURL
+  }
+
   func sendImage(_ image: UIImage, caption: String) {
     guard let peerId else { return }
 
@@ -333,6 +569,117 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     // sendMessageHaptic()
   }
 
+  private func sendVideos(caption: String) {
+    guard let peerId else { return }
+    let videoURLs = pendingVideoURLs
+    guard !videoURLs.isEmpty else { return }
+
+    sendButton.configuration?.showsActivityIndicator = true
+    clearAttachments()
+
+    let trimmedCaption = caption.trimmingCharacters(in: .whitespacesAndNewlines)
+    let messageCaption = trimmedCaption.isEmpty ? nil : trimmedCaption
+    let replyToMessageId = ChatState.shared.getState(peer: peerId).replyingMessageId
+
+    Task { [weak self] in
+      guard let self else { return }
+
+      for (index, url) in videoURLs.enumerated() {
+        do {
+          let videoInfo = try await FileCache.saveVideo(url: url)
+          let mediaItem = FileMediaItem.video(videoInfo)
+          let isFirst = index == 0
+
+          await MainActor.run {
+            Transactions.shared.mutate(
+              transaction: .sendMessage(
+                .init(
+                  text: isFirst ? messageCaption : nil,
+                  peerId: peerId,
+                  chatId: chatId ?? 0,
+                  mediaItems: [mediaItem],
+                  replyToMsgId: isFirst ? replyToMessageId : nil,
+                  isSticker: nil,
+                  entities: nil
+                )
+              )
+            )
+          }
+        } catch {
+          Log.shared.error("Failed to save and send video \(index + 1)", error: error)
+        }
+      }
+
+      await MainActor.run { [weak self] in
+        guard let self else { return }
+        resetComposeStateAfterPreviewSend()
+        dismissVideoPreview()
+        sendButton.configuration?.showsActivityIndicator = false
+        clearAttachments()
+        ChatState.shared.clearReplyingMessageId(peer: peerId)
+      }
+    }
+  }
+
+  private func sendMixedMedia(caption: String) {
+    guard let peerId else { return }
+    let mediaItems = pendingMixedMediaItems
+    guard !mediaItems.isEmpty else { return }
+
+    sendButton.configuration?.showsActivityIndicator = true
+    clearAttachments()
+
+    let trimmedCaption = caption.trimmingCharacters(in: .whitespacesAndNewlines)
+    let messageCaption = trimmedCaption.isEmpty ? nil : trimmedCaption
+    let replyToMessageId = ChatState.shared.getState(peer: peerId).replyingMessageId
+
+    Task { [weak self] in
+      guard let self else { return }
+
+      for (index, item) in mediaItems.enumerated() {
+        do {
+          let mediaItem: FileMediaItem
+          switch item {
+            case let .photo(id: _, image: image):
+              let photoInfo = try FileCache.savePhoto(image: image, optimize: true)
+              mediaItem = .photo(photoInfo)
+            case let .video(id: _, url: url):
+              let videoInfo = try await FileCache.saveVideo(url: url)
+              mediaItem = .video(videoInfo)
+          }
+
+          let isFirst = index == 0
+          await MainActor.run {
+            Transactions.shared.mutate(
+              transaction: .sendMessage(
+                .init(
+                  text: isFirst ? messageCaption : nil,
+                  peerId: peerId,
+                  chatId: chatId ?? 0,
+                  mediaItems: [mediaItem],
+                  replyToMsgId: isFirst ? replyToMessageId : nil,
+                  isSticker: nil,
+                  entities: nil
+                )
+              )
+            )
+          }
+        } catch {
+          Log.shared.error("Failed to save and send mixed media item \(index + 1)", error: error)
+        }
+      }
+
+      await MainActor.run { [weak self] in
+        guard let self else { return }
+        resetComposeStateAfterPreviewSend()
+        dismissMixedMediaPreview()
+        sendButton.configuration?.showsActivityIndicator = false
+        clearAttachments()
+        ChatState.shared.clearReplyingMessageId(peer: peerId)
+      }
+    }
+  }
+
   func handlePastedImage() {
     guard let image = UIPasteboard.general.image else { return }
 
@@ -393,28 +740,12 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
   }
 
   func addVideo(_ url: URL) {
-    sendButton.configuration?.showsActivityIndicator = true
-
-    Task { [weak self] in
-      do {
-        let videoInfo = try await FileCache.saveVideo(url: url)
-        let mediaItem = FileMediaItem.video(videoInfo)
-        let uniqueId = mediaItem.getItemUniqueId()
-
-        await MainActor.run { [weak self] in
-          guard let self else { return }
-          attachmentItems[uniqueId] = mediaItem
-          updateSendButtonVisibility()
-          sendButton.configuration?.showsActivityIndicator = false
-          sendMessage()
-        }
-      } catch {
-        Log.shared.error("Failed to save video", error: error)
-        await MainActor.run { [weak self] in
-          self?.sendButton.configuration?.showsActivityIndicator = false
-          self?.showVideoError(error)
-        }
-      }
+    do {
+      let previewURL = try copyVideoToTemporaryPreviewURL(from: url)
+      presentVideoPreview(with: [previewURL])
+    } catch {
+      Log.shared.error("Failed to prepare video preview", error: error)
+      showVideoError(error)
     }
   }
 
@@ -445,129 +776,200 @@ extension ComposeView: PHPickerViewControllerDelegate {
       }
       return
     }
-    
+
     isPickerPresented = false
 
-    if activePickerMode == .videos {
-      handleVideoPickerResults(results, picker: picker)
-      return
-    }
-
-    // If only one photo selected, use the original single preview
-    if results.count == 1 {
-      let result = results.first!
-      result.itemProvider.loadObject(ofClass: UIImage.self) { [weak self, weak picker] object, error in
-        guard let self, let picker else { return }
-
-        if let error {
-          Log.shared.debug("Failed to load image:", file: error.localizedDescription)
-          DispatchQueue.main.async {
-            picker.dismiss(animated: true) { [weak self] in
-              self?.isPickerPresented = false
-            }
-          }
-          return
-        }
-
-        guard let image = object as? UIImage else {
-          DispatchQueue.main.async {
-            picker.dismiss(animated: true) { [weak self] in
-              self?.isPickerPresented = false
-            }
-          }
-          return
-        }
-
-        DispatchQueue.main.async {
-          self.selectedImage = image
-          self.previewViewModel.isPresented = true
-
-          let previewView = SwiftUIPhotoPreviewView(
-            image: image,
-            caption: Binding(
-              get: { [weak self] in self?.previewViewModel.caption ?? "" },
-              set: { [weak self] newValue in self?.previewViewModel.caption = newValue }
-            ),
-            isPresented: Binding(
-              get: { [weak self] in self?.previewViewModel.isPresented ?? false },
-              set: { [weak self] newValue in
-                self?.previewViewModel.isPresented = newValue
-                if !newValue {
-                  self?.dismissPreview()
-                }
-              }
-            ),
-            onSend: { [weak self] image, caption in
-              self?.sendImage(image, caption: caption)
-            },
-            onAddMorePhotos: { [weak self] in
-              self?.presentPicker()
-            }
-          )
-
-          let previewVC = UIHostingController(rootView: previewView)
-          previewVC.modalPresentationStyle = .fullScreen
-          previewVC.modalTransitionStyle = .crossDissolve
-
-          picker.present(previewVC, animated: true)
-        }
-      }
-    } else {
-      // Multiple photos selected, use multi-photo preview
-      loadMultipleImages(from: results, picker: picker)
-    }
-  }
-
-  private func handleVideoPickerResults(_ results: [PHPickerResult], picker: PHPickerViewController) {
     Task { [weak self, weak picker] in
       guard let self, let picker else { return }
 
-      var loadedItems: [(index: Int, item: FileMediaItem)] = []
-
-      await withTaskGroup(of: (Int, FileMediaItem?).self) { group in
-        for (index, result) in results.enumerated() {
-          group.addTask { [weak self] in
-            guard let self else { return (index, nil) }
-            let item = await self.loadVideoItem(from: result)
-            return (index, item)
-          }
-        }
-
-        for await (index, item) in group {
-          if let item {
-            loadedItems.append((index: index, item: item))
-          }
-        }
-      }
+      let loadedItems = await loadUnifiedPickerSelections(results)
 
       await MainActor.run { [weak self, weak picker] in
         guard let self, let picker else { return }
 
-        let sortedItems = loadedItems.sorted { $0.index < $1.index }.map(\.item)
-        guard !sortedItems.isEmpty else {
+        guard !loadedItems.isEmpty else {
           picker.dismiss(animated: true) { [weak self] in
             self?.isPickerPresented = false
           }
           return
         }
 
-        for item in sortedItems {
-          let uniqueId = item.getItemUniqueId()
-          attachmentItems[uniqueId] = item
+        let photoItems = loadedItems.compactMap(\.image)
+        let videoItems = loadedItems.compactMap(\.videoURL)
+
+        if videoItems.isEmpty {
+          if photoItems.count == 1, let image = photoItems.first {
+            presentSinglePhotoPreview(image, picker: picker)
+          } else {
+            presentPhotoBatchPreview(photoItems, picker: picker)
+          }
+          return
         }
 
-        updateSendButtonVisibility()
-
-        picker.dismiss(animated: true) { [weak self] in
-          guard let self else { return }
-          isPickerPresented = false
-          sendMessage()
+        if photoItems.isEmpty, videoItems.count == 1, let url = videoItems.first {
+          presentVideoPreview(with: [url], presenter: picker)
+          return
         }
+
+        presentMixedMediaPreview(
+          with: loadedItems.map(\.previewItem),
+          presenter: picker
+        )
       }
     }
   }
 
-  private func loadVideoItem(from result: PHPickerResult) async -> FileMediaItem? {
+  private struct LoadedLibraryItem {
+    let index: Int
+    let payload: Payload
+
+    enum Payload {
+      case photo(UIImage)
+      case video(URL)
+    }
+
+    var image: UIImage? {
+      guard case let .photo(image) = payload else { return nil }
+      return image
+    }
+
+    var videoURL: URL? {
+      guard case let .video(url) = payload else { return nil }
+      return url
+    }
+
+    var previewItem: MixedMediaPreviewItem {
+      switch payload {
+        case let .photo(image):
+          .photo(id: UUID(), image: image)
+        case let .video(url):
+          .video(id: UUID(), url: url)
+      }
+    }
+  }
+
+  private func loadUnifiedPickerSelections(_ results: [PHPickerResult]) async -> [LoadedLibraryItem] {
+    var loadedItems: [LoadedLibraryItem] = []
+
+    await withTaskGroup(of: LoadedLibraryItem?.self) { group in
+      for (index, result) in results.enumerated() {
+        group.addTask { [weak self] in
+          guard let self else { return nil }
+          return await self.loadUnifiedPickerSelection(result, index: index)
+        }
+      }
+
+      for await item in group {
+        if let item {
+          loadedItems.append(item)
+        }
+      }
+    }
+
+    return loadedItems.sorted { $0.index < $1.index }
+  }
+
+  private func loadUnifiedPickerSelection(
+    _ result: PHPickerResult,
+    index: Int
+  ) async -> LoadedLibraryItem? {
+    if let videoURL = await loadVideoPreviewURL(from: result) {
+      return LoadedLibraryItem(index: index, payload: .video(videoURL))
+    }
+
+    let provider = result.itemProvider
+    if provider.canLoadObject(ofClass: UIImage.self),
+       let image = await loadUIImage(from: provider) {
+      return LoadedLibraryItem(index: index, payload: .photo(image))
+    }
+
+    return nil
+  }
+
+  private func loadUIImage(from provider: NSItemProvider) async -> UIImage? {
+    await withCheckedContinuation { continuation in
+      provider.loadObject(ofClass: UIImage.self) { object, error in
+        if let error {
+          Log.shared.error("Failed to load image from picker", error: error)
+          continuation.resume(returning: nil)
+          return
+        }
+
+        continuation.resume(returning: object as? UIImage)
+      }
+    }
+  }
+
+  private func presentSinglePhotoPreview(_ image: UIImage, picker: PHPickerViewController) {
+    selectedImage = image
+    previewViewModel.isPresented = true
+
+    let previewView = SwiftUIPhotoPreviewView(
+      image: image,
+      caption: Binding(
+        get: { [weak self] in self?.previewViewModel.caption ?? "" },
+        set: { [weak self] newValue in self?.previewViewModel.caption = newValue }
+      ),
+      isPresented: Binding(
+        get: { [weak self] in self?.previewViewModel.isPresented ?? false },
+        set: { [weak self] newValue in
+          self?.previewViewModel.isPresented = newValue
+          if !newValue {
+            self?.dismissPreview()
+          }
+        }
+      ),
+      onSend: { [weak self] image, caption in
+        self?.sendImage(image, caption: caption)
+      },
+      onAddMorePhotos: { [weak self] in
+        self?.presentPicker()
+      }
+    )
+
+    let previewVC = UIHostingController(rootView: previewView)
+    previewVC.modalPresentationStyle = .fullScreen
+    previewVC.modalTransitionStyle = .crossDissolve
+    picker.present(previewVC, animated: true)
+  }
+
+  private func presentPhotoBatchPreview(_ images: [UIImage], picker: PHPickerViewController) {
+    guard !images.isEmpty else {
+      picker.dismiss(animated: true) { [weak self] in
+        self?.isPickerPresented = false
+      }
+      return
+    }
+
+    multiPhotoPreviewViewModel.setPhotos(images)
+    multiPhotoPreviewViewModel.isPresented = true
+
+    let multiPreviewView = SwiftUIPhotoPreviewView(
+      viewModel: multiPhotoPreviewViewModel,
+      isPresented: Binding(
+        get: { [weak self] in self?.multiPhotoPreviewViewModel.isPresented ?? false },
+        set: { [weak self] newValue in
+          self?.multiPhotoPreviewViewModel.isPresented = newValue
+          if !newValue {
+            self?.dismissMultiPreview()
+          }
+        }
+      ),
+      onSend: { [weak self] photoItems in
+        self?.sendMultipleImages(photoItems)
+      },
+      onAddMorePhotos: { [weak self] in
+        self?.presentPicker()
+      }
+    )
+
+    let previewVC = UIHostingController(rootView: multiPreviewView)
+    previewVC.modalPresentationStyle = .fullScreen
+    previewVC.modalTransitionStyle = .crossDissolve
+    picker.present(previewVC, animated: true)
+  }
+
+  private func loadVideoPreviewURL(from result: PHPickerResult) async -> URL? {
     let provider = result.itemProvider
     let typeIdentifier = [UTType.movie.identifier, UTType.video.identifier]
       .first(where: { provider.hasItemConformingToTypeIdentifier($0) })
@@ -587,27 +989,12 @@ extension ComposeView: PHPickerViewControllerDelegate {
           return
         }
 
-        let tempDirectory = FileManager.default.temporaryDirectory
-        let fileExtension = url.pathExtension.isEmpty ? "mp4" : url.pathExtension
-        let tempUrl = tempDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension(fileExtension)
-
         do {
-          try FileManager.default.copyItem(at: url, to: tempUrl)
+          let temporaryURL = try self.copyVideoToTemporaryPreviewURL(from: url)
+          continuation.resume(returning: temporaryURL)
         } catch {
           Log.shared.error("Failed to copy video file from picker", error: error)
           continuation.resume(returning: nil)
-          return
-        }
-
-        Task {
-          defer { try? FileManager.default.removeItem(at: tempUrl) }
-          do {
-            let videoInfo = try await FileCache.saveVideo(url: tempUrl)
-            continuation.resume(returning: .video(videoInfo))
-          } catch {
-            Log.shared.error("Failed to save video from picker", error: error)
-            continuation.resume(returning: nil)
-          }
         }
       }
     }

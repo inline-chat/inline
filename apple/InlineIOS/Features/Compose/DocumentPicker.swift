@@ -27,6 +27,14 @@ extension ComposeView: UIDocumentPickerDelegate {
 
   func addFile(_ url: URL) {
     if isVideoFile(url) {
+      guard url.startAccessingSecurityScopedResource() else {
+        Log.shared.error("Failed to access security-scoped resource for video: \(url)")
+        return
+      }
+      defer {
+        url.stopAccessingSecurityScopedResource()
+      }
+
       addVideo(url)
       return
     }

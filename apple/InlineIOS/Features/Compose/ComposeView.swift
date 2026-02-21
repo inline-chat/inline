@@ -44,12 +44,13 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
   var isButtonVisible = false
   var selectedImage: UIImage?
+  var pendingVideoURLs: [URL] = []
+  var pendingMixedMediaItems: [MixedMediaPreviewItem] = []
   var showingPhotoPreview: Bool = false
   var imageCaption: String = ""
 
   enum MediaPickerMode {
-    case photos
-    case videos
+    case library
   }
 
   var attachmentItems: [String: FileMediaItem] = [:]
@@ -79,9 +80,11 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
   let previewViewModel = SwiftUIPhotoPreviewViewModel()
   let multiPhotoPreviewViewModel = SwiftUIPhotoPreviewViewModel()
+  let videoPreviewViewModel = VideoPreviewViewModel()
+  let mixedMediaPreviewViewModel = MixedMediaPreviewViewModel()
   let draftSaveInterval: TimeInterval = 2.0 // Save every 2 seconds
   var isPickerPresented = false
-  var activePickerMode: MediaPickerMode = .photos
+  var activePickerMode: MediaPickerMode = .library
 
   // MARK: - UI Components
 
