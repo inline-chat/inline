@@ -3,7 +3,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js"
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js"
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js"
 import { createInlineMcpServer } from "./server"
-import type { Grant } from "../store/types"
+import type { McpGrant } from "./grant"
 import type { InlineApi } from "../inline/inline-api"
 
 type Sent = { message: JSONRPCMessage }
@@ -59,15 +59,14 @@ function lastMessagesSendAuditRecord(infoSpy: ReturnType<typeof vi.spyOn>) {
   return serialized as Record<string, unknown>
 }
 
-const grant: Grant = {
+const grant: McpGrant = {
   id: "g1",
   clientId: "c1",
   inlineUserId: 1n,
   scope: "messages:read spaces:read messages:write",
   spaceIds: [10n],
-  inlineTokenEnc: "v1.fake.fake",
-  createdAtMs: Date.now(),
-  revokedAtMs: null,
+  allowDms: false,
+  allowHomeThreads: false,
 }
 
 describe("mcp tool server", () => {

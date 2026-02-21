@@ -29,8 +29,8 @@ This package is intentionally a minimal, solid foundation. Before deploying publ
 ### Storage / Scaling
 - Decide whether v1 is single-instance only:
   - Current `/mcp` sessions are in-memory; restarts will drop sessions.
+- OAuth state/tokens are persisted in the main server database (Postgres) and validated via introspection.
 - If multi-instance or HA is needed:
-  - Move OAuth transient state (`auth_requests`, `auth_codes`) + refresh tokens + grants to shared storage.
   - Move MCP session routing to either:
     - stateless transport (preferred), or
     - shared session store + sticky routing.
@@ -49,7 +49,7 @@ This package is intentionally a minimal, solid foundation. Before deploying publ
 ### Privacy / Authorization
 - Re-confirm the intended authorization boundaries:
   - Only explicitly selected spaces are allowed.
-  - Private chats (no `spaceId`) should remain blocked unless you introduce a separate consent toggle.
+  - DMs and home threads are only allowed when the user enables the matching consent toggles.
 - Add auditing for write actions (`messages.send`):
   - record tool name, user id, space id, chat id, timestamp, outcome (no message bodies in logs).
 

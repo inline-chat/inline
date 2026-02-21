@@ -1,5 +1,5 @@
 {
-  "name": "@inline-chat/mcp",
+  "name": "@inline-chat/oauth-core",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -15,22 +15,12 @@
     }
   },
   "scripts": {
-    "dev": "bun --watch src/main.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --coverage"
-  },
-  "dependencies": {
-    "@inline-chat/oauth-core": "workspace:*",
-    "@inline-chat/realtime-sdk": "workspace:*",
-    "@inline-chat/protocol": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.26.0",
-    "zod": "^4.3.6"
+    "test": "bun test"
   },
   "devDependencies": {
     "@types/node": "^20.11.30",
-    "@vitest/coverage-v8": "4.0.16",
-    "typescript": "^5.8.3",
-    "vitest": "^4.0.16"
+    "typescript": "^5.8.3"
   }
 }

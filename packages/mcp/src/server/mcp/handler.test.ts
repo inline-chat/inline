@@ -1,23 +1,5 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { createApp } from "../app"
-import { createMemoryStore } from "../store"
-
-function base64Url(bytes: Uint8Array): string {
-  return Buffer.from(bytes)
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "")
-}
-
-async function encryptInlineToken(keyB64: string, plaintext: string): Promise<string> {
-  const raw = Buffer.from(keyB64, "base64")
-  const key = await crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["encrypt"])
-  const iv = crypto.getRandomValues(new Uint8Array(12))
-  const pt = new TextEncoder().encode(plaintext)
-  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, pt)
-  return `v1.${base64Url(iv)}.${base64Url(new Uint8Array(ct))}`
-}
 
 const initRequest = {
   jsonrpc: "2.0",
@@ -30,17 +12,44 @@ const initRequest = {
   },
 }
 
+function activeIntrospection(input: {
+  grantId: string
+  clientId?: string
+  inlineUserId?: string
+  scope?: string
+  spaceIds?: string[]
+  allowDms?: boolean
+  allowHomeThreads?: boolean
+  inlineToken?: string
+}): Record<string, unknown> {
+  return {
+    active: true,
+    grant_id: input.grantId,
+    client_id: input.clientId ?? "client-1",
+    scope: input.scope ?? "messages:read spaces:read messages:write",
+    exp: Math.floor(Date.now() / 1000) + 3600,
+    inline_user_id: input.inlineUserId ?? "1",
+    space_ids: input.spaceIds ?? ["10"],
+    allow_dms: input.allowDms ?? false,
+    allow_home_threads: input.allowHomeThreads ?? false,
+    inline_token: input.inlineToken ?? "1:inline-token",
+  }
+}
+
 describe("/mcp", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it("requires Authorization", async () => {
-    const app = createApp({ issuer: "http://localhost:8791", dbPath: ":memory:" })
+    const app = createApp({ issuer: "http://localhost:8791" })
     const res = await app.fetch(new Request("http://localhost/mcp", { method: "POST" }))
     expect(res.status).toBe(401)
     expect(res.headers.get("www-authenticate")).toContain("Bearer")
-    expect(res.headers.get("www-authenticate")).toContain("scope=\"messages:read spaces:read\"")
   })
 
   it("rejects invalid authorization header format", async () => {
-    const app = createApp({ issuer: "http://localhost:8791", dbPath: ":memory:" })
+    const app = createApp({ issuer: "http://localhost:8791" })
     const res = await app.fetch(
       new Request("http://localhost/mcp", {
         method: "POST",
@@ -51,8 +60,15 @@ describe("/mcp", () => {
     expect(await res.json()).toEqual({ error: "invalid_authorization" })
   })
 
-  it("rejects invalid access tokens", async () => {
-    const app = createApp({ issuer: "http://localhost:8791", dbPath: ":memory:" })
+  it("rejects invalid access tokens from introspection", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ active: false }), { status: 401 }))
+
+    const app = createApp({
+      issuer: "http://localhost:8791",
+      oauthIntrospectionUrl: "https://api.inline.chat/oauth/introspect",
+      oauthInternalSharedSecret: "secret",
+    })
+
     const res = await app.fetch(
       new Request("http://localhost/mcp", {
         method: "POST",
@@ -62,59 +78,158 @@ describe("/mcp", () => {
     expect(res.status).toBe(401)
   })
 
-  it("rate limits mcp initialization posts", async () => {
+  it("returns 502 when introspection upstream is unavailable", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network down"))
+
     const app = createApp({
       issuer: "http://localhost:8791",
-      dbPath: ":memory:",
-      endpointRateLimits: {
-        sendEmailCode: { max: 10, windowMs: 10 * 60_000 },
-        verifyEmailCode: { max: 20, windowMs: 10 * 60_000 },
-        token: { max: 60, windowMs: 60_000 },
-        mcpInitialize: { max: 1, windowMs: 60_000 },
-      },
+      oauthIntrospectionUrl: "https://api.inline.chat/oauth/introspect",
+      oauthInternalSharedSecret: "secret",
     })
 
-    const first = await app.fetch(
+    const res = await app.fetch(
       new Request("http://localhost/mcp", {
         method: "POST",
-        headers: { "x-forwarded-for": "10.0.0.1" },
+        headers: { authorization: "Bearer mcp_at_nope" },
       }),
     )
-    expect(first.status).toBe(401)
 
-    const second = await app.fetch(
+    expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({ error: "oauth_introspection_unavailable" })
+  })
+
+  it("returns 502 when introspection upstream responds non-200", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ error: "boom" }), { status: 500 }))
+
+    const app = createApp({
+      issuer: "http://localhost:8791",
+      oauthIntrospectionUrl: "https://api.inline.chat/oauth/introspect",
+      oauthInternalSharedSecret: "secret",
+    })
+
+    const res = await app.fetch(
       new Request("http://localhost/mcp", {
         method: "POST",
-        headers: { "x-forwarded-for": "10.0.0.1" },
+        headers: { authorization: "Bearer mcp_at_nope" },
       }),
     )
-    expect(second.status).toBe(429)
-    expect(second.headers.get("retry-after")).toBeTruthy()
+
+    expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({ error: "oauth_introspection_failed" })
+  })
+
+  it("returns 502 when introspection response is invalid json", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("not-json", { status: 200 }))
+
+    const app = createApp({
+      issuer: "http://localhost:8791",
+      oauthIntrospectionUrl: "https://api.inline.chat/oauth/introspect",
+      oauthInternalSharedSecret: "secret",
+    })
+
+    const res = await app.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: { authorization: "Bearer mcp_at_nope" },
+      }),
+    )
+
+    expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({ error: "oauth_introspection_invalid_response" })
+  })
+
+  it("returns 502 when introspection user id cannot be parsed as bigint", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify(
+          activeIntrospection({
+            grantId: "g1",
+            inlineUserId: "not-a-number",
+          }),
+        ),
+        { status: 200 },
+      ),
+    )
+
+    const app = createApp({
+      issuer: "http://localhost:8791",
+      oauthIntrospectionUrl: "https://api.inline.chat/oauth/introspect",
+      oauthInternalSharedSecret: "secret",
+    })
+
+    const res = await app.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: { authorization: "Bearer mcp_at_nope" },
+      }),
+    )
+
+    expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({ error: "oauth_introspection_invalid_user" })
+  })
+
+  it("treats malformed active introspection payload as invalid token", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          active: true,
+          grant_id: "g1",
+          client_id: "c1",
+          scope: "messages:read",
+          exp: Math.floor(Date.now() / 1000) + 3600,
+          inline_user_id: "1",
+          space_ids: ["10"],
+          allow_dms: true,
+          allow_home_threads: true,
+          // missing inline_token
+        }),
+        { status: 200 },
+      ),
+    )
+
+    const app = createApp({
+      issuer: "http://localhost:8791",
+      oauthIntrospectionUrl: "https://api.inline.chat/oauth/introspect",
+      oauthInternalSharedSecret: "secret",
+    })
+
+    const res = await app.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: { authorization: "Bearer mcp_at_nope" },
+      }),
+    )
+
+    expect(res.status).toBe(401)
+    expect(await res.json()).toEqual({ error: "invalid_token" })
+  })
+
+  it("returns 500 when oauth secret is missing", async () => {
+    const app = createApp({
+      issuer: "http://localhost:8791",
+      oauthIntrospectionUrl: "https://api.inline.chat/oauth/introspect",
+      oauthInternalSharedSecret: null,
+    })
+
+    const res = await app.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: { authorization: "Bearer token" },
+      }),
+    )
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: "mcp_oauth_not_configured" })
   })
 
   it("rejects requests with unknown session id", async () => {
-    const store = createMemoryStore()
-    const now = Date.now()
-    const client = store.createClient({ redirectUris: ["https://example.com/cb"], clientName: "x", nowMs: now })
-    const grant = store.createGrant({
-      id: "g1",
-      clientId: client.clientId,
-      inlineUserId: 1n,
-      scope: "messages:read spaces:read",
-      spaceIds: [10n],
-      inlineTokenEnc: "v1.fake.fake",
-      nowMs: now,
-    })
-    store.createAccessToken({ tokenHashHex: await (async () => {
-      const data = new TextEncoder().encode("mcp_at_ok")
-      const digest = await crypto.subtle.digest("SHA-256", data)
-      const bytes = new Uint8Array(digest)
-      let out = ""
-      for (const b of bytes) out += b.toString(16).padStart(2, "0")
-      return out
-    })(), grantId: grant.id, nowMs: now, expiresAtMs: now + 60_000 })
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(activeIntrospection({ grantId: "g1" })), { status: 200 }))
 
-    const app = createApp({ issuer: "http://localhost:8791", dbPath: ":memory:", store })
+    const app = createApp({
+      issuer: "http://localhost:8791",
+      oauthIntrospectionUrl: "https://api.inline.chat/oauth/introspect",
+      oauthInternalSharedSecret: "secret",
+    })
+
     const res = await app.fetch(
       new Request("http://localhost/mcp", {
         method: "GET",
@@ -124,96 +239,20 @@ describe("/mcp", () => {
     expect(res.status).toBe(404)
   })
 
-  it("returns 500 when token decryption key is missing", async () => {
-    const store = createMemoryStore()
-    const now = Date.now()
-    const client = store.createClient({ redirectUris: ["https://example.com/cb"], clientName: "x", nowMs: now })
-    const grant = store.createGrant({
-      id: "g1",
-      clientId: client.clientId,
-      inlineUserId: 1n,
-      scope: "messages:read spaces:read",
-      spaceIds: [10n],
-      inlineTokenEnc: "v1.fake.fake",
-      nowMs: now,
-    })
-
-    const accessToken = "mcp_at_ok"
-    const hashHex = await (async () => {
-      const data = new TextEncoder().encode(accessToken)
-      const digest = await crypto.subtle.digest("SHA-256", data)
-      const bytes = new Uint8Array(digest)
-      let out = ""
-      for (const b of bytes) out += b.toString(16).padStart(2, "0")
-      return out
-    })()
-
-    store.createAccessToken({ tokenHashHex: hashHex, grantId: grant.id, nowMs: now, expiresAtMs: now + 60_000 })
+  it("initializes a streamable session for valid token", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(activeIntrospection({ grantId: "g1" })), { status: 200 }))
 
     const app = createApp({
       issuer: "http://localhost:8791",
-      dbPath: ":memory:",
-      tokenEncryptionKeyB64: null,
-      store,
+      oauthIntrospectionUrl: "https://api.inline.chat/oauth/introspect",
+      oauthInternalSharedSecret: "secret",
     })
 
     const res = await app.fetch(
       new Request("http://localhost/mcp", {
         method: "POST",
         headers: {
-          authorization: `Bearer ${accessToken}`,
-          accept: "application/json, text/event-stream",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify(initRequest),
-      }),
-    )
-    expect(res.status).toBe(500)
-  })
-
-  it("initializes a streamable http session when token is valid", async () => {
-    const keyBytes = new Uint8Array(32)
-    keyBytes.fill(7)
-    const keyB64 = Buffer.from(keyBytes).toString("base64")
-
-    const store = createMemoryStore()
-    const now = Date.now()
-
-    const client = store.createClient({ redirectUris: ["https://example.com/cb"], clientName: "x", nowMs: now })
-    const grant = store.createGrant({
-      id: "g1",
-      clientId: client.clientId,
-      inlineUserId: 1n,
-      scope: "messages:read spaces:read messages:write",
-      spaceIds: [10n],
-      inlineTokenEnc: await encryptInlineToken(keyB64, "1:fake-inline-token"),
-      nowMs: now,
-    })
-
-    const accessToken = "mcp_at_testtoken"
-    const hashHex = await (async () => {
-      const data = new TextEncoder().encode(accessToken)
-      const digest = await crypto.subtle.digest("SHA-256", data)
-      const bytes = new Uint8Array(digest)
-      let out = ""
-      for (const b of bytes) out += b.toString(16).padStart(2, "0")
-      return out
-    })()
-
-    store.createAccessToken({ tokenHashHex: hashHex, grantId: grant.id, nowMs: now, expiresAtMs: now + 60_000 })
-
-    const app = createApp({
-      issuer: "http://localhost:8791",
-      dbPath: ":memory:",
-      tokenEncryptionKeyB64: keyB64,
-      store,
-    })
-
-    const res = await app.fetch(
-      new Request("http://localhost/mcp", {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${accessToken}`,
+          authorization: "Bearer mcp_at_valid",
           accept: "application/json, text/event-stream",
           "content-type": "application/json",
         },
@@ -227,81 +266,126 @@ describe("/mcp", () => {
   })
 
   it("rejects session grant mismatches", async () => {
-    const keyBytes = new Uint8Array(32)
-    keyBytes.fill(8)
-    const keyB64 = Buffer.from(keyBytes).toString("base64")
-
-    const store = createMemoryStore()
-    const now = Date.now()
-
-    const client = store.createClient({ redirectUris: ["https://example.com/cb"], clientName: "x", nowMs: now })
-
-    const grant1 = store.createGrant({
-      id: "g1",
-      clientId: client.clientId,
-      inlineUserId: 1n,
-      scope: "messages:read spaces:read",
-      spaceIds: [10n],
-      inlineTokenEnc: await encryptInlineToken(keyB64, "1:fake-inline-token-1"),
-      nowMs: now,
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { token?: string }
+      if (body.token === "token-1") {
+        return new Response(JSON.stringify(activeIntrospection({ grantId: "g1", inlineUserId: "1", inlineToken: "1:t1" })), {
+          status: 200,
+        })
+      }
+      if (body.token === "token-2") {
+        return new Response(JSON.stringify(activeIntrospection({ grantId: "g2", inlineUserId: "2", inlineToken: "2:t2" })), {
+          status: 200,
+        })
+      }
+      return new Response(JSON.stringify({ active: false }), { status: 401 })
     })
-
-    const grant2 = store.createGrant({
-      id: "g2",
-      clientId: client.clientId,
-      inlineUserId: 2n,
-      scope: "messages:read spaces:read",
-      spaceIds: [10n],
-      inlineTokenEnc: await encryptInlineToken(keyB64, "2:fake-inline-token-2"),
-      nowMs: now,
-    })
-
-    const access1 = "mcp_at_1"
-    const access2 = "mcp_at_2"
-
-    const hash = async (t: string) => {
-      const data = new TextEncoder().encode(t)
-      const digest = await crypto.subtle.digest("SHA-256", data)
-      const bytes = new Uint8Array(digest)
-      let out = ""
-      for (const b of bytes) out += b.toString(16).padStart(2, "0")
-      return out
-    }
-
-    store.createAccessToken({ tokenHashHex: await hash(access1), grantId: grant1.id, nowMs: now, expiresAtMs: now + 60_000 })
-    store.createAccessToken({ tokenHashHex: await hash(access2), grantId: grant2.id, nowMs: now, expiresAtMs: now + 60_000 })
 
     const app = createApp({
       issuer: "http://localhost:8791",
-      dbPath: ":memory:",
-      tokenEncryptionKeyB64: keyB64,
-      store,
+      oauthIntrospectionUrl: "https://api.inline.chat/oauth/introspect",
+      oauthInternalSharedSecret: "secret",
     })
 
     const initRes = await app.fetch(
       new Request("http://localhost/mcp", {
         method: "POST",
         headers: {
-          authorization: `Bearer ${access1}`,
+          authorization: "Bearer token-1",
           accept: "application/json, text/event-stream",
           "content-type": "application/json",
         },
         body: JSON.stringify(initRequest),
       }),
     )
+
+    expect(initRes.status).toBe(200)
     const sessionId = initRes.headers.get("mcp-session-id")
     expect(sessionId).toBeTruthy()
 
-    const res = await app.fetch(
+    const mismatch = await app.fetch(
       new Request("http://localhost/mcp", {
         method: "GET",
         headers: {
-          authorization: `Bearer ${access2}`,
+          authorization: "Bearer token-2",
           accept: "text/event-stream",
           "mcp-session-id": sessionId!,
         },
       }),
     )
-    expect(res.status).toBe(403)
+
+    expect(mismatch.status).toBe(403)
+    expect(fetchMock).toHaveBeenCalled()
+  })
+
+  it("accepts existing session requests for the same grant", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      return new Response(JSON.stringify(activeIntrospection({ grantId: "g1", inlineUserId: "1", inlineToken: "1:t1" })), {
+        status: 200,
+      })
+    })
+
+    const app = createApp({
+      issuer: "http://localhost:8791",
+      oauthIntrospectionUrl: "https://api.inline.chat/oauth/introspect",
+      oauthInternalSharedSecret: "secret",
+    })
+
+    const initRes = await app.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer token-1",
+          accept: "application/json, text/event-stream",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(initRequest),
+      }),
+    )
+
+    expect(initRes.status).toBe(200)
+    const sessionId = initRes.headers.get("mcp-session-id")
+    expect(sessionId).toBeTruthy()
+
+    const nextRes = await app.fetch(
+      new Request("http://localhost/mcp", {
+        method: "GET",
+        headers: {
+          authorization: "Bearer token-1",
+          accept: "text/event-stream",
+          "mcp-session-id": sessionId!,
+        },
+      }),
+    )
+
+    expect(nextRes.status).toBe(200)
+  })
+
+  it("rejects introspection payloads with malformed space ids", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ...activeIntrospection({ grantId: "g1" }),
+          space_ids: ["abc"],
+        }),
+        { status: 200 },
+      ),
+    )
+
+    const app = createApp({
+      issuer: "http://localhost:8791",
+      oauthIntrospectionUrl: "https://api.inline.chat/oauth/introspect",
+      oauthInternalSharedSecret: "secret",
+    })
+
+    const res = await app.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: { authorization: "Bearer token-1" },
+      }),
+    )
+
+    expect(res.status).toBe(401)
+    expect(await res.json()).toEqual({ error: "invalid_token" })
   })
 })

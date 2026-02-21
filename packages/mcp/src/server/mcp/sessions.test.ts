@@ -58,5 +58,41 @@ describe("McpSessionManager", () => {
     expect(externalClosed).toBe(1)
     expect(mgr.get(sessionId!)).toBeNull()
   })
-})
 
+  it("closes idle sessions automatically", async () => {
+    const mgr = new McpSessionManager({ idleTimeoutMs: 20 })
+    const server = new McpServer({ name: "idle-test", version: "0" })
+
+    let externalClosed = 0
+    const { transport } = mgr.createTransport({
+      grantId: "g2",
+      nowMs: Date.now(),
+      server,
+      close: async () => {
+        externalClosed++
+      },
+    })
+
+    await server.connect(transport)
+
+    const res = await transport.handleRequest(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: {
+          accept: "application/json, text/event-stream",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(initRequest),
+      }),
+    )
+
+    const sessionId = res.headers.get("mcp-session-id")
+    expect(sessionId).toBeTruthy()
+    expect(mgr.get(sessionId!)).not.toBeNull()
+
+    await new Promise((resolve) => setTimeout(resolve, 80))
+
+    expect(mgr.get(sessionId!)).toBeNull()
+    expect(externalClosed).toBeGreaterThanOrEqual(1)
+  })
+})

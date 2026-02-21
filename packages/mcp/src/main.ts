@@ -1,11 +1,9 @@
 import { createApp } from "./server/app"
-import { createBunSqliteStore } from "./server/store/bun-sqlite-store"
 import { defaultConfig } from "./server/config"
 
 const port = Number(process.env.PORT ?? "8791")
 const config = defaultConfig()
-const store = createBunSqliteStore({ dbPath: config.dbPath })
-const app = createApp({ ...config, store })
+const app = createApp(config)
 
 Bun.serve({
   port,

@@ -14,18 +14,20 @@ import {
 
 export type InlineAllowedContext = {
   allowedSpaceIds: bigint[]
+  allowDms?: boolean
+  allowHomeThreads?: boolean
 }
 
 export type InlineEligibleChat = {
   chatId: bigint
   title: string
-  spaceId: bigint
+  spaceId: bigint | null
 }
 
 export type InlineSearchHit = {
   chatId: bigint
   chatTitle: string
-  spaceId: bigint
+  spaceId: bigint | null
   message: Message
 }
 
@@ -66,11 +68,23 @@ export function createInlineApi(params: {
   }
 
   const allowedSpaceSet = () => new Set(params.allowed.allowedSpaceIds.map((id) => id.toString()))
+  const allowDms = params.allowed.allowDms === true
+  const allowHomeThreads = params.allowed.allowHomeThreads === true
+
+  const isChatAllowed = (chat: Chat): boolean => {
+    const spaceId = chat.spaceId
+    if (!spaceId) {
+      const peerType = chat.peerId?.type.oneofKind
+      if (peerType === "user") return allowDms
+      if (peerType === "chat") return allowHomeThreads
+      return false
+    }
+    return allowedSpaceSet().has(spaceId.toString())
+  }
 
   const ensureChatAllowed = async (chat: Chat) => {
-    const spaceId = chat.spaceId
-    if (!spaceId) throw new Error("chat is not in a space")
-    if (!allowedSpaceSet().has(spaceId.toString())) throw new Error("chat is not in an allowed space")
+    if (isChatAllowed(chat)) return
+    throw new Error("chat is not in an allowed context")
   }
 
   const getChats = async (): Promise<GetChatsResult> => {
@@ -89,16 +103,13 @@ export function createInlineApi(params: {
   }
 
   const getEligibleChats = async (): Promise<InlineEligibleChat[]> => {
-    const allowed = allowedSpaceSet()
     const payload = await getChats()
 
-    // Only chats explicitly in allowed spaces.
+    // Only chats explicitly in allowed spaces, DMs, and home threads.
     const eligible: InlineEligibleChat[] = []
     for (const chat of payload.chats) {
-      const spaceId = chat.spaceId
-      if (!spaceId) continue
-      if (!allowed.has(spaceId.toString())) continue
-      eligible.push({ chatId: chat.id, title: chat.title, spaceId })
+      if (!isChatAllowed(chat)) continue
+      eligible.push({ chatId: chat.id, title: chat.title, spaceId: chat.spaceId ?? null })
     }
 
     // Prefer chats with a last message (best-effort ordering).

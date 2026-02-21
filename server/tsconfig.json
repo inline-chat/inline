@@ -7,6 +7,9 @@
 
   "references": [
     {
+      "path": "../packages/oauth-core"
+    },
+    {
       "path": "../packages/protocol"
     },
     {

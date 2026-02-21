@@ -1,23 +1,14 @@
 export type McpConfig = {
   issuer: string
   inlineApiBaseUrl: string
-  dbPath: string
-  tokenEncryptionKeyB64: string | null
-  // Used for generating a stable cookie name to avoid collisions across envs.
-  cookiePrefix: string
+  oauthIssuer: string
+  oauthProxyBaseUrl: string
+  oauthIntrospectionUrl: string
+  oauthInternalSharedSecret: string | null
   allowedHosts: string[]
   allowedOriginHosts: string[]
   endpointRateLimits: {
-    sendEmailCode: RateLimitRule
-    verifyEmailCode: RateLimitRule
-    token: RateLimitRule
     mcpInitialize: RateLimitRule
-  }
-  emailAbuseRateLimits: {
-    sendPerEmail: RateLimitRule
-    sendPerContext: RateLimitRule
-    verifyPerEmail: RateLimitRule
-    verifyPerContext: RateLimitRule
   }
 }
 
@@ -107,6 +98,10 @@ function parseHostAllowlist(raw: string | undefined, fallback: string[]): string
 
 export function defaultConfig(): McpConfig {
   const issuer = process.env.MCP_ISSUER || DEFAULT_ISSUER
+  const inlineApiBaseUrl = process.env.INLINE_API_BASE_URL || "https://api.inline.chat"
+  const oauthIssuer = process.env.MCP_OAUTH_ISSUER || inlineApiBaseUrl
+  const oauthProxyBaseUrl = process.env.MCP_OAUTH_PROXY_BASE_URL || oauthIssuer
+  const oauthIntrospectionUrl = process.env.MCP_OAUTH_INTROSPECTION_URL || `${oauthProxyBaseUrl}/oauth/introspect`
   const allowedHosts = parseHostAllowlist(process.env.MCP_ALLOWED_HOSTS, defaultAllowedHosts(issuer))
   const allowedOriginHosts = parseHostAllowlist(
     process.env.MCP_ALLOWED_ORIGINS,
@@ -115,23 +110,15 @@ export function defaultConfig(): McpConfig {
 
   return {
     issuer,
-    inlineApiBaseUrl: process.env.INLINE_API_BASE_URL || "https://api.inline.chat",
-    dbPath: process.env.MCP_DB_PATH || "./data/inline-mcp.sqlite",
-    tokenEncryptionKeyB64: process.env.MCP_TOKEN_ENCRYPTION_KEY_B64 || null,
-    cookiePrefix: process.env.MCP_COOKIE_PREFIX || "inline_mcp",
+    inlineApiBaseUrl,
+    oauthIssuer,
+    oauthProxyBaseUrl,
+    oauthIntrospectionUrl,
+    oauthInternalSharedSecret: process.env.MCP_INTERNAL_SHARED_SECRET || null,
     allowedHosts,
     allowedOriginHosts,
     endpointRateLimits: {
-      sendEmailCode: parseRateLimitRuleEnv("MCP_RATE_LIMIT_SEND_EMAIL_CODE", { max: 10, windowMs: 10 * 60_000 }),
-      verifyEmailCode: parseRateLimitRuleEnv("MCP_RATE_LIMIT_VERIFY_EMAIL_CODE", { max: 20, windowMs: 10 * 60_000 }),
-      token: parseRateLimitRuleEnv("MCP_RATE_LIMIT_TOKEN", { max: 60, windowMs: 60_000 }),
       mcpInitialize: parseRateLimitRuleEnv("MCP_RATE_LIMIT_MCP_INIT", { max: 30, windowMs: 60_000 }),
-    },
-    emailAbuseRateLimits: {
-      sendPerEmail: parseRateLimitRuleEnv("MCP_EMAIL_ABUSE_SEND_PER_EMAIL", { max: 4, windowMs: 10 * 60_000 }),
-      sendPerContext: parseRateLimitRuleEnv("MCP_EMAIL_ABUSE_SEND_PER_CONTEXT", { max: 6, windowMs: 10 * 60_000 }),
-      verifyPerEmail: parseRateLimitRuleEnv("MCP_EMAIL_ABUSE_VERIFY_PER_EMAIL", { max: 10, windowMs: 10 * 60_000 }),
-      verifyPerContext: parseRateLimitRuleEnv("MCP_EMAIL_ABUSE_VERIFY_PER_CONTEXT", { max: 12, windowMs: 10 * 60_000 }),
     },
   }
 }

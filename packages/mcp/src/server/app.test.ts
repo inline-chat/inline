@@ -1,8 +1,11 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { createApp } from "./app"
-import type { Store } from "./store"
 
 describe("mcp app", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it("createApp works without options", async () => {
     const app = createApp()
     const res = await app.fetch(new Request("https://mcp.inline.chat/health"))
@@ -10,111 +13,88 @@ describe("mcp app", () => {
   })
 
   it("health returns ok", async () => {
-    const app = createApp({ issuer: "http://localhost:1234", dbPath: ":memory:" })
+    const app = createApp({ issuer: "http://localhost:1234" })
     const res = await app.fetch(new Request("http://localhost/health"))
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ ok: true })
   })
 
   it("root returns a description", async () => {
-    const app = createApp({ issuer: "http://localhost:1234", dbPath: ":memory:" })
+    const app = createApp({ issuer: "http://localhost:1234" })
     const res = await app.fetch(new Request("http://localhost/"))
     expect(res.status).toBe(200)
     expect(res.headers.get("content-type")).toContain("text/plain")
     expect(await res.text()).toContain("Inline MCP server")
   })
 
-  it("well-known oauth metadata uses issuer", async () => {
-    const app = createApp({ issuer: "https://mcp.inline.chat", dbPath: ":memory:" })
-    const res = await app.fetch(new Request("https://mcp.inline.chat/.well-known/oauth-authorization-server"))
-    expect(res.status).toBe(200)
-    const body = await res.json()
-    expect(body.issuer).toBe("https://mcp.inline.chat")
-    expect(body.authorization_endpoint).toBe("https://mcp.inline.chat/oauth/authorize")
-    expect(body.token_endpoint).toBe("https://mcp.inline.chat/oauth/token")
-    expect(body.registration_endpoint).toBe("https://mcp.inline.chat/oauth/register")
-    expect(body.revocation_endpoint).toBe("https://mcp.inline.chat/oauth/revoke")
-    expect(body.code_challenge_methods_supported).toEqual(["S256"])
-  })
-
-  it("well-known protected resource points at issuer", async () => {
-    const app = createApp({ issuer: "https://mcp.inline.chat", dbPath: ":memory:" })
+  it("well-known protected resource points at configured oauth issuer", async () => {
+    const app = createApp({ issuer: "https://mcp.inline.chat", oauthIssuer: "https://api.inline.chat" })
     const res = await app.fetch(new Request("https://mcp.inline.chat/.well-known/oauth-protected-resource"))
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.resource).toBe("https://mcp.inline.chat")
-    expect(body.authorization_servers).toEqual(["https://mcp.inline.chat"])
-    expect(body.scopes_supported).toEqual(["offline_access", "messages:read", "messages:write", "spaces:read"])
-    expect(body.bearer_methods_supported).toEqual(["header"])
+    expect(body.authorization_servers).toEqual(["https://api.inline.chat"])
   })
 
-  it("oauth placeholder endpoints exist", async () => {
-    const app = createApp({ issuer: "http://localhost:1234", dbPath: ":memory:" })
-    const res = await app.fetch(
-      new Request("http://localhost/oauth/register", {
-        method: "POST",
+  it("proxies oauth routes to upstream server", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ issuer: "https://api.inline.chat" }), {
+        status: 200,
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ redirect_uris: ["https://example.com/cb"], client_name: "x" }),
       }),
     )
-    expect(res.status).toBe(201)
-    const body = await res.json()
-    expect(typeof body.client_id).toBe("string")
-    expect(body.redirect_uris).toEqual(["https://example.com/cb"])
+
+    const app = createApp({
+      issuer: "https://mcp.inline.chat",
+      oauthProxyBaseUrl: "https://api.inline.chat",
+    })
+
+    const res = await app.fetch(new Request("https://mcp.inline.chat/.well-known/oauth-authorization-server"))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ issuer: "https://api.inline.chat" })
+
+    expect(fetchMock).toHaveBeenCalled()
+    const [url] = fetchMock.mock.calls[0] ?? []
+    expect(String(url)).toBe("https://api.inline.chat/.well-known/oauth-authorization-server")
   })
 
-  it("oauth placeholder endpoints reject other methods", async () => {
-    const app = createApp({ issuer: "http://localhost:1234", dbPath: ":memory:" })
-    const res = await app.fetch(new Request("http://localhost/oauth/token", { method: "PUT" }))
-    expect(res.status).toBe(404)
+  it("returns 502 when oauth upstream is unavailable", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("boom"))
+
+    const app = createApp({
+      issuer: "https://mcp.inline.chat",
+      oauthProxyBaseUrl: "https://api.inline.chat",
+    })
+
+    const res = await app.fetch(new Request("https://mcp.inline.chat/oauth/register", { method: "POST" }))
+    expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({ error: "oauth_upstream_unavailable" })
   })
 
-  it("oauth authorize and token placeholders return 501", async () => {
-    const app = createApp({ issuer: "http://localhost:1234", dbPath: ":memory:" })
-    const a = await app.fetch(new Request("http://localhost/oauth/authorize"))
-    expect(a.status).toBe(400)
+  it("rate limits mcp initialization requests", async () => {
+    const app = createApp({
+      issuer: "http://localhost:1234",
+      endpointRateLimits: {
+        mcpInitialize: { max: 1, windowMs: 60_000 },
+      },
+    })
 
-    const t = await app.fetch(new Request("http://localhost/oauth/token", { method: "POST" }))
-    expect(t.status).toBe(400)
-  })
+    const first = await app.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: { "x-forwarded-for": "10.0.0.1" },
+      }),
+    )
+    expect(first.status).toBe(401)
 
-  it("oauth authorize placeholder rejects invalid methods", async () => {
-    const app = createApp({ issuer: "http://localhost:1234", dbPath: ":memory:" })
-    const res = await app.fetch(new Request("http://localhost/oauth/authorize", { method: "PUT" }))
-    expect(res.status).toBe(404)
-  })
-
-  it("defaults issuer from env", async () => {
-    const prev = process.env.MCP_ISSUER
-    process.env.MCP_ISSUER = "http://env-issuer.test"
-    try {
-      const app = createApp({ dbPath: ":memory:" })
-      const res = await app.fetch(new Request("http://env-issuer.test/.well-known/oauth-authorization-server"))
-      const body = await res.json()
-      expect(body.issuer).toBe("http://env-issuer.test")
-    } finally {
-      if (prev == null) delete process.env.MCP_ISSUER
-      else process.env.MCP_ISSUER = prev
-    }
-  })
-
-  it("falls back to production issuer when env missing", async () => {
-    const prev = process.env.MCP_ISSUER
-    delete process.env.MCP_ISSUER
-    try {
-      const app = createApp({ dbPath: ":memory:" })
-      const res = await app.fetch(new Request("https://mcp.inline.chat/.well-known/oauth-authorization-server"))
-      const body = await res.json()
-      expect(body.issuer).toBe("https://mcp.inline.chat")
-    } finally {
-      if (prev != null) process.env.MCP_ISSUER = prev
-    }
-  })
-
-  it("unknown route 404s", async () => {
-    const app = createApp({ issuer: "http://localhost:1234", dbPath: ":memory:" })
-    const res = await app.fetch(new Request("http://localhost/nope"))
-    expect(res.status).toBe(404)
+    const second = await app.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: { "x-forwarded-for": "10.0.0.1" },
+      }),
+    )
+    expect(second.status).toBe(429)
+    expect(second.headers.get("retry-after")).toBeTruthy()
   })
 
   it("rejects requests from disallowed hosts", async () => {
@@ -141,64 +121,77 @@ describe("mcp app", () => {
     expect(await res.json()).toEqual({ error: "forbidden_origin" })
   })
 
-  it("uses injected store", async () => {
-    let cleanupCalled = 0
-    const store: Store = {
-      ensureSchema() {},
-      cleanupExpired() {
-        cleanupCalled++
-      },
-      consumeRateLimit() {
-        return { allowed: true, retryAfterSeconds: 0 }
-      },
-      createClient() {
-        throw new Error("not used")
-      },
-      getClient() {
-        return null
-      },
-      createAuthRequest() {
-        throw new Error("not used")
-      },
-      getAuthRequest() {
-        return null
-      },
-      setAuthRequestEmail() {},
-      setAuthRequestInlineTokenEnc() {},
-      setAuthRequestInlineUserId() {},
-      deleteAuthRequest() {},
-      createGrant() {
-        throw new Error("not used")
-      },
-      getGrant() {
-        return null
-      },
-      revokeGrant() {},
-      createAuthCode() {
-        throw new Error("not used")
-      },
-      getAuthCode() {
-        return null
-      },
-      markAuthCodeUsed() {},
-      createAccessToken() {},
-      getAccessToken() {
-        return null
-      },
-      createRefreshToken() {},
-      getRefreshToken() {
-        return null
-      },
-      revokeRefreshToken() {},
-      revokeRefreshTokensByGrant() {},
-      findGrantIdByTokenHash() {
-        return null
-      },
-    }
+  it("handles OPTIONS preflight for allowed origins", async () => {
+    const app = createApp({
+      allowedHosts: ["localhost"],
+      allowedOriginHosts: ["good.example"],
+    })
+    const res = await app.fetch(
+      new Request("http://localhost/mcp", {
+        method: "OPTIONS",
+        headers: {
+          origin: "https://good.example",
+          "access-control-request-method": "POST",
+          "access-control-request-headers": "authorization, content-type, accept, mcp-session-id",
+        },
+      }),
+    )
 
-    const app = createApp({ issuer: "http://localhost:1234", store })
-    const res = await app.fetch(new Request("http://localhost/.well-known/oauth-protected-resource"))
-    expect(res.status).toBe(200)
-    expect(cleanupCalled).toBe(1)
+    expect(res.status).toBe(204)
+    expect(res.headers.get("access-control-allow-origin")).toBe("https://good.example")
+    expect(res.headers.get("access-control-allow-methods")).toContain("POST")
+    expect(res.headers.get("access-control-allow-methods")).toContain("DELETE")
+    const allowHeaders = res.headers.get("access-control-allow-headers") ?? ""
+    expect(allowHeaders).toContain("authorization")
+    expect(allowHeaders).toContain("content-type")
+    expect(allowHeaders).toContain("accept")
+    expect(allowHeaders).toContain("mcp-session-id")
+  })
+
+  it("rejects OPTIONS preflight from disallowed origins", async () => {
+    const app = createApp({
+      allowedHosts: ["localhost"],
+      allowedOriginHosts: ["good.example"],
+    })
+    const res = await app.fetch(
+      new Request("http://localhost/mcp", {
+        method: "OPTIONS",
+        headers: {
+          origin: "https://evil.example",
+          "access-control-request-method": "POST",
+          "access-control-request-headers": "authorization",
+        },
+      }),
+    )
+
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({ error: "forbidden_origin" })
+    expect(res.headers.get("access-control-allow-origin")).toBeNull()
+  })
+
+  it("adds CORS expose headers to actual responses for allowed origins", async () => {
+    const app = createApp({
+      allowedHosts: ["localhost"],
+      allowedOriginHosts: ["good.example"],
+    })
+    const res = await app.fetch(
+      new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: { origin: "https://good.example" },
+      }),
+    )
+
+    expect(res.status).toBe(401)
+    expect(res.headers.get("access-control-allow-origin")).toBe("https://good.example")
+    const exposeHeaders = res.headers.get("access-control-expose-headers") ?? ""
+    expect(exposeHeaders).toContain("mcp-session-id")
+    expect(exposeHeaders).toContain("www-authenticate")
+    expect(res.headers.get("www-authenticate")).toContain("Bearer")
+  })
+
+  it("unknown route 404s", async () => {
+    const app = createApp({ issuer: "http://localhost:1234" })
+    const res = await app.fetch(new Request("http://localhost/nope"))
+    expect(res.status).toBe(404)
   })
 })

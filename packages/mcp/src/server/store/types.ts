@@ -27,6 +27,8 @@ export type Grant = {
   inlineUserId: bigint
   scope: string
   spaceIds: bigint[]
+  allowDms: boolean
+  allowHomeThreads: boolean
   inlineTokenEnc: string
   createdAtMs: number
   revokedAtMs: number | null
@@ -98,6 +100,8 @@ export type Store = {
     inlineUserId: bigint
     scope: string
     spaceIds: bigint[]
+    allowDms?: boolean
+    allowHomeThreads?: boolean
     inlineTokenEnc: string
     nowMs: number
   }): Grant

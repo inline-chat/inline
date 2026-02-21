@@ -1,6 +1,6 @@
 # @inline-chat/mcp
 
-Standalone MCP + OAuth server for Inline (Bun runtime).
+Inline MCP resource server (Bun runtime) with OAuth routed through the main API server.
 
 ## Dev
 
@@ -27,11 +27,13 @@ Production readiness checklist: `PRODUCTION_CHECKLIST.md`.
 - `POST /oauth/token` (alias: `POST /token`)
 - `POST /oauth/revoke` (alias: `POST /revoke`)
 
+OAuth routes above are proxied to the API OAuth server configured by `MCP_OAUTH_PROXY_BASE_URL` (defaults to `INLINE_API_BASE_URL`).
+
 ## MCP Tools (v1)
 
-- `search` (read-only): searches messages across the spaces the user explicitly approved
+- `search` (read-only): searches messages across approved spaces and, when enabled, DMs and home threads
 - `fetch` (read-only): fetches a single message by ID returned from `search`
-- `messages.send` (write): sends a message to a chat within an approved space
+- `messages.send` (write): sends a message to an approved chat
 
 ID format used by `search` results (and accepted by `fetch`):
 - `inline:chat:<chatId>:msg:<messageId>`

@@ -100,12 +100,16 @@ export function createMemoryStore(): Store {
     },
 
     createGrant(input) {
+      const allowDms = input.allowDms ?? false
+      const allowHomeThreads = input.allowHomeThreads ?? false
       const grant: Grant = {
         id: input.id,
         clientId: input.clientId,
         inlineUserId: input.inlineUserId,
         scope: input.scope,
         spaceIds: input.spaceIds,
+        allowDms,
+        allowHomeThreads,
         inlineTokenEnc: input.inlineTokenEnc,
         createdAtMs: input.nowMs,
         revokedAtMs: null,
