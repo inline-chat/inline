@@ -435,6 +435,13 @@
       "when": 1771426802908,
       "tag": "0061_login-challenges",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1771619976825,
+      "tag": "0062_mcp-oauth-core",
+      "breakpoints": true
     }
   ]
 }

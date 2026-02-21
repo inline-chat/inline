@@ -18,6 +18,7 @@ COPY web/packages/protocol/package.json /temp/dev/web/packages/protocol/
 COPY packages/bot-api-types/package.json /temp/dev/packages/bot-api-types/
 COPY packages/bot-api/package.json /temp/dev/packages/bot-api/
 COPY packages/mcp/package.json /temp/dev/packages/mcp/
+COPY packages/oauth-core/package.json /temp/dev/packages/oauth-core/
 COPY packages/openclaw-inline/package.json /temp/dev/packages/openclaw-inline/
 COPY packages/sdk/package.json /temp/dev/packages/sdk/
 COPY packages/protocol/package.json /temp/dev/packages/protocol/
@@ -41,6 +42,7 @@ COPY web/packages/protocol/package.json /temp/prod/web/packages/protocol/
 COPY packages/bot-api-types/package.json /temp/prod/packages/bot-api-types/
 COPY packages/bot-api/package.json /temp/prod/packages/bot-api/
 COPY packages/mcp/package.json /temp/prod/packages/mcp/
+COPY packages/oauth-core/package.json /temp/prod/packages/oauth-core/
 COPY packages/openclaw-inline/package.json /temp/prod/packages/openclaw-inline/
 COPY packages/sdk/package.json /temp/prod/packages/sdk/
 COPY packages/protocol/package.json /temp/prod/packages/protocol/
@@ -64,12 +66,14 @@ COPY web/packages/protocol/package.json ./web/packages/protocol/package.json
 COPY packages/bot-api-types/package.json ./packages/bot-api-types/package.json
 COPY packages/bot-api/package.json ./packages/bot-api/package.json
 COPY packages/mcp ./packages/mcp
+COPY packages/oauth-core ./packages/oauth-core
 COPY packages/openclaw-inline/package.json ./packages/openclaw-inline/package.json
 COPY packages/sdk ./packages/sdk
 COPY packages/protocol ./packages/protocol
 COPY scripts/package.json ./scripts/package.json
 RUN cd packages/protocol && bun run build
 RUN cd packages/sdk && bun run build
+RUN cd packages/oauth-core && bun run build
 RUN cd packages/mcp && bun run build
 
 # Final stage.
@@ -91,6 +95,8 @@ COPY --from=build /usr/src/app/packages/bot-api-types/package.json ./packages/bo
 COPY --from=build /usr/src/app/packages/bot-api/package.json ./packages/bot-api/package.json
 COPY --from=build /usr/src/app/packages/mcp/package.json ./packages/mcp/package.json
 COPY --from=build /usr/src/app/packages/mcp/dist ./packages/mcp/dist
+COPY --from=build /usr/src/app/packages/oauth-core/package.json ./packages/oauth-core/package.json
+COPY --from=build /usr/src/app/packages/oauth-core/dist ./packages/oauth-core/dist
 COPY --from=build /usr/src/app/packages/openclaw-inline/package.json ./packages/openclaw-inline/package.json
 COPY --from=build /usr/src/app/packages/sdk/package.json ./packages/sdk/package.json
 COPY --from=build /usr/src/app/packages/sdk/dist ./packages/sdk/dist
@@ -104,10 +110,13 @@ RUN apt-get update && apt-get install -y curl
 
 ENV NODE_ENV=production
 ENV PORT=8791
-ENV MCP_DB_PATH=/data/inline-mcp.sqlite
+ENV INLINE_API_BASE_URL=https://api.inline.chat
+ENV MCP_OAUTH_ISSUER=https://api.inline.chat
+ENV MCP_OAUTH_PROXY_BASE_URL=https://api.inline.chat
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD curl --fail --silent http://127.0.0.1:8791/health > /dev/null || exit 1
 
 USER bun
 WORKDIR /usr/src/app/packages/mcp
 EXPOSE 8791
-VOLUME ["/data"]
 CMD ["bun", "run", "dist/main.js"]

@@ -61,6 +61,7 @@
       "name": "@inline-chat/mcp",
       "version": "0.0.1",
       "dependencies": {
+        "@inline-chat/oauth-core": "workspace:*",
         "@inline-chat/protocol": "workspace:*",
         "@inline-chat/realtime-sdk": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.26.0",
@@ -73,9 +74,17 @@
         "vitest": "^4.0.16",
       },
     },
+    "packages/oauth-core": {
+      "name": "@inline-chat/oauth-core",
+      "version": "0.0.1",
+      "devDependencies": {
+        "@types/node": "^20.11.30",
+        "typescript": "^5.8.3",
+      },
+    },
     "packages/openclaw-inline": {
       "name": "@inline-openclaw/inline",
-      "version": "0.0.6",
+      "version": "0.0.13",
       "dependencies": {
         "@inline-chat/realtime-sdk": "^0.0.4",
         "zod": "^4.1.5",
@@ -103,7 +112,7 @@
     },
     "packages/sdk": {
       "name": "@inline-chat/realtime-sdk",
-      "version": "0.0.4",
+      "version": "0.0.7",
       "dependencies": {
         "@inline-chat/protocol": "^0.0.2",
         "ws": "^8.18.3",
@@ -136,6 +145,7 @@
         "@elysiajs/swagger": "^1.1.5",
         "@inline-chat/bot-api-types": "workspace:*",
         "@inline-chat/email-templates": "workspace:*",
+        "@inline-chat/oauth-core": "workspace:*",
         "@inline-chat/protocol": "workspace:*",
         "@linear/sdk": "^38.0.0",
         "@notionhq/client": "^3.0.1",
@@ -613,6 +623,8 @@
     "@inline-chat/email-templates": ["@inline-chat/email-templates@workspace:server/packages/email-templates"],
 
     "@inline-chat/mcp": ["@inline-chat/mcp@workspace:packages/mcp"],
+
+    "@inline-chat/oauth-core": ["@inline-chat/oauth-core@workspace:packages/oauth-core"],
 
     "@inline-chat/protocol": ["@inline-chat/protocol@workspace:packages/protocol"],
 

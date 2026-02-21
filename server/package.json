@@ -39,6 +39,7 @@
     "@react-email/components": "^1.0.6",
     "@react-email/render": "^2.0.4",
     "@inline-chat/bot-api-types": "workspace:*",
+    "@inline-chat/oauth-core": "workspace:*",
     "@inline-chat/protocol": "workspace:*",
     "@inline-chat/email-templates": "workspace:*",
     "@sentry/bun": "10",

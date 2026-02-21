@@ -18,6 +18,7 @@ COPY web/packages/protocol/package.json /temp/dev/web/packages/protocol/
 COPY packages/bot-api-types/package.json /temp/dev/packages/bot-api-types/
 COPY packages/bot-api/package.json /temp/dev/packages/bot-api/
 COPY packages/mcp/package.json /temp/dev/packages/mcp/
+COPY packages/oauth-core/package.json /temp/dev/packages/oauth-core/
 COPY packages/openclaw-inline/package.json /temp/dev/packages/openclaw-inline/
 COPY packages/protocol/package.json /temp/dev/packages/protocol/
 COPY packages/sdk/package.json /temp/dev/packages/sdk/
@@ -41,6 +42,7 @@ COPY web/packages/protocol/package.json /temp/prod/web/packages/protocol/
 COPY packages/bot-api-types/package.json /temp/prod/packages/bot-api-types/
 COPY packages/bot-api/package.json /temp/prod/packages/bot-api/
 COPY packages/mcp/package.json /temp/prod/packages/mcp/
+COPY packages/oauth-core/package.json /temp/prod/packages/oauth-core/
 COPY packages/openclaw-inline/package.json /temp/prod/packages/openclaw-inline/
 COPY packages/protocol/package.json /temp/prod/packages/protocol/
 COPY packages/sdk/package.json /temp/prod/packages/sdk/
@@ -68,6 +70,7 @@ ENV DATABASE_URL=${DATABASE_URL}
 ENV NODE_ENV=production
 # RUN bun typecheck 
 RUN bun install --frozen-lockfile 
+RUN cd packages/oauth-core && bun run build
 RUN cd server && bun run build
 
 # copy production dependencies and source code into final image
@@ -86,6 +89,8 @@ COPY --from=prerelease /usr/src/app/web/packages/protocol/package.json ./web/pac
 COPY --from=prerelease /usr/src/app/packages/bot-api-types/package.json ./packages/bot-api-types/
 COPY --from=prerelease /usr/src/app/packages/bot-api/package.json ./packages/bot-api/
 COPY --from=prerelease /usr/src/app/packages/mcp/package.json ./packages/mcp/
+COPY --from=prerelease /usr/src/app/packages/oauth-core/package.json ./packages/oauth-core/
+COPY --from=prerelease /usr/src/app/packages/oauth-core/dist ./packages/oauth-core/dist
 COPY --from=prerelease /usr/src/app/packages/openclaw-inline/package.json ./packages/openclaw-inline/
 COPY --from=prerelease /usr/src/app/packages/protocol/package.json ./packages/protocol/
 COPY --from=prerelease /usr/src/app/packages/sdk/package.json ./packages/sdk/
@@ -104,8 +109,7 @@ RUN apt-get update && apt-get install -y curl
 USER bun
 EXPOSE 8000/tcp
 
-# Add healthcheck
-# HEALTHCHECK --interval=10s --timeout=30s --start-period=5s --retries=3 \
-#   CMD curl -f http://localhost:8000/ || exit 1
+HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=5 \
+  CMD curl -fsS http://localhost:8000/healthz || exit 1
 
 ENTRYPOINT [ "bun", "run", "server/dist/index.js" ]

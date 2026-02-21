@@ -36,7 +36,9 @@
       "@inline-chat/protocol": ["../packages/protocol/src"],
       "@inline-chat/protocol/*": ["../packages/protocol/src/*"],
       "@inline-chat/bot-api-types": ["../packages/bot-api-types/src/index.ts"],
-      "@inline-chat/bot-api-types/*": ["../packages/bot-api-types/src/*"]
+      "@inline-chat/bot-api-types/*": ["../packages/bot-api-types/src/*"],
+      "@inline-chat/oauth-core": ["../packages/oauth-core/src/index.ts"],
+      "@inline-chat/oauth-core/*": ["../packages/oauth-core/src/*"]
     }
   }
 }

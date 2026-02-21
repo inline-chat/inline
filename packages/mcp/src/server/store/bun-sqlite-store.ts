@@ -1,5 +1,4 @@
 import { Database } from "bun:sqlite"
-import type { McpConfig } from "../config"
 import { mkdirSync } from "node:fs"
 import { dirname } from "node:path"
 import type {
@@ -12,7 +11,7 @@ import type {
   Store,
 } from "./types"
 
-export function createBunSqliteStore(config: Pick<McpConfig, "dbPath">): Store {
+export function createBunSqliteStore(config: { dbPath: string }): Store {
   if (config.dbPath !== ":memory:") {
     // Ensure the parent directory exists so Bun's sqlite can create the file.
     mkdirSync(dirname(config.dbPath), { recursive: true })
@@ -56,6 +55,9 @@ class BunSqliteStore implements Store {
         inline_user_id text not null,
         scope text not null,
         space_ids_json text not null,
+        allow_home_chats integer not null default 0,
+        allow_dms integer not null default 0,
+        allow_home_threads integer not null default 0,
         inline_token_enc text not null,
         created_at_ms integer not null,
         revoked_at_ms integer
@@ -91,6 +93,23 @@ class BunSqliteStore implements Store {
         reset_at_ms integer not null
       );
     `)
+
+    this.ensureColumn("grants", "allow_home_chats", "integer not null default 0")
+    this.ensureColumn("grants", "allow_dms", "integer not null default 0")
+    this.ensureColumn("grants", "allow_home_threads", "integer not null default 0")
+    // Backfill grants created before the split between DMs and home threads.
+    this.db.exec(`
+      update grants
+      set allow_dms = 1,
+          allow_home_threads = 1
+      where allow_home_chats = 1 and allow_dms = 0 and allow_home_threads = 0;
+    `)
+  }
+
+  private ensureColumn(tableName: string, columnName: string, columnDefSql: string): void {
+    const columns = this.db.query<{ name: string }, []>(`pragma table_info(${tableName})`).all()
+    if (columns.some((column) => column.name === columnName)) return
+    this.db.exec(`alter table ${tableName} add column ${columnName} ${columnDefSql}`)
   }
 
   cleanupExpired(nowMs: number): void {
@@ -254,12 +273,17 @@ class BunSqliteStore implements Store {
     inlineUserId: bigint
     scope: string
     spaceIds: bigint[]
+    allowDms?: boolean
+    allowHomeThreads?: boolean
     inlineTokenEnc: string
     nowMs: number
   }): Grant {
+    const allowDms = input.allowDms ?? false
+    const allowHomeThreads = input.allowHomeThreads ?? false
+    const allowHomeChats = allowDms || allowHomeThreads
     this.db
       .query(
-        "insert into grants (id, client_id, inline_user_id, scope, space_ids_json, inline_token_enc, created_at_ms) values (?, ?, ?, ?, ?, ?, ?)",
+        "insert into grants (id, client_id, inline_user_id, scope, space_ids_json, allow_home_chats, allow_dms, allow_home_threads, inline_token_enc, created_at_ms) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         input.id,
@@ -267,6 +291,9 @@ class BunSqliteStore implements Store {
         input.inlineUserId.toString(),
         input.scope,
         JSON.stringify(input.spaceIds.map((s) => s.toString())),
+        allowHomeChats ? 1 : 0,
+        allowDms ? 1 : 0,
+        allowHomeThreads ? 1 : 0,
         input.inlineTokenEnc,
         input.nowMs,
       )
@@ -276,6 +303,8 @@ class BunSqliteStore implements Store {
       inlineUserId: input.inlineUserId,
       scope: input.scope,
       spaceIds: input.spaceIds,
+      allowDms,
+      allowHomeThreads,
       inlineTokenEnc: input.inlineTokenEnc,
       createdAtMs: input.nowMs,
       revokedAtMs: null,
@@ -291,13 +320,15 @@ class BunSqliteStore implements Store {
           inline_user_id: string
           scope: string
           space_ids_json: string
+          allow_dms: number
+          allow_home_threads: number
           inline_token_enc: string
           created_at_ms: number
           revoked_at_ms: number | null
         },
         [string]
       >(
-        "select id, client_id, inline_user_id, scope, space_ids_json, inline_token_enc, created_at_ms, revoked_at_ms from grants where id = ?",
+        "select id, client_id, inline_user_id, scope, space_ids_json, allow_dms, allow_home_threads, inline_token_enc, created_at_ms, revoked_at_ms from grants where id = ?",
       )
       .get(grantId)
     if (!row) return null
@@ -307,6 +338,8 @@ class BunSqliteStore implements Store {
       inlineUserId: BigInt(row.inline_user_id),
       scope: row.scope,
       spaceIds: (JSON.parse(row.space_ids_json) as string[]).map((s) => BigInt(s)),
+      allowDms: row.allow_dms === 1,
+      allowHomeThreads: row.allow_home_threads === 1,
       inlineTokenEnc: row.inline_token_enc,
       createdAtMs: row.created_at_ms,
       revokedAtMs: row.revoked_at_ms,

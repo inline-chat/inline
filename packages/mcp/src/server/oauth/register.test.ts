@@ -1,141 +1,66 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { createApp } from "../app"
 
-describe("oauth register", () => {
-  it("rejects non-POST methods", async () => {
-    const app = createApp({ issuer: "http://localhost:8791" })
-    const res = await app.fetch(new Request("http://localhost/oauth/register"))
-    expect(res.status).toBe(404)
+describe("oauth register proxy", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
-  it("accepts http://localhost redirect uris (dev)", async () => {
-    const app = createApp({ issuer: "http://localhost:8791" })
+  it("forwards register request to oauth upstream", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          client_id: "client-1",
+          redirect_uris: ["https://example.com/callback"],
+        }),
+        {
+          status: 201,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+    )
+
+    const app = createApp({
+      issuer: "http://localhost:8791",
+      oauthProxyBaseUrl: "https://api.inline.chat",
+      allowedHosts: ["localhost"],
+      allowedOriginHosts: ["localhost"],
+    })
+
     const res = await app.fetch(
       new Request("http://localhost/oauth/register", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ redirect_uris: ["http://localhost:3000/cb"] }),
+        body: JSON.stringify({ redirect_uris: ["https://example.com/callback"] }),
       }),
     )
+
     expect(res.status).toBe(201)
-    const body = await res.json()
-    expect(body.redirect_uris).toEqual(["http://localhost:3000/cb"])
+    expect(await res.json()).toEqual({
+      client_id: "client-1",
+      redirect_uris: ["https://example.com/callback"],
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] ?? []
+    expect(String(url)).toBe("https://api.inline.chat/oauth/register")
+    expect((init as RequestInit).method).toBe("POST")
   })
 
-  it("rejects invalid json", async () => {
-    const app = createApp({ issuer: "http://localhost:8791" })
-    const res = await app.fetch(
-      new Request("http://localhost/oauth/register", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: "{",
-      }),
-    )
-    expect(res.status).toBe(400)
-  })
+  it("forwards alias /register to oauth upstream", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("ok", { status: 200 }))
 
-  it("rejects non-object json", async () => {
-    const app = createApp({ issuer: "http://localhost:8791" })
-    const res = await app.fetch(
-      new Request("http://localhost/oauth/register", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify("nope"),
-      }),
-    )
-    expect(res.status).toBe(400)
-  })
+    const app = createApp({
+      issuer: "http://localhost:8791",
+      oauthProxyBaseUrl: "https://api.inline.chat",
+      allowedHosts: ["localhost"],
+      allowedOriginHosts: ["localhost"],
+    })
 
-  it("rejects missing redirect_uris", async () => {
-    const app = createApp({ issuer: "http://localhost:8791" })
-    const res = await app.fetch(
-      new Request("http://localhost/oauth/register", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({}),
-      }),
-    )
-    expect(res.status).toBe(400)
-    expect((await res.json()).error).toBe("bad_request")
-  })
+    const res = await app.fetch(new Request("http://localhost/register", { method: "POST" }))
+    expect(res.status).toBe(200)
 
-  it("rejects empty redirect_uris", async () => {
-    const app = createApp({ issuer: "http://localhost:8791" })
-    const res = await app.fetch(
-      new Request("http://localhost/oauth/register", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ redirect_uris: [] }),
-      }),
-    )
-    expect(res.status).toBe(400)
-  })
-
-  it("rejects non-string redirect_uris", async () => {
-    const app = createApp({ issuer: "http://localhost:8791" })
-    const res = await app.fetch(
-      new Request("http://localhost/oauth/register", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ redirect_uris: [123] }),
-      }),
-    )
-    expect(res.status).toBe(400)
-  })
-
-  it("rejects empty redirect uri strings", async () => {
-    const app = createApp({ issuer: "http://localhost:8791" })
-    const res = await app.fetch(
-      new Request("http://localhost/oauth/register", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ redirect_uris: ["   "] }),
-      }),
-    )
-    expect(res.status).toBe(400)
-  })
-
-  it("rejects invalid and disallowed redirect uris", async () => {
-    const app = createApp({ issuer: "http://localhost:8791" })
-
-    const invalid = await app.fetch(
-      new Request("http://localhost/oauth/register", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ redirect_uris: ["not a url"] }),
-      }),
-    )
-    expect(invalid.status).toBe(400)
-
-    const disallowedScheme = await app.fetch(
-      new Request("http://localhost/oauth/register", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ redirect_uris: ["ftp://example.com/cb"] }),
-      }),
-    )
-    expect(disallowedScheme.status).toBe(400)
-
-    const disallowedHttp = await app.fetch(
-      new Request("http://localhost/oauth/register", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ redirect_uris: ["http://example.com/cb"] }),
-      }),
-    )
-    expect(disallowedHttp.status).toBe(400)
-  })
-
-  it("trims client_name", async () => {
-    const app = createApp({ issuer: "http://localhost:8791" })
-    const res = await app.fetch(
-      new Request("http://localhost/oauth/register", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ redirect_uris: ["https://example.com/cb"], client_name: "  Name  " }),
-      }),
-    )
-    const body = await res.json()
-    expect(body.client_name).toBe("Name")
+    const [url] = fetchMock.mock.calls[0] ?? []
+    expect(String(url)).toBe("https://api.inline.chat/register")
   })
 })

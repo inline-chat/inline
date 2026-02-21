@@ -51,6 +51,8 @@ describe("memory store", () => {
       inlineUserId: 42n,
       scope: "messages:read offline_access",
       spaceIds: [1n, 2n],
+      allowDms: true,
+      allowHomeThreads: true,
       inlineTokenEnc: "enc",
       nowMs: now,
     })
@@ -176,5 +178,35 @@ describe("memory store", () => {
     store.setAuthRequestInlineTokenEnc("missing", "enc")
     store.setAuthRequestInlineUserId("missing", 1n)
     store.markAuthCodeUsed("missing", 1)
+  })
+
+  it("revokes grants and refresh tokens by grant id and resolves grant by token hash", () => {
+    const store = createMemoryStore()
+    const now = 1000
+
+    store.createGrant({
+      id: "g1",
+      clientId: "c1",
+      inlineUserId: 42n,
+      scope: "messages:read",
+      spaceIds: [1n],
+      inlineTokenEnc: "enc",
+      nowMs: now,
+    })
+
+    store.createAccessToken({ tokenHashHex: "access1", grantId: "g1", nowMs: now, expiresAtMs: now + 1000 })
+    store.createRefreshToken({ tokenHashHex: "refresh1", grantId: "g1", nowMs: now, expiresAtMs: now + 1000 })
+    store.createRefreshToken({ tokenHashHex: "refresh2", grantId: "g1", nowMs: now, expiresAtMs: now + 1000 })
+
+    expect(store.findGrantIdByTokenHash("access1")).toBe("g1")
+    expect(store.findGrantIdByTokenHash("refresh1")).toBe("g1")
+    expect(store.findGrantIdByTokenHash("missing")).toBeNull()
+
+    store.revokeGrant("g1", now + 10)
+    expect(store.getGrant("g1")?.revokedAtMs).toBe(now + 10)
+
+    store.revokeRefreshTokensByGrant("g1", now + 20)
+    expect(store.getRefreshToken("refresh1", now + 21)).toBeNull()
+    expect(store.getRefreshToken("refresh2", now + 21)).toBeNull()
   })
 })

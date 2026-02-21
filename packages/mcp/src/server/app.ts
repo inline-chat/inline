@@ -1,17 +1,23 @@
 import { notFound, text, withJson } from "./http/response"
 import { OAuth } from "./oauth/routes"
 import { Mcp } from "./mcp/handler"
-import { createMemoryStore, type Store } from "./store"
 import { defaultAllowedHosts, defaultAllowedOriginHosts, defaultConfig, type McpConfig } from "./config"
 
 export type InlineMcpApp = {
   fetch(req: Request): Promise<Response>
 }
 
-export type CreateAppOptions = Partial<McpConfig> & {
-  // Test seam.
-  store?: Store
+export type CreateAppOptions = Partial<McpConfig>
+
+type RateLimitBucket = {
+  count: number
+  resetAtMs: number
 }
+
+const CORS_ALLOWED_METHODS = "GET, POST, DELETE, OPTIONS"
+const CORS_ALLOWED_HEADERS = "authorization, content-type, accept, mcp-session-id"
+const CORS_EXPOSE_HEADERS = "mcp-session-id, www-authenticate"
+const CORS_MAX_AGE_SECONDS = "600"
 
 function normalizeHostLike(value: string): string | null {
   const trimmed = value.trim()
@@ -60,17 +66,78 @@ function isAllowedOrigin(req: Request, config: McpConfig): boolean {
   return config.allowedOriginHosts.includes(originHost)
 }
 
+function addVary(headers: Headers, value: string): void {
+  const existing = headers.get("vary")
+  if (!existing) {
+    headers.set("vary", value)
+    return
+  }
+
+  const normalized = value.toLowerCase()
+  const existingValues = existing
+    .split(",")
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean)
+  if (existingValues.includes(normalized)) return
+  headers.set("vary", `${existing}, ${value}`)
+}
+
+function preflight(req: Request, origin: string): Response {
+  const requestHeaders = req.headers.get("access-control-request-headers")
+  const allowHeaders = requestHeaders && requestHeaders.trim().length > 0 ? requestHeaders : CORS_ALLOWED_HEADERS
+  const headers = new Headers({
+    "access-control-allow-origin": origin,
+    "access-control-allow-methods": CORS_ALLOWED_METHODS,
+    "access-control-allow-headers": allowHeaders,
+    "access-control-max-age": CORS_MAX_AGE_SECONDS,
+  })
+  addVary(headers, "origin")
+  addVary(headers, "access-control-request-method")
+  addVary(headers, "access-control-request-headers")
+  return new Response(null, { status: 204, headers })
+}
+
+function withCors(res: Response, origin: string): Response {
+  const headers = new Headers(res.headers)
+  headers.set("access-control-allow-origin", origin)
+  headers.set("access-control-expose-headers", CORS_EXPOSE_HEADERS)
+  addVary(headers, "origin")
+  return new Response(res.body, {
+    status: res.status,
+    statusText: res.statusText,
+    headers,
+  })
+}
+
 export function createApp(options?: CreateAppOptions): InlineMcpApp {
   const defaulted = defaultConfig()
   const config = { ...defaulted, ...(options ?? {}) }
+
   if (options?.issuer && options.allowedHosts == null) {
     config.allowedHosts = defaultAllowedHosts(config.issuer)
   }
+
   if (options?.allowedOriginHosts == null && (options?.issuer != null || options?.allowedHosts != null)) {
     config.allowedOriginHosts = defaultAllowedOriginHosts(config.issuer, config.allowedHosts)
   }
-  const store = options?.store ?? createMemoryStore()
-  const mcp = Mcp.create({ config, store })
+
+  const mcp = Mcp.create({ config })
+  const initRateLimits = new Map<string, RateLimitBucket>()
+
+  const consumeInitRateLimit = (key: string, nowMs: number): { allowed: boolean; retryAfterSeconds: number } => {
+    const bucket = initRateLimits.get(key)
+    const rule = config.endpointRateLimits.mcpInitialize
+
+    if (!bucket || bucket.resetAtMs <= nowMs) {
+      initRateLimits.set(key, { count: 1, resetAtMs: nowMs + rule.windowMs })
+      return { allowed: true, retryAfterSeconds: 0 }
+    }
+
+    bucket.count += 1
+    const allowed = bucket.count <= rule.max
+    const retryAfterSeconds = allowed ? 0 : Math.max(1, Math.ceil((bucket.resetAtMs - nowMs) / 1000))
+    return { allowed, retryAfterSeconds }
+  }
 
   return {
     async fetch(req) {
@@ -79,41 +146,55 @@ export function createApp(options?: CreateAppOptions): InlineMcpApp {
       if (!isAllowedHost(req, url, config)) {
         return withJson({ error: "forbidden_host" }, { status: 403 })
       }
+
+      const origin = req.headers.get("origin")
+
       if (!isAllowedOrigin(req, config)) {
         return withJson({ error: "forbidden_origin" }, { status: 403 })
       }
+
+      if (req.method === "OPTIONS" && origin && req.headers.get("access-control-request-method")) {
+        return preflight(req, origin)
+      }
+
+      const finish = (res: Response): Response => {
+        if (!origin) return res
+        return withCors(res, origin)
+      }
+
       if (url.pathname === "/mcp" && req.method === "POST" && !req.headers.get("mcp-session-id")) {
         const nowMs = Date.now()
         const ip = resolveClientIp(req)
-        const rl = store.consumeRateLimit({
-          key: `endpoint:mcp-init:${ip}`,
-          nowMs,
-          windowMs: config.endpointRateLimits.mcpInitialize.windowMs,
-          max: config.endpointRateLimits.mcpInitialize.max,
-        })
-        if (!rl.allowed) {
-          return withJson(
-            { error: "rate_limited", error_description: "Too many MCP initialization attempts." },
-            { status: 429, headers: { "retry-after": String(rl.retryAfterSeconds) } },
+        const rateLimit = consumeInitRateLimit(`endpoint:mcp-init:${ip}`, nowMs)
+
+        if (!rateLimit.allowed) {
+          return finish(
+            withJson(
+              { error: "rate_limited", error_description: "Too many MCP initialization attempts." },
+              {
+                status: 429,
+                headers: { "retry-after": String(rateLimit.retryAfterSeconds) },
+              },
+            ),
           )
         }
       }
 
       if (url.pathname === "/health") {
-        return withJson({ ok: true })
+        return finish(withJson({ ok: true }))
       }
 
       const mcpRes = await mcp.handle(req, url)
-      if (mcpRes) return mcpRes
+      if (mcpRes) return finish(mcpRes)
 
-      const oauthRes = await OAuth.handle(req, url, config, store)
-      if (oauthRes) return oauthRes
+      const oauthRes = await OAuth.handle(req, url, config)
+      if (oauthRes) return finish(oauthRes)
 
       if (url.pathname === "/") {
-        return text(200, "Inline MCP server (see /health)")
+        return finish(text(200, "Inline MCP server (see /health)"))
       }
 
-      return notFound()
+      return finish(notFound())
     },
   }
 }

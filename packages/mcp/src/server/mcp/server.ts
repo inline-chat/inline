@@ -1,7 +1,7 @@
 import * as z from "zod/v4"
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js"
-import type { Grant } from "../store/types"
+import type { McpGrant } from "./grant"
 import type { InlineApi } from "../inline/inline-api"
 import { formatInlineMessageId, parseInlineMessageId } from "./ids"
 import { logMessagesSendAudit } from "./audit-log"
@@ -37,7 +37,7 @@ function sourceTitle(title: string | null | undefined, chatId: bigint): string {
 }
 
 export function createInlineMcpServer(params: {
-  grant: Grant
+  grant: McpGrant
   inline: InlineApi
 }): McpServer {
   const server = new McpServer(
@@ -56,7 +56,7 @@ export function createInlineMcpServer(params: {
     "search",
     {
       title: "Search Inline",
-      description: "Search messages in the spaces you approved.",
+      description: "Search messages in the spaces, DMs, and home threads you approved.",
       inputSchema: {
         query: z.string().min(1).describe("Search query"),
       },
@@ -99,7 +99,7 @@ export function createInlineMcpServer(params: {
     "fetch",
     {
       title: "Fetch Inline Message",
-      description: "Fetch a message by ID from the spaces you approved.",
+      description: "Fetch a message by ID from the spaces, DMs, and home threads you approved.",
       inputSchema: {
         id: z.string().min(1).describe("Message ID returned by search"),
       },
@@ -148,7 +148,7 @@ export function createInlineMcpServer(params: {
     "messages.send",
     {
       title: "Send Inline Message",
-      description: "Send a message to a chat in one of the spaces you approved.",
+      description: "Send a message to a chat in your approved spaces, DMs, or home threads.",
       inputSchema: {
         chatId: z.string().min(1).describe("Inline chat id"),
         text: z.string().min(1).max(8000).describe("Message text"),

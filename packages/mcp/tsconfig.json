@@ -13,8 +13,17 @@
     "declarationMap": false,
     "sourceMap": false,
 
-    "verbatimModuleSyntax": true
+    "verbatimModuleSyntax": true,
+    "baseUrl": ".",
+    "paths": {
+      "@inline-chat/oauth-core": ["../oauth-core/src/index.ts"],
+      "@inline-chat/oauth-core/*": ["../oauth-core/src/*"]
+    }
   },
-  "include": ["src"]
+  "include": ["src"],
+  "references": [
+    {
+      "path": "../oauth-core"
+    }
+  ]
 }
-

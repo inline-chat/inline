@@ -20,6 +20,7 @@ import { Elysia } from "elysia"
 import { there } from "./controllers/extra/there"
 import swagger from "@elysiajs/swagger"
 import { apiV1 } from "@in/server/controllers/v1"
+import { oauth } from "@in/server/controllers/oauth"
 import { botApi } from "@in/server/controllers/bot/bot"
 import { connectionManager } from "@in/server/ws/connections"
 import { Log, LogLevel } from "@in/server/utils/log"
@@ -54,6 +55,7 @@ if (NODE_ENV !== "development") {
 export const app = new Elysia()
   .use(health)
   .use(root)
+  .use(oauth)
   .use(apiV1)
   .use(botApi)
   .use(realtime)
