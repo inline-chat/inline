@@ -1,6 +1,8 @@
 import Combine
+import GRDB
 import InlineKit
 import InlineUI
+import Logger
 import UIKit
 
 final class NewVideoView: UIView {
@@ -14,10 +16,13 @@ final class NewVideoView: UIView {
   private let maskLayer = CAShapeLayer()
   private var imageConstraints: [NSLayoutConstraint] = []
   private var progressCancellable: AnyCancellable?
+  private var uploadProgressCancellable: AnyCancellable?
   private var isDownloading = false
   private var isPresentingViewer = false
   private var pendingViewerURL: URL?
   private var downloadProgress: Double = 0
+  private var boundUploadVideoLocalId: Int64?
+  private var uploadProgressEvent: UploadProgressEvent?
 
   private var hasText: Bool {
     fullMessage.message.text?.isEmpty == false
@@ -91,7 +96,7 @@ final class NewVideoView: UIView {
     button.setImage(UIImage(systemName: "xmark", withConfiguration: config), for: .normal)
     button.tintColor = .white
     button.isHidden = true
-    button.accessibilityLabel = "Cancel download"
+    button.accessibilityLabel = "Cancel transfer"
     return button
   }()
 
@@ -144,6 +149,7 @@ final class NewVideoView: UIView {
 
   deinit {
     progressCancellable?.cancel()
+    uploadProgressCancellable?.cancel()
   }
 
   // MARK: - Setup
@@ -267,7 +273,7 @@ final class NewVideoView: UIView {
     setupMask()
     setupGestures()
     updateImage()
-    updateDurationLabel()
+    updateTopLeftBadge()
     updateOverlay()
   }
 
@@ -275,7 +281,7 @@ final class NewVideoView: UIView {
     let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap))
     tapGesture.delegate = self
     addGestureRecognizer(tapGesture)
-    cancelDownloadButton.addTarget(self, action: #selector(handleCancelDownload), for: .touchUpInside)
+    cancelDownloadButton.addTarget(self, action: #selector(handleCancelTransfer), for: .touchUpInside)
   }
 
   private func setupMask() {
@@ -325,19 +331,23 @@ final class NewVideoView: UIView {
         == fullMessage.videoInfo?.thumbnail?.bestPhotoSize()?.localPath
     {
       updateOverlay()
-      updateDurationLabel()
+      updateTopLeftBadge()
       return
     }
 
     progressCancellable?.cancel()
     progressCancellable = nil
+    uploadProgressCancellable?.cancel()
+    uploadProgressCancellable = nil
+    boundUploadVideoLocalId = nil
+    uploadProgressEvent = nil
     isDownloading = false
     downloadProgress = 0
     downloadProgressView.setProgress(0)
 
     setupVideoConstraints()
     updateImage()
-    updateDurationLabel()
+    updateTopLeftBadge()
     updateOverlay()
   }
 
@@ -356,11 +366,18 @@ final class NewVideoView: UIView {
       .map { FileDownloader.shared.isVideoDownloadActive(videoId: $0.id) } ?? false
     let downloading = !isVideoDownloaded && (isDownloading || globalDownloadActive)
 
+    if isUploading, let videoLocalId = fullMessage.videoInfo?.video.id {
+      bindUploadProgressIfNeeded(videoLocalId: videoLocalId)
+    } else {
+      clearUploadProgressBinding()
+      uploadProgressEvent = nil
+    }
+
     if isUploading {
       overlayIconView.isHidden = true
       overlaySpinner.startAnimating()
       downloadProgressView.isHidden = true
-      cancelDownloadButton.isHidden = true
+      cancelDownloadButton.isHidden = false
     } else if downloading {
       overlaySpinner.stopAnimating()
       overlayIconView.isHidden = true
@@ -382,11 +399,41 @@ final class NewVideoView: UIView {
     }
 
     overlayBackground.isHidden = false
+    updateTopLeftBadge()
   }
 
-  private func updateDurationLabel() {
+  private func updateTopLeftBadge() {
+    if fullMessage.message.status == .sending,
+       let event = uploadProgressEvent {
+      durationBadge.isHidden = false
+      switch event.phase {
+        case .processing:
+          durationBadge.text = "Processing..."
+        case .uploading:
+          if event.totalBytes > 0, event.bytesSent > 0, event.fraction < 0.999 {
+            let uploaded = FileHelpers.formatFileSize(UInt64(event.bytesSent))
+            let total = FileHelpers.formatFileSize(UInt64(event.totalBytes))
+            durationBadge.text = "\(uploaded) / \(total)"
+          } else {
+            durationBadge.text = "Uploading..."
+          }
+        case .completed:
+          showDurationBadge()
+        case .failed:
+          durationBadge.text = "Upload failed"
+        case .cancelled:
+          durationBadge.text = "Upload cancelled"
+      }
+      return
+    }
+
+    showDurationBadge()
+  }
+
+  private func showDurationBadge() {
     guard let duration = fullMessage.videoInfo?.video.duration, duration > 0 else {
       durationBadge.isHidden = true
+      durationBadge.text = nil
       return
     }
 
@@ -499,7 +546,22 @@ final class NewVideoView: UIView {
       }
   }
 
-  @objc private func handleCancelDownload() {
+  @objc private func handleCancelTransfer() {
+    let isUploading = fullMessage.message.status == .sending && fullMessage.videoInfo?.video.cdnUrl == nil
+    if isUploading,
+       let videoLocalId = fullMessage.videoInfo?.video.id {
+      cancelUpload(
+        videoLocalId: videoLocalId,
+        transactionId: fullMessage.message.transactionId,
+        randomId: fullMessage.message.randomId
+      )
+      return
+    }
+
+    cancelDownload()
+  }
+
+  private func cancelDownload() {
     guard let videoId = fullMessage.videoInfo?.id else { return }
     FileDownloader.shared.cancelVideoDownload(videoId: videoId)
     progressCancellable?.cancel()
@@ -508,6 +570,72 @@ final class NewVideoView: UIView {
     downloadProgress = 0
     downloadProgressView.setProgress(0)
     updateOverlay()
+  }
+
+  private func cancelUpload(videoLocalId: Int64, transactionId: String?, randomId: Int64?) {
+    Task { await FileUploader.shared.cancelVideoUpload(videoLocalId: videoLocalId) }
+
+    if let transactionId, !transactionId.isEmpty {
+      Transactions.shared.cancel(transactionId: transactionId)
+    } else if let randomId {
+      Task {
+        Api.realtime.cancelTransaction(where: {
+          guard $0.transaction.method == .sendMessage else { return false }
+          guard case let .sendMessage(input) = $0.transaction.input else { return false }
+          return input.randomID == randomId
+        })
+      }
+    }
+
+    Task(priority: .userInitiated) {
+      let message = fullMessage.message
+      let chatId = message.chatId
+      let messageId = message.messageId
+      let peerId = message.peerId
+
+      do {
+        try await AppDatabase.shared.dbWriter.write { db in
+          try Message
+            .filter(Column("chatId") == chatId)
+            .filter(Column("messageId") == messageId)
+            .deleteAll(db)
+        }
+
+        MessagesPublisher.shared
+          .messagesDeleted(messageIds: [messageId], peer: peerId)
+      } catch {
+        Log.shared.error("Failed to delete local message row for cancel", error: error)
+      }
+    }
+
+    clearUploadProgressBinding()
+    uploadProgressEvent = nil
+    updateOverlay()
+  }
+
+  private func bindUploadProgressIfNeeded(videoLocalId: Int64) {
+    guard boundUploadVideoLocalId != videoLocalId else { return }
+
+    uploadProgressCancellable?.cancel()
+    boundUploadVideoLocalId = videoLocalId
+    uploadProgressCancellable = FileUploader
+      .videoUploadProgressPublisher(videoLocalId: videoLocalId)
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] event in
+        guard let self else { return }
+        uploadProgressEvent = event
+        updateTopLeftBadge()
+
+        if event.phase == .completed || event.phase == .failed || event.phase == .cancelled {
+          clearUploadProgressBinding()
+        }
+      }
+  }
+
+  private func clearUploadProgressBinding() {
+    uploadProgressCancellable?.cancel()
+    uploadProgressCancellable = nil
+    boundUploadVideoLocalId = nil
   }
 
   private func videoLocalUrl() -> URL? {
