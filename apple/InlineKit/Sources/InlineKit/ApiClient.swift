@@ -73,10 +73,26 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   public init() {}
 
   private let log = Log.scoped("ApiClient")
-  private final class UploadTaskDelegate: NSObject, URLSessionTaskDelegate {
-    private let progressHandler: @Sendable (Double) -> Void
 
-    init(progressHandler: @escaping @Sendable (Double) -> Void) {
+  public struct UploadTransferProgress: Sendable {
+    public let bytesSent: Int64
+    public let totalBytes: Int64
+
+    public var fraction: Double {
+      guard totalBytes > 0 else { return 0 }
+      return min(max(Double(bytesSent) / Double(totalBytes), 0), 1)
+    }
+
+    public init(bytesSent: Int64, totalBytes: Int64) {
+      self.bytesSent = bytesSent
+      self.totalBytes = totalBytes
+    }
+  }
+
+  private final class UploadTaskDelegate: NSObject, URLSessionTaskDelegate {
+    private let progressHandler: @Sendable (UploadTransferProgress) -> Void
+
+    init(progressHandler: @escaping @Sendable (UploadTransferProgress) -> Void) {
       self.progressHandler = progressHandler
     }
 
@@ -88,8 +104,12 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
       totalBytesExpectedToSend: Int64
     ) {
       guard totalBytesExpectedToSend > 0 else { return }
-      let fraction = Double(totalBytesSent) / Double(totalBytesExpectedToSend)
-      progressHandler(min(max(fraction, 0), 1))
+      progressHandler(
+        UploadTransferProgress(
+          bytesSent: totalBytesSent,
+          totalBytes: totalBytesExpectedToSend
+        )
+      )
     }
   }
 
@@ -666,7 +686,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     filename: String,
     mimeType: MIMEType,
     videoMetadata: VideoUploadMetadata? = nil,
-    progress: @escaping @Sendable (Double) -> Void
+    progress: @escaping @Sendable (UploadTransferProgress) -> Void
   ) async throws -> UploadFileResult {
     guard let url = URL(string: "\(baseURL)/uploadFile") else {
       throw APIError.invalidURL
@@ -729,7 +749,8 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     do {
       let delegate = UploadTaskDelegate(progressHandler: progress)
       let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
-      progress(0)
+      let estimatedBytes = Int64(multipartFormData.body.count)
+      progress(UploadTransferProgress(bytesSent: 0, totalBytes: estimatedBytes))
       let (data, response) = try await session.upload(for: request, from: multipartFormData.body)
       session.finishTasksAndInvalidate()
 
@@ -742,7 +763,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
           let apiResponse = try decoder.decode(APIResponse<UploadFileResult>.self, from: data)
           switch apiResponse {
             case let .success(data):
-              progress(1)
+              progress(UploadTransferProgress(bytesSent: estimatedBytes, totalBytes: estimatedBytes))
               return data
             case let .error(error, errorCode, description):
               log.error("Error \(error): \(description ?? "")")

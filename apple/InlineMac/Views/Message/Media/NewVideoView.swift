@@ -279,6 +279,9 @@ final class NewVideoView: NSView {
   private var isDownloading = false
   private var isShowingPreview = false
   private var progressCancellable: AnyCancellable?
+  private var uploadProgressCancellable: AnyCancellable?
+  private var boundUploadVideoLocalId: Int64?
+  private var uploadProgressEvent: UploadProgressEvent?
   private var suppressNextClick = false
   private enum ActiveTransfer {
     case uploading(videoLocalId: Int64, transactionId: String?, randomId: Int64?)
@@ -340,12 +343,13 @@ final class NewVideoView: NSView {
       // Even if the thumbnail is unchanged, refresh overlay to reflect download/upload state changes.
       refreshDownloadFlags()
       updateOverlay()
+      updateTopLeftBadge()
       return
     }
 
     refreshDownloadFlags()
     updateImage()
-    updateDurationLabel()
+    updateTopLeftBadge()
     updateOverlay()
   }
 
@@ -395,7 +399,7 @@ final class NewVideoView: NSView {
     updateImage()
     setupMasks()
     setupClickGesture()
-    updateDurationLabel()
+    updateTopLeftBadge()
     updateOverlay()
   }
 
@@ -647,10 +651,41 @@ final class NewVideoView: NSView {
     CATransaction.commit()
   }
 
-  private func updateDurationLabel() {
+  private func updateTopLeftBadge() {
+    if fullMessage.message.status == .sending,
+       let event = uploadProgressEvent {
+      durationBadge.isHidden = false
+      durationBadgeBackground.isHidden = false
+
+      switch event.phase {
+      case .processing:
+        durationBadge.stringValue = "Processing..."
+      case .uploading:
+        if event.totalBytes > 0, event.bytesSent > 0, event.fraction < 0.999 {
+          let uploaded = FileHelpers.formatFileSize(UInt64(event.bytesSent))
+          let total = FileHelpers.formatFileSize(UInt64(event.totalBytes))
+          durationBadge.stringValue = "\(uploaded) / \(total)"
+        } else {
+          durationBadge.stringValue = "Uploading..."
+        }
+      case .completed:
+        showDurationBadge()
+      case .failed:
+        durationBadge.stringValue = "Upload failed"
+      case .cancelled:
+        durationBadge.stringValue = "Upload cancelled"
+      }
+      return
+    }
+
+    showDurationBadge()
+  }
+
+  private func showDurationBadge() {
     guard let durationSeconds = fullMessage.videoInfo?.video.duration, durationSeconds > 0 else {
       durationBadge.isHidden = true
       durationBadgeBackground.isHidden = true
+      durationBadge.stringValue = ""
       return
     }
 
@@ -694,6 +729,12 @@ final class NewVideoView: NSView {
     }
 
     let isUploading = fullMessage.message.status == .sending && fullMessage.videoInfo?.video.cdnUrl == nil
+    if isUploading, let videoLocalId = fullMessage.videoInfo?.video.id {
+      bindUploadProgressIfNeeded(videoLocalId: videoLocalId)
+    } else {
+      clearUploadProgressBinding()
+      uploadProgressEvent = nil
+    }
     let globalDownloadActive = fullMessage.videoInfo
       .map { FileDownloader.shared.isVideoDownloadActive(videoId: $0.id) } ?? false
 
@@ -724,6 +765,8 @@ final class NewVideoView: NSView {
     } else {
       activeTransfer = nil
     }
+
+    updateTopLeftBadge()
   }
 
   private func refreshDownloadFlags() {
@@ -731,6 +774,31 @@ final class NewVideoView: NSView {
     if let local = videoLocalUrl(), FileManager.default.fileExists(atPath: local.path) {
       isDownloading = false
     }
+  }
+
+  private func bindUploadProgressIfNeeded(videoLocalId: Int64) {
+    guard boundUploadVideoLocalId != videoLocalId else { return }
+
+    uploadProgressCancellable?.cancel()
+    boundUploadVideoLocalId = videoLocalId
+    uploadProgressCancellable = FileUploader
+      .videoUploadProgressPublisher(videoLocalId: videoLocalId)
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] event in
+        guard let self else { return }
+        uploadProgressEvent = event
+        updateTopLeftBadge()
+
+        if event.phase == .completed || event.phase == .failed || event.phase == .cancelled {
+          clearUploadProgressBinding()
+        }
+      }
+  }
+
+  private func clearUploadProgressBinding() {
+    uploadProgressCancellable?.cancel()
+    uploadProgressCancellable = nil
+    boundUploadVideoLocalId = nil
   }
 
   // MARK: - Click / Preview
@@ -824,6 +892,7 @@ final class NewVideoView: NSView {
 
   deinit {
     progressCancellable?.cancel()
+    uploadProgressCancellable?.cancel()
   }
 
   private func cancelActiveTransfer() {
@@ -878,6 +947,8 @@ final class NewVideoView: NSView {
       isDownloading = false
       progressCancellable?.cancel()
       progressCancellable = nil
+      clearUploadProgressBinding()
+      uploadProgressEvent = nil
       updateOverlay()
     }
   }

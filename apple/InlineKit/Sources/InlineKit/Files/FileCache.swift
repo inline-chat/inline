@@ -369,50 +369,19 @@ public actor FileCache: Sendable {
     guard durationTime.isValid else { throw FileCacheError.failedToSave }
     let durationSeconds = Int(CMTimeGetSeconds(durationTime).rounded())
 
-    // Persist the video to app cache.
-    // Keep native MP4 as-is for fast attach and Telegram-like UX.
-    // Only transcode non-MP4 inputs to guarantee server-accepted format.
+    // Persist the original selected video to app cache first.
+    // Preprocessing/transcoding happens in FileUploader right before upload.
     let directory = FileHelpers.getLocalCacheDirectory(for: .videos)
     let fileManager = FileManager.default
     let sourceExtension = url.pathExtension.lowercased()
-    let needsMp4Transcode = sourceExtension != "mp4"
-    let shouldPreprocess = needsMp4Transcode
-    let localPath = UUID().uuidString + ".mp4"
+    let localExtension = sourceExtension.isEmpty ? "mp4" : sourceExtension
+    let localPath = UUID().uuidString + "." + localExtension
     let localUrl = directory.appendingPathComponent(localPath)
-
-    var finalWidth = width
-    var finalHeight = height
-    var finalDuration = durationSeconds
-    var fileSize = 0
-
-    if shouldPreprocess {
-      do {
-        let options = VideoCompressionOptions.uploadDefault(forceTranscode: true)
-        let result = try await VideoCompressor.shared.compressVideo(at: url, options: options)
-        defer {
-          if fileManager.fileExists(atPath: result.url.path) {
-            try? fileManager.removeItem(at: result.url)
-          }
-        }
-        if fileManager.fileExists(atPath: localUrl.path) {
-          try fileManager.removeItem(at: localUrl)
-        }
-        try fileManager.moveItem(at: result.url, to: localUrl)
-        finalWidth = result.width
-        finalHeight = result.height
-        finalDuration = result.duration
-        fileSize = Int(result.fileSize)
-      } catch {
-        // Non-MP4 inputs must become MP4, so surface preprocessing failure.
-        throw error
-      }
-    } else {
-      if fileManager.fileExists(atPath: localUrl.path) {
-        try fileManager.removeItem(at: localUrl)
-      }
-      try fileManager.copyItem(at: url, to: localUrl)
-      fileSize = FileHelpers.getFileSize(at: localUrl)
+    if fileManager.fileExists(atPath: localUrl.path) {
+      try fileManager.removeItem(at: localUrl)
     }
+    try fileManager.copyItem(at: url, to: localUrl)
+    let fileSize = FileHelpers.getFileSize(at: localUrl)
 
     // Generate or reuse thumbnail
     let thumbImage: PlatformImage? = if let thumbnail {
@@ -426,9 +395,9 @@ public actor FileCache: Sendable {
     } else { nil }
 
     let video = try MediaHelpers.shared.createLocalVideo(
-      width: finalWidth,
-      height: finalHeight,
-      duration: finalDuration,
+      width: width,
+      height: height,
+      duration: durationSeconds,
       size: fileSize,
       thumbnail: thumbnailInfo?.photo,
       localPath: localPath

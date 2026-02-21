@@ -90,40 +90,7 @@ extension ComposeView {
     button.configuration = config
     button.layer.cornerRadius = 20
     button.clipsToBounds = true
-
-    let libraryAction = UIAction(
-      title: "Photos",
-      image: UIImage(systemName: "photo.on.rectangle.angled"),
-      handler: { [weak self] _ in
-        self?.presentPicker()
-      }
-    )
-
-    let videoAction = UIAction(
-      title: "Video",
-      image: UIImage(systemName: "video"),
-      handler: { [weak self] _ in
-        self?.presentVideoPicker()
-      }
-    )
-
-    let cameraAction = UIAction(
-      title: "Camera",
-      image: UIImage(systemName: "camera"),
-      handler: { [weak self] _ in
-        self?.presentCamera()
-      }
-    )
-
-    let fileAction = UIAction(
-      title: "File",
-      image: UIImage(systemName: "folder"),
-      handler: { [weak self] _ in
-        self?.presentFileManager()
-      }
-    )
-    button.menu = UIMenu(children: [libraryAction, videoAction, cameraAction, fileAction])
-    button.showsMenuAsPrimaryAction = true
+    button.addTarget(self, action: #selector(attachmentButtonTapped), for: .touchUpInside)
 
     return button
   }

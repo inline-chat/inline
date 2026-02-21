@@ -1243,8 +1243,8 @@ class ShareState: ObservableObject {
 
           let uploadResult: InlineKit.UploadFileResult
           let itemIndex = processedItems
-          let progressHandler: (Double) -> Void = { [weak self] progress in
-            let itemProgress = (Double(itemIndex) + progress) / Double(totalItems)
+          let progressHandler: @Sendable (ApiClient.UploadTransferProgress) -> Void = { [weak self] progress in
+            let itemProgress = (Double(itemIndex) + progress.fraction) / Double(totalItems)
             Task { @MainActor in
               self?.uploadProgress = itemProgress * 0.9
             }
@@ -1301,9 +1301,21 @@ class ShareState: ObservableObject {
                   ]
                 )
               }
+              let videoData = try Data(contentsOf: prepared.url, options: .mappedIfSafe)
+              guard Int64(videoData.count) <= Self.maxVideoFileSizeBytes else {
+                throw NSError(
+                  domain: "ShareError",
+                  code: 3,
+                  userInfo: [
+                    NSLocalizedDescriptionKey:
+                      "\(prepared.fileName) is too large. Maximum size is \(Self.maxFileSizeDisplay(for: Self.maxVideoFileSizeBytes))."
+                  ]
+                )
+              }
               let videoMetadata = try await buildVideoMetadata(from: prepared.url)
-              uploadResult = try await apiClient.uploadVideoMultipart(
-                fileURL: prepared.url,
+              uploadResult = try await apiClient.uploadFile(
+                type: .video,
+                data: videoData,
                 filename: prepared.fileName,
                 mimeType: prepared.mimeType,
                 videoMetadata: videoMetadata,
