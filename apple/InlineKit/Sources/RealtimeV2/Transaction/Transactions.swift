@@ -239,7 +239,7 @@ actor Transactions {
   }
 
   /// Cancel all transactions that match the predicate from the queue.
-  func cancel(where predicate: (TransactionWrapper) -> Bool) {
+  func cancel(where predicate: @Sendable (TransactionWrapper) -> Bool) {
     for (transactionId, wrapper) in _queue {
       if predicate(wrapper) {
         log.trace("Cancelling transaction \(transactionId) \(wrapper.transaction.debugDescription)")
