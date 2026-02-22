@@ -77,6 +77,7 @@ public final class ChatLinksViewModel: ObservableObject, @unchecked Sendable {
   private var hasStarted = false
 
   private let pageSize: Int32 = 50
+  private let loadMoreTriggerWindow = 8
 
   public init(db: AppDatabase, chatId: Int64, peer: Peer) {
     self.db = db
@@ -157,9 +158,24 @@ public final class ChatLinksViewModel: ObservableObject, @unchecked Sendable {
   }
 
   public func loadMoreIfNeeded(currentMessageId: Int64) async {
-    guard let lastMessageId = linkMessages.last?.message.messageId else { return }
-    guard currentMessageId == lastMessageId else { return }
+    guard Self.shouldLoadMore(
+      currentMessageId: currentMessageId,
+      loadedMessageIds: linkMessages.map(\.message.messageId),
+      triggerWindow: loadMoreTriggerWindow
+    ) else { return }
     await loadMore(reset: false)
+  }
+
+  nonisolated static func shouldLoadMore(
+    currentMessageId: Int64,
+    loadedMessageIds: [Int64],
+    triggerWindow: Int
+  ) -> Bool {
+    guard triggerWindow > 0, !loadedMessageIds.isEmpty else { return false }
+    let dedupedIds = Array(Set(loadedMessageIds))
+    let oldestToNewest = dedupedIds.sorted()
+    let triggerCount = min(triggerWindow, oldestToNewest.count)
+    return oldestToNewest.prefix(triggerCount).contains(currentMessageId)
   }
 
   private func loadMore(reset: Bool) async {
