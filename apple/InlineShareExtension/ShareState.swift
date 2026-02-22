@@ -1302,8 +1302,10 @@ class ShareState: ObservableObject {
                 )
               }
               let videoMetadata = try await buildVideoMetadata(from: prepared.url)
-              uploadResult = try await apiClient.uploadVideoMultipart(
-                fileURL: prepared.url,
+              let videoData = try Data(contentsOf: prepared.url, options: .mappedIfSafe)
+              uploadResult = try await apiClient.uploadFile(
+                type: .video,
+                data: videoData,
                 filename: prepared.fileName,
                 mimeType: prepared.mimeType,
                 videoMetadata: videoMetadata,
