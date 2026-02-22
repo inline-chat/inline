@@ -412,8 +412,10 @@ public actor RealtimeV2 {
     }
   }
 
-  public func cancelTransaction(where predicate: @escaping (TransactionWrapper) -> Bool) {
-    Task { await transactions.cancel(where: predicate) }
+  public func cancelTransaction(where predicate: @escaping @Sendable (TransactionWrapper) -> Bool) {
+    Task { [predicate] in
+      await transactions.cancel(where: predicate)
+    }
   }
 
   public func updateSyncConfig(_ config: SyncConfig) {
