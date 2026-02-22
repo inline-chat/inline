@@ -593,13 +593,25 @@ class MainSidebarItemCell: NSView {
 
   private func archiveChat(archived: Bool) {
     guard let item, let peer = item.peerId else { return }
-    let spaceId = item.spaceId
+    let scopedSpaceId: Int64? = if item.kind == .contact {
+      item.spaceId ?? nav2?.activeTab.spaceId
+    } else {
+      item.spaceId
+    }
     let shouldNavigateOut = shouldNavigateOutOnArchive(peer: peer, archived: archived)
     let nav2 = nav2
 
     Task(priority: .userInitiated) {
       do {
-        try await DataManager.shared.updateDialog(peerId: peer, archived: archived, spaceId: spaceId)
+        if item.kind == .contact, let scopedSpaceId, case let .user(userId) = peer {
+          try await DataManager.shared.updateSpaceMemberDialogArchiveState(
+            spaceId: scopedSpaceId,
+            peerUserId: userId,
+            archived: archived
+          )
+        } else {
+          try await DataManager.shared.updateDialog(peerId: peer, archived: archived, spaceId: scopedSpaceId)
+        }
         if shouldNavigateOut {
           await MainActor.run {
             nav2?.navigate(to: .empty)

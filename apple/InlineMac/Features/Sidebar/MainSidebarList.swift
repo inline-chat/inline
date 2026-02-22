@@ -701,7 +701,21 @@ class MainSidebarList: NSView {
     guard let item = chatItemsByID[id], let peer = item.peerId else { return false }
     if item.dialog?.archived == true {
       Task(priority: .userInitiated) {
-        try await DataManager.shared.updateDialog(peerId: peer, archived: false, spaceId: item.spaceId)
+        let scopedSpaceId: Int64? = if item.kind == .contact {
+          item.spaceId ?? nav2.activeTab.spaceId
+        } else {
+          item.spaceId
+        }
+
+        if item.kind == .contact, let scopedSpaceId, case let .user(userId) = peer {
+          try await DataManager.shared.updateSpaceMemberDialogArchiveState(
+            spaceId: scopedSpaceId,
+            peerUserId: userId,
+            archived: false
+          )
+        } else {
+          try await DataManager.shared.updateDialog(peerId: peer, archived: false, spaceId: scopedSpaceId)
+        }
       }
     }
     nav2.navigate(to: .chat(peer: peer))

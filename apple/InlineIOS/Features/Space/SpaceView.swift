@@ -157,7 +157,11 @@ struct SpaceView: View {
   private func handleArchive(_ item: HomeChatItem) {
     Task {
       if let user = item.user {
-        try await data.updateDialog(peerId: .user(id: user.user.id), archived: true)
+        try await data.updateSpaceMemberDialogArchiveState(
+          spaceId: spaceId,
+          peerUserId: user.user.id,
+          archived: true
+        )
       } else if let chat = item.chat {
         try await data.updateDialog(peerId: .thread(id: chat.id), archived: true)
       }
