@@ -700,6 +700,23 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("space member dialog archive state") { db in
+      try db.create(table: "spaceMemberDialogArchiveState") { t in
+        t.autoIncrementedPrimaryKey("id")
+        t.column("spaceId", .integer).notNull().references("space", column: "id", onDelete: .cascade)
+        t.column("peerUserId", .integer).notNull().references("user", column: "id", onDelete: .cascade)
+        t.column("archived", .boolean).notNull().defaults(to: false)
+        t.column("updatedAt", .datetime).notNull()
+        t.uniqueKey(["spaceId", "peerUserId"], onConflict: .replace)
+      }
+
+      try db.create(
+        index: "space_member_dialog_archive_state_space_idx",
+        on: "spaceMemberDialogArchiveState",
+        columns: ["spaceId", "archived"]
+      )
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

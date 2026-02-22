@@ -77,7 +77,7 @@ public final class FullSpaceViewModel: ObservableObject {
   @Published public private(set) var members: [FullMemberItem] = []
 
   public var filteredMemberChats: [SpaceChatItem] {
-    memberChats
+    memberChats.filter { $0.dialog.archived != true }
   }
 
   public var filteredChats: [SpaceChatItem] {
@@ -125,10 +125,22 @@ public final class FullSpaceViewModel: ObservableObject {
     membersChatsSancellable =
       ValueObservation
         .tracking { db in
-          try Member
+          let spaceArchivedPeerUserIds = try SpaceMemberDialogArchiveState.archivedPeerUserIds(db: db, spaceId: spaceId)
+
+          let items = try Member
             .spaceChatItemRequest()
             .filter(Column("spaceId") == spaceId)
             .fetchAll(db)
+
+          return items.map { item in
+            var patched = item
+            if let peerUserId = patched.dialog.peerUserId {
+              patched.dialog.archived = spaceArchivedPeerUserIds.contains(peerUserId)
+            } else {
+              patched.dialog.archived = false
+            }
+            return patched
+          }
         }
         .publisher(in: db.dbWriter, scheduling: .immediate)
         .sink(
@@ -136,12 +148,7 @@ public final class FullSpaceViewModel: ObservableObject {
             Log.shared.error("failed to fetch members in space view model. error: \(error)")
           },
           receiveValue: { [weak self] members in
-            // Log.shared.debug("got list of members chats \(members)")
             self?.memberChats = members
-//              .filter { chat in
-//              // For now, filter chats with users who are pending setup
-//              chat.userInfo?.user.pendingSetup != true
-//            }
           }
         )
   }

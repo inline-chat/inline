@@ -86,7 +86,7 @@ struct ChatListItem: Hashable, Identifiable {
     id = Identifier(kind: .contact, rawValue: member.id)
   }
 
-  init(spaceContactItem: SpaceChatItem) {
+  init(spaceContactItem: SpaceChatItem, spaceId: Int64? = nil) {
     kind = .contact
     dialog = spaceContactItem.dialog
     chat = spaceContactItem.chat
@@ -103,7 +103,7 @@ struct ChatListItem: Hashable, Identifiable {
     } else {
       lastMessage = nil
     }
-    spaceId = spaceContactItem.dialog.spaceId
+    self.spaceId = spaceId ?? spaceContactItem.dialog.spaceId
     id = Identifier(kind: .contact, rawValue: spaceContactItem.id)
   }
 

@@ -532,6 +532,38 @@ public class DataManager: ObservableObject {
     )
   }
 
+  public func updateSpaceMemberDialogArchiveState(
+    spaceId: Int64,
+    peerUserId: Int64,
+    archived: Bool
+  ) async throws {
+    try await database.dbWriter.write { db in
+      let existing = try SpaceMemberDialogArchiveState
+        .filter(SpaceMemberDialogArchiveState.Columns.spaceId == spaceId)
+        .filter(SpaceMemberDialogArchiveState.Columns.peerUserId == peerUserId)
+        .fetchOne(db)
+
+      if archived {
+        if var existing {
+          existing.archived = true
+          existing.updatedAt = Date()
+          try existing.update(db)
+        } else {
+          let state = SpaceMemberDialogArchiveState(
+            spaceId: spaceId,
+            peerUserId: peerUserId,
+            archived: true
+          )
+          try state.insert(db)
+        }
+      } else {
+        if let existing {
+          try existing.delete(db)
+        }
+      }
+    }
+  }
+
   public func getSpace(spaceId: Int64) async throws {
     let result = try await ApiClient.shared.getSpace(spaceId: spaceId)
     try await database.dbWriter.write { db in
