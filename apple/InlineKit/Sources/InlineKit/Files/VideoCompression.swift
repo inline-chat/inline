@@ -19,10 +19,10 @@ public struct VideoCompressionOptions: Sendable {
 
   public static func uploadDefault(forceTranscode: Bool = false) -> VideoCompressionOptions {
     VideoCompressionOptions(
-      maxDimension: 960,
-      minFileSizeBytes: 4_000_000,
-      maxBitrateMbps: 4.5,
-      minimumCompressionRatio: 0.9,
+      maxDimension: 1_280,
+      minFileSizeBytes: 8_000_000,
+      maxBitrateMbps: 3.0,
+      minimumCompressionRatio: 0.94,
       forceTranscode: forceTranscode
     )
   }
@@ -170,17 +170,23 @@ public actor VideoCompressor {
     exportSession.shouldOptimizeForNetworkUse = true
 
     let sessionBox = ExportSessionBox(exportSession)
-    try await withCheckedThrowingContinuation { continuation in
-      sessionBox.session.exportAsynchronously {
-        switch sessionBox.session.status {
-        case .completed:
-          continuation.resume()
-        case .failed, .cancelled:
-          continuation.resume(throwing: sessionBox.session.error ?? VideoCompressionError.exportFailed)
-        default:
-          continuation.resume(throwing: VideoCompressionError.exportFailed)
+    try await withTaskCancellationHandler {
+      try await withCheckedThrowingContinuation { continuation in
+        sessionBox.session.exportAsynchronously {
+          switch sessionBox.session.status {
+          case .completed:
+            continuation.resume()
+          case .cancelled:
+            continuation.resume(throwing: CancellationError())
+          case .failed:
+            continuation.resume(throwing: sessionBox.session.error ?? VideoCompressionError.exportFailed)
+          default:
+            continuation.resume(throwing: VideoCompressionError.exportFailed)
+          }
         }
       }
+    } onCancel: {
+      sessionBox.session.cancelExport()
     }
   }
 
