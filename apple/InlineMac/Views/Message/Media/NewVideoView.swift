@@ -278,7 +278,11 @@ final class NewVideoView: NSView {
   private var bottomRightRadius: CGFloat = Theme.messageBubbleCornerRadius - 1
   private var isDownloading = false
   private var isShowingPreview = false
-  private var progressCancellable: AnyCancellable?
+  private var downloadProgressCancellable: AnyCancellable?
+  private var uploadProgressCancellable: AnyCancellable?
+  private var uploadProgressBindingTask: Task<Void, Never>?
+  private var uploadProgressLocalId: Int64?
+  private var uploadProgressSnapshot: UploadProgressSnapshot?
   private var suppressNextClick = false
   private enum ActiveTransfer {
     case uploading(videoLocalId: Int64, transactionId: String?, randomId: Int64?)
@@ -331,6 +335,7 @@ final class NewVideoView: NSView {
     self.fullMessage = fullMessage
     updateCornerRadii()
     updateMasks()
+    syncUploadProgressBinding()
 
     if
       prev.videoInfo?.id == fullMessage.videoInfo?.id,
@@ -339,6 +344,7 @@ final class NewVideoView: NSView {
     {
       // Even if the thumbnail is unchanged, refresh overlay to reflect download/upload state changes.
       refreshDownloadFlags()
+      updateDurationLabel()
       updateOverlay()
       return
     }
@@ -395,6 +401,7 @@ final class NewVideoView: NSView {
     updateImage()
     setupMasks()
     setupClickGesture()
+    syncUploadProgressBinding()
     updateDurationLabel()
     updateOverlay()
   }
@@ -648,6 +655,20 @@ final class NewVideoView: NSView {
   }
 
   private func updateDurationLabel() {
+    if isPendingUpload(), let uploadProgressSnapshot {
+      durationBadge.isHidden = false
+      durationBadgeBackground.isHidden = false
+      switch uploadProgressSnapshot.stage {
+      case .processing:
+        durationBadge.stringValue = "Processing"
+      case .uploading, .completed:
+        durationBadge.stringValue = uploadProgressLabel(uploadProgressSnapshot)
+      case .failed:
+        durationBadge.stringValue = "Failed"
+      }
+      return
+    }
+
     guard let durationSeconds = fullMessage.videoInfo?.video.duration, durationSeconds > 0 else {
       durationBadge.isHidden = true
       durationBadgeBackground.isHidden = true
@@ -671,6 +692,27 @@ final class NewVideoView: NSView {
     }
   }
 
+  private func uploadProgressLabel(_ progress: UploadProgressSnapshot) -> String {
+    if progress.totalBytes > 0 {
+      return "\(formatTransferBytes(progress.bytesSent))/\(formatTransferBytes(progress.totalBytes))"
+    }
+
+    if progress.fractionCompleted > 0 {
+      let percent = Int((progress.fractionCompleted * 100).rounded())
+      return "\(percent)%"
+    }
+
+    return "Uploading"
+  }
+
+  private func formatTransferBytes(_ bytes: Int64) -> String {
+    ByteCountFormatter.string(fromByteCount: max(0, bytes), countStyle: .file)
+  }
+
+  private func isPendingUpload() -> Bool {
+    fullMessage.message.status == .sending && fullMessage.videoInfo?.video.cdnUrl == nil
+  }
+
   private func updateOverlay() {
     if !Thread.isMainThread {
       DispatchQueue.main.async { [weak self] in self?.updateOverlay() }
@@ -689,11 +731,13 @@ final class NewVideoView: NSView {
     if isVideoDownloaded {
       // Prevent any new download attempts once we have the file locally.
       isDownloading = false
-      progressCancellable?.cancel()
-      progressCancellable = nil
+      downloadProgressCancellable?.cancel()
+      downloadProgressCancellable = nil
     }
 
-    let isUploading = fullMessage.message.status == .sending && fullMessage.videoInfo?.video.cdnUrl == nil
+    let isUploading = isPendingUpload()
+      || uploadProgressSnapshot?.stage == .processing
+      || uploadProgressSnapshot?.stage == .uploading
     let globalDownloadActive = fullMessage.videoInfo
       .map { FileDownloader.shared.isVideoDownloadActive(videoId: $0.id) } ?? false
 
@@ -730,6 +774,46 @@ final class NewVideoView: NSView {
     // Clear stale downloading state if the file is already present locally.
     if let local = videoLocalUrl(), FileManager.default.fileExists(atPath: local.path) {
       isDownloading = false
+    }
+  }
+
+  private func syncUploadProgressBinding() {
+    guard isPendingUpload(), let videoLocalId = fullMessage.videoInfo?.video.id else {
+      clearUploadProgressBinding(resetState: true)
+      return
+    }
+
+    if uploadProgressLocalId == videoLocalId, (uploadProgressCancellable != nil || uploadProgressBindingTask != nil) {
+      return
+    }
+
+    clearUploadProgressBinding(resetState: false)
+    uploadProgressLocalId = videoLocalId
+    uploadProgressBindingTask = Task { @MainActor [weak self] in
+      guard let self else { return }
+      let publisher = await FileUploader.shared.videoProgressPublisher(videoLocalId: videoLocalId)
+      guard !Task.isCancelled, self.uploadProgressLocalId == videoLocalId else { return }
+
+      self.uploadProgressBindingTask = nil
+      self.uploadProgressCancellable = publisher
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] progress in
+          guard let self else { return }
+          self.uploadProgressSnapshot = progress
+          self.updateDurationLabel()
+          self.updateOverlay()
+        }
+    }
+  }
+
+  private func clearUploadProgressBinding(resetState: Bool) {
+    uploadProgressBindingTask?.cancel()
+    uploadProgressBindingTask = nil
+    uploadProgressCancellable?.cancel()
+    uploadProgressCancellable = nil
+    uploadProgressLocalId = nil
+    if resetState {
+      uploadProgressSnapshot = nil
     }
   }
 
@@ -823,7 +907,9 @@ final class NewVideoView: NSView {
   }
 
   deinit {
-    progressCancellable?.cancel()
+    downloadProgressCancellable?.cancel()
+    uploadProgressCancellable?.cancel()
+    uploadProgressBindingTask?.cancel()
   }
 
   private func cancelActiveTransfer() {
@@ -834,8 +920,8 @@ final class NewVideoView: NSView {
     case let .downloading(videoId):
       FileDownloader.shared.cancelVideoDownload(videoId: videoId)
       isDownloading = false
-      progressCancellable?.cancel()
-      progressCancellable = nil
+      downloadProgressCancellable?.cancel()
+      downloadProgressCancellable = nil
       updateOverlay()
 
     case let .uploading(videoLocalId, transactionId, randomId):
@@ -876,8 +962,8 @@ final class NewVideoView: NSView {
       }
 
       isDownloading = false
-      progressCancellable?.cancel()
-      progressCancellable = nil
+      downloadProgressCancellable?.cancel()
+      downloadProgressCancellable = nil
       updateOverlay()
     }
   }
@@ -992,14 +1078,14 @@ extension NewVideoView {
 
       isDownloading = true
       updateOverlay()
-      progressCancellable = FileDownloader.shared.videoProgressPublisher(videoId: videoInfo.id)
+      downloadProgressCancellable = FileDownloader.shared.videoProgressPublisher(videoId: videoInfo.id)
         .receive(on: DispatchQueue.main)
         .sink { [weak self] progress in
           guard let self else { return }
 
           // Bail out early if the file landed while we were listening.
           if let local = self.videoLocalUrl(), FileManager.default.fileExists(atPath: local.path) {
-            self.progressCancellable = nil
+            self.downloadProgressCancellable = nil
             self.isDownloading = false
             self.updateOverlay()
             completion(.success(local))
@@ -1007,7 +1093,7 @@ extension NewVideoView {
           }
 
           if let error = progress.error {
-            self.progressCancellable = nil
+            self.downloadProgressCancellable = nil
             self.isDownloading = false
             self.updateOverlay()
             completion(.failure(error))
@@ -1015,7 +1101,7 @@ extension NewVideoView {
           }
 
           if progress.isComplete, let local = self.videoLocalUrl() {
-            self.progressCancellable = nil
+            self.downloadProgressCancellable = nil
             self.isDownloading = false
             self.updateOverlay()
             completion(.success(local))
