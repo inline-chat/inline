@@ -612,26 +612,26 @@ public extension Message {
     updateHasLinkIfNeeded()
 
     // Save the message
-    let message = try saveAndFetch(db, onConflict: .ignore)
+    let savedMessage = try saveAndFetch(db, onConflict: .ignore)
 
     // Publish changes if needed
     if publishChanges {
-      let message = self // Create an immutable copy
+      let messageForPublish = self
       let peer = peerId // Capture the peer value
+      let wasExisting = isExisting
 
       db.afterNextTransaction { _ in
         Task { @MainActor in
-          // HACKY WAY
-          if isExisting {
-            await MessagesPublisher.shared.messageUpdated(message: message, peer: peer, animated: false)
+          if wasExisting {
+            await MessagesPublisher.shared.messageUpdated(message: messageForPublish, peer: peer, animated: false)
           } else {
-            await MessagesPublisher.shared.messageAdded(message: message, peer: peer)
+            await MessagesPublisher.shared.messageAdded(message: messageForPublish, peer: peer)
           }
         }
       }
     }
 
-    return message
+    return savedMessage
   }
 
 }
@@ -670,18 +670,20 @@ public extension ApiMessage {
     }
 
     if publishChanges {
+      let messageForPublish = message
+      let peer = messageForPublish.peerId
       // Publish changes when save is successful
       if isUpdate {
         db.afterNextTransaction { _ in
           Task { @MainActor in
-            await MessagesPublisher.shared.messageUpdated(message: message, peer: message.peerId, animated: false)
+            await MessagesPublisher.shared.messageUpdated(message: messageForPublish, peer: peer, animated: false)
           }
         }
       } else {
         db.afterNextTransaction { _ in
           // This code runs after the transaction successfully commits
           Task { @MainActor in
-            await MessagesPublisher.shared.messageAdded(message: message, peer: message.peerId)
+            await MessagesPublisher.shared.messageAdded(message: messageForPublish, peer: peer)
           }
         }
       }
@@ -761,18 +763,20 @@ public extension Message {
     }
 
     if publishChanges {
+      let messageForPublish = message
+      let peer = messageForPublish.peerId
       // Publish changes when save is successful
       if isUpdate {
         db.afterNextTransaction { _ in
           Task { @MainActor in
-            await MessagesPublisher.shared.messageUpdated(message: message, peer: message.peerId, animated: false)
+            await MessagesPublisher.shared.messageUpdated(message: messageForPublish, peer: peer, animated: false)
           }
         }
       } else {
         db.afterNextTransaction { _ in
           // This code runs after the transaction successfully commits
           Task { @MainActor in
-            await MessagesPublisher.shared.messageAdded(message: message, peer: message.peerId)
+            await MessagesPublisher.shared.messageAdded(message: messageForPublish, peer: peer)
           }
         }
       }

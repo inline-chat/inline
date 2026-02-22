@@ -70,6 +70,7 @@ public final class HomeSearchViewModel: ObservableObject {
 
     Task {
       do {
+        let queryPattern = "%\(trimmedQuery)%"
         let chats = try await db.reader.read { db in
           let threads = try Chat
             .filter {
@@ -81,12 +82,10 @@ public final class HomeSearchViewModel: ObservableObject {
             .fetchAll(db)
 
           let users = try User
-            .filter {
-              $0.firstName.like("%\(trimmedQuery)%") ||
-                $0.lastName.like("%\(trimmedQuery)%") ||
-                $0.email == trimmedQuery ||
-                $0.username == trimmedQuery
-            }
+            .filter(
+              sql: "firstName LIKE ? OR lastName LIKE ? OR email = ? OR username = ?",
+              arguments: [queryPattern, queryPattern, trimmedQuery, trimmedQuery]
+            )
             .fetchAll(db)
 
           return threads.map { HomeSearchResultItem.thread($0) } +
