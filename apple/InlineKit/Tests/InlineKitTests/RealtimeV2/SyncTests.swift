@@ -6,7 +6,7 @@ import Testing
 @testable import RealtimeV2
 
 @Suite("SyncTests")
-class SyncTests {
+final class SyncTests {
   @Test("updates lastSyncDate with safety gap")
   func testLastSyncDateSafetyGap() async throws {
     let storage = InMemorySyncStorage()
@@ -57,12 +57,13 @@ class SyncTests {
     var update = InlineProtocol.Update()
     update.update = .chatHasNewUpdates(payload)
 
-    Task { await sync.process(updates: [update]) }
+    async let firstProcess: Void = sync.process(updates: [update])
     await client.waitForFirstCallStarted()
 
     await sync.process(updates: [update])
 
     await client.releaseFirstCall()
+    await firstProcess
     _ = await waitForCondition {
       await client.getCallCount() == 2
     }
@@ -770,7 +771,7 @@ class SyncTests {
     var signal = InlineProtocol.Update()
     signal.update = .chatHasNewUpdates(payload)
 
-    Task { await sync.process(updates: [signal]) }
+    async let firstProcess: Void = sync.process(updates: [signal])
     await client.waitForCallStarted(2)
 
     let realtime1 = makeNewMessageUpdate(seq: 1, date: 80)
@@ -778,6 +779,7 @@ class SyncTests {
     await sync.process(updates: [realtime1, realtime2])
 
     await client.releaseCall(2)
+    await firstProcess
 
     _ = await waitForCondition {
       await apply.appliedUpdates.count == 2
@@ -827,13 +829,14 @@ class SyncTests {
     var signal = InlineProtocol.Update()
     signal.update = .chatHasNewUpdates(payload)
 
-    Task { await sync.process(updates: [signal]) }
+    async let firstProcess: Void = sync.process(updates: [signal])
     await client.waitForCallStarted(2)
 
     let realtime2 = makeChatInfoUpdate(seq: 2, date: 90)
     await sync.process(updates: [realtime2])
 
     await client.releaseCall(2)
+    await firstProcess
 
     _ = await waitForCondition {
       await apply.appliedUpdates.count == 2
@@ -1010,7 +1013,7 @@ class SyncTests {
     var signal = InlineProtocol.Update()
     signal.update = .chatHasNewUpdates(payload)
 
-    Task { await sync.process(updates: [signal]) }
+    async let firstProcess: Void = sync.process(updates: [signal])
     await client.waitForCallStarted(2)
 
     let realtime4 = makeNewMessageUpdate(seq: 4, date: 110)
@@ -1018,6 +1021,7 @@ class SyncTests {
     await sync.process(updates: [realtime4, realtime5])
 
     await client.releaseCall(2)
+    await firstProcess
 
     _ = await waitForCondition {
       await apply.appliedUpdates.count == 5
@@ -1099,7 +1103,7 @@ class SyncTests {
     var signal = InlineProtocol.Update()
     signal.update = .chatHasNewUpdates(payload)
 
-    Task { await sync.process(updates: [signal]) }
+    async let firstProcess: Void = sync.process(updates: [signal])
     await client.waitForFirstCallStarted()
 
     // While the fetch is in-flight (awaiting callRpc), a realtime update advances the bucket to seq=1.
@@ -1107,6 +1111,7 @@ class SyncTests {
     await sync.process(updates: [realtimeUpdate])
 
     await client.releaseFirstCall()
+    await firstProcess
     _ = await waitForCondition {
       let bucketState = await storage.getBucketState(for: .chat(peer: peer))
       return bucketState.seq == 1
