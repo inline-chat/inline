@@ -1,4 +1,5 @@
 import GRDB
+import AppKit
 import InlineKit
 import InlineUI
 import Logger
@@ -205,9 +206,13 @@ struct ChatInfo: View {
     VStack(spacing: 0) {
       ChatInfoDetailRow(title: "Chat ID") {
         if let chatId {
-          Text(String(chatId))
-            .font(.system(.body, design: .monospaced))
-            .textSelection(.enabled)
+          Button {
+            copyThreadIdToClipboard(chatId)
+          } label: {
+            Text(String(chatId))
+              .font(.system(.body, design: .monospaced))
+          }
+          .buttonStyle(.plain)
         } else {
           Text("—")
             .foregroundStyle(.secondary)
@@ -358,6 +363,13 @@ struct ChatInfo: View {
 
   private func syncTranslationState() {
     isTranslationEnabled = TranslationState.shared.isTranslationEnabled(for: peerId)
+  }
+
+  private func copyThreadIdToClipboard(_ threadId: Int64) {
+    let pasteboard = NSPasteboard.general
+    pasteboard.clearContents()
+    pasteboard.setString(String(threadId), forType: .string)
+    ToastCenter.shared.showSuccess("Copied chat ID")
   }
 
   private func loadVisibilityPermissions() async {
