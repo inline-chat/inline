@@ -115,7 +115,7 @@ ENV MCP_OAUTH_ISSUER=https://api.inline.chat
 ENV MCP_OAUTH_PROXY_BASE_URL=https://api.inline.chat
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD sh -c 'curl -fsS "http://127.0.0.1:${PORT:-8791}/health" > /dev/null || exit 1'
+  CMD sh -c 'curl -fsS -H "Host: mcp.inline.chat" "http://127.0.0.1:${PORT:-8791}/health" > /dev/null || exit 1'
 
 USER bun
 WORKDIR /usr/src/app/packages/mcp
