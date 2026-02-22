@@ -24,6 +24,7 @@ struct HomeSidebar: View {
   @State private var searchQuery = ""
   @State private var keyMonitorSearchUnsubscriber: (() -> Void)?
   @State private var keyMonitorVimUnsubscriber: (() -> Void)?
+  @State private var focusSearchObserver: NSObjectProtocol?
   @State private var hasRestoredSpaceSelection = false
   private static let updateOverlayBottomPadding: CGFloat = 42 + 16
 
@@ -148,18 +149,21 @@ struct HomeSidebar: View {
     }
     .onAppear {
       subscribeNavKeyMonitor()
-      // Add notification observer for focus search
-      NotificationCenter.default.addObserver(
-        forName: .focusSearch,
-        object: nil,
-        queue: .main
-      ) { _ in
-        isSearching = true
+      if focusSearchObserver == nil {
+        focusSearchObserver = NotificationCenter.default.addObserver(
+          forName: .focusSearch,
+          object: nil,
+          queue: .main
+        ) { _ in
+          isSearching = true
+        }
       }
     }
     .onDisappear {
-      // Remove notification observer
-      NotificationCenter.default.removeObserver(self, name: .focusSearch, object: nil)
+      if let focusSearchObserver {
+        NotificationCenter.default.removeObserver(focusSearchObserver)
+        self.focusSearchObserver = nil
+      }
     }
   }
 

@@ -9,6 +9,7 @@ import SwiftUI
 @MainActor
 class MainSplitView: NSViewController {
   let dependencies: AppDependencies
+  private let log = Log.scoped("MainSplitView")
   private let quickSearchViewModel: QuickSearchViewModel
 
   // Views
@@ -109,6 +110,7 @@ class MainSplitView: NSViewController {
   private var isQuickSearchVisible: Bool = false
   private var didPrewarmQuickSearch: Bool = false
   private var quickSearchClickMonitor: Any?
+  private var quickSearchClickMonitorIgnoreUntil: TimeInterval = 0
 
   private var isTabStripEnabled: Bool {
     AppSettings.shared.showMainTabStrip
@@ -560,18 +562,24 @@ class MainSplitView: NSViewController {
 
     DispatchQueue.main.async { [weak self] in
       guard let self else { return }
+      guard self.isQuickSearchVisible == false else { return }
       self.quickSearchOverlayContainer.isHidden = true
       self.quickSearchOverlayContainer.alphaValue = 1
     }
   }
 
   private func setupQuickSearchObserver() {
+    guard quickSearchObserver == nil else { return }
     quickSearchObserver = NotificationCenter.default.addObserver(
       forName: .focusSearch,
       object: nil,
       queue: .main
     ) { [weak self] _ in
-      self?.toggleQuickSearchOverlay()
+      guard let self else { return }
+      if self.isQuickSearchVisible {
+        self.log.debug("Ignoring focusSearch; quick search is already visible")
+      }
+      self.showQuickSearchOverlay()
     }
   }
 
@@ -707,9 +715,14 @@ class MainSplitView: NSViewController {
     isQuickSearchVisible = true
     quickSearchOverlayBackground.isHidden = false
     quickSearchOverlayContainer.isHidden = false
+    quickSearchOverlayContainer.alphaValue = 1
+    let baselineEventTimestamp = NSApp.currentEvent?.timestamp ?? 0
+    let baselineUptime = ProcessInfo.processInfo.systemUptime
+    quickSearchClickMonitorIgnoreUntil = max(baselineEventTimestamp, baselineUptime) + 0.12
     quickSearchViewModel.requestFocus()
     installQuickSearchKeyHandlers()
     installQuickSearchClickMonitor()
+    log.debug("Quick search shown")
     NotificationCenter.default.post(
       name: .quickSearchVisibilityChanged,
       object: nil,
@@ -722,9 +735,11 @@ class MainSplitView: NSViewController {
     isQuickSearchVisible = false
     quickSearchOverlayBackground.isHidden = true
     quickSearchOverlayContainer.isHidden = true
+    quickSearchClickMonitorIgnoreUntil = 0
     quickSearchViewModel.reset()
     removeQuickSearchKeyHandlers()
     removeQuickSearchClickMonitor()
+    log.debug("Quick search hidden")
     NotificationCenter.default.post(
       name: .quickSearchVisibilityChanged,
       object: nil,
@@ -808,8 +823,12 @@ class MainSplitView: NSViewController {
       matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
     ) { [weak self] event in
       guard let self, self.isQuickSearchVisible else { return event }
+      if event.timestamp < self.quickSearchClickMonitorIgnoreUntil {
+        return event
+      }
       let pointInContainer = self.quickSearchOverlayContainer.convert(event.locationInWindow, from: nil)
       if self.quickSearchOverlayContainer.bounds.contains(pointInContainer) == false {
+        self.log.debug("Dismissing quick search from outside click")
         self.hideQuickSearchOverlay()
       }
       return event
