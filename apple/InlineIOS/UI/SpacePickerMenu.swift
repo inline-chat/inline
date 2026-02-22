@@ -73,19 +73,16 @@ private struct SpacePickerMenuPill: View {
   @Environment(\.colorScheme) private var colorScheme
 
   var body: some View {
-    SpacePickerMenuLabel(space: space, title: title)
-      .padding(.horizontal, 10)
-      .padding(.vertical, 9)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .background {
-        if #available(iOS 26.0, *) {
-          Color.clear
-            .glassEffect(.regular.interactive(), in: Capsule())
-        } else {
-          Capsule()
-            .fill(.ultraThinMaterial)
-        }
-      }
+    if #available(iOS 26.0, *) {
+      SpacePickerMenuLabel(space: space, title: title)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .glassEffect(.regular.interactive(), in: Capsule())
+    } else {
+      SpacePickerMenuLabel(space: space, title: title)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+    }
   }
 
   private var borderColor: Color {
@@ -96,7 +93,6 @@ private struct SpacePickerMenuPill: View {
 private struct SpacePickerMenuLabel: View {
   let space: Space?
   let title: String
-
 
   var body: some View {
     HStack(spacing: 8) {
@@ -120,16 +116,9 @@ private struct SpacePickerMenuLabel: View {
       Text(title)
         .font(.headline)
         .foregroundStyle(.primary)
-        .frame(maxWidth: 160, alignment: .leading)
         .lineLimit(1)
         .truncationMode(.tail)
-        // Prefer truncating the title over hiding it entirely in tight toolbar layouts.
         .layoutPriority(1)
-
-      Image(systemName: "chevron.up.chevron.down")
-        .font(.caption2)
-        .foregroundStyle(.secondary)
-        .frame(width: 12, height: 12)
     }
   }
 }
@@ -137,7 +126,6 @@ private struct SpacePickerMenuLabel: View {
 private struct SpacePickerOverlayView: View {
   private static let cornerRadius: CGFloat = 12
   private static let maxListHeight: CGFloat = 260
-  private static let preferredWidth: CGFloat = 240
 
   let spaces: [Space]
   let selectedSpaceId: Int64?
@@ -149,8 +137,7 @@ private struct SpacePickerOverlayView: View {
   @Environment(\.colorScheme) private var colorScheme
 
   var body: some View {
-    let shape = RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
-    let content = VStack(spacing: 8) {
+    VStack(spacing: 8) {
       ScrollView {
         VStack(spacing: 0) {
           if let onSelectHome {
@@ -193,34 +180,14 @@ private struct SpacePickerOverlayView: View {
           }
           .buttonStyle(.plain)
         }
+        .padding(10)
       }
       .scrollIndicators(.hidden)
-      .frame(maxHeight: Self.maxListHeight)
+      
     }
-    .padding(10)
-    .frame(width: Self.preferredWidth)
-
-    Group {
-      if #available(iOS 26.0, *) {
-        GlassEffectContainer(spacing: 8) {
-          content
-        }
-        .glassEffect(.regular.interactive(), in: shape)
-      } else {
-        content
-          .background(.ultraThinMaterial, in: shape)
-      }
-    }
-    .overlay(
-      shape.stroke(borderColor, lineWidth: 0.5)
-    )
-    .shadow(color: Color.black.opacity(0.2), radius: 12, x: 0, y: 6)
+    
   }
-
-  private var borderColor: Color {
-    colorScheme == .dark ? Color.white.opacity(0.08) : Color.black.opacity(0.08)
-  }
-
+ 
 }
 
 private struct SpacePickerOverlayRow: View {
