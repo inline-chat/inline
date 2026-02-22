@@ -105,16 +105,14 @@ COPY --from=build /usr/src/app/packages/protocol/dist ./packages/protocol/dist
 COPY --from=build /usr/src/app/scripts/package.json ./scripts/package.json
 RUN bun install --frozen-lockfile --production
 
-# Install curl for Coolify healthcheck.
-RUN apt-get update && apt-get install -y curl
+# Install curl/wget for external platform health checks.
+RUN apt-get update && apt-get install -y --no-install-recommends curl wget && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production
 ENV PORT=8791
 ENV INLINE_API_BASE_URL=https://api.inline.chat
 ENV MCP_OAUTH_ISSUER=https://api.inline.chat
 ENV MCP_OAUTH_PROXY_BASE_URL=https://api.inline.chat
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD curl --fail --silent http://127.0.0.1:8791/health > /dev/null || exit 1
 
 USER bun
 WORKDIR /usr/src/app/packages/mcp

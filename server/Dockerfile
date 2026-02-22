@@ -101,15 +101,12 @@ COPY --from=prerelease /usr/src/app/server/packages/email-preview/package.json .
 COPY --from=prerelease /usr/src/app/server/packages/email-templates/package.json ./server/packages/email-templates/
 RUN bun install --frozen-lockfile --production
 
-# Install curl for Coolify healthcheck
-RUN apt-get update && apt-get install -y curl
+# Install curl/wget for external platform health checks
+RUN apt-get update && apt-get install -y --no-install-recommends curl wget && rm -rf /var/lib/apt/lists/*
 
 
 # run the app
 USER bun
 EXPOSE 8000/tcp
-
-HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=5 \
-  CMD curl -fsS http://localhost:8000/healthz || exit 1
 
 ENTRYPOINT [ "bun", "run", "server/dist/index.js" ]
