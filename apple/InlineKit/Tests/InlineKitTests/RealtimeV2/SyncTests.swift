@@ -49,18 +49,13 @@ final class SyncTests {
     let config = SyncConfig(enableMessageUpdates: false, lastSyncSafetyGapSeconds: 15)
     let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
 
-    let peer = makeChatPeer(chatId: 1)
-    var payload = InlineProtocol.UpdateChatHasNewUpdates()
-    payload.peerID = peer
-    payload.updateSeq = 1
-
-    var update = InlineProtocol.Update()
-    update.update = .chatHasNewUpdates(payload)
-
-    async let firstProcess: Void = sync.process(updates: [update])
+    let chatId: Int64 = 1
+    let firstSignal = makeChatHasNewUpdatesSignal(chatId: chatId, updateSeq: 1)
+    async let firstProcess: Void = sync.process(updates: [firstSignal])
     await client.waitForFirstCallStarted()
 
-    await sync.process(updates: [update])
+    let secondSignal = makeChatHasNewUpdatesSignal(chatId: chatId, updateSeq: 1)
+    await sync.process(updates: [secondSignal])
 
     await client.releaseFirstCall()
     await firstProcess
@@ -764,14 +759,8 @@ final class SyncTests {
     let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
 
     let peer = makeChatPeer(chatId: 1)
-    var payload = InlineProtocol.UpdateChatHasNewUpdates()
-    payload.peerID = peer
-    payload.updateSeq = 2
-
-    var signal = InlineProtocol.Update()
-    signal.update = .chatHasNewUpdates(payload)
-
-    async let firstProcess: Void = sync.process(updates: [signal])
+    let firstSignal = makeChatHasNewUpdatesSignal(chatId: 1, updateSeq: 2)
+    async let firstProcess: Void = sync.process(updates: [firstSignal])
     await client.waitForCallStarted(2)
 
     let realtime1 = makeNewMessageUpdate(seq: 1, date: 80)
@@ -822,14 +811,8 @@ final class SyncTests {
     let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
 
     let peer = makeChatPeer(chatId: 1)
-    var payload = InlineProtocol.UpdateChatHasNewUpdates()
-    payload.peerID = peer
-    payload.updateSeq = 2
-
-    var signal = InlineProtocol.Update()
-    signal.update = .chatHasNewUpdates(payload)
-
-    async let firstProcess: Void = sync.process(updates: [signal])
+    let firstSignal = makeChatHasNewUpdatesSignal(chatId: 1, updateSeq: 2)
+    async let firstProcess: Void = sync.process(updates: [firstSignal])
     await client.waitForCallStarted(2)
 
     let realtime2 = makeChatInfoUpdate(seq: 2, date: 90)
@@ -1006,14 +989,8 @@ final class SyncTests {
     let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
 
     let peer = makeChatPeer(chatId: 1)
-    var payload = InlineProtocol.UpdateChatHasNewUpdates()
-    payload.peerID = peer
-    payload.updateSeq = 5
-
-    var signal = InlineProtocol.Update()
-    signal.update = .chatHasNewUpdates(payload)
-
-    async let firstProcess: Void = sync.process(updates: [signal])
+    let firstSignal = makeChatHasNewUpdatesSignal(chatId: 1, updateSeq: 5)
+    async let firstProcess: Void = sync.process(updates: [firstSignal])
     await client.waitForCallStarted(2)
 
     let realtime4 = makeNewMessageUpdate(seq: 4, date: 110)
@@ -1096,14 +1073,8 @@ final class SyncTests {
     let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
 
     let peer = makeChatPeer(chatId: 1)
-    var payload = InlineProtocol.UpdateChatHasNewUpdates()
-    payload.peerID = peer
-    payload.updateSeq = 1
-
-    var signal = InlineProtocol.Update()
-    signal.update = .chatHasNewUpdates(payload)
-
-    async let firstProcess: Void = sync.process(updates: [signal])
+    let firstSignal = makeChatHasNewUpdatesSignal(chatId: 1, updateSeq: 1)
+    async let firstProcess: Void = sync.process(updates: [firstSignal])
     await client.waitForFirstCallStarted()
 
     // While the fetch is in-flight (awaiting callRpc), a realtime update advances the bucket to seq=1.
@@ -1359,6 +1330,16 @@ private func makeChatPeer(chatId: Int64) -> InlineProtocol.Peer {
   chat.chatID = chatId
   peer.chat = chat
   return peer
+}
+
+private func makeChatHasNewUpdatesSignal(chatId: Int64, updateSeq: Int32) -> InlineProtocol.Update {
+  var payload = InlineProtocol.UpdateChatHasNewUpdates()
+  payload.peerID = makeChatPeer(chatId: chatId)
+  payload.updateSeq = updateSeq
+
+  var update = InlineProtocol.Update()
+  update.update = .chatHasNewUpdates(payload)
+  return update
 }
 
 private func makeGetUpdatesResult(
