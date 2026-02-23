@@ -23,8 +23,7 @@ class ComposeMenuButton: NSView {
     button.isBordered = false
     button.translatesAutoresizingMaskIntoConstraints = false
 
-    // let image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)?
-    let image = NSImage(systemSymbolName: "paperclip", accessibilityDescription: nil)?
+    let image = NSImage(systemSymbolName: "plus", accessibilityDescription: nil)?
       .withSymbolConfiguration(.init(pointSize: size * 0.6, weight: .semibold))
     button.image = image
     button.contentTintColor = .tertiaryLabelColor
