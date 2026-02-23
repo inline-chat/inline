@@ -76,9 +76,29 @@ export class WebSocketTransport implements Transport {
     }
 
     if (this.socket) {
-      this.socket.removeAllListeners()
-      this.socket.close()
+      const socket = this.socket
       this.socket = null
+      socket.removeAllListeners()
+      this.closeSocketSafely(socket)
+    }
+  }
+
+  private closeSocketSafely(socket: WebSocket) {
+    try {
+      if (socket.readyState === WebSocket.CONNECTING) {
+        socket.terminate()
+        return
+      }
+      if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CLOSING) {
+        socket.close()
+      }
+    } catch (error) {
+      this.log.warn?.("WebSocket cleanup close failed", error)
+      try {
+        socket.terminate()
+      } catch {
+        // no-op
+      }
     }
   }
 
