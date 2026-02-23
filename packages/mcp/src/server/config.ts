@@ -19,6 +19,10 @@ export type RateLimitRule = {
 
 const LOCAL_DEV_HOSTS = ["localhost", "127.0.0.1", "[::1]"]
 const DEFAULT_ISSUER = "https://mcp.inline.chat"
+const DEFAULT_INLINE_API_BASE_URL = "https://api.inline.chat"
+const DEFAULT_OAUTH_ISSUER = "https://api.inline.chat"
+const DEFAULT_OAUTH_PROXY_BASE_URL = "https://api.inline.chat"
+const DEFAULT_OAUTH_INTROSPECTION_URL = "https://api.inline.chat/oauth/introspect"
 const DEFAULT_PUBLIC_ORIGIN_HOSTS = ["chatgpt.com", "chat.openai.com", "claude.ai"]
 
 function parsePositiveIntEnv(name: string, fallback: number, opts: { min: number; max: number }): number {
@@ -39,14 +43,6 @@ function parseRateLimitRuleEnv(prefix: string, fallback: RateLimitRule): RateLim
       max: 24 * 60 * 60_000,
     }),
   }
-}
-
-function parseCsv(raw: string | undefined): string[] {
-  if (!raw) return []
-  return raw
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean)
 }
 
 function normalizeHostLike(value: string): string | null {
@@ -90,33 +86,17 @@ export function defaultAllowedOriginHosts(issuer: string, allowedHosts: string[]
   return uniqueNonEmpty([...allowedHosts, ...DEFAULT_PUBLIC_ORIGIN_HOSTS])
 }
 
-function parseHostAllowlist(raw: string | undefined, fallback: string[]): string[] {
-  const parsed = parseCsv(raw).map(normalizeHostLike)
-  const normalized = uniqueNonEmpty(parsed)
-  return normalized.length > 0 ? normalized : fallback
-}
-
 export function defaultConfig(): McpConfig {
-  const issuer = process.env.MCP_ISSUER || DEFAULT_ISSUER
-  const inlineApiBaseUrl = process.env.INLINE_API_BASE_URL || "https://api.inline.chat"
-  const oauthIssuer = process.env.MCP_OAUTH_ISSUER || inlineApiBaseUrl
-  const oauthProxyBaseUrl = process.env.MCP_OAUTH_PROXY_BASE_URL || oauthIssuer
-  const oauthIntrospectionUrl = process.env.MCP_OAUTH_INTROSPECTION_URL || `${oauthProxyBaseUrl}/oauth/introspect`
-  const allowedHosts = parseHostAllowlist(process.env.MCP_ALLOWED_HOSTS, defaultAllowedHosts(issuer))
-  const allowedOriginHosts = parseHostAllowlist(
-    process.env.MCP_ALLOWED_ORIGINS,
-    defaultAllowedOriginHosts(issuer, allowedHosts),
-  )
-
+  const baseAllowedHosts = defaultAllowedHosts(DEFAULT_ISSUER)
   return {
-    issuer,
-    inlineApiBaseUrl,
-    oauthIssuer,
-    oauthProxyBaseUrl,
-    oauthIntrospectionUrl,
+    issuer: DEFAULT_ISSUER,
+    inlineApiBaseUrl: DEFAULT_INLINE_API_BASE_URL,
+    oauthIssuer: DEFAULT_OAUTH_ISSUER,
+    oauthProxyBaseUrl: DEFAULT_OAUTH_PROXY_BASE_URL,
+    oauthIntrospectionUrl: DEFAULT_OAUTH_INTROSPECTION_URL,
     oauthInternalSharedSecret: process.env.MCP_INTERNAL_SHARED_SECRET || null,
-    allowedHosts,
-    allowedOriginHosts,
+    allowedHosts: baseAllowedHosts,
+    allowedOriginHosts: defaultAllowedOriginHosts(DEFAULT_ISSUER, baseAllowedHosts),
     endpointRateLimits: {
       mcpInitialize: parseRateLimitRuleEnv("MCP_RATE_LIMIT_MCP_INIT", { max: 30, windowMs: 60_000 }),
     },

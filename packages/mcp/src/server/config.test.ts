@@ -7,9 +7,9 @@ const ENV_KEYS = [
   "MCP_OAUTH_ISSUER",
   "MCP_OAUTH_PROXY_BASE_URL",
   "MCP_OAUTH_INTROSPECTION_URL",
-  "MCP_INTERNAL_SHARED_SECRET",
   "MCP_ALLOWED_HOSTS",
   "MCP_ALLOWED_ORIGINS",
+  "MCP_INTERNAL_SHARED_SECRET",
   "MCP_RATE_LIMIT_MCP_INIT_MAX",
   "MCP_RATE_LIMIT_MCP_INIT_WINDOW_MS",
 ] as const
@@ -47,26 +47,32 @@ describe("defaultConfig", () => {
     expect(config.endpointRateLimits.mcpInitialize.max).toBe(30)
   })
 
-  it("derives issuer host and parses allowlists", () => {
+  it("uses fixed production endpoints and allowlists", () => {
     clearManagedEnv()
-    process.env.MCP_ISSUER = "https://mcp.inline.chat"
-    process.env.MCP_ALLOWED_HOSTS = "https://mcp.inline.chat, api.inline.chat:443, ,invalid host"
-    process.env.MCP_ALLOWED_ORIGINS = "https://chat.openai.com, claude.ai"
+    ;(process.env as Record<string, string>)["MCP_ISSUER"] = "http://localhost:8791"
+    ;(process.env as Record<string, string>)["INLINE_API_BASE_URL"] = "https://example.com"
+    ;(process.env as Record<string, string>)["MCP_OAUTH_ISSUER"] = "https://oauth.example.com"
+    ;(process.env as Record<string, string>)["MCP_OAUTH_PROXY_BASE_URL"] = "https://proxy.example.com"
+    ;(process.env as Record<string, string>)["MCP_OAUTH_INTROSPECTION_URL"] = "https://proxy.example.com/introspect"
+    ;(process.env as Record<string, string>)["MCP_ALLOWED_HOSTS"] = "localhost"
+    ;(process.env as Record<string, string>)["MCP_ALLOWED_ORIGINS"] = "localhost"
 
     const config = defaultConfig()
-    expect(config.allowedHosts).toEqual(["mcp.inline.chat", "api.inline.chat"])
-    expect(config.allowedOriginHosts).toEqual(["chat.openai.com", "claude.ai"])
-  })
-
-  it("falls back to defaults when allowlist env values are invalid", () => {
-    clearManagedEnv()
-    process.env.MCP_ISSUER = "https://mcp.inline.chat"
-    process.env.MCP_ALLOWED_HOSTS = " , :// , ???"
-    delete process.env.MCP_ALLOWED_ORIGINS
-
-    const config = defaultConfig()
+    expect(config.issuer).toBe("https://mcp.inline.chat")
+    expect(config.inlineApiBaseUrl).toBe("https://api.inline.chat")
+    expect(config.oauthIssuer).toBe("https://api.inline.chat")
+    expect(config.oauthProxyBaseUrl).toBe("https://api.inline.chat")
+    expect(config.oauthIntrospectionUrl).toBe("https://api.inline.chat/oauth/introspect")
     expect(config.allowedHosts).toEqual(["mcp.inline.chat"])
     expect(config.allowedOriginHosts).toEqual(["mcp.inline.chat", "chatgpt.com", "chat.openai.com", "claude.ai"])
+  })
+
+  it("reads shared secret from env", () => {
+    clearManagedEnv()
+    process.env.MCP_INTERNAL_SHARED_SECRET = "super-secret"
+
+    const config = defaultConfig()
+    expect(config.oauthInternalSharedSecret).toBe("super-secret")
   })
 
   it("parses configured mcp init rate limits from env", () => {
@@ -89,17 +95,9 @@ describe("defaultConfig", () => {
     expect(config.endpointRateLimits.mcpInitialize.windowMs).toBe(60_000)
   })
 
-  it("uses explicit oauth endpoint configuration", () => {
+  it("defaults secret to null", () => {
     clearManagedEnv()
-    process.env.MCP_OAUTH_ISSUER = "https://oauth.inline.chat"
-    process.env.MCP_OAUTH_PROXY_BASE_URL = "https://api-internal.inline.chat"
-    process.env.MCP_OAUTH_INTROSPECTION_URL = "https://api-internal.inline.chat/internal/introspect"
-    process.env.MCP_INTERNAL_SHARED_SECRET = "super-secret"
-
     const config = defaultConfig()
-    expect(config.oauthIssuer).toBe("https://oauth.inline.chat")
-    expect(config.oauthProxyBaseUrl).toBe("https://api-internal.inline.chat")
-    expect(config.oauthIntrospectionUrl).toBe("https://api-internal.inline.chat/internal/introspect")
-    expect(config.oauthInternalSharedSecret).toBe("super-secret")
+    expect(config.oauthInternalSharedSecret).toBeNull()
   })
 })
