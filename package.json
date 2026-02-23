@@ -36,6 +36,10 @@
     "release:cli:install": "cd scripts && bun run release:cli:install",
     "release:macos": "cd scripts && bun run macos:release-app"
   },
+  "overrides": {
+    "@inline-chat/protocol": "workspace:*",
+    "@inline-chat/realtime-sdk": "workspace:*"
+  },
   "devDependencies": {
     "@types/bun": "^1.3.5",
     "oxlint": "^1.39.0"

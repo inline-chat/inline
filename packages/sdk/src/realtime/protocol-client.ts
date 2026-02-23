@@ -25,6 +25,12 @@ type PendingRpcRequest = {
 const emptyRpcInput: RpcCall["input"] = { oneofKind: undefined }
 const defaultRpcTimeoutMs = 30_000
 
+const assertValidRpcMethod = (method: Method) => {
+  if (typeof method !== "number" || !Number.isInteger(method) || method <= 0) {
+    throw new ProtocolClientError("invalid-rpc-method", { message: `Invalid rpc method: ${String(method)}` })
+  }
+}
+
 export class ProtocolClient {
   readonly events = new AsyncChannel<ClientEvent>()
   readonly transport: Transport
@@ -87,6 +93,7 @@ export class ProtocolClient {
 
   async sendRpc(method: Method, input: RpcCall["input"] = emptyRpcInput): Promise<bigint> {
     this.ensureOpenForRpc()
+    assertValidRpcMethod(method)
     const message = this.wrapMessage({
       oneofKind: "rpcCall",
       rpcCall: { method, input },
@@ -101,6 +108,7 @@ export class ProtocolClient {
     input: RpcCall["input"] = emptyRpcInput,
     options?: { timeoutMs?: number | null },
   ): Promise<RpcResult["result"]> {
+    assertValidRpcMethod(method)
     const message = this.wrapMessage({
       oneofKind: "rpcCall",
       rpcCall: { method, input },
@@ -382,7 +390,7 @@ const normalizeRpcTimeoutMs = (timeoutMs: number | null | undefined, fallback: n
 
 export class ProtocolClientError extends Error {
   constructor(
-    code: "not-authorized" | "not-connected" | "rpc-error" | "stopped" | "timeout",
+    code: "not-authorized" | "not-connected" | "rpc-error" | "stopped" | "timeout" | "invalid-rpc-method",
     details?: { code?: number; message?: string },
   ) {
     super(details?.message ?? code)

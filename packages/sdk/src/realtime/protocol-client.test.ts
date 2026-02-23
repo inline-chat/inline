@@ -111,6 +111,33 @@ describe("ProtocolClient", () => {
     await expect(p2).rejects.toBeInstanceOf(ProtocolClientError)
   })
 
+  it("rejects invalid rpc method values before sending", async () => {
+    const transport = new MockTransport()
+    const client = new ProtocolClient({
+      transport,
+      getConnectionInit: () => ({ token: "t" }),
+    })
+
+    await client.startTransport()
+    await transport.connect()
+    await transport.emitMessage(
+      ServerProtocolMessage.create({ id: 1n, body: { oneofKind: "connectionOpen", connectionOpen: {} } }),
+    )
+    await waitForOpen(client)
+
+    const sentBefore = transport.sent.length
+
+    await expect(client.sendRpc(undefined as any, { oneofKind: "getMe", getMe: {} })).rejects.toBeInstanceOf(
+      ProtocolClientError,
+    )
+    await expect(client.callRpc(0 as any, { oneofKind: "getMe", getMe: {} })).rejects.toBeInstanceOf(
+      ProtocolClientError,
+    )
+
+    const sentAfter = transport.sent.length
+    expect(sentAfter).toBe(sentBefore)
+  })
+
   it("callRpc can time out", async () => {
     vi.useFakeTimers()
     const transport = new MockTransport()

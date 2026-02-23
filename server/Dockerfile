@@ -70,6 +70,7 @@ ENV DATABASE_URL=${DATABASE_URL}
 ENV NODE_ENV=production
 # RUN bun typecheck 
 RUN bun install --frozen-lockfile 
+RUN cd packages/protocol && bun run build
 RUN cd packages/oauth-core && bun run build
 RUN cd server && bun run build
 
@@ -93,6 +94,7 @@ COPY --from=prerelease /usr/src/app/packages/oauth-core/package.json ./packages/
 COPY --from=prerelease /usr/src/app/packages/oauth-core/dist ./packages/oauth-core/dist
 COPY --from=prerelease /usr/src/app/packages/openclaw-inline/package.json ./packages/openclaw-inline/
 COPY --from=prerelease /usr/src/app/packages/protocol/package.json ./packages/protocol/
+COPY --from=prerelease /usr/src/app/packages/protocol/dist ./packages/protocol/dist
 COPY --from=prerelease /usr/src/app/packages/sdk/package.json ./packages/sdk/
 COPY --from=prerelease /usr/src/app/desktop/package.json ./desktop/
 COPY --from=prerelease /usr/src/app/scripts/package.json ./scripts/
