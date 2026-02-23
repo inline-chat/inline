@@ -10,7 +10,7 @@ import {
 } from "./notion"
 import { MessageModel, type ProcessedMessage } from "@in/server/db/models/messages"
 import { Log, LogLevel } from "@in/server/utils/log"
-import { HARDCODED_TRANSLATION_CONTEXT } from "@in/server/env"
+import { HARDCODED_TRANSLATION_CONTEXT, isDev } from "@in/server/env"
 import { getCachedChatInfo, type CachedChatInfo } from "@in/server/modules/cache/chatInfo"
 import { getCachedUserName, type UserName } from "@in/server/modules/cache/userNames"
 import { filterFalsy } from "@in/server/utils/filter"
@@ -19,6 +19,23 @@ import { formatMessage } from "@in/server/modules/notifications/eval"
 import { systemPrompt14 } from "./prompts"
 
 const log = new Log("NotionAgent", LogLevel.INFO)
+
+const logDevTelemetry = (message: string, metadata: Record<string, unknown>) => {
+  if (isDev) {
+    log.info(message, metadata)
+  }
+}
+
+const logProdTelemetry = (message: string, metadata: Record<string, unknown>) => {
+  if (!isDev) {
+    log.info(message, metadata)
+  }
+}
+
+const errorTelemetry = (error: unknown) => ({
+  errorName: error instanceof Error ? error.name : "UnknownError",
+  errorMessage: error instanceof Error ? error.message : String(error),
+})
 
 function inlineUserDisplayName(user: UserName | undefined, fallbackUserId: number): string {
   if (user) {
@@ -34,243 +51,318 @@ function inlineUserDisplayName(user: UserName | undefined, fallbackUserId: numbe
 
 async function createNotionPage(input: { spaceId: number; chatId: number; messageId: number; currentUserId: number }) {
   const startTime = Date.now()
-  log.info("🕐 Starting Notion page creation", { ...input })
-
-  if (!openaiClient) {
-    throw new Error("OpenAI client not initialized")
+  let stage = "start"
+  const telemetry = {
+    spaceId: input.spaceId,
+    chatId: input.chatId,
+    messageId: input.messageId,
   }
+  const devTelemetry = { ...telemetry, currentUserId: input.currentUserId }
 
-  // First, get the Notion client and database info
-  const clientStart = Date.now()
-  const { client, databaseId } = await getNotionClient(input.spaceId)
-  log.info("🕐 Got Notion client", { durationSeconds: ((Date.now() - clientStart) / 1000).toFixed(3) })
+  logProdTelemetry("Notion page creation started", telemetry)
+  logDevTelemetry("Starting Notion page creation", input)
 
-  if (!databaseId) {
-    Log.shared.error("No databaseId found", { spaceId: input.spaceId })
-    throw new Error("No databaseId found")
-  }
-
-  // Run all data fetching operations in parallel - this is the biggest optimization
-  const dataFetchStart = Date.now()
-  const [notionUsers, database, samplePages, targetMessage, messages, chatInfo, participantNames, currentUserName] =
-    await Promise.all([
-      getNotionUsers(input.spaceId, client).then(formatNotionUsers),
-      getActiveDatabaseData(input.spaceId, databaseId, client),
-      getSampleDatabasePages(input.spaceId, databaseId, 3, client),
-      MessageModel.getMessage(input.messageId, input.chatId),
-      MessageModel.getMessagesAroundTarget(input.chatId, input.messageId, 20, 10),
-      getCachedChatInfo(input.chatId),
-      // Fetch participant names in parallel instead of sequentially
-      getCachedChatInfo(input.chatId).then(async (chatInfo) => {
-        if (!chatInfo?.participantUserIds) return []
-        const names = await Promise.all(chatInfo.participantUserIds.map((userId) => getCachedUserName(userId)))
-        return names.filter(filterFalsy)
-      }),
-      getCachedUserName(input.currentUserId),
-    ])
-  log.info("🕐 Completed parallel data fetching", {
-    durationSeconds: ((Date.now() - dataFetchStart) / 1000).toFixed(3),
-  })
-
-  log.info("Creating Notion page", { database: database?.id, chatTitle: chatInfo?.title, chatId: input.chatId })
-
-  if (!database) {
-    throw new Error("No active database found")
-  }
-
-  if (!chatInfo) {
-    throw new Error("Could not find chat information in database")
-  }
-
-  const promptStart = Date.now()
-  let userPrompt = taskPrompt(
-    notionUsers,
-    database,
-    samplePages,
-    messages,
-    targetMessage,
-    chatInfo,
-    participantNames,
-    currentUserName,
-    input.currentUserId,
-  )
-  log.info("🕐 Generated user prompt", { durationSeconds: ((Date.now() - promptStart) / 1000).toFixed(3) })
-
-  const openaiStart = Date.now()
-
-  if (!openaiClient) {
-    throw new Error("OpenAI client not initialized")
-  }
-
-  // throw new Error("test")
-  const completion = await openaiClient.chat.completions.create({
-    model: "gpt-5.2",
-    verbosity: "medium",
-    reasoning_effort: "low", // was "hard"
-
-    messages: [
-      {
-        role: "system",
-        content: systemPrompt14,
-      },
-      {
-        role: "user",
-        content: userPrompt,
-      },
-    ],
-  })
-  log.info("🕐 OpenAI completion finished", { durationSeconds: ((Date.now() - openaiStart) / 1000).toFixed(3) })
-
-  const inputTokens = completion.usage?.prompt_tokens ?? 0
-  const outputTokens = completion.usage?.completion_tokens ?? 0
-  // input per milion tokens : $2
-  // output per milion tokens : $8
-  const inputPrice = (inputTokens * 0.002) / 1000
-  const outputPrice = (outputTokens * 0.008) / 1000
-  const totalPrice = inputPrice + outputPrice
-  log.info(`Notion agent price: $${totalPrice.toFixed(4)} • ${completion.model}`)
-
-  const parsedResponse = completion.choices[0]?.message?.content
-  if (!parsedResponse) {
-    throw new Error("Failed to generate task data")
-  }
-
-  log.info("Notion agent response", { response: parsedResponse })
-
-  const parseStart = Date.now()
-  let validatedData: any
   try {
-    validatedData = JSON.parse(parsedResponse)
-  } catch (err) {
-    log.error("Failed to parse Notion agent JSON", { err, response: parsedResponse })
-    throw new Error("Notion agent returned invalid JSON")
-  }
-  log.info("🕐 Parsed response JSON", { durationSeconds: ((Date.now() - parseStart) / 1000).toFixed(3) })
-
-  const propertiesFromResponse = validatedData?.properties || {}
-  const descriptionFromResponse = validatedData?.description
-
-  // Use hardcoded icon instead of AI-generated one
-  const iconFromResponse = {
-    type: "external" as const,
-    external: {
-      url: "https://www.notion.so/icons/circle_lightgray.svg",
-    },
-  }
-
-  // Transform simplified blocks to proper Notion format
-  const transformedDescription =
-    descriptionFromResponse?.map((block: any) => {
-      const notionBlock: any = {
-        object: "block",
-        type: block.type,
-      }
-
-      if (block.type === "paragraph") {
-        notionBlock.paragraph = {
-          rich_text:
-            block.rich_text?.map((rt: any) => ({
-              type: "text",
-              text: {
-                content: rt.content || "",
-                link: rt.url ? { url: rt.url } : null,
-              },
-              annotations: {
-                bold: false,
-                italic: false,
-                strikethrough: false,
-                underline: false,
-                code: false,
-                color: "default",
-              },
-              plain_text: rt.content || "",
-              href: rt.url || null,
-            })) || [],
-          color: "default",
-        }
-      } else if (block.type === "bulleted_list_item") {
-        notionBlock.bulleted_list_item = {
-          rich_text:
-            block.rich_text?.map((rt: any) => ({
-              type: "text",
-              text: {
-                content: rt.content || "",
-                link: rt.url ? { url: rt.url } : null,
-              },
-              annotations: {
-                bold: false,
-                italic: false,
-                strikethrough: false,
-                underline: false,
-                code: false,
-                color: "default",
-              },
-              plain_text: rt.content || "",
-              href: rt.url || null,
-            })) || [],
-          color: "default",
-        }
-      }
-
-      return notionBlock
-    }) || undefined
-
-  // Transform the Zod schema output to match Notion API format
-  const transformStart = Date.now()
-  const propertiesData: Record<string, any> = {}
-
-  // Filter out null values and transform to Notion API format
-  Object.entries(propertiesFromResponse).forEach(([key, value]) => {
-    if (value !== null) {
-      if (value && typeof value === "object" && "date" in value && value.date) {
-        const dateObj = { ...value.date } as any
-        // Remove empty string end dates
-        if (dateObj.end === "") {
-          delete dateObj.end
-        }
-        propertiesData[key] = { date: dateObj }
-      } else {
-        propertiesData[key] = value
-      }
+    if (!openaiClient) {
+      throw new Error("OpenAI client not initialized")
     }
-  })
 
-  // Extract task title using the dynamic helper
-  const titlePropertyName = findTitleProperty(database)
-  const taskTitle = extractTaskTitle(propertiesData, titlePropertyName)
-  log.info("🕐 Transformed properties data", { durationSeconds: ((Date.now() - transformStart) / 1000).toFixed(3) })
+    // First, get the Notion client and database info
+    stage = "load_notion_client"
+    const clientStart = Date.now()
+    const { client, databaseId } = await getNotionClient(input.spaceId)
+    logDevTelemetry("Loaded Notion client", {
+      spaceId: input.spaceId,
+      durationMs: Date.now() - clientStart,
+    })
 
-  // Create the page with properties and description
-  const pageCreateStart = Date.now()
+    if (!databaseId) {
+      Log.shared.error("No databaseId found", devTelemetry)
+      throw new Error("No databaseId found")
+    }
 
-  if (!databaseId) {
-    throw new Error("Database ID is required but was null")
-  }
+    // Run all data fetching operations in parallel - this is the biggest optimization
+    stage = "load_notion_context"
+    const dataFetchStart = Date.now()
+    const [notionUsers, database, samplePages, targetMessage, messages, chatInfo, participantNames, currentUserName] =
+      await Promise.all([
+        getNotionUsers(input.spaceId, client).then(formatNotionUsers),
+        getActiveDatabaseData(input.spaceId, databaseId, client),
+        getSampleDatabasePages(input.spaceId, databaseId, 3, client),
+        MessageModel.getMessage(input.messageId, input.chatId),
+        MessageModel.getMessagesAroundTarget(input.chatId, input.messageId, 20, 10),
+        getCachedChatInfo(input.chatId),
+        // Fetch participant names in parallel instead of sequentially
+        getCachedChatInfo(input.chatId).then(async (chatInfo) => {
+          if (!chatInfo?.participantUserIds) return []
+          const names = await Promise.all(chatInfo.participantUserIds.map((userId) => getCachedUserName(userId)))
+          return names.filter(filterFalsy)
+        }),
+        getCachedUserName(input.currentUserId),
+      ])
+    logDevTelemetry("Loaded Notion task context", {
+      spaceId: input.spaceId,
+      chatId: input.chatId,
+      messageId: input.messageId,
+      durationMs: Date.now() - dataFetchStart,
+      notionUsersCount: notionUsers.length,
+      samplePagesCount: samplePages.length,
+      participantCount: participantNames.length,
+      contextMessageCount: messages.length,
+    })
 
-  const page = await newNotionPage(
-    input.spaceId,
-    databaseId,
-    propertiesData,
-    client,
-    transformedDescription || undefined,
-    iconFromResponse,
-  )
-  log.info("🕐 Created Notion page", {
-    pageId: page.id,
-    durationSeconds: ((Date.now() - pageCreateStart) / 1000).toFixed(3),
-  })
+    logDevTelemetry("Preparing Notion page payload", {
+      spaceId: input.spaceId,
+      chatId: input.chatId,
+      databaseId: database?.id,
+    })
 
-  const totalDuration = Date.now() - startTime
-  log.info("🕐 Notion page creation completed", {
-    pageId: page.id,
-    totalDurationSeconds: (totalDuration / 1000).toFixed(3),
-    taskTitle,
-  })
+    if (!database) {
+      throw new Error("No active database found")
+    }
 
-  return {
-    pageId: page.id,
-    url: `https://notion.so/${page.id.replace(/-/g, "")}`,
-    taskTitle,
+    if (!chatInfo) {
+      throw new Error("Could not find chat information in database")
+    }
+
+    stage = "build_prompt"
+    const promptStart = Date.now()
+    const userPrompt = taskPrompt(
+      notionUsers,
+      database,
+      samplePages,
+      messages,
+      targetMessage,
+      chatInfo,
+      participantNames,
+      currentUserName,
+      input.currentUserId,
+    )
+    logDevTelemetry("Built Notion task prompt", {
+      spaceId: input.spaceId,
+      chatId: input.chatId,
+      messageId: input.messageId,
+      durationMs: Date.now() - promptStart,
+      promptLength: userPrompt.length,
+    })
+
+    stage = "openai_completion"
+    const openaiStart = Date.now()
+    const completion = await openaiClient.chat.completions.create({
+      model: "gpt-5.2",
+      verbosity: "medium",
+      reasoning_effort: "low", // was "hard"
+
+      messages: [
+        {
+          role: "system",
+          content: systemPrompt14,
+        },
+        {
+          role: "user",
+          content: userPrompt,
+        },
+      ],
+    })
+    logDevTelemetry("Received Notion agent completion", {
+      spaceId: input.spaceId,
+      chatId: input.chatId,
+      messageId: input.messageId,
+      durationMs: Date.now() - openaiStart,
+    })
+
+    const inputTokens = completion.usage?.prompt_tokens ?? 0
+    const outputTokens = completion.usage?.completion_tokens ?? 0
+    // input per milion tokens : $2
+    // output per milion tokens : $8
+    const inputPrice = (inputTokens * 0.002) / 1000
+    const outputPrice = (outputTokens * 0.008) / 1000
+    const totalPrice = inputPrice + outputPrice
+    const completionDurationMs = Date.now() - openaiStart
+    logProdTelemetry("Notion agent completion telemetry", {
+      ...telemetry,
+      completionDurationMs,
+      inputTokens,
+      outputTokens,
+      estimatedCostUsd: Number(totalPrice.toFixed(4)),
+    })
+    logDevTelemetry("Notion agent usage", {
+      ...devTelemetry,
+      model: completion.model,
+      inputTokens,
+      outputTokens,
+      estimatedCostUsd: Number(totalPrice.toFixed(4)),
+    })
+
+    const parsedResponse = completion.choices[0]?.message?.content
+    if (!parsedResponse) {
+      throw new Error("Failed to generate task data")
+    }
+
+    stage = "parse_agent_response"
+    const parseStart = Date.now()
+    let validatedData: any
+    try {
+      validatedData = JSON.parse(parsedResponse)
+    } catch (err) {
+      log.error("Failed to parse Notion agent JSON", err, {
+        ...devTelemetry,
+        responseLength: parsedResponse.length,
+      })
+      throw new Error("Notion agent returned invalid JSON")
+    }
+    logDevTelemetry("Parsed Notion agent JSON", {
+      ...devTelemetry,
+      durationMs: Date.now() - parseStart,
+    })
+
+    const propertiesFromResponse = validatedData?.properties || {}
+    const descriptionFromResponse = validatedData?.description
+
+    // Use hardcoded icon instead of AI-generated one
+    const iconFromResponse = {
+      type: "external" as const,
+      external: {
+        url: "https://www.notion.so/icons/circle_lightgray.svg",
+      },
+    }
+
+    // Transform simplified blocks to proper Notion format
+    const transformedDescription =
+      descriptionFromResponse?.map((block: any) => {
+        const notionBlock: any = {
+          object: "block",
+          type: block.type,
+        }
+
+        if (block.type === "paragraph") {
+          notionBlock.paragraph = {
+            rich_text:
+              block.rich_text?.map((rt: any) => ({
+                type: "text",
+                text: {
+                  content: rt.content || "",
+                  link: rt.url ? { url: rt.url } : null,
+                },
+                annotations: {
+                  bold: false,
+                  italic: false,
+                  strikethrough: false,
+                  underline: false,
+                  code: false,
+                  color: "default",
+                },
+                plain_text: rt.content || "",
+                href: rt.url || null,
+              })) || [],
+            color: "default",
+          }
+        } else if (block.type === "bulleted_list_item") {
+          notionBlock.bulleted_list_item = {
+            rich_text:
+              block.rich_text?.map((rt: any) => ({
+                type: "text",
+                text: {
+                  content: rt.content || "",
+                  link: rt.url ? { url: rt.url } : null,
+                },
+                annotations: {
+                  bold: false,
+                  italic: false,
+                  strikethrough: false,
+                  underline: false,
+                  code: false,
+                  color: "default",
+                },
+                plain_text: rt.content || "",
+                href: rt.url || null,
+              })) || [],
+            color: "default",
+          }
+        }
+
+        return notionBlock
+      }) || undefined
+
+    // Transform the Zod schema output to match Notion API format
+    stage = "transform_payload"
+    const transformStart = Date.now()
+    const propertiesData: Record<string, any> = {}
+
+    // Filter out null values and transform to Notion API format
+    Object.entries(propertiesFromResponse).forEach(([key, value]) => {
+      if (value !== null) {
+        if (value && typeof value === "object" && "date" in value && value.date) {
+          const dateObj = { ...value.date } as any
+          // Remove empty string end dates
+          if (dateObj.end === "") {
+            delete dateObj.end
+          }
+          propertiesData[key] = { date: dateObj }
+        } else {
+          propertiesData[key] = value
+        }
+      }
+    })
+
+    // Extract task title using the dynamic helper
+    const titlePropertyName = findTitleProperty(database)
+    const taskTitle = extractTaskTitle(propertiesData, titlePropertyName)
+    logDevTelemetry("Transformed Notion properties payload", {
+      ...devTelemetry,
+      durationMs: Date.now() - transformStart,
+      propertiesCount: Object.keys(propertiesData).length,
+      descriptionBlockCount: Array.isArray(transformedDescription) ? transformedDescription.length : 0,
+    })
+
+    // Create the page with properties and description
+    stage = "create_notion_page"
+    const pageCreateStart = Date.now()
+
+    if (!databaseId) {
+      throw new Error("Database ID is required but was null")
+    }
+
+    const page = await newNotionPage(
+      input.spaceId,
+      databaseId,
+      propertiesData,
+      client,
+      transformedDescription || undefined,
+      iconFromResponse,
+    )
+    logDevTelemetry("Created Notion page", {
+      ...devTelemetry,
+      hasPageId: Boolean(page.id),
+      durationMs: Date.now() - pageCreateStart,
+    })
+
+    const totalDuration = Date.now() - startTime
+    logProdTelemetry("Notion page creation completed", {
+      ...telemetry,
+      totalDurationMs: totalDuration,
+      hasTaskTitle: Boolean(taskTitle),
+    })
+    logDevTelemetry("Notion page creation completed", {
+      ...devTelemetry,
+      totalDurationMs: totalDuration,
+      hasTaskTitle: Boolean(taskTitle),
+    })
+
+    return {
+      pageId: page.id,
+      url: `https://notion.so/${page.id.replace(/-/g, "")}`,
+      taskTitle,
+    }
+  } catch (error) {
+    const totalDuration = Date.now() - startTime
+    log.error("Notion page creation failed", error, {
+      ...devTelemetry,
+      stage,
+      totalDurationMs: totalDuration,
+      ...errorTelemetry(error),
+    })
+    throw error
   }
 }
 

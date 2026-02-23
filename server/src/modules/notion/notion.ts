@@ -1,6 +1,7 @@
 import { db } from "@in/server/db"
 import { IntegrationsModel } from "@in/server/db/models/integrations"
-import { integrations, users } from "@in/server/db/schema"
+import { users } from "@in/server/db/schema"
+import { isDev } from "@in/server/env"
 import { Log } from "@in/server/utils/log"
 import { Client } from "@notionhq/client"
 import type {
@@ -8,7 +9,18 @@ import type {
   SearchResponse,
   CreatePageParameters,
 } from "@notionhq/client/build/src/api-endpoints"
-import { and, eq } from "drizzle-orm"
+import { eq } from "drizzle-orm"
+
+const logDevTelemetry = (message: string, metadata: Record<string, unknown>) => {
+  if (isDev) {
+    Log.shared.info(message, metadata)
+  }
+}
+
+const errorTelemetry = (error: unknown) => ({
+  errorName: error instanceof Error ? error.name : "UnknownError",
+  errorMessage: error instanceof Error ? error.message : String(error),
+})
 
 export async function getNotionClient(spaceId: number): Promise<{ client: Client; databaseId: string | null }> {
   const { accessToken, databaseId } = await IntegrationsModel.getAuthTokenWithSpaceId(spaceId, "notion")
@@ -60,8 +72,15 @@ export async function getDatabases(spaceId: number, pageSize = 50, notion: Clien
 // get active database data
 export async function getActiveDatabaseData(spaceId: number, databaseId: string, notion: Client) {
   const database = await notion.databases.retrieve({ database_id: databaseId })
-  Log.shared.info("🔍 Database", { database })
-  console.log("🔍 Database", database)
+  const databaseProperties =
+    "properties" in database && database.properties && typeof database.properties === "object"
+      ? database.properties
+      : undefined
+  logDevTelemetry("Loaded Notion database metadata", {
+    spaceId,
+    databaseId,
+    propertyCount: databaseProperties ? Object.keys(databaseProperties).length : 0,
+  })
 
   return database
 }
@@ -72,8 +91,10 @@ export async function getNotionUsers(spaceId: number, notion: Client) {
     page_size: 100,
   })
 
-  console.log("🔍 Users", users)
-  Log.shared.info("🔍 Users", { users })
+  logDevTelemetry("Loaded Notion users", {
+    spaceId,
+    usersCount: Array.isArray(users.results) ? users.results.length : 0,
+  })
 
   return users
 }
@@ -86,6 +107,14 @@ export async function newNotionPage(
   children?: CreatePageParameters["children"],
   icon?: CreatePageParameters["icon"],
 ) {
+  logDevTelemetry("Creating Notion page", {
+    spaceId,
+    databaseId,
+    propertyCount: Object.keys(properties ?? {}).length,
+    childrenCount: Array.isArray(children) ? children.length : 0,
+    hasIcon: Boolean(icon),
+  })
+
   const pageData: CreatePageParameters = {
     parent: { database_id: databaseId },
     properties,
@@ -100,8 +129,11 @@ export async function newNotionPage(
   }
 
   const page = await client.pages.create(pageData)
-
-  console.log("🔍 Page", page)
+  logDevTelemetry("Created Notion page", {
+    spaceId,
+    databaseId,
+    hasPageId: Boolean(page.id),
+  })
   return page
 }
 
@@ -112,14 +144,14 @@ export async function getCurrentNotionUser(spaceId: number, currentUserId: numbe
 
   let [dbUser] = await db.select().from(users).where(eq(users.id, currentUserId))
   if (!dbUser) {
-    console.error("Could not find current user in database", { currentUserId })
+    Log.shared.error("Could not find current user in database", { currentUserId, spaceId })
     throw new Error("Could not find current user in database")
   }
 
   const notionUser = notionUsers.results.find((u) => u.type === "person" && u.person?.email === dbUser.email)
 
   if (!notionUser) {
-    console.error("Could not find current user in Notion", { currentUserId })
+    Log.shared.error("Could not find current user in Notion", { currentUserId, spaceId })
     throw new Error("Could not find current user in Notion")
   }
 
@@ -173,7 +205,8 @@ export async function getSampleDatabasePages(spaceId: number, databaseId: string
       }),
     )
 
-    Log.shared.info("Retrieved sample pages with content", {
+    logDevTelemetry("Retrieved sample pages with content", {
+      spaceId,
       count: pagesWithContent.length,
       databaseId,
     })
@@ -182,7 +215,7 @@ export async function getSampleDatabasePages(spaceId: number, databaseId: string
   } catch (error) {
     Log.shared.error("Failed to retrieve sample pages", {
       spaceId,
-      error: error instanceof Error ? error.message : String(error),
+      ...errorTelemetry(error),
     })
     return []
   }
