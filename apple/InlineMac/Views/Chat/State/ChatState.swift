@@ -4,8 +4,23 @@ import Foundation
 import InlineKit
 
 enum MessageListAction {
-  case scrollToMsg(Int64)
+  case scrollToMsg(ScrollToMessageRequest)
   case scrollToBottom
+}
+
+enum ScrollToMessageReason: String, Sendable, Codable {
+  case reply
+  case pinned
+  case forwarded
+  case media
+  case link
+  case search
+  case unknown
+}
+
+struct ScrollToMessageRequest: Sendable, Equatable {
+  let messageId: Int64
+  let reason: ScrollToMessageReason
 }
 
 class ChatState {
@@ -88,9 +103,9 @@ class ChatState {
   }
 
   /// Scroll to a message by ID and highlight
-  public func scrollTo(msgId: Int64) {
+  public func scrollTo(msgId: Int64, reason: ScrollToMessageReason = .unknown) {
     Task { @MainActor in
-      await events.send(.scrollToMsg(msgId))
+      await events.send(.scrollToMsg(ScrollToMessageRequest(messageId: msgId, reason: reason)))
     }
   }
 

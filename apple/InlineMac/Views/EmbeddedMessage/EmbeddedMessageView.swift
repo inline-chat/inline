@@ -288,8 +288,15 @@ class EmbeddedMessageView: NSView {
 
     let messageId = message.messageId
     let chatState = ChatsManager.shared.get(for: message.peerId, chatId: message.chatId)
-
-    chatState.scrollTo(msgId: messageId)
+    let reason: ScrollToMessageReason = switch kind {
+      case .replyInMessage, .replyingInCompose, .editingInCompose:
+        .reply
+      case .pinnedInHeader:
+        .pinned
+      case .forwardingInCompose:
+        .unknown
+    }
+    chatState.scrollTo(msgId: messageId, reason: reason)
   }
 
   func update(with embeddedMessage: EmbeddedMessage, kind: Kind) {
