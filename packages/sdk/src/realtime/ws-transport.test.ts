@@ -7,7 +7,9 @@ vi.mock("ws", () => {
   const sockets: FakeWebSocket[] = []
 
   class FakeWebSocket {
+    static CONNECTING = 0
     static OPEN = 1
+    static CLOSING = 2
     static CLOSED = 3
 
     static __getLast() {
@@ -21,9 +23,11 @@ vi.mock("ws", () => {
     }
 
     readonly url: string
-    readyState = FakeWebSocket.CLOSED
+    readyState = FakeWebSocket.CONNECTING
     binaryType: string | undefined
     sent: Uint8Array[] = []
+    terminated = false
+    throwOnClose = false
 
     private handlers = new Map<string, Handler[]>()
 
@@ -47,8 +51,18 @@ vi.mock("ws", () => {
     }
 
     close() {
+      if (this.throwOnClose) {
+        this.throwOnClose = false
+        throw new Error("close boom")
+      }
       this.readyState = FakeWebSocket.CLOSED
       this.emit("close", 1000, Buffer.from(""))
+    }
+
+    terminate() {
+      this.terminated = true
+      this.readyState = FakeWebSocket.CLOSED
+      this.emit("close", 1006, Buffer.from("terminated"))
     }
 
     emit(event: string, ...args: any[]) {
@@ -295,5 +309,28 @@ describe("WebSocketTransport", () => {
 
     // Private helper exercised via bracket access to cover the defensive throw.
     expect(() => (transport as any).coerceBinary("nope")).toThrow(/Unsupported WebSocket message payload/)
+  })
+
+  it("cleanup is resilient when ws.close throws", async () => {
+    vi.useFakeTimers()
+
+    const { WebSocketTransport } = await import("./ws-transport")
+    const { WebSocket } = await import("ws")
+
+    const transport = new WebSocketTransport({ url: "ws://example.test" })
+    await transport.start()
+
+    const sock = (WebSocket as any).__getLast()
+    sock.__open()
+    sock.throwOnClose = true
+
+    await expect(transport.stopConnection()).resolves.toBeUndefined()
+    expect(sock.terminated).toBe(true)
+
+    await expect(transport.reconnect({ skipDelay: true })).resolves.toBeUndefined()
+    vi.runOnlyPendingTimers()
+    expect((WebSocket as any).__count()).toBeGreaterThanOrEqual(2)
+
+    vi.useRealTimers()
   })
 })
