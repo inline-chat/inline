@@ -3,8 +3,8 @@ export type InlineMessageRef = {
   messageId: bigint
 }
 
-// Stable ID format used by `search` results and accepted by `fetch`.
-//
+// Legacy message ID format from MCP v1. Not used by the current tool contract,
+// but kept as a utility for compatibility at call sites outside this package.
 // Example: inline:chat:123:msg:456
 export function formatInlineMessageId(ref: InlineMessageRef): string {
   return `inline:chat:${ref.chatId.toString()}:msg:${ref.messageId.toString()}`
