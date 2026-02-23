@@ -956,7 +956,7 @@ export function createInlineMcpServer(params: {
       annotations: {
         title: "Upload File",
         readOnlyHint: false,
-        openWorldHint: false,
+        openWorldHint: true,
       },
       _meta: toolMeta(["messages:write"], "Uploading file...", "File uploaded"),
     },
