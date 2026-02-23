@@ -12,6 +12,7 @@ bun run dev
 ```
 
 Production readiness checklist: `PRODUCTION_CHECKLIST.md`.
+ChatGPT submission checklist: `SUBMISSION_CHECKLIST.md`.
 
 ## Endpoints (v1)
 
