@@ -1,25 +1,25 @@
 import { Type, type Static } from "@sinclair/typebox"
-import { Log } from "../../utils/log"
+import { Log, LogLevel } from "../../utils/log"
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import { createNotionPage } from "@in/server/modules/notion/agent"
 import { db } from "@in/server/db"
 import { externalTasks, messageAttachments, messages, users } from "@in/server/db/schema"
-import { count, and, eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import { TInputPeerInfo, TPeerInfo } from "../../api-types"
 import { getUpdateGroup } from "../../modules/updates"
 import { connectionManager } from "../../ws/connections"
 import {
   MessageAttachmentExternalTask_Status,
-  type Update,
   type MessageAttachment,
-  type InputPeer,
 } from "@inline-chat/protocol/core"
 import { RealtimeUpdates } from "../../realtime/message"
 import { Notifications } from "../../modules/notifications/notifications"
-import { decrypt, encrypt, type EncryptedData } from "@in/server/modules/encryption/encryption"
+import { encrypt, type EncryptedData } from "@in/server/modules/encryption/encryption"
 import { decryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { encodeMessageAttachmentUpdate } from "../../realtime/encoders/encodeMessageAttachment"
 import { ProtocolConvertors } from "@in/server/types/protocolConvertors"
+import { isDev } from "@in/server/env"
+import { InlineError } from "@in/server/types/errors"
 
 export const Input = Type.Object({
   spaceId: Type.Number(),
@@ -33,16 +33,46 @@ export const Response = Type.Object({
   taskTitle: Type.Union([Type.String(), Type.Null()]),
 })
 
+const logDevTelemetry = (message: string, metadata: Record<string, unknown>) => {
+  if (isDev) {
+    Log.shared.info(message, metadata)
+  }
+}
+
+const taskTelemetryLog = new Log("NotionTaskCreate", LogLevel.INFO)
+
+const logProdTelemetry = (message: string, metadata: Record<string, unknown>) => {
+  if (!isDev) {
+    taskTelemetryLog.info(message, metadata)
+  }
+}
+
+const errorTelemetry = (error: unknown) => ({
+  errorName: error instanceof Error ? error.name : "UnknownError",
+  errorMessage: error instanceof Error ? error.message : String(error),
+})
+
 export const handler = async (
   input: Static<typeof Input>,
   context: HandlerContext,
 ): Promise<Static<typeof Response>> => {
   const { spaceId, messageId, chatId, peerId } = input
   const startTime = Date.now()
-  Log.shared.info("🕐 Starting Notion task creation", { ...input, currentUserId: context.currentUserId })
+  let stage = "start"
+  const telemetry = {
+    spaceId,
+    chatId,
+    messageId,
+    peerType: "userId" in peerId ? "dm" : "thread",
+  }
+  const devTelemetry = { ...telemetry, currentUserId: context.currentUserId }
+
+  logProdTelemetry("Notion task creation started", telemetry)
+  logDevTelemetry("Starting Notion task creation", devTelemetry)
 
   try {
     // Create Notion page and check message existence in parallel
+    stage = "create_page_and_load_message"
     const parallelStart = Date.now()
     const [result, message] = await Promise.all([
       createNotionPage({
@@ -57,26 +87,31 @@ export const handler = async (
         .where(and(eq(messages.messageId, messageId), eq(messages.chatId, chatId)))
         .then((result) => result[0]),
     ])
-    Log.shared.info("🕐 Completed parallel operations (Notion page + message check)", {
-      durationSeconds: ((Date.now() - parallelStart) / 1000).toFixed(3),
+    logDevTelemetry("Notion task context loaded", {
+      ...devTelemetry,
+      durationMs: Date.now() - parallelStart,
     })
 
     if (!message) {
-      Log.shared.error("Message does not exist, cannot create task attachment", { messageId })
+      Log.shared.error("Message does not exist, cannot create task attachment", devTelemetry)
       throw new Error("Message does not exist")
     }
 
     // Encrypt title if it exists (this is fast, no need to parallelize)
+    stage = "encrypt_task_title"
     const encryptStart = Date.now()
     let encryptedTitle: EncryptedData | null = null
     if (result.taskTitle) {
       encryptedTitle = await encrypt(result.taskTitle)
     }
-    Log.shared.info("🕐 Title encryption completed", {
-      durationSeconds: ((Date.now() - encryptStart) / 1000).toFixed(3),
+    logDevTelemetry("Notion task title encrypted", {
+      ...devTelemetry,
+      durationMs: Date.now() - encryptStart,
+      hasTitle: Boolean(result.taskTitle),
     })
 
     // Insert external task and get update group info in parallel
+    stage = "write_task_and_update_group"
     const dbOperationsStart = Date.now()
     const [externalTaskResult, updateGroup] = await Promise.all([
       db
@@ -96,8 +131,11 @@ export const handler = async (
         .then(([task]) => task),
       getUpdateGroup(peerId, { currentUserId: context.currentUserId }),
     ])
-    Log.shared.info("🕐 Database operations completed (external task + update group)", {
-      durationSeconds: ((Date.now() - dbOperationsStart) / 1000).toFixed(3),
+    logDevTelemetry("Notion task database writes completed", {
+      ...devTelemetry,
+      durationMs: Date.now() - dbOperationsStart,
+      hasExternalTask: Boolean(externalTaskResult?.id),
+      updateGroupType: updateGroup.type,
     })
 
     if (!externalTaskResult?.id) {
@@ -105,6 +143,7 @@ export const handler = async (
     }
 
     // Create message attachment and get sender user info in parallel
+    stage = "write_message_attachment_and_load_sender"
     const attachmentStart = Date.now()
     const [messageAttachmentRow, senderUser] = await Promise.all([
       db
@@ -121,8 +160,10 @@ export const handler = async (
         .where(eq(users.id, context.currentUserId))
         .then(([user]) => user),
     ])
-    Log.shared.info("🕐 Message attachment and user info completed", {
-      durationSeconds: ((Date.now() - attachmentStart) / 1000).toFixed(3),
+    logDevTelemetry("Notion attachment write completed", {
+      ...devTelemetry,
+      durationMs: Date.now() - attachmentStart,
+      hasAttachment: Boolean(messageAttachmentRow?.id),
     })
 
     if (!messageAttachmentRow?.id) {
@@ -130,8 +171,9 @@ export const handler = async (
     }
 
     // Prepare all parallel operations for updates and notifications
+    stage = "push_updates_and_notifications"
     const updatesStart = Date.now()
-    const parallelOperations: Promise<any>[] = []
+    const parallelOperations: Promise<unknown>[] = []
 
     // Add message attachment update
     parallelOperations.push(
@@ -175,7 +217,7 @@ export const handler = async (
               isThread: updateGroup.type === "threadUsers",
             },
           }).catch((error) => {
-            Log.shared.error("Failed to send task creation notification", { error })
+            Log.shared.error("Failed to send task creation notification", error, devTelemetry)
           }),
         )
       }
@@ -183,25 +225,47 @@ export const handler = async (
 
     // Execute all parallel operations
     await Promise.allSettled(parallelOperations)
-    Log.shared.info("🕐 Updates and notifications completed", {
-      durationSeconds: ((Date.now() - updatesStart) / 1000).toFixed(3),
+    logDevTelemetry("Notion updates and notifications completed", {
+      ...devTelemetry,
+      durationMs: Date.now() - updatesStart,
     })
 
     const totalDuration = Date.now() - startTime
-    Log.shared.info("🕐 Notion task creation completed successfully", {
-      totalDurationSeconds: (totalDuration / 1000).toFixed(3),
-      pageId: result.pageId,
-      taskTitle: result.taskTitle,
+    logProdTelemetry("Notion task creation completed", {
+      ...telemetry,
+      totalDurationMs: totalDuration,
+      hasTaskTitle: Boolean(result.taskTitle),
+    })
+    logDevTelemetry("Notion task creation completed", {
+      ...devTelemetry,
+      totalDurationMs: totalDuration,
+      hasPageId: Boolean(result.pageId),
+      hasTaskTitle: Boolean(result.taskTitle),
     })
 
     return { url: result.url, taskTitle: result.taskTitle }
   } catch (error) {
     const totalDuration = Date.now() - startTime
-    Log.shared.error("🕐 Failed to create Notion task", {
-      error,
-      totalDurationSeconds: (totalDuration / 1000).toFixed(3),
+    logProdTelemetry("Notion task creation failed", {
+      ...telemetry,
+      stage,
+      totalDurationMs: totalDuration,
     })
-    throw error
+    const errorMeta = errorTelemetry(error)
+    Log.shared.error("Failed to create Notion task", error, {
+      ...devTelemetry,
+      stage,
+      totalDurationMs: totalDuration,
+      ...errorMeta,
+    })
+
+    if (error instanceof InlineError) {
+      throw error
+    }
+
+    const internalError = new InlineError(InlineError.ApiError.INTERNAL)
+    internalError.description = `Failed to create Notion task (${stage}): ${errorMeta.errorMessage}`
+    throw internalError
   }
 }
 
@@ -227,14 +291,17 @@ const messageAttachmentUpdate = async ({
   try {
     // Use passed updateGroup or fetch if not provided (for backward compatibility)
     const finalUpdateGroup = updateGroup || (await getUpdateGroup(peerId, { currentUserId }))
-    Log.shared.info("Pushing messageAttachment update for Notion external task", {
+    logDevTelemetry("Pushing messageAttachment update for Notion external task", {
       currentUserId,
       chatId,
       messageId,
-      messageAttachmentId: messageAttachmentId.toString(),
-      externalTaskId: externalTask.id,
       updateGroupType: finalUpdateGroup.type,
-      recipientCount: Array.isArray(finalUpdateGroup.userIds) ? finalUpdateGroup.userIds.length : undefined,
+      recipientCount:
+        finalUpdateGroup.type === "spaceUsers"
+          ? connectionManager.getSpaceUserIds(finalUpdateGroup.spaceId).length
+          : Array.isArray(finalUpdateGroup.userIds)
+          ? finalUpdateGroup.userIds.length
+          : undefined,
     })
 
     // Create the MessageAttachment object
@@ -298,6 +365,11 @@ const messageAttachmentUpdate = async ({
       })
     }
   } catch (error) {
-    Log.shared.error("Failed to update message attachment", { error })
+    Log.shared.error("Failed to update message attachment for Notion task", error, {
+      currentUserId,
+      chatId,
+      messageId,
+      ...errorTelemetry(error),
+    })
   }
 }
