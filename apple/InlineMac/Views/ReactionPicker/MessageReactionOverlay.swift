@@ -257,3 +257,19 @@ extension MessageViewAppKit {
     overlayWindow.makeKeyAndOrderFront(nil)
   }
 }
+
+extension MinimalMessageViewAppKit {
+  func showReactionOverlay() {
+    // Don't show reactions for messages that are still sending
+    guard fullMessage.message.status != .sending else { return }
+
+    let overlayWindow = ReactionOverlayWindow(
+      messageView: self,
+      fullMessage: fullMessage
+    )
+
+    overlayWindow.ignoresMouseEvents = false
+    overlayWindow.contentView?.wantsLayer = true
+    overlayWindow.makeKeyAndOrderFront(nil)
+  }
+}

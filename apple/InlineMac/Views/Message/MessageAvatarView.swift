@@ -48,6 +48,12 @@ class UserAvatarView: NSView {
     fatalError("init(coder:) has not been implemented")
   }
 
+  func update(userInfo: UserInfo) {
+    guard self.userInfo != userInfo else { return }
+    self.userInfo = userInfo
+    updateAvatar()
+  }
+
   private func updateAvatar() {
     guard let userInfo else { return }
 

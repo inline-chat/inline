@@ -5,8 +5,19 @@ import Logger
 import SwiftUI
 import Translation
 
+private protocol MessageTableRenderableView: AnyObject {
+  func updateTextAndSize(fullMessage: FullMessage, props: MessageViewProps, animate: Bool)
+  func updateSize(props: MessageViewProps)
+  func reflectBoundsChange(fraction: CGFloat)
+  func setScrollState(_ state: MessageListScrollState)
+  func reset()
+}
+
+extension MessageViewAppKit: MessageTableRenderableView {}
+extension MinimalMessageViewAppKit: MessageTableRenderableView {}
+
 class MessageTableCell: NSView {
-  private var messageView: MessageViewAppKit?
+  private var messageView: (NSView & MessageTableRenderableView)?
   private var currentContent: (message: FullMessage, props: MessageViewProps)?
   private let log = Log.scoped("MessageTableCell", enableTracing: false)
   private var dependencies: AppDependencies?
@@ -85,7 +96,8 @@ class MessageTableCell: NSView {
        currentContent.message.repliedToMessage?.id == message.repliedToMessage?.id,
        // disable re-use for file message completely for now until we can optimize later
        // same avatar
-       currentContent.props.firstInGroup == props.firstInGroup
+       currentContent.props.firstInGroup == props.firstInGroup,
+       currentContent.props.renderStyle == props.renderStyle
     // For now, recreate if moving from single line to multi line
     // , currentContent.props.layout.isSingleLine == props.layout.isSingleLine
     // different text
@@ -144,12 +156,24 @@ class MessageTableCell: NSView {
 
     messageView?.removeFromSuperview()
 
-    let newMessageView = MessageViewAppKit(
-      fullMessage: content.0,
-      props: content.1,
-      dependencies: dependencies,
-      isScrolling: scrollState.isScrolling
-    )
+    let newMessageView: (NSView & MessageTableRenderableView)
+    switch content.1.renderStyle {
+    case .bubble:
+      newMessageView = MessageViewAppKit(
+        fullMessage: content.0,
+        props: content.1,
+        dependencies: dependencies,
+        isScrolling: scrollState.isScrolling
+      )
+    case .minimal:
+      newMessageView = MinimalMessageViewAppKit(
+        fullMessage: content.0,
+        props: content.1,
+        dependencies: dependencies,
+        isScrolling: scrollState.isScrolling
+      )
+    }
+
     newMessageView.translatesAutoresizingMaskIntoConstraints = false
     addSubview(newMessageView)
 

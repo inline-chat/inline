@@ -114,6 +114,12 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  @Published var messageRenderStyle: MessageRenderStyle {
+    didSet {
+      UserDefaults.standard.set(messageRenderStyle.rawValue, forKey: "messageRenderStyle")
+    }
+  }
+
   // MARK: - Sidebar
 
   @Published var showSidebarMessagePreview: Bool {
@@ -177,6 +183,14 @@ final class AppSettings: ObservableObject {
     } else {
       appearance = .system
     }
+
+    if let storedMessageRenderStyle = UserDefaults.standard.string(forKey: "messageRenderStyle"),
+       let style = MessageRenderStyle(rawValue: storedMessageRenderStyle) {
+      messageRenderStyle = style
+    } else {
+      messageRenderStyle = .bubble
+    }
+
     if let storedShowPreview = UserDefaults.standard.object(forKey: "showSidebarMessagePreview") as? Bool {
       showSidebarMessagePreview = storedShowPreview
     } else {

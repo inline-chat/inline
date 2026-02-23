@@ -14,10 +14,10 @@ import TextProcessing
 import Throttler
 import Translation
 
-class MessageViewAppKit: NSView {
+class MinimalMessageViewAppKit: NSView {
   private let feature_relayoutOnBoundsChange = true
-  private let log = Log.scoped("MessageView", enableTracing: true)
-  static let avatarSize: CGFloat = Theme.messageAvatarSize
+  private let log = Log.scoped("MinimalMessageView", enableTracing: true)
+  static let avatarSize: CGFloat = MessageSizeCalculator.minimalAvatarSize
   private(set) var fullMessage: FullMessage
   private let dependencies: AppDependencies?
   private var props: MessageViewProps
@@ -66,11 +66,33 @@ class MessageViewAppKit: NSView {
   }
 
   private var chatHasAvatar: Bool {
-    !isDM
+    true
   }
 
   private var showsAvatar: Bool {
-    chatHasAvatar && props.layout.hasAvatar && !outgoing
+    chatHasAvatar && props.layout.hasAvatar
+  }
+
+  private var avatarUserInfo: UserInfo {
+    if let senderInfo = fullMessage.senderInfo {
+      return senderInfo
+    }
+
+    if outgoing {
+      if let currentUserInfo = dependencies?.rootData?.currentUserInfo {
+        return currentUserInfo
+      }
+
+      if let currentUserId = Auth.shared.getCurrentUserId(),
+         let currentUserInfo = try? AppDatabase.shared.reader.read({ db in
+           try User.userInfoQuery().filter(key: currentUserId).fetchOne(db)
+         })
+      {
+        return currentUserInfo
+      }
+    }
+
+    return .deleted
   }
 
   private var showsName: Bool {
@@ -124,10 +146,6 @@ class MessageViewAppKit: NSView {
     props.layout.reactionsOutsideBubble
   }
 
-  private var shouldUseTransparentOutgoingReactions: Bool {
-    outgoing && (emojiMessage || reactionsOutsideBubble)
-  }
-
   private var textWidth: CGFloat {
     props.layout.text?.size.width ?? 1.0
   }
@@ -137,13 +155,10 @@ class MessageViewAppKit: NSView {
   }
 
   private var textColor: NSColor {
-    Self.textColor(outgoing: outgoing)
+    .labelColor
   }
 
   private var forwardHeaderTextColor: NSColor {
-    if outgoing, props.layout.hasBubbleColor {
-      return .white
-    }
     return .controlAccentColor
   }
 
@@ -191,20 +206,12 @@ class MessageViewAppKit: NSView {
     return "Forwarded from: \(forwardHeaderTitle)"
   }
 
-  static func textColor(outgoing: Bool) -> NSColor {
-    if outgoing {
-      NSColor.white
-    } else {
-      NSColor.labelColor
-    }
+  static func textColor(outgoing _: Bool) -> NSColor {
+    .labelColor
   }
 
-  static func linkColor(outgoing: Bool) -> NSColor {
-    if outgoing {
-      NSColor.white
-    } else {
-      NSColor.linkColor
-    }
+  static func linkColor(outgoing _: Bool) -> NSColor {
+    .linkColor
   }
 
   private var emojiMessage: Bool {
@@ -212,13 +219,7 @@ class MessageViewAppKit: NSView {
   }
 
   private var bubbleBackgroundColor: NSColor {
-    if !props.layout.hasBubbleColor {
-      NSColor.clear
-    } else if outgoing {
-      Theme.messageBubblePrimaryBgColor
-    } else {
-      Theme.messageBubbleSecondaryBgColor
-    }
+    .clear
   }
 
   private var linkColor: NSColor {
@@ -229,6 +230,10 @@ class MessageViewAppKit: NSView {
     Self.linkColor(outgoing: outgoing)
   }
 
+  private var embeddedReplyStyle: EmbeddedMessageView.EmbeddedMessageStyle {
+    .colored
+  }
+
   private var senderFont: NSFont {
     .systemFont(
       ofSize: 12,
@@ -237,15 +242,7 @@ class MessageViewAppKit: NSView {
   }
 
   private var isTimeOverlay: Bool {
-    // If we have a document and the message is empty, we don't want to show the time overlay
-    if props.layout.hasDocument, !props.layout.hasText {
-      false
-    } else if emojiMessage {
-      true
-    } else {
-      // for photos, we want to show the time overlay if the message is empty
-      !props.layout.hasText
-    }
+    false
   }
 
   // State
@@ -269,7 +266,7 @@ class MessageViewAppKit: NSView {
   private var shineEffectView: ShineEffectView?
 
   private lazy var avatarView: UserAvatarView = {
-    let view = UserAvatarView(userInfo: fullMessage.senderInfo ?? .deleted)
+    let view = UserAvatarView(userInfo: avatarUserInfo, size: Self.avatarSize)
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -331,7 +328,7 @@ class MessageViewAppKit: NSView {
     let view = DocumentView(
       documentInfo: documentInfo,
       fullMessage: self.fullMessage,
-      white: outgoing
+      white: false
     )
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
@@ -350,7 +347,7 @@ class MessageViewAppKit: NSView {
 
   /// Reply
   private lazy var replyView: EmbeddedMessageView = {
-    let view = EmbeddedMessageView(style: outgoing ? .white : .colored)
+    let view = EmbeddedMessageView(style: embeddedReplyStyle)
     view.translatesAutoresizingMaskIntoConstraints = false
     view.setRelatedMessage(fullMessage.message)
     if let embeddedMessage = fullMessage.repliedToMessage {
@@ -560,9 +557,10 @@ class MessageViewAppKit: NSView {
 
     if showsName {
       addSubview(nameLabel)
-      let name = from.firstName ?? from.username ?? ""
+      let senderName = from.firstName ?? from.username ?? "You"
       let nameForInitials = UserAvatar.getNameForInitials(user: from)
-      nameLabel.stringValue = outgoing ? "You" : name
+      let shouldUseActualOutgoingName = outgoing && message.peerId.isThread
+      nameLabel.stringValue = shouldUseActualOutgoingName ? senderName : (outgoing ? "You" : senderName)
       nameLabel.textColor = NSColor(
         InitialsCircle.ColorPalette
           .color(for: nameForInitials)
@@ -608,6 +606,7 @@ class MessageViewAppKit: NSView {
     }
 
     addSubview(timeAndStateView)
+    timeAndStateView.isHidden = true
 
     setupMessageText()
     setupContextMenu()
@@ -821,8 +820,8 @@ class MessageViewAppKit: NSView {
       fullMessage: fullMessage,
       groups: fullMessage.groupedReactions,
       layoutItems: props.layout.reactionItems,
-      forceIncomingStyle: reactionsOutsideBubble,
-      transparentOutgoingStyle: shouldUseTransparentOutgoingReactions,
+      forceIncomingStyle: true,
+      transparentOutgoingStyle: false,
       animate: animate
     )
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -865,17 +864,10 @@ class MessageViewAppKit: NSView {
           equalTo: bubbleView.bottomAnchor,
           constant: props.layout.reactionsOutsideBubbleTopInset
         )
-        if outgoing {
-          reactionViewTrailingConstraint = reactionsView.trailingAnchor.constraint(
-            equalTo: bubbleView.trailingAnchor,
-            constant: -reactionsPlan.spacing.right
-          )
-        } else {
-          reactionViewLeadingConstraint = reactionsView.leadingAnchor.constraint(
-            equalTo: bubbleView.leadingAnchor,
-            constant: reactionsPlan.spacing.left
-          )
-        }
+        reactionViewLeadingConstraint = reactionsView.leadingAnchor.constraint(
+          equalTo: bubbleView.leadingAnchor,
+          constant: reactionsPlan.spacing.left
+        )
       } else {
         reactionViewTopConstraint = reactionsView.topAnchor.constraint(
           equalTo: contentView.topAnchor,
@@ -904,8 +896,8 @@ class MessageViewAppKit: NSView {
       fullMessage: fullMessage,
       groups: fullMessage.groupedReactions,
       layoutItems: props.layout.reactionItems,
-      forceIncomingStyle: reactionsOutsideBubble,
-      transparentOutgoingStyle: shouldUseTransparentOutgoingReactions,
+      forceIncomingStyle: true,
+      transparentOutgoingStyle: false,
       animate: false
     )
   }
@@ -941,8 +933,8 @@ class MessageViewAppKit: NSView {
         fullMessage: next,
         groups: next.groupedReactions,
         layoutItems: props.layout.reactionItems,
-        forceIncomingStyle: reactionsOutsideBubble,
-        transparentOutgoingStyle: shouldUseTransparentOutgoingReactions,
+        forceIncomingStyle: true,
+        transparentOutgoingStyle: false,
         animate: true
       )
     }
@@ -1076,6 +1068,13 @@ class MessageViewAppKit: NSView {
   private func setupConstraints() {
     var constraints: [NSLayoutConstraint] = []
     let layout = props.layout
+    let reservedAvatarSlotWidth =
+      Theme.messageSidePadding + MessageSizeCalculator.minimalAvatarSize + Theme.messageHorizontalStackSpacing
+    let contentLeading: CGFloat = if let avatar = layout.avatar {
+      avatar.spacing.left + avatar.size.width + avatar.spacing.right
+    } else {
+      reservedAvatarSlotWidth
+    }
 
     defer {
       NSLayoutConstraint.activate(constraints)
@@ -1113,13 +1112,10 @@ class MessageViewAppKit: NSView {
       constraints.append(
         contentsOf: [
           nameLabel.leadingAnchor
-            .constraint(
-              equalTo: leadingAnchor,
-              constant: layout.nameAndBubbleLeading + name.spacing.left
-            ),
+            .constraint(equalTo: contentView.leadingAnchor, constant: name.spacing.left),
+          nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor),
           nameLabel.topAnchor
             .constraint(equalTo: topAnchor, constant: layout.wrapper.spacing.top),
-          nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
           nameLabel.heightAnchor
             .constraint(equalToConstant: name.size.height),
         ]
@@ -1160,18 +1156,11 @@ class MessageViewAppKit: NSView {
     contentViewWidthConstraint = contentView.widthAnchor.constraint(equalToConstant: layout.bubble.size.width)
     contentViewHeightConstraint = contentView.heightAnchor.constraint(equalToConstant: layout.bubble.size.height)
 
-    let sidePadding = Theme.messageSidePadding
-    let contentLeading = chatHasAvatar ? layout.nameAndBubbleLeading : sidePadding
-
     // Depending on outgoing or incoming message
     let contentViewSideAnchor =
-      !outgoing ?
-      contentView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading) :
-      contentView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -sidePadding)
+      contentView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading)
     let bubbleViewSideAnchor =
-      !outgoing ?
-      bubbleView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading) :
-      bubbleView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -sidePadding)
+      bubbleView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: contentLeading)
 
     constraints.append(
       contentsOf: [
@@ -1201,16 +1190,12 @@ class MessageViewAppKit: NSView {
         constant: text.spacing.left
       )
 
-      constraints.append(
-        contentsOf: [
-          textViewHeightConstraint!,
-          textViewWidthConstraint!,
-          textViewTopConstraint!,
-          textViewLeadingConstraint!,
-        ]
-      )
-
-      // TODO: Handle RTL
+      constraints.append(contentsOf: [
+        textViewHeightConstraint!,
+        textViewWidthConstraint!,
+        textViewTopConstraint!,
+        textViewLeadingConstraint,
+      ].compactMap(\.self))
     }
 
     // Reactions
@@ -1226,17 +1211,10 @@ class MessageViewAppKit: NSView {
           equalTo: bubbleView.bottomAnchor,
           constant: layout.reactionsOutsideBubbleTopInset
         )
-        if outgoing {
-          reactionViewTrailingConstraint = reactionsView.trailingAnchor.constraint(
-            equalTo: bubbleView.trailingAnchor,
-            constant: -reactionsPlan.spacing.right
-          )
-        } else {
-          reactionViewLeadingConstraint = reactionsView.leadingAnchor.constraint(
-            equalTo: bubbleView.leadingAnchor,
-            constant: reactionsPlan.spacing.left
-          )
-        }
+        reactionViewLeadingConstraint = reactionsView.leadingAnchor.constraint(
+          equalTo: bubbleView.leadingAnchor,
+          constant: reactionsPlan.spacing.left
+        )
       } else {
         reactionViewTopConstraint = reactionsView.topAnchor.constraint(
           equalTo: contentView.topAnchor,
@@ -1488,8 +1466,7 @@ class MessageViewAppKit: NSView {
     if let text = props.layout.text,
        let textViewWidthConstraint,
        let textViewHeightConstraint,
-       let textViewTopConstraint,
-       let textViewLeadingConstraint
+       let textViewTopConstraint
     {
       log.trace("Updating text view constraints for message \(text.size)")
       if textViewWidthConstraint.constant != text.size.width {
@@ -1504,7 +1481,16 @@ class MessageViewAppKit: NSView {
         textViewTopConstraint.constant = props.layout.textContentViewTop
       }
 
-      if textViewLeadingConstraint.constant != text.spacing.left {
+      if textViewLeadingConstraint == nil {
+        textViewLeadingConstraint = textView.leadingAnchor.constraint(
+          equalTo: contentView.leadingAnchor,
+          constant: text.spacing.left
+        )
+      }
+      textViewLeadingConstraint?.isActive = true
+      if let textViewLeadingConstraint,
+         textViewLeadingConstraint.constant != text.spacing.left
+      {
         textViewLeadingConstraint.constant = text.spacing.left
       }
     }
@@ -1544,6 +1530,22 @@ class MessageViewAppKit: NSView {
       if photoViewTopConstraint.constant != props.layout.photoContentViewTop {
         photoViewTopConstraint.constant = props.layout.photoContentViewTop
       }
+    } else if let photo = props.layout.photo {
+      if photoView.superview == nil {
+        contentView.addSubview(photoView)
+      }
+      photoViewTopConstraint = photoView.topAnchor.constraint(
+        equalTo: contentView.topAnchor,
+        constant: props.layout.photoContentViewTop
+      )
+      photoViewHeightConstraint = photoView.heightAnchor.constraint(equalToConstant: photo.size.height)
+      photoViewWidthConstraint = photoView.widthAnchor.constraint(equalToConstant: photo.size.width)
+      NSLayoutConstraint.activate([
+        photoViewTopConstraint!,
+        photoViewHeightConstraint!,
+        photoViewWidthConstraint!,
+        photoView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: photo.spacing.left),
+      ])
     }
 
     if let video = props.layout.video,
@@ -1587,6 +1589,22 @@ class MessageViewAppKit: NSView {
       if documentViewTopConstraint.constant != documentTop {
         documentViewTopConstraint.constant = documentTop
       }
+    } else if let document = props.layout.document, let documentView {
+      if documentView.superview == nil {
+        contentView.addSubview(documentView)
+      }
+      documentViewTopConstraint = documentView.topAnchor.constraint(
+        equalTo: contentView.topAnchor,
+        constant: props.layout.documentContentViewTop
+      )
+      NSLayoutConstraint.activate([
+        documentViewTopConstraint!,
+        documentView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: document.spacing.left),
+        documentView.trailingAnchor.constraint(
+          equalTo: contentView.trailingAnchor,
+          constant: -document.spacing.right
+        ),
+      ])
     }
 
     if let bubbleViewWidthConstraint,
@@ -1634,18 +1652,10 @@ class MessageViewAppKit: NSView {
       if reactionViewTopConstraint.constant != reactionTopConstant {
         reactionViewTopConstraint.constant = reactionTopConstant
       }
-      if props.layout.reactionsOutsideBubble, outgoing {
-        if let reactionViewTrailingConstraint,
-           reactionViewTrailingConstraint.constant != -reactionsPlan.spacing.right
-        {
-          reactionViewTrailingConstraint.constant = -reactionsPlan.spacing.right
-        }
-      } else {
-        if let reactionViewLeadingConstraint,
-           reactionViewLeadingConstraint.constant != reactionsPlan.spacing.left
-        {
-          reactionViewLeadingConstraint.constant = reactionsPlan.spacing.left
-        }
+      if let reactionViewLeadingConstraint,
+         reactionViewLeadingConstraint.constant != reactionsPlan.spacing.left
+      {
+        reactionViewLeadingConstraint.constant = reactionsPlan.spacing.left
       }
     } else if let reactionsView, let reactionsPlan = props.layout.reactions {
       // setup
@@ -1660,17 +1670,10 @@ class MessageViewAppKit: NSView {
           equalTo: bubbleView.bottomAnchor,
           constant: props.layout.reactionsOutsideBubbleTopInset
         )
-        if outgoing {
-          reactionViewTrailingConstraint = reactionsView.trailingAnchor.constraint(
-            equalTo: bubbleView.trailingAnchor,
-            constant: -reactionsPlan.spacing.right
-          )
-        } else {
-          reactionViewLeadingConstraint = reactionsView.leadingAnchor.constraint(
-            equalTo: bubbleView.leadingAnchor,
-            constant: reactionsPlan.spacing.left
-          )
-        }
+        reactionViewLeadingConstraint = reactionsView.leadingAnchor.constraint(
+          equalTo: bubbleView.leadingAnchor,
+          constant: reactionsPlan.spacing.left
+        )
       } else {
         reactionViewTopConstraint = reactionsView.topAnchor.constraint(
           equalTo: contentView.topAnchor,
@@ -1758,7 +1761,7 @@ class MessageViewAppKit: NSView {
     // From Cache
 
     if
-      let cachedAttributedString = CacheAttrs.shared.get(message: fullMessage, renderStyle: .bubble)
+      let cachedAttributedString = CacheAttrs.shared.get(message: fullMessage, renderStyle: .minimal)
     {
       let attributedString = cachedAttributedString
       textView.textStorage?.setAttributedString(attributedString)
@@ -1800,7 +1803,7 @@ class MessageViewAppKit: NSView {
 
     textView.textStorage?.setAttributedString(attributedString)
 
-    CacheAttrs.shared.set(message: fullMessage, renderStyle: .bubble, value: attributedString)
+    CacheAttrs.shared.set(message: fullMessage, renderStyle: .minimal, value: attributedString)
 
     if useTextKit2 {
       textView.textContainer?.size = props.layout.text?.size ?? .zero
@@ -2246,12 +2249,29 @@ class MessageViewAppKit: NSView {
     prevInViewport = false
 
     // Ensure media views exist before constraint updates when reusing the view
+    if props.layout.photo != nil, photoView.superview == nil {
+      contentView.addSubview(photoView)
+    }
+
     if props.layout.video != nil, videoView.superview == nil {
       contentView.addSubview(videoView)
     }
 
     // update internal props
     self.fullMessage = fullMessage
+
+    if props.layout.document != nil, let documentView, documentView.superview == nil {
+      contentView.addSubview(documentView)
+    }
+
+    if props.layout.attachments != nil, attachmentsView == nil {
+      attachmentsView = createAttachmentsView()
+      if let attachmentsView {
+        contentView.addSubview(attachmentsView)
+      }
+    } else if props.layout.attachments != nil, let attachmentsView, attachmentsView.superview == nil {
+      contentView.addSubview(attachmentsView)
+    }
 
     // Update related message for reply view
     if hasReply {
@@ -2263,6 +2283,10 @@ class MessageViewAppKit: NSView {
 
     // Update props and reflect changes
     updatePropsAndUpdateLayout(props: props, disableTextRelayout: true, animate: animate)
+
+    if showsAvatar {
+      avatarView.update(userInfo: avatarUserInfo)
+    }
 
     // Reactions
     // TODO: Reactions are not updating as expected
@@ -2314,6 +2338,7 @@ class MessageViewAppKit: NSView {
 
     // Update time and state
     timeAndStateView.updateMessage(fullMessage, overlay: isTimeOverlay)
+    timeAndStateView.isHidden = true
 
     // Ensure swipe UI is reset if message cannot be replied to
     if !self.fullMessage.canReply {
@@ -2649,7 +2674,7 @@ class MessageViewAppKit: NSView {
 
 // MARK: - Tracking Area & Hover
 
-extension MessageViewAppKit {
+extension MinimalMessageViewAppKit {
   func setScrollState(_ state: MessageListScrollState) {
     handleScrollStateChange(state)
   }
@@ -2711,7 +2736,7 @@ extension MessageViewAppKit {
 
 // MARK: - NSGestureRecognizerDelegate
 
-extension MessageViewAppKit: NSGestureRecognizerDelegate {
+extension MinimalMessageViewAppKit: NSGestureRecognizerDelegate {
   func gestureRecognizer(_: NSGestureRecognizer, shouldReceive event: NSEvent) -> Bool {
     guard let reactionsView else { return true }
 
@@ -2727,7 +2752,7 @@ extension MessageViewAppKit: NSGestureRecognizerDelegate {
 
 // MARK: - NSTextViewDelegate
 
-extension MessageViewAppKit: NSTextViewDelegate {
+extension MinimalMessageViewAppKit: NSTextViewDelegate {
   func textView(_: NSTextView, menu: NSMenu, for _: NSEvent, at charIndex: Int) -> NSMenu? {
     let linkURL = linkURLForContextMenu(at: charIndex)
     return createMenu(context: .textView, nativeMenu: menu, linkURL: linkURL)
@@ -2740,7 +2765,7 @@ extension MessageViewAppKit: NSTextViewDelegate {
   // }
 }
 
-extension MessageViewAppKit: NSMenuDelegate {
+extension MinimalMessageViewAppKit: NSMenuDelegate {
   enum MenuContext {
     case message
     case textView
@@ -3035,7 +3060,7 @@ private extension NSLayoutConstraint {
 }
 
 //// Implement viewport constraint
-extension MessageViewAppKit: NSTextViewportLayoutControllerDelegate {
+extension MinimalMessageViewAppKit: NSTextViewportLayoutControllerDelegate {
   func textViewportLayoutController(
     _ textViewportLayoutController: NSTextViewportLayoutController,
     configureRenderingSurfaceFor textLayoutFragment: NSTextLayoutFragment

@@ -15,6 +15,7 @@ class MessageListAppKit: NSViewController {
   var viewModel: MessagesProgressiveViewModel
   private var messages: [FullMessage] { viewModel.messages }
   private var state: ChatState
+  private let messageRenderStyle: MessageRenderStyle
 
   // MARK: - Interleaved rows (messages + day separators)
 
@@ -67,6 +68,7 @@ class MessageListAppKit: NSViewController {
     self.dependencies = dependencies
     self.peerId = peerId
     self.chat = chat
+    messageRenderStyle = AppSettings.shared.messageRenderStyle
     viewModel = MessagesProgressiveViewModel(peer: peerId)
     state = ChatsManager
       .get(
@@ -1509,7 +1511,7 @@ class MessageListAppKit: NSViewController {
       if let rowView = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? MessageTableCell {
         let inputProps = messageProps(for: row)
         if let message = message(forRow: row) {
-          let (_, _, _, plan) = sizeCalculator.calculateSize(
+          let (_, _, _, plan) = calculateSize(
             for: message,
             with: inputProps,
             tableWidth: tableWidth()
@@ -1521,6 +1523,7 @@ class MessageListAppKit: NSViewController {
             isFirstMessage: inputProps.isFirstMessage,
             isRtl: inputProps.isRtl,
             isDM: chat?.type == .privateChat,
+            renderStyle: inputProps.renderStyle,
             index: messageIndexById[message.id],
             translated: inputProps.translated,
             layout: plan,
@@ -1556,7 +1559,7 @@ class MessageListAppKit: NSViewController {
       for row in rowsToUpdate {
         guard let message = message(forRow: row) else { continue }
         let props = messageProps(for: row)
-        let _ = sizeCalculator.calculateSize(for: message, with: props, tableWidth: width_)
+        let _ = calculateSize(for: message, with: props, tableWidth: width_)
       }
     }
   }
@@ -1585,7 +1588,8 @@ class MessageListAppKit: NSViewController {
         isFirstMessage: true,
         isDM: chat?.type == .privateChat,
         isRtl: false,
-        translated: false
+        translated: false,
+        renderStyle: messageRenderStyle
       )
     }
 
@@ -1595,8 +1599,22 @@ class MessageListAppKit: NSViewController {
       isFirstMessage: isFirstMessage(at: row),
       isDM: chat?.type == .privateChat,
       isRtl: false,
-      translated: message.isTranslated
+      translated: message.isTranslated,
+      renderStyle: messageRenderStyle
     )
+  }
+
+  private func calculateSize(
+    for message: FullMessage,
+    with props: MessageViewInputProps,
+    tableWidth: CGFloat
+  ) -> (NSSize, NSSize, NSSize?, MessageSizeCalculator.LayoutPlans) {
+    switch props.renderStyle {
+    case .bubble:
+      sizeCalculator.calculateBubbleSize(for: message, with: props, tableWidth: tableWidth)
+    case .minimal:
+      sizeCalculator.calculateMinimalSize(for: message, with: props, tableWidth: tableWidth)
+    }
   }
 
   private func calculateNewHeight(forRow row: Int) -> CGFloat {
@@ -1606,7 +1624,7 @@ class MessageListAppKit: NSViewController {
 
     let props = messageProps(for: row)
 
-    let (_, _, _, plan) = sizeCalculator.calculateSize(for: message, with: props, tableWidth: tableWidth())
+    let (_, _, _, plan) = calculateSize(for: message, with: props, tableWidth: tableWidth())
     return plan.totalHeight
   }
 
@@ -1824,9 +1842,17 @@ extension MessageListAppKit: NSTableViewDelegate {
 
     // Day boundary should start a new group (even for the same sender).
     let calendar = Calendar.autoupdatingCurrent
-    return calendar.startOfDay(for: previous.message.date) != calendar.startOfDay(for: current.message.date)
-//    return previous.message.fromId != current.message.fromId ||
-//      current.message.date.timeIntervalSince(previous.message.date) > 300
+    if calendar.startOfDay(for: previous.message.date) != calendar.startOfDay(for: current.message.date) {
+      return true
+    }
+
+    let gapSeconds = current.message.date.timeIntervalSince(previous.message.date)
+    // A quiet period should start a new visual group in both bubble and minimal styles.
+    if gapSeconds > 300 {
+      return true
+    }
+
+    return false
   }
 
   func isLastMessage(at row: Int) -> Bool {
@@ -1880,7 +1906,7 @@ extension MessageListAppKit: NSTableViewDelegate {
 
         let inputProps = messageProps(for: row)
 
-        let (_, _, _, layoutPlan) = sizeCalculator.calculateSize(
+        let (_, _, _, layoutPlan) = calculateSize(
           for: message,
           with: inputProps,
           tableWidth: tableWidth()
@@ -1892,6 +1918,7 @@ extension MessageListAppKit: NSTableViewDelegate {
           isFirstMessage: inputProps.isFirstMessage,
           isRtl: inputProps.isRtl,
           isDM: chat?.type == .privateChat,
+          renderStyle: inputProps.renderStyle,
           index: messageIndex,
           translated: inputProps.translated,
           layout: layoutPlan
@@ -1924,7 +1951,7 @@ extension MessageListAppKit: NSTableViewDelegate {
         let props = messageProps(for: row)
         let tableWidth = ceil(tableView.bounds.width)
 
-        let (_, _, _, plan) = sizeCalculator.calculateSize(for: message, with: props, tableWidth: tableWidth)
+        let (_, _, _, plan) = calculateSize(for: message, with: props, tableWidth: tableWidth)
 
         return plan.totalHeight
     }
