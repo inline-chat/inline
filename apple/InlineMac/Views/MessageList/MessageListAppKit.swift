@@ -109,9 +109,9 @@ class MessageListAppKit: NSViewController {
 
       for await event in self_.state.events {
         switch event {
-          case let .scrollToMsg(msgId):
+          case let .scrollToMsg(request):
             // scroll and highlight
-            self_.scrollToMsgAndHighlight(msgId)
+            self_.scrollToMsgAndHighlight(request)
 
           case .scrollToBottom:
             if !self_.isAtBottom {
@@ -1013,6 +1013,64 @@ class MessageListAppKit: NSViewController {
   }
 
   private var loadingBatch = false
+  private var loadingRemoteOlderBatch = false
+  private var noRemoteOlderBeforeMessageId: Int64?
+  private var lastRemoteOlderCursor: Int64?
+
+  private func shouldRequestRemoteOlder(beforeMessageId: Int64) -> Bool {
+    guard beforeMessageId > 0 else { return false }
+
+    if let noRemoteOlderBeforeMessageId, beforeMessageId <= noRemoteOlderBeforeMessageId {
+      return false
+    }
+
+    if loadingRemoteOlderBatch, lastRemoteOlderCursor == beforeMessageId {
+      return false
+    }
+
+    return true
+  }
+
+  private func remoteOlderLimit() -> Int32 {
+    Int32(messages.count > 200 ? 200 : 100)
+  }
+
+  private func requestRemoteOlderBatch(beforeMessageId: Int64) {
+    guard shouldRequestRemoteOlder(beforeMessageId: beforeMessageId) else { return }
+
+    loadingRemoteOlderBatch = true
+    lastRemoteOlderCursor = beforeMessageId
+
+    Task { [weak self] in
+      guard let self else { return }
+      defer { loadingRemoteOlderBatch = false }
+
+      do {
+        let rpcResult = try await Api.realtime.send(
+          .getChatHistory(peer: peerId, offsetID: beforeMessageId, limit: remoteOlderLimit())
+        )
+
+        guard let rpcResult, case let .getChatHistory(result) = rpcResult else {
+          return
+        }
+
+        if result.messages.isEmpty {
+          if let boundary = noRemoteOlderBeforeMessageId {
+            noRemoteOlderBeforeMessageId = max(boundary, beforeMessageId)
+          } else {
+            noRemoteOlderBeforeMessageId = beforeMessageId
+          }
+          return
+        }
+
+        await MainActor.run { [weak self] in
+          self?.loadBatch(at: .older)
+        }
+      } catch {
+        log.error("Failed to load older messages from remote", error: error)
+      }
+    }
+  }
 
   // Currently only at top is supported.
   func loadBatch(at direction: MessagesProgressiveViewModel.MessagesLoadDirection) {
@@ -1022,6 +1080,8 @@ class MessageListAppKit: NSViewController {
 
     Task { [weak self] in
       guard let self else { return }
+      let oldestMessageIdBeforeLoad = messages.first?.message.messageId
+      var didInsertRows = false
       // Preserve scroll position from bottom if we're loading at top
       maintainingBottomScroll { [weak self] in
         guard let self else { return false }
@@ -1057,14 +1117,23 @@ class MessageListAppKit: NSViewController {
             tableView.reloadData()
           }
 
-          loadingBatch = false
+          didInsertRows = true
           return true
         }
 
         // Don't maintain
-        loadingBatch = false
+        didInsertRows = false
         return false
       }
+
+      loadingBatch = false
+
+      guard !didInsertRows else { return }
+      guard direction == .older else { return }
+      guard let oldestMessageIdBeforeLoad else { return }
+      guard !viewModel.canLoadOlderFromLocal else { return }
+
+      requestRemoteOlderBatch(beforeMessageId: oldestMessageIdBeforeLoad)
     }
   }
 
@@ -1903,7 +1972,19 @@ enum MessageListScrollState {
 extension MessageListAppKit {
   // MARK: - Scroll to message
 
-  func scrollToMsgAndHighlight(_ msgId: Int64) {
+  func scrollToMsgAndHighlight(_ request: ScrollToMessageRequest) {
+    scrollToMsgAndHighlight(
+      request.messageId,
+      reason: request.reason,
+      didAttemptLocalAroundLoad: false
+    )
+  }
+
+  private func scrollToMsgAndHighlight(
+    _ msgId: Int64,
+    reason: ScrollToMessageReason,
+    didAttemptLocalAroundLoad: Bool
+  ) {
     // Don't allow negative msgIds (likely local messages)
     guard msgId > 0 else { return }
 
@@ -1915,15 +1996,37 @@ extension MessageListAppKit {
     guard let messageIndex = messages.firstIndex(where: { $0.message.messageId == msgId }) else {
       log.error("Message not found for id \(msgId)")
 
+      if !didAttemptLocalAroundLoad {
+        let loadedAroundTarget = viewModel.loadLocalWindowAroundMessage(messageId: msgId, publish: false)
+        if loadedAroundTarget {
+          log.debug("Loaded local around-target window for message \(msgId), reason=\(reason.rawValue)")
+          rebuildRowItems()
+          tableView.reloadData()
+
+          DispatchQueue.main.async { [weak self] in
+            self?.scrollToMsgAndHighlight(
+              msgId,
+              reason: reason,
+              didAttemptLocalAroundLoad: true
+            )
+          }
+          return
+        }
+      }
+
       // TODO: Load more to get to it
-      if let first = messages.first, first.message.messageId > msgId {
+      if let first = messages.first, first.message.messageId > msgId, viewModel.canLoadOlderFromLocal {
         log
           .debug(
             "Loading batch at top to find message because first message id = \(first.message.messageId) and what we want is \(msgId)"
           )
         loadBatch(at: .older)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-          self?.scrollToMsgAndHighlight(msgId)
+          self?.scrollToMsgAndHighlight(
+            msgId,
+            reason: reason,
+            didAttemptLocalAroundLoad: true
+          )
         }
       } else {
         log.error("Message not found for id even after loading all messages from cache \(msgId)")

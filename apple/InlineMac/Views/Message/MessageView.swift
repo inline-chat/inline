@@ -1059,7 +1059,7 @@ class MessageViewAppKit: NSView {
 
     if targetPeer == message.peerId {
       let chatState = ChatsManager.shared.get(for: targetPeer, chatId: message.chatId)
-      chatState.scrollTo(msgId: forwardedMessageId)
+      chatState.scrollTo(msgId: forwardedMessageId, reason: .forwarded)
       return
     }
 
@@ -1070,7 +1070,7 @@ class MessageViewAppKit: NSView {
 
     openChat(peer: targetPeer)
     let chatState = ChatsManager.shared.get(for: targetPeer, chatId: chat.id)
-    chatState.scrollTo(msgId: forwardedMessageId)
+    chatState.scrollTo(msgId: forwardedMessageId, reason: .forwarded)
   }
 
   private func setupConstraints() {

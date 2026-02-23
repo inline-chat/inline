@@ -27,6 +27,22 @@ public class MessagesProgressiveViewModel {
   // note: using date is most reliable as our sorting is based on date
   private var minDate: Date = .init()
   private var maxDate: Date = .init()
+  public private(set) var oldestLoadedMessageId: Int64?
+  public private(set) var newestLoadedMessageId: Int64?
+  public private(set) var canLoadOlderFromLocal: Bool = false
+  public private(set) var canLoadNewerFromLocal: Bool = false
+
+  struct MessageGapRange: Equatable {
+    let startMessageId: Int64
+    let endMessageId: Int64
+
+    init(startMessageId: Int64, endMessageId: Int64) {
+      self.startMessageId = min(startMessageId, endMessageId)
+      self.endMessageId = max(startMessageId, endMessageId)
+    }
+  }
+
+  private(set) var gapRanges: [MessageGapRange] = []
 
   // internals
   // was 80
@@ -79,17 +95,28 @@ public class MessagesProgressiveViewModel {
   }
 
   public func loadBatch(at direction: MessagesLoadDirection, publish: Bool = true) {
-    // top id as cursor?
-    // firs try lets use date as cursor
-    let cursor = direction == .older ? minDate : maxDate
-    let limit = messages.count > 200 ? 200 : 100
-    let prepend = direction == (reversed ? .newer : .older)
-    //    log.debug("Loading next batch at \(direction) \(cursor)")
-    loadAdditionalMessages(limit: limit, cursor: cursor, prepend: prepend, publish: publish)
+    let request = buildAdditionalLoadRequest(direction: direction)
+    log.trace(
+      "Loading batch direction=\(request.direction.logLabel) limit=\(request.limit) prepend=\(request.prepend)"
+    )
+    loadAdditionalMessages(request: request, publish: publish)
   }
 
   public func setAtBottom(_ atBottom: Bool) {
     self.atBottom = atBottom
+  }
+
+  func setGapRanges(_ ranges: [MessageGapRange]) {
+    gapRanges = Self.mergedGapRanges(ranges)
+  }
+
+  func addGapRange(startMessageId: Int64, endMessageId: Int64) {
+    let range = MessageGapRange(startMessageId: startMessageId, endMessageId: endMessageId)
+    gapRanges = Self.mergedGapRanges(gapRanges + [range])
+  }
+
+  func clearGapRanges() {
+    gapRanges.removeAll(keepingCapacity: true)
   }
 
   public enum MessagesChangeSet {
@@ -122,6 +149,7 @@ public class MessagesProgressiveViewModel {
           // sort()
 
           updateRange()
+          updateLoadedWindowMetadata()
 
           // Return changeset
           return MessagesChangeSet.added(newMessages, indexSet: [messages.count - 1])
@@ -143,6 +171,7 @@ public class MessagesProgressiveViewModel {
 
           // Update ange
           updateRange()
+          updateLoadedWindowMetadata()
 
           // Return changeset
           return MessagesChangeSet.deleted(deletedGlobalIds, indexSet: sortedIndices)
@@ -157,6 +186,7 @@ public class MessagesProgressiveViewModel {
 
           messages[index] = messageUpdate.message
           updateRange() // ??
+          updateLoadedWindowMetadata()
           return MessagesChangeSet.updated([messageUpdate.message], indexSet: [index], animated: messageUpdate.animated)
         }
 
@@ -187,6 +217,13 @@ public class MessagesProgressiveViewModel {
 
   private func sort(batch: [FullMessage]) -> [FullMessage] {
     stableSorted(batch)
+  }
+
+  struct AdditionalLoadRequest {
+    let direction: MessagesLoadDirection
+    let limit: Int
+    let cursor: Date
+    let prepend: Bool
   }
 
   struct MessageSortKey: Hashable {
@@ -233,8 +270,27 @@ public class MessagesProgressiveViewModel {
     Self.stableSortedMessages(batch, reversed: reversed)
   }
 
-  // TODO: make it O(1) instead of O(n)
-  private func updateRange() {
+  static func batchDedupedAtCursor(
+    _ batch: [FullMessage],
+    existingMessages: [FullMessage],
+    cursor: Date
+  ) -> [FullMessage] {
+    let existingMessagesAtCursor = Set(
+      existingMessages.filter { $0.message.date == cursor }.map(\.id)
+    )
+    return batch.filter { !existingMessagesAtCursor.contains($0.id) }
+  }
+
+  static func mergedMessages(
+    existing: [FullMessage],
+    additionalBatch: [FullMessage],
+    prepend: Bool
+  ) -> [FullMessage] {
+    guard !additionalBatch.isEmpty else { return existing }
+    return prepend ? (additionalBatch + existing) : (existing + additionalBatch)
+  }
+
+  static func dateRange(for messages: [FullMessage]) -> (minDate: Date, maxDate: Date) {
     var lowestDate = Date.distantFuture
     var highestDate = Date.distantPast
 
@@ -248,8 +304,139 @@ public class MessagesProgressiveViewModel {
       }
     }
 
-    minDate = lowestDate
-    maxDate = highestDate
+    return (minDate: lowestDate, maxDate: highestDate)
+  }
+
+  static func mergedGapRanges(_ ranges: [MessageGapRange]) -> [MessageGapRange] {
+    guard !ranges.isEmpty else { return [] }
+
+    let sorted = ranges.sorted { lhs, rhs in
+      if lhs.startMessageId != rhs.startMessageId {
+        return lhs.startMessageId < rhs.startMessageId
+      }
+      return lhs.endMessageId < rhs.endMessageId
+    }
+
+    var merged: [MessageGapRange] = []
+    merged.reserveCapacity(sorted.count)
+
+    for range in sorted {
+      guard let last = merged.last else {
+        merged.append(range)
+        continue
+      }
+
+      let touchesOrOverlaps = last.endMessageId == .max || range.startMessageId <= (last.endMessageId + 1)
+      if touchesOrOverlaps {
+        merged[merged.count - 1] = MessageGapRange(
+          startMessageId: last.startMessageId,
+          endMessageId: max(last.endMessageId, range.endMessageId)
+        )
+      } else {
+        merged.append(range)
+      }
+    }
+
+    return merged
+  }
+
+  // TODO: make it O(1) instead of O(n)
+  private func updateRange() {
+    let range = Self.dateRange(for: messages)
+    minDate = range.minDate
+    maxDate = range.maxDate
+  }
+
+  private func updateLoadedWindowMetadata() {
+    let messageIds = messages.map(\.message.messageId)
+    guard let oldest = messageIds.min(), let newest = messageIds.max() else {
+      oldestLoadedMessageId = nil
+      newestLoadedMessageId = nil
+      canLoadOlderFromLocal = false
+      canLoadNewerFromLocal = false
+      return
+    }
+
+    oldestLoadedMessageId = oldest
+    newestLoadedMessageId = newest
+
+    do {
+      let availability = try db.reader.read { db -> (Bool, Bool) in
+        let olderExists = try baseQuery()
+          .filter(Column("messageId") < oldest)
+          .limit(1)
+          .fetchCount(db) > 0
+        let newerExists = try baseQuery()
+          .filter(Column("messageId") > newest)
+          .limit(1)
+          .fetchCount(db) > 0
+        return (olderExists, newerExists)
+      }
+
+      canLoadOlderFromLocal = availability.0
+      canLoadNewerFromLocal = availability.1
+    } catch {
+      Log.shared.error("Failed to update loaded window metadata", error: error)
+      canLoadOlderFromLocal = false
+      canLoadNewerFromLocal = false
+    }
+  }
+
+  @discardableResult
+  public func loadLocalWindowAroundMessage(messageId: Int64, publish: Bool = true) -> Bool {
+    guard messageId > 0 else { return false }
+
+    let totalWindow = max(60, initialLimit)
+    let beforeLimit = max(20, totalWindow / 2)
+    let afterLimit = max(20, totalWindow - beforeLimit - 1)
+
+    do {
+      let aroundBatch = try db.reader.read { db -> [FullMessage]? in
+        guard let target = try baseQuery()
+          .filter(Column("messageId") == messageId)
+          .fetchOne(db)
+        else {
+          return nil
+        }
+
+        let targetDate = target.message.date
+        let targetMessageId = target.message.messageId
+
+        let olderOrTarget = try baseQuery()
+          .filter(
+            sql: "(date < ?) OR (date = ? AND messageId <= ?)",
+            arguments: [targetDate, targetDate, targetMessageId]
+          )
+          .order(Column("date").desc, Column("messageId").desc)
+          .limit(beforeLimit + 1)
+          .fetchAll(db)
+
+        let newer = try baseQuery()
+          .filter(
+            sql: "(date > ?) OR (date = ? AND messageId > ?)",
+            arguments: [targetDate, targetDate, targetMessageId]
+          )
+          .order(Column("date").asc, Column("messageId").asc)
+          .limit(afterLimit)
+          .fetchAll(db)
+
+        return olderOrTarget.reversed() + newer
+      }
+
+      guard var aroundBatch else {
+        return false
+      }
+
+      aroundBatch = sort(batch: aroundBatch)
+      messages = aroundBatch
+      updateRange()
+      updateLoadedWindowMetadata()
+
+      return messages.contains { $0.message.messageId == messageId }
+    } catch {
+      Log.shared.error("Failed to load local around-target window", error: error)
+      return false
+    }
   }
 
   private func refetchCurrentRange() {
@@ -261,49 +448,97 @@ public class MessagesProgressiveViewModel {
     case preserveRange
   }
 
+  private func buildAdditionalLoadRequest(direction: MessagesLoadDirection) -> AdditionalLoadRequest {
+    let cursor = direction == .older ? minDate : maxDate
+    let limit = messages.count > 200 ? 200 : 100
+    let prepend = direction == (reversed ? .newer : .older)
+    return AdditionalLoadRequest(
+      direction: direction,
+      limit: limit,
+      cursor: cursor,
+      prepend: prepend
+    )
+  }
+
+  private func buildBaseOrderedQuery() -> QueryInterfaceRequest<FullMessage> {
+    baseQuery()
+      .order(Column("date").desc, Column("messageId").desc)
+  }
+
+  private func buildQueryForLoad(loadMode: LoadMode, previousCount: Int) -> QueryInterfaceRequest<FullMessage> {
+    var query = buildBaseOrderedQuery()
+
+    switch loadMode {
+      case let .limit(limit):
+        query = query.limit(limit)
+
+      case .preserveRange:
+        query =
+          query
+            .filter(Column("date") >= minDate)
+            .filter(Column("date") <= maxDate)
+            .limit(previousCount)
+    }
+
+    return query
+  }
+
+  private func fetchMessages(loadMode: LoadMode, previousCount: Int) throws -> [FullMessage] {
+    try db.reader.read { db in
+      try buildQueryForLoad(loadMode: loadMode, previousCount: previousCount).fetchAll(db)
+    }
+  }
+
+  private func normalizedMessagesForDisplay(_ batch: [FullMessage]) -> [FullMessage] {
+    if reversed {
+      // It's already reversed because SQL query sorts descending.
+      return batch
+    }
+
+    // Reverse back for chronological presentation in non-reversed mode.
+    return batch.reversed()
+  }
+
+  private func fetchAdditionalMessages(request: AdditionalLoadRequest) throws -> [FullMessage] {
+    try db.reader.read { db in
+      var query = buildBaseOrderedQuery()
+      query = query.filter(Column("date") <= request.cursor)
+      query = query.limit(request.limit)
+      return try query.fetchAll(db)
+    }
+  }
+
+  private func loadModeLogLabel(_ loadMode: LoadMode) -> String {
+    switch loadMode {
+      case let .limit(limit):
+        "limit(\(limit))"
+      case .preserveRange:
+        "preserveRange"
+    }
+  }
+
   private func loadMessages(_ loadMode: LoadMode) {
     let prevCount = messages.count
+    log.trace("Loading messages mode=\(loadModeLogLabel(loadMode)) previousCount=\(prevCount)")
 
     do {
-      let messagesBatch: [FullMessage] = try db.reader.read { db in
-        var query = baseQuery()
-
-        query = query.order(Column("date").desc, Column("messageId").desc)
-
-        switch loadMode {
-          case let .limit(limit):
-            query = query.limit(limit)
-
-          case .preserveRange:
-            query =
-              query
-                .filter(Column("date") >= minDate)
-                .filter(Column("date") <= maxDate)
-                .limit(prevCount)
-        }
-
-        return try query.fetchAll(db)
-      }
+      let messagesBatch = try fetchMessages(loadMode: loadMode, previousCount: prevCount)
 
       //      log.trace("loaded messages: \(messagesBatch.count)")
-      if reversed {
-        // it's actually already reversed bc of our .order above
-        messages = messagesBatch
-      } else {
-        messages = messagesBatch.reversed() // reverse it back
-      }
+      messages = normalizedMessagesForDisplay(messagesBatch)
 
       // Uncomment if we want to sort in SQL based on anything other than date
       // sort()
 
       updateRange()
+      updateLoadedWindowMetadata()
 
     } catch {
       Log.shared.error("Failed to get messages \(error)")
     }
   }
 
-  private func loadAdditionalMessages(limit: Int, cursor: Date, prepend: Bool, publish: Bool) {
+  private func loadAdditionalMessages(request: AdditionalLoadRequest, publish: Bool) {
     let peer = peer
 
     log
@@ -312,38 +547,24 @@ public class MessagesProgressiveViewModel {
       )
 
     do {
-      var messagesBatch: [FullMessage] = try db.reader.read { db in
-        var query = baseQuery()
+      var messagesBatch = try fetchAdditionalMessages(request: request)
+      let rawCount = messagesBatch.count
 
-        // FIXME: we'll need to adjust it based on newest or oldest
-        query = query.order(Column("date").desc, Column("messageId").desc)
-        query = query.filter(Column("date") <= cursor)
-
-        query = query.limit(limit)
-
-        return try query.fetchAll(db)
-      }
-
-      log.debug("loaded additional messages: \(messagesBatch.count)")
+      log.debug("loaded additional messages: \(rawCount)")
 
       messagesBatch = sort(batch: messagesBatch)
-
-      // Dedup those with exact date as cursor as they might be included in both.
-      let existingMessagesAtCursor = Set(
-        messages.filter { $0.message.date == cursor }.map(\.id)
+      messagesBatch = Self.batchDedupedAtCursor(messagesBatch, existingMessages: messages, cursor: request.cursor)
+      log.trace(
+        "Batch dedupe direction=\(request.direction.logLabel) raw=\(rawCount) deduped=\(messagesBatch.count)"
       )
-      messagesBatch.removeAll { existingMessagesAtCursor.contains($0.id) }
 
       // Only proceed if we have new messages to add
       if !messagesBatch.isEmpty {
-        if prepend {
-          messages.insert(contentsOf: messagesBatch, at: 0)
-        } else {
-          messages.append(contentsOf: messagesBatch)
-        }
+        messages = Self.mergedMessages(existing: messages, additionalBatch: messagesBatch, prepend: request.prepend)
 
         updateRange()
       }
+      updateLoadedWindowMetadata()
     } catch {
       Log.shared.error("Failed to get messages \(error)")
     }
@@ -363,6 +584,17 @@ public class MessagesProgressiveViewModel {
             .filter(Column("peerUserId") == id)
     }
     return query
+  }
+}
+
+private extension MessagesProgressiveViewModel.MessagesLoadDirection {
+  var logLabel: String {
+    switch self {
+      case .older:
+        "older"
+      case .newer:
+        "newer"
+    }
   }
 }
 
