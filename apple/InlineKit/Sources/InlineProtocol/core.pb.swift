@@ -287,6 +287,52 @@ public enum PushNotificationProvider: SwiftProtobuf.Enum, Swift.CaseIterable {
 
 }
 
+public enum GetChatHistoryMode: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case historyModeUnspecified // = 0
+  case historyModeLatest // = 1
+  case historyModeOlder // = 2
+  case historyModeNewer // = 3
+  case historyModeAround // = 4
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .historyModeUnspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .historyModeUnspecified
+    case 1: self = .historyModeLatest
+    case 2: self = .historyModeOlder
+    case 3: self = .historyModeNewer
+    case 4: self = .historyModeAround
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .historyModeUnspecified: return 0
+    case .historyModeLatest: return 1
+    case .historyModeOlder: return 2
+    case .historyModeNewer: return 3
+    case .historyModeAround: return 4
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [GetChatHistoryMode] = [
+    .historyModeUnspecified,
+    .historyModeLatest,
+    .historyModeOlder,
+    .historyModeNewer,
+    .historyModeAround,
+  ]
+
+}
+
 public enum SearchMessagesFilter: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
   case filterUnspecified // = 0
@@ -4906,7 +4952,8 @@ public struct GetChatHistoryInput: Sendable {
   /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
   public mutating func clearPeerID() {self._peerID = nil}
 
-  /// ID of the message to start from
+  /// Legacy older-history cursor.
+  /// When `mode` is not provided, this preserves old behavior and fetches messages with ID < offset_id.
   public var offsetID: Int64 {
     get {return _offsetID ?? 0}
     set {_offsetID = newValue}
@@ -4916,7 +4963,8 @@ public struct GetChatHistoryInput: Sendable {
   /// Clears the value of `offsetID`. Subsequent reads from it will return its default value.
   public mutating func clearOffsetID() {self._offsetID = nil}
 
-  /// Number of messages to return
+  /// Number of messages to return.
+  /// For `mode = HISTORY_MODE_AROUND`, this acts as a fallback split if before/after limits are not provided.
   public var limit: Int32 {
     get {return _limit ?? 0}
     set {_limit = newValue}
@@ -4926,6 +4974,76 @@ public struct GetChatHistoryInput: Sendable {
   /// Clears the value of `limit`. Subsequent reads from it will return its default value.
   public mutating func clearLimit() {self._limit = nil}
 
+  /// Explicit fetch mode for history pagination/windowing.
+  public var mode: GetChatHistoryMode {
+    get {return _mode ?? .historyModeUnspecified}
+    set {_mode = newValue}
+  }
+  /// Returns true if `mode` has been explicitly set.
+  public var hasMode: Bool {return self._mode != nil}
+  /// Clears the value of `mode`. Subsequent reads from it will return its default value.
+  public mutating func clearMode() {self._mode = nil}
+
+  /// Around mode anchor message ID.
+  public var anchorID: Int64 {
+    get {return _anchorID ?? 0}
+    set {_anchorID = newValue}
+  }
+  /// Returns true if `anchorID` has been explicitly set.
+  public var hasAnchorID: Bool {return self._anchorID != nil}
+  /// Clears the value of `anchorID`. Subsequent reads from it will return its default value.
+  public mutating func clearAnchorID() {self._anchorID = nil}
+
+  /// Older mode cursor (messages with ID < before_id).
+  public var beforeID: Int64 {
+    get {return _beforeID ?? 0}
+    set {_beforeID = newValue}
+  }
+  /// Returns true if `beforeID` has been explicitly set.
+  public var hasBeforeID: Bool {return self._beforeID != nil}
+  /// Clears the value of `beforeID`. Subsequent reads from it will return its default value.
+  public mutating func clearBeforeID() {self._beforeID = nil}
+
+  /// Newer mode cursor (messages with ID > after_id).
+  public var afterID: Int64 {
+    get {return _afterID ?? 0}
+    set {_afterID = newValue}
+  }
+  /// Returns true if `afterID` has been explicitly set.
+  public var hasAfterID: Bool {return self._afterID != nil}
+  /// Clears the value of `afterID`. Subsequent reads from it will return its default value.
+  public mutating func clearAfterID() {self._afterID = nil}
+
+  /// Around mode count for messages older than anchor.
+  public var beforeLimit: Int32 {
+    get {return _beforeLimit ?? 0}
+    set {_beforeLimit = newValue}
+  }
+  /// Returns true if `beforeLimit` has been explicitly set.
+  public var hasBeforeLimit: Bool {return self._beforeLimit != nil}
+  /// Clears the value of `beforeLimit`. Subsequent reads from it will return its default value.
+  public mutating func clearBeforeLimit() {self._beforeLimit = nil}
+
+  /// Around mode count for messages newer than anchor.
+  public var afterLimit: Int32 {
+    get {return _afterLimit ?? 0}
+    set {_afterLimit = newValue}
+  }
+  /// Returns true if `afterLimit` has been explicitly set.
+  public var hasAfterLimit: Bool {return self._afterLimit != nil}
+  /// Clears the value of `afterLimit`. Subsequent reads from it will return its default value.
+  public mutating func clearAfterLimit() {self._afterLimit = nil}
+
+  /// Around mode include anchor row in response.
+  public var includeAnchor: Bool {
+    get {return _includeAnchor ?? false}
+    set {_includeAnchor = newValue}
+  }
+  /// Returns true if `includeAnchor` has been explicitly set.
+  public var hasIncludeAnchor: Bool {return self._includeAnchor != nil}
+  /// Clears the value of `includeAnchor`. Subsequent reads from it will return its default value.
+  public mutating func clearIncludeAnchor() {self._includeAnchor = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -4933,6 +5051,13 @@ public struct GetChatHistoryInput: Sendable {
   fileprivate var _peerID: InputPeer? = nil
   fileprivate var _offsetID: Int64? = nil
   fileprivate var _limit: Int32? = nil
+  fileprivate var _mode: GetChatHistoryMode? = nil
+  fileprivate var _anchorID: Int64? = nil
+  fileprivate var _beforeID: Int64? = nil
+  fileprivate var _afterID: Int64? = nil
+  fileprivate var _beforeLimit: Int32? = nil
+  fileprivate var _afterLimit: Int32? = nil
+  fileprivate var _includeAnchor: Bool? = nil
 }
 
 public struct GetChatHistoryResult: Sendable {
@@ -6980,6 +7105,16 @@ extension PushNotificationProvider: SwiftProtobuf._ProtoNameProviding {
     0: .same(proto: "PUSH_NOTIFICATION_PROVIDER_UNSPECIFIED"),
     1: .same(proto: "PUSH_NOTIFICATION_PROVIDER_APNS"),
     2: .same(proto: "PUSH_NOTIFICATION_PROVIDER_EXPO_ANDROID"),
+  ]
+}
+
+extension GetChatHistoryMode: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    0: .same(proto: "HISTORY_MODE_UNSPECIFIED"),
+    1: .same(proto: "HISTORY_MODE_LATEST"),
+    2: .same(proto: "HISTORY_MODE_OLDER"),
+    3: .same(proto: "HISTORY_MODE_NEWER"),
+    4: .same(proto: "HISTORY_MODE_AROUND"),
   ]
 }
 
@@ -14331,6 +14466,13 @@ extension GetChatHistoryInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
     1: .standard(proto: "peer_id"),
     2: .standard(proto: "offset_id"),
     3: .same(proto: "limit"),
+    4: .same(proto: "mode"),
+    5: .standard(proto: "anchor_id"),
+    6: .standard(proto: "before_id"),
+    7: .standard(proto: "after_id"),
+    8: .standard(proto: "before_limit"),
+    9: .standard(proto: "after_limit"),
+    10: .standard(proto: "include_anchor"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -14342,6 +14484,13 @@ extension GetChatHistoryInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
       case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
       case 2: try { try decoder.decodeSingularInt64Field(value: &self._offsetID) }()
       case 3: try { try decoder.decodeSingularInt32Field(value: &self._limit) }()
+      case 4: try { try decoder.decodeSingularEnumField(value: &self._mode) }()
+      case 5: try { try decoder.decodeSingularInt64Field(value: &self._anchorID) }()
+      case 6: try { try decoder.decodeSingularInt64Field(value: &self._beforeID) }()
+      case 7: try { try decoder.decodeSingularInt64Field(value: &self._afterID) }()
+      case 8: try { try decoder.decodeSingularInt32Field(value: &self._beforeLimit) }()
+      case 9: try { try decoder.decodeSingularInt32Field(value: &self._afterLimit) }()
+      case 10: try { try decoder.decodeSingularBoolField(value: &self._includeAnchor) }()
       default: break
       }
     }
@@ -14361,6 +14510,27 @@ extension GetChatHistoryInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
     try { if let v = self._limit {
       try visitor.visitSingularInt32Field(value: v, fieldNumber: 3)
     } }()
+    try { if let v = self._mode {
+      try visitor.visitSingularEnumField(value: v, fieldNumber: 4)
+    } }()
+    try { if let v = self._anchorID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 5)
+    } }()
+    try { if let v = self._beforeID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 6)
+    } }()
+    try { if let v = self._afterID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 7)
+    } }()
+    try { if let v = self._beforeLimit {
+      try visitor.visitSingularInt32Field(value: v, fieldNumber: 8)
+    } }()
+    try { if let v = self._afterLimit {
+      try visitor.visitSingularInt32Field(value: v, fieldNumber: 9)
+    } }()
+    try { if let v = self._includeAnchor {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 10)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -14368,6 +14538,13 @@ extension GetChatHistoryInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpl
     if lhs._peerID != rhs._peerID {return false}
     if lhs._offsetID != rhs._offsetID {return false}
     if lhs._limit != rhs._limit {return false}
+    if lhs._mode != rhs._mode {return false}
+    if lhs._anchorID != rhs._anchorID {return false}
+    if lhs._beforeID != rhs._beforeID {return false}
+    if lhs._afterID != rhs._afterID {return false}
+    if lhs._beforeLimit != rhs._beforeLimit {return false}
+    if lhs._afterLimit != rhs._afterLimit {return false}
+    if lhs._includeAnchor != rhs._includeAnchor {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

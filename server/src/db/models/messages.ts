@@ -129,27 +129,36 @@ export type ProcessedMessageAttachment = Omit<DbMessageAttachment, "externalTask
   linkEmbed?: ProcessedLinkEmbed | null
 }
 
-async function getMessages(
-  inputPeer: InputPeer,
-  { currentUserId, offsetId, limit }: { currentUserId: number; offsetId?: bigint; limit?: number },
-): Promise<DbFullMessage[]> {
-  let chatId = await ChatModel.getChatIdFromInputPeer(inputPeer, { currentUserId })
+type GetMessagesMode = "latest" | "older" | "newer" | "around"
 
-  if (!chatId) {
-    throw ModelError.ChatInvalid
-  }
+type GetMessagesInput = {
+  currentUserId: number
+  offsetId?: bigint
+  limit?: number
+  mode?: GetMessagesMode
+  beforeId?: bigint
+  afterId?: bigint
+  anchorId?: bigint
+  beforeLimit?: number
+  afterLimit?: number
+  includeAnchor?: boolean
+}
 
-  const offsetIdNumber = offsetId ? Number(offsetId) : undefined
-
-  let result = await db._query.messages.findMany({
-    where: offsetIdNumber
-      ? and(eq(messages.chatId, chatId), lt(messages.messageId, offsetIdNumber))
-      : eq(messages.chatId, chatId),
-    orderBy: desc(messages.messageId),
-    limit: limit ?? 60,
+const fullMessageRelations = {
+  from: true,
+  reactions: true,
+  photo: {
     with: {
-      from: true,
-      reactions: true,
+      photoSizes: {
+        with: {
+          file: true,
+        },
+      },
+    },
+  },
+  video: {
+    with: {
+      file: true,
       photo: {
         with: {
           photoSizes: {
@@ -159,9 +168,18 @@ async function getMessages(
           },
         },
       },
-      video: {
+    },
+  },
+  document: {
+    with: {
+      file: true,
+    },
+  },
+  messageAttachments: {
+    with: {
+      externalTask: true,
+      linkEmbed: {
         with: {
-          file: true,
           photo: {
             with: {
               photoSizes: {
@@ -173,33 +191,132 @@ async function getMessages(
           },
         },
       },
-      document: {
-        with: {
-          file: true,
-        },
-      },
-      messageAttachments: {
-        with: {
-          externalTask: true,
-          linkEmbed: {
-            with: {
-              photo: {
-                with: {
-                  photoSizes: {
-                    with: {
-                      file: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
     },
-  })
+  },
+} as const
 
-  return result.map(processMessage)
+function getResolvedHistoryMode(input: GetMessagesInput): GetMessagesMode {
+  if (input.mode) {
+    return input.mode
+  }
+
+  // Legacy compatibility: offset_id implies older-page mode.
+  if (input.offsetId !== undefined) {
+    return "older"
+  }
+
+  return "latest"
+}
+
+async function getMessages(
+  inputPeer: InputPeer,
+  input: GetMessagesInput,
+): Promise<DbFullMessage[]> {
+  const { currentUserId } = input
+  let chatId = await ChatModel.getChatIdFromInputPeer(inputPeer, { currentUserId })
+
+  if (!chatId) {
+    throw ModelError.ChatInvalid
+  }
+
+  const mode = getResolvedHistoryMode(input)
+
+  if (mode === "latest") {
+    const latestMessages = await db._query.messages.findMany({
+      where: eq(messages.chatId, chatId),
+      orderBy: desc(messages.messageId),
+      limit: input.limit ?? 60,
+      with: fullMessageRelations,
+    })
+
+    return latestMessages.map(processMessage)
+  }
+
+  if (mode === "older") {
+    const beforeId = input.beforeId ?? input.offsetId
+    const beforeIdNumber = beforeId ? Number(beforeId) : undefined
+
+    const olderMessages = await db._query.messages.findMany({
+      where: beforeIdNumber
+        ? and(eq(messages.chatId, chatId), lt(messages.messageId, beforeIdNumber))
+        : eq(messages.chatId, chatId),
+      orderBy: desc(messages.messageId),
+      limit: input.limit ?? 60,
+      with: fullMessageRelations,
+    })
+
+    return olderMessages.map(processMessage)
+  }
+
+  if (mode === "newer") {
+    if (input.afterId === undefined) {
+      return []
+    }
+
+    const afterIdNumber = Number(input.afterId)
+
+    const newerMessagesAsc = await db._query.messages.findMany({
+      where: and(eq(messages.chatId, chatId), gt(messages.messageId, afterIdNumber)),
+      orderBy: asc(messages.messageId),
+      limit: input.limit ?? 60,
+      with: fullMessageRelations,
+    })
+
+    newerMessagesAsc.reverse()
+    return newerMessagesAsc.map(processMessage)
+  }
+
+  // mode === "around"
+  if (input.anchorId === undefined) {
+    return []
+  }
+
+  const anchorIdNumber = Number(input.anchorId)
+  const includeAnchor = input.includeAnchor ?? true
+  const aroundLimit = input.limit ?? 60
+  const defaultBeforeLimit = Math.floor(aroundLimit / 2)
+  const defaultAfterLimit = Math.max(aroundLimit - defaultBeforeLimit - (includeAnchor ? 1 : 0), 0)
+  const beforeLimit = Math.max(input.beforeLimit ?? defaultBeforeLimit, 0)
+  const afterLimit = Math.max(input.afterLimit ?? defaultAfterLimit, 0)
+
+  const anchorExists = await db._query.messages.findFirst({
+    where: and(eq(messages.chatId, chatId), eq(messages.messageId, anchorIdNumber)),
+    columns: { messageId: true },
+  })
+  if (!anchorExists) {
+    return []
+  }
+
+  const [beforeMessages, anchorMessages, afterMessages] = await Promise.all([
+    beforeLimit > 0
+      ? db._query.messages.findMany({
+          where: and(eq(messages.chatId, chatId), lt(messages.messageId, anchorIdNumber)),
+          orderBy: desc(messages.messageId),
+          limit: beforeLimit,
+          with: fullMessageRelations,
+        })
+      : Promise.resolve([]),
+    includeAnchor
+      ? db._query.messages.findMany({
+          where: and(eq(messages.chatId, chatId), eq(messages.messageId, anchorIdNumber)),
+          limit: 1,
+          with: fullMessageRelations,
+        })
+      : Promise.resolve([]),
+    afterLimit > 0
+      ? db._query.messages.findMany({
+          where: and(eq(messages.chatId, chatId), gt(messages.messageId, anchorIdNumber)),
+          orderBy: asc(messages.messageId),
+          limit: afterLimit,
+          with: fullMessageRelations,
+        })
+      : Promise.resolve([]),
+  ])
+
+  const combinedAround = [...beforeMessages, ...anchorMessages, ...afterMessages]
+  combinedAround.sort((a, b) => b.messageId - a.messageId)
+
+  return combinedAround.map(processMessage)
 }
 
 async function getMessagesWithMediaFilter(input: {
