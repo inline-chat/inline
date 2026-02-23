@@ -3128,17 +3128,61 @@ export interface GetChatHistoryInput {
      */
     peerId?: InputPeer;
     /**
-     * ID of the message to start from
+     * Legacy older-history cursor.
+     * When `mode` is not provided, this preserves old behavior and fetches messages with ID < offset_id.
      *
      * @generated from protobuf field: optional int64 offset_id = 2;
      */
     offsetId?: bigint;
     /**
-     * Number of messages to return
+     * Number of messages to return.
+     * For `mode = HISTORY_MODE_AROUND`, this acts as a fallback split if before/after limits are not provided.
      *
      * @generated from protobuf field: optional int32 limit = 3;
      */
     limit?: number;
+    /**
+     * Explicit fetch mode for history pagination/windowing.
+     *
+     * @generated from protobuf field: optional GetChatHistoryMode mode = 4;
+     */
+    mode?: GetChatHistoryMode;
+    /**
+     * Around mode anchor message ID.
+     *
+     * @generated from protobuf field: optional int64 anchor_id = 5;
+     */
+    anchorId?: bigint;
+    /**
+     * Older mode cursor (messages with ID < before_id).
+     *
+     * @generated from protobuf field: optional int64 before_id = 6;
+     */
+    beforeId?: bigint;
+    /**
+     * Newer mode cursor (messages with ID > after_id).
+     *
+     * @generated from protobuf field: optional int64 after_id = 7;
+     */
+    afterId?: bigint;
+    /**
+     * Around mode count for messages older than anchor.
+     *
+     * @generated from protobuf field: optional int32 before_limit = 8;
+     */
+    beforeLimit?: number;
+    /**
+     * Around mode count for messages newer than anchor.
+     *
+     * @generated from protobuf field: optional int32 after_limit = 9;
+     */
+    afterLimit?: number;
+    /**
+     * Around mode include anchor row in response.
+     *
+     * @generated from protobuf field: optional bool include_anchor = 10;
+     */
+    includeAnchor?: boolean;
 }
 /**
  * @generated from protobuf message GetChatHistoryResult
@@ -4613,6 +4657,31 @@ export enum PushNotificationProvider {
      * @generated from protobuf enum value: PUSH_NOTIFICATION_PROVIDER_EXPO_ANDROID = 2;
      */
     EXPO_ANDROID = 2
+}
+/**
+ * @generated from protobuf enum GetChatHistoryMode
+ */
+export enum GetChatHistoryMode {
+    /**
+     * @generated from protobuf enum value: HISTORY_MODE_UNSPECIFIED = 0;
+     */
+    HISTORY_MODE_UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: HISTORY_MODE_LATEST = 1;
+     */
+    HISTORY_MODE_LATEST = 1,
+    /**
+     * @generated from protobuf enum value: HISTORY_MODE_OLDER = 2;
+     */
+    HISTORY_MODE_OLDER = 2,
+    /**
+     * @generated from protobuf enum value: HISTORY_MODE_NEWER = 3;
+     */
+    HISTORY_MODE_NEWER = 3,
+    /**
+     * @generated from protobuf enum value: HISTORY_MODE_AROUND = 4;
+     */
+    HISTORY_MODE_AROUND = 4
 }
 /**
  * @generated from protobuf enum SearchMessagesFilter
@@ -12374,7 +12443,14 @@ class GetChatHistoryInput$Type extends MessageType<GetChatHistoryInput> {
         super("GetChatHistoryInput", [
             { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
             { no: 2, name: "offset_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 3, name: "limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ }
+            { no: 3, name: "limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 4, name: "mode", kind: "enum", opt: true, T: () => ["GetChatHistoryMode", GetChatHistoryMode] },
+            { no: 5, name: "anchor_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 6, name: "before_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 7, name: "after_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 8, name: "before_limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 9, name: "after_limit", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
+            { no: 10, name: "include_anchor", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<GetChatHistoryInput>): GetChatHistoryInput {
@@ -12397,6 +12473,27 @@ class GetChatHistoryInput$Type extends MessageType<GetChatHistoryInput> {
                 case /* optional int32 limit */ 3:
                     message.limit = reader.int32();
                     break;
+                case /* optional GetChatHistoryMode mode */ 4:
+                    message.mode = reader.int32();
+                    break;
+                case /* optional int64 anchor_id */ 5:
+                    message.anchorId = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 before_id */ 6:
+                    message.beforeId = reader.int64().toBigInt();
+                    break;
+                case /* optional int64 after_id */ 7:
+                    message.afterId = reader.int64().toBigInt();
+                    break;
+                case /* optional int32 before_limit */ 8:
+                    message.beforeLimit = reader.int32();
+                    break;
+                case /* optional int32 after_limit */ 9:
+                    message.afterLimit = reader.int32();
+                    break;
+                case /* optional bool include_anchor */ 10:
+                    message.includeAnchor = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -12418,6 +12515,27 @@ class GetChatHistoryInput$Type extends MessageType<GetChatHistoryInput> {
         /* optional int32 limit = 3; */
         if (message.limit !== undefined)
             writer.tag(3, WireType.Varint).int32(message.limit);
+        /* optional GetChatHistoryMode mode = 4; */
+        if (message.mode !== undefined)
+            writer.tag(4, WireType.Varint).int32(message.mode);
+        /* optional int64 anchor_id = 5; */
+        if (message.anchorId !== undefined)
+            writer.tag(5, WireType.Varint).int64(message.anchorId);
+        /* optional int64 before_id = 6; */
+        if (message.beforeId !== undefined)
+            writer.tag(6, WireType.Varint).int64(message.beforeId);
+        /* optional int64 after_id = 7; */
+        if (message.afterId !== undefined)
+            writer.tag(7, WireType.Varint).int64(message.afterId);
+        /* optional int32 before_limit = 8; */
+        if (message.beforeLimit !== undefined)
+            writer.tag(8, WireType.Varint).int32(message.beforeLimit);
+        /* optional int32 after_limit = 9; */
+        if (message.afterLimit !== undefined)
+            writer.tag(9, WireType.Varint).int32(message.afterLimit);
+        /* optional bool include_anchor = 10; */
+        if (message.includeAnchor !== undefined)
+            writer.tag(10, WireType.Varint).bool(message.includeAnchor);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

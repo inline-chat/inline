@@ -1180,14 +1180,45 @@ message ForwardMessagesInput {
 
 message ForwardMessagesResult { repeated Update updates = 1; }
 
+enum GetChatHistoryMode {
+  HISTORY_MODE_UNSPECIFIED = 0;
+  HISTORY_MODE_LATEST = 1;
+  HISTORY_MODE_OLDER = 2;
+  HISTORY_MODE_NEWER = 3;
+  HISTORY_MODE_AROUND = 4;
+}
+
 message GetChatHistoryInput {
   InputPeer peer_id = 1;
 
-  // ID of the message to start from
+  // Legacy older-history cursor.
+  // When `mode` is not provided, this preserves old behavior and fetches messages with ID < offset_id.
   optional int64 offset_id = 2;
 
-  // Number of messages to return
+  // Number of messages to return.
+  // For `mode = HISTORY_MODE_AROUND`, this acts as a fallback split if before/after limits are not provided.
   optional int32 limit = 3;
+
+  // Explicit fetch mode for history pagination/windowing.
+  optional GetChatHistoryMode mode = 4;
+
+  // Around mode anchor message ID.
+  optional int64 anchor_id = 5;
+
+  // Older mode cursor (messages with ID < before_id).
+  optional int64 before_id = 6;
+
+  // Newer mode cursor (messages with ID > after_id).
+  optional int64 after_id = 7;
+
+  // Around mode count for messages older than anchor.
+  optional int32 before_limit = 8;
+
+  // Around mode count for messages newer than anchor.
+  optional int32 after_limit = 9;
+
+  // Around mode include anchor row in response.
+  optional bool include_anchor = 10;
 }
 
 message GetChatHistoryResult { repeated Message messages = 1; }

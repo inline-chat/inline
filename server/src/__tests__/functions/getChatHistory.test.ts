@@ -253,4 +253,154 @@ describe("getChatHistory", () => {
     expect(thirdBatch.messages[0]?.id).toBe(30n)
     expect(thirdBatch.messages[29]?.id).toBe(1n)
   })
+
+  test("supports explicit newer mode with after_id cursor", async () => {
+    const userA = (await testUtils.createUser("userA8@example.com"))!
+    const userB = (await testUtils.createUser("userB8@example.com"))!
+
+    const chat = (await testUtils.createPrivateChat(userA, userB))!
+    await db
+      .insert(schema.dialogs)
+      .values([
+        { chatId: chat.id, userId: userA.id, peerUserId: userB.id },
+        { chatId: chat.id, userId: userB.id, peerUserId: userA.id },
+      ])
+      .execute()
+
+    for (let messageId = 1; messageId <= 8; messageId += 1) {
+      await testUtils.createTestMessage({
+        messageId,
+        chatId: chat.id,
+        fromId: userA.id,
+        text: `Message ${messageId}`,
+      })
+    }
+
+    await db.update(schema.chats).set({ lastMsgId: 8 }).where(eq(schema.chats.id, chat.id)).execute()
+
+    const peerId = {
+      type: {
+        oneofKind: "user" as const,
+        user: { userId: BigInt(userB.id) },
+      },
+    }
+    const context = makeFunctionContext(userA.id)
+
+    const result = await getChatHistory(
+      {
+        peerId,
+        mode: "newer",
+        afterId: 4n,
+        limit: 3,
+      },
+      context,
+    )
+
+    expect(result.messages.map((message) => message.id)).toEqual([7n, 6n, 5n])
+  })
+
+  test("supports around mode with anchor inclusion", async () => {
+    const userA = (await testUtils.createUser("userA9@example.com"))!
+    const userB = (await testUtils.createUser("userB9@example.com"))!
+
+    const chat = (await testUtils.createPrivateChat(userA, userB))!
+    await db
+      .insert(schema.dialogs)
+      .values([
+        { chatId: chat.id, userId: userA.id, peerUserId: userB.id },
+        { chatId: chat.id, userId: userB.id, peerUserId: userA.id },
+      ])
+      .execute()
+
+    for (let messageId = 1; messageId <= 12; messageId += 1) {
+      await testUtils.createTestMessage({
+        messageId,
+        chatId: chat.id,
+        fromId: userA.id,
+        text: `Message ${messageId}`,
+      })
+    }
+
+    await db.update(schema.chats).set({ lastMsgId: 12 }).where(eq(schema.chats.id, chat.id)).execute()
+
+    const peerId = {
+      type: {
+        oneofKind: "user" as const,
+        user: { userId: BigInt(userB.id) },
+      },
+    }
+    const context = makeFunctionContext(userA.id)
+
+    const aroundWithAnchor = await getChatHistory(
+      {
+        peerId,
+        mode: "around",
+        anchorId: 7n,
+        beforeLimit: 2,
+        afterLimit: 3,
+        includeAnchor: true,
+      },
+      context,
+    )
+
+    expect(aroundWithAnchor.messages.map((message) => message.id)).toEqual([10n, 9n, 8n, 7n, 6n, 5n])
+
+    const aroundWithoutAnchor = await getChatHistory(
+      {
+        peerId,
+        mode: "around",
+        anchorId: 7n,
+        beforeLimit: 2,
+        afterLimit: 3,
+        includeAnchor: false,
+      },
+      context,
+    )
+
+    expect(aroundWithoutAnchor.messages.map((message) => message.id)).toEqual([10n, 9n, 8n, 6n, 5n])
+  })
+
+  test("rejects invalid explicit mode combinations", async () => {
+    const userA = (await testUtils.createUser("userA10@example.com"))!
+    const userB = (await testUtils.createUser("userB10@example.com"))!
+
+    const chat = (await testUtils.createPrivateChat(userA, userB))!
+    await db
+      .insert(schema.dialogs)
+      .values([
+        { chatId: chat.id, userId: userA.id, peerUserId: userB.id },
+        { chatId: chat.id, userId: userB.id, peerUserId: userA.id },
+      ])
+      .execute()
+
+    const peerId = {
+      type: {
+        oneofKind: "user" as const,
+        user: { userId: BigInt(userB.id) },
+      },
+    }
+    const context = makeFunctionContext(userA.id)
+
+    await expect(
+      getChatHistory(
+        {
+          peerId,
+          mode: "newer",
+          limit: 10,
+        },
+        context,
+      ),
+    ).rejects.toThrow()
+
+    await expect(
+      getChatHistory(
+        {
+          peerId,
+          mode: "around",
+          limit: 10,
+        },
+        context,
+      ),
+    ).rejects.toThrow()
+  })
 })

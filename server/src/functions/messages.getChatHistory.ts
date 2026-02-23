@@ -14,6 +14,13 @@ type Input = {
   peerId: InputPeer
   offsetId?: bigint
   limit?: number
+  mode?: "latest" | "older" | "newer" | "around"
+  beforeId?: bigint
+  afterId?: bigint
+  anchorId?: bigint
+  beforeLimit?: number
+  afterLimit?: number
+  includeAnchor?: boolean
 }
 
 type Output = {
@@ -24,7 +31,18 @@ const log = new Log("functions.getChatHistory")
 
 async function getMessagesWithChatCreation(
   inputPeer: InputPeer,
-  options: { currentUserId: number; offsetId?: bigint; limit?: number },
+  options: {
+    currentUserId: number
+    offsetId?: bigint
+    limit?: number
+    mode?: "latest" | "older" | "newer" | "around"
+    beforeId?: bigint
+    afterId?: bigint
+    anchorId?: bigint
+    beforeLimit?: number
+    afterLimit?: number
+    includeAnchor?: boolean
+  },
 ): Promise<{ chat: DbChat; messages: DbFullMessage[] }> {
   let chat: DbChat
 
@@ -88,10 +106,39 @@ export const getChatHistory = async (input: Input, context: FunctionContext): Pr
   // input data
   const inputPeer = input.peerId
 
+  const mode = input.mode ?? (input.offsetId !== undefined ? "older" : "latest")
+
+  if (mode === "older" && input.beforeId === undefined && input.offsetId === undefined) {
+    throw RealtimeRpcError.BadRequest()
+  }
+
+  if (mode === "newer" && input.afterId === undefined) {
+    throw RealtimeRpcError.BadRequest()
+  }
+
+  if (mode === "around" && input.anchorId === undefined) {
+    throw RealtimeRpcError.BadRequest()
+  }
+
+  if (input.beforeLimit !== undefined && input.beforeLimit < 0) {
+    throw RealtimeRpcError.BadRequest()
+  }
+
+  if (input.afterLimit !== undefined && input.afterLimit < 0) {
+    throw RealtimeRpcError.BadRequest()
+  }
+
   // get messages
   const { messages } = await getMessagesWithChatCreation(inputPeer, {
     offsetId: input.offsetId,
     limit: input.limit,
+    mode,
+    beforeId: input.beforeId,
+    afterId: input.afterId,
+    anchorId: input.anchorId,
+    beforeLimit: input.beforeLimit,
+    afterLimit: input.afterLimit,
+    includeAnchor: input.includeAnchor,
     currentUserId: context.currentUserId,
   })
 
