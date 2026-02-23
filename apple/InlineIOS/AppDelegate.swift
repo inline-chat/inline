@@ -1,8 +1,10 @@
 import Auth
+import CryptoKit
 import Foundation
 import InlineConfig
 import InlineKit
 import Logger
+import Security
 import Sentry
 import UIKit
 
@@ -115,10 +117,16 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
   ) {
     let deviceToken = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
+    let pushContentKey = Self.makePushContentEncryptionKeyMetadata()
+    let pushContentVersion: UInt32? = pushContentKey == nil ? nil : Self.pushContentVersion
 
     Task.detached {
-      _ = try await ApiClient.shared.savePushNotification(
-        pushToken: deviceToken
+      _ = await Api.realtime.sendQueued(
+        .updatePushNotificationDetails(
+          applePushToken: deviceToken,
+          pushContentEncryptionKey: pushContentKey,
+          pushContentVersion: pushContentVersion
+        )
       )
     }
   }
@@ -218,6 +226,95 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 }
 
 private extension AppDelegate {
+  static let pushContentVersion: UInt32 = 1
+  static let pushContentKeychainService = "chat.inline.push-content"
+  static let pushContentPrivateKeyAccount = "private-key-v1"
+  static let pushContentKeyId = "ios-x25519-v1"
+  static let pushContentKeychainAccessGroup = "2487AN8AL4.keychainGroup"
+  static let pushContentAlgorithmRawValue = 1
+
+  static func makePushContentEncryptionKeyMetadata() -> PushContentEncryptionKeyMetadata? {
+    guard let privateKey = loadOrCreatePushContentPrivateKey() else {
+      return nil
+    }
+
+    return PushContentEncryptionKeyMetadata(
+      publicKey: privateKey.publicKey.rawRepresentation,
+      keyId: pushContentKeyId,
+      algorithmRawValue: pushContentAlgorithmRawValue
+    )
+  }
+
+  static func loadOrCreatePushContentPrivateKey() -> Curve25519.KeyAgreement.PrivateKey? {
+    if let existingData = loadPushContentPrivateKeyData() {
+      do {
+        return try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: existingData)
+      } catch {
+        Log.shared.error("Failed to decode existing push-content private key", error: error)
+      }
+    }
+
+    let privateKey = Curve25519.KeyAgreement.PrivateKey()
+    let didStore = storePushContentPrivateKeyData(privateKey.rawRepresentation)
+    if !didStore {
+      Log.shared.error("Failed to persist push-content private key")
+      return nil
+    }
+    return privateKey
+  }
+
+  static func basePushContentKeychainQuery() -> [String: Any] {
+    [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: pushContentKeychainService,
+      kSecAttrAccount as String: pushContentPrivateKeyAccount,
+      kSecAttrAccessGroup as String: pushContentKeychainAccessGroup,
+    ]
+  }
+
+  static func loadPushContentPrivateKeyData() -> Data? {
+    var query = basePushContentKeychainQuery()
+    query[kSecReturnData as String] = true
+    query[kSecMatchLimit as String] = kSecMatchLimitOne
+
+    var item: CFTypeRef?
+    let status = SecItemCopyMatching(query as CFDictionary, &item)
+    if status == errSecSuccess, let data = item as? Data {
+      return data
+    }
+    if status == errSecItemNotFound {
+      return nil
+    }
+
+    Log.shared.error("Failed to read push-content private key (status: \(status))")
+    return nil
+  }
+
+  static func storePushContentPrivateKeyData(_ keyData: Data) -> Bool {
+    var insertQuery = basePushContentKeychainQuery()
+    insertQuery[kSecValueData as String] = keyData
+    insertQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+
+    let addStatus = SecItemAdd(insertQuery as CFDictionary, nil)
+    if addStatus == errSecSuccess {
+      return true
+    }
+
+    if addStatus == errSecDuplicateItem {
+      let updateQuery = basePushContentKeychainQuery()
+      let updateAttributes: [String: Any] = [kSecValueData as String: keyData]
+      let updateStatus = SecItemUpdate(updateQuery as CFDictionary, updateAttributes as CFDictionary)
+      if updateStatus == errSecSuccess {
+        return true
+      }
+      Log.shared.error("Failed to update push-content private key (status: \(updateStatus))")
+      return false
+    }
+
+    Log.shared.error("Failed to add push-content private key (status: \(addStatus))")
+    return false
+  }
+
   static func coerceString(_ value: Any?) -> String? {
     if let string = value as? String { return string }
     if let int = value as? Int { return String(int) }

@@ -43,6 +43,7 @@ import { updateChatInfoHandler } from "@in/server/realtime/handlers/messages.upd
 import { pinMessageHandler } from "@in/server/realtime/handlers/messages.pinMessage"
 import { moveThreadHandler } from "@in/server/realtime/handlers/messages.moveThread"
 import { updateDialogNotificationSettings } from "@in/server/realtime/handlers/messages.updateDialogNotificationSettings"
+import { updatePushNotificationDetailsHandler } from "@in/server/realtime/handlers/user.updatePushNotificationDetails"
 
 const log = new Log("rpc")
 
@@ -364,6 +365,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await updateDialogNotificationSettings(call.input.updateDialogNotificationSettings, handlerContext)
       return { oneofKind: "updateDialogNotificationSettings", updateDialogNotificationSettings: result }
+    }
+
+    case Method.UPDATE_PUSH_NOTIFICATION_DETAILS: {
+      if (call.input.oneofKind !== "updatePushNotificationDetails") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      let result = await updatePushNotificationDetailsHandler(call.input.updatePushNotificationDetails, handlerContext)
+      return { oneofKind: "updatePushNotificationDetails", updatePushNotificationDetails: result }
     }
 
     default:

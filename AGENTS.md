@@ -8,6 +8,7 @@
 ## Critical Rules
 - Never revert/discard/reset/clean work unless explicitly asked; ask before one-way deletion commands (`rm`, restore/reset/checkout) unless explicitly requested.
 - If unexpected changes appear in a file you are editing, stop and ask. Ignore unrelated file changes.
+- When the worktree is dirty, continue without stopping for unrelated modified/untracked files. Only stop if unexpected changes appear in the specific file/hunk currently being edited.
 - Never touch `.env` files.
 ## Multi-agent Safety
 - Do not create/apply/drop stashes (including `--autostash`) unless explicitly requested.

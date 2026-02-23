@@ -1724,6 +1724,12 @@ export interface RpcCall {
          */
         readMessages: ReadMessagesInput;
     } | {
+        oneofKind: "updatePushNotificationDetails";
+        /**
+         * @generated from protobuf field: UpdatePushNotificationDetailsInput updatePushNotificationDetails = 42;
+         */
+        updatePushNotificationDetails: UpdatePushNotificationDetailsInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1978,6 +1984,12 @@ export interface RpcResult {
          * @generated from protobuf field: ReadMessagesResult readMessages = 41;
          */
         readMessages: ReadMessagesResult;
+    } | {
+        oneofKind: "updatePushNotificationDetails";
+        /**
+         * @generated from protobuf field: UpdatePushNotificationDetailsResult updatePushNotificationDetails = 42;
+         */
+        updatePushNotificationDetails: UpdatePushNotificationDetailsResult;
     } | {
         oneofKind: undefined;
     };
@@ -2589,6 +2601,130 @@ export interface SendComposeActionInput {
  * @generated from protobuf message SendComposeActionResult
  */
 export interface SendComposeActionResult {
+}
+/**
+ * @generated from protobuf message PushContentEncryptionKey
+ */
+export interface PushContentEncryptionKey {
+    /**
+     * Raw public key bytes for the receiving device/session.
+     *
+     * @generated from protobuf field: bytes public_key = 1;
+     */
+    publicKey: Uint8Array;
+    /**
+     * Optional key identifier to support rotation and debugging.
+     *
+     * @generated from protobuf field: optional string key_id = 2;
+     */
+    keyId?: string;
+    /**
+     * Public-key algorithm/cipher-suite descriptor.
+     *
+     * @generated from protobuf field: PushContentEncryptionKey.Algorithm algorithm = 3;
+     */
+    algorithm: PushContentEncryptionKey_Algorithm;
+}
+/**
+ * @generated from protobuf enum PushContentEncryptionKey.Algorithm
+ */
+export enum PushContentEncryptionKey_Algorithm {
+    /**
+     * @generated from protobuf enum value: ALGORITHM_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: ALGORITHM_X25519_HKDF_SHA256_AES256_GCM = 1;
+     */
+    X25519_HKDF_SHA256_AES256_GCM = 1
+}
+/**
+ * @generated from protobuf message ApnsNotificationMethod
+ */
+export interface ApnsNotificationMethod {
+    /**
+     * APNs device token.
+     *
+     * @generated from protobuf field: string device_token = 1;
+     */
+    deviceToken: string;
+}
+/**
+ * @generated from protobuf message ExpoAndroidNotificationMethod
+ */
+export interface ExpoAndroidNotificationMethod {
+    /**
+     * Expo push token (ExponentPushToken[...] format).
+     *
+     * @generated from protobuf field: string expo_push_token = 1;
+     */
+    expoPushToken: string;
+}
+/**
+ * @generated from protobuf message PushNotificationMethod
+ */
+export interface PushNotificationMethod {
+    /**
+     * Selected push transport/provider for the session.
+     *
+     * @generated from protobuf field: PushNotificationProvider provider = 1;
+     */
+    provider: PushNotificationProvider;
+    /**
+     * @generated from protobuf oneof: method
+     */
+    method: {
+        oneofKind: "apns";
+        /**
+         * @generated from protobuf field: ApnsNotificationMethod apns = 2;
+         */
+        apns: ApnsNotificationMethod;
+    } | {
+        oneofKind: "expoAndroid";
+        /**
+         * @generated from protobuf field: ExpoAndroidNotificationMethod expo_android = 3;
+         */
+        expoAndroid: ExpoAndroidNotificationMethod;
+    } | {
+        oneofKind: undefined;
+    };
+}
+/**
+ * Register/update push notification details for the current session.
+ *
+ * @generated from protobuf message UpdatePushNotificationDetailsInput
+ */
+export interface UpdatePushNotificationDetailsInput {
+    /**
+     * Legacy APNs token for old clients. Kept for gradual migration/fallback.
+     *
+     * @deprecated
+     * @generated from protobuf field: string apple_push_token = 1 [deprecated = true];
+     */
+    applePushToken: string;
+    /**
+     * Optional metadata for encrypted push content rollout.
+     *
+     * @generated from protobuf field: optional PushContentEncryptionKey push_content_encryption_key = 2;
+     */
+    pushContentEncryptionKey?: PushContentEncryptionKey;
+    /**
+     * Optional encrypted payload schema version/capability marker.
+     *
+     * @generated from protobuf field: optional uint32 push_content_version = 3;
+     */
+    pushContentVersion?: number;
+    /**
+     * New provider-specific method payload.
+     *
+     * @generated from protobuf field: optional PushNotificationMethod notification_method = 4;
+     */
+    notificationMethod?: PushNotificationMethod;
+}
+/**
+ * @generated from protobuf message UpdatePushNotificationDetailsResult
+ */
+export interface UpdatePushNotificationDetailsResult {
 }
 /**
  * @generated from protobuf message GetChatsInput
@@ -4455,7 +4591,28 @@ export enum Method {
     /**
      * @generated from protobuf enum value: READ_MESSAGES = 40;
      */
-    READ_MESSAGES = 40
+    READ_MESSAGES = 40,
+    /**
+     * @generated from protobuf enum value: UPDATE_PUSH_NOTIFICATION_DETAILS = 41;
+     */
+    UPDATE_PUSH_NOTIFICATION_DETAILS = 41
+}
+/**
+ * @generated from protobuf enum PushNotificationProvider
+ */
+export enum PushNotificationProvider {
+    /**
+     * @generated from protobuf enum value: PUSH_NOTIFICATION_PROVIDER_UNSPECIFIED = 0;
+     */
+    UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: PUSH_NOTIFICATION_PROVIDER_APNS = 1;
+     */
+    APNS = 1,
+    /**
+     * @generated from protobuf enum value: PUSH_NOTIFICATION_PROVIDER_EXPO_ANDROID = 2;
+     */
+    EXPO_ANDROID = 2
 }
 /**
  * @generated from protobuf enum SearchMessagesFilter
@@ -7848,7 +8005,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 38, name: "updateBotProfile", kind: "message", oneof: "input", T: () => UpdateBotProfileInput },
             { no: 39, name: "getMessages", kind: "message", oneof: "input", T: () => GetMessagesInput },
             { no: 40, name: "updateDialogNotificationSettings", kind: "message", oneof: "input", T: () => UpdateDialogNotificationSettingsInput },
-            { no: 41, name: "readMessages", kind: "message", oneof: "input", T: () => ReadMessagesInput }
+            { no: 41, name: "readMessages", kind: "message", oneof: "input", T: () => ReadMessagesInput },
+            { no: 42, name: "updatePushNotificationDetails", kind: "message", oneof: "input", T: () => UpdatePushNotificationDetailsInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -8107,6 +8265,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         readMessages: ReadMessagesInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).readMessages)
                     };
                     break;
+                case /* UpdatePushNotificationDetailsInput updatePushNotificationDetails */ 42:
+                    message.input = {
+                        oneofKind: "updatePushNotificationDetails",
+                        updatePushNotificationDetails: UpdatePushNotificationDetailsInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).updatePushNotificationDetails)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -8242,6 +8406,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* ReadMessagesInput readMessages = 41; */
         if (message.input.oneofKind === "readMessages")
             ReadMessagesInput.internalBinaryWrite(message.input.readMessages, writer.tag(41, WireType.LengthDelimited).fork(), options).join();
+        /* UpdatePushNotificationDetailsInput updatePushNotificationDetails = 42; */
+        if (message.input.oneofKind === "updatePushNotificationDetails")
+            UpdatePushNotificationDetailsInput.internalBinaryWrite(message.input.updatePushNotificationDetails, writer.tag(42, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -8296,7 +8463,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 38, name: "updateBotProfile", kind: "message", oneof: "result", T: () => UpdateBotProfileResult },
             { no: 39, name: "getMessages", kind: "message", oneof: "result", T: () => GetMessagesResult },
             { no: 40, name: "updateDialogNotificationSettings", kind: "message", oneof: "result", T: () => UpdateDialogNotificationSettingsResult },
-            { no: 41, name: "readMessages", kind: "message", oneof: "result", T: () => ReadMessagesResult }
+            { no: 41, name: "readMessages", kind: "message", oneof: "result", T: () => ReadMessagesResult },
+            { no: 42, name: "updatePushNotificationDetails", kind: "message", oneof: "result", T: () => UpdatePushNotificationDetailsResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -8555,6 +8723,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         readMessages: ReadMessagesResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).readMessages)
                     };
                     break;
+                case /* UpdatePushNotificationDetailsResult updatePushNotificationDetails */ 42:
+                    message.result = {
+                        oneofKind: "updatePushNotificationDetails",
+                        updatePushNotificationDetails: UpdatePushNotificationDetailsResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).updatePushNotificationDetails)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -8690,6 +8864,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* ReadMessagesResult readMessages = 41; */
         if (message.result.oneofKind === "readMessages")
             ReadMessagesResult.internalBinaryWrite(message.result.readMessages, writer.tag(41, WireType.LengthDelimited).fork(), options).join();
+        /* UpdatePushNotificationDetailsResult updatePushNotificationDetails = 42; */
+        if (message.result.oneofKind === "updatePushNotificationDetails")
+            UpdatePushNotificationDetailsResult.internalBinaryWrite(message.result.updatePushNotificationDetails, writer.tag(42, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -10647,6 +10824,323 @@ class SendComposeActionResult$Type extends MessageType<SendComposeActionResult> 
  * @generated MessageType for protobuf message SendComposeActionResult
  */
 export const SendComposeActionResult = new SendComposeActionResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class PushContentEncryptionKey$Type extends MessageType<PushContentEncryptionKey> {
+    constructor() {
+        super("PushContentEncryptionKey", [
+            { no: 1, name: "public_key", kind: "scalar", T: 12 /*ScalarType.BYTES*/ },
+            { no: 2, name: "key_id", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "algorithm", kind: "enum", T: () => ["PushContentEncryptionKey.Algorithm", PushContentEncryptionKey_Algorithm, "ALGORITHM_"] }
+        ]);
+    }
+    create(value?: PartialMessage<PushContentEncryptionKey>): PushContentEncryptionKey {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.publicKey = new Uint8Array(0);
+        message.algorithm = 0;
+        if (value !== undefined)
+            reflectionMergePartial<PushContentEncryptionKey>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: PushContentEncryptionKey): PushContentEncryptionKey {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bytes public_key */ 1:
+                    message.publicKey = reader.bytes();
+                    break;
+                case /* optional string key_id */ 2:
+                    message.keyId = reader.string();
+                    break;
+                case /* PushContentEncryptionKey.Algorithm algorithm */ 3:
+                    message.algorithm = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: PushContentEncryptionKey, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bytes public_key = 1; */
+        if (message.publicKey.length)
+            writer.tag(1, WireType.LengthDelimited).bytes(message.publicKey);
+        /* optional string key_id = 2; */
+        if (message.keyId !== undefined)
+            writer.tag(2, WireType.LengthDelimited).string(message.keyId);
+        /* PushContentEncryptionKey.Algorithm algorithm = 3; */
+        if (message.algorithm !== 0)
+            writer.tag(3, WireType.Varint).int32(message.algorithm);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message PushContentEncryptionKey
+ */
+export const PushContentEncryptionKey = new PushContentEncryptionKey$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ApnsNotificationMethod$Type extends MessageType<ApnsNotificationMethod> {
+    constructor() {
+        super("ApnsNotificationMethod", [
+            { no: 1, name: "device_token", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ApnsNotificationMethod>): ApnsNotificationMethod {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.deviceToken = "";
+        if (value !== undefined)
+            reflectionMergePartial<ApnsNotificationMethod>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ApnsNotificationMethod): ApnsNotificationMethod {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string device_token */ 1:
+                    message.deviceToken = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ApnsNotificationMethod, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string device_token = 1; */
+        if (message.deviceToken !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.deviceToken);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ApnsNotificationMethod
+ */
+export const ApnsNotificationMethod = new ApnsNotificationMethod$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ExpoAndroidNotificationMethod$Type extends MessageType<ExpoAndroidNotificationMethod> {
+    constructor() {
+        super("ExpoAndroidNotificationMethod", [
+            { no: 1, name: "expo_push_token", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ExpoAndroidNotificationMethod>): ExpoAndroidNotificationMethod {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.expoPushToken = "";
+        if (value !== undefined)
+            reflectionMergePartial<ExpoAndroidNotificationMethod>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ExpoAndroidNotificationMethod): ExpoAndroidNotificationMethod {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string expo_push_token */ 1:
+                    message.expoPushToken = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ExpoAndroidNotificationMethod, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string expo_push_token = 1; */
+        if (message.expoPushToken !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.expoPushToken);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message ExpoAndroidNotificationMethod
+ */
+export const ExpoAndroidNotificationMethod = new ExpoAndroidNotificationMethod$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class PushNotificationMethod$Type extends MessageType<PushNotificationMethod> {
+    constructor() {
+        super("PushNotificationMethod", [
+            { no: 1, name: "provider", kind: "enum", T: () => ["PushNotificationProvider", PushNotificationProvider, "PUSH_NOTIFICATION_PROVIDER_"] },
+            { no: 2, name: "apns", kind: "message", oneof: "method", T: () => ApnsNotificationMethod },
+            { no: 3, name: "expo_android", kind: "message", oneof: "method", T: () => ExpoAndroidNotificationMethod }
+        ]);
+    }
+    create(value?: PartialMessage<PushNotificationMethod>): PushNotificationMethod {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.provider = 0;
+        message.method = { oneofKind: undefined };
+        if (value !== undefined)
+            reflectionMergePartial<PushNotificationMethod>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: PushNotificationMethod): PushNotificationMethod {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* PushNotificationProvider provider */ 1:
+                    message.provider = reader.int32();
+                    break;
+                case /* ApnsNotificationMethod apns */ 2:
+                    message.method = {
+                        oneofKind: "apns",
+                        apns: ApnsNotificationMethod.internalBinaryRead(reader, reader.uint32(), options, (message.method as any).apns)
+                    };
+                    break;
+                case /* ExpoAndroidNotificationMethod expo_android */ 3:
+                    message.method = {
+                        oneofKind: "expoAndroid",
+                        expoAndroid: ExpoAndroidNotificationMethod.internalBinaryRead(reader, reader.uint32(), options, (message.method as any).expoAndroid)
+                    };
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: PushNotificationMethod, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* PushNotificationProvider provider = 1; */
+        if (message.provider !== 0)
+            writer.tag(1, WireType.Varint).int32(message.provider);
+        /* ApnsNotificationMethod apns = 2; */
+        if (message.method.oneofKind === "apns")
+            ApnsNotificationMethod.internalBinaryWrite(message.method.apns, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* ExpoAndroidNotificationMethod expo_android = 3; */
+        if (message.method.oneofKind === "expoAndroid")
+            ExpoAndroidNotificationMethod.internalBinaryWrite(message.method.expoAndroid, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message PushNotificationMethod
+ */
+export const PushNotificationMethod = new PushNotificationMethod$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdatePushNotificationDetailsInput$Type extends MessageType<UpdatePushNotificationDetailsInput> {
+    constructor() {
+        super("UpdatePushNotificationDetailsInput", [
+            { no: 1, name: "apple_push_token", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "push_content_encryption_key", kind: "message", T: () => PushContentEncryptionKey },
+            { no: 3, name: "push_content_version", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ },
+            { no: 4, name: "notification_method", kind: "message", T: () => PushNotificationMethod }
+        ]);
+    }
+    create(value?: PartialMessage<UpdatePushNotificationDetailsInput>): UpdatePushNotificationDetailsInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.applePushToken = "";
+        if (value !== undefined)
+            reflectionMergePartial<UpdatePushNotificationDetailsInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdatePushNotificationDetailsInput): UpdatePushNotificationDetailsInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string apple_push_token = 1 [deprecated = true];*/ 1:
+                    message.applePushToken = reader.string();
+                    break;
+                case /* optional PushContentEncryptionKey push_content_encryption_key */ 2:
+                    message.pushContentEncryptionKey = PushContentEncryptionKey.internalBinaryRead(reader, reader.uint32(), options, message.pushContentEncryptionKey);
+                    break;
+                case /* optional uint32 push_content_version */ 3:
+                    message.pushContentVersion = reader.uint32();
+                    break;
+                case /* optional PushNotificationMethod notification_method */ 4:
+                    message.notificationMethod = PushNotificationMethod.internalBinaryRead(reader, reader.uint32(), options, message.notificationMethod);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdatePushNotificationDetailsInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string apple_push_token = 1 [deprecated = true]; */
+        if (message.applePushToken !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.applePushToken);
+        /* optional PushContentEncryptionKey push_content_encryption_key = 2; */
+        if (message.pushContentEncryptionKey)
+            PushContentEncryptionKey.internalBinaryWrite(message.pushContentEncryptionKey, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* optional uint32 push_content_version = 3; */
+        if (message.pushContentVersion !== undefined)
+            writer.tag(3, WireType.Varint).uint32(message.pushContentVersion);
+        /* optional PushNotificationMethod notification_method = 4; */
+        if (message.notificationMethod)
+            PushNotificationMethod.internalBinaryWrite(message.notificationMethod, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdatePushNotificationDetailsInput
+ */
+export const UpdatePushNotificationDetailsInput = new UpdatePushNotificationDetailsInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdatePushNotificationDetailsResult$Type extends MessageType<UpdatePushNotificationDetailsResult> {
+    constructor() {
+        super("UpdatePushNotificationDetailsResult", []);
+    }
+    create(value?: PartialMessage<UpdatePushNotificationDetailsResult>): UpdatePushNotificationDetailsResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<UpdatePushNotificationDetailsResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdatePushNotificationDetailsResult): UpdatePushNotificationDetailsResult {
+        return target ?? this.create();
+    }
+    internalBinaryWrite(message: UpdatePushNotificationDetailsResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdatePushNotificationDetailsResult
+ */
+export const UpdatePushNotificationDetailsResult = new UpdatePushNotificationDetailsResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class GetChatsInput$Type extends MessageType<GetChatsInput> {
     constructor() {
