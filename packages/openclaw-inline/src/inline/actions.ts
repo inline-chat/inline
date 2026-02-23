@@ -74,6 +74,12 @@ for (const group of ACTION_GROUPS) {
 }
 
 const SUPPORTED_ACTIONS = Array.from(ACTION_TO_GATE_KEY.keys())
+const GET_MESSAGES_METHOD =
+  typeof (Method as Record<string, unknown>).GET_MESSAGES === "number" &&
+  Number.isInteger((Method as Record<string, unknown>).GET_MESSAGES) &&
+  ((Method as Record<string, unknown>).GET_MESSAGES as number) > 0
+    ? ((Method as Record<string, unknown>).GET_MESSAGES as Method)
+    : null
 
 function normalizeChatId(raw: string): string {
   const normalized = normalizeInlineTarget(raw) ?? raw.trim()
@@ -444,15 +450,18 @@ async function findMessageById(params: {
   chatId: bigint
   messageId: bigint
 }): Promise<Message | null> {
-  const directResult = await params.client
-    .invokeRaw(Method.GET_MESSAGES, {
-      oneofKind: "getMessages",
-      getMessages: {
-        peerId: buildChatPeer(params.chatId),
-        messageIds: [params.messageId],
-      },
-    })
-    .catch(() => null)
+  const directResult =
+    GET_MESSAGES_METHOD == null
+      ? null
+      : await params.client
+          .invokeRaw(GET_MESSAGES_METHOD, {
+            oneofKind: "getMessages",
+            getMessages: {
+              peerId: buildChatPeer(params.chatId),
+              messageIds: [params.messageId],
+            },
+          })
+          .catch(() => null)
   if (directResult?.oneofKind === "getMessages") {
     return (directResult.getMessages.messages ?? []).find((message) => message.id === params.messageId) ?? null
   }

@@ -46,6 +46,12 @@ const HISTORY_LINE_MAX_CHARS = 280
 const BOT_MESSAGE_CACHE_LIMIT = 500
 const REACTION_TARGET_LOOKUP_LIMIT = 8
 const REPLY_TARGET_LOOKUP_LIMIT = 8
+const GET_MESSAGES_METHOD =
+  typeof (Method as Record<string, unknown>).GET_MESSAGES === "number" &&
+  Number.isInteger((Method as Record<string, unknown>).GET_MESSAGES) &&
+  ((Method as Record<string, unknown>).GET_MESSAGES as number) > 0
+    ? ((Method as Record<string, unknown>).GET_MESSAGES as Method)
+    : null
 
 function normalizeAllowEntry(raw: string): string {
   return raw.trim().replace(/^inline:/i, "").replace(/^user:/i, "")
@@ -178,15 +184,18 @@ async function findChatMessageById(params: {
   meId: bigint
   botMessageIdsByChat: Map<string, string[]>
 }): Promise<Message | null> {
-  const directResult = await params.client
-    .invokeRaw(Method.GET_MESSAGES, {
-      oneofKind: "getMessages",
-      getMessages: {
-        peerId: buildChatPeer(params.chatId),
-        messageIds: [params.messageId],
-      },
-    })
-    .catch(() => null)
+  const directResult =
+    GET_MESSAGES_METHOD == null
+      ? null
+      : await params.client
+          .invokeRaw(GET_MESSAGES_METHOD, {
+            oneofKind: "getMessages",
+            getMessages: {
+              peerId: buildChatPeer(params.chatId),
+              messageIds: [params.messageId],
+            },
+          })
+          .catch(() => null)
   if (directResult?.oneofKind === "getMessages") {
     const directMessages = directResult.getMessages.messages ?? []
     rememberBotMessagesFromList({

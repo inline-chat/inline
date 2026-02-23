@@ -1242,7 +1242,7 @@ describe("InlineSdkClient", () => {
     await client.close()
   })
 
-  it("invokeUncheckedRaw() bypasses validation for known methods", async () => {
+  it("invokeUncheckedRaw() bypasses input/result validation for known methods", async () => {
     const transport = new MockTransport()
     const client = new InlineSdkClient({
       baseUrl: "https://api.inline.chat",
@@ -1252,11 +1252,11 @@ describe("InlineSdkClient", () => {
 
     await connectAndOpen(client, transport)
 
-    // UNSPECIFIED normally has no input mapping; unchecked should still send.
-    const p = client.invokeUncheckedRaw(Method.UNSPECIFIED, { oneofKind: "getMe", getMe: {} } as any)
+    // GET_ME normally expects getMe input; unchecked should still send mismatched input.
+    const p = client.invokeUncheckedRaw(Method.GET_ME, { oneofKind: "sendMessage", sendMessage: {} } as any)
 
-    await waitFor(() => transport.sent.some((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.UNSPECIFIED))
-    const rpc = transport.sent.find((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.UNSPECIFIED)
+    await waitFor(() => transport.sent.some((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.GET_ME))
+    const rpc = transport.sent.find((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.GET_ME)
     if (!rpc || rpc.body.oneofKind !== "rpcCall") throw new Error("missing rpc")
 
     await transport.emitMessage(

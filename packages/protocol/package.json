@@ -1,6 +1,6 @@
 {
   "name": "@inline-chat/protocol",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "private": false,
   "type": "module",
   "files": [

@@ -84,9 +84,9 @@
     },
     "packages/openclaw-inline": {
       "name": "@inline-openclaw/inline",
-      "version": "0.0.13",
+      "version": "0.0.14",
       "dependencies": {
-        "@inline-chat/realtime-sdk": "^0.0.4",
+        "@inline-chat/realtime-sdk": "^0.0.8",
         "zod": "^4.1.5",
       },
       "devDependencies": {
@@ -102,7 +102,7 @@
     },
     "packages/protocol": {
       "name": "@inline-chat/protocol",
-      "version": "0.0.2",
+      "version": "0.0.3",
       "dependencies": {
         "@protobuf-ts/runtime": "^2.11.1",
       },
@@ -112,9 +112,9 @@
     },
     "packages/sdk": {
       "name": "@inline-chat/realtime-sdk",
-      "version": "0.0.7",
+      "version": "0.0.8",
       "dependencies": {
-        "@inline-chat/protocol": "^0.0.2",
+        "@inline-chat/protocol": "^0.0.3",
         "ws": "^8.18.3",
       },
       "devDependencies": {
@@ -290,6 +290,10 @@
         "typescript": "^5.7.2",
       },
     },
+  },
+  "overrides": {
+    "@inline-chat/protocol": "workspace:*",
+    "@inline-chat/realtime-sdk": "workspace:*",
   },
   "packages": {
     "@agentclientprotocol/sdk": ["@agentclientprotocol/sdk@0.14.1", "", { "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-b6r3PS3Nly+Wyw9U+0nOr47bV8tfS476EgyEMhoKvJCZLbgqoDFN7DJwkxL88RR0aiOqOYV1ZnESHqb+RmdH8w=="],

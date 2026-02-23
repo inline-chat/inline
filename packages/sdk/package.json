@@ -1,6 +1,6 @@
 {
   "name": "@inline-chat/realtime-sdk",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "private": false,
   "type": "module",
   "files": [
@@ -20,7 +20,7 @@
     "test": "vitest run --coverage"
   },
   "dependencies": {
-    "@inline-chat/protocol": "^0.0.2",
+    "@inline-chat/protocol": "^0.0.3",
     "ws": "^8.18.3"
   },
   "devDependencies": {
