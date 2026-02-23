@@ -126,8 +126,8 @@ extension NotificationsManager {
     let deviceToken = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
 
     Task {
-      let _ = try await ApiClient.shared.savePushNotification(
-        pushToken: deviceToken
+      let _ = await Api.realtime.sendQueued(
+        .updatePushNotificationDetails(applePushToken: deviceToken)
       )
 
       log.debug("Saved push notification token")

@@ -98,6 +98,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case getMessages // = 38
   case updateDialogNotificationSettings // = 39
   case readMessages // = 40
+  case updatePushNotificationDetails // = 41
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -147,6 +148,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 38: self = .getMessages
     case 39: self = .updateDialogNotificationSettings
     case 40: self = .readMessages
+    case 41: self = .updatePushNotificationDetails
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -194,6 +196,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .getMessages: return 38
     case .updateDialogNotificationSettings: return 39
     case .readMessages: return 40
+    case .updatePushNotificationDetails: return 41
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -241,6 +244,45 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .getMessages,
     .updateDialogNotificationSettings,
     .readMessages,
+    .updatePushNotificationDetails,
+  ]
+
+}
+
+public enum PushNotificationProvider: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case apns // = 1
+  case expoAndroid // = 2
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .apns
+    case 2: self = .expoAndroid
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .apns: return 1
+    case .expoAndroid: return 2
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [PushNotificationProvider] = [
+    .unspecified,
+    .apns,
+    .expoAndroid,
   ]
 
 }
@@ -2668,6 +2710,14 @@ public struct RpcCall: Sendable {
     set {input = .readMessages(newValue)}
   }
 
+  public var updatePushNotificationDetails: UpdatePushNotificationDetailsInput {
+    get {
+      if case .updatePushNotificationDetails(let v)? = input {return v}
+      return UpdatePushNotificationDetailsInput()
+    }
+    set {input = .updatePushNotificationDetails(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Input: Equatable, Sendable {
@@ -2711,6 +2761,7 @@ public struct RpcCall: Sendable {
     case getMessages(GetMessagesInput)
     case updateDialogNotificationSettings(UpdateDialogNotificationSettingsInput)
     case readMessages(ReadMessagesInput)
+    case updatePushNotificationDetails(UpdatePushNotificationDetailsInput)
 
   }
 
@@ -3052,6 +3103,14 @@ public struct RpcResult: @unchecked Sendable {
     set {_uniqueStorage()._result = .readMessages(newValue)}
   }
 
+  public var updatePushNotificationDetails: UpdatePushNotificationDetailsResult {
+    get {
+      if case .updatePushNotificationDetails(let v)? = _storage._result {return v}
+      return UpdatePushNotificationDetailsResult()
+    }
+    set {_uniqueStorage()._result = .updatePushNotificationDetails(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Result: Equatable, Sendable {
@@ -3095,6 +3154,7 @@ public struct RpcResult: @unchecked Sendable {
     case getMessages(GetMessagesResult)
     case updateDialogNotificationSettings(UpdateDialogNotificationSettingsResult)
     case readMessages(ReadMessagesResult)
+    case updatePushNotificationDetails(UpdatePushNotificationDetailsResult)
 
   }
 
@@ -4065,6 +4125,193 @@ public struct SendComposeActionInput: Sendable {
 }
 
 public struct SendComposeActionResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct PushContentEncryptionKey: @unchecked Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Raw public key bytes for the receiving device/session.
+  public var publicKey: Data = Data()
+
+  /// Optional key identifier to support rotation and debugging.
+  public var keyID: String {
+    get {return _keyID ?? String()}
+    set {_keyID = newValue}
+  }
+  /// Returns true if `keyID` has been explicitly set.
+  public var hasKeyID: Bool {return self._keyID != nil}
+  /// Clears the value of `keyID`. Subsequent reads from it will return its default value.
+  public mutating func clearKeyID() {self._keyID = nil}
+
+  /// Public-key algorithm/cipher-suite descriptor.
+  public var algorithm: PushContentEncryptionKey.Algorithm = .unspecified
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public enum Algorithm: SwiftProtobuf.Enum, Swift.CaseIterable {
+    public typealias RawValue = Int
+    case unspecified // = 0
+    case x25519HkdfSha256Aes256Gcm // = 1
+    case UNRECOGNIZED(Int)
+
+    public init() {
+      self = .unspecified
+    }
+
+    public init?(rawValue: Int) {
+      switch rawValue {
+      case 0: self = .unspecified
+      case 1: self = .x25519HkdfSha256Aes256Gcm
+      default: self = .UNRECOGNIZED(rawValue)
+      }
+    }
+
+    public var rawValue: Int {
+      switch self {
+      case .unspecified: return 0
+      case .x25519HkdfSha256Aes256Gcm: return 1
+      case .UNRECOGNIZED(let i): return i
+      }
+    }
+
+    // The compiler won't synthesize support with the UNRECOGNIZED case.
+    public static let allCases: [PushContentEncryptionKey.Algorithm] = [
+      .unspecified,
+      .x25519HkdfSha256Aes256Gcm,
+    ]
+
+  }
+
+  public init() {}
+
+  fileprivate var _keyID: String? = nil
+}
+
+public struct ApnsNotificationMethod: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// APNs device token.
+  public var deviceToken: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct ExpoAndroidNotificationMethod: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Expo push token (ExponentPushToken[...] format).
+  public var expoPushToken: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct PushNotificationMethod: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Selected push transport/provider for the session.
+  public var provider: PushNotificationProvider = .unspecified
+
+  /// Exactly one notification method should be set for each session.
+  public var method: PushNotificationMethod.OneOf_Method? = nil
+
+  public var apns: ApnsNotificationMethod {
+    get {
+      if case .apns(let v)? = method {return v}
+      return ApnsNotificationMethod()
+    }
+    set {method = .apns(newValue)}
+  }
+
+  public var expoAndroid: ExpoAndroidNotificationMethod {
+    get {
+      if case .expoAndroid(let v)? = method {return v}
+      return ExpoAndroidNotificationMethod()
+    }
+    set {method = .expoAndroid(newValue)}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  /// Exactly one notification method should be set for each session.
+  public enum OneOf_Method: Equatable, Sendable {
+    case apns(ApnsNotificationMethod)
+    case expoAndroid(ExpoAndroidNotificationMethod)
+
+  }
+
+  public init() {}
+}
+
+/// Register/update push notification details for the current session.
+public struct UpdatePushNotificationDetailsInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Legacy APNs token for old clients. Kept for gradual migration/fallback.
+  ///
+  /// NOTE: This field was marked as deprecated in the .proto file.
+  public var applePushToken: String = String()
+
+  /// Optional metadata for encrypted push content rollout.
+  public var pushContentEncryptionKey: PushContentEncryptionKey {
+    get {return _pushContentEncryptionKey ?? PushContentEncryptionKey()}
+    set {_pushContentEncryptionKey = newValue}
+  }
+  /// Returns true if `pushContentEncryptionKey` has been explicitly set.
+  public var hasPushContentEncryptionKey: Bool {return self._pushContentEncryptionKey != nil}
+  /// Clears the value of `pushContentEncryptionKey`. Subsequent reads from it will return its default value.
+  public mutating func clearPushContentEncryptionKey() {self._pushContentEncryptionKey = nil}
+
+  /// Optional encrypted payload schema version/capability marker.
+  public var pushContentVersion: UInt32 {
+    get {return _pushContentVersion ?? 0}
+    set {_pushContentVersion = newValue}
+  }
+  /// Returns true if `pushContentVersion` has been explicitly set.
+  public var hasPushContentVersion: Bool {return self._pushContentVersion != nil}
+  /// Clears the value of `pushContentVersion`. Subsequent reads from it will return its default value.
+  public mutating func clearPushContentVersion() {self._pushContentVersion = nil}
+
+  /// New provider-specific method payload.
+  public var notificationMethod: PushNotificationMethod {
+    get {return _notificationMethod ?? PushNotificationMethod()}
+    set {_notificationMethod = newValue}
+  }
+  /// Returns true if `notificationMethod` has been explicitly set.
+  public var hasNotificationMethod: Bool {return self._notificationMethod != nil}
+  /// Clears the value of `notificationMethod`. Subsequent reads from it will return its default value.
+  public mutating func clearNotificationMethod() {self._notificationMethod = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _pushContentEncryptionKey: PushContentEncryptionKey? = nil
+  fileprivate var _pushContentVersion: UInt32? = nil
+  fileprivate var _notificationMethod: PushNotificationMethod? = nil
+}
+
+public struct UpdatePushNotificationDetailsResult: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -6724,6 +6971,15 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     38: .same(proto: "GET_MESSAGES"),
     39: .same(proto: "UPDATE_DIALOG_NOTIFICATION_SETTINGS"),
     40: .same(proto: "READ_MESSAGES"),
+    41: .same(proto: "UPDATE_PUSH_NOTIFICATION_DETAILS"),
+  ]
+}
+
+extension PushNotificationProvider: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    0: .same(proto: "PUSH_NOTIFICATION_PROVIDER_UNSPECIFIED"),
+    1: .same(proto: "PUSH_NOTIFICATION_PROVIDER_APNS"),
+    2: .same(proto: "PUSH_NOTIFICATION_PROVIDER_EXPO_ANDROID"),
   ]
 }
 
@@ -9711,6 +9967,7 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     39: .same(proto: "getMessages"),
     40: .same(proto: "updateDialogNotificationSettings"),
     41: .same(proto: "readMessages"),
+    42: .same(proto: "updatePushNotificationDetails"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -10240,6 +10497,19 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
           self.input = .readMessages(v)
         }
       }()
+      case 42: try {
+        var v: UpdatePushNotificationDetailsInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .updatePushNotificationDetails(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .updatePushNotificationDetails(v)
+        }
+      }()
       default: break
       }
     }
@@ -10414,6 +10684,10 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       guard case .readMessages(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 41)
     }()
+    case .updatePushNotificationDetails?: try {
+      guard case .updatePushNotificationDetails(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 42)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -10471,6 +10745,7 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     39: .same(proto: "getMessages"),
     40: .same(proto: "updateDialogNotificationSettings"),
     41: .same(proto: "readMessages"),
+    42: .same(proto: "updatePushNotificationDetails"),
   ]
 
   fileprivate class _StorageClass {
@@ -11031,6 +11306,19 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
             _storage._result = .readMessages(v)
           }
         }()
+        case 42: try {
+          var v: UpdatePushNotificationDetailsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .updatePushNotificationDetails(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .updatePushNotificationDetails(v)
+          }
+        }()
         default: break
         }
       }
@@ -11206,6 +11494,10 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
       case .readMessages?: try {
         guard case .readMessages(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 41)
+      }()
+      case .updatePushNotificationDetails?: try {
+        guard case .updatePushNotificationDetails(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 42)
       }()
       case nil: break
       }
@@ -12817,6 +13109,274 @@ extension SendComposeActionResult: SwiftProtobuf.Message, SwiftProtobuf._Message
   }
 
   public static func ==(lhs: SendComposeActionResult, rhs: SendComposeActionResult) -> Bool {
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension PushContentEncryptionKey: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "PushContentEncryptionKey"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "public_key"),
+    2: .standard(proto: "key_id"),
+    3: .same(proto: "algorithm"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularBytesField(value: &self.publicKey) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self._keyID) }()
+      case 3: try { try decoder.decodeSingularEnumField(value: &self.algorithm) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.publicKey.isEmpty {
+      try visitor.visitSingularBytesField(value: self.publicKey, fieldNumber: 1)
+    }
+    try { if let v = self._keyID {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    } }()
+    if self.algorithm != .unspecified {
+      try visitor.visitSingularEnumField(value: self.algorithm, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: PushContentEncryptionKey, rhs: PushContentEncryptionKey) -> Bool {
+    if lhs.publicKey != rhs.publicKey {return false}
+    if lhs._keyID != rhs._keyID {return false}
+    if lhs.algorithm != rhs.algorithm {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension PushContentEncryptionKey.Algorithm: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    0: .same(proto: "ALGORITHM_UNSPECIFIED"),
+    1: .same(proto: "ALGORITHM_X25519_HKDF_SHA256_AES256_GCM"),
+  ]
+}
+
+extension ApnsNotificationMethod: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ApnsNotificationMethod"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "device_token"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.deviceToken) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.deviceToken.isEmpty {
+      try visitor.visitSingularStringField(value: self.deviceToken, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: ApnsNotificationMethod, rhs: ApnsNotificationMethod) -> Bool {
+    if lhs.deviceToken != rhs.deviceToken {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension ExpoAndroidNotificationMethod: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ExpoAndroidNotificationMethod"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "expo_push_token"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.expoPushToken) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.expoPushToken.isEmpty {
+      try visitor.visitSingularStringField(value: self.expoPushToken, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: ExpoAndroidNotificationMethod, rhs: ExpoAndroidNotificationMethod) -> Bool {
+    if lhs.expoPushToken != rhs.expoPushToken {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension PushNotificationMethod: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "PushNotificationMethod"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "provider"),
+    2: .same(proto: "apns"),
+    3: .standard(proto: "expo_android"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularEnumField(value: &self.provider) }()
+      case 2: try {
+        var v: ApnsNotificationMethod?
+        var hadOneofValue = false
+        if let current = self.method {
+          hadOneofValue = true
+          if case .apns(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.method = .apns(v)
+        }
+      }()
+      case 3: try {
+        var v: ExpoAndroidNotificationMethod?
+        var hadOneofValue = false
+        if let current = self.method {
+          hadOneofValue = true
+          if case .expoAndroid(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.method = .expoAndroid(v)
+        }
+      }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.provider != .unspecified {
+      try visitor.visitSingularEnumField(value: self.provider, fieldNumber: 1)
+    }
+    switch self.method {
+    case .apns?: try {
+      guard case .apns(let v)? = self.method else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    }()
+    case .expoAndroid?: try {
+      guard case .expoAndroid(let v)? = self.method else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    }()
+    case nil: break
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: PushNotificationMethod, rhs: PushNotificationMethod) -> Bool {
+    if lhs.provider != rhs.provider {return false}
+    if lhs.method != rhs.method {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdatePushNotificationDetailsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdatePushNotificationDetailsInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "apple_push_token"),
+    2: .standard(proto: "push_content_encryption_key"),
+    3: .standard(proto: "push_content_version"),
+    4: .standard(proto: "notification_method"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.applePushToken) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._pushContentEncryptionKey) }()
+      case 3: try { try decoder.decodeSingularUInt32Field(value: &self._pushContentVersion) }()
+      case 4: try { try decoder.decodeSingularMessageField(value: &self._notificationMethod) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.applePushToken.isEmpty {
+      try visitor.visitSingularStringField(value: self.applePushToken, fieldNumber: 1)
+    }
+    try { if let v = self._pushContentEncryptionKey {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    try { if let v = self._pushContentVersion {
+      try visitor.visitSingularUInt32Field(value: v, fieldNumber: 3)
+    } }()
+    try { if let v = self._notificationMethod {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdatePushNotificationDetailsInput, rhs: UpdatePushNotificationDetailsInput) -> Bool {
+    if lhs.applePushToken != rhs.applePushToken {return false}
+    if lhs._pushContentEncryptionKey != rhs._pushContentEncryptionKey {return false}
+    if lhs._pushContentVersion != rhs._pushContentVersion {return false}
+    if lhs._notificationMethod != rhs._notificationMethod {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdatePushNotificationDetailsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdatePushNotificationDetailsResult"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdatePushNotificationDetailsResult, rhs: UpdatePushNotificationDetailsResult) -> Bool {
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

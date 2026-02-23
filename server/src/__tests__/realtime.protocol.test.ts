@@ -7,7 +7,10 @@ import {
   wsSendClientProtocolMessage,
   wsServerProtocolMessage,
 } from "@in/server/realtime/test/utils"
-import { Method } from "@inline-chat/protocol/core"
+import { Method, PushNotificationProvider } from "@inline-chat/protocol/core"
+import { db } from "@in/server/db"
+import { sessions } from "@in/server/db/schema"
+import { eq } from "drizzle-orm"
 import { afterAll, beforeAll, describe, expect, it, mock } from "bun:test"
 import Elysia from "elysia"
 
@@ -46,7 +49,7 @@ describe("realtime protocol safety", () => {
   const authenticateSocket = async () => {
     const ws = await openRealtimeSocket()
     const user = await testUtils.createUser("realtime-auth@test.com")
-    const { token } = await testUtils.createSessionForUser(user.id)
+    const { token, session } = await testUtils.createSessionForUser(user.id, { clientType: "ios" })
 
     wsSendClientProtocolMessage(ws, {
       id: 1n,
@@ -63,7 +66,7 @@ describe("realtime protocol safety", () => {
 
     const openMessage = await wsServerProtocolMessage(ws)
     expect(openMessage.body.oneofKind).toBe("connectionOpen")
-    return ws
+    return { ws, sessionId: session.id }
   }
 
   it("closes socket for text payloads", async () => {
@@ -100,12 +103,12 @@ describe("realtime protocol safety", () => {
   })
 
   it("returns connectionOpen for valid connectionInit token", async () => {
-    const ws = await authenticateSocket()
+    const { ws } = await authenticateSocket()
     await wsClosed(ws)
   })
 
   it("maps rpc method/input mismatch into rpcError instead of crashing", async () => {
-    const ws = await authenticateSocket()
+    const { ws } = await authenticateSocket()
 
     wsSendClientProtocolMessage(ws, {
       id: 99n,
@@ -131,7 +134,7 @@ describe("realtime protocol safety", () => {
   })
 
   it("responds to ping with pong and same nonce", async () => {
-    const ws = await authenticateSocket()
+    const { ws } = await authenticateSocket()
     const nonce = 12345n
 
     wsSendClientProtocolMessage(ws, {
@@ -169,5 +172,107 @@ describe("realtime protocol safety", () => {
     const pong = await wsServerProtocolMessage(goodWs)
     expect(pong.body.oneofKind).toBe("pong")
     await wsClosed(goodWs)
+  })
+
+  it("updates push notification details via RPC", async () => {
+    const { ws, sessionId } = await authenticateSocket()
+    const publicKey = new Uint8Array(Array.from({ length: 32 }, (_, i) => i + 1))
+
+    wsSendClientProtocolMessage(ws, {
+      id: 500n,
+      seq: 2,
+      body: {
+        oneofKind: "rpcCall",
+        rpcCall: {
+          method: Method.UPDATE_PUSH_NOTIFICATION_DETAILS,
+          input: {
+            oneofKind: "updatePushNotificationDetails",
+            updatePushNotificationDetails: {
+              applePushToken: "",
+              notificationMethod: {
+                provider: PushNotificationProvider.APNS,
+                method: {
+                  oneofKind: "apns",
+                  apns: {
+                    deviceToken: "apn-rpc-token",
+                  },
+                },
+              },
+              pushContentEncryptionKey: {
+                publicKey,
+                keyId: "key-v1",
+                algorithm: 1,
+              },
+              pushContentVersion: 1,
+            },
+          },
+        },
+      },
+    })
+
+    const response = await wsServerProtocolMessage(ws)
+    expect(response.body.oneofKind).toBe("rpcResult")
+    if (response.body.oneofKind === "rpcResult") {
+      expect(response.body.rpcResult.reqMsgId).toBe(500n)
+      expect(response.body.rpcResult.result.oneofKind).toBe("updatePushNotificationDetails")
+    }
+
+    const session = await db
+      .select({
+        applePushTokenEncrypted: sessions.applePushTokenEncrypted,
+        pushContentKeyPublic: sessions.pushContentKeyPublic,
+        pushContentKeyId: sessions.pushContentKeyId,
+        pushContentKeyAlgorithm: sessions.pushContentKeyAlgorithm,
+        pushContentVersion: sessions.pushContentVersion,
+      })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .limit(1)
+      .then((rows) => rows[0])
+
+    expect(session).toBeDefined()
+    expect(session?.applePushTokenEncrypted).toBeTruthy()
+    expect(session?.pushContentKeyPublic).toBeTruthy()
+    expect(Buffer.from(session?.pushContentKeyPublic ?? []).equals(Buffer.from(publicKey))).toBe(true)
+    expect(session?.pushContentKeyId).toBe("key-v1")
+    expect(session?.pushContentKeyAlgorithm).toBe("X25519_HKDF_SHA256_AES256_GCM")
+    expect(session?.pushContentVersion).toBe(1)
+
+    await wsClosed(ws)
+  })
+
+  it("rejects malformed push-content key metadata via RPC", async () => {
+    const { ws } = await authenticateSocket()
+
+    wsSendClientProtocolMessage(ws, {
+      id: 501n,
+      seq: 2,
+      body: {
+        oneofKind: "rpcCall",
+        rpcCall: {
+          method: Method.UPDATE_PUSH_NOTIFICATION_DETAILS,
+          input: {
+            oneofKind: "updatePushNotificationDetails",
+            updatePushNotificationDetails: {
+              applePushToken: "apn-rpc-token",
+              pushContentEncryptionKey: {
+                publicKey: new Uint8Array([1, 2, 3]),
+                keyId: "key-v1",
+                algorithm: 1,
+              },
+              pushContentVersion: 1,
+            },
+          },
+        },
+      },
+    })
+
+    const response = await wsServerProtocolMessage(ws)
+    expect(response.body.oneofKind).toBe("rpcError")
+    if (response.body.oneofKind === "rpcError") {
+      expect(response.body.rpcError.reqMsgId).toBe(501n)
+    }
+
+    await wsClosed(ws)
   })
 })

@@ -4,6 +4,11 @@ import { isSuppressedApnFailure, shouldInvalidateTokenForApnFailure, summarizeAp
 import { Log } from "@in/server/utils/log"
 import { Notification } from "apn"
 import { configureAlertNotification, configureBackgroundNotification, iOSTopic, isIOSPushSession } from "./utils"
+import {
+  encryptSendMessagePushContent,
+  PUSH_CONTENT_ALGORITHM,
+  PUSH_CONTENT_VERSION,
+} from "@in/server/modules/notifications/pushContentEncryption"
 
 type AlertPushPayload = {
   kind: "alert"
@@ -65,6 +70,60 @@ const configureTimeSensitive = (notification: Notification) => {
   aps["interruption-level"] = "time-sensitive"
 }
 
+const configurePlaintextSendMessageNotification = ({
+  notification,
+  payload,
+}: {
+  notification: Notification
+  payload: SendMessagePushPayload
+}) => {
+  const senderPayload: Record<string, unknown> = { id: payload.senderUserId }
+
+  if (payload.senderDisplayName) senderPayload["displayName"] = payload.senderDisplayName
+  if (payload.senderProfilePhotoUrl) senderPayload["profilePhotoUrl"] = payload.senderProfilePhotoUrl
+
+  const apsPayload: Record<string, unknown> = {
+    userId: payload.senderUserId,
+    threadId: payload.threadId,
+    isThread: payload.isThread ?? false,
+    sender: senderPayload,
+    threadEmoji: payload.threadEmoji,
+    messageId: payload.messageId,
+  }
+
+  notification.payload = apsPayload
+  notification.contentAvailable = true
+  notification.mutableContent = true
+  configureAlertNotification(notification)
+
+  notification.sound = "default"
+  if (payload.isUrgentNudge) {
+    configureTimeSensitive(notification)
+  }
+  notification.alert = {
+    title: payload.title,
+    body: payload.body,
+    subtitle: payload.subtitle,
+  }
+}
+
+const genericEncryptedAlertTitle = "New message"
+const genericEncryptedAlertBody = "Open Inline to read it."
+
+type UserSession = Awaited<ReturnType<typeof SessionsModel.getValidSessionsByUserId>>[number]
+
+const sessionSupportsEncryptedPushContent = (
+  session: UserSession,
+): session is UserSession & {
+  pushContentKeyPublic: Uint8Array
+  pushContentVersion: number
+  pushContentKeyAlgorithm: string
+} => {
+  if (!session.pushContentKeyPublic || session.pushContentKeyPublic.length === 0) return false
+  if (!session.pushContentVersion || session.pushContentVersion < PUSH_CONTENT_VERSION) return false
+  return session.pushContentKeyAlgorithm === PUSH_CONTENT_ALGORITHM
+}
+
 export const sendPushNotificationToUser = async ({ userId, payload }: SendPushToUserInput) => {
   try {
     // Get all sessions for the user
@@ -89,33 +148,62 @@ export const sendPushNotificationToUser = async ({ userId, payload }: SendPushTo
       notification.threadId = payload.threadId
 
       if (payload.kind === "send_message") {
-        const senderPayload: Record<string, unknown> = { id: payload.senderUserId }
+        if (sessionSupportsEncryptedPushContent(session)) {
+          let encryptedContent: ReturnType<typeof encryptSendMessagePushContent> | undefined
+          try {
+            encryptedContent = encryptSendMessagePushContent({
+              recipientPublicKey: session.pushContentKeyPublic,
+              recipientKeyId: session.pushContentKeyId ?? undefined,
+              content: {
+                kind: "send_message",
+                sender: {
+                  id: payload.senderUserId,
+                  displayName: payload.senderDisplayName,
+                  profilePhotoUrl: payload.senderProfilePhotoUrl,
+                },
+                title: payload.title,
+                body: payload.body,
+                subtitle: payload.subtitle,
+                threadId: payload.threadId,
+                messageId: payload.messageId,
+                isThread: payload.isThread ?? false,
+                threadEmoji: payload.threadEmoji,
+              },
+            })
+          } catch (error) {
+            log.error("Failed to encrypt push content", {
+              error,
+              userId,
+              sessionId: session.id,
+              threadId: payload.threadId,
+            })
+          }
 
-        if (payload.senderDisplayName) senderPayload["displayName"] = payload.senderDisplayName
-        if (payload.senderProfilePhotoUrl) senderPayload["profilePhotoUrl"] = payload.senderProfilePhotoUrl
+          if (encryptedContent) {
+            notification.payload = {
+              kind: "send_message_encrypted",
+              threadId: payload.threadId,
+              messageId: payload.messageId,
+              encryptedContent,
+            }
+            notification.contentAvailable = true
+            notification.mutableContent = true
+            configureAlertNotification(notification)
 
-        const apsPayload: Record<string, unknown> = {
-          userId: payload.senderUserId,
-          threadId: payload.threadId,
-          isThread: payload.isThread ?? false,
-          sender: senderPayload,
-          threadEmoji: payload.threadEmoji,
-          messageId: payload.messageId,
-        }
+            notification.sound = "default"
+            if (payload.isUrgentNudge) {
+              configureTimeSensitive(notification)
+            }
 
-        notification.payload = apsPayload
-        notification.contentAvailable = true
-        notification.mutableContent = true
-        configureAlertNotification(notification)
-
-        notification.sound = "default"
-        if (payload.isUrgentNudge) {
-          configureTimeSensitive(notification)
-        }
-        notification.alert = {
-          title: payload.title,
-          body: payload.body,
-          subtitle: payload.subtitle,
+            notification.alert = {
+              title: genericEncryptedAlertTitle,
+              body: genericEncryptedAlertBody,
+            }
+          } else {
+            configurePlaintextSendMessageNotification({ notification, payload })
+          }
+        } else {
+          configurePlaintextSendMessageNotification({ notification, payload })
         }
       } else if (payload.kind === "alert") {
         notification.payload = {

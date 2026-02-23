@@ -28,6 +28,19 @@ export interface CreateSessionData {
   deviceId?: string | undefined
 }
 
+export interface PushContentEncryptionKeyDetails {
+  publicKey: Uint8Array
+  keyId?: string | undefined
+  algorithm?: string | undefined
+}
+
+export interface UpdatePushNotificationDetailsData {
+  applePushToken: string
+  deviceId?: string | undefined
+  pushContentEncryptionKey?: PushContentEncryptionKeyDetails | undefined
+  pushContentVersion?: number | undefined
+}
+
 // Interface for session with decrypted data
 export interface SessionWithDecryptedData
   extends Omit<
@@ -169,17 +182,42 @@ export class SessionsModel {
   }
 
   static async updateApplePushToken(id: number, applePushToken: string, deviceId?: string): Promise<void> {
-    const encryptedApplePushToken = encrypt(applePushToken)
+    await this.updatePushNotificationDetails(id, {
+      applePushToken,
+      deviceId,
+    })
+  }
+
+  static async updatePushNotificationDetails(id: number, data: UpdatePushNotificationDetailsData): Promise<void> {
+    if (!id || id <= 0) {
+      throw new Error("Invalid session ID")
+    }
+    if (!data.applePushToken || data.applePushToken.trim().length === 0) {
+      throw new Error("Invalid apple push token")
+    }
+
+    const encryptedApplePushToken = encrypt(data.applePushToken)
+    const updateData: Partial<DbNewSession> = {
+      applePushToken: null,
+      applePushTokenEncrypted: encryptedApplePushToken.encrypted,
+      applePushTokenIv: encryptedApplePushToken.iv,
+      applePushTokenTag: encryptedApplePushToken.authTag,
+      ...(data.deviceId ? { deviceId: data.deviceId } : {}),
+    }
+
+    if (data.pushContentEncryptionKey) {
+      updateData.pushContentKeyPublic = Buffer.from(data.pushContentEncryptionKey.publicKey)
+      updateData.pushContentKeyId = data.pushContentEncryptionKey.keyId ?? null
+      updateData.pushContentKeyAlgorithm = data.pushContentEncryptionKey.algorithm ?? null
+    }
+
+    if (data.pushContentVersion !== undefined) {
+      updateData.pushContentVersion = data.pushContentVersion
+    }
 
     await db
       .update(sessions)
-      .set({
-        applePushToken: null,
-        applePushTokenEncrypted: encryptedApplePushToken.encrypted,
-        applePushTokenIv: encryptedApplePushToken.iv,
-        applePushTokenTag: encryptedApplePushToken.authTag,
-        ...(deviceId ? { deviceId } : {}),
-      })
+      .set(updateData)
       .where(eq(sessions.id, id))
   }
 

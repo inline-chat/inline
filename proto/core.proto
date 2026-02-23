@@ -623,6 +623,7 @@ enum Method {
   GET_MESSAGES = 38;
   UPDATE_DIALOG_NOTIFICATION_SETTINGS = 39;
   READ_MESSAGES = 40;
+  UPDATE_PUSH_NOTIFICATION_DETAILS = 41;
 }
 
 message RpcCall {
@@ -668,6 +669,7 @@ message RpcCall {
     GetMessagesInput getMessages = 39;
     UpdateDialogNotificationSettingsInput updateDialogNotificationSettings = 40;
     ReadMessagesInput readMessages = 41;
+    UpdatePushNotificationDetailsInput updatePushNotificationDetails = 42;
   }
 }
 
@@ -715,6 +717,7 @@ message RpcResult {
     GetMessagesResult getMessages = 39;
     UpdateDialogNotificationSettingsResult updateDialogNotificationSettings = 40;
     ReadMessagesResult readMessages = 41;
+    UpdatePushNotificationDetailsResult updatePushNotificationDetails = 42;
   }
 }
 
@@ -956,6 +959,66 @@ message SendComposeActionInput {
 }
 
 message SendComposeActionResult {}
+
+message PushContentEncryptionKey {
+  enum Algorithm {
+    ALGORITHM_UNSPECIFIED = 0;
+    ALGORITHM_X25519_HKDF_SHA256_AES256_GCM = 1;
+  }
+
+  // Raw public key bytes for the receiving device/session.
+  bytes public_key = 1;
+
+  // Optional key identifier to support rotation and debugging.
+  optional string key_id = 2;
+
+  // Public-key algorithm/cipher-suite descriptor.
+  Algorithm algorithm = 3;
+}
+
+enum PushNotificationProvider {
+  PUSH_NOTIFICATION_PROVIDER_UNSPECIFIED = 0;
+  PUSH_NOTIFICATION_PROVIDER_APNS = 1;
+  PUSH_NOTIFICATION_PROVIDER_EXPO_ANDROID = 2;
+}
+
+message ApnsNotificationMethod {
+  // APNs device token.
+  string device_token = 1;
+}
+
+message ExpoAndroidNotificationMethod {
+  // Expo push token (ExponentPushToken[...] format).
+  string expo_push_token = 1;
+}
+
+message PushNotificationMethod {
+  // Selected push transport/provider for the session.
+  PushNotificationProvider provider = 1;
+
+  // Exactly one notification method should be set for each session.
+  oneof method {
+    ApnsNotificationMethod apns = 2;
+    ExpoAndroidNotificationMethod expo_android = 3;
+  }
+}
+
+// Register/update push notification details for the current session.
+message UpdatePushNotificationDetailsInput {
+  // Legacy APNs token for old clients. Kept for gradual migration/fallback.
+  string apple_push_token = 1 [deprecated = true];
+
+  // Optional metadata for encrypted push content rollout.
+  optional PushContentEncryptionKey push_content_encryption_key = 2;
+
+  // Optional encrypted payload schema version/capability marker.
+  optional uint32 push_content_version = 3;
+
+  // New provider-specific method payload.
+  optional PushNotificationMethod notification_method = 4;
+}
+
+message UpdatePushNotificationDetailsResult {}
 
 message GetChatsInput {}
 

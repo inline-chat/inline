@@ -1,6 +1,8 @@
+import CryptoKit
 import Foundation
 import Intents
 import OSLog
+import Security
 import UIKit
 import UserNotifications
 
@@ -23,6 +25,8 @@ final class NotificationService: UNNotificationServiceExtension {
       contentHandler(request.content)
       return
     }
+
+    hydrateFromEncryptedContentIfNeeded(content: bestAttemptContent)
 
     let userInfo = bestAttemptContent.userInfo
     guard let sender = SenderPayload(userInfo: userInfo) else {
@@ -62,6 +66,175 @@ final class NotificationService: UNNotificationServiceExtension {
 // MARK: - Private helpers
 
 private extension NotificationService {
+  static let pushContentHkdfInfo = Data("inline.push-content.v1".utf8)
+  static let pushContentKeychainService = "chat.inline.push-content"
+  static let pushContentPrivateKeyAccount = "private-key-v1"
+  static let pushContentKeychainAccessGroup = "2487AN8AL4.keychainGroup"
+
+  struct EncryptedPayloadEnvelope {
+    let version: Int
+    let algorithm: String
+    let keyId: String?
+    let ephemeralPublicKey: String
+    let salt: String
+    let iv: String
+    let ciphertext: String
+    let tag: String
+
+    init?(userInfo: [AnyHashable: Any]) {
+      guard let rawEnvelope = userInfo["encryptedContent"] as? [String: Any] else { return nil }
+      guard
+        let version = rawEnvelope["version"] as? Int,
+        let algorithm = rawEnvelope["algorithm"] as? String,
+        let ephemeralPublicKey = rawEnvelope["ephemeralPublicKey"] as? String,
+        let salt = rawEnvelope["salt"] as? String,
+        let iv = rawEnvelope["iv"] as? String,
+        let ciphertext = rawEnvelope["ciphertext"] as? String,
+        let tag = rawEnvelope["tag"] as? String
+      else {
+        return nil
+      }
+
+      self.version = version
+      self.algorithm = algorithm
+      self.keyId = rawEnvelope["keyId"] as? String
+      self.ephemeralPublicKey = ephemeralPublicKey
+      self.salt = salt
+      self.iv = iv
+      self.ciphertext = ciphertext
+      self.tag = tag
+    }
+  }
+
+  struct DecryptedSendMessagePayload: Decodable {
+    struct Sender: Decodable {
+      let id: Int
+      let displayName: String?
+      let profilePhotoUrl: String?
+    }
+
+    let kind: String
+    let sender: Sender
+    let title: String
+    let body: String
+    let subtitle: String?
+    let threadId: String
+    let messageId: String
+    let isThread: Bool
+    let threadEmoji: String?
+  }
+
+  func hydrateFromEncryptedContentIfNeeded(content: UNMutableNotificationContent) {
+    guard let envelope = EncryptedPayloadEnvelope(userInfo: content.userInfo) else {
+      return
+    }
+
+    guard envelope.version == 1, envelope.algorithm == "X25519_HKDF_SHA256_AES256_GCM" else {
+      logger.error("unsupported encrypted payload metadata")
+      return
+    }
+
+    guard let privateKeyData = loadPushContentPrivateKeyData() else {
+      logger.error("push-content private key missing")
+      return
+    }
+
+    do {
+      let privateKey = try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: privateKeyData)
+      let payloadData = try decryptEnvelope(envelope, privateKey: privateKey)
+      let payload = try JSONDecoder().decode(DecryptedSendMessagePayload.self, from: payloadData)
+      guard payload.kind == "send_message" else {
+        logger.error("unsupported decrypted payload kind")
+        return
+      }
+
+      content.title = payload.title
+      content.body = payload.body
+      content.subtitle = payload.subtitle ?? ""
+
+      var userInfo = content.userInfo
+      userInfo["userId"] = payload.sender.id
+      userInfo["threadId"] = payload.threadId
+      userInfo["messageId"] = payload.messageId
+      userInfo["isThread"] = payload.isThread
+      if let threadEmoji = payload.threadEmoji {
+        userInfo["threadEmoji"] = threadEmoji
+      }
+
+      var senderInfo: [String: Any] = ["id": payload.sender.id]
+      if let displayName = payload.sender.displayName {
+        senderInfo["displayName"] = displayName
+      }
+      if let profilePhotoUrl = payload.sender.profilePhotoUrl {
+        senderInfo["profilePhotoUrl"] = profilePhotoUrl
+      }
+      userInfo["sender"] = senderInfo
+      content.userInfo = userInfo
+
+      logger.info("decrypted encrypted notification content")
+    } catch {
+      logger.error("failed to decrypt encrypted notification content: \(error.localizedDescription, privacy: .public)")
+    }
+  }
+
+  func decryptEnvelope(
+    _ envelope: EncryptedPayloadEnvelope,
+    privateKey: Curve25519.KeyAgreement.PrivateKey
+  ) throws -> Data {
+    let ephemeralPublicKeyData = try decodeBase64URL(envelope.ephemeralPublicKey)
+    let salt = try decodeBase64URL(envelope.salt)
+    let iv = try decodeBase64URL(envelope.iv)
+    let ciphertext = try decodeBase64URL(envelope.ciphertext)
+    let tag = try decodeBase64URL(envelope.tag)
+
+    let ephemeralPublicKey = try Curve25519.KeyAgreement.PublicKey(rawRepresentation: ephemeralPublicKeyData)
+    let sharedSecret = try privateKey.sharedSecretFromKeyAgreement(with: ephemeralPublicKey)
+    let symmetricKey = sharedSecret.hkdfDerivedSymmetricKey(
+      using: SHA256.self,
+      salt: salt,
+      sharedInfo: Self.pushContentHkdfInfo,
+      outputByteCount: 32
+    )
+
+    let nonce = try AES.GCM.Nonce(data: iv)
+    let sealedBox = try AES.GCM.SealedBox(nonce: nonce, ciphertext: ciphertext, tag: tag)
+    return try AES.GCM.open(sealedBox, using: symmetricKey)
+  }
+
+  func decodeBase64URL(_ value: String) throws -> Data {
+    var base64 = value.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+    let remainder = base64.count % 4
+    if remainder != 0 {
+      base64.append(String(repeating: "=", count: 4 - remainder))
+    }
+
+    guard let data = Data(base64Encoded: base64) else {
+      throw NSError(domain: "NotificationService", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid base64url"])
+    }
+    return data
+  }
+
+  func loadPushContentPrivateKeyData() -> Data? {
+    let query: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: Self.pushContentKeychainService,
+      kSecAttrAccount as String: Self.pushContentPrivateKeyAccount,
+      kSecAttrAccessGroup as String: Self.pushContentKeychainAccessGroup,
+      kSecReturnData as String: true,
+      kSecMatchLimit as String: kSecMatchLimitOne,
+    ]
+
+    var item: CFTypeRef?
+    let status = SecItemCopyMatching(query as CFDictionary, &item)
+    if status == errSecSuccess {
+      return item as? Data
+    }
+    if status != errSecItemNotFound {
+      logger.error("failed to read push-content keychain item: \(status, privacy: .public)")
+    }
+    return nil
+  }
+
   struct SenderPayload {
     let id: String
     let displayName: String?
