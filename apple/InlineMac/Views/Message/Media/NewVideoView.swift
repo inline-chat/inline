@@ -655,6 +655,27 @@ final class NewVideoView: NSView {
   }
 
   private func updateDurationLabel() {
+    if !Thread.isMainThread {
+      DispatchQueue.main.async { [weak self] in
+        self?.updateDurationLabel()
+      }
+      return
+    }
+
+    if isPendingUpload(), let uploadProgressSnapshot {
+      durationBadge.isHidden = false
+      durationBadgeBackground.isHidden = false
+      switch uploadProgressSnapshot.stage {
+      case .processing:
+        durationBadge.stringValue = "Processing"
+      case .uploading, .completed:
+        durationBadge.stringValue = uploadProgressLabel(uploadProgressSnapshot)
+      case .failed:
+        durationBadge.stringValue = "Failed"
+      }
+      return
+    }
+
     guard let durationSeconds = fullMessage.videoInfo?.video.duration, durationSeconds > 0 else {
       durationBadge.isHidden = true
       durationBadgeBackground.isHidden = true
@@ -676,6 +697,23 @@ final class NewVideoView: NSView {
     } else {
       return String(format: "%d:%02d", mins, secs)
     }
+  }
+
+  private func uploadProgressLabel(_ progress: UploadProgressSnapshot) -> String {
+    if progress.totalBytes > 0 {
+      return "\(formatTransferBytes(progress.bytesSent))/\(formatTransferBytes(progress.totalBytes))"
+    }
+
+    if progress.fractionCompleted > 0 {
+      let percent = Int((progress.fractionCompleted * 100).rounded())
+      return "\(percent)%"
+    }
+
+    return "Uploading"
+  }
+
+  private func formatTransferBytes(_ bytes: Int64) -> String {
+    ByteCountFormatter.string(fromByteCount: max(0, bytes), countStyle: .file)
   }
 
   private func isPendingUpload() -> Bool {
