@@ -749,9 +749,14 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     do {
       let delegate = UploadTaskDelegate(progressHandler: progress)
       let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+      let tempUploadFileURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("inline-upload-\(UUID().uuidString).tmp")
+      try multipartFormData.body.write(to: tempUploadFileURL, options: .atomic)
+      defer { try? FileManager.default.removeItem(at: tempUploadFileURL) }
+
       let totalBodyBytes = Int64(multipartFormData.body.count)
       progress(UploadTransferProgress(bytesSent: 0, totalBytes: totalBodyBytes, fractionCompleted: 0))
-      let (data, response) = try await session.upload(for: request, from: multipartFormData.body)
+      let (data, response) = try await session.upload(for: request, fromFile: tempUploadFileURL)
       session.finishTasksAndInvalidate()
 
       guard let httpResponse = response as? HTTPURLResponse else {
