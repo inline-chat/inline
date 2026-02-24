@@ -350,7 +350,6 @@ final class TabStripCollectionViewItem: NSCollectionViewItem, TabStripItemHoverD
     if let tabView = view as? TabStripItemView {
       tabView.isClosable = true
     }
-    applyLayoutMode(.standard)
     titleLabel.layer?.mask = titleMaskLayer
     updateAppearance(animated: false)
   }
