@@ -814,29 +814,50 @@ class ComposeAppKit: NSView {
 
   @MainActor
   func addVideo(_ url: URL, thumbnail: NSImage? = nil) async {
-    do {
-      let videoInfo = try await FileCache.saveVideo(url: url, thumbnail: thumbnail)
-      let mediaItem = FileMediaItem.video(videoInfo)
-      let uniqueId = mediaItem.getItemUniqueId()
+    // Show a placeholder immediately, then persist/cache the video in background.
+    let pendingId = "pending_video_\(UUID().uuidString)"
+    attachments.addVideoView(thumbnail: thumbnail, videoURL: url, id: pendingId)
+    updateHeight(animate: true)
 
-      attachments.addVideoView(videoInfo, id: uniqueId)
-      // Only swap the view if we just generated a new thumbnail
-      if let previousItem = attachmentItems[uniqueId],
-         case let FileMediaItem.video(prevVideoInfo) = previousItem,
-         prevVideoInfo.thumbnail == nil,
-         videoInfo.thumbnail != nil {
-        attachments.removeVideoView(id: uniqueId)
-        attachments.addVideoView(videoInfo, id: uniqueId)
+    let task = Task.detached(priority: .userInitiated) { [weak self] in
+      guard let self else { return }
+      if Task.isCancelled { return }
+
+      do {
+        let videoInfo = try await FileCache.saveVideo(url: url, thumbnail: thumbnail)
+        let mediaItem = FileMediaItem.video(videoInfo)
+        let uniqueId = mediaItem.getItemUniqueId()
+
+        await MainActor.run { [weak self] in
+          guard let self else { return }
+          guard self.pendingVideoSaveTasks[pendingId] != nil else { return } // removed/cancelled
+          self.pendingVideoSaveTasks.removeValue(forKey: pendingId)
+
+          self.attachments.removeVideoView(id: pendingId)
+          self.attachments.addVideoView(videoInfo, id: uniqueId)
+          self.attachmentItems[uniqueId] = mediaItem
+          self.updateHeight(animate: true)
+        }
+      } catch {
+        await MainActor.run { [weak self] in
+          guard let self else { return }
+          guard self.pendingVideoSaveTasks[pendingId] != nil else { return } // removed/cancelled
+          self.pendingVideoSaveTasks.removeValue(forKey: pendingId)
+          self.attachments.removeVideoView(id: pendingId)
+          self.updateHeight(animate: true)
+        }
+        Log.shared.error("Failed to save video in attachments", error: error)
       }
-
-      attachmentItems[uniqueId] = mediaItem
-      updateHeight(animate: true)
-    } catch {
-      Log.shared.error("Failed to save video in attachments", error: error)
     }
+
+    pendingVideoSaveTasks[pendingId] = task
   }
 
   func removeVideo(_ id: String) {
+    if let task = pendingVideoSaveTasks.removeValue(forKey: id) {
+      task.cancel()
+    }
+
     attachments.removeVideoView(id: id)
     attachmentItems.removeValue(forKey: id)
     updateHeight(animate: true)
@@ -871,6 +892,11 @@ class ComposeAppKit: NSView {
   }
 
   func clearAttachments(updateHeights: Bool = false) {
+    for (_, task) in pendingVideoSaveTasks {
+      task.cancel()
+    }
+    pendingVideoSaveTasks.removeAll()
+
     attachmentItems.removeAll()
     attachments.clearViews()
     if updateHeights {
@@ -1147,6 +1173,7 @@ class ComposeAppKit: NSView {
   private var keyMonitorUnsubscribe: (() -> Void)?
   private var keyMonitorPasteUnsubscribe: (() -> Void)?
   private var pendingImageSaveTasks: [String: Task<Void, Never>] = [:]
+  private var pendingVideoSaveTasks: [String: Task<Void, Never>] = [:]
 
   private func setupKeyDownHandler() {
     keyMonitorUnsubscribe = dependencies.keyMonitor?.addHandler(
@@ -1221,6 +1248,16 @@ class ComposeAppKit: NSView {
     NSLayoutConstraint.deactivate(mentionMenuConstraints)
     mentionMenuConstraints.removeAll()
     mentionCompletionMenu?.removeFromSuperview()
+
+    for (_, task) in pendingImageSaveTasks {
+      task.cancel()
+    }
+    pendingImageSaveTasks.removeAll()
+
+    for (_, task) in pendingVideoSaveTasks {
+      task.cancel()
+    }
+    pendingVideoSaveTasks.removeAll()
 
     log.trace("deinit")
   }

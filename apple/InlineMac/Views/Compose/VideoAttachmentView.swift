@@ -30,7 +30,7 @@ final class VideoAttachmentView: NSView, QLPreviewItem {
     self.minWidth = minWidth
 
     imageView = NSImageView(frame: .zero)
-    imageView.image = thumbnail ?? NSImage(systemSymbolName: "film", accessibilityDescription: nil)
+    imageView.image = thumbnail
     imageView.imageScaling = .scaleProportionallyUpOrDown
     imageView.translatesAutoresizingMaskIntoConstraints = false
 
