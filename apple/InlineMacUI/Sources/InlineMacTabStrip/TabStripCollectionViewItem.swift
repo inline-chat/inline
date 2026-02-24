@@ -58,11 +58,6 @@ final class TabStripCollectionViewItem: NSCollectionViewItem, TabStripItemHoverD
   private let titleMaskLayer = CAGradientLayer()
   private let closeOverlay = TabStripCloseOverlayView()
 
-  private enum LayoutMode {
-    case home
-    case standard
-  }
-
   override init(nibName _: NSNib.Name?, bundle _: Bundle?) {
     super.init(nibName: nil, bundle: nil)
     setupViews()
@@ -172,6 +167,7 @@ final class TabStripCollectionViewItem: NSCollectionViewItem, TabStripItemHoverD
       ),
       iconWidthConstraint,
       iconHeightConstraint,
+      iconCenterXForHome,
 
       titleLeadingConstraint,
       titleLabel.centerYAnchor.constraint(
@@ -190,8 +186,6 @@ final class TabStripCollectionViewItem: NSCollectionViewItem, TabStripItemHoverD
     closeOverlay.setContentHuggingPriority(.required, for: .horizontal)
     titleLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
     titleLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
-    applyLayoutMode(.standard)
   }
 
   func configure(
@@ -214,9 +208,10 @@ final class TabStripCollectionViewItem: NSCollectionViewItem, TabStripItemHoverD
 
     titleLeadingConstraint.constant = isHome ? 0 : Style.iconTrailingPadding * paddingScale
     iconLeadingConstraint.constant = Style.iconLeadingPadding * paddingScale
+    iconCenterXForHome.isActive = isHome
+    iconLeadingConstraint.isActive = !isHome
 
     if isHome {
-      applyLayoutMode(.home)
       iconWidthConstraint.constant = Style.homeIconPointSize
       iconHeightConstraint.constant = Style.homeIconPointSize
       iconImageView.layer?.cornerRadius = 0
@@ -234,10 +229,13 @@ final class TabStripCollectionViewItem: NSCollectionViewItem, TabStripItemHoverD
       iconImageView.contentTintColor = Style.homeIconTintColor
       titleLabel.stringValue = ""
       titleLabel.isHidden = true
+      titleLeadingConstraint.isActive = false
+      titleTrailingConstraint.isActive = false
+      iconLeadingConstraint.isActive = false
+      iconCenterXForHome.isActive = true
       closeOverlay.isHidden = true
       titleLabel.layer?.mask = nil
     } else {
-      applyLayoutMode(.standard)
       iconWidthConstraint.constant = iconSize
       iconHeightConstraint.constant = iconSize
       iconImageView.layer?.cornerRadius = iconSize / 3
@@ -249,6 +247,10 @@ final class TabStripCollectionViewItem: NSCollectionViewItem, TabStripItemHoverD
       iconImageView.contentTintColor = nil
       titleLabel.stringValue = item.title
       titleLabel.isHidden = false
+      titleLeadingConstraint.isActive = true
+      titleTrailingConstraint.isActive = true
+      iconLeadingConstraint.isActive = true
+      iconCenterXForHome.isActive = false
       titleTrailingConstraint.constant = -Style.trailingInsetDefault
       closeOverlay.isHidden = false
       titleLabel.layer?.mask = titleMaskLayer
@@ -351,30 +353,11 @@ final class TabStripCollectionViewItem: NSCollectionViewItem, TabStripItemHoverD
       tabView.isClosable = true
     }
     titleLabel.layer?.mask = titleMaskLayer
+    titleLeadingConstraint.isActive = true
+    titleTrailingConstraint.isActive = true
+    iconLeadingConstraint.isActive = true
+    iconCenterXForHome.isActive = false
     updateAppearance(animated: false)
-  }
-
-  private func applyLayoutMode(_ mode: LayoutMode) {
-    switch mode {
-    case .home:
-      NSLayoutConstraint.deactivate([
-        iconLeadingConstraint,
-        titleLeadingConstraint,
-        titleTrailingConstraint,
-      ])
-      NSLayoutConstraint.activate([
-        iconCenterXForHome,
-      ])
-    case .standard:
-      NSLayoutConstraint.deactivate([
-        iconCenterXForHome,
-      ])
-      NSLayoutConstraint.activate([
-        iconLeadingConstraint,
-        titleLeadingConstraint,
-        titleTrailingConstraint,
-      ])
-    }
   }
 
   func tabHoverDidChange(isHovered: Bool) {
