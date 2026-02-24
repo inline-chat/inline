@@ -385,6 +385,13 @@ class DocumentView: UIView {
   }
 
   private func updateUIForDocumentState() {
+    if !Thread.isMainThread {
+      DispatchQueue.main.async { [weak self] in
+        self?.updateUIForDocumentState()
+      }
+      return
+    }
+
     UIView.performWithoutAnimation {
       switch documentState {
         case .locallyAvailable:
@@ -406,9 +413,17 @@ class DocumentView: UIView {
           let totalStr = FileHelpers.formatFileSize(UInt64(totalBytes))
           fileSizeLabel.text = "\(downloadedStr) / \(totalStr)"
 
-        case .uploading:
+        case let .uploading(bytesSent, totalBytes):
           showUploadingSpinner()
-          fileSizeLabel.text = FileHelpers.formatFileSize(UInt64(document?.size ?? 0))
+          if totalBytes > 0, bytesSent >= totalBytes {
+            fileSizeLabel.text = "processing..."
+          } else if bytesSent == 0 {
+            fileSizeLabel.text = "uploading..."
+          } else {
+            let uploadedStr = FileHelpers.formatFileSize(UInt64(bytesSent))
+            let totalStr = FileHelpers.formatFileSize(UInt64(totalBytes))
+            fileSizeLabel.text = "\(uploadedStr) / \(totalStr)"
+          }
       }
     }
 
