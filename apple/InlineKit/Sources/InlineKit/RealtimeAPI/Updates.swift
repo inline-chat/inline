@@ -233,10 +233,15 @@ extension InlineProtocol.UpdateNewMessage {
 
     try Chat.updateLastMsgId(db, chatId: message.chatID, lastMsgId: msg.messageId, date: msg.date)
 
-    // Increase unread count only when this message is newly inserted and not ours.
+    // Increase unread count only when this message is newly inserted, not ours,
+    // and newer than the dialog's read cursor. This prevents catch-up replays
+    // from reintroducing unread state after a read update has already been applied.
     if !hadMessage, msg.out == false, var dialog = try? Dialog.get(peerId: msg.peerId).fetchOne(db) {
-      dialog.unreadCount = (dialog.unreadCount ?? 0) + 1
-      try dialog.update(db)
+      let readInboxMaxId = dialog.readInboxMaxId ?? 0
+      if msg.messageId > readInboxMaxId {
+        dialog.unreadCount = (dialog.unreadCount ?? 0) + 1
+        try dialog.update(db)
+      }
     }
 
     #if os(macOS)
