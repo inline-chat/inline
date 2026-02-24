@@ -1,3 +1,4 @@
+import "dotenv/config"
 import * as Sentry from "@sentry/bun"
 import { API_BASE_URL, NODE_ENV, PORT, SENTRY_DSN } from "@in/server/env"
 import { gitCommitHash, version } from "@in/server/buildEnv"
