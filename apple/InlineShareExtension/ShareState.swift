@@ -1243,8 +1243,8 @@ class ShareState: ObservableObject {
 
           let uploadResult: InlineKit.UploadFileResult
           let itemIndex = processedItems
-          let progressHandler: (Double) -> Void = { [weak self] progress in
-            let itemProgress = (Double(itemIndex) + progress) / Double(totalItems)
+          let progressHandler: (ApiClient.UploadTransferProgress) -> Void = { [weak self] progress in
+            let itemProgress = (Double(itemIndex) + progress.fractionCompleted) / Double(totalItems)
             Task { @MainActor in
               self?.uploadProgress = itemProgress * 0.9
             }
