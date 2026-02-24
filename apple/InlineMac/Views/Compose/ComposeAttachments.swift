@@ -225,8 +225,6 @@ final class ComposeAttachments: NSView {
   }
 
   public func addVideoView(_ videoInfo: VideoInfo, id: String) {
-    if videoAttachments[id] != nil { return }
-
     let thumbnail: NSImage? = {
       guard let localPath = videoInfo.thumbnail?.sizes.first?.localPath else { return nil }
       let url = FileHelpers.getLocalCacheDirectory(for: .photos).appendingPathComponent(localPath)
@@ -237,6 +235,12 @@ final class ComposeAttachments: NSView {
       guard let localPath = videoInfo.video.localPath else { return nil }
       return FileHelpers.getLocalCacheDirectory(for: .videos).appendingPathComponent(localPath)
     }()
+
+    addVideoView(thumbnail: thumbnail, videoURL: videoURL, id: id)
+  }
+
+  public func addVideoView(thumbnail: NSImage?, videoURL: URL?, id: String) {
+    if videoAttachments[id] != nil { return }
 
     let aspectRatio: CGFloat
     if let thumb = thumbnail {
