@@ -250,46 +250,58 @@ public struct TransactionSendMessage: Transaction {
           }
 
         case let .document(documentInfo):
-          // Notify UI that document upload is starting
-          let documentId = documentInfo.document.id
-          Log.shared.debug("📤 Sending DocumentUploadStarted notification for document ID: \(documentId)")
-          Task { @MainActor in
-            NotificationCenter.default.post(
-              name: NSNotification.Name("DocumentUploadStarted"),
-              object: nil,
-              userInfo: ["documentId": documentId]
-            )
-          }
-
-          // Start document upload status
-          // let clearUploadState = await ComposeActions.shared.startDocumentUpload(for: peerId)
-          defer {
-            // Clear the upload status and notify completion
+          var localDocumentIdForNotifications = documentInfo.document.id
+          if let localDocumentIdForNotifications {
+            Log.shared.debug("📤 Sending DocumentUploadStarted notification for document ID: \(localDocumentIdForNotifications)")
             Task { @MainActor in
-              // clearUploadState()
               NotificationCenter.default.post(
-                name: NSNotification.Name("DocumentUploadCompleted"),
+                name: NSNotification.Name("DocumentUploadStarted"),
                 object: nil,
-                userInfo: ["documentId": documentInfo.document.id]
+                userInfo: ["documentId": localDocumentIdForNotifications]
               )
             }
           }
 
           do {
             let localDocumentId = try await FileUploader.shared.uploadDocument(documentInfo: documentInfo)
+            localDocumentIdForNotifications = localDocumentId
+
+            if documentInfo.document.id == nil {
+              Log.shared.debug("📤 Sending DocumentUploadStarted notification for document ID: \(localDocumentId)")
+              Task { @MainActor in
+                NotificationCenter.default.post(
+                  name: NSNotification.Name("DocumentUploadStarted"),
+                  object: nil,
+                  userInfo: ["documentId": localDocumentId]
+                )
+              }
+            }
+
             if let documentServerId = try await FileUploader.shared.waitForUpload(documentLocalId: localDocumentId)?
               .documentId
             {
               inputMedia = .fromDocumentId(documentServerId)
             }
-          } catch {
-            // Notify UI that document upload failed
+
             Task { @MainActor in
               NotificationCenter.default.post(
-                name: NSNotification.Name("DocumentUploadFailed"),
+                name: NSNotification.Name("DocumentUploadCompleted"),
                 object: nil,
-                userInfo: ["documentId": documentInfo.document.id, "error": error]
+                userInfo: ["documentId": localDocumentId]
               )
+            }
+          } catch {
+            // Notify UI that document upload failed
+            if let localDocumentIdForNotifications {
+              Task { @MainActor in
+                NotificationCenter.default.post(
+                  name: NSNotification.Name("DocumentUploadFailed"),
+                  object: nil,
+                  userInfo: ["documentId": localDocumentIdForNotifications, "error": error]
+                )
+              }
+            } else {
+              Log.shared.warning("Unable to post DocumentUploadFailed notification without a local document ID")
             }
             throw error
           }

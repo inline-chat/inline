@@ -395,19 +395,6 @@ final class NewVideoView: UIView {
   }
 
   private func updateDurationLabel() {
-    if isPendingUpload(), let uploadProgressSnapshot {
-      durationBadge.isHidden = false
-      switch uploadProgressSnapshot.stage {
-      case .processing:
-        durationBadge.text = "Processing"
-      case .uploading, .completed:
-        durationBadge.text = uploadProgressLabel(uploadProgressSnapshot)
-      case .failed:
-        durationBadge.text = "Failed"
-      }
-      return
-    }
-
     guard let duration = fullMessage.videoInfo?.video.duration, duration > 0 else {
       durationBadge.isHidden = true
       return
@@ -426,23 +413,6 @@ final class NewVideoView: UIView {
       return String(format: "%d:%02d:%02d", hours, remMins, secs)
     }
     return String(format: "%d:%02d", mins, secs)
-  }
-
-  private func uploadProgressLabel(_ progress: UploadProgressSnapshot) -> String {
-    if progress.totalBytes > 0 {
-      return "\(formatTransferBytes(progress.bytesSent))/\(formatTransferBytes(progress.totalBytes))"
-    }
-
-    if progress.fractionCompleted > 0 {
-      let percent = Int((progress.fractionCompleted * 100).rounded())
-      return "\(percent)%"
-    }
-
-    return "Uploading"
-  }
-
-  private func formatTransferBytes(_ bytes: Int64) -> String {
-    ByteCountFormatter.string(fromByteCount: max(0, bytes), countStyle: .file)
   }
 
   private func isPendingUpload() -> Bool {
