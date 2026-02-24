@@ -24,6 +24,7 @@ class DocumentView: UIView {
   private var progressSubscription: AnyCancellable?
   private var uploadProgressSubscription: AnyCancellable?
   private var uploadProgressBindingTask: Task<Void, Never>?
+  private var isUploadProcessing = false
   private var documentState: DocumentState = .needsDownload {
     didSet {
       updateUIForDocumentState()
@@ -415,7 +416,7 @@ class DocumentView: UIView {
 
         case let .uploading(bytesSent, totalBytes):
           showUploadingSpinner()
-          if totalBytes > 0, bytesSent >= totalBytes {
+          if isUploadProcessing {
             fileSizeLabel.text = "processing..."
           } else if bytesSent == 0 {
             fileSizeLabel.text = "uploading..."
@@ -519,6 +520,7 @@ class DocumentView: UIView {
       hideUploadingSpinner()
       progressSubscription?.cancel()
       progressSubscription = nil
+      clearUploadProgressBinding()
     }
   }
 
@@ -670,6 +672,7 @@ class DocumentView: UIView {
   func startUpload() {
     guard let document else { return }
 
+    isUploadProcessing = false
     let fileSize = Int64(document.size ?? 0)
     documentState = .uploading(bytesSent: 0, totalBytes: fileSize)
 
@@ -686,12 +689,14 @@ class DocumentView: UIView {
   }
 
   func completeUpload() {
+    isUploadProcessing = false
     hideUploadingSpinner()
     documentState = .locallyAvailable
     clearUploadProgressBinding()
   }
 
   func failUpload() {
+    isUploadProcessing = false
     hideUploadingSpinner()
     documentState = .locallyAvailable
     clearUploadProgressBinding()
@@ -724,14 +729,18 @@ class DocumentView: UIView {
 
           switch snapshot.stage {
             case .processing:
+              self.isUploadProcessing = true
               let totalBytes = max(snapshot.totalBytes, fallbackTotalBytes)
-              self.updateUploadProgress(bytesSent: totalBytes, totalBytes: totalBytes)
+              self.updateUploadProgress(bytesSent: 0, totalBytes: totalBytes)
             case .uploading:
+              self.isUploadProcessing = false
               let totalBytes = snapshot.totalBytes > 0 ? snapshot.totalBytes : fallbackTotalBytes
               self.updateUploadProgress(bytesSent: snapshot.bytesSent, totalBytes: totalBytes)
             case .completed:
+              self.isUploadProcessing = false
               self.completeUpload()
             case .failed:
+              self.isUploadProcessing = false
               self.failUpload()
           }
         }
@@ -739,6 +748,7 @@ class DocumentView: UIView {
   }
 
   private func clearUploadProgressBinding() {
+    isUploadProcessing = false
     uploadProgressBindingTask?.cancel()
     uploadProgressBindingTask = nil
     uploadProgressSubscription?.cancel()
