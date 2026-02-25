@@ -44,7 +44,7 @@ let package = Package(
   dependencies: [
     .package(url: "https://github.com/inline-chat/GRDB.swift", from: "7.10.0"),
     .package(url: "https://github.com/inline-chat/GRDBQuery", from: "0.11.5"),
-    .package(url: "https://github.com/getsentry/sentry-cocoa", from: "8.57.3"),
+    .package(url: "https://github.com/getsentry/sentry-cocoa", from: "9.5.1"),
     .package(url: "https://github.com/evgenyneu/keychain-swift.git", from: "24.0.0"),
     .package(url: "https://github.com/apple/swift-protobuf.git", from: "1.28.2"),
     .package(url: "https://github.com/Kuniwak/MultipartFormDataKit", from: "1.0.0"),
