@@ -45,13 +45,38 @@ class MessageSizeCalculator {
   // Core Text typographic settings
   private let typographicSettings: [NSAttributedString.Key: Any]
 
-  private func hasBubbleColor(style: RenderStyle, emojiMessage: Bool, isSticker: Bool) -> Bool {
+  private func hasBubbleColor(
+    style: RenderStyle,
+    emojiMessage: Bool,
+    isSticker: Bool,
+    isPngPhotoWithoutCaption: Bool = false
+  ) -> Bool {
     switch style {
     case .bubble:
-      return !emojiMessage && !isSticker
+      return !emojiMessage && !isSticker && !isPngPhotoWithoutCaption
     case .minimal:
       return false
     }
+  }
+
+  private func hasNonEmptyCaption(_ message: FullMessage) -> Bool {
+    guard let text = message.displayText else { return false }
+    return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+  }
+
+  private func isPNGPhotoMessage(_ message: FullMessage) -> Bool {
+    if message.photoInfo?.photo.format == .png {
+      return true
+    }
+
+    guard let file = message.file, file.fileType == .photo else { return false }
+    if file.mimeType?.lowercased().contains("png") == true {
+      return true
+    }
+    if file.fileName?.lowercased().hasSuffix(".png") == true {
+      return true
+    }
+    return false
   }
 
   private func textColor(for style: RenderStyle, outgoing: Bool) -> NSColor {
@@ -507,7 +532,13 @@ class MessageSizeCalculator {
     let emojiInfo: (count: Int, isAllEmojis: Bool) = isTextOnly ? text.emojiInfo : (0, false)
     // TODO: remove has reply once we confirm reply embed style looks good with emojis
     let emojiMessage = !hasReply && !hasForwardHeader && isTextOnly && emojiInfo.isAllEmojis && emojiInfo.count > 0
-    let hasBubbleColor = hasBubbleColor(style: .bubble, emojiMessage: emojiMessage, isSticker: isSticker)
+    let isPngPhotoWithoutCaption = isPNGPhotoMessage(message) && !hasNonEmptyCaption(message)
+    let hasBubbleColor = hasBubbleColor(
+      style: .bubble,
+      emojiMessage: emojiMessage,
+      isSticker: isSticker,
+      isPngPhotoWithoutCaption: isPngPhotoWithoutCaption
+    )
     let bubbleContentHorizontalInset = horizontalBubbleInset(for: .bubble)
 
     // Font size
