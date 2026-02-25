@@ -19,16 +19,6 @@ public enum LogLevel: String, Sendable {
     }
   }
 
-  var sentryLevel: SentryLevel {
-    switch self {
-      case .error: .error
-      case .warning: .warning
-      case .info: .info
-      case .debug: .debug
-      case .trace: .debug
-    }
-  }
-
   var priority: Int {
     switch self {
       case .trace: 0
@@ -112,8 +102,6 @@ public final class Log: @unchecked Sendable {
     )
     // #endif
 
-    let level_ = level
-
     if level == .info {
       SentrySDK.logger.info(logMessage)
     }
@@ -126,7 +114,6 @@ public final class Log: @unchecked Sendable {
             error,
             message: message,
             scope: scope_,
-            level: level_,
             file: file,
             function: function,
             line: line
@@ -135,7 +122,6 @@ public final class Log: @unchecked Sendable {
           await SentryReporter.shared.reportMessage(
             message,
             scope: scope_,
-            level: level_,
             error: error,
             file: file,
             function: function,
@@ -208,14 +194,12 @@ private actor SentryReporter {
     _ error: Error,
     message: String,
     scope: String,
-    level: LogLevel,
     file: String = #file,
     function: String = #function,
     line: Int = #line
   ) async {
     await MainActor.run {
-      SentrySDK.capture(error: error) { sentryScope in
-        sentryScope.setLevel(level.sentryLevel)
+      _ = SentrySDK.capture(error: error) { sentryScope in
         sentryScope.setTag(value: scope, key: "scope")
         sentryScope.setExtra(value: message, key: "message")
         sentryScope.setExtra(value: file, key: "file")
@@ -228,15 +212,13 @@ private actor SentryReporter {
   func reportMessage(
     _ message: String,
     scope: String,
-    level: LogLevel,
     error: Error?,
     file: String = #file,
     function: String = #function,
     line: Int = #line
   ) async {
     await MainActor.run {
-      SentrySDK.capture(message: message) { sentryScope in
-        sentryScope.setLevel(level.sentryLevel)
+      _ = SentrySDK.capture(message: message) { sentryScope in
         sentryScope.setTag(value: scope, key: "scope")
         sentryScope.setExtra(value: file, key: "file")
         sentryScope.setExtra(value: function, key: "function")

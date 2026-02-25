@@ -28,7 +28,7 @@ public final class Analytics: Sendable {
       options.debug = false
       options.tracesSampleRate = 0.1
       options.swiftAsyncStacktraces = true
-      options.experimental.enableLogs = true
+      options.enableLogs = true
     }
 
     Log.shared.info("Analytics: starting")
