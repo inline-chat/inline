@@ -14,9 +14,9 @@ public struct ConnectionPolicy: Sendable {
     backoff: BackoffPolicy = .default,
     authTimeout: Duration = .seconds(10),
     connectTimeout: Duration = .seconds(10),
-    pingInterval: Duration = .seconds(10),
-    pingTimeoutGood: Duration = .seconds(8),
-    pingTimeoutConstrained: Duration = .seconds(20),
+    pingInterval: Duration = .seconds(5),
+    pingTimeoutGood: Duration = .seconds(6),
+    pingTimeoutConstrained: Duration = .seconds(12),
     backgroundGrace: Duration = .seconds(30),
     wakeProbeTimeout: Duration = .seconds(2)
   ) {

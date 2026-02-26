@@ -696,6 +696,74 @@ final class SyncTests {
     }
   }
 
+  @Test("chatMoved catch-up updates are applied")
+  func testChatMovedCatchupApplies() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+
+    let moved = makeChatMovedUpdate(seq: 1, date: 100, chatId: 1, oldSpaceId: 10, newSpaceId: 11)
+    let response = makeGetUpdatesResult(
+      seq: 1,
+      date: 100,
+      updates: [moved],
+      final: true,
+      resultType: .slice
+    )
+
+    let client = FakeProtocolClient(responses: [response])
+    let config = SyncConfig(enableMessageUpdates: false, lastSyncSafetyGapSeconds: 15)
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+
+    var payload = InlineProtocol.UpdateChatHasNewUpdates()
+    payload.peerID = makeChatPeer(chatId: 1)
+    payload.updateSeq = 1
+
+    var trigger = InlineProtocol.Update()
+    trigger.update = .chatHasNewUpdates(payload)
+
+    await sync.process(updates: [trigger])
+    let didApply = await waitForCondition(timeout: .seconds(1)) {
+      await apply.appliedUpdates.count == 1
+    }
+    #expect(didApply)
+
+    let applied = await apply.appliedUpdates
+    #expect(applied.count == 1)
+    guard let first = applied.first else { return }
+    if case .chatMoved = first.update {
+      // ok
+    } else {
+      #expect(Bool(false), "Expected chatMoved")
+    }
+  }
+
+  @Test("sequenced updateReadMaxId realtime update advances user bucket state")
+  func testRealtimeUpdateReadMaxIdAdvancesUserBucketState() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    let client = FakeProtocolClient(responses: [])
+    let config = SyncConfig(enableMessageUpdates: false, lastSyncSafetyGapSeconds: 15)
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+
+    let update = makeUpdateReadMaxIdUpdate(
+      seq: 1,
+      date: 100,
+      peer: makeChatPeer(chatId: 1),
+      readMaxId: 42,
+      unreadCount: 0
+    )
+
+    await sync.process(updates: [update])
+    let didAdvance = await waitForCondition(timeout: .seconds(1)) {
+      let state = await storage.getBucketState(for: .user)
+      return state.seq == 1 && state.date == 100
+    }
+    #expect(didAdvance)
+
+    let applied = await apply.appliedUpdates
+    #expect(applied.count == 1)
+  }
+
   @Test("buffers out-of-order realtime updates and repairs gap via fetch")
   func testRealtimeOutOfOrderIsBufferedUntilGapRepair() async throws {
     let storage = InMemorySyncStorage()
@@ -1408,5 +1476,28 @@ private func makeChatInfoUpdate(seq: Int64, date: Int64, chatId: Int64 = 1) -> I
   update.seq = Int32(seq)
   update.date = date
   update.update = .chatInfo(payload)
+  return update
+}
+
+private func makeChatMovedUpdate(
+  seq: Int64,
+  date: Int64,
+  chatId: Int64,
+  oldSpaceId: Int64,
+  newSpaceId: Int64
+) -> InlineProtocol.Update {
+  var chat = InlineProtocol.Chat()
+  chat.id = chatId
+  chat.peerID = makeChatPeer(chatId: chatId)
+
+  var payload = InlineProtocol.UpdateChatMoved()
+  payload.chat = chat
+  payload.oldSpaceID = oldSpaceId
+  payload.newSpaceID = newSpaceId
+
+  var update = InlineProtocol.Update()
+  update.seq = Int32(seq)
+  update.date = date
+  update.update = .chatMoved(payload)
   return update
 }

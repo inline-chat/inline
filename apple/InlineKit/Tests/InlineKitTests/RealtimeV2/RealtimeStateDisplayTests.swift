@@ -5,6 +5,28 @@ import Testing
 
 @Suite("RealtimeV2.RealtimeStateDisplay")
 final class RealtimeStateDisplayTests {
+  @Test("default reconnect delay shows connecting within roughly one second")
+  @MainActor
+  func testDefaultReconnectDelay() async throws {
+    let state = RealtimeState()
+
+    state.applyConnectionState(.connecting)
+
+    let remainedHiddenEarly = await waitForDisplayedState(
+      nil,
+      in: state,
+      duration: .milliseconds(750)
+    )
+    #expect(remainedHiddenEarly)
+
+    let didShowConnecting = await waitForDisplayedState(
+      .connecting,
+      in: state,
+      timeout: .milliseconds(700)
+    )
+    #expect(didShowConnecting)
+  }
+
   @Test("transient reconnect does not show connecting UI")
   @MainActor
   func testTransientReconnectDoesNotShowConnectingUI() async throws {

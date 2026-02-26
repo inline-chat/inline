@@ -105,6 +105,50 @@ final class ConnectionManagerTests {
 
     await manager.shutdownForTesting()
   }
+
+  @Test("default policy uses fast ping cadence")
+  func testDefaultPolicyPingCadence() {
+    let policy = ConnectionPolicy()
+    #expect(policy.pingInterval == .seconds(5))
+    #expect(policy.pingTimeoutGood == .seconds(6))
+    #expect(policy.pingTimeoutConstrained == .seconds(12))
+  }
+
+  @Test("missing pong transitions to backoff with ping timeout reason")
+  func testPingTimeoutTransitionsToBackoff() async throws {
+    let session = FakeProtocolSession()
+    let policy = ConnectionPolicy(
+      backoff: BackoffPolicy { _ in .seconds(5) },
+      authTimeout: .seconds(1),
+      connectTimeout: .seconds(1),
+      pingInterval: .milliseconds(20),
+      pingTimeoutGood: .milliseconds(30),
+      pingTimeoutConstrained: .milliseconds(30),
+      backgroundGrace: .seconds(30),
+      wakeProbeTimeout: .seconds(1)
+    )
+    let manager = ConnectionManager(session: session, policy: policy, constraints: .initial)
+
+    await manager.start()
+    await manager.setAuthAvailable(true)
+    await manager.connectNow()
+
+    session.emit(.transportConnected)
+    session.emit(.protocolOpen)
+
+    let sentPing = await waitForCondition(timeout: .seconds(1)) {
+      await session.sentPingCount > 0
+    }
+    #expect(sentPing)
+
+    let transitionedToBackoff = await waitForCondition(timeout: .seconds(1)) {
+      let snapshot = await manager.currentSnapshot()
+      return snapshot.state == .backoff && snapshot.reason == .pingTimeout
+    }
+    #expect(transitionedToBackoff)
+
+    await manager.shutdownForTesting()
+  }
 }
 
 // MARK: - Test Helpers
@@ -133,6 +177,7 @@ actor FakeProtocolSession: ProtocolSessionType {
   private(set) var startTransportCount: Int = 0
   private(set) var stopTransportCount: Int = 0
   private(set) var startHandshakeCount: Int = 0
+  private(set) var sentPingCount: Int = 0
 
   func startTransport() async {
     startTransportCount += 1
@@ -146,7 +191,9 @@ actor FakeProtocolSession: ProtocolSessionType {
     startHandshakeCount += 1
   }
 
-  func sendPing(nonce: UInt64) async {}
+  func sendPing(nonce: UInt64) async {
+    sentPingCount += 1
+  }
 
   func sendRpc(method: InlineProtocol.Method, input: RpcCall.OneOf_Input?) async throws -> UInt64 {
     0
