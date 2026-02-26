@@ -233,7 +233,7 @@ struct ExperimentalRootView: View {
     } label: {
       Image(systemName: "plus")
         .font(.system(size: 14, weight: .semibold))
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.primary)
         .frame(width: 36, height: 36)
         .contentShape(Circle())
     }
@@ -296,7 +296,10 @@ struct ExperimentalRootView: View {
 
   private var trailingButtonGroup: some View {
     HStack(spacing: 0) {
-      NotificationSettingsButton()
+      NotificationSettingsButton(
+        iconColor: .primary,
+        iconFont: .system(size: 14, weight: .semibold)
+      )
         .frame(width: 36, height: 36)
 
       Divider()
@@ -335,7 +338,7 @@ struct ExperimentalRootView: View {
       } label: {
         Image(systemName: "line.3.horizontal.decrease")
           .font(.system(size: 14, weight: .semibold))
-          .foregroundStyle(.secondary)
+          .foregroundStyle(.primary)
           .frame(width: 36, height: 36)
           .contentShape(Rectangle())
       }

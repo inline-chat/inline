@@ -5,7 +5,14 @@ import SwiftUI
 struct NotificationSettingsButton: View {
   @EnvironmentObject private var notificationSettings: NotificationSettingsManager
 
+  private let iconColor: Color
+  private let iconFont: Font?
   @State private var presented = false
+
+  init(iconColor: Color = .primary, iconFont: Font? = nil) {
+    self.iconColor = iconColor
+    self.iconFont = iconFont
+  }
 
   var body: some View {
     button
@@ -33,14 +40,21 @@ struct NotificationSettingsButton: View {
     Button {
       presented.toggle()
     } label: {
-      Image(systemName: notificationIcon)
-        .foregroundStyle(.primary)
-        .contentShape(Rectangle())
-        .transition(.asymmetric(
-          insertion: .scale.combined(with: .opacity),
-          removal: .scale.combined(with: .opacity)
-        ))
-        .animation(.easeOut(duration: 0.2), value: notificationIcon)
+      Group {
+        if let iconFont {
+          Image(systemName: notificationIcon)
+            .font(iconFont)
+        } else {
+          Image(systemName: notificationIcon)
+        }
+      }
+      .foregroundStyle(iconColor)
+      .contentShape(Rectangle())
+      .transition(.asymmetric(
+        insertion: .scale.combined(with: .opacity),
+        removal: .scale.combined(with: .opacity)
+      ))
+      .animation(.easeOut(duration: 0.2), value: notificationIcon)
     }
   }
 
