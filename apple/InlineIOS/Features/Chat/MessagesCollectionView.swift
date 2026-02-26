@@ -1300,6 +1300,11 @@ private extension MessagesCollectionView {
       if let messageView = cell.messageView {
         let pointInMessageView = collectionView.convert(point, to: messageView)
 
+        // Let link long-press in the message text handle its own menu.
+        if messageView.linkURL(atPointInMessageView: pointInMessageView) != nil {
+          return nil
+        }
+
         // Check if the point is within any subview that has a context menu interaction
         if let hitView = messageView.hitTest(pointInMessageView, with: nil) {
           // Check if the hit view or any of its superviews (up to messageView) has a context menu interaction

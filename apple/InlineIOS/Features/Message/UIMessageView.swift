@@ -28,6 +28,7 @@ class UIMessageView: UIView {
   }
 
   private var shineEffectView: ShineEffectView?
+  private weak var linkLongPressGesture: UILongPressGestureRecognizer?
 
   var linkTapHandler: ((URL) -> Void)?
   var onPhotoTap: ((FullMessage, UIView, UIImage?, URL) -> Void)? {
@@ -338,8 +339,8 @@ class UIMessageView: UIView {
   }
 
   func handleLinkTap() {
-    linkTapHandler = { [weak self] url in
-      self?.presentLinkActionSheet(for: url)
+    linkTapHandler = { url in
+      UIApplication.shared.open(url)
     }
   }
 
@@ -917,9 +918,15 @@ class UIMessageView: UIView {
   func addGestureRecognizer() {
     messageLabel.isUserInteractionEnabled = true
 
-    // Add tap gesture for mentions and links
+    // Tap opens links and handles mention/code shortcuts.
     let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTextViewTap))
+    let longPressGesture = UILongPressGestureRecognizer(target: self, action: #selector(handleTextViewLongPress))
+    longPressGesture.delegate = self
+    tapGesture.require(toFail: longPressGesture)
+
     messageLabel.addGestureRecognizer(tapGesture)
+    messageLabel.addGestureRecognizer(longPressGesture)
+    linkLongPressGesture = longPressGesture
   }
 
   func setupDoubleTapGestureRecognizer() {
@@ -1037,23 +1044,77 @@ class UIMessageView: UIView {
           return
         }
 
-        attributedText.enumerateAttribute(.link, in: NSRange(
-          location: 0,
-          length: attributedText.length
-        )) { value, range, _ in
-          if NSLocationInRange(characterIndex, range),
-             let url = resolveLinkURL(from: value)
-          {
-            linkTapHandler?(url)
-            return
-          }
+        if let url = linkURL(at: characterIndex, in: attributedText) {
+          linkTapHandler?(url)
+          return
         }
       }
     }
   }
 
+  @objc private func handleTextViewLongPress(_ gesture: UILongPressGestureRecognizer) {
+    guard gesture.state == .began else { return }
+    let pressLocation = gesture.location(in: messageLabel)
+    guard let url = linkURL(at: pressLocation) else { return }
+    presentLinkActionSheet(for: url)
+  }
+
+  override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+    guard gestureRecognizer === linkLongPressGesture else { return true }
+    return linkURL(at: gestureRecognizer.location(in: messageLabel)) != nil
+  }
+
+  func linkURL(atPointInMessageView pointInMessageView: CGPoint) -> URL? {
+    let pointInMessageLabel = convert(pointInMessageView, to: messageLabel)
+    return linkURL(at: pointInMessageLabel)
+  }
+
+  private func linkURL(at point: CGPoint) -> URL? {
+    guard messageLabel.bounds.contains(point) else { return nil }
+
+    let textContainer = messageLabel.textContainer
+    let layoutManager = messageLabel.layoutManager
+    let containerPoint = CGPoint(
+      x: point.x - messageLabel.textContainerInset.left + messageLabel.contentOffset.x,
+      y: point.y - messageLabel.textContainerInset.top + messageLabel.contentOffset.y
+    )
+
+    layoutManager.ensureLayout(for: textContainer)
+
+    let usedRect = layoutManager.usedRect(for: textContainer)
+    guard usedRect.insetBy(dx: -2, dy: -2).contains(containerPoint) else { return nil }
+
+    var fraction: CGFloat = 0
+    let glyphIndex = layoutManager.glyphIndex(
+      for: containerPoint,
+      in: textContainer,
+      fractionOfDistanceThroughGlyph: &fraction
+    )
+    guard glyphIndex < layoutManager.numberOfGlyphs else { return nil }
+
+    let glyphRect = layoutManager.boundingRect(
+      forGlyphRange: NSRange(location: glyphIndex, length: 1),
+      in: textContainer
+    )
+    guard glyphRect.insetBy(dx: -2, dy: -2).contains(containerPoint) else { return nil }
+
+    let characterIndex = layoutManager.characterIndexForGlyph(at: glyphIndex)
+
+    guard let attributedText = messageLabel.attributedText else { return nil }
+    return linkURL(at: characterIndex, in: attributedText)
+  }
+
+  private func linkURL(at characterIndex: Int, in attributedText: NSAttributedString) -> URL? {
+    guard characterIndex >= 0, characterIndex < attributedText.length else { return nil }
+    let linkValue = attributedText.attribute(.link, at: characterIndex, effectiveRange: nil)
+    return resolveLinkURL(from: linkValue)
+  }
+
   private func resolveLinkURL(from value: Any?) -> URL? {
-    if let url = value as? URL {
+    if let url = value as? URL,
+       let scheme = url.scheme?.lowercased(),
+       ["http", "https"].contains(scheme)
+    {
       return url
     }
 
@@ -1061,11 +1122,21 @@ class UIMessageView: UIView {
       return nil
     }
 
-    if let url = URL(string: urlString), url.scheme != nil {
+    if let url = URL(string: urlString),
+       let scheme = url.scheme?.lowercased(),
+       ["http", "https"].contains(scheme)
+    {
       return url
     }
 
-    return URL(string: "https://\(urlString)")
+    guard let url = URL(string: "https://\(urlString)"),
+          let scheme = url.scheme?.lowercased(),
+          ["http", "https"].contains(scheme)
+    else {
+      return nil
+    }
+
+    return url
   }
 
   @objc func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
