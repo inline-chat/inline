@@ -20,7 +20,7 @@ public class RealtimeState: ObservableObject, @unchecked Sendable {
   public var displayedConnectionStatePublisher: PassthroughSubject<RealtimeConnectionState?, Never> = .init()
 
   public init(
-    displayDelaySeconds: TimeInterval = 2,
+    displayDelaySeconds: TimeInterval = 1,
     hideDelaySeconds: TimeInterval = 1
   ) {
     self.displayDelaySeconds = displayDelaySeconds

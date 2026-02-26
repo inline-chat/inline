@@ -492,6 +492,8 @@ actor Sync {
         .user
       case let .newChat(payload):
         .chat(peer: payload.chat.peerID)
+      case let .chatMoved(payload):
+        .chat(peer: payload.chat.peerID)
       case let .participantAdd(payload):
         .chat(peer: .with { $0.chat = .with { $0.chatID = payload.chatID } })
       case let .participantDelete(payload):
@@ -502,6 +504,8 @@ actor Sync {
         .chat(peer: .with { $0.chat = .with { $0.chatID = payload.chatID } })
       case let .pinnedMessages(payload):
         .chat(peer: payload.peerID)
+      case .updateReadMaxID:
+        .user
       default:
         nil
     }
@@ -645,6 +649,8 @@ actor BucketActor {
       case .updateReadMaxID:
         true
       case .newChat:
+        true
+      case .chatMoved:
         true
       case .joinSpace:
         true
