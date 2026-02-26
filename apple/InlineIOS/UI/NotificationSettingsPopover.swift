@@ -64,7 +64,7 @@ struct NotificationSettingsButton: View {
       case .none: "bell.slash"
       case .mentions: "at"
       case .importantOnly: "apple.meditate"
-      case .onlyMentions: "bubble.left.and.bubble.right"
+      case .onlyMentions: "at"
     }
   }
 
@@ -108,7 +108,7 @@ struct NotificationSettingsButton: View {
           )
 
           NotificationSettingsItem(
-            systemImage: "bubble.left.and.bubble.right.fill",
+            systemImage: "at",
             title: "Only mentions",
             description: "Mentions and nudges still notify you",
             selected: notificationSettings.mode == .onlyMentions,
@@ -117,8 +117,7 @@ struct NotificationSettingsButton: View {
               notificationSettings.mode = mode
               notificationSettings.disableDmNotifications = true
               close()
-            },
-            iconFontSize: 14
+            }
           )
 
           /*
