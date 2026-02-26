@@ -71,7 +71,7 @@ class MainSidebar: NSViewController {
   private lazy var updateOverlayView: NSHostingView<AnyView> = {
     let view = NSHostingView(
       rootView: AnyView(
-        UpdateSidebarOverlayButton()
+        UpdateSidebarOverlayButton(placement: .topCorner)
           .environmentObject(dependencies.updateInstallState)
       )
     )
@@ -140,11 +140,21 @@ class MainSidebar: NSViewController {
   private var archiveTitleHeightConstraint: NSLayoutConstraint?
   private var archiveTitleTopConstraint: NSLayoutConstraint?
   private var archiveTitleBottomConstraint: NSLayoutConstraint?
+  private var updateOverlayFallbackConstraints: [NSLayoutConstraint] = []
+  private var updateOverlayTitlebarConstraints: [NSLayoutConstraint] = []
+  private var updateOverlayLeadingToZoomConstraint: NSLayoutConstraint?
+  private weak var updateOverlayTitlebarHostView: NSView?
+  private weak var updateOverlayAnchorButton: NSButton?
+  private var isUpdateReadyToInstall = false
   private var switchToInboxObserver: NSObjectProtocol?
   private static let footerHeight: CGFloat = MainSidebarFooterMetrics.height
   private static let archiveTitleHeight: CGFloat = 16
   private static let archiveTitleTopSpacing: CGFloat = 12
   private static let archiveTitleBottomSpacing: CGFloat = 4
+  private static let updateButtonTrailingGapToTrafficLights: CGFloat = 8
+  private static let updateButtonSidebarTrailingInset: CGFloat = 18
+  private static let updateButtonFallbackTopInset: CGFloat = 10
+  private static let updateButtonFallbackLeadingInset: CGFloat = 92
 
   override func loadView() {
     view = NSView()
@@ -172,6 +182,23 @@ class MainSidebar: NSViewController {
       constant: Self.archiveTitleTopSpacing
     )
     self.archiveTitleTopConstraint = archiveTitleTopConstraint
+    let updateOverlayTopConstraint = updateOverlayView.topAnchor.constraint(
+      equalTo: view.topAnchor,
+      constant: Self.updateButtonFallbackTopInset
+    )
+    let updateOverlayLeadingConstraint = updateOverlayView.leadingAnchor.constraint(
+      equalTo: view.leadingAnchor,
+      constant: Self.updateButtonFallbackLeadingInset
+    )
+    let updateOverlayTrailingConstraint = updateOverlayView.trailingAnchor.constraint(
+      lessThanOrEqualTo: view.trailingAnchor,
+      constant: -Self.outerEdgeInsets
+    )
+    updateOverlayFallbackConstraints = [
+      updateOverlayTopConstraint,
+      updateOverlayLeadingConstraint,
+      updateOverlayTrailingConstraint,
+    ]
 
     NSLayoutConstraint.activate([
       headerView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Self.outerEdgeInsets),
@@ -197,16 +224,9 @@ class MainSidebar: NSViewController {
       footerView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
       footerView.heightAnchor.constraint(equalToConstant: Self.footerHeight),
 
-      updateOverlayView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-      updateOverlayView.bottomAnchor.constraint(equalTo: footerView.topAnchor, constant: -16),
-      updateOverlayView.leadingAnchor.constraint(
-        greaterThanOrEqualTo: view.leadingAnchor,
-        constant: Self.outerEdgeInsets
-      ),
-      updateOverlayView.trailingAnchor.constraint(
-        lessThanOrEqualTo: view.trailingAnchor,
-        constant: -Self.outerEdgeInsets
-      ),
+      updateOverlayTopConstraint,
+      updateOverlayLeadingConstraint,
+      updateOverlayTrailingConstraint,
 
       footerHostingView.leadingAnchor.constraint(equalTo: footerView.leadingAnchor),
       footerHostingView.trailingAnchor.constraint(equalTo: footerView.trailingAnchor),
@@ -241,7 +261,9 @@ class MainSidebar: NSViewController {
     updateOverlayCancellable = dependencies.updateInstallState.$isReadyToInstall
       .receive(on: DispatchQueue.main)
       .sink { [weak self] isReady in
-        self?.updateOverlayView.isHidden = !isReady
+        self?.isUpdateReadyToInstall = isReady
+        self?.updateOverlayPlacement()
+        self?.view.needsLayout = true
       }
 
     setContent(for: .inbox)
@@ -585,6 +607,7 @@ class MainSidebar: NSViewController {
   override func viewDidLayout() {
     super.viewDidLayout()
     headerTopConstraint?.constant = headerTopInset()
+    updateOverlayPlacement()
     if spacePickerState.isVisible {
       spacePickerPresenter?.repositionIfPossible()
     }
@@ -594,7 +617,90 @@ class MainSidebar: NSViewController {
     guard trafficLightsVisible != isVisible else { return }
     trafficLightsVisible = isVisible
     headerTopConstraint?.constant = headerTopInset()
+    updateOverlayPlacement()
     view.needsLayout = true
+  }
+
+  private func updateOverlayPlacement() {
+    let shouldShow = isUpdateReadyToInstall && trafficLightsVisible
+    updateOverlayView.isHidden = !shouldShow
+    guard shouldShow else { return }
+
+    guard let window = view.window,
+          let zoomButton = window.standardWindowButton(.zoomButton),
+          let titlebarHost = zoomButton.superview
+    else {
+      ensureUpdateOverlayAttachedToSidebarFallback()
+      return
+    }
+
+    ensureUpdateOverlayAttachedToTrafficLights(zoomButton: zoomButton, hostView: titlebarHost)
+    updateOverlayHorizontalPosition(zoomButton: zoomButton, hostView: titlebarHost)
+  }
+
+  private func ensureUpdateOverlayAttachedToTrafficLights(zoomButton: NSButton, hostView: NSView) {
+    let needsSuperviewUpdate = updateOverlayView.superview !== hostView
+    let needsConstraintRefresh = updateOverlayTitlebarHostView !== hostView
+      || updateOverlayAnchorButton !== zoomButton
+      || updateOverlayTitlebarConstraints.isEmpty
+
+    if needsSuperviewUpdate {
+      NSLayoutConstraint.deactivate(updateOverlayFallbackConstraints)
+      NSLayoutConstraint.deactivate(updateOverlayTitlebarConstraints)
+      updateOverlayView.removeFromSuperview()
+      hostView.addSubview(updateOverlayView)
+    }
+
+    guard needsSuperviewUpdate || needsConstraintRefresh else { return }
+
+    NSLayoutConstraint.deactivate(updateOverlayTitlebarConstraints)
+    let leadingConstraint = updateOverlayView.leadingAnchor.constraint(
+      equalTo: zoomButton.trailingAnchor,
+      constant: Self.updateButtonTrailingGapToTrafficLights
+    )
+    updateOverlayLeadingToZoomConstraint = leadingConstraint
+    updateOverlayTitlebarConstraints = [
+      leadingConstraint,
+      updateOverlayView.centerYAnchor.constraint(equalTo: zoomButton.centerYAnchor),
+      updateOverlayView.trailingAnchor.constraint(
+        lessThanOrEqualTo: hostView.trailingAnchor,
+        constant: -Self.outerEdgeInsets
+      ),
+    ]
+    NSLayoutConstraint.activate(updateOverlayTitlebarConstraints)
+    updateOverlayTitlebarHostView = hostView
+    updateOverlayAnchorButton = zoomButton
+  }
+
+  private func ensureUpdateOverlayAttachedToSidebarFallback() {
+    guard updateOverlayView.superview !== view else {
+      if updateOverlayFallbackConstraints.contains(where: { $0.isActive == false }) {
+        NSLayoutConstraint.deactivate(updateOverlayTitlebarConstraints)
+        NSLayoutConstraint.activate(updateOverlayFallbackConstraints)
+      }
+      return
+    }
+
+    NSLayoutConstraint.deactivate(updateOverlayTitlebarConstraints)
+    updateOverlayView.removeFromSuperview()
+    view.addSubview(updateOverlayView)
+    NSLayoutConstraint.activate(updateOverlayFallbackConstraints)
+    updateOverlayLeadingToZoomConstraint = nil
+    updateOverlayTitlebarHostView = nil
+    updateOverlayAnchorButton = nil
+  }
+
+  private func updateOverlayHorizontalPosition(zoomButton: NSButton, hostView: NSView) {
+    guard let leadingConstraint = updateOverlayLeadingToZoomConstraint else { return }
+
+    let sidebarRectInHost = hostView.convert(view.bounds, from: view)
+    let zoomRectInHost = hostView.convert(zoomButton.bounds, from: zoomButton)
+    let buttonWidth = max(updateOverlayView.fittingSize.width, updateOverlayView.intrinsicContentSize.width)
+
+    let minLeading = zoomRectInHost.maxX + Self.updateButtonTrailingGapToTrafficLights
+    let desiredLeading = sidebarRectInHost.maxX - Self.updateButtonSidebarTrailingInset - buttonWidth
+    let resolvedLeading = max(minLeading, desiredLeading)
+    leadingConstraint.constant = resolvedLeading - zoomRectInHost.maxX
   }
 }
 
