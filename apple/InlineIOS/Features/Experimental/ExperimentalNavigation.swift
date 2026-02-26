@@ -32,7 +32,7 @@ struct ExperimentalDestinationView: View {
     case let .space(id):
       SpaceView(spaceId: id)
     case let .chat(peer):
-      ChatView(peer: peer)
+      ChatView(peer: peer, autoCleanupUntitledEmptyThreadOnBack: true)
     case let .chatInfo(chatItem):
       ChatInfoView(chatItem: chatItem)
     case let .spaceSettings(spaceId):
@@ -108,6 +108,7 @@ private struct ExperimentalHomeView: View {
       case .inbox:
         ExperimentalChatListView(
           items: inboxItems,
+          emptyStyle: .inlineLogo,
           emptyTitle: "No chats",
           emptySubtitle: "Start a new chat with the plus button.",
           sectionHeader: nil,
@@ -118,6 +119,7 @@ private struct ExperimentalHomeView: View {
       case .archived:
         ExperimentalChatListView(
           items: archivedItems,
+          emptyStyle: .text,
           emptyTitle: "No archived chats",
           emptySubtitle: "Archived chats will show up here.",
           sectionHeader: "Archived Chats",
@@ -332,7 +334,13 @@ private final class ExperimentalSpaceChatsViewModel: ObservableObject {
 }
 
 private struct ExperimentalChatListView: View {
+  enum EmptyStyle {
+    case text
+    case inlineLogo
+  }
+
   let items: [HomeChatItem]
+  let emptyStyle: EmptyStyle
   let emptyTitle: String
   let emptySubtitle: String
   let sectionHeader: String?
@@ -344,7 +352,12 @@ private struct ExperimentalChatListView: View {
 
   var body: some View {
     if items.isEmpty {
-      ExperimentalEmptyStateView(title: emptyTitle, subtitle: emptySubtitle)
+      switch emptyStyle {
+      case .text:
+        ExperimentalEmptyStateView(title: emptyTitle, subtitle: emptySubtitle)
+      case .inlineLogo:
+        ExperimentalInlineLogoEmptyStateView()
+      }
     } else {
       List {
         if let sectionHeader {
@@ -359,7 +372,12 @@ private struct ExperimentalChatListView: View {
         }
       }
       .listStyle(.plain)
+      .animation(.snappy(duration: 0.25, extraBounce: 0), value: itemIDs)
     }
+  }
+
+  private var itemIDs: [Int64] {
+    items.map(\.id)
   }
 
   private var rows: some View {
@@ -382,6 +400,12 @@ private struct ExperimentalChatListView: View {
         bottom: 8,
         trailing: 16
       ))
+      .transition(
+        .asymmetric(
+          insertion: .opacity.combined(with: .move(edge: .top)),
+          removal: .opacity.combined(with: .move(edge: .top))
+        )
+      )
     }
   }
 
@@ -462,6 +486,25 @@ private struct ExperimentalEmptyStateView: View {
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(Color(.systemBackground))
+  }
+}
+
+private struct ExperimentalInlineLogoEmptyStateView: View {
+  @Environment(\.colorScheme) private var colorScheme
+
+  private var imageOpacity: Double {
+    colorScheme == .dark ? 0.2 : 1.0
+  }
+
+  var body: some View {
+    Image("inline-logo-bg")
+      .resizable()
+      .scaledToFit()
+      .frame(maxWidth: 320, maxHeight: 320)
+      .opacity(imageOpacity)
+      .accessibilityHidden(true)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .background(Color(.systemBackground))
   }
 }
 

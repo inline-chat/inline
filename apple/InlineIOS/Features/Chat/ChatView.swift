@@ -9,10 +9,12 @@ import Translation
 struct ChatView: View {
   var peerId: Peer
   var preview: Bool
+  private let autoCleanupUntitledEmptyThreadOnBack: Bool
 
   @State var navBarHeight: CGFloat = 0
   @State var isChatHeaderPressed = false
   @State private var pageState: PageState = .initial
+  @State private var attemptedUntitledCleanupOnExit = false
 
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
 
@@ -32,9 +34,14 @@ struct ChatView: View {
     case error(Error)
   }
 
-  init(peer: Peer, preview: Bool = false) {
+  init(
+    peer: Peer,
+    preview: Bool = false,
+    autoCleanupUntitledEmptyThreadOnBack: Bool = false
+  ) {
     peerId = peer
     self.preview = preview
+    self.autoCleanupUntitledEmptyThreadOnBack = autoCleanupUntitledEmptyThreadOnBack
     _fullChatViewModel = EnvironmentStateObject { env in
       FullChatViewModel(db: env.appDatabase, peer: peer)
     }
@@ -106,6 +113,9 @@ struct ChatView: View {
     }
     .task {
       await fetchChatIfNeeded()
+    }
+    .onDisappear {
+      scheduleUntitledThreadCleanupIfNeeded()
     }
     .onChange(of: scenePhase) { _, newPhase in
       if newPhase == .active, fullChatViewModel.chat != nil {
@@ -294,6 +304,30 @@ struct ChatView: View {
         .buttonStyle(.borderedProminent)
       }
       .padding()
+    }
+  }
+
+  private func scheduleUntitledThreadCleanupIfNeeded() {
+    guard autoCleanupUntitledEmptyThreadOnBack else { return }
+    guard case .thread = peerId else { return }
+    guard !attemptedUntitledCleanupOnExit else { return }
+
+    Task { @MainActor in
+      await Task.yield()
+      guard !chatRouteStillPresent else { return }
+
+      attemptedUntitledCleanupOnExit = true
+      do {
+        _ = try await data.deleteThreadIfUntitledAndEmpty(peerId: peerId)
+      } catch {
+        Log.shared.error("Failed to cleanup untitled empty thread on exit", error: error)
+      }
+    }
+  }
+
+  private var chatRouteStillPresent: Bool {
+    AppTab.allCases.contains { tab in
+      router[tab].contains(.chat(peer: peerId))
     }
   }
 }

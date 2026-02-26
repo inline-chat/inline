@@ -17,9 +17,12 @@ struct ExperimentalRootView: View {
   @StateObject private var fileUploadViewModel = FileUploadViewModel()
   @StateObject private var tabsManager = TabsManager()
   @State private var rootTab: RootTab = .chats
+  @State private var isCreatingThread = false
 
   @Environment(Router.self) private var router
+  @Environment(\.auth) private var auth
   @Environment(\.colorScheme) private var colorScheme
+  @Environment(\.realtimeV2) private var realtimeV2
   @EnvironmentStateObject private var data: DataManager
   @EnvironmentStateObject private var home: HomeViewModel
   @EnvironmentStateObject private var compactSpaceList: CompactSpaceList
@@ -226,11 +229,7 @@ struct ExperimentalRootView: View {
     activeSpaceId: Int64?
   ) -> some View {
     Button {
-      if let spaceId = activeSpaceId {
-        router.push(.createThread(spaceId: spaceId), for: router.selectedTab)
-      } else {
-        router.push(.createSpaceChat, for: router.selectedTab)
-      }
+      createThreadInstantly(spaceId: activeSpaceId)
     } label: {
       Image(systemName: "plus")
         .font(.system(size: 14, weight: .semibold))
@@ -239,7 +238,60 @@ struct ExperimentalRootView: View {
         .contentShape(Circle())
     }
     .buttonStyle(.plain)
+    .disabled(isCreatingThread)
     .accessibilityLabel("New Chat")
+  }
+
+  private func createThreadInstantly(spaceId: Int64?) {
+    guard !isCreatingThread else { return }
+    guard let currentUserId = auth.currentUserId else {
+      ToastManager.shared.showToast(
+        "You're signed out. Please log in again.",
+        type: .error,
+        systemImage: "exclamationmark.triangle"
+      )
+      return
+    }
+
+    isCreatingThread = true
+
+    Task {
+      do {
+        let result = try await realtimeV2.send(
+          .createChat(
+            title: "",
+            emoji: nil,
+            isPublic: false,
+            spaceId: spaceId,
+            participants: [currentUserId]
+          )
+        )
+
+        await MainActor.run {
+          isCreatingThread = false
+
+          if case let .createChat(response) = result {
+            router.push(.chat(peer: .thread(id: response.chat.id)), for: router.selectedTab)
+          } else {
+            ToastManager.shared.showToast(
+              "Failed to create thread.",
+              type: .error,
+              systemImage: "exclamationmark.triangle"
+            )
+          }
+        }
+      } catch {
+        await MainActor.run {
+          isCreatingThread = false
+          ToastManager.shared.showToast(
+            "Failed to create thread.",
+            type: .error,
+            systemImage: "exclamationmark.triangle"
+          )
+          Log.shared.error("Failed to create thread", error: error)
+        }
+      }
+    }
   }
 
   private var trailingButtonGroup: some View {

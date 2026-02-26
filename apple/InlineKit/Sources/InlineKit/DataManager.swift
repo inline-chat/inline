@@ -427,55 +427,9 @@ public class DataManager: ObservableObject {
     archived: Bool? = nil,
     spaceId: Int64? = nil
   ) async throws {
-    if archived == true, case let .thread(threadId) = peerId {
-      let shouldDelete = try await database.reader.read { db in
-        guard let chat = try Chat.fetchOne(db, id: threadId), chat.type == .thread else { return false }
-        let trimmedTitle = chat.title?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let isUntitled = trimmedTitle == nil || trimmedTitle?.isEmpty == true
-        let hasNoMessages = chat.lastMsgId == nil || chat.lastMsgId == 0
-        return isUntitled && hasNoMessages
-      }
-
-      if shouldDelete {
-        do {
-          _ = try await Api.realtime.send(.deleteChat(peerId: peerId))
-          try await database.dbWriter.write { db in
-            do {
-              try Message.filter(Column("chatId") == threadId).deleteAll(db)
-            } catch {
-              Log.shared.error("Failed to delete chat messages", error: error)
-            }
-
-            do {
-              try Dialog.filter(Column("peerThreadId") == threadId).deleteAll(db)
-            } catch {
-              Log.shared.error("Failed to delete dialog", error: error)
-            }
-
-            do {
-              try Chat.filter(Column("id") == threadId).deleteAll(db)
-            } catch {
-              Log.shared.error("Failed to delete chat", error: error)
-            }
-          }
-
-          Task.detached {
-            NotificationCenter.default.post(
-              name: Notification.Name("chatDeletedNotification"),
-              object: nil,
-              userInfo: ["chatId": threadId]
-            )
-          }
-          return
-        } catch let error as RealtimeAPIError {
-          switch error {
-            case let .rpcError(errorCode, _, code)
-            where errorCode == .unauthenticated || code == 403:
-              log.warning("Delete chat not permitted; falling back to archive")
-            default:
-              throw error
-          }
-        }
+    if archived == true, case .thread = peerId {
+      if try await deleteThreadIfUntitledAndEmpty(peerId: peerId) {
+        return
       }
     }
 
@@ -530,6 +484,65 @@ public class DataManager: ObservableObject {
       pinned: pinned,
       archived: archivedValue
     )
+  }
+
+  /// Deletes a thread only when it is untitled and has no messages.
+  /// - Returns: `true` when deletion was performed; otherwise `false`.
+  @discardableResult
+  public func deleteThreadIfUntitledAndEmpty(peerId: Peer) async throws -> Bool {
+    guard case let .thread(threadId) = peerId else { return false }
+
+    let shouldDelete = try await database.reader.read { db in
+      guard let chat = try Chat.fetchOne(db, id: threadId), chat.type == .thread else { return false }
+      let trimmedTitle = chat.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+      let isUntitled = trimmedTitle == nil || trimmedTitle?.isEmpty == true
+      let hasNoMessages = chat.lastMsgId == nil || chat.lastMsgId == 0
+      return isUntitled && hasNoMessages
+    }
+
+    guard shouldDelete else { return false }
+
+    do {
+      _ = try await Api.realtime.send(.deleteChat(peerId: peerId))
+      try await database.dbWriter.write { db in
+        do {
+          try Message.filter(Column("chatId") == threadId).deleteAll(db)
+        } catch {
+          Log.shared.error("Failed to delete chat messages", error: error)
+        }
+
+        do {
+          try Dialog.filter(Column("peerThreadId") == threadId).deleteAll(db)
+        } catch {
+          Log.shared.error("Failed to delete dialog", error: error)
+        }
+
+        do {
+          try Chat.filter(Column("id") == threadId).deleteAll(db)
+        } catch {
+          Log.shared.error("Failed to delete chat", error: error)
+        }
+      }
+
+      Task.detached {
+        NotificationCenter.default.post(
+          name: Notification.Name("chatDeletedNotification"),
+          object: nil,
+          userInfo: ["chatId": threadId]
+        )
+      }
+
+      return true
+    } catch let error as RealtimeAPIError {
+      switch error {
+        case let .rpcError(errorCode, _, code)
+        where errorCode == .unauthenticated || code == 403:
+          log.warning("Delete chat not permitted")
+          return false
+        default:
+          throw error
+      }
+    }
   }
 
   public func updateSpaceMemberDialogArchiveState(
