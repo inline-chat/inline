@@ -1036,12 +1036,26 @@ public extension AppDatabase {
     return true
   }
 
+  /// Shared in-memory DB used as the default SwiftUI environment fallback.
+  /// Keeping this cached avoids repeated in-memory database bootstrap work.
+  static let environmentDefault = makeInMemory(passphrase: "123")
+
+  private static func makeInMemory(passphrase: String) -> AppDatabase {
+    do {
+      let dbQueue = try DatabaseQueue(
+        configuration: AppDatabase.makeConfiguration(passphrase: passphrase)
+      )
+      return try AppDatabase(dbQueue)
+    } catch {
+      fatalError("Unable to initialize in-memory database: \(error)")
+    }
+  }
+
   /// Creates an empty database for SwiftUI previews
   static func empty() -> AppDatabase {
-    // Connect to an in-memory database
-    // Refrence https://swiftpackageindex.com/groue/grdb.swift/documentation/grdb/databaseconnections
-    let dbQueue = try! DatabaseQueue(configuration: AppDatabase.makeConfiguration())
-    return try! AppDatabase(dbQueue)
+    // For preview/test in-memory DBs we use the legacy passphrase directly and
+    // avoid keychain reads on this hot path.
+    makeInMemory(passphrase: "123")
   }
 
   static func emptyWithSpaces() -> AppDatabase {
