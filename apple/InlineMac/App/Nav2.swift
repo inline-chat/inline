@@ -214,6 +214,10 @@ struct Nav2Entry: Codable {
       } catch {
         await MainActor.run {
           guard self.pendingChatOpenRequestID == requestID else { return }
+          guard self.activeTab == requestTab else {
+            self.clearPendingChatOpenState(cancelTask: false)
+            return
+          }
           self.preparedChatPayloads.removeValue(forKey: peer)
           self.clearPendingChatOpenState(cancelTask: false)
           self.navigate(to: .chat(peer: peer))

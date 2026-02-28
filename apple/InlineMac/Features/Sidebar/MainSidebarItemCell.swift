@@ -18,6 +18,7 @@ class MainSidebarItemCell: NSView {
   private var currentTitleText = ""
   private var currentMessageText = ""
   private var currentBadgeState = BadgeState(unread: false, pinned: false)
+  private var unreadBadgeAnimationToken: UInt = 0
   private var currentArchiveState: Bool?
 
   private static let avatarSpacing: CGFloat = MainSidebar.iconTrailingPadding
@@ -922,6 +923,9 @@ class MainSidebarItemCell: NSView {
   }
 
   private func setUnreadBadgeVisible(_ visible: Bool, animated: Bool) {
+    unreadBadgeAnimationToken &+= 1
+    let animationToken = unreadBadgeAnimationToken
+
     guard
       animated,
       NSWorkspace.shared.accessibilityDisplayShouldReduceMotion == false
@@ -971,6 +975,7 @@ class MainSidebarItemCell: NSView {
       unreadBadgeView.animator().alphaValue = 0
     } completionHandler: { [weak self] in
       guard let self else { return }
+      guard self.unreadBadgeAnimationToken == animationToken else { return }
       self.unreadBadgeView.isHidden = true
       self.unreadBadgeView.layer?.transform = CATransform3DIdentity
     }
