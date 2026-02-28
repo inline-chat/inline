@@ -27,7 +27,8 @@
 - If undoing your own changes in a file with other uncommitted edits, ask first.
 - Regenerate protobufs when contracts change (`bun run generate:proto`); run focused `swift build` for touched Swift packages.
 - Run focused tests/typechecks for affected areas; add/update tests for new features and regressions.
-- For deployment or run-checks validation, treat web as WIP and skip web checks unless Mo explicitly asks to include them.
+- Do not extend requested changes or investigations to `web/` unless explicitly asked.
+- For deployment or run-checks validation, treat web as WIP and skip web checks unless explicitly asked to include them.
 - New UI work must stay in new UI components; do not modify legacy sidebar/old UI.
 - For larger tasks, create/update a plan file in `.agent-docs/` named `YYYY-MM-DD-title-kebab-case.md`.
 - In final handoff/review/push, call out security risks and state production readiness.
