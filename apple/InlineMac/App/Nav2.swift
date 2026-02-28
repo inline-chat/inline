@@ -102,10 +102,14 @@ struct Nav2Entry: Codable {
   @ObservationIgnored private var saveStateTask: Task<Void, Never>?
   @ObservationIgnored private let navigationSignpostLog = OSLog(subsystem: "InlineMac", category: "Navigation")
   @ObservationIgnored private var activeChatNavigation: (peer: Peer, id: OSSignpostID)?
+  @ObservationIgnored private var pendingChatOpenTask: Task<Void, Never>?
+  @ObservationIgnored private var pendingChatOpenRequestID: UUID?
+  @ObservationIgnored private var preparedChatPayloads: [Peer: PreparedChatPayload] = [:]
 
   // MARK: - State
 
   var tabs: [TabId] = [.home]
+  var pendingChatPeer: Peer?
 
   var activeTabIndex: Int = 0
 
@@ -146,21 +150,81 @@ struct Nav2Entry: Codable {
     return .empty
   }
 
+  func consumePreparedChatPayload(for peer: Peer) -> PreparedChatPayload? {
+    guard let payload = preparedChatPayloads.removeValue(forKey: peer) else { return nil }
+    guard payload.peer == peer else { return nil }
+    return payload
+  }
+
   // MARK: - Methods
 
   func navigate(to route: Nav2Route) {
+    clearPendingChatOpenState()
     log.trace("Navigating to \(route)")
     if case let .chat(peer) = route {
       // PERF MARK: begin chat navigation signpost (remove when done).
       beginChatNavigationSignpost(peer: peer)
     }
     lastRoutes[activeTab] = route
-    _ = recordNavigation(route: route, tab: activeTab, isImplicit: false, replaceImplicit: true)
+    let didRecord = recordNavigation(route: route, tab: activeTab, isImplicit: false, replaceImplicit: true)
+    if !didRecord, case let .chat(peer) = route {
+      // No route transition means no consumer will read this payload.
+      preparedChatPayloads.removeValue(forKey: peer)
+    }
     forwardHistory.removeAll()
+  }
+
+  @MainActor
+  func requestOpenChat(peer: Peer, database: AppDatabase = .shared) {
+    if pendingChatPeer == peer {
+      return
+    }
+    if case let .chat(currentPeer) = currentRoute, pendingChatPeer == nil, currentPeer == peer {
+      return
+    }
+
+    pendingChatOpenTask?.cancel()
+    preparedChatPayloads.removeValue(forKey: peer)
+
+    let requestID = UUID()
+    let requestTab = activeTab
+    pendingChatOpenRequestID = requestID
+    pendingChatPeer = peer
+
+    pendingChatOpenTask = Task(priority: .userInitiated) { [weak self] in
+      guard let self else { return }
+      do {
+        let payload = try await ChatOpenPreloader.shared.prepare(peer: peer, database: database)
+        await MainActor.run {
+          guard self.pendingChatOpenRequestID == requestID else { return }
+          guard self.activeTab == requestTab else {
+            self.clearPendingChatOpenState(cancelTask: false)
+            return
+          }
+
+          self.preparedChatPayloads[peer] = payload
+          self.clearPendingChatOpenState(cancelTask: false)
+          self.navigate(to: .chat(peer: peer))
+        }
+      } catch is CancellationError {
+        await MainActor.run {
+          guard self.pendingChatOpenRequestID == requestID else { return }
+          self.clearPendingChatOpenState(cancelTask: false)
+        }
+      } catch {
+        await MainActor.run {
+          guard self.pendingChatOpenRequestID == requestID else { return }
+          self.preparedChatPayloads.removeValue(forKey: peer)
+          self.clearPendingChatOpenState(cancelTask: false)
+          self.navigate(to: .chat(peer: peer))
+        }
+      }
+    }
   }
 
   func goBack() {
     guard canGoBack else { return }
+    clearPendingChatOpenState()
     let current = history.removeLast()
     forwardHistory.append(current)
 
@@ -171,6 +235,7 @@ struct Nav2Entry: Codable {
 
   func goForward() {
     guard let next = forwardHistory.popLast() else { return }
+    clearPendingChatOpenState()
     history.append(next)
     updateActiveTab(to: next)
   }
@@ -245,7 +310,7 @@ struct Nav2Entry: Codable {
           openHomeTabIfNeeded()
         }
 
-        navigate(to: .chat(peer: peer))
+        requestOpenChat(peer: peer, database: database)
 
       case let .user(userId):
         if let activeSpaceId = activeTab.spaceId {
@@ -254,7 +319,7 @@ struct Nav2Entry: Codable {
             openHomeTabIfNeeded()
           }
         }
-        navigate(to: .chat(peer: peer))
+        requestOpenChat(peer: peer, database: database)
     }
   }
 
@@ -358,6 +423,8 @@ struct Nav2Entry: Codable {
 
   // Called on logout
   func reset() {
+    clearPendingChatOpenState()
+    preparedChatPayloads.removeAll(keepingCapacity: true)
     tabs = [.home]
     activeTabIndex = 0
     history = []
@@ -375,9 +442,19 @@ struct Nav2Entry: Codable {
     }
   }
 
+  private func clearPendingChatOpenState(cancelTask: Bool = true) {
+    if cancelTask {
+      pendingChatOpenTask?.cancel()
+    }
+    pendingChatOpenTask = nil
+    pendingChatOpenRequestID = nil
+    pendingChatPeer = nil
+  }
+
   /// Centralized tab activation that restores the last route for that tab (or .empty).
   private func activateTab(at index: Int, routeOverride: Nav2Route? = nil) {
     guard index < tabs.count else { return }
+    clearPendingChatOpenState()
 
     let targetTab = tabs[index]
     activeTabIndex = index

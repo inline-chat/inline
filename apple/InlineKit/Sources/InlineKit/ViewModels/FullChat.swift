@@ -313,14 +313,29 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
   private var historyRefetchTask: Task<Void, Never>?
   private var lastHistoryRefetchTime: CFTimeInterval = 0
   private let historyRefetchCooldown: CFTimeInterval = 1.0
+  private var didStartChatObservation = false
 
   private var db: AppDatabase
   public var peer: Peer
 
-  public init(db: AppDatabase, peer: Peer) {
+  public init(
+    db: AppDatabase,
+    peer: Peer,
+    initialChatItem: SpaceChatItem? = nil,
+    startObservation: Bool = true
+  ) {
     self.db = db
     self.peer = peer
+    chatItem = initialChatItem
 
+    if startObservation {
+      startChatObservationIfNeeded()
+    }
+  }
+
+  public func startChatObservationIfNeeded() {
+    guard !didStartChatObservation else { return }
+    didStartChatObservation = true
     fetchChat()
   }
 
@@ -336,22 +351,22 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
               try Dialog
                 .spaceChatItemQueryForUser()
                 .filter(id: Dialog.getDialogId(peerId: peerId))
-                .fetchAll(db)
+                .fetchOne(db)
 
             case .thread:
               // Fetch thread chat
               try Dialog
                 .spaceChatItemQueryForChat()
                 .filter(id: Dialog.getDialogId(peerId: peerId))
-                .fetchAll(db)
+                .fetchOne(db)
           }
         }
         .publisher(in: db.dbWriter, scheduling: .immediate)
         .sink(
           receiveCompletion: { Log.shared.error("Failed to get full chat \($0)") },
-          receiveValue: { [weak self] (chats: [SpaceChatItem]) in
+          receiveValue: { [weak self] (fullChat: SpaceChatItem?) in
             if let self,
-               let fullChat = chats.first,
+               let fullChat,
 
                fullChat.dialog != self.chatItem?.dialog ||
                fullChat.chat?.title != self.chatItem?.chat?.title ||
@@ -360,7 +375,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
             {
               // Important Note
               // Only update if the dialog is different, ignore chat and message for performance reasons
-              chatItem = chats.first
+              chatItem = fullChat
             }
           }
         )

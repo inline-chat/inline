@@ -36,6 +36,9 @@ class MainSidebarItemCell: NSView {
     0,
     MainSidebar.innerEdgeInsets - unreadBadgeInsetAdjustment
   )
+  private static let unreadBadgeShowDuration: TimeInterval = 0.16
+  private static let unreadBadgeHideDuration: TimeInterval = 0.12
+  private static let unreadBadgeHiddenScale: CGFloat = 0.7
   private static let pinnedBadgeSize: CGFloat = 10
   private static let pinnedBadgePointSize: CGFloat = 10
   private static let actionButtonSize: CGFloat = 18
@@ -452,9 +455,11 @@ class MainSidebarItemCell: NSView {
       pinned: isPinned
     )
     if currentBadgeState != nextBadgeState {
-      applyBadges(nextBadgeState)
+      let shouldAnimateBadgeTransition = hasConfiguredBadges && !preparingForReuse
+      applyBadges(nextBadgeState, animated: shouldAnimateBadgeTransition)
       currentBadgeState = nextBadgeState
     }
+    hasConfiguredBadges = true
 
     currentArchiveState = isArchived
     updateSelectionState(isRouteSelected: isRouteSelected, highlightNavSelection: highlightNavSelection)
@@ -465,6 +470,7 @@ class MainSidebarItemCell: NSView {
   }
 
   private var preparingForReuse = false
+  private var hasConfiguredBadges = false
 
   func reset() {
     preparingForReuse = true
@@ -472,7 +478,7 @@ class MainSidebarItemCell: NSView {
     isDropTarget = false
     isNavSelected = false
     isKeyboardSelected = false
-    unreadBadgeView.isHidden = true
+    setUnreadBadgeVisible(false, animated: false)
     pinnedIconView.isHidden = true
     messageLabel.stringValue = ""
     nameLabel.stringValue = ""
@@ -482,6 +488,7 @@ class MainSidebarItemCell: NSView {
     currentTitleText = ""
     currentMessageText = ""
     currentBadgeState = BadgeState(unread: false, pinned: false)
+    hasConfiguredBadges = false
     currentArchiveState = nil
     leadingContainerView.subviews.forEach { $0.removeFromSuperview() }
     actionButton.isHidden = true
@@ -759,7 +766,7 @@ class MainSidebarItemCell: NSView {
     }
 
     guard let item, let nav2, let peer = item.peerId else { return }
-    nav2.navigate(to: .chat(peer: peer))
+    nav2.requestOpenChat(peer: peer, database: dependencies?.database ?? .shared)
   }
 
   private func leadingContent() -> LeadingContent {
@@ -904,14 +911,88 @@ class MainSidebarItemCell: NSView {
     return trimmed.isEmpty ? nil : trimmed
   }
 
-  private func applyBadges(_ state: BadgeState) {
+  private func applyBadges(_ state: BadgeState, animated: Bool) {
     guard actionItem == nil else {
-      unreadBadgeView.isHidden = true
+      setUnreadBadgeVisible(false, animated: false)
       pinnedIconView.isHidden = true
       return
     }
-    unreadBadgeView.isHidden = !state.unread
+    setUnreadBadgeVisible(state.unread, animated: animated)
     pinnedIconView.isHidden = !state.pinned
+  }
+
+  private func setUnreadBadgeVisible(_ visible: Bool, animated: Bool) {
+    guard
+      animated,
+      NSWorkspace.shared.accessibilityDisplayShouldReduceMotion == false
+    else {
+      applyUnreadBadgeState(visible: visible)
+      return
+    }
+
+    if visible {
+      guard unreadBadgeView.isHidden else {
+        unreadBadgeView.alphaValue = 1
+        unreadBadgeView.layer?.transform = CATransform3DIdentity
+        return
+      }
+
+      unreadBadgeView.layer?.removeAnimation(forKey: "scale")
+      unreadBadgeView.layer?.transform = CATransform3DMakeScale(
+        Self.unreadBadgeHiddenScale,
+        Self.unreadBadgeHiddenScale,
+        1
+      )
+      unreadBadgeView.alphaValue = 0
+      unreadBadgeView.isHidden = false
+
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = Self.unreadBadgeShowDuration
+        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        unreadBadgeView.animator().alphaValue = 1
+      }
+
+      let scaleAnimation = CABasicAnimation(keyPath: "transform.scale")
+      scaleAnimation.fromValue = Self.unreadBadgeHiddenScale
+      scaleAnimation.toValue = 1
+      scaleAnimation.duration = Self.unreadBadgeShowDuration
+      scaleAnimation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+      unreadBadgeView.layer?.add(scaleAnimation, forKey: "scale")
+      unreadBadgeView.layer?.transform = CATransform3DIdentity
+      return
+    }
+
+    guard unreadBadgeView.isHidden == false else { return }
+
+    unreadBadgeView.layer?.removeAnimation(forKey: "scale")
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = Self.unreadBadgeHideDuration
+      context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+      unreadBadgeView.animator().alphaValue = 0
+    } completionHandler: { [weak self] in
+      guard let self else { return }
+      self.unreadBadgeView.isHidden = true
+      self.unreadBadgeView.layer?.transform = CATransform3DIdentity
+    }
+
+    let scaleAnimation = CABasicAnimation(keyPath: "transform.scale")
+    scaleAnimation.fromValue = 1
+    scaleAnimation.toValue = Self.unreadBadgeHiddenScale
+    scaleAnimation.duration = Self.unreadBadgeHideDuration
+    scaleAnimation.timingFunction = CAMediaTimingFunction(name: .easeIn)
+    unreadBadgeView.layer?.add(scaleAnimation, forKey: "scale")
+    unreadBadgeView.layer?.transform = CATransform3DMakeScale(
+      Self.unreadBadgeHiddenScale,
+      Self.unreadBadgeHiddenScale,
+      1
+    )
+  }
+
+  private func applyUnreadBadgeState(visible: Bool) {
+    unreadBadgeView.layer?.removeAnimation(forKey: "scale")
+    unreadBadgeView.alphaValue = visible ? 1 : 0
+    unreadBadgeView.isHidden = !visible
+    unreadBadgeView.layer?.transform = CATransform3DIdentity
   }
 
   private func updateAppearance() {
@@ -1011,7 +1092,7 @@ class MainSidebarItemCell: NSView {
     guard attachments.isEmpty == false else { return false }
 
     PendingDropAttachments.shared.enqueue(peerId: peer, attachments: attachments)
-    nav2.navigate(to: .chat(peer: peer))
+    nav2.requestOpenChat(peer: peer, database: dependencies?.database ?? .shared)
     return true
   }
 
