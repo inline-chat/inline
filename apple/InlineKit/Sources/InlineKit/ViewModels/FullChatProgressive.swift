@@ -32,6 +32,28 @@ public class MessagesProgressiveViewModel {
   public private(set) var canLoadOlderFromLocal: Bool = false
   public private(set) var canLoadNewerFromLocal: Bool = false
 
+  public struct InitialState: Sendable {
+    public let messages: [FullMessage]
+    public let oldestLoadedMessageId: Int64?
+    public let newestLoadedMessageId: Int64?
+    public let canLoadOlderFromLocal: Bool
+    public let canLoadNewerFromLocal: Bool
+
+    public init(
+      messages: [FullMessage],
+      oldestLoadedMessageId: Int64?,
+      newestLoadedMessageId: Int64?,
+      canLoadOlderFromLocal: Bool,
+      canLoadNewerFromLocal: Bool
+    ) {
+      self.messages = messages
+      self.oldestLoadedMessageId = oldestLoadedMessageId
+      self.newestLoadedMessageId = newestLoadedMessageId
+      self.canLoadOlderFromLocal = canLoadOlderFromLocal
+      self.canLoadNewerFromLocal = canLoadNewerFromLocal
+    }
+  }
+
   struct MessageGapRange: Equatable {
     let startMessageId: Int64
     let endMessageId: Int64
@@ -46,12 +68,15 @@ public class MessagesProgressiveViewModel {
 
   // internals
   // was 80
-  private lazy var initialLimit: Int = // divide window height by 25
+  public static func defaultInitialLimit() -> Int {
     if let height = ScreenMetrics.height {
       (Int(height.rounded()) / 24) + 30
     } else {
       60
     }
+  }
+
+  private lazy var initialLimit: Int = Self.defaultInitialLimit()
 
   private let log = Log.scoped("MessagesViewModel", enableTracing: false)
   private let db = AppDatabase.shared
@@ -60,11 +85,15 @@ public class MessagesProgressiveViewModel {
 
   // Note:
   // limit, cursor, range, etc are internals to this module. the view layer should not care about this.
-  public init(peer: Peer, reversed: Bool = false) {
+  public init(peer: Peer, reversed: Bool = false, initialState: InitialState? = nil) {
     self.peer = peer
     self.reversed = reversed
-    // get initial batch
-    loadMessages(.limit(initialLimit))
+    if let initialState {
+      applyInitialState(initialState)
+    } else {
+      // get initial batch
+      loadMessages(.limit(initialLimit))
+    }
 
     // subscribe to changes
     MessagesPublisher.shared.publisher
@@ -76,6 +105,20 @@ public class MessagesProgressiveViewModel {
         }
       }
       .store(in: &cancellable)
+  }
+
+  private func applyInitialState(_ state: InitialState) {
+    messages = state.messages
+    if messages.isEmpty {
+      minDate = .init()
+      maxDate = .init()
+    } else {
+      updateRange()
+    }
+    oldestLoadedMessageId = state.oldestLoadedMessageId
+    newestLoadedMessageId = state.newestLoadedMessageId
+    canLoadOlderFromLocal = state.canLoadOlderFromLocal
+    canLoadNewerFromLocal = state.canLoadNewerFromLocal
   }
 
   // Set an observer to update the UI

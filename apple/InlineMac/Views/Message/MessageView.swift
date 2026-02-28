@@ -2059,7 +2059,7 @@ class MessageViewAppKit: NSView {
 
   private func openChat(peer: Peer) {
     if let nav2 = dependencies?.nav2 {
-      nav2.navigate(to: .chat(peer: peer))
+      nav2.requestOpenChat(peer: peer, database: dependencies?.database ?? .shared)
     } else {
       Nav.main.open(.chat(peer: peer))
     }

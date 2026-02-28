@@ -12,7 +12,8 @@ extension MainSplitView {
         return PlaceholderContentViewController(message: nil)
 
       case let .chat(peer):
-        return ChatViewAppKit(peerId: peer, dependencies: dependencies)
+        let preparedPayload = dependencies.nav2?.consumePreparedChatPayload(for: peer)
+        return ChatViewAppKit(peerId: peer, preparedPayload: preparedPayload, dependencies: dependencies)
 
       case let .chatInfo(peer):
         return NSHostingController(

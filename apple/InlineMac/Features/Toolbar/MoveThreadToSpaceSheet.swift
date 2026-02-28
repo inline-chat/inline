@@ -116,7 +116,7 @@ struct MoveThreadToSpaceSheet: View {
           Task { @MainActor in
             await Task.yield()
             nav2.openSpace(space)
-            nav2.navigate(to: .chat(peer: .thread(id: chatId)))
+            nav2.requestOpenChat(peer: .thread(id: chatId), database: AppDatabase.shared)
           }
         }
       } catch {

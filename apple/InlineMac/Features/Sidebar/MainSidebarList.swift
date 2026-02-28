@@ -248,7 +248,7 @@ class MainSidebarList: NSView {
     super.init(frame: .zero)
     translatesAutoresizingMaskIntoConstraints = false
     displayMode = AppSettings.shared.showSidebarMessagePreview ? .messagePreview : .compact
-    navSelectedPeer = Self.selectedPeer(from: dependencies.nav2?.currentRoute)
+    navSelectedPeer = Self.selectedPeer(from: dependencies.nav2)
 
     setupViews()
     setupNotifications()
@@ -388,7 +388,7 @@ class MainSidebarList: NSView {
 
     guard orderedChatIds.isEmpty == false else { return }
 
-    let currentPeer = Self.selectedPeer(from: nav2.currentRoute)
+    let currentPeer = Self.selectedPeer(from: nav2)
 
     let currentIndex: Int = {
       guard let currentPeer else { return -1 }
@@ -398,7 +398,7 @@ class MainSidebarList: NSView {
     let targetIndex = currentIndex + offset
     guard targetIndex >= 0, targetIndex < orderedChatIds.count else { return }
     guard let targetPeer = chatItemsByID[orderedChatIds[targetIndex]]?.peerId else { return }
-    nav2.navigate(to: .chat(peer: targetPeer))
+    nav2.requestOpenChat(peer: targetPeer, database: dependencies.database)
   }
 
   private func createLayout() -> NSCollectionViewLayout {
@@ -826,6 +826,7 @@ class MainSidebarList: NSView {
 
     withObservationTracking { [weak self] in
       _ = self?.nav2?.currentRoute
+      _ = self?.nav2?.pendingChatPeer
     } onChange: { [weak self] in
       self?.observeNavRoute()
       Task { @MainActor [weak self] in
@@ -836,7 +837,7 @@ class MainSidebarList: NSView {
 
   private func updateRouteSelectionState() {
     let previousPeer = navSelectedPeer
-    let nextPeer = Self.selectedPeer(from: nav2?.currentRoute)
+    let nextPeer = Self.selectedPeer(from: nav2)
     guard previousPeer != nextPeer else { return }
     navSelectedPeer = nextPeer
     refreshVisibleSelectionState(for: candidateSelectionItems(oldPeer: previousPeer, newPeer: nextPeer))
@@ -1000,7 +1001,7 @@ class MainSidebarList: NSView {
         }
       }
     }
-    nav2.navigate(to: .chat(peer: peer))
+    nav2.requestOpenChat(peer: peer, database: dependencies.database)
     return true
   }
 
@@ -1017,6 +1018,13 @@ class MainSidebarList: NSView {
     default:
       return nil
     }
+  }
+
+  private static func selectedPeer(from nav2: Nav2?) -> Peer? {
+    if let pendingPeer = nav2?.pendingChatPeer {
+      return pendingPeer
+    }
+    return selectedPeer(from: nav2?.currentRoute)
   }
 
   private static func searchTokens(for item: ChatListItem) -> [String] {

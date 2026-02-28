@@ -15,6 +15,7 @@ class ChatViewAppKit: NSViewController {
   let peerId: Peer
   let dependencies: AppDependencies
   private var viewModel: FullChatViewModel
+  private let preparedPayload: PreparedChatPayload?
 
   private var dialog: Dialog? {
     viewModel.chatItem?.dialog
@@ -37,21 +38,43 @@ class ChatViewAppKit: NSViewController {
   private var spinnerVC: NSHostingController<SpinnerView>?
   private var errorVC: NSHostingController<ErrorView>?
   private var pendingDropObserver: NSObjectProtocol?
+  private var appDidBecomeActiveObserver: NSObjectProtocol?
+  private var deferredObservationTask: Task<Void, Never>?
 
   private var didInitialRefetch = false
   private let messageListSignpostLog = OSLog(subsystem: "InlineMac", category: "MessageList")
 
-  init(peerId: Peer, chat: Chat? = nil, dependencies: AppDependencies) {
+  init(
+    peerId: Peer,
+    chat: Chat? = nil,
+    preparedPayload: PreparedChatPayload? = nil,
+    dependencies: AppDependencies
+  ) {
     self.peerId = peerId
     self.dependencies = dependencies
-    viewModel = FullChatViewModel(db: dependencies.database, peer: peerId)
+    self.preparedPayload = preparedPayload
+    viewModel = FullChatViewModel(
+      db: dependencies.database,
+      peer: peerId,
+      initialChatItem: preparedPayload?.chatItem,
+      startObservation: preparedPayload == nil
+    )
     state = .initial(viewModel.chat)
     super.init(nibName: nil, bundle: nil)
 
-    // Refetch
-    viewModel.refetchChatView()
+    if preparedPayload == nil {
+      // Refetch immediately when no prepared payload exists.
+      viewModel.refetchChatView()
+    } else {
+      // Defer observation/refetch so route commit stays responsive.
+      deferredObservationTask = Task { @MainActor [weak self] in
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        self?.viewModel.startChatObservationIfNeeded()
+        self?.viewModel.refetchChatView()
+      }
+    }
 
-    NotificationCenter.default.addObserver(
+    appDidBecomeActiveObserver = NotificationCenter.default.addObserver(
       forName: NSApplication.didBecomeActiveNotification,
       object: nil,
       queue: .main
@@ -163,7 +186,12 @@ class ChatViewAppKit: NSViewController {
     // PERF MARK: begin message list setup (remove when done).
     os_signpost(.begin, log: messageListSignpostLog, name: "MessageListSetup", signpostID: signpostID)
     // Message List
-    let messageListVC_ = MessageListAppKit(dependencies: dependencies, peerId: peerId, chat: chat)
+    let messageListVC_ = MessageListAppKit(
+      dependencies: dependencies,
+      peerId: peerId,
+      chat: chat,
+      initialState: preparedPayload?.messagesInitialState
+    )
     addChild(messageListVC_)
     view.addSubview(messageListVC_.view)
     messageListVC_.view.translatesAutoresizingMaskIntoConstraints = false
@@ -251,14 +279,19 @@ class ChatViewAppKit: NSViewController {
   }
 
   func dispose() {
+    deferredObservationTask?.cancel()
+    deferredObservationTask = nil
     clearCurrentViews()
   }
 
   deinit {
+    deferredObservationTask?.cancel()
     clearCurrentViews()
 
-    // Remove observer
-    NotificationCenter.default.removeObserver(self, name: NSApplication.didBecomeActiveNotification, object: nil)
+    // Remove observers
+    if let appDidBecomeActiveObserver {
+      NotificationCenter.default.removeObserver(appDidBecomeActiveObserver)
+    }
     if let pendingDropObserver {
       NotificationCenter.default.removeObserver(pendingDropObserver)
     }

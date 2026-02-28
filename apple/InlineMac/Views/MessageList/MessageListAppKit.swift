@@ -64,12 +64,17 @@ class MessageListAppKit: NSViewController {
   private var needsUnreadUpdateOnActive = false
   private var appActivityObserverId: UUID?
 
-  init(dependencies: AppDependencies, peerId: Peer, chat: Chat) {
+  init(
+    dependencies: AppDependencies,
+    peerId: Peer,
+    chat: Chat,
+    initialState: MessagesProgressiveViewModel.InitialState? = nil
+  ) {
     self.dependencies = dependencies
     self.peerId = peerId
     self.chat = chat
     messageRenderStyle = AppSettings.shared.messageRenderStyle
-    viewModel = MessagesProgressiveViewModel(peer: peerId)
+    viewModel = MessagesProgressiveViewModel(peer: peerId, initialState: initialState)
     state = ChatsManager
       .get(
         for: peerId,
