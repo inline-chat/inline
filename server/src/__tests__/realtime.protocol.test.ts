@@ -275,4 +275,102 @@ describe("realtime protocol safety", () => {
 
     await wsClosed(ws)
   })
+
+  it("clears push-content metadata when update omits key details", async () => {
+    const { ws, sessionId } = await authenticateSocket()
+    const publicKey = new Uint8Array(Array.from({ length: 32 }, (_, i) => i + 1))
+
+    wsSendClientProtocolMessage(ws, {
+      id: 502n,
+      seq: 2,
+      body: {
+        oneofKind: "rpcCall",
+        rpcCall: {
+          method: Method.UPDATE_PUSH_NOTIFICATION_DETAILS,
+          input: {
+            oneofKind: "updatePushNotificationDetails",
+            updatePushNotificationDetails: {
+              applePushToken: "",
+              notificationMethod: {
+                provider: PushNotificationProvider.APNS,
+                method: {
+                  oneofKind: "apns",
+                  apns: {
+                    deviceToken: "apn-rpc-token-a",
+                  },
+                },
+              },
+              pushContentEncryptionKey: {
+                publicKey,
+                keyId: "key-v1",
+                algorithm: 1,
+              },
+              pushContentVersion: 1,
+            },
+          },
+        },
+      },
+    })
+
+    const firstResponse = await wsServerProtocolMessage(ws)
+    expect(firstResponse.body.oneofKind).toBe("rpcResult")
+    if (firstResponse.body.oneofKind === "rpcResult") {
+      expect(firstResponse.body.rpcResult.reqMsgId).toBe(502n)
+    }
+
+    wsSendClientProtocolMessage(ws, {
+      id: 503n,
+      seq: 3,
+      body: {
+        oneofKind: "rpcCall",
+        rpcCall: {
+          method: Method.UPDATE_PUSH_NOTIFICATION_DETAILS,
+          input: {
+            oneofKind: "updatePushNotificationDetails",
+            updatePushNotificationDetails: {
+              applePushToken: "",
+              notificationMethod: {
+                provider: PushNotificationProvider.APNS,
+                method: {
+                  oneofKind: "apns",
+                  apns: {
+                    deviceToken: "apn-rpc-token-b",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    })
+
+    const secondResponse = await wsServerProtocolMessage(ws)
+    expect(secondResponse.body.oneofKind).toBe("rpcResult")
+    if (secondResponse.body.oneofKind === "rpcResult") {
+      expect(secondResponse.body.rpcResult.reqMsgId).toBe(503n)
+      expect(secondResponse.body.rpcResult.result.oneofKind).toBe("updatePushNotificationDetails")
+    }
+
+    const session = await db
+      .select({
+        applePushTokenEncrypted: sessions.applePushTokenEncrypted,
+        pushContentKeyPublic: sessions.pushContentKeyPublic,
+        pushContentKeyId: sessions.pushContentKeyId,
+        pushContentKeyAlgorithm: sessions.pushContentKeyAlgorithm,
+        pushContentVersion: sessions.pushContentVersion,
+      })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .limit(1)
+      .then((rows) => rows[0])
+
+    expect(session).toBeDefined()
+    expect(session?.applePushTokenEncrypted).toBeTruthy()
+    expect(session?.pushContentKeyPublic).toBeNull()
+    expect(session?.pushContentKeyId).toBeNull()
+    expect(session?.pushContentKeyAlgorithm).toBeNull()
+    expect(session?.pushContentVersion).toBeNull()
+
+    await wsClosed(ws)
+  })
 })
