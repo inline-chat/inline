@@ -1764,15 +1764,29 @@ extension ComposeAppKit {
     // Check if there is a draft message
     guard let draft = dialog.draftMessage else { return false }
 
-    // Convert to attributed string
-    let attributedString = toAttributedString(
-      text: draft.text,
-      entities: draft.entities,
-    )
+    // Convert to attributed string. Most drafts are plain text, so avoid entity
+    // parsing work when protobuf entities are not present.
+    let attributedString: NSAttributedString
+    if draft.hasEntities {
+      attributedString = toAttributedString(
+        text: draft.text,
+        entities: draft.entities
+      )
+    } else {
+      attributedString = NSAttributedString(
+        string: draft.text,
+        attributes: [
+          .font: ComposeTextEditor.font,
+          .foregroundColor: ComposeTextEditor.textColor
+        ]
+      )
+    }
 
-    // Layout for accurate height measurements. Without this, it doesn't use the
-    // correct width for text height calculations
-    layoutSubtreeIfNeeded()
+    // `didLayout()` is called after layout in normal flow. Only force layout
+    // when width isn't resolved yet.
+    if textEditor.bounds.width <= 1 {
+      layoutSubtreeIfNeeded()
+    }
 
     // Set as compose text
     setAttributedString(attributedString)

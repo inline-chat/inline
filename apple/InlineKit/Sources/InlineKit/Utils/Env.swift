@@ -4,7 +4,7 @@ import RealtimeV2
 import SwiftUI
 
 public extension EnvironmentValues {
-  @Entry var appDatabase = AppDatabase.empty()
+  @Entry var appDatabase = AppDatabase.environmentDefault
   @Entry var auth = Auth.shared
   @Entry var transactions = Transactions.shared
   @Entry var realtime = Realtime.shared

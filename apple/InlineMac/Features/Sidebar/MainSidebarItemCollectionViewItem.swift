@@ -18,9 +18,8 @@ class MainSidebarItemCollectionViewItem: NSCollectionViewItem {
   override func preferredLayoutAttributesFitting(
     _ layoutAttributes: NSCollectionViewLayoutAttributes
   ) -> NSCollectionViewLayoutAttributes {
-    let attributes = super.preferredLayoutAttributesFitting(layoutAttributes)
-    attributes.size.height = displayMode.itemHeight
-    return attributes
+    layoutAttributes.size.height = displayMode.itemHeight
+    return layoutAttributes
   }
 
   override func loadView() {
@@ -46,6 +45,7 @@ class MainSidebarItemCollectionViewItem: NSCollectionViewItem {
     dependencies: AppDependencies,
     events: PassthroughSubject<MainSidebarList.ScrollEvent, Never>,
     highlightNavSelection: Bool,
+    isRouteSelected: Bool,
     displayMode: MainSidebarList.DisplayMode
   ) {
     self.displayMode = displayMode
@@ -54,6 +54,7 @@ class MainSidebarItemCollectionViewItem: NSCollectionViewItem {
       dependencies: dependencies,
       events: events,
       highlightNavSelection: highlightNavSelection,
+      isRouteSelected: isRouteSelected,
       displayMode: displayMode
     )
   }
@@ -61,5 +62,12 @@ class MainSidebarItemCollectionViewItem: NSCollectionViewItem {
   func setDisplayMode(_ displayMode: MainSidebarList.DisplayMode) {
     self.displayMode = displayMode
     cellView?.updateDisplayMode(displayMode)
+  }
+
+  func updateSelectionState(routeSelected: Bool, highlightNavSelection: Bool) {
+    cellView?.updateSelectionState(
+      isRouteSelected: routeSelected,
+      highlightNavSelection: highlightNavSelection
+    )
   }
 }

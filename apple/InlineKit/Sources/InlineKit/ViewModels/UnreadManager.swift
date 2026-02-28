@@ -12,6 +12,49 @@ public final class UnreadManager: Sendable {
   public static let shared = UnreadManager()
 
   private let log = Log.scoped("UnreadManager", enableTracing: false)
+  private static let readAllLocalCooldown: TimeInterval = 0.15
+  private static let readAllRemoteCooldown: TimeInterval = 0.35
+
+  private actor ReadAllGate {
+    struct State {
+      var lastLocalWriteAt: TimeInterval = 0
+      var lastRemoteSendAt: TimeInterval = 0
+      var remoteInFlight = false
+    }
+
+    private var stateByDialogId: [Int64: State] = [:]
+
+    func begin(
+      dialogId: Int64,
+      now: TimeInterval,
+      localCooldown: TimeInterval,
+      remoteCooldown: TimeInterval
+    ) -> (shouldWriteLocal: Bool, shouldSendRemote: Bool) {
+      var state = stateByDialogId[dialogId] ?? State()
+
+      let shouldWriteLocal = now - state.lastLocalWriteAt >= localCooldown
+      if shouldWriteLocal {
+        state.lastLocalWriteAt = now
+      }
+
+      let shouldSendRemote = state.remoteInFlight == false && now - state.lastRemoteSendAt >= remoteCooldown
+      if shouldSendRemote {
+        state.lastRemoteSendAt = now
+        state.remoteInFlight = true
+      }
+
+      stateByDialogId[dialogId] = state
+      return (shouldWriteLocal, shouldSendRemote)
+    }
+
+    func completeRemote(dialogId: Int64) {
+      guard var state = stateByDialogId[dialogId] else { return }
+      state.remoteInFlight = false
+      stateByDialogId[dialogId] = state
+    }
+  }
+
+  private let readAllGate = ReadAllGate()
 
   private init() {}
 
@@ -52,25 +95,38 @@ public final class UnreadManager: Sendable {
   // Useful in context menu to mark all messages as read
   public func readAll(_ peerId: Peer, chatId: Int64) {
     log.debug("readAll")
+    let localDialogId = Dialog.getDialogId(peerId: peerId)
 
-    // update local DB
-    do {
-      try db.dbWriter.write { db in
-        let localDialogId = Dialog.getDialogId(peerId: peerId)
-        try Dialog
-          .filter(id: localDialogId)
-          .updateAll(db, [
-            Column("unreadCount").set(to: 0),
-            Column("unreadMark").set(to: false)
-          ])
+    Task(priority: .utility) {
+      let now = Date().timeIntervalSinceReferenceDate
+      let (shouldWriteLocal, shouldSendRemote) = await readAllGate.begin(
+        dialogId: localDialogId,
+        now: now,
+        localCooldown: Self.readAllLocalCooldown,
+        remoteCooldown: Self.readAllRemoteCooldown
+      )
+
+      if shouldWriteLocal {
+        do {
+          try await db.dbWriter.write { db in
+            let hasUnread = (Column("unreadCount") > 0) || (Column("unreadMark") == true)
+            try Dialog
+              .filter(id: localDialogId)
+              .filter(hasUnread)
+              .updateAll(db, [
+                Column("unreadCount").set(to: 0),
+                Column("unreadMark").set(to: false)
+              ])
+          }
+        } catch {
+          log.error("Failed to update local DB with unread count", error: error)
+        }
       }
-    } catch {
-      log.error("Failed to update local DB with unread count", error: error)
-    }
 
-    // Update remote server
-    Task {
-      await sendReadMessagesToServer(peerId: peerId, maxId: nil)
+      if shouldSendRemote {
+        await sendReadMessagesToServer(peerId: peerId, maxId: nil)
+        await readAllGate.completeRemote(dialogId: localDialogId)
+      }
     }
 
 #if os(iOS)
