@@ -2101,7 +2101,7 @@ private extension MessagesCollectionView {
           type: .success,
           systemImage: "checkmark.circle",
           action: {
-            UIApplication.shared.open(url)
+            InAppBrowser.shared.open(url)
           },
           actionTitle: "Open"
         )
@@ -2142,7 +2142,7 @@ extension MessagesCollectionView.Coordinator: InlineKit.NotionTaskManagerDelegat
         systemImage: systemImage,
         action: {
           if let url = URL(string: url) {
-            UIApplication.shared.open(url)
+            InAppBrowser.shared.open(url)
           }
         },
         actionTitle: "Open"

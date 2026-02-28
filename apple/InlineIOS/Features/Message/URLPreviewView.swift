@@ -1,7 +1,6 @@
 import InlineKit
 import Nuke
 import NukeUI
-import SafariServices
 import UIKit
 
 class URLPreviewView: UIView {
@@ -21,8 +20,6 @@ class URLPreviewView: UIView {
     view.contentMode = .scaleAspectFill
     view.clipsToBounds = true
     view.layer.cornerRadius = 6
-
-    print("")
     return view
   }()
 
@@ -47,7 +44,7 @@ class URLPreviewView: UIView {
 
   @objc private func handleTap() {
     guard let url = previewUrl else { return }
-    UIApplication.shared.open(url)
+    InAppBrowser.shared.open(url, from: parentViewController)
   }
 
   func configure(
