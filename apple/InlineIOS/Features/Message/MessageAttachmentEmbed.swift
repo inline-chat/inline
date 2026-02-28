@@ -131,7 +131,7 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
       previewProvider: nil
     ) { [weak self] _ in
       let openAction = UIAction(
-        title: "Open URL",
+        title: "Fast Open",
         image: UIImage(systemName: "safari")
       ) { _ in
         guard let url = self?.url else { return }

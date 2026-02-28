@@ -365,7 +365,7 @@ class UIMessageView: UIView {
       )
     })
 
-    alert.addAction(UIAlertAction(title: "Open Link", style: .default) { _ in
+    alert.addAction(UIAlertAction(title: "Fast Open", style: .default) { _ in
       InAppBrowser.shared.open(url, from: viewController)
     })
 

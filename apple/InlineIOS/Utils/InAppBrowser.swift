@@ -5,6 +5,9 @@ final class InAppBrowser: NSObject {
   static let shared = InAppBrowser()
 
   private static let supportedSchemes: Set<String> = ["http", "https"]
+  private static let universalLinkOptions: [UIApplication.OpenExternalURLOptionsKey: Any] = [
+    .universalLinksOnly: true,
+  ]
   private weak var presentedSafariViewController: SFSafariViewController?
 
   private override init() {}
@@ -36,6 +39,21 @@ final class InAppBrowser: NSObject {
 
     guard Self.supportedSchemes.contains(scheme) else {
       UIApplication.shared.open(url)
+      return
+    }
+
+    UIApplication.shared.open(url, options: Self.universalLinkOptions) { [weak self, weak presenter] openedInApp in
+      guard let self else { return }
+      guard !openedInApp else { return }
+      self.presentInAppSafari(url, from: presenter)
+    }
+  }
+
+  private func presentInAppSafari(_ url: URL, from presenter: UIViewController?) {
+    if !Thread.isMainThread {
+      DispatchQueue.main.async { [weak self] in
+        self?.presentInAppSafari(url, from: presenter)
+      }
       return
     }
 
