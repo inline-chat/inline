@@ -1780,7 +1780,7 @@ private extension MessagesCollectionView {
       contextMenuConfiguration configuration: UIContextMenuConfiguration,
       highlightPreviewForItemAt indexPath: IndexPath
     ) -> UITargetedPreview? {
-      targetedPreview(for: indexPath)
+      return targetedPreview(for: indexPath)
     }
 
     func collectionView(
@@ -1788,7 +1788,7 @@ private extension MessagesCollectionView {
       contextMenuConfiguration configuration: UIContextMenuConfiguration,
       dismissalPreviewForItemAt indexPath: IndexPath
     ) -> UITargetedPreview? {
-      targetedPreview(for: indexPath)
+      return targetedPreview(for: indexPath)
     }
 
     // MARK: - Private
