@@ -2103,7 +2103,7 @@ private extension MessagesCollectionView {
           action: {
             InAppBrowser.shared.open(url)
           },
-          actionTitle: "Open"
+          actionTitle: "Fast Open"
         )
       } catch {
         ToastManager.shared.showToast(
@@ -2145,7 +2145,7 @@ extension MessagesCollectionView.Coordinator: InlineKit.NotionTaskManagerDelegat
             InAppBrowser.shared.open(url)
           }
         },
-        actionTitle: "Open"
+        actionTitle: "Fast Open"
       )
     }
   }
