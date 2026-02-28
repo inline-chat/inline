@@ -1,6 +1,5 @@
 import { Log } from "@in/server/utils/log"
 import { API_BASE_URL, INLINE_ALERTS_BOT_TOKEN, INLINE_ALERTS_CHAT_ID, TELEGRAM_ALERTS_CHAT_ID, TELEGRAM_TOKEN } from "@in/server/env"
-import { randomInt } from "node:crypto"
 
 export const sendBotEvent = (text: string) => {
   // Fire-and-forget. These notifications are best-effort and should never affect the caller.
@@ -40,11 +39,8 @@ async function sendInlineBotEvent(text: string) {
   const chatId = INLINE_ALERTS_CHAT_ID ? Number(INLINE_ALERTS_CHAT_ID) : null
   if (!botToken || !chatId || !Number.isFinite(chatId) || chatId <= 0) return
 
-  // Random 64-bit integer string is preferred (matches API semantics).
-  const randomId = (BigInt(Date.now()) * 1000n + BigInt(randomInt(1000))).toString()
-
   try {
-    await fetch(`${API_BASE_URL}/v1/sendMessage`, {
+    await fetch(`${API_BASE_URL}/v1/sendMessage20250509`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -53,7 +49,6 @@ async function sendInlineBotEvent(text: string) {
       body: JSON.stringify({
         peerThreadId: chatId,
         text,
-        randomId,
       }),
     })
   } catch (error) {
