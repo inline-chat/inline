@@ -202,6 +202,11 @@ export class SessionsModel {
       applePushTokenEncrypted: encryptedApplePushToken.encrypted,
       applePushTokenIv: encryptedApplePushToken.iv,
       applePushTokenTag: encryptedApplePushToken.authTag,
+      // Token-only updates must clear stale encrypted-push capability.
+      pushContentKeyPublic: null,
+      pushContentKeyId: null,
+      pushContentKeyAlgorithm: null,
+      pushContentVersion: null,
       ...(data.deviceId ? { deviceId: data.deviceId } : {}),
     }
 
