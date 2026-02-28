@@ -477,7 +477,7 @@ private struct LinkRow: View {
 
   private func openLink(_ url: URL?) {
     guard let url else { return }
-    UIApplication.shared.open(url)
+    InAppBrowser.shared.open(url)
   }
 
   private var linkIconCircle: some View {

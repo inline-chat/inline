@@ -339,14 +339,14 @@ class UIMessageView: UIView {
   }
 
   func handleLinkTap() {
-    linkTapHandler = { url in
-      UIApplication.shared.open(url)
+    linkTapHandler = { [weak self] url in
+      InAppBrowser.shared.open(url, from: self?.findViewController())
     }
   }
 
   private func presentLinkActionSheet(for url: URL) {
     guard let viewController = findViewController() else {
-      UIApplication.shared.open(url)
+      InAppBrowser.shared.open(url)
       return
     }
 
@@ -366,7 +366,7 @@ class UIMessageView: UIView {
     })
 
     alert.addAction(UIAlertAction(title: "Open Link", style: .default) { _ in
-      UIApplication.shared.open(url)
+      InAppBrowser.shared.open(url, from: viewController)
     })
 
     alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))

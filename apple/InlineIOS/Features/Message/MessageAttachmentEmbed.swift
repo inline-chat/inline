@@ -1,6 +1,5 @@
 import InlineKit
 import Logger
-import SafariServices
 import UIKit
 
 class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestureRecognizerDelegate {
@@ -136,7 +135,7 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
         image: UIImage(systemName: "safari")
       ) { _ in
         guard let url = self?.url else { return }
-        UIApplication.shared.open(url)
+        InAppBrowser.shared.open(url, from: self?.findViewController())
       }
 
       let copyURLAction = UIAction(
@@ -177,8 +176,7 @@ class MessageAttachmentEmbed: UIView, UIContextMenuInteractionDelegate, UIGestur
 
   @objc private func handleTap() {
     guard let url else { return }
-    // Open URL directly in Safari instead of in-app
-    UIApplication.shared.open(url)
+    InAppBrowser.shared.open(url, from: findViewController())
   }
 
   // MARK: - Private Helpers

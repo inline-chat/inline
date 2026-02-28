@@ -19,8 +19,6 @@ struct IntegrationCard: View {
   var navigateToOptions: (() -> Void)? = nil
   var permissionCheck: (() -> Bool)? = nil
 
-  @Environment(\.openURL) private var openURL
-
   let baseURL: String = ApiClient.serverURL
 
   var body: some View {
@@ -54,12 +52,12 @@ struct IntegrationCard: View {
             URL(string: "\(baseURL)/integrations/\(provider)/integrate?token=\(token)&spaceId=\(spaceId)")
           {
             Log.shared.debug("Opening URL: \(url)")
-            openURL(url)
+            InAppBrowser.shared.open(url)
           }
         } else {
           if let url = URL(string: "\(baseURL)/integrations/\(provider)/integrate?token=\(token)") {
             Log.shared.debug("Opening URL: \(url)")
-            openURL(url)
+            InAppBrowser.shared.open(url)
           }
         }
         Task { @MainActor in
@@ -111,6 +109,7 @@ struct IntegrationCard: View {
       }
     }
     .onOpenURL { url in
+      InAppBrowser.shared.dismissIfPresented()
       if url.scheme == "in", url.host == "integrations", url.path == "/\(provider)",
          let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
          components.queryItems?.first(where: { $0.name == "success" })?.value == "true"
