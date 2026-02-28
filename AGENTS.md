@@ -33,6 +33,7 @@
 - In final handoff/review/push, call out security risks and state production readiness.
 ## Reminders
 - Security (due 2026-05-18): remove legacy email OTP verification fallback without `challengeToken` in `server/src/modules/auth/emailLoginChallenges.ts`.
+- Performance (added 2026-02-24): macOS send-message and open-chat paths are latency-critical; progressive/message-list changes must avoid regressions and include focused perf validation.
 ## Common Commands
 - Root: `bun run dev`, `bun run dev:server`, `bun run dev:web`, `bun run typecheck`, `bun run test`, `bun run lint`.
 - Protos: `bun run generate:proto`; per-language from `scripts/`: `bun run generate`.
