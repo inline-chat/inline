@@ -97,7 +97,7 @@ public final class UnreadManager: Sendable {
     log.debug("readAll")
     let localDialogId = Dialog.getDialogId(peerId: peerId)
 
-    Task(priority: .utility) {
+    Task(priority: .userInitiated) {
       let now = Date().timeIntervalSinceReferenceDate
       let (shouldWriteLocal, shouldSendRemote) = await readAllGate.begin(
         dialogId: localDialogId,
