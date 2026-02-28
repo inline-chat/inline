@@ -9,7 +9,41 @@ import SwiftUI
 @MainActor
 @Observable
 final class ExperimentalNavigationModel {
-  var activeSpaceId: Int64?
+  private static let activeSpaceDefaultsKey = "activeSpaceId"
+
+  var activeSpaceId: Int64? {
+    didSet {
+      saveActiveSpaceId(activeSpaceId)
+    }
+  }
+
+  init() {
+    activeSpaceId = Self.loadActiveSpaceId()
+  }
+
+  private static func loadActiveSpaceId() -> Int64? {
+    let defaults = UserDefaults.standard
+
+    if let value = defaults.object(forKey: activeSpaceDefaultsKey) as? Int64 {
+      return value
+    }
+    if let value = defaults.object(forKey: activeSpaceDefaultsKey) as? Int {
+      return Int64(value)
+    }
+    if let value = defaults.object(forKey: activeSpaceDefaultsKey) as? NSNumber {
+      return value.int64Value
+    }
+    return nil
+  }
+
+  private func saveActiveSpaceId(_ spaceId: Int64?) {
+    let defaults = UserDefaults.standard
+    if let spaceId {
+      defaults.set(spaceId, forKey: Self.activeSpaceDefaultsKey)
+    } else {
+      defaults.removeObject(forKey: Self.activeSpaceDefaultsKey)
+    }
+  }
 }
 
 struct ExperimentalDestinationView: View {
