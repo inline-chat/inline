@@ -1162,6 +1162,9 @@ class UIMessageView: UIView {
 
   private func linkTarget(at characterIndex: Int, in attributedText: NSAttributedString) -> (url: URL, range: NSRange)? {
     guard characterIndex >= 0, characterIndex < attributedText.length else { return nil }
+    if attributedText.attribute(.mentionUserId, at: characterIndex, effectiveRange: nil) != nil {
+      return nil
+    }
     var effectiveRange = NSRange(location: 0, length: 0)
     let linkValue = attributedText.attribute(.link, at: characterIndex, effectiveRange: &effectiveRange)
     guard let url = resolveLinkURL(from: linkValue) else { return nil }
@@ -1185,6 +1188,10 @@ class UIMessageView: UIView {
        ["http", "https"].contains(scheme)
     {
       return url
+    }
+
+    if urlString.contains("://") {
+      return nil
     }
 
     guard let url = URL(string: "https://\(urlString)"),
