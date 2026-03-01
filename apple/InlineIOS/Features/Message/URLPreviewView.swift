@@ -90,11 +90,13 @@ class URLPreviewView: UIView {
     titleLabel.translatesAutoresizingMaskIntoConstraints = false
     titleLabel.isUserInteractionEnabled = false
 
-    descriptionLabel.text = preview.description
+    let shouldHideLoomDescription = isLoomPreview(preview)
+    let shouldShowDescription = !shouldHideLoomDescription && preview.description != nil
+    descriptionLabel.text = shouldShowDescription ? preview.description : nil
     descriptionLabel.font = UIFont.systemFont(ofSize: 14)
     descriptionLabel.textColor = secondaryTextColor
     descriptionLabel.numberOfLines = 0
-    descriptionLabel.isHidden = preview.description == nil
+    descriptionLabel.isHidden = !shouldShowDescription
     descriptionLabel.translatesAutoresizingMaskIntoConstraints = false
     descriptionLabel.isUserInteractionEnabled = false
 
@@ -116,7 +118,9 @@ class URLPreviewView: UIView {
     addSubview(rectangleView)
     addSubview(siteNameLabel)
     addSubview(titleLabel)
-    addSubview(descriptionLabel)
+    if shouldShowDescription {
+      addSubview(descriptionLabel)
+    }
     addSubview(imageView)
 
     NSLayoutConstraint.deactivate(constraints)
@@ -150,7 +154,7 @@ class URLPreviewView: UIView {
         }
       }
     }
-    NSLayoutConstraint.activate([
+    var layoutConstraints: [NSLayoutConstraint] = [
       // Rectangle accent line
       rectangleView.leadingAnchor.constraint(equalTo: leadingAnchor),
       rectangleView.widthAnchor.constraint(equalToConstant: rectangleWidth),
@@ -166,14 +170,22 @@ class URLPreviewView: UIView {
       titleLabel.topAnchor.constraint(equalTo: siteNameLabel.bottomAnchor, constant: interLabelSpacing),
       titleLabel.leadingAnchor.constraint(equalTo: rectangleView.trailingAnchor, constant: contentSpacing),
       titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalPadding),
+    ]
 
-      // Description label
-      descriptionLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: interLabelSpacing),
-      descriptionLabel.leadingAnchor.constraint(equalTo: rectangleView.trailingAnchor, constant: contentSpacing),
-      descriptionLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalPadding),
+    if shouldShowDescription {
+      layoutConstraints.append(contentsOf: [
+        descriptionLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: interLabelSpacing),
+        descriptionLabel.leadingAnchor.constraint(equalTo: rectangleView.trailingAnchor, constant: contentSpacing),
+        descriptionLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalPadding),
+        imageView.topAnchor.constraint(equalTo: descriptionLabel.bottomAnchor, constant: verticalPadding),
+      ])
+    } else {
+      layoutConstraints.append(
+        imageView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: verticalPadding)
+      )
+    }
 
-      // Image view
-      imageView.topAnchor.constraint(equalTo: descriptionLabel.bottomAnchor, constant: verticalPadding),
+    layoutConstraints.append(contentsOf: [
       imageView.leadingAnchor.constraint(equalTo: rectangleView.trailingAnchor, constant: contentSpacing),
       imageView.widthAnchor.constraint(lessThanOrEqualToConstant: maxWidth),
       imageView.widthAnchor.constraint(equalToConstant: imageWidth),
@@ -181,7 +193,10 @@ class URLPreviewView: UIView {
       imageView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -verticalPadding),
     ])
 
-    for label in [siteNameLabel, titleLabel, descriptionLabel] {
+    NSLayoutConstraint.activate(layoutConstraints)
+
+    let labels: [UILabel] = shouldShowDescription ? [siteNameLabel, titleLabel, descriptionLabel] : [siteNameLabel, titleLabel]
+    for label in labels {
       label.preferredMaxLayoutWidth = 0
     }
 
@@ -215,6 +230,18 @@ class URLPreviewView: UIView {
       w = h * aspect
     }
     return h
+  }
+
+  private func isLoomPreview(_ preview: UrlPreview) -> Bool {
+    if let siteName = preview.siteName?.lowercased(), siteName.contains("loom") {
+      return true
+    }
+
+    if let host = URLComponents(string: preview.url)?.host?.lowercased(), host.contains("loom.com") {
+      return true
+    }
+
+    return preview.url.lowercased().contains("loom.com")
   }
 }
 

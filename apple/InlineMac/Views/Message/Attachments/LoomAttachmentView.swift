@@ -95,15 +95,6 @@ class LoomAttachmentView: NSView, AttachmentView {
     return label
   }()
 
-  private lazy var descriptionLabel: NSTextField = {
-    let label = NSTextField(labelWithString: "")
-    label.font = .systemFont(ofSize: Theme.messageTextFontSize - 1)
-    label.lineBreakMode = .byTruncatingTail
-    label.maximumNumberOfLines = 2
-    label.translatesAutoresizingMaskIntoConstraints = false
-    return label
-  }()
-
   private lazy var placeholderImageView: NSImageView = {
     let view = NSImageView()
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -214,7 +205,6 @@ class LoomAttachmentView: NSView, AttachmentView {
 
     textStack.addArrangedSubview(loomTagLabel)
     textStack.addArrangedSubview(titleLabel)
-    textStack.addArrangedSubview(descriptionLabel)
   }
 
   private func configure() {
@@ -224,7 +214,6 @@ class LoomAttachmentView: NSView, AttachmentView {
     toolTip = preview.title ?? preview.url
 
     titleLabel.stringValue = preview.title ?? "Loom video"
-    descriptionLabel.stringValue = preview.description ?? "Open in Loom"
     setAccessibilityLabel("Loom: \(titleLabel.stringValue)")
     setAccessibilityRole(.group)
 
@@ -287,10 +276,6 @@ class LoomAttachmentView: NSView, AttachmentView {
     message.outgoing ? .white : .labelColor
   }
 
-  private var secondaryTextColor: NSColor {
-    message.outgoing ? .white.withAlphaComponent(0.8) : .secondaryLabelColor
-  }
-
   private var tagTextColor: NSColor {
     message.outgoing ? .white.withAlphaComponent(0.75) : .tertiaryLabelColor
   }
@@ -300,7 +285,6 @@ class LoomAttachmentView: NSView, AttachmentView {
     backgroundView.layer?.backgroundColor = backgroundColor.cgColor
     accentView.layer?.backgroundColor = accentColor.cgColor
     titleLabel.textColor = primaryTextColor
-    descriptionLabel.textColor = secondaryTextColor
     loomTagLabel.textColor = tagTextColor
   }
 
