@@ -167,7 +167,6 @@ final class TabStripCollectionViewItem: NSCollectionViewItem, TabStripItemHoverD
       ),
       iconWidthConstraint,
       iconHeightConstraint,
-      iconCenterXForHome,
 
       titleLeadingConstraint,
       titleLabel.centerYAnchor.constraint(
@@ -208,8 +207,6 @@ final class TabStripCollectionViewItem: NSCollectionViewItem, TabStripItemHoverD
 
     titleLeadingConstraint.constant = isHome ? 0 : Style.iconTrailingPadding * paddingScale
     iconLeadingConstraint.constant = Style.iconLeadingPadding * paddingScale
-    iconCenterXForHome.isActive = isHome
-    iconLeadingConstraint.isActive = !isHome
 
     if isHome {
       iconWidthConstraint.constant = Style.homeIconPointSize
@@ -247,10 +244,10 @@ final class TabStripCollectionViewItem: NSCollectionViewItem, TabStripItemHoverD
       iconImageView.contentTintColor = nil
       titleLabel.stringValue = item.title
       titleLabel.isHidden = false
+      iconCenterXForHome.isActive = false
       titleLeadingConstraint.isActive = true
       titleTrailingConstraint.isActive = true
       iconLeadingConstraint.isActive = true
-      iconCenterXForHome.isActive = false
       titleTrailingConstraint.constant = -Style.trailingInsetDefault
       closeOverlay.isHidden = false
       titleLabel.layer?.mask = titleMaskLayer
@@ -353,9 +350,6 @@ final class TabStripCollectionViewItem: NSCollectionViewItem, TabStripItemHoverD
       tabView.isClosable = true
     }
     titleLabel.layer?.mask = titleMaskLayer
-    titleLeadingConstraint.isActive = true
-    titleTrailingConstraint.isActive = true
-    iconLeadingConstraint.isActive = true
     iconCenterXForHome.isActive = false
     updateAppearance(animated: false)
   }
