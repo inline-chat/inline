@@ -1,10 +1,16 @@
 import Combine
 import InlineKit
 import InlineUI
+import Logger
 import UIKit
 
 final class NewVideoView: UIView {
   // MARK: - Properties
+
+  private enum ActiveTransfer {
+    case downloading(videoId: Int64)
+    case uploading(videoLocalId: Int64, transactionId: String?, randomId: Int64?)
+  }
 
   private var fullMessage: FullMessage
   private let maxWidth: CGFloat = 280
@@ -18,6 +24,7 @@ final class NewVideoView: UIView {
   private var uploadProgressBindingTask: Task<Void, Never>?
   private var uploadProgressLocalId: Int64?
   private var uploadProgressSnapshot: UploadProgressSnapshot?
+  private var activeTransfer: ActiveTransfer?
   private var isDownloading = false
   private var isPresentingViewer = false
   private var pendingViewerURL: URL?
@@ -81,21 +88,21 @@ final class NewVideoView: UIView {
     return view
   }()
 
-  private let downloadProgressView: CircularProgressHostingView = {
+  private let transferProgressView: CircularProgressHostingView = {
     let view = CircularProgressHostingView()
     view.translatesAutoresizingMaskIntoConstraints = false
     view.isHidden = true
     return view
   }()
 
-  private let cancelDownloadButton: UIButton = {
+  private let cancelTransferButton: UIButton = {
     let config = UIImage.SymbolConfiguration(pointSize: 14, weight: .bold)
     let button = UIButton(type: .system)
     button.translatesAutoresizingMaskIntoConstraints = false
     button.setImage(UIImage(systemName: "xmark", withConfiguration: config), for: .normal)
     button.tintColor = .white
     button.isHidden = true
-    button.accessibilityLabel = "Cancel download"
+    button.accessibilityLabel = "Cancel transfer"
     return button
   }()
 
@@ -233,8 +240,8 @@ final class NewVideoView: UIView {
     addSubview(overlayBackground)
     overlayBackground.addSubview(overlayIconView)
     overlayBackground.addSubview(overlaySpinner)
-    overlayBackground.addSubview(downloadProgressView)
-    overlayBackground.addSubview(cancelDownloadButton)
+    overlayBackground.addSubview(transferProgressView)
+    overlayBackground.addSubview(cancelTransferButton)
     addSubview(durationBadge)
 
     NSLayoutConstraint.activate([
@@ -249,13 +256,13 @@ final class NewVideoView: UIView {
       overlaySpinner.centerXAnchor.constraint(equalTo: overlayBackground.centerXAnchor),
       overlaySpinner.centerYAnchor.constraint(equalTo: overlayBackground.centerYAnchor),
 
-      downloadProgressView.topAnchor.constraint(equalTo: overlayBackground.topAnchor, constant: 3),
-      downloadProgressView.leadingAnchor.constraint(equalTo: overlayBackground.leadingAnchor, constant: 3),
-      downloadProgressView.trailingAnchor.constraint(equalTo: overlayBackground.trailingAnchor, constant: -3),
-      downloadProgressView.bottomAnchor.constraint(equalTo: overlayBackground.bottomAnchor, constant: -3),
+      transferProgressView.topAnchor.constraint(equalTo: overlayBackground.topAnchor, constant: 3),
+      transferProgressView.leadingAnchor.constraint(equalTo: overlayBackground.leadingAnchor, constant: 3),
+      transferProgressView.trailingAnchor.constraint(equalTo: overlayBackground.trailingAnchor, constant: -3),
+      transferProgressView.bottomAnchor.constraint(equalTo: overlayBackground.bottomAnchor, constant: -3),
 
-      cancelDownloadButton.centerXAnchor.constraint(equalTo: overlayBackground.centerXAnchor),
-      cancelDownloadButton.centerYAnchor.constraint(equalTo: overlayBackground.centerYAnchor),
+      cancelTransferButton.centerXAnchor.constraint(equalTo: overlayBackground.centerXAnchor),
+      cancelTransferButton.centerYAnchor.constraint(equalTo: overlayBackground.centerYAnchor),
 
       durationBadge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
       durationBadge.topAnchor.constraint(equalTo: topAnchor, constant: 6),
@@ -282,7 +289,7 @@ final class NewVideoView: UIView {
     let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap))
     tapGesture.delegate = self
     addGestureRecognizer(tapGesture)
-    cancelDownloadButton.addTarget(self, action: #selector(handleCancelDownload), for: .touchUpInside)
+    cancelTransferButton.addTarget(self, action: #selector(handleCancelTransfer), for: .touchUpInside)
   }
 
   private func setupMask() {
@@ -341,7 +348,8 @@ final class NewVideoView: UIView {
     downloadProgressCancellable = nil
     isDownloading = false
     downloadProgress = 0
-    downloadProgressView.setProgress(0)
+    transferProgressView.setProgress(0)
+    activeTransfer = nil
 
     setupVideoConstraints()
     updateImage()
@@ -367,28 +375,45 @@ final class NewVideoView: UIView {
     let downloading = !isVideoDownloaded && (isDownloading || globalDownloadActive)
 
     if isUploading {
+      let uploadProgress = max(0, min(uploadProgressSnapshot?.fractionCompleted ?? 0, 1))
       overlayIconView.isHidden = true
-      overlaySpinner.startAnimating()
-      downloadProgressView.isHidden = true
-      cancelDownloadButton.isHidden = true
+      overlaySpinner.stopAnimating()
+      transferProgressView.isHidden = false
+      cancelTransferButton.isHidden = false
+      transferProgressView.setProgress(uploadProgress)
+      if let videoLocalId = fullMessage.videoInfo?.video.id {
+        activeTransfer = .uploading(
+          videoLocalId: videoLocalId,
+          transactionId: fullMessage.message.transactionId,
+          randomId: fullMessage.message.randomId
+        )
+      } else {
+        activeTransfer = nil
+      }
     } else if downloading {
       overlaySpinner.stopAnimating()
       overlayIconView.isHidden = true
-      downloadProgressView.isHidden = false
-      cancelDownloadButton.isHidden = false
-      downloadProgressView.setProgress(downloadProgress)
+      transferProgressView.isHidden = false
+      cancelTransferButton.isHidden = false
+      transferProgressView.setProgress(downloadProgress)
+      if let videoId = fullMessage.videoInfo?.id {
+        activeTransfer = .downloading(videoId: videoId)
+      } else {
+        activeTransfer = nil
+      }
       if let videoId = fullMessage.videoInfo?.id {
         bindProgressIfNeeded(videoId: videoId)
       }
     } else {
       overlaySpinner.stopAnimating()
       overlayIconView.isHidden = false
-      downloadProgressView.isHidden = true
-      cancelDownloadButton.isHidden = true
+      transferProgressView.isHidden = true
+      cancelTransferButton.isHidden = true
       overlayIconView.image = UIImage(
         systemName: isVideoDownloaded ? "play.fill" : "arrow.down",
         withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .semibold)
       )
+      activeTransfer = nil
     }
 
     overlayBackground.isHidden = false
@@ -506,7 +531,7 @@ final class NewVideoView: UIView {
 
     isDownloading = true
     downloadProgress = 0
-    downloadProgressView.setProgress(0)
+    transferProgressView.setProgress(0)
     updateOverlay()
     FileDownloader.shared.downloadVideo(video: videoInfo, for: fullMessage.message) { [weak self] _ in
       DispatchQueue.main.async { [weak self] in
@@ -532,33 +557,76 @@ final class NewVideoView: UIView {
           self.downloadProgressCancellable = nil
           self.isDownloading = false
           self.downloadProgress = 0
+          self.activeTransfer = nil
           self.updateOverlay()
           return
         }
 
         if progress.error == nil, !progress.isComplete {
           self.downloadProgress = progress.progress
-          self.downloadProgressView.setProgress(progress.progress)
+          self.transferProgressView.setProgress(progress.progress)
         }
 
         if progress.error != nil || progress.isComplete {
           self.downloadProgressCancellable = nil
           self.isDownloading = false
           self.downloadProgress = 0
+          self.activeTransfer = nil
           self.updateOverlay()
         }
       }
   }
 
-  @objc private func handleCancelDownload() {
-    guard let videoId = fullMessage.videoInfo?.id else { return }
-    FileDownloader.shared.cancelVideoDownload(videoId: videoId)
-    downloadProgressCancellable?.cancel()
-    downloadProgressCancellable = nil
-    isDownloading = false
-    downloadProgress = 0
-    downloadProgressView.setProgress(0)
-    updateOverlay()
+  @objc private func handleCancelTransfer() {
+    guard let activeTransfer else { return }
+
+    switch activeTransfer {
+    case let .downloading(videoId):
+      FileDownloader.shared.cancelVideoDownload(videoId: videoId)
+      downloadProgressCancellable?.cancel()
+      downloadProgressCancellable = nil
+      isDownloading = false
+      downloadProgress = 0
+      transferProgressView.setProgress(0)
+      self.activeTransfer = nil
+      updateOverlay()
+
+    case let .uploading(videoLocalId, transactionId, randomId):
+      Task {
+        await FileUploader.shared.cancelVideoUpload(videoLocalId: videoLocalId)
+      }
+
+      if let transactionId, !transactionId.isEmpty {
+        Transactions.shared.cancel(transactionId: transactionId)
+      } else if let randomId {
+        Task {
+          Api.realtime.cancelTransaction(where: {
+            guard $0.transaction.method == .sendMessage else { return false }
+            guard case let .sendMessage(input) = $0.transaction.input else { return false }
+            return input.randomID == randomId
+          })
+        }
+      }
+
+      let message = fullMessage.message
+      Task(priority: .userInitiated) {
+        do {
+          try await AppDatabase.shared.dbWriter.write { db in
+            try Message.deleteMessages(db, messageIds: [message.messageId], chatId: message.chatId)
+          }
+
+          MessagesPublisher.shared
+            .messagesDeleted(messageIds: [message.messageId], peer: message.peerId)
+        } catch {
+          Log.shared.error("Failed to delete local video message after cancellation", error: error)
+        }
+      }
+
+      clearUploadProgressBinding(resetState: true)
+      transferProgressView.setProgress(0)
+      self.activeTransfer = nil
+      updateOverlay()
+    }
   }
 
   private func syncUploadProgressBinding() {
@@ -657,7 +725,7 @@ final class NewVideoView: UIView {
 
 extension NewVideoView: UIGestureRecognizerDelegate {
   func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-    if let touchedView = touch.view, touchedView.isDescendant(of: cancelDownloadButton) {
+    if let touchedView = touch.view, touchedView.isDescendant(of: cancelTransferButton) {
       return false
     }
     return true

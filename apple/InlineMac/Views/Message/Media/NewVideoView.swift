@@ -18,16 +18,18 @@ private final class VideoOverlayViewModel: ObservableObject {
     case play
     case download
     case spinner
+    case uploadProgress
   }
 
   struct State: Equatable {
     var icon: Icon
     var showsPlaceholder: Bool
+    var uploadProgress: CGFloat
   }
 
   @Published private(set) var state: State
 
-  init(initialState: State = .init(icon: .none, showsPlaceholder: true)) {
+  init(initialState: State = .init(icon: .none, showsPlaceholder: true, uploadProgress: 0)) {
     state = initialState
   }
 
@@ -35,19 +37,21 @@ private final class VideoOverlayViewModel: ObservableObject {
     hasThumbnail: Bool,
     isVideoDownloaded: Bool,
     isDownloading: Bool,
-    isUploading: Bool
+    isUploading: Bool,
+    uploadProgressFraction: Double
   ) {
-    // Spinner shows for active transfer (download or upload). Otherwise play if local, else download.
+    // Uploads show determinate circular progress. Downloads show spinner.
     let icon: Icon
     if isUploading || isDownloading {
-      icon = .spinner
+      icon = isUploading ? .uploadProgress : .spinner
     } else if isVideoDownloaded {
       icon = .play
     } else {
       icon = .download
     }
 
-    let newState = State(icon: icon, showsPlaceholder: !hasThumbnail)
+    let clampedProgress = CGFloat(max(0, min(uploadProgressFraction, 1)))
+    let newState = State(icon: icon, showsPlaceholder: !hasThumbnail, uploadProgress: clampedProgress)
     if newState != state {
       state = newState
     }
@@ -55,6 +59,54 @@ private final class VideoOverlayViewModel: ObservableObject {
 }
 
 private final class VideoOverlayView: NSView {
+  private final class UploadProgressView: NSView {
+    private let trackLayer = CAShapeLayer()
+    private let progressLayer = CAShapeLayer()
+
+    override init(frame frameRect: NSRect) {
+      super.init(frame: frameRect)
+      wantsLayer = true
+      translatesAutoresizingMaskIntoConstraints = false
+      layer?.addSublayer(trackLayer)
+      layer?.addSublayer(progressLayer)
+
+      trackLayer.fillColor = NSColor.clear.cgColor
+      trackLayer.strokeColor = NSColor.white.withAlphaComponent(0.3).cgColor
+      trackLayer.lineWidth = 2
+      trackLayer.lineCap = .round
+
+      progressLayer.fillColor = NSColor.clear.cgColor
+      progressLayer.strokeColor = NSColor.white.cgColor
+      progressLayer.lineWidth = 2
+      progressLayer.lineCap = .round
+      progressLayer.strokeStart = 0
+      progressLayer.strokeEnd = 0
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layout() {
+      super.layout()
+      let inset: CGFloat = 2
+      let rect = bounds.insetBy(dx: inset, dy: inset)
+      let path = NSBezierPath(
+        roundedRect: rect,
+        xRadius: rect.width / 2,
+        yRadius: rect.height / 2
+      ).cgPath
+      trackLayer.frame = bounds
+      progressLayer.frame = bounds
+      trackLayer.path = path
+      progressLayer.path = path
+    }
+
+    func setProgress(_ progress: CGFloat) {
+      progressLayer.strokeEnd = max(0, min(progress, 1))
+      isHidden = false
+    }
+  }
+
   private final class RingSpinnerView: NSView {
     private let ringLayer = CAShapeLayer()
     private var isAnimating = false
@@ -154,6 +206,7 @@ private final class VideoOverlayView: NSView {
   }()
 
   private let spinner = RingSpinnerView()
+  private let uploadProgress = UploadProgressView()
 
   private var cancellable: AnyCancellable?
 
@@ -166,8 +219,10 @@ private final class VideoOverlayView: NSView {
     addSubview(playIcon)
     addSubview(downloadIcon)
     addSubview(spinner)
+    addSubview(uploadProgress)
     addSubview(cancelButton)
     spinner.isHidden = true
+    uploadProgress.isHidden = true
     cancelButton.target = self
     cancelButton.action = #selector(handleCancel)
 
@@ -187,6 +242,11 @@ private final class VideoOverlayView: NSView {
       spinner.centerYAnchor.constraint(equalTo: centerYAnchor),
       spinner.widthAnchor.constraint(equalToConstant: 44),
       spinner.heightAnchor.constraint(equalToConstant: 44),
+
+      uploadProgress.centerXAnchor.constraint(equalTo: centerXAnchor),
+      uploadProgress.centerYAnchor.constraint(equalTo: centerYAnchor),
+      uploadProgress.widthAnchor.constraint(equalToConstant: 44),
+      uploadProgress.heightAnchor.constraint(equalToConstant: 44),
 
       cancelButton.centerXAnchor.constraint(equalTo: centerXAnchor),
       cancelButton.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -212,22 +272,32 @@ private final class VideoOverlayView: NSView {
       playIcon.isHidden = true
       downloadIcon.isHidden = true
       spinner.stopAnimating()
+      uploadProgress.isHidden = true
     case .play:
       playIcon.isHidden = false
       downloadIcon.isHidden = true
       spinner.stopAnimating()
+      uploadProgress.isHidden = true
     case .download:
       playIcon.isHidden = true
       downloadIcon.isHidden = false
       spinner.stopAnimating()
+      uploadProgress.isHidden = true
     case .spinner:
       playIcon.isHidden = true
       downloadIcon.isHidden = true
       spinner.startAnimating()
+      uploadProgress.isHidden = true
+    case .uploadProgress:
+      playIcon.isHidden = true
+      downloadIcon.isHidden = true
+      spinner.stopAnimating()
+      uploadProgress.setProgress(state.uploadProgress)
     }
 
     spinner.isHidden = state.icon != .spinner
-    cancelButton.isHidden = state.icon != .spinner
+    uploadProgress.isHidden = state.icon != .uploadProgress
+    cancelButton.isHidden = !(state.icon == .spinner || state.icon == .uploadProgress)
     backgroundCircle.isHidden = state.icon == .none
   }
 
@@ -745,6 +815,7 @@ final class NewVideoView: NSView {
     let isUploading = isPendingUpload()
       || uploadProgressSnapshot?.stage == .processing
       || uploadProgressSnapshot?.stage == .uploading
+    let uploadProgressFraction = uploadProgressSnapshot?.fractionCompleted ?? 0
     let globalDownloadActive = fullMessage.videoInfo
       .map { FileDownloader.shared.isVideoDownloadActive(videoId: $0.id) } ?? false
 
@@ -755,24 +826,30 @@ final class NewVideoView: NSView {
       hasThumbnail: hasThumb,
       isVideoDownloaded: isVideoDownloaded,
       isDownloading: downloading,
-      isUploading: isUploading
+      isUploading: isUploading,
+      uploadProgressFraction: uploadProgressFraction
     )
 
     backgroundView.isHidden = hasThumb ? true : false
 
-    if overlayViewModel.state.icon == .spinner {
-      if isUploading, let videoLocalId = fullMessage.videoInfo?.video.id {
+    switch overlayViewModel.state.icon {
+    case .uploadProgress:
+      if let videoLocalId = fullMessage.videoInfo?.video.id {
         activeTransfer = .uploading(
           videoLocalId: videoLocalId,
           transactionId: fullMessage.message.transactionId,
           randomId: fullMessage.message.randomId
         )
-      } else if downloading, let videoId = fullMessage.videoInfo?.id {
+      } else {
+        activeTransfer = nil
+      }
+    case .spinner:
+      if let videoId = fullMessage.videoInfo?.id {
         activeTransfer = .downloading(videoId: videoId)
       } else {
         activeTransfer = nil
       }
-    } else {
+    default:
       activeTransfer = nil
     }
   }
