@@ -6,10 +6,10 @@ class LoomAttachmentView: NSView, AttachmentView {
 
   private enum Constants {
     static let cornerRadius: CGFloat = 10
-    static let padding: CGFloat = 8
-    static let spacing: CGFloat = 10
+    static let padding: CGFloat = 6
+    static let spacing: CGFloat = 8
     static let accentWidth: CGFloat = 3
-    static let imageSide: CGFloat = 68
+    static let imageSide: CGFloat = 52
     static let playIconSize: CGFloat = 18
     static let loomTagFontSize: CGFloat = 10
   }
@@ -48,7 +48,7 @@ class LoomAttachmentView: NSView, AttachmentView {
     stack.translatesAutoresizingMaskIntoConstraints = false
     stack.orientation = .horizontal
     stack.spacing = Constants.spacing
-    stack.alignment = .centerY
+    stack.alignment = .top
     stack.detachesHiddenViews = true
     return stack
   }()
