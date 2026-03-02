@@ -28,6 +28,9 @@ const createScenario = async ({ sourceFromCurrentUser }: { sourceFromCurrentUser
   const dmPeerUser = await testUtils.createUser(nextEmail("dm-peer"))
   const destinationPeerUser = await testUtils.createUser(nextEmail("thread-peer"))
   const space = await testUtils.createSpace("Forward Test Space")
+  if (!space) {
+    throw new Error("Failed to create test space")
+  }
 
   await db.insert(members).values([
     { userId: currentUser.id, spaceId: space.id, role: "member" },
@@ -44,6 +47,9 @@ const createScenario = async ({ sourceFromCurrentUser }: { sourceFromCurrentUser
       createdBy: currentUser.id,
     })
     .returning()
+  if (!destinationThread) {
+    throw new Error("Failed to create destination thread")
+  }
 
   await db.insert(chatParticipants).values([
     { chatId: destinationThread.id, userId: currentUser.id },
