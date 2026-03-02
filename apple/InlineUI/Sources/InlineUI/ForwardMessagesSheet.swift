@@ -32,6 +32,7 @@ public struct ForwardMessagesSheet: View {
   @Environment(\.dismiss) private var dismiss
 
   private let messages: [FullMessage]
+  private let database: AppDatabase
   private let onSelect: ForwardMessagesSelectHandler?
   private let onSend: ForwardMessagesSendHandler?
   private let onClose: (() -> Void)?
@@ -80,6 +81,7 @@ public struct ForwardMessagesSheet: View {
     onClose: (() -> Void)? = nil
   ) {
     self.messages = messages
+    self.database = database
     self.onSelect = onSelect
     self.onSend = onSend
     self.onClose = onClose
@@ -289,15 +291,34 @@ public struct ForwardMessagesSheet: View {
   }
 
   private func buildSelection() -> ForwardMessagesSelection? {
-    guard let fromPeerId = messages.first?.peerId,
-          let sourceChatId = messages.first?.chatId
-    else {
+    guard let sourceMessage = messages.first else {
       log.error("Missing forward source metadata")
       return nil
     }
+
+    let sourceChatId = sourceMessage.chatId
+    let fromPeerId: Peer
+    if let sourceChat = try? database.reader.read({ db in
+      try Chat.fetchOne(db, id: sourceChatId)
+    }) {
+      if let peerUserId = sourceChat.peerUserId {
+        fromPeerId = .user(id: peerUserId)
+      } else {
+        fromPeerId = .thread(id: sourceChat.id)
+      }
+    } else {
+      fromPeerId = sourceMessage.peerId
+      log.warning("Falling back to message peer for forward source chatId=\(sourceChatId)")
+    }
+
     let messageIds = messages.map(\.message.messageId)
     guard let previewMessageId = messageIds.first else {
       log.error("Missing forward message ids")
+      return nil
+    }
+
+    if messages.contains(where: { $0.chatId != sourceChatId }) {
+      log.error("Forward selection contains messages from multiple chats sourceChatId=\(sourceChatId)")
       return nil
     }
 
