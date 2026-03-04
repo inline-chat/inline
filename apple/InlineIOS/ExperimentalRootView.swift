@@ -96,6 +96,10 @@ struct ExperimentalRootView: View {
       // Put the toolbar on the TabView root. Toolbars declared inside TabView pages can fail to
       // render reliably; attaching here keeps the top bar consistent.
       .toolbar {
+        ToolbarItem(placement: .topBarLeading) {
+          leadingButtonGroup
+        }
+
         ToolbarItem(placement: .principal) {
           activeSpacePicker(selectedSpaceId: $bindableNav.activeSpaceId)
         }
@@ -106,13 +110,13 @@ struct ExperimentalRootView: View {
           }
           ToolbarSpacer(.fixed, placement: .topBarTrailing)
           ToolbarItem(placement: .topBarTrailing) {
-            trailingButtonGroup
+            filterButton
           }
         } else {
           ToolbarItem(placement: .topBarTrailing) {
             HStack(spacing: 10) {
               createThreadButton(activeSpaceId: bindableNav.activeSpaceId)
-              trailingButtonGroup
+              filterButton
             }
           }
         }
@@ -221,7 +225,7 @@ struct ExperimentalRootView: View {
     picker
       .contentShape(Capsule())
       // Ensure the toolbar gives the label enough width to show the active space name.
-      .frame(minWidth: 140, idealWidth: 180, maxWidth: 240, alignment: .leading)
+      .frame(minWidth: 140, idealWidth: 180, maxWidth: 240, alignment: .center)
   }
 
   @ViewBuilder
@@ -294,35 +298,15 @@ struct ExperimentalRootView: View {
     }
   }
 
-  private var trailingButtonGroup: some View {
+  private var leadingButtonGroup: some View {
     HStack(spacing: 0) {
       NotificationSettingsButton(
         iconColor: .primary,
         iconFont: .system(size: 14, weight: .semibold)
       )
-        .frame(width: 36, height: 36)
-
-      Divider()
-        .opacity(0.35)
-        .padding(.vertical, 8)
+      .frame(width: 36, height: 36)
 
       Menu {
-        if nav.activeSpaceId == nil {
-          Picker("View", selection: homeChatScopeBinding) {
-            ForEach(ExperimentalHomeChatScope.allCases) { scope in
-              Label(scope.title, systemImage: scope.systemImage)
-                .tag(scope)
-            }
-          }
-        }
-
-        Picker("Chat Items", selection: chatItemRenderModeBinding) {
-          ForEach(ExperimentalHomeChatItemRenderMode.allCases) { mode in
-            Label(mode.title, systemImage: mode.systemImage)
-              .tag(mode)
-          }
-        }
-
         Button {
           presentMembers()
         } label: {
@@ -336,7 +320,7 @@ struct ExperimentalRootView: View {
           Label("Settings", systemImage: "gearshape")
         }
       } label: {
-        Image(systemName: "line.3.horizontal.decrease")
+        Image(systemName: "ellipsis")
           .font(.system(size: 14, weight: .semibold))
           .foregroundStyle(.primary)
           .frame(width: 36, height: 36)
@@ -344,5 +328,34 @@ struct ExperimentalRootView: View {
       }
       .accessibilityLabel("More")
     }
+  }
+
+  private var filterButton: some View {
+    Menu {
+      if nav.activeSpaceId == nil {
+        Picker("Filters", selection: homeChatScopeBinding) {
+          ForEach(ExperimentalHomeChatScope.allCases) { scope in
+            Label(scope.title, systemImage: scope.systemImage)
+              .tag(scope)
+          }
+        }
+      }
+
+      Menu("View Options") {
+        Picker("View Options", selection: chatItemRenderModeBinding) {
+          ForEach(ExperimentalHomeChatItemRenderMode.allCases) { mode in
+            Label(mode.title, systemImage: mode.systemImage)
+              .tag(mode)
+          }
+        }
+      }
+    } label: {
+      Image(systemName: "line.3.horizontal.decrease")
+        .font(.system(size: 14, weight: .semibold))
+        .foregroundStyle(.primary)
+        .frame(width: 36, height: 36)
+        .contentShape(Rectangle())
+    }
+    .accessibilityLabel("Filters")
   }
 }

@@ -259,6 +259,7 @@ public extension ApiDialog {
     if let existing {
       dialog.draftMessage = existing.draftMessage
       dialog.notificationSettings = existing.notificationSettings
+      dialog.unreadMark = existing.unreadMark
       try dialog.save(db)
     } else {
       try dialog.save(db, onConflict: .replace)
@@ -279,6 +280,9 @@ public extension InlineProtocol.Dialog {
     if let existing {
       var newDialog = Dialog(from: self)
       newDialog.draftMessage = existing.draftMessage
+      if !hasNotificationSettings {
+        newDialog.notificationSettings = existing.notificationSettings
+      }
       try newDialog.save(db, onConflict: .replace)
       return newDialog
     } else {

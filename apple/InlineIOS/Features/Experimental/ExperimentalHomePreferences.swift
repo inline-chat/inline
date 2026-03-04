@@ -8,18 +8,15 @@ enum ExperimentalHomePreferenceKeys {
 enum ExperimentalHomeChatScope: String, CaseIterable, Identifiable {
   case all
   case home
-  case spaces
 
   var id: String { rawValue }
 
   var title: String {
     switch self {
     case .all:
-      "All Chats"
+      "All"
     case .home:
-      "Home Only"
-    case .spaces:
-      "Spaces Only"
+      "Only Home"
     }
   }
 
@@ -29,8 +26,6 @@ enum ExperimentalHomeChatScope: String, CaseIterable, Identifiable {
       "tray.full"
     case .home:
       "house.fill"
-    case .spaces:
-      "building.2"
     }
   }
 }
@@ -40,16 +35,20 @@ enum ExperimentalHomeChatItemRenderMode: String, CaseIterable, Identifiable {
   case oneLineLastMessage
   case noLastMessage = "minimal"
 
+  static var allCases: [ExperimentalHomeChatItemRenderMode] {
+    [.noLastMessage, .oneLineLastMessage, .twoLineLastMessage]
+  }
+
   var id: String { rawValue }
 
   var title: String {
     switch self {
     case .twoLineLastMessage:
-      "2-Line Last Message"
+      "Default"
     case .oneLineLastMessage:
-      "1-Line Last Message"
+      "Medium"
     case .noLastMessage:
-      "No Last Message"
+      "Compact"
     }
   }
 
@@ -60,7 +59,7 @@ enum ExperimentalHomeChatItemRenderMode: String, CaseIterable, Identifiable {
     case .oneLineLastMessage:
       "text.justify.left"
     case .noLastMessage:
-      "text.badge.minus"
+      "line.3.horizontal.decrease"
     }
   }
 }

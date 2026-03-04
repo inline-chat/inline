@@ -8,6 +8,7 @@ struct CreateSpace: View {
   @State private var name = ""
   @FocusState private var isFocused: Bool
   @FormState var formState
+  @AppStorage("enableExperimentalView") private var enableExperimentalView = false
 
   @EnvironmentObject var nav: Navigation
   @Environment(\.appDatabase) var database
@@ -64,8 +65,16 @@ struct CreateSpace: View {
         dismiss()
 
         if let id {
-          router.selectedTab = .spaces
-          router.push(.space(id: id))
+          if enableExperimentalView {
+            let targetTab: AppTab = (router.selectedTab == .archived) ? .archived : .chats
+            if router.selectedTab != targetTab {
+              router.selectedTab = targetTab
+            }
+            router.push(.space(id: id), for: targetTab)
+          } else {
+            router.selectedTab = .spaces
+            router.push(.space(id: id), for: .spaces)
+          }
         }
 
       } catch {

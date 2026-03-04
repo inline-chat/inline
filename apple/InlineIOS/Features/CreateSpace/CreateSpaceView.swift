@@ -11,6 +11,7 @@ struct CreateSpaceView: View {
   @FocusState private var isFocused: Bool
   @FocusState private var showEmojiPicker: Bool
   @FormState var formState
+  @AppStorage("enableExperimentalView") private var enableExperimentalView = false
 
   @Environment(\.appDatabase) var database
   @Environment(Router.self) private var router
@@ -109,9 +110,18 @@ struct CreateSpaceView: View {
         formState.succeeded()
 
         if let id {
-          router.popToRoot()
-          router.selectedTab = .spaces
-          router.push(.space(id: id))
+          if enableExperimentalView {
+            let targetTab: AppTab = (router.selectedTab == .archived) ? .archived : .chats
+            if router.selectedTab != targetTab {
+              router.selectedTab = targetTab
+            }
+            router.popToRoot(for: targetTab)
+            router.push(.space(id: id), for: targetTab)
+          } else {
+            router.popToRoot(for: .spaces)
+            router.selectedTab = .spaces
+            router.push(.space(id: id), for: .spaces)
+          }
         }
 
       } catch {
