@@ -35,9 +35,6 @@
         }
       }
     },
-    "%@ options" : {
-
-    },
     "%@ Settings" : {
 
     },
@@ -243,9 +240,6 @@
 
     },
     "Chat" : {
-
-    },
-    "Chat Items" : {
 
     },
     "Chat title" : {
@@ -641,6 +635,9 @@
 
     },
     "Failed to load chat" : {
+
+    },
+    "Filters" : {
 
     },
     "Find" : {
@@ -1124,6 +1121,9 @@
       }
     },
     "View" : {
+
+    },
+    "View Options" : {
 
     },
     "Visibility" : {

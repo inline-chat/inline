@@ -10,6 +10,9 @@ import SwiftUI
 @Observable
 final class ExperimentalNavigationModel {
   private static let activeSpaceDefaultsKey = "activeSpaceId"
+  private var didRunHomeBootstrap = false
+  private var fetchedDialogSpaceIds = Set<Int64>()
+  private var fetchingDialogSpaceIds = Set<Int64>()
 
   var activeSpaceId: Int64? {
     didSet {
@@ -19,6 +22,29 @@ final class ExperimentalNavigationModel {
 
   init() {
     activeSpaceId = Self.loadActiveSpaceId()
+  }
+
+  func consumeNeedsHomeBootstrap() -> Bool {
+    guard !didRunHomeBootstrap else { return false }
+    didRunHomeBootstrap = true
+    return true
+  }
+
+  func beginDialogsFetchIfNeeded(spaceId: Int64) -> Bool {
+    guard !fetchedDialogSpaceIds.contains(spaceId) else { return false }
+    return fetchingDialogSpaceIds.insert(spaceId).inserted
+  }
+
+  func completeDialogsFetch(spaceId: Int64, succeeded: Bool) {
+    fetchingDialogSpaceIds.remove(spaceId)
+    if succeeded {
+      fetchedDialogSpaceIds.insert(spaceId)
+    }
+  }
+
+  func pruneDialogFetchState(validSpaceIds: Set<Int64>) {
+    fetchedDialogSpaceIds = fetchedDialogSpaceIds.filter { validSpaceIds.contains($0) }
+    fetchingDialogSpaceIds = fetchingDialogSpaceIds.filter { validSpaceIds.contains($0) }
   }
 
   private static func loadActiveSpaceId() -> Int64? {
@@ -121,12 +147,12 @@ private struct ExperimentalHomeView: View {
   @EnvironmentObject private var compactSpaceList: CompactSpaceList
   @EnvironmentObject private var data: DataManager
   @EnvironmentObject private var home: HomeViewModel
+  @EnvironmentObject private var notificationHandler: NotificationHandler
+  @Environment(\.realtimeV2) private var realtimeV2
   @EnvironmentStateObject private var chatsModel: ExperimentalSpaceChatsViewModel
 
   @AppStorage(ExperimentalHomePreferenceKeys.chatScope) private var homeChatScopeRaw: String = ExperimentalHomeChatScope.all.rawValue
   @AppStorage(ExperimentalHomePreferenceKeys.chatItemRenderMode) private var chatItemRenderModeRaw: String = ExperimentalHomeChatItemRenderMode.twoLineLastMessage.rawValue
-  @State private var didInitialFetch = false
-  @State private var fetchedSpaceIds = Set<Int64>()
 
   init(nav: ExperimentalNavigationModel, initialTab: ExperimentalHomeTab) {
     self.nav = nav
@@ -168,11 +194,16 @@ private struct ExperimentalHomeView: View {
     .navigationBarTitleDisplayMode(.inline)
     .navigationTitle("")
     .task {
-      guard !didInitialFetch else { return }
-      didInitialFetch = true
-      await initialFetch()
+      chatsModel.setSpaceId(nav.activeSpaceId)
+
+      if nav.consumeNeedsHomeBootstrap() {
+        await initialFetch()
+      } else {
+        await refreshDialogsForCurrentSelection()
+      }
     }
     .onChange(of: compactSpaceList.spaces) { _, _ in
+      nav.pruneDialogFetchState(validSpaceIds: Set(compactSpaceList.spaces.map(\.id)))
       ensureActiveSpaceExists()
       chatsModel.setSpaceId(nav.activeSpaceId)
       Task { await refreshDialogsForCurrentSelection() }
@@ -202,8 +233,6 @@ private struct ExperimentalHomeView: View {
           true
         case .home:
           item.space == nil
-        case .spaces:
-          item.space != nil
         }
       }
     } else {
@@ -231,6 +260,20 @@ private struct ExperimentalHomeView: View {
   }
 
   private func initialFetch() async {
+    notificationHandler.setAuthenticated(value: true)
+
+    do {
+      _ = try await realtimeV2.send(.getMe())
+    } catch {
+      Log.shared.error("Failed to getMe", error: error)
+    }
+
+    do {
+      _ = try await realtimeV2.send(.getChats())
+    } catch {
+      Log.shared.error("Failed to getChats", error: error)
+    }
+
     do {
       _ = try await data.getSpaces()
     } catch {
@@ -252,10 +295,12 @@ private struct ExperimentalHomeView: View {
   }
 
   private func fetchDialogsIfNeeded(spaceId: Int64) async {
-    guard fetchedSpaceIds.insert(spaceId).inserted else { return }
+    guard nav.beginDialogsFetchIfNeeded(spaceId: spaceId) else { return }
     do {
       try await data.getDialogs(spaceId: spaceId)
+      nav.completeDialogsFetch(spaceId: spaceId, succeeded: true)
     } catch {
+      nav.completeDialogsFetch(spaceId: spaceId, succeeded: false)
       Log.shared.error("Failed to get dialogs", error: error)
     }
   }
@@ -382,7 +427,10 @@ private struct ExperimentalChatListView: View {
   let chatItemRenderMode: ExperimentalHomeChatItemRenderMode
   let onTapItem: (HomeChatItem) -> Void
 
+  @Environment(Router.self) private var router
   @EnvironmentObject private var data: DataManager
+  @Environment(\.realtimeV2) private var realtimeV2
+  @StateObject private var translationCoordinator = ChatListTranslationCoordinator()
 
   var body: some View {
     if items.isEmpty {
@@ -407,11 +455,32 @@ private struct ExperimentalChatListView: View {
       }
       .listStyle(.plain)
       .animation(.snappy(duration: 0.25, extraBounce: 0), value: itemIDs)
+      .onChange(of: items) { _, newItems in
+        translationCoordinator.process(
+          items: newItems,
+          currentPeers: currentPeers
+        )
+      }
+      .onAppear {
+        translationCoordinator.prime(items: items)
+      }
+      .onDisappear {
+        translationCoordinator.cancel()
+      }
     }
   }
 
   private var itemIDs: [Int64] {
     items.map(\.id)
+  }
+
+  private var currentPeers: Set<Peer> {
+    Set(router.selectedTabPath.compactMap { destination in
+      if case let .chat(peer) = destination {
+        return peer
+      }
+      return nil
+    })
   }
 
   private var rows: some View {
@@ -424,8 +493,12 @@ private struct ExperimentalChatListView: View {
           .contentShape(.rect)
       }
       .buttonStyle(.plain)
+      .swipeActions(edge: .leading, allowsFullSwipe: false) {
+        readUnreadButton(for: item)
+      }
       .swipeActions(edge: .trailing, allowsFullSwipe: true) {
         archiveButton(for: item)
+        pinButton(for: item)
       }
       .listRowSeparator(index == 0 ? .hidden : .visible, edges: .top)
       .listRowInsets(EdgeInsets(
@@ -441,6 +514,30 @@ private struct ExperimentalChatListView: View {
         )
       )
     }
+  }
+
+  @ViewBuilder
+  private func pinButton(for item: HomeChatItem) -> some View {
+    let isPinned = item.dialog.pinned ?? false
+
+    Button {
+      Task {
+        do {
+          try await data.updateDialog(
+            peerId: item.peerId,
+            pinned: !isPinned
+          )
+        } catch {
+          Log.shared.error("Failed to update pin state", error: error)
+        }
+      }
+    } label: {
+      Label(
+        isPinned ? "Unpin" : "Pin",
+        systemImage: isPinned ? "pin.slash.fill" : "pin.fill"
+      )
+    }
+    .tint(.indigo)
   }
 
   @ViewBuilder
@@ -461,6 +558,31 @@ private struct ExperimentalChatListView: View {
       )
     }
     .tint(Color(.systemPurple))
+  }
+
+  @ViewBuilder
+  private func readUnreadButton(for item: HomeChatItem) -> some View {
+    let hasUnread = (item.dialog.unreadCount ?? 0) > 0 || item.dialog.unreadMark == true
+
+    Button {
+      Task {
+        do {
+          if hasUnread {
+            UnreadManager.shared.readAll(item.peerId, chatId: item.chat?.id ?? 0)
+          } else {
+            _ = try await realtimeV2.send(.markAsUnread(peerId: item.peerId))
+          }
+        } catch {
+          Log.shared.error("Failed to update read state", error: error)
+        }
+      }
+    } label: {
+      Label(
+        hasUnread ? "Mark Read" : "Mark Unread",
+        systemImage: hasUnread ? "checkmark.message.fill" : "envelope.badge.fill"
+      )
+    }
+    .tint(.blue)
   }
 
   @ViewBuilder
@@ -549,6 +671,7 @@ struct ExperimentalMembersSheetView: View {
 
   @Environment(Router.self) private var router
   @EnvironmentStateObject private var viewModel: SpaceFullMembersViewModel
+  @State private var didRunInitialFetch = false
 
   init(spaceId: Int64) {
     self.spaceId = spaceId
@@ -590,6 +713,11 @@ struct ExperimentalMembersSheetView: View {
           .accessibilityLabel("Refresh")
         }
       }
+    }
+    .task {
+      guard !didRunInitialFetch else { return }
+      didRunInitialFetch = true
+      await viewModel.refetchMembers()
     }
   }
 }

@@ -326,12 +326,9 @@ public class DataManager: ObservableObject {
           try chat.save(db, onConflict: .replace)
         }
 
-        // Save dialogs
-        let dialogs = result.dialogs.map { dialog in
-          Dialog(from: dialog)
-        }
-        try dialogs.forEach { dialog in
-          try dialog.save(db, onConflict: .replace)
+        // Save dialogs (merge with existing local-only fields such as drafts/settings).
+        try result.dialogs.forEach { dialog in
+          try dialog.saveFull(db)
         }
       }
 
