@@ -122,25 +122,13 @@ final class ChatsViewModel: ObservableObject {
     contactsCancellable =
       ValueObservation
         .tracking { db in
-          let spaceArchivedPeerUserIds = try SpaceMemberDialogArchiveState.archivedPeerUserIds(db: db, spaceId: spaceId)
-
-          let items = try Dialog
+          return try Dialog
             .spaceChatItemQueryForUser()
             .filter(
               sql: "dialog.peerUserId IN (SELECT userId FROM member WHERE spaceId = ?)",
               arguments: StatementArguments([spaceId])
             )
             .fetchAll(db)
-
-          return items.map { item in
-            var patched = item
-            if let peerUserId = patched.dialog.peerUserId {
-              patched.dialog.archived = spaceArchivedPeerUserIds.contains(peerUserId)
-            } else {
-              patched.dialog.archived = false
-            }
-            return patched
-          }
         }
         .publisher(in: db.dbWriter, scheduling: .immediate)
         .receive(on: DispatchQueue.main)
@@ -148,7 +136,7 @@ final class ChatsViewModel: ObservableObject {
           receiveCompletion: { _ in },
           receiveValue: { [weak self] (items: [SpaceChatItem]) in
             guard let self else { return }
-            contactItems = items.map { ChatListItem(spaceContactItem: $0, spaceId: spaceId) }
+            contactItems = items.map(ChatListItem.init(spaceContactItem:))
             updateItems()
           }
         )
