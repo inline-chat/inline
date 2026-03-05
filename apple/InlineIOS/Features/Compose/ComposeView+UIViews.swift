@@ -36,30 +36,33 @@ extension ComposeView {
 
     button.configurationUpdateHandler = { [weak button] _ in
       guard let button else { return }
-
-      let config = button.configuration
+      if !button.isUserInteractionEnabled || button.alpha <= 0.01 {
+        button.layer.removeAllAnimations()
+        button.transform = .identity
+        return
+      }
 
       if button.isHighlighted {
         UIView.animate(
-          withDuration: 0.15,
+          withDuration: 0.4,
           delay: 0,
-          options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseInOut],
-          animations: {
-            button.transform = CGAffineTransform(scaleX: 0.9, y: 0.9)
-          }
-        )
+          options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseInOut]
+        ) {
+          button.transform = CGAffineTransform(scaleX: 0.75, y: 0.75)
+        }
       } else {
-        UIView.animate(
-          withDuration: 0.12,
-          delay: 0.05,
-          options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseIn],
-          animations: {
-            button.transform = .identity
-          }
-        )
-      }
+        let currentScale =
+          CGFloat((button.layer.presentation()?.value(forKeyPath: "transform.scale.y") as? NSNumber)?.floatValue ?? Float(button.transform.a))
+        button.transform = CGAffineTransform(scaleX: currentScale, y: currentScale)
 
-      button.configuration = config
+        UIView.animate(
+          withDuration: 0.25,
+          delay: 0,
+          options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseInOut]
+        ) {
+          button.transform = .identity
+        }
+      }
     }
 
     button.configuration = config
