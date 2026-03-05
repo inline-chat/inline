@@ -2123,6 +2123,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         peer_id: Some(peer.clone()),
                         offset_id: args.offset_id,
                         limit: args.limit,
+                        ..Default::default()
                     };
 
                     let result = realtime
@@ -2489,6 +2490,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         peer_id: Some(peer),
                         offset_id: args.offset_id,
                         limit: args.limit,
+                        ..Default::default()
                     };
                     let result = realtime
                         .call_rpc(
@@ -2945,6 +2947,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         peer_id: Some(peer.clone()),
                         offset_id: Some(offset_id),
                         limit: Some(1),
+                        ..Default::default()
                     };
                     let result = realtime
                         .call_rpc(
@@ -5085,6 +5088,7 @@ async fn fetch_message_by_id(
             peer_id: Some(peer.clone()),
             offset_id: Some(offset_id),
             limit: Some(20),
+            ..Default::default()
         };
         let result = realtime
             .call_rpc(
