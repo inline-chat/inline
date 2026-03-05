@@ -3,7 +3,6 @@ import { withJson } from "../http/response"
 import { MCP_SUPPORTED_SCOPES } from "@inline-chat/oauth-core"
 
 const PROXIED_OAUTH_PATHS = new Set([
-  "/.well-known/oauth-authorization-server",
   "/oauth/register",
   "/register",
   "/oauth/authorize",
@@ -16,6 +15,11 @@ const PROXIED_OAUTH_PATHS = new Set([
   "/oauth/revoke",
   "/revoke",
 ])
+
+function oauthEndpoint(base: string, path: string): string {
+  const normalizedBase = base.endsWith("/") ? base : `${base}/`
+  return new URL(path.replace(/^\//, ""), normalizedBase).toString()
+}
 
 function normalizeForwardedFor(value: string | null): string {
   if (!value) return "unknown"
@@ -53,6 +57,21 @@ async function proxyToOauthServer(req: Request, url: URL, config: McpConfig): Pr
 
 export const OAuth = {
   async handle(req: Request, url: URL, config: McpConfig): Promise<Response | null> {
+    if (url.pathname === "/.well-known/oauth-authorization-server") {
+      return withJson({
+        issuer: config.oauthIssuer,
+        authorization_endpoint: oauthEndpoint(config.oauthIssuer, "/oauth/authorize"),
+        token_endpoint: oauthEndpoint(config.oauthIssuer, "/oauth/token"),
+        registration_endpoint: oauthEndpoint(config.oauthIssuer, "/oauth/register"),
+        revocation_endpoint: oauthEndpoint(config.oauthIssuer, "/oauth/revoke"),
+        scopes_supported: [...MCP_SUPPORTED_SCOPES],
+        response_types_supported: ["code"],
+        grant_types_supported: ["authorization_code", "refresh_token"],
+        token_endpoint_auth_methods_supported: ["none"],
+        code_challenge_methods_supported: ["S256"],
+      })
+    }
+
     if (url.pathname === "/.well-known/oauth-protected-resource") {
       return withJson({
         resource: config.issuer,
