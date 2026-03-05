@@ -26,8 +26,6 @@ struct ExperimentalRootView: View {
   @EnvironmentStateObject private var data: DataManager
   @EnvironmentStateObject private var home: HomeViewModel
   @EnvironmentStateObject private var compactSpaceList: CompactSpaceList
-  @AppStorage(ExperimentalHomePreferenceKeys.chatScope) private var homeChatScopeRaw: String = ExperimentalHomeChatScope.all.rawValue
-  @AppStorage(ExperimentalHomePreferenceKeys.chatItemRenderMode) private var chatItemRenderModeRaw: String = ExperimentalHomeChatItemRenderMode.twoLineLastMessage.rawValue
 
   init() {
     _data = EnvironmentStateObject { env in
@@ -104,21 +102,8 @@ struct ExperimentalRootView: View {
           activeSpacePicker(selectedSpaceId: $bindableNav.activeSpaceId)
         }
 
-        if #available(iOS 26.0, *) {
-          ToolbarItem(placement: .topBarTrailing) {
-            createThreadButton(activeSpaceId: bindableNav.activeSpaceId)
-          }
-          ToolbarSpacer(.fixed, placement: .topBarTrailing)
-          ToolbarItem(placement: .topBarTrailing) {
-            filterButton
-          }
-        } else {
-          ToolbarItem(placement: .topBarTrailing) {
-            HStack(spacing: 10) {
-              createThreadButton(activeSpaceId: bindableNav.activeSpaceId)
-              filterButton
-            }
-          }
+        ToolbarItem(placement: .topBarTrailing) {
+          createThreadButton(activeSpaceId: bindableNav.activeSpaceId)
         }
       }
       // Match the app's translucent styling for the system tab bar.
@@ -170,35 +155,6 @@ struct ExperimentalRootView: View {
     @Bindable var bindableNav = nav
 
     return ExperimentalDestinationView(nav: bindableNav, destination: root)
-  }
-
-  private func presentMembers() {
-    guard let spaceId = nav.activeSpaceId else { return }
-    router.presentSheet(.members(spaceId: spaceId))
-  }
-
-  // MARK: - Toolbar
-
-  private var homeChatScope: ExperimentalHomeChatScope {
-    ExperimentalHomeChatScope(rawValue: homeChatScopeRaw) ?? .all
-  }
-
-  private var homeChatScopeBinding: Binding<ExperimentalHomeChatScope> {
-    Binding(
-      get: { homeChatScope },
-      set: { homeChatScopeRaw = $0.rawValue }
-    )
-  }
-
-  private var chatItemRenderMode: ExperimentalHomeChatItemRenderMode {
-    ExperimentalHomeChatItemRenderMode(rawValue: chatItemRenderModeRaw) ?? .twoLineLastMessage
-  }
-
-  private var chatItemRenderModeBinding: Binding<ExperimentalHomeChatItemRenderMode> {
-    Binding(
-      get: { chatItemRenderMode },
-      set: { chatItemRenderModeRaw = $0.rawValue }
-    )
   }
 
   @ViewBuilder
@@ -306,56 +262,17 @@ struct ExperimentalRootView: View {
       )
       .frame(width: 36, height: 36)
 
-      Menu {
-        Button {
-          presentMembers()
-        } label: {
-          Label("Members", systemImage: "person.2")
-        }
-        .disabled(nav.activeSpaceId == nil)
-
-        Button {
-          router.presentSheet(.settings)
-        } label: {
-          Label("Settings", systemImage: "gearshape")
-        }
+      Button {
+        router.presentSheet(.settings)
       } label: {
-        Image(systemName: "ellipsis")
+        Image(systemName: "gearshape")
           .font(.system(size: 14, weight: .semibold))
           .foregroundStyle(.primary)
           .frame(width: 36, height: 36)
           .contentShape(Rectangle())
       }
-      .accessibilityLabel("More")
+      .buttonStyle(.plain)
+      .accessibilityLabel("Settings")
     }
-  }
-
-  private var filterButton: some View {
-    Menu {
-      if nav.activeSpaceId == nil {
-        Picker("Filters", selection: homeChatScopeBinding) {
-          ForEach(ExperimentalHomeChatScope.allCases) { scope in
-            Label(scope.title, systemImage: scope.systemImage)
-              .tag(scope)
-          }
-        }
-      }
-
-      Menu("View Options") {
-        Picker("View Options", selection: chatItemRenderModeBinding) {
-          ForEach(ExperimentalHomeChatItemRenderMode.allCases) { mode in
-            Label(mode.title, systemImage: mode.systemImage)
-              .tag(mode)
-          }
-        }
-      }
-    } label: {
-      Image(systemName: "line.3.horizontal.decrease")
-        .font(.system(size: 14, weight: .semibold))
-        .foregroundStyle(.primary)
-        .frame(width: 36, height: 36)
-        .contentShape(Rectangle())
-    }
-    .accessibilityLabel("Filters")
   }
 }
