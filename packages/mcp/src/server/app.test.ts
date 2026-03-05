@@ -36,26 +36,30 @@ describe("mcp app", () => {
     expect(body.authorization_servers).toEqual(["https://api.inline.chat"])
   })
 
-  it("proxies oauth routes to upstream server", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ issuer: "https://api.inline.chat" }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      }),
-    )
-
+  it("returns oauth authorization metadata locally", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }))
     const app = createApp({
       issuer: "https://mcp.inline.chat",
+      oauthIssuer: "https://api.inline.chat",
       oauthProxyBaseUrl: "https://api.inline.chat",
     })
 
     const res = await app.fetch(new Request("https://mcp.inline.chat/.well-known/oauth-authorization-server"))
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ issuer: "https://api.inline.chat" })
+    expect(await res.json()).toEqual({
+      issuer: "https://api.inline.chat",
+      authorization_endpoint: "https://api.inline.chat/oauth/authorize",
+      token_endpoint: "https://api.inline.chat/oauth/token",
+      registration_endpoint: "https://api.inline.chat/oauth/register",
+      revocation_endpoint: "https://api.inline.chat/oauth/revoke",
+      scopes_supported: ["offline_access", "messages:read", "messages:write", "spaces:read"],
+      response_types_supported: ["code"],
+      grant_types_supported: ["authorization_code", "refresh_token"],
+      token_endpoint_auth_methods_supported: ["none"],
+      code_challenge_methods_supported: ["S256"],
+    })
 
-    expect(fetchMock).toHaveBeenCalled()
-    const [url] = fetchMock.mock.calls[0] ?? []
-    expect(String(url)).toBe("https://api.inline.chat/.well-known/oauth-authorization-server")
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it("returns 502 when oauth upstream is unavailable", async () => {

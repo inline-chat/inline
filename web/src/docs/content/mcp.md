@@ -1,141 +1,109 @@
 # MCP
 
-Inline MCP lets MCP-compatible clients use your Inline workspace context with explicit OAuth consent.
+Inline MCP lets MCP-compatible clients use your Inline workspace with explicit OAuth consent.
 
-Use it when you want assistants to search messages and send messages in allowed spaces, DMs, and home threads.
+Use it when you want assistants to read conversations, search/list messages, create conversations, and send text/media in approved contexts.
 
 ## Status
 
-Alpha (first-cohort release). Contracts are stable enough for early production use and may evolve.
+Alpha (first-cohort release). Stable enough for early production usage; surface may evolve.
 
-## URL and Metadata
-
-- MCP server URL: `https://mcp.inline.chat/mcp`
-- OAuth authorization server metadata: `https://api.inline.chat/.well-known/oauth-authorization-server`
-- Protected resource metadata: `https://mcp.inline.chat/.well-known/oauth-protected-resource`
-- OAuth revoke endpoint: `https://api.inline.chat/oauth/revoke`
-
-Compatibility note: `https://mcp.inline.chat/oauth/*` is proxied to the API OAuth server.
-
-## Connect Inline MCP
+## Quick Setup
 
 ### ChatGPT Apps
 
 1. Add an MCP connector in ChatGPT Apps.
 2. Set server URL to `https://mcp.inline.chat/mcp`.
-3. Complete the Inline OAuth sign-in and consent flow.
+3. Complete Inline OAuth sign-in and consent.
 
 ### Claude
-
-Use the same remote MCP URL:
 
 ```bash
 claude mcp add --transport http inline https://mcp.inline.chat/mcp
 ```
 
-Then complete the Inline OAuth sign-in flow in Claude.
+Then complete Inline OAuth sign-in in Claude.
 
 ### Other MCP clients
 
-Any remote MCP client that supports OAuth 2.1 + PKCE can use:
+Any remote MCP client with OAuth 2.1 + PKCE (`S256`) can connect using:
 
 - Server URL: `https://mcp.inline.chat/mcp`
-- OAuth discovery: `https://api.inline.chat/.well-known/oauth-authorization-server`
+- OAuth metadata: `https://api.inline.chat/.well-known/oauth-authorization-server`
+- Protected resource metadata: `https://mcp.inline.chat/.well-known/oauth-protected-resource`
 
-## Authorization Flow
+Compatibility: `https://mcp.inline.chat/oauth/*` is proxied to the Inline OAuth server.
 
-1. Client registers dynamically with OAuth.
-2. User signs in to Inline with email code.
+## OAuth and Scopes
+
+Authorization flow:
+
+1. Client performs dynamic OAuth registration.
+2. User signs in to Inline.
 3. User grants scopes.
-4. User selects allowed spaces and can enable `DMs` and `Home threads` (threads shared with you).
-5. Client exchanges authorization code using PKCE (`S256`).
-6. Refresh tokens are issued only if `offline_access` is requested.
+4. User chooses allowed spaces and can enable `DMs` and `Home threads`.
+5. Client exchanges authorization code with PKCE (`S256`).
+6. Refresh token is issued only when `offline_access` is requested.
 
-Token lifetimes:
+Default token lifetimes:
 
 - Access token: 1 hour
 - Refresh token: 30 days
 
-## Scopes
+Scopes:
 
-- `messages:read`: required for `search` and `fetch`
-- `messages:write`: required for `messages.send`
-- `spaces:read`: used for space discovery and consent enforcement
-- `offline_access`: enables refresh token issuance
+- `messages:read`
+- `messages:write`
+- `spaces:read`
+- `offline_access`
 
 Default scope when none is requested: `messages:read spaces:read`
-
-## Tools
-
-### `search`
-
-Searches messages in approved spaces and, when enabled, approved DMs/home threads.
-
-Input:
-
-- `query` (string)
-
-Returns `results[]` with:
-
-- `id` (`inline:chat:<chatId>:msg:<messageId>`)
-- `title`
-- `source` (`chatId`, `title`)
-- `snippet` (when available)
-
-### `fetch`
-
-Fetches one message by `id` from `search`.
-
-Input:
-
-- `id` (`inline:chat:<chatId>:msg:<messageId>`)
-
-Returns:
-
-- `id`, `title`, `text`
-- `source` (`chatId`, `title`)
-- `metadata` (`chatId`, `messageId`, `spaceId`, `fromId`, `date`)
-
-### `messages.send`
-
-Sends a message into an approved chat.
-
-Input:
-
-- `chatId` (string)
-- `text` (1 to 8000 chars)
-- `sendMode` (`normal` or `silent`, default `normal`)
-- `parseMarkdown` (boolean, default `true`)
-
-Returns:
-
-- `ok`
-- `chatId`
-- `messageId`
 
 ## Permission Model
 
 - Space access is limited to spaces selected during consent.
-- DMs are available only when `DMs` is enabled.
-- Home threads are available only when `Home threads` is enabled.
-- Tool scopes are checked on every call.
+- DM access is available only if `DMs` is enabled.
+- Home-thread access is available only if `Home threads` is enabled.
+- Tool scopes are enforced on every call.
 
-## Known Limits
+## Tools
 
-- Search currently returns up to 20 hits and scans up to 50 eligible chats.
-- MCP sessions are in-memory; restart drops active MCP sessions.
-- Each MCP session uses one Inline realtime WebSocket connection.
-- Current tool surface is intentionally focused: `search`, `fetch`, `messages.send`.
+Current MCP tools:
+
+- `conversations.list`: list eligible conversations or resolve a conversation by name/title/ID.
+- `conversations.create`: create a new conversation in an allowed space or home threads.
+- `messages.list`: list recent messages in one chat or DM with filters (`since`, `until`, `content`, `unreadOnly`, etc).
+- `messages.search`: search messages in one chat or DM (not global search).
+- `messages.unread`: list unread messages across approved conversations.
+- `messages.send`: send a text message to a chat or DM.
+- `files.upload`: upload media from `base64` or an HTTPS URL and get Inline media IDs.
+- `messages.send_media`: send uploaded photo/video/document with optional caption.
+- `messages.send_batch`: send ordered text/media items in one call.
+
+Legacy tools `search` and `fetch` are removed.
+
+## Limits
+
+- `messages.list` and `messages.search`: up to 50 messages per call.
+- `messages.unread`: up to 200 messages per call.
+- `messages.send_batch`: up to 100 items per call.
+- `files.upload`: max file size 25 MB.
+- `files.upload` URL source: HTTPS only, private/local network targets are blocked, up to 3 redirects.
+- New MCP session initialization (`POST /mcp` without `mcp-session-id`) is rate-limited per IP.
+- MCP sessions are in-memory and have idle expiry; server restart drops active sessions.
+- Each active MCP session uses one Inline realtime WebSocket connection.
 
 ## Troubleshooting
 
 - `401 invalid_token`: reconnect and complete OAuth again.
-- `403 insufficient_scope`: reconnect and grant required scopes.
+- `403 insufficient_scope`: reconnect and grant needed scopes.
+- `429 rate_limited`: wait and retry initialization.
+- `404 unknown_session`: session expired/restarted; reconnect to create a new session.
 - Missing expected chats: reconnect and expand consent (spaces, DMs, home threads).
 - No refresh behavior: ensure client requested `offline_access`.
 
 ## MCP vs Other Inline APIs
 
 - Use MCP for assistant workflows in MCP-native clients.
-- Use [Realtime API](/docs/realtime-api) for full custom app experiences.
+- Use [Realtime API](/docs/realtime-api) for fully custom client/app integrations.
 - Use [Bot API](/docs/bot-api) for direct HTTP bot integrations.

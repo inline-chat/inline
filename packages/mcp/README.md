@@ -14,7 +14,7 @@ bun run dev
 Production readiness checklist: `PRODUCTION_CHECKLIST.md`.
 ChatGPT submission checklist: `SUBMISSION_CHECKLIST.md`.
 
-## Endpoints (v1)
+## Endpoints
 
 - `GET /health`
 - `GET|POST|DELETE /mcp` (MCP Streamable HTTP)
@@ -28,7 +28,8 @@ ChatGPT submission checklist: `SUBMISSION_CHECKLIST.md`.
 - `POST /oauth/token` (alias: `POST /token`)
 - `POST /oauth/revoke` (alias: `POST /revoke`)
 
-OAuth routes above are proxied to the API OAuth server configured by `MCP_OAUTH_PROXY_BASE_URL` (defaults to `INLINE_API_BASE_URL`).
+OAuth routes above are proxied to the API OAuth server (`https://api.inline.chat` in default config).
+If embedding the app programmatically, you can override this via `createApp({ oauthProxyBaseUrl })`.
 
 ## MCP Tools (v2)
 
