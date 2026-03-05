@@ -34,6 +34,7 @@ import { FILES_PATH_PREFIX } from "@in/server/modules/files/path"
 import { getR2 } from "@in/server/libs/r2"
 import { UsersModel } from "@in/server/db/models/users"
 import { issueEmailLoginChallenge, verifyEmailLoginChallenge } from "@in/server/modules/auth/emailLoginChallenges"
+import { getDesktopPushSuppressionMetrics } from "@in/server/modules/notifications/desktopPushSuppression"
 
 const ADMIN_COOKIE_NAME = "inline_admin_session" as const
 const ADMIN_IDLE_MS = 1000 * 60 * 60 * 24
@@ -665,6 +666,7 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
       const errorStats = getErrorStats()
 
       const connectedToday = await countConnectedUsersToday()
+      const desktopPushSuppression = getDesktopPushSuppressionMetrics()
 
       return {
         ok: true,
@@ -691,6 +693,9 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
             last5m: errorStats.last5m,
             last15m: errorStats.last15m,
             total: errorStats.total,
+          },
+          notifications: {
+            desktopPushSuppression,
           },
         },
       }

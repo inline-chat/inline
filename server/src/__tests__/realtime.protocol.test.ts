@@ -7,7 +7,7 @@ import {
   wsSendClientProtocolMessage,
   wsServerProtocolMessage,
 } from "@in/server/realtime/test/utils"
-import { Method, PushNotificationProvider } from "@inline-chat/protocol/core"
+import { Method, PushNotificationProvider, RpcError_Code } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import { sessions } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
@@ -129,6 +129,32 @@ describe("realtime protocol safety", () => {
     expect(response.body.oneofKind).toBe("rpcError")
     if (response.body.oneofKind === "rpcError") {
       expect(response.body.rpcError.reqMsgId).toBe(99n)
+    }
+    await wsClosed(ws)
+  })
+
+  it("returns explicit rpcError for unsupported rpc methods", async () => {
+    const { ws } = await authenticateSocket()
+
+    wsSendClientProtocolMessage(ws, {
+      id: 100n,
+      seq: 2,
+      body: {
+        oneofKind: "rpcCall",
+        rpcCall: {
+          method: 999 as Method,
+          input: { oneofKind: undefined },
+        },
+      },
+    })
+
+    const response = await wsServerProtocolMessage(ws)
+    expect(response.body.oneofKind).toBe("rpcError")
+    if (response.body.oneofKind === "rpcError") {
+      expect(response.body.rpcError.reqMsgId).toBe(100n)
+      expect(response.body.rpcError.errorCode).toBe(RpcError_Code.BAD_REQUEST)
+      expect(response.body.rpcError.code).toBe(400)
+      expect(response.body.rpcError.message).toContain("Unsupported RPC method: 999")
     }
     await wsClosed(ws)
   })

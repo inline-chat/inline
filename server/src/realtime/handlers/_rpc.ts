@@ -376,8 +376,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
     }
 
     default:
-      Log.shared.error(`Unknown method: ${call.method}`)
-      throw RealtimeRpcError.BadRequest()
+      throw RealtimeRpcError.UnsupportedRpcMethod(call.method)
   }
 }
 

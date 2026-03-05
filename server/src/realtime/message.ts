@@ -38,6 +38,26 @@ const getMethodName = (method: number): string => {
   return Method[method] ?? `UNKNOWN_METHOD_${method}`
 }
 
+const unsupportedRpcMethodLogKeys = new Set<string>()
+const MAX_UNSUPPORTED_RPC_METHOD_LOG_KEYS = 512
+
+const isUnsupportedRpcMethodError = (error: unknown): error is RealtimeRpcError => {
+  return (
+    error instanceof RealtimeRpcError &&
+    error.code === RpcError_Code.BAD_REQUEST &&
+    error.message.startsWith("Unsupported RPC method:")
+  )
+}
+
+const shouldLogUnsupportedRpcMethodWarning = (key: string): boolean => {
+  if (unsupportedRpcMethodLogKeys.has(key)) return false
+  if (unsupportedRpcMethodLogKeys.size >= MAX_UNSUPPORTED_RPC_METHOD_LOG_KEYS) {
+    unsupportedRpcMethodLogKeys.clear()
+  }
+  unsupportedRpcMethodLogKeys.add(key)
+  return true
+}
+
 // Cache for lazily-loaded RPC handler to avoid circular import and per-call dynamic import cost
 let rpcHandlerModulePromise: Promise<typeof import("@in/server/realtime/handlers/_rpc")> | null = null
 
@@ -165,7 +185,20 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
       message.body.oneofKind === "connectionInit"
         ? "error handling message in connectionInit"
         : "error handling message"
-    log.error(logMessage, e, errorMeta)
+    const unsupportedRpcMethodKey =
+      message.body.oneofKind === "rpcCall"
+        ? `${handlerContext.userId}:${handlerContext.sessionId}:${message.body.rpcCall.method}`
+        : null
+    if (isUnsupportedRpcMethodError(e) && unsupportedRpcMethodKey) {
+      const errorPayload = { ...errorMeta, errorMessage: e.message }
+      if (shouldLogUnsupportedRpcMethodWarning(unsupportedRpcMethodKey)) {
+        log.warn(logMessage, errorPayload)
+      } else {
+        log.debug(logMessage, errorPayload)
+      }
+    } else {
+      log.error(logMessage, e, errorMeta)
+    }
     if (message.body.oneofKind === "connectionInit") {
       // TODO: handle this better
       ws.close()
