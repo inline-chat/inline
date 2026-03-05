@@ -2017,6 +2017,12 @@ class MinimalMessageViewAppKit: NSView {
   @objc private func forwardMessage() {
     guard let window, let presentingController = window.contentViewController else { return }
 
+    var dismissForwardSheet: (() -> Void)?
+    var sheetClickMonitor: Any?
+    var escapeKeyMonitor: Any?
+    var sheetCloseObserver: Any?
+    var isDismissingForwardSheet = false
+
     weak var weakHostingController: NSViewController?
     let rootView = ForwardMessagesSheet(
       messages: [fullMessage],
@@ -2040,9 +2046,8 @@ class MinimalMessageViewAppKit: NSView {
         guard let self else { return }
         await self.forwardMessages(destinations: destinations, selection: selection)
       },
-      onClose: { [weak presentingController] in
-        guard let hostingController = weakHostingController else { return }
-        presentingController?.dismiss(hostingController)
+      onClose: {
+        dismissForwardSheet?()
       }
     )
     .appDatabase(AppDatabase.shared)
@@ -2051,12 +2056,62 @@ class MinimalMessageViewAppKit: NSView {
     weakHostingController = hostingController
     hostingController.title = "Forward"
     hostingController.preferredContentSize = NSSize(width: 480, height: 560)
+
+    let cleanupForwardSheetDismissHandlers = {
+      if let monitor = sheetClickMonitor {
+        NSEvent.removeMonitor(monitor)
+        sheetClickMonitor = nil
+      }
+      if let monitor = escapeKeyMonitor {
+        NSEvent.removeMonitor(monitor)
+        escapeKeyMonitor = nil
+      }
+      if let observer = sheetCloseObserver {
+        NotificationCenter.default.removeObserver(observer)
+        sheetCloseObserver = nil
+      }
+    }
+
+    dismissForwardSheet = { [weak presentingController] in
+      guard !isDismissingForwardSheet else { return }
+      isDismissingForwardSheet = true
+      cleanupForwardSheetDismissHandlers()
+      guard let hostingController = weakHostingController else { return }
+      presentingController?.dismiss(hostingController)
+    }
+
     presentingController.presentAsSheet(hostingController)
     DispatchQueue.main.async { [weak hostingController] in
-      guard let window = hostingController?.view.window else { return }
-      window.title = "Forward"
-      window.styleMask.insert(.closable)
-      window.standardWindowButton(.closeButton)?.isHidden = false
+      guard let hostingController, let sheetWindow = hostingController.view.window else { return }
+      sheetWindow.title = "Forward"
+      sheetWindow.styleMask.insert(.closable)
+      sheetWindow.standardWindowButton(.closeButton)?.isHidden = false
+
+      sheetCloseObserver = NotificationCenter.default.addObserver(
+        forName: NSWindow.willCloseNotification,
+        object: sheetWindow,
+        queue: .main
+      ) { _ in
+        cleanupForwardSheetDismissHandlers()
+      }
+
+      sheetClickMonitor = NSEvent.addLocalMonitorForEvents(
+        matching: [.leftMouseDown, .rightMouseDown]
+      ) { event in
+        guard !isDismissingForwardSheet else { return event }
+        if let eventWindow = event.window, eventWindow === sheetWindow {
+          return event
+        }
+        dismissForwardSheet?()
+        return event
+      }
+
+      escapeKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+        guard !isDismissingForwardSheet else { return event }
+        guard event.keyCode == 53 else { return event } // Esc
+        dismissForwardSheet?()
+        return nil
+      }
     }
   }
 
