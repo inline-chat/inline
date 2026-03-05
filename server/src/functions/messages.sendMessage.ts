@@ -47,6 +47,7 @@ import { getCachedUserProfilePhotoUrl } from "@in/server/modules/cache/userPhoto
 import { processAttachments } from "@in/server/db/models/messages"
 import { and, eq, inArray } from "drizzle-orm"
 import { unarchiveIfNeeded } from "@in/server/modules/message/unarchiveIfNeeded"
+import { desktopPushSuppressionTracker } from "@in/server/modules/notifications/desktopPushSuppression"
 
 type Input = {
   peerId: InputPeer
@@ -1054,22 +1055,36 @@ async function sendNotificationToUser({
     body = `${senderName}: ${body}`
   }
 
-  Notifications.sendToUser({
+  const suppressionDecision = desktopPushSuppressionTracker.shouldSuppressIOSSendMessagePush({
     userId,
-    payload: {
-      kind: "send_message",
-      senderUserId: messageInfo.message.fromId,
-      threadId: `chat_${messageInfo.message.chatId}`,
-      isThread: chat?.type == "thread",
-      messageId: String(messageInfo.message.messageId),
-      title,
-      body,
-      isUrgentNudge: isUrgentNudge,
-      senderDisplayName: senderName ?? undefined,
-      senderProfilePhotoUrl,
-      threadEmoji: chat?.emoji ?? undefined,
-    },
+    chatId: messageInfo.message.chatId,
+    isUrgentNudge,
   })
+
+  if (!suppressionDecision.suppress) {
+    Notifications.sendToUser({
+      userId,
+      payload: {
+        kind: "send_message",
+        senderUserId: messageInfo.message.fromId,
+        threadId: `chat_${messageInfo.message.chatId}`,
+        isThread: chat?.type == "thread",
+        messageId: String(messageInfo.message.messageId),
+        title,
+        body,
+        isUrgentNudge: isUrgentNudge,
+        senderDisplayName: senderName ?? undefined,
+        senderProfilePhotoUrl,
+        threadEmoji: chat?.emoji ?? undefined,
+      },
+    })
+  } else {
+    log.debug("Suppressing iOS send_message push due to active desktop chat", {
+      userId,
+      chatId: messageInfo.message.chatId,
+      reason: suppressionDecision.reason,
+    })
+  }
 
   if (needsExplicitMacNotification) {
     RealtimeUpdates.pushToUser(userId, [

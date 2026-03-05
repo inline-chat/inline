@@ -6,6 +6,7 @@ import { encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { DialogsModel } from "@in/server/db/models/dialogs"
 import { Notifications } from "@in/server/modules/notifications/notifications"
+import { desktopPushSuppressionTracker } from "@in/server/modules/notifications/desktopPushSuppression"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import type { ServerUpdate } from "@inline-chat/protocol/server"
 import type { FunctionContext } from "@in/server/functions/_types"
@@ -42,6 +43,32 @@ export const readMessages = async (input: Input, context: FunctionContext): Prom
   }
 
   const outputPeer = encodePeerFromInputPeer({ inputPeer: input.peer, currentUserId: context.currentUserId })
+
+  const existingDialog = await db
+    .select({
+      chatId: dialogs.chatId,
+      readInboxMaxId: dialogs.readInboxMaxId,
+      unreadMark: dialogs.unreadMark,
+    })
+    .from(dialogs)
+    .where(
+      and(
+        dialogPeerCondition,
+        eq(dialogs.userId, context.currentUserId),
+      ),
+    )
+    .limit(1)
+    .then((rows) => rows[0])
+
+  const activityChatId = existingDialog?.chatId
+  if (activityChatId) {
+    // Best effort only. If tracking fails, push behavior should remain unchanged.
+    void desktopPushSuppressionTracker.recordReadActivity({
+      userId: context.currentUserId,
+      sessionId: context.currentSessionId,
+      chatId: activityChatId,
+    })
+  }
 
   let maxId = input.maxId
   if (maxId === undefined) {
@@ -88,21 +115,7 @@ export const readMessages = async (input: Input, context: FunctionContext): Prom
     return { updates }
   }
 
-  const existing = await db
-    .select({
-      chatId: dialogs.chatId,
-      readInboxMaxId: dialogs.readInboxMaxId,
-      unreadMark: dialogs.unreadMark,
-    })
-    .from(dialogs)
-    .where(
-      and(
-        dialogPeerCondition,
-        eq(dialogs.userId, context.currentUserId),
-      ),
-    )
-    .limit(1)
-    .then((rows) => rows[0])
+  const existing = existingDialog
 
   const previousReadMaxId = existing?.readInboxMaxId ?? 0
   const didClearUnreadMark = existing?.unreadMark === true

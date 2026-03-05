@@ -37,6 +37,14 @@ export class RealtimeRpcError extends Error {
   public static BadRequest() {
     return RealtimeRpcError.create(RpcError_Code.BAD_REQUEST, "Bad request", 400, RealtimeRpcError.BadRequest)
   }
+  public static UnsupportedRpcMethod(method: number): RealtimeRpcError {
+    return RealtimeRpcError.create(
+      RpcError_Code.BAD_REQUEST,
+      `Unsupported RPC method: ${method}`,
+      400,
+      (): RealtimeRpcError => RealtimeRpcError.UnsupportedRpcMethod(method),
+    )
+  }
   public static Unauthenticated() {
     return RealtimeRpcError.create(
       RpcError_Code.UNAUTHENTICATED,
