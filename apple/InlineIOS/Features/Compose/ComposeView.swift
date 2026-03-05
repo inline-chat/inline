@@ -21,6 +21,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   let maxHeight: CGFloat = 350
   let buttonSize: CGSize = .init(width: 32, height: 32)
   let linkColor: UIColor = ThemeManager.shared.selected.accent
+  private let telegramSendButtonShowDuration: TimeInterval = 0.2
+  private let telegramSendButtonHideDuration: TimeInterval = 0.14
+  private let telegramSendButtonBlurDuration: TimeInterval = 0.18
+  private let telegramSendButtonBlurRadius: CGFloat = 4.0
 
   static let minHeight: CGFloat = 46.0
   static let textViewVerticalPadding: CGFloat = 0.0
@@ -295,34 +299,106 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   func buttonDisappear() {
-    print("buttonDisappear")
+    guard isButtonVisible || !sendButton.alpha.isZero else {
+      sendButton.isEnabled = false
+      sendButton.isUserInteractionEnabled = false
+      return
+    }
     isButtonVisible = false
-    UIView.animate(withDuration: 0.12, delay: 0.1, options: [.curveEaseOut, .allowUserInteraction]) {
-      self.sendButton.transform = CGAffineTransform(scaleX: 1.05, y: 1.05)
+
+    animateTelegramSendButtonBlur(to: telegramSendButtonBlurRadius)
+
+    UIView.animate(
+      withDuration: telegramSendButtonHideDuration,
+      delay: 0,
+      options: [.curveEaseInOut, .allowUserInteraction, .beginFromCurrentState]
+    ) {
       self.sendButton.alpha = 0
+    } completion: { _ in
+      self.sendButton.isEnabled = false
+      self.sendButton.isUserInteractionEnabled = false
+      self.sendButton.transform = .identity
     }
   }
 
   func buttonAppear() {
-    print("buttonAppear")
     guard !isButtonVisible else { return }
     isButtonVisible = true
-    sendButton.transform = CGAffineTransform(scaleX: 0.5, y: 0.5)
+    sendButton.isEnabled = true
+    sendButton.isUserInteractionEnabled = true
+
+    animateTelegramSendButtonBlur(to: 0.0)
+
     sendButton.alpha = 0.0
-    layoutIfNeeded()
+    sendButton.transform = .identity
+
     UIView.animate(
-      withDuration: 0.21,
+      withDuration: telegramSendButtonShowDuration,
       delay: 0,
-      usingSpringWithDamping: 0.8,
-      initialSpringVelocity: 0.5,
-      options: .curveEaseOut
+      options: [.curveEaseInOut, .allowUserInteraction, .beginFromCurrentState]
     ) {
-      // self.sendButtonContainer.alpha = 1
-      // self.sendButtonContainer.transform = .identity
-      self.sendButton.transform = .identity
       self.sendButton.alpha = 1
-    } completion: { _ in
+      self.sendButton.transform = .identity
     }
+  }
+
+  private func currentTelegramSendButtonBlurRadius() -> CGFloat {
+    if let presentationRadius = sendButton.layer.presentation()?.value(forKeyPath: "filters.gaussianBlur.inputRadius") as? NSNumber {
+      return CGFloat(presentationRadius.floatValue)
+    }
+    if let layerRadius = sendButton.layer.value(forKeyPath: "filters.gaussianBlur.inputRadius") as? NSNumber {
+      return CGFloat(layerRadius.floatValue)
+    }
+    return 0.0
+  }
+
+  private func makeTelegramGaussianBlurFilter(radius: CGFloat) -> NSObject? {
+    guard let filterClass = NSClassFromString(String("retliFAC".reversed())) as? NSObject.Type else {
+      return nil
+    }
+
+    let selector = NSSelectorFromString(String(":epyThtiWretlif".reversed()))
+    guard let filter = filterClass.perform(selector, with: "gaussianBlur")?.takeUnretainedValue() as? NSObject else {
+      return nil
+    }
+
+    filter.setValue(radius, forKey: "inputRadius")
+    return filter
+  }
+
+  private func animateTelegramSendButtonBlur(to toRadius: CGFloat) {
+    sendButton.layer.removeAnimation(forKey: "telegram.sendButton.blur")
+    let fromRadius = currentTelegramSendButtonBlurRadius()
+
+    if abs(fromRadius - toRadius) < 0.01 {
+      if toRadius <= 0.0 {
+        sendButton.layer.filters = nil
+      }
+      return
+    }
+
+    guard let blurFilter = makeTelegramGaussianBlurFilter(radius: toRadius) else {
+      return
+    }
+
+    sendButton.layer.filters = [blurFilter]
+
+    let animation = CABasicAnimation(keyPath: "filters.gaussianBlur.inputRadius")
+    animation.fromValue = fromRadius as NSNumber
+    animation.toValue = toRadius as NSNumber
+    animation.duration = telegramSendButtonBlurDuration
+    animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+    animation.isRemovedOnCompletion = true
+
+    CATransaction.begin()
+    CATransaction.setCompletionBlock { [weak self] in
+      guard let self else { return }
+      if toRadius <= 0.0 {
+        self.sendButton.layer.filters = nil
+      }
+    }
+    sendButton.layer.add(animation, forKey: "telegram.sendButton.blur")
+    CATransaction.commit()
   }
 
   @objc func sendTapped() {
@@ -825,8 +901,6 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
   func updateSendButtonVisibility() {
     let shouldEnableSend = canSend
-    sendButton.isEnabled = shouldEnableSend
-    sendButton.isUserInteractionEnabled = shouldEnableSend
 
     if shouldEnableSend {
       buttonAppear()
