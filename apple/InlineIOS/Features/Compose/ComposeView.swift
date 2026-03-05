@@ -402,6 +402,12 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   @objc func sendTapped() {
+    guard canSend else { return }
+
+    let feedbackGenerator = UIImpactFeedbackGenerator(style: .light)
+    feedbackGenerator.prepare()
+    feedbackGenerator.impactOccurred(intensity: 1.0)
+
     sendMessage()
   }
 
