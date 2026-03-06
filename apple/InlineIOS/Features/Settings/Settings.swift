@@ -190,6 +190,7 @@ struct SettingsView: View {
         await Api.realtime.clearSyncState()
         try? AppDatabase.clearDB()
         await MainActor.run {
+          NotificationCenter.default.post(name: .localDataCleared, object: nil)
           isClearing = false
         }
       } catch {

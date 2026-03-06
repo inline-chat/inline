@@ -30,8 +30,8 @@ final class ExperimentalNavigationModel {
     return true
   }
 
-  func beginDialogsFetchIfNeeded(spaceId: Int64) -> Bool {
-    guard !fetchedDialogSpaceIds.contains(spaceId) else { return false }
+  func beginDialogsFetchIfNeeded(spaceId: Int64, force: Bool = false) -> Bool {
+    guard force || !fetchedDialogSpaceIds.contains(spaceId) else { return false }
     return fetchingDialogSpaceIds.insert(spaceId).inserted
   }
 
@@ -45,6 +45,12 @@ final class ExperimentalNavigationModel {
   func pruneDialogFetchState(validSpaceIds: Set<Int64>) {
     fetchedDialogSpaceIds = fetchedDialogSpaceIds.filter { validSpaceIds.contains($0) }
     fetchingDialogSpaceIds = fetchingDialogSpaceIds.filter { validSpaceIds.contains($0) }
+  }
+
+  func resetHomeDataState() {
+    didRunHomeBootstrap = false
+    fetchedDialogSpaceIds.removeAll()
+    fetchingDialogSpaceIds.removeAll()
   }
 
   private static func loadActiveSpaceId() -> Int64? {
@@ -153,6 +159,8 @@ private struct ExperimentalHomeView: View {
 
   @AppStorage(ExperimentalHomePreferenceKeys.chatScope) private var homeChatScopeRaw: String = ExperimentalHomeChatScope.all.rawValue
   @AppStorage(ExperimentalHomePreferenceKeys.chatItemRenderMode) private var chatItemRenderModeRaw: String = ExperimentalHomeChatItemRenderMode.twoLineLastMessage.rawValue
+  @State private var hasLoadedHomeData = false
+  @State private var isLoadingHomeData = false
 
   init(nav: ExperimentalNavigationModel, initialTab: ExperimentalHomeTab) {
     self.nav = nav
@@ -174,7 +182,9 @@ private struct ExperimentalHomeView: View {
           sectionHeader: nil,
           showsSpaceNameInRows: nav.activeSpaceId == nil,
           chatItemRenderMode: chatItemRenderMode,
-          onTapItem: openChat
+          isLoading: isLoadingHomeData,
+          onTapItem: openChat,
+          onRefresh: refreshHomeContent
         )
       case .archived:
         ExperimentalChatListView(
@@ -185,7 +195,9 @@ private struct ExperimentalHomeView: View {
           sectionHeader: "Archived Chats",
           showsSpaceNameInRows: nav.activeSpaceId == nil,
           chatItemRenderMode: chatItemRenderMode,
-          onTapItem: openChat
+          isLoading: isLoadingHomeData,
+          onTapItem: openChat,
+          onRefresh: refreshHomeContent
         )
       }
     }
@@ -195,12 +207,7 @@ private struct ExperimentalHomeView: View {
     .navigationTitle("")
     .task {
       chatsModel.setSpaceId(nav.activeSpaceId)
-
-      if nav.consumeNeedsHomeBootstrap() {
-        await initialFetch()
-      } else {
-        await refreshDialogsForCurrentSelection()
-      }
+      await loadHomeDataOnAppear()
     }
     .onChange(of: compactSpaceList.spaces) { _, _ in
       nav.pruneDialogFetchState(validSpaceIds: Set(compactSpaceList.spaces.map(\.id)))
@@ -210,7 +217,7 @@ private struct ExperimentalHomeView: View {
     }
     .onChange(of: nav.activeSpaceId) { _, newValue in
       chatsModel.setSpaceId(newValue)
-      Task { await refreshDialogsForCurrentSelection() }
+      Task { await reloadHomeData(forceDialogs: true) }
     }
   }
 
@@ -250,6 +257,7 @@ private struct ExperimentalHomeView: View {
 
   private func ensureActiveSpaceExists() {
     guard let activeSpaceId = nav.activeSpaceId else { return }
+    guard !compactSpaceList.spaces.isEmpty else { return }
     if !compactSpaceList.spaces.contains(where: { $0.id == activeSpaceId }) {
       nav.activeSpaceId = nil
     }
@@ -259,43 +267,76 @@ private struct ExperimentalHomeView: View {
     router.push(.chat(peer: item.peerId))
   }
 
-  private func initialFetch() async {
-    notificationHandler.setAuthenticated(value: true)
-
-    do {
-      _ = try await realtimeV2.send(.getMe())
-    } catch {
-      Log.shared.error("Failed to getMe", error: error)
-    }
-
-    do {
-      _ = try await realtimeV2.send(.getChats())
-    } catch {
-      Log.shared.error("Failed to getChats", error: error)
-    }
-
-    do {
-      _ = try await data.getSpaces()
-    } catch {
-      Log.shared.error("Failed to getSpaces", error: error)
-    }
-    chatsModel.setSpaceId(nav.activeSpaceId)
-    await refreshDialogsForCurrentSelection()
+  private func loadHomeDataOnAppear() async {
+    let shouldBootstrap = nav.consumeNeedsHomeBootstrap()
+    await reloadHomeData(
+      includeBootstrapData: shouldBootstrap,
+      forceDialogs: nav.activeSpaceId != nil
+    )
   }
 
-  private func refreshDialogsForCurrentSelection() async {
+  private func refreshHomeContent() async {
+    await reloadHomeData(includeBootstrapData: true, forceDialogs: true)
+  }
+
+  private func reloadHomeData(
+    includeBootstrapData: Bool = false,
+    forceDialogs: Bool = false
+  ) async {
+    let shouldShowLoadingState = !hasLoadedHomeData || currentChats.isEmpty
+    if shouldShowLoadingState {
+      isLoadingHomeData = true
+    }
+    defer {
+      hasLoadedHomeData = true
+      isLoadingHomeData = false
+    }
+
+    var availableSpaces = compactSpaceList.spaces
+
+    if includeBootstrapData {
+      notificationHandler.setAuthenticated(value: true)
+
+      do {
+        _ = try await realtimeV2.send(.getMe())
+      } catch {
+        Log.shared.error("Failed to getMe", error: error)
+      }
+
+      do {
+        _ = try await realtimeV2.send(.getChats())
+      } catch {
+        Log.shared.error("Failed to getChats", error: error)
+      }
+
+      do {
+        availableSpaces = try await data.getSpaces()
+        nav.pruneDialogFetchState(validSpaceIds: Set(availableSpaces.map(\.id)))
+      } catch {
+        Log.shared.error("Failed to getSpaces", error: error)
+      }
+    }
+
+    chatsModel.setSpaceId(nav.activeSpaceId)
+    await refreshDialogsForCurrentSelection(force: forceDialogs, availableSpaces: availableSpaces)
+  }
+
+  private func refreshDialogsForCurrentSelection(
+    force: Bool = false,
+    availableSpaces: [Space]? = nil
+  ) async {
     if let spaceId = nav.activeSpaceId {
-      await fetchDialogsIfNeeded(spaceId: spaceId)
+      await fetchDialogsIfNeeded(spaceId: spaceId, force: force)
     } else {
       // Home: show chats from all spaces, so ensure each space has at least one dialogs fetch.
-      for space in compactSpaceList.spaces {
-        await fetchDialogsIfNeeded(spaceId: space.id)
+      for space in availableSpaces ?? compactSpaceList.spaces {
+        await fetchDialogsIfNeeded(spaceId: space.id, force: force)
       }
     }
   }
 
-  private func fetchDialogsIfNeeded(spaceId: Int64) async {
-    guard nav.beginDialogsFetchIfNeeded(spaceId: spaceId) else { return }
+  private func fetchDialogsIfNeeded(spaceId: Int64, force: Bool = false) async {
+    guard nav.beginDialogsFetchIfNeeded(spaceId: spaceId, force: force) else { return }
     do {
       try await data.getDialogs(spaceId: spaceId)
       nav.completeDialogsFetch(spaceId: spaceId, succeeded: true)
@@ -334,6 +375,7 @@ private final class ExperimentalSpaceChatsViewModel: ObservableObject {
     }
 
     let spaceIdValue = spaceId
+    items = []
 
     cancellable = ValueObservation
       .tracking { db in
@@ -425,7 +467,9 @@ private struct ExperimentalChatListView: View {
   let sectionHeader: String?
   let showsSpaceNameInRows: Bool
   let chatItemRenderMode: ExperimentalHomeChatItemRenderMode
+  let isLoading: Bool
   let onTapItem: (HomeChatItem) -> Void
+  let onRefresh: () async -> Void
 
   @Environment(Router.self) private var router
   @EnvironmentObject private var data: DataManager
@@ -433,13 +477,10 @@ private struct ExperimentalChatListView: View {
   @StateObject private var translationCoordinator = ChatListTranslationCoordinator()
 
   var body: some View {
-    if items.isEmpty {
-      switch emptyStyle {
-      case .text:
-        ExperimentalEmptyStateView(title: emptyTitle, subtitle: emptySubtitle)
-      case .inlineLogo:
-        ExperimentalInlineLogoEmptyStateView()
-      }
+    if isLoading && items.isEmpty {
+      ExperimentalLoadingStateView()
+    } else if items.isEmpty {
+      emptyContent
     } else {
       List {
         if let sectionHeader {
@@ -454,6 +495,9 @@ private struct ExperimentalChatListView: View {
         }
       }
       .listStyle(.plain)
+      .refreshable {
+        await onRefresh()
+      }
       .animation(.snappy(duration: 0.25, extraBounce: 0), value: itemIDs)
       .onChange(of: items) { _, newItems in
         translationCoordinator.process(
@@ -467,6 +511,16 @@ private struct ExperimentalChatListView: View {
       .onDisappear {
         translationCoordinator.cancel()
       }
+    }
+  }
+
+  @ViewBuilder
+  private var emptyContent: some View {
+    switch emptyStyle {
+    case .text:
+      ExperimentalEmptyStateView(title: emptyTitle, subtitle: emptySubtitle)
+    case .inlineLogo:
+      ExperimentalInlineLogoEmptyStateView()
     }
   }
 
@@ -639,6 +693,19 @@ private struct ExperimentalEmptyStateView: View {
         .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
         .padding(.horizontal, 24)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .background(Color(.systemBackground))
+  }
+}
+
+private struct ExperimentalLoadingStateView: View {
+  var body: some View {
+    VStack(spacing: 12) {
+      ProgressView()
+      Text("Loading chats...")
+        .font(.headline)
+        .foregroundStyle(.secondary)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(Color(.systemBackground))
