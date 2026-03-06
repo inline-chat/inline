@@ -153,7 +153,9 @@ class UIMessageView: UIView {
   }
 
   private var shouldClearBubbleForMedia: Bool {
-    shouldShowFloatingMetadata && message.forwardFromUserId == nil
+    shouldShowFloatingMetadata
+      && message.forwardFromUserId == nil
+      && !isPhotoOnlyReplyMessage
   }
 
   var isSticker: Bool {
@@ -168,8 +170,16 @@ class UIMessageView: UIView {
     hasMedia && !message.hasText
   }
 
+  private var isPhotoOnlyReplyMessage: Bool {
+    message.hasPhoto && !message.hasText && message.repliedToMessageId != nil
+  }
+
   private var shouldPadForwardHeader: Bool {
     isMediaOnlyMessage && !shouldShowReactionsInsideBubble
+  }
+
+  private var shouldUseStandardPhotoReplyPadding: Bool {
+    isPhotoOnlyReplyMessage && !shouldShowReactionsInsideBubble
   }
 
   private var shouldShowReactionsOutsideBubble: Bool {
@@ -515,11 +525,38 @@ class UIMessageView: UIView {
   func setupReplyViewIfNeeded() {
     guard message.repliedToMessageId != nil else { return }
 
-    containerStack.addArrangedSubview(embedView)
+    let replyHostView: UIView
+    if shouldUseStandardPhotoReplyPadding {
+      let replyContainer = UIView()
+      replyContainer.translatesAutoresizingMaskIntoConstraints = false
+      replyContainer.layoutMargins = UIEdgeInsets(
+        top: StackPadding.replyInset,
+        left: StackPadding.replyInset,
+        bottom: StackPadding.replyInset,
+        right: StackPadding.replyInset
+      )
+      replyContainer.insetsLayoutMarginsFromSafeArea = false
+
+      embedView.translatesAutoresizingMaskIntoConstraints = false
+      replyContainer.addSubview(embedView)
+      NSLayoutConstraint.activate([
+        embedView.topAnchor.constraint(equalTo: replyContainer.layoutMarginsGuide.topAnchor),
+        embedView.leadingAnchor.constraint(equalTo: replyContainer.layoutMarginsGuide.leadingAnchor),
+        embedView.trailingAnchor.constraint(equalTo: replyContainer.layoutMarginsGuide.trailingAnchor),
+        embedView.bottomAnchor.constraint(equalTo: replyContainer.layoutMarginsGuide.bottomAnchor),
+      ])
+
+      containerStack.addArrangedSubview(replyContainer)
+      containerStack.setCustomSpacing(StackPadding.replyBottomSpacing, after: replyContainer)
+      replyHostView = replyContainer
+    } else {
+      containerStack.addArrangedSubview(embedView)
+      replyHostView = embedView
+    }
 
     let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleEmbedViewTap))
-    embedView.isUserInteractionEnabled = true
-    embedView.addGestureRecognizer(tapGesture)
+    replyHostView.isUserInteractionEnabled = true
+    replyHostView.addGestureRecognizer(tapGesture)
 
     if let embeddedMessage = fullMessage.repliedToMessage {
       embedView.configure(
@@ -1251,6 +1288,8 @@ class UIMessageView: UIView {
     static let leading: CGFloat = 12
     static let bottom: CGFloat = 8
     static let trailing: CGFloat = 12
+    static let replyInset: CGFloat = 6
+    static let replyBottomSpacing: CGFloat = 0
     static let reactionMetadataExtraSpacing: CGFloat = 4
     static let emojiReactionMetadataExtraSpacing: CGFloat = 8
     static let forwardHeaderVertical: CGFloat = 6
