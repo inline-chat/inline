@@ -8,8 +8,9 @@ class EmbedMessageView: UIView {
     static let cornerRadius: CGFloat = 8
     static let rectangleWidth: CGFloat = 4
     static let contentSpacing: CGFloat = 6
-    static let verticalPadding: CGFloat = 4
-    static let horizontalPadding: CGFloat = 6
+    static let contentPadding: CGFloat = 2.5
+    static let verticalPadding: CGFloat = contentPadding
+    static let horizontalPadding: CGFloat = contentPadding
     static let iconPointSizeMessage: CGFloat = 14
     static let iconPointSizeCompose: CGFloat = 17
     static let thumbnailSize: CGFloat = 32
@@ -30,7 +31,12 @@ class EmbedMessageView: UIView {
     case compose
   }
 
-  static let height: CGFloat = 42
+  static let height: CGFloat = {
+    let headerFont = UIFont.systemFont(ofSize: 14, weight: .medium)
+    let messageFont = UIFont.systemFont(ofSize: 14)
+    let totalHeight = (Constants.verticalPadding * 2) + headerFont.lineHeight + messageFont.lineHeight
+    return ceil(totalHeight)
+  }()
   static let composeHeight: CGFloat = {
     let headerFont = UIFont.systemFont(ofSize: 17, weight: .medium)
     let messageFont = UIFont.systemFont(ofSize: 17)

@@ -155,7 +155,7 @@ class UIMessageView: UIView {
   private var shouldClearBubbleForMedia: Bool {
     shouldShowFloatingMetadata
       && message.forwardFromUserId == nil
-      && !isPhotoOnlyReplyMessage
+      && message.repliedToMessageId == nil
   }
 
   var isSticker: Bool {
@@ -170,16 +170,12 @@ class UIMessageView: UIView {
     hasMedia && !message.hasText
   }
 
-  private var isPhotoOnlyReplyMessage: Bool {
-    message.hasPhoto && !message.hasText && message.repliedToMessageId != nil
-  }
-
   private var shouldPadForwardHeader: Bool {
     isMediaOnlyMessage && !shouldShowReactionsInsideBubble
   }
 
-  private var shouldUseStandardPhotoReplyPadding: Bool {
-    isPhotoOnlyReplyMessage && !shouldShowReactionsInsideBubble
+  private var shouldUseStandardMediaReplyPadding: Bool {
+    isMediaOnlyMessage && message.repliedToMessageId != nil && !shouldShowReactionsInsideBubble
   }
 
   private var shouldShowReactionsOutsideBubble: Bool {
@@ -526,7 +522,7 @@ class UIMessageView: UIView {
     guard message.repliedToMessageId != nil else { return }
 
     let replyHostView: UIView
-    if shouldUseStandardPhotoReplyPadding {
+    if shouldUseStandardMediaReplyPadding {
       let replyContainer = UIView()
       replyContainer.translatesAutoresizingMaskIntoConstraints = false
       replyContainer.layoutMargins = UIEdgeInsets(
@@ -1288,7 +1284,7 @@ class UIMessageView: UIView {
     static let leading: CGFloat = 12
     static let bottom: CGFloat = 8
     static let trailing: CGFloat = 12
-    static let replyInset: CGFloat = 6
+    static let replyInset: CGFloat = 3
     static let replyBottomSpacing: CGFloat = 0
     static let reactionMetadataExtraSpacing: CGFloat = 4
     static let emojiReactionMetadataExtraSpacing: CGFloat = 8
