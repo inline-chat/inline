@@ -56,6 +56,7 @@ struct ContentView2: View {
 
 private struct AuthedAppRoot: View {
   @Environment(Router.self) private var router
+  @Environment(\.realtimeV2) private var realtimeV2
 
   private let database: AppDatabase
 
@@ -94,6 +95,11 @@ private struct AuthedAppRoot: View {
     .environmentObject(data)
     .environmentObject(home)
     .environmentObject(compactSpaceList)
+    .onReceive(NotificationCenter.default.publisher(for: .localDataCleared)) { _ in
+      Task {
+        await refetchCoreDataAfterLocalDataCleared()
+      }
+    }
   }
 
   @ViewBuilder
@@ -157,6 +163,26 @@ private struct AuthedAppRoot: View {
 
     case let .members(spaceId):
       ExperimentalMembersSheetView(spaceId: spaceId)
+    }
+  }
+
+  private func refetchCoreDataAfterLocalDataCleared() async {
+    do {
+      _ = try await realtimeV2.send(.getMe())
+    } catch {
+      Log.shared.error("Failed to reload current user after clearing local data", error: error)
+    }
+
+    do {
+      _ = try await realtimeV2.send(.getChats())
+    } catch {
+      Log.shared.error("Failed to reload chats after clearing local data", error: error)
+    }
+
+    do {
+      _ = try await data.getSpaces()
+    } catch {
+      Log.shared.error("Failed to reload spaces after clearing local data", error: error)
     }
   }
 }

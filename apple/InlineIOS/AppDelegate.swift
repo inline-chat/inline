@@ -391,4 +391,5 @@ public class NotificationHandler: ObservableObject {
 
 extension Notification.Name {
   static let authenticationChanged = Notification.Name("authenticationChanged")
+  static let localDataCleared = Notification.Name("localDataCleared")
 }

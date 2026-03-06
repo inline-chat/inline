@@ -49,7 +49,7 @@ struct ExperimentalRootView: View {
       case .onboarding:
         OnboardingView()
       case .loading:
-        EmptyView()
+        loadingView
       }
     }
     .environment(router)
@@ -66,6 +66,23 @@ struct ExperimentalRootView: View {
     // Experimental UI pushes destinations above the TabView, so explicit tab bar hiding is unnecessary.
     .environment(\.inlineHideTabBar, false)
     .toastView()
+    .onReceive(NotificationCenter.default.publisher(for: .localDataCleared)) { _ in
+      nav.resetHomeDataState()
+      Task {
+        await refetchCoreDataAfterLocalDataCleared()
+      }
+    }
+  }
+
+  private var loadingView: some View {
+    VStack(spacing: 12) {
+      ProgressView()
+      Text("Unlocking...")
+        .font(.headline)
+        .foregroundStyle(.secondary)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .background(Color(.systemBackground))
   }
 
   private var mainTabs: some View {
@@ -273,6 +290,26 @@ struct ExperimentalRootView: View {
       }
       .buttonStyle(.plain)
       .accessibilityLabel("Settings")
+    }
+  }
+
+  private func refetchCoreDataAfterLocalDataCleared() async {
+    do {
+      _ = try await realtimeV2.send(.getMe())
+    } catch {
+      Log.shared.error("Failed to reload current user after clearing local data", error: error)
+    }
+
+    do {
+      _ = try await realtimeV2.send(.getChats())
+    } catch {
+      Log.shared.error("Failed to reload chats after clearing local data", error: error)
+    }
+
+    do {
+      _ = try await data.getSpaces()
+    } catch {
+      Log.shared.error("Failed to reload spaces after clearing local data", error: error)
     }
   }
 }
