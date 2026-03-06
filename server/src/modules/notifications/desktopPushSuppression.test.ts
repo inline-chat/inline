@@ -137,4 +137,40 @@ describe("desktopPushSuppression", () => {
 
     expect(tracker.getMetrics().errorsTotal).toBe(1)
   })
+
+  it("does not cache non-desktop session client type", async () => {
+    let resolverCalls = 0
+    const tracker = new DesktopPushSuppressionTracker({
+      now: () => now,
+      resolveSessionClientType: async () => {
+        resolverCalls += 1
+        return "ios"
+      },
+    })
+
+    await tracker.recordReadActivity({ userId: 2, sessionId: 10, chatId: 20 })
+    await tracker.recordReadActivity({ userId: 2, sessionId: 10, chatId: 20 })
+
+    expect(resolverCalls).toBe(2)
+  })
+
+  it("caches desktop session type until activity is pruned", async () => {
+    let resolverCalls = 0
+    const tracker = new DesktopPushSuppressionTracker({
+      now: () => now,
+      activityTtlMs: 10,
+      resolveSessionClientType: async () => {
+        resolverCalls += 1
+        return "macos"
+      },
+    })
+
+    await tracker.recordReadActivity({ userId: 3, sessionId: 11, chatId: 20 })
+    await tracker.recordReadActivity({ userId: 3, sessionId: 11, chatId: 20 })
+    expect(resolverCalls).toBe(1)
+
+    now += 11
+    await tracker.recordReadActivity({ userId: 3, sessionId: 11, chatId: 20 })
+    expect(resolverCalls).toBe(2)
+  })
 })

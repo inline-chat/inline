@@ -211,7 +211,9 @@ export class DesktopPushSuppressionTracker {
     }
 
     const clientType = await this.resolveSessionClientType(input)
-    this.sessionClientTypeCache.set(input.sessionId, clientType)
+    if (clientType && DESKTOP_CLIENT_TYPES.has(clientType)) {
+      this.sessionClientTypeCache.set(input.sessionId, clientType)
+    }
     return clientType
   }
 
@@ -224,6 +226,7 @@ export class DesktopPushSuppressionTracker {
       }
 
       this.sessionActivity.delete(sessionId)
+      this.sessionClientTypeCache.delete(sessionId)
 
       const userSessionIds = this.sessionsByUser.get(activity.userId)
       if (!userSessionIds) {
