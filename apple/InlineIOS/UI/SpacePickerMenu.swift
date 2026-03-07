@@ -34,8 +34,6 @@ struct SpacePickerMenu: View {
           space: activeSpace,
           systemImage: onSelectHome != nil ? "house.fill" : "building.2.fill"
         )
-        .padding(.leading, 12)
-
         Text(title)
           .font(.title)
           .fontWeight(.bold)
@@ -43,11 +41,6 @@ struct SpacePickerMenu: View {
           .lineLimit(1)
           .truncationMode(.tail)
           .allowsTightening(true)
-
-        // Image(systemName: "chevron.up.chevron.down")
-        //   .font(.callout)
-        //   .foregroundStyle(.secondary)
-
       }
       .contentShape(Rectangle())
     }
