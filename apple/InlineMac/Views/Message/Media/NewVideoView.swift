@@ -96,6 +96,9 @@ private final class VideoOverlayView: NSView {
 
     override var isHidden: Bool {
       didSet {
+        if isHidden {
+          resetProgress()
+        }
         updateRotationAnimation()
       }
     }
@@ -142,6 +145,11 @@ private final class VideoOverlayView: NSView {
         clockwise: false
       )
       progressLayer.path = path
+    }
+
+    private func resetProgress() {
+      displayedProgress = Constants.minVisibleProgress
+      progressLayer.strokeEnd = displayedProgress
     }
 
     private func updateRotationAnimation() {

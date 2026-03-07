@@ -289,6 +289,9 @@
     "Clear Shared Data" : {
 
     },
+    "Close" : {
+
+    },
     "Code sent to %@" : {
       "comment" : "Code sent confirmation"
     },
@@ -637,9 +640,6 @@
     "Failed to load chat" : {
 
     },
-    "Filters" : {
-
-    },
     "Find" : {
       "localizations" : {
         "fa" : {
@@ -657,9 +657,6 @@
       }
     },
     "Global Search" : {
-
-    },
-    "Home" : {
 
     },
     "Integration Options" : {
@@ -724,6 +721,9 @@
     "Leave Space" : {
 
     },
+    "Loading chats..." : {
+
+    },
     "Logout" : {
 
     },
@@ -746,9 +746,6 @@
 
     },
     "Message" : {
-
-    },
-    "More" : {
 
     },
     "name@example.com" : {
@@ -1121,9 +1118,6 @@
       }
     },
     "View" : {
-
-    },
-    "View Options" : {
 
     },
     "Visibility" : {
