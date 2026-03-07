@@ -1284,7 +1284,7 @@ class UIMessageView: UIView {
     static let leading: CGFloat = 12
     static let bottom: CGFloat = 8
     static let trailing: CGFloat = 12
-    static let replyInset: CGFloat = 3
+    static let replyInset: CGFloat = 6
     static let replyBottomSpacing: CGFloat = 0
     static let reactionMetadataExtraSpacing: CGFloat = 4
     static let emojiReactionMetadataExtraSpacing: CGFloat = 8
