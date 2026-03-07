@@ -3,52 +3,73 @@ import InlineUI
 import SwiftUI
 
 struct SpacePickerMenu: View {
+  private enum PresentedSheet: String, Identifiable {
+    case picker
+
+    var id: String { rawValue }
+  }
+
   @EnvironmentObject private var compactSpaceList: CompactSpaceList
   @Environment(Router.self) private var router
+
   var selectedSpaceId: Binding<Int64?>? = nil
   var onSelectHome: (() -> Void)? = nil
   var onSelectSpace: ((Space) -> Void)? = nil
   var onCreateSpace: (() -> Void)? = nil
 
   @State private var localSelectedSpaceId: Int64?
-  @State private var isPickerVisible = false
+  @State private var presentedSheet: PresentedSheet?
 
   var body: some View {
     let selectedSpaceId = selectedSpaceId ?? $localSelectedSpaceId
+    let activeSpace = selectedSpace(selectedSpaceId.wrappedValue)
+    let title = activeSpace?.displayName ?? (onSelectHome != nil ? "Home" : "Spaces")
     let createSpace = onCreateSpace ?? { router.push(.createSpace) }
-    let space = selectedSpace(selectedSpaceId.wrappedValue)
-    let title = space?.displayName ?? ((onSelectHome == nil) ? "Spaces" : "Home")
-    let isHomeSelected = onSelectHome != nil && selectedSpaceId.wrappedValue == nil
 
     Button {
-      isPickerVisible.toggle()
+      presentedSheet = .picker
     } label: {
-      SpacePickerMenuPill(space: space, title: title)
+      HStack(spacing: 8) {
+        SpacePickerToolbarIcon(
+          space: activeSpace,
+          systemImage: onSelectHome != nil ? "house.fill" : "building.2.fill"
+        )
+        .padding(.leading, 12)
+
+        Text(title)
+          .font(.title)
+          .fontWeight(.bold)
+          .foregroundStyle(.primary)
+          .lineLimit(1)
+          .truncationMode(.tail)
+          .allowsTightening(true)
+
+        // Image(systemName: "chevron.up.chevron.down")
+        //   .font(.callout)
+        //   .foregroundStyle(.secondary)
+
+      }
+      .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
-    .popover(isPresented: $isPickerVisible, arrowEdge: .top) {
-      SpacePickerOverlayView(
+    .accessibilityLabel(title)
+    .sheet(item: $presentedSheet) { _ in
+      SpacePickerSheet(
         spaces: compactSpaceList.spaces,
-        selectedSpaceId: selectedSpace(selectedSpaceId.wrappedValue)?.id,
-        isHomeSelected: isHomeSelected,
+        selectedSpaceId: activeSpace?.id,
+        showsHome: onSelectHome != nil,
         onSelectHome: onSelectHome.map { onSelectHome in
           {
-            isPickerVisible = false
             selectedSpaceId.wrappedValue = nil
             onSelectHome()
           }
         },
-        onSelect: { space in
-          isPickerVisible = false
-          onSelectSpace?(space)
+        onSelectSpace: { space in
           selectedSpaceId.wrappedValue = space.id
+          onSelectSpace?(space)
         },
-        onCreateSpace: {
-          isPickerVisible = false
-          createSpace()
-        }
+        onCreateSpace: createSpace
       )
-      .presentationCompactAdaptation(.none)
     }
   }
 
@@ -57,8 +78,7 @@ struct SpacePickerMenu: View {
       return compactSpaceList.spaces.first(where: { $0.id == selectedSpaceId })
     }
 
-    // Legacy behavior: default to the first space when nothing is selected.
-    if selectedSpaceId == nil, onSelectHome == nil {
+    if onSelectHome == nil {
       return compactSpaceList.spaces.first
     }
 
@@ -66,201 +86,157 @@ struct SpacePickerMenu: View {
   }
 }
 
-private struct SpacePickerMenuPill: View {
+private struct SpacePickerToolbarIcon: View {
   let space: Space?
-  let title: String
-
-  @Environment(\.colorScheme) private var colorScheme
+  let systemImage: String
 
   var body: some View {
-    if #available(iOS 26.0, *) {
-      SpacePickerMenuLabel(space: space, title: title)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 9)
-        .glassEffect(.regular.interactive(), in: Capsule())
+    if let space {
+      MonochromeSpaceAvatar(space: space, size: 32)
     } else {
-      SpacePickerMenuLabel(space: space, title: title)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 9)
-    }
-  }
-
-  private var borderColor: Color {
-    colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.08)
-  }
-}
-
-private struct SpacePickerMenuLabel: View {
-  let space: Space?
-  let title: String
-
-  var body: some View {
-    HStack(spacing: 8) {
-      if let space {
-        SpaceAvatar(space: space, size: 24)
-      } else if title == "Home" {
-        Circle()
-          .fill(Color(.systemGray5))
-          .frame(width: 24, height: 24)
-          .overlay {
-            Image(systemName: "house.fill")
-              .font(.caption2)
-              .foregroundStyle(.secondary)
-          }
-      } else {
-        Circle()
-          .fill(Color(.systemGray5))
-          .frame(width: 24, height: 24)
-      }
-
-      Text(title)
-        .font(.headline)
-        .foregroundStyle(.primary)
-        .lineLimit(1)
-        .truncationMode(.tail)
-        .layoutPriority(1)
+      RoundedRectangle(cornerRadius: 32.0 / 3.0, style: .continuous)
+        .fill(Color.gray.opacity(0.15))
+        .frame(width: 32, height: 32)
+        .overlay {
+          Image(systemName: systemImage)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(.secondary)
+        }
     }
   }
 }
 
-private struct SpacePickerOverlayView: View {
-  private static let cornerRadius: CGFloat = 12
-  private static let maxListHeight: CGFloat = 260
-
+private struct SpacePickerSheet: View {
   let spaces: [Space]
   let selectedSpaceId: Int64?
-  let isHomeSelected: Bool
+  let showsHome: Bool
   let onSelectHome: (() -> Void)?
-  let onSelect: (Space) -> Void
+  let onSelectSpace: (Space) -> Void
   let onCreateSpace: () -> Void
 
-  @Environment(\.colorScheme) private var colorScheme
+  @Environment(\.dismiss) private var dismiss
 
   var body: some View {
-    VStack(spacing: 8) {
-      ScrollView {
-        VStack(spacing: 0) {
-          if let onSelectHome {
-            SpacePickerOverlayHomeRow(
-              isSelected: isHomeSelected,
-              onSelect: onSelectHome
-            )
-          }
-
-          if spaces.isEmpty {
-            SpacePickerEmptyRow()
-          } else {
-            ForEach(spaces) { space in
-              SpacePickerOverlayRow(
-                space: space,
-                isSelected: space.id == selectedSpaceId,
-                onSelect: onSelect
-              )
-            }
-          }
-
-          Divider()
-            .opacity(0.6)
-            .padding(.vertical, 4)
-
+    NavigationStack {
+      List {
+        if showsHome, let onSelectHome {
           Button {
-            onCreateSpace()
+            dismiss()
+            onSelectHome()
           } label: {
-            HStack(spacing: 8) {
-              Image(systemName: "plus")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-              Text("Create Space")
-                .font(.body)
-                .foregroundStyle(.primary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 10)
+            SpacePickerRow(
+              title: "Home",
+              space: nil,
+              systemImage: "house.fill",
+              isSelected: selectedSpaceId == nil
+            )
           }
           .buttonStyle(.plain)
         }
-        .padding(10)
+
+        if spaces.isEmpty {
+          Text("No Spaces")
+            .foregroundStyle(.secondary)
+        } else {
+          ForEach(spaces) { space in
+            Button {
+              dismiss()
+              onSelectSpace(space)
+            } label: {
+              SpacePickerRow(
+                title: space.displayName,
+                space: space,
+                systemImage: "building.2.fill",
+                isSelected: space.id == selectedSpaceId
+              )
+            }
+            .buttonStyle(.plain)
+          }
+        }
+
+        Button {
+          dismiss()
+          onCreateSpace()
+        } label: {
+          SpacePickerCreateRow(systemImage: "plus")
+        }
+        .buttonStyle(.plain)
       }
-      .scrollIndicators(.hidden)
-      
+      .navigationTitle("Spaces")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .topBarLeading) {
+          Button("Close") {
+            dismiss()
+          }
+        }
+      }
     }
-    
+    .presentationDetents([.medium, .large])
+    .presentationDragIndicator(.visible)
   }
- 
 }
 
-private struct SpacePickerOverlayRow: View {
-  let space: Space
+private struct SpacePickerRow: View {
+  let title: String
+  let space: Space?
+  let systemImage: String
   let isSelected: Bool
-  let onSelect: (Space) -> Void
 
   var body: some View {
-    Button {
-      onSelect(space)
-    } label: {
-      HStack(spacing: 8) {
-        SpaceAvatar(space: space, size: 22)
-        Text(space.displayName)
-          .font(.body)
-          .foregroundStyle(.primary)
-          .lineLimit(1)
-        Spacer(minLength: 0)
-      }
-      .padding(.vertical, 8)
-      .padding(.horizontal, 10)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .background(isSelected ? Color(.systemBackground) : Color.clear)
-      .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-    }
-    .buttonStyle(.plain)
-  }
-}
+    HStack(spacing: 12) {
+      SpacePickerListIcon(space: space, systemImage: systemImage, size: 28)
 
-private struct SpacePickerOverlayHomeRow: View {
-  let isSelected: Bool
-  let onSelect: () -> Void
-
-  var body: some View {
-    Button {
-      onSelect()
-    } label: {
-      HStack(spacing: 8) {
-        Image(systemName: "house.fill")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .frame(width: 22, height: 22)
-
-        Text("Home")
-          .font(.body)
-          .foregroundStyle(.primary)
-          .lineLimit(1)
-
-        Spacer(minLength: 0)
-      }
-      .padding(.vertical, 8)
-      .padding(.horizontal, 10)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .background(isSelected ? Color(.systemBackground) : Color.clear)
-      .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-    }
-    .buttonStyle(.plain)
-  }
-}
-
-private struct SpacePickerEmptyRow: View {
-  var body: some View {
-    HStack(spacing: 8) {
-      Circle()
-        .fill(Color(.systemGray5))
-        .frame(width: 22, height: 22)
-      Text("No Spaces")
-        .foregroundStyle(.secondary)
+      Text(title)
+        .foregroundStyle(.primary)
         .lineLimit(1)
-      Spacer(minLength: 0)
+
+      Spacer()
+
+      if isSelected {
+        Image(systemName: "checkmark")
+          .font(.body)
+          .fontWeight(.semibold)
+          .foregroundStyle(Color.accentColor)
+      }
     }
-    .padding(.vertical, 8)
-    .padding(.horizontal, 10)
-    .frame(maxWidth: .infinity, alignment: .leading)
+    .contentShape(Rectangle())
+  }
+}
+
+private struct SpacePickerCreateRow: View {
+  let systemImage: String
+
+  var body: some View {
+    HStack(spacing: 12) {
+      SpacePickerListIcon(space: nil, systemImage: systemImage, size: 28)
+
+      Text("Create Space")
+        .foregroundStyle(.primary)
+
+      Spacer()
+    }
+    .contentShape(Rectangle())
+  }
+}
+
+private struct SpacePickerListIcon: View {
+  let space: Space?
+  let systemImage: String
+  let size: CGFloat
+
+  var body: some View {
+    if let space {
+      MonochromeSpaceAvatar(space: space, size: size)
+    } else {
+      RoundedRectangle(cornerRadius: size / 3, style: .continuous)
+        .fill(Color.gray.opacity(0.15))
+        .frame(width: size, height: size)
+        .overlay {
+          Image(systemName: systemImage)
+            .font(.system(size: size * 0.44, weight: .semibold))
+            .foregroundStyle(.secondary)
+        }
+    }
   }
 }
