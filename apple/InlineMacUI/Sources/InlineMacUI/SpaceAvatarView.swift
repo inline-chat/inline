@@ -1,5 +1,6 @@
 import AppKit
 import InlineKit
+import InlineUI
 
 public class SpaceAvatarView: NSView {
   private var space: Space?
@@ -73,15 +74,9 @@ public class SpaceAvatarView: NSView {
     let paragraph = NSMutableParagraphStyle()
     paragraph.alignment = .center
 
-    let text: String = {
-      if let emoji = leadingEmoji(for: space) {
-        return emoji
-      }
-      let trimmed = space.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-      return trimmed.first.map { String($0).uppercased() } ?? "·"
-    }()
+    let text = SpaceAvatarContent.text(for: space)
 
-    let fontScale: CGFloat = text.isAllEmojis ? 0.6 : 0.55
+    let fontScale = SpaceAvatarContent.fontScale(for: text)
     let attributes: [NSAttributedString.Key: Any] = [
       .font: NSFont.systemFont(ofSize: size * fontScale, weight: .semibold),
       .foregroundColor: NSColor.secondaryLabelColor,
@@ -100,29 +95,5 @@ public class SpaceAvatarView: NSView {
 
     image.unlockFocus()
     return image
-  }
-
-  private static func leadingEmoji(for space: Space) -> String? {
-    let rawName = space.name
-    let nameWithoutEmoji = space.nameWithoutEmoji
-    guard rawName != nameWithoutEmoji else { return nil }
-    let emojiPart = nameWithoutEmoji.isEmpty
-      ? rawName
-      : String(rawName.dropLast(nameWithoutEmoji.count))
-    let trimmed = emojiPart.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmed.isEmpty ? nil : trimmed
-  }
-}
-
-private extension String {
-  var isAllEmojis: Bool {
-    !isEmpty && allSatisfy { $0.isEmoji }
-  }
-}
-
-private extension Character {
-  var isEmoji: Bool {
-    guard let scalar = unicodeScalars.first else { return false }
-    return scalar.properties.isEmoji && (scalar.value > 0x238C || unicodeScalars.count > 1)
   }
 }

@@ -44,12 +44,12 @@ struct ExperimentalRootView: View {
   var body: some View {
     Group {
       switch mainViewRouter.route {
-      case .main:
-        mainTabs
-      case .onboarding:
-        OnboardingView()
-      case .loading:
-        loadingView
+        case .main:
+          mainTabs
+        case .onboarding:
+          OnboardingView()
+        case .loading:
+          loadingView
       }
     }
     .environment(router)
@@ -106,30 +106,20 @@ struct ExperimentalRootView: View {
           .tag(RootTab.chats)
       }
       .background(Color(.systemBackground))
-      .navigationBarTitleDisplayMode(.inline)
+      .experimentalRootTitleDisplayMode()
       .navigationTitle("")
       // Put the toolbar on the TabView root. Toolbars declared inside TabView pages can fail to
       // render reliably; attaching here keeps the top bar consistent.
       .toolbar {
-        ToolbarItem(placement: .topBarLeading) {
-          leadingButtonGroup
-        }
-
-        ToolbarItem(placement: .principal) {
-          activeSpacePicker(selectedSpaceId: $bindableNav.activeSpaceId)
-        }
-
-        ToolbarItem(placement: .topBarTrailing) {
-          createThreadButton(activeSpaceId: bindableNav.activeSpaceId)
-        }
+        experimentalToolbarContent(activeSpaceId: bindableNav.activeSpaceId)
       }
       // Match the app's translucent styling for the system tab bar.
-      .toolbarBackground(.visible, for: .tabBar)
-      .toolbarBackground(.thinMaterial, for: .tabBar)
+      // .toolbarBackground(.visible, for: .tabBar)
+      // .toolbarBackground(.thinMaterial, for: .tabBar)
       .navigationDestination(for: Destination.self) { destination in
         ExperimentalDestinationView(nav: bindableNav, destination: destination)
       }
-    }
+        }
     // Prevent child views (e.g. ChatView) from "leaking" a dark toolbar color scheme back to the root.
     .toolbarColorScheme(colorScheme, for: .navigationBar)
     // Also reset any leaked toolbar background visibility state.
@@ -153,14 +143,14 @@ struct ExperimentalRootView: View {
     }
     .onChange(of: rootTab) { _, newValue in
       switch newValue {
-      case .chats:
-        if bindableRouter.selectedTab != .chats {
-          bindableRouter.selectedTab = .chats
-        }
-      case .archived:
-        if bindableRouter.selectedTab != .archived {
-          bindableRouter.selectedTab = .archived
-        }
+        case .chats:
+          if bindableRouter.selectedTab != .chats {
+            bindableRouter.selectedTab = .chats
+          }
+        case .archived:
+          if bindableRouter.selectedTab != .archived {
+            bindableRouter.selectedTab = .archived
+          }
       }
     }
   }
@@ -196,9 +186,6 @@ struct ExperimentalRootView: View {
     )
 
     picker
-      .contentShape(Capsule())
-      // Ensure the toolbar gives the label enough width to show the active space name.
-      .frame(minWidth: 140, idealWidth: 180, maxWidth: 240, alignment: .center)
   }
 
   @ViewBuilder
@@ -271,26 +258,61 @@ struct ExperimentalRootView: View {
     }
   }
 
-  private var leadingButtonGroup: some View {
-    HStack(spacing: 0) {
-      NotificationSettingsButton(
-        iconColor: .primary,
-        iconFont: .system(size: 14, weight: .semibold)
-      )
-      .frame(width: 36, height: 36)
-
-      Button {
-        router.presentSheet(.settings)
-      } label: {
-        Image(systemName: "gearshape")
-          .font(.system(size: 14, weight: .semibold))
-          .foregroundStyle(.primary)
-          .frame(width: 36, height: 36)
-          .contentShape(Rectangle())
+  @ToolbarContentBuilder
+  private func experimentalToolbarContent(activeSpaceId: Int64?) -> some ToolbarContent {
+    if #available(iOS 26.0, *) {
+      ToolbarItem(placement: .principal) {
+        activeSpacePicker(selectedSpaceId: $nav.activeSpaceId)
       }
-      .buttonStyle(.plain)
-      .accessibilityLabel("Settings")
+      .sharedBackgroundVisibility(.hidden)
+
+      ToolbarItem(placement: .topBarTrailing) {
+        notificationsButton
+      }
+      ToolbarSpacer(.fixed, placement: .topBarTrailing)
+      ToolbarItem(placement: .topBarTrailing) {
+        settingsButton
+      }
+      ToolbarSpacer(.fixed, placement: .topBarTrailing)
+
+      ToolbarItem(placement: .topBarTrailing) {
+        createThreadButton(activeSpaceId: activeSpaceId)
+      }
+    } else {
+      ToolbarItem(placement: .topBarLeading) {
+        activeSpacePicker(selectedSpaceId: $nav.activeSpaceId)
+      }
+
+      ToolbarItem(placement: .topBarTrailing) {
+        HStack(spacing: 8) {
+          settingsButton
+          createThreadButton(activeSpaceId: activeSpaceId)
+          notificationsButton
+        }
+      }
     }
+  }
+
+  private var notificationsButton: some View {
+    NotificationSettingsButton(
+      iconColor: .primary,
+      iconFont: .system(size: 14, weight: .semibold)
+    )
+    .frame(width: 36, height: 36)
+  }
+
+  private var settingsButton: some View {
+    Button {
+      router.presentSheet(.settings)
+    } label: {
+      Image(systemName: "gearshape")
+        .font(.system(size: 14, weight: .semibold))
+        .foregroundStyle(.primary)
+        .frame(width: 36, height: 36)
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel("Settings")
   }
 
   private func refetchCoreDataAfterLocalDataCleared() async {
@@ -310,6 +332,17 @@ struct ExperimentalRootView: View {
       _ = try await data.getSpaces()
     } catch {
       Log.shared.error("Failed to reload spaces after clearing local data", error: error)
+    }
+  }
+}
+
+private extension View {
+  @ViewBuilder
+  func experimentalRootTitleDisplayMode() -> some View {
+    if #available(iOS 26.0, *) {
+      toolbarTitleDisplayMode(.inlineLarge)
+    } else {
+      navigationBarTitleDisplayMode(.inline)
     }
   }
 }
