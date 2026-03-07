@@ -6,7 +6,30 @@ import SwiftUI
 struct ExperimentalRootView: View {
   private enum RootTab: Hashable {
     case chats
+    case search
     case archived
+
+    init(appTab: AppTab) {
+      switch appTab {
+        case .archived:
+          self = .archived
+        case .search:
+          self = .search
+        case .chats, .spaces:
+          self = .chats
+      }
+    }
+
+    var appTab: AppTab {
+      switch self {
+        case .chats:
+          .chats
+        case .search:
+          .search
+        case .archived:
+          .archived
+      }
+    }
   }
 
   @State private var nav = ExperimentalNavigationModel()
@@ -17,6 +40,9 @@ struct ExperimentalRootView: View {
   @StateObject private var fileUploadViewModel = FileUploadViewModel()
   @StateObject private var tabsManager = TabsManager()
   @State private var rootTab: RootTab = .chats
+  @State private var lastNonSearchRootTab: RootTab = .chats
+  @State private var searchQuery = ""
+  @State private var isSearchPresented = false
   @State private var isCreatingThread = false
 
   @Environment(Router.self) private var router
@@ -63,7 +89,7 @@ struct ExperimentalRootView: View {
     .environmentObject(fileUploadViewModel)
     .environmentObject(tabsManager)
     .environmentObject(compactSpaceList)
-    // Experimental UI pushes destinations above the TabView, so explicit tab bar hiding is unnecessary.
+    // Experimental UI keeps navigation inside per-tab stacks, so explicit tab bar hiding is unnecessary.
     .environment(\.inlineHideTabBar, false)
     .toastView()
     .onReceive(NotificationCenter.default.publisher(for: .localDataCleared)) { _ in
@@ -89,68 +115,83 @@ struct ExperimentalRootView: View {
     @Bindable var bindableRouter = router
     @Bindable var bindableNav = nav
 
-    // Place the TabView at the root of a single NavigationStack so pushed destinations (ChatView, etc.)
-    // render above it. This keeps the tab bar "home-only" without requiring per-screen hiding.
-    return NavigationStack(path: $bindableRouter[bindableRouter.selectedTab]) {
-      TabView(selection: $rootTab) {
-        chatsRoot(nav: bindableNav, root: .archived)
-          .tabItem {
-            Label("Archived", systemImage: "archivebox.fill")
-          }
-          .tag(RootTab.archived)
+    return TabView(selection: $rootTab) {
+      Tab("Archived", systemImage: "archivebox.fill", value: .archived) {
+        rootNavigationStack(
+          nav: bindableNav,
+          appTab: .archived,
+          rootDestination: .archived
+        )
+      }
 
-        chatsRoot(nav: bindableNav, root: .chats)
-          .tabItem {
-            Label("Chats", systemImage: "bubble.left.and.bubble.right.fill")
-          }
-          .tag(RootTab.chats)
+      Tab("Chats", systemImage: "bubble.left.and.bubble.right.fill", value: .chats) {
+        rootNavigationStack(
+          nav: bindableNav,
+          appTab: .chats,
+          rootDestination: .chats
+        )
       }
-      .background(Color(.systemBackground))
-      .experimentalRootTitleDisplayMode()
-      .navigationTitle("")
-      // Put the toolbar on the TabView root. Toolbars declared inside TabView pages can fail to
-      // render reliably; attaching here keeps the top bar consistent.
-      .toolbar {
-        experimentalToolbarContent(activeSpaceId: bindableNav.activeSpaceId)
+
+      Tab(value: .search, role: .search) {
+        searchNavigationStack(nav: bindableNav)
       }
-      // Match the app's translucent styling for the system tab bar.
-      // .toolbarBackground(.visible, for: .tabBar)
-      // .toolbarBackground(.thinMaterial, for: .tabBar)
-      .navigationDestination(for: Destination.self) { destination in
-        ExperimentalDestinationView(nav: bindableNav, destination: destination)
-      }
-        }
-    // Prevent child views (e.g. ChatView) from "leaking" a dark toolbar color scheme back to the root.
-    .toolbarColorScheme(colorScheme, for: .navigationBar)
-    // Also reset any leaked toolbar background visibility state.
-    .toolbarBackground(.visible, for: .navigationBar)
+    }
+    .background(Color(.systemBackground))
+    .experimentalRootSearchable(text: $searchQuery, isPresented: $isSearchPresented)
     .sheet(item: $bindableRouter.presentedSheet) { sheet in
       ExperimentalSheetView(sheet: sheet)
     }
     .onAppear {
-      // Experimental UI only supports `.chats` and `.archived` as root tabs; normalize anything else.
-      let desiredTab: AppTab = (bindableRouter.selectedTab == .archived) ? .archived : .chats
+      // Experimental UI only supports `.chats`, `.archived`, and `.search` as root tabs.
+      let desiredTab = RootTab(appTab: bindableRouter.selectedTab).appTab
       if bindableRouter.selectedTab != desiredTab {
         bindableRouter.selectedTab = desiredTab
       }
-      rootTab = (desiredTab == .archived) ? .archived : .chats
+      rootTab = RootTab(appTab: desiredTab)
+      if rootTab != .search {
+        lastNonSearchRootTab = rootTab
+      }
     }
     .onChange(of: bindableRouter.selectedTab) { _, newValue in
-      let desiredRootTab: RootTab = (newValue == .archived) ? .archived : .chats
+      let desiredRootTab = RootTab(appTab: newValue)
+      let desiredTab = desiredRootTab.appTab
+      if bindableRouter.selectedTab != desiredTab {
+        bindableRouter.selectedTab = desiredTab
+        return
+      }
       if rootTab != desiredRootTab {
         rootTab = desiredRootTab
       }
     }
-    .onChange(of: rootTab) { _, newValue in
-      switch newValue {
-        case .chats:
-          if bindableRouter.selectedTab != .chats {
-            bindableRouter.selectedTab = .chats
-          }
-        case .archived:
-          if bindableRouter.selectedTab != .archived {
-            bindableRouter.selectedTab = .archived
-          }
+    .onChange(of: rootTab) { oldValue, newValue in
+      let desiredTab = newValue.appTab
+      if bindableRouter.selectedTab != desiredTab {
+        bindableRouter.selectedTab = desiredTab
+      }
+
+      if newValue == .search {
+        if oldValue != .search {
+          lastNonSearchRootTab = oldValue
+        }
+        if !usesNativeSearchTabActivation {
+          activateSearch()
+        }
+      } else {
+        lastNonSearchRootTab = newValue
+        if !usesNativeSearchTabActivation, isSearchPresented {
+          isSearchPresented = false
+        }
+      }
+    }
+    .onChange(of: isSearchPresented) { _, newValue in
+      guard !newValue else { return }
+      guard !usesNativeSearchTabActivation else { return }
+      guard rootTab == .search else { return }
+
+      searchQuery = ""
+
+      if rootTab != lastNonSearchRootTab {
+        rootTab = lastNonSearchRootTab
       }
     }
   }
@@ -162,6 +203,59 @@ struct ExperimentalRootView: View {
     @Bindable var bindableNav = nav
 
     return ExperimentalDestinationView(nav: bindableNav, destination: root)
+  }
+
+  private func rootNavigationStack(
+    nav: ExperimentalNavigationModel,
+    appTab: AppTab,
+    rootDestination: Destination
+  ) -> some View {
+    @Bindable var bindableRouter = router
+    @Bindable var bindableNav = nav
+
+    return NavigationStack(path: $bindableRouter[appTab]) {
+      chatsRoot(nav: bindableNav, root: rootDestination)
+        .background(Color(.systemBackground))
+        .experimentalRootTitleDisplayMode()
+        .navigationTitle("")
+        .toolbar {
+          experimentalToolbarContent(activeSpaceId: bindableNav.activeSpaceId)
+        }
+        .navigationDestination(for: Destination.self) { destination in
+          ExperimentalDestinationView(nav: bindableNav, destination: destination)
+        }
+    }
+    // Prevent child views (e.g. ChatView) from "leaking" a dark toolbar color scheme back to the root.
+    .toolbarColorScheme(colorScheme, for: .navigationBar)
+    // Also reset any leaked toolbar background visibility state.
+    .toolbarBackground(.visible, for: .navigationBar)
+  }
+
+  private func searchNavigationStack(
+    nav: ExperimentalNavigationModel
+  ) -> some View {
+    @Bindable var bindableRouter = router
+    @Bindable var bindableNav = nav
+
+    return NavigationStack(path: $bindableRouter[.search]) {
+      ExperimentalSearchView(query: searchQuery, activeSpaceId: bindableNav.activeSpaceId)
+        .background(Color(.systemBackground))
+        .experimentalRootTitleDisplayMode()
+        .navigationTitle("")
+        .navigationDestination(for: Destination.self) { destination in
+          ExperimentalDestinationView(nav: bindableNav, destination: destination)
+        }
+    }
+    .toolbarColorScheme(colorScheme, for: .navigationBar)
+    .toolbarBackground(.visible, for: .navigationBar)
+  }
+
+  private var usesNativeSearchTabActivation: Bool {
+    if #available(iOS 26.0, *) {
+      true
+    } else {
+      false
+    }
   }
 
   @ViewBuilder
@@ -258,6 +352,14 @@ struct ExperimentalRootView: View {
     }
   }
 
+  private func activateSearch() {
+    Task { @MainActor in
+      await Task.yield()
+      guard rootTab == .search else { return }
+      isSearchPresented = true
+    }
+  }
+
   @ToolbarContentBuilder
   private func experimentalToolbarContent(activeSpaceId: Int64?) -> some ToolbarContent {
     if #available(iOS 26.0, *) {
@@ -274,7 +376,6 @@ struct ExperimentalRootView: View {
         settingsButton
       }
       ToolbarSpacer(.fixed, placement: .topBarTrailing)
-
       ToolbarItem(placement: .topBarTrailing) {
         createThreadButton(activeSpaceId: activeSpaceId)
       }
@@ -343,6 +444,19 @@ private extension View {
       toolbarTitleDisplayMode(.inlineLarge)
     } else {
       navigationBarTitleDisplayMode(.inline)
+    }
+  }
+
+  @ViewBuilder
+  func experimentalRootSearchable(
+    text: Binding<String>,
+    isPresented: Binding<Bool>
+  ) -> some View {
+    if #available(iOS 26.0, *) {
+      searchable(text: text, prompt: "Find")
+        .tabViewSearchActivation(.searchTabSelection)
+    } else {
+      searchable(text: text, isPresented: isPresented, prompt: "Find")
     }
   }
 }
