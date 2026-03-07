@@ -4,13 +4,14 @@ import SwiftUI
 typealias Router = NavigationModel<AppTab, Destination, Sheet>
 
 enum AppTab: String, TabType, CaseIterable, Codable {
-  case archived, chats, spaces
+  case archived, chats, search, spaces
 
   var id: String { rawValue }
   var icon: String {
     switch self {
       case .archived: "archivebox.fill"
       case .chats: "bubble.left.and.bubble.right.fill"
+      case .search: "magnifyingglass"
       case .spaces: "building.2.fill"
     }
   }

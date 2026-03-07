@@ -55,6 +55,8 @@ struct ContentView2: View {
 }
 
 private struct AuthedAppRoot: View {
+  private let legacyRootTabs: [AppTab] = [.archived, .chats, .spaces]
+
   @Environment(Router.self) private var router
   @Environment(\.realtimeV2) private var realtimeV2
 
@@ -75,7 +77,7 @@ private struct AuthedAppRoot: View {
     @Bindable var bindableRouter = router
 
     TabView(selection: $bindableRouter.selectedTab) {
-      ForEach(AppTab.allCases) { tab in
+      ForEach(legacyRootTabs) { tab in
         NavigationStack(path: $bindableRouter[tab]) {
           tabContentView(for: tab)
             .navigationDestination(for: Destination.self) { destination in
@@ -95,6 +97,12 @@ private struct AuthedAppRoot: View {
     .environmentObject(data)
     .environmentObject(home)
     .environmentObject(compactSpaceList)
+    .onAppear {
+      normalizeSelectedTabIfNeeded(selectedTab: bindableRouter.selectedTab)
+    }
+    .onChange(of: bindableRouter.selectedTab) { _, newValue in
+      normalizeSelectedTabIfNeeded(selectedTab: newValue)
+    }
     .onReceive(NotificationCenter.default.publisher(for: .localDataCleared)) { _ in
       Task {
         await refetchCoreDataAfterLocalDataCleared()
@@ -109,6 +117,8 @@ private struct AuthedAppRoot: View {
       HomeView()
     case .archived:
       ArchivedChatsView()
+    case .search:
+      HomeView()
     case .spaces:
       SpacesView()
     }
@@ -183,6 +193,13 @@ private struct AuthedAppRoot: View {
       _ = try await data.getSpaces()
     } catch {
       Log.shared.error("Failed to reload spaces after clearing local data", error: error)
+    }
+  }
+
+  private func normalizeSelectedTabIfNeeded(selectedTab: AppTab) {
+    guard legacyRootTabs.contains(selectedTab) else {
+      router.selectedTab = .chats
+      return
     }
   }
 }
