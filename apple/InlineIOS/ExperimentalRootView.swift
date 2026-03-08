@@ -89,7 +89,7 @@ struct ExperimentalRootView: View {
     .environmentObject(fileUploadViewModel)
     .environmentObject(tabsManager)
     .environmentObject(compactSpaceList)
-    // Experimental UI keeps navigation inside per-tab stacks, so explicit tab bar hiding is unnecessary.
+    // Experimental UI keeps navigation inside per-tab stacks; each stack owns tab bar visibility.
     .environment(\.inlineHideTabBar, false)
     .toastView()
     .onReceive(NotificationCenter.default.publisher(for: .localDataCleared)) { _ in
@@ -225,6 +225,10 @@ struct ExperimentalRootView: View {
           ExperimentalDestinationView(nav: bindableNav, destination: destination)
         }
     }
+    .toolbar(
+      bindableRouter[appTab].isEmpty ? Visibility.visible : Visibility.hidden,
+      for: .tabBar
+    )
     // Prevent child views (e.g. ChatView) from "leaking" a dark toolbar color scheme back to the root.
     .toolbarColorScheme(colorScheme, for: .navigationBar)
     // Also reset any leaked toolbar background visibility state.
@@ -246,6 +250,10 @@ struct ExperimentalRootView: View {
           ExperimentalDestinationView(nav: bindableNav, destination: destination)
         }
     }
+    .toolbar(
+      bindableRouter[.search].isEmpty ? Visibility.visible : Visibility.hidden,
+      for: .tabBar
+    )
     .toolbarColorScheme(colorScheme, for: .navigationBar)
     .toolbarBackground(.visible, for: .navigationBar)
   }
