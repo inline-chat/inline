@@ -299,9 +299,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   func buttonDisappear() {
-    guard isButtonVisible || !sendButton.alpha.isZero else {
+    guard isButtonVisible || !ComposeSendButtonState.isEffectivelyHidden(alpha: Double(sendButton.alpha)) else {
       sendButton.isEnabled = false
       sendButton.isUserInteractionEnabled = false
+      sendButton.setNeedsUpdateConfiguration()
       return
     }
     isButtonVisible = false
@@ -314,23 +315,39 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       options: [.curveEaseInOut, .allowUserInteraction, .beginFromCurrentState]
     ) {
       self.sendButton.alpha = 0
-    } completion: { _ in
+    } completion: { finished in
+      guard ComposeSendButtonState.shouldFinalizeHide(
+        finished: finished,
+        isButtonVisible: self.isButtonVisible
+      ) else { return }
       self.sendButton.isEnabled = false
       self.sendButton.isUserInteractionEnabled = false
       self.sendButton.transform = .identity
+      self.sendButton.setNeedsUpdateConfiguration()
     }
   }
 
   func buttonAppear() {
-    guard !isButtonVisible else { return }
+    let isFullyVisible = ComposeSendButtonState.isFullyVisible(
+      isButtonVisible: isButtonVisible,
+      isEnabled: sendButton.isEnabled,
+      isUserInteractionEnabled: sendButton.isUserInteractionEnabled,
+      alpha: Double(sendButton.alpha)
+    )
+    guard !isFullyVisible else { return }
+
     isButtonVisible = true
     sendButton.isEnabled = true
     sendButton.isUserInteractionEnabled = true
+    sendButton.setNeedsUpdateConfiguration()
 
     animateTelegramSendButtonBlur(to: 0.0)
 
-    sendButton.alpha = 0.0
     sendButton.transform = .identity
+
+    if ComposeSendButtonState.isEffectivelyHidden(alpha: Double(sendButton.alpha)) {
+      sendButton.alpha = 0.0
+    }
 
     UIView.animate(
       withDuration: telegramSendButtonShowDuration,

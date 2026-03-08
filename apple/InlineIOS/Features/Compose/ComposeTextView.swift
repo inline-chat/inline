@@ -1,4 +1,5 @@
 import InlineKit
+import InlineUI
 import Logger
 import ObjectiveC
 import TextProcessing
@@ -108,16 +109,18 @@ class ComposeTextView: UITextView {
       composeView?.handlePastedImage()
     } else if let string = UIPasteboard.general.string {
       // Insert plain text only
-      let range = selectedRange
-      let newText = (text as NSString).replacingCharacters(in: range, with: string)
-      text = newText
-      // Reset attributes
-      fixFontSizeAfterStickerInsertion()
-      showPlaceholder(text.isEmpty)
-      composeView?.updateHeight()
-      if !text.isEmpty {
-        composeView?.buttonAppear()
-      }
+      let pasteResult = ComposePlainTextPaste.apply(
+        currentText: text ?? "",
+        selectedRange: selectedRange,
+        pastedText: string
+      )
+      text = pasteResult.text
+      selectedRange = pasteResult.selectedRange
+
+      // Programmatic text assignment bypasses the normal delegate path.
+      // Route paste through the same change handlers as typing so send state stays in sync.
+      textDidChange()
+      delegate?.textViewDidChange?(self)
     } else {
       super.paste(sender)
       fixFontSizeAfterStickerInsertion()
