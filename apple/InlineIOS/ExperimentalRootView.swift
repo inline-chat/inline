@@ -368,10 +368,22 @@ private struct ExperimentalAuthedRootView: View {
   @ToolbarContentBuilder
   private func experimentalToolbarContent(activeSpaceId: Int64?) -> some ToolbarContent {
     if #available(iOS 26.0, *) {
+
       ToolbarItem(placement: .principal) {
         activeSpacePicker(selectedSpaceId: $nav.activeSpaceId)
+          .frame(maxWidth: .infinity, alignment: .leading)
       }
       .sharedBackgroundVisibility(.hidden)
+
+
+      ToolbarItem(placement: .topBarTrailing) {
+        Color.clear
+          .frame(width: 36, height: 36)
+          .allowsHitTesting(false)
+          .accessibilityHidden(true)
+      }
+      .sharedBackgroundVisibility(.hidden)
+      ToolbarSpacer(.fixed, placement: .topBarTrailing)
 
       ToolbarItem(placement: .topBarTrailing) {
         notificationsButton
