@@ -183,8 +183,7 @@ private struct ExperimentalHomeView: View {
           showsSpaceNameInRows: nav.activeSpaceId == nil,
           chatItemRenderMode: chatItemRenderMode,
           isLoading: isLoadingHomeData,
-          onTapItem: openChat,
-          onRefresh: refreshHomeContent
+          onTapItem: openChat
         )
       case .archived:
         ExperimentalChatListView(
@@ -196,8 +195,7 @@ private struct ExperimentalHomeView: View {
           showsSpaceNameInRows: nav.activeSpaceId == nil,
           chatItemRenderMode: chatItemRenderMode,
           isLoading: isLoadingHomeData,
-          onTapItem: openChat,
-          onRefresh: refreshHomeContent
+          onTapItem: openChat
         )
       }
     }
@@ -273,10 +271,6 @@ private struct ExperimentalHomeView: View {
       includeBootstrapData: shouldBootstrap,
       forceDialogs: nav.activeSpaceId != nil
     )
-  }
-
-  private func refreshHomeContent() async {
-    await reloadHomeData(includeBootstrapData: true, forceDialogs: true)
   }
 
   private func reloadHomeData(
@@ -469,7 +463,6 @@ private struct ExperimentalChatListView: View {
   let chatItemRenderMode: ExperimentalHomeChatItemRenderMode
   let isLoading: Bool
   let onTapItem: (HomeChatItem) -> Void
-  let onRefresh: () async -> Void
 
   @Environment(Router.self) private var router
   @EnvironmentObject private var data: DataManager
@@ -495,9 +488,6 @@ private struct ExperimentalChatListView: View {
         }
       }
       .listStyle(.plain)
-      .refreshable {
-        await onRefresh()
-      }
       .animation(.snappy(duration: 0.25, extraBounce: 0), value: itemIDs)
       .onChange(of: items) { _, newItems in
         translationCoordinator.process(
