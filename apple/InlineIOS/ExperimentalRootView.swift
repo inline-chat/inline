@@ -3,42 +3,83 @@ import InlineUI
 import Logger
 import SwiftUI
 
-struct ExperimentalRootView: View {
-  private enum RootTab: Hashable {
-    case chats
-    case search
-    case archived
+private enum RootTab: Hashable {
+  case chats
+  case search
+  case archived
 
-    init(appTab: AppTab) {
-      switch appTab {
-        case .archived:
-          self = .archived
-        case .search:
-          self = .search
-        case .chats, .spaces:
-          self = .chats
-      }
-    }
-
-    var appTab: AppTab {
-      switch self {
-        case .chats:
-          .chats
-        case .search:
-          .search
-        case .archived:
-          .archived
-      }
+  init(appTab: AppTab) {
+    switch appTab {
+      case .archived:
+        self = .archived
+      case .search:
+        self = .search
+      case .chats, .spaces:
+        self = .chats
     }
   }
 
-  @State private var nav = ExperimentalNavigationModel()
+  var appTab: AppTab {
+    switch self {
+      case .chats:
+        .chats
+      case .search:
+        .search
+      case .archived:
+        .archived
+    }
+  }
+}
+
+struct ExperimentalRootView: View {
   @StateObject private var onboardingNavigation = OnboardingNavigation()
   @StateObject private var api = ApiClient()
   @StateObject private var userData = UserData()
   @StateObject private var mainViewRouter = MainViewRouter()
   @StateObject private var fileUploadViewModel = FileUploadViewModel()
   @StateObject private var tabsManager = TabsManager()
+
+  @Environment(Router.self) private var router
+
+  var body: some View {
+    Group {
+      switch mainViewRouter.route {
+        case .main:
+          // Keep auth-session state under the authed subtree so a fresh login rebuilds bootstrap state.
+          ExperimentalAuthedRootView()
+        case .onboarding:
+          OnboardingView()
+        case .loading:
+          loadingView
+      }
+    }
+    .environment(router)
+    .environmentObject(onboardingNavigation)
+    .environmentObject(Api.realtime.stateObject)
+    .environmentObject(api)
+    .environmentObject(userData)
+    .environmentObject(mainViewRouter)
+    .environmentObject(fileUploadViewModel)
+    .environmentObject(tabsManager)
+    // Experimental UI keeps navigation inside per-tab stacks; each stack owns tab bar visibility.
+    .environment(\.inlineHideTabBar, false)
+    .toastView()
+  }
+
+  private var loadingView: some View {
+    VStack(spacing: 12) {
+      ProgressView()
+      Text("Unlocking...")
+        .font(.headline)
+        .foregroundStyle(.secondary)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .background(Color(.systemBackground))
+  }
+}
+
+private struct ExperimentalAuthedRootView: View {
+  @State private var nav = ExperimentalNavigationModel()
   @State private var rootTab: RootTab = .chats
   @State private var lastNonSearchRootTab: RootTab = .chats
   @State private var searchQuery = ""
@@ -68,47 +109,16 @@ struct ExperimentalRootView: View {
   }
 
   var body: some View {
-    Group {
-      switch mainViewRouter.route {
-        case .main:
-          mainTabs
-        case .onboarding:
-          OnboardingView()
-        case .loading:
-          loadingView
+    mainTabs
+      .environmentObject(data)
+      .environmentObject(home)
+      .environmentObject(compactSpaceList)
+      .onReceive(NotificationCenter.default.publisher(for: .localDataCleared)) { _ in
+        nav.resetHomeDataState()
+        Task {
+          await refetchCoreDataAfterLocalDataCleared()
+        }
       }
-    }
-    .environment(router)
-    .environmentObject(onboardingNavigation)
-    .environmentObject(Api.realtime.stateObject)
-    .environmentObject(api)
-    .environmentObject(userData)
-    .environmentObject(data)
-    .environmentObject(mainViewRouter)
-    .environmentObject(home)
-    .environmentObject(fileUploadViewModel)
-    .environmentObject(tabsManager)
-    .environmentObject(compactSpaceList)
-    // Experimental UI keeps navigation inside per-tab stacks; each stack owns tab bar visibility.
-    .environment(\.inlineHideTabBar, false)
-    .toastView()
-    .onReceive(NotificationCenter.default.publisher(for: .localDataCleared)) { _ in
-      nav.resetHomeDataState()
-      Task {
-        await refetchCoreDataAfterLocalDataCleared()
-      }
-    }
-  }
-
-  private var loadingView: some View {
-    VStack(spacing: 12) {
-      ProgressView()
-      Text("Unlocking...")
-        .font(.headline)
-        .foregroundStyle(.secondary)
-    }
-    .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(Color(.systemBackground))
   }
 
   private var mainTabs: some View {
