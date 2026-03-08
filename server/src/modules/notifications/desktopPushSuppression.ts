@@ -59,7 +59,7 @@ export type DesktopPushSuppressionMetrics = {
   lastSuppressedAt: number | null
 }
 
-const DEFAULT_ACTIVITY_TTL_MS = 60_000
+const DEFAULT_ACTIVITY_TTL_MS = 30_000
 
 // NOTE: This module keeps activity state in memory and is only correct in single-instance deployments.
 // For multi-instance deployments, move activity/session-type state to a shared store (e.g. Redis/Postgres).
