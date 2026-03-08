@@ -16,7 +16,7 @@ export type DesktopPushSuppressionDecision = {
   reason: DesktopPushSuppressionReason
 }
 
-export type RecordReadActivityInput = {
+export type RecordChatActivityInput = {
   userId: number
   sessionId: number
   chatId: number
@@ -59,7 +59,7 @@ export type DesktopPushSuppressionMetrics = {
   lastSuppressedAt: number | null
 }
 
-const DEFAULT_ACTIVITY_TTL_MS = 12_000
+const DEFAULT_ACTIVITY_TTL_MS = 60_000
 
 // NOTE: This module keeps activity state in memory and is only correct in single-instance deployments.
 // For multi-instance deployments, move activity/session-type state to a shared store (e.g. Redis/Postgres).
@@ -89,7 +89,7 @@ export class DesktopPushSuppressionTracker {
     this.resolveSessionClientType = options.resolveSessionClientType ?? defaultSessionClientTypeResolver
   }
 
-  async recordReadActivity(input: RecordReadActivityInput): Promise<void> {
+  async recordChatActivity(input: RecordChatActivityInput): Promise<void> {
     const now = input.now ?? this.now()
     this.pruneStale(now)
 

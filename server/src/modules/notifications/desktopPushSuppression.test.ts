@@ -14,7 +14,7 @@ describe("desktopPushSuppression", () => {
       resolveSessionClientType: async () => "macos",
     })
 
-    await tracker.recordReadActivity({ userId: 7, sessionId: 11, chatId: 22 })
+    await tracker.recordChatActivity({ userId: 7, sessionId: 11, chatId: 22 })
 
     const decision = tracker.shouldSuppressIOSSendMessagePush({
       userId: 7,
@@ -34,13 +34,22 @@ describe("desktopPushSuppression", () => {
   it("does not suppress when activity is stale", async () => {
     const tracker = new DesktopPushSuppressionTracker({
       now: () => now,
-      activityTtlMs: 12_000,
       resolveSessionClientType: async () => "macos",
     })
 
-    await tracker.recordReadActivity({ userId: 1, sessionId: 1, chatId: 100 })
+    await tracker.recordChatActivity({ userId: 1, sessionId: 1, chatId: 100 })
 
-    now += 12_001
+    now += 59_999
+
+    expect(
+      tracker.shouldSuppressIOSSendMessagePush({
+        userId: 1,
+        chatId: 100,
+        isUrgentNudge: false,
+      }),
+    ).toEqual({ suppress: true, reason: "active_desktop_chat" })
+
+    now += 2
 
     const decision = tracker.shouldSuppressIOSSendMessagePush({
       userId: 1,
@@ -57,7 +66,7 @@ describe("desktopPushSuppression", () => {
       resolveSessionClientType: async () => "macos",
     })
 
-    await tracker.recordReadActivity({ userId: 3, sessionId: 4, chatId: 50 })
+    await tracker.recordChatActivity({ userId: 3, sessionId: 4, chatId: 50 })
 
     const decision = tracker.shouldSuppressIOSSendMessagePush({
       userId: 3,
@@ -74,7 +83,7 @@ describe("desktopPushSuppression", () => {
       resolveSessionClientType: async () => "ios",
     })
 
-    await tracker.recordReadActivity({ userId: 9, sessionId: 2, chatId: 44 })
+    await tracker.recordChatActivity({ userId: 9, sessionId: 2, chatId: 44 })
 
     const decision = tracker.shouldSuppressIOSSendMessagePush({
       userId: 9,
@@ -92,7 +101,7 @@ describe("desktopPushSuppression", () => {
       resolveSessionClientType: async () => null,
     })
 
-    await tracker.recordReadActivity({ userId: 5, sessionId: 7, chatId: 88 })
+    await tracker.recordChatActivity({ userId: 5, sessionId: 7, chatId: 88 })
 
     const decision = tracker.shouldSuppressIOSSendMessagePush({
       userId: 5,
@@ -110,7 +119,7 @@ describe("desktopPushSuppression", () => {
       resolveSessionClientType: async () => "macos",
     })
 
-    await tracker.recordReadActivity({ userId: 1, sessionId: 99, chatId: 20 })
+    await tracker.recordChatActivity({ userId: 1, sessionId: 99, chatId: 20 })
 
     const decision = tracker.shouldSuppressIOSSendMessagePush({
       userId: 1,
@@ -133,7 +142,7 @@ describe("desktopPushSuppression", () => {
       },
     })
 
-    await tracker.recordReadActivity({ userId: 1, sessionId: 99, chatId: 20 })
+    await tracker.recordChatActivity({ userId: 1, sessionId: 99, chatId: 20 })
 
     expect(tracker.getMetrics().errorsTotal).toBe(1)
   })
@@ -148,8 +157,8 @@ describe("desktopPushSuppression", () => {
       },
     })
 
-    await tracker.recordReadActivity({ userId: 2, sessionId: 10, chatId: 20 })
-    await tracker.recordReadActivity({ userId: 2, sessionId: 10, chatId: 20 })
+    await tracker.recordChatActivity({ userId: 2, sessionId: 10, chatId: 20 })
+    await tracker.recordChatActivity({ userId: 2, sessionId: 10, chatId: 20 })
 
     expect(resolverCalls).toBe(2)
   })
@@ -165,12 +174,12 @@ describe("desktopPushSuppression", () => {
       },
     })
 
-    await tracker.recordReadActivity({ userId: 3, sessionId: 11, chatId: 20 })
-    await tracker.recordReadActivity({ userId: 3, sessionId: 11, chatId: 20 })
+    await tracker.recordChatActivity({ userId: 3, sessionId: 11, chatId: 20 })
+    await tracker.recordChatActivity({ userId: 3, sessionId: 11, chatId: 20 })
     expect(resolverCalls).toBe(1)
 
     now += 11
-    await tracker.recordReadActivity({ userId: 3, sessionId: 11, chatId: 20 })
+    await tracker.recordChatActivity({ userId: 3, sessionId: 11, chatId: 20 })
     expect(resolverCalls).toBe(2)
   })
 })

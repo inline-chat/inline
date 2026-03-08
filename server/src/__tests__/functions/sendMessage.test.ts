@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, beforeAll } from "bun:test"
+import { describe, test, expect, beforeAll, mock } from "bun:test"
 import { InputPeer, Message, MessageEntity_Type, SendMessageResult } from "@inline-chat/protocol/core"
 import { setupTestDatabase, testUtils } from "../setup"
 import { sendMessage } from "@in/server/functions/messages.sendMessage"
@@ -9,6 +9,7 @@ import { dialogs, users } from "@in/server/db/schema"
 import { and, eq } from "drizzle-orm"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import { UpdatesModel } from "@in/server/db/models/updates"
+import { desktopPushSuppressionTracker } from "@in/server/modules/notifications/desktopPushSuppression"
 
 // Test state
 let currentUser: DbUser
@@ -38,6 +39,31 @@ describe("sendMessage", () => {
       type: { oneofKind: "chat" as const, chat: { chatId: BigInt(privateChat.id) } },
     }
     context = testUtils.functionContext({ userId: currentUser.id, sessionId: 1 })
+  })
+
+  test("records desktop chat activity from successful sends", async () => {
+    const mockRecordChatActivity = mock().mockResolvedValue(undefined)
+    const originalRecordChatActivity = desktopPushSuppressionTracker.recordChatActivity
+    desktopPushSuppressionTracker.recordChatActivity = mockRecordChatActivity
+
+    try {
+      await sendMessage(
+        {
+          peerId: privateChatPeerId,
+          message: "activity ping",
+        },
+        context,
+      )
+    } finally {
+      desktopPushSuppressionTracker.recordChatActivity = originalRecordChatActivity
+    }
+
+    expect(mockRecordChatActivity).toHaveBeenCalledTimes(1)
+    expect(mockRecordChatActivity).toHaveBeenCalledWith({
+      userId: currentUser.id,
+      sessionId: context.currentSessionId,
+      chatId: privateChat.id,
+    })
   })
 
   test("should create a text message", async () => {

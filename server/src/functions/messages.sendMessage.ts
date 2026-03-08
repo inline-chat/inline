@@ -225,6 +225,12 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     }
   }
 
+  const recordDesktopChatActivityPromise = desktopPushSuppressionTracker.recordChatActivity({
+    userId: currentUserId,
+    sessionId: context.currentSessionId,
+    chatId,
+  })
+
   // Process Loom links in the message if any
   if (text && !input.skipLinkProcessing) {
     // Process Loom links in parallel with message sending
@@ -262,6 +268,8 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   unarchiveUpdates.forEach(({ userId, update }) => {
     RealtimeUpdates.pushToUser(userId, [update])
   })
+
+  await recordDesktopChatActivityPromise
 
   let { selfUpdates } = await pushUpdates({
     inputPeer,
