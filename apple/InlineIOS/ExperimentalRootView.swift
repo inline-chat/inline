@@ -139,7 +139,12 @@ struct ExperimentalRootView: View {
     .background(Color(.systemBackground))
     .experimentalRootSearchable(text: $searchQuery, isPresented: $isSearchPresented)
     .sheet(item: $bindableRouter.presentedSheet) { sheet in
-      ExperimentalSheetView(sheet: sheet)
+      if case .chatInfo = sheet {
+        ExperimentalSheetView(sheet: sheet)
+          .presentationDetents([.medium, .large])
+      } else {
+        ExperimentalSheetView(sheet: sheet)
+      }
     }
     .onAppear {
       // Experimental UI only supports `.chats`, `.archived`, and `.search` as root tabs.

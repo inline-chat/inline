@@ -24,6 +24,7 @@ struct ChatInfoView: View {
   @EnvironmentObject var nav: Navigation
   @EnvironmentObject var api: ApiClient
   @Environment(Router.self) var router
+  @Environment(\.dismiss) private var dismiss
   @State var selectedTab: ChatInfoTab
   @Namespace var tabSelection
   @State  var showMakePublicAlert = false
@@ -114,6 +115,12 @@ struct ChatInfoView: View {
       Color(.systemGray3).adjustLuminosity(by: 0.2),
       Color(.systemGray5).adjustLuminosity(by: 0),
     ]
+  }
+
+  var isPresentedAsSheet: Bool {
+    guard let presentedSheet = router.presentedSheet else { return false }
+    guard case let .chatInfo(presentedChatItem) = presentedSheet else { return false }
+    return presentedChatItem.id == chatItem.id
   }
 
   init(chatItem: SpaceChatItem) {
@@ -377,27 +384,43 @@ struct ChatInfoView: View {
     .toolbar {
       if canEditChatInfo {
         if isEditingInfo {
-          ToolbarItem(placement: .topBarLeading) {
+          ToolbarItem(placement: .cancellationAction) {
             Button("Cancel") {
               cancelEditingChatInfo()
             }
-            .buttonStyle(.borderless)
           }
-          ToolbarItem(placement: .topBarTrailing) {
+          ToolbarItem(placement: .confirmationAction) {
             Button(isSavingInfo ? "Saving..." : "Save") {
               saveChatInfo()
             }
-            .buttonStyle(.borderless)
             .disabled(!canSaveChatInfo || isSavingInfo)
-            .opacity((!canSaveChatInfo || isSavingInfo) ? 0.5 : 1)
           }
         } else {
-          ToolbarItem(placement: .topBarTrailing) {
+          if isPresentedAsSheet {
+            ToolbarItem(placement: .cancellationAction) {
+              Button {
+                dismiss()
+              } label: {
+                Image(systemName: "xmark")
+              }
+              .accessibilityLabel("Close")
+            }
+          }
+
+          ToolbarItem(placement: .primaryAction) {
             Button("Edit") {
               startEditingChatInfo()
             }
-            .buttonStyle(.borderless)
           }
+        }
+      } else if isPresentedAsSheet {
+        ToolbarItem(placement: .cancellationAction) {
+          Button {
+            dismiss()
+          } label: {
+            Image(systemName: "xmark")
+          }
+          .accessibilityLabel("Close")
         }
       }
     }
