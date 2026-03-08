@@ -134,6 +134,10 @@ struct ExperimentalSheetView: View {
       InviteToSpaceView(spaceId: spaceId)
     case let .members(spaceId):
       ExperimentalMembersSheetView(spaceId: spaceId)
+    case let .chatInfo(chatItem):
+      NavigationStack {
+        ChatInfoView(chatItem: chatItem)
+      }
     }
   }
 }

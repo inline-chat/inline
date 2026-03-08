@@ -41,6 +41,7 @@ enum Sheet: SheetType, Codable {
 
   case addMember(spaceId: Int64)
   case members(spaceId: Int64)
+  case chatInfo(chatItem: SpaceChatItem)
   var id: String {
     switch self {
       case .createSpace:
@@ -57,6 +58,9 @@ enum Sheet: SheetType, Codable {
 
       case let .members(spaceId):
         "members_\(spaceId)"
+
+      case let .chatInfo(chatItem):
+        "chatInfo_\(chatItem.id)"
     }
   }
 }
