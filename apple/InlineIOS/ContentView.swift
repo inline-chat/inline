@@ -173,6 +173,12 @@ private struct AuthedAppRoot: View {
 
     case let .members(spaceId):
       ExperimentalMembersSheetView(spaceId: spaceId)
+
+    case let .chatInfo(chatItem):
+      NavigationStack {
+        ChatInfoView(chatItem: chatItem)
+      }
+      .presentationDetents([.medium, .large])
     }
   }
 
