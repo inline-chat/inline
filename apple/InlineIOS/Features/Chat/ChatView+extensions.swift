@@ -172,7 +172,7 @@ struct ChatToolbarLeadingView: View {
     .opacity(isChatHeaderPressed ? 0.7 : 1.0)
     .onTapGesture {
       if let chatItem = fullChatViewModel.chatItem {
-        router.push(.chatInfo(chatItem: chatItem))
+        router.presentSheet(.chatInfo(chatItem: chatItem))
       }
     }
     .onLongPressGesture(minimumDuration: 0, maximumDistance: .infinity, pressing: { pressing in
