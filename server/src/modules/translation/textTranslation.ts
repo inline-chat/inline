@@ -1,13 +1,13 @@
 import type { ChatModel } from "openai/resources/shared.mjs"
-import { zodResponseFormat } from "openai/helpers/zod.mjs"
 import invariant from "tiny-invariant"
-import { z } from "zod"
+import { z } from "zod/v4"
 import { openaiClient } from "@in/server/libs/openAI"
 import { getCachedUserName } from "@in/server/modules/cache/userNames"
 import { HARDCODED_TRANSLATION_CONTEXT } from "@in/server/env"
 import { Log } from "@in/server/utils/log"
 import type { TranslationCallInput } from "./types"
 import { relativeTimeFromNow } from "@in/server/modules/notifications/eval"
+import { zodResponseFormat } from "openai/helpers/zod"
 
 const log = new Log("modules/translation/textTranslation")
 
@@ -107,7 +107,7 @@ export async function translateTexts(
   log.debug("Text translation system prompt:", systemPrompt)
   log.debug("Text translation user prompt:", userPrompt)
 
-  const response = await openaiClient.chat.completions.create({
+  const response = await openaiClient.chat.completions.parse({
     model: "gpt-5-mini" as ChatModel,
     verbosity: "medium",
     reasoning_effort: "minimal",
@@ -128,7 +128,10 @@ export async function translateTexts(
 
   try {
     log.debug(`Text translation result: ${response.choices[0]?.message.content}`)
-    const result = TextTranslationResultSchema.parse(JSON.parse(response.choices[0]?.message.content ?? "{}"))
+    const result = response.choices[0]?.message.parsed
+    if (!result) {
+      throw new Error("Missing parsed text translation response")
+    }
     return result.translations
   } catch (error) {
     log.error(`Text translation decoding failed: ${error}`)

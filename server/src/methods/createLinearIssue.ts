@@ -2,7 +2,7 @@ import { Optional, Type, type Static } from "@sinclair/typebox"
 import { eq, and, gte, lte } from "drizzle-orm"
 import { chats, chatParticipants, users, messages } from "../db/schema"
 import { db } from "../db"
-import { z } from "zod"
+import { z } from "zod/v4"
 import {
   createIssue,
   generateIssueLink,
@@ -13,13 +13,13 @@ import {
 } from "@in/server/libs/linear"
 import { openaiClient } from "../libs/openAI"
 import { Log } from "../utils/log"
-import { zodResponseFormat } from "openai/helpers/zod.mjs"
 import { messageAttachments, externalTasks, type DbExternalTask } from "../db/schema/attachments"
 import { encrypt } from "../modules/encryption/encryption"
 import { TInputPeerInfo, TPeerInfo } from "../api-types"
 import { getUpdateGroup } from "../modules/updates"
 import { connectionManager } from "../ws/connections"
 import { MessageAttachmentExternalTask_Status, type MessageAttachment } from "@inline-chat/protocol/core"
+import { zodResponseFormat } from "openai/helpers/zod"
 import { RealtimeUpdates } from "../realtime/message"
 import { examples, prompt } from "../libs/linear/prompt"
 import { Notifications } from "../modules/notifications/notifications"
@@ -232,8 +232,8 @@ export const handler = async (
     spaceId,
     labelCount: labels.labels?.length ?? 0,
   })
-  const completion = await openaiClient.chat.completions.create({
-    model: "gpt-5.2",
+  const completion = await openaiClient.chat.completions.parse({
+    model: "gpt-5.4",
     verbosity: "low",
     reasoning_effort: "low",
     messages: [
@@ -262,12 +262,10 @@ export const handler = async (
   })
 
   try {
-    const parsedResponse = completion.choices[0]?.message?.content
-    if (!parsedResponse) {
-      throw new Error("Missing OpenAI response")
+    const response = completion.choices[0]?.message.parsed
+    if (!response) {
+      throw new Error("Missing parsed OpenAI response")
     }
-
-    const response = issueSchema.parse(JSON.parse(parsedResponse))
     Log.shared.debug("OpenAI response parsed for Linear issue", {
       currentUserId,
       chatId,

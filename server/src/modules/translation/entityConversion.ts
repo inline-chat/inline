@@ -1,10 +1,10 @@
 import type { ChatModel } from "openai/resources/shared.mjs"
-import { zodResponseFormat } from "openai/helpers/zod.mjs"
 import invariant from "tiny-invariant"
-import { z } from "zod"
+import { z } from "zod/v4"
 import { MessageEntities } from "@inline-chat/protocol/core"
 import { openaiClient } from "@in/server/libs/openAI"
 import { Log } from "@in/server/utils/log"
+import { zodResponseFormat } from "openai/helpers/zod"
 
 const log = new Log("modules/translation/entityConversion")
 
@@ -94,7 +94,7 @@ ${input.messages
   log.debug("Entity conversion system prompt:", systemPrompt)
   log.debug("Entity conversion user prompt:", userPrompt)
 
-  const response = await openaiClient.chat.completions.create({
+  const response = await openaiClient.chat.completions.parse({
     model: "gpt-5-mini" as ChatModel,
     verbosity: "low",
     reasoning_effort: "minimal",
@@ -115,7 +115,10 @@ ${input.messages
 
   try {
     log.debug(`Entity conversion result: ${response.choices[0]?.message.content}`)
-    const result = BatchEntityConversionResultSchema.parse(JSON.parse(response.choices[0]?.message.content ?? "{}"))
+    const result = response.choices[0]?.message.parsed
+    if (!result) {
+      throw new Error("Missing parsed entity conversion response")
+    }
 
     return result.conversions.map((conversion) => {
       let entities: MessageEntities | null = null
