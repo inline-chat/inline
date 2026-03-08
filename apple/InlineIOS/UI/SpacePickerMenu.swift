@@ -1,5 +1,4 @@
 import InlineKit
-import InlineUI
 import SwiftUI
 
 struct SpacePickerMenu: View {
@@ -85,7 +84,7 @@ private struct SpacePickerToolbarIcon: View {
 
   var body: some View {
     if let space {
-      MonochromeSpaceAvatar(space: space, size: 32)
+      SpacePickerMonochromeAvatar(space: space, size: 32)
     } else {
       RoundedRectangle(cornerRadius: 32.0 / 3.0, style: .continuous)
         .fill(Color.gray.opacity(0.15))
@@ -220,7 +219,7 @@ private struct SpacePickerListIcon: View {
 
   var body: some View {
     if let space {
-      MonochromeSpaceAvatar(space: space, size: size)
+      SpacePickerMonochromeAvatar(space: space, size: size)
     } else {
       RoundedRectangle(cornerRadius: size / 3, style: .continuous)
         .fill(Color.gray.opacity(0.15))
@@ -231,5 +230,53 @@ private struct SpacePickerListIcon: View {
             .foregroundStyle(.secondary)
         }
     }
+  }
+}
+
+private struct SpacePickerMonochromeAvatar: View {
+  let space: Space
+  let size: CGFloat
+
+  var body: some View {
+    let displayText = leadingEmoji ?? fallbackText
+
+    RoundedRectangle(cornerRadius: size / 3, style: .continuous)
+      .fill(Color.gray.opacity(0.15))
+      .frame(width: size, height: size)
+      .overlay {
+        Text(displayText)
+          .font(.system(size: size * (displayText.spacePickerIsAllEmoji ? 0.6 : 0.55), weight: .semibold))
+          .foregroundStyle(.secondary)
+      }
+  }
+
+  private var leadingEmoji: String? {
+    let rawName = space.name
+    let nameWithoutEmoji = space.nameWithoutEmoji
+    guard rawName != nameWithoutEmoji else { return nil }
+
+    let emojiPart = nameWithoutEmoji.isEmpty
+      ? rawName
+      : String(rawName.dropLast(nameWithoutEmoji.count))
+    let trimmed = emojiPart.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
+  }
+
+  private var fallbackText: String {
+    let trimmed = space.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.first.map { String($0).uppercased() } ?? "·"
+  }
+}
+
+private extension String {
+  var spacePickerIsAllEmoji: Bool {
+    !isEmpty && allSatisfy(\.spacePickerIsEmoji)
+  }
+}
+
+private extension Character {
+  var spacePickerIsEmoji: Bool {
+    guard let scalar = unicodeScalars.first else { return false }
+    return scalar.properties.isEmoji && (scalar.value > 0x238C || unicodeScalars.count > 1)
   }
 }
