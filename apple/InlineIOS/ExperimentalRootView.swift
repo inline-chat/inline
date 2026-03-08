@@ -290,24 +290,6 @@ struct ExperimentalRootView: View {
     picker
   }
 
-  @ViewBuilder
-  private func createThreadButton(
-    activeSpaceId: Int64?
-  ) -> some View {
-    Button {
-      createThreadInstantly(spaceId: activeSpaceId)
-    } label: {
-      Image(systemName: "plus")
-        .font(.system(size: 14, weight: .semibold))
-        .foregroundStyle(.primary)
-        .frame(width: 36, height: 36)
-        .contentShape(Circle())
-    }
-    .buttonStyle(.plain)
-    .disabled(isCreatingThread)
-    .accessibilityLabel("New Chat")
-  }
-
   private func createThreadInstantly(spaceId: Int64?) {
     guard !isCreatingThread else { return }
     guard let currentUserId = auth.currentUserId else {
@@ -381,11 +363,7 @@ struct ExperimentalRootView: View {
       }
       ToolbarSpacer(.fixed, placement: .topBarTrailing)
       ToolbarItem(placement: .topBarTrailing) {
-        settingsButton
-      }
-      ToolbarSpacer(.fixed, placement: .topBarTrailing)
-      ToolbarItem(placement: .topBarTrailing) {
-        createThreadButton(activeSpaceId: activeSpaceId)
+        overflowMenuButton(activeSpaceId: activeSpaceId)
       }
     } else {
       ToolbarItem(placement: .topBarLeading) {
@@ -394,9 +372,8 @@ struct ExperimentalRootView: View {
 
       ToolbarItem(placement: .topBarTrailing) {
         HStack(spacing: 8) {
-          settingsButton
-          createThreadButton(activeSpaceId: activeSpaceId)
           notificationsButton
+          overflowMenuButton(activeSpaceId: activeSpaceId)
         }
       }
     }
@@ -410,18 +387,28 @@ struct ExperimentalRootView: View {
     .frame(width: 36, height: 36)
   }
 
-  private var settingsButton: some View {
-    Button {
-      router.presentSheet(.settings)
+  private func overflowMenuButton(activeSpaceId: Int64?) -> some View {
+    Menu {
+      Button {
+        createThreadInstantly(spaceId: activeSpaceId)
+      } label: {
+        Label("New Chat", systemImage: "plus")
+      }
+      .disabled(isCreatingThread)
+
+      Button {
+        router.presentSheet(.settings)
+      } label: {
+        Label("Settings", systemImage: "gearshape")
+      }
     } label: {
-      Image(systemName: "gearshape")
+      Image(systemName: "ellipsis")
         .font(.system(size: 14, weight: .semibold))
         .foregroundStyle(.primary)
         .frame(width: 36, height: 36)
         .contentShape(Rectangle())
     }
-    .buttonStyle(.plain)
-    .accessibilityLabel("Settings")
+    .accessibilityLabel("More")
   }
 
   private func refetchCoreDataAfterLocalDataCleared() async {
