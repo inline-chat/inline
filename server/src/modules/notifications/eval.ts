@@ -9,9 +9,9 @@ import { getCachedSpaceInfo } from "@in/server/modules/cache/spaceCache"
 import { getCachedUserName, UserNamesCache, type UserName } from "@in/server/modules/cache/userNames"
 import { filterFalsy } from "@in/server/utils/filter"
 import { Log } from "@in/server/utils/log"
-import { zodResponseFormat } from "openai/helpers/zod.mjs"
+import { zodResponseFormat } from "openai/helpers/zod"
 import type { ChatModel } from "openai/resources/chat/chat.mjs"
-import z from "zod"
+import { z } from "zod/v4"
 
 type InputMessage = {
   id: number
@@ -68,7 +68,7 @@ export const batchEvaluate = async (_input: Input): Promise<NotificationEvalResu
   log.debug(`Notification eval system prompt: ${systemPrompt}`)
   log.debug(`Notification eval user prompt: ${userPrompt}`)
 
-  const response = await openaiClient.chat.completions.create({
+  const response = await openaiClient.chat.completions.parse({
     model: model,
     messages: [
       { role: "system", content: systemPrompt },
@@ -118,7 +118,10 @@ export const batchEvaluate = async (_input: Input): Promise<NotificationEvalResu
 
     log.info(`Notification eval price: $${totalPrice.toFixed(4)} • ${model}`)
 
-    const result = outputSchema.parse(JSON.parse(response.choices[0]?.message.content ?? "[]"))
+    const result = response.choices[0]?.message.parsed
+    if (!result) {
+      throw new Error("Missing parsed notification eval response")
+    }
 
     return result
   } catch (error) {

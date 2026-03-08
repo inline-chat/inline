@@ -149,7 +149,7 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
     stage = "openai_completion"
     const openaiStart = Date.now()
     const completion = await openaiClient.chat.completions.create({
-      model: "gpt-5.2",
+      model: "gpt-5.4",
       verbosity: "medium",
       reasoning_effort: "low", // was "hard"
 
