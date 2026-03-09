@@ -863,7 +863,7 @@ public actor FileUploader {
   }
 }
 
-public enum FileUploadError: Error {
+public enum FileUploadError: Error, LocalizedError {
   case failedToUpload
   case failedToSave
   case invalidPhoto
@@ -877,4 +877,31 @@ public enum FileUploadError: Error {
   case uploadAlreadyCompleted
   case uploadCancelled
   case uploadTimeout
+
+  public var errorDescription: String? {
+    switch self {
+      case .failedToUpload:
+        "Couldn't upload the file."
+      case .failedToSave:
+        "The uploaded file couldn't be saved locally."
+      case .invalidPhoto:
+        "The selected photo couldn't be prepared for upload."
+      case .invalidVideo:
+        "The selected video couldn't be prepared for upload."
+      case .invalidDocument:
+        "The selected file couldn't be prepared for upload."
+      case .invalidPhotoId, .invalidDocumentId, .invalidVideoId:
+        "The local file reference is invalid."
+      case .invalidVideoMetadata:
+        "The video metadata is invalid."
+      case .uploadAlreadyInProgress:
+        "This upload is already in progress."
+      case .uploadAlreadyCompleted:
+        "This upload already finished."
+      case .uploadCancelled:
+        "The upload was cancelled."
+      case .uploadTimeout:
+        "The upload timed out."
+    }
+  }
 }

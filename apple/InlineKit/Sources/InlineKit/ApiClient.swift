@@ -11,7 +11,7 @@ import UIKit
 import AppKit
 #endif
 
-public enum APIError: Error {
+public enum APIError: Error, LocalizedError {
   case invalidURL
   case invalidResponse
   case httpError(statusCode: Int)
@@ -19,6 +19,25 @@ public enum APIError: Error {
   case networkError
   case rateLimited
   case error(error: String, errorCode: Int?, description: String?)
+
+  public var errorDescription: String? {
+    switch self {
+      case .invalidURL:
+        "The upload URL is invalid."
+      case .invalidResponse:
+        "The server returned an invalid response."
+      case let .httpError(statusCode):
+        "The server returned HTTP \(statusCode)."
+      case let .decodingError(error):
+        "Failed to decode the server response: \(error.localizedDescription)"
+      case .networkError:
+        "Network request failed."
+      case .rateLimited:
+        "Too many requests. Please wait a bit and try again."
+      case let .error(_, _, description):
+        description ?? "The server rejected the request."
+    }
+  }
 }
 
 public enum Path: String {
@@ -775,8 +794,18 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
               throw APIError.error(error: error, errorCode: errorCode, description: description)
           }
         case 429:
+          if let apiResponse = try? decoder.decode(APIResponse<UploadFileResult>.self, from: data),
+             case let .error(error, errorCode, description) = apiResponse
+          {
+            throw APIError.error(error: error, errorCode: errorCode, description: description)
+          }
           throw APIError.rateLimited
         default:
+          if let apiResponse = try? decoder.decode(APIResponse<UploadFileResult>.self, from: data),
+             case let .error(error, errorCode, description) = apiResponse
+          {
+            throw APIError.error(error: error, errorCode: errorCode, description: description)
+          }
           throw APIError.httpError(statusCode: httpResponse.statusCode)
       }
     } catch let decodingError as DecodingError {
@@ -1179,6 +1208,7 @@ public enum ApiComposeAction: String, Codable, Sendable {
   case uploadingPhoto
   case uploadingDocument
   case uploadingVideo
+  case recordingVoice
 
   public func toHumanReadable() -> String {
     switch self {
@@ -1193,6 +1223,9 @@ public enum ApiComposeAction: String, Codable, Sendable {
 
       case .uploadingVideo:
         "uploading video..."
+
+      case .recordingVoice:
+        "recording voice..."
     }
   }
 
@@ -1209,6 +1242,9 @@ public enum ApiComposeAction: String, Codable, Sendable {
 
       case .uploadingVideo:
         "uploading video"
+
+      case .recordingVoice:
+        "recording voice"
     }
   }
 }

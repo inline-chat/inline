@@ -6,6 +6,8 @@ const log = new Log("modules/files/metadata")
 const validPhotoMimeTypes = ["image/jpeg", "image/png", "image/gif"]
 const validPhotoExtensions = ["jpg", "jpeg", "png", "gif"]
 const maxFileSize = 40_000_000 // 40MB
+const maxPhotoDimensionSum = 15_000
+const maxPhotoAspectRatio = 20
 
 // Get the width and height of a photo and validate the dimensions
 export const getPhotoMetadataAndValidate = async (
@@ -72,17 +74,29 @@ export const getPhotoMetadataAndValidate = async (
 
   // Validate the dimensions
   if (typeof width !== "number" || typeof height !== "number") {
-    throw new InlineError(ApiError.PHOTO_INVALID_DIMENSIONS)
+    throw photoDimensionsError("We couldn't read this image's dimensions. Try resaving it or send it as a file.")
   }
 
-  if (width + height > 15000) {
-    // TODO: Reduce
-    throw new InlineError(InlineError.ApiError.PHOTO_INVALID_DIMENSIONS)
+  if (width + height > maxPhotoDimensionSum) {
+    log.warn("Rejecting photo with oversized dimensions", {
+      fileName,
+      width,
+      height,
+      maxPhotoDimensionSum,
+    })
+    throw photoDimensionsError("This image is too large to send as a photo. Send it as a file instead.")
   }
 
   const ratio = Math.max(width / height, height / width)
-  if (ratio > 20) {
-    throw new InlineError(InlineError.ApiError.PHOTO_INVALID_DIMENSIONS)
+  if (ratio > maxPhotoAspectRatio) {
+    log.warn("Rejecting photo with extreme aspect ratio", {
+      fileName,
+      width,
+      height,
+      ratio,
+      maxPhotoAspectRatio,
+    })
+    throw photoDimensionsError("This image is too wide or too tall to send as a photo. Send it as a file instead.")
   }
 
   return { width, height, mimeType, fileName, extension }
@@ -188,6 +202,70 @@ export const getDocumentMetadataAndValidate = async (
   return { mimeType, fileName, extension }
 }
 
+const validVoiceMimeTypes = ["audio/ogg"]
+const validVoiceExtensions = ["ogg", "oga"]
+const maxVoiceFileSize = 20_000_000 // 20MB
+const maxVoiceWaveformBytes = 2048
+
+export const getVoiceMetadataAndValidate = async (
+  file: File,
+  duration: number,
+  waveform: Uint8Array,
+): Promise<{
+  duration: number
+  waveform: Uint8Array
+  mimeType: string
+  fileName: string
+  extension: string
+}> => {
+  const fileName = decodeFileName(file.name, "voice")
+  const size = file.size
+  const mimeType = file.type.trim()
+  let extension = fileName.split(".").pop()?.toLowerCase()
+
+  if (size === 0) {
+    throw badRequest("Uploaded voice message is empty")
+  }
+
+  if (!mimeType) {
+    throw badRequest("Uploaded voice message is missing MIME type")
+  }
+
+  if (!Number.isInteger(duration) || duration < 0) {
+    throw badRequest("Invalid voice duration: expected integer >= 0")
+  }
+
+  if (waveform.length === 0) {
+    throw badRequest("Voice upload requires a non-empty waveform")
+  }
+
+  if (waveform.length > maxVoiceWaveformBytes) {
+    throw badRequest(`Voice waveform exceeds max size of ${maxVoiceWaveformBytes} bytes`)
+  }
+
+  if (!extension || !validVoiceExtensions.includes(extension)) {
+    throw badRequest("Voice upload requires .ogg or .oga extension")
+  }
+
+  if (size > maxVoiceFileSize) {
+    throw new InlineError(InlineError.ApiError.FILE_TOO_LARGE)
+  }
+
+  if (!validVoiceMimeTypes.includes(mimeType)) {
+    throw badRequest("Voice upload requires audio/ogg MIME type")
+  }
+
+  extension = extension ?? "ogg"
+
+  return {
+    duration,
+    waveform,
+    mimeType,
+    fileName,
+    extension,
+  }
+}
+
 function decodeFileName(fileName: string | undefined, fallback: string): string {
   const raw = fileName?.trim()
   if (!raw) return fallback
@@ -201,6 +279,12 @@ function decodeFileName(fileName: string | undefined, fallback: string): string 
 
 function badRequest(description: string): InlineError {
   const error = new InlineError(ApiError.BAD_REQUEST)
+  error.description = description
+  return error
+}
+
+function photoDimensionsError(description: string): InlineError {
+  const error = new InlineError(ApiError.PHOTO_INVALID_DIMENSIONS)
   error.description = description
   return error
 }
