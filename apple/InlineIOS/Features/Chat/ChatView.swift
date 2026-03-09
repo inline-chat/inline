@@ -242,6 +242,18 @@ struct ChatView: View {
       guard let targetPeer, targetPeer != peerId else { return }
       router.push(.chat(peer: targetPeer))
     }
+    .onReceive(NotificationCenter.default.publisher(for: .mediaSendFailed)) { notification in
+      guard let chatId = notification.userInfo?["chatId"] as? Int64,
+            chatId == fullChatViewModel.chat?.id
+      else { return }
+
+      let message = notification.userInfo?["message"] as? String ?? "Couldn't send attachment."
+      ToastManager.shared.showToast(
+        message,
+        type: .error,
+        systemImage: "exclamationmark.triangle.fill"
+      )
+    }
     .environmentObject(fullChatViewModel)
     .environment(router)
   }

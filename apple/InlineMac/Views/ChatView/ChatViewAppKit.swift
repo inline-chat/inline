@@ -39,6 +39,7 @@ class ChatViewAppKit: NSViewController {
   private var errorVC: NSHostingController<ErrorView>?
   private var pendingDropObserver: NSObjectProtocol?
   private var appDidBecomeActiveObserver: NSObjectProtocol?
+  private var mediaSendFailedObserver: NSObjectProtocol?
   private var deferredObservationTask: Task<Void, Never>?
 
   private var didInitialRefetch = false
@@ -80,6 +81,20 @@ class ChatViewAppKit: NSViewController {
       queue: .main
     ) { [weak self] _ in
       self?.viewModel.refetchChatView()
+    }
+
+    mediaSendFailedObserver = NotificationCenter.default.addObserver(
+      forName: .mediaSendFailed,
+      object: nil,
+      queue: .main
+    ) { [weak self] notification in
+      guard let self,
+            let chatId = notification.userInfo?["chatId"] as? Int64,
+            chatId == self.viewModel.chat?.id
+      else { return }
+
+      let message = notification.userInfo?["message"] as? String ?? "Couldn't send attachment."
+      ToastCenter.shared.showError(message)
     }
   }
 
@@ -294,6 +309,9 @@ class ChatViewAppKit: NSViewController {
     }
     if let pendingDropObserver {
       NotificationCenter.default.removeObserver(pendingDropObserver)
+    }
+    if let mediaSendFailedObserver {
+      NotificationCenter.default.removeObserver(mediaSendFailedObserver)
     }
 
     // Remove window check since cleanup should have happened in viewWillDisappear

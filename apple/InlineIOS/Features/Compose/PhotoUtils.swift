@@ -7,6 +7,25 @@ import UIKit
 import UniformTypeIdentifiers
 
 extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+  private func shouldSendAsFile(_ image: UIImage) -> Bool {
+    let width = max(image.size.width, 1)
+    let height = max(image.size.height, 1)
+    let ratio = max(width / height, height / width)
+    return ratio > 20 || (width < 50 && height < 50)
+  }
+
+  private func makeImageAttachment(_ image: UIImage, optimizePhoto: Bool) throws -> FileMediaItem {
+    if shouldSendAsFile(image) {
+      let tempDirectory = FileHelpers.getTrueTemporaryDirectory()
+      let fileName = "image-\(UUID().uuidString).jpg"
+      let (_, tempURL) = try image.save(to: tempDirectory, withName: fileName, format: .jpeg)
+      defer { try? FileManager.default.removeItem(at: tempURL) }
+      return .document(try FileCache.saveDocument(url: tempURL))
+    }
+
+    return .photo(try FileCache.savePhoto(image: image, optimize: optimizePhoto))
+  }
+
   private func resetComposeStateAfterPreviewSend() {
     if let attributed = textView.attributedText?.mutableCopy() as? NSMutableAttributedString {
       let marker = "\u{FFFC}" as NSString
@@ -257,8 +276,7 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     clearAttachments()
 
     do {
-      let photoInfo = try FileCache.savePhoto(image: image)
-      let mediaItem = FileMediaItem.photo(photoInfo)
+      let mediaItem = try makeImageAttachment(image, optimizePhoto: false)
       let uniqueId = mediaItem.getItemUniqueId()
       attachmentItems[uniqueId] = mediaItem
     } catch {
@@ -296,8 +314,7 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
 
     for (index, photoItem) in photoItems.enumerated() {
       do {
-        let photoInfo = try FileCache.savePhoto(image: photoItem.image, optimize: true)
-        let mediaItem = FileMediaItem.photo(photoInfo)
+        let mediaItem = try makeImageAttachment(photoItem.image, optimizePhoto: true)
 
         // Include caption for each photo if it has one
         let isFirst = index == 0
@@ -381,8 +398,7 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
 
   func addImage(_ image: UIImage) {
     do {
-      let photoInfo = try FileCache.savePhoto(image: image, optimize: true)
-      let mediaItem = FileMediaItem.photo(photoInfo)
+      let mediaItem = try makeImageAttachment(image, optimizePhoto: true)
       let uniqueId = mediaItem.getItemUniqueId()
 
       // Update state

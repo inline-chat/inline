@@ -214,6 +214,14 @@ class ShareState: ObservableObject {
     return image.jpegData(compressionQuality: Self.imageCompressionQuality)
   }
 
+  private nonisolated func shouldSendPhotoAsDocument(_ data: Data) -> Bool {
+    guard let image = UIImage(data: data) else { return false }
+    let width = max(image.size.width, 1)
+    let height = max(image.size.height, 1)
+    let ratio = max(width / height, height / width)
+    return ratio > 20 || (width < 50 && height < 50)
+  }
+
   private nonisolated func isSupportedPhotoMimeType(_ mimeType: MIMEType) -> Bool {
     let lowercased = mimeType.text.lowercased()
     return lowercased == "image/jpeg" || lowercased == "image/png" || lowercased == "image/gif"
@@ -470,6 +478,18 @@ class ShareState: ObservableObject {
           log.error(tagged("Failed to read shared photo data; falling back to document"), error: error)
         }
       }
+      if resolvedFileType == .photo {
+        do {
+          let data = try Data(contentsOf: tempURL)
+          if shouldSendPhotoAsDocument(data) {
+            resolvedFileType = .document
+            log.warning(tagged("Photo aspect ratio is too extreme; sending as document"))
+          }
+        } catch {
+          resolvedFileType = .document
+          log.error(tagged("Failed to inspect shared photo dimensions; falling back to document"), error: error)
+        }
+      }
       let fileSize = try? tempURL.resourceValues(forKeys: [.fileSizeKey]).fileSize
       accumulator.addFile(SharedFile(
         url: tempURL,
@@ -533,6 +553,10 @@ class ShareState: ObservableObject {
           resolvedFileType = .document
           log.warning(tagged("Unsupported photo MIME type; falling back to document (\(resolvedMimeType.text))"))
         }
+      }
+      if resolvedFileType == .photo && shouldSendPhotoAsDocument(data) {
+        resolvedFileType = .document
+        log.warning(tagged("Photo aspect ratio is too extreme; sending as document"))
       }
       let tempURL = try writeDataToTemporaryLocation(
         data,

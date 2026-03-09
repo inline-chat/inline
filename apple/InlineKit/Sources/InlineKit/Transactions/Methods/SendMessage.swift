@@ -336,9 +336,28 @@ public struct TransactionSendMessage: Transaction {
   }
 
   public func shouldRetryOnFail(error: Error) -> Bool {
+    if let error = error as? APIError {
+      switch error {
+        case let .error(_, errorCode, _):
+          if let errorCode, (400 ... 499).contains(errorCode), errorCode != 429 {
+            return false
+          }
+          return true
+        case let .httpError(statusCode):
+          if (400 ... 499).contains(statusCode), statusCode != 429 {
+            return false
+          }
+          return true
+        case .invalidURL:
+          return false
+        case .invalidResponse, .decodingError, .networkError, .rateLimited:
+          return true
+      }
+    }
+
     if let error = error as? RealtimeAPIError {
       switch error {
-        case let .rpcError(ec, msg, code):
+        case let .rpcError(_, _, code):
           switch code {
             case 400, 401:
               return false
@@ -366,6 +385,19 @@ public struct TransactionSendMessage: Transaction {
 
   public func didFail(error: Error?) async {
     Log.shared.error("Failed to send message", error: error)
+
+    if !attachments.isEmpty {
+      NotificationCenter.default.post(
+        name: .mediaSendFailed,
+        object: nil,
+        userInfo: [
+          "chatId": chatId,
+          "temporaryMessageId": temporaryMessageId,
+          "message": mediaSendFailureDescription(error: error),
+        ]
+      )
+    }
+
     guard let currentUserId = Auth.getCurrentUserId() else {
       return
     }
@@ -410,5 +442,31 @@ public struct TransactionSendMessage: Transaction {
 
   enum SendMessageError: Error {
     case failed
+  }
+
+  private func mediaSendFailureDescription(error: Error?) -> String {
+    let itemName = attachments.first.map { attachmentName(for: $0.media) } ?? "attachment"
+
+    guard let error else {
+      return "Couldn't send \(itemName)."
+    }
+
+    let detail = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+    if detail.isEmpty {
+      return "Couldn't send \(itemName)."
+    }
+
+    return "Couldn't send \(itemName). \(detail)"
+  }
+
+  private func attachmentName(for media: FileMediaItem) -> String {
+    switch media {
+      case .photo:
+        "photo"
+      case .video:
+        "video"
+      case .document:
+        "file"
+    }
   }
 }
