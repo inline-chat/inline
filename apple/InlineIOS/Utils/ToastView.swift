@@ -5,142 +5,24 @@ struct ToastView: View {
   @State private var animationProgress: Double = 0
   @State private var previousMessage: String = ""
   private let toastManager = ToastManager.shared
+  private let bubbleCornerRadius: CGFloat = 24
+  private let clusterSpacing: CGFloat = 12
 
   var body: some View {
-    HStack(alignment: .top, spacing: 8) {
-      if let systemImage = toast.systemImage {
-        if systemImage == "notion-logo" || systemImage == "linear-icon" {
-          Image(systemImage)
-            .resizable()
-            .frame(width: 18, height: 18)
-            .padding(.top, 2)
-            .transition(.asymmetric(
-              insertion: .scale.combined(with: .opacity),
-              removal: .scale.combined(with: .opacity)
-            ))
-            .id(systemImage)
-        } else {
-          Image(systemName: systemImage)
-            .foregroundColor(toast.type == .success ? .green : .secondary)
-            .padding(.top, 2)
-            .transition(.asymmetric(
-              insertion: .scale.combined(with: .opacity),
-              removal: .scale.combined(with: .opacity)
-            ))
-            .id(systemImage)
+    toastCluster
+      .animation(.spring(response: 0.4, dampingFraction: 0.8), value: toast.id)
+      .transition(.move(edge: .bottom).combined(with: .opacity))
+      .scaleEffect(toast.message != previousMessage ? 1.02 : 1.0)
+      .animation(.spring(response: 0.3, dampingFraction: 0.76), value: toast.message)
+      .onAppear {
+        animationProgress = 1.0
+        previousMessage = toast.message
+      }
+      .onChange(of: toast.message) { _, newMessage in
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+          previousMessage = newMessage
         }
       }
-
-      VStack(alignment: .leading, spacing: 2) {
-        HStack {
-          Text(toast.message)
-            .foregroundColor(.primary)
-            .transition(.asymmetric(
-              insertion: .move(edge: .trailing).combined(with: .opacity),
-              removal: .move(edge: .leading).combined(with: .opacity)
-            ))
-            .id(toast.message)
-
-          if toast.type == .info, toast.shouldStayVisible {
-            Spacer()
-
-            // Animated progress indicator
-            HStack(spacing: 2) {
-              ForEach(0 ..< 3, id: \.self) { index in
-                Circle()
-                  .fill(.secondary)
-                  .frame(width: 4, height: 4)
-                  .scaleEffect(animationProgress > Double(index) * 0.33 ? 1.2 : 0.8)
-                  .opacity(animationProgress > Double(index) * 0.33 ? 1.0 : 0.4)
-                  .animation(
-                    .easeInOut(duration: 0.6)
-                      .repeatForever(autoreverses: true)
-                      .delay(Double(index) * 0.2),
-                    value: animationProgress
-                  )
-              }
-            }
-          }
-        }
-
-        if toast.type == .info, toast.shouldStayVisible {
-          HStack(spacing: 4) {
-            Text("Step")
-              .font(.caption2)
-              .foregroundColor(.secondary)
-
-            Text("\(getStepNumber(for: toast.message))")
-              .font(.caption2.monospacedDigit())
-              .foregroundColor(.primary)
-              .transition(.opacity.combined(with: .scale(scale: 0.8)))
-              .animation(.spring(response: 0.4, dampingFraction: 0.8), value: getStepNumber(for: toast.message))
-              .id("step-\(getStepNumber(for: toast.message))")
-
-            Text("of 4")
-              .font(.caption2)
-              .foregroundColor(.secondary)
-
-            Spacer()
-          }
-        }
-      }
-
-      Spacer()
-
-      if let actionTitle = toast.actionTitle {
-        Button(actionTitle) {
-          toast.action?()
-        }
-        .foregroundColor(toast.type == .success ? .green : toast.type == .error ? .red : .blue)
-        .padding(.leading, 4)
-        .transition(.opacity)
-        .id(actionTitle)
-      }
-    }
-    .animation(.spring(response: 0.4, dampingFraction: 0.8), value: toast.id)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .padding(.horizontal, 16)
-    .padding(.vertical, 10)
-    .background(
-      ZStack {
-        RoundedRectangle(cornerRadius: 20)
-          .fill(.thinMaterial)
-        RoundedRectangle(cornerRadius: 20)
-          .fill(
-            toast.type == .success ?
-              Color.green.opacity(0.1) : toast.type == .error ? Color.red.opacity(0.1) : Color(uiColor: .systemGray6)
-          )
-          .strokeBorder(
-            toast.type == .success ?
-              Color.green.opacity(0.2) : toast.type == .error ? Color.red.opacity(0.1) : Color.primary.opacity(0.08),
-
-            lineWidth: 1
-          )
-      }
-    )
-    .padding(.horizontal, 20)
-    .shadow(color: Color.primary.opacity(0.06), radius: 8, x: 0, y: 3)
-    .contentShape(RoundedRectangle(cornerRadius: 20))
-    .onTapGesture {
-      toastManager.hideToast()
-    }
-    .transition(
-      .asymmetric(
-        insertion: .opacity.combined(with: .move(edge: .top)),
-        removal: .opacity.combined(with: .move(edge: .top))
-      )
-    )
-    .scaleEffect(toast.message != previousMessage ? 1.05 : 1.0)
-    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: toast.message)
-    .onAppear {
-      animationProgress = 1.0
-      previousMessage = toast.message
-    }
-    .onChange(of: toast.message) { newMessage in
-      withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-        previousMessage = newMessage
-      }
-    }
   }
 
   private func getStepNumber(for message: String) -> Int {
@@ -157,20 +39,161 @@ struct ToastView: View {
         1
     }
   }
+
+  @ViewBuilder
+  private var toastCluster: some View {
+    if #available(iOS 26.0, *), toast.actionTitle != nil {
+      GlassEffectContainer(spacing: clusterSpacing) {
+        toastClusterContent
+      }
+    } else {
+      toastClusterContent
+    }
+  }
+
+  @ViewBuilder
+  private var toastClusterContent: some View {
+    if toast.actionTitle != nil {
+      ViewThatFits {
+        HStack(alignment: .bottom, spacing: clusterSpacing) {
+          toastBubble
+          toastActionButton
+        }
+
+        VStack(alignment: .trailing, spacing: 10) {
+          toastBubble
+          toastActionButton
+        }
+      }
+    } else {
+      toastBubble
+    }
+  }
+
+  private var toastBubble: some View {
+    HStack(alignment: toast.showsProgressDetails ? .top : .center, spacing: 10) {
+      toastIcon
+
+      VStack(alignment: .leading, spacing: toast.showsProgressDetails ? 4 : 0) {
+        Text(toast.message)
+          .font(.callout.weight(.semibold))
+          .foregroundStyle(.primary)
+          .multilineTextAlignment(.leading)
+          .lineLimit(3)
+          .fixedSize(horizontal: false, vertical: true)
+          .transition(.move(edge: .trailing).combined(with: .opacity))
+          .id(toast.message)
+
+        if toast.showsProgressDetails {
+          HStack(spacing: 6) {
+            progressDots
+
+            Text("Step \(getStepNumber(for: toast.message)) of 4")
+              .font(.footnote.weight(.medium))
+              .monospacedDigit()
+              .foregroundStyle(.secondary)
+              .transition(.opacity.combined(with: .scale(scale: 0.9)))
+              .id("step-\(getStepNumber(for: toast.message))")
+          }
+        }
+      }
+    }
+    .padding(.horizontal, 18)
+    .padding(.vertical, toast.showsProgressDetails ? 12 : 10)
+    .modifier(ToastBubbleSurfaceModifier(toast: toast, cornerRadius: bubbleCornerRadius))
+    .contentShape(.rect(cornerRadius: bubbleCornerRadius))
+    .onTapGesture {
+      toastManager.hideToast()
+    }
+  }
+
+  @ViewBuilder
+  private var toastIcon: some View {
+    if let systemImage = toast.systemImage {
+      if systemImage == "notion-logo" || systemImage == "linear-icon" {
+        Image(systemImage)
+          .resizable()
+          .scaledToFit()
+          .frame(width: 16, height: 16)
+          .padding(.top, toast.showsProgressDetails ? 3 : 0)
+          .transition(.scale.combined(with: .opacity))
+          .id(systemImage)
+      } else {
+        Image(systemName: systemImage)
+          .font(.callout.weight(.semibold))
+          .foregroundStyle(iconForegroundColor)
+          .padding(.top, toast.showsProgressDetails ? 3 : 0)
+          .transition(.scale.combined(with: .opacity))
+          .id(systemImage)
+      }
+    }
+  }
+
+  private var progressDots: some View {
+    HStack(spacing: 4) {
+      ForEach(0 ..< 3, id: \.self) { index in
+        Circle()
+          .fill(Color.secondary)
+          .frame(width: 4, height: 4)
+          .scaleEffect(animationProgress > Double(index) * 0.33 ? 1.1 : 0.82)
+          .opacity(animationProgress > Double(index) * 0.33 ? 1.0 : 0.42)
+          .animation(
+            .easeInOut(duration: 0.6)
+              .repeatForever(autoreverses: true)
+              .delay(Double(index) * 0.2),
+            value: animationProgress
+          )
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var toastActionButton: some View {
+    if let actionTitle = toast.actionTitle {
+      if #available(iOS 26.0, *) {
+        Button(actionTitle) {
+          toast.action?()
+        }
+        .font(.callout.weight(.semibold))
+        .buttonStyle(.glassProminent)
+        .controlSize(.regular)
+        .tint(actionTintColor)
+        .transition(.opacity)
+        .id(actionTitle)
+      } else {
+        Button(actionTitle) {
+          toast.action?()
+        }
+        .font(.callout.weight(.semibold))
+        .buttonStyle(.borderedProminent)
+        .controlSize(.regular)
+        .buttonBorderShape(.capsule)
+        .tint(actionTintColor)
+        .transition(.opacity)
+        .id(actionTitle)
+      }
+    }
+  }
+
+  private var iconForegroundColor: Color {
+    toast.statusAccentColor
+  }
+
+  private var actionTintColor: Color {
+    .accentColor
+  }
 }
 
 struct ToastContainerModifier: ViewModifier {
-  @StateObject private var toastManager = ToastManager.shared
+  @ObservedObject private var toastManager = ToastManager.shared
 
   func body(content: Content) -> some View {
     content
       .overlay(alignment: .bottom) {
         if let toast = toastManager.currentToast {
-          VStack {
-            Spacer()
-            ToastView(toast: toast)
-              .padding(.bottom, 60)
-          }
+          ToastView(toast: toast)
+            .padding(.horizontal, 16)
+            .safeAreaPadding(.bottom, 10)
         }
       }
   }
@@ -179,6 +202,78 @@ struct ToastContainerModifier: ViewModifier {
 extension View {
   func toastView() -> some View {
     modifier(ToastContainerModifier())
+  }
+}
+
+private struct ToastBubbleSurfaceModifier: ViewModifier {
+  let toast: ToastData
+  let cornerRadius: CGFloat
+
+  @ViewBuilder
+  func body(content: Content) -> some View {
+    if #available(iOS 26.0, *) {
+      content
+        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: cornerRadius))
+    } else {
+      content
+        .background {
+          RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(.thinMaterial)
+            .overlay {
+              RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(toast.fallbackFillColor)
+            }
+            .overlay {
+              RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .strokeBorder(toast.fallbackStrokeColor, lineWidth: 1)
+            }
+        }
+    }
+  }
+}
+
+private extension ToastData {
+  var showsProgressDetails: Bool {
+    type == .info && shouldStayVisible
+  }
+
+  var statusAccentColor: Color {
+    switch type {
+      case .success:
+        Color(uiColor: .systemGreen)
+      case .error:
+        Color(uiColor: .systemRed)
+      case .loading:
+        .accentColor
+      case .info:
+        Color(uiColor: .secondaryLabel)
+    }
+  }
+
+  var fallbackFillColor: Color {
+    switch type {
+      case .success:
+        Color(uiColor: .systemGreen).opacity(0.14)
+      case .error:
+        Color(uiColor: .systemRed).opacity(0.14)
+      case .loading:
+        Color.accentColor.opacity(0.12)
+      case .info:
+        Color(uiColor: .secondarySystemBackground).opacity(0.7)
+    }
+  }
+
+  var fallbackStrokeColor: Color {
+    switch type {
+      case .success:
+        Color(uiColor: .systemGreen).opacity(0.22)
+      case .error:
+        Color(uiColor: .systemRed).opacity(0.2)
+      case .loading:
+        Color.accentColor.opacity(0.18)
+      case .info:
+        Color.primary.opacity(0.08)
+    }
   }
 }
 
