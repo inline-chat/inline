@@ -29,9 +29,6 @@ class UIMessageView: UIView {
 
   private var shineEffectView: ShineEffectView?
   private weak var linkLongPressGesture: UILongPressGestureRecognizer?
-  private lazy var linkEditMenuInteraction = UIEditMenuInteraction(delegate: self)
-  private var activeLinkForEditMenu: URL?
-  private weak var linkHoldHighlightView: UIView?
 
   var linkTapHandler: ((URL) -> Void)?
   var onPhotoTap: ((FullMessage, UIView, UIImage?, URL) -> Void)? {
@@ -351,6 +348,42 @@ class UIMessageView: UIView {
     linkTapHandler = { [weak self] url in
       InAppBrowser.shared.open(url, from: self?.findViewController())
     }
+  }
+
+  private func presentLinkActionSheet(for linkTarget: LinkContextMenuTarget) {
+    guard let viewController = findViewController() else {
+      InAppBrowser.shared.open(linkTarget.url)
+      return
+    }
+
+    let alert = UIAlertController(
+      title: nil,
+      message: linkTarget.url.absoluteString,
+      preferredStyle: .actionSheet
+    )
+
+    alert.addAction(UIAlertAction(title: "Open", style: .default) { _ in
+      InAppBrowser.shared.open(linkTarget.url, from: viewController)
+    })
+
+    alert.addAction(UIAlertAction(title: "Copy Link", style: .default) { _ in
+      UIPasteboard.general.string = linkTarget.url.absoluteString
+      ToastManager.shared.showToast(
+        "Copied link",
+        type: .success,
+        systemImage: "doc.on.doc"
+      )
+    })
+
+    alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+
+    if let popover = alert.popoverPresentationController {
+      popover.sourceView = messageLabel
+      popover.sourceRect = linkTarget.rectInMessageLabel
+      popover.permittedArrowDirections = []
+    }
+
+    viewController.present(alert, animated: true)
   }
 
   func setupViews() {
@@ -924,10 +957,6 @@ class UIMessageView: UIView {
     longPressGesture.delegate = self
     tapGesture.require(toFail: longPressGesture)
 
-    if !messageLabel.interactions.contains(where: { $0 === linkEditMenuInteraction }) {
-      messageLabel.addInteraction(linkEditMenuInteraction)
-    }
-
     messageLabel.addGestureRecognizer(tapGesture)
     messageLabel.addGestureRecognizer(longPressGesture)
     linkLongPressGesture = longPressGesture
@@ -1062,76 +1091,15 @@ class UIMessageView: UIView {
   }
 
   @objc private func handleTextViewLongPress(_ gesture: UILongPressGestureRecognizer) {
+    guard gesture.state == .began else { return }
     let pressLocation = gesture.location(in: messageLabel)
-
-    switch gesture.state {
-      case .began:
-        guard let linkTarget = linkContextMenuTarget(at: pressLocation) else { return }
-        showLinkHoldHighlight(for: linkTarget)
-        presentLinkEditMenu(for: linkTarget)
-      case .failed:
-        hideLinkHoldHighlight()
-      default:
-        break
-    }
+    guard let linkTarget = linkContextMenuTarget(at: pressLocation) else { return }
+    presentLinkActionSheet(for: linkTarget)
   }
 
   override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
     guard gestureRecognizer === linkLongPressGesture else { return true }
     return linkContextMenuTarget(at: gestureRecognizer.location(in: messageLabel)) != nil
-  }
-
-  private func presentLinkEditMenu(for linkTarget: LinkContextMenuTarget) {
-    activeLinkForEditMenu = linkTarget.url
-    let anchorPoint = CGPoint(
-      x: linkTarget.rectInMessageLabel.midX,
-      y: min(messageLabel.bounds.maxY - 1, linkTarget.rectInMessageLabel.maxY + 6)
-    )
-    let configuration = UIEditMenuConfiguration(identifier: nil, sourcePoint: anchorPoint)
-    linkEditMenuInteraction.presentEditMenu(with: configuration)
-  }
-
-  private func showLinkHoldHighlight(for linkTarget: LinkContextMenuTarget) {
-    hideLinkHoldHighlight(animated: false)
-
-    var highlightRectInBubble = bubbleView.convert(linkTarget.rectInMessageLabel, from: messageLabel)
-    highlightRectInBubble = highlightRectInBubble.intersection(bubbleView.bounds.insetBy(dx: -2, dy: -2))
-    guard !highlightRectInBubble.isNull, !highlightRectInBubble.isEmpty else { return }
-
-    let highlightView = UIView(frame: highlightRectInBubble.insetBy(dx: -2, dy: -1))
-    highlightView.isUserInteractionEnabled = false
-    highlightView.backgroundColor = outgoing
-      ? UIColor.white.withAlphaComponent(0.2)
-      : UIColor.label.withAlphaComponent(0.12)
-    highlightView.layer.cornerRadius = 6
-    highlightView.layer.masksToBounds = true
-    highlightView.alpha = 0
-
-    bubbleView.insertSubview(highlightView, belowSubview: containerStack)
-    UIView.animate(withDuration: 0.12) {
-      highlightView.alpha = 1
-    }
-
-    linkHoldHighlightView = highlightView
-  }
-
-  private func hideLinkHoldHighlight(animated: Bool = true) {
-    guard let highlightView = linkHoldHighlightView else { return }
-    linkHoldHighlightView = nil
-
-    let remove = {
-      highlightView.removeFromSuperview()
-    }
-
-    if animated {
-      UIView.animate(withDuration: 0.12, animations: {
-        highlightView.alpha = 0
-      }, completion: { _ in
-        remove()
-      })
-    } else {
-      remove()
-    }
   }
 
   func linkContextMenuTarget(atPointInMessageView pointInMessageView: CGPoint) -> LinkContextMenuTarget? {
@@ -1511,44 +1479,5 @@ class UIMessageView: UIView {
       }
     }
     return nil
-  }
-}
-
-extension UIMessageView: UIEditMenuInteractionDelegate {
-  func editMenuInteraction(
-    _ interaction: UIEditMenuInteraction,
-    menuFor _: UIEditMenuConfiguration,
-    suggestedActions _: [UIMenuElement]
-  ) -> UIMenu? {
-    guard interaction === linkEditMenuInteraction,
-          let url = activeLinkForEditMenu
-    else {
-      return nil
-    }
-
-    let openAction = UIAction(title: "Open", image: UIImage(systemName: "safari")) { [weak self] _ in
-      InAppBrowser.shared.open(url, from: self?.findViewController())
-    }
-
-    let copyAction = UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { _ in
-      UIPasteboard.general.string = url.absoluteString
-      ToastManager.shared.showToast(
-        "Copied link",
-        type: .success,
-        systemImage: "doc.on.doc"
-      )
-    }
-
-    return UIMenu(children: [openAction, copyAction])
-  }
-
-  func editMenuInteraction(
-    _ interaction: UIEditMenuInteraction,
-    willDismissMenuFor _: UIEditMenuConfiguration,
-    animator _: any UIEditMenuInteractionAnimating
-  ) {
-    guard interaction === linkEditMenuInteraction else { return }
-    activeLinkForEditMenu = nil
-    hideLinkHoldHighlight()
   }
 }
