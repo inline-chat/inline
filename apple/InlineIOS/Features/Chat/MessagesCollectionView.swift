@@ -1053,15 +1053,19 @@ private extension MessagesCollectionView {
         "😡",
       ]
 
+      let containerWidth = currentCollectionView?.window?.bounds.width
+        ?? currentCollectionView?.bounds.width
+        ?? UIScreen.main.bounds.width
+      let preferredWidth = ContextMenuAccessoryLayout.reactionPickerWidth(for: containerWidth)
+
       let containerView = UIView()
-      containerView.translatesAutoresizingMaskIntoConstraints = true
+      containerView.translatesAutoresizingMaskIntoConstraints = false
 
       let blurEffect = UIBlurEffect(style: .systemMaterial)
       let blurView = UIVisualEffectView(effect: blurEffect)
       blurView.translatesAutoresizingMaskIntoConstraints = false
       containerView.addSubview(blurView)
 
-      let preferredWidth = min(UIScreen.main.bounds.width - 40, 320)
       let scrollView = UIScrollView()
       scrollView.translatesAutoresizingMaskIntoConstraints = false
       scrollView.showsHorizontalScrollIndicator = false
@@ -1081,6 +1085,9 @@ private extension MessagesCollectionView {
       }
 
       NSLayoutConstraint.activate([
+        containerView.widthAnchor.constraint(equalToConstant: preferredWidth),
+        containerView.heightAnchor.constraint(equalToConstant: ContextMenuAccessoryLayout.reactionPickerHeight),
+
         blurView.topAnchor.constraint(equalTo: containerView.topAnchor),
         blurView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
         blurView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
@@ -1090,8 +1097,6 @@ private extension MessagesCollectionView {
         scrollView.leadingAnchor.constraint(equalTo: blurView.contentView.leadingAnchor),
         scrollView.trailingAnchor.constraint(equalTo: blurView.contentView.trailingAnchor),
         scrollView.bottomAnchor.constraint(equalTo: blurView.contentView.bottomAnchor),
-        scrollView.widthAnchor.constraint(equalToConstant: preferredWidth),
-        scrollView.heightAnchor.constraint(equalToConstant: 52),
 
         stackView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor, constant: 7),
         stackView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor, constant: 8),

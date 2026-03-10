@@ -38,23 +38,29 @@ extension UIContextMenuInteraction {
 
       let accessoryView = UIContextMenuInteraction.accessoryView(configuration: identifierView.configuration)
 
-      let width = UIScreen.main.bounds.width - 80
-      let height: CGFloat = 70
+      let containerWidth = view?.window?.bounds.width ?? view?.bounds.width ?? UIScreen.main.bounds.width
+      let width = ContextMenuAccessoryLayout.reactionPickerWidth(for: containerWidth)
+      let height = ContextMenuAccessoryLayout.accessoryHostHeight
 
       accessoryView?.frame = CGRect(x: 0, y: 0, width: width, height: height)
       accessoryView?.backgroundColor = .clear
 
-      contentView.frame = CGRect(x: 0, y: 0, width: width, height: height)
+      contentView.frame = CGRect(
+        x: 0,
+        y: 0,
+        width: width,
+        height: ContextMenuAccessoryLayout.reactionPickerHeight
+      )
 
       contentView.translatesAutoresizingMaskIntoConstraints = false
       accessoryView?.addSubview(contentView)
 
-      NSLayoutConstraint.activate([
-        contentView.centerXAnchor.constraint(equalTo: accessoryView!.centerXAnchor),
-        contentView.centerYAnchor.constraint(equalTo: accessoryView!.centerYAnchor),
-        contentView.leadingAnchor.constraint(equalTo: accessoryView!.leadingAnchor),
-        contentView.trailingAnchor.constraint(equalTo: accessoryView!.trailingAnchor),
-      ])
+      if let accessoryView {
+        NSLayoutConstraint.activate([
+          contentView.centerXAnchor.constraint(equalTo: accessoryView.centerXAnchor),
+          contentView.centerYAnchor.constraint(equalTo: accessoryView.centerYAnchor),
+        ])
+      }
 
       return [accessoryView].compact()
     } else {
