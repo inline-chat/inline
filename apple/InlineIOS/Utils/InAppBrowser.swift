@@ -1,3 +1,4 @@
+import InlineKit
 import SafariServices
 import UIKit
 
@@ -38,6 +39,11 @@ final class InAppBrowser: NSObject {
     guard let scheme = url.scheme?.lowercased() else { return }
 
     guard Self.supportedSchemes.contains(scheme) else {
+      UIApplication.shared.open(url)
+      return
+    }
+
+    guard InAppLinkPreferences.opensLinksInApp() else {
       UIApplication.shared.open(url)
       return
     }

@@ -20,6 +20,8 @@ struct SettingsView: View {
   @State private var showClearCacheError = false
   @State private var pickedImage: UIImage? = nil
   @State private var showCropper: Bool = false
+  @AppStorage(InAppLinkPreferences.openLinksInAppKey)
+  private var openLinksInApp = InAppLinkPreferences.defaultOpenLinksInApp
 
   var body: some View {
     List {
@@ -46,6 +48,18 @@ struct SettingsView: View {
           iconColor: .blue,
           title: "Appearance"
         )
+      }
+
+      Section(footer: Text("When off, links open in your default browser or the matching app.")) {
+        SettingsItem(
+          icon: "safari.fill",
+          iconColor: .indigo,
+          title: "Open Links In App"
+        ) {
+          Toggle("", isOn: $openLinksInApp)
+            .labelsHidden()
+            .accessibilityLabel("Open links in app")
+        }
       }
 
       NavigationLink(destination: DebugView()) {
