@@ -142,6 +142,43 @@ describe("sendComposeAction", () => {
     expect(mockPushToUser).toHaveBeenCalledWith(user3.id, [expectedUpdate])
   })
 
+  test("should send recording voice action to DM participant", async () => {
+    const user1 = await testUtils.createUser(nextEmail("voice-user1"))
+    const user2 = await testUtils.createUser(nextEmail("voice-user2"))
+
+    if (!user1 || !user2) throw new Error("Failed to create users")
+
+    await testUtils.createPrivateChat(user1, user2)
+
+    const inputPeer = {
+      type: { oneofKind: "user" as const, user: { userId: BigInt(user2.id) } },
+    }
+
+    await sendComposeAction(
+      {
+        peer: inputPeer,
+        action: UpdateComposeAction_ComposeAction.RECORDING_VOICE,
+      },
+      {
+        currentUserId: user1.id,
+        currentSessionId: 123,
+      },
+    )
+
+    expect(mockPushToUser).toHaveBeenCalledWith(user2.id, [
+      {
+        update: {
+          oneofKind: "updateComposeAction",
+          updateComposeAction: {
+            userId: BigInt(user1.id),
+            peerId: { type: { oneofKind: "user", user: { userId: BigInt(user1.id) } } },
+            action: UpdateComposeAction_ComposeAction.RECORDING_VOICE,
+          },
+        },
+      },
+    ])
+  })
+
   test("should not send update to sender", async () => {
     const user1 = await testUtils.createUser(nextEmail("user1"))
     const user2 = await testUtils.createUser(nextEmail("user2"))

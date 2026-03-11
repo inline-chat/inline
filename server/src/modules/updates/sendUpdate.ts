@@ -76,6 +76,8 @@ const getNewUpdatesForComposeAction = (
     newAction = UpdateComposeAction_ComposeAction.UPLOADING_PHOTO
   } else if (action.action === "uploadingVideo") {
     newAction = UpdateComposeAction_ComposeAction.UPLOADING_VIDEO
+  } else if (action.action === "recordingVoice") {
+    newAction = UpdateComposeAction_ComposeAction.RECORDING_VOICE
   }
 
   const updateComposeAction: Update = {

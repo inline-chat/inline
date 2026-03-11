@@ -9,6 +9,7 @@ import { encodeDialog } from "@in/server/realtime/encoders/encodeDialog"
 import { encodeTranslation, encodeUnencryptedTranslation } from "@in/server/realtime/encoders/encodeTranslation"
 import { encodeChatParticipant } from "./encodeChatParticipant"
 import { encodeUserSettings } from "./encodeUserSettings"
+import { encodeVoice } from "./encodeVoice"
 export const Encoders = {
   photoLegacy: encodePhotoLegacy,
   message: encodeMessage,
@@ -19,6 +20,7 @@ export const Encoders = {
   user: encodeUser,
   chat: encodeChat,
   photo: encodePhoto,
+  voice: encodeVoice,
   member: encodeMember,
   space: encodeSpace,
   dialog: encodeDialog,

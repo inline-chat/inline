@@ -4,6 +4,21 @@ import "core.proto";
 
 package client;
 
+message MessageContentPayload {
+  MessageVoiceContent voice = 1;
+}
+
+message MessageVoiceContent {
+  int64 voice_id = 1;
+  int32 duration = 2;
+  bytes waveform = 3;
+  string mime_type = 4;
+  string cdn_url = 5;
+  string local_relative_path = 6;
+  int64 size = 7;
+  string transcription = 8;
+}
+
 message Transaction {
   string id = 1;
   int64 date = 2;

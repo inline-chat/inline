@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test"
 import { InputPeer } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
-import { chatParticipants, chats, members, messages } from "@in/server/db/schema"
+import { chatParticipants, chats, files, members, messages, voices } from "@in/server/db/schema"
 import type { DbUser } from "@in/server/db/schema"
 import { MessageModel } from "@in/server/db/models/messages"
 import { forwardMessages } from "@in/server/functions/messages.forwardMessages"
@@ -17,6 +17,7 @@ setupTestLifecycle()
 type Scenario = {
   currentUser: DbUser
   dmPeerUser: DbUser
+  sourceChatId: number
   destinationThreadId: number
   sourceMessageId: bigint
   fromPeerId: InputPeer
@@ -71,6 +72,7 @@ const createScenario = async ({ sourceFromCurrentUser }: { sourceFromCurrentUser
   return {
     currentUser,
     dmPeerUser,
+    sourceChatId: sourceDm.id,
     destinationThreadId: destinationThread.id,
     sourceMessageId: BigInt(sourceMessage.messageId),
     fromPeerId: {
@@ -93,6 +95,38 @@ const forwardedMessageFromDestination = async (destinationThreadId: number) => {
   }
 
   return MessageModel.getMessage(storedMessage.messageId, destinationThreadId)
+}
+
+const createVoiceForUser = async (userId: number) => {
+  const [file] = await db
+    .insert(files)
+    .values({
+      fileUniqueId: `INV-forward-${runId}-${userIndex++}`,
+      userId,
+      fileType: "voice",
+      mimeType: "audio/ogg",
+      fileSize: 222,
+    })
+    .returning()
+
+  if (!file) {
+    throw new Error("Failed to create test voice file")
+  }
+
+  const [voice] = await db
+    .insert(voices)
+    .values({
+      fileId: file.id,
+      duration: 9,
+      waveform: Buffer.from([8, 6, 7, 5]),
+    })
+    .returning()
+
+  if (!voice) {
+    throw new Error("Failed to create test voice")
+  }
+
+  return voice
 }
 
 describe("forwardMessages DM -> private thread", () => {
@@ -143,5 +177,44 @@ describe("forwardMessages DM -> private thread", () => {
     expect(forwarded.fwdFromPeerChatId).toBeNull()
     expect(forwarded.fwdFromSenderId).toBeNull()
     expect(forwarded.fwdFromMessageId).toBeNull()
+  })
+
+  test("forwards voice media and clones the voice row", async () => {
+    const scenario = await createScenario({ sourceFromCurrentUser: false })
+    const voice = await createVoiceForUser(scenario.dmPeerUser.id)
+    const [sourceVoiceMessage] = await db
+      .insert(messages)
+      .values({
+        messageId: 2,
+        chatId: scenario.sourceChatId,
+        fromId: scenario.dmPeerUser.id,
+        mediaType: "voice",
+        voiceId: voice.id,
+      })
+      .returning()
+
+    if (!sourceVoiceMessage) {
+      throw new Error("Failed to create source voice message")
+    }
+
+    const context = testUtils.functionContext({ userId: scenario.currentUser.id, sessionId: 1 })
+
+    const result = await forwardMessages(
+      {
+        fromPeerId: scenario.fromPeerId,
+        toPeerId: scenario.toPeerId,
+        messageIds: [BigInt(sourceVoiceMessage.messageId)],
+      },
+      context,
+    )
+
+    expect(result.updates.length).toBeGreaterThan(0)
+
+    const forwarded = await forwardedMessageFromDestination(scenario.destinationThreadId)
+    expect(forwarded.voiceId).not.toBeNull()
+    expect(forwarded.voice?.id).not.toBe(voice.id)
+    expect(forwarded.voice?.duration).toBe(9)
+    expect(forwarded.voice?.waveform).toEqual(Buffer.from([8, 6, 7, 5]))
+    expect(forwarded.fwdFromPeerUserId).toBe(scenario.dmPeerUser.id)
   })
 })

@@ -52,6 +52,14 @@ public extension InputMedia {
     }
   }
 
+  static func fromVoiceId(_ voiceId: Int64) -> InputMedia {
+    InputMedia.with {
+      $0.media = .voice(.with {
+        $0.voiceID = voiceId
+      })
+    }
+  }
+
   static func fromNudge() -> InputMedia {
     InputMedia.with {
       $0.media = .nudge(.init())

@@ -699,12 +699,23 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
     }
   }
 
+  public struct VoiceUploadMetadata: Sendable {
+    public let duration: Int
+    public let waveform: Data
+
+    public init(duration: Int, waveform: Data) {
+      self.duration = duration
+      self.waveform = waveform
+    }
+  }
+
   public func uploadFile(
     type: MessageFileType,
     data: Data,
     filename: String,
     mimeType: MIMEType,
     videoMetadata: VideoUploadMetadata? = nil,
+    voiceMetadata: VoiceUploadMetadata? = nil,
     progress: @escaping @Sendable (UploadTransferProgress) -> Void
   ) async throws -> UploadFileResult {
     guard let url = URL(string: "\(baseURL)/uploadFile") else {
@@ -750,6 +761,13 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
           data: thumb
         ))
       }
+    }
+
+    if let voiceMetadata {
+      fields.append(contentsOf: [
+        (name: "duration", filename: nil, mimeType: nil, data: "\(voiceMetadata.duration)".data(using: .utf8)!),
+        (name: "waveform", filename: nil, mimeType: nil, data: voiceMetadata.waveform.base64EncodedData()),
+      ])
     }
 
     let multipartFormData = try MultipartFormData.Builder.build(
@@ -1150,6 +1168,7 @@ public struct UploadFileResult: Codable, Sendable {
   public let photoId: Int64?
   public let videoId: Int64?
   public let documentId: Int64?
+  public let voiceId: Int64?
 }
 
 public struct GetSpace: Codable, Sendable {

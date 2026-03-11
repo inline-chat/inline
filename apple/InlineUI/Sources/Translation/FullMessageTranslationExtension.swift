@@ -34,8 +34,12 @@ public extension FullMessage {
   var displayText: String? {
     if let translationText {
       translationText
+    } else if let text = message.text {
+      text
+    } else if message.hasVoice, !ExperimentalFeatureFlags.voiceMessagesEnabled {
+      message.stringRepresentationPlain
     } else {
-      message.text
+      nil
     }
   }
 
@@ -68,8 +72,12 @@ public extension EmbeddedMessage {
   var displayText: String? {
     if let translationText {
       translationText
+    } else if let text = message.text {
+      text
+    } else if message.hasVoice, !ExperimentalFeatureFlags.voiceMessagesEnabled {
+      message.stringRepresentationPlain
     } else {
-      message.text
+      nil
     }
   }
 

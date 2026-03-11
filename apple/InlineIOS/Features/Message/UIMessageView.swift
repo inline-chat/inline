@@ -3,6 +3,7 @@ import Auth
 import Combine
 import GRDB
 import InlineKit
+import InlineUI
 import Logger
 import Nuke
 import NukeUI
@@ -163,6 +164,10 @@ class UIMessageView: UIView {
     message.hasPhoto || message.hasVideo
   }
 
+  private var shouldShowVoiceMessage: Bool {
+    ExperimentalFeatureFlags.voiceMessagesEnabled && message.hasVoice
+  }
+
   private var isMediaOnlyMessage: Bool {
     hasMedia && !message.hasText
   }
@@ -212,6 +217,9 @@ class UIMessageView: UIView {
 
     if message.hasUnsupportedTypes {
       return false
+    }
+    if shouldShowVoiceMessage {
+      return true
     }
     if fullMessage.message.documentId != nil {
       return true
@@ -288,6 +296,7 @@ class UIMessageView: UIView {
   lazy var videoView = createVideoView()
   lazy var floatingMetadataView = createFloatingMetadataView()
   lazy var documentView = createDocumentView()
+  lazy var voiceMessageViewController = createVoiceMessageViewController()
   lazy var messageAttachmentEmbed = createMessageAttachmentEmbed()
   lazy var metadataView = createMessageTimeAndStatus()
   private weak var metadataContainerView: UIStackView?
@@ -733,7 +742,12 @@ class UIMessageView: UIView {
   }
 
   func setupDocumentViewIfNeeded() {
-    guard fullMessage.documentInfo != nil else { return }
+    guard fullMessage.documentInfo != nil || shouldShowVoiceMessage else { return }
+
+    if shouldShowVoiceMessage {
+      containerStack.addArrangedSubview(voiceMessageViewController.view)
+      return
+    }
 
     containerStack.addArrangedSubview(documentView)
 

@@ -163,6 +163,8 @@ public enum Theme {
   public static let embeddedMessageHeight: CGFloat = 40.0
   public static let documentViewHeight: CGFloat = 36.0
   public static let documentViewWidth: CGFloat = 200.0
+  public static let voiceMessageViewHeight: CGFloat = 54.0
+  public static let voiceMessageViewWidth: CGFloat = 240.0
   public static let attachmentViewWidth: CGFloat = 260.0
   public static let externalTaskViewHeight: CGFloat = 46.0
   public static let loomPreviewHeight: CGFloat = 64.0

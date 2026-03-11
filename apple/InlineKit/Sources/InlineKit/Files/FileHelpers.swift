@@ -6,6 +6,7 @@ public enum FileLocalCacheDirectory {
   case photos
   case videos
   case documents
+  case voices
 }
 
 public enum FileHelpers {
@@ -68,6 +69,8 @@ public enum FileHelpers {
       documentsDirectory.appendingPathComponent("Videos", isDirectory: true)
     case .documents:
       documentsDirectory.appendingPathComponent("Documents", isDirectory: true)
+    case .voices:
+      documentsDirectory.appendingPathComponent("Voices", isDirectory: true)
     }
 
     // Create the directory if it doesn't exist

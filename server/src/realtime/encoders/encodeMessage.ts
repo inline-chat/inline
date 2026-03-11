@@ -14,9 +14,10 @@ import {
 } from "@inline-chat/protocol/core"
 import { encodePeer, encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer"
 import { encodePhoto, encodePhotoLegacy } from "@in/server/realtime/encoders/encodePhoto"
-import type { DbFullDocument, DbFullPhoto, DbFullVideo } from "@in/server/db/models/files"
+import type { DbFullDocument, DbFullPhoto, DbFullVideo, DbFullVoice } from "@in/server/db/models/files"
 import { encodeVideo } from "@in/server/realtime/encoders/encodeVideo"
 import { encodeDocument } from "@in/server/realtime/encoders/encodeDocument"
+import { encodeVoice } from "@in/server/realtime/encoders/encodeVoice"
 import type { DbFullMessage } from "@in/server/db/models/messages"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { encodeReaction } from "@in/server/realtime/encoders/encodeReaction"
@@ -30,6 +31,7 @@ export const encodeMessage = ({
   photo,
   video,
   document,
+  voice,
   encodingForUserId,
   encodingForPeer,
   sendMode,
@@ -41,6 +43,7 @@ export const encodeMessage = ({
   photo?: DbFullPhoto | undefined
   video?: DbFullVideo | undefined
   document?: DbFullDocument | undefined
+  voice?: DbFullVoice | undefined
   sendMode?: MessageSendMode
 }): Message => {
   // Decrypt
@@ -116,6 +119,13 @@ export const encodeMessage = ({
       media: {
         oneofKind: "document",
         document: { document: encodeDocument({ document }) },
+      },
+    }
+  } else if (voice) {
+    media = {
+      media: {
+        oneofKind: "voice",
+        voice: { voice: encodeVoice({ voice }) },
       },
     }
   }
@@ -212,6 +222,13 @@ export const encodeFullMessage = ({
       media: {
         oneofKind: "document",
         document: { document: encodeDocument({ document: message.document }) },
+      },
+    }
+  } else if (message.voice) {
+    media = {
+      media: {
+        oneofKind: "voice",
+        voice: { voice: encodeVoice({ voice: message.voice }) },
       },
     }
   }

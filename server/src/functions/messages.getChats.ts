@@ -287,6 +287,15 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
           document: {
             with: {
               file: true,
+              photo: {
+                with: {
+                  photoSizes: {
+                    with: {
+                      file: true,
+                    },
+                  },
+                },
+              },
             },
           },
           reactions: true,

@@ -25,7 +25,7 @@ export const files = pgTable("files", {
 
   // --------------------------------------------------------
   // Deperecated Fields
-  fileType: text("file_type", { enum: ["photo", "video", "document", "audio"] }),
+  fileType: text("file_type", { enum: ["photo", "video", "document", "audio", "voice"] }),
   videoDuration: doublePrecision("video_duration"),
   thumbSize: text("thumb_size"),
   thumbFor: integer("thumb_for").references((): AnyPgColumn => files.id),

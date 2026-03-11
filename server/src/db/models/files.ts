@@ -6,11 +6,13 @@ import {
   photos,
   photoSizes,
   videos,
+  voices,
   type DbDocument,
   type DbFile,
   type DbPhoto,
   type DbPhotoSize,
   type DbVideo,
+  type DbVoice,
 } from "@in/server/db/schema"
 import { decrypt } from "@in/server/modules/encryption/encryption"
 import { generateFileUniqueId } from "@in/server/modules/files/fileId"
@@ -22,14 +24,17 @@ export const FileModel = {
   getPhotoById: getPhotoById,
   getVideoById: getVideoById,
   getDocumentById: getDocumentById,
+  getVoiceById: getVoiceById,
 
   processFullPhoto: processFullPhoto,
   processFullVideo: processFullVideo,
   processFullDocument: processFullDocument,
+  processFullVoice: processFullVoice,
 
   clonePhotoById: clonePhotoById,
   cloneVideoById: cloneVideoById,
   cloneDocumentById: cloneDocumentById,
+  cloneVoiceById: cloneVoiceById,
 }
 
 export async function getFileByUniqueId(fileUniqueId: string): Promise<DbFile | undefined> {
@@ -301,6 +306,7 @@ export async function cloneVideoById(videoId: number, newOwnerId: number): Promi
 
 export type InputDbFullDocument = DbDocument & {
   file: DbFile | null
+  photo: InputDbFullPhoto | null
 }
 
 function processFullDocument(document: InputDbFullDocument): DbFullDocument {
@@ -315,6 +321,7 @@ function processFullDocument(document: InputDbFullDocument): DbFullDocument {
         ? decrypt({ encrypted: document.fileName, iv: document.fileNameIv, authTag: document.fileNameTag })
         : null,
     file: processFile(document.file),
+    photo: document.photo ? processFullPhoto(document.photo) : null,
   }
 }
 
@@ -324,6 +331,7 @@ export type DbPlainDocument = Omit<DbDocument, "fileName" | "fileNameIv" | "file
 }
 export type DbFullDocument = DbPlainDocument & {
   file: DbFullPlainFile
+  photo: DbFullPhoto | null
 }
 
 async function getDocumentById(documentId: bigint): Promise<DbFullDocument | undefined> {
@@ -331,6 +339,15 @@ async function getDocumentById(documentId: bigint): Promise<DbFullDocument | und
     where: eq(documents.id, Number(documentId)),
     with: {
       file: true,
+      photo: {
+        with: {
+          photoSizes: {
+            with: {
+              file: true,
+            },
+          },
+        },
+      },
     },
   })
 
@@ -386,4 +403,72 @@ export async function cloneDocumentById(documentId: number, newOwnerId: number):
   }
 
   return newDocument.id
+}
+
+export type InputDbFullVoice = DbVoice & {
+  file: DbFile | null
+}
+
+export type DbFullVoice = DbVoice & {
+  file: DbFullPlainFile
+}
+
+function processFullVoice(voice: InputDbFullVoice): DbFullVoice {
+  if (!voice.file) {
+    throw ModelError.VoiceInvalid
+  }
+
+  return {
+    ...voice,
+    file: processFile(voice.file),
+  }
+}
+
+async function getVoiceById(voiceId: bigint): Promise<DbFullVoice | undefined> {
+  const result = await db._query.voices.findFirst({
+    where: eq(voices.id, Number(voiceId)),
+    with: {
+      file: true,
+    },
+  })
+
+  if (!result) {
+    throw ModelError.VoiceInvalid
+  }
+
+  return processFullVoice(result)
+}
+
+export async function cloneVoiceById(voiceId: number, newOwnerId: number): Promise<number> {
+  const voice = await db._query.voices.findFirst({
+    where: eq(voices.id, voiceId),
+    with: {
+      file: true,
+    },
+  })
+
+  if (!voice || !voice.file) {
+    throw ModelError.VoiceInvalid
+  }
+
+  const newFile = await cloneFileFromExisting({
+    file: voice.file,
+    newOwnerId,
+    fileType: FileTypes.VOICE,
+  })
+
+  const [newVoice] = await db
+    .insert(voices)
+    .values({
+      fileId: newFile.id,
+      duration: voice.duration,
+      waveform: voice.waveform,
+    })
+    .returning()
+
+  if (!newVoice) {
+    throw ModelError.VoiceInvalid
+  }
+
+  return newVoice.id
 }

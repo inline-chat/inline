@@ -4,6 +4,7 @@ import SwiftUI
 
 struct ExperimentalView: View {
   @AppStorage("enableExperimentalView") private var enableExperimentalView = false
+  @AppStorage(ExperimentalFeatureFlags.voiceMessagesKey) private var enableVoiceMessages = false
   @Environment(\.realtimeV2) private var realtimeV2
   @State private var enableSyncMessageUpdates = Api.realtime.getEnableSyncMessageUpdates()
 
@@ -30,7 +31,17 @@ struct ExperimentalView: View {
             .accessibilityLabel("Enable sync message updates")
         }
 
-        Text("UI changes may require an app restart. Sync changes apply immediately.")
+        SettingsItem(
+          icon: "waveform",
+          iconColor: .red,
+          title: "Enable voice messages"
+        ) {
+          Toggle("", isOn: $enableVoiceMessages)
+            .labelsHidden()
+            .accessibilityLabel("Enable voice messages")
+        }
+
+        Text("Experimental voice features and UI changes may require an app restart. Sync changes apply immediately.")
           .font(.caption)
           .foregroundStyle(.secondary)
       }

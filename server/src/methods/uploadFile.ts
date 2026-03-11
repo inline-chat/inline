@@ -8,6 +8,7 @@ import { FileTypes, type UploadFileResult } from "@in/server/modules/files/types
 import { uploadPhoto } from "@in/server/modules/files/uploadPhoto"
 import { uploadDocument } from "@in/server/modules/files/uploadDocument"
 import { uploadVideo } from "@in/server/modules/files/uploadVideo"
+import { uploadVoice } from "@in/server/modules/files/uploadVoice"
 import { ApiError, InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
 
@@ -34,6 +35,7 @@ export const Input = Type.Object({
   width: Optional(Type.String()),
   height: Optional(Type.String()),
   duration: Optional(Type.String()),
+  waveform: Optional(Type.String()),
 
   // For documents
   // photoId: Optional(Type.Number()),
@@ -44,6 +46,7 @@ export const Response = Type.Object({
   photoId: Type.Optional(Type.Number()),
   videoId: Type.Optional(Type.Number()),
   documentId: Type.Optional(Type.Number()),
+  voiceId: Type.Optional(Type.Number()),
 })
 
 const handler = async (input: Static<typeof Input>, context: HandlerContext): Promise<Static<typeof Response>> => {
@@ -56,7 +59,10 @@ const handler = async (input: Static<typeof Input>, context: HandlerContext): Pr
     const width = input.type === FileTypes.VIDEO ? parseOptionalInt("width", input.width, 1) : undefined
     const height = input.type === FileTypes.VIDEO ? parseOptionalInt("height", input.height, 1) : undefined
     const duration =
-      input.type === FileTypes.VIDEO ? parseOptionalInt("duration", input.duration, 0) : undefined
+      input.type === FileTypes.VIDEO || input.type === FileTypes.VOICE
+        ? parseOptionalInt("duration", input.duration, 0)
+        : undefined
+    const waveform = input.type === FileTypes.VOICE ? parseRequiredBase64("waveform", input.waveform) : undefined
 
     if (input.thumbnail?.size === 0) {
       throw uploadBadRequest("Uploaded thumbnail is empty")
@@ -81,8 +87,19 @@ const handler = async (input: Static<typeof Input>, context: HandlerContext): Pr
       }
     }
 
+    if (input.type === FileTypes.VOICE) {
+      if (duration === undefined || waveform === undefined) {
+        log.error("Missing voice metadata", {
+          ...requestDiagnostics,
+          hasDuration: duration !== undefined,
+          hasWaveform: waveform !== undefined,
+        })
+        throw uploadBadRequest("Voice upload requires duration and waveform")
+      }
+    }
+
     let result: UploadFileResult
-    let videoThumbnailId: number | undefined
+    let uploadedThumbnailId: number | undefined
 
     try {
       switch (input.type) {
@@ -90,10 +107,9 @@ const handler = async (input: Static<typeof Input>, context: HandlerContext): Pr
           result = await uploadPhoto(file, { userId: context.currentUserId })
           break
         case FileTypes.VIDEO:
-          // Upload optional thumbnail first so we can associate it with the video row
           if (input.thumbnail) {
             const thumbResult = await uploadPhoto(input.thumbnail, { userId: context.currentUserId })
-            videoThumbnailId = thumbResult.photoId
+            uploadedThumbnailId = thumbResult.photoId
           }
 
           result = await uploadVideo(
@@ -102,13 +118,32 @@ const handler = async (input: Static<typeof Input>, context: HandlerContext): Pr
               width: width ?? 1280,
               height: height ?? 720,
               duration: duration ?? 0,
-              photoId: videoThumbnailId ? BigInt(videoThumbnailId) : undefined,
+              photoId: uploadedThumbnailId ? BigInt(uploadedThumbnailId) : undefined,
             },
             { userId: context.currentUserId },
           )
           break
         case FileTypes.DOCUMENT:
-          result = await uploadDocument(file, undefined, { userId: context.currentUserId })
+          if (input.thumbnail) {
+            const thumbResult = await uploadPhoto(input.thumbnail, { userId: context.currentUserId })
+            uploadedThumbnailId = thumbResult.photoId
+          }
+
+          result = await uploadDocument(
+            file,
+            uploadedThumbnailId ? BigInt(uploadedThumbnailId) : undefined,
+            { userId: context.currentUserId },
+          )
+          break
+        case FileTypes.VOICE:
+          result = await uploadVoice(
+            file,
+            {
+              duration: duration ?? 0,
+              waveform: waveform ?? new Uint8Array(),
+            },
+            { userId: context.currentUserId },
+          )
           break
       }
     } catch (error) {
@@ -123,9 +158,10 @@ const handler = async (input: Static<typeof Input>, context: HandlerContext): Pr
 
     return {
       fileUniqueId: result.fileUniqueId,
-      photoId: result.photoId ?? videoThumbnailId,
+      photoId: result.photoId ?? uploadedThumbnailId,
       videoId: result.videoId,
       documentId: result.documentId,
+      voiceId: result.voiceId,
     }
   } catch (error) {
     log.error("File upload request failed", { error, ...requestDiagnostics })
@@ -189,6 +225,26 @@ function parseOptionalInt(name: string, value: string | undefined, min: number):
   }
 
   return parsed
+}
+
+function parseRequiredBase64(name: string, value: string | undefined): Uint8Array | undefined {
+  if (value === undefined) {
+    return undefined
+  }
+
+  const trimmed = value.trim()
+  if (!trimmed) {
+    log.error("Invalid base64 upload metadata", { name, reason: "empty" })
+    throw uploadBadRequest(`Invalid ${name}: expected base64 data`)
+  }
+
+  const compact = trimmed.replace(/\s+/g, "")
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(compact) || compact.length % 4 !== 0) {
+    log.error("Invalid base64 upload metadata", { name, reason: "malformed" })
+    throw uploadBadRequest(`Invalid ${name}: expected base64 data`)
+  }
+
+  return Uint8Array.from(Buffer.from(compact, "base64"))
 }
 
 function requireUploadFile(file: File | undefined): File {

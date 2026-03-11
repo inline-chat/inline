@@ -436,13 +436,14 @@ message MessageAttachmentExternalTask {
 }
 
 message MessageMedia {
-  // WIP: add document, audio, video.
+  // WIP: add richer media/filtering metadata.
 
   oneof media {
     MessagePhoto photo = 1;
     MessageVideo video = 2;
     MessageDocument document = 3;
     MessageNudge nudge = 4;
+    MessageVoice voice = 5;
   }
 }
 
@@ -451,6 +452,8 @@ message MessagePhoto { Photo photo = 1; }
 message MessageVideo { Video video = 1; }
 
 message MessageDocument { Document document = 1; }
+
+message MessageVoice { Voice voice = 1; }
 
 // Nudge message (empty payload)
 message MessageNudge {}
@@ -497,6 +500,31 @@ message Document {
 
   // Date of upload
   int64 date = 6;
+
+  // Thumbnail of the document
+  optional Photo photo = 7;
+}
+
+message Voice {
+  int64 id = 1;
+
+  // Date of upload
+  int64 date = 2;
+
+  // Duration of the voice message in seconds
+  int32 duration = 3;
+
+  // File size
+  int32 size = 4;
+
+  // MIME type of the file
+  string mime_type = 5;
+
+  // CDN URL
+  optional string cdn_url = 6;
+
+  // Waveform bytes for rendering
+  bytes waveform = 7;
 }
 
 // Photo for message media, profile photo, space photo, or chat photo
@@ -1109,6 +1137,7 @@ message InputMedia {
     InputMediaVideo video = 2;
     InputMediaDocument document = 3;
     InputMediaNudge nudge = 4;
+    InputMediaVoice voice = 5;
   }
 }
 
@@ -1125,6 +1154,11 @@ message InputMediaVideo {
 message InputMediaDocument {
   // ID of the document that we have uploaded
   int64 document_id = 1;
+}
+
+message InputMediaVoice {
+  // ID of the voice message that we have uploaded
+  int64 voice_id = 1;
 }
 
 // Nudge message (empty payload)
@@ -1526,6 +1560,7 @@ message UpdateComposeAction {
     UPLOADING_PHOTO = 2;
     UPLOADING_DOCUMENT = 3;
     UPLOADING_VIDEO = 4;
+    RECORDING_VOICE = 5;
   }
 
   // User ID of the user who is composing the message

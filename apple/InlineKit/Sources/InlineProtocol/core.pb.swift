@@ -1982,7 +1982,7 @@ public struct MessageAttachmentExternalTask: Sendable {
   public init() {}
 }
 
-/// WIP: add document, audio, video.
+/// WIP: add richer media/filtering metadata.
 public struct MessageMedia: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -2022,6 +2022,14 @@ public struct MessageMedia: Sendable {
     set {media = .nudge(newValue)}
   }
 
+  public var voice: MessageVoice {
+    get {
+      if case .voice(let v)? = media {return v}
+      return MessageVoice()
+    }
+    set {media = .voice(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Media: Equatable, Sendable {
@@ -2029,6 +2037,7 @@ public struct MessageMedia: Sendable {
     case video(MessageVideo)
     case document(MessageDocument)
     case nudge(MessageNudge)
+    case voice(MessageVoice)
 
   }
 
@@ -2096,6 +2105,27 @@ public struct MessageDocument: Sendable {
   public init() {}
 
   fileprivate var _document: Document? = nil
+}
+
+public struct MessageVoice: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var voice: Voice {
+    get {return _voice ?? Voice()}
+    set {_voice = newValue}
+  }
+  /// Returns true if `voice` has been explicitly set.
+  public var hasVoice: Bool {return self._voice != nil}
+  /// Clears the value of `voice`. Subsequent reads from it will return its default value.
+  public mutating func clearVoice() {self._voice = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _voice: Voice? = nil
 }
 
 /// Nudge message (empty payload)
@@ -2187,6 +2217,56 @@ public struct Document: Sendable {
 
   /// Date of upload
   public var date: Int64 = 0
+
+  /// Thumbnail of the document
+  public var photo: Photo {
+    get {return _photo ?? Photo()}
+    set {_photo = newValue}
+  }
+  /// Returns true if `photo` has been explicitly set.
+  public var hasPhoto: Bool {return self._photo != nil}
+  /// Clears the value of `photo`. Subsequent reads from it will return its default value.
+  public mutating func clearPhoto() {self._photo = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _cdnURL: String? = nil
+  fileprivate var _photo: Photo? = nil
+}
+
+public struct Voice: @unchecked Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var id: Int64 = 0
+
+  /// Date of upload
+  public var date: Int64 = 0
+
+  /// Duration of the voice message in seconds
+  public var duration: Int32 = 0
+
+  /// File size
+  public var size: Int32 = 0
+
+  /// MIME type of the file
+  public var mimeType: String = String()
+
+  /// CDN URL
+  public var cdnURL: String {
+    get {return _cdnURL ?? String()}
+    set {_cdnURL = newValue}
+  }
+  /// Returns true if `cdnURL` has been explicitly set.
+  public var hasCdnURL: Bool {return self._cdnURL != nil}
+  /// Clears the value of `cdnURL`. Subsequent reads from it will return its default value.
+  public mutating func clearCdnURL() {self._cdnURL = nil}
+
+  /// Waveform bytes for rendering
+  public var waveform: Data = Data()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -4674,6 +4754,14 @@ public struct InputMedia: Sendable {
     set {media = .nudge(newValue)}
   }
 
+  public var voice: InputMediaVoice {
+    get {
+      if case .voice(let v)? = media {return v}
+      return InputMediaVoice()
+    }
+    set {media = .voice(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Media: Equatable, Sendable {
@@ -4681,6 +4769,7 @@ public struct InputMedia: Sendable {
     case video(InputMediaVideo)
     case document(InputMediaDocument)
     case nudge(InputMediaNudge)
+    case voice(InputMediaVoice)
 
   }
 
@@ -4720,6 +4809,19 @@ public struct InputMediaDocument: Sendable {
 
   /// ID of the document that we have uploaded
   public var documentID: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct InputMediaVoice: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// ID of the voice message that we have uploaded
+  public var voiceID: Int64 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -6286,6 +6388,7 @@ public struct UpdateComposeAction: Sendable {
     case uploadingPhoto // = 2
     case uploadingDocument // = 3
     case uploadingVideo // = 4
+    case recordingVoice // = 5
     case UNRECOGNIZED(Int)
 
     public init() {
@@ -6299,6 +6402,7 @@ public struct UpdateComposeAction: Sendable {
       case 2: self = .uploadingPhoto
       case 3: self = .uploadingDocument
       case 4: self = .uploadingVideo
+      case 5: self = .recordingVoice
       default: self = .UNRECOGNIZED(rawValue)
       }
     }
@@ -6310,6 +6414,7 @@ public struct UpdateComposeAction: Sendable {
       case .uploadingPhoto: return 2
       case .uploadingDocument: return 3
       case .uploadingVideo: return 4
+      case .recordingVoice: return 5
       case .UNRECOGNIZED(let i): return i
       }
     }
@@ -6321,6 +6426,7 @@ public struct UpdateComposeAction: Sendable {
       .uploadingPhoto,
       .uploadingDocument,
       .uploadingVideo,
+      .recordingVoice,
     ]
 
   }
@@ -9484,6 +9590,7 @@ extension MessageMedia: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementat
     2: .same(proto: "video"),
     3: .same(proto: "document"),
     4: .same(proto: "nudge"),
+    5: .same(proto: "voice"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -9544,6 +9651,19 @@ extension MessageMedia: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementat
           self.media = .nudge(v)
         }
       }()
+      case 5: try {
+        var v: MessageVoice?
+        var hadOneofValue = false
+        if let current = self.media {
+          hadOneofValue = true
+          if case .voice(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.media = .voice(v)
+        }
+      }()
       default: break
       }
     }
@@ -9570,6 +9690,10 @@ extension MessageMedia: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementat
     case .nudge?: try {
       guard case .nudge(let v)? = self.media else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+    }()
+    case .voice?: try {
+      guard case .voice(let v)? = self.media else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
     }()
     case nil: break
     }
@@ -9691,6 +9815,42 @@ extension MessageDocument: SwiftProtobuf.Message, SwiftProtobuf._MessageImplemen
   }
 }
 
+extension MessageVoice: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "MessageVoice"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "voice"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._voice) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._voice {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: MessageVoice, rhs: MessageVoice) -> Bool {
+    if lhs._voice != rhs._voice {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
 extension MessageNudge: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "MessageNudge"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
@@ -9797,6 +9957,7 @@ extension Document: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationB
     4: .same(proto: "size"),
     5: .standard(proto: "cdn_url"),
     6: .same(proto: "date"),
+    7: .same(proto: "photo"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -9811,6 +9972,7 @@ extension Document: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationB
       case 4: try { try decoder.decodeSingularInt32Field(value: &self.size) }()
       case 5: try { try decoder.decodeSingularStringField(value: &self._cdnURL) }()
       case 6: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
+      case 7: try { try decoder.decodeSingularMessageField(value: &self._photo) }()
       default: break
       }
     }
@@ -9839,6 +10001,9 @@ extension Document: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationB
     if self.date != 0 {
       try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 6)
     }
+    try { if let v = self._photo {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -9849,6 +10014,79 @@ extension Document: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationB
     if lhs.size != rhs.size {return false}
     if lhs._cdnURL != rhs._cdnURL {return false}
     if lhs.date != rhs.date {return false}
+    if lhs._photo != rhs._photo {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Voice: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "Voice"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "id"),
+    2: .same(proto: "date"),
+    3: .same(proto: "duration"),
+    4: .same(proto: "size"),
+    5: .standard(proto: "mime_type"),
+    6: .standard(proto: "cdn_url"),
+    7: .same(proto: "waveform"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.id) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
+      case 3: try { try decoder.decodeSingularInt32Field(value: &self.duration) }()
+      case 4: try { try decoder.decodeSingularInt32Field(value: &self.size) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self.mimeType) }()
+      case 6: try { try decoder.decodeSingularStringField(value: &self._cdnURL) }()
+      case 7: try { try decoder.decodeSingularBytesField(value: &self.waveform) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.id != 0 {
+      try visitor.visitSingularInt64Field(value: self.id, fieldNumber: 1)
+    }
+    if self.date != 0 {
+      try visitor.visitSingularInt64Field(value: self.date, fieldNumber: 2)
+    }
+    if self.duration != 0 {
+      try visitor.visitSingularInt32Field(value: self.duration, fieldNumber: 3)
+    }
+    if self.size != 0 {
+      try visitor.visitSingularInt32Field(value: self.size, fieldNumber: 4)
+    }
+    if !self.mimeType.isEmpty {
+      try visitor.visitSingularStringField(value: self.mimeType, fieldNumber: 5)
+    }
+    try { if let v = self._cdnURL {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 6)
+    } }()
+    if !self.waveform.isEmpty {
+      try visitor.visitSingularBytesField(value: self.waveform, fieldNumber: 7)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Voice, rhs: Voice) -> Bool {
+    if lhs.id != rhs.id {return false}
+    if lhs.date != rhs.date {return false}
+    if lhs.duration != rhs.duration {return false}
+    if lhs.size != rhs.size {return false}
+    if lhs.mimeType != rhs.mimeType {return false}
+    if lhs._cdnURL != rhs._cdnURL {return false}
+    if lhs.waveform != rhs.waveform {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -14032,6 +14270,7 @@ extension InputMedia: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
     2: .same(proto: "video"),
     3: .same(proto: "document"),
     4: .same(proto: "nudge"),
+    5: .same(proto: "voice"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -14092,6 +14331,19 @@ extension InputMedia: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
           self.media = .nudge(v)
         }
       }()
+      case 5: try {
+        var v: InputMediaVoice?
+        var hadOneofValue = false
+        if let current = self.media {
+          hadOneofValue = true
+          if case .voice(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.media = .voice(v)
+        }
+      }()
       default: break
       }
     }
@@ -14118,6 +14370,10 @@ extension InputMedia: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementatio
     case .nudge?: try {
       guard case .nudge(let v)? = self.media else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+    }()
+    case .voice?: try {
+      guard case .voice(let v)? = self.media else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
     }()
     case nil: break
     }
@@ -14222,6 +14478,38 @@ extension InputMediaDocument: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
 
   public static func ==(lhs: InputMediaDocument, rhs: InputMediaDocument) -> Bool {
     if lhs.documentID != rhs.documentID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension InputMediaVoice: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "InputMediaVoice"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "voice_id"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.voiceID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.voiceID != 0 {
+      try visitor.visitSingularInt64Field(value: self.voiceID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: InputMediaVoice, rhs: InputMediaVoice) -> Bool {
+    if lhs.voiceID != rhs.voiceID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -16711,6 +16999,7 @@ extension UpdateComposeAction.ComposeAction: SwiftProtobuf._ProtoNameProviding {
     2: .same(proto: "UPLOADING_PHOTO"),
     3: .same(proto: "UPLOADING_DOCUMENT"),
     4: .same(proto: "UPLOADING_VIDEO"),
+    5: .same(proto: "RECORDING_VOICE"),
   ]
 }
 

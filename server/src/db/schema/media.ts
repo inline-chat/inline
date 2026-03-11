@@ -116,3 +116,21 @@ export const videoRelations = relations(videos, ({ one }) => ({
     references: [photos.id],
   }),
 }))
+
+export const voices = pgTable("voices", {
+  id: bigint("id", { mode: "number" }).generatedAlwaysAsIdentity().primaryKey(),
+  fileId: integer("file_id").references(() => files.id),
+  date: creationDate,
+  duration: integer("duration"),
+  waveform: bytea("waveform"),
+})
+
+export type DbVoice = typeof voices.$inferSelect
+export type DBNewVoice = typeof voices.$inferInsert
+
+export const voiceRelations = relations(voices, ({ one }) => ({
+  file: one(files, {
+    fields: [voices.fileId],
+    references: [files.id],
+  }),
+}))

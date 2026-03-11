@@ -408,8 +408,14 @@ final class MediaHelpers: Sendable {
         return existingDocument
       }
 
+      var thumbnailPhotoId: Int64? = nil
+      if proto.hasPhoto {
+        let thumbnail = try savePhotoFromProto(proto.photo)
+        thumbnailPhotoId = thumbnail.id
+      }
+
       // Create the document
-      var document = Document.from(proto: proto)
+      var document = Document.from(proto: proto, localPhotoId: thumbnailPhotoId)
 
       try document.insert(db)
 

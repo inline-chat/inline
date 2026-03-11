@@ -8,6 +8,7 @@
 // For information on using the generated types, please see the documentation:
 //   https://github.com/apple/swift-protobuf/
 
+import Foundation
 import SwiftProtobuf
 
 // If the compiler emits an error on this type, it is because this file
@@ -18,6 +19,53 @@ import SwiftProtobuf
 fileprivate struct _GeneratedWithProtocGenSwiftVersion: SwiftProtobuf.ProtobufAPIVersionCheck {
   struct _2: SwiftProtobuf.ProtobufAPIVersion_2 {}
   typealias Version = _2
+}
+
+public struct Client_MessageContentPayload: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var voice: Client_MessageVoiceContent {
+    get {return _voice ?? Client_MessageVoiceContent()}
+    set {_voice = newValue}
+  }
+  /// Returns true if `voice` has been explicitly set.
+  public var hasVoice: Bool {return self._voice != nil}
+  /// Clears the value of `voice`. Subsequent reads from it will return its default value.
+  public mutating func clearVoice() {self._voice = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _voice: Client_MessageVoiceContent? = nil
+}
+
+public struct Client_MessageVoiceContent: @unchecked Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var voiceID: Int64 = 0
+
+  public var duration: Int32 = 0
+
+  public var waveform: Data = Data()
+
+  public var mimeType: String = String()
+
+  public var cdnURL: String = String()
+
+  public var localRelativePath: String = String()
+
+  public var size: Int64 = 0
+
+  public var transcription: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
 }
 
 public struct Client_Transaction: Sendable {
@@ -48,6 +96,116 @@ public struct Client_Transaction: Sendable {
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 fileprivate let _protobuf_package = "client"
+
+extension Client_MessageContentPayload: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".MessageContentPayload"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "voice"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._voice) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._voice {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Client_MessageContentPayload, rhs: Client_MessageContentPayload) -> Bool {
+    if lhs._voice != rhs._voice {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Client_MessageVoiceContent: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".MessageVoiceContent"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "voice_id"),
+    2: .same(proto: "duration"),
+    3: .same(proto: "waveform"),
+    4: .standard(proto: "mime_type"),
+    5: .standard(proto: "cdn_url"),
+    6: .standard(proto: "local_relative_path"),
+    7: .same(proto: "size"),
+    8: .same(proto: "transcription"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.voiceID) }()
+      case 2: try { try decoder.decodeSingularInt32Field(value: &self.duration) }()
+      case 3: try { try decoder.decodeSingularBytesField(value: &self.waveform) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.mimeType) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self.cdnURL) }()
+      case 6: try { try decoder.decodeSingularStringField(value: &self.localRelativePath) }()
+      case 7: try { try decoder.decodeSingularInt64Field(value: &self.size) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self.transcription) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.voiceID != 0 {
+      try visitor.visitSingularInt64Field(value: self.voiceID, fieldNumber: 1)
+    }
+    if self.duration != 0 {
+      try visitor.visitSingularInt32Field(value: self.duration, fieldNumber: 2)
+    }
+    if !self.waveform.isEmpty {
+      try visitor.visitSingularBytesField(value: self.waveform, fieldNumber: 3)
+    }
+    if !self.mimeType.isEmpty {
+      try visitor.visitSingularStringField(value: self.mimeType, fieldNumber: 4)
+    }
+    if !self.cdnURL.isEmpty {
+      try visitor.visitSingularStringField(value: self.cdnURL, fieldNumber: 5)
+    }
+    if !self.localRelativePath.isEmpty {
+      try visitor.visitSingularStringField(value: self.localRelativePath, fieldNumber: 6)
+    }
+    if self.size != 0 {
+      try visitor.visitSingularInt64Field(value: self.size, fieldNumber: 7)
+    }
+    if !self.transcription.isEmpty {
+      try visitor.visitSingularStringField(value: self.transcription, fieldNumber: 8)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Client_MessageVoiceContent, rhs: Client_MessageVoiceContent) -> Bool {
+    if lhs.voiceID != rhs.voiceID {return false}
+    if lhs.duration != rhs.duration {return false}
+    if lhs.waveform != rhs.waveform {return false}
+    if lhs.mimeType != rhs.mimeType {return false}
+    if lhs.cdnURL != rhs.cdnURL {return false}
+    if lhs.localRelativePath != rhs.localRelativePath {return false}
+    if lhs.size != rhs.size {return false}
+    if lhs.transcription != rhs.transcription {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
 
 extension Client_Transaction: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Transaction"

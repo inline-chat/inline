@@ -165,6 +165,11 @@ public struct TransactionSendMessage: Transaction {
       photoId: media?.asPhotoId(),
       videoId: media?.asVideoId(),
       documentId: media?.asDocumentId(),
+      contentPayload: media?.asVoiceContent().map { voiceContent in
+        Client_MessageContentPayload.with {
+          $0.voice = voiceContent
+        }
+      },
       transactionId: id,
       isSticker: isSticker,
       entities: entities
@@ -304,6 +309,12 @@ public struct TransactionSendMessage: Transaction {
               Log.shared.warning("Unable to post DocumentUploadFailed notification without a local document ID")
             }
             throw error
+          }
+
+        case let .voice(voiceContent):
+          let localVoiceId = try await FileUploader.shared.uploadVoice(voiceContent: voiceContent)
+          if let voiceServerId = try await FileUploader.shared.waitForUpload(voiceLocalId: localVoiceId)?.voiceId {
+            inputMedia = .fromVoiceId(voiceServerId)
           }
       }
     }
@@ -467,6 +478,8 @@ public struct TransactionSendMessage: Transaction {
         "video"
       case .document:
         "file"
+      case .voice:
+        "voice message"
     }
   }
 }

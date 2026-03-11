@@ -86,6 +86,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   public var photoId: Int64?
   public var videoId: Int64?
   public var documentId: Int64?
+  public var contentPayload: Client_MessageContentPayload?
   public var transactionId: String?
   public var isSticker: Bool?
   public var hasLink: Bool?
@@ -121,6 +122,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     public static let photoId = Column(CodingKeys.photoId)
     public static let videoId = Column(CodingKeys.videoId)
     public static let documentId = Column(CodingKeys.documentId)
+    public static let contentPayload = Column(CodingKeys.contentPayload)
     public static let hasLink = Column(CodingKeys.hasLink)
     public static let entities = Column(CodingKeys.entities)
   }
@@ -254,6 +256,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     photoId: Int64? = nil,
     videoId: Int64? = nil,
     documentId: Int64? = nil,
+    contentPayload: Client_MessageContentPayload? = nil,
     transactionId: String? = nil,
     isSticker: Bool? = nil,
     hasLink: Bool? = nil,
@@ -281,6 +284,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     self.photoId = photoId
     self.videoId = videoId
     self.documentId = documentId
+    self.contentPayload = contentPayload
     self.transactionId = transactionId
     self.isSticker = isSticker
     self.hasLink = hasLink
@@ -342,6 +346,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       photoId: from.media.photo.hasPhoto ? from.media.photo.photo.id : nil,
       videoId: from.media.video.hasVideo ? from.media.video.video.id : nil,
       documentId: from.media.document.hasDocument ? from.media.document.document.id : nil,
+      contentPayload: from.media.voice.hasVoice ? Self.contentPayload(from: from.media.voice.voice) : nil,
       isSticker: from.isSticker,
       hasLink: from.hasHasLink_p ? from.hasLink_p : nil,
       entities: from.hasEntities ? from.entities : nil
@@ -492,6 +497,83 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     let baseId = messageId == 0 ? 1 : messageId
     return baseId > 0 ? -baseId : baseId
   }
+
+  private static func contentPayload(from voice: InlineProtocol.Voice) -> Client_MessageContentPayload {
+    Client_MessageContentPayload.with {
+      $0.voice = Client_MessageVoiceContent.with {
+        $0.voiceID = voice.id
+        $0.duration = Int32(voice.duration)
+        $0.waveform = voice.waveform
+        $0.mimeType = voice.mimeType
+        $0.cdnURL = voice.cdnURL
+        $0.size = Int64(voice.size)
+      }
+    }
+  }
+
+  private static func mergedContentPayload(
+    incoming: Client_MessageContentPayload?,
+    existing: Client_MessageContentPayload?
+  ) -> Client_MessageContentPayload? {
+    switch (incoming, existing) {
+    case let (incoming?, existing?):
+      var merged = incoming
+      if incoming.hasVoice || existing.hasVoice {
+        if incoming.hasVoice {
+          merged.voice = mergedVoiceContent(
+            incoming: incoming.voice,
+            existing: existing.hasVoice ? existing.voice : nil
+          )
+        } else if existing.hasVoice {
+          merged.voice = existing.voice
+        }
+      }
+      return merged
+
+    case let (incoming?, nil):
+      return incoming
+
+    case let (nil, existing?):
+      return existing
+
+    case (nil, nil):
+      return nil
+    }
+  }
+
+  private static func mergedVoiceContent(
+    incoming: Client_MessageVoiceContent,
+    existing: Client_MessageVoiceContent?
+  ) -> Client_MessageVoiceContent {
+    guard let existing else { return incoming }
+
+    var merged = incoming
+    if merged.voiceID == 0 {
+      merged.voiceID = existing.voiceID
+    }
+    if merged.duration == 0 {
+      merged.duration = existing.duration
+    }
+    if merged.waveform.isEmpty {
+      merged.waveform = existing.waveform
+    }
+    if merged.mimeType.isEmpty {
+      merged.mimeType = existing.mimeType
+    }
+    if merged.cdnURL.isEmpty {
+      merged.cdnURL = existing.cdnURL
+    }
+    if merged.localRelativePath.isEmpty {
+      merged.localRelativePath = existing.localRelativePath
+    }
+    if merged.size == 0 {
+      merged.size = existing.size
+    }
+    if merged.transcription.isEmpty {
+      merged.transcription = existing.transcription
+    }
+    return merged
+  }
 }
 
 // MARK: - UI helpers
@@ -511,6 +593,8 @@ public extension Message {
       "🎥 Video"
     } else if let _ = documentId {
       "📄 Document"
+    } else if hasVoice {
+      "🎤 Voice message"
     } else {
       "Message"
     }
@@ -530,6 +614,8 @@ public extension Message {
       "Video"
     } else if let _ = documentId {
       "Document"
+    } else if hasVoice {
+      "Voice message"
     } else {
       "Message"
     }
@@ -554,6 +640,8 @@ public extension InlineProtocol.Message {
       "🎥 Video"
     } else if media.document.hasDocument {
       "📄 Document"
+    } else if media.voice.hasVoice {
+      "🎤 Voice message"
     } else {
       "Message"
     }
@@ -572,6 +660,8 @@ public extension InlineProtocol.Message {
       "Video"
     } else if media.document.hasDocument {
       "Document"
+    } else if media.voice.hasVoice {
+      "Voice message"
     } else {
       "Message"
     }
@@ -600,6 +690,7 @@ public extension Message {
         photoId = photoId ?? existing.photoId
         documentId = documentId ?? existing.documentId
         videoId = videoId ?? existing.videoId
+        contentPayload = Message.mergedContentPayload(incoming: contentPayload, existing: existing.contentPayload)
         hasLink = hasLink ?? existing.hasLink
         entities = entities ?? existing.entities
         transactionId = existing.transactionId
@@ -651,6 +742,7 @@ public extension ApiMessage {
       message.status = existing.status
       message.fileId = existing.fileId
       message.text = existing.text
+      message.contentPayload = existing.contentPayload
       message.transactionId = existing.transactionId
       message.hasLink = existing.hasLink
       message.editDate = editDate.map { Date(timeIntervalSince1970: TimeInterval($0)) }
@@ -800,6 +892,9 @@ public extension Message {
       case let .document(documentMessage):
         try processDocumentAttachment(db, documentMessage: documentMessage.document, message: &message)
 
+      case let .voice(voiceMessage):
+        processVoiceAttachment(voiceMessage: voiceMessage.voice, message: &message)
+
       default:
         break
     }
@@ -841,11 +936,31 @@ public extension Message {
     documentMessage: InlineProtocol.Document,
     message: inout Message
   ) throws {
+    var thumbnailPhotoId: Int64?
+    if documentMessage.hasPhoto {
+      let photo = try Photo.updateFromProtocol(db, protoPhoto: documentMessage.photo)
+      thumbnailPhotoId = photo.id
+    }
+
     // Use the new update method that preserves local path
-    let document = try Document.updateFromProtocol(db, protoDocument: documentMessage)
+    let document = try Document.updateFromProtocol(
+      db,
+      protoDocument: documentMessage,
+      thumbnailPhotoId: thumbnailPhotoId
+    )
 
     // Update message with document reference
     message.documentId = document.documentId
+  }
+
+  private static func processVoiceAttachment(
+    voiceMessage: InlineProtocol.Voice,
+    message: inout Message
+  ) {
+    message.contentPayload = mergedContentPayload(
+      incoming: contentPayload(from: voiceMessage),
+      existing: message.contentPayload
+    )
   }
 }
 
@@ -862,13 +977,55 @@ public extension Message {
     videoId != nil
   }
 
+  var voiceContent: Client_MessageVoiceContent? {
+    guard let contentPayload, contentPayload.hasVoice else { return nil }
+    return contentPayload.voice
+  }
+
+  var hasVoice: Bool {
+    voiceContent != nil
+  }
+
+  var voiceRemoteId: Int64? {
+    guard let voiceContent else { return nil }
+    return voiceContent.voiceID > 0 ? voiceContent.voiceID : nil
+  }
+
+  var voiceLocalRelativePath: String? {
+    guard let voiceContent else { return nil }
+    let trimmed = voiceContent.localRelativePath.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
+  }
+
+  var voiceLocalURL: URL? {
+    guard let voiceLocalRelativePath else { return nil }
+    return FileCache.getUrl(for: .voices, localPath: voiceLocalRelativePath)
+  }
+
   var hasText: Bool {
     guard let text else { return false }
     return !text.isEmpty
   }
 
   var hasUnsupportedTypes: Bool {
-    false
+    hasVoice && !ExperimentalFeatureFlags.voiceMessagesEnabled
+  }
+
+  mutating func setVoiceContent(_ voiceContent: Client_MessageVoiceContent?) {
+    switch voiceContent {
+    case let voiceContent?:
+      contentPayload = Client_MessageContentPayload.with {
+        $0.voice = voiceContent
+      }
+    case nil:
+      contentPayload = nil
+    }
+  }
+
+  mutating func setVoiceLocalRelativePath(_ localRelativePath: String?) {
+    guard var voiceContent else { return }
+    voiceContent.localRelativePath = localRelativePath ?? ""
+    setVoiceContent(voiceContent)
   }
 }
 

@@ -1,4 +1,5 @@
 import Foundation
+import InlineProtocol
 
 public enum UploadState {
   case idle
@@ -32,6 +33,7 @@ public enum FileMediaItem: Codable, Sendable {
   case photo(PhotoInfo)
   case document(DocumentInfo)
   case video(VideoInfo)
+  case voice(Client_MessageVoiceContent)
 
   var id: Int64 {
     switch self {
@@ -41,17 +43,22 @@ public enum FileMediaItem: Codable, Sendable {
         document.id
       case let .video(video):
         video.id
+      case let .voice(voice):
+        voice.voiceID
     }
   }
 
   public func getLocalPath() -> String? {
     switch self {
       case let .photo(photo):
-        photo.sizes.first?.localPath
+        return photo.sizes.first?.localPath
       case let .document(document):
-        document.document.localPath
+        return document.document.localPath
       case let .video(video):
-        video.video.localPath
+        return video.video.localPath
+      case let .voice(voice):
+        let localPath = voice.localRelativePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        return localPath.isEmpty ? nil : localPath
     }
   }
 
@@ -69,6 +76,8 @@ public enum FileMediaItem: Codable, Sendable {
         "document_\(document.id)"
       case let .video(video):
         "video_\(video.id)"
+      case let .voice(voice):
+        "voice_\(voice.voiceID)"
     }
   }
 
@@ -101,5 +110,20 @@ public enum FileMediaItem: Codable, Sendable {
   public func asDocumentId() -> Int64? {
     guard case let .document(document) = self else { return nil }
     return document.document.documentId
+  }
+
+  public func asVoiceLocalId() -> Int64? {
+    guard case let .voice(voice) = self else { return nil }
+    return voice.voiceID
+  }
+
+  public func asVoiceId() -> Int64? {
+    guard case let .voice(voice) = self else { return nil }
+    return voice.voiceID
+  }
+
+  public func asVoiceContent() -> Client_MessageVoiceContent? {
+    guard case let .voice(voice) = self else { return nil }
+    return voice
   }
 }

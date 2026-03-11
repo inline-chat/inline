@@ -83,6 +83,11 @@ public final class FileDownloader: NSObject, Sendable {
     progressPublisher(for: "photo_\(photoId)")
   }
 
+  /// Get a publisher for tracking download progress of a voice message.
+  public func voiceProgressPublisher(voiceId: Int64) -> AnyPublisher<DownloadProgress, Never> {
+    progressPublisher(for: "voice_\(voiceId)")
+  }
+
   public func downloadDocument(
     document: DocumentInfo,
     for message: Message? = nil,
@@ -186,6 +191,57 @@ public final class FileDownloader: NSObject, Sendable {
     )
   }
 
+  public func downloadVoice(
+    message: Message,
+    completion: @escaping (Result<URL, Error>) -> Void
+  ) {
+    guard let voice = message.voiceContent else {
+      completion(.failure(FileCacheError.failedToSave))
+      return
+    }
+
+    guard let url = URL(string: voice.cdnURL) else {
+      let error = NSError(
+        domain: "FileDownloader",
+        code: 404,
+        userInfo: [NSLocalizedDescriptionKey: "No remote URL found"]
+      )
+      log.warning("No remote URL found for voice \(voice.voiceID)")
+      completion(.failure(error))
+      return
+    }
+
+    let downloadId = "voice_\(voice.voiceID)"
+    let localPath = "\(UUID().uuidString).ogg"
+    let localUrl = FileCache.getUrl(for: .voices, localPath: localPath)
+
+    downloadFile(
+      id: downloadId,
+      url: url,
+      localUrl: localUrl,
+      completion: { [weak self] result in
+        guard let self else { return }
+
+        switch result {
+        case let .success(fileURL):
+          Task {
+            do {
+              try await FileCache.shared.saveVoiceDownload(message: message, localPath: localPath)
+              completion(.success(fileURL))
+            } catch {
+              self.log.error("Error saving voice download: \(error)")
+              completion(.failure(error))
+            }
+          }
+
+        case let .failure(error):
+          self.log.error("Voice download failed: \(error)")
+          completion(.failure(error))
+        }
+      }
+    )
+  }
+
   /// Cancel a download by document ID
   public func cancelDocumentDownload(documentId: Int64) {
     cancelDownload(id: "doc_\(documentId)")
@@ -199,6 +255,11 @@ public final class FileDownloader: NSObject, Sendable {
   /// Cancel a download by photo ID
   public func cancelPhotoDownload(photoId: Int64) {
     cancelDownload(id: "photo_\(photoId)")
+  }
+
+  /// Cancel a download by voice ID
+  public func cancelVoiceDownload(voiceId: Int64) {
+    cancelDownload(id: "voice_\(voiceId)")
   }
 
   // Add this to FileDownloader class
@@ -216,6 +277,10 @@ public final class FileDownloader: NSObject, Sendable {
 
   public func isPhotoDownloadActive(photoId: Int64) -> Bool {
     isDownloadActive(for: "photo_\(photoId)")
+  }
+
+  public func isVoiceDownloadActive(voiceId: Int64) -> Bool {
+    isDownloadActive(for: "voice_\(voiceId)")
   }
 
   // MARK: - Private Methods

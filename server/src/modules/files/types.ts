@@ -2,9 +2,10 @@ export enum FileTypes {
   PHOTO = "photo",
   VIDEO = "video",
   DOCUMENT = "document",
+  VOICE = "voice",
 }
 
-export type FileType = FileTypes.PHOTO | FileTypes.VIDEO | FileTypes.DOCUMENT
+export type FileType = FileTypes.PHOTO | FileTypes.VIDEO | FileTypes.DOCUMENT | FileTypes.VOICE
 
 export type UploadFileResult = {
   fileUniqueId: string
@@ -12,4 +13,5 @@ export type UploadFileResult = {
   photoId?: number
   videoId?: number
   documentId?: number
+  voiceId?: number
 }

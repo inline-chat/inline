@@ -12,6 +12,52 @@ import { reflectionMergePartial } from "@protobuf-ts/runtime";
 import { MessageType } from "@protobuf-ts/runtime";
 import { RpcCall } from "./core.js";
 /**
+ * @generated from protobuf message client.MessageContentPayload
+ */
+export interface MessageContentPayload {
+    /**
+     * @generated from protobuf field: client.MessageVoiceContent voice = 1;
+     */
+    voice?: MessageVoiceContent;
+}
+/**
+ * @generated from protobuf message client.MessageVoiceContent
+ */
+export interface MessageVoiceContent {
+    /**
+     * @generated from protobuf field: int64 voice_id = 1;
+     */
+    voiceId: bigint;
+    /**
+     * @generated from protobuf field: int32 duration = 2;
+     */
+    duration: number;
+    /**
+     * @generated from protobuf field: bytes waveform = 3;
+     */
+    waveform: Uint8Array;
+    /**
+     * @generated from protobuf field: string mime_type = 4;
+     */
+    mimeType: string;
+    /**
+     * @generated from protobuf field: string cdn_url = 5;
+     */
+    cdnUrl: string;
+    /**
+     * @generated from protobuf field: string local_relative_path = 6;
+     */
+    localRelativePath: string;
+    /**
+     * @generated from protobuf field: int64 size = 7;
+     */
+    size: bigint;
+    /**
+     * @generated from protobuf field: string transcription = 8;
+     */
+    transcription: string;
+}
+/**
  * @generated from protobuf message client.Transaction
  */
 export interface Transaction {
@@ -28,6 +74,155 @@ export interface Transaction {
      */
     call?: RpcCall;
 }
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageContentPayload$Type extends MessageType<MessageContentPayload> {
+    constructor() {
+        super("client.MessageContentPayload", [
+            { no: 1, name: "voice", kind: "message", T: () => MessageVoiceContent }
+        ]);
+    }
+    create(value?: PartialMessage<MessageContentPayload>): MessageContentPayload {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<MessageContentPayload>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageContentPayload): MessageContentPayload {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* client.MessageVoiceContent voice */ 1:
+                    message.voice = MessageVoiceContent.internalBinaryRead(reader, reader.uint32(), options, message.voice);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageContentPayload, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* client.MessageVoiceContent voice = 1; */
+        if (message.voice)
+            MessageVoiceContent.internalBinaryWrite(message.voice, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message client.MessageContentPayload
+ */
+export const MessageContentPayload = new MessageContentPayload$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class MessageVoiceContent$Type extends MessageType<MessageVoiceContent> {
+    constructor() {
+        super("client.MessageVoiceContent", [
+            { no: 1, name: "voice_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "duration", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 3, name: "waveform", kind: "scalar", T: 12 /*ScalarType.BYTES*/ },
+            { no: 4, name: "mime_type", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "cdn_url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "local_relative_path", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "size", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 8, name: "transcription", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<MessageVoiceContent>): MessageVoiceContent {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.voiceId = 0n;
+        message.duration = 0;
+        message.waveform = new Uint8Array(0);
+        message.mimeType = "";
+        message.cdnUrl = "";
+        message.localRelativePath = "";
+        message.size = 0n;
+        message.transcription = "";
+        if (value !== undefined)
+            reflectionMergePartial<MessageVoiceContent>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageVoiceContent): MessageVoiceContent {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 voice_id */ 1:
+                    message.voiceId = reader.int64().toBigInt();
+                    break;
+                case /* int32 duration */ 2:
+                    message.duration = reader.int32();
+                    break;
+                case /* bytes waveform */ 3:
+                    message.waveform = reader.bytes();
+                    break;
+                case /* string mime_type */ 4:
+                    message.mimeType = reader.string();
+                    break;
+                case /* string cdn_url */ 5:
+                    message.cdnUrl = reader.string();
+                    break;
+                case /* string local_relative_path */ 6:
+                    message.localRelativePath = reader.string();
+                    break;
+                case /* int64 size */ 7:
+                    message.size = reader.int64().toBigInt();
+                    break;
+                case /* string transcription */ 8:
+                    message.transcription = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageVoiceContent, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 voice_id = 1; */
+        if (message.voiceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.voiceId);
+        /* int32 duration = 2; */
+        if (message.duration !== 0)
+            writer.tag(2, WireType.Varint).int32(message.duration);
+        /* bytes waveform = 3; */
+        if (message.waveform.length)
+            writer.tag(3, WireType.LengthDelimited).bytes(message.waveform);
+        /* string mime_type = 4; */
+        if (message.mimeType !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.mimeType);
+        /* string cdn_url = 5; */
+        if (message.cdnUrl !== "")
+            writer.tag(5, WireType.LengthDelimited).string(message.cdnUrl);
+        /* string local_relative_path = 6; */
+        if (message.localRelativePath !== "")
+            writer.tag(6, WireType.LengthDelimited).string(message.localRelativePath);
+        /* int64 size = 7; */
+        if (message.size !== 0n)
+            writer.tag(7, WireType.Varint).int64(message.size);
+        /* string transcription = 8; */
+        if (message.transcription !== "")
+            writer.tag(8, WireType.LengthDelimited).string(message.transcription);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message client.MessageVoiceContent
+ */
+export const MessageVoiceContent = new MessageVoiceContent$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class Transaction$Type extends MessageType<Transaction> {
     constructor() {
