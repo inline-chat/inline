@@ -1,5 +1,6 @@
 import AppKit
 import InlineKit
+import TextProcessing
 
 protocol ComposeTextViewDelegate: NSTextViewDelegate {
   func textViewDidPressReturn(_ textView: NSTextView) -> Bool
@@ -8,6 +9,7 @@ protocol ComposeTextViewDelegate: NSTextViewDelegate {
   func textViewDidPressArrowDown(_ textView: NSTextView) -> Bool
   func textViewDidPressTab(_ textView: NSTextView) -> Bool
   func textViewDidPressEscape(_ textView: NSTextView) -> Bool
+  func textViewDidChangeFormatting(_ textView: NSTextView)
   // Add new delegate method for image paste
   func textView(_ textView: NSTextView, didReceiveImage image: NSImage, url: URL?)
   func textView(_ textView: NSTextView, didReceiveFile url: URL)
@@ -23,8 +25,15 @@ protocol ComposeTextViewDelegate: NSTextViewDelegate {
 
 class ComposeNSTextView: NSTextView {
   private var isStrippingEmailLinks = false
+  private let boldUndoActionName = "Bold"
 
   override func keyDown(with event: NSEvent) {
+    let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+    if modifiers == [.command], event.charactersIgnoringModifiers?.lowercased() == "b" {
+      toggleBold(self)
+      return
+    }
+
     // Handle return key
     if event.keyCode == 36 {
       if event.modifierFlags.contains(.command) {
@@ -166,6 +175,22 @@ class ComposeNSTextView: NSTextView {
 
   private func notifyDelegateAboutVideo(_ url: URL) {
     (delegate as? ComposeTextViewDelegate)?.textView(self, didReceiveVideo: url)
+  }
+
+  private func notifyDelegateAboutFormattingChange() {
+    (delegate as? ComposeTextViewDelegate)?.textViewDidChangeFormatting(self)
+  }
+
+  @objc func toggleBold(_ sender: Any?) {
+    let range = selectedRange()
+    guard range.location != NSNotFound else { return }
+
+    if range.length == 0 {
+      toggleTypingAttributesBold()
+      return
+    }
+
+    toggleBold(in: range)
   }
 
   override func paste(_ sender: Any?) {
@@ -638,4 +663,110 @@ class ComposeNSTextView: NSTextView {
 
     return super.performDragOperation(sender)
   }
+
+  private func toggleTypingAttributesBold() {
+    updateTypingAttributesIfNeeded()
+
+    let snapshot = FormattingSnapshot(
+      attributedString: NSAttributedString(attributedString: attributedString()),
+      selectedRange: selectedRange(),
+      typingAttributes: typingAttributes
+    )
+    registerUndo(snapshot)
+
+    let currentFont = (typingAttributes[.font] as? NSFont) ?? ComposeTextEditor.font
+    let wantsBold = !PlatformFontTraits.isBold(currentFont)
+
+    setTypingAttributesBold(wantsBold)
+    notifyDelegateAboutFormattingChange()
+  }
+
+  private func toggleBold(in range: NSRange) {
+    guard let textStorage else { return }
+
+    let fullRange = NSRange(location: 0, length: textStorage.length)
+    let safeRange = NSIntersectionRange(range, fullRange)
+    guard safeRange.length > 0 else { return }
+
+    let snapshot = FormattingSnapshot(
+      attributedString: NSAttributedString(attributedString: attributedString()),
+      selectedRange: selectedRange(),
+      typingAttributes: typingAttributes
+    )
+    registerUndo(snapshot)
+
+    let wantsBold = !isRangeFullyBold(safeRange)
+    var fontRuns: [(range: NSRange, font: NSFont)] = []
+
+    textStorage.enumerateAttribute(.font, in: safeRange, options: []) { value, subrange, _ in
+      fontRuns.append((subrange, (value as? NSFont) ?? ComposeTextEditor.font))
+    }
+
+    textStorage.beginEditing()
+    for fontRun in fontRuns {
+      textStorage.addAttribute(
+        .font,
+        value: PlatformFontTraits.settingBold(wantsBold, on: fontRun.font),
+        range: fontRun.range
+      )
+    }
+    textStorage.endEditing()
+
+    setTypingAttributesBold(wantsBold)
+    setSelectedRange(safeRange)
+    notifyDelegateAboutFormattingChange()
+  }
+
+  private func isRangeFullyBold(_ range: NSRange) -> Bool {
+    guard range.length > 0 else { return false }
+
+    var sawCharacters = false
+    var allBold = true
+    attributedString().enumerateAttribute(.font, in: range, options: []) { value, _, stop in
+      sawCharacters = true
+      let font = (value as? NSFont) ?? ComposeTextEditor.font
+      if !PlatformFontTraits.isBold(font) {
+        allBold = false
+        stop.pointee = true
+      }
+    }
+
+    return sawCharacters && allBold
+  }
+
+  private func registerUndo(_ snapshot: FormattingSnapshot) {
+    undoManager?.registerUndo(withTarget: self) { target in
+      target.restoreFormattingSnapshot(snapshot)
+    }
+    undoManager?.setActionName(boldUndoActionName)
+  }
+
+  private func restoreFormattingSnapshot(_ snapshot: FormattingSnapshot) {
+    registerUndo(
+      FormattingSnapshot(
+        attributedString: NSAttributedString(attributedString: attributedString()),
+        selectedRange: selectedRange(),
+        typingAttributes: typingAttributes
+      )
+    )
+
+    textStorage?.setAttributedString(snapshot.attributedString)
+    setSelectedRange(snapshot.selectedRange)
+    typingAttributes = snapshot.typingAttributes
+    notifyDelegateAboutFormattingChange()
+  }
+
+  private func setTypingAttributesBold(_ wantsBold: Bool) {
+    var newTypingAttributes = typingAttributes
+    let currentFont = (newTypingAttributes[.font] as? NSFont) ?? ComposeTextEditor.font
+    newTypingAttributes[.font] = PlatformFontTraits.settingBold(wantsBold, on: currentFont)
+    newTypingAttributes[.underlineStyle] = 0
+    typingAttributes = newTypingAttributes
+  }
+}
+
+private struct FormattingSnapshot {
+  let attributedString: NSAttributedString
+  let selectedRange: NSRange
+  let typingAttributes: [NSAttributedString.Key: Any]
 }

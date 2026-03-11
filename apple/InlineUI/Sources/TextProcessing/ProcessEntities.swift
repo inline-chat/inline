@@ -968,25 +968,7 @@ public class ProcessEntities {
   }
 
   private static func createBoldFont(from font: PlatformFont) -> PlatformFont {
-    #if os(macOS)
-    // NSFontManager.convert may return nil depending on the source font/traits. Provide safe fallbacks.
-    if let converted = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask) as PlatformFont?,
-       NSFontManager.shared.traits(of: converted).contains(.boldFontMask)
-    {
-      return converted
-    }
-    // Fallback: try to create bold using font descriptor
-    let descriptor = font.fontDescriptor.withSymbolicTraits(.bold)
-    if let boldFont = NSFont(descriptor: descriptor, size: font.pointSize) {
-      return boldFont
-    }
-    // Safe fallbacks with valid point size
-    let safeSize = max(font.pointSize, 12.0)
-    return NSFont.boldSystemFont(ofSize: safeSize)
-    #else
-    let safeSize = max(font.pointSize, 12.0)
-    return UIFont.boldSystemFont(ofSize: safeSize)
-    #endif
+    PlatformFontTraits.settingBold(true, on: font)
   }
 
   private static func createMonospaceFont(from font: PlatformFont) -> PlatformFont {

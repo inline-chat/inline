@@ -1553,6 +1553,10 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     return false // not handled
   }
 
+  func textViewDidChangeFormatting(_ textView: NSTextView) {
+    saveDraftWithDebounce()
+  }
+
   func textView(_ textView: NSTextView, didDetectMentionWith query: String, at location: Int) {
     // This method is called from text change detection
     // Implementation will be in textDidChange
