@@ -824,9 +824,6 @@
     "of %lld" : {
 
     },
-    "of 4" : {
-
-    },
     "OK" : {
 
     },
@@ -837,6 +834,9 @@
 
     },
     "Only space admins and owners can connect and manage integrations." : {
+
+    },
+    "Open links in app" : {
 
     },
     "Options" : {
@@ -1033,7 +1033,7 @@
     "Start a chat" : {
 
     },
-    "Step" : {
+    "Step %lld of 4" : {
 
     },
     "Sticker" : {
@@ -1142,6 +1142,9 @@
           }
         }
       }
+    },
+    "When off, links open in your default browser or the matching app." : {
+
     },
     "xxxxxx" : {
       "comment" : "Code input placeholder",

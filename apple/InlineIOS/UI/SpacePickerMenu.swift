@@ -1,4 +1,5 @@
 import InlineKit
+import RealtimeV2
 import SwiftUI
 
 struct SpacePickerMenu: View {
@@ -9,6 +10,7 @@ struct SpacePickerMenu: View {
   }
 
   @EnvironmentObject private var compactSpaceList: CompactSpaceList
+  @EnvironmentObject private var realtimeState: RealtimeState
   @Environment(Router.self) private var router
 
   var selectedSpaceId: Binding<Int64?>? = nil
@@ -22,7 +24,10 @@ struct SpacePickerMenu: View {
   var body: some View {
     let selectedSpaceId = selectedSpaceId ?? $localSelectedSpaceId
     let activeSpace = selectedSpace(selectedSpaceId.wrappedValue)
-    let title = activeSpace?.displayName ?? (onSelectHome != nil ? "Home" : "Spaces")
+    let displayedConnectionState = realtimeState.displayedConnectionState
+    let title = displayedConnectionState?.title
+      ?? activeSpace?.displayName
+      ?? (onSelectHome != nil ? "Home" : "Spaces")
     let createSpace = onCreateSpace ?? { router.push(.createSpace) }
 
     Button {
