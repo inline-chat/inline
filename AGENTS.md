@@ -1,6 +1,6 @@
 ## Orientation
 - Inline is a multi-client work chat app: backend (`server/` Bun/TS), Apple clients (`apple/` SwiftUI/UIKit/AppKit), web (`web/` React/TanStack), and shared protobufs (`proto/`).
-- Shared Swift packages: `apple/InlineKit`, `apple/InlineUI`, `apple/InlineProtocol`; app targets: `apple/InlineIOS`, `apple/InlineMac`.
+- Shared Swift packages: `apple/InlineKit`, `apple/InlineUI`, `apple/InlineProtocol`; app targets: `apple/InlineIOS`, `apple/InlineXIOS`, `apple/InlineMac`.
 - Backend structure: `src/functions`, `src/realtime`, `src/db`.
 - Use `bun` for JS/TS tooling (not npm/yarn); keep IDs as `Int64` (`Id`/`ID`) and timestamps in seconds unless API requires ms.
 - Production: `https://api.inline.chat` and `https://inline.chat`.
@@ -52,6 +52,9 @@
 - Requires authenticated `gh` and release env vars; script checks duplicate tags.
 
 ## Apple (iOS/macOS)
+- `apple/InlineIOS` is the main iOS app. `apple/InlineXIOS` is experimental only.
+- Treat `apple/InlineXIOS` and `apple/InlineIOS` as separate iOS apps. If the user asks for changes in one, do not add matching or spillover changes to the other unless explicitly requested.
+- For broad app, Apple-platform, or multi-platform changes, do not include `apple/InlineXIOS` unless the user explicitly asks for it by name.
 - Prefer new feature work in `apple/InlineIOSUI` and `apple/InlineMacUI`; use legacy targets only when tightly coupled.
 - Minimum versions: iOS 18, macOS 15.
 - Prefer Swift Testing (`import Testing`, `@Test`, `@Suite`) and Observation (`@Observable`, `@Bindable`).
