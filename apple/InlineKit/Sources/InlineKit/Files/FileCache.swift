@@ -1,4 +1,5 @@
 import Foundation
+import InlineProtocol
 import Logger
 import Nuke
 import AVFoundation
@@ -274,6 +275,24 @@ public actor FileCache: Sendable {
     triggerMessageReload(message: message)
   }
 
+  /// Save a downloaded voice message to the cache and update the message payload.
+  public func saveVoiceDownload(message: Message, localPath: String) async throws {
+    try await database.dbWriter.write { db in
+      guard var storedMessage = try Message.fetchOne(
+        db,
+        key: ["messageId": message.messageId, "chatId": message.chatId]
+      ) else {
+        throw FileCacheError.failedToSave
+      }
+
+      storedMessage.setVoiceLocalRelativePath(localPath)
+      try storedMessage.saveMessage(db)
+      self.log.debug("Updated voice message \(message.messageId) with local path \(localPath)")
+    }
+
+    triggerMessageReload(message: message)
+  }
+
   // MARK: - Helpers
 
   #if os(macOS)
@@ -435,6 +454,34 @@ public actor FileCache: Sendable {
     )
 
     return VideoInfo(video: video, photoInfo: thumbnailInfo)
+  }
+
+  public static func saveVoice(
+    data: Data,
+    duration: Int,
+    waveform: Data,
+    mimeType: String = "audio/ogg",
+    fileExtension: String = "ogg"
+  ) throws -> Client_MessageVoiceContent {
+    let normalizedExtension = fileExtension.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    let finalExtension = normalizedExtension.hasPrefix(".") ? normalizedExtension : ".\(normalizedExtension)"
+    let localPath = "\(UUID().uuidString)\(finalExtension)"
+    let fileURL = FileHelpers.getLocalCacheDirectory(for: .voices).appendingPathComponent(localPath)
+
+    try data.write(to: fileURL, options: .atomic)
+
+    return Client_MessageVoiceContent.with {
+      $0.voiceID = temporaryLocalMediaID()
+      $0.duration = Int32(max(duration, 0))
+      $0.waveform = waveform
+      $0.mimeType = mimeType
+      $0.localRelativePath = localPath
+      $0.size = Int64(data.count)
+    }
+  }
+
+  private static func temporaryLocalMediaID() -> Int64 {
+    Int64(bitPattern: UInt64(arc4random()) | (UInt64(arc4random()) << 32)) * -1
   }
 
   public static func saveDocument(url: URL) throws -> InlineKit.DocumentInfo {

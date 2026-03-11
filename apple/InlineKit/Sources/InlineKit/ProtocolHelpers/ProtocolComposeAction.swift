@@ -13,6 +13,8 @@ public extension InlineProtocol.UpdateComposeAction.ComposeAction {
         .uploadingPhoto
       case .uploadingVideo:
         .uploadingVideo
+      case .recordingVoice:
+        .recordingVoice
       default:
         .typing
     }
@@ -30,6 +32,8 @@ public extension ApiComposeAction {
         .uploadingPhoto
       case .uploadingVideo:
         .uploadingVideo
+      case .recordingVoice:
+        .recordingVoice
     }
   }
 }

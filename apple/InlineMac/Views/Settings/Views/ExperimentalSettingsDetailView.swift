@@ -11,6 +11,7 @@ struct ExperimentalSettingsDetailView: View {
     Form {
       Section("Experimental") {
         Toggle("Enable new Mac UI", isOn: $appSettings.enableNewMacUI)
+        Toggle("Enable voice messages", isOn: $appSettings.enableVoiceMessages)
         Picker("Message style", selection: $appSettings.messageRenderStyle) {
           ForEach(MessageRenderStyle.allCases, id: \.self) { style in
             Text(style.title).tag(style)
@@ -18,7 +19,7 @@ struct ExperimentalSettingsDetailView: View {
         }
         .pickerStyle(.segmented)
         Toggle("Enable sync message updates", isOn: $enableSyncMessageUpdates)
-        Text("Message style applies to newly opened chats. Sync changes apply immediately.")
+        Text("Message style applies to newly opened chats. Voice features and sync changes may require an app restart.")
           .font(.caption)
           .foregroundStyle(.secondary)
       }

@@ -7,9 +7,11 @@ import {
   type DbFullDocument,
   type DbFullPhoto,
   type DbFullVideo,
+  type DbFullVoice,
   type InputDbFullDocument,
   type InputDbFullPhoto,
   type InputDbFullVideo,
+  type InputDbFullVoice,
 } from "@in/server/db/models/files"
 import {
   chats,
@@ -65,6 +67,7 @@ export type DbInputFullMessage = DbMessage & {
   photo: InputDbFullPhoto | null
   video: InputDbFullVideo | null
   document: InputDbFullDocument | null
+  voice?: InputDbFullVoice | null
   messageAttachments?: DbInputFullAttachment[]
 }
 
@@ -102,6 +105,7 @@ export type DbFullMessage = Omit<
   photo: DbFullPhoto | null
   video: DbFullVideo | null
   document: DbFullDocument | null
+  voice: DbFullVoice | null
   messageAttachments?: ProcessedAttachment[]
 }
 
@@ -171,6 +175,20 @@ const fullMessageRelations = {
     },
   },
   document: {
+    with: {
+      file: true,
+      photo: {
+        with: {
+          photoSizes: {
+            with: {
+              file: true,
+            },
+          },
+        },
+      },
+    },
+  },
+  voice: {
     with: {
       file: true,
     },
@@ -365,6 +383,20 @@ async function getMessagesWithMediaFilter(input: {
       document: {
         with: {
           file: true,
+          photo: {
+            with: {
+              photoSizes: {
+                with: {
+                  file: true,
+                },
+              },
+            },
+          },
+        },
+      },
+      voice: {
+        with: {
+          file: true,
         },
       },
       messageAttachments: {
@@ -430,6 +462,7 @@ function processMessage(message: DbInputFullMessage): DbFullMessage {
     photo: message.photo ? FileModel.processFullPhoto(message.photo) : null,
     video: message.video ? FileModel.processFullVideo(message.video) : null,
     document: message.document ? FileModel.processFullDocument(message.document) : null,
+    voice: message.voice ? FileModel.processFullVoice(message.voice) : null,
     messageAttachments: message.messageAttachments ? processAttachments(message.messageAttachments) : [],
   }
 }
@@ -733,6 +766,20 @@ async function getMessage(messageId: number, chatId: number): Promise<DbFullMess
       document: {
         with: {
           file: true,
+          photo: {
+            with: {
+              photoSizes: {
+                with: {
+                  file: true,
+                },
+              },
+            },
+          },
+        },
+      },
+      voice: {
+        with: {
+          file: true,
         },
       },
       messageAttachments: {
@@ -1034,6 +1081,20 @@ async function getMessagesByIds(chatId: number, messageIds: bigint[]): Promise<D
         },
       },
       document: {
+        with: {
+          file: true,
+          photo: {
+            with: {
+              photoSizes: {
+                with: {
+                  file: true,
+                },
+              },
+            },
+          },
+        },
+      },
+      voice: {
         with: {
           file: true,
         },

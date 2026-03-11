@@ -156,6 +156,12 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  @Published var enableVoiceMessages: Bool {
+    didSet {
+      UserDefaults.standard.set(enableVoiceMessages, forKey: ExperimentalFeatureFlags.voiceMessagesKey)
+    }
+  }
+
   // MARK: - Updates
 
   @Published var autoUpdateChannel: AutoUpdateChannel {
@@ -200,6 +206,7 @@ final class AppSettings: ObservableObject {
     showDockBadgeUnreadDMs = UserDefaults.standard.object(forKey: "showDockBadgeUnreadDMs") as? Bool ?? true
     enableNewMacUI = UserDefaults.standard.bool(forKey: "enableNewMacUI")
     showMainTabStrip = UserDefaults.standard.object(forKey: "showMainTabStrip") as? Bool ?? false
+    enableVoiceMessages = UserDefaults.standard.bool(forKey: ExperimentalFeatureFlags.voiceMessagesKey)
     if let storedChannel = UserDefaults.standard.string(forKey: "autoUpdateChannel"),
        !storedChannel.isEmpty,
        let channel = AutoUpdateChannel(rawValue: storedChannel) {

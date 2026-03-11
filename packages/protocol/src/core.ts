@@ -1119,7 +1119,7 @@ export enum MessageAttachmentExternalTask_Status {
     CANCELLED = 5
 }
 /**
- * WIP: add document, audio, video.
+ * WIP: add richer media/filtering metadata.
  *
  * @generated from protobuf message MessageMedia
  */
@@ -1152,6 +1152,12 @@ export interface MessageMedia {
          */
         nudge: MessageNudge;
     } | {
+        oneofKind: "voice";
+        /**
+         * @generated from protobuf field: MessageVoice voice = 5;
+         */
+        voice: MessageVoice;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -1181,6 +1187,15 @@ export interface MessageDocument {
      * @generated from protobuf field: Document document = 1;
      */
     document?: Document;
+}
+/**
+ * @generated from protobuf message MessageVoice
+ */
+export interface MessageVoice {
+    /**
+     * @generated from protobuf field: Voice voice = 1;
+     */
+    voice?: Voice;
 }
 /**
  * Nudge message (empty payload)
@@ -1278,6 +1293,57 @@ export interface Document {
      * @generated from protobuf field: int64 date = 6;
      */
     date: bigint;
+    /**
+     * Thumbnail of the document
+     *
+     * @generated from protobuf field: optional Photo photo = 7;
+     */
+    photo?: Photo;
+}
+/**
+ * @generated from protobuf message Voice
+ */
+export interface Voice {
+    /**
+     * @generated from protobuf field: int64 id = 1;
+     */
+    id: bigint;
+    /**
+     * Date of upload
+     *
+     * @generated from protobuf field: int64 date = 2;
+     */
+    date: bigint;
+    /**
+     * Duration of the voice message in seconds
+     *
+     * @generated from protobuf field: int32 duration = 3;
+     */
+    duration: number;
+    /**
+     * File size
+     *
+     * @generated from protobuf field: int32 size = 4;
+     */
+    size: number;
+    /**
+     * MIME type of the file
+     *
+     * @generated from protobuf field: string mime_type = 5;
+     */
+    mimeType: string;
+    /**
+     * CDN URL
+     *
+     * @generated from protobuf field: optional string cdn_url = 6;
+     */
+    cdnUrl?: string;
+    /**
+     * Waveform bytes for rendering
+     *
+     * @generated from protobuf field: bytes waveform = 7;
+     */
+    waveform: Uint8Array;
 }
 /**
  * Photo for message media, profile photo, space photo, or chat photo
@@ -2962,6 +3028,12 @@ export interface InputMedia {
          */
         nudge: InputMediaNudge;
     } | {
+        oneofKind: "voice";
+        /**
+         * @generated from protobuf field: InputMediaVoice voice = 5;
+         */
+        voice: InputMediaVoice;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -2997,6 +3069,17 @@ export interface InputMediaDocument {
      * @generated from protobuf field: int64 document_id = 1;
      */
     documentId: bigint;
+}
+/**
+ * @generated from protobuf message InputMediaVoice
+ */
+export interface InputMediaVoice {
+    /**
+     * ID of the voice message that we have uploaded
+     *
+     * @generated from protobuf field: int64 voice_id = 1;
+     */
+    voiceId: bigint;
 }
 /**
  * Nudge message (empty payload)
@@ -4008,7 +4091,11 @@ export enum UpdateComposeAction_ComposeAction {
     /**
      * @generated from protobuf enum value: UPLOADING_VIDEO = 4;
      */
-    UPLOADING_VIDEO = 4
+    UPLOADING_VIDEO = 4,
+    /**
+     * @generated from protobuf enum value: RECORDING_VOICE = 5;
+     */
+    RECORDING_VOICE = 5
 }
 /**
  * @generated from protobuf message UpdateMessageAttachment
@@ -7373,7 +7460,8 @@ class MessageMedia$Type extends MessageType<MessageMedia> {
             { no: 1, name: "photo", kind: "message", oneof: "media", T: () => MessagePhoto },
             { no: 2, name: "video", kind: "message", oneof: "media", T: () => MessageVideo },
             { no: 3, name: "document", kind: "message", oneof: "media", T: () => MessageDocument },
-            { no: 4, name: "nudge", kind: "message", oneof: "media", T: () => MessageNudge }
+            { no: 4, name: "nudge", kind: "message", oneof: "media", T: () => MessageNudge },
+            { no: 5, name: "voice", kind: "message", oneof: "media", T: () => MessageVoice }
         ]);
     }
     create(value?: PartialMessage<MessageMedia>): MessageMedia {
@@ -7412,6 +7500,12 @@ class MessageMedia$Type extends MessageType<MessageMedia> {
                         nudge: MessageNudge.internalBinaryRead(reader, reader.uint32(), options, (message.media as any).nudge)
                     };
                     break;
+                case /* MessageVoice voice */ 5:
+                    message.media = {
+                        oneofKind: "voice",
+                        voice: MessageVoice.internalBinaryRead(reader, reader.uint32(), options, (message.media as any).voice)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -7436,6 +7530,9 @@ class MessageMedia$Type extends MessageType<MessageMedia> {
         /* MessageNudge nudge = 4; */
         if (message.media.oneofKind === "nudge")
             MessageNudge.internalBinaryWrite(message.media.nudge, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* MessageVoice voice = 5; */
+        if (message.media.oneofKind === "voice")
+            MessageVoice.internalBinaryWrite(message.media.voice, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -7585,6 +7682,52 @@ class MessageDocument$Type extends MessageType<MessageDocument> {
  */
 export const MessageDocument = new MessageDocument$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class MessageVoice$Type extends MessageType<MessageVoice> {
+    constructor() {
+        super("MessageVoice", [
+            { no: 1, name: "voice", kind: "message", T: () => Voice }
+        ]);
+    }
+    create(value?: PartialMessage<MessageVoice>): MessageVoice {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<MessageVoice>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: MessageVoice): MessageVoice {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Voice voice */ 1:
+                    message.voice = Voice.internalBinaryRead(reader, reader.uint32(), options, message.voice);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: MessageVoice, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Voice voice = 1; */
+        if (message.voice)
+            Voice.internalBinaryWrite(message.voice, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message MessageVoice
+ */
+export const MessageVoice = new MessageVoice$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class MessageNudge$Type extends MessageType<MessageNudge> {
     constructor() {
         super("MessageNudge", []);
@@ -7719,7 +7862,8 @@ class Document$Type extends MessageType<Document> {
             { no: 3, name: "mime_type", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 4, name: "size", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
             { no: 5, name: "cdn_url", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
-            { no: 6, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+            { no: 6, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 7, name: "photo", kind: "message", T: () => Photo }
         ]);
     }
     create(value?: PartialMessage<Document>): Document {
@@ -7756,6 +7900,9 @@ class Document$Type extends MessageType<Document> {
                 case /* int64 date */ 6:
                     message.date = reader.int64().toBigInt();
                     break;
+                case /* optional Photo photo */ 7:
+                    message.photo = Photo.internalBinaryRead(reader, reader.uint32(), options, message.photo);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -7786,6 +7933,9 @@ class Document$Type extends MessageType<Document> {
         /* int64 date = 6; */
         if (message.date !== 0n)
             writer.tag(6, WireType.Varint).int64(message.date);
+        /* optional Photo photo = 7; */
+        if (message.photo)
+            Photo.internalBinaryWrite(message.photo, writer.tag(7, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -7796,6 +7946,100 @@ class Document$Type extends MessageType<Document> {
  * @generated MessageType for protobuf message Document
  */
 export const Document = new Document$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class Voice$Type extends MessageType<Voice> {
+    constructor() {
+        super("Voice", [
+            { no: 1, name: "id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "duration", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 4, name: "size", kind: "scalar", T: 5 /*ScalarType.INT32*/ },
+            { no: 5, name: "mime_type", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "cdn_url", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "waveform", kind: "scalar", T: 12 /*ScalarType.BYTES*/ }
+        ]);
+    }
+    create(value?: PartialMessage<Voice>): Voice {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.id = 0n;
+        message.date = 0n;
+        message.duration = 0;
+        message.size = 0;
+        message.mimeType = "";
+        message.waveform = new Uint8Array(0);
+        if (value !== undefined)
+            reflectionMergePartial<Voice>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: Voice): Voice {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 id */ 1:
+                    message.id = reader.int64().toBigInt();
+                    break;
+                case /* int64 date */ 2:
+                    message.date = reader.int64().toBigInt();
+                    break;
+                case /* int32 duration */ 3:
+                    message.duration = reader.int32();
+                    break;
+                case /* int32 size */ 4:
+                    message.size = reader.int32();
+                    break;
+                case /* string mime_type */ 5:
+                    message.mimeType = reader.string();
+                    break;
+                case /* optional string cdn_url */ 6:
+                    message.cdnUrl = reader.string();
+                    break;
+                case /* bytes waveform */ 7:
+                    message.waveform = reader.bytes();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: Voice, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 id = 1; */
+        if (message.id !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.id);
+        /* int64 date = 2; */
+        if (message.date !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.date);
+        /* int32 duration = 3; */
+        if (message.duration !== 0)
+            writer.tag(3, WireType.Varint).int32(message.duration);
+        /* int32 size = 4; */
+        if (message.size !== 0)
+            writer.tag(4, WireType.Varint).int32(message.size);
+        /* string mime_type = 5; */
+        if (message.mimeType !== "")
+            writer.tag(5, WireType.LengthDelimited).string(message.mimeType);
+        /* optional string cdn_url = 6; */
+        if (message.cdnUrl !== undefined)
+            writer.tag(6, WireType.LengthDelimited).string(message.cdnUrl);
+        /* bytes waveform = 7; */
+        if (message.waveform.length)
+            writer.tag(7, WireType.LengthDelimited).bytes(message.waveform);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message Voice
+ */
+export const Voice = new Voice$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class Photo$Type extends MessageType<Photo> {
     constructor() {
@@ -11912,7 +12156,8 @@ class InputMedia$Type extends MessageType<InputMedia> {
             { no: 1, name: "photo", kind: "message", oneof: "media", T: () => InputMediaPhoto },
             { no: 2, name: "video", kind: "message", oneof: "media", T: () => InputMediaVideo },
             { no: 3, name: "document", kind: "message", oneof: "media", T: () => InputMediaDocument },
-            { no: 4, name: "nudge", kind: "message", oneof: "media", T: () => InputMediaNudge }
+            { no: 4, name: "nudge", kind: "message", oneof: "media", T: () => InputMediaNudge },
+            { no: 5, name: "voice", kind: "message", oneof: "media", T: () => InputMediaVoice }
         ]);
     }
     create(value?: PartialMessage<InputMedia>): InputMedia {
@@ -11951,6 +12196,12 @@ class InputMedia$Type extends MessageType<InputMedia> {
                         nudge: InputMediaNudge.internalBinaryRead(reader, reader.uint32(), options, (message.media as any).nudge)
                     };
                     break;
+                case /* InputMediaVoice voice */ 5:
+                    message.media = {
+                        oneofKind: "voice",
+                        voice: InputMediaVoice.internalBinaryRead(reader, reader.uint32(), options, (message.media as any).voice)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -11975,6 +12226,9 @@ class InputMedia$Type extends MessageType<InputMedia> {
         /* InputMediaNudge nudge = 4; */
         if (message.media.oneofKind === "nudge")
             InputMediaNudge.internalBinaryWrite(message.media.nudge, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* InputMediaVoice voice = 5; */
+        if (message.media.oneofKind === "voice")
+            InputMediaVoice.internalBinaryWrite(message.media.voice, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -12126,6 +12380,53 @@ class InputMediaDocument$Type extends MessageType<InputMediaDocument> {
  * @generated MessageType for protobuf message InputMediaDocument
  */
 export const InputMediaDocument = new InputMediaDocument$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class InputMediaVoice$Type extends MessageType<InputMediaVoice> {
+    constructor() {
+        super("InputMediaVoice", [
+            { no: 1, name: "voice_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<InputMediaVoice>): InputMediaVoice {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.voiceId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<InputMediaVoice>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: InputMediaVoice): InputMediaVoice {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 voice_id */ 1:
+                    message.voiceId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: InputMediaVoice, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 voice_id = 1; */
+        if (message.voiceId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.voiceId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message InputMediaVoice
+ */
+export const InputMediaVoice = new InputMediaVoice$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class InputMediaNudge$Type extends MessageType<InputMediaNudge> {
     constructor() {

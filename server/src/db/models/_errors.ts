@@ -4,6 +4,7 @@ enum ModelErrorCodes {
   PHOTO_INVALID = "PHOTO_INVALID",
   VIDEO_INVALID = "VIDEO_INVALID",
   DOCUMENT_INVALID = "DOCUMENT_INVALID",
+  VOICE_INVALID = "VOICE_INVALID",
   FAILED = "FAILED",
 }
 
@@ -23,5 +24,6 @@ export class ModelError extends Error {
   public static PhotoInvalid = new ModelError(ModelErrorCodes.PHOTO_INVALID)
   public static VideoInvalid = new ModelError(ModelErrorCodes.VIDEO_INVALID)
   public static DocumentInvalid = new ModelError(ModelErrorCodes.DOCUMENT_INVALID)
+  public static VoiceInvalid = new ModelError(ModelErrorCodes.VOICE_INVALID)
   public static Failed = new ModelError(ModelErrorCodes.FAILED)
 }

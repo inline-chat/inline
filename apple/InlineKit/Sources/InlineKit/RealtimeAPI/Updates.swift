@@ -346,6 +346,8 @@ extension InlineProtocol.UpdateComposeAction {
         .uploadingPhoto
       case .uploadingVideo:
         .uploadingVideo
+      case .recordingVoice:
+        .recordingVoice
       default:
         nil
     }

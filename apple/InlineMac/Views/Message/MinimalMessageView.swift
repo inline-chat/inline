@@ -130,6 +130,14 @@ class MinimalMessageViewAppKit: NSView {
     props.layout.hasDocument
   }
 
+  private var hasVoiceInDocumentSlot: Bool {
+    ExperimentalFeatureFlags.voiceMessagesEnabled && message.hasVoice
+  }
+
+  private var hasActualDocument: Bool {
+    fullMessage.documentInfo != nil
+  }
+
   private var hasReply: Bool {
     props.layout.hasReply
   }
@@ -322,6 +330,12 @@ class MinimalMessageViewAppKit: NSView {
     return view
   }()
 
+  private lazy var documentContainerView: NSView = {
+    let view = NSView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
+
   private lazy var documentView: DocumentView? = {
     guard let documentInfo = fullMessage.documentInfo else { return nil }
 
@@ -330,6 +344,14 @@ class MinimalMessageViewAppKit: NSView {
       fullMessage: self.fullMessage,
       white: false
     )
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
+
+  private lazy var voiceMessageView: NSHostingView<VoiceMessageBubble>? = {
+    guard hasVoiceInDocumentSlot else { return nil }
+
+    let view = NSHostingView(rootView: VoiceMessageBubble(message: fullMessage.message, outgoing: outgoing))
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -343,6 +365,41 @@ class MinimalMessageViewAppKit: NSView {
     let view = MessageAttachmentsView(attachments: fullMessage.attachments, message: message)
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
+  }
+
+  private func syncDocumentSlotView() {
+    guard hasDocument else {
+      documentContainerView.subviews.forEach { $0.removeFromSuperview() }
+      return
+    }
+
+    let desiredView: NSView?
+    if hasVoiceInDocumentSlot {
+      voiceMessageView?.rootView = VoiceMessageBubble(message: fullMessage.message, outgoing: outgoing)
+      desiredView = voiceMessageView
+    } else {
+      if let documentInfo = fullMessage.documentInfo {
+        documentView?.update(with: documentInfo)
+      }
+      desiredView = documentView
+    }
+
+    for subview in documentContainerView.subviews where subview !== desiredView {
+      subview.removeFromSuperview()
+    }
+
+    guard let desiredView else { return }
+
+    if desiredView.superview !== documentContainerView {
+      desiredView.removeFromSuperview()
+      documentContainerView.addSubview(desiredView)
+      NSLayoutConstraint.activate([
+        desiredView.topAnchor.constraint(equalTo: documentContainerView.topAnchor),
+        desiredView.leadingAnchor.constraint(equalTo: documentContainerView.leadingAnchor),
+        desiredView.trailingAnchor.constraint(equalTo: documentContainerView.trailingAnchor),
+        desiredView.bottomAnchor.constraint(equalTo: documentContainerView.bottomAnchor),
+      ])
+    }
   }
 
   /// Reply
@@ -587,8 +644,9 @@ class MinimalMessageViewAppKit: NSView {
       contentView.addSubview(videoView)
     }
 
-    if hasDocument, let documentView {
-      contentView.addSubview(documentView)
+    if hasDocument {
+      contentView.addSubview(documentContainerView)
+      syncDocumentSlotView()
     }
 
     if hasText {
@@ -1309,17 +1367,19 @@ class MinimalMessageViewAppKit: NSView {
     }
 
     // Document
-    if let document = layout.document, let documentView {
-      documentViewTopConstraint = documentView.topAnchor.constraint(
+    if let document = layout.document {
+      documentViewTopConstraint = documentContainerView.topAnchor.constraint(
         equalTo: contentView.topAnchor,
         constant: layout.documentContentViewTop
       )
+      documentViewHeightConstraint = documentContainerView.heightAnchor.constraint(equalToConstant: document.size.height)
 
       constraints.append(
         contentsOf: [
           documentViewTopConstraint!,
-          documentView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: document.spacing.left),
-          documentView.trailingAnchor.constraint(
+          documentViewHeightConstraint!,
+          documentContainerView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: document.spacing.left),
+          documentContainerView.trailingAnchor.constraint(
             equalTo: contentView.trailingAnchor,
             constant: -document.spacing.right
           ),
@@ -1403,6 +1463,7 @@ class MinimalMessageViewAppKit: NSView {
   private var forwardHeaderTopConstraint: NSLayoutConstraint?
 
   private var documentViewTopConstraint: NSLayoutConstraint?
+  private var documentViewHeightConstraint: NSLayoutConstraint?
 
   private var attachmentsViewTopConstraint: NSLayoutConstraint?
 
@@ -1582,25 +1643,32 @@ class MinimalMessageViewAppKit: NSView {
     }
 
     if let document = props.layout.document,
-       let documentViewTopConstraint
+       let documentViewTopConstraint,
+       let documentViewHeightConstraint
     {
       log.trace("Updating document view constraints for message \(document.size)")
       let documentTop = props.layout.documentContentViewTop
       if documentViewTopConstraint.constant != documentTop {
         documentViewTopConstraint.constant = documentTop
       }
-    } else if let document = props.layout.document, let documentView {
-      if documentView.superview == nil {
-        contentView.addSubview(documentView)
+      if documentViewHeightConstraint.constant != document.size.height {
+        documentViewHeightConstraint.constant = document.size.height
       }
-      documentViewTopConstraint = documentView.topAnchor.constraint(
+    } else if let document = props.layout.document {
+      if documentContainerView.superview == nil {
+        contentView.addSubview(documentContainerView)
+      }
+      syncDocumentSlotView()
+      documentViewTopConstraint = documentContainerView.topAnchor.constraint(
         equalTo: contentView.topAnchor,
         constant: props.layout.documentContentViewTop
       )
+      documentViewHeightConstraint = documentContainerView.heightAnchor.constraint(equalToConstant: document.size.height)
       NSLayoutConstraint.activate([
         documentViewTopConstraint!,
-        documentView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: document.spacing.left),
-        documentView.trailingAnchor.constraint(
+        documentViewHeightConstraint!,
+        documentContainerView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: document.spacing.left),
+        documentContainerView.trailingAnchor.constraint(
           equalTo: contentView.trailingAnchor,
           constant: -document.spacing.right
         ),
@@ -2315,8 +2383,15 @@ class MinimalMessageViewAppKit: NSView {
     // update internal props
     self.fullMessage = fullMessage
 
-    if props.layout.document != nil, let documentView, documentView.superview == nil {
-      contentView.addSubview(documentView)
+    if props.layout.document != nil {
+      if documentContainerView.superview == nil {
+        contentView.addSubview(documentContainerView)
+      }
+      syncDocumentSlotView()
+    } else {
+      documentContainerView.removeFromSuperview()
+      documentViewTopConstraint = nil
+      documentViewHeightConstraint = nil
     }
 
     if props.layout.attachments != nil, attachmentsView == nil {
@@ -2372,10 +2447,8 @@ class MinimalMessageViewAppKit: NSView {
     }
 
     // Document
-    if hasDocument, let documentView {
-      if let documentInfo = fullMessage.documentInfo {
-        documentView.update(with: documentInfo)
-      }
+    if hasDocument {
+      syncDocumentSlotView()
     }
 
     if hasAttachments {
@@ -2686,6 +2759,10 @@ class MinimalMessageViewAppKit: NSView {
 
       if let documentInfo = fullMessage.documentInfo {
         mediaItems.append(.document(documentInfo))
+      }
+
+      if let voiceContent = message.voiceContent {
+        mediaItems.append(.voice(voiceContent))
       }
 
       let messageId = self.message.messageId
@@ -3026,7 +3103,7 @@ extension MinimalMessageViewAppKit: NSMenuDelegate {
     }
 
     // Add document actions
-    if hasDocument {
+    if hasActualDocument {
       menu.addItem(NSMenuItem.separator())
       let saveItem = NSMenuItem(title: "Save Document", action: #selector(saveDocument), keyEquivalent: "s")
       saveItem.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Save Document")

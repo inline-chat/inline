@@ -9,7 +9,7 @@ import {
 } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { FileModel, type DbFullPhoto, type DbFullVideo } from "@in/server/db/models/files"
-import type { DbFullDocument } from "@in/server/db/models/files"
+import type { DbFullDocument, DbFullVoice } from "@in/server/db/models/files"
 import { MessageModel } from "@in/server/db/models/messages"
 import { db } from "@in/server/db"
 import { dialogs, lower, messageAttachments, users, type DbChat, type DbMessage } from "@in/server/db/schema"
@@ -57,6 +57,7 @@ type Input = {
   photoId?: bigint
   videoId?: bigint
   documentId?: bigint
+  voiceId?: bigint
   nudge?: boolean
   sendDate?: number
   isSticker?: boolean
@@ -124,11 +125,12 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   // Encrypt
   const encryptedMessage = text ? encryptMessage(text) : undefined
 
-  // photo, video, document ids
+  // photo, video, document, voice ids
   let dbFullPhoto: DbFullPhoto | undefined
   let dbFullVideo: DbFullVideo | undefined
   let dbFullDocument: DbFullDocument | undefined
-  let mediaType: "photo" | "video" | "document" | "nudge" | null = null
+  let dbFullVoice: DbFullVoice | undefined
+  let mediaType: "photo" | "video" | "document" | "nudge" | "voice" | null = null
 
   if (input.nudge) {
     mediaType = "nudge"
@@ -141,6 +143,9 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   } else if (input.documentId) {
     dbFullDocument = await FileModel.getDocumentById(input.documentId)
     mediaType = "document"
+  } else if (input.voiceId) {
+    dbFullVoice = await FileModel.getVoiceById(input.voiceId)
+    mediaType = "voice"
   }
 
   // encrypt entities
@@ -193,6 +198,7 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       photoId: dbFullPhoto?.id ?? null,
       videoId: dbFullVideo?.id ?? null,
       documentId: dbFullDocument?.id ?? null,
+      voiceId: dbFullVoice?.id ?? null,
       isSticker: input.isSticker ?? false,
       hasLink: hasLink,
       entitiesEncrypted: encryptedEntities?.encrypted ?? null,
@@ -243,13 +249,17 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     photo: dbFullPhoto,
     video: dbFullVideo,
     document: dbFullDocument,
+    voice: dbFullVoice,
     sendMode: input.sendMode,
   }
 
   //await debugDelay(5000)
 
   const hasAttachments =
-    messageInfo.photo !== undefined || messageInfo.video !== undefined || messageInfo.document !== undefined
+    messageInfo.photo !== undefined ||
+    messageInfo.video !== undefined ||
+    messageInfo.document !== undefined ||
+    messageInfo.voice !== undefined
 
   // send new updates
   // TODO: need to create the update, use the sequence number
@@ -1048,6 +1058,8 @@ async function sendNotificationToUser({
       body = "🎥 " + body
     } else if (messageInfo.message.mediaType === "document") {
       body = "📄 " + body
+    } else if (messageInfo.message.mediaType === "voice") {
+      body = "🎤 " + body
     }
   } else if (messageInfo.message.isSticker) {
     body = "🖼️ Sticker"
@@ -1057,6 +1069,8 @@ async function sendNotificationToUser({
     body = "🎥 Video"
   } else if (messageInfo.message.mediaType === "document") {
     body = "📄 File"
+  } else if (messageInfo.message.mediaType === "voice") {
+    body = "🎤 Voice message"
   }
 
   if (includeSenderNameInMessage) {

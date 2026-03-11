@@ -5,7 +5,7 @@ import { sendMessage } from "@in/server/functions/messages.sendMessage"
 import type { DbChat, DbUser } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { db } from "@in/server/db"
-import { dialogs, users } from "@in/server/db/schema"
+import { dialogs, files, users, voices } from "@in/server/db/schema"
 import { and, eq } from "drizzle-orm"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import { UpdatesModel } from "@in/server/db/models/updates"
@@ -28,6 +28,38 @@ function extractMessage(result: SendMessageResult): Message | null {
     return null
   }
   return update.update.newMessage?.message ?? null
+}
+
+async function createVoiceForUser(userId: number) {
+  const [file] = await db
+    .insert(files)
+    .values({
+      fileUniqueId: `INV-${runId}-${userIndex++}`,
+      userId,
+      fileType: "voice",
+      mimeType: "audio/ogg",
+      fileSize: 321,
+    })
+    .returning()
+
+  if (!file) {
+    throw new Error("Failed to create test voice file")
+  }
+
+  const [voice] = await db
+    .insert(voices)
+    .values({
+      fileId: file.id,
+      duration: 12,
+      waveform: Buffer.from([1, 2, 3, 4]),
+    })
+    .returning()
+
+  if (!voice) {
+    throw new Error("Failed to create test voice")
+  }
+
+  return voice
 }
 
 describe("sendMessage", () => {
@@ -138,6 +170,30 @@ describe("sendMessage", () => {
     expect(message!.entities!.entities[0]!.type).toBe(MessageEntity_Type.MENTION)
     expect(message!.entities!.entities[0]!.offset).toBe(0n)
     expect(message!.entities!.entities[0]!.length).toBe(3n)
+  })
+
+  test("should create a voice message", async () => {
+    const voice = await createVoiceForUser(currentUser.id)
+
+    const result = await sendMessage(
+      {
+        peerId: privateChatPeerId,
+        voiceId: BigInt(voice.id),
+      },
+      context,
+    )
+
+    expect(result.updates).toHaveLength(2)
+    const message = extractMessage(result)
+    expect(message).toBeTruthy()
+    expect(message?.media?.media.oneofKind).toBe("voice")
+    if (message?.media?.media.oneofKind !== "voice") {
+      throw new Error("Expected voice media")
+    }
+    const encodedVoice = message.media.media.voice.voice
+    expect(encodedVoice).toBeTruthy()
+    expect(encodedVoice?.duration).toBe(12)
+    expect(encodedVoice?.waveform).toEqual(new Uint8Array([1, 2, 3, 4]))
   })
 
   test("parses @username mention from text when client does not provide mention entity", async () => {

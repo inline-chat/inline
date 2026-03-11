@@ -289,7 +289,7 @@ senderUserId="${m.fromId}"
 ${m.replyToMsgId ? `replyToMsgId="${m.replyToMsgId}"` : ""}>
 ${m.photoId ? "[photo attachment]" : ""} ${m.videoId ? "[video attachment]" : ""} ${
     m.documentId ? "[document attachment]" : ""
-  } ${m.text ? m.text : "[empty caption]"}
+  } ${m.voiceId ? "[voice attachment]" : ""} ${m.text ? m.text : "[empty caption]"}
   ${m.entities ? formatEntities(m.entities) : ""}
   </message>`
 }

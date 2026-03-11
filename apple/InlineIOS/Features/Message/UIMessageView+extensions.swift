@@ -1,6 +1,7 @@
 import Auth
 import GRDB
 import InlineKit
+import InlineUI
 import Logger
 import Nuke
 import NukeUI
@@ -125,6 +126,19 @@ extension UIMessageView {
     view.translatesAutoresizingMaskIntoConstraints = false
 
     return view
+  }
+
+  func createVoiceMessageViewController() -> UIHostingController<VoiceMessageBubble> {
+    let controller = UIHostingController(
+      rootView: VoiceMessageBubble(message: fullMessage.message, outgoing: outgoing)
+    )
+    controller.view.translatesAutoresizingMaskIntoConstraints = false
+    controller.view.backgroundColor = .clear
+    NSLayoutConstraint.activate([
+      controller.view.widthAnchor.constraint(equalToConstant: 240),
+      controller.view.heightAnchor.constraint(equalToConstant: 54),
+    ])
+    return controller
   }
 
   func createMessageAttachmentEmbed() -> MessageAttachmentEmbed {

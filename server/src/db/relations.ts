@@ -15,6 +15,7 @@ export const relations = defineRelations(
     photos: schema.photos,
     videos: schema.videos,
     documents: schema.documents,
+    voices: schema.voices,
     reactions: schema.reactions,
     photoSizes: schema.photoSizes,
     messageAttachments: schema.messageAttachments,
@@ -139,6 +140,11 @@ export const relations = defineRelations(
         to: r.documents.id,
         optional: true,
       }),
+      voice: r.one.voices({
+        from: r.messages.voiceId,
+        to: r.voices.id,
+        optional: true,
+      }),
     },
 
     // Space relations - handles workspace functionality
@@ -236,6 +242,14 @@ export const relations = defineRelations(
       }),
       file: r.one.files({
         from: r.photoSizes.fileId,
+        to: r.files.id,
+        optional: true,
+      }),
+    },
+
+    voices: {
+      file: r.one.files({
+        from: r.voices.fileId,
         to: r.files.id,
         optional: true,
       }),

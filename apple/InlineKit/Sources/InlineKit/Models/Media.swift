@@ -260,14 +260,15 @@ public extension Video {
 }
 
 public extension Document {
-  static func from(proto: InlineProtocol.Document) -> Document {
+  static func from(proto: InlineProtocol.Document, localPhotoId: Int64? = nil) -> Document {
     Document(
       documentId: proto.id,
       date: Date(timeIntervalSince1970: TimeInterval(proto.date)),
       fileName: proto.fileName.isEmpty ? nil : proto.fileName,
       mimeType: proto.mimeType.isEmpty ? nil : proto.mimeType,
       size: proto.size > 0 ? Int(proto.size) : nil,
-      cdnUrl: proto.cdnURL.isEmpty ? nil : proto.cdnURL
+      cdnUrl: proto.cdnURL.isEmpty ? nil : proto.cdnURL,
+      thumbnailPhotoId: localPhotoId
     )
   }
 }
@@ -516,7 +517,11 @@ extension Document {
 
 public extension Document {
   // Add this method to update from protocol while preserving local path
-  static func updateFromProtocol(_ db: Database, protoDocument: InlineProtocol.Document) throws -> Document {
+  static func updateFromProtocol(
+    _ db: Database,
+    protoDocument: InlineProtocol.Document,
+    thumbnailPhotoId: Int64?
+  ) throws -> Document {
     // Try to find existing document
     if let existingDocument = try Document.filter(Column("documentId") == protoDocument.id).fetchOne(db) {
       // Create updated document with preserved local path
@@ -528,7 +533,8 @@ public extension Document {
         mimeType: protoDocument.mimeType,
         size: protoDocument.size > 0 ? Int(protoDocument.size) : nil,
         cdnUrl: protoDocument.hasCdnURL ? protoDocument.cdnURL : nil,
-        localPath: existingDocument.localPath // Preserve local path
+        localPath: existingDocument.localPath, // Preserve local path
+        thumbnailPhotoId: thumbnailPhotoId ?? existingDocument.thumbnailPhotoId
       )
       Log.shared.debug("Updating document with ID \(protoDocument.id) \(protoDocument.fileName) \(updatedDocument)")
 
@@ -544,7 +550,8 @@ public extension Document {
         mimeType: protoDocument.mimeType,
         size: protoDocument.size > 0 ? Int(protoDocument.size) : nil,
         cdnUrl: protoDocument.hasCdnURL ? protoDocument.cdnURL : nil,
-        localPath: nil
+        localPath: nil,
+        thumbnailPhotoId: thumbnailPhotoId
       )
 
       let document = try newDocument.saveAndFetch(db)
@@ -642,6 +649,7 @@ public extension PhotoSize {
         width: Int(protoSize.w),
         height: Int(protoSize.h),
         size: Int(protoSize.size),
+        bytes: protoSize.bytes.isEmpty ? nil : protoSize.bytes,
         cdnUrl: protoSize.hasCdnURL ? protoSize.cdnURL : nil,
         localPath: existingSize.localPath // Preserve local path
       )

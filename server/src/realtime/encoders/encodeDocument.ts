@@ -1,6 +1,7 @@
 import { getSignedUrl } from "@in/server/modules/files/path"
 import { Document } from "@inline-chat/protocol/core"
 import type { DbFullDocument } from "@in/server/db/models/files"
+import { encodePhoto } from "@in/server/realtime/encoders/encodePhoto"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 
 const defaultMimeType = "application/octet-stream"
@@ -13,6 +14,7 @@ export const encodeDocument = ({ document }: { document: DbFullDocument }) => {
     mimeType: document.file.mimeType ?? defaultMimeType,
     fileName: document.fileName ?? "",
     cdnUrl: document.file?.path ? getSignedUrl(document.file.path) ?? undefined : undefined,
+    photo: document.photo ? encodePhoto({ photo: document.photo }) : undefined,
   }
 
   return proto

@@ -180,6 +180,7 @@ export const forwardMessages = async (input: Input, context: FunctionContext): P
     let photoId: bigint | undefined
     let videoId: bigint | undefined
     let documentId: bigint | undefined
+    let voiceId: bigint | undefined
 
     if (sourceMessage.photoId) {
       const clonedPhotoId = await FileModel.clonePhotoById(sourceMessage.photoId, currentUserId)
@@ -196,6 +197,11 @@ export const forwardMessages = async (input: Input, context: FunctionContext): P
       documentId = BigInt(clonedDocumentId)
     }
 
+    if (sourceMessage.voiceId) {
+      const clonedVoiceId = await FileModel.cloneVoiceById(sourceMessage.voiceId, currentUserId)
+      voiceId = BigInt(clonedVoiceId)
+    }
+
     const result = await sendMessage(
       {
         peerId: input.toPeerId,
@@ -204,6 +210,7 @@ export const forwardMessages = async (input: Input, context: FunctionContext): P
         photoId: photoId,
         videoId: videoId,
         documentId: documentId,
+        voiceId: voiceId,
         isSticker: sourceMessage.isSticker ?? false,
         forwardHeader: forwardHeader,
         messageAttachments: attachments,

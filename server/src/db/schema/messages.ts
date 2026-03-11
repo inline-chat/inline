@@ -9,7 +9,7 @@ import { bytea, creationDate } from "@in/server/db/schema/common"
 import type { AnyPgColumn } from "drizzle-orm/pg-core"
 import { relations } from "drizzle-orm/_relations"
 import { files } from "@in/server/db/schema/files"
-import { documents, photos, videos } from "@in/server/db/schema/media"
+import { documents, photos, videos, voices } from "@in/server/db/schema/media"
 import { messageAttachments } from "./attachments"
 import { translations } from "@in/server/db/schema/translations"
 import { reactions } from "@in/server/db/schema/reactions"
@@ -69,10 +69,11 @@ export const messages = pgTable(
     groupedId: bigint("grouped_id", { mode: "bigint" }),
 
     /** media id, photo, video, document, etc */
-    mediaType: text("media_type", { enum: ["photo", "video", "document", "nudge"] }),
+    mediaType: text("media_type", { enum: ["photo", "video", "document", "nudge", "voice"] }),
     photoId: bigint("photo_id", { mode: "number" }).references(() => photos.id),
     videoId: bigint("video_id", { mode: "number" }).references(() => videos.id),
     documentId: bigint("document_id", { mode: "number" }).references(() => documents.id),
+    voiceId: bigint("voice_id", { mode: "number" }).references(() => voices.id),
 
     // --------------------------------------------------------
     // Deprecated fields
@@ -100,6 +101,7 @@ export const messageRelations = relations(messages, ({ one, many }) => ({
   photo: one(photos, { fields: [messages.photoId], references: [photos.id] }),
   video: one(videos, { fields: [messages.videoId], references: [videos.id] }),
   document: one(documents, { fields: [messages.documentId], references: [documents.id] }),
+  voice: one(voices, { fields: [messages.voiceId], references: [voices.id] }),
   messageAttachments: many(messageAttachments),
 
   translations: many(translations),

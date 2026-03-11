@@ -15,6 +15,7 @@ public enum MessageFileType: String, Codable, DatabaseValueConvertible, Sendable
   case photo
   case document
   case video
+  case voice
 }
 
 public struct File: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord,

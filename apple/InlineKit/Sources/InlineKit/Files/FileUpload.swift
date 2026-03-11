@@ -18,6 +18,7 @@ public struct UploadResult: Sendable {
   public var photoId: Int64?
   public var videoId: Int64?
   public var documentId: Int64?
+  public var voiceId: Int64?
 }
 
 private struct UploadTaskInfo {
@@ -222,6 +223,10 @@ public actor FileUploader {
     progressPublisher(for: getUploadId(photoId: photoLocalId)).eraseToAnyPublisher()
   }
 
+  public func voiceProgressPublisher(voiceLocalId: Int64) -> AnyPublisher<UploadProgressSnapshot, Never> {
+    progressPublisher(for: getUploadId(voiceId: voiceLocalId)).eraseToAnyPublisher()
+  }
+
   public func setUploadProgressHandler(
     for uploadId: String,
     handler: @escaping @Sendable (UploadProgressSnapshot) -> Void
@@ -357,13 +362,48 @@ public actor FileUploader {
     return localId
   }
 
+  public func uploadVoice(
+    voiceContent: Client_MessageVoiceContent
+  ) async throws -> Int64 {
+    let localVoiceId = voiceContent.voiceID
+    guard localVoiceId != 0 else {
+      throw FileUploadError.invalidVoiceId
+    }
+
+    guard let localPath = voiceContent.localRelativePath.nilIfEmpty else {
+      throw FileUploadError.invalidVoice
+    }
+
+    let localURL = FileHelpers.getLocalCacheDirectory(for: .voices).appendingPathComponent(localPath)
+    let fileName = localURL.lastPathComponent
+    let mimeType = voiceContent.mimeType.nilIfEmpty ?? "audio/ogg"
+    let metadata = ApiClient.VoiceUploadMetadata(
+      duration: Int(voiceContent.duration),
+      waveform: voiceContent.waveform
+    )
+
+    let uploadId = getUploadId(voiceId: localVoiceId)
+    publishProgress(uploadId: uploadId, progress: .processing(id: uploadId))
+
+    try startUpload(
+      media: .voice(voiceContent),
+      localUrl: localURL,
+      mimeType: mimeType,
+      fileName: fileName,
+      voiceMetadata: metadata
+    )
+
+    return localVoiceId
+  }
+
   public func startUpload(
     media: FileMediaItem,
     localUrl: URL,
     mimeType: String,
     fileName: String,
     priority: TaskPriority = .userInitiated,
-    videoMetadata: ApiClient.VideoUploadMetadata? = nil
+    videoMetadata: ApiClient.VideoUploadMetadata? = nil,
+    voiceMetadata: ApiClient.VoiceUploadMetadata? = nil
   ) throws {
     let type: MessageFileType
     let uploadId: String
@@ -382,6 +422,9 @@ public actor FileUploader {
       case let .document(documentInfo):
         uploadId = getUploadId(documentId: documentInfo.document.id!)
         type = .document
+      case let .voice(voiceContent):
+        uploadId = getUploadId(voiceId: voiceContent.voiceID)
+        type = .voice
     }
 
     // Check if upload already exists
@@ -399,6 +442,7 @@ public actor FileUploader {
     }
 
     let metadata = videoMetadata
+    let resolvedVoiceMetadata = voiceMetadata
     let task = Task<UploadResult, any Error>(priority: priority) {
       try await FileUploader.shared.performUpload(
         uploadId: uploadId,
@@ -407,7 +451,8 @@ public actor FileUploader {
         mimeType: mimeType,
         fileName: fileName,
         type: type,
-        videoMetadata: metadata
+        videoMetadata: metadata,
+        voiceMetadata: resolvedVoiceMetadata
       )
     }
 
@@ -422,7 +467,8 @@ public actor FileUploader {
     mimeType: String,
     fileName: String,
     type: MessageFileType,
-    videoMetadata: ApiClient.VideoUploadMetadata?
+    videoMetadata: ApiClient.VideoUploadMetadata?,
+    voiceMetadata: ApiClient.VoiceUploadMetadata?
   ) async throws -> UploadResult {
     Log.shared.debug("[FileUploader] Starting upload for \(uploadId)")
 
@@ -430,6 +476,7 @@ public actor FileUploader {
     var uploadMimeType = mimeType
     var uploadFileName = fileName
     var resolvedVideoMetadata = videoMetadata
+    var resolvedVoiceMetadata = voiceMetadata
     var temporaryArtifacts: [URL] = []
 
     switch media {
@@ -463,6 +510,11 @@ public actor FileUploader {
       }
     case .document:
       break
+    case let .voice(voiceContent):
+      resolvedVoiceMetadata = ApiClient.VoiceUploadMetadata(
+        duration: Int(voiceContent.duration),
+        waveform: voiceContent.waveform
+      )
     }
 
     defer {
@@ -493,6 +545,7 @@ public actor FileUploader {
       filename: uploadFileName,
       mimeType: MIMEType(text: uploadMimeType),
       videoMetadata: resolvedVideoMetadata,
+      voiceMetadata: resolvedVoiceMetadata,
       progress: progressHandler
     )
 
@@ -502,7 +555,8 @@ public actor FileUploader {
     let result_ = UploadResult(
       photoId: result.photoId,
       videoId: result.videoId,
-      documentId: result.documentId
+      documentId: result.documentId,
+      voiceId: result.voiceId
     )
 
     // Update database with new ID
@@ -544,6 +598,10 @@ public actor FileUploader {
 
   public func cancelVideoUpload(videoLocalId: Int64) {
     cancel(uploadId: getUploadId(videoId: videoLocalId))
+  }
+
+  public func cancelVoiceUpload(voiceLocalId: Int64) {
+    cancel(uploadId: getUploadId(voiceId: voiceLocalId))
   }
 
   public func cancelAll() {
@@ -612,6 +670,8 @@ public actor FileUploader {
             )
           }
         }
+      case .voice:
+        break
     }
   }
 
@@ -627,6 +687,10 @@ public actor FileUploader {
 
   private func getUploadId(documentId: Int64) -> String {
     "document_\(documentId)"
+  }
+
+  private func getUploadId(voiceId: Int64) -> String {
+    "voice_\(voiceId)"
   }
 
   private struct PreparedVideoUploadPayload {
@@ -847,6 +911,10 @@ public actor FileUploader {
     try await waitForUpload(uploadId: getUploadId(documentId: id))
   }
 
+  public func waitForUpload(voiceLocalId id: Int64) async throws -> UploadResult? {
+    try await waitForUpload(uploadId: getUploadId(voiceId: id))
+  }
+
   private func waitForUpload(uploadId: String) async throws -> UploadResult? {
     if let taskInfo = uploadTasks[uploadId] {
       // still in progress
@@ -869,9 +937,11 @@ public enum FileUploadError: Error, LocalizedError {
   case invalidPhoto
   case invalidVideo
   case invalidDocument
+  case invalidVoice
   case invalidPhotoId
   case invalidDocumentId
   case invalidVideoId
+  case invalidVoiceId
   case invalidVideoMetadata
   case uploadAlreadyInProgress
   case uploadAlreadyCompleted
@@ -890,7 +960,9 @@ public enum FileUploadError: Error, LocalizedError {
         "The selected video couldn't be prepared for upload."
       case .invalidDocument:
         "The selected file couldn't be prepared for upload."
-      case .invalidPhotoId, .invalidDocumentId, .invalidVideoId:
+      case .invalidVoice:
+        "The selected voice message couldn't be prepared for upload."
+      case .invalidPhotoId, .invalidDocumentId, .invalidVideoId, .invalidVoiceId:
         "The local file reference is invalid."
       case .invalidVideoMetadata:
         "The video metadata is invalid."
@@ -903,5 +975,12 @@ public enum FileUploadError: Error, LocalizedError {
       case .uploadTimeout:
         "The upload timed out."
     }
+  }
+}
+
+private extension String {
+  var nilIfEmpty: String? {
+    let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
   }
 }

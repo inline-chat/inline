@@ -516,7 +516,8 @@ class MessageSizeCalculator {
     let hasText = message.message.text != nil
     let text = message.displayText ?? emptyFallback
     let hasMedia = message.hasMedia
-    let hasDocument = message.documentInfo != nil
+    let hasVoice = ExperimentalFeatureFlags.voiceMessagesEnabled && message.message.hasVoice
+    let hasDocument = message.documentInfo != nil || hasVoice
     let hasReply = message.message.repliedToMessageId != nil
     let hasForwardHeader = message.message.forwardFromUserId != nil
     let hasReactions = message.reactions.count > 0
@@ -642,7 +643,8 @@ class MessageSizeCalculator {
     if hasDocument {
       // Documents have minimum width but can expand up to parent available width
       // Start with the minimum document width, but don't exceed parent available width
-      documentWidth = min(parentAvailableWidth, Theme.documentViewWidth)
+      let baseWidth = hasVoice ? Theme.voiceMessageViewWidth : Theme.documentViewWidth
+      documentWidth = min(parentAvailableWidth, baseWidth)
     }
 
     // Calculate attachments width first if we have attachments
@@ -904,7 +906,8 @@ class MessageSizeCalculator {
     if hasDocument, let documentWidth {
       documentPlan = LayoutPlan(size: .zero, spacing: .zero)
       // Use the shared document width calculated above
-      documentPlan!.size = CGSize(width: documentWidth, height: Theme.documentViewHeight)
+      let documentHeight = hasVoice ? Theme.voiceMessageViewHeight : Theme.documentViewHeight
+      documentPlan!.size = CGSize(width: documentWidth, height: documentHeight)
 
       if hasText {
         // documentPlan!.spacing = .bottom(Theme.messageTextAndPhotoSpacing)
@@ -1228,7 +1231,8 @@ class MessageSizeCalculator {
     let hasText = message.message.text != nil
     let text = message.displayText ?? emptyFallback
     let hasMedia = message.hasMedia
-    let hasDocument = message.documentInfo != nil
+    let hasVoice = ExperimentalFeatureFlags.voiceMessagesEnabled && message.message.hasVoice
+    let hasDocument = message.documentInfo != nil || hasVoice
     let hasReply = message.message.repliedToMessageId != nil
     let hasForwardHeader = message.message.forwardFromUserId != nil
     let hasReactions = message.reactions.count > 0
@@ -1330,8 +1334,12 @@ class MessageSizeCalculator {
     }
 
     if hasDocument {
-      let maxDocumentWidth = min(Self.minimalDocumentMaxWidth, parentAvailableWidth)
-      documentWidth = min(parentAvailableWidth, max(Theme.documentViewWidth, maxDocumentWidth))
+      if hasVoice {
+        documentWidth = min(parentAvailableWidth, Theme.voiceMessageViewWidth)
+      } else {
+        let maxDocumentWidth = min(Self.minimalDocumentMaxWidth, parentAvailableWidth)
+        documentWidth = min(parentAvailableWidth, max(Theme.documentViewWidth, maxDocumentWidth))
+      }
     }
 
     if hasAttachments {
@@ -1478,7 +1486,8 @@ class MessageSizeCalculator {
 
     if hasDocument, let documentWidth {
       documentPlan = LayoutPlan(size: .zero, spacing: .zero)
-      documentPlan!.size = CGSize(width: documentWidth, height: Theme.documentViewHeight)
+      let documentHeight = hasVoice ? Theme.voiceMessageViewHeight : Theme.documentViewHeight
+      documentPlan!.size = CGSize(width: documentWidth, height: documentHeight)
       documentPlan!.spacing = NSEdgeInsets(
         top: 8,
         left: 0,
