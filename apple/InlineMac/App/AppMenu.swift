@@ -222,6 +222,11 @@ final class AppMenu: NSObject {
       action: #selector(NSText.selectAll(_:)),
       keyEquivalent: "a"
     )
+    editMenu.addItem(
+      withTitle: "Bold",
+      action: #selector(ComposeNSTextView.toggleBold(_:)),
+      keyEquivalent: "b"
+    )
 
     editMenu.addItem(NSMenuItem.separator())
 
