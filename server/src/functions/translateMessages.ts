@@ -154,23 +154,37 @@ export async function translateMessages(
     })
 
     // Insert translations
-    await TranslationModel.insertTranslations(messageTranslations).catch((error) => {
+    let persistedTranslations: typeof messageTranslations = []
+    let skippedTranslations: typeof messageTranslations = []
+
+    try {
+      ;({ persistedTranslations, skippedTranslations } = await TranslationModel.insertTranslations(messageTranslations))
+    } catch (error) {
       log.error("Failed to insert translations", {
         error,
         translationCount: messageTranslations.length,
       })
       throw error
-    })
+    }
+
+    if (skippedTranslations.length > 0) {
+      log.warn("Skipped translations for messages that no longer exist", {
+        skippedCount: skippedTranslations.length,
+        skippedMessageIds: skippedTranslations.map((translation) => translation.messageId),
+        persistedCount: persistedTranslations.length,
+      })
+    }
 
     // Combine new and existing translations
     const allTranslations = [
-      ...messageTranslations.map((t) => Encoders.unencryptedTranslation({ translation: t })),
+      ...persistedTranslations.map((t) => Encoders.unencryptedTranslation({ translation: t })),
       ...existingTranslations.map((t) => Encoders.translation({ translation: t })),
     ]
 
     log.debug("Returning combined translations", {
       totalTranslations: allTranslations.length,
-      newTranslations: messageTranslations.length,
+      newTranslations: persistedTranslations.length,
+      skippedTranslations: skippedTranslations.length,
       existingTranslations: existingTranslations.length,
     })
 
