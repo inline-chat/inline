@@ -1,3 +1,4 @@
+import AVFoundation
 import InlineKit
 import Logger
 import PhotosUI
@@ -88,6 +89,8 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     let picker = UIImagePickerController()
     picker.sourceType = .camera
     picker.mediaTypes = [UTType.image.identifier, UTType.movie.identifier]
+    picker.videoQuality = .typeHigh
+    picker.videoExportPreset = AVAssetExportPresetPassthrough
     picker.delegate = self
     picker.allowsEditing = false
 
