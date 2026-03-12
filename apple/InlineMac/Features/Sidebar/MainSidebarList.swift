@@ -170,6 +170,16 @@ class MainSidebarList: NSView {
     let editDate: Date?
   }
 
+  private struct ObservedChatItemSignature: Equatable {
+    let id: ChatListItem.Identifier
+    let render: ChatRenderSignature
+  }
+
+  private struct ObservedItemsSignature: Equatable {
+    let active: [ObservedChatItemSignature]
+    let archived: [ObservedChatItemSignature]
+  }
+
   private struct SnapshotContext: Equatable {
     let mode: Mode
     let searchQuery: String
@@ -472,6 +482,9 @@ class MainSidebarList: NSView {
     viewModel.setSortStrategy(sortStrategy)
 
     viewModel.$items
+      .removeDuplicates(by: { lhs, rhs in
+        Self.observedItemsSignature(for: lhs) == Self.observedItemsSignature(for: rhs)
+      })
       .receive(on: DispatchQueue.main)
       .sink { [weak self] _ in
         self?.applySnapshot()
@@ -1102,7 +1115,7 @@ class MainSidebarList: NSView {
       "Chat"
     }
 
-    let messagePreview = item.sidebarBasePreviewText
+    let messagePreview = item.sidebarLastMessagePreviewText
 
     let peerSignature: PeerSignature = if let user = item.user?.user {
       .user(
@@ -1146,6 +1159,17 @@ class MainSidebarList: NSView {
       peerId: item.peerId,
       messageId: item.lastMessage?.message.id,
       editDate: item.lastMessage?.message.editDate
+    )
+  }
+
+  private static func observedItemsSignature(for items: ChatsViewModel.Items) -> ObservedItemsSignature {
+    ObservedItemsSignature(
+      active: items.active.map {
+        ObservedChatItemSignature(id: $0.id, render: renderSignature(for: $0))
+      },
+      archived: items.archived.map {
+        ObservedChatItemSignature(id: $0.id, render: renderSignature(for: $0))
+      }
     )
   }
 
