@@ -152,4 +152,8 @@ extension ChatListItem {
     }
     return "\(sender): \(messageText)"
   }
+
+  var sidebarBasePreviewText: String {
+    draftPreviewText ?? sidebarLastMessagePreviewText
+  }
 }

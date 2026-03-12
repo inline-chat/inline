@@ -64,6 +64,7 @@ class ComposeAppKit: NSView {
   // Draft
   private var draftDebounceTask: Task<Void, Never>?
   private var initializedDraft = false
+  private var didRequestFinalDraftPersistence = false
 
   // Internal
   private var heightConstraint: NSLayoutConstraint!
@@ -189,6 +190,15 @@ class ComposeAppKit: NSView {
 
     // Set up mention menu positioning now that we have a window
     addMentionMenuToSuperview()
+  }
+
+  override func viewWillMove(toSuperview newSuperview: NSView?) {
+    if newSuperview == nil {
+      requestImmediateDraftPersistenceIfNeeded()
+    } else {
+      didRequestFinalDraftPersistence = false
+    }
+    super.viewWillMove(toSuperview: newSuperview)
   }
 
   // MARK: Initialization
@@ -1231,10 +1241,7 @@ class ComposeAppKit: NSView {
   }
 
   deinit {
-    saveDraft()
-
-    draftDebounceTask?.cancel()
-    draftDebounceTask = nil
+    requestImmediateDraftPersistenceIfNeeded()
 
     // Clean up
     keyMonitorUnsubscribe?()
@@ -1806,12 +1813,26 @@ extension ComposeAppKit {
     Drafts.shared.clear(peerId: peerId)
   }
 
-  /// Triggers save with a 300ms delay which cancels previous Task thus creating a basic debounced
+  private func requestImmediateDraftPersistenceIfNeeded() {
+    guard didRequestFinalDraftPersistence == false else { return }
+    didRequestFinalDraftPersistence = true
+
+    draftDebounceTask?.cancel()
+    draftDebounceTask = nil
+
+    if isEmptyTrimmed {
+      clearDraft()
+    } else {
+      saveDraft()
+    }
+  }
+
+  /// Triggers save with a 3s delay which cancels previous Task thus creating a basic debounced
   /// version to be used on textDidChange.
   private func saveDraftWithDebounce() {
     draftDebounceTask?.cancel()
     draftDebounceTask = Task { [weak self] in
-      try? await Task.sleep(for: .milliseconds(300), tolerance: .milliseconds(100))
+      try? await Task.sleep(for: .seconds(3), tolerance: .milliseconds(500))
       guard !Task.isCancelled else { return }
       self?.saveDraft()
     }
