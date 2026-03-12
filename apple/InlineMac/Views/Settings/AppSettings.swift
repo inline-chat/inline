@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import InlineKit
 import SwiftUI
 
 enum AutoUpdateChannel: String, CaseIterable, Identifiable {

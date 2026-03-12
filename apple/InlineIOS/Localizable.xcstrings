@@ -559,6 +559,9 @@
     "Enable sync message updates" : {
 
     },
+    "Enable voice messages" : {
+
+    },
     "Enter the code" : {
       "comment" : "Code input title",
       "localizations" : {
@@ -635,6 +638,9 @@
 
     },
     "Experimental" : {
+
+    },
+    "Experimental voice features and UI changes may require an app restart. Sync changes apply immediately." : {
 
     },
     "Failed to load chat" : {
@@ -1077,9 +1083,6 @@
 
     },
     "Type to find existing chats or search for people to start new conversations" : {
-
-    },
-    "UI changes may require an app restart. Sync changes apply immediately." : {
 
     },
     "Unarchive" : {
