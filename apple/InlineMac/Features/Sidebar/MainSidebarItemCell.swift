@@ -11,6 +11,8 @@ class MainSidebarItemCell: NSView {
   private var nav2: Nav2?
   private var eventsIdentifier: ObjectIdentifier?
   private var scrollEventsCancellable: AnyCancellable?
+  private var translationStateCancellable: AnyCancellable?
+  private var composeActionsCancellable: AnyCancellable?
 
   private var item: ChatListItem?
   private var actionItem: MainSidebarList.ActionItem?
@@ -327,6 +329,8 @@ class MainSidebarItemCell: NSView {
   }
 
   private func setup() {
+    bindTransientStateObserversIfNeeded()
+
     addSubview(containerView)
     containerView.addSubview(stackView)
     containerView.addSubview(actionButton)
@@ -822,15 +826,47 @@ class MainSidebarItemCell: NSView {
     messageLabel.isHidden = isActionItem || !displayMode.showsMessagePreview
   }
 
-  private func messagePreviewText() -> String {
-    guard let lastMessage = item?.lastMessage else { return "" }
-    let messageText = lastMessage.displayTextForLastMessage
-      ?? lastMessage.message.stringRepresentationPlain
-    guard item?.kind == .thread, item?.chat?.type == .thread else { return messageText }
-    guard let sender = lastMessage.senderInfo?.user.shortDisplayName, !sender.isEmpty else {
-      return messageText
+  private func bindTransientStateObserversIfNeeded() {
+    if translationStateCancellable == nil {
+      translationStateCancellable = TranslationState.shared.subject
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] peer, _ in
+          guard self?.item?.peerId == peer else { return }
+          self?.refreshMessagePreview()
+        }
     }
-    return "\(sender): \(messageText)"
+
+    if composeActionsCancellable == nil {
+      composeActionsCancellable = ComposeActions.shared.$actions
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] _ in
+          guard let self, self.item?.peerId?.isPrivate == true else { return }
+          self.refreshMessagePreview()
+        }
+    }
+  }
+
+  private func refreshMessagePreview() {
+    let messageText = messagePreviewText()
+    guard currentMessageText != messageText else { return }
+    configureMessagePreview(messageText: messageText)
+    currentMessageText = messageText
+  }
+
+  private func messagePreviewText() -> String {
+    if let draftText = item?.draftPreviewText {
+      return draftText
+    }
+    if let typingText = typingPreviewText() {
+      return typingText
+    }
+    return item?.sidebarLastMessagePreviewText ?? ""
+  }
+
+  private func typingPreviewText() -> String? {
+    guard displayMode.showsMessagePreview else { return nil }
+    guard let peer = item?.peerId, peer.isPrivate else { return nil }
+    return ComposeActions.shared.getTypingDisplayText(for: peer)
   }
 
   private func applyDisplayMode(_ mode: MainSidebarList.DisplayMode) {
@@ -843,6 +879,11 @@ class MainSidebarItemCell: NSView {
     messageLabel.font = .systemFont(ofSize: mode.messageFontSize, weight: .regular)
     messageLabel.isHidden = isActionItem || !mode.showsMessagePreview
     contentStackView.spacing = mode.messageLineSpacing
+    let messageText = messagePreviewText()
+    if currentMessageText != messageText {
+      currentMessageText = messageText
+    }
+    configureMessagePreview(messageText: currentMessageText)
     updateTrackingArea()
   }
 
