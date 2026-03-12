@@ -370,8 +370,9 @@ public actor FileCache: Sendable {
     let durationSeconds = Int(CMTimeGetSeconds(durationTime).rounded())
 
     // Persist the video to app cache.
-    // Keep native MP4 as-is for fast attach and Telegram-like UX.
-    // Only transcode non-MP4 inputs to guarantee server-accepted format.
+    // Keep native MP4 as-is for fast attach and only normalize non-MP4 inputs
+    // to the container format we upload. Avoid lossy cache-time compression here;
+    // upload preprocessing is the single place that should reduce quality.
     let directory = FileHelpers.getLocalCacheDirectory(for: .videos)
     let fileManager = FileManager.default
     let sourceExtension = url.pathExtension.lowercased()
@@ -387,8 +388,7 @@ public actor FileCache: Sendable {
 
     if shouldPreprocess {
       do {
-        let options = VideoCompressionOptions.uploadDefault(forceTranscode: true)
-        let result = try await VideoCompressor.shared.compressVideo(at: url, options: options)
+        let result = try await VideoCompressor.shared.normalizeToMP4(at: url)
         defer {
           if fileManager.fileExists(atPath: result.url.path) {
             try? fileManager.removeItem(at: result.url)

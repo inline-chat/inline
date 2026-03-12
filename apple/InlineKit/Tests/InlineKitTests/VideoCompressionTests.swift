@@ -6,6 +6,21 @@ import Testing
 
 @Suite("Video Compression")
 struct VideoCompressionTests {
+  @Test("normalizes mov input to mp4 without changing dimensions")
+  func testNormalizeToMP4() async throws {
+    let videoURL = try await makeTestVideoURL(frameCount: 20, fileType: .mov)
+    defer { try? FileManager.default.removeItem(at: videoURL) }
+
+    let result = try await VideoCompressor.shared.normalizeToMP4(at: videoURL)
+    defer { try? FileManager.default.removeItem(at: result.url) }
+
+    #expect(result.url.pathExtension.lowercased() == "mp4")
+    #expect(result.width == 64)
+    #expect(result.height == 64)
+    #expect(result.duration > 0)
+    #expect(result.fileSize > 0)
+  }
+
   @Test("returns compressionNotNeeded when thresholds are high")
   func testCompressionNotNeededForSmallVideo() async throws {
     let videoURL = try await makeTestVideoURL()
@@ -69,15 +84,17 @@ private final class AssetWriterBox: @unchecked Sendable {
 private func makeTestVideoURL(
   size: CGSize = CGSize(width: 64, height: 64),
   frameCount: Int = 2,
-  fps: Int32 = 10
+  fps: Int32 = 10,
+  fileType: AVFileType = .mp4
 ) async throws -> URL {
+  let pathExtension = fileType == .mov ? "mov" : "mp4"
   let outputURL = FileManager.default.temporaryDirectory
-    .appendingPathComponent("inlinekit_test_\(UUID().uuidString).mp4")
+    .appendingPathComponent("inlinekit_test_\(UUID().uuidString).\(pathExtension)")
   if FileManager.default.fileExists(atPath: outputURL.path) {
     try FileManager.default.removeItem(at: outputURL)
   }
 
-  let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
+  let writer = try AVAssetWriter(outputURL: outputURL, fileType: fileType)
   let videoSettings: [String: Any] = [
     AVVideoCodecKey: AVVideoCodecType.h264,
     AVVideoWidthKey: Int(size.width),

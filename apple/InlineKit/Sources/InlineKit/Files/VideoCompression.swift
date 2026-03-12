@@ -43,6 +43,58 @@ public actor VideoCompressor {
 
   private init() {}
 
+  func normalizeToMP4(at sourceURL: URL) async throws -> VideoCompressionResult {
+    let asset = AVURLAsset(url: sourceURL)
+    let compatiblePresets = AVAssetExportSession.exportPresets(compatibleWith: asset)
+    let tempURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("normalized_\(UUID().uuidString).mp4")
+
+    if FileManager.default.fileExists(atPath: tempURL.path) {
+      try FileManager.default.removeItem(at: tempURL)
+    }
+
+    var shouldCleanupTemp = true
+    defer {
+      if shouldCleanupTemp, FileManager.default.fileExists(atPath: tempURL.path) {
+        try? FileManager.default.removeItem(at: tempURL)
+      }
+    }
+
+    if compatiblePresets.contains(AVAssetExportPresetPassthrough) {
+      do {
+        try await export(asset: asset, presetName: AVAssetExportPresetPassthrough, destinationURL: tempURL)
+      } catch {
+        log.debug("Passthrough MP4 normalization failed, falling back to highest-quality export")
+      }
+    }
+
+    if !FileManager.default.fileExists(atPath: tempURL.path) {
+      let fallbackPreset = [
+        AVAssetExportPresetHighestQuality,
+        AVAssetExportPresetMediumQuality,
+        AVAssetExportPresetLowQuality,
+      ].first(where: compatiblePresets.contains)
+
+      guard let fallbackPreset else {
+        throw VideoCompressionError.exportFailed
+      }
+
+      try await export(asset: asset, presetName: fallbackPreset, destinationURL: tempURL)
+    }
+
+    let outputMetadata = try await loadMetadata(for: AVURLAsset(url: tempURL))
+    let outputSize = fileSize(for: tempURL)
+    shouldCleanupTemp = false
+
+    return VideoCompressionResult(
+      url: tempURL,
+      width: outputMetadata.width,
+      height: outputMetadata.height,
+      duration: outputMetadata.duration,
+      fileSize: outputSize
+    )
+  }
+
   public func compressVideo(at sourceURL: URL, options: VideoCompressionOptions) async throws -> VideoCompressionResult {
     let asset = AVURLAsset(url: sourceURL)
     let metadata = try await loadMetadata(for: asset)
