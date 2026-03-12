@@ -20,6 +20,7 @@ let package = Package(
 
   products: [
     .library(name: "InlineIOSUI", targets: ["InlineIOSUI"]),
+    .library(name: "Onboarding", targets: ["Onboarding"]),
   ],
 
   dependencies: [
@@ -31,6 +32,14 @@ let package = Package(
     .target(
       name: "InlineIOSUI",
       dependencies: baseDependencies,
+      swiftSettings: [
+        .swiftLanguageMode(.v6),
+      ]
+    ),
+
+    .target(
+      name: "Onboarding",
+      path: "Sources/Onborading",
       swiftSettings: [
         .swiftLanguageMode(.v6),
       ]
