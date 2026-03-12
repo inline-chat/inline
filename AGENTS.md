@@ -1,4 +1,5 @@
 ## Orientation
+
 - Inline is a multi-client work chat app: backend (`server/` Bun/TS), Apple clients (`apple/` SwiftUI/UIKit/AppKit), web (`web/` React/TanStack), and shared protobufs (`proto/`).
 - Shared Swift packages: `apple/InlineKit`, `apple/InlineUI`, `apple/InlineProtocol`; app targets: `apple/InlineIOS`, `apple/InlineXIOS`, `apple/InlineMac`.
 - Backend structure: `src/functions`, `src/realtime`, `src/db`.
@@ -6,12 +7,14 @@
 - Production: `https://api.inline.chat` and `https://inline.chat`.
 
 ## Critical Rules
+
 - Never revert/discard/reset/clean work unless explicitly asked; ask before one-way deletion commands (`rm`, restore/reset/checkout) unless explicitly requested.
 - If unexpected changes appear in a file you are editing, stop and ask. Ignore unrelated file changes.
 - When the worktree is dirty, continue without stopping for unrelated modified/untracked files. Only stop if unexpected changes appear in the specific file/hunk currently being edited.
 - Never read, write or touch `.env` files.
 
 ## Multi-agent Safety
+
 - Do not create/apply/drop stashes (including `--autostash`) unless explicitly requested.
 - Do not switch branches, create/modify worktrees, or clone this repo for commit/push unless explicitly requested.
 - On "push", `git pull --rebase` is allowed; if conflicts occur, stop and ask before resolving.
@@ -19,42 +22,46 @@
 - When unrecognized files exist, continue and focus only on relevant files.
 
 ## Working Rules
+
 - Use existing logging for production logs (`Log`, `server/src/utils/log.ts`).
 - Avoid unsafe Swift/typescript patterns (`Any`/`any` where avoidable, force unwraps, `try!`, unsafe casts).
 - Keep commits atomic and scoped; do not amend existing commits.
 - Before committing, verify staged files (`git diff --cached --name-only`); prefer `scripts/committer "<msg>" <file...>`.
+- Write commit message in lowercase, include scope like this: `macos: fix ...`; scopes include: macos|ios|server|mcp|sdk|cli|openclaw|apple|web|docs|website; for general changes either no prefix or generic ones: eg. chore
 - If undoing your own changes in a file with other uncommitted edits, ask first.
 - Regenerate protobufs when contracts change (`bun run generate:proto`); run focused `swift build` for touched Swift packages.
 - Run focused tests/typechecks for affected areas; add/update tests for new features and regressions.
 - Web is WIP. Do not extend requested changes or investigations to `web/` unless explicitly asked.
 - New UI work must stay in new UI components; do not modify legacy sidebar/old UI.
 - When asked to write a plan or save your investigation, make a file in `.agent-docs/` named `YYYY-MM-DD-title-kebab-case.md`.
-- In final handoff/review/push, call out security risks and state production readiness.
+- In final handoff/review/push, call out security risks, possible performance regressions, and state production readiness.
 
 ## Reminders
+
 - Security (due 2026-05-18): remove legacy email OTP verification fallback without `challengeToken` in `server/src/modules/auth/emailLoginChallenges.ts`.
 
 ## Common Commands
+
 - Root: `bun run dev`, `bun run dev:server`, `bun run dev:web`, `bun run typecheck`, `bun run test`, `bun run lint`.
 - Protos: `bun run generate:proto`; per-language from `scripts/`: `bun run generate`.
 - DB: `cd server && bun run db:migrate`; create migration `bun run db:generate <name>`; inspect `bun run db:studio`.
 - Backend tests: `cd server && bun test src/__tests__/modules/...` (`DEBUG=1` for verbose).
 
 ## NPM SDK Releases
+
 - Public SDKs: `@inline-chat/protocol`, `@inline-chat/realtime-sdk`, `@inline-chat/bot-api-types`, `@inline-chat/bot-api`.
 - Publish only when external runtime behavior/public types change.
 - Publish order: `protocol -> realtime-sdk` and `bot-api-types -> bot-api`.
 - For publish requests, provide copy-paste commands with package dir and `--otp=<YOUR_OTP_CODE>`.
 
 ## CLI
+
 - CLI source: `cli/` (Rust), binary `inline`, release artifacts `inline-cli-<version>-<target>.tar.gz`.
 - Release flow: `cd scripts && bun run release:cli -- release`.
 - Requires authenticated `gh` and release env vars; script checks duplicate tags.
 
 ## Apple (iOS/macOS)
-- `apple/InlineIOS` is the main iOS app. `apple/InlineXIOS` is experimental only.
-- Treat `apple/InlineXIOS` and `apple/InlineIOS` as separate iOS apps. If the user asks for changes in one, do not add matching or spillover changes to the other unless explicitly requested.
-- For broad app, Apple-platform, or multi-platform changes, do not include `apple/InlineXIOS` unless the user explicitly asks for it by name.
+
 - Prefer new feature work in `apple/InlineIOSUI` and `apple/InlineMacUI`; use legacy targets only when tightly coupled.
 - Minimum versions: iOS 18, macOS 15.
 - Prefer Swift Testing (`import Testing`, `@Test`, `@Suite`) and Observation (`@Observable`, `@Bindable`).
@@ -70,6 +77,7 @@
 - send-message and open-chat paths are latency-critical; progressive/message-list changes must avoid regressions and include focused perf validation.
 
 ## Backend
+
 - Bun runtime entry: `server/src/index.ts`; logic in `src/functions`, realtime handlers/encoders in `src/realtime`, DB schema/models in `src/db`.
 - Add shutdown cleanup in `server/src/lifecycle/gracefulShutdown.ts`.
 - Use Drizzle flow for schema changes; do not hand-write migrations.
@@ -80,6 +88,7 @@
 - User data integrity and correctness must be considered during shutdown, DB downtime, burst requests, and such.
 
 ## Web & Docs
+
 - Web stack: TanStack Router + Vite + StyleX/Tailwind; keep SSR-safe patterns.
 - Web commands: `cd web && bun run dev|build|typecheck`.
 - Prefer existing tokens/utilities over ad-hoc CSS; keep light/dark behavior consistent.
@@ -87,6 +96,7 @@
 - Docs additions: add markdown page + route + nav entry; keep writing concise and practical.
 
 ## Admin
+
 - Admin frontend: `admin/` (Vite + TanStack Router); backend: `server/src/controllers/admin.ts`.
 - Keep admin endpoints under `/admin` with origin allowlist + admin session cookie.
 - Never load remote assets/scripts/styles/fonts in admin UI.
@@ -96,7 +106,9 @@
 - Admin metrics should exclude deleted users and bots by default.
 
 ## Glossary
+
 ### Area nicknames we use to reference different macOS views
+
 - New UI: alternate UI switched by settings toggle with a different `MainWindowController`.
 - New sidebar: `apple/InlineMac/Features/Sidebar/MainSidebar.swift`.
 - New chat icon: `apple/InlineMac/Views/ChatIcon/SidebarChatIconView.swift`.
