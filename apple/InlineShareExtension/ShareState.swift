@@ -860,6 +860,12 @@ class ShareState: ObservableObject {
           )
         }
         return .fromDocumentId(documentId)
+      case .voice:
+        throw NSError(
+          domain: "ShareError",
+          code: 12,
+          userInfo: [NSLocalizedDescriptionKey: "Voice messages are not supported from the share extension."]
+        )
     }
   }
 
@@ -1334,6 +1340,14 @@ class ShareState: ObservableObject {
                 mimeType: prepared.mimeType,
                 videoMetadata: videoMetadata,
                 progress: progressHandler
+              )
+            case .voice:
+              throw NSError(
+                domain: "ShareError",
+                code: 13,
+                userInfo: [
+                  NSLocalizedDescriptionKey: "Voice messages are not supported from the share extension."
+                ]
               )
           }
 

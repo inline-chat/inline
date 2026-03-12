@@ -189,6 +189,10 @@ struct DirectChatItem: View {
           case .uploadingVideo:
             UploadProgressIndicator(color: .secondary)
               .frame(width: 14)
+          case .recordingVoice:
+            Image(systemName: "waveform")
+              .font(.caption2)
+              .foregroundStyle(.secondary)
           case .none:
             EmptyView()
         }
