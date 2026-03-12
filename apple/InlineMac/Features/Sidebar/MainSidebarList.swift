@@ -4,6 +4,7 @@ import Combine
 import InlineKit
 import InlineMacWindow
 import Observation
+import Translation
 
 class MainSidebarList: NSView {
   private let snapshotBuildQueue = DispatchQueue(
@@ -163,6 +164,12 @@ class MainSidebarList: NSView {
     case deleted
   }
 
+  private struct TranslationTriggerSignature: Hashable {
+    let peerId: Peer?
+    let messageId: Int64?
+    let editDate: Date?
+  }
+
   private struct SnapshotContext: Equatable {
     let mode: Mode
     let searchQuery: String
@@ -178,6 +185,7 @@ class MainSidebarList: NSView {
   private var lastSnapshotContext: SnapshotContext?
   private var activeViewModelCancellables = Set<AnyCancellable>()
   private var settingsCancellable: AnyCancellable?
+  private var translationStateCancellable: AnyCancellable?
   private var scrollEventsSubject = PassthroughSubject<ScrollEvent, Never>()
   private var quickSearchVisibilityObserver: NSObjectProtocol?
   private var isQuickSearchVisible = false
@@ -254,6 +262,7 @@ class MainSidebarList: NSView {
     setupNotifications()
     setupDataSource()
     bindDisplayModeSettings()
+    bindTranslationState()
     bindActiveChatsViewModel()
     observeNavTabs()
     observeNavRoute()
@@ -344,6 +353,15 @@ class MainSidebarList: NSView {
       .sink { [weak self] showPreview in
         let mode: DisplayMode = showPreview ? .messagePreview : .compact
         self?.setDisplayMode(mode)
+      }
+  }
+
+  private func bindTranslationState() {
+    translationStateCancellable = TranslationState.shared.subject
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] peer, enabled in
+        guard enabled else { return }
+        self?.processTranslations(forPeers: [peer])
       }
   }
 
@@ -532,6 +550,7 @@ class MainSidebarList: NSView {
 
     let oldValuesByItem = previousItemsByID
     let oldOrderedItems = previousOrderedItems
+    let oldChatItemsByID = chatItemsByID
 
     var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
 
@@ -549,11 +568,16 @@ class MainSidebarList: NSView {
     let hasStructuralChanges = oldOrderedItems != data.orderedItems || previousSections != data.sections
     let hasVisibleStructuralChanges = hasStructuralChanges && !changedItems.isDisjoint(with: visibleItems)
     let shouldAnimate = shouldAnimateHint && !contextChanged && !isLiveScrolling && hasVisibleStructuralChanges
+    let translationItems = translationItems(
+      oldChatItemsByID: oldChatItemsByID,
+      newChatItemsByID: data.chatItemsByID
+    )
 
     chatItemsByID = data.chatItemsByID
     lastChatItemCount = data.chatItemCount
     onChatCountChanged?(mode, data.chatItemCount)
     onArchiveCountChanged?(data.archivedCount)
+    processTranslations(for: translationItems)
 
     if hasStructuralChanges == false {
       reconfigureVisibleItems(changedItems)
@@ -638,6 +662,40 @@ class MainSidebarList: NSView {
     guard dataSource != nil else { return [] }
     let visible = collectionView.indexPathsForVisibleItems()
     return Set(visible.compactMap { dataSource.itemIdentifier(for: $0) })
+  }
+
+  private func processTranslations(for items: [ChatListItem]) {
+    guard displayMode.showsMessagePreview else { return }
+    guard AppSettings.shared.translationUIEnabled else { return }
+    let activePeer = Self.selectedPeer(from: nav2)
+
+    for item in items {
+      guard let peer = item.peerId, peer != activePeer else { continue }
+      guard TranslationState.shared.isTranslationEnabled(for: peer) else { continue }
+      guard let lastMessage = item.lastMessage else { continue }
+      TranslationViewModel.translateMessages(
+        for: peer,
+        messages: [FullMessage(from: lastMessage)]
+      )
+    }
+  }
+
+  private func processTranslations(forPeers peers: [Peer]) {
+    guard peers.isEmpty == false else { return }
+    let items = peers.compactMap { peer in
+      chatItemsByID.first(where: { $0.value.peerId == peer })?.value
+    }
+    processTranslations(for: items)
+  }
+
+  private func translationItems(
+    oldChatItemsByID: [ChatListItem.Identifier: ChatListItem],
+    newChatItemsByID: [ChatListItem.Identifier: ChatListItem]
+  ) -> [ChatListItem] {
+    newChatItemsByID.values.filter { item in
+      guard let oldItem = oldChatItemsByID[item.id] else { return true }
+      return Self.translationTriggerSignature(for: oldItem) != Self.translationTriggerSignature(for: item)
+    }
   }
 
   private func updateScrollSeparators() {
@@ -950,6 +1008,9 @@ class MainSidebarList: NSView {
     }
     collectionView.collectionViewLayout?.invalidateLayout()
     collectionView.layoutSubtreeIfNeeded()
+    if mode.showsMessagePreview {
+      processTranslations(for: Array(chatItemsByID.values))
+    }
   }
 
   func setSearchQuery(_ query: String) {
@@ -1041,16 +1102,7 @@ class MainSidebarList: NSView {
       "Chat"
     }
 
-    let messagePreview: String = {
-      guard let lastMessage = item.lastMessage else { return "" }
-      let messageText = lastMessage.displayTextForLastMessage
-        ?? lastMessage.message.stringRepresentationPlain
-      guard item.kind == .thread, item.chat?.type == .thread else { return messageText }
-      guard let sender = lastMessage.senderInfo?.user.shortDisplayName, sender.isEmpty == false else {
-        return messageText
-      }
-      return "\(sender): \(messageText)"
-    }()
+    let messagePreview = item.sidebarBasePreviewText
 
     let peerSignature: PeerSignature = if let user = item.user?.user {
       .user(
@@ -1086,6 +1138,14 @@ class MainSidebarList: NSView {
       isPinned: item.dialog?.pinned == true,
       isArchived: item.dialog?.archived == true,
       peerSignature: peerSignature
+    )
+  }
+
+  private static func translationTriggerSignature(for item: ChatListItem) -> TranslationTriggerSignature {
+    TranslationTriggerSignature(
+      peerId: item.peerId,
+      messageId: item.lastMessage?.message.id,
+      editDate: item.lastMessage?.message.editDate
     )
   }
 

@@ -1,4 +1,6 @@
+import Foundation
 import InlineKit
+import Translation
 
 /// Common presentation model for sidebar chat- and contact-like rows.
 struct ChatListItem: Hashable, Identifiable {
@@ -126,5 +128,32 @@ struct ChatListItem: Hashable, Identifiable {
     }
     spaceId = spaceChatItem.dialog.spaceId
     id = Identifier(kind: .thread, rawValue: spaceChatItem.id)
+  }
+}
+
+extension ChatListItem {
+  var draftPreviewText: String? {
+    guard let draftText = dialog?.draftMessage?.text else { return nil }
+    let normalizedText = draftText
+      .components(separatedBy: .newlines)
+      .joined(separator: " ")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    guard normalizedText.isEmpty == false else { return nil }
+    return "Draft: \(normalizedText)"
+  }
+
+  var sidebarLastMessagePreviewText: String {
+    guard let lastMessage else { return "" }
+    let messageText = lastMessage.displayTextForLastMessage
+      ?? lastMessage.message.stringRepresentationPlain
+    guard kind == .thread, chat?.type == .thread else { return messageText }
+    guard let sender = lastMessage.senderInfo?.user.shortDisplayName, sender.isEmpty == false else {
+      return messageText
+    }
+    return "\(sender): \(messageText)"
+  }
+
+  var sidebarBasePreviewText: String {
+    draftPreviewText ?? sidebarLastMessagePreviewText
   }
 }
