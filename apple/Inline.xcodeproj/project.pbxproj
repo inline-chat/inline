@@ -397,6 +397,7 @@
 				C38A28332CA5AB8F00D3DFB8 /* Sources */,
 				C38A28342CA5AB8F00D3DFB8 /* Frameworks */,
 				C38A28352CA5AB8F00D3DFB8 /* Resources */,
+				B78C9E2F2EF1A9C800A1D1B2 /* Upload Debug Symbols to Sentry */,
 				B7020C522DCE1534007099D9 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
@@ -597,6 +598,25 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		B78C9E2F2EF1A9C800A1D1B2 /* Upload Debug Symbols to Sentry */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/../scripts/apple/upload-dsyms.sh",
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}",
+			);
+			name = "Upload Debug Symbols to Sentry";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ \"${ACTION:-}\" != \"install\" ]; then\n  echo \"Skipping Sentry dSYM upload because ACTION=${ACTION:-unset}\"\n  exit 0\nfi\n\nif [ -n \"${CI_XCODEBUILD_ACTION:-}\" ]; then\n  echo \"Skipping Sentry dSYM upload in target build phase because Xcode Cloud uploads in ci_post_xcodebuild.sh\"\n  exit 0\nfi\n\nif [ ! -x \"$SRCROOT/../scripts/apple/upload-dsyms.sh\" ]; then\n  echo \"warning: missing scripts/apple/upload-dsyms.sh\"\n  exit 0\nfi\n\nif ! \"$SRCROOT/../scripts/apple/upload-dsyms.sh\" --search-root \"$DWARF_DSYM_FOLDER_PATH\" --org \"${SENTRY_ORG:-usenoor}\" --project \"${SENTRY_PROJECT:-inline-ios-macos}\" --api-url \"${SENTRY_API_URL:-https://us.sentry.io}\"; then\n  echo \"warning: failed to upload dSYMs to Sentry\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		B7020C3E2DCE1534007099D9 /* Sources */ = {

@@ -16,6 +16,25 @@ public final class Analytics: Sendable {
 
   static let runInDebugBuilds = false
 
+  private static func bundleString(for key: String) -> String? {
+    guard let value = Bundle.main.object(forInfoDictionaryKey: key) as? String else { return nil }
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
+  }
+
+  private static func sentryReleaseName() -> String? {
+    guard let version = bundleString(for: "CFBundleShortVersionString") else { return nil }
+    return "inline-apple@\(version)"
+  }
+
+  private static func sentryDist() -> String? {
+    bundleString(for: "CFBundleVersion")
+  }
+
+  private static func sentryCommit() -> String? {
+    bundleString(for: "InlineCommit")
+  }
+
   /// Starts Sentry
   public static func start() {
     if debugBuild, !runInDebugBuilds {
@@ -23,12 +42,30 @@ public final class Analytics: Sendable {
       return
     }
 
+    let releaseName = sentryReleaseName()
+    let dist = sentryDist()
+    let commit = sentryCommit()
+
     SentrySDK.start { options in
       options.dsn = InlineConfig.SentryDSN
       options.debug = false
       options.tracesSampleRate = 0.1
       options.swiftAsyncStacktraces = true
       options.enableLogs = true
+      options.releaseName = releaseName
+      options.dist = dist
+    }
+
+    SentrySDK.configureScope { scope in
+      if let version = bundleString(for: "CFBundleShortVersionString") {
+        scope.setTag(value: version, key: "app_version")
+      }
+      if let dist {
+        scope.setTag(value: dist, key: "app_build")
+      }
+      if let commit {
+        scope.setTag(value: commit, key: "app_commit")
+      }
     }
 
     Log.shared.info("Analytics: starting")

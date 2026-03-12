@@ -1,10 +1,17 @@
 import "dotenv/config"
 import * as Sentry from "@sentry/bun"
 import { API_BASE_URL, NODE_ENV, PORT, SENTRY_DSN } from "@in/server/env"
-import { gitCommitHash, version } from "@in/server/buildEnv"
+import { gitCommitHash, gitCommitSha, version } from "@in/server/buildEnv"
+import { buildServerSentryDist, buildServerSentryRelease } from "@in/server/utils/sentryRelease"
+
+const sentryRelease = buildServerSentryRelease(version, gitCommitSha)
+const sentryDist = buildServerSentryDist(gitCommitSha)
 
 Sentry.init({
   dsn: SENTRY_DSN,
+  release: sentryRelease,
+  dist: sentryDist,
+  environment: NODE_ENV,
   tracesSampleRate: 1.0,
   enabled: NODE_ENV !== "development",
   enableLogs: true,

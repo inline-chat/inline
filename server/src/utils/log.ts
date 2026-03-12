@@ -153,10 +153,8 @@ export class Log {
     const scopeColored = styleText("yellow", this.scope)
     if (typeof messageOrError === "string") {
       console.warn(scopeColored, redactValue(messageOrError), redactValue(error))
-      Sentry.captureMessage(redactString(messageOrError), "warning")
     } else {
       console.warn(scopeColored, redactValue(messageOrError))
-      Sentry.captureMessage(redactString(String(messageOrError)), "warning")
     }
   }
 

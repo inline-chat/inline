@@ -186,6 +186,16 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: bash scripts/macos/build-direct.sh
 
+      - name: Upload dSYMs to Sentry
+        if: ${{ secrets.SENTRY_AUTH_TOKEN != '' }}
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: usenoor
+          SENTRY_PROJECT: inline-ios-macos
+        run: |
+          set -euo pipefail
+          bun run scripts/macos/upload-dsyms.ts --search-root build/InlineMacDirect/Build/Products/Release
+
       - name: Resolve Release Tag
         id: release_tag
         env:

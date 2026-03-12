@@ -32,7 +32,8 @@ with Sparkle (non-TestFlight) and preparing DMG artifacts.
 - `update_appcast.py`: generates/updates an appcast from `sign_update` output.
 - `validate_appcast.py`: validates Sparkle appcasts before upload.
 - `release-direct.ts`: uploads DMG and/or appcast to R2 with cache headers.
-- `release-app.ts`: runs the local release pipeline (build → upload DMG → update appcast → upload appcast), with an interactive TUI (shows progress, skipped steps, and failures clearly).
+- `upload-dsyms.ts`: uploads zipped `.dSYM` bundles to Sentry using Sentry's API.
+- `release-app.ts`: runs the local release pipeline (build → upload dSYMs → upload DMG → update appcast → upload appcast), with an interactive TUI (shows progress, skipped steps, and failures clearly).
 - `update-version.ts`: bumps the InlineMac marketing version, creates a `macos-vX.Y.Z` tag, and pushes to trigger CI.
 - `appcast-only.sh`: updates the appcast only (no rebuild), with validation.
 
@@ -74,6 +75,16 @@ Choose one of the two auth methods below.
 - `PUBLIC_RELEASES_R2_BUCKET`
 - `PUBLIC_RELEASES_R2_ENDPOINT`
 - `PUBLIC_RELEASES_R2_PUBLIC_BASE_URL` (expected: `https://public-assets.inline.chat`)
+
+### Required for Sentry dSYM upload
+
+- `SENTRY_AUTH_TOKEN` or an authenticated modern `sentry` CLI session where `sentry auth token` works
+
+### Optional for Sentry dSYM upload
+
+- `SENTRY_ORG` (default: `usenoor`)
+- `SENTRY_PROJECT` (default: `inline-ios-macos`)
+- `SENTRY_API_URL` (default: `https://us.sentry.io`)
 
 ### Optional
 
@@ -204,6 +215,5 @@ bash scripts/macos/appcast-only.sh --channel beta
 
 - Sparkle private key is **never** embedded in the app bundle. It is only used
   for appcast signing in the release pipeline.
-- This script does not upload artifacts. Uploads and appcast updates are handled
-  by CI steps in later pipeline stages, with DMG uploads happening before appcast updates.
+- The local release script uploads dSYMs to Sentry before artifact upload so new crashes symbolicate sooner.
 - Appcasts are validated locally and in CI before upload to avoid broken feeds.

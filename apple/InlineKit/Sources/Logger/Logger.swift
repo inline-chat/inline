@@ -107,7 +107,7 @@ public final class Log: @unchecked Sendable {
     }
 
     // Handle Sentry reporting with proper isolation
-    if level == .error || level == .warning {
+    if level == .error {
       Task {
         if level == .error, let error {
           await SentryReporter.shared.reportError(
@@ -190,6 +190,26 @@ extension Log: Logging {
 private actor SentryReporter {
   static let shared = SentryReporter()
 
+  private func shouldReport(_ error: Error) -> Bool {
+    if error is CancellationError {
+      return false
+    }
+
+    let nsError = error as NSError
+    guard nsError.domain == NSURLErrorDomain else { return true }
+
+    switch nsError.code {
+      case NSURLErrorCancelled,
+        NSURLErrorTimedOut,
+        NSURLErrorNotConnectedToInternet,
+        NSURLErrorSecureConnectionFailed,
+        NSURLErrorNetworkConnectionLost:
+        return false
+      default:
+        return true
+    }
+  }
+
   func reportError(
     _ error: Error,
     message: String,
@@ -198,6 +218,8 @@ private actor SentryReporter {
     function: String = #function,
     line: Int = #line
   ) async {
+    guard shouldReport(error) else { return }
+
     await MainActor.run {
       _ = SentrySDK.capture(error: error) { sentryScope in
         sentryScope.setTag(value: scope, key: "scope")

@@ -61,7 +61,7 @@ function usage(): string {
     "  --release-tag <tag>              Attach DMG to GitHub release/tag (default: beta->tip, stable->empty)",
     "  --skip-github-release            Skip GitHub release/tag steps",
     "  --skip <ids>                     Skip steps (comma-separated or repeatable)",
-    "                                  Known ids: build, post-check, upload-dmg, verify-dmg, gen-appcast, validate-appcast, upload-appcast, github",
+    "                                  Known ids: build, upload-sentry-dsyms, post-check, upload-dmg, verify-dmg, gen-appcast, validate-appcast, upload-appcast, github",
     "                                  Aliases: upload (upload-dmg+upload-appcast), appcast (gen+validate+upload)",
     "  --pause-before-notarize          Pause after app/DMG build so you can test locally, then continue notarization",
     "  --dry-run                         Print what would run, without executing the pipeline",
@@ -463,6 +463,7 @@ function taskEnabled(opts: ReleaseOptions, id: string): boolean {
 
 const KNOWN_SKIP_IDS = new Set([
   "build",
+  "upload-sentry-dsyms",
   "post-check",
   "upload-dmg",
   "verify-dmg",
@@ -557,6 +558,15 @@ async function main() {
         if (!commandExists(c)) missing.push(c);
       }
     }
+    if (taskEnabled(opts, "upload-sentry-dsyms")) {
+      for (const c of ["ditto"]) {
+        if (!commandExists(c)) missing.push(c);
+      }
+      if (!process.env.SENTRY_AUTH_TOKEN && !commandExists("sentry")) {
+        if (ctx.dryRun) ui.info("Warning: upload-sentry-dsyms expects SENTRY_AUTH_TOKEN or an authenticated `sentry` CLI session.");
+        else throw new Error("upload-sentry-dsyms requires SENTRY_AUTH_TOKEN or an authenticated `sentry` CLI session.");
+      }
+    }
     if (taskEnabled(opts, "post-check")) {
       for (const c of ["hdiutil", "spctl", "lipo"]) {
         if (!commandExists(c)) missing.push(c);
@@ -618,6 +628,32 @@ async function main() {
           PAUSE_BEFORE_NOTARIZE: ctx.pauseBeforeNotarize ? "1" : "0",
         },
       });
+    },
+  });
+
+  tasks.push({
+    id: "upload-sentry-dsyms",
+    title: "Upload dSYMs to Sentry",
+    enabled: taskEnabled(opts, "upload-sentry-dsyms"),
+    skipReason: taskEnabled(opts, "upload-sentry-dsyms") ? undefined : "operator requested",
+    dryRun: (ctx, ui) => {
+      ui.info("Would run:");
+      ui.info(`  bun run scripts/macos/upload-dsyms.ts --search-root ${resolve(ctx.derivedData, "Build/Products/Release")}`);
+      ui.info("Auth:");
+      ui.info("  Uses SENTRY_AUTH_TOKEN if set, otherwise resolves the token from `sentry auth token`.");
+      ui.info("Optional env:");
+      ui.info("  SENTRY_ORG (default: usenoor), SENTRY_PROJECT (default: inline-ios-macos), SENTRY_API_URL (default: https://us.sentry.io)");
+    },
+    run: async (ctx, ui) => {
+      const searchRoot = resolve(ctx.derivedData, "Build/Products/Release");
+      if (!existsSync(searchRoot)) {
+        throw new Error(`Release products directory not found at ${searchRoot}`);
+      }
+      await runStreaming(
+        ui,
+        ["bun", "run", resolve(ctx.rootDir, "scripts/macos/upload-dsyms.ts"), "--search-root", searchRoot],
+        { cwd: ctx.rootDir },
+      );
     },
   });
 
