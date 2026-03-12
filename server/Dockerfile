@@ -66,6 +66,18 @@ ENV SOURCE_COMMIT=${SOURCE_COMMIT}
 ARG DATABASE_URL
 ENV DATABASE_URL=${DATABASE_URL}
 
+ARG SENTRY_AUTH_TOKEN
+ENV SENTRY_AUTH_TOKEN=${SENTRY_AUTH_TOKEN}
+
+ARG SENTRY_ORG=usenoor
+ENV SENTRY_ORG=${SENTRY_ORG}
+
+ARG SENTRY_PROJECT=inline-server
+ENV SENTRY_PROJECT=${SENTRY_PROJECT}
+
+ARG SENTRY_URL=https://us.sentry.io
+ENV SENTRY_URL=${SENTRY_URL}
+
 # [optional] tests & build
 ENV NODE_ENV=production
 # RUN bun typecheck 
@@ -73,6 +85,7 @@ RUN bun install --frozen-lockfile
 RUN cd packages/protocol && bun run build
 RUN cd packages/oauth-core && bun run build
 RUN cd server && bun run build
+RUN if [ -n "$SENTRY_AUTH_TOKEN" ]; then cd server && bun run scripts/upload-sourcemaps.ts; else echo "Skipping Sentry sourcemap upload"; fi
 
 # copy production dependencies and source code into final image
 FROM base AS release
