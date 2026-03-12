@@ -1,5 +1,6 @@
 import InlineKit
 import InlineProtocol
+import InlineUI
 import Logger
 import Nuke
 import NukeExtensions
@@ -49,6 +50,12 @@ final class NewPhotoView: UIView {
     activityIndicator.startAnimating()
     view.placeholderView = activityIndicator
 
+    return view
+  }()
+
+  private let tinyThumbnailBackgroundView: InlineTinyThumbnailBackgroundView = {
+    let view = InlineTinyThumbnailBackgroundView()
+    view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
 
@@ -231,10 +238,16 @@ final class NewPhotoView: UIView {
   }
 
   private func setupViews() {
+    addSubview(tinyThumbnailBackgroundView)
     addSubview(imageView)
     addSubview(highlightOverlay)
 
     NSLayoutConstraint.activate([
+      tinyThumbnailBackgroundView.topAnchor.constraint(equalTo: topAnchor),
+      tinyThumbnailBackgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      tinyThumbnailBackgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      tinyThumbnailBackgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
       highlightOverlay.topAnchor.constraint(equalTo: topAnchor),
       highlightOverlay.leadingAnchor.constraint(equalTo: leadingAnchor),
       highlightOverlay.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -244,6 +257,7 @@ final class NewPhotoView: UIView {
     setupImageConstraints()
     setupGestures()
     setupMask()
+    updateTinyThumbnailBackground()
     updateImage()
   }
 
@@ -300,6 +314,7 @@ final class NewPhotoView: UIView {
     let prev = self.fullMessage
     self.fullMessage = fullMessage
     updateMask()
+    updateTinyThumbnailBackground()
 
     if
       prev.photoInfo?.id == fullMessage.photoInfo?.id,
@@ -310,6 +325,10 @@ final class NewPhotoView: UIView {
     }
     setupImageConstraints()
     updateImage()
+  }
+
+  private func updateTinyThumbnailBackground() {
+    tinyThumbnailBackgroundView.setPhoto(isSticker ? nil : fullMessage.photoInfo)
   }
 
   private func updateImage() {

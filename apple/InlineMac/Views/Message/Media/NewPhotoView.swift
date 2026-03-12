@@ -1,5 +1,6 @@
 import AppKit
 import InlineKit
+import InlineUI
 import Logger
 import Nuke
 import NukeUI
@@ -31,6 +32,12 @@ final class NewPhotoView: NSView {
     view.wantsLayer = true
     view.layer?.masksToBounds = true
     view.backgroundColor = .gray.withAlphaComponent(0.05)
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
+
+  private let tinyThumbnailBackgroundView: InlineTinyThumbnailBackgroundView = {
+    let view = InlineTinyThumbnailBackgroundView()
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -72,7 +79,14 @@ final class NewPhotoView: NSView {
 
     translatesAutoresizingMaskIntoConstraints = false
 
-    // Add background view first (below image view)
+    addSubview(tinyThumbnailBackgroundView)
+    NSLayoutConstraint.activate([
+      tinyThumbnailBackgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      tinyThumbnailBackgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      tinyThumbnailBackgroundView.topAnchor.constraint(equalTo: topAnchor),
+      tinyThumbnailBackgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
+    ])
+
     addSubview(backgroundView)
     NSLayoutConstraint.activate([
       backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -82,6 +96,7 @@ final class NewPhotoView: NSView {
     ])
 
     // setupImage()
+    updateTinyThumbnailBackground()
     updateImage()
     setupMasks()
     setupDragSource()
@@ -117,6 +132,7 @@ final class NewPhotoView: NSView {
     self.fullMessage = fullMessage
     updateCornerRadii()
     updateMasks()
+    updateTinyThumbnailBackground()
 
     // Only reload if file id or image source has changed
     if
@@ -129,6 +145,13 @@ final class NewPhotoView: NSView {
     }
 
     updateImage()
+  }
+
+  private func updateTinyThumbnailBackground() {
+    tinyThumbnailBackgroundView.setPhoto(fullMessage.message.isSticker == true ? nil : fullMessage.photoInfo)
+    if currentImage == nil {
+      backgroundView.isHidden = !shouldShowFlatPlaceholder()
+    }
   }
 
   private func updateCornerRadii() {
@@ -235,14 +258,18 @@ final class NewPhotoView: NSView {
   }
 
   private func showLoadingView() {
-    print("showLoadingView")
     wasLoadedWithPlaceholder = true
-    backgroundView.alphaValue = 1.0
+    backgroundView.isHidden = !shouldShowFlatPlaceholder()
   }
 
   private func hideLoadingView() {
-    // Don't hide the background view, just make it transparent if needed
-    backgroundView.alphaValue = 0.0
+    backgroundView.isHidden = true
+  }
+
+  private func shouldShowFlatPlaceholder() -> Bool {
+    InlineTinyThumbnailDecoder.strippedBytes(
+      from: fullMessage.message.isSticker == true ? nil : fullMessage.photoInfo
+    ) == nil
   }
 
   override func layout() {

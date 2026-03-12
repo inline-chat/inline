@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import GRDB
 import InlineKit
+import InlineUI
 import Logger
 #if canImport(QuickLookUI)
 import QuickLookUI
@@ -326,6 +327,12 @@ final class NewVideoView: NSView {
     return view
   }()
 
+  private let tinyThumbnailBackgroundView: InlineTinyThumbnailBackgroundView = {
+    let view = InlineTinyThumbnailBackgroundView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
+
   private let overlayViewModel = VideoOverlayViewModel()
   private lazy var overlayView = VideoOverlayView(viewModel: overlayViewModel, onCancel: { [weak self] in
     self?.cancelActiveTransfer()
@@ -402,6 +409,7 @@ final class NewVideoView: NSView {
     self.fullMessage = fullMessage
     updateCornerRadii()
     updateMasks()
+    updateTinyThumbnailBackground()
     syncUploadProgressBinding()
 
     if
@@ -438,6 +446,14 @@ final class NewVideoView: NSView {
     layer?.rasterizationScale = window?.backingScaleFactor ?? 2.0
     translatesAutoresizingMaskIntoConstraints = false
 
+    addSubview(tinyThumbnailBackgroundView)
+    NSLayoutConstraint.activate([
+      tinyThumbnailBackgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      tinyThumbnailBackgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      tinyThumbnailBackgroundView.topAnchor.constraint(equalTo: topAnchor),
+      tinyThumbnailBackgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
+    ])
+
     addSubview(backgroundView)
     NSLayoutConstraint.activate([
       backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -468,6 +484,7 @@ final class NewVideoView: NSView {
     durationBadge.setContentCompressionResistancePriority(.required, for: .horizontal)
     durationBadge.setContentHuggingPriority(.required, for: .horizontal)
 
+    updateTinyThumbnailBackground()
     updateImage()
     setupMasks()
     setupClickGesture()
@@ -559,6 +576,13 @@ final class NewVideoView: NSView {
           self.animateImageTransition(to: image, key: cacheKey)
         }
       }
+    }
+  }
+
+  private func updateTinyThumbnailBackground() {
+    tinyThumbnailBackgroundView.setPhoto(fullMessage.videoInfo?.thumbnail)
+    if currentImage == nil {
+      backgroundView.isHidden = hasTinyThumbnailPlaceholder()
     }
   }
 
@@ -870,7 +894,7 @@ final class NewVideoView: NSView {
       uploadProgressFraction: uploadProgressFraction
     )
 
-    backgroundView.isHidden = hasThumb ? true : false
+    backgroundView.isHidden = hasThumb || hasTinyThumbnailPlaceholder()
 
     switch overlayViewModel.state.icon {
     case .downloadProgress:
@@ -900,6 +924,10 @@ final class NewVideoView: NSView {
       isDownloading = false
       clearDownloadProgressBinding(resetState: true)
     }
+  }
+
+  private func hasTinyThumbnailPlaceholder() -> Bool {
+    InlineTinyThumbnailDecoder.strippedBytes(from: fullMessage.videoInfo?.thumbnail) != nil
   }
 
   private func bindDownloadProgressIfNeeded(videoId: Int64) {

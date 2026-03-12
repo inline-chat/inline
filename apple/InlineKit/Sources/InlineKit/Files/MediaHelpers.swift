@@ -140,34 +140,7 @@ final class MediaHelpers: Sendable {
   /// - Returns: The saved photo
   func savePhotoFromProto(_ proto: InlineProtocol.Photo) throws -> Photo {
     try database.dbWriter.write { db in
-      // Check if we already have this photo by server ID
-      if let existingPhoto = try Photo.filter(Photo.Columns.photoId == proto.id).fetchOne(db) {
-        return existingPhoto
-      }
-
-      // Create the photo
-      var photo = Photo(
-        photoId: proto.id,
-        date: Date(timeIntervalSince1970: TimeInterval(proto.date)),
-        format: proto.format.toImageFormat()
-      )
-      try photo.insert(db)
-
-      // Add photo sizes
-      for protoSize in proto.sizes {
-        let photoSize = PhotoSize(
-          photoId: photo.id!,
-          type: protoSize.type,
-          width: protoSize.w > 0 ? Int(protoSize.w) : nil,
-          height: protoSize.h > 0 ? Int(protoSize.h) : nil,
-          size: protoSize.size > 0 ? Int(protoSize.size) : nil,
-          bytes: protoSize.hasBytes ? protoSize.bytes : nil,
-          cdnUrl: protoSize.hasCdnURL ? protoSize.cdnURL : nil
-        )
-        try photoSize.insert(db)
-      }
-
-      return photo
+      try Photo.updateFromProtocol(db, protoPhoto: proto)
     }
   }
 
