@@ -1,5 +1,6 @@
 import AppKit
 import InlineKit
+import InlineUI
 import Logger
 import Nuke
 import NukeUI
@@ -23,6 +24,12 @@ final class SimplePhotoView: NSView {
     let view = BasicView()
     view.wantsLayer = true
     view.backgroundColor = .gray.withAlphaComponent(0.05)
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
+
+  private let tinyThumbnailBackgroundView: InlineTinyThumbnailBackgroundView = {
+    let view = InlineTinyThumbnailBackgroundView()
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
@@ -69,11 +76,17 @@ final class SimplePhotoView: NSView {
     layer?.masksToBounds = true
     translatesAutoresizingMaskIntoConstraints = false
 
+    addSubview(tinyThumbnailBackgroundView)
     addSubview(backgroundView)
     addSubview(imageView)
     addSubview(overlayImageView)
 
     NSLayoutConstraint.activate([
+      tinyThumbnailBackgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      tinyThumbnailBackgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      tinyThumbnailBackgroundView.topAnchor.constraint(equalTo: topAnchor),
+      tinyThumbnailBackgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
       backgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
       backgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
       backgroundView.topAnchor.constraint(equalTo: topAnchor),
@@ -89,6 +102,7 @@ final class SimplePhotoView: NSView {
     ])
 
     imageView.layer?.addSublayer(imageLayer)
+    updateTinyThumbnailBackground()
     showLoadingView()
     updateOverlayImage()
   }
@@ -126,6 +140,13 @@ final class SimplePhotoView: NSView {
     }
   }
 
+  private func updateTinyThumbnailBackground() {
+    tinyThumbnailBackgroundView.setPhoto(photoInfo)
+    if imageLayer.contents == nil {
+      backgroundView.isHidden = !shouldShowFlatPlaceholder()
+    }
+  }
+
   private func setImage(_ image: NSImage) {
     imageLayer.contents = image
     updateImageLayerFrame()
@@ -155,11 +176,15 @@ final class SimplePhotoView: NSView {
   }
 
   private func showLoadingView() {
-    backgroundView.alphaValue = 1.0
+    backgroundView.isHidden = !shouldShowFlatPlaceholder()
   }
 
   private func hideLoadingView() {
-    backgroundView.alphaValue = 0.0
+    backgroundView.isHidden = true
+  }
+
+  private func shouldShowFlatPlaceholder() -> Bool {
+    InlineTinyThumbnailDecoder.strippedBytes(from: photoInfo) == nil
   }
 
   override func layout() {
@@ -181,6 +206,7 @@ final class SimplePhotoView: NSView {
   func update(with photoInfo: PhotoInfo, overlaySymbol: String? = nil) {
     self.photoInfo = photoInfo
     self.overlaySymbol = overlaySymbol
+    updateTinyThumbnailBackground()
     updateOverlayImage()
     updateImage()
   }

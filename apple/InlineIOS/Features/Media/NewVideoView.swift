@@ -64,6 +64,12 @@ final class NewVideoView: UIView {
     return view
   }()
 
+  private let tinyThumbnailBackgroundView: InlineTinyThumbnailBackgroundView = {
+    let view = InlineTinyThumbnailBackgroundView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
+
   private let highlightOverlay: UIView = {
     let view = UIView()
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -237,6 +243,7 @@ final class NewVideoView: UIView {
   }
 
   private func setupViews() {
+    addSubview(tinyThumbnailBackgroundView)
     addSubview(thumbnailView)
     addSubview(highlightOverlay)
     addSubview(overlayBackground)
@@ -246,6 +253,11 @@ final class NewVideoView: UIView {
     addSubview(durationBadge)
 
     NSLayoutConstraint.activate([
+      tinyThumbnailBackgroundView.topAnchor.constraint(equalTo: topAnchor),
+      tinyThumbnailBackgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      tinyThumbnailBackgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      tinyThumbnailBackgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
       overlayBackground.centerXAnchor.constraint(equalTo: centerXAnchor),
       overlayBackground.centerYAnchor.constraint(equalTo: centerYAnchor),
       overlayBackground.widthAnchor.constraint(equalToConstant: 44),
@@ -277,6 +289,7 @@ final class NewVideoView: UIView {
     setupVideoConstraints()
     setupMask()
     setupGestures()
+    updateTinyThumbnailBackground()
     updateImage()
     syncUploadProgressBinding()
     updateDurationLabel()
@@ -335,6 +348,7 @@ final class NewVideoView: UIView {
       resolvedVideoLocalPath = localPath
     }
     updateMask()
+    updateTinyThumbnailBackground()
     syncUploadProgressBinding()
 
     if
@@ -365,6 +379,10 @@ final class NewVideoView: UIView {
 
   private func updateImage() {
     thumbnailView.setPhoto(fullMessage.videoInfo?.thumbnail, reloadMessageOnFinish: fullMessage.message)
+  }
+
+  private func updateTinyThumbnailBackground() {
+    tinyThumbnailBackgroundView.setPhoto(fullMessage.videoInfo?.thumbnail)
   }
 
   // MARK: - Overlay

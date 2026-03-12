@@ -204,29 +204,7 @@ public extension Photo {
   /// - Returns: The saved Photo object (with local id and server photoId)
   @discardableResult
   static func savePhotoFromProtocol(_ db: Database, photo protoPhoto: InlineProtocol.Photo) throws -> Photo {
-    // Create the Photo from protocol and insert or update
-    var photo = Photo.from(proto: protoPhoto)
-    // Try to find existing photo by server photoId
-    if let existing = try Photo.filter(Photo.Columns.photoId == protoPhoto.id).fetchOne(db) {
-      photo.id = existing.id
-      try photo.update(db)
-    } else {
-      photo = try photo.insertAndFetch(db)
-    }
-    // Save associated PhotoSize objects, referencing Photo.id
-    for protoSize in protoPhoto.sizes {
-      var size = PhotoSize.from(proto: protoSize, photoId: photo.id!)
-      // Try to find existing size by photoId (local) and type
-      if let existingSize = try PhotoSize.filter(PhotoSize.Columns.photoId == photo.id!)
-        .filter(PhotoSize.Columns.type == protoSize.type).fetchOne(db)
-      {
-        size.id = existingSize.id
-        try size.update(db)
-      } else {
-        try size.insert(db)
-      }
-    }
-    return photo
+    try Photo.updateFromProtocol(db, protoPhoto: protoPhoto)
   }
 }
 
@@ -398,7 +376,60 @@ public struct PhotoInfo: Codable, Equatable, FetchableRecord, Hashable, Persista
 
   // helpers
   public func bestPhotoSize() -> PhotoSize? {
-    sizes.first { $0.type == "f" } ?? sizes.first
+    let nonStrippedSizes = sizes.filter { $0.type != "s" }
+
+    guard nonStrippedSizes.isEmpty == false else {
+      return sizes.first { $0.type == "s" } ?? sizes.first
+    }
+
+    return nonStrippedSizes.max { lhs, rhs in
+      let lhsTypePriority = photoTypePriority(lhs.type)
+      let rhsTypePriority = photoTypePriority(rhs.type)
+      if lhsTypePriority != rhsTypePriority {
+        return lhsTypePriority < rhsTypePriority
+      }
+
+      let lhsArea = max((lhs.width ?? 0) * (lhs.height ?? 0), 0)
+      let rhsArea = max((rhs.width ?? 0) * (rhs.height ?? 0), 0)
+      if lhsArea != rhsArea {
+        return lhsArea < rhsArea
+      }
+
+      let lhsSize = lhs.size ?? 0
+      let rhsSize = rhs.size ?? 0
+      if lhsSize != rhsSize {
+        return lhsSize < rhsSize
+      }
+
+      let lhsAvailability = photoAvailabilityPriority(lhs)
+      let rhsAvailability = photoAvailabilityPriority(rhs)
+      return lhsAvailability < rhsAvailability
+    }
+  }
+
+  private func photoAvailabilityPriority(_ size: PhotoSize) -> Int {
+    if size.localPath?.isEmpty == false {
+      return 2
+    }
+    if size.cdnUrl?.isEmpty == false {
+      return 1
+    }
+    return 0
+  }
+
+  private func photoTypePriority(_ type: String) -> Int {
+    switch type {
+    case "f":
+      return 4
+    case "d":
+      return 3
+    case "c":
+      return 2
+    case "b":
+      return 1
+    default:
+      return 0
+    }
   }
 }
 

@@ -2,6 +2,8 @@ import { getPhotoMetadataAndValidate } from "@in/server/modules/files/metadata"
 import { FileTypes, type UploadFileResult } from "@in/server/modules/files/types"
 import { photos, photoSizes } from "@in/server/db/schema"
 import { db } from "@in/server/db"
+import { encryptBinary } from "@in/server/modules/encryption/encryption"
+import { generateStrippedThumbnail } from "@in/server/modules/files/strippedThumbnail"
 import { uploadFile } from "./uploadAFile"
 import { InlineError } from "@in/server/types/errors"
 import { Log } from "@in/server/utils/log"
@@ -36,9 +38,17 @@ export async function uploadPhoto(file: File, context: { userId: number }): Prom
 
     const { dbFile, fileUniqueId } = await uploadFile(file, FileTypes.PHOTO, metadata, context)
 
-    // Generate thumbhash and store that
-    // Upload thumbnails...
-    // TODO: Implement this
+    const strippedThumbnail = await generateStrippedThumbnail(file).catch((error) => {
+      log.warn("Failed to generate stripped thumbnail", {
+        error,
+        fileUniqueId,
+        userId: context.userId,
+        fileName: file.name,
+      })
+      return null
+    })
+
+    const encryptedStrippedThumbnail = strippedThumbnail ? encryptBinary(strippedThumbnail.bytes) : null
 
     // Save photo metadata
     const format = metadata.mimeType === "image/jpeg" ? "jpeg" : "png"
@@ -50,6 +60,9 @@ export async function uploadPhoto(file: File, context: { userId: number }): Prom
           format,
           width: metadata.width,
           height: metadata.height,
+          stripped: encryptedStrippedThumbnail?.encrypted ?? null,
+          strippedIv: encryptedStrippedThumbnail?.iv ?? null,
+          strippedTag: encryptedStrippedThumbnail?.authTag ?? null,
           date: new Date(),
         })
         .returning()
@@ -101,12 +114,4 @@ export async function uploadPhoto(file: File, context: { userId: number }): Prom
     })
     throw error
   }
-}
-
-function generateThumbnails(file: File, fileUniqueId: string, prefix: string) {
-  // TODO: Implement this
-}
-
-function generateThumbhash(file: File, fileUniqueId: string, prefix: string) {
-  // TODO: Implement this
 }
