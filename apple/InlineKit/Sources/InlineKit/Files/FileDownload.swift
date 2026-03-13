@@ -358,18 +358,17 @@ public final class FileDownloader: NSObject, Sendable {
       if case let .success(fileUrl) = result {
         do {
           try FileManager.default.moveItem(at: fileUrl, to: localUrl)
+          completion(.success(localUrl))
         } catch {
           log.error("Error moving downloaded file: \(error)")
           completion(.failure(error))
-          return
         }
+      } else {
+        completion(result)
       }
 
       // Clean up
       activeTasks[id] = nil
-
-      // Execute completion handler
-      completion(result)
     }
 
     // Start the download
