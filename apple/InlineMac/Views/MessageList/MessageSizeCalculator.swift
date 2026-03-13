@@ -519,7 +519,7 @@ class MessageSizeCalculator {
     let hasVoice = ExperimentalFeatureFlags.voiceMessagesEnabled && message.message.hasVoice
     let hasDocument = message.documentInfo != nil || hasVoice
     let hasReply = message.message.repliedToMessageId != nil
-    let hasForwardHeader = message.message.forwardFromUserId != nil
+    let hasForwardHeader = message.message.hasForwardHeader
     let hasReactions = message.reactions.count > 0
     let renderableAttachments = message.attachments.filter(\.isRenderableAttachment)
     let hasAttachments = !renderableAttachments.isEmpty
@@ -1234,7 +1234,7 @@ class MessageSizeCalculator {
     let hasVoice = ExperimentalFeatureFlags.voiceMessagesEnabled && message.message.hasVoice
     let hasDocument = message.documentInfo != nil || hasVoice
     let hasReply = message.message.repliedToMessageId != nil
-    let hasForwardHeader = message.message.forwardFromUserId != nil
+    let hasForwardHeader = message.message.hasForwardHeader
     let hasReactions = message.reactions.count > 0
     let renderableAttachments = message.attachments.filter(\.isRenderableAttachment)
     let hasAttachments = !renderableAttachments.isEmpty
