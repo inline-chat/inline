@@ -9,6 +9,7 @@ import { z } from "zod"
 
 const InlineActionsSchema = z
   .object({
+    send: z.boolean().optional(),
     reply: z.boolean().optional(),
     reactions: z.boolean().optional(),
     read: z.boolean().optional(),

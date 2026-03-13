@@ -1,6 +1,7 @@
-import type { OpenClawPluginApi } from "openclaw/plugin-sdk"
+import type { AnyAgentTool, OpenClawPluginApi } from "openclaw/plugin-sdk"
 import { emptyPluginConfigSchema } from "openclaw/plugin-sdk"
 import { inlineChannelPlugin } from "./inline/channel.js"
+import { createInlineMembersTool } from "./inline/members-tool.js"
 import { setInlineRuntime } from "./runtime.js"
 
 const plugin: {
@@ -19,6 +20,9 @@ const plugin: {
   register(api: OpenClawPluginApi) {
     setInlineRuntime(api.runtime)
     api.registerChannel({ plugin: inlineChannelPlugin })
+    api.registerTool((ctx) => createInlineMembersTool(ctx) as AnyAgentTool, {
+      names: ["inline_members"],
+    })
   },
 }
 

@@ -11,16 +11,19 @@ import {
 import {
   InlineSdkClient,
   Method,
-  Member_Role,
   type Chat,
   type Dialog,
   type Message,
   type User,
 } from "@inline-chat/realtime-sdk"
 import { resolveInlineAccount, resolveInlineToken } from "./accounts.js"
+import { uploadInlineMediaFromUrl } from "./media.js"
+import { summarizeInlineMessageContent } from "./message-content.js"
 import { normalizeInlineTarget } from "./normalize.js"
+import { buildInlineUserDisplayName, getSpaceMembersWithUsers } from "./space-members.js"
 
 type InlineActionGateKey =
+  | "send"
   | "reply"
   | "reactions"
   | "read"
@@ -37,7 +40,8 @@ const ACTION_GROUPS: Array<{
   defaultEnabled: boolean
   actions: ChannelMessageActionName[]
 }> = [
-  { key: "reply", defaultEnabled: true, actions: ["reply"] },
+  { key: "send", defaultEnabled: true, actions: ["send", "sendAttachment"] },
+  { key: "reply", defaultEnabled: true, actions: ["reply", "thread-reply"] },
   { key: "reactions", defaultEnabled: true, actions: ["react", "reactions"] },
   { key: "read", defaultEnabled: true, actions: ["read"] },
   { key: "search", defaultEnabled: true, actions: ["search"] },
@@ -48,6 +52,7 @@ const ACTION_GROUPS: Array<{
     actions: [
       "channel-info",
       "channel-edit",
+      "renameGroup",
       "channel-list",
       "channel-create",
       "channel-delete",
@@ -59,7 +64,7 @@ const ACTION_GROUPS: Array<{
   {
     key: "participants",
     defaultEnabled: true,
-    actions: ["addParticipant", "removeParticipant", "leaveGroup", "member-info"],
+    actions: ["addParticipant", "removeParticipant", "kick", "leaveGroup", "member-info"],
   },
   { key: "delete", defaultEnabled: true, actions: ["delete", "unsend"] },
   { key: "pins", defaultEnabled: true, actions: ["pin", "unpin", "list-pins"] },
@@ -315,6 +320,65 @@ function resolveChatIdFromParams(params: Record<string, unknown>): bigint {
   return BigInt(normalizeChatId(raw))
 }
 
+function resolveMessageSendTargetFromParams(params: Record<string, unknown>): {
+  target: string
+  chatId?: bigint
+  userId?: bigint
+} {
+  const explicitUserIdRaw = readFlexibleId(params, "userId") ?? readStringParam(params, "userId")
+  if (explicitUserIdRaw) {
+    const userId = parseInlineId(explicitUserIdRaw, "userId")
+    return {
+      target: `user:${String(userId)}`,
+      userId,
+    }
+  }
+
+  const rawTarget = readFlexibleId(params, "to") ?? readStringParam(params, "to")
+  if (rawTarget) {
+    const normalized = normalizeInlineTarget(rawTarget) ?? rawTarget.trim()
+    const userMatch = normalized.match(/^user:([0-9]+)$/i)
+    if (userMatch?.[1]) {
+      return {
+        target: `user:${userMatch[1]}`,
+        userId: BigInt(userMatch[1]),
+      }
+    }
+    if (!/^[0-9]+$/.test(normalized)) {
+      throw new Error(`inline action: invalid target "${rawTarget}"`)
+    }
+    return {
+      target: normalized,
+      chatId: BigInt(normalized),
+    }
+  }
+
+  const rawChatId =
+    readFlexibleId(params, "chatId") ??
+    readStringParam(params, "chatId") ??
+    readFlexibleId(params, "channelId") ??
+    readStringParam(params, "channelId")
+  if (!rawChatId) {
+    throw new Error("inline action requires to/chatId/channelId/userId")
+  }
+
+  const normalized = normalizeInlineTarget(rawChatId) ?? rawChatId.trim()
+  const userMatch = normalized.match(/^user:([0-9]+)$/i)
+  if (userMatch?.[1]) {
+    return {
+      target: `user:${userMatch[1]}`,
+      userId: BigInt(userMatch[1]),
+    }
+  }
+  if (!/^[0-9]+$/.test(normalized)) {
+    throw new Error(`inline action: invalid target "${rawChatId}"`)
+  }
+  return {
+    target: normalized,
+    chatId: BigInt(normalized),
+  }
+}
+
 function buildChatPeer(chatId: bigint) {
   return {
     type: {
@@ -324,14 +388,6 @@ function buildChatPeer(chatId: bigint) {
   }
 }
 
-function buildInlineUserDisplayName(user: { firstName?: string; lastName?: string; username?: string }): string {
-  const explicit = [user.firstName?.trim(), user.lastName?.trim()].filter(Boolean).join(" ")
-  if (explicit) return explicit
-  const username = user.username?.trim()
-  if (username) return `@${username}`
-  return "Unknown"
-}
-
 function mapMessage(message: {
   id: bigint
   fromId: bigint
@@ -339,6 +395,9 @@ function mapMessage(message: {
   message?: string
   out?: boolean
   replyToMsgId?: bigint
+  media?: Message["media"]
+  attachments?: Message["attachments"]
+  entities?: Message["entities"]
   reactions?: {
     reactions?: Array<{
       emoji?: string
@@ -349,6 +408,7 @@ function mapMessage(message: {
     }>
   }
 }) {
+  const content = summarizeInlineMessageContent(message as Message)
   const reactions = (message.reactions?.reactions ?? []).map((reaction) => ({
     emoji: reaction.emoji ?? "",
     userId: String(reaction.userId),
@@ -361,9 +421,14 @@ function mapMessage(message: {
     id: String(message.id),
     fromId: String(message.fromId),
     date: Number(message.date) * 1000,
-    text: message.message ?? "",
+    text: content.text,
+    rawText: content.rawText,
     out: Boolean(message.out),
     replyToId: message.replyToMsgId != null ? String(message.replyToMsgId) : undefined,
+    attachmentUrls: content.attachmentUrls,
+    links: content.links,
+    media: content.media,
+    attachments: content.attachments,
     reactions,
   }
 }
@@ -402,14 +467,6 @@ function mapChatEntry(params: {
           ? { kind: "chat", id: String(peer.chat.chatId) }
           : null,
   }
-}
-
-function mapSpaceMemberRole(role: Member_Role | undefined): "owner" | "admin" | "member" | null {
-  if (role == null) return null
-  if (role === Member_Role.OWNER) return "owner"
-  if (role === Member_Role.ADMIN) return "admin"
-  if (role === Member_Role.MEMBER) return "member"
-  return null
 }
 
 async function loadMessageReactions(params: {
@@ -539,6 +596,44 @@ function buildUserMap(users: User[]): Map<string, User> {
   return map
 }
 
+async function resolveSpaceIdFromParams(params: {
+  client: InlineSdkClient
+  action: string
+  rawParams: Record<string, unknown>
+}): Promise<bigint> {
+  const directSpaceId = parseOptionalInlineId(
+    readFlexibleId(params.rawParams, "spaceId") ??
+      readFlexibleId(params.rawParams, "space") ??
+      readStringParam(params.rawParams, "spaceId"),
+    "spaceId",
+  )
+  if (directSpaceId != null) return directSpaceId
+
+  const chatTarget =
+    readFlexibleId(params.rawParams, "chatId") ??
+    readFlexibleId(params.rawParams, "channelId") ??
+    readFlexibleId(params.rawParams, "to") ??
+    readStringParam(params.rawParams, "to")
+  if (!chatTarget) {
+    throw new Error(`inline action: ${params.action} requires spaceId (or a chat target in a space)`)
+  }
+
+  const chatId = BigInt(normalizeChatId(chatTarget))
+  const chatResult = await params.client.invokeRaw(Method.GET_CHAT, {
+    oneofKind: "getChat",
+    getChat: { peerId: buildChatPeer(chatId) },
+  })
+  if (chatResult.oneofKind !== "getChat") {
+    throw new Error(`inline action: expected getChat result, got ${String(chatResult.oneofKind)}`)
+  }
+
+  const inferredSpaceId = chatResult.getChat.chat?.spaceId ?? chatResult.getChat.dialog?.spaceId
+  if (inferredSpaceId == null) {
+    throw new Error(`inline action: ${params.action} requires a spaceId or a chat that belongs to a space`)
+  }
+  return inferredSpaceId
+}
+
 function listAllActions(): ChannelMessageActionName[] {
   const out = new Set<ChannelMessageActionName>()
   for (const group of ACTION_GROUPS) {
@@ -588,7 +683,7 @@ export const inlineMessageActions: ChannelMessageActionAdapter = {
     const to = typeof args.to === "string" ? args.to.trim() : ""
     if (!to) return null
     const normalized = normalizeInlineTarget(to) ?? to
-    if (!/^[0-9]+$/.test(normalized)) return null
+    if (!/^(user:)?[0-9]+$/i.test(normalized)) return null
     return { to: normalized }
   },
   handleAction: async ({ action, params, cfg, accountId }) => {
@@ -601,26 +696,112 @@ export const inlineMessageActions: ChannelMessageActionAdapter = {
 
     const normalizedAction: ChannelMessageActionName = action
 
-    if (normalizedAction === "reply") {
+    if (normalizedAction === "send" || normalizedAction === "sendAttachment") {
       const parseMarkdown =
         resolveInlineAccount({ cfg, accountId: accountId ?? null }).config.parseMarkdown ?? true
       return await withInlineClient({
         cfg,
         accountId,
         fn: async (client) => {
-          const chatId = resolveChatIdFromParams(params)
-          const replyToMsgId = parseInlineId(
+          const target = resolveMessageSendTargetFromParams(params)
+          const sendTarget =
+            target.chatId != null ? { chatId: target.chatId } : target.userId != null ? { userId: target.userId } : null
+          if (!sendTarget) {
+            throw new Error("inline action: missing message target")
+          }
+          const mediaUrl =
+            readStringParam(params, "mediaUrl") ??
+            readStringParam(params, "attachmentUrl") ??
+            readStringParam(params, "url")
+          const text =
+            readStringParam(params, "message") ??
+            readStringParam(params, "text") ??
+            readStringParam(params, "caption") ??
+            ""
+          const replyToMsgId = parseOptionalInlineId(
             readFlexibleId(params, "messageId") ??
               readFlexibleId(params, "replyTo") ??
               readFlexibleId(params, "replyToId") ??
               readStringParam(params, "messageId") ??
               readStringParam(params, "replyTo") ??
-              readStringParam(params, "replyToId", { required: true }),
+              readStringParam(params, "replyToId"),
+            "messageId",
+          )
+
+          if (normalizedAction === "sendAttachment" && !mediaUrl) {
+            throw new Error("inline action: sendAttachment requires mediaUrl/url")
+          }
+
+          if (!mediaUrl) {
+            const message =
+              readStringParam(params, "message") ??
+              readStringParam(params, "text", { required: true, allowEmpty: true })
+            const sent = await client.sendMessage({
+              ...sendTarget,
+              text: message,
+              ...(replyToMsgId != null ? { replyToMsgId } : {}),
+              parseMarkdown,
+            })
+            return jsonResult({
+              ok: true,
+              target: target.target,
+              messageId: sent.messageId != null ? String(sent.messageId) : null,
+              replyToId: replyToMsgId != null ? String(replyToMsgId) : null,
+            })
+          }
+
+          const media = await uploadInlineMediaFromUrl({
+            client,
+            cfg,
+            accountId: accountId ?? null,
+            mediaUrl,
+          })
+          const sent = await client.sendMessage({
+            ...sendTarget,
+            ...(text ? { text } : {}),
+            media,
+            ...(replyToMsgId != null ? { replyToMsgId } : {}),
+            ...(text ? { parseMarkdown } : {}),
+          })
+          return jsonResult({
+            ok: true,
+            target: target.target,
+            messageId: sent.messageId != null ? String(sent.messageId) : null,
+            mediaUrl,
+            replyToId: replyToMsgId != null ? String(replyToMsgId) : null,
+          })
+        },
+      })
+    }
+
+    if (normalizedAction === "reply" || normalizedAction === "thread-reply") {
+      const parseMarkdown =
+        resolveInlineAccount({ cfg, accountId: accountId ?? null }).config.parseMarkdown ?? true
+      return await withInlineClient({
+        cfg,
+        accountId,
+        fn: async (client) => {
+          const replyParams =
+            normalizedAction === "thread-reply" &&
+            params.threadId != null &&
+            params.to == null &&
+            params.chatId == null &&
+            params.channelId == null
+              ? { ...params, to: params.threadId }
+              : params
+          const chatId = resolveChatIdFromParams(replyParams)
+          const replyToMsgId = parseInlineId(
+            readFlexibleId(replyParams, "messageId") ??
+              readFlexibleId(replyParams, "replyTo") ??
+              readFlexibleId(replyParams, "replyToId") ??
+              readStringParam(replyParams, "messageId") ??
+              readStringParam(replyParams, "replyTo") ??
+              readStringParam(replyParams, "replyToId", { required: true }),
             "messageId",
           )
           const text =
-            readStringParam(params, "message") ??
-            readStringParam(params, "text", { required: true, allowEmpty: true })
+            readStringParam(replyParams, "message") ??
+            readStringParam(replyParams, "text", { required: true, allowEmpty: true })
           const sent = await client.sendMessage({
             chatId,
             text,
@@ -851,7 +1032,7 @@ export const inlineMessageActions: ChannelMessageActionAdapter = {
       })
     }
 
-    if (normalizedAction === "channel-edit") {
+    if (normalizedAction === "channel-edit" || normalizedAction === "renameGroup") {
       return await withInlineClient({
         cfg,
         accountId,
@@ -1115,7 +1296,7 @@ export const inlineMessageActions: ChannelMessageActionAdapter = {
       })
     }
 
-    if (normalizedAction === "removeParticipant") {
+    if (normalizedAction === "removeParticipant" || normalizedAction === "kick") {
       return await withInlineClient({
         cfg,
         accountId,
@@ -1343,18 +1524,11 @@ export const inlineMessageActions: ChannelMessageActionAdapter = {
         accountId,
         fn: async (client) => {
           const chatId = resolveChatIdFromParams(params)
-          const chatResult = await client.invokeRaw(Method.GET_CHAT, {
-            oneofKind: "getChat",
-            getChat: { peerId: buildChatPeer(chatId) },
+          const spaceId = await resolveSpaceIdFromParams({
+            client,
+            action: "permissions",
+            rawParams: params,
           })
-          if (chatResult.oneofKind !== "getChat") {
-            throw new Error(`inline action: expected getChat result, got ${String(chatResult.oneofKind)}`)
-          }
-
-          const spaceId = chatResult.getChat.chat?.spaceId ?? chatResult.getChat.dialog?.spaceId
-          if (spaceId == null) {
-            throw new Error("inline action: permissions requires a chat that belongs to a space")
-          }
 
           const userIdRaw =
             readFlexibleId(params, "userId") ??
@@ -1397,34 +1571,9 @@ export const inlineMessageActions: ChannelMessageActionAdapter = {
             }
           }
 
-          const membersResult = await client.invokeRaw(Method.GET_SPACE_MEMBERS, {
-            oneofKind: "getSpaceMembers",
-            getSpaceMembers: {
-              spaceId,
-            },
-          })
-          if (membersResult.oneofKind !== "getSpaceMembers") {
-            throw new Error(
-              `inline action: expected getSpaceMembers result, got ${String(membersResult.oneofKind)}`,
-            )
-          }
-
-          const usersById = buildUserMap(membersResult.getSpaceMembers.users ?? [])
-          const members = (membersResult.getSpaceMembers.members ?? []).map((member) => {
-            const linkedUser = usersById.get(String(member.userId))
-            return {
-              userId: String(member.userId),
-              role: mapSpaceMemberRole(member.role),
-              canAccessPublicChats: member.canAccessPublicChats,
-              date: Number(member.date) * 1000,
-              user: linkedUser
-                ? {
-                    id: String(linkedUser.id),
-                    name: buildInlineUserDisplayName(linkedUser),
-                    username: linkedUser.username ?? null,
-                  }
-                : null,
-            }
+          const members = await getSpaceMembersWithUsers({
+            client,
+            spaceId,
           })
 
           const filteredMembers =
