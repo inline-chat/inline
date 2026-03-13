@@ -9,6 +9,13 @@ struct GeneralSettingsDetailView: View {
         Toggle("Launch at Login", isOn: $appSettings.launchAtLogin)
       }
 
+      Section("Files") {
+        Toggle(
+          "Automatically save downloaded files to Downloads",
+          isOn: $appSettings.autoSaveDownloadedFilesToDownloadsFolder
+        )
+      }
+
       Section("Compose") {
         Toggle("Automatic Spell Correction", isOn: $appSettings.automaticSpellCorrection)
         Toggle("Check Spelling While Typing", isOn: $appSettings.checkSpellingWhileTyping)

@@ -25,6 +25,7 @@ class DocumentView: NSView {
   private var progressSubscription: AnyCancellable?
   private var isDownloading = false
   private var white = false
+  private var locallyAvailableFileURL: URL?
 
   // MARK: - UI Elements
 
@@ -174,6 +175,7 @@ class DocumentView: NSView {
     self.removeAction = removeAction
     self.fullMessage = fullMessage
     self.white = white ?? false
+    locallyAvailableFileURL = Self.localDocumentURL(for: documentInfo)
 
     super.init(frame: NSRect(x: 0, y: 0, width: 300, height: Theme.documentViewHeight))
 
@@ -409,9 +411,11 @@ class DocumentView: NSView {
       guard let self else { return }
 
       switch result {
-      case .success:
+      case let .success(fileURL):
         DispatchQueue.main.async {
+          self.locallyAvailableFileURL = fileURL
           self.documentState = .locallyAvailable
+          self.autoSaveDownloadedFileIfNeeded(sourceURL: fileURL)
         }
       // Success - refresh document info
       // refreshDocumentInfo()
@@ -460,6 +464,7 @@ class DocumentView: NSView {
   func update(with documentInfo: DocumentInfo) {
     // Update document info
     self.documentInfo = documentInfo
+    locallyAvailableFileURL = Self.localDocumentURL(for: documentInfo)
 
     // Check if the document is already downloaded
     if documentInfo.document.localPath != nil {
@@ -565,112 +570,153 @@ class DocumentView: NSView {
 //
 extension DocumentView {
   private func showInFinder() {
-    guard let localPath = documentInfo.document.localPath else { return }
-
-    // Get the source file URL
-    let cacheDirectory = FileHelpers.getLocalCacheDirectory(for: .documents)
-    let sourceURL = cacheDirectory.appendingPathComponent(localPath)
-
-    // Get the Downloads directory
-    let fileManager = FileManager.default
-    let downloadsURL = fileManager.urls(for: .downloadsDirectory, in: .userDomainMask).first!
-
-    // Get the filename
-    let fileName = documentInfo.document.fileName ?? "Unknown File"
-
-    // Check if an exact match already exists in Downloads
-    let potentialExistingFile = downloadsURL.appendingPathComponent(fileName)
-
-    if fileManager.fileExists(atPath: potentialExistingFile.path) {
-      // File with same name exists in Downloads, check if it's the same file
-      if hasSameContent(sourceURL: sourceURL, destinationURL: potentialExistingFile) {
-        // It's the same file, just reveal it
-        NSWorkspace.shared.activateFileViewerSelecting([potentialExistingFile])
-        return
-      } else {
-        // It's a different file with the same name, create a unique name
-        let uniqueFileName = createUniqueFileName(fileName, inDirectory: downloadsURL)
-        let destinationURL = downloadsURL.appendingPathComponent(uniqueFileName)
-
-        copyAndRevealFile(from: sourceURL, to: destinationURL, fallbackURL: sourceURL)
-      }
-    } else {
-      // No file with same name exists in Downloads, copy it
-      let destinationURL = downloadsURL.appendingPathComponent(fileName)
-
-      copyAndRevealFile(from: sourceURL, to: destinationURL, fallbackURL: sourceURL)
-    }
+    guard let sourceURL = currentLocalDocumentURL() else { return }
+    revealDocumentInFinder(sourceURL: sourceURL)
   }
 
   // Helper method to create a unique filename with sequential numbering
   private func createUniqueFileName(_ fileName: String, inDirectory directory: URL) -> String {
     let fileManager = FileManager.default
+    let parsedFileURL = URL(fileURLWithPath: fileName)
+    let fileExtension = parsedFileURL.pathExtension.isEmpty ? "" : ".\(parsedFileURL.pathExtension)"
+    let baseName = parsedFileURL.deletingPathExtension().lastPathComponent
 
-    // Split the filename into base name and extension
-    let fileExtension = fileName.contains(".") ? "." + fileName.components(separatedBy: ".").last! : ""
-    let baseName = fileName.contains(".") ? fileName.components(separatedBy: ".").dropLast()
-      .joined(separator: ".") : fileName
-
-    // Check if the base name already ends with a number in parentheses like "file (1)"
-    let baseNameWithoutNumber: String
-    let regex = try! NSRegularExpression(pattern: " \\((\\d+)\\)$", options: [])
+    let regex = try? NSRegularExpression(pattern: " \\((\\d+)\\)$", options: [])
     let range = NSRange(baseName.startIndex ..< baseName.endIndex, in: baseName)
 
-    if let match = regex.firstMatch(in: baseName, options: [], range: range),
+    let baseNameWithoutNumber: String
+    let initialCounter: Int
+
+    if let regex,
+       let match = regex.firstMatch(in: baseName, options: [], range: range),
        let numberRange = Range(match.range(at: 1), in: baseName),
-       let existingNumber = Int(baseName[numberRange])
+       let existingNumber = Int(baseName[numberRange]),
+       let baseRange = Range(NSRange(location: 0, length: match.range.location), in: baseName)
     {
-      // The filename already has a number, extract the base name without the number
-      if let baseRange = Range(NSRange(location: 0, length: match.range.location), in: baseName) {
-        baseNameWithoutNumber = String(baseName[baseRange])
-      } else {
-        baseNameWithoutNumber = baseName
-      }
-
-      // Start checking from the next number
-      var counter = existingNumber + 1
-
-      // Try incrementing numbers until we find an available filename
-      while true {
-        let newFileName = "\(baseNameWithoutNumber) (\(counter))\(fileExtension)"
-        let newFilePath = directory.appendingPathComponent(newFileName).path
-
-        if !fileManager.fileExists(atPath: newFilePath) {
-          return newFileName
-        }
-
-        counter += 1
-      }
+      baseNameWithoutNumber = String(baseName[baseRange])
+      initialCounter = existingNumber + 1
     } else {
-      // The filename doesn't have a number yet, start with (1)
-      var counter = 1
+      baseNameWithoutNumber = baseName
+      initialCounter = 1
+    }
 
-      // Try incrementing numbers until we find an available filename
-      while true {
-        let newFileName = "\(baseName) (\(counter))\(fileExtension)"
-        let newFilePath = directory.appendingPathComponent(newFileName).path
+    var counter = initialCounter
+    while true {
+      let newFileName = "\(baseNameWithoutNumber) (\(counter))\(fileExtension)"
+      let newFilePath = directory.appendingPathComponent(newFileName).path
 
-        if !fileManager.fileExists(atPath: newFilePath) {
-          return newFileName
-        }
-
-        counter += 1
+      if !fileManager.fileExists(atPath: newFilePath) {
+        return newFileName
       }
+
+      counter += 1
     }
   }
 
-  // Helper method to copy and reveal a file
-  private func copyAndRevealFile(from sourceURL: URL, to destinationURL: URL, fallbackURL: URL) {
-    let fileManager = FileManager.default
-
+  private func autoSaveDownloadedFileIfNeeded(sourceURL: URL) {
+    guard AppSettings.shared.autoSaveDownloadedFilesToDownloadsFolder else { return }
     do {
-      try fileManager.copyItem(at: sourceURL, to: destinationURL)
+      _ = try ensureDocumentExistsInDownloads(sourceURL: sourceURL)
+    } catch {
+      Log.shared.error("Failed to auto-save downloaded file to Downloads", error: error)
+    }
+  }
+
+  private func revealDocumentInFinder(sourceURL: URL) {
+    do {
+      let destinationURL = try ensureDocumentExistsInDownloads(sourceURL: sourceURL)
       NSWorkspace.shared.activateFileViewerSelecting([destinationURL])
     } catch {
-      print("Error copying file: \(error)")
-      // If copy fails, just show the original file
-      NSWorkspace.shared.activateFileViewerSelecting([fallbackURL])
+      Log.shared.error("Failed to reveal downloaded file in Finder", error: error)
+      NSWorkspace.shared.activateFileViewerSelecting([sourceURL])
     }
+  }
+
+  private func ensureDocumentExistsInDownloads(sourceURL: URL) throws -> URL {
+    let downloadsURL = try downloadsDirectoryURL()
+    let fileManager = FileManager.default
+    let fileName = documentInfo.document.fileName ?? "Unknown File"
+    let exactDestinationURL = downloadsURL.appendingPathComponent(fileName)
+
+    if let existingURL = try findExistingDownloadedFile(sourceURL: sourceURL, in: downloadsURL, fileName: fileName) {
+      return existingURL
+    }
+
+    let destinationURL = if fileManager.fileExists(atPath: exactDestinationURL.path) {
+      downloadsURL.appendingPathComponent(createUniqueFileName(fileName, inDirectory: downloadsURL))
+    } else {
+      exactDestinationURL
+    }
+
+    try fileManager.copyItem(at: sourceURL, to: destinationURL)
+    return destinationURL
+  }
+
+  private func downloadsDirectoryURL() throws -> URL {
+    if let downloadsURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first {
+      return downloadsURL
+    }
+
+    throw NSError(
+      domain: "DocumentView",
+      code: 1,
+      userInfo: [NSLocalizedDescriptionKey: "Downloads directory is unavailable"]
+    )
+  }
+
+  private func findExistingDownloadedFile(sourceURL: URL, in directory: URL, fileName: String) throws -> URL? {
+    let fileManager = FileManager.default
+    let exactMatchURL = directory.appendingPathComponent(fileName)
+
+    if fileManager.fileExists(atPath: exactMatchURL.path),
+       hasSameContent(sourceURL: sourceURL, destinationURL: exactMatchURL)
+    {
+      return exactMatchURL
+    }
+
+    let directoryContents = try fileManager.contentsOfDirectory(
+      at: directory,
+      includingPropertiesForKeys: nil,
+      options: [.skipsHiddenFiles]
+    )
+
+    for candidateURL in directoryContents where isGeneratedDownloadName(candidateURL.lastPathComponent, for: fileName) {
+      if hasSameContent(sourceURL: sourceURL, destinationURL: candidateURL) {
+        return candidateURL
+      }
+    }
+
+    return nil
+  }
+
+  private func isGeneratedDownloadName(_ candidateName: String, for originalFileName: String) -> Bool {
+    let originalURL = URL(fileURLWithPath: originalFileName)
+    let candidateURL = URL(fileURLWithPath: candidateName)
+    let originalBaseName = originalURL.deletingPathExtension().lastPathComponent
+    let candidateBaseName = candidateURL.deletingPathExtension().lastPathComponent
+
+    guard candidateURL.pathExtension == originalURL.pathExtension else {
+      return false
+    }
+
+    let escapedBaseName = NSRegularExpression.escapedPattern(for: originalBaseName)
+    let pattern = "^" + escapedBaseName + " \\([0-9]+\\)$"
+    guard let regex = try? NSRegularExpression(pattern: pattern) else {
+      return false
+    }
+
+    let range = NSRange(candidateBaseName.startIndex ..< candidateBaseName.endIndex, in: candidateBaseName)
+    return regex.firstMatch(in: candidateBaseName, options: [], range: range) != nil
+  }
+
+  private func currentLocalDocumentURL() -> URL? {
+    Self.localDocumentURL(for: documentInfo) ?? locallyAvailableFileURL
+  }
+
+  private static func localDocumentURL(for documentInfo: DocumentInfo) -> URL? {
+    guard let localPath = documentInfo.document.localPath else { return nil }
+    let cacheDirectory = FileHelpers.getLocalCacheDirectory(for: .documents)
+    return cacheDirectory.appendingPathComponent(localPath)
   }
 
   // Simplified file comparison
@@ -707,7 +753,7 @@ extension DocumentView {
 
       return false
     } catch {
-      print("Error comparing files: \(error)")
+      Log.shared.error("Error comparing files", error: error)
       return false
     }
   }
