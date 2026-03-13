@@ -14,6 +14,7 @@ import { resolveInlineToken, type ResolvedInlineAccount } from "./accounts.js"
 import { resolveInlineGroupRequireMention } from "./policy.js"
 import { getInlineRuntime } from "../runtime.js"
 import { uploadInlineMediaFromUrl } from "./media.js"
+import { summarizeInlineMessageContent } from "./message-content.js"
 
 const CHANNEL_ID = "inline" as const
 
@@ -87,7 +88,7 @@ async function resolveChatInfo(
 }
 
 function messageText(message: Message): string {
-  return (message.message ?? "").trim()
+  return summarizeInlineMessageContent(message).text
 }
 
 function normalizeInlineUsername(raw: string | undefined): string | undefined {
@@ -332,7 +333,7 @@ async function buildHistoryContext(params: {
           repliedToBot = item.fromId === params.meId
         }
 
-        const text = normalizeHistoryText(item.message)
+        const text = normalizeHistoryText(summarizeInlineMessageContent(item).text)
         if (!text) continue
         const label = resolveHistorySenderLabel({
           senderId: item.fromId,
