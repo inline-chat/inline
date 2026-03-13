@@ -134,6 +134,13 @@ describe("parseMarkdown", () => {
       expect(result.entities[0]!.type).toBe(MessageEntity_Type.PRE)
     })
 
+    test("code block preserves link syntax without nested parsing", () => {
+      const result = parseMarkdown("```\n[not a link](https://example.com)\n```")
+      expect(result.text).toBe("[not a link](https://example.com)")
+      expect(result.entities).toHaveLength(1)
+      expect(result.entities[0]!.type).toBe(MessageEntity_Type.PRE)
+    })
+
     test("code block with text before and after", () => {
       const result = parseMarkdown("Before\n```js\ncode\n```\nAfter")
       expect(result.text).toBe("Before\ncode\nAfter")
@@ -273,6 +280,28 @@ describe("parseMarkdown", () => {
       expect(result.entities).toHaveLength(1)
       expect(result.entities[0]!.type).toBe(MessageEntity_Type.CODE)
     })
+
+    test("inline code wrapped by bold still blocks markdown parsing inside code", () => {
+      const result = parseMarkdown("**`[not a link](url)`**")
+      expect(result.text).toBe("[not a link](url)")
+      expect(result.entities).toHaveLength(2)
+
+      const boldEntity = result.entities.find((entity) => entity.type === MessageEntity_Type.BOLD)
+      const codeEntity = result.entities.find((entity) => entity.type === MessageEntity_Type.CODE)
+      const linkEntity = result.entities.find((entity) => entity.type === MessageEntity_Type.TEXT_URL)
+
+      expect(boldEntity).toMatchObject({
+        offset: BigInt(0),
+        length: BigInt(17),
+        type: MessageEntity_Type.BOLD,
+      })
+      expect(codeEntity).toMatchObject({
+        offset: BigInt(0),
+        length: BigInt(17),
+        type: MessageEntity_Type.CODE,
+      })
+      expect(linkEntity).toBeUndefined()
+    })
   })
 
   describe("multiple entities", () => {
@@ -314,6 +343,56 @@ describe("parseMarkdown", () => {
       const result = parseMarkdown("Use `code` and [link](url)")
       expect(result.text).toBe("Use code and link")
       expect(result.entities).toHaveLength(2)
+    })
+
+    test("bold wrapping a markdown link preserves both entities", () => {
+      const result = parseMarkdown("**[click here](https://example.com)**")
+
+      expect(result.text).toBe("click here")
+      expect(result.entities).toHaveLength(2)
+
+      const boldEntity = result.entities.find((entity) => entity.type === MessageEntity_Type.BOLD)
+      const linkEntity = result.entities.find((entity) => entity.type === MessageEntity_Type.TEXT_URL)
+
+      expect(boldEntity).toMatchObject({
+        offset: BigInt(0),
+        length: BigInt(10),
+        type: MessageEntity_Type.BOLD,
+      })
+      expect(linkEntity).toMatchObject({
+        offset: BigInt(0),
+        length: BigInt(10),
+        type: MessageEntity_Type.TEXT_URL,
+      })
+      expect(linkEntity?.entity).toEqual({
+        oneofKind: "textUrl",
+        textUrl: { url: "https://example.com" },
+      })
+    })
+
+    test("markdown link text can contain bold formatting", () => {
+      const result = parseMarkdown("[**click here**](https://example.com)")
+
+      expect(result.text).toBe("click here")
+      expect(result.entities).toHaveLength(2)
+
+      const boldEntity = result.entities.find((entity) => entity.type === MessageEntity_Type.BOLD)
+      const linkEntity = result.entities.find((entity) => entity.type === MessageEntity_Type.TEXT_URL)
+
+      expect(boldEntity).toMatchObject({
+        offset: BigInt(0),
+        length: BigInt(10),
+        type: MessageEntity_Type.BOLD,
+      })
+      expect(linkEntity).toMatchObject({
+        offset: BigInt(0),
+        length: BigInt(10),
+        type: MessageEntity_Type.TEXT_URL,
+      })
+      expect(linkEntity?.entity).toEqual({
+        oneofKind: "textUrl",
+        textUrl: { url: "https://example.com" },
+      })
     })
   })
 

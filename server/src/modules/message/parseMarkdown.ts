@@ -12,6 +12,7 @@ type Match = {
   type: MessageEntity_Type
   url?: string
   language?: string
+  nestedEntities?: MessageEntity[]
 }
 
 /**
@@ -64,6 +65,9 @@ export function parseMarkdown(input: string): ParsedMarkdown {
       // Record entity with offset in output text
       const offset = result.length
       entities.push(createEntity(match, offset))
+      if (match.nestedEntities?.length) {
+        entities.push(...shiftEntities(match.nestedEntities, offset))
+      }
       // Add the content (without markdown syntax)
       result += match.content
     }
@@ -75,6 +79,29 @@ export function parseMarkdown(input: string): ParsedMarkdown {
   result += input.slice(lastIndex)
 
   return { text: result, entities }
+}
+
+function shiftEntities(entities: MessageEntity[], offset: number): MessageEntity[] {
+  return entities.map((entity) => ({
+    ...entity,
+    offset: entity.offset + BigInt(offset),
+  }))
+}
+
+function parseNestedContent(
+  content: string,
+  options?: { allowedTypes?: Set<MessageEntity_Type> }
+): { text: string; entities: MessageEntity[] } {
+  const parsed = parseMarkdown(content)
+
+  if (!options?.allowedTypes) {
+    return parsed
+  }
+
+  return {
+    text: parsed.text,
+    entities: parsed.entities.filter((entity) => options.allowedTypes?.has(entity.type)),
+  }
 }
 
 function createEntity(match: Match, offset: number): MessageEntity {
@@ -168,12 +195,22 @@ function findLinks(text: string, matches: Match[]): void {
     const url = match[2] ?? ""
 
     if (linkText.length > 0 && url.length > 0) {
+      const parsedLinkText = parseNestedContent(linkText, {
+        allowedTypes: new Set([
+          MessageEntity_Type.BOLD,
+          MessageEntity_Type.ITALIC,
+          MessageEntity_Type.CODE,
+          MessageEntity_Type.PRE,
+        ]),
+      })
+
       matches.push({
         start: match.index,
         end: match.index + match[0].length,
-        content: linkText,
+        content: parsedLinkText.text,
         type: MessageEntity_Type.TEXT_URL,
         url,
+        nestedEntities: parsedLinkText.entities,
       })
     }
   }
@@ -205,11 +242,14 @@ function findBold(text: string, matches: Match[]): void {
     const content = match[2] ?? ""
 
     if (content.trim().length > 0) {
+      const parsedContent = parseNestedContent(content)
+
       matches.push({
         start: match.index,
         end: match.index + match[0].length,
-        content,
+        content: parsedContent.text,
         type: MessageEntity_Type.BOLD,
+        nestedEntities: parsedContent.entities,
       })
     }
   }
@@ -224,11 +264,14 @@ function findItalic(text: string, matches: Match[]): void {
     const content = match[1] || match[2] || ""
 
     if (content.trim().length > 0) {
+      const parsedContent = parseNestedContent(content)
+
       matches.push({
         start: match.index,
         end: match.index + match[0].length,
-        content,
+        content: parsedContent.text,
         type: MessageEntity_Type.ITALIC,
+        nestedEntities: parsedContent.entities,
       })
     }
   }
