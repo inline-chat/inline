@@ -136,14 +136,16 @@ For `message send`/plugin outbound sends:
 ## Message Tool RPC Actions
 
 The plugin exposes Inline RPC-backed actions through OpenClaw's `message` tool.
-Inline RPC-backed actions use a numeric chat id via `to`, `chatId`, or `channelId`.
+Most Inline RPC-backed actions use a numeric chat id via `to`, `chatId`, or `channelId`.
+Direct DM sends can also target `user:<id>`.
 
+- Sending: `send`, `sendAttachment`
 - Replying: `reply`, `thread-reply`
 - Reactions: `react`, `reactions`
 - Reading/searching: `read`, `search`
 - Editing: `edit`
-- Channels/threads: `channel-info`, `channel-edit`, `channel-list`, `channel-create`, `channel-delete`, `channel-move`, `thread-list`, `thread-create`
-- Participants: `addParticipant`, `removeParticipant`, `leaveGroup`, `member-info`
+- Channels/threads: `channel-info`, `channel-edit`, `renameGroup`, `channel-list`, `channel-create`, `channel-delete`, `channel-move`, `thread-list`, `thread-create`
+- Participants: `addParticipant`, `removeParticipant`, `kick`, `leaveGroup`, `member-info`
 - Message lifecycle: `delete`, `unsend`
 - Pins: `pin`, `unpin`, `list-pins`
 - Space permissions: `permissions`
@@ -154,6 +156,7 @@ You can gate action groups from config:
 channels:
   inline:
     actions:
+      send: true
       reply: true
       reactions: true
       read: true
@@ -165,6 +168,14 @@ channels:
       pins: true
       permissions: true
 ```
+
+## Extra Agent Tools
+
+The plugin also registers a dedicated `inline_members` tool for space-member discovery outside the `message` action surface.
+
+- Required input: `spaceId`
+- Optional filters: `query`, `userId`, `limit`, `accountId`
+- Returned members include explicit DM targets like `user:123`
 
 Multi-account:
 

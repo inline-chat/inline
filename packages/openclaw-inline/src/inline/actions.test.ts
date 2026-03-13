@@ -22,10 +22,14 @@ describe("inline/actions", () => {
       }) ?? []
 
     expect(configured).toContain("reply")
-    expect(configured).not.toContain("thread-reply")
+    expect(configured).toContain("send")
+    expect(configured).toContain("sendAttachment")
+    expect(configured).toContain("thread-reply")
     expect(configured).toContain("channel-list")
+    expect(configured).toContain("renameGroup")
     expect(configured).toContain("channel-create")
     expect(configured).toContain("removeParticipant")
+    expect(configured).toContain("kick")
     expect(configured).toContain("leaveGroup")
     expect(configured).toContain("delete")
     expect(configured).toContain("pin")
@@ -39,6 +43,7 @@ describe("inline/actions", () => {
               token: "token",
               baseUrl: "https://api.inline.chat",
               actions: {
+                send: false,
                 channels: false,
                 participants: false,
                 delete: false,
@@ -51,6 +56,7 @@ describe("inline/actions", () => {
       }) ?? []
 
     expect(gated).toContain("reply")
+    expect(gated).not.toContain("send")
     expect(gated).not.toContain("channel-list")
     expect(gated).not.toContain("removeParticipant")
     expect(gated).not.toContain("delete")
@@ -83,12 +89,24 @@ describe("inline/actions", () => {
     expect(actions.length).toBeGreaterThan(0)
   })
 
+  it("extracts explicit user targets for send routing", async () => {
+    vi.resetModules()
+    const { inlineMessageActions } = await import("./actions")
+
+    const extracted = inlineMessageActions.extractToolSend?.({
+      args: { action: "sendMessage", to: "inline:user:99" },
+    } as any)
+
+    expect(extracted).toEqual({ to: "user:99" })
+  })
+
   it("dispatches expanded rpc action set via Inline RPC", async () => {
     vi.resetModules()
 
     const connect = vi.fn(async () => {})
     const close = vi.fn(async () => {})
     const sendMessage = vi.fn(async () => ({ messageId: 88n }))
+    const uploadInlineMediaFromUrl = vi.fn(async () => ({ kind: "photo", photoId: 901n }))
     const getMe = vi.fn(async () => ({ userId: 500n, firstName: "Inline", username: "inline-bot" }))
     const sampleMessageWithReaction = {
       id: 10n,
@@ -291,6 +309,9 @@ describe("inline/actions", () => {
         invokeRaw = invokeRaw
       },
     }))
+    vi.doMock("./media", () => ({
+      uploadInlineMediaFromUrl,
+    }))
 
     const { inlineMessageActions } = await import("./actions")
 
@@ -305,9 +326,37 @@ describe("inline/actions", () => {
 
     await inlineMessageActions.handleAction?.({
       channel: "inline",
+      action: "send",
+      cfg,
+      params: { to: "user:99", message: "dm body" },
+    } as any)
+
+    await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "send",
+      cfg,
+      params: { userId: "99", message: "dm by user id" },
+    } as any)
+
+    await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "sendAttachment",
+      cfg,
+      params: { to: "user:99", mediaUrl: "https://cdn.inline.chat/outbound-image.jpg", caption: "caption" },
+    } as any)
+
+    await inlineMessageActions.handleAction?.({
+      channel: "inline",
       action: "reply",
       cfg,
       params: { to: "7", messageId: "10", message: "reply body" },
+    } as any)
+
+    await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "thread-reply",
+      cfg,
+      params: { threadId: "7", replyToId: "10", text: "thread reply body" },
     } as any)
 
     await inlineMessageActions.handleAction?.({
@@ -382,6 +431,13 @@ describe("inline/actions", () => {
 
     await inlineMessageActions.handleAction?.({
       channel: "inline",
+      action: "renameGroup",
+      cfg,
+      params: { to: "7", threadName: "Alias Rename" },
+    } as any)
+
+    await inlineMessageActions.handleAction?.({
+      channel: "inline",
       action: "channel-delete",
       cfg,
       params: { to: "7" },
@@ -404,6 +460,13 @@ describe("inline/actions", () => {
     await inlineMessageActions.handleAction?.({
       channel: "inline",
       action: "removeParticipant",
+      cfg,
+      params: { to: "7", participant: "@new-user" },
+    } as any)
+
+    await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "kick",
       cfg,
       params: { to: "7", participant: "@new-user" },
     } as any)
@@ -438,9 +501,40 @@ describe("inline/actions", () => {
 
     expect(sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
+        userId: 99n,
+        text: "dm body",
+      }),
+    )
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 99n,
+        text: "dm by user id",
+      }),
+    )
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 99n,
+        text: "caption",
+        media: { kind: "photo", photoId: 901n },
+      }),
+    )
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
         chatId: 7n,
         text: "reply body",
         replyToMsgId: 10n,
+      }),
+    )
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: 7n,
+        text: "thread reply body",
+        replyToMsgId: 10n,
+      }),
+    )
+    expect(uploadInlineMediaFromUrl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mediaUrl: "https://cdn.inline.chat/outbound-image.jpg",
       }),
     )
     expect(invokeRaw).toHaveBeenCalledWith(
@@ -509,6 +603,15 @@ describe("inline/actions", () => {
       27,
       expect.objectContaining({
         oneofKind: "updateMemberAccess",
+      }),
+    )
+    expect(invokeRaw).toHaveBeenCalledWith(
+      10,
+      expect.objectContaining({
+        oneofKind: "getSpaceMembers",
+        getSpaceMembers: {
+          spaceId: 22n,
+        },
       }),
     )
     expect(invokeRaw).toHaveBeenCalledWith(
@@ -602,6 +705,111 @@ describe("inline/actions", () => {
         oneofKind: "getChatHistory",
       }),
     )
+  })
+
+  it("returns attachment-aware text and urls for read results", async () => {
+    vi.resetModules()
+
+    const invokeRaw = vi.fn(async (method: number) => {
+      if (method === 5) {
+        return {
+          oneofKind: "getChatHistory",
+          getChatHistory: {
+            messages: [
+              {
+                id: 270n,
+                fromId: 42n,
+                date: 1_700_000_000n,
+                message: "",
+                out: false,
+                media: {
+                  media: {
+                    oneofKind: "photo",
+                    photo: {
+                      photo: {
+                        id: 901n,
+                        sizes: [{ w: 1200, h: 900, size: 12345, cdnUrl: "https://cdn.inline.chat/image-270.jpg" }],
+                      },
+                    },
+                  },
+                },
+                attachments: {
+                  attachments: [
+                    {
+                      attachment: {
+                        oneofKind: "urlPreview",
+                        urlPreview: {
+                          id: 902n,
+                          url: "https://example.com/image-context",
+                          title: "Image context",
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        }
+      }
+      throw new Error(`unexpected method ${String(method)}`)
+    })
+
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {
+        GET_CHAT_HISTORY: 5,
+      },
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = vi.fn(async () => {})
+        close = vi.fn(async () => {})
+        invokeRaw = invokeRaw
+      },
+    }))
+
+    const { inlineMessageActions } = await import("./actions")
+
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+        },
+      },
+    } satisfies OpenClawConfig
+
+    const result = await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "read",
+      cfg,
+      params: { to: "7", limit: 1 },
+    } as any)
+
+    expect(result).toMatchObject({
+      details: {
+        messages: [
+          expect.objectContaining({
+            id: "270",
+            text: "[photo] https://cdn.inline.chat/image-270.jpg | [link preview: Image context] https://example.com/image-context",
+            rawText: "",
+            attachmentUrls: [
+              "https://cdn.inline.chat/image-270.jpg",
+              "https://example.com/image-context",
+            ],
+            media: expect.objectContaining({
+              kind: "photo",
+              url: "https://cdn.inline.chat/image-270.jpg",
+            }),
+            attachments: [
+              expect.objectContaining({
+                kind: "urlPreview",
+                url: "https://example.com/image-context",
+              }),
+            ],
+          }),
+        ],
+      },
+    })
   })
 
   it("rejects disabled actions from config", async () => {

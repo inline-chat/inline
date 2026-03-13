@@ -31,6 +31,7 @@ describe("inline/config-schema", () => {
       InlineConfigSchema.safeParse({
         mediaMaxMb: 10,
         actions: {
+          send: true,
           read: true,
           channels: true,
           permissions: false,

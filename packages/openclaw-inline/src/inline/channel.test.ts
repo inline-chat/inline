@@ -170,12 +170,17 @@ describe("inline/channel", () => {
     }) ?? []
 
     expect(actions).toContain("read")
+    expect(actions).toContain("send")
+    expect(actions).toContain("sendAttachment")
     expect(actions).toContain("reply")
+    expect(actions).toContain("thread-reply")
     expect(actions).toContain("react")
     expect(actions).toContain("reactions")
     expect(actions).toContain("edit")
     expect(actions).toContain("channel-edit")
+    expect(actions).toContain("renameGroup")
     expect(actions).toContain("addParticipant")
+    expect(actions).toContain("kick")
   })
 
   it("outbound sendText uses the Inline SDK client (mocked)", async () => {
