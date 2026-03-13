@@ -92,6 +92,12 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   public var hasLink: Bool?
   public var entities: MessageEntities?
 
+  public var hasForwardHeader: Bool {
+    forwardFromUserId != nil
+      || forwardFromPeerUserId != nil
+      || forwardFromPeerThreadId != nil
+  }
+
   private static let log = Log.scoped("Message")
   private static let allowedLinkSchemes: Set<String> = ["http", "https"]
   private static let linkDetector: NSDataDetector? = {

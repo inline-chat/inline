@@ -85,6 +85,7 @@ class MessageTableCell: NSView {
        // same message layout
        currentContent.message.message.out == message.message.out,
        currentContent.message.message.repliedToMessageId == message.message.repliedToMessageId,
+       currentContent.message.message.hasForwardHeader == message.message.hasForwardHeader,
        // exclude file/photo/video from reuse
        currentContent.message.file?.id == message.file?.id,
        currentContent.message.photoInfo?.id == message.photoInfo?.id,

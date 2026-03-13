@@ -367,6 +367,30 @@ class MinimalMessageViewAppKit: NSView {
     return view
   }
 
+  private func syncForwardHeaderView(for props: MessageViewProps) {
+    guard props.layout.hasForwardHeader else {
+      if forwardHeaderLabel.superview != nil {
+        forwardHeaderLabel.removeFromSuperview()
+      }
+      NSLayoutConstraint.deactivate([
+        forwardHeaderTopConstraint,
+        forwardHeaderLeadingConstraint,
+        forwardHeaderTrailingConstraint,
+      ].compactMap { $0 })
+      forwardHeaderTopConstraint = nil
+      forwardHeaderLeadingConstraint = nil
+      forwardHeaderTrailingConstraint = nil
+      return
+    }
+
+    forwardHeaderLabel.textColor = .controlAccentColor
+    forwardHeaderLabel.stringValue = forwardHeaderText
+
+    if forwardHeaderLabel.superview == nil {
+      contentView.addSubview(forwardHeaderLabel)
+    }
+  }
+
   private func syncDocumentSlotView() {
     guard hasDocument else {
       documentContainerView.subviews.forEach { $0.removeFromSuperview() }
@@ -626,11 +650,7 @@ class MinimalMessageViewAppKit: NSView {
 
     addSubview(contentView)
 
-    if hasForwardHeader {
-      forwardHeaderLabel.textColor = forwardHeaderTextColor
-      forwardHeaderLabel.stringValue = forwardHeaderText
-      contentView.addSubview(forwardHeaderLabel)
-    }
+    syncForwardHeaderView(for: props)
 
     if hasReply {
       contentView.addSubview(replyView)
@@ -1335,17 +1355,19 @@ class MinimalMessageViewAppKit: NSView {
         equalTo: contentView.topAnchor,
         constant: forwardHeader.spacing.top
       )
+      forwardHeaderLeadingConstraint = forwardHeaderLabel.leadingAnchor.constraint(
+        equalTo: contentView.leadingAnchor,
+        constant: forwardHeader.spacing.left
+      )
+      forwardHeaderTrailingConstraint = forwardHeaderLabel.trailingAnchor.constraint(
+        equalTo: contentView.trailingAnchor,
+        constant: -forwardHeader.spacing.right
+      )
 
       constraints.append(
         contentsOf: [
-          forwardHeaderLabel.leadingAnchor.constraint(
-            equalTo: contentView.leadingAnchor,
-            constant: forwardHeader.spacing.left
-          ),
-          forwardHeaderLabel.trailingAnchor.constraint(
-            equalTo: contentView.trailingAnchor,
-            constant: -forwardHeader.spacing.right
-          ),
+          forwardHeaderLeadingConstraint!,
+          forwardHeaderTrailingConstraint!,
           forwardHeaderTopConstraint!,
         ]
       )
@@ -1461,6 +1483,8 @@ class MinimalMessageViewAppKit: NSView {
 
   private var replyViewTopConstraint: NSLayoutConstraint?
   private var forwardHeaderTopConstraint: NSLayoutConstraint?
+  private var forwardHeaderLeadingConstraint: NSLayoutConstraint?
+  private var forwardHeaderTrailingConstraint: NSLayoutConstraint?
 
   private var documentViewTopConstraint: NSLayoutConstraint?
   private var documentViewHeightConstraint: NSLayoutConstraint?
@@ -1565,12 +1589,54 @@ class MinimalMessageViewAppKit: NSView {
       }
     }
 
-    if let forwardHeader = props.layout.forwardHeader,
-       let forwardHeaderTopConstraint
-    {
+    if let forwardHeader = props.layout.forwardHeader {
+      if forwardHeaderLabel.superview == nil {
+        contentView.addSubview(forwardHeaderLabel)
+      }
+
+      if forwardHeaderTopConstraint == nil
+        || forwardHeaderLeadingConstraint == nil
+        || forwardHeaderTrailingConstraint == nil
+      {
+        forwardHeaderTopConstraint = forwardHeaderLabel.topAnchor.constraint(
+          equalTo: contentView.topAnchor,
+          constant: forwardHeader.spacing.top
+        )
+        forwardHeaderLeadingConstraint = forwardHeaderLabel.leadingAnchor.constraint(
+          equalTo: contentView.leadingAnchor,
+          constant: forwardHeader.spacing.left
+        )
+        forwardHeaderTrailingConstraint = forwardHeaderLabel.trailingAnchor.constraint(
+          equalTo: contentView.trailingAnchor,
+          constant: -forwardHeader.spacing.right
+        )
+        NSLayoutConstraint.activate([
+          forwardHeaderTopConstraint!,
+          forwardHeaderLeadingConstraint!,
+          forwardHeaderTrailingConstraint!,
+        ])
+      }
+
+      guard let forwardHeaderTopConstraint,
+            let forwardHeaderLeadingConstraint,
+            let forwardHeaderTrailingConstraint
+      else {
+        super.updateConstraints()
+        return
+      }
+
       log.trace("Updating forward header constraints for message \(forwardHeader.size)")
       if forwardHeaderTopConstraint.constant != forwardHeader.spacing.top {
         forwardHeaderTopConstraint.constant = forwardHeader.spacing.top
+      }
+
+      if forwardHeaderLeadingConstraint.constant != forwardHeader.spacing.left {
+        forwardHeaderLeadingConstraint.constant = forwardHeader.spacing.left
+      }
+
+      let trailingConstant = -forwardHeader.spacing.right
+      if forwardHeaderTrailingConstraint.constant != trailingConstant {
+        forwardHeaderTrailingConstraint.constant = trailingConstant
       }
     }
 
@@ -2382,6 +2448,7 @@ class MinimalMessageViewAppKit: NSView {
 
     // update internal props
     self.fullMessage = fullMessage
+    syncForwardHeaderView(for: props)
 
     if props.layout.document != nil {
       if documentContainerView.superview == nil {
@@ -2428,10 +2495,7 @@ class MinimalMessageViewAppKit: NSView {
     // Update bubble background
     bubbleView.backgroundColor = bubbleBackgroundColor
 
-    if hasForwardHeader {
-      forwardHeaderLabel.textColor = forwardHeaderTextColor
-      forwardHeaderLabel.stringValue = forwardHeaderText
-    }
+    syncForwardHeaderView(for: props)
 
     // Photo
     if hasPhoto {

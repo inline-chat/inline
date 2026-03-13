@@ -677,7 +677,7 @@ final class NewVideoView: NSView {
   private func updateCornerRadii() {
     let hasText = fullMessage.message.text?.isEmpty == false
     let hasTopHeader = fullMessage.message.repliedToMessageId != nil
-      || fullMessage.message.forwardFromUserId != nil
+      || fullMessage.message.hasForwardHeader
     let bubbleRadius = Theme.messageBubbleCornerRadius - 1
     let topRadius = hasTopHeader ? 0 : bubbleRadius
 
