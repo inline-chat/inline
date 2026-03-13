@@ -245,16 +245,14 @@ Inherited access still comes from the DM parent via `parent_chat_id`.
 
 ## Security Rule For Reply Anchors
 
-If a child has direct participants who cannot access the parent chat, anchor-row visibility behavior may later need its own rules.
+If a child has direct participants who cannot access the parent chat, the anchored parent message row may still be shown inside the subthread.
 
 Recommended rule:
 
-- if viewer can access parent chat, show the anchor row normally
-- otherwise show a redacted stub with no parent content
+- if the anchored parent message is present, it is acceptable to show it to subthread users inside the child thread
+- this is allowed even when the viewer is present only through child-thread participation
 
 But this is not a blocker for the core subthread model in the current plan.
-
-This remains one of the main security-sensitive areas.
 
 ## Dialog / Sidebar Model
 
