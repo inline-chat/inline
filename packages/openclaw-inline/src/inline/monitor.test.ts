@@ -860,6 +860,93 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("includes attachment-only messages in history and current inbound body", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 7301n,
+            date: 1_700_000_110n,
+            fromId: 51n,
+            message: "",
+            mentioned: true,
+            media: {
+              media: {
+                oneofKind: "photo",
+                photo: {
+                  photo: {
+                    id: 900n,
+                    sizes: [{ w: 1200, h: 900, size: 12345, cdnUrl: "https://cdn.inline.chat/current-photo.jpg" }],
+                  },
+                },
+              },
+            },
+          } as any,
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      historyByChat: {
+        "88": [
+          {
+            id: 7300n,
+            date: 1_700_000_109n,
+            fromId: 52n,
+            message: "",
+            attachments: {
+              attachments: [
+                {
+                  attachment: {
+                    oneofKind: "urlPreview",
+                    urlPreview: {
+                      id: 901n,
+                      url: "https://example.com/design",
+                      title: "Design mock",
+                    },
+                  },
+                },
+              ],
+            },
+          } as any,
+        ],
+      },
+      dispatchReplyPayload: {
+        text: "looks good",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+        historyLimit: 10,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalled()
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: expect.stringContaining("#7300 user:52: [link preview: Design mock] https://example.com/design"),
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: expect.stringContaining("Current message:\n[photo] https://cdn.inline.chat/current-photo.jpg"),
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
   it("can bypass mention gate on replies to bot messages when historyLimit=0 via reply target lookup", async () => {
     const harness = await setupMonitorHarness({
       events: [
