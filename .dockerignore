@@ -1,0 +1,5 @@
+.git
+.agent-docs
+**/.DS_Store
+**/node_modules
+**/dist
