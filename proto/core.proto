@@ -1127,6 +1127,7 @@ message EditMessageInput {
   InputPeer peer_id = 2;
   string text = 3;
   optional MessageEntities entities = 7;
+  optional bool parse_markdown = 8;
 }
 
 message EditMessageResult { repeated Update updates = 1; }
