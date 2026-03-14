@@ -1002,6 +1002,8 @@ export const inlineMessageActions: ChannelMessageActionAdapter = {
     }
 
     if (normalizedAction === "edit") {
+      const parseMarkdown =
+        resolveInlineAccount({ cfg, accountId: accountId ?? null }).config.parseMarkdown ?? true
       return await withInlineClient({
         cfg,
         accountId,
@@ -1019,13 +1021,14 @@ export const inlineMessageActions: ChannelMessageActionAdapter = {
               messageId,
               peerId: buildChatPeer(chatId),
               text,
+              parseMarkdown,
             },
           })
           if (result.oneofKind !== "editMessage") {
             throw new Error(`inline action: expected editMessage result, got ${String(result.oneofKind)}`)
           }
           return jsonResult(
-            toJsonSafe({ ok: true, chatId: String(chatId), messageId: String(messageId), text }),
+            toJsonSafe({ ok: true, chatId: String(chatId), messageId: String(messageId), text, parseMarkdown }),
           )
         },
       })

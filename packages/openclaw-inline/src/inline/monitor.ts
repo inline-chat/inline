@@ -49,6 +49,15 @@ type InlineInboundMediaInfo = {
   contentType?: string | undefined
 }
 
+type InlineEditStreamState = {
+  messageId: bigint | null
+  accumulatedText: string
+  lastPartialText: string
+  finalTextAccumulator: string
+  failed: boolean
+  opChain: Promise<void>
+}
+
 const DEFAULT_GROUP_HISTORY_LIMIT = 12
 const DEFAULT_DM_HISTORY_LIMIT = 6
 const HISTORY_LINE_MAX_CHARS = 280
@@ -266,6 +275,34 @@ function normalizeHistoryText(raw: string | undefined): string {
   if (!compact) return ""
   if (compact.length <= HISTORY_LINE_MAX_CHARS) return compact
   return `${compact.slice(0, HISTORY_LINE_MAX_CHARS - 1)}…`
+}
+
+function drainCompleteParagraphs(buffer: string): { paragraphs: string[]; rest: string } {
+  const paragraphs: string[] = []
+  let rest = buffer
+
+  while (rest.length > 0) {
+    const breakIndex = rest.indexOf("\n\n")
+    if (breakIndex < 0) break
+    const paragraph = rest.slice(0, breakIndex).trim()
+    if (paragraph) {
+      paragraphs.push(paragraph)
+    }
+    rest = rest.slice(breakIndex).replace(/^\n+/, "")
+  }
+
+  return { paragraphs, rest }
+}
+
+function appendParagraphText(existing: string, paragraph: string): string {
+  const trimmed = paragraph.trim()
+  if (!trimmed) return existing
+  return existing ? `${existing}\n\n${trimmed}` : trimmed
+}
+
+function extractCompleteParagraphText(text: string): string {
+  const drained = drainCompleteParagraphs(text)
+  return drained.paragraphs.reduce((acc, paragraph) => appendParagraphText(acc, paragraph), "").trim()
 }
 
 function resolveHistorySenderLabel(params: {
@@ -976,13 +1013,84 @@ export async function monitorInlineProvider(params: {
             : {}
 
         const parseMarkdown = account.config.parseMarkdown ?? true
+        const streamViaEditMessage = account.config.streamViaEditMessage === true
+        const defaultReplyToMsgId = isGroup && msg.replyToMsgId != null ? msg.id : undefined
         const disableBlockStreaming =
-          typeof account.config.blockStreaming === "boolean"
+          streamViaEditMessage
+            ? true
+            : typeof account.config.blockStreaming === "boolean"
             ? !account.config.blockStreaming
             : undefined
+        const editStreamState: InlineEditStreamState = {
+          messageId: null,
+          accumulatedText: "",
+          lastPartialText: "",
+          finalTextAccumulator: "",
+          failed: false,
+          opChain: Promise.resolve(),
+        }
         const replyOptions = {
           ...(onModelSelected ? { onModelSelected } : {}),
           blockReplyTimeoutMs: 25_000,
+          ...(streamViaEditMessage
+            ? {
+                onPartialReply: async (payload: { text?: string; mediaUrls?: string[] }) => {
+                  if (editStreamState.failed) return
+                  if ((payload.mediaUrls?.length ?? 0) > 0) return
+                  const partialText = typeof payload.text === "string" ? payload.text : ""
+                  if (!partialText || partialText === editStreamState.lastPartialText) return
+                  editStreamState.lastPartialText = partialText
+
+                  const nextText = rewriteNumericMentionsToUsernames(
+                    extractCompleteParagraphText(partialText),
+                    senderProfilesById,
+                  ).trim()
+                  if (!nextText || nextText === editStreamState.accumulatedText) return
+
+                  editStreamState.opChain = editStreamState.opChain.then(async () => {
+                    if (editStreamState.failed) return
+                    if (!nextText || nextText === editStreamState.accumulatedText) return
+
+                    try {
+                      if (editStreamState.messageId == null) {
+                        const sent = await client.sendMessage({
+                          chatId,
+                          text: nextText,
+                          ...(defaultReplyToMsgId != null ? { replyToMsgId: defaultReplyToMsgId } : {}),
+                          parseMarkdown,
+                        })
+                        if (sent.messageId == null) {
+                          throw new Error("inline edit stream: sendMessage returned no messageId")
+                        }
+                        editStreamState.messageId = sent.messageId
+                        rememberBotMessageId(botMessageIdsByChat, chatId, sent.messageId)
+                      } else {
+                        const result = await client.invokeRaw(Method.EDIT_MESSAGE, {
+                          oneofKind: "editMessage",
+                          editMessage: {
+                            messageId: editStreamState.messageId,
+                            peerId: buildChatPeer(chatId),
+                            text: nextText,
+                            parseMarkdown,
+                          },
+                        })
+                        if (result.oneofKind !== "editMessage") {
+                          throw new Error(
+                            `inline edit stream: expected editMessage result, got ${String(result.oneofKind)}`,
+                          )
+                        }
+                      }
+                      editStreamState.accumulatedText = nextText
+                      statusSink?.({ lastOutboundAt: Date.now() })
+                    } catch (error) {
+                      editStreamState.failed = true
+                      runtime.error?.(`inline edit stream failed: ${String(error)}`)
+                    }
+                  })
+                  await editStreamState.opChain
+                },
+              }
+            : {}),
           ...(typeof disableBlockStreaming === "boolean" ? { disableBlockStreaming } : {}),
         }
 
@@ -993,7 +1101,7 @@ export async function monitorInlineProvider(params: {
             ...prefixOptions,
             ...typingCallbacks,
             deliver: async (payload) => {
-              const rawText = (payload.text ?? "").trim()
+              const rawText = payload.text ?? ""
               const mediaList = payload.mediaUrls?.length
                 ? payload.mediaUrls
                 : payload.mediaUrl
@@ -1031,18 +1139,54 @@ export async function monitorInlineProvider(params: {
                 rememberSent(sent.messageId)
               }
 
+              const updateStreamedMessage = async (text: string): Promise<boolean> => {
+                await editStreamState.opChain
+                if (editStreamState.messageId == null) return false
+                const nextText = text.trim()
+                if (!nextText) return true
+                if (!editStreamState.failed && nextText === editStreamState.accumulatedText) return true
+
+                const result = await client.invokeRaw(Method.EDIT_MESSAGE, {
+                  oneofKind: "editMessage",
+                  editMessage: {
+                    messageId: editStreamState.messageId,
+                    peerId: buildChatPeer(chatId),
+                    text: nextText,
+                    parseMarkdown,
+                  },
+                })
+                if (result.oneofKind !== "editMessage") {
+                  throw new Error(`inline edit stream: expected editMessage result, got ${String(result.oneofKind)}`)
+                }
+                editStreamState.accumulatedText = nextText
+                editStreamState.lastPartialText = nextText
+                editStreamState.failed = false
+                return true
+              }
+
               if (mediaList.length === 0) {
                 if (!outboundText.trim()) return
+                if (streamViaEditMessage && editStreamState.messageId != null) {
+                  editStreamState.finalTextAccumulator += outboundText
+                  await updateStreamedMessage(editStreamState.finalTextAccumulator)
+                  statusSink?.({ lastOutboundAt: Date.now() })
+                  return
+                }
                 await sendTextFallback(outboundText, true)
                 statusSink?.({ lastOutboundAt: Date.now() })
                 return
+              }
+
+              if (streamViaEditMessage && editStreamState.messageId != null && outboundText.trim()) {
+                await updateStreamedMessage(outboundText)
               }
 
               for (let index = 0; index < mediaList.length; index++) {
                 const mediaUrl = mediaList[index]
                 if (!mediaUrl?.trim()) continue
                 const isFirst = index === 0
-                const caption = isFirst ? outboundText : ""
+                const caption =
+                  isFirst && !(streamViaEditMessage && editStreamState.messageId != null) ? outboundText : ""
                 try {
                   const media = await uploadInlineMediaFromUrl({
                     client,

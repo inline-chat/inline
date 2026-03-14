@@ -100,6 +100,7 @@ channels:
     # Streaming + chunking:
     mediaMaxMb: 20
     blockStreaming: true
+    streamViaEditMessage: true # optional: paragraph-level text streaming via send+edit fallback; off by default
     chunkMode: "newline" # length|newline
     blockStreamingCoalesce:
       minChars: 600
