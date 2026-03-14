@@ -11,12 +11,14 @@ import { RealtimeUpdates } from "../realtime/message"
 import { connectionManager } from "../ws/connections"
 import { encodeDate, encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
+import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
 
 type Input = {
   messageId: bigint
   peer: InputPeer
   text: string
   entities?: MessageEntities
+  parseMarkdown?: boolean
 }
 
 type Output = {
@@ -27,12 +29,17 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
   const chatId = await ChatModel.getChatIdFromInputPeer(input.peer, context)
   const currentUserId = context.currentUserId
   const fullMessage = await MessageModel.getMessage(Number(input.messageId), chatId)
+  const outgoingText = await processOutgoingText({
+    text: input.text,
+    entities: input.entities,
+    parseMarkdown: input.parseMarkdown,
+  })
 
   const { message, update } = await MessageModel.editMessage({
     messageId: Number(input.messageId),
     chatId,
-    text: input.text,
-    entities: input.entities,
+    text: outgoingText.text,
+    entities: outgoingText.entities,
   })
 
   if (!message) {

@@ -12,7 +12,13 @@ export const editMessage = async (
   }
 
   const result = await Functions.messages.editMessage(
-    { messageId: input.messageId, peer: input.peerId, text: input.text, entities: input.entities },
+    {
+      messageId: input.messageId,
+      peer: input.peerId,
+      text: input.text,
+      entities: input.entities,
+      parseMarkdown: input.parseMarkdown ?? undefined,
+    },
     {
       currentSessionId: handlerContext.sessionId,
       currentUserId: handlerContext.userId,

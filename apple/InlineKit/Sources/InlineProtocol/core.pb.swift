@@ -4695,12 +4695,22 @@ public struct EditMessageInput: Sendable {
   /// Clears the value of `entities`. Subsequent reads from it will return its default value.
   public mutating func clearEntities() {self._entities = nil}
 
+  public var parseMarkdown: Bool {
+    get {return _parseMarkdown ?? false}
+    set {_parseMarkdown = newValue}
+  }
+  /// Returns true if `parseMarkdown` has been explicitly set.
+  public var hasParseMarkdown: Bool {return self._parseMarkdown != nil}
+  /// Clears the value of `parseMarkdown`. Subsequent reads from it will return its default value.
+  public mutating func clearParseMarkdown() {self._parseMarkdown = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _peerID: InputPeer? = nil
   fileprivate var _entities: MessageEntities? = nil
+  fileprivate var _parseMarkdown: Bool? = nil
 }
 
 public struct EditMessageResult: Sendable {
@@ -14184,6 +14194,7 @@ extension EditMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     2: .standard(proto: "peer_id"),
     3: .same(proto: "text"),
     7: .same(proto: "entities"),
+    8: .standard(proto: "parse_markdown"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -14196,6 +14207,7 @@ extension EditMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
       case 2: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self.text) }()
       case 7: try { try decoder.decodeSingularMessageField(value: &self._entities) }()
+      case 8: try { try decoder.decodeSingularBoolField(value: &self._parseMarkdown) }()
       default: break
       }
     }
@@ -14218,6 +14230,9 @@ extension EditMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     try { if let v = self._entities {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
     } }()
+    try { if let v = self._parseMarkdown {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 8)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -14226,6 +14241,7 @@ extension EditMessageInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
     if lhs._peerID != rhs._peerID {return false}
     if lhs.text != rhs.text {return false}
     if lhs._entities != rhs._entities {return false}
+    if lhs._parseMarkdown != rhs._parseMarkdown {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
