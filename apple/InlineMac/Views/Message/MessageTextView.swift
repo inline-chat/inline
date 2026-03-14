@@ -106,14 +106,17 @@ class MessageTextView: NSTextView {
     let fullRange = NSRange(location: 0, length: textStorage.length)
     textStorage.enumerateAttribute(.inlineCode, in: fullRange, options: []) { value, range, _ in
       guard (value as? Bool) == true else { return }
-      guard let inlineRect = codeBlockRect(for: range, style: inlineCodeStyle),
-            inlineRect.intersects(rect)
-      else { return }
       let backgroundColor = (textStorage.attribute(.inlineCodeBackground, at: range.location, effectiveRange: nil)
         as? NSColor) ?? NSColor.labelColor.withAlphaComponent(0.12)
-      let path = NSBezierPath(roundedRect: inlineRect, xRadius: inlineCodeStyle.cornerRadius, yRadius: inlineCodeStyle.cornerRadius)
-      backgroundColor.setFill()
-      path.fill()
+      for inlineRect in inlineCodeRects(for: range, style: inlineCodeStyle) where inlineRect.intersects(rect) {
+        let path = NSBezierPath(
+          roundedRect: inlineRect,
+          xRadius: inlineCodeStyle.cornerRadius,
+          yRadius: inlineCodeStyle.cornerRadius
+        )
+        backgroundColor.setFill()
+        path.fill()
+      }
     }
   }
 
@@ -167,5 +170,95 @@ class MessageTextView: NSTextView {
     let insetBounds = bounds.insetBy(dx: style.blockHorizontalInset, dy: 0)
     let clipped = padded.intersection(insetBounds)
     return clipped.isNull ? nil : clipped
+  }
+
+  private func inlineCodeRects(for range: NSRange, style: CodeBlockStyle) -> [NSRect] {
+    if let textLayoutManager = textLayoutManager,
+       let textContentManager = textLayoutManager.textContentManager
+    {
+      let documentRange = textContentManager.documentRange
+      guard let startLocation = textContentManager.location(documentRange.location, offsetBy: range.location),
+            let endLocation = textContentManager.location(startLocation, offsetBy: range.length),
+            let textRange = NSTextRange(location: startLocation, end: endLocation)
+      else { return [] }
+
+      var rects: [NSRect] = []
+      textLayoutManager.enumerateTextSegments(
+        in: textRange,
+        type: .selection,
+        options: [.rangeNotRequired]
+      ) { _, segmentRect, _, _ in
+        if let adjustedRect = self.adjustedInlineCodeRect(for: segmentRect, style: style) {
+          rects.append(adjustedRect)
+        }
+        return true
+      }
+      return mergeInlineCodeRects(rects)
+    }
+
+    guard let layoutManager, let textContainer else { return [] }
+    let glyphRange = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+    guard glyphRange.length > 0 else { return [] }
+
+    var rects: [NSRect] = []
+    layoutManager.enumerateEnclosingRects(
+      forGlyphRange: glyphRange,
+      withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
+      in: textContainer
+    ) { rect, _ in
+      var adjusted = rect
+      adjusted.origin.x += self.textContainerInset.width
+      adjusted.origin.y += self.textContainerInset.height
+      if let adjustedRect = self.adjustedInlineCodeRect(for: adjusted, style: style) {
+        rects.append(adjustedRect)
+      }
+    }
+
+    return mergeInlineCodeRects(rects)
+  }
+
+  private func adjustedInlineCodeRect(for rect: NSRect, style: CodeBlockStyle) -> NSRect? {
+    guard !rect.isNull, rect.width > 0, rect.height > 0 else { return nil }
+
+    var padded = rect
+    padded.origin.x -= style.textInsetLeft
+    padded.size.width += style.textInsetLeft + style.textInsetRight
+    padded.origin.y -= style.verticalPadding
+    padded.size.height += style.verticalPadding * 2
+
+    let insetBounds = bounds.insetBy(dx: style.blockHorizontalInset, dy: 0)
+    let clipped = padded.intersection(insetBounds)
+    return clipped.isNull ? nil : clipped
+  }
+
+  private func mergeInlineCodeRects(_ rects: [NSRect]) -> [NSRect] {
+    let tolerance: CGFloat = 1
+    let sortedRects = rects.sorted { lhs, rhs in
+      if abs(lhs.minY - rhs.minY) > tolerance {
+        return lhs.minY < rhs.minY
+      }
+      return lhs.minX < rhs.minX
+    }
+
+    var mergedRects: [NSRect] = []
+    for rect in sortedRects {
+      guard var lastRect = mergedRects.last else {
+        mergedRects.append(rect)
+        continue
+      }
+
+      let sameLine = abs(lastRect.minY - rect.minY) <= tolerance
+        && abs(lastRect.height - rect.height) <= tolerance
+      let overlapsOrTouches = rect.minX <= lastRect.maxX + tolerance
+
+      if sameLine && overlapsOrTouches {
+        lastRect = lastRect.union(rect)
+        mergedRects[mergedRects.count - 1] = lastRect
+      } else {
+        mergedRects.append(rect)
+      }
+    }
+
+    return mergedRects
   }
 }

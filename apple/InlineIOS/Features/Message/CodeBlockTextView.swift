@@ -72,14 +72,13 @@ final class CodeBlockTextView: UITextView {
     let fullRange = NSRange(location: 0, length: textStorage.length)
     textStorage.enumerateAttribute(.inlineCode, in: fullRange, options: []) { value, range, _ in
       guard (value as? Bool) == true else { return }
-      guard let inlineRect = codeBlockRect(for: range, style: inlineCodeStyle, tight: true),
-            inlineRect.intersects(rect)
-      else { return }
       let backgroundColor = (textStorage.attribute(.inlineCodeBackground, at: range.location, effectiveRange: nil)
         as? UIColor) ?? UIColor.label.withAlphaComponent(0.12)
-      let path = UIBezierPath(roundedRect: inlineRect, cornerRadius: inlineCodeStyle.cornerRadius)
-      backgroundColor.setFill()
-      path.fill()
+      for inlineRect in inlineCodeRects(for: range, style: inlineCodeStyle) where inlineRect.intersects(rect) {
+        let path = UIBezierPath(roundedRect: inlineRect, cornerRadius: inlineCodeStyle.cornerRadius)
+        backgroundColor.setFill()
+        path.fill()
+      }
     }
   }
 
@@ -123,5 +122,75 @@ final class CodeBlockTextView: UITextView {
     let insetBounds = bounds.insetBy(dx: style.blockHorizontalInset, dy: 0)
     let clipped = padded.intersection(insetBounds)
     return clipped.isNull ? nil : clipped
+  }
+
+  private func inlineCodeRects(for range: NSRange, style: CodeBlockStyle) -> [CGRect] {
+    let layoutManager = self.layoutManager
+    let textContainer = self.textContainer
+    let glyphRange = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+    guard glyphRange.length > 0 else { return [] }
+
+    layoutManager.ensureLayout(forCharacterRange: range)
+
+    var rects: [CGRect] = []
+    layoutManager.enumerateEnclosingRects(
+      forGlyphRange: glyphRange,
+      withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
+      in: textContainer
+    ) { rect, _ in
+      var adjusted = rect
+      adjusted.origin.x += self.textContainerInset.left - self.contentOffset.x
+      adjusted.origin.y += self.textContainerInset.top - self.contentOffset.y
+      if let adjustedRect = self.adjustedInlineCodeRect(for: adjusted, style: style) {
+        rects.append(adjustedRect)
+      }
+    }
+
+    return mergeInlineCodeRects(rects)
+  }
+
+  private func adjustedInlineCodeRect(for rect: CGRect, style: CodeBlockStyle) -> CGRect? {
+    guard !rect.isNull, rect.width > 0, rect.height > 0 else { return nil }
+
+    var padded = rect
+    padded.origin.x -= style.textInsetLeft
+    padded.size.width += style.textInsetLeft + style.textInsetRight
+    padded.origin.y -= style.verticalPadding
+    padded.size.height += style.verticalPadding * 2
+
+    let insetBounds = bounds.insetBy(dx: style.blockHorizontalInset, dy: 0)
+    let clipped = padded.intersection(insetBounds)
+    return clipped.isNull ? nil : clipped
+  }
+
+  private func mergeInlineCodeRects(_ rects: [CGRect]) -> [CGRect] {
+    let tolerance: CGFloat = 1
+    let sortedRects = rects.sorted { lhs, rhs in
+      if abs(lhs.minY - rhs.minY) > tolerance {
+        return lhs.minY < rhs.minY
+      }
+      return lhs.minX < rhs.minX
+    }
+
+    var mergedRects: [CGRect] = []
+    for rect in sortedRects {
+      guard var lastRect = mergedRects.last else {
+        mergedRects.append(rect)
+        continue
+      }
+
+      let sameLine = abs(lastRect.minY - rect.minY) <= tolerance
+        && abs(lastRect.height - rect.height) <= tolerance
+      let overlapsOrTouches = rect.minX <= lastRect.maxX + tolerance
+
+      if sameLine && overlapsOrTouches {
+        lastRect = lastRect.union(rect)
+        mergedRects[mergedRects.count - 1] = lastRect
+      } else {
+        mergedRects.append(rect)
+      }
+    }
+
+    return mergedRects
   }
 }
