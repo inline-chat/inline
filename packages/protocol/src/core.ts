@@ -2986,6 +2986,10 @@ export interface EditMessageInput {
      * @generated from protobuf field: optional MessageEntities entities = 7;
      */
     entities?: MessageEntities;
+    /**
+     * @generated from protobuf field: optional bool parse_markdown = 8;
+     */
+    parseMarkdown?: boolean;
 }
 /**
  * @generated from protobuf message EditMessageResult
@@ -12040,7 +12044,8 @@ class EditMessageInput$Type extends MessageType<EditMessageInput> {
             { no: 1, name: "message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 2, name: "peer_id", kind: "message", T: () => InputPeer },
             { no: 3, name: "text", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
-            { no: 7, name: "entities", kind: "message", T: () => MessageEntities }
+            { no: 7, name: "entities", kind: "message", T: () => MessageEntities },
+            { no: 8, name: "parse_markdown", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<EditMessageInput>): EditMessageInput {
@@ -12068,6 +12073,9 @@ class EditMessageInput$Type extends MessageType<EditMessageInput> {
                 case /* optional MessageEntities entities */ 7:
                     message.entities = MessageEntities.internalBinaryRead(reader, reader.uint32(), options, message.entities);
                     break;
+                case /* optional bool parse_markdown */ 8:
+                    message.parseMarkdown = reader.bool();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -12092,6 +12100,9 @@ class EditMessageInput$Type extends MessageType<EditMessageInput> {
         /* optional MessageEntities entities = 7; */
         if (message.entities)
             MessageEntities.internalBinaryWrite(message.entities, writer.tag(7, WireType.LengthDelimited).fork(), options).join();
+        /* optional bool parse_markdown = 8; */
+        if (message.parseMarkdown !== undefined)
+            writer.tag(8, WireType.Varint).bool(message.parseMarkdown);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
