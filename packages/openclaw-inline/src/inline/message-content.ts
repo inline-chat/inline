@@ -37,6 +37,7 @@ export type InlineMessageAttachmentSummary =
 export type InlineMessageContent = {
   text: string
   rawText: string
+  attachmentText: string
   links: string[]
   attachmentUrls: string[]
   media: InlineMessageMediaSummary
@@ -195,42 +196,50 @@ function extractMessageUrls(message: Message, attachments: InlineMessageAttachme
 }
 
 function formatMediaSummary(media: Exclude<InlineMessageMediaSummary, null>): string {
-  if (media.kind === "nudge") return "[nudge]"
+  if (media.kind === "nudge") return "nudge"
   if (media.kind === "photo") {
-    return media.url ? `[photo] ${media.url}` : "[photo]"
+    return media.url ? `image attachment: ${media.url}` : "image attachment"
   }
   if (media.kind === "video") {
-    return media.url ? `[video] ${media.url}` : "[video]"
+    return media.url ? `video attachment: ${media.url}` : "video attachment"
   }
 
-  const label = media.fileName ? `[document: ${media.fileName}]` : "[document]"
-  return media.url ? `${label} ${media.url}` : label
+  const label = media.fileName ? `document attachment (${media.fileName})` : "document attachment"
+  return media.url ? `${label}: ${media.url}` : label
 }
 
 function formatAttachmentSummary(attachment: InlineMessageAttachmentSummary): string {
   if (attachment.kind === "urlPreview") {
     const title = compactWhitespace(attachment.title ?? undefined)
     const url = attachment.url?.trim() ?? ""
-    if (title && url) return `[link preview: ${title}] ${url}`
-    if (url) return `[link preview] ${url}`
-    if (title) return `[link preview: ${title}]`
-    return "[link preview]"
+    if (title && url) return `link preview (${title}): ${url}`
+    if (url) return `link preview: ${url}`
+    if (title) return `link preview (${title})`
+    return "link preview"
   }
 
   const title = compactWhitespace(attachment.title ?? undefined)
   const source = compactWhitespace(attachment.application ?? undefined)
   const url = attachment.url?.trim() ?? ""
   const label = [source, title].filter(Boolean).join(": ")
-  if (label && url) return `[task: ${label}] ${url}`
-  if (url) return `[task] ${url}`
-  if (label) return `[task: ${label}]`
-  return "[task]"
+  if (label && url) return `task attachment (${label}): ${url}`
+  if (url) return `task attachment: ${url}`
+  if (label) return `task attachment (${label})`
+  return "task attachment"
 }
 
 export function summarizeInlineMessageContent(message: Message): InlineMessageContent {
   const rawText = compactWhitespace(message.message)
   const media = messageMediaSummary(message)
   const attachments = messageAttachmentSummaries(message)
+  const attachmentParts: string[] = []
+  if (media) {
+    attachmentParts.push(formatMediaSummary(media))
+  }
+  for (const attachment of attachments) {
+    attachmentParts.push(formatAttachmentSummary(attachment))
+  }
+  const attachmentText = attachmentParts.filter(Boolean).join(" | ")
   const links = extractMessageUrls(message, attachments)
   const attachmentUrls = Array.from(
     new Set([
@@ -243,17 +252,12 @@ export function summarizeInlineMessageContent(message: Message): InlineMessageCo
     ]),
   )
 
-  const parts = [rawText]
-  if (media) {
-    parts.push(formatMediaSummary(media))
-  }
-  for (const attachment of attachments) {
-    parts.push(formatAttachmentSummary(attachment))
-  }
+  const parts = [rawText, attachmentText]
 
   return {
     text: parts.filter(Boolean).join(" | "),
     rawText,
+    attachmentText,
     links,
     attachmentUrls,
     media,

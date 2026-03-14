@@ -4,6 +4,7 @@ import {
   createReplyPrefixOptions,
   createTypingCallbacks,
   logInboundDrop,
+  resolveChannelMediaMaxBytes,
   resolveControlCommandGate,
   resolveMentionGatingWithBypass,
   type OpenClawConfig,
@@ -37,8 +38,14 @@ type SenderProfile = {
 
 type HistoryContext = {
   historyText: string | null
+  attachmentText: string | null
   repliedToBot: boolean
   replyToSenderId: string | null
+}
+
+type InlineInboundMediaInfo = {
+  path: string
+  contentType?: string | undefined
 }
 
 const DEFAULT_GROUP_HISTORY_LIMIT = 12
@@ -47,6 +54,8 @@ const HISTORY_LINE_MAX_CHARS = 280
 const BOT_MESSAGE_CACHE_LIMIT = 500
 const REACTION_TARGET_LOOKUP_LIMIT = 8
 const REPLY_TARGET_LOOKUP_LIMIT = 8
+const ATTACHMENT_CONTEXT_LIMIT = 6
+const DEFAULT_INLINE_MEDIA_MAX_BYTES = 8 * 1024 * 1024
 const GET_MESSAGES_METHOD =
   typeof (Method as Record<string, unknown>).GET_MESSAGES === "number" &&
   Number.isInteger((Method as Record<string, unknown>).GET_MESSAGES) &&
@@ -284,6 +293,116 @@ function resolveHistoryLimit(params: {
   return params.dmHistoryLimit ?? params.historyLimit ?? DEFAULT_DM_HISTORY_LIMIT
 }
 
+function resolveInlineMediaMaxBytes(params: {
+  cfg: OpenClawConfig
+  account: ResolvedInlineAccount
+}): number {
+  return (
+    resolveChannelMediaMaxBytes({
+      cfg: params.cfg,
+      accountId: params.account.accountId,
+      resolveChannelLimitMb: ({ accountId }) => {
+        if (accountId != null && accountId !== params.account.accountId) return undefined
+        return params.account.config.mediaMaxMb
+      },
+    }) ?? DEFAULT_INLINE_MEDIA_MAX_BYTES
+  )
+}
+
+function buildInlineInboundMediaPayload(media: InlineInboundMediaInfo[]): {
+  MediaPath?: string
+  MediaUrl?: string
+  MediaPaths?: string[]
+  MediaUrls?: string[]
+  MediaTypes?: string[]
+} {
+  const first = media[0]
+  const mediaPaths = media.map((item) => item.path)
+  const mediaTypes =
+    media.length > 0 && media.every((item) => Boolean(item.contentType?.trim()))
+      ? media.map((item) => item.contentType!.trim())
+      : []
+
+  return {
+    ...(first?.path ? { MediaPath: first.path, MediaUrl: first.path } : {}),
+    ...(mediaPaths.length > 0 ? { MediaPaths: mediaPaths, MediaUrls: mediaPaths } : {}),
+    ...(mediaTypes.length > 0 ? { MediaTypes: mediaTypes } : {}),
+  }
+}
+
+function resolveFilePathHint(params: { sourceUrl: string; preferredName?: string | null | undefined }): string | undefined {
+  const preferred = params.preferredName?.trim()
+  if (preferred) return preferred
+
+  try {
+    const pathname = new URL(params.sourceUrl).pathname
+    const base = path.basename(pathname).trim()
+    if (base) return base
+  } catch {
+    // ignore malformed urls and let the media pipeline choose a filename
+  }
+
+  return undefined
+}
+
+async function resolveInlineInboundMedia(params: {
+  core: ReturnType<typeof getInlineRuntime>
+  message: Message
+  maxBytes: number
+  log?: { warn?: (msg: string) => void; debug?: (msg: string) => void } | undefined
+}): Promise<InlineInboundMediaInfo[]> {
+  const content = summarizeInlineMessageContent(params.message)
+  const candidates = new Map<
+    string,
+    {
+      fileName?: string | null
+      mimeType?: string | null
+    }
+  >()
+
+  if (content.media?.url) {
+    candidates.set(content.media.url, {
+      fileName: content.media.fileName ?? null,
+      mimeType: content.media.mimeType ?? null,
+    })
+  }
+
+  for (const attachment of content.attachments) {
+    if (attachment.kind !== "urlPreview" || !attachment.previewImageUrl) continue
+    candidates.set(attachment.previewImageUrl, {
+      mimeType: null,
+    })
+  }
+
+  const out: InlineInboundMediaInfo[] = []
+  for (const [url, candidate] of candidates.entries()) {
+    try {
+      const filePathHint = resolveFilePathHint({ sourceUrl: url, preferredName: candidate.fileName })
+      const fetched = await params.core.channel.media.fetchRemoteMedia({
+        url,
+        maxBytes: params.maxBytes,
+        ...(filePathHint ? { filePathHint } : {}),
+      })
+      const saved = await params.core.channel.media.saveMediaBuffer(
+        fetched.buffer,
+        fetched.contentType ?? candidate.mimeType ?? undefined,
+        "inbound",
+        params.maxBytes,
+        fetched.fileName ?? candidate.fileName ?? undefined,
+      )
+      const contentType = saved.contentType ?? fetched.contentType ?? candidate.mimeType ?? undefined
+      out.push({
+        path: saved.path,
+        ...(contentType ? { contentType } : {}),
+      })
+    } catch (err) {
+      params.log?.warn?.(`inline: failed to download inbound media ${url}: ${String(err)}`)
+    }
+  }
+
+  return out
+}
+
 async function buildHistoryContext(params: {
   client: InlineSdkClient
   chatId: bigint
@@ -301,6 +420,7 @@ async function buildHistoryContext(params: {
   let replyToSenderId: string | null = null
   let foundReplyTargetInHistory = false
   const lines: string[] = []
+  const attachmentLines: string[] = []
 
   if (params.historyLimit > 0) {
     const messages = await loadChatHistoryMessages({
@@ -333,7 +453,8 @@ async function buildHistoryContext(params: {
           repliedToBot = item.fromId === params.meId
         }
 
-        const text = normalizeHistoryText(summarizeInlineMessageContent(item).text)
+        const content = summarizeInlineMessageContent(item)
+        const text = normalizeHistoryText(content.text)
         if (!text) continue
         const label = resolveHistorySenderLabel({
           senderId: item.fromId,
@@ -342,6 +463,10 @@ async function buildHistoryContext(params: {
         })
         const replySuffix = item.replyToMsgId != null ? ` ->${String(item.replyToMsgId)}` : ""
         lines.push(`#${String(item.id)}${replySuffix} ${label}: ${text}`)
+        const attachmentText = normalizeHistoryText(content.attachmentText)
+        if (attachmentText) {
+          attachmentLines.push(`#${String(item.id)}${replySuffix} ${label}: ${attachmentText}`)
+        }
       }
     }
   }
@@ -364,10 +489,18 @@ async function buildHistoryContext(params: {
   }
 
   if (!lines.length) {
-    return { historyText: null, repliedToBot, replyToSenderId }
+    return {
+      historyText: null,
+      attachmentText: attachmentLines.length ? attachmentLines.slice(-ATTACHMENT_CONTEXT_LIMIT).join("\n") : null,
+      repliedToBot,
+      replyToSenderId,
+    }
   }
   return {
     historyText: `Recent thread messages (oldest -> newest):\n${lines.join("\n")}`,
+    attachmentText: attachmentLines.length
+      ? `Recent media/attachments:\n${attachmentLines.slice(-ATTACHMENT_CONTEXT_LIMIT).join("\n")}`
+      : null,
     repliedToBot,
     replyToSenderId,
   }
@@ -416,6 +549,7 @@ export async function monitorInlineProvider(params: {
   const botMessageIdsByChat = new Map<string, string[]>()
   const hydratedParticipantChats = new Set<string>()
   const participantFetches = new Map<string, Promise<void>>()
+  const inboundMediaMaxBytes = resolveInlineMediaMaxBytes({ cfg, account })
 
   const hydrateChatParticipants = async (chatId: bigint): Promise<void> => {
     const chatKey = String(chatId)
@@ -693,7 +827,7 @@ export async function monitorInlineProvider(params: {
           botMessageIdsByChat,
         }).catch((err) => {
           statusSink?.({ lastError: `getChatHistory failed: ${String(err)}` })
-          return { historyText: null, repliedToBot: false, replyToSenderId: null }
+          return { historyText: null, attachmentText: null, repliedToBot: false, replyToSenderId: null }
         })
         const implicitMention =
           (reactionEvent != null && isGroup) ||
@@ -725,21 +859,35 @@ export async function monitorInlineProvider(params: {
           continue
         }
 
+        const inboundMedia = reactionEvent
+          ? []
+          : await resolveInlineInboundMedia({
+              core,
+              message: msg,
+              maxBytes: inboundMediaMaxBytes,
+              ...(log ? { log } : {}),
+            })
+
         const timestamp = Number(msg.date) * 1000
         const fromLabel = isGroup ? `chat:${chatInfo.title ?? String(chatId)}` : `user:${senderId}`
 
         const storePath = core.channel.session.resolveStorePath(cfg.session?.store, { agentId: route.agentId })
         const envelopeOptions = core.channel.reply.resolveEnvelopeFormatOptions(cfg)
         const previousTimestamp = core.channel.session.readSessionUpdatedAt({ storePath, sessionKey: route.sessionKey })
+        const combinedBody = [
+          historyContext.historyText,
+          historyContext.attachmentText,
+          `Current message:\n${rawBody}`,
+        ]
+          .filter(Boolean)
+          .join("\n\n")
         const body = core.channel.reply.formatAgentEnvelope({
           channel: "Inline",
           from: fromLabel,
           timestamp,
           ...(previousTimestamp != null ? { previousTimestamp } : {}),
           envelope: envelopeOptions,
-          body: historyContext.historyText
-            ? `${historyContext.historyText}\n\nCurrent message:\n${rawBody}`
-            : rawBody,
+          body: combinedBody || rawBody,
         })
 
         const ctxPayload = core.channel.reply.finalizeInboundContext({
@@ -762,6 +910,7 @@ export async function monitorInlineProvider(params: {
           ...(msg.replyToMsgId != null ? { ReplyToId: String(msg.replyToMsgId) } : {}),
           ...(historyContext.replyToSenderId != null ? { ReplyToSenderId: historyContext.replyToSenderId } : {}),
           ...(msg.replyToMsgId != null ? { ReplyToWasBot: historyContext.repliedToBot } : {}),
+          ...buildInlineInboundMediaPayload(inboundMedia),
           Timestamp: timestamp || Date.now(),
           WasMentioned: mentionGate.effectiveWasMentioned,
           CommandAuthorized: commandAuthorized,

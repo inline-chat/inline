@@ -206,6 +206,26 @@ function parseInlineListValuesFromParams(params: Record<string, unknown>, keys: 
   return Array.from(new Set(entries.map((entry) => entry.trim()).filter(Boolean)))
 }
 
+function resolveInlineOutboundMediaInputs(params: Record<string, unknown>): string[] {
+  const plural = parseInlineListValuesFromParams(params, [
+    "mediaUrls",
+    "attachmentUrls",
+    "filePaths",
+    "paths",
+    "files",
+  ])
+  const single = parseInlineListValuesFromParams(params, [
+    "mediaUrl",
+    "attachmentUrl",
+    "url",
+    "media",
+    "filePath",
+    "path",
+    "file",
+  ])
+  return Array.from(new Set([...plural, ...single]))
+}
+
 function normalizeInlineUserLookupToken(raw: string): string {
   return raw
     .trim()
@@ -423,6 +443,7 @@ function mapMessage(message: {
     date: Number(message.date) * 1000,
     text: content.text,
     rawText: content.rawText,
+    attachmentText: content.attachmentText,
     out: Boolean(message.out),
     replyToId: message.replyToMsgId != null ? String(message.replyToMsgId) : undefined,
     attachmentUrls: content.attachmentUrls,
@@ -709,10 +730,7 @@ export const inlineMessageActions: ChannelMessageActionAdapter = {
           if (!sendTarget) {
             throw new Error("inline action: missing message target")
           }
-          const mediaUrl =
-            readStringParam(params, "mediaUrl") ??
-            readStringParam(params, "attachmentUrl") ??
-            readStringParam(params, "url")
+          const mediaSources = resolveInlineOutboundMediaInputs(params)
           const text =
             readStringParam(params, "message") ??
             readStringParam(params, "text") ??
@@ -728,11 +746,11 @@ export const inlineMessageActions: ChannelMessageActionAdapter = {
             "messageId",
           )
 
-          if (normalizedAction === "sendAttachment" && !mediaUrl) {
-            throw new Error("inline action: sendAttachment requires mediaUrl/url")
+          if (normalizedAction === "sendAttachment" && mediaSources.length === 0) {
+            throw new Error("inline action: sendAttachment requires media/file input")
           }
 
-          if (!mediaUrl) {
+          if (mediaSources.length === 0) {
             const message =
               readStringParam(params, "message") ??
               readStringParam(params, "text", { required: true, allowEmpty: true })
@@ -750,24 +768,29 @@ export const inlineMessageActions: ChannelMessageActionAdapter = {
             })
           }
 
-          const media = await uploadInlineMediaFromUrl({
-            client,
-            cfg,
-            accountId: accountId ?? null,
-            mediaUrl,
-          })
-          const sent = await client.sendMessage({
-            ...sendTarget,
-            ...(text ? { text } : {}),
-            media,
-            ...(replyToMsgId != null ? { replyToMsgId } : {}),
-            ...(text ? { parseMarkdown } : {}),
-          })
+          let lastSent: { messageId?: bigint | null } | null = null
+          for (let index = 0; index < mediaSources.length; index += 1) {
+            const mediaUrl = mediaSources[index]
+            if (!mediaUrl) continue
+            const media = await uploadInlineMediaFromUrl({
+              client,
+              cfg,
+              accountId: accountId ?? null,
+              mediaUrl,
+            })
+            lastSent = await client.sendMessage({
+              ...sendTarget,
+              ...(index === 0 && text ? { text } : {}),
+              media,
+              ...(index === 0 && replyToMsgId != null ? { replyToMsgId } : {}),
+              ...(index === 0 && text ? { parseMarkdown } : {}),
+            })
+          }
           return jsonResult({
             ok: true,
             target: target.target,
-            messageId: sent.messageId != null ? String(sent.messageId) : null,
-            mediaUrl,
+            messageId: lastSent?.messageId != null ? String(lastSent.messageId) : null,
+            ...(mediaSources.length === 1 ? { mediaUrl: mediaSources[0] } : { mediaUrls: mediaSources }),
             replyToId: replyToMsgId != null ? String(replyToMsgId) : null,
           })
         },

@@ -347,6 +347,34 @@ describe("inline/actions", () => {
 
     await inlineMessageActions.handleAction?.({
       channel: "inline",
+      action: "sendAttachment",
+      cfg,
+      params: { to: "user:99", filePath: "/Users/mo/.openclaw/workspace/half-vertical.png", caption: "local file" },
+    } as any)
+
+    await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "send",
+      cfg,
+      params: { to: "user:99", message: "media alias", media: "/Users/mo/.openclaw/workspace/half-vertical.png" },
+    } as any)
+
+    await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "sendAttachment",
+      cfg,
+      params: {
+        to: "user:99",
+        caption: "multi",
+        filePaths: [
+          "/Users/mo/.openclaw/workspace/half-vertical.png",
+          "/Users/mo/.openclaw/workspace/half-vertical-2.png",
+        ],
+      },
+    } as any)
+
+    await inlineMessageActions.handleAction?.({
+      channel: "inline",
       action: "reply",
       cfg,
       params: { to: "7", messageId: "10", message: "reply body" },
@@ -520,6 +548,33 @@ describe("inline/actions", () => {
     )
     expect(sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
+        userId: 99n,
+        text: "local file",
+        media: { kind: "photo", photoId: 901n },
+      }),
+    )
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 99n,
+        text: "media alias",
+        media: { kind: "photo", photoId: 901n },
+      }),
+    )
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 99n,
+        text: "multi",
+        media: { kind: "photo", photoId: 901n },
+      }),
+    )
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 99n,
+        media: { kind: "photo", photoId: 901n },
+      }),
+    )
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
         chatId: 7n,
         text: "reply body",
         replyToMsgId: 10n,
@@ -535,6 +590,16 @@ describe("inline/actions", () => {
     expect(uploadInlineMediaFromUrl).toHaveBeenCalledWith(
       expect.objectContaining({
         mediaUrl: "https://cdn.inline.chat/outbound-image.jpg",
+      }),
+    )
+    expect(uploadInlineMediaFromUrl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mediaUrl: "/Users/mo/.openclaw/workspace/half-vertical.png",
+      }),
+    )
+    expect(uploadInlineMediaFromUrl).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mediaUrl: "/Users/mo/.openclaw/workspace/half-vertical-2.png",
       }),
     )
     expect(invokeRaw).toHaveBeenCalledWith(
@@ -790,8 +855,10 @@ describe("inline/actions", () => {
         messages: [
           expect.objectContaining({
             id: "270",
-            text: "[photo] https://cdn.inline.chat/image-270.jpg | [link preview: Image context] https://example.com/image-context",
+            text: "image attachment: https://cdn.inline.chat/image-270.jpg | link preview (Image context): https://example.com/image-context",
             rawText: "",
+            attachmentText:
+              "image attachment: https://cdn.inline.chat/image-270.jpg | link preview (Image context): https://example.com/image-context",
             attachmentUrls: [
               "https://cdn.inline.chat/image-270.jpg",
               "https://example.com/image-context",
@@ -810,6 +877,55 @@ describe("inline/actions", () => {
         ],
       },
     })
+  })
+
+  it("rejects sendAttachment when no media source is provided", async () => {
+    vi.resetModules()
+
+    const sendMessage = vi.fn(async () => ({ messageId: 1n }))
+    const connect = vi.fn(async () => {})
+    const close = vi.fn(async () => {})
+    const uploadInlineMediaFromUrl = vi.fn(async () => ({ kind: "photo", photoId: 901n }))
+
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {
+        GET_CHAT: 25,
+      },
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = connect
+        close = close
+        sendMessage = sendMessage
+        invokeRaw = vi.fn(async () => ({ oneofKind: undefined }))
+      },
+    }))
+    vi.doMock("./media", () => ({
+      uploadInlineMediaFromUrl,
+    }))
+
+    const { inlineMessageActions } = await import("./actions")
+
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+        },
+      },
+    } satisfies OpenClawConfig
+
+    await expect(
+      inlineMessageActions.handleAction?.({
+        channel: "inline",
+        action: "sendAttachment",
+        cfg,
+        params: { to: "user:99", caption: "missing media" },
+      } as any),
+    ).rejects.toThrow("inline action: sendAttachment requires media/file input")
+
+    expect(uploadInlineMediaFromUrl).not.toHaveBeenCalled()
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(close).toHaveBeenCalled()
   })
 
   it("rejects disabled actions from config", async () => {
