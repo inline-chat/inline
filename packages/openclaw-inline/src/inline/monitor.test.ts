@@ -7,6 +7,8 @@ type MonitorHarness = {
   calls: {
     sendMessage: ReturnType<typeof vi.fn>
     uploadFile: ReturnType<typeof vi.fn>
+    fetchRemoteMedia: ReturnType<typeof vi.fn>
+    saveMediaBuffer: ReturnType<typeof vi.fn>
     resolveAgentRoute: ReturnType<typeof vi.fn>
     recordInboundSession: ReturnType<typeof vi.fn>
     finalizeInboundContext: ReturnType<typeof vi.fn>
@@ -66,6 +68,7 @@ type MonitorSetup = {
     out?: boolean
     replyToMsgId?: bigint
   }>>
+  mediaByUrl?: Record<string, { contentType?: string; fileName?: string; buffer?: Uint8Array | Buffer }>
   dispatchReplyPayload?: { text?: string; replyToId?: string; mediaUrl?: string; mediaUrls?: string[] }
 }
 
@@ -129,6 +132,28 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
 
   const sendMessage = vi.fn(async () => ({ messageId: 1n }))
   const uploadFile = vi.fn(async () => ({ fileUniqueId: "INP_1", photoId: 200n }))
+  const fetchRemoteMedia = vi.fn(async ({ url }: { url: string }) => {
+    const media = setup.mediaByUrl?.[url]
+    return {
+      buffer: Buffer.from(media?.buffer ?? [1, 2, 3]),
+      contentType: media?.contentType ?? "image/jpeg",
+      fileName: media?.fileName,
+    }
+  })
+  const saveMediaBuffer = vi.fn(
+    async (
+      _buffer: Buffer,
+      contentType?: string,
+      _subdir?: string,
+      _maxBytes?: number,
+      originalFilename?: string,
+    ) => ({
+      id: "saved-media",
+      path: originalFilename ? `/tmp/${originalFilename}` : "/tmp/saved-media.bin",
+      size: 3,
+      contentType,
+    }),
+  )
   const resolveAgentRoute = vi.fn((input: any) => ({
     agentId: "main",
     channel: "inline",
@@ -315,6 +340,10 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       commands: {
         shouldHandleTextCommands: () => true,
       },
+      media: {
+        fetchRemoteMedia,
+        saveMediaBuffer,
+      },
       text: {
         hasControlCommand: () => false,
       },
@@ -345,6 +374,8 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     calls: {
       sendMessage,
       uploadFile,
+      fetchRemoteMedia,
+      saveMediaBuffer,
       resolveAgentRoute,
       recordInboundSession,
       finalizeInboundContext,
@@ -913,6 +944,12 @@ describe("inline/monitor", () => {
           } as any,
         ],
       },
+      mediaByUrl: {
+        "https://cdn.inline.chat/current-photo.jpg": {
+          contentType: "image/jpeg",
+          fileName: "current-photo.jpg",
+        },
+      },
       dispatchReplyPayload: {
         text: "looks good",
       },
@@ -932,14 +969,100 @@ describe("inline/monitor", () => {
 
     await waitFor(() => {
       expect(harness.calls.dispatchReply).toHaveBeenCalled()
+      expect(harness.calls.fetchRemoteMedia).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: "https://cdn.inline.chat/current-photo.jpg",
+        }),
+      )
+      expect(harness.calls.saveMediaBuffer).toHaveBeenCalledWith(
+        expect.any(Buffer),
+        "image/jpeg",
+        "inbound",
+        8 * 1024 * 1024,
+        "current-photo.jpg",
+      )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: expect.stringContaining("#7300 user:52: [link preview: Design mock] https://example.com/design"),
+          Body: expect.stringContaining("#7300 user:52: link preview (Design mock): https://example.com/design"),
         }),
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: expect.stringContaining("Current message:\n[photo] https://cdn.inline.chat/current-photo.jpg"),
+          Body: expect.stringContaining("Recent media/attachments:\n#7300 user:52: link preview (Design mock): https://example.com/design"),
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: expect.stringContaining("Current message:\nimage attachment: https://cdn.inline.chat/current-photo.jpg"),
+          MediaPath: "/tmp/current-photo.jpg",
+          MediaUrl: "/tmp/current-photo.jpg",
+          MediaPaths: ["/tmp/current-photo.jpg"],
+          MediaUrls: ["/tmp/current-photo.jpg"],
+          MediaTypes: ["image/jpeg"],
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("continues when inbound media download fails", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 7302n,
+            date: 1_700_000_111n,
+            fromId: 51n,
+            message: "",
+            mentioned: true,
+            media: {
+              media: {
+                oneofKind: "photo",
+                photo: {
+                  photo: {
+                    id: 901n,
+                    sizes: [{ w: 400, h: 300, size: 4567, cdnUrl: "https://cdn.inline.chat/broken-photo.jpg" }],
+                  },
+                },
+              },
+            },
+          } as any,
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      dispatchReplyPayload: {
+        text: "still replying",
+      },
+    })
+
+    harness.calls.fetchRemoteMedia.mockRejectedValueOnce(new Error("network failed"))
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalled()
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.not.objectContaining({
+          MediaPath: expect.anything(),
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: expect.stringContaining("Current message:\nimage attachment: https://cdn.inline.chat/broken-photo.jpg"),
         }),
       )
     })
