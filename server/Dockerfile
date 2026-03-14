@@ -3,8 +3,7 @@
 FROM oven/bun:1 AS base
 WORKDIR /usr/src/app
 
-# install dependencies into temp directory
-# this will cache them and speed up future builds
+# install dependencies into temp directories keyed only by workspace manifests
 FROM base AS install
 RUN mkdir -p /temp/dev
 COPY package.json bun.lock /temp/dev/
@@ -53,10 +52,9 @@ COPY server/packages/email-preview/package.json /temp/prod/server/packages/email
 COPY server/packages/email-templates/package.json /temp/prod/server/packages/email-templates/
 RUN cd /temp/prod && bun install --frozen-lockfile --production
 
-# copy node_modules from temp directory
-# then copy all (non-ignored) project files into the image
+# copy the preinstalled workspace skeleton, then overlay source code
 FROM base AS prerelease
-COPY --from=install /temp/dev/node_modules node_modules
+COPY --from=install /temp/dev/ ./
 COPY . .
 
 # Env
@@ -66,55 +64,19 @@ ENV SOURCE_COMMIT=${SOURCE_COMMIT}
 ARG DATABASE_URL
 ENV DATABASE_URL=${DATABASE_URL}
 
-ARG SENTRY_AUTH_TOKEN
-ENV SENTRY_AUTH_TOKEN=${SENTRY_AUTH_TOKEN}
-
-ARG SENTRY_ORG=usenoor
-ENV SENTRY_ORG=${SENTRY_ORG}
-
-ARG SENTRY_PROJECT=inline-server
-ENV SENTRY_PROJECT=${SENTRY_PROJECT}
-
-ARG SENTRY_URL=https://us.sentry.io
-ENV SENTRY_URL=${SENTRY_URL}
-
 # [optional] tests & build
 ENV NODE_ENV=production
 # RUN bun typecheck 
-RUN bun install --frozen-lockfile 
 RUN cd packages/protocol && bun run build
 RUN cd packages/oauth-core && bun run build
 RUN cd server && bun run build
-RUN if [ -n "$SENTRY_AUTH_TOKEN" ]; then cd server && bun run scripts/upload-sourcemaps.ts; else echo "Skipping Sentry sourcemap upload"; fi
 
-# copy production dependencies and source code into final image
+# copy production dependencies and built artifacts into final image
 FROM base AS release
-COPY --from=install /temp/prod/node_modules node_modules
+COPY --from=install /temp/prod/ ./
 COPY --from=prerelease /usr/src/app/server/dist ./server/dist
-COPY --from=prerelease /usr/src/app/package.json .
-COPY --from=prerelease /usr/src/app/bun.lock .
-COPY --from=prerelease /usr/src/app/admin/package.json ./admin/
-COPY --from=prerelease /usr/src/app/web/package.json ./web/
-COPY --from=prerelease /usr/src/app/web/packages/auth/package.json ./web/packages/auth/
-COPY --from=prerelease /usr/src/app/web/packages/client/package.json ./web/packages/client/
-COPY --from=prerelease /usr/src/app/web/packages/config/package.json ./web/packages/config/
-COPY --from=prerelease /usr/src/app/web/packages/log/package.json ./web/packages/log/
-COPY --from=prerelease /usr/src/app/web/packages/protocol/package.json ./web/packages/protocol/
-COPY --from=prerelease /usr/src/app/packages/bot-api-types/package.json ./packages/bot-api-types/
-COPY --from=prerelease /usr/src/app/packages/bot-api/package.json ./packages/bot-api/
-COPY --from=prerelease /usr/src/app/packages/mcp/package.json ./packages/mcp/
-COPY --from=prerelease /usr/src/app/packages/oauth-core/package.json ./packages/oauth-core/
 COPY --from=prerelease /usr/src/app/packages/oauth-core/dist ./packages/oauth-core/dist
-COPY --from=prerelease /usr/src/app/packages/openclaw-inline/package.json ./packages/openclaw-inline/
-COPY --from=prerelease /usr/src/app/packages/protocol/package.json ./packages/protocol/
 COPY --from=prerelease /usr/src/app/packages/protocol/dist ./packages/protocol/dist
-COPY --from=prerelease /usr/src/app/packages/sdk/package.json ./packages/sdk/
-COPY --from=prerelease /usr/src/app/desktop/package.json ./desktop/
-COPY --from=prerelease /usr/src/app/scripts/package.json ./scripts/
-COPY --from=prerelease /usr/src/app/server/package.json ./server/
-COPY --from=prerelease /usr/src/app/server/packages/email-preview/package.json ./server/packages/email-preview/
-COPY --from=prerelease /usr/src/app/server/packages/email-templates/package.json ./server/packages/email-templates/
-RUN bun install --frozen-lockfile --production
 
 # Install curl/wget for external platform health checks
 RUN apt-get update && apt-get install -y --no-install-recommends curl wget && rm -rf /var/lib/apt/lists/*
