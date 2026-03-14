@@ -389,6 +389,13 @@ describe("inline/actions", () => {
 
     await inlineMessageActions.handleAction?.({
       channel: "inline",
+      action: "edit",
+      cfg,
+      params: { to: "7", messageId: "10", message: "**edited** body" },
+    } as any)
+
+    await inlineMessageActions.handleAction?.({
+      channel: "inline",
       action: "delete",
       cfg,
       params: { to: "7", messageIds: ["10", "11"] },
@@ -606,6 +613,17 @@ describe("inline/actions", () => {
       4,
       expect.objectContaining({
         oneofKind: "deleteMessages",
+      }),
+    )
+    expect(invokeRaw).toHaveBeenCalledWith(
+      8,
+      expect.objectContaining({
+        oneofKind: "editMessage",
+        editMessage: expect.objectContaining({
+          messageId: 10n,
+          text: "**edited** body",
+          parseMarkdown: true,
+        }),
       }),
     )
     expect(invokeRaw).toHaveBeenCalledWith(
