@@ -6,6 +6,7 @@ type MonitorHarness = {
   monitorInlineProvider: typeof import("./monitor")["monitorInlineProvider"]
   calls: {
     sendMessage: ReturnType<typeof vi.fn>
+    invokeRaw: ReturnType<typeof vi.fn>
     uploadFile: ReturnType<typeof vi.fn>
     fetchRemoteMedia: ReturnType<typeof vi.fn>
     saveMediaBuffer: ReturnType<typeof vi.fn>
@@ -71,6 +72,10 @@ type MonitorSetup = {
   }>>
   mediaByUrl?: Record<string, { contentType?: string; fileName?: string; buffer?: Uint8Array | Buffer }>
   dispatchReplyPayload?: { text?: string; replyToId?: string; mediaUrl?: string; mediaUrls?: string[] }
+  dispatchReplyPayloads?: Array<{ text?: string; replyToId?: string; mediaUrl?: string; mediaUrls?: string[] }>
+  partialReplies?: Array<{ text?: string; mediaUrls?: string[] }>
+  partialRepliesConcurrent?: boolean
+  sendMessageDelayMs?: number
 }
 
 function buildAccount(overrides?: {
@@ -84,6 +89,7 @@ function buildAccount(overrides?: {
   dmHistoryLimit?: number
   parseMarkdown?: boolean
   blockStreaming?: boolean
+  streamViaEditMessage?: boolean
 }) {
   return {
     accountId: "default",
@@ -108,6 +114,7 @@ function buildAccount(overrides?: {
       dmHistoryLimit: overrides?.dmHistoryLimit,
       parseMarkdown: overrides?.parseMarkdown ?? true,
       blockStreaming: overrides?.blockStreaming,
+      streamViaEditMessage: overrides?.streamViaEditMessage,
       textChunkLimit: 4000,
     },
   } as any
@@ -131,7 +138,12 @@ async function waitFor(assertion: () => void, timeoutMs = 1_500): Promise<void> 
 async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness> {
   vi.resetModules()
 
-  const sendMessage = vi.fn(async () => ({ messageId: 1n }))
+  const sendMessage = vi.fn(async () => {
+    if (setup.sendMessageDelayMs != null && setup.sendMessageDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, setup.sendMessageDelayMs))
+    }
+    return { messageId: 1n }
+  })
   const uploadFile = vi.fn(async () => ({ fileUniqueId: "INP_1", photoId: 200n }))
   const fetchRemoteMedia = vi.fn(async ({ url }: { url: string }) => {
     const media = setup.mediaByUrl?.[url]
@@ -165,13 +177,82 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
   }))
   const recordInboundSession = vi.fn(async () => {})
   const finalizeInboundContext = vi.fn((ctx: any) => ctx)
-  const dispatchReply = vi.fn(async ({ dispatcherOptions }: any) => {
+  const dispatchReply = vi.fn(async ({ dispatcherOptions, replyOptions }: any) => {
+    if (setup.partialRepliesConcurrent) {
+      await Promise.all((setup.partialReplies ?? []).map((partial) => replyOptions?.onPartialReply?.(partial)))
+    } else {
+      for (const partial of setup.partialReplies ?? []) {
+        await replyOptions?.onPartialReply?.(partial)
+      }
+    }
+    for (const payload of setup.dispatchReplyPayloads ?? []) {
+      await dispatcherOptions.deliver(payload)
+    }
     if (!setup.dispatchReplyPayload) return
     await dispatcherOptions.deliver(setup.dispatchReplyPayload)
   })
   const upsertPairingRequest = vi.fn(async () => ({ code: "PAIR-123", created: true }))
   const buildPairingReply = vi.fn(() => "PAIRING_REPLY")
   const readAllowFromStore = vi.fn(async () => [])
+  const invokeRaw = vi.fn(async (
+    method: number,
+    input: {
+      oneofKind?: string
+      getChatParticipants?: { chatId?: bigint }
+      getChatHistory?: { peerId?: { type?: { oneofKind?: string; chat?: { chatId?: bigint } } } }
+      editMessage?: {
+        messageId?: bigint
+        peerId?: { type?: { oneofKind?: string; chat?: { chatId?: bigint } } }
+        text?: string
+        parseMarkdown?: boolean
+      }
+      getMessages?: {
+        peerId?: { type?: { oneofKind?: string; chat?: { chatId?: bigint } } }
+        messageIds?: bigint[]
+      }
+    },
+  ) => {
+    if (method === 13 && input?.oneofKind === "getChatParticipants") {
+      const chatId = String(input.getChatParticipants?.chatId ?? "")
+      return {
+        oneofKind: "getChatParticipants",
+        getChatParticipants: {
+          participants: [],
+          users: setup.participants?.[chatId] ?? [],
+        },
+      }
+    }
+    if (method === 5 && input?.oneofKind === "getChatHistory") {
+      const chatId = String(input.getChatHistory?.peerId?.type?.chat?.chatId ?? "")
+      return {
+        oneofKind: "getChatHistory",
+        getChatHistory: {
+          messages: setup.historyByChat?.[chatId] ?? [],
+        },
+      }
+    }
+    if (method === 38 && input?.oneofKind === "getMessages") {
+      const chatId = String(input.getMessages?.peerId?.type?.chat?.chatId ?? "")
+      const messageIds = input.getMessages?.messageIds ?? []
+      const known = setup.historyByChat?.[chatId] ?? []
+      const byId = new Map(known.map((message) => [String(message.id), message]))
+      return {
+        oneofKind: "getMessages",
+        getMessages: {
+          messages: messageIds
+            .map((id) => byId.get(String(id)))
+            .filter((message): message is NonNullable<typeof message> => Boolean(message)),
+        },
+      }
+    }
+    if (method === 8 && input?.oneofKind === "editMessage") {
+      return {
+        oneofKind: "editMessage",
+        editMessage: { updates: [] },
+      }
+    }
+    return { oneofKind: undefined }
+  })
 
   vi.doMock("@inline-chat/realtime-sdk", () => {
     async function* eventsGenerator() {
@@ -220,6 +301,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       Method: {
         GET_CHAT_HISTORY: 5,
         GET_CHAT_PARTICIPANTS: 13,
+        EDIT_MESSAGE: 8,
         GET_MESSAGES: 38,
       },
       InlineSdkClient: class {
@@ -245,53 +327,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         sendMessage = sendMessage
         uploadFile = uploadFile
         sendTyping = vi.fn(async () => {})
-        invokeRaw = vi.fn(async (
-          method: number,
-          input: {
-            oneofKind?: string
-            getChatParticipants?: { chatId?: bigint }
-            getChatHistory?: { peerId?: { type?: { oneofKind?: string; chat?: { chatId?: bigint } } } }
-            getMessages?: {
-              peerId?: { type?: { oneofKind?: string; chat?: { chatId?: bigint } } }
-              messageIds?: bigint[]
-            }
-          },
-        ) => {
-          if (method === 13 && input?.oneofKind === "getChatParticipants") {
-            const chatId = String(input.getChatParticipants?.chatId ?? "")
-            return {
-              oneofKind: "getChatParticipants",
-              getChatParticipants: {
-                participants: [],
-                users: setup.participants?.[chatId] ?? [],
-              },
-            }
-          }
-          if (method === 5 && input?.oneofKind === "getChatHistory") {
-            const chatId = String(input.getChatHistory?.peerId?.type?.chat?.chatId ?? "")
-            return {
-              oneofKind: "getChatHistory",
-              getChatHistory: {
-                messages: setup.historyByChat?.[chatId] ?? [],
-              },
-            }
-          }
-          if (method === 38 && input?.oneofKind === "getMessages") {
-            const chatId = String(input.getMessages?.peerId?.type?.chat?.chatId ?? "")
-            const messageIds = input.getMessages?.messageIds ?? []
-            const known = setup.historyByChat?.[chatId] ?? []
-            const byId = new Map(known.map((message) => [String(message.id), message]))
-            return {
-              oneofKind: "getMessages",
-              getMessages: {
-                messages: messageIds
-                  .map((id) => byId.get(String(id)))
-                  .filter((message): message is NonNullable<typeof message> => Boolean(message)),
-              },
-            }
-          }
-          return { oneofKind: undefined }
-        })
+        invokeRaw = invokeRaw
         invokeUncheckedRaw = this.invokeRaw
         close = vi.fn(async () => {})
         events = vi.fn(() => eventsGenerator())
@@ -374,6 +410,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     monitorInlineProvider: mod.monitorInlineProvider,
     calls: {
       sendMessage,
+      invokeRaw,
       uploadFile,
       fetchRemoteMedia,
       saveMediaBuffer,
@@ -763,6 +800,228 @@ describe("inline/monitor", () => {
       expect(harness.calls.dispatchReply).toHaveBeenCalled()
       const args = harness.calls.dispatchReply.mock.calls[0]?.[0]
       expect(args?.replyOptions?.disableBlockStreaming).toBe(true)
+    })
+
+    await handle.stop()
+  })
+
+  it("keeps edit-based streaming off by default", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 66n,
+          message: {
+            id: 5600n,
+            date: 1_700_000_006n,
+            fromId: 42n,
+            message: "dm",
+          },
+        },
+      ],
+      chats: {
+        "66": { kind: "direct", title: "Alice" },
+      },
+      partialReplies: [{ text: "first paragraph\n\n" }],
+      dispatchReplyPayload: {
+        text: "first paragraph\n\nsecond paragraph",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      const args = harness.calls.dispatchReply.mock.calls[0]?.[0]
+      expect(args?.replyOptions?.onPartialReply).toBeUndefined()
+      expect(harness.calls.invokeRaw).not.toHaveBeenCalledWith(
+        8,
+        expect.objectContaining({ oneofKind: "editMessage" }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledTimes(1)
+    })
+
+    await handle.stop()
+  })
+
+  it("streams by paragraph through send plus editMessage when enabled", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 67n,
+          message: {
+            id: 5700n,
+            date: 1_700_000_007n,
+            fromId: 42n,
+            message: "dm",
+          },
+        },
+      ],
+      chats: {
+        "67": { kind: "direct", title: "Alice" },
+      },
+      partialReplies: [
+        { text: "first **paragraph**\n\n" },
+        { text: "second paragraph" },
+      ],
+      dispatchReplyPayload: {
+        text: "first **paragraph**\n\nsecond paragraph",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open", streamViaEditMessage: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      const args = harness.calls.dispatchReply.mock.calls[0]?.[0]
+      expect(typeof args?.replyOptions?.onPartialReply).toBe("function")
+      expect(args?.replyOptions?.disableBlockStreaming).toBe(true)
+      expect(harness.calls.sendMessage).toHaveBeenCalledTimes(1)
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 67n,
+          text: "first **paragraph**",
+          parseMarkdown: true,
+        }),
+      )
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        8,
+        expect.objectContaining({
+          oneofKind: "editMessage",
+          editMessage: expect.objectContaining({
+            messageId: 1n,
+            text: "first **paragraph**\n\nsecond paragraph",
+            parseMarkdown: true,
+          }),
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("serializes concurrent partial snapshots so the first paragraph sends only once", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 68n,
+          message: {
+            id: 5800n,
+            date: 1_700_000_008n,
+            fromId: 42n,
+            message: "dm",
+          },
+        },
+      ],
+      chats: {
+        "68": { kind: "direct", title: "Alice" },
+      },
+      partialReplies: [
+        { text: "first paragraph\n\n" },
+        { text: "first paragraph\n\nsecond" },
+        { text: "first paragraph\n\nsecond paragraph" },
+      ],
+      partialRepliesConcurrent: true,
+      sendMessageDelayMs: 25,
+      dispatchReplyPayload: {
+        text: "first paragraph\n\nsecond paragraph",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open", streamViaEditMessage: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.sendMessage).toHaveBeenCalledTimes(1)
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 68n,
+          text: "first paragraph",
+        }),
+      )
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        8,
+        expect.objectContaining({
+          oneofKind: "editMessage",
+          editMessage: expect.objectContaining({
+            text: "first paragraph\n\nsecond paragraph",
+            parseMarkdown: true,
+          }),
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("reconstructs multi-chunk final text into the streamed message instead of overwriting with the last chunk", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 69n,
+          message: {
+            id: 5900n,
+            date: 1_700_000_009n,
+            fromId: 42n,
+            message: "dm",
+          },
+        },
+      ],
+      chats: {
+        "69": { kind: "direct", title: "Alice" },
+      },
+      partialReplies: [{ text: "first paragraph\n\n" }],
+      dispatchReplyPayloads: [
+        { text: "first paragraph\n\nsecond " },
+        { text: "paragraph\n\nthird paragraph" },
+      ],
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open", streamViaEditMessage: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.sendMessage).toHaveBeenCalledTimes(1)
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 69n,
+          text: "first paragraph",
+        }),
+      )
+      const editCalls = harness.calls.invokeRaw.mock.calls.filter((call) => call[0] === 8)
+      expect(editCalls.length).toBeGreaterThanOrEqual(2)
+      expect(editCalls.at(-1)?.[1]).toEqual(
+        expect.objectContaining({
+          oneofKind: "editMessage",
+          editMessage: expect.objectContaining({
+            text: "first paragraph\n\nsecond paragraph\n\nthird paragraph",
+            parseMarkdown: true,
+          }),
+        }),
+      )
     })
 
     await handle.stop()

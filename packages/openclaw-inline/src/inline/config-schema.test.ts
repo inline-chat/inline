@@ -37,6 +37,7 @@ describe("inline/config-schema", () => {
           permissions: false,
         },
         blockStreaming: true,
+        streamViaEditMessage: true,
         chunkMode: "newline",
         blockStreamingCoalesce: { minChars: 600, idleMs: 700, maxChars: 2_200 },
         replyToBotWithoutMention: true,
