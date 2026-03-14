@@ -39,6 +39,7 @@ type SenderProfile = {
 type HistoryContext = {
   historyText: string | null
   attachmentText: string | null
+  entityText: string | null
   repliedToBot: boolean
   replyToSenderId: string | null
 }
@@ -56,6 +57,8 @@ const REACTION_TARGET_LOOKUP_LIMIT = 8
 const REPLY_TARGET_LOOKUP_LIMIT = 8
 const ATTACHMENT_CONTEXT_LIMIT = 6
 const DEFAULT_INLINE_MEDIA_MAX_BYTES = 8 * 1024 * 1024
+const INLINE_FORMATTING_NOTE =
+  "Inline formatting note: prefer bullet lists over markdown tables. If a table is necessary, render it inside a fenced code block."
 const GET_MESSAGES_METHOD =
   typeof (Method as Record<string, unknown>).GET_MESSAGES === "number" &&
   Number.isInteger((Method as Record<string, unknown>).GET_MESSAGES) &&
@@ -94,10 +97,6 @@ async function resolveChatInfo(
   const info: CachedChatInfo = { kind, title }
   cache.set(chatId, info)
   return info
-}
-
-function messageText(message: Message): string {
-  return summarizeInlineMessageContent(message).text
 }
 
 function normalizeInlineUsername(raw: string | undefined): string | undefined {
@@ -421,6 +420,7 @@ async function buildHistoryContext(params: {
   let foundReplyTargetInHistory = false
   const lines: string[] = []
   const attachmentLines: string[] = []
+  const entityLines: string[] = []
 
   if (params.historyLimit > 0) {
     const messages = await loadChatHistoryMessages({
@@ -467,6 +467,10 @@ async function buildHistoryContext(params: {
         if (attachmentText) {
           attachmentLines.push(`#${String(item.id)}${replySuffix} ${label}: ${attachmentText}`)
         }
+        const entityText = normalizeHistoryText(content.entityText)
+        if (entityText) {
+          entityLines.push(`#${String(item.id)}${replySuffix} ${label}: ${entityText}`)
+        }
       }
     }
   }
@@ -492,6 +496,7 @@ async function buildHistoryContext(params: {
     return {
       historyText: null,
       attachmentText: attachmentLines.length ? attachmentLines.slice(-ATTACHMENT_CONTEXT_LIMIT).join("\n") : null,
+      entityText: entityLines.length ? entityLines.slice(-ATTACHMENT_CONTEXT_LIMIT).join("\n") : null,
       repliedToBot,
       replyToSenderId,
     }
@@ -500,6 +505,9 @@ async function buildHistoryContext(params: {
     historyText: `Recent thread messages (oldest -> newest):\n${lines.join("\n")}`,
     attachmentText: attachmentLines.length
       ? `Recent media/attachments:\n${attachmentLines.slice(-ATTACHMENT_CONTEXT_LIMIT).join("\n")}`
+      : null,
+    entityText: entityLines.length
+      ? `Recent message entities:\n${entityLines.slice(-ATTACHMENT_CONTEXT_LIMIT).join("\n")}`
       : null,
     repliedToBot,
     replyToSenderId,
@@ -597,11 +605,14 @@ export async function monitorInlineProvider(params: {
         if (abortSignal.aborted) break
         let msg: Message
         let rawBody = ""
+        let currentEntityText: string | null = null
         let reactionEvent: { action: "added" | "removed"; emoji: string; targetMessageId: bigint } | null = null
 
         if (event.kind === "message.new") {
           msg = event.message
-          rawBody = messageText(msg)
+          const content = summarizeInlineMessageContent(msg)
+          rawBody = content.text
+          currentEntityText = content.entityText || null
           if (!rawBody) continue
 
           // Ignore echoes / our own outbound messages.
@@ -827,7 +838,7 @@ export async function monitorInlineProvider(params: {
           botMessageIdsByChat,
         }).catch((err) => {
           statusSink?.({ lastError: `getChatHistory failed: ${String(err)}` })
-          return { historyText: null, attachmentText: null, repliedToBot: false, replyToSenderId: null }
+          return { historyText: null, attachmentText: null, entityText: null, repliedToBot: false, replyToSenderId: null }
         })
         const implicitMention =
           (reactionEvent != null && isGroup) ||
@@ -877,7 +888,10 @@ export async function monitorInlineProvider(params: {
         const combinedBody = [
           historyContext.historyText,
           historyContext.attachmentText,
+          historyContext.entityText,
+          INLINE_FORMATTING_NOTE,
           `Current message:\n${rawBody}`,
+          currentEntityText ? `Current message entities:\n${currentEntityText}` : null,
         ]
           .filter(Boolean)
           .join("\n\n")
