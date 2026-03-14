@@ -67,6 +67,7 @@ type MonitorSetup = {
     message?: string
     out?: boolean
     replyToMsgId?: bigint
+    entities?: unknown
   }>>
   mediaByUrl?: Record<string, { contentType?: string; fileName?: string; buffer?: Uint8Array | Buffer }>
   dispatchReplyPayload?: { text?: string; replyToId?: string; mediaUrl?: string; mediaUrls?: string[] }
@@ -1063,6 +1064,111 @@ describe("inline/monitor", () => {
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
           Body: expect.stringContaining("Current message:\nimage attachment: https://cdn.inline.chat/broken-photo.jpg"),
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("includes entity helpers and inline formatting guidance in inbound context", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 91n,
+          message: {
+            id: 7401n,
+            date: 1_700_000_200n,
+            fromId: 52n,
+            message: "See Alice docs",
+            entities: {
+              entities: [
+                {
+                  type: 1,
+                  offset: 4n,
+                  length: 5n,
+                  entity: {
+                    oneofKind: "mention",
+                    mention: { userId: 99n },
+                  },
+                },
+                {
+                  type: 3,
+                  offset: 10n,
+                  length: 4n,
+                  entity: {
+                    oneofKind: "textUrl",
+                    textUrl: { url: "https://example.com/current-docs" },
+                  },
+                },
+              ],
+            },
+          } as any,
+        },
+      ],
+      chats: {
+        "91": { kind: "direct", title: "Alice" },
+      },
+      historyByChat: {
+        "91": [
+          {
+            id: 7300n,
+            date: 1_700_000_150n,
+            fromId: 52n,
+            message: "Review portal",
+            entities: {
+              entities: [
+                {
+                  type: 3,
+                  offset: 7n,
+                  length: 6n,
+                  entity: {
+                    oneofKind: "textUrl",
+                    textUrl: { url: "https://example.com/history-portal" },
+                  },
+                },
+              ],
+            },
+          } as any,
+        ],
+      },
+      dispatchReplyPayload: {
+        text: "looks good",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        dmPolicy: "open",
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalled()
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: expect.stringContaining(
+            'Recent message entities:\n#7300 user:52: text link "portal" -> https://example.com/history-portal',
+          ),
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: expect.stringContaining(
+            "Inline formatting note: prefer bullet lists over markdown tables. If a table is necessary, render it inside a fenced code block.",
+          ),
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: expect.stringContaining(
+            'Current message entities:\nmention "Alice" -> user:99 | text link "docs" -> https://example.com/current-docs',
+          ),
         }),
       )
     })

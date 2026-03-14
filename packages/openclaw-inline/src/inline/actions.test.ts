@@ -879,6 +879,111 @@ describe("inline/actions", () => {
     })
   })
 
+  it("returns structured entities for read results", async () => {
+    vi.resetModules()
+
+    const invokeRaw = vi.fn(async (method: number) => {
+      if (method === 5) {
+        return {
+          oneofKind: "getChatHistory",
+          getChatHistory: {
+            messages: [
+              {
+                id: 271n,
+                fromId: 42n,
+                date: 1_700_000_010n,
+                message: "See Alice docs",
+                out: false,
+                entities: {
+                  entities: [
+                    {
+                      type: 1,
+                      offset: 4n,
+                      length: 5n,
+                      entity: {
+                        oneofKind: "mention",
+                        mention: { userId: 99n },
+                      },
+                    },
+                    {
+                      type: 3,
+                      offset: 10n,
+                      length: 4n,
+                      entity: {
+                        oneofKind: "textUrl",
+                        textUrl: { url: "https://example.com/docs" },
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        }
+      }
+      throw new Error(`unexpected method ${String(method)}`)
+    })
+
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {
+        GET_CHAT_HISTORY: 5,
+      },
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = vi.fn(async () => {})
+        close = vi.fn(async () => {})
+        invokeRaw = invokeRaw
+      },
+    }))
+
+    const { inlineMessageActions } = await import("./actions")
+
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+        },
+      },
+    } satisfies OpenClawConfig
+
+    const result = await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "read",
+      cfg,
+      params: { to: "7", limit: 1 },
+    } as any)
+
+    expect(result).toMatchObject({
+      details: {
+        messages: [
+          expect.objectContaining({
+            id: "271",
+            text: "See Alice docs",
+            entityText: 'mention "Alice" -> user:99 | text link "docs" -> https://example.com/docs',
+            entities: [
+              {
+                type: "mention",
+                offset: 4,
+                length: 5,
+                text: "Alice",
+                userId: "99",
+              },
+              {
+                type: "text_link",
+                offset: 10,
+                length: 4,
+                text: "docs",
+                url: "https://example.com/docs",
+              },
+            ],
+            links: ["https://example.com/docs"],
+          }),
+        ],
+      },
+    })
+  })
+
   it("rejects sendAttachment when no media source is provided", async () => {
     vi.resetModules()
 

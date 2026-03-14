@@ -444,12 +444,14 @@ function mapMessage(message: {
     text: content.text,
     rawText: content.rawText,
     attachmentText: content.attachmentText,
+    entityText: content.entityText,
     out: Boolean(message.out),
     replyToId: message.replyToMsgId != null ? String(message.replyToMsgId) : undefined,
     attachmentUrls: content.attachmentUrls,
     links: content.links,
     media: content.media,
     attachments: content.attachments,
+    entities: content.entities,
     reactions,
   }
 }
