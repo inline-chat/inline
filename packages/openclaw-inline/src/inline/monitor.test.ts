@@ -21,6 +21,10 @@ type MonitorHarness = {
 }
 
 type MonitorSetup = {
+  me?: {
+    userId?: bigint
+    username?: string
+  }
   events: Array<
     | {
         kind: "message.new"
@@ -198,6 +202,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     method: number,
     input: {
       oneofKind?: string
+      getMe?: Record<string, never>
       getChatParticipants?: { chatId?: bigint }
       getChatHistory?: { peerId?: { type?: { oneofKind?: string; chat?: { chatId?: bigint } } } }
       editMessage?: {
@@ -212,6 +217,17 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       }
     },
   ) => {
+    if (method === 1 && input?.oneofKind === "getMe") {
+      return {
+        oneofKind: "getMe",
+        getMe: {
+          user: {
+            id: setup.me?.userId ?? 777n,
+            ...(setup.me?.username ? { username: setup.me.username } : {}),
+          },
+        },
+      }
+    }
     if (method === 13 && input?.oneofKind === "getChatParticipants") {
       const chatId = String(input.getChatParticipants?.chatId ?? "")
       return {
@@ -299,6 +315,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         constructor(_path: string) {}
       },
       Method: {
+        GET_ME: 1,
         GET_CHAT_HISTORY: 5,
         GET_CHAT_PARTICIPANTS: 13,
         EDIT_MESSAGE: 8,
@@ -307,7 +324,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       InlineSdkClient: class {
         constructor(_opts: unknown) {}
         connect = vi.fn(async () => {})
-        getMe = vi.fn(async () => ({ userId: 777n }))
+        getMe = vi.fn(async () => ({ userId: setup.me?.userId ?? 777n }))
         getChat = vi.fn(async ({ chatId }: { chatId: bigint }) => {
           const key = String(chatId)
           const info = setup.chats[key] ?? { kind: "group", title: `chat-${key}` }
@@ -350,15 +367,28 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       detectMime: vi.fn(async () => "image/png"),
       logInboundDrop: vi.fn(),
       resolveControlCommandGate: vi.fn(() => ({ shouldBlock: false, commandAuthorized: true })),
-      resolveMentionGatingWithBypass: vi.fn((params: any) => ({
-        shouldSkip: Boolean(
+      resolveMentionGatingWithBypass: vi.fn((params: any) => {
+        const shouldBypassMention = Boolean(
           params.isGroup &&
-          params.requireMention &&
-          !params.wasMentioned &&
-          !params.implicitMention,
-        ),
-        effectiveWasMentioned: Boolean(params.wasMentioned || params.implicitMention),
-      })),
+            params.requireMention &&
+            !params.wasMentioned &&
+            !params.implicitMention &&
+            params.allowTextCommands &&
+            params.commandAuthorized &&
+            params.hasControlCommand,
+        )
+        return {
+          shouldSkip: Boolean(
+            params.isGroup &&
+              params.requireMention &&
+              !params.wasMentioned &&
+              !params.implicitMention &&
+              !shouldBypassMention,
+          ),
+          effectiveWasMentioned: Boolean(params.wasMentioned || params.implicitMention || shouldBypassMention),
+          shouldBypassMention,
+        }
+      }),
     }
   })
 
@@ -382,7 +412,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         saveMediaBuffer,
       },
       text: {
-        hasControlCommand: () => false,
+        hasControlCommand: (text?: string) => /^\/\S+/.test((text ?? "").trim()),
       },
       routing: {
         resolveAgentRoute,
@@ -1084,6 +1114,65 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("normalizes targeted bot commands and bypasses mention gating for the active bot", async () => {
+    const harness = await setupMonitorHarness({
+      me: {
+        userId: 777n,
+        username: "inlinebot",
+      },
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 6002n,
+            date: 1_700_000_006n,
+            fromId: 51n,
+            message: "/status@inlinebot now",
+            mentioned: false,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      dispatchReplyPayload: {
+        text: "command handled",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+        groupAllowFrom: ["51"],
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          RawBody: "/status@inlinebot now",
+          CommandBody: "/status now",
+          WasMentioned: true,
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 88n,
+          text: "command handled",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
   it("can bypass mention gate on replies to bot messages and keeps reply threaded", async () => {
     const harness = await setupMonitorHarness({
       events: [
@@ -1253,12 +1342,104 @@ describe("inline/monitor", () => {
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: expect.stringContaining("Current message:\nimage attachment: https://cdn.inline.chat/current-photo.jpg"),
+          Body: expect.stringMatching(
+            /Current message:\n<media:image>[\s\S]*Current media\/attachments:\nimage attachment: https:\/\/cdn\.inline\.chat\/current-photo\.jpg/,
+          ),
           MediaPath: "/tmp/current-photo.jpg",
+          MediaType: "image/jpeg",
           MediaUrl: "/tmp/current-photo.jpg",
           MediaPaths: ["/tmp/current-photo.jpg"],
           MediaUrls: ["/tmp/current-photo.jpg"],
           MediaTypes: ["image/jpeg"],
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("exposes attachment-only documents with placeholder text and media metadata", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 7303n,
+            date: 1_700_000_112n,
+            fromId: 51n,
+            message: "",
+            mentioned: true,
+            media: {
+              media: {
+                oneofKind: "document",
+                document: {
+                  document: {
+                    id: 902n,
+                    cdnUrl: "https://cdn.inline.chat/spec.pdf",
+                    fileName: "spec.pdf",
+                    mimeType: "application/pdf",
+                    size: 12_345,
+                  },
+                },
+              },
+            },
+          } as any,
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      mediaByUrl: {
+        "https://cdn.inline.chat/spec.pdf": {
+          contentType: "application/pdf",
+          fileName: "spec.pdf",
+        },
+      },
+      dispatchReplyPayload: {
+        text: "reviewed",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalled()
+      expect(harness.calls.fetchRemoteMedia).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: "https://cdn.inline.chat/spec.pdf",
+          filePathHint: "spec.pdf",
+        }),
+      )
+      expect(harness.calls.saveMediaBuffer).toHaveBeenCalledWith(
+        expect.any(Buffer),
+        "application/pdf",
+        "inbound",
+        8 * 1024 * 1024,
+        "spec.pdf",
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: expect.stringMatching(
+            /Current message:\n<media:document>[\s\S]*Current media\/attachments:\ndocument attachment \(spec\.pdf\): https:\/\/cdn\.inline\.chat\/spec\.pdf/,
+          ),
+          RawBody: "<media:document>",
+          CommandBody: "<media:document>",
+          MediaPath: "/tmp/spec.pdf",
+          MediaType: "application/pdf",
+          MediaUrl: "/tmp/spec.pdf",
+          MediaPaths: ["/tmp/spec.pdf"],
+          MediaUrls: ["/tmp/spec.pdf"],
+          MediaTypes: ["application/pdf"],
         }),
       )
     })
@@ -1322,7 +1503,9 @@ describe("inline/monitor", () => {
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: expect.stringContaining("Current message:\nimage attachment: https://cdn.inline.chat/broken-photo.jpg"),
+          Body: expect.stringMatching(
+            /Current message:\n<media:image>[\s\S]*Current media\/attachments:\nimage attachment: https:\/\/cdn\.inline\.chat\/broken-photo\.jpg/,
+          ),
         }),
       )
     })
