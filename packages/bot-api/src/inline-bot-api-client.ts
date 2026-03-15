@@ -12,10 +12,12 @@ import type {
   GetChatParams,
   GetChatResult,
   GetMeResult,
+  GetMyCommandsResult,
   InlineBotApiClientOptions,
   InlineBotApiMethodOptions,
   InlineBotApiRequestOptions,
   InlineBotApiResponse,
+  SetMyCommandsParams,
   SendMessageParams,
   SendMessageResult,
   SendReactionParams,
@@ -23,9 +25,9 @@ import type {
 
 const defaultBaseUrl = "https://api.inline.chat"
 
-const getMethodNames = new Set<BotMethodName>(["getMe", "getChat", "getChatHistory"])
+const getMethodNames = new Set<BotMethodName>(["getMe", "getChat", "getChatHistory", "getMyCommands"])
 
-function isGetMethod(method: string): method is "getMe" | "getChat" | "getChatHistory" {
+function isGetMethod(method: string): method is "getMe" | "getChat" | "getChatHistory" | "getMyCommands" {
   return getMethodNames.has(method as BotMethodName)
 }
 
@@ -171,6 +173,18 @@ export class InlineBotApiClient {
 
   getChatHistory(params: GetChatHistoryParams, options?: InlineBotApiMethodOptions) {
     return this.method("getChatHistory", params, options)
+  }
+
+  getMyCommands(options?: InlineBotApiMethodOptions) {
+    return this.method("getMyCommands", undefined, options)
+  }
+
+  setMyCommands(params: SetMyCommandsParams, options?: InlineBotApiMethodOptions) {
+    return this.method("setMyCommands", params, options)
+  }
+
+  deleteMyCommands(options?: InlineBotApiMethodOptions) {
+    return this.method("deleteMyCommands", undefined, options)
   }
 
   sendMessage(params: SendMessageParams, options?: InlineBotApiMethodOptions) {

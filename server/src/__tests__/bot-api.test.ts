@@ -404,4 +404,201 @@ describe("Bot HTTP API", () => {
     expect(editJson.ok).toBe(true)
     expect(editJson.result.message.text).toBe("from-body")
   })
+
+  it("manages bot commands through getMyCommands, setMyCommands, and deleteMyCommands", async () => {
+    const [bot] = await db
+      .insert(users)
+      .values({
+        firstName: "CommandsBot",
+        username: "commandsbot",
+        bot: true,
+        emailVerified: false,
+        phoneVerified: false,
+        pendingSetup: false,
+      })
+      .returning()
+
+    const { token } = await generateToken(bot!.id)
+    await SessionsModel.create({
+      userId: bot!.id,
+      tokenHash: hashToken(token),
+      personalData: {},
+      clientType: "api",
+    })
+
+    const initialRes = await app.handle(
+      new Request("http://localhost/bot/getMyCommands", {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    )
+
+    expect(initialRes.status).toBe(200)
+    const initialJson = await initialRes.json()
+    expect(initialJson).toEqual({
+      ok: true,
+      result: {
+        commands: [],
+      },
+    })
+
+    const setRes = await app.handle(
+      new Request("http://localhost/bot/setMyCommands", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          commands: [
+            { command: "start", description: "Start the bot", sort_order: 1 },
+            { command: "help", description: "Show help", sort_order: 2 },
+          ],
+        }),
+      }),
+    )
+
+    expect(setRes.status).toBe(200)
+    const setJson = await setRes.json()
+    expect(setJson).toEqual({
+      ok: true,
+      result: {},
+    })
+
+    const afterSetRes = await app.handle(
+      new Request("http://localhost/bot/getMyCommands", {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    )
+
+    expect(afterSetRes.status).toBe(200)
+    const afterSetJson = await afterSetRes.json()
+    expect(afterSetJson).toEqual({
+      ok: true,
+      result: {
+        commands: [
+          { command: "start", description: "Start the bot", sort_order: 1 },
+          { command: "help", description: "Show help", sort_order: 2 },
+        ],
+      },
+    })
+
+    const deleteRes = await app.handle(
+      new Request("http://localhost/bot/deleteMyCommands", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }),
+    )
+
+    expect(deleteRes.status).toBe(200)
+    const deleteJson = await deleteRes.json()
+    expect(deleteJson).toEqual({
+      ok: true,
+      result: {},
+    })
+
+    const afterDeleteRes = await app.handle(
+      new Request("http://localhost/bot/getMyCommands", {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    )
+
+    expect(afterDeleteRes.status).toBe(200)
+    const afterDeleteJson = await afterDeleteRes.json()
+    expect(afterDeleteJson).toEqual({
+      ok: true,
+      result: {
+        commands: [],
+      },
+    })
+  })
+
+  it("rejects invalid command payloads for setMyCommands", async () => {
+    const [bot] = await db
+      .insert(users)
+      .values({
+        firstName: "InvalidCommandsBot",
+        username: "invalidcommandsbot",
+        bot: true,
+        emailVerified: false,
+        phoneVerified: false,
+        pendingSetup: false,
+      })
+      .returning()
+
+    const { token } = await generateToken(bot!.id)
+    await SessionsModel.create({
+      userId: bot!.id,
+      tokenHash: hashToken(token),
+      personalData: {},
+      clientType: "api",
+    })
+
+    const invalidRes = await app.handle(
+      new Request("http://localhost/bot/setMyCommands", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          commands: [
+            { command: "Start", description: "Uppercase command should fail" },
+          ],
+        }),
+      }),
+    )
+
+    expect(invalidRes.status).toBe(400)
+    const invalidJson = await invalidRes.json()
+    expect(invalidJson.ok).toBe(false)
+    expect(invalidJson.error_code).toBe(400)
+  })
+
+  it("rejects duplicate command payloads for setMyCommands", async () => {
+    const [bot] = await db
+      .insert(users)
+      .values({
+        firstName: "DuplicateCommandsBot",
+        username: "duplicatecommandsbot",
+        bot: true,
+        emailVerified: false,
+        phoneVerified: false,
+        pendingSetup: false,
+      })
+      .returning()
+
+    const { token } = await generateToken(bot!.id)
+    await SessionsModel.create({
+      userId: bot!.id,
+      tokenHash: hashToken(token),
+      personalData: {},
+      clientType: "api",
+    })
+
+    const duplicateRes = await app.handle(
+      new Request("http://localhost/bot/setMyCommands", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          commands: [
+            { command: "start", description: "Start the bot" },
+            { command: "start", description: "Duplicate start" },
+          ],
+        }),
+      }),
+    )
+
+    expect(duplicateRes.status).toBe(400)
+    const duplicateJson = await duplicateRes.json()
+    expect(duplicateJson.ok).toBe(false)
+    expect(duplicateJson.error_code).toBe(400)
+  })
 })

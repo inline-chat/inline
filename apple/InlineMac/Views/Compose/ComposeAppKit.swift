@@ -59,6 +59,15 @@ class ComposeAppKit: NSView {
   private var mentionMenuConstraints: [NSLayoutConstraint] = []
   private var pendingAutoAddParticipants: Set<Int64> = []
 
+  // Slash command completion
+  private var commandCompletionMenu: CommandCompletionMenu?
+  private let slashCommandDetector = SlashCommandDetector()
+  private var peerBotCommandsViewModel: PeerBotCommandsViewModel?
+  private var currentSlashCommandRange: SlashCommandRange?
+  private var currentSlashQuery: String?
+  private var commandKeyMonitorEscUnsubscribe: (() -> Void)?
+  private var commandMenuConstraints: [NSLayoutConstraint] = []
+
   private static let mentionAutoAddLimit = 10
 
   // Draft
@@ -190,6 +199,7 @@ class ComposeAppKit: NSView {
 
     // Set up mention menu positioning now that we have a window
     addMentionMenuToSuperview()
+    addCommandMenuToSuperview()
   }
 
   override func viewWillMove(toSuperview newSuperview: NSView?) {
@@ -259,6 +269,7 @@ class ComposeAppKit: NSView {
     updateSilentModeUI()
     setupTextEditor()
     setupMentionCompletion()
+    setupSlashCommandCompletion()
   }
 
   /// This method is called from ChatViewAppKit's viewDidLayout
@@ -490,11 +501,40 @@ class ComposeAppKit: NSView {
     Log.shared.debug("🔍 addMentionMenuToSuperview: menu positioned above compose view")
   }
 
+  private func setupSlashCommandCompletion() {
+    peerBotCommandsViewModel = PeerBotCommandsViewModel(peer: peerId)
+    commandCompletionMenu = CommandCompletionMenu()
+    commandCompletionMenu?.delegate = self
+    commandCompletionMenu?.translatesAutoresizingMaskIntoConstraints = false
+  }
+
+  private func addCommandMenuToSuperview() {
+    guard let menu = commandCompletionMenu,
+          menu.superview == nil,
+          let parentView = parentChatView?.view
+    else {
+      return
+    }
+
+    parentView.addSubview(menu)
+    NSLayoutConstraint.deactivate(commandMenuConstraints)
+    commandMenuConstraints.removeAll()
+
+    commandMenuConstraints = [
+      menu.leadingAnchor.constraint(equalTo: leadingAnchor),
+      menu.trailingAnchor.constraint(equalTo: trailingAnchor),
+      menu.bottomAnchor.constraint(equalTo: topAnchor),
+    ]
+
+    NSLayoutConstraint.activate(commandMenuConstraints)
+  }
+
   private func showMentionCompletion(for query: String) {
     Log.shared.debug("🔍 showMentionCompletion: query='\(query)'")
 
     // Ensure menu is added to view hierarchy
     addMentionMenuToSuperview()
+    hideCommandCompletion()
 
     mentionCompletionMenu?.filterParticipants(with: query)
     mentionCompletionMenu?.show()
@@ -518,6 +558,46 @@ class ComposeAppKit: NSView {
     mentionKeyMonitorEscUnsubscribe = nil
   }
 
+  private func showCommandCompletion(for query: String) {
+    currentSlashQuery = query
+    addCommandMenuToSuperview()
+    hideMentionCompletion()
+
+    guard let peerBotCommandsViewModel else { return }
+    let suggestions = peerBotCommandsViewModel.suggestions(matching: query)
+    commandCompletionMenu?.updateSuggestions(suggestions)
+
+    if suggestions.isEmpty {
+      commandCompletionMenu?.hide()
+    } else {
+      commandCompletionMenu?.show()
+      commandKeyMonitorEscUnsubscribe?()
+      commandKeyMonitorEscUnsubscribe = dependencies.keyMonitor?.addHandler(
+        for: .escape,
+        key: "compose_command_\(peerId)",
+        handler: { [weak self] _ in
+          self?.hideCommandCompletion()
+        }
+      )
+    }
+
+    if peerBotCommandsViewModel.shouldAttemptLoad {
+      Task { @MainActor [weak self] in
+        await peerBotCommandsViewModel.ensureLoaded()
+        guard self?.currentSlashQuery == query else { return }
+        self?.showCommandCompletion(for: query)
+      }
+    }
+  }
+
+  private func hideCommandCompletion() {
+    currentSlashCommandRange = nil
+    currentSlashQuery = nil
+    commandCompletionMenu?.hide()
+    commandKeyMonitorEscUnsubscribe?()
+    commandKeyMonitorEscUnsubscribe = nil
+  }
+
   private func detectMentionAtCursor() {
     let cursorPosition = textEditor.textView.selectedRange().location
     let attributedText = textEditor.attributedString
@@ -529,6 +609,28 @@ class ComposeAppKit: NSView {
     } else {
       hideMentionCompletion()
     }
+  }
+
+  @discardableResult
+  private func detectSlashCommandAtCursor() -> Bool {
+    let cursorPosition = textEditor.textView.selectedRange().location
+    let attributedText = textEditor.attributedString
+
+    if let slashRange = slashCommandDetector.detectSlashCommandAt(cursorPosition: cursorPosition, in: attributedText) {
+      currentSlashCommandRange = slashRange
+      showCommandCompletion(for: slashRange.query)
+      return true
+    }
+
+    hideCommandCompletion()
+    return false
+  }
+
+  private func detectComposeCompletionsAtCursor() {
+    if detectSlashCommandAtCursor() {
+      return
+    }
+    detectMentionAtCursor()
   }
 
   // MARK: - Public Interface
@@ -1324,6 +1426,11 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func textViewDidPressArrowUp(_ textView: NSTextView) -> Bool {
+    if commandCompletionMenu?.isVisible == true {
+      commandCompletionMenu?.selectPrevious()
+      return true
+    }
+
     // If mention menu is visible, let it handle the arrow key
     if mentionCompletionMenu?.isVisible == true {
       mentionCompletionMenu?.selectPrevious()
@@ -1352,6 +1459,10 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func textViewDidPressReturn(_ textView: NSTextView) -> Bool {
+    if let commandCompletionMenu, commandCompletionMenu.isVisible, commandCompletionMenu.selectCurrentItem() {
+      return true
+    }
+
     // If mention menu is visible, select current item with Enter
     if let mentionCompletionMenu, mentionCompletionMenu.isVisible {
       if mentionCompletionMenu.selectCurrentItem() {
@@ -1433,8 +1544,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
       log.trace("ignore next height change")
     }
 
-    // Detect mentions
-    detectMentionAtCursor()
+    detectComposeCompletionsAtCursor()
 
     handleStickerDetectionIfNeeded(for: textView)
 
@@ -1528,9 +1638,15 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
 
     // Reset typing attributes when cursor moves to prevent mention style leakage
     textView.updateTypingAttributesIfNeeded()
+    detectComposeCompletionsAtCursor()
   }
 
   func textViewDidPressArrowDown(_ textView: NSTextView) -> Bool {
+    if commandCompletionMenu?.isVisible == true {
+      commandCompletionMenu?.selectNext()
+      return true
+    }
+
     // If mention menu is visible, let it handle the arrow key
     if mentionCompletionMenu?.isVisible == true {
       mentionCompletionMenu?.selectNext()
@@ -1541,6 +1657,11 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func textViewDidPressTab(_ textView: NSTextView) -> Bool {
+    if commandCompletionMenu?.isVisible == true {
+      commandCompletionMenu?.selectCurrentItem()
+      return true
+    }
+
     // If mention menu is visible, select current item
     if mentionCompletionMenu?.isVisible == true {
       mentionCompletionMenu?.selectCurrentItem()
@@ -1551,6 +1672,11 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func textViewDidPressEscape(_ textView: NSTextView) -> Bool {
+    if commandCompletionMenu?.isVisible == true {
+      hideCommandCompletion()
+      return true
+    }
+
     // If mention menu is visible, hide it
     if mentionCompletionMenu?.isVisible == true {
       hideMentionCompletion()
@@ -1571,6 +1697,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
 
   func textViewDidCancelMention(_ textView: NSTextView) {
     hideMentionCompletion()
+    hideCommandCompletion()
   }
 
   func textViewDidGainFocus(_ textView: NSTextView) {
@@ -1580,6 +1707,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   func textViewDidLoseFocus(_ textView: NSTextView) {
     // Hide mention menu when text view loses focus
     hideMentionCompletion()
+    hideCommandCompletion()
   }
 }
 
@@ -1647,6 +1775,32 @@ extension ComposeAppKit: MentionCompletionMenuDelegate {
 
   func mentionMenuDidRequestClose(_ menu: MentionCompletionMenu) {
     hideMentionCompletion()
+  }
+}
+
+extension ComposeAppKit: CommandCompletionMenuDelegate {
+  func commandMenu(_ menu: CommandCompletionMenu, didSelectSuggestion suggestion: PeerBotCommandSuggestion) {
+    guard let currentSlashCommandRange else { return }
+
+    let currentAttributedText = textEditor.attributedString
+    let commandText = suggestion.insertionText.trimmingCharacters(in: .whitespacesAndNewlines)
+    let result = slashCommandDetector.replaceSlashCommand(
+      in: currentAttributedText,
+      range: currentSlashCommandRange.range,
+      with: commandText
+    )
+
+    ignoreNextHeightChange = true
+    textEditor.setAttributedString(result.newAttributedText)
+    textEditor.textView.setSelectedRange(NSRange(location: result.newCursorPosition, length: 0))
+    ignoreNextHeightChange = false
+
+    hideCommandCompletion()
+    send()
+  }
+
+  func commandMenuDidRequestClose(_ menu: CommandCompletionMenu) {
+    hideCommandCompletion()
   }
 }
 

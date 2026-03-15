@@ -5,12 +5,14 @@ import { handleBotError } from "./error"
 import { TApiEnvelope, normalizeInputId } from "./helpers"
 import {
   TBotChat,
+  TBotCommand,
   TBotMessage,
   TBotUser,
   TDeleteMessageInput,
   TEditMessageTextInput,
   TGetChatHistoryInput,
   TGetChatInput,
+  TSetMyCommandsInput,
   TSendMessageInput,
   TSendReactionInput,
 } from "./types"
@@ -29,6 +31,7 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { ModelError } from "@in/server/db/models/_errors"
 import { encodeBotEntities, parseBotEntities, type BotUserJson } from "./entities"
 import { UsersModel } from "@in/server/db/models/users"
+import { BotCommandsModel } from "@in/server/db/models/botCommands"
 import type {
   BotChat,
   BotChatLastMessage,
@@ -48,6 +51,78 @@ const toBotUser = (user: any, options?: { isBot?: boolean }): BotUser => {
     first_name: user.firstName ?? undefined,
     last_name: user.lastName ?? undefined,
   }
+}
+
+type BotCommandJson = {
+  command: string
+  description: string
+  sort_order?: number
+}
+
+const BOT_COMMAND_RE = /^[a-z0-9_]+$/
+const BOT_COMMAND_LIMIT = 100
+
+const toBotCommand = (row: { command: string; description: string; sortOrder?: number | null }): BotCommandJson => ({
+  command: row.command,
+  description: row.description,
+  sort_order: row.sortOrder ?? undefined,
+})
+
+const normalizeBotCommandsInput = (value: unknown): Array<{ command: string; description: string; sortOrder: number }> => {
+  const parsed = parseMaybeJsonValue(value)
+  if (!Array.isArray(parsed)) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+
+  if (parsed.length > BOT_COMMAND_LIMIT) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+
+  const seenCommands = new Set<string>()
+
+  return parsed.map((item, index) => {
+    if (!isRecord(item)) {
+      throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+    }
+
+    const rawCommand = item["command"]
+    const rawDescription = item["description"]
+    const rawSortOrder = item["sort_order"]
+
+    if (typeof rawCommand !== "string" || typeof rawDescription !== "string") {
+      throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+    }
+
+    const command = rawCommand.trim()
+    const description = rawDescription.trim()
+
+    if (command.length < 1 || command.length > 32 || !BOT_COMMAND_RE.test(command)) {
+      throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+    }
+
+    if (description.length < 1 || description.length > 256 || seenCommands.has(command)) {
+      throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+    }
+
+    seenCommands.add(command)
+
+    let sortOrder = index
+    if (typeof rawSortOrder === "number" && Number.isFinite(rawSortOrder)) {
+      sortOrder = rawSortOrder
+    } else if (typeof rawSortOrder === "string" && rawSortOrder.trim() !== "") {
+      const parsedSortOrder = Number(rawSortOrder)
+      if (!Number.isFinite(parsedSortOrder)) {
+        throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+      }
+      sortOrder = parsedSortOrder
+    }
+
+    return {
+      command,
+      description,
+      sortOrder,
+    }
+  })
 }
 
 const toBotPeer = (peer: any): BotPeer => {
@@ -647,6 +722,70 @@ const botMethods = (authPlugin: any): any => {
     },
     {
       body: t.Optional(TSendReactionInput),
+      response: TApiEnvelope(t.Object({})),
+    },
+  )
+
+  app.get(
+    "/getMyCommands",
+    async ({ store }: any) => {
+      try {
+        return {
+          ok: true,
+          result: {
+            commands: (await BotCommandsModel.getForBotUserId(store.currentUserId)).map((command) =>
+              toBotCommand({
+                command: command.command,
+                description: command.description,
+                sortOrder: command.sortOrder,
+              }),
+            ),
+          },
+        }
+      } catch (error) {
+        throwInlineFromUnknown(error)
+      }
+    },
+    {
+      response: TApiEnvelope(t.Object({ commands: t.Array(TBotCommand) })),
+    },
+  )
+
+  app.post(
+    "/setMyCommands",
+    async ({ body, query, store }: any) => {
+      try {
+        const input = mergePostInput(body, query)
+        const commands = normalizeBotCommandsInput(input["commands"]).map((command) => ({
+          command: command.command,
+          description: command.description,
+          sortOrder: command.sortOrder,
+        }))
+
+        await BotCommandsModel.replaceForBotUserId(store.currentUserId, commands)
+
+        return { ok: true, result: {} }
+      } catch (error) {
+        throwInlineFromUnknown(error)
+      }
+    },
+    {
+      body: t.Optional(TSetMyCommandsInput),
+      response: TApiEnvelope(t.Object({})),
+    },
+  )
+
+  app.post(
+    "/deleteMyCommands",
+    async ({ store }: any) => {
+      try {
+        await BotCommandsModel.deleteForBotUserId(store.currentUserId)
+        return { ok: true, result: {} }
+      } catch (error) {
+        throwInlineFromUnknown(error)
+      }
+    },
+    {
       response: TApiEnvelope(t.Object({})),
     },
   )

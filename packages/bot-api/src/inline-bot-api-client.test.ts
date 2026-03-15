@@ -154,6 +154,80 @@ describe("InlineBotApiClient", () => {
     expect(JSON.parse(seenBody)).toEqual({ c: true })
   })
 
+  it("uses GET for getMyCommands", async () => {
+    let seenUrl = ""
+    let seenMethod = ""
+
+    const client = new InlineBotApiClient({
+      token: "t",
+      fetch: (async (input, init) => {
+        seenUrl = String(input)
+        seenMethod = init?.method ?? ""
+        return new Response(JSON.stringify({ ok: true, result: { commands: [] } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }) as any,
+    })
+
+    const res = await client.getMyCommands()
+    expect(res.ok).toBe(true)
+    expect(seenMethod).toBe("GET")
+    expect(seenUrl).toBe("https://api.inline.chat/bot/getMyCommands")
+  })
+
+  it("uses POST JSON for setMyCommands", async () => {
+    let seenUrl = ""
+    let seenMethod = ""
+    let seenBody = ""
+
+    const client = new InlineBotApiClient({
+      token: "t",
+      fetch: (async (input, init) => {
+        seenUrl = String(input)
+        seenMethod = init?.method ?? ""
+        seenBody = init?.body ? String(init.body) : ""
+        return new Response(JSON.stringify({ ok: true, result: {} }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }) as any,
+    })
+
+    const res = await client.setMyCommands({
+      commands: [{ command: "start", description: "Start the bot", sort_order: 1 }],
+    })
+
+    expect(res.ok).toBe(true)
+    expect(seenMethod).toBe("POST")
+    expect(seenUrl).toBe("https://api.inline.chat/bot/setMyCommands")
+    expect(JSON.parse(seenBody)).toEqual({
+      commands: [{ command: "start", description: "Start the bot", sort_order: 1 }],
+    })
+  })
+
+  it("uses POST for deleteMyCommands", async () => {
+    let seenUrl = ""
+    let seenMethod = ""
+
+    const client = new InlineBotApiClient({
+      token: "t",
+      fetch: (async (input, init) => {
+        seenUrl = String(input)
+        seenMethod = init?.method ?? ""
+        return new Response(JSON.stringify({ ok: true, result: {} }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }) as any,
+    })
+
+    const res = await client.deleteMyCommands()
+    expect(res.ok).toBe(true)
+    expect(seenMethod).toBe("POST")
+    expect(seenUrl).toBe("https://api.inline.chat/bot/deleteMyCommands")
+  })
+
   it("uses global fetch when no fetch implementation is provided", async () => {
     const fetchMock = vi.fn(async () => {
       return new Response(JSON.stringify({ ok: true, result: { user: { id: 1, is_bot: true } } }), {
