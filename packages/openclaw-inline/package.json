@@ -1,6 +1,6 @@
 {
   "name": "@inline-openclaw/inline",
-  "version": "0.0.18",
+  "version": "0.0.19",
   "type": "module",
   "files": [
     "dist",
@@ -15,7 +15,7 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "rm -rf dist && bun build ./src/index.ts --outdir dist --entry-naming '[name].js' --target=node --format=esm --packages=bundle --external openclaw/plugin-sdk --sourcemap=linked && tsc -p tsconfig.json --emitDeclarationOnly",
     "prepack": "bun run build",
     "pretest": "rm -rf coverage",
     "typecheck": "tsc -p tsconfig.json --noEmit",
