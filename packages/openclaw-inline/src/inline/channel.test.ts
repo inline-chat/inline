@@ -586,6 +586,12 @@ describe("inline/channel", () => {
     const uploadFile = vi.fn(async () => ({ fileUniqueId: "INP_1", photoId: 101n }))
     const sendMessage = vi.fn(async () => ({ messageId: 55n }))
     const close = vi.fn(async () => {})
+    const loadWebMedia = vi.fn(async () => ({
+      buffer: Buffer.from([1, 2, 3]),
+      contentType: "image/png",
+      kind: "image",
+      fileName: "image.png",
+    }))
 
     mockRealtimeSdk({
       InlineSdkClient: class {
@@ -601,12 +607,7 @@ describe("inline/channel", () => {
       const actual = await vi.importActual<Record<string, unknown>>("openclaw/plugin-sdk")
       return {
         ...actual,
-        loadWebMedia: vi.fn(async () => ({
-          buffer: Buffer.from([1, 2, 3]),
-          contentType: "image/png",
-          kind: "image",
-          fileName: "image.png",
-        })),
+        loadWebMedia,
         detectMime: vi.fn(async () => "image/png"),
       }
     })
@@ -643,6 +644,10 @@ describe("inline/channel", () => {
       expect.objectContaining({
         type: "photo",
       }),
+    )
+    expect(loadWebMedia).toHaveBeenCalledWith(
+      "https://example.com/image.png",
+      300 * 1024 * 1024,
     )
     expect(sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({

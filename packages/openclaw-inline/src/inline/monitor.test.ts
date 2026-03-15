@@ -94,6 +94,7 @@ function buildAccount(overrides?: {
   parseMarkdown?: boolean
   blockStreaming?: boolean
   streamViaEditMessage?: boolean
+  mediaMaxMb?: number
 }) {
   return {
     accountId: "default",
@@ -119,6 +120,7 @@ function buildAccount(overrides?: {
       parseMarkdown: overrides?.parseMarkdown ?? true,
       blockStreaming: overrides?.blockStreaming,
       streamViaEditMessage: overrides?.streamViaEditMessage,
+      mediaMaxMb: overrides?.mediaMaxMb,
       textChunkLimit: 4000,
     },
   } as any
@@ -1327,7 +1329,7 @@ describe("inline/monitor", () => {
         expect.any(Buffer),
         "image/jpeg",
         "inbound",
-        8 * 1024 * 1024,
+        300 * 1024 * 1024,
         "current-photo.jpg",
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
@@ -1424,7 +1426,7 @@ describe("inline/monitor", () => {
         expect.any(Buffer),
         "application/pdf",
         "inbound",
-        8 * 1024 * 1024,
+        300 * 1024 * 1024,
         "spec.pdf",
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
@@ -1505,6 +1507,87 @@ describe("inline/monitor", () => {
         expect.objectContaining({
           Body: expect.stringMatching(
             /Current message:\n<media:image>[\s\S]*Current media\/attachments:\nimage attachment: https:\/\/cdn\.inline\.chat\/broken-photo\.jpg/,
+          ),
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("preserves the remote attachment url when inbound media exceeds the configured limit", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 7304n,
+            date: 1_700_000_113n,
+            fromId: 51n,
+            message: "",
+            mentioned: true,
+            media: {
+              media: {
+                oneofKind: "document",
+                document: {
+                  document: {
+                    id: 903n,
+                    cdnUrl: "https://cdn.inline.chat/huge-spec.pdf",
+                    fileName: "huge-spec.pdf",
+                    mimeType: "application/pdf",
+                    size: 500_000_000,
+                  },
+                },
+              },
+            },
+          } as any,
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      dispatchReplyPayload: {
+        text: "still visible",
+      },
+    })
+
+    harness.calls.fetchRemoteMedia.mockRejectedValueOnce(
+      new Error(
+        "Failed to fetch media from https://cdn.inline.chat/huge-spec.pdf: content length 500000000 exceeds maxBytes 1048576",
+      ),
+    )
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+        mediaMaxMb: 1,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalled()
+      expect(harness.calls.fetchRemoteMedia).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: "https://cdn.inline.chat/huge-spec.pdf",
+          maxBytes: 1 * 1024 * 1024,
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.not.objectContaining({
+          MediaPath: expect.anything(),
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          RawBody: "<media:document>",
+          Body: expect.stringMatching(
+            /Current message:\n<media:document>[\s\S]*Current media\/attachments:\ndocument attachment \(huge-spec\.pdf\): https:\/\/cdn\.inline\.chat\/huge-spec\.pdf/,
           ),
         }),
       )
