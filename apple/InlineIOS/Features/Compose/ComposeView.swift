@@ -78,6 +78,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     }
   }
   var mentionManager: MentionManager?
+  var slashCommandManager: SlashCommandManager?
   var draftSaveTimer: Timer?
   var originalDraftEntities: MessageEntities?
 
@@ -139,6 +140,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     super.didMoveToWindow()
     if window != nil {
       setupMentionManager()
+      setupSlashCommandManager()
       layoutIfNeeded()
       let hasEmbed = (embedContainerHeightConstraint?.constant ?? 0) > 0
       if hasEmbed || !(textView.text?.isEmpty ?? true) {
@@ -168,6 +170,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   func resetMentionManager() {
     mentionManager?.cleanup()
     mentionManager = nil
+    slashCommandManager?.cleanup()
+    slashCommandManager = nil
   }
 
   override func resignFirstResponder() -> Bool {
@@ -931,4 +935,12 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       buttonDisappear()
     }
   }
+}
+
+extension ComposeView: SlashCommandManagerDelegate {
+  func slashCommandManager(_ manager: SlashCommandManager, didInsertCommand text: String, for range: NSRange) {
+    sendMessage()
+  }
+
+  func slashCommandManagerDidDismiss(_ manager: SlashCommandManager) {}
 }

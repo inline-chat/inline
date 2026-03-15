@@ -8,6 +8,8 @@ import { addReaction } from "./messages.addReaction"
 import { deleteReaction } from "./messages.deleteReaction"
 import { editMessage } from "./messages.editMessage"
 import { createChat } from "./messages.createChat"
+import { createSubthread } from "./messages.createSubthread"
+import { showChatInSidebar } from "./messages.showChatInSidebar"
 import { getSpaceMembers } from "./space.getSpaceMembers"
 import { deleteChat } from "./messages.deleteChat"
 import { inviteToSpace } from "./space.inviteToSpace"
@@ -24,6 +26,9 @@ import { getUserSettings } from "./user.getUserSettings"
 import { updateUserSettings } from "./user.updateUserSettings"
 import { createBot } from "./createBot"
 import { listBots } from "./bot.listBots"
+import { getBotCommands } from "./bot.getCommands"
+import { setBotCommands } from "./bot.setCommands"
+import { getPeerBotCommands } from "./bot.getPeerCommands"
 import { revealBotToken } from "./bot.revealToken"
 import { rotateBotToken } from "./bot.rotateToken"
 import { updateBotProfile } from "./bot.updateProfile"
@@ -45,6 +50,8 @@ export const Functions = {
     deleteReaction: deleteReaction,
     editMessage: editMessage,
     createChat: createChat,
+    createSubthread: createSubthread,
+    showChatInSidebar: showChatInSidebar,
     deleteChat: deleteChat,
     getChatParticipants: getChatParticipants,
     addChatParticipant: addChatParticipant,
@@ -71,6 +78,9 @@ export const Functions = {
   bot: {
     createBot: createBot,
     listBots: listBots,
+    getCommands: getBotCommands,
+    setCommands: setBotCommands,
+    getPeerCommands: getPeerBotCommands,
     revealBotToken: revealBotToken,
     rotateBotToken: rotateBotToken,
     updateBotProfile: updateBotProfile,

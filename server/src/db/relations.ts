@@ -25,6 +25,7 @@ export const relations = defineRelations(
     translations: schema.translations,
     userSettings: schema.userSettings,
     updates: schema.updates,
+    botCommands: schema.botCommands,
   },
   (r) => ({
     users: {
@@ -38,6 +39,14 @@ export const relations = defineRelations(
         from: r.users.photoFileId,
         to: r.files.id,
         optional: true,
+      }),
+      botCommands: r.many.botCommands(),
+    },
+
+    botCommands: {
+      botUser: r.one.users({
+        from: r.botCommands.botUserId,
+        to: r.users.id,
       }),
     },
 

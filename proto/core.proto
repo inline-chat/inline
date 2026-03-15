@@ -142,6 +142,7 @@ message Dialog {
   optional int64 chat_id = 7;
   optional bool unread_mark = 8;
   optional DialogNotificationSettings notification_settings = 9;
+  optional bool sidebar_visible = 10;
 }
 
 // A thread
@@ -174,6 +175,26 @@ message Chat {
 
   // Creator user ID
   optional int64 created_by = 10;
+
+  // Structural parent chat for linked subthreads.
+  optional int64 parent_chat_id = 11;
+
+  // Parent message anchor when this subthread is a reply thread.
+  optional int64 parent_message_id = 12;
+}
+
+message MessageReplies {
+  // Child chat ID for the reply thread.
+  int64 chat_id = 1;
+
+  // Number of messages currently in the reply thread.
+  int32 reply_count = 2;
+
+  // True when the viewer has durable unread state in the reply thread.
+  bool has_unread = 3;
+
+  // Recent distinct repliers in newest-first order. Limited server-side.
+  repeated int64 recent_replier_user_ids = 4;
 }
 
 message Message {
@@ -230,6 +251,10 @@ message Message {
 
   // Forward header info
   optional MessageFwdHeader fwd_from = 18;
+
+  // Replies shown under the parent message row when this message has an
+  // anchored child thread.
+  optional MessageReplies replies = 19;
 }
 
 enum MessageSendMode {
@@ -652,6 +677,11 @@ enum Method {
   UPDATE_DIALOG_NOTIFICATION_SETTINGS = 39;
   READ_MESSAGES = 40;
   UPDATE_PUSH_NOTIFICATION_DETAILS = 41;
+  CREATE_SUBTHREAD = 42;
+  GET_BOT_COMMANDS = 43;
+  SET_BOT_COMMANDS = 44;
+  GET_PEER_BOT_COMMANDS = 45;
+  SHOW_CHAT_IN_SIDEBAR = 46;
 }
 
 message RpcCall {
@@ -698,6 +728,11 @@ message RpcCall {
     UpdateDialogNotificationSettingsInput updateDialogNotificationSettings = 40;
     ReadMessagesInput readMessages = 41;
     UpdatePushNotificationDetailsInput updatePushNotificationDetails = 42;
+    CreateSubthreadInput createSubthread = 43;
+    GetBotCommandsInput getBotCommands = 44;
+    SetBotCommandsInput setBotCommands = 45;
+    GetPeerBotCommandsInput getPeerBotCommands = 46;
+    ShowChatInSidebarInput showChatInSidebar = 47;
   }
 }
 
@@ -746,6 +781,11 @@ message RpcResult {
     UpdateDialogNotificationSettingsResult updateDialogNotificationSettings = 40;
     ReadMessagesResult readMessages = 41;
     UpdatePushNotificationDetailsResult updatePushNotificationDetails = 42;
+    CreateSubthreadResult createSubthread = 43;
+    GetBotCommandsResult getBotCommands = 44;
+    SetBotCommandsResult setBotCommands = 45;
+    GetPeerBotCommandsResult getPeerBotCommands = 46;
+    ShowChatInSidebarResult showChatInSidebar = 47;
   }
 }
 
@@ -850,6 +890,17 @@ message GetChatResult {
   Chat chat = 1;
   Dialog dialog = 2;
   repeated int64 pinned_message_ids = 3;
+  Message anchor_message = 4;
+}
+
+message ShowChatInSidebarInput {
+  // Peer ID to surface in the sidebar.
+  InputPeer peer_id = 1;
+}
+
+message ShowChatInSidebarResult {
+  Chat chat = 1;
+  Dialog dialog = 2;
 }
 
 // Mark dialog as unread
@@ -893,6 +944,32 @@ message CreateBotResult {
 message ListBotsInput {}
 
 message ListBotsResult { repeated User bots = 1; }
+
+message BotCommand {
+  string command = 1;
+  string description = 2;
+  optional int32 sort_order = 3;
+}
+
+message PeerBotCommands {
+  User bot = 1;
+  repeated BotCommand commands = 2;
+}
+
+message GetBotCommandsInput { int64 bot_user_id = 1; }
+
+message GetBotCommandsResult { repeated BotCommand commands = 1; }
+
+message SetBotCommandsInput {
+  int64 bot_user_id = 1;
+  repeated BotCommand commands = 2;
+}
+
+message SetBotCommandsResult { repeated BotCommand commands = 1; }
+
+message GetPeerBotCommandsInput { InputPeer peer_id = 1; }
+
+message GetPeerBotCommandsResult { repeated PeerBotCommands bots = 1; }
 
 message RevealBotTokenInput { int64 bot_user_id = 1; }
 
@@ -1322,6 +1399,32 @@ message CreateChatResult {
   Dialog dialog = 2;
 }
 
+message CreateSubthreadInput {
+  // Required parent chat for inherited access and navigation.
+  int64 parent_chat_id = 1;
+
+  // Optional parent message anchor. When set, this subthread is also a reply thread.
+  optional int64 parent_message_id = 2;
+
+  // Optional explicit title. Defaults to a reply-derived title when omitted.
+  optional string title = 3;
+
+  // Optional explicit description.
+  optional string description = 4;
+
+  // Optional explicit emoji.
+  optional string emoji = 5;
+
+  // Optional direct child participants.
+  repeated InputChatParticipant participants = 6;
+}
+
+message CreateSubthreadResult {
+  Chat chat = 1;
+  Dialog dialog = 2;
+  Message anchor_message = 3;
+}
+
 message GetSpaceMembersInput { int64 space_id = 1; }
 
 message GetSpaceMembersResult {
@@ -1368,6 +1471,7 @@ message Update {
     UpdatePinnedMessages pinned_messages = 31;
     UpdateChatMoved chat_moved = 32;
     UpdateDialogNotificationSettings dialog_notification_settings = 33;
+    UpdateChatOpen chat_open = 34;
   }
 }
 
@@ -1522,6 +1626,13 @@ message UpdateNewChat {
   // Dialog dialog = 2;
 
   // If private chat
+  optional User user = 3;
+}
+
+// Update when a chat becomes sidebar-visible for a specific user.
+message UpdateChatOpen {
+  Chat chat = 1;
+  Dialog dialog = 2;
   optional User user = 3;
 }
 

@@ -26,6 +26,12 @@ export const TBotPeer = t.Object({
   thread_id: t.Optional(t.Number()),
 })
 
+export const TBotCommand = t.Object({
+  command: t.String(),
+  description: t.String(),
+  sort_order: t.Optional(t.Number()),
+})
+
 export const TBotChat = t.Object({
   chat_id: t.Number(),
   title: t.Optional(t.String()),
@@ -103,4 +109,8 @@ export const TSendReactionInput = t.Object({
   ...TBotTargetFields,
   message_id: TTargetId,
   emoji: t.String(),
+})
+
+export const TSetMyCommandsInput = t.Object({
+  commands: t.Array(TBotCommand),
 })

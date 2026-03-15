@@ -46,8 +46,10 @@ extension ComposeView: UITextViewDelegate {
       startDraftSaveTimer()
     }
 
-    // Handle mention detection
-    mentionManager?.handleTextChange(in: textView)
+    let slashActive = slashCommandManager?.handleTextChange(in: textView) ?? false
+    if !slashActive {
+      mentionManager?.handleTextChange(in: textView)
+    }
   }
 
   func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
@@ -57,15 +59,21 @@ extension ComposeView: UITextViewDelegate {
       }
     }
 
-    mentionManager?.handleIncomingText(text)
+    if slashCommandManager?.isCompletionVisible != true {
+      mentionManager?.handleIncomingText(text)
+    }
 
     // If deleting inside a mention, strip mention styling first, then apply the delete.
-    if mentionManager?.handleMentionRemovalOnDelete(in: textView, changeRange: range, replacementText: text) == true {
+    if slashCommandManager?.isCompletionVisible != true,
+       mentionManager?.handleMentionRemovalOnDelete(in: textView, changeRange: range, replacementText: text) == true
+    {
       return false
     }
 
     // Auto-pick an exact mention match when typing space/punctuation at the end of a single result.
-    if mentionManager?.handleAutoPickIfNeeded(in: textView, changeRange: range, replacementText: text) == true {
+    if slashCommandManager?.isCompletionVisible != true,
+       mentionManager?.handleAutoPickIfNeeded(in: textView, changeRange: range, replacementText: text) == true
+    {
       return false
     }
 
@@ -89,8 +97,10 @@ extension ComposeView: UITextViewDelegate {
     // Reset typing attributes when cursor moves to prevent style leakage
     textView.updateTypingAttributesIfNeeded()
 
-    // Handle mention detection on selection change
-    mentionManager?.handleTextChange(in: textView)
+    let slashActive = slashCommandManager?.handleTextChange(in: textView) ?? false
+    if !slashActive {
+      mentionManager?.handleTextChange(in: textView)
+    }
   }
 
   // MARK: - Bold Text Processing
