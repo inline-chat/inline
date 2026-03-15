@@ -682,6 +682,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
     messageToolHints: () => [
       "- Inline targeting: omit `target` to reply in the current chat.",
       "- Inline explicit targets: `chat:<chatId>` for chats and `user:<userId>` for direct users. Prefer `user:` for DM user targets.",
+      "- Inline special tools: use `inline_nudge` to send a nudge, and `inline_forward` to forward message ids between chats or users.",
     ],
   },
 

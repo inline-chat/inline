@@ -10,7 +10,7 @@ describe("plugin entry", () => {
 
     const runtime = { version: "test" } as unknown as PluginRuntime
     let registered = false
-    let registeredToolNames: string[] | null = null
+    const registeredToolNames: string[] = []
     const api = {
       runtime,
       registerChannel: ({ plugin }) => {
@@ -18,14 +18,14 @@ describe("plugin entry", () => {
         expect(plugin.id).toBe("inline")
       },
       registerTool: (_tool, opts) => {
-        registeredToolNames = opts?.names ?? null
+        registeredToolNames.push(...(opts?.names ?? []))
       },
     } as unknown as OpenClawPluginApi
 
     pluginMod.default.register(api)
 
     expect(registered).toBe(true)
-    expect(registeredToolNames).toEqual(["inline_members"])
+    expect(registeredToolNames).toEqual(["inline_members", "inline_nudge", "inline_forward"])
     expect(runtimeMod.getInlineRuntime()).toBe(runtime)
   })
 })
