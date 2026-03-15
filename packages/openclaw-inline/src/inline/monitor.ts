@@ -114,6 +114,19 @@ function normalizeInlineUsername(raw: string | undefined): string | undefined {
   return trimmed.startsWith("@") ? trimmed.slice(1) : trimmed
 }
 
+function normalizeInlineCommandBody(raw: string, botUsername: string | undefined): string {
+  const normalized = raw.trim()
+  const normalizedBotUsername = botUsername?.trim().toLowerCase()
+  const mentionMatch = normalizedBotUsername ? normalized.match(/^\/([^\s@]+)@([^\s]+)(.*)$/) : null
+  if (mentionMatch) {
+    const [, command, targetUsername, suffix] = mentionMatch
+    if (targetUsername?.toLowerCase() === normalizedBotUsername) {
+      return `/${command}${suffix ?? ""}`
+    }
+  }
+  return normalized
+}
+
 function buildInlineSenderName(params: {
   firstName: string | undefined
   lastName: string | undefined
@@ -347,6 +360,7 @@ function resolveInlineMediaMaxBytes(params: {
 
 function buildInlineInboundMediaPayload(media: InlineInboundMediaInfo[]): {
   MediaPath?: string
+  MediaType?: string
   MediaUrl?: string
   MediaPaths?: string[]
   MediaUrls?: string[]
@@ -354,16 +368,40 @@ function buildInlineInboundMediaPayload(media: InlineInboundMediaInfo[]): {
 } {
   const first = media[0]
   const mediaPaths = media.map((item) => item.path)
-  const mediaTypes =
-    media.length > 0 && media.every((item) => Boolean(item.contentType?.trim()))
-      ? media.map((item) => item.contentType!.trim())
-      : []
+  const firstMediaType = first?.contentType?.trim()
+  const mediaTypes = media
+    .map((item) => item.contentType?.trim())
+    .filter((item): item is string => Boolean(item))
 
   return {
     ...(first?.path ? { MediaPath: first.path, MediaUrl: first.path } : {}),
+    ...(firstMediaType ? { MediaType: firstMediaType } : {}),
     ...(mediaPaths.length > 0 ? { MediaPaths: mediaPaths, MediaUrls: mediaPaths } : {}),
     ...(mediaTypes.length > 0 ? { MediaTypes: mediaTypes } : {}),
   }
+}
+
+function buildInlineAttachmentPlaceholder(content: ReturnType<typeof summarizeInlineMessageContent>): string {
+  const media = content.media
+  if (!media) return ""
+  switch (media.kind) {
+    case "photo":
+      return "<media:image>"
+    case "video":
+      return "<media:video>"
+    case "document":
+      return "<media:document>"
+    default:
+      return ""
+  }
+}
+
+function buildInlineInboundBodyText(content: ReturnType<typeof summarizeInlineMessageContent>): string {
+  const textWithPlaceholder = [content.rawText, buildInlineAttachmentPlaceholder(content)]
+    .filter(Boolean)
+    .join("\n")
+    .trim()
+  return textWithPlaceholder || content.text
 }
 
 function resolveFilePathHint(params: { sourceUrl: string; preferredName?: string | null | undefined }): string | undefined {
@@ -586,8 +624,16 @@ export async function monitorInlineProvider(params: {
   })
 
   await client.connect(abortSignal)
-  const me = await client.getMe()
-  log?.info(`[${account.accountId}] inline connected (me=${String(me.userId)})`)
+  const meResult = await client.invokeRaw(Method.GET_ME, {
+    oneofKind: "getMe",
+    getMe: {},
+  })
+  if (meResult.oneofKind !== "getMe" || !meResult.getMe.user) {
+    throw new Error("inline getMe: missing user")
+  }
+  const meId = meResult.getMe.user.id
+  const botUsername = normalizeInlineUsername(meResult.getMe.user.username)?.toLowerCase()
+  log?.info(`[${account.accountId}] inline connected (me=${String(meId)})`)
 
   const chatCache = new Map<bigint, CachedChatInfo>()
   const senderProfilesById = new Map<string, SenderProfile>()
@@ -642,25 +688,27 @@ export async function monitorInlineProvider(params: {
         if (abortSignal.aborted) break
         let msg: Message
         let rawBody = ""
+        let currentAttachmentText: string | null = null
         let currentEntityText: string | null = null
         let reactionEvent: { action: "added" | "removed"; emoji: string; targetMessageId: bigint } | null = null
 
         if (event.kind === "message.new") {
           msg = event.message
           const content = summarizeInlineMessageContent(msg)
-          rawBody = content.text
+          rawBody = buildInlineInboundBodyText(content)
+          currentAttachmentText = content.attachmentText || null
           currentEntityText = content.entityText || null
           if (!rawBody) continue
 
           // Ignore echoes / our own outbound messages.
-          if (msg.out || msg.fromId === me.userId) continue
+          if (msg.out || msg.fromId === meId) continue
         } else if (event.kind === "reaction.add") {
-          if (event.reaction.userId === me.userId) continue
+          if (event.reaction.userId === meId) continue
           const onBotMessage = await isReactionTargetBotMessage({
             client,
             chatId: event.chatId,
             messageId: event.reaction.messageId,
-            meId: me.userId,
+            meId,
             botMessageIdsByChat,
           }).catch((err) => {
             statusSink?.({ lastError: `getChatHistory (reaction target) failed: ${String(err)}` })
@@ -684,12 +732,12 @@ export async function monitorInlineProvider(params: {
             replyToMsgId: event.reaction.messageId,
           } as Message
         } else if (event.kind === "reaction.delete") {
-          if (event.userId === me.userId) continue
+          if (event.userId === meId) continue
           const onBotMessage = await isReactionTargetBotMessage({
             client,
             chatId: event.chatId,
             messageId: event.messageId,
-            meId: me.userId,
+            meId,
             botMessageIdsByChat,
           }).catch((err) => {
             statusSink?.({ lastError: `getChatHistory (reaction target) failed: ${String(err)}` })
@@ -770,7 +818,11 @@ export async function monitorInlineProvider(params: {
         const useAccessGroups = cfg.commands?.useAccessGroups !== false
         const allowForCommands = isGroup ? effectiveGroupAllowFrom : effectiveAllowFrom
         const senderAllowedForCommands = allowlistMatch({ allowFrom: allowForCommands, senderId })
-        const hasControlCommand = core.channel.text.hasControlCommand(rawBody, cfg)
+        const hasControlCommand = core.channel.text.hasControlCommand(
+          rawBody,
+          cfg,
+          botUsername ? { botUsername } : undefined,
+        )
         const commandGate = resolveControlCommandGate({
           useAccessGroups,
           authorizers: [{ configured: allowForCommands.length > 0, allowed: senderAllowedForCommands }],
@@ -870,7 +922,7 @@ export async function monitorInlineProvider(params: {
           currentMessageId: msg.id,
           replyToMsgId: msg.replyToMsgId,
           senderProfilesById,
-          meId: me.userId,
+          meId,
           historyLimit,
           botMessageIdsByChat,
         }).catch((err) => {
@@ -928,6 +980,9 @@ export async function monitorInlineProvider(params: {
           historyContext.entityText,
           INLINE_FORMATTING_NOTE,
           `Current message:\n${rawBody}`,
+          currentAttachmentText && currentAttachmentText !== rawBody
+            ? `Current media/attachments:\n${currentAttachmentText}`
+            : null,
           currentEntityText ? `Current message entities:\n${currentEntityText}` : null,
         ]
           .filter(Boolean)
@@ -940,11 +995,12 @@ export async function monitorInlineProvider(params: {
           envelope: envelopeOptions,
           body: combinedBody || rawBody,
         })
+        const commandBody = normalizeInlineCommandBody(rawBody, botUsername)
 
         const ctxPayload = core.channel.reply.finalizeInboundContext({
           Body: body,
           RawBody: rawBody,
-          CommandBody: rawBody,
+          CommandBody: commandBody,
           From: isGroup ? `inline:chat:${String(chatId)}` : `inline:${senderId}`,
           To: `inline:${String(chatId)}`,
           SessionKey: route.sessionKey,
