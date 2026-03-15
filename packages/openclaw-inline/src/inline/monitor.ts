@@ -65,7 +65,7 @@ const BOT_MESSAGE_CACHE_LIMIT = 500
 const REACTION_TARGET_LOOKUP_LIMIT = 8
 const REPLY_TARGET_LOOKUP_LIMIT = 8
 const ATTACHMENT_CONTEXT_LIMIT = 6
-const DEFAULT_INLINE_MEDIA_MAX_BYTES = 8 * 1024 * 1024
+const DEFAULT_INLINE_MEDIA_MAX_BYTES = 300 * 1024 * 1024
 const INLINE_FORMATTING_NOTE =
   "Inline formatting note: prefer bullet lists over markdown tables. If a table is necessary, render it inside a fenced code block."
 const GET_MESSAGES_METHOD =

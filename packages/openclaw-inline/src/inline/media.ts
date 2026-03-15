@@ -8,7 +8,7 @@ import {
   type OpenClawConfig,
 } from "openclaw/plugin-sdk"
 
-const DEFAULT_MEDIA_MAX_MB = 20
+const DEFAULT_MEDIA_MAX_MB = 300
 const SUPPORTED_INLINE_PHOTO_MIME = new Set(["image/jpeg", "image/png", "image/gif"])
 const SUPPORTED_INLINE_VIDEO_MIME = new Set(["video/mp4"])
 const DEFAULT_VIDEO_WIDTH = 1280
