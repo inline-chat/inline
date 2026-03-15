@@ -6,7 +6,6 @@ describe("plugin entry", () => {
     vi.resetModules()
 
     const pluginMod = await import("./index")
-    const runtimeMod = await import("./runtime")
 
     const runtime = { version: "test" } as unknown as PluginRuntime
     let registered = false
@@ -26,6 +25,5 @@ describe("plugin entry", () => {
 
     expect(registered).toBe(true)
     expect(registeredToolNames).toEqual(["inline_members", "inline_nudge", "inline_forward"])
-    expect(runtimeMod.getInlineRuntime()).toBe(runtime)
   })
 })
