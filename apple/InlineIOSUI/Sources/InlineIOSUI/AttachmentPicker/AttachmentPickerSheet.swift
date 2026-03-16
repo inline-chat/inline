@@ -7,6 +7,7 @@ public struct AttachmentPickerActions {
   public let openLibrary: () -> Void
   public let openFiles: () -> Void
   public let openRecentItem: (AttachmentPickerModel.RecentItem) -> Void
+  public let openRecentItems: ([AttachmentPickerModel.RecentItem]) -> Void
   public let manageLimitedAccess: () -> Void
 
   public init(
@@ -14,12 +15,14 @@ public struct AttachmentPickerActions {
     openLibrary: @escaping () -> Void,
     openFiles: @escaping () -> Void,
     openRecentItem: @escaping (AttachmentPickerModel.RecentItem) -> Void,
+    openRecentItems: @escaping ([AttachmentPickerModel.RecentItem]) -> Void,
     manageLimitedAccess: @escaping () -> Void
   ) {
     self.openCamera = openCamera
     self.openLibrary = openLibrary
     self.openFiles = openFiles
     self.openRecentItem = openRecentItem
+    self.openRecentItems = openRecentItems
     self.manageLimitedAccess = manageLimitedAccess
   }
 }
@@ -85,7 +88,13 @@ public struct AttachmentPickerSheet: View {
         AttachmentPickerCameraTile(action: actions.openCamera)
 
         ForEach(model.recentItems) { item in
-          AttachmentPickerRecentTile(item: item) {
+          AttachmentPickerRecentTile(
+            item: item,
+            isSelected: model.selectedRecentItemIds.contains(item.localIdentifier),
+            onSelectToggle: {
+              model.toggleRecentSelection(localIdentifier: item.localIdentifier)
+            }
+          ) {
             actions.openRecentItem(item)
           }
         }
@@ -96,6 +105,10 @@ public struct AttachmentPickerSheet: View {
 
   private var actionList: some View {
     VStack(spacing: 18) {
+      if model.selectedRecentItems.isEmpty == false {
+        sendSelectedButton
+      }
+
       listActionButton(
         title: "Library",
         systemImage: "photo.on.rectangle.angled",
@@ -109,6 +122,33 @@ public struct AttachmentPickerSheet: View {
       )
     }
     .padding(.horizontal, 20)
+  }
+
+  private var sendSelectedButtonTitle: String {
+    let count = model.selectedRecentItems.count
+    if count == 1 {
+      return "Send 1 Selected"
+    }
+    return "Send \(count) Selected"
+  }
+
+  private var sendSelectedButton: some View {
+    HStack {
+      Spacer(minLength: 0)
+      Button(action: {
+        let selectedItems = model.selectedRecentItems
+        guard selectedItems.isEmpty == false else { return }
+        actions.openRecentItems(selectedItems)
+        model.clearRecentSelection()
+      }) {
+        Text(sendSelectedButtonTitle)
+          .font(.body.weight(.semibold))
+          .frame(minWidth: 190)
+      }
+      .buttonStyle(.borderedProminent)
+      .accessibilityLabel(sendSelectedButtonTitle)
+      Spacer(minLength: 0)
+    }
   }
 
   private func listActionButton(title: String, systemImage: String, action: @escaping () -> Void) -> some View {

@@ -1,3 +1,4 @@
+import Foundation
 import Photos
 import Testing
 
@@ -5,6 +6,27 @@ import Testing
 
 @Suite("AttachmentPickerModel")
 struct AttachmentPickerModelTests {
+  private final class RecentItemsStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [AttachmentPickerModel.RecentItem]
+
+    init(_ items: [AttachmentPickerModel.RecentItem]) {
+      self.items = items
+    }
+
+    func get() -> [AttachmentPickerModel.RecentItem] {
+      lock.lock()
+      defer { lock.unlock() }
+      return items
+    }
+
+    func set(_ items: [AttachmentPickerModel.RecentItem]) {
+      lock.lock()
+      self.items = items
+      lock.unlock()
+    }
+  }
+
   @MainActor
   @Test("limited authorization shows the limited access notice")
   func limitedAuthorizationShowsNotice() async {
@@ -77,5 +99,57 @@ struct AttachmentPickerModelTests {
     #expect(AttachmentPickerModel.recentMediaType(for: .image) == .image)
     #expect(AttachmentPickerModel.recentMediaType(for: .video) == .video)
     #expect(AttachmentPickerModel.recentMediaType(for: .audio) == nil)
+  }
+
+  @MainActor
+  @Test("selected recent items keep picker order")
+  func selectedRecentItemsKeepPickerOrder() async {
+    let oldest = Date(timeIntervalSince1970: 1)
+    let middle = Date(timeIntervalSince1970: 2)
+    let newest = Date(timeIntervalSince1970: 3)
+
+    let model = AttachmentPickerModel(
+      authorizationStatusProvider: { .authorized },
+      recentItemsProvider: {
+        [
+          .init(localIdentifier: "oldest", createdAt: oldest, mediaType: .image),
+          .init(localIdentifier: "middle", createdAt: middle, mediaType: .video),
+          .init(localIdentifier: "newest", createdAt: newest, mediaType: .image),
+        ]
+      }
+    )
+
+    await model.reload()
+    model.toggleRecentSelection(localIdentifier: "middle")
+    model.toggleRecentSelection(localIdentifier: "newest")
+
+    #expect(model.selectedRecentItems.map(\.localIdentifier) == ["newest", "middle"])
+  }
+
+  @MainActor
+  @Test("reload prunes selected items that are no longer available")
+  func reloadPrunesMissingSelections() async {
+    let now = Date()
+    let store = RecentItemsStore([
+      .init(localIdentifier: "one", createdAt: now, mediaType: .image),
+      .init(localIdentifier: "two", createdAt: now.addingTimeInterval(-1), mediaType: .image),
+    ])
+
+    let model = AttachmentPickerModel(
+      authorizationStatusProvider: { .authorized },
+      recentItemsProvider: { store.get() }
+    )
+
+    await model.reload()
+    model.toggleRecentSelection(localIdentifier: "one")
+    model.toggleRecentSelection(localIdentifier: "two")
+    #expect(model.selectedRecentItems.count == 2)
+
+    store.set([
+      .init(localIdentifier: "two", createdAt: now.addingTimeInterval(-1), mediaType: .image),
+    ])
+    await model.reload()
+
+    #expect(model.selectedRecentItems.map(\.localIdentifier) == ["two"])
   }
 }

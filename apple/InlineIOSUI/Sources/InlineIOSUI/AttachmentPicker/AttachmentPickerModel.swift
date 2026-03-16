@@ -26,6 +26,7 @@ public final class AttachmentPickerModel {
 
   public private(set) var authorizationStatus: PHAuthorizationStatus
   public private(set) var recentItems: [RecentItem] = []
+  public private(set) var selectedRecentItemIds: Set<String> = []
   public private(set) var isLoading = false
 
   public var showsLimitedAccessNotice: Bool {
@@ -41,6 +42,10 @@ public final class AttachmentPickerModel {
       @unknown default:
         false
     }
+  }
+
+  public var selectedRecentItems: [RecentItem] {
+    recentItems.filter { selectedRecentItemIds.contains($0.localIdentifier) }
   }
 
   @ObservationIgnored private let authorizationStatusProvider: @Sendable () -> PHAuthorizationStatus
@@ -72,8 +77,11 @@ public final class AttachmentPickerModel {
         fetchRecentItems()
       }.value
       recentItems = Self.sortRecentItems(fetchedItems)
+      let availableIds = Set(recentItems.map(\.localIdentifier))
+      selectedRecentItemIds = selectedRecentItemIds.intersection(availableIds)
     } else {
       recentItems = []
+      selectedRecentItemIds = []
     }
 
     isLoading = false
@@ -147,5 +155,17 @@ public final class AttachmentPickerModel {
     }
 
     return items
+  }
+
+  public func toggleRecentSelection(localIdentifier: String) {
+    if selectedRecentItemIds.contains(localIdentifier) {
+      selectedRecentItemIds.remove(localIdentifier)
+    } else {
+      selectedRecentItemIds.insert(localIdentifier)
+    }
+  }
+
+  public func clearRecentSelection() {
+    selectedRecentItemIds.removeAll()
   }
 }
