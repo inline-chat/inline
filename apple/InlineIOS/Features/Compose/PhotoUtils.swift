@@ -1,5 +1,6 @@
 import AVFoundation
 import InlineKit
+import Photos
 import Logger
 import PhotosUI
 import SwiftUI
@@ -47,86 +48,13 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     updateSendButtonVisibility()
   }
 
-  // MARK: - UIImagePickerControllerDelegate
-
-  func presentPicker() {
-    guard let windowScene = window?.windowScene, !isPickerPresented else { return }
-
-    activePickerMode = .photos
-
-    var configuration = PHPickerConfiguration(photoLibrary: .shared())
-    configuration.filter = .images
-    configuration.selectionLimit = 30
-
-    let picker = PHPickerViewController(configuration: configuration)
-    picker.delegate = self
-    isPickerPresented = true
-
-    let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow })
-    let rootVC = keyWindow?.rootViewController
-    rootVC?.present(picker, animated: true)
-  }
-
-  func presentVideoPicker() {
-    guard let windowScene = window?.windowScene, !isPickerPresented else { return }
-
-    activePickerMode = .videos
-
-    var configuration = PHPickerConfiguration(photoLibrary: .shared())
-    configuration.filter = .videos
-    configuration.selectionLimit = 10
-
-    let picker = PHPickerViewController(configuration: configuration)
-    picker.delegate = self
-    isPickerPresented = true
-
-    let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow })
-    let rootVC = keyWindow?.rootViewController
-    rootVC?.present(picker, animated: true)
-  }
-
-  func presentCamera() {
-    let status = AVCaptureDevice.authorizationStatus(for: .video)
-
-    switch status {
-      case .notDetermined:
-        AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
-          if granted {
-            DispatchQueue.main.async {
-              self?.showCameraPicker()
-            }
-          }
-        }
-      case .authorized:
-        showCameraPicker()
-      default:
-        Log.shared.error("Failed to presentCamera")
-    }
-  }
-
-  func showCameraPicker() {
-    let picker = UIImagePickerController()
-    picker.sourceType = .camera
-    picker.mediaTypes = [UTType.image.identifier, UTType.movie.identifier]
-    picker.videoQuality = .typeHigh
-    picker.videoExportPreset = AVAssetExportPresetPassthrough
-    picker.delegate = self
-    picker.allowsEditing = false
-
-    if let windowScene = window?.windowScene,
-       let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow }),
-       let rootVC = keyWindow.rootViewController
-    {
-      rootVC.present(picker, animated: true)
-    }
-  }
-
-  func handleDroppedImage(_ image: UIImage) {
+  private func presentSingleImagePreview(_ image: UIImage, presenter: UIViewController? = nil) {
     guard !previewViewModel.isPresented, !multiPhotoPreviewViewModel.isPresented else { return }
+    guard let resolvedPresenter = presenter ?? attachmentFlowPresenter() else { return }
 
-    // For dropped single images, use single photo preview
     selectedImage = image
     previewViewModel.isPresented = true
+    currentPreviewUsesAttachmentPicker = attachmentPickerViewController != nil
 
     let previewView = SwiftUIPhotoPreviewView(
       image: image,
@@ -152,29 +80,20 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     )
 
     let previewVC = UIHostingController(rootView: previewView)
-    previewVC.modalPresentationStyle = UIModalPresentationStyle.fullScreen
-    previewVC.modalTransitionStyle = UIModalTransitionStyle.crossDissolve
+    previewVC.modalPresentationStyle = .fullScreen
+    previewVC.modalTransitionStyle = .crossDissolve
 
-    if let windowScene = window?.windowScene,
-       let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow }),
-       let rootVC = keyWindow.rootViewController
-    {
-      rootVC.present(previewVC, animated: true)
-    }
+    resolvedPresenter.present(previewVC, animated: true)
   }
 
-  func handleMultipleDroppedImages(_ images: [UIImage]) {
+  private func presentMultiImagePreview(_ images: [UIImage], presenter: UIViewController? = nil) {
     guard !images.isEmpty else { return }
     guard !previewViewModel.isPresented, !multiPhotoPreviewViewModel.isPresented else { return }
+    guard let resolvedPresenter = presenter ?? attachmentFlowPresenter() else { return }
 
-    if images.count == 1 {
-      handleDroppedImage(images[0])
-      return
-    }
-
-    // Set up multi-photo preview for multiple dropped images
     multiPhotoPreviewViewModel.setPhotos(images)
     multiPhotoPreviewViewModel.isPresented = true
+    currentPreviewUsesAttachmentPicker = attachmentPickerViewController != nil
 
     let multiPreviewView = SwiftUIPhotoPreviewView(
       viewModel: multiPhotoPreviewViewModel,
@@ -199,15 +118,90 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     previewVC.modalPresentationStyle = .fullScreen
     previewVC.modalTransitionStyle = .crossDissolve
 
-    if let windowScene = window?.windowScene,
-       let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow }),
-       let rootVC = keyWindow.rootViewController
-    {
-      rootVC.present(previewVC, animated: true)
+    resolvedPresenter.present(previewVC, animated: true)
+  }
+
+  // MARK: - UIImagePickerControllerDelegate
+
+  func presentPicker() {
+    guard !isPickerPresented, let presenter = attachmentFlowPresenter() else { return }
+
+    activePickerMode = .photos
+
+    var configuration = PHPickerConfiguration(photoLibrary: .shared())
+    configuration.filter = .images
+    configuration.selectionLimit = 30
+
+    let picker = PHPickerViewController(configuration: configuration)
+    picker.delegate = self
+    isPickerPresented = true
+
+    presenter.present(picker, animated: true)
+  }
+
+  func presentVideoPicker() {
+    guard !isPickerPresented, let presenter = attachmentFlowPresenter() else { return }
+
+    activePickerMode = .videos
+
+    var configuration = PHPickerConfiguration(photoLibrary: .shared())
+    configuration.filter = .videos
+    configuration.selectionLimit = 10
+
+    let picker = PHPickerViewController(configuration: configuration)
+    picker.delegate = self
+    isPickerPresented = true
+
+    presenter.present(picker, animated: true)
+  }
+
+  func presentCamera() {
+    let status = AVCaptureDevice.authorizationStatus(for: .video)
+
+    switch status {
+      case .notDetermined:
+        AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+          if granted {
+            DispatchQueue.main.async {
+              self?.showCameraPicker()
+            }
+          }
+        }
+      case .authorized:
+        showCameraPicker()
+      default:
+        Log.shared.error("Failed to presentCamera")
     }
   }
 
-  func dismissPreview() {
+  func showCameraPicker() {
+    guard let presenter = attachmentFlowPresenter() else { return }
+
+    let picker = UIImagePickerController()
+    picker.sourceType = .camera
+    picker.mediaTypes = [UTType.image.identifier, UTType.movie.identifier]
+    picker.videoQuality = .typeHigh
+    picker.videoExportPreset = AVAssetExportPresetPassthrough
+    picker.delegate = self
+    picker.allowsEditing = false
+
+    presenter.present(picker, animated: true)
+  }
+
+  func handleDroppedImage(_ image: UIImage) {
+    presentSingleImagePreview(image)
+  }
+
+  func handleMultipleDroppedImages(_ images: [UIImage]) {
+    if images.count == 1 {
+      handleDroppedImage(images[0])
+      return
+    }
+
+    presentMultiImagePreview(images)
+  }
+
+  func dismissPreview(dismissAttachmentPicker: Bool = false) {
     var responder: UIResponder? = self
     var currentVC: UIViewController?
 
@@ -228,17 +222,31 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
 
     let picker = topmostVC.presentingViewController as? PHPickerViewController
 
-    topmostVC.dismiss(animated: true) { [weak self] in
-      picker?.dismiss(animated: true) {
-        self?.isPickerPresented = false
+    let finalizeDismissal: () -> Void = { [weak self] in
+      guard let self else { return }
+      self.selectedImage = nil
+      self.previewViewModel.caption = ""
+      self.previewViewModel.isPresented = false
+      self.currentPreviewUsesAttachmentPicker = false
+
+      if dismissAttachmentPicker {
+        self.dismissAttachmentPickerIfPresented(animated: true)
       }
-      self?.selectedImage = nil
-      self?.previewViewModel.caption = ""
-      self?.previewViewModel.isPresented = false
+    }
+
+    topmostVC.dismiss(animated: true) { [weak self] in
+      if let picker {
+        picker.dismiss(animated: true) { [weak self] in
+          self?.isPickerPresented = false
+          finalizeDismissal()
+        }
+      } else {
+        finalizeDismissal()
+      }
     }
   }
 
-  func dismissMultiPreview() {
+  func dismissMultiPreview(dismissAttachmentPicker: Bool = false) {
     var responder: UIResponder? = self
     var currentVC: UIViewController?
 
@@ -259,13 +267,27 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
 
     let picker = topmostVC.presentingViewController as? PHPickerViewController
 
-    topmostVC.dismiss(animated: true) { [weak self] in
-      picker?.dismiss(animated: true) {
-        self?.isPickerPresented = false
+    let finalizeDismissal: () -> Void = { [weak self] in
+      guard let self else { return }
+      self.multiPhotoPreviewViewModel.photoItems.removeAll()
+      self.multiPhotoPreviewViewModel.currentIndex = 0
+      self.multiPhotoPreviewViewModel.isPresented = false
+      self.currentPreviewUsesAttachmentPicker = false
+
+      if dismissAttachmentPicker {
+        self.dismissAttachmentPickerIfPresented(animated: true)
       }
-      self?.multiPhotoPreviewViewModel.photoItems.removeAll()
-      self?.multiPhotoPreviewViewModel.currentIndex = 0
-      self?.multiPhotoPreviewViewModel.isPresented = false
+    }
+
+    topmostVC.dismiss(animated: true) { [weak self] in
+      if let picker {
+        picker.dismiss(animated: true) { [weak self] in
+          self?.isPickerPresented = false
+          finalizeDismissal()
+        }
+      } else {
+        finalizeDismissal()
+      }
     }
   }
 
@@ -300,7 +322,7 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     }
 
     resetComposeStateAfterPreviewSend()
-    dismissPreview()
+    dismissPreview(dismissAttachmentPicker: currentPreviewUsesAttachmentPicker)
     sendButton.configuration?.showsActivityIndicator = false
     clearAttachments()
     // sendMessageHaptic()
@@ -346,7 +368,7 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
 
     // Clear state and dismiss
     resetComposeStateAfterPreviewSend()
-    dismissMultiPreview()
+    dismissMultiPreview(dismissAttachmentPicker: currentPreviewUsesAttachmentPicker)
     sendButton.configuration?.showsActivityIndicator = false
     clearAttachments()
     ChatState.shared.clearReplyingMessageId(peer: peerId)
@@ -355,45 +377,7 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
 
   func handlePastedImage() {
     guard let image = UIPasteboard.general.image else { return }
-
-    selectedImage = image
-    previewViewModel.isPresented = true
-
-    let previewView = SwiftUIPhotoPreviewView(
-      image: image,
-      caption: Binding(
-        get: { [weak self] in self?.previewViewModel.caption ?? "" },
-        set: { [weak self] newValue in self?.previewViewModel.caption = newValue }
-      ),
-      isPresented: Binding(
-        get: { [weak self] in self?.previewViewModel.isPresented ?? false },
-        set: { [weak self] newValue in
-          self?.previewViewModel.isPresented = newValue
-          if !newValue {
-            self?.dismissPreview()
-          }
-        }
-      ),
-      onSend: { [weak self] image, caption in
-        self?.sendImage(image, caption: caption)
-      },
-      onAddMorePhotos: { [weak self] in
-        self?.presentPicker()
-      }
-    )
-
-    let previewVC = UIHostingController(rootView: previewView)
-    previewVC.modalPresentationStyle = UIModalPresentationStyle.fullScreen
-    previewVC.modalTransitionStyle = UIModalTransitionStyle.crossDissolve
-
-    var responder: UIResponder? = self
-    while let nextResponder = responder?.next {
-      if let viewController = nextResponder as? UIViewController {
-        viewController.present(previewVC, animated: true)
-        break
-      }
-      responder = nextResponder
-    }
+    presentSingleImagePreview(image)
   }
 
   func addImage(_ image: UIImage) {
@@ -445,12 +429,49 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     )
     alert.addAction(UIAlertAction(title: "OK", style: .default))
 
-    if let windowScene = window?.windowScene,
-       let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow }),
-       let rootVC = keyWindow.rootViewController
-    {
-      rootVC.present(alert, animated: true)
+    attachmentFlowPresenter()?.present(alert, animated: true)
+  }
+
+  func openRecentAsset(localIdentifier: String) {
+    let assets = PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier], options: nil)
+    guard let asset = assets.firstObject else {
+      showRecentAssetError(message: "Couldn't load that recent photo.")
+      return
     }
+
+    let options = PHImageRequestOptions()
+    options.deliveryMode = .highQualityFormat
+    options.resizeMode = .none
+    options.isNetworkAccessAllowed = true
+    options.version = .current
+
+    PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { [weak self] data, _, _, info in
+      if let isCancelled = info?[PHImageCancelledKey] as? Bool, isCancelled {
+        return
+      }
+
+      guard let data, let image = UIImage(data: data) else {
+        DispatchQueue.main.async {
+          self?.showRecentAssetError(message: "Couldn't open that recent photo.")
+        }
+        return
+      }
+
+      DispatchQueue.main.async {
+        self?.handleDroppedImage(image)
+      }
+    }
+  }
+
+  private func showRecentAssetError(message: String) {
+    let alert = UIAlertController(
+      title: "Photo Error",
+      message: message,
+      preferredStyle: .alert
+    )
+    alert.addAction(UIAlertAction(title: "OK", style: .default))
+
+    attachmentFlowPresenter()?.present(alert, animated: true)
   }
 }
 
@@ -498,37 +519,7 @@ extension ComposeView: PHPickerViewControllerDelegate {
         }
 
         DispatchQueue.main.async {
-          self.selectedImage = image
-          self.previewViewModel.isPresented = true
-
-          let previewView = SwiftUIPhotoPreviewView(
-            image: image,
-            caption: Binding(
-              get: { [weak self] in self?.previewViewModel.caption ?? "" },
-              set: { [weak self] newValue in self?.previewViewModel.caption = newValue }
-            ),
-            isPresented: Binding(
-              get: { [weak self] in self?.previewViewModel.isPresented ?? false },
-              set: { [weak self] newValue in
-                self?.previewViewModel.isPresented = newValue
-                if !newValue {
-                  self?.dismissPreview()
-                }
-              }
-            ),
-            onSend: { [weak self] image, caption in
-              self?.sendImage(image, caption: caption)
-            },
-            onAddMorePhotos: { [weak self] in
-              self?.presentPicker()
-            }
-          )
-
-          let previewVC = UIHostingController(rootView: previewView)
-          previewVC.modalPresentationStyle = .fullScreen
-          previewVC.modalTransitionStyle = .crossDissolve
-
-          picker.present(previewVC, animated: true)
+          self.presentSingleImagePreview(image, presenter: picker)
         }
       }
     } else {
@@ -672,34 +663,7 @@ extension ComposeView: PHPickerViewControllerDelegate {
         return
       }
 
-      // Set up multi-photo preview
-      multiPhotoPreviewViewModel.setPhotos(sortedImages)
-      multiPhotoPreviewViewModel.isPresented = true
-
-      let multiPreviewView = SwiftUIPhotoPreviewView(
-        viewModel: multiPhotoPreviewViewModel,
-        isPresented: Binding(
-          get: { [weak self] in self?.multiPhotoPreviewViewModel.isPresented ?? false },
-          set: { [weak self] newValue in
-            self?.multiPhotoPreviewViewModel.isPresented = newValue
-            if !newValue {
-              self?.dismissMultiPreview()
-            }
-          }
-        ),
-        onSend: { [weak self] photoItems in
-          self?.sendMultipleImages(photoItems)
-        },
-        onAddMorePhotos: { [weak self] in
-          self?.presentPicker()
-        }
-      )
-
-      let previewVC = UIHostingController(rootView: multiPreviewView)
-      previewVC.modalPresentationStyle = UIModalPresentationStyle.fullScreen
-      previewVC.modalTransitionStyle = UIModalTransitionStyle.crossDissolve
-
-      picker.present(previewVC, animated: true)
+      self.presentMultiImagePreview(sortedImages, presenter: picker)
     }
   }
 }

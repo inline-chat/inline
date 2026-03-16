@@ -54,6 +54,7 @@
 		CDC72E3D2D999C6D001E8A0C /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = CDC72E3C2D999C6D001E8A0C /* GRDB */; };
 		CDE960162CB94C4F004C541C /* SwiftUIIntrospect in Frameworks */ = {isa = PBXBuildFile; productRef = CDE960152CB94C4F004C541C /* SwiftUIIntrospect */; };
 		CDE9601C2CB94D1C004C541C /* KeychainSwift in Frameworks */ = {isa = PBXBuildFile; productRef = CDE9601B2CB94D1C004C541C /* KeychainSwift */; };
+		D1A0B1C32F10432100A1B2C3 /* InlineIOSUI in Frameworks */ = {isa = PBXBuildFile; productRef = D1A0B1C22F10432100A1B2C3 /* InlineIOSUI */; };
 		E95DD2F1FC76F473B6D31EB6 /* InlineMacWindow in Frameworks */ = {isa = PBXBuildFile; productRef = 7BABF642C785B35DB0C34BF2 /* InlineMacWindow */; };
 /* End PBXBuildFile section */
 
@@ -246,6 +247,7 @@
 				C35E950E2CAC497700D569AF /* GRDB in Frameworks */,
 				C37F34402D5A4D4800D7D7CC /* MCEmojiPicker in Frameworks */,
 				C3CC99192CCE9AF7007F7F77 /* InlineUI in Frameworks */,
+				D1A0B1C32F10432100A1B2C3 /* InlineIOSUI in Frameworks */,
 				CD0240C42EA439D400976FDE /* Invite in Frameworks */,
 				C38C905E2CB9431900B78B8A /* InlineKit in Frameworks */,
 				C35092CA2CAEA7DB00AE3E23 /* Sentry in Frameworks */,
@@ -427,6 +429,7 @@
 				B7F71EB82DDB3BA70091C872 /* RenderMeThis */,
 				CD4E8E2B2E088F6B00CE6BC0 /* TextProcessing */,
 				CD735FEF2E493C8E00F7BFFE /* Translation */,
+				D1A0B1C22F10432100A1B2C3 /* InlineIOSUI */,
 				CD0240C32EA439D400976FDE /* Invite */,
 				B7E8E0E32EBA637100EA23B8 /* ContextMenuAccessoryStructs */,
 			);
@@ -1744,6 +1747,10 @@
 			isa = XCSwiftPackageProductDependency;
 			package = C35092D32CAEE8EA00AE3E23 /* XCRemoteSwiftPackageReference "keychain-swift" */;
 			productName = KeychainSwift;
+		};
+		D1A0B1C22F10432100A1B2C3 /* InlineIOSUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = InlineIOSUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
