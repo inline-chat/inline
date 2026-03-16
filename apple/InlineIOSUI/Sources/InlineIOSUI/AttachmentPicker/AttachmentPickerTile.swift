@@ -42,43 +42,85 @@ public struct AttachmentPickerCameraTile: View {
 
 public struct AttachmentPickerRecentTile: View {
   private let item: AttachmentPickerModel.RecentItem
+  private let isSelected: Bool
+  private let onSelectToggle: () -> Void
   private let action: () -> Void
 
-  public init(item: AttachmentPickerModel.RecentItem, action: @escaping () -> Void) {
+  public init(
+    item: AttachmentPickerModel.RecentItem,
+    isSelected: Bool,
+    onSelectToggle: @escaping () -> Void,
+    action: @escaping () -> Void
+  ) {
     self.item = item
+    self.isSelected = isSelected
+    self.onSelectToggle = onSelectToggle
     self.action = action
   }
 
   public var body: some View {
-    Button(action: action) {
-      ZStack(alignment: .bottomTrailing) {
-        AttachmentPickerAssetThumbnail(
-          localIdentifier: item.localIdentifier,
-          mediaType: item.mediaType
-        )
+    ZStack(alignment: .topTrailing) {
+      Button(action: action) {
+        ZStack(alignment: .bottomTrailing) {
+          AttachmentPickerAssetThumbnail(
+            localIdentifier: item.localIdentifier,
+            mediaType: item.mediaType
+          )
+          .frame(
+            width: AttachmentPickerTileMetrics.thumbnailWidth,
+            height: AttachmentPickerTileMetrics.thumbnailHeight
+          )
+          .clipShape(.rect(cornerRadius: AttachmentPickerTileMetrics.cornerRadius))
+
+          if item.mediaType == .video {
+            Image(systemName: "video.fill")
+              .font(.system(size: 12, weight: .semibold))
+              .foregroundStyle(.white)
+              .padding(8)
+              .background(.black.opacity(0.55), in: Circle())
+              .padding(8)
+          }
+        }
         .frame(
           width: AttachmentPickerTileMetrics.thumbnailWidth,
           height: AttachmentPickerTileMetrics.thumbnailHeight
         )
-        .clipShape(.rect(cornerRadius: AttachmentPickerTileMetrics.cornerRadius))
-
-        if item.mediaType == .video {
-          Image(systemName: "video.fill")
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(.white)
-            .padding(8)
-            .background(.black.opacity(0.55), in: Circle())
-            .padding(8)
-        }
+        .contentShape(.rect(cornerRadius: AttachmentPickerTileMetrics.cornerRadius))
       }
-      .frame(
-        width: AttachmentPickerTileMetrics.thumbnailWidth,
-        height: AttachmentPickerTileMetrics.thumbnailHeight
-      )
-      .contentShape(.rect(cornerRadius: AttachmentPickerTileMetrics.cornerRadius))
+      .buttonStyle(.plain)
+      .accessibilityLabel(item.mediaType == .video ? "Recent video" : "Recent photo")
+
+      Button(action: onSelectToggle) {
+        ZStack(alignment: .topTrailing) {
+          AttachmentPickerSelectionCircle(isSelected: isSelected)
+        }
+        .frame(width: 36, height: 36, alignment: .topTrailing)
+      }
+      .buttonStyle(.plain)
+      .contentShape(.rect)
+      .padding(8)
+      .accessibilityLabel(isSelected ? "Deselect media" : "Select media")
     }
-    .buttonStyle(.plain)
-    .accessibilityLabel(item.mediaType == .video ? "Recent video" : "Recent photo")
+  }
+}
+
+private struct AttachmentPickerSelectionCircle: View {
+  let isSelected: Bool
+
+  var body: some View {
+    ZStack {
+      Circle()
+        .fill(.white)
+      Circle()
+        .stroke(.black.opacity(0.18), lineWidth: 1)
+
+      if isSelected {
+        Image(systemName: "checkmark")
+          .font(.system(size: 10, weight: .bold))
+          .foregroundStyle(.black)
+      }
+    }
+    .frame(width: 22, height: 22)
   }
 }
 

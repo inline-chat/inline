@@ -424,7 +424,11 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     }
   }
 
-  func addVideo(_ url: URL, removeSourceAfterProcessing: Bool = false) {
+  func addVideo(
+    _ url: URL,
+    removeSourceAfterProcessing: Bool = false,
+    dismissAttachmentPickerOnSuccess: Bool = true
+  ) {
     sendButton.configuration?.showsActivityIndicator = true
     let pendingId = addPendingVideoAttachment()
     Task {
@@ -455,7 +459,9 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
           }
           _ = addAttachmentItem(mediaItem)
           sendButton.configuration?.showsActivityIndicator = false
-          dismissAttachmentPickerIfPresented(animated: true)
+          if dismissAttachmentPickerOnSuccess {
+            dismissAttachmentPickerIfPresented(animated: true)
+          }
         }
       } catch {
         Log.shared.error("Failed to save video", error: error)
@@ -480,6 +486,24 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
   }
 
   func openRecentAsset(localIdentifier: String) {
+    openRecentAsset(localIdentifier: localIdentifier, dismissAttachmentPickerOnSuccess: true)
+  }
+
+  func openRecentAssets(localIdentifiers: [String]) {
+    let validIdentifiers = localIdentifiers.filter { $0.isEmpty == false }
+    guard validIdentifiers.isEmpty == false else { return }
+
+    for identifier in validIdentifiers {
+      openRecentAsset(localIdentifier: identifier, dismissAttachmentPickerOnSuccess: false)
+    }
+
+    dismissAttachmentPickerIfPresented(animated: true)
+  }
+
+  private func openRecentAsset(
+    localIdentifier: String,
+    dismissAttachmentPickerOnSuccess: Bool
+  ) {
     let assets = PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier], options: nil)
     guard let asset = assets.firstObject else {
       showRecentAssetError(message: "Couldn't load that recent media.")
@@ -487,7 +511,7 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     }
 
     if asset.mediaType == .video {
-      loadRecentVideoAsset(asset)
+      loadRecentVideoAsset(asset, dismissAttachmentPickerOnSuccess: dismissAttachmentPickerOnSuccess)
       return
     }
 
@@ -516,12 +540,17 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
 
       DispatchQueue.main.async {
         self?.addImages([image])
-        self?.dismissAttachmentPickerIfPresented(animated: true)
+        if dismissAttachmentPickerOnSuccess {
+          self?.dismissAttachmentPickerIfPresented(animated: true)
+        }
       }
     }
   }
 
-  private func loadRecentVideoAsset(_ asset: PHAsset) {
+  private func loadRecentVideoAsset(
+    _ asset: PHAsset,
+    dismissAttachmentPickerOnSuccess: Bool
+  ) {
     let resources = PHAssetResource.assetResources(for: asset)
     guard let resource = resources.first(where: { [.fullSizeVideo, .video, .pairedVideo].contains($0.type) }) else {
       showRecentAssetError(message: "Couldn't open that recent video.")
@@ -547,8 +576,11 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
       }
 
       DispatchQueue.main.async {
-        self?.addVideo(tempURL, removeSourceAfterProcessing: true)
-        self?.dismissAttachmentPickerIfPresented(animated: true)
+        self?.addVideo(
+          tempURL,
+          removeSourceAfterProcessing: true,
+          dismissAttachmentPickerOnSuccess: dismissAttachmentPickerOnSuccess
+        )
       }
     }
   }

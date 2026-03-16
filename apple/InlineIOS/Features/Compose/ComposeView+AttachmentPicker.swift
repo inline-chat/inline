@@ -32,6 +32,9 @@ extension ComposeView: UIAdaptivePresentationControllerDelegate {
           openRecentItem: { [weak self] item in
             self?.openRecentAsset(localIdentifier: item.localIdentifier)
           },
+          openRecentItems: { [weak self] items in
+            self?.openRecentAssets(localIdentifiers: items.map(\.localIdentifier))
+          },
           manageLimitedAccess: { [weak self] in
             self?.presentLimitedLibraryManager()
           }
