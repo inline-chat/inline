@@ -39,17 +39,10 @@ extension ComposeView: UIDocumentPickerDelegate {
     do {
       let documentInfo = try FileCache.saveDocument(url: url)
       let mediaItem = FileMediaItem.document(documentInfo)
-      let uniqueId = mediaItem.getItemUniqueId()
-
-      // Update state
-      attachmentItems[uniqueId] = mediaItem
+      let uniqueId = addAttachmentItem(mediaItem)
 
       Log.shared.debug("Added file attachment with uniqueId: \(uniqueId)")
-
-      // Send immediately after adding the file
-      DispatchQueue.main.async { [weak self] in
-        self?.sendMessage()
-      }
+      dismissAttachmentPickerIfPresented(animated: true)
     } catch {
       Log.shared.error("Failed to save document", error: error)
 

@@ -24,7 +24,8 @@ extension ComposeView {
 
     let contentHeight = size.height
     let embedHeight = embedContainerHeightConstraint?.constant ?? 0
-    let newHeight = textViewHeightByContentHeight(contentHeight) + embedHeight
+    let attachmentHeight = attachmentContainerHeightConstraint?.constant ?? 0
+    let newHeight = textViewHeightByContentHeight(contentHeight) + embedHeight + attachmentHeight
     guard abs(composeHeightConstraint.constant - newHeight) > 1 else { return }
 
     composeHeightConstraint.constant = newHeight
