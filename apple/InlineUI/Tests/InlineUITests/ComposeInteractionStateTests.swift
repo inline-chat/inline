@@ -95,4 +95,52 @@ struct ComposeInteractionStateTests {
 
     #expect(shouldFinalize == false)
   }
+
+  @Test("text can send while attachments are still uploading")
+  func sendEligibilityAllowsTextDuringUpload() async throws {
+    let canSend = ComposeSendEligibility.canSend(
+      hasText: true,
+      hasAttachments: true,
+      hasForward: false,
+      hasPendingVideos: false,
+      hasActiveAttachmentUploads: true
+    )
+
+    #expect(canSend == true)
+  }
+
+  @Test("attachment-only send waits for pending media readiness")
+  func sendEligibilityBlocksAttachmentOnlyDuringPendingMedia() async throws {
+    let canSend = ComposeSendEligibility.canSend(
+      hasText: false,
+      hasAttachments: true,
+      hasForward: false,
+      hasPendingVideos: true,
+      hasActiveAttachmentUploads: false
+    )
+
+    #expect(canSend == false)
+  }
+
+  @Test("text only mode is used when text exists and media is not ready")
+  func sendEligibilityUsesTextOnlyModeWhenMediaIsNotReady() async throws {
+    let shouldSendTextOnly = ComposeSendEligibility.shouldSendTextOnly(
+      hasText: true,
+      hasPendingVideos: true,
+      hasActiveAttachmentUploads: false
+    )
+
+    #expect(shouldSendTextOnly == true)
+  }
+
+  @Test("text only mode is not used when media is ready")
+  func sendEligibilityDoesNotUseTextOnlyModeWhenMediaReady() async throws {
+    let shouldSendTextOnly = ComposeSendEligibility.shouldSendTextOnly(
+      hasText: true,
+      hasPendingVideos: false,
+      hasActiveAttachmentUploads: false
+    )
+
+    #expect(shouldSendTextOnly == false)
+  }
 }
