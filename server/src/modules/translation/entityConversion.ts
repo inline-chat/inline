@@ -53,8 +53,13 @@ function parseConvertedEntitiesJson(input: { messageId: number; entities: string
       return MessageEntities.fromJson({ entities: parsed })
     }
 
-    if (typeof parsed === "object" && "entities" in parsed) {
-      return MessageEntities.fromJson(parsed)
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "entities" in parsed &&
+      Array.isArray(parsed.entities)
+    ) {
+      return MessageEntities.fromJson({ entities: parsed.entities })
     }
 
     log.warn(`Invalid entities format for messageId ${input.messageId}:`, parsed)
