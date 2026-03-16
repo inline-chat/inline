@@ -1,0 +1,1 @@
+ALTER TABLE "dialogs" ADD COLUMN "sidebar_visible" boolean DEFAULT true NOT NULL;

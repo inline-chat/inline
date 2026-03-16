@@ -1,8 +1,9 @@
 import { db } from "@in/server/db"
-import { and, eq } from "drizzle-orm"
-import { chatParticipants, dialogs, members } from "@in/server/db/schema"
+import { eq } from "drizzle-orm"
+import { dialogs, members } from "@in/server/db/schema"
 import { InlineError } from "@in/server/types/errors"
 import { ChatModel, getChatFromPeer } from "@in/server/db/models/chats"
+import { getEffectiveAccessUserIds } from "@in/server/modules/subthreads"
 
 export type UpdateGroup =
   // Used for DMs and non-public threads
@@ -31,34 +32,10 @@ export const getUpdateGroup = async (peerId: TPeerInfo, context: { currentUserId
     // DMs
     return { type: "dmUsers", userIds: [chat.minUserId, chat.maxUserId] }
   } else if (chat.type === "thread") {
-    if (!chat.spaceId) {
-      const participantIds = await db
-        .select({ userId: chatParticipants.userId })
-        .from(chatParticipants)
-        .where(eq(chatParticipants.chatId, chat.id))
-        .then((result) => result.map(({ userId }) => userId))
-      return { type: "threadUsers", userIds: participantIds }
-    }
-    if (chat.publicThread) {
-      // Legacy
-      //return { type: "space", spaceId: chat.spaceId }
-
-      // For public threads, only members with public access should receive updates
-      const users = await db
-        .select({ userId: members.userId })
-        .from(members)
-        .where(and(eq(members.spaceId, chat.spaceId), eq(members.canAccessPublicChats, true)))
-      return { type: "threadUsers", spaceId: chat.spaceId, userIds: users.map((user) => user.userId) }
-    } else {
-      // get participant ids from chatParticipants
-      const participantIds = await db
-        .select({ userId: chatParticipants.userId })
-        .from(chatParticipants)
-        .where(eq(chatParticipants.chatId, chat.id))
-        // TODO: Possible memory OOM issue can happen here for larger chats which will require pagination and batching
-        .then((result) => result.map(({ userId }) => userId))
-      return { type: "threadUsers", spaceId: chat.spaceId, userIds: participantIds }
-    }
+    const userIds = await getEffectiveAccessUserIds(chat)
+    return chat.spaceId != null
+      ? { type: "threadUsers", spaceId: chat.spaceId, userIds }
+      : { type: "threadUsers", userIds }
   }
 
   throw new InlineError(InlineError.ApiError.PEER_INVALID)
@@ -82,34 +59,10 @@ export const getUpdateGroupFromInputPeer = async (
     // DMs
     return { type: "dmUsers", userIds: [chat.minUserId, chat.maxUserId] }
   } else if (chat.type === "thread") {
-    if (!chat.spaceId) {
-      const participantIds = await db
-        .select({ userId: chatParticipants.userId })
-        .from(chatParticipants)
-        .where(eq(chatParticipants.chatId, chat.id))
-        .then((result) => result.map(({ userId }) => userId))
-      return { type: "threadUsers", userIds: participantIds }
-    }
-    if (chat.publicThread) {
-      // Legacy
-      //return { type: "space", spaceId: chat.spaceId }
-
-      // For public threads, only members with public access should receive updates
-      const users = await db
-        .select({ userId: members.userId })
-        .from(members)
-        .where(and(eq(members.spaceId, chat.spaceId), eq(members.canAccessPublicChats, true)))
-      return { type: "threadUsers", spaceId: chat.spaceId, userIds: users.map((user) => user.userId) }
-    } else {
-      // get participant ids from chatParticipants
-      const participantIds = await db
-        .select({ userId: chatParticipants.userId })
-        .from(chatParticipants)
-        .where(eq(chatParticipants.chatId, chat.id))
-        // TODO: Possible memory OOM issue can happen here for larger chats which will require pagination and batching
-        .then((result) => result.map(({ userId }) => userId))
-      return { type: "threadUsers", spaceId: chat.spaceId, userIds: participantIds }
-    }
+    const userIds = await getEffectiveAccessUserIds(chat)
+    return chat.spaceId != null
+      ? { type: "threadUsers", spaceId: chat.spaceId, userIds }
+      : { type: "threadUsers", userIds }
   }
 
   throw new InlineError(InlineError.ApiError.PEER_INVALID)

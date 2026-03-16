@@ -115,7 +115,11 @@ export const handler = async (
 
   // --- 1. Existing Thread Dialogs ---
   const existingThreadDialogs = await db._query.dialogs.findMany({
-    where: and(eq(schema.dialogs.userId, currentUserId), eq(schema.dialogs.spaceId, spaceId)),
+    where: and(
+      eq(schema.dialogs.userId, currentUserId),
+      eq(schema.dialogs.spaceId, spaceId),
+      eq(schema.dialogs.sidebarVisible, true),
+    ),
     with: { chat: { with: { lastMsg: { with: { from: true, file: true } } } } },
     limit: MAX_LIMIT,
   })
@@ -151,6 +155,7 @@ export const handler = async (
           eq(schema.chats.spaceId, spaceId),
           eq(schema.chats.type, "thread"),
           eq(schema.chats.publicThread, true),
+          isNull(schema.chats.parentChatId),
         ),
         with: {
           dialogs: { where: eq(schema.dialogs.userId, currentUserId) },
@@ -188,6 +193,7 @@ export const handler = async (
           eq(schema.chats.spaceId, spaceId),
           eq(schema.chats.type, "thread"),
           eq(schema.chats.publicThread, false),
+          isNull(schema.chats.parentChatId),
           eq(schema.chatParticipants.userId, currentUserId),
         ),
       )

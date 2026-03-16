@@ -273,6 +273,7 @@ describe("getUpdates", () => {
     expect(first.update.markAsUnread.unreadMark).toBe(true)
   })
 
+
   test("inflates userDialogNotificationSettings to dialogNotificationSettings in user bucket", async () => {
     const user = await testUtils.createUser("dialog-settings@sync.com")
 

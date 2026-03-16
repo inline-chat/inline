@@ -5,7 +5,9 @@ import type { HandlerContext } from "../../controllers/helpers"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import { UpdatesModel, type DecryptedUpdate } from "@in/server/db/models/updates"
 import { db } from "../../db"
+import { chats, dialogs as dialogsTable, messages } from "../../db/schema"
 import type { ServerUpdate } from "@inline-chat/protocol/server"
+import { and, eq } from "drizzle-orm"
 
 describe("updateDialog", () => {
   setupTestLifecycle()
@@ -63,5 +65,73 @@ describe("updateDialog", () => {
     expect(peerType.user.userId).toBe(BigInt(userB.id))
     expect(archivedUpdates[1]?.payload.update.oneofKind).toBe("userDialogArchived")
     expect(archivedUpdates[1]?.payload.update.userDialogArchived.archived).toBe(false)
+  })
+
+  test("promotes hidden linked-subthread dialogs when pinning or unarchiving", async () => {
+    const owner = await testUtils.createUser("thread-dialog-owner@example.com")
+    const participant = await testUtils.createUser("thread-dialog-participant@example.com")
+    if (!owner || !participant) throw new Error("Failed to create users")
+
+    const parentChat = await testUtils.createChat(null, "Parent Thread", "thread", false, owner.id)
+    if (!parentChat) throw new Error("Failed to create parent chat")
+
+    await testUtils.addParticipant(parentChat.id, owner.id)
+    await testUtils.addParticipant(parentChat.id, participant.id)
+
+    await db.insert(messages).values({
+      chatId: parentChat.id,
+      messageId: 1,
+      fromId: owner.id,
+      text: "anchor",
+    })
+
+    const [childChat] = await db
+      .insert(chats)
+      .values({
+        type: "thread",
+        title: "Re: anchor",
+        publicThread: false,
+        createdBy: owner.id,
+        parentChatId: parentChat.id,
+        parentMessageId: 1,
+      })
+      .returning()
+
+    if (!childChat) throw new Error("Failed to create child chat")
+
+    await db.insert(dialogsTable).values({
+      userId: participant.id,
+      chatId: childChat.id,
+      sidebarVisible: false,
+      pinned: false,
+      archived: true,
+    })
+
+    await handler({ peerThreadId: String(childChat.id), pinned: true }, makeContext(participant.id))
+
+    let [dialogAfterPin] = await db
+      .select()
+      .from(dialogsTable)
+      .where(and(eq(dialogsTable.chatId, childChat.id), eq(dialogsTable.userId, participant.id)))
+      .limit(1)
+
+    expect(dialogAfterPin?.sidebarVisible).toBe(true)
+    expect(dialogAfterPin?.pinned).toBe(true)
+
+    await db
+      .update(dialogsTable)
+      .set({ sidebarVisible: false, archived: true, pinned: false })
+      .where(and(eq(dialogsTable.chatId, childChat.id), eq(dialogsTable.userId, participant.id)))
+
+    await handler({ peerThreadId: String(childChat.id), archived: false }, makeContext(participant.id))
+
+    let [dialogAfterUnarchive] = await db
+      .select()
+      .from(dialogsTable)
+      .where(and(eq(dialogsTable.chatId, childChat.id), eq(dialogsTable.userId, participant.id)))
+      .limit(1)
+
+    expect(dialogAfterUnarchive?.sidebarVisible).toBe(true)
+    expect(dialogAfterUnarchive?.archived).toBe(false)
   })
 })

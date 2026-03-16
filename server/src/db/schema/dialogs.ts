@@ -48,6 +48,9 @@ export const dialogs = pgTable(
     /** archived */
     archived: boolean("archived").default(false),
 
+    /** whether this dialog should appear in sidebar/home lists */
+    sidebarVisible: boolean("sidebar_visible").default(true).notNull(),
+
     /** manually marked as unread */
     unreadMark: boolean("unread_mark").default(false),
 

@@ -456,6 +456,20 @@
       "when": 1773064379413,
       "tag": "0064_add-voice-media",
       "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1773417875396,
+      "tag": "0065_add_reply_threads",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1773498141214,
+      "tag": "0066_add_dialog_sidebar_visibility",
+      "breakpoints": true
     }
   ]
 }

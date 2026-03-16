@@ -32,9 +32,11 @@ describe("getChat", () => {
     await testUtils.addParticipant(chat.id, participant.id)
 
     const result = await getChat({ peerId: makeInputPeerChat(chat.id) }, makeHandlerContext(creator.id))
+    const resultDialog = result.dialog
 
     expect(result.chat.spaceId).toBeUndefined()
-    expect(result.dialog.spaceId).toBeUndefined()
+    expect(resultDialog).toBeDefined()
+    expect(resultDialog!.spaceId).toBeUndefined()
 
     const [dialog] = await db
       .select()
@@ -56,7 +58,7 @@ describe("getChat", () => {
     await testUtils.addParticipant(chat.id, creator.id)
 
     await expect(getChat({ peerId: makeInputPeerChat(chat.id) }, makeHandlerContext(outsider.id))).rejects.toMatchObject({
-      code: RealtimeRpcError.Code.CHAT_ID_INVALID,
+      code: RealtimeRpcError.Code.PEER_ID_INVALID,
     })
   })
 })

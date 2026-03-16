@@ -182,6 +182,9 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
         // Public threads
         {
           type: "thread",
+          parentChatId: {
+            isNull: true,
+          },
           publicThread: true,
           // that we are a participant in
           space: {
@@ -201,6 +204,9 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
         // Private threads
         {
           type: "thread",
+          parentChatId: {
+            isNull: true,
+          },
           publicThread: false,
           // that we are a participant in
           participants: {
@@ -224,6 +230,9 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
         // Home threads (non-space)
         {
           type: "thread",
+          parentChatId: {
+            isNull: true,
+          },
           publicThread: false,
           spaceId: {
             isNull: true,
@@ -232,6 +241,18 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
             user: {
               id: currentUserId,
             },
+          },
+        },
+
+        // Linked subthreads only surface once a dialog exists for this user.
+        {
+          type: "thread",
+          parentChatId: {
+            isNotNull: true,
+          },
+          dialogs: {
+            userId: currentUserId,
+            sidebarVisible: true,
           },
         },
       ],
@@ -323,7 +344,7 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
   })
 
   // Create dialogs for all chats that don't have a dialog
-  const chatsThatNeedDialogs = chats.filter((c) => c.dialogs.length === 0)
+  const chatsThatNeedDialogs = chats.filter((c) => c.parentChatId == null && c.dialogs.length === 0)
   if (chatsThatNeedDialogs.length > 0) {
     let createdDialogs = await db
       .insert(dialogs)

@@ -8,6 +8,7 @@ import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { Log } from "@in/server/utils/log"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
+import { getMessageRepliesMap } from "@in/server/modules/subthreads"
 import type { DbChat } from "@in/server/db/schema"
 import { MessageSearchModule } from "@in/server/modules/search/messagesSearch"
 
@@ -56,6 +57,11 @@ export const searchMessages = async (input: Input, context: FunctionContext): Pr
       limit: maxResults,
       filter: mediaFilter,
     })
+    const repliesMap = await getMessageRepliesMap({
+      parentChatId: chat.id,
+      parentMessageIds: fullMessages.map((message) => message.messageId),
+      userId: context.currentUserId,
+    })
 
     return {
       messages: fullMessages.map((message) =>
@@ -63,6 +69,7 @@ export const searchMessages = async (input: Input, context: FunctionContext): Pr
           message,
           encodingForUserId: context.currentUserId,
           encodingForPeer: { inputPeer: input.peerId },
+          replies: repliesMap.get(message.messageId),
         }),
       ),
     }
@@ -82,12 +89,18 @@ export const searchMessages = async (input: Input, context: FunctionContext): Pr
 
   const fullMessages = await MessageModel.getMessagesByIds(chat.id, messageIds)
   const orderedMessages = orderMessagesById(messageIds, fullMessages)
+  const repliesMap = await getMessageRepliesMap({
+    parentChatId: chat.id,
+    parentMessageIds: orderedMessages.map((message) => message.messageId),
+    userId: context.currentUserId,
+  })
 
   const encodedMessages = orderedMessages.map((message) =>
     Encoders.fullMessage({
       message,
       encodingForUserId: context.currentUserId,
       encodingForPeer: { inputPeer: input.peerId },
+      replies: repliesMap.get(message.messageId),
     }),
   )
 

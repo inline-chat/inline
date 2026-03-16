@@ -43,5 +43,7 @@ export function encodeChat(chat: DbChat, { encodingForUserId }: { encodingForUse
     peerId: peerId,
     date: encodeDateStrict(chat.date),
     createdBy: chat.createdBy ? BigInt(chat.createdBy) : undefined,
+    parentChatId: chat.parentChatId ? BigInt(chat.parentChatId) : undefined,
+    parentMessageId: chat.parentMessageId ? BigInt(chat.parentMessageId) : undefined,
   }
 }

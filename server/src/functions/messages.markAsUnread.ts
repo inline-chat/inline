@@ -9,6 +9,7 @@ import { encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import type { ServerUpdate } from "@inline-chat/protocol/server"
+import { emitReplyThreadParentRepliesUpdateIfNeeded } from "@in/server/modules/subthreads"
 
 type Input = {
   peer: InputPeer
@@ -75,6 +76,11 @@ export const markAsUnread = async (input: Input, context: FunctionContext): Prom
 
   // Mark-as-unread is per-user; push to all sessions for this user (skip the initiating session).
   RealtimeUpdates.pushToUser(context.currentUserId, updates, { skipSessionId: context.currentSessionId })
+
+  await emitReplyThreadParentRepliesUpdateIfNeeded({
+    chatId,
+    currentUserId: context.currentUserId,
+  })
 
   return { updates }
 } 

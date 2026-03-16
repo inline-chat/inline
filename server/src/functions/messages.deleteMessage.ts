@@ -11,6 +11,7 @@ import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { Log } from "@in/server/utils/log"
 import { Notifications } from "@in/server/modules/notifications/notifications"
+import { emitReplyThreadParentRepliesUpdateIfNeeded } from "@in/server/modules/subthreads"
 
 type Input = {
   messageIds: bigint[]
@@ -44,6 +45,11 @@ export const deleteMessage = async (input: Input, context: FunctionContext): Pro
     messageIds: input.messageIds,
     currentUserId: context.currentUserId,
     update,
+  })
+
+  await emitReplyThreadParentRepliesUpdateIfNeeded({
+    chatId: chat.id,
+    currentUserId: context.currentUserId,
   })
 
   await Promise.all(

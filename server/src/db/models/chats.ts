@@ -323,6 +323,9 @@ export async function getUserChats(input: GetUserChatsInput): Promise<GetUserCha
         // Public threads
         {
           type: "thread",
+          parentChatId: {
+            isNull: true,
+          },
           publicThread: true,
           // that we are a participant in
           space: {
@@ -338,6 +341,9 @@ export async function getUserChats(input: GetUserChatsInput): Promise<GetUserCha
         // Private threads
         {
           type: "thread",
+          parentChatId: {
+            isNull: true,
+          },
           publicThread: false,
           // that we are a participant in
           participants: {
@@ -351,6 +357,17 @@ export async function getUserChats(input: GetUserChatsInput): Promise<GetUserCha
             members: {
               userId,
             },
+          },
+        },
+
+        // Linked subthreads only surface once a dialog exists for this user.
+        {
+          type: "thread",
+          parentChatId: {
+            isNotNull: true,
+          },
+          dialogs: {
+            userId,
           },
         },
       ],
