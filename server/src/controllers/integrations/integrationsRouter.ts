@@ -190,9 +190,13 @@ export const integrationsRouter = new Elysia({ prefix: "/integrations" })
         sameSite: "lax",
       })
 
-      const { url } = getNotionAuthUrl(state)
+      const { url, error } = getNotionAuthUrl(state)
       if (!url) {
-        return Response.json({ error: "Notion auth URL not found" }, { status: 500 })
+        Log.shared.error("Failed to create Notion OAuth authorization URL", {
+          spaceId,
+          reason: error ?? "unknown",
+        })
+        return Response.json({ error: error ?? "Notion auth URL not found" }, { status: 500 })
       }
       return Response.redirect(url)
     },

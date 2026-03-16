@@ -6,24 +6,60 @@ import { integrations } from "@in/server/db/schema/integrations"
 
 export let notionOauth: arctic.Notion | undefined
 
-let isDev = process.env.NODE_ENV === "development"
-if (isDev && process.env.NOTION_CLIENT_ID_DEV && process.env.NOTION_CLIENT_SECRET_DEV) {
+const isProd = process.env.NODE_ENV === "production"
+
+const resolveNotionOauthConfig = () => {
+  if (isProd) {
+    return {
+      clientId: process.env.NOTION_CLIENT_ID,
+      clientSecret: process.env.NOTION_CLIENT_SECRET,
+      redirectUri: "https://api.inline.chat/integrations/notion/callback",
+    }
+  }
+
+  return {
+    clientId: process.env.NOTION_CLIENT_ID_DEV ?? process.env.NOTION_CLIENT_ID,
+    clientSecret: process.env.NOTION_CLIENT_SECRET_DEV ?? process.env.NOTION_CLIENT_SECRET,
+    redirectUri: "http://localhost:8000/integrations/notion/callback",
+  }
+}
+
+const notionOauthConfig = resolveNotionOauthConfig()
+if (notionOauthConfig.clientId && notionOauthConfig.clientSecret) {
   notionOauth = new arctic.Notion(
-    process.env.NOTION_CLIENT_ID_DEV,
-    process.env.NOTION_CLIENT_SECRET_DEV,
-    "http://127.0.0.1:8000/integrations/notion/callback",
+    notionOauthConfig.clientId,
+    notionOauthConfig.clientSecret,
+    notionOauthConfig.redirectUri,
   )
-} else if (!isDev && process.env.NOTION_CLIENT_ID && process.env.NOTION_CLIENT_SECRET) {
-  notionOauth = new arctic.Notion(
-    process.env.NOTION_CLIENT_ID,
-    process.env.NOTION_CLIENT_SECRET,
-    "https://api.inline.chat/integrations/notion/callback",
-  )
+} else {
+  Log.shared.warn("Notion OAuth is not configured", {
+    nodeEnv: process.env.NODE_ENV ?? "unknown",
+    isProd,
+    hasNotionClientId: Boolean(process.env.NOTION_CLIENT_ID),
+    hasNotionClientSecret: Boolean(process.env.NOTION_CLIENT_SECRET),
+    hasNotionClientIdDev: Boolean(process.env.NOTION_CLIENT_ID_DEV),
+    hasNotionClientSecretDev: Boolean(process.env.NOTION_CLIENT_SECRET_DEV),
+  })
 }
 
 export const getNotionAuthUrl = (state: string) => {
-  const url = notionOauth?.createAuthorizationURL(state)
-  return { url }
+  if (!notionOauth) {
+    return {
+      url: undefined,
+      error: "Notion OAuth is not configured on the server",
+    }
+  }
+
+  try {
+    const url = notionOauth.createAuthorizationURL(state)
+    return { url, error: undefined as string | undefined }
+  } catch (error) {
+    Log.shared.error("Failed to create Notion OAuth authorization URL", error)
+    return {
+      url: undefined,
+      error: "Failed to create Notion OAuth authorization URL",
+    }
+  }
 }
 
 export const handleNotionCallback = async ({
@@ -35,8 +71,15 @@ export const handleNotionCallback = async ({
   userId: number
   spaceId: string
 }) => {
+  if (!notionOauth) {
+    return {
+      ok: false as const,
+      error: "Notion OAuth is not configured on the server",
+    }
+  }
+
   try {
-    const tokens = await notionOauth?.validateAuthorizationCode(code)
+    const tokens = await notionOauth.validateAuthorizationCode(code)
 
     if (!tokens) {
       return {

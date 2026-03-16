@@ -88,7 +88,7 @@ class NotionTaskCoordinator: ObservableObject {
   }
 
   private func showErrorToast(error: Error) {
-    ToastCenter.shared.showError("Failed to create Notion task")
+    ToastCenter.shared.showError(notionTaskUserFacingMessage(error: error))
   }
 }
 

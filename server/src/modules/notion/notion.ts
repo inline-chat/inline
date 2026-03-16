@@ -1,15 +1,19 @@
 import { db } from "@in/server/db"
 import { IntegrationsModel } from "@in/server/db/models/integrations"
-import { users } from "@in/server/db/schema"
+import { integrations, users } from "@in/server/db/schema"
 import { isDev } from "@in/server/env"
 import { Log } from "@in/server/utils/log"
+import { isNotionObjectNotFoundError, NOTION_SETUP_ERROR_MESSAGES } from "./errors"
 import { Client } from "@notionhq/client"
 import type {
-  DatabaseObjectResponse,
-  SearchResponse,
   CreatePageParameters,
+  DataSourceObjectResponse,
+  DatabaseObjectResponse,
+  PartialDataSourceObjectResponse,
+  PartialDatabaseObjectResponse,
+  SearchResponse,
 } from "@notionhq/client/build/src/api-endpoints"
-import { eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 
 const logDevTelemetry = (message: string, metadata: Record<string, unknown>) => {
   if (isDev) {
@@ -22,6 +26,28 @@ const errorTelemetry = (error: unknown) => ({
   errorMessage: error instanceof Error ? error.message : String(error),
 })
 
+export type ResolvedNotionParent = {
+  databaseId: string
+  dataSource: DataSourceObjectResponse
+  dataSourceId: string
+  wasLegacyDatabaseSelection: boolean
+}
+
+type DataSourceRef = {
+  id: string
+  name: string
+}
+
+/**
+ * Simplified selectable parent containing id, title, and icon.
+ * The id is a data source id in the latest Notion API.
+ */
+interface SimplifiedDatabase {
+  id: string
+  title: string
+  icon: string | null
+}
+
 export async function getNotionClient(spaceId: number): Promise<{ client: Client; databaseId: string | null }> {
   const { accessToken, databaseId } = await IntegrationsModel.getAuthTokenWithSpaceId(spaceId, "notion")
 
@@ -33,59 +59,170 @@ export async function getNotionClient(spaceId: number): Promise<{ client: Client
   }
 }
 
-/**
- * Simplified database object containing id, title, and icon
- */
-interface SimplifiedDatabase {
-  id: string
-  title: string
-  icon: string | null
+export function selectActiveDataSource(
+  savedParentId: string,
+  databaseId: string,
+  dataSources: DataSourceRef[],
+): DataSourceRef {
+  const directMatch = dataSources.find((dataSource) => dataSource.id === savedParentId)
+  if (directMatch) {
+    return directMatch
+  }
+
+  if (savedParentId === databaseId) {
+    if (dataSources.length === 1) {
+      return dataSources[0]!
+    }
+
+    throw new Error(NOTION_SETUP_ERROR_MESSAGES.legacyDatabaseSelectionAmbiguous)
+  }
+
+  throw new Error(NOTION_SETUP_ERROR_MESSAGES.parentNotFound)
 }
 
-/**
- * Helper function to extract simplified database information
- * @param {DatabaseObjectResponse} db - The database object response from Notion API
- * @returns {SimplifiedDatabase} A simplified database object containing id, title, and icon
- */
-function extract(db: DatabaseObjectResponse): SimplifiedDatabase {
-  const title = db.title.map((t) => t.plain_text).join("")
-  const icon = db.icon?.type === "emoji" ? db.icon.emoji : null
-  return { id: db.id, title, icon }
+export async function resolveSelectedNotionParent(
+  spaceId: number,
+  savedParentId: string,
+  notion: Client,
+): Promise<ResolvedNotionParent> {
+  const directDataSource = await tryGetDataSource(savedParentId, notion)
+  if (directDataSource) {
+    const databaseId = getDatabaseIdFromDataSource(directDataSource)
+    return {
+      databaseId,
+      dataSource: directDataSource,
+      dataSourceId: directDataSource.id,
+      wasLegacyDatabaseSelection: false,
+    }
+  }
+
+  const database = await retrieveDatabaseOrThrowParentNotFound(savedParentId, notion)
+  const selectedDataSource = selectActiveDataSource(
+    savedParentId,
+    database.id,
+    database.data_sources.map((dataSource) => ({
+      id: dataSource.id,
+      name: dataSource.name,
+    })),
+  )
+
+  logDevTelemetry("Resolved legacy Notion database selection to data source", {
+    spaceId,
+    savedParentId,
+    databaseId: database.id,
+    dataSourceId: selectedDataSource.id,
+    dataSourceCount: database.data_sources.length,
+  })
+
+  const dataSource = assertFullDataSource(await notion.dataSources.retrieve({ data_source_id: selectedDataSource.id }))
+  return {
+    databaseId: database.id,
+    dataSource,
+    dataSourceId: dataSource.id,
+    wasLegacyDatabaseSelection: true,
+  }
 }
 
-/**
- * Get all databases from Notion for a given space
- * @param {number} spaceId - The ID of the space who connected to the integration
- * @param {number} [pageSize=50] - The number of databases to return
- * @returns {Promise<SimplifiedDatabase[]>} A promise that resolves to an array of simplified database objects
- */
+export async function persistCanonicalNotionParentId(
+  spaceId: number,
+  savedParentId: string,
+  canonicalDataSourceId: string,
+): Promise<void> {
+  if (!savedParentId || savedParentId === canonicalDataSourceId) {
+    return
+  }
+
+  await db
+    .update(integrations)
+    .set({ notionDatabaseId: canonicalDataSourceId })
+    .where(and(eq(integrations.spaceId, spaceId), eq(integrations.provider, "notion")))
+}
+
 export async function getDatabases(spaceId: number, pageSize = 50, notion: Client): Promise<SimplifiedDatabase[]> {
   const response: SearchResponse = await notion.search({
-    filter: { property: "object", value: "database" },
+    filter: { property: "object", value: "data_source" },
     sort: { direction: "descending", timestamp: "last_edited_time" },
     page_size: pageSize,
   })
 
-  return response.results.filter((r) => r.object === "database").map((r) => extract(r as DatabaseObjectResponse))
+  const dataSources = (
+    await Promise.all(
+    response.results
+      .filter((result): result is DataSourceObjectResponse | PartialDataSourceObjectResponse => result.object === "data_source")
+      .map(async (result) => {
+        try {
+          if (isFullDataSource(result)) {
+            return result
+          }
+
+          return assertFullDataSource(await notion.dataSources.retrieve({ data_source_id: result.id }))
+        } catch (error) {
+          Log.shared.warn("Skipping unavailable Notion data source while loading picker options", {
+            spaceId,
+            dataSourceId: result.id,
+            ...errorTelemetry(error),
+          })
+          return null
+        }
+      }),
+    )
+  ).filter((dataSource): dataSource is DataSourceObjectResponse => dataSource !== null)
+
+  const databaseIds = Array.from(new Set(dataSources.map((dataSource) => getDatabaseIdFromDataSource(dataSource))))
+  const databases = (
+    await Promise.all(
+    databaseIds.map(async (databaseId) => {
+      try {
+        const database = assertFullDatabase(await notion.databases.retrieve({ database_id: databaseId }))
+        return [databaseId, database] as const
+      } catch (error) {
+        Log.shared.warn("Skipping unavailable Notion database metadata while loading picker options", {
+          spaceId,
+          databaseId,
+          ...errorTelemetry(error),
+        })
+        return null
+      }
+    }),
+    )
+  ).filter((entry): entry is readonly [string, DatabaseObjectResponse] => entry !== null)
+
+  const databaseById = new Map(databases)
+  const dataSourceCountByDatabaseId = dataSources.reduce<Record<string, number>>((acc, dataSource) => {
+    const databaseId = getDatabaseIdFromDataSource(dataSource)
+    acc[databaseId] = (acc[databaseId] ?? 0) + 1
+    return acc
+  }, {})
+
+  return dataSources.map((dataSource) => {
+    const databaseId = getDatabaseIdFromDataSource(dataSource)
+    const database = databaseById.get(databaseId)
+
+    return {
+      id: dataSource.id,
+      title: buildSelectableTitle(dataSource, database, dataSourceCountByDatabaseId[databaseId] ?? 1),
+      icon: extractIcon(dataSource.icon) ?? extractIcon(database?.icon ?? null),
+    }
+  })
 }
 
-// get active database data
-export async function getActiveDatabaseData(spaceId: number, databaseId: string, notion: Client) {
-  const database = await notion.databases.retrieve({ database_id: databaseId })
-  const databaseProperties =
-    "properties" in database && database.properties && typeof database.properties === "object"
-      ? database.properties
+export async function getActiveDatabaseData(spaceId: number, dataSourceId: string, notion: Client) {
+  const dataSource = assertFullDataSource(await notion.dataSources.retrieve({ data_source_id: dataSourceId }))
+
+  const properties =
+    "properties" in dataSource && dataSource.properties && typeof dataSource.properties === "object"
+      ? dataSource.properties
       : undefined
-  logDevTelemetry("Loaded Notion database metadata", {
+
+  logDevTelemetry("Loaded Notion data source metadata", {
     spaceId,
-    databaseId,
-    propertyCount: databaseProperties ? Object.keys(databaseProperties).length : 0,
+    dataSourceId: dataSource.id,
+    propertyCount: properties ? Object.keys(properties).length : 0,
   })
 
-  return database
+  return dataSource
 }
 
-// get all notion users
 export async function getNotionUsers(spaceId: number, notion: Client) {
   const users = await notion.users.list({
     page_size: 100,
@@ -101,27 +238,27 @@ export async function getNotionUsers(spaceId: number, notion: Client) {
 
 export async function newNotionPage(
   spaceId: number,
-  databaseId: string,
+  dataSourceId: string,
   properties: CreatePageParameters["properties"],
   client: Client,
-  children?: CreatePageParameters["children"],
+  markdown?: string | null,
   icon?: CreatePageParameters["icon"],
 ) {
   logDevTelemetry("Creating Notion page", {
     spaceId,
-    databaseId,
+    dataSourceId,
     propertyCount: Object.keys(properties ?? {}).length,
-    childrenCount: Array.isArray(children) ? children.length : 0,
+    markdownLength: markdown?.length ?? 0,
     hasIcon: Boolean(icon),
   })
 
   const pageData: CreatePageParameters = {
-    parent: { database_id: databaseId },
+    parent: { data_source_id: dataSourceId },
     properties,
   }
 
-  if (children) {
-    pageData.children = children
+  if (markdown && markdown.trim().length > 0) {
+    pageData.markdown = markdown
   }
 
   if (icon) {
@@ -131,7 +268,7 @@ export async function newNotionPage(
   const page = await client.pages.create(pageData)
   logDevTelemetry("Created Notion page", {
     spaceId,
-    databaseId,
+    dataSourceId,
     hasPageId: Boolean(page.id),
   })
   return page
@@ -158,16 +295,10 @@ export async function getCurrentNotionUser(spaceId: number, currentUserId: numbe
   return notionUser
 }
 
-/**
- * Get a sample of pages from a Notion database to understand the tone and format
- * @param {number} spaceId - The ID of the space who connected to the integration
- * @param {number} [limit=10] - Maximum number of pages to retrieve
- * @returns {Promise<any[]>} Array of sample pages with their properties and content
- */
-export async function getSampleDatabasePages(spaceId: number, databaseId: string, limit = 10, notion: Client) {
+export async function getSampleDatabasePages(spaceId: number, dataSourceId: string, limit = 10, notion: Client) {
   try {
-    const response = await notion.databases.query({
-      database_id: databaseId,
+    const response = await notion.dataSources.query({
+      data_source_id: dataSourceId,
       page_size: limit,
       sorts: [
         {
@@ -177,41 +308,38 @@ export async function getSampleDatabasePages(spaceId: number, databaseId: string
       ],
     })
 
-    // Fetch page content (blocks) for each page
-    const pagesWithContent = await Promise.all(
+    const pagesWithMarkdown = await Promise.all(
       response.results.map(async (page) => {
         try {
-          // Get the page blocks (content)
-          const blocks = await notion.blocks.children.list({
-            block_id: page.id,
-            page_size: 50, // Limit blocks to avoid too much content
+          const markdown = await notion.pages.retrieveMarkdown({
+            page_id: page.id,
           })
 
           return {
             ...page,
-            content: blocks.results,
+            markdown: markdown.markdown,
           }
         } catch (error) {
-          Log.shared.warn("Failed to retrieve blocks for page", {
+          Log.shared.warn("Failed to retrieve page markdown for sample page", {
             pageId: page.id,
             error: error instanceof Error ? error.message : String(error),
           })
-          // Return page without content if blocks fetch fails
+
           return {
             ...page,
-            content: [],
+            markdown: "",
           }
         }
       }),
     )
 
-    logDevTelemetry("Retrieved sample pages with content", {
+    logDevTelemetry("Retrieved sample pages with markdown", {
       spaceId,
-      count: pagesWithContent.length,
-      databaseId,
+      count: pagesWithMarkdown.length,
+      dataSourceId,
     })
 
-    return pagesWithContent
+    return pagesWithMarkdown
   } catch (error) {
     Log.shared.error("Failed to retrieve sample pages", {
       spaceId,
@@ -248,4 +376,81 @@ export function formatNotionUsers(notionUsers: any): NotionUser[] {
   }
 
   return users
+}
+
+function buildSelectableTitle(
+  dataSource: DataSourceObjectResponse,
+  database: DatabaseObjectResponse | undefined,
+  dataSourceCount: number,
+): string {
+  const dataSourceTitle = plainTextFromRichText(dataSource.title).trim()
+  const databaseTitle = plainTextFromRichText(database?.title ?? []).trim()
+
+  if (dataSourceCount > 1 && databaseTitle && dataSourceTitle) {
+    return `${databaseTitle} / ${dataSourceTitle}`
+  }
+
+  return dataSourceTitle || databaseTitle || "Untitled Notion source"
+}
+
+function plainTextFromRichText(items: Array<{ plain_text?: string }> | undefined): string {
+  return (items ?? []).map((item) => item.plain_text ?? "").join("")
+}
+
+function getDatabaseIdFromDataSource(dataSource: DataSourceObjectResponse): string {
+  return dataSource.parent.database_id
+}
+
+function extractIcon(icon: { type?: string; emoji?: string } | null | undefined): string | null {
+  if (icon?.type === "emoji" && typeof icon.emoji === "string") {
+    return icon.emoji
+  }
+
+  return null
+}
+
+async function tryGetDataSource(dataSourceId: string, notion: Client): Promise<DataSourceObjectResponse | null> {
+  try {
+    return assertFullDataSource(await notion.dataSources.retrieve({ data_source_id: dataSourceId }))
+  } catch (error) {
+    if (isNotionObjectNotFoundError(error)) {
+      return null
+    }
+
+    throw error
+  }
+}
+
+async function retrieveDatabaseOrThrowParentNotFound(databaseId: string, notion: Client): Promise<DatabaseObjectResponse> {
+  try {
+    return assertFullDatabase(await notion.databases.retrieve({ database_id: databaseId }))
+  } catch (error) {
+    if (!isNotionObjectNotFoundError(error)) {
+      throw error
+    }
+
+    throw new Error(NOTION_SETUP_ERROR_MESSAGES.parentNotFound)
+  }
+}
+
+function assertFullDatabase(database: DatabaseObjectResponse | PartialDatabaseObjectResponse): DatabaseObjectResponse {
+  if ("data_sources" in database && "title" in database) {
+    return database
+  }
+
+  throw new Error(NOTION_SETUP_ERROR_MESSAGES.parentNotFound)
+}
+
+function assertFullDataSource(
+  dataSource: DataSourceObjectResponse | PartialDataSourceObjectResponse,
+): DataSourceObjectResponse {
+  if ("properties" in dataSource && "title" in dataSource && "parent" in dataSource) {
+    return dataSource
+  }
+
+  throw new Error(NOTION_SETUP_ERROR_MESSAGES.parentNotFound)
+}
+
+function isFullDataSource(dataSource: DataSourceObjectResponse | PartialDataSourceObjectResponse): dataSource is DataSourceObjectResponse {
+  return "title" in dataSource && "parent" in dataSource && "icon" in dataSource
 }
