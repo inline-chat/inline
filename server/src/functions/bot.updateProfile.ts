@@ -24,7 +24,11 @@ export const updateBotProfile = async (
     .where(and(eq(users.id, botUserId), eq(users.bot, true)))
     .limit(1)
 
-  if (!bot || bot.botCreatorId !== context.currentUserId) {
+  const currentUserId = context.currentUserId
+  const canUpdateAsCreator = bot?.botCreatorId === currentUserId
+  const canUpdateAsBotSelf = bot?.id === currentUserId
+
+  if (!bot || (!canUpdateAsCreator && !canUpdateAsBotSelf)) {
     throw RealtimeRpcError.UserIdInvalid()
   }
 
@@ -76,4 +80,3 @@ export const updateBotProfile = async (
     }),
   }
 }
-
