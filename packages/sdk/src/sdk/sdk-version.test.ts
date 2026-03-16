@@ -12,12 +12,12 @@ describe("sdk-version", () => {
     expect(readFileSync).toHaveBeenCalledTimes(1)
   })
 
-  it("falls back to unknown when package.json cannot be parsed", async () => {
+  it("omits the version when package.json cannot be parsed", async () => {
     vi.resetModules()
     const readFileSync = vi.fn(() => "{ invalid")
     vi.doMock("node:fs", () => ({ readFileSync }))
 
     const { getSdkVersion } = await import("./sdk-version.js")
-    expect(getSdkVersion()).toBe("unknown")
+    expect(getSdkVersion()).toBeUndefined()
   })
 })
