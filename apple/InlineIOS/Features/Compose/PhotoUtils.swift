@@ -7,6 +7,29 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
+private func immediateVideoThumbnail(from url: URL) -> UIImage? {
+  let hasAccess = url.startAccessingSecurityScopedResource()
+  defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
+
+  let asset = AVURLAsset(url: url)
+  let generator = AVAssetImageGenerator(asset: asset)
+  generator.appliesPreferredTrackTransform = true
+
+  let durationSeconds = CMTimeGetSeconds(asset.duration)
+  let sampleSecond: Double = if durationSeconds.isFinite, durationSeconds > 0 {
+    min(max(durationSeconds * 0.1, 0.1), 1.0)
+  } else {
+    0.5
+  }
+  let time = CMTime(seconds: sampleSecond, preferredTimescale: 600)
+
+  guard let cgImage = try? generator.copyCGImage(at: time, actualTime: nil) else {
+    return nil
+  }
+
+  return UIImage(cgImage: cgImage)
+}
+
 extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDelegate {
   private func shouldSendAsFile(_ image: UIImage) -> Bool {
     let width = max(image.size.width, 1)
@@ -129,7 +152,7 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     activePickerMode = .photos
 
     var configuration = PHPickerConfiguration(photoLibrary: .shared())
-    configuration.filter = .images
+    configuration.filter = .any(of: [.images, .videos])
     configuration.selectionLimit = 30
 
     let picker = PHPickerViewController(configuration: configuration)
@@ -189,16 +212,12 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
   }
 
   func handleDroppedImage(_ image: UIImage) {
-    presentSingleImagePreview(image)
+    addImages([image])
   }
 
   func handleMultipleDroppedImages(_ images: [UIImage]) {
-    if images.count == 1 {
-      handleDroppedImage(images[0])
-      return
-    }
-
-    presentMultiImagePreview(images)
+    guard !images.isEmpty else { return }
+    addImages(images)
   }
 
   func dismissPreview(dismissAttachmentPicker: Bool = false) {
@@ -377,43 +396,71 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
 
   func handlePastedImage() {
     guard let image = UIPasteboard.general.image else { return }
-    presentSingleImagePreview(image)
+    addImages([image])
   }
 
   func addImage(_ image: UIImage) {
-    do {
-      let mediaItem = try makeImageAttachment(image, optimizePhoto: true)
-      let uniqueId = mediaItem.getItemUniqueId()
+    addImages([image])
+  }
 
-      // Update state
-      attachmentItems[uniqueId] = mediaItem
-      updateSendButtonVisibility()
+  func addImages(_ images: [UIImage]) {
+    guard !images.isEmpty else { return }
 
-      Log.shared.debug("Added image attachment with uniqueId: \(uniqueId)")
-    } catch {
-      Log.shared.error("Failed to save photo in attachments", error: error)
+    var didAddAny = false
+    for image in images {
+      do {
+        let mediaItem = try makeImageAttachment(image, optimizePhoto: true)
+        let uniqueId = mediaItem.getItemUniqueId()
+        attachmentItems[uniqueId] = mediaItem
+        didAddAny = true
+        Log.shared.debug("Added image attachment with uniqueId: \(uniqueId)")
+      } catch {
+        Log.shared.error("Failed to save photo in attachments", error: error)
+      }
+    }
+
+    if didAddAny {
+      handleAttachmentItemsChanged()
     }
   }
 
-  func addVideo(_ url: URL) {
+  func addVideo(_ url: URL, removeSourceAfterProcessing: Bool = false) {
     sendButton.configuration?.showsActivityIndicator = true
+    let pendingId = addPendingVideoAttachment()
+    Task {
+      defer {
+        if removeSourceAfterProcessing {
+          try? FileManager.default.removeItem(at: url)
+        }
+      }
 
-    Task { [weak self] in
       do {
-        let videoInfo = try await FileCache.saveVideo(url: url)
+        let immediateThumbnail = immediateVideoThumbnail(from: url)
+        if let immediateThumbnail {
+          await MainActor.run { [weak self] in
+            self?.updatePendingVideoAttachmentThumbnail(pendingId, image: immediateThumbnail)
+          }
+        }
+
+        let videoInfo = try await FileCache.saveVideo(url: url, thumbnail: immediateThumbnail)
         let mediaItem = FileMediaItem.video(videoInfo)
-        let uniqueId = mediaItem.getItemUniqueId()
 
         await MainActor.run { [weak self] in
           guard let self else { return }
-          attachmentItems[uniqueId] = mediaItem
-          updateSendButtonVisibility()
+          let isCanceled = isPendingVideoAttachmentCanceled(pendingId)
+          removePendingVideoAttachment(pendingId, animated: false)
+          guard !isCanceled else {
+            sendButton.configuration?.showsActivityIndicator = false
+            return
+          }
+          _ = addAttachmentItem(mediaItem)
           sendButton.configuration?.showsActivityIndicator = false
-          sendMessage()
+          dismissAttachmentPickerIfPresented(animated: true)
         }
       } catch {
         Log.shared.error("Failed to save video", error: error)
         await MainActor.run { [weak self] in
+          self?.removePendingVideoAttachment(pendingId, animated: false)
           self?.sendButton.configuration?.showsActivityIndicator = false
           self?.showVideoError(error)
         }
@@ -435,7 +482,17 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
   func openRecentAsset(localIdentifier: String) {
     let assets = PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier], options: nil)
     guard let asset = assets.firstObject else {
-      showRecentAssetError(message: "Couldn't load that recent photo.")
+      showRecentAssetError(message: "Couldn't load that recent media.")
+      return
+    }
+
+    if asset.mediaType == .video {
+      loadRecentVideoAsset(asset)
+      return
+    }
+
+    guard asset.mediaType == .image else {
+      showRecentAssetError(message: "Unsupported recent media type.")
       return
     }
 
@@ -458,14 +515,47 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
       }
 
       DispatchQueue.main.async {
-        self?.handleDroppedImage(image)
+        self?.addImages([image])
+        self?.dismissAttachmentPickerIfPresented(animated: true)
+      }
+    }
+  }
+
+  private func loadRecentVideoAsset(_ asset: PHAsset) {
+    let resources = PHAssetResource.assetResources(for: asset)
+    guard let resource = resources.first(where: { [.fullSizeVideo, .video, .pairedVideo].contains($0.type) }) else {
+      showRecentAssetError(message: "Couldn't open that recent video.")
+      return
+    }
+
+    let fileExtension = URL(fileURLWithPath: resource.originalFilename).pathExtension
+    let resolvedExtension = fileExtension.isEmpty ? "mov" : fileExtension
+    let tempURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString)
+      .appendingPathExtension(resolvedExtension)
+
+    let options = PHAssetResourceRequestOptions()
+    options.isNetworkAccessAllowed = true
+
+    PHAssetResourceManager.default().writeData(for: resource, toFile: tempURL, options: options) { [weak self] error in
+      if let error {
+        try? FileManager.default.removeItem(at: tempURL)
+        DispatchQueue.main.async {
+          self?.showRecentAssetError(message: "Couldn't open that recent video: \(error.localizedDescription)")
+        }
+        return
+      }
+
+      DispatchQueue.main.async {
+        self?.addVideo(tempURL, removeSourceAfterProcessing: true)
+        self?.dismissAttachmentPickerIfPresented(animated: true)
       }
     }
   }
 
   private func showRecentAssetError(message: String) {
     let alert = UIAlertController(
-      title: "Photo Error",
+      title: "Media Error",
       message: message,
       preferredStyle: .alert
     )
@@ -493,42 +583,102 @@ extension ComposeView: PHPickerViewControllerDelegate {
       return
     }
 
-    // If only one photo selected, use the original single preview
-    if results.count == 1 {
-      let result = results.first!
-      result.itemProvider.loadObject(ofClass: UIImage.self) { [weak self, weak picker] object, error in
-        guard let self, let picker else { return }
+    handleLibraryPickerResults(results, picker: picker)
+  }
 
-        if let error {
-          Log.shared.debug("Failed to load image:", file: error.localizedDescription)
-          DispatchQueue.main.async {
-            picker.dismiss(animated: true) { [weak self] in
-              self?.isPickerPresented = false
-            }
+  private enum LibraryPickerItem {
+    case image(UIImage)
+    case video(FileMediaItem)
+  }
+
+  private func handleLibraryPickerResults(_ results: [PHPickerResult], picker: PHPickerViewController) {
+    var pendingVideoIdsByIndex: [Int: String] = [:]
+    for (index, result) in results.enumerated() where isVideoResult(result) {
+      let pendingId = addPendingVideoAttachment()
+      pendingVideoIdsByIndex[index] = pendingId
+      requestPendingVideoThumbnail(for: result, pendingId: pendingId)
+    }
+
+    Task { [weak self, weak picker] in
+      guard let self, let picker else { return }
+
+      var loadedItems: [(index: Int, item: LibraryPickerItem)] = []
+
+      await withTaskGroup(of: (Int, LibraryPickerItem?).self) { group in
+        for (index, result) in results.enumerated() {
+          group.addTask { [weak self] in
+            guard let self else { return (index, nil) }
+            let item = await self.loadLibraryItem(from: result)
+            return (index, item)
           }
-          return
         }
 
-        guard let image = object as? UIImage else {
-          DispatchQueue.main.async {
-            picker.dismiss(animated: true) { [weak self] in
-              self?.isPickerPresented = false
-            }
+        for await (index, item) in group {
+          if let item {
+            loadedItems.append((index: index, item: item))
           }
-          return
-        }
-
-        DispatchQueue.main.async {
-          self.presentSingleImagePreview(image, presenter: picker)
         }
       }
-    } else {
-      // Multiple photos selected, use multi-photo preview
-      loadMultipleImages(from: results, picker: picker)
+
+      await MainActor.run { [weak self, weak picker] in
+        guard let self, let picker else { return }
+
+        for pendingId in pendingVideoIdsByIndex.values {
+          removePendingVideoAttachment(pendingId, animated: false)
+        }
+
+        let sortedEntries = loadedItems.sorted { $0.index < $1.index }
+        guard !sortedEntries.isEmpty else {
+          picker.dismiss(animated: true) { [weak self] in
+            self?.isPickerPresented = false
+          }
+          return
+        }
+
+        var didAddAny = false
+        for entry in sortedEntries {
+          let item = entry.item
+          switch item {
+            case let .image(image):
+              do {
+                let mediaItem = try makeImageAttachment(image, optimizePhoto: true)
+                let uniqueId = mediaItem.getItemUniqueId()
+                attachmentItems[uniqueId] = mediaItem
+                didAddAny = true
+              } catch {
+                Log.shared.error("Failed to save photo in attachments", error: error)
+              }
+            case let .video(videoItem):
+              if let pendingId = pendingVideoIdsByIndex[entry.index], isPendingVideoAttachmentCanceled(pendingId) {
+                continue
+              }
+              let uniqueId = videoItem.getItemUniqueId()
+              attachmentItems[uniqueId] = videoItem
+              didAddAny = true
+          }
+        }
+
+        if didAddAny {
+          handleAttachmentItemsChanged(animated: false)
+        }
+
+        picker.dismiss(animated: true) { [weak self] in
+          guard let self else { return }
+          isPickerPresented = false
+          dismissAttachmentPickerIfPresented(animated: true)
+        }
+      }
     }
   }
 
   private func handleVideoPickerResults(_ results: [PHPickerResult], picker: PHPickerViewController) {
+    var pendingVideoIdsByIndex: [Int: String] = [:]
+    for (index, result) in results.enumerated() {
+      let pendingId = addPendingVideoAttachment()
+      pendingVideoIdsByIndex[index] = pendingId
+      requestPendingVideoThumbnail(for: result, pendingId: pendingId)
+    }
+
     Task { [weak self, weak picker] in
       guard let self, let picker else { return }
 
@@ -553,26 +703,133 @@ extension ComposeView: PHPickerViewControllerDelegate {
       await MainActor.run { [weak self, weak picker] in
         guard let self, let picker else { return }
 
-        let sortedItems = loadedItems.sorted { $0.index < $1.index }.map(\.item)
-        guard !sortedItems.isEmpty else {
+        for pendingId in pendingVideoIdsByIndex.values {
+          removePendingVideoAttachment(pendingId, animated: false)
+        }
+
+        let sortedEntries = loadedItems.sorted { $0.index < $1.index }
+        guard !sortedEntries.isEmpty else {
           picker.dismiss(animated: true) { [weak self] in
             self?.isPickerPresented = false
           }
           return
         }
 
-        for item in sortedItems {
+        for entry in sortedEntries {
+          if let pendingId = pendingVideoIdsByIndex[entry.index], isPendingVideoAttachmentCanceled(pendingId) {
+            continue
+          }
+          let item = entry.item
           let uniqueId = item.getItemUniqueId()
           attachmentItems[uniqueId] = item
         }
-
-        updateSendButtonVisibility()
+        handleAttachmentItemsChanged(animated: false)
 
         picker.dismiss(animated: true) { [weak self] in
           guard let self else { return }
           isPickerPresented = false
-          sendMessage()
+          dismissAttachmentPickerIfPresented(animated: true)
         }
+      }
+    }
+  }
+
+  private func loadLibraryItem(from result: PHPickerResult) async -> LibraryPickerItem? {
+    switch pickerAssetMediaType(for: result) {
+      case .video:
+        if let item = await loadVideoItem(from: result) {
+          return .video(item)
+        }
+      case .image:
+        if let image = await loadImageItem(from: result) {
+          return .image(image)
+        }
+      case .none, .some(.unknown):
+        break
+      @unknown default:
+        break
+    }
+
+    if let image = await loadImageItem(from: result) {
+      return .image(image)
+    }
+
+    if let item = await loadVideoItem(from: result) {
+      return .video(item)
+    }
+
+    return nil
+  }
+
+  private func pickerAssetMediaType(for result: PHPickerResult) -> PHAssetMediaType? {
+    guard let assetIdentifier = result.assetIdentifier else { return nil }
+    let assets = PHAsset.fetchAssets(withLocalIdentifiers: [assetIdentifier], options: nil)
+    return assets.firstObject?.mediaType
+  }
+
+  private func isVideoResult(_ result: PHPickerResult) -> Bool {
+    let provider = result.itemProvider
+    if provider.hasItemConformingToTypeIdentifier(UTType.movie.identifier) ||
+        provider.hasItemConformingToTypeIdentifier(UTType.video.identifier)
+    {
+      return true
+    }
+
+    return pickerAssetMediaType(for: result) == .video
+  }
+
+  private func requestPendingVideoThumbnail(for result: PHPickerResult, pendingId: String) {
+    let provider = result.itemProvider
+    _ = provider.loadPreviewImage(options: nil) { [weak self] object, _ in
+      let image: UIImage?
+      if let previewImage = object as? UIImage {
+        image = previewImage
+      } else if let url = object as? URL {
+        image = UIImage(contentsOfFile: url.path)
+      } else if let nsUrl = object as? NSURL, let path = nsUrl.path {
+        image = UIImage(contentsOfFile: path)
+      } else {
+        image = nil
+      }
+
+      guard let image else { return }
+      DispatchQueue.main.async {
+        self?.updatePendingVideoAttachmentThumbnail(pendingId, image: image)
+      }
+    }
+
+    guard let assetIdentifier = result.assetIdentifier else { return }
+    let assets = PHAsset.fetchAssets(withLocalIdentifiers: [assetIdentifier], options: nil)
+    guard let asset = assets.firstObject, asset.mediaType == .video else { return }
+
+    let requestOptions = PHImageRequestOptions()
+    requestOptions.deliveryMode = .opportunistic
+    requestOptions.resizeMode = .fast
+    requestOptions.isNetworkAccessAllowed = true
+
+    PHImageManager.default().requestImage(
+      for: asset,
+      targetSize: CGSize(width: 220, height: 220),
+      contentMode: .aspectFill,
+      options: requestOptions
+    ) { [weak self] image, _ in
+      guard let image else { return }
+      DispatchQueue.main.async {
+        self?.updatePendingVideoAttachmentThumbnail(pendingId, image: image)
+      }
+    }
+  }
+
+  private func loadImageItem(from result: PHPickerResult) async -> UIImage? {
+    await withCheckedContinuation { continuation in
+      result.itemProvider.loadObject(ofClass: UIImage.self) { object, error in
+        if let error {
+          Log.shared.error("Failed to load image from picker", error: error)
+          continuation.resume(returning: nil)
+          return
+        }
+
+        continuation.resume(returning: object as? UIImage)
       }
     }
   }
@@ -612,7 +869,8 @@ extension ComposeView: PHPickerViewControllerDelegate {
         Task {
           defer { try? FileManager.default.removeItem(at: tempUrl) }
           do {
-            let videoInfo = try await FileCache.saveVideo(url: tempUrl)
+            let immediateThumbnail = immediateVideoThumbnail(from: tempUrl)
+            let videoInfo = try await FileCache.saveVideo(url: tempUrl, thumbnail: immediateThumbnail)
             continuation.resume(returning: .video(videoInfo))
           } catch {
             Log.shared.error("Failed to save video from picker", error: error)
@@ -623,49 +881,6 @@ extension ComposeView: PHPickerViewControllerDelegate {
     }
   }
 
-  private func loadMultipleImages(from results: [PHPickerResult], picker: PHPickerViewController) {
-    let dispatchGroup = DispatchGroup()
-    var loadedImages: [(index: Int, image: UIImage)] = []
-    let loadQueue = DispatchQueue(label: "com.inline.imageLoading", qos: .userInitiated, attributes: .concurrent)
-
-    for (index, result) in results.enumerated() {
-      dispatchGroup.enter()
-
-      loadQueue.async {
-        result.itemProvider.loadObject(ofClass: UIImage.self) { object, error in
-          defer { dispatchGroup.leave() }
-
-          if let error {
-            Log.shared.debug("Failed to load image at index \(index):", file: error.localizedDescription)
-            return
-          }
-
-          guard let image = object as? UIImage else { return }
-
-          // Thread-safe array update
-          DispatchQueue.main.sync {
-            loadedImages.append((index: index, image: image))
-          }
-        }
-      }
-    }
-
-    dispatchGroup.notify(queue: .main) { [weak self, weak picker] in
-      guard let self, let picker else { return }
-
-      // Sort images by original order
-      let sortedImages = loadedImages.sorted { $0.index < $1.index }.map(\.image)
-
-      guard !sortedImages.isEmpty else {
-        picker.dismiss(animated: true) { [weak self] in
-          self?.isPickerPresented = false
-        }
-        return
-      }
-
-      self.presentMultiImagePreview(sortedImages, presenter: picker)
-    }
-  }
 }
 
 // MARK: - UIImagePickerControllerDelegate
@@ -689,7 +904,8 @@ extension ComposeView {
       }
 
       picker.dismiss(animated: true) { [weak self] in
-        self?.handleDroppedImage(image)
+        self?.addImages([image])
+        self?.dismissAttachmentPickerIfPresented(animated: true)
       }
     } else if mediaType == UTType.movie.identifier {
       guard let url = info[.mediaURL] as? URL else {
