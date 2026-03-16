@@ -36,6 +36,7 @@ message ServerUpdate {
     ServerUserUpdateReadMaxId user_read_max_id = 20;
     ServerUserUpdateMarkAsUnread user_mark_as_unread = 22;
     ServerUserUpdateDialogNotificationSettings user_dialog_notification_settings = 23;
+    ServerUserUpdateChatOpen user_chat_open = 24;
   }
 }
 
@@ -162,4 +163,11 @@ message ServerUserUpdateMarkAsUnread {
 message ServerUserUpdateDialogNotificationSettings {
   Peer peer_id = 1;
   optional DialogNotificationSettings notification_settings = 2;
+}
+
+// Update for a user when a chat becomes sidebar-visible for them.
+message ServerUserUpdateChatOpen {
+  Chat chat = 1;
+  Dialog dialog = 2;
+  optional User user = 3;
 }

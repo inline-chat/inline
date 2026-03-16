@@ -10,6 +10,8 @@ import { UnknownFieldHandler } from "@protobuf-ts/runtime";
 import type { PartialMessage } from "@protobuf-ts/runtime";
 import { reflectionMergePartial } from "@protobuf-ts/runtime";
 import { MessageType } from "@protobuf-ts/runtime";
+import { Dialog } from "./core.js";
+import { Chat } from "./core.js";
 import { DialogNotificationSettings } from "./core.js";
 import { Space } from "./core.js";
 import { Peer } from "./core.js";
@@ -154,6 +156,12 @@ export interface ServerUpdate {
          * @generated from protobuf field: server.ServerUserUpdateDialogNotificationSettings user_dialog_notification_settings = 23;
          */
         userDialogNotificationSettings: ServerUserUpdateDialogNotificationSettings;
+    } | {
+        oneofKind: "userChatOpen";
+        /**
+         * @generated from protobuf field: server.ServerUserUpdateChatOpen user_chat_open = 24;
+         */
+        userChatOpen: ServerUserUpdateChatOpen;
     } | {
         oneofKind: undefined;
     };
@@ -467,6 +475,25 @@ export interface ServerUserUpdateDialogNotificationSettings {
      */
     notificationSettings?: DialogNotificationSettings;
 }
+/**
+ * Update for a user when a chat becomes sidebar-visible for them.
+ *
+ * @generated from protobuf message server.ServerUserUpdateChatOpen
+ */
+export interface ServerUserUpdateChatOpen {
+    /**
+     * @generated from protobuf field: Chat chat = 1;
+     */
+    chat?: Chat;
+    /**
+     * @generated from protobuf field: Dialog dialog = 2;
+     */
+    dialog?: Dialog;
+    /**
+     * @generated from protobuf field: optional User user = 3;
+     */
+    user?: User;
+}
 // @generated message type with reflection information, may provide speed optimized methods
 class ServerUpdate$Type extends MessageType<ServerUpdate> {
     constructor() {
@@ -492,7 +519,8 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
             { no: 17, name: "user_join_space", kind: "message", oneof: "update", T: () => ServerUserUpdateJoinSpace },
             { no: 20, name: "user_read_max_id", kind: "message", oneof: "update", T: () => ServerUserUpdateReadMaxId },
             { no: 22, name: "user_mark_as_unread", kind: "message", oneof: "update", T: () => ServerUserUpdateMarkAsUnread },
-            { no: 23, name: "user_dialog_notification_settings", kind: "message", oneof: "update", T: () => ServerUserUpdateDialogNotificationSettings }
+            { no: 23, name: "user_dialog_notification_settings", kind: "message", oneof: "update", T: () => ServerUserUpdateDialogNotificationSettings },
+            { no: 24, name: "user_chat_open", kind: "message", oneof: "update", T: () => ServerUserUpdateChatOpen }
         ]);
     }
     create(value?: PartialMessage<ServerUpdate>): ServerUpdate {
@@ -635,6 +663,12 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
                         userDialogNotificationSettings: ServerUserUpdateDialogNotificationSettings.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userDialogNotificationSettings)
                     };
                     break;
+                case /* server.ServerUserUpdateChatOpen user_chat_open */ 24:
+                    message.update = {
+                        oneofKind: "userChatOpen",
+                        userChatOpen: ServerUserUpdateChatOpen.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userChatOpen)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -713,6 +747,9 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* server.ServerUserUpdateDialogNotificationSettings user_dialog_notification_settings = 23; */
         if (message.update.oneofKind === "userDialogNotificationSettings")
             ServerUserUpdateDialogNotificationSettings.internalBinaryWrite(message.update.userDialogNotificationSettings, writer.tag(23, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerUserUpdateChatOpen user_chat_open = 24; */
+        if (message.update.oneofKind === "userChatOpen")
+            ServerUserUpdateChatOpen.internalBinaryWrite(message.update.userChatOpen, writer.tag(24, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -1809,3 +1846,63 @@ class ServerUserUpdateDialogNotificationSettings$Type extends MessageType<Server
  * @generated MessageType for protobuf message server.ServerUserUpdateDialogNotificationSettings
  */
 export const ServerUserUpdateDialogNotificationSettings = new ServerUserUpdateDialogNotificationSettings$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerUserUpdateChatOpen$Type extends MessageType<ServerUserUpdateChatOpen> {
+    constructor() {
+        super("server.ServerUserUpdateChatOpen", [
+            { no: 1, name: "chat", kind: "message", T: () => Chat },
+            { no: 2, name: "dialog", kind: "message", T: () => Dialog },
+            { no: 3, name: "user", kind: "message", T: () => User }
+        ]);
+    }
+    create(value?: PartialMessage<ServerUserUpdateChatOpen>): ServerUserUpdateChatOpen {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<ServerUserUpdateChatOpen>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerUserUpdateChatOpen): ServerUserUpdateChatOpen {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Chat chat */ 1:
+                    message.chat = Chat.internalBinaryRead(reader, reader.uint32(), options, message.chat);
+                    break;
+                case /* Dialog dialog */ 2:
+                    message.dialog = Dialog.internalBinaryRead(reader, reader.uint32(), options, message.dialog);
+                    break;
+                case /* optional User user */ 3:
+                    message.user = User.internalBinaryRead(reader, reader.uint32(), options, message.user);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerUserUpdateChatOpen, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Chat chat = 1; */
+        if (message.chat)
+            Chat.internalBinaryWrite(message.chat, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* Dialog dialog = 2; */
+        if (message.dialog)
+            Dialog.internalBinaryWrite(message.dialog, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* optional User user = 3; */
+        if (message.user)
+            User.internalBinaryWrite(message.user, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerUserUpdateChatOpen
+ */
+export const ServerUserUpdateChatOpen = new ServerUserUpdateChatOpen$Type();
