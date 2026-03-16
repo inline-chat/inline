@@ -15,8 +15,6 @@ import { addReaction } from "./messages.addReactions"
 import { deleteReaction } from "./messages.deleteReaction"
 import { editMessage } from "./messages.editMessage"
 import { createChat } from "@in/server/realtime/handlers/messages.createChat"
-import { createSubthread } from "@in/server/realtime/handlers/messages.createSubthread"
-import { showChatInSidebar } from "@in/server/realtime/handlers/messages.showChatInSidebar"
 import { getSpaceMembers } from "@in/server/realtime/handlers/space.getSpaceMembers"
 import { deleteChatHandler } from "@in/server/realtime/handlers/messages.deleteChat"
 import { inviteToSpace } from "@in/server/functions/space.inviteToSpace"
@@ -135,22 +133,6 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await createChat(call.input.createChat, handlerContext)
       return { oneofKind: "createChat", createChat: result }
-    }
-
-    case Method.CREATE_SUBTHREAD: {
-      if (call.input.oneofKind !== "createSubthread") {
-        throw RealtimeRpcError.BadRequest()
-      }
-      let result = await createSubthread(call.input.createSubthread, handlerContext)
-      return { oneofKind: "createSubthread", createSubthread: result }
-    }
-
-    case Method.SHOW_CHAT_IN_SIDEBAR: {
-      if (call.input.oneofKind !== "showChatInSidebar") {
-        throw RealtimeRpcError.BadRequest()
-      }
-      const result = await showChatInSidebar(call.input.showChatInSidebar, handlerContext)
-      return { oneofKind: "showChatInSidebar", showChatInSidebar: result }
     }
 
     case Method.GET_BOT_COMMANDS: {
