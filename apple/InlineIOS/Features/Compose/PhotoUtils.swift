@@ -313,7 +313,6 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
   func sendImage(_ image: UIImage, caption: String) {
     guard let peerId else { return }
 
-    sendButton.configuration?.showsActivityIndicator = true
     clearAttachments()
 
     do {
@@ -342,7 +341,6 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
 
     resetComposeStateAfterPreviewSend()
     dismissPreview(dismissAttachmentPicker: currentPreviewUsesAttachmentPicker)
-    sendButton.configuration?.showsActivityIndicator = false
     clearAttachments()
     // sendMessageHaptic()
   }
@@ -350,7 +348,6 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
   func sendMultipleImages(_ photoItems: [PhotoItem]) {
     guard let peerId else { return }
 
-    sendButton.configuration?.showsActivityIndicator = true
     let replyToMessageId = ChatState.shared.getState(peer: peerId).replyingMessageId
 
     for (index, photoItem) in photoItems.enumerated() {
@@ -388,7 +385,6 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     // Clear state and dismiss
     resetComposeStateAfterPreviewSend()
     dismissMultiPreview(dismissAttachmentPicker: currentPreviewUsesAttachmentPicker)
-    sendButton.configuration?.showsActivityIndicator = false
     clearAttachments()
     ChatState.shared.clearReplyingMessageId(peer: peerId)
     // sendMessageHaptic()
@@ -429,7 +425,6 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     removeSourceAfterProcessing: Bool = false,
     dismissAttachmentPickerOnSuccess: Bool = true
   ) {
-    sendButton.configuration?.showsActivityIndicator = true
     let pendingId = addPendingVideoAttachment()
     Task {
       defer {
@@ -453,12 +448,8 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
           guard let self else { return }
           let isCanceled = isPendingVideoAttachmentCanceled(pendingId)
           removePendingVideoAttachment(pendingId, animated: false)
-          guard !isCanceled else {
-            sendButton.configuration?.showsActivityIndicator = false
-            return
-          }
+          guard !isCanceled else { return }
           _ = addAttachmentItem(mediaItem)
-          sendButton.configuration?.showsActivityIndicator = false
           if dismissAttachmentPickerOnSuccess {
             dismissAttachmentPickerIfPresented(animated: true)
           }
@@ -467,7 +458,6 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
         Log.shared.error("Failed to save video", error: error)
         await MainActor.run { [weak self] in
           self?.removePendingVideoAttachment(pendingId, animated: false)
-          self?.sendButton.configuration?.showsActivityIndicator = false
           self?.showVideoError(error)
         }
       }

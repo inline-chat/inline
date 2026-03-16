@@ -92,7 +92,13 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     let hasAttachments = !attachmentItems.isEmpty
     let hasForward = peerId.map { ChatState.shared.getState(peer: $0).forwardContext != nil } ?? false
     let hasPendingVideos = !pendingVideoAttachments.isEmpty
-    return (hasText || hasAttachments || hasForward) && !hasPendingVideos && !hasActiveAttachmentUploads
+    return ComposeSendEligibility.canSend(
+      hasText: hasText,
+      hasAttachments: hasAttachments,
+      hasForward: hasForward,
+      hasPendingVideos: hasPendingVideos,
+      hasActiveAttachmentUploads: hasActiveAttachmentUploads
+    )
   }
 
   var onHeightChange: ((CGFloat) -> Void)?
@@ -487,19 +493,35 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
   func sendMessage(sendMode: MessageSendMode? = nil) {
     guard let peerId else { return }
-    guard pendingVideoAttachments.isEmpty else { return }
-    guard !hasActiveAttachmentUploads else { return }
     let state = ChatState.shared.getState(peer: peerId)
     let isEditing = state.editingMessageId != nil
     let forwardContext = state.forwardContext
     guard let chatId else { return }
+    let hasPendingVideos = !pendingVideoAttachments.isEmpty
+    let hasActiveUploads = hasActiveAttachmentUploads
 
     let rawText = (textView.text ?? "")
       .replacingOccurrences(of: "\u{FFFC}", with: "")
       .trimmingCharacters(in: .whitespacesAndNewlines)
     let hasText = !rawText.isEmpty
     let attachmentItemsSnapshot = attachmentItems
-    let hasAttachments = !attachmentItemsSnapshot.isEmpty
+    let hasAttachmentItems = !attachmentItemsSnapshot.isEmpty
+    let hasForward = forwardContext != nil
+    guard ComposeSendEligibility.canSend(
+      hasText: hasText,
+      hasAttachments: hasAttachmentItems,
+      hasForward: hasForward,
+      hasPendingVideos: hasPendingVideos,
+      hasActiveAttachmentUploads: hasActiveUploads
+    ) else { return }
+
+    let shouldSendTextOnly = ComposeSendEligibility.shouldSendTextOnly(
+      hasText: hasText,
+      hasPendingVideos: hasPendingVideos,
+      hasActiveAttachmentUploads: hasActiveUploads
+    )
+    let attachmentItemsToSend = shouldSendTextOnly ? [String: FileMediaItem]() : attachmentItemsSnapshot
+    let hasAttachments = !attachmentItemsToSend.isEmpty
 
     // Can't send if no text, no attachments, and not forwarding
     guard hasText || hasAttachments || forwardContext != nil else { return }
@@ -520,7 +542,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     }
 
     func sendTextAndAttachments(replyToMessageId: Int64?, queueOnly: Bool) async {
-      if attachmentItemsSnapshot.isEmpty {
+      if attachmentItemsToSend.isEmpty {
         if queueOnly {
           _ = await Api.realtime.sendQueued(.sendMessage(
             text: textFromAttributedString ?? text ?? "",
@@ -547,7 +569,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
           }
         }
       } else {
-        for (index, (_, attachment)) in attachmentItemsSnapshot.enumerated() {
+        for (index, (_, attachment)) in attachmentItemsToSend.enumerated() {
           log.debug("Sending attachment: \(attachment)")
           let isFirst = index == 0
 
@@ -617,8 +639,12 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       ChatState.shared.clearReplyingMessageId(peer: peerId)
     }
 
-    // Clear everything
-    resetComposeState()
+    if shouldSendTextOnly {
+      clearComposeTextAfterSend()
+    } else {
+      // Clear everything
+      resetComposeState()
+    }
   }
 
   func updateSendButtonForEditing(_ isEditing: Bool) {
@@ -952,6 +978,19 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     textView.showPlaceholder(true)
     buttonDisappear()
 
+    sendButton.configuration?.showsActivityIndicator = false
+  }
+
+  private func clearComposeTextAfterSend() {
+    clearDraft()
+    stopDraftSaveTimer()
+    textView.text = ""
+    resetTextViewState()
+    textView.font = .systemFont(ofSize: 17)
+    textView.typingAttributes[.font] = UIFont.systemFont(ofSize: 17)
+    textView.showPlaceholder(true)
+    updateSendButtonVisibility()
+    updateHeight()
     sendButton.configuration?.showsActivityIndicator = false
   }
 

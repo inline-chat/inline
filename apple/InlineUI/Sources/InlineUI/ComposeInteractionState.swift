@@ -60,3 +60,28 @@ public enum ComposeSendButtonState {
     finished && !isButtonVisible
   }
 }
+
+public enum ComposeSendEligibility {
+  public static func canSend(
+    hasText: Bool,
+    hasAttachments: Bool,
+    hasForward: Bool,
+    hasPendingVideos: Bool,
+    hasActiveAttachmentUploads: Bool
+  ) -> Bool {
+    if hasText {
+      return true
+    }
+
+    guard hasAttachments || hasForward else { return false }
+    return !hasPendingVideos && !hasActiveAttachmentUploads
+  }
+
+  public static func shouldSendTextOnly(
+    hasText: Bool,
+    hasPendingVideos: Bool,
+    hasActiveAttachmentUploads: Bool
+  ) -> Bool {
+    hasText && (hasPendingVideos || hasActiveAttachmentUploads)
+  }
+}
