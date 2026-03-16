@@ -97,7 +97,7 @@ public struct AttachmentPickerSheet: View {
   private var actionList: some View {
     VStack(spacing: 18) {
       listActionButton(
-        title: "Photos",
+        title: "Library",
         systemImage: "photo.on.rectangle.angled",
         action: actions.openLibrary
       )
@@ -139,9 +139,9 @@ public struct AttachmentPickerSheet: View {
 
     switch model.authorizationStatus {
       case .denied, .restricted:
-        return "Allow photo access to see recent photos here."
+        return "Allow photo access to see recent media here."
       case .authorized, .limited:
-        return model.recentItems.isEmpty ? "No recent photos yet." : nil
+        return model.recentItems.isEmpty ? "No recent photos or videos yet." : nil
       case .notDetermined:
         return nil
       @unknown default:

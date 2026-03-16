@@ -98,13 +98,29 @@ public final class AttachmentPickerModel {
     }
   }
 
+  nonisolated static func recentMediaType(for assetMediaType: PHAssetMediaType) -> RecentMediaType? {
+    switch assetMediaType {
+      case .image:
+        return .image
+      case .video:
+        return .video
+      case .audio:
+        return nil
+      case .unknown:
+        return nil
+      @unknown default:
+        return nil
+    }
+  }
+
   private nonisolated static func fetchRecentItems(limit: Int) -> [RecentItem] {
     let options = PHFetchOptions()
     options.sortDescriptors = [NSSortDescriptor(key: #keyPath(PHAsset.creationDate), ascending: false)]
     options.fetchLimit = limit
     options.predicate = NSPredicate(
-      format: "mediaType == %d",
-      PHAssetMediaType.image.rawValue
+      format: "mediaType == %d OR mediaType == %d",
+      PHAssetMediaType.image.rawValue,
+      PHAssetMediaType.video.rawValue
     )
 
     let assets = PHAsset.fetchAssets(with: options)
@@ -117,11 +133,15 @@ public final class AttachmentPickerModel {
         return
       }
 
+      guard let mediaType = recentMediaType(for: asset.mediaType) else {
+        return
+      }
+
       items.append(
         RecentItem(
           localIdentifier: asset.localIdentifier,
           createdAt: asset.creationDate,
-          mediaType: .image
+          mediaType: mediaType
         )
       )
     }

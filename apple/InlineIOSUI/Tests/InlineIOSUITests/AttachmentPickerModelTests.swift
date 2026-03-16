@@ -71,4 +71,11 @@ struct AttachmentPickerModelTests {
 
     #expect(model.recentItems.map(\.localIdentifier) == ["newer", "older"])
   }
+
+  @Test("media type mapper includes videos")
+  func mediaTypeMapperIncludesVideos() {
+    #expect(AttachmentPickerModel.recentMediaType(for: .image) == .image)
+    #expect(AttachmentPickerModel.recentMediaType(for: .video) == .video)
+    #expect(AttachmentPickerModel.recentMediaType(for: .audio) == nil)
+  }
 }
