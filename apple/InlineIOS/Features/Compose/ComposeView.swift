@@ -8,6 +8,7 @@ import InlineUI
 import Logger
 import MobileCoreServices
 import PhotosUI
+import QuickLook
 import SwiftUI
 import TextProcessing
 import UIKit
@@ -68,6 +69,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   private var attachmentUploadSubscriptions: [String: AnyCancellable] = [:]
   private var attachmentUploadBindingTasks: [String: Task<Void, Never>] = [:]
   private var attachmentUploadStartTasks: [String: Task<Void, Never>] = [:]
+  private var quickLookPreviewURL: URL?
+  private var documentInteractionController: UIDocumentInteractionController?
 
   private var hasActiveAttachmentUploads: Bool {
     for attachmentId in attachmentItems.keys {
@@ -1172,7 +1175,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     for (id, mediaItem) in attachmentItems {
       let preview = ComposeAttachmentPreviewItemView(
         attachmentId: id,
-        mediaItem: mediaItem
+        mediaItem: mediaItem,
+        onPreview: { [weak self] attachmentId, sourceView in
+          self?.openAttachmentPreview(attachmentId: attachmentId, sourceView: sourceView)
+        }
       ) { [weak self] attachmentId in
         self?.removeAttachment(attachmentId)
       }
@@ -1210,6 +1216,71 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     canceledPendingVideoAttachmentIds.contains(pendingId)
   }
 
+  private func openAttachmentPreview(attachmentId: String, sourceView: UIView) {
+    guard let mediaItem = attachmentItems[attachmentId] else { return }
+    guard let presenter = attachmentFlowPresenter() else { return }
+    guard presenter.presentedViewController == nil else { return }
+
+    guard let fileURL = mediaItem.localFileURL(),
+          FileManager.default.fileExists(atPath: fileURL.path)
+    else {
+      showAttachmentPreviewUnavailableAlert()
+      return
+    }
+
+    switch mediaItem {
+    case .photo:
+      let viewer = ImageViewerController(
+        imageURL: fileURL,
+        sourceView: sourceView,
+        sourceCornerRadius: 16
+      )
+      presenter.present(viewer, animated: false)
+    case .video:
+      let viewer = ImageViewerController(
+        videoURL: fileURL,
+        sourceView: sourceView,
+        sourceCornerRadius: 16
+      )
+      presenter.present(viewer, animated: false)
+    case .document:
+      presentDocumentPreview(fileURL: fileURL, sourceView: sourceView, presenter: presenter)
+    case .voice:
+      showAttachmentPreviewUnavailableAlert()
+    }
+  }
+
+  private func presentDocumentPreview(fileURL: URL, sourceView: UIView, presenter: UIViewController) {
+    if QLPreviewController.canPreview(fileURL as NSURL) {
+      quickLookPreviewURL = fileURL
+      let previewController = QLPreviewController()
+      previewController.dataSource = self
+      previewController.delegate = self
+      presenter.present(previewController, animated: true)
+      return
+    }
+
+    let interactionController = UIDocumentInteractionController(url: fileURL)
+    interactionController.delegate = self
+    documentInteractionController = interactionController
+
+    if !interactionController.presentPreview(animated: true) {
+      _ = interactionController.presentOptionsMenu(from: sourceView.bounds, in: sourceView, animated: true)
+    }
+  }
+
+  private func showAttachmentPreviewUnavailableAlert() {
+    guard let presenter = attachmentFlowPresenter() else { return }
+
+    let alert = UIAlertController(
+      title: "Preview Unavailable",
+      message: "This attachment can't be previewed right now.",
+      preferredStyle: .alert
+    )
+    alert.addAction(UIAlertAction(title: "OK", style: .default))
+    presenter.present(alert, animated: true)
+  }
+
   func updateSendButtonVisibility() {
     let shouldEnableSend = canSend
 
@@ -1229,18 +1300,49 @@ extension ComposeView: SlashCommandManagerDelegate {
   func slashCommandManagerDidDismiss(_ manager: SlashCommandManager) {}
 }
 
+extension ComposeView: QLPreviewControllerDataSource, QLPreviewControllerDelegate {
+  func numberOfPreviewItems(in controller: QLPreviewController) -> Int {
+    quickLookPreviewURL == nil ? 0 : 1
+  }
+
+  func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
+    if let quickLookPreviewURL {
+      return quickLookPreviewURL as NSURL
+    }
+
+    return NSURL(fileURLWithPath: "/")
+  }
+
+  func previewControllerDidDismiss(_ controller: QLPreviewController) {
+    quickLookPreviewURL = nil
+  }
+}
+
+extension ComposeView: UIDocumentInteractionControllerDelegate {
+  func documentInteractionControllerViewControllerForPreview(_ controller: UIDocumentInteractionController) -> UIViewController {
+    attachmentFlowPresenter() ?? UIViewController()
+  }
+
+  func documentInteractionControllerDidEndPreview(_ controller: UIDocumentInteractionController) {
+    if documentInteractionController === controller {
+      documentInteractionController = nil
+    }
+  }
+}
+
 private final class ComposeAttachmentPreviewItemView: UIView {
   static let stripHeight: CGFloat = 92
 
   private enum Metrics {
     static let tileSize: CGFloat = 84
     static let cornerRadius: CGFloat = 16
-    static let removeButtonSize: CGFloat = 52
+    static let removeButtonSize: CGFloat = 22
     static let removeBadgeSize: CGFloat = 22
     static let progressRingSize: CGFloat = 28
   }
 
   private let attachmentId: String
+  private let onPreview: ((String, UIView) -> Void)?
   private let onRemove: (String) -> Void
   var attachmentIdentifier: String { attachmentId }
 
@@ -1377,9 +1479,11 @@ private final class ComposeAttachmentPreviewItemView: UIView {
   init(
     attachmentId: String,
     mediaItem: FileMediaItem,
+    onPreview: ((String, UIView) -> Void)?,
     onRemove: @escaping (String) -> Void
   ) {
     self.attachmentId = attachmentId
+    self.onPreview = onPreview
     self.onRemove = onRemove
     super.init(frame: .zero)
     setupViews()
@@ -1392,6 +1496,7 @@ private final class ComposeAttachmentPreviewItemView: UIView {
     onRemove: @escaping (String) -> Void
   ) {
     attachmentId = pendingVideoId
+    onPreview = nil
     self.onRemove = onRemove
     super.init(frame: .zero)
     accessibilityIdentifier = pendingVideoId
@@ -1406,6 +1511,10 @@ private final class ComposeAttachmentPreviewItemView: UIView {
 
   @objc private func removeTapped() {
     onRemove(attachmentId)
+  }
+
+  @objc private func previewTapped() {
+    onPreview?(attachmentId, tileContentView)
   }
 
   private func setupViews() {
@@ -1426,6 +1535,9 @@ private final class ComposeAttachmentPreviewItemView: UIView {
     addSubview(removeButton)
     removeButton.addSubview(removeBadgeView)
     removeBadgeView.addSubview(removeIconView)
+
+    let tapGesture = UITapGestureRecognizer(target: self, action: #selector(previewTapped))
+    tileContentView.addGestureRecognizer(tapGesture)
 
     NSLayoutConstraint.activate([
       widthAnchor.constraint(equalToConstant: Metrics.tileSize),
@@ -1480,13 +1592,13 @@ private final class ComposeAttachmentPreviewItemView: UIView {
       loadingIndicator.centerXAnchor.constraint(equalTo: tileContentView.centerXAnchor),
       loadingIndicator.centerYAnchor.constraint(equalTo: tileContentView.centerYAnchor),
 
-      removeButton.topAnchor.constraint(equalTo: topAnchor),
-      removeButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+      removeButton.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+      removeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
       removeButton.widthAnchor.constraint(equalToConstant: Metrics.removeButtonSize),
       removeButton.heightAnchor.constraint(equalToConstant: Metrics.removeButtonSize),
 
-      removeBadgeView.topAnchor.constraint(equalTo: removeButton.topAnchor, constant: 6),
-      removeBadgeView.trailingAnchor.constraint(equalTo: removeButton.trailingAnchor, constant: -6),
+      removeBadgeView.centerXAnchor.constraint(equalTo: removeButton.centerXAnchor),
+      removeBadgeView.centerYAnchor.constraint(equalTo: removeButton.centerYAnchor),
       removeBadgeView.widthAnchor.constraint(equalToConstant: Metrics.removeBadgeSize),
       removeBadgeView.heightAnchor.constraint(equalToConstant: Metrics.removeBadgeSize),
 

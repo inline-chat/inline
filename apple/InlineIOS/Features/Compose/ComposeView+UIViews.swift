@@ -149,6 +149,7 @@ extension ComposeView {
     view.showsVerticalScrollIndicator = false
     view.alwaysBounceHorizontal = true
     view.alwaysBounceVertical = false
+    view.delaysContentTouches = false
     view.isHidden = true
     return view
   }

@@ -67,6 +67,24 @@ public enum FileMediaItem: Codable, Sendable {
     return localPath?.components(separatedBy: "/").last
   }
 
+  public func localFileURL() -> URL? {
+    switch self {
+    case let .photo(photoInfo):
+      guard let localPath = photoInfo.bestPhotoSize()?.localPath else { return nil }
+      return FileCache.getUrl(for: .photos, localPath: localPath)
+    case let .document(documentInfo):
+      guard let localPath = documentInfo.document.localPath else { return nil }
+      return FileCache.getUrl(for: .documents, localPath: localPath)
+    case let .video(videoInfo):
+      guard let localPath = videoInfo.video.localPath else { return nil }
+      return FileCache.getUrl(for: .videos, localPath: localPath)
+    case let .voice(voice):
+      let localPath = voice.localRelativePath.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !localPath.isEmpty else { return nil }
+      return FileCache.getUrl(for: .voices, localPath: localPath)
+    }
+  }
+
   // Helpers
   public func getItemUniqueId() -> String {
     switch self {
