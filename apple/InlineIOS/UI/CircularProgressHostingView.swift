@@ -2,7 +2,7 @@ import UIKit
 
 final class CircularProgressHostingView: UIView {
   private enum Constants {
-    static let lineWidth: CGFloat = 1.75
+    static let lineWidth: CGFloat = 2.6
     static let minVisibleProgress: CGFloat = 0.06
     static let rotationDuration: CFTimeInterval = 1.5
     static let ringInset: CGFloat = 1

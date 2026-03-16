@@ -64,6 +64,24 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   var attachmentItems: [String: FileMediaItem] = [:]
   var pendingVideoAttachments: [PendingVideoAttachment] = []
   var canceledPendingVideoAttachmentIds: Set<String> = []
+  private var attachmentUploadProgress: [String: UploadProgressSnapshot] = [:]
+  private var attachmentUploadSubscriptions: [String: AnyCancellable] = [:]
+  private var attachmentUploadBindingTasks: [String: Task<Void, Never>] = [:]
+  private var attachmentUploadStartTasks: [String: Task<Void, Never>] = [:]
+
+  private var hasActiveAttachmentUploads: Bool {
+    for attachmentId in attachmentItems.keys {
+      guard let progress = attachmentUploadProgress[attachmentId] else {
+        return true
+      }
+
+      if progress.stage == .processing || progress.stage == .uploading {
+        return true
+      }
+    }
+
+    return false
+  }
 
   var canSend: Bool {
     let normalizedText = (textView.text ?? "").replacingOccurrences(of: "\u{FFFC}", with: "")
@@ -71,7 +89,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     let hasAttachments = !attachmentItems.isEmpty
     let hasForward = peerId.map { ChatState.shared.getState(peer: $0).forwardContext != nil } ?? false
     let hasPendingVideos = !pendingVideoAttachments.isEmpty
-    return (hasText || hasAttachments || hasForward) && !hasPendingVideos
+    return (hasText || hasAttachments || hasForward) && !hasPendingVideos && !hasActiveAttachmentUploads
   }
 
   var onHeightChange: ((CGFloat) -> Void)?
@@ -118,6 +136,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
   deinit {
     stopDraftSaveTimer()
+    clearAttachmentUploadTracking(cancelUploads: true)
     removeObservers()
   }
 
@@ -466,6 +485,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   func sendMessage(sendMode: MessageSendMode? = nil) {
     guard let peerId else { return }
     guard pendingVideoAttachments.isEmpty else { return }
+    guard !hasActiveAttachmentUploads else { return }
     let state = ChatState.shared.getState(peer: peerId)
     let isEditing = state.editingMessageId != nil
     let forwardContext = state.forwardContext
@@ -969,9 +989,162 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   func handleAttachmentItemsChanged(animated: Bool = true) {
+    syncAttachmentUploadTracking()
     refreshAttachmentPreviews()
     updateSendButtonVisibility()
     updateHeight(animated: animated)
+  }
+
+  private func syncAttachmentUploadTracking() {
+    let currentAttachmentIds = Set(attachmentItems.keys)
+
+    for trackedId in Set(attachmentUploadProgress.keys) where !currentAttachmentIds.contains(trackedId) {
+      stopTrackingAttachmentUpload(trackedId, cancelUpload: true)
+    }
+
+    for taskId in Set(attachmentUploadBindingTasks.keys) where !currentAttachmentIds.contains(taskId) {
+      stopTrackingAttachmentUpload(taskId, cancelUpload: true)
+    }
+
+    for taskId in Set(attachmentUploadStartTasks.keys) where !currentAttachmentIds.contains(taskId) {
+      stopTrackingAttachmentUpload(taskId, cancelUpload: true)
+    }
+
+    for subscriptionId in Set(attachmentUploadSubscriptions.keys) where !currentAttachmentIds.contains(subscriptionId) {
+      stopTrackingAttachmentUpload(subscriptionId, cancelUpload: true)
+    }
+
+    for (attachmentId, mediaItem) in attachmentItems {
+      guard attachmentUploadProgress[attachmentId] == nil, attachmentUploadStartTasks[attachmentId] == nil else {
+        continue
+      }
+
+      startTrackingAttachmentUpload(attachmentId: attachmentId, mediaItem: mediaItem)
+    }
+  }
+
+  private func startTrackingAttachmentUpload(attachmentId: String, mediaItem: FileMediaItem) {
+    setAttachmentUploadProgress(.processing(id: attachmentId), for: attachmentId)
+    bindAttachmentUploadProgress(attachmentId: attachmentId, mediaItem: mediaItem)
+
+    attachmentUploadStartTasks[attachmentId] = Task { [weak self] in
+      guard let self else { return }
+
+      do {
+        try await self.startAttachmentUpload(mediaItem)
+      } catch {
+        await MainActor.run { [weak self] in
+          guard let self else { return }
+          guard self.attachmentItems[attachmentId] != nil else { return }
+          self.setAttachmentUploadProgress(.failed(id: attachmentId, error: error), for: attachmentId)
+        }
+      }
+
+      await MainActor.run { [weak self] in
+        self?.attachmentUploadStartTasks.removeValue(forKey: attachmentId)
+      }
+    }
+  }
+
+  private func bindAttachmentUploadProgress(attachmentId: String, mediaItem: FileMediaItem) {
+    attachmentUploadBindingTasks[attachmentId] = Task { @MainActor [weak self] in
+      guard let self else { return }
+
+      let publisher = await uploadProgressPublisher(for: mediaItem)
+      guard !Task.isCancelled else {
+        self.attachmentUploadBindingTasks.removeValue(forKey: attachmentId)
+        return
+      }
+
+      guard let publisher else {
+        self.attachmentUploadBindingTasks.removeValue(forKey: attachmentId)
+        return
+      }
+
+      self.attachmentUploadBindingTasks.removeValue(forKey: attachmentId)
+      self.attachmentUploadSubscriptions[attachmentId] = publisher
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] snapshot in
+          guard let self else { return }
+          guard self.attachmentItems[attachmentId] != nil else { return }
+          self.setAttachmentUploadProgress(snapshot, for: attachmentId)
+        }
+    }
+  }
+
+  private func uploadProgressPublisher(for mediaItem: FileMediaItem) async -> AnyPublisher<UploadProgressSnapshot, Never>? {
+    switch mediaItem {
+    case let .photo(photoInfo):
+      guard let localId = photoInfo.photo.id else { return nil }
+      return await FileUploader.shared.photoProgressPublisher(photoLocalId: localId)
+    case let .video(videoInfo):
+      guard let localId = videoInfo.video.id else { return nil }
+      return await FileUploader.shared.videoProgressPublisher(videoLocalId: localId)
+    case let .document(documentInfo):
+      guard let localId = documentInfo.document.id else { return nil }
+      return await FileUploader.shared.documentProgressPublisher(documentLocalId: localId)
+    case .voice:
+      return nil
+    }
+  }
+
+  private func startAttachmentUpload(_ mediaItem: FileMediaItem) async throws {
+    switch mediaItem {
+    case let .photo(photoInfo):
+      _ = try await FileUploader.shared.uploadPhoto(photoInfo: photoInfo)
+    case let .video(videoInfo):
+      _ = try await FileUploader.shared.uploadVideo(videoInfo: videoInfo)
+    case let .document(documentInfo):
+      _ = try await FileUploader.shared.uploadDocument(documentInfo: documentInfo)
+    case .voice:
+      break
+    }
+  }
+
+  private func setAttachmentUploadProgress(_ progress: UploadProgressSnapshot, for attachmentId: String) {
+    attachmentUploadProgress[attachmentId] = progress
+
+    if let preview = attachmentStackView.arrangedSubviews
+      .compactMap({ $0 as? ComposeAttachmentPreviewItemView })
+      .first(where: { $0.attachmentIdentifier == attachmentId })
+    {
+      preview.setUploadProgress(progress)
+    }
+
+    updateSendButtonVisibility()
+  }
+
+  private func stopTrackingAttachmentUpload(_ attachmentId: String, cancelUpload: Bool) {
+    attachmentUploadBindingTasks[attachmentId]?.cancel()
+    attachmentUploadBindingTasks.removeValue(forKey: attachmentId)
+
+    attachmentUploadStartTasks[attachmentId]?.cancel()
+    attachmentUploadStartTasks.removeValue(forKey: attachmentId)
+
+    attachmentUploadSubscriptions[attachmentId]?.cancel()
+    attachmentUploadSubscriptions.removeValue(forKey: attachmentId)
+
+    if cancelUpload,
+       let progress = attachmentUploadProgress[attachmentId],
+       (progress.stage == .processing || progress.stage == .uploading)
+    {
+      Task {
+        await FileUploader.shared.cancel(uploadId: attachmentId)
+      }
+    }
+
+    attachmentUploadProgress.removeValue(forKey: attachmentId)
+  }
+
+  private func clearAttachmentUploadTracking(cancelUploads: Bool) {
+    let trackedAttachmentIds = Set(attachmentUploadProgress.keys)
+      .union(attachmentUploadBindingTasks.keys)
+      .union(attachmentUploadStartTasks.keys)
+      .union(attachmentUploadSubscriptions.keys)
+
+    for attachmentId in trackedAttachmentIds {
+      stopTrackingAttachmentUpload(attachmentId, cancelUpload: cancelUploads)
+    }
   }
 
   func refreshAttachmentPreviews() {
@@ -1003,6 +1176,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       ) { [weak self] attachmentId in
         self?.removeAttachment(attachmentId)
       }
+      preview.setUploadProgress(attachmentUploadProgress[id])
       attachmentStackView.addArrangedSubview(preview)
     }
   }
@@ -1063,10 +1237,12 @@ private final class ComposeAttachmentPreviewItemView: UIView {
     static let cornerRadius: CGFloat = 16
     static let removeButtonSize: CGFloat = 52
     static let removeBadgeSize: CGFloat = 22
+    static let progressRingSize: CGFloat = 28
   }
 
   private let attachmentId: String
   private let onRemove: (String) -> Void
+  var attachmentIdentifier: String { attachmentId }
 
   private let tileContentView: UIView = {
     let view = UIView()
@@ -1138,6 +1314,22 @@ private final class ComposeAttachmentPreviewItemView: UIView {
     iconView.layer.shadowOpacity = 0.6
     iconView.isHidden = true
     return iconView
+  }()
+
+  private let progressOverlayView: UIView = {
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.backgroundColor = UIColor.black.withAlphaComponent(0.4)
+    view.isUserInteractionEnabled = false
+    view.isHidden = true
+    return view
+  }()
+
+  private let uploadProgressView: CircularProgressHostingView = {
+    let view = CircularProgressHostingView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.isHidden = true
+    return view
   }()
 
   private let loadingIndicator: UIActivityIndicatorView = {
@@ -1228,6 +1420,8 @@ private final class ComposeAttachmentPreviewItemView: UIView {
     tileContentView.addSubview(centerIconView)
     tileContentView.addSubview(extensionBadge)
     tileContentView.addSubview(overlayIconView)
+    tileContentView.addSubview(progressOverlayView)
+    progressOverlayView.addSubview(uploadProgressView)
     tileContentView.addSubview(loadingIndicator)
     addSubview(removeButton)
     removeButton.addSubview(removeBadgeView)
@@ -1273,6 +1467,16 @@ private final class ComposeAttachmentPreviewItemView: UIView {
       overlayIconView.centerXAnchor.constraint(equalTo: tileContentView.centerXAnchor),
       overlayIconView.centerYAnchor.constraint(equalTo: tileContentView.centerYAnchor),
 
+      progressOverlayView.leadingAnchor.constraint(equalTo: tileContentView.leadingAnchor),
+      progressOverlayView.trailingAnchor.constraint(equalTo: tileContentView.trailingAnchor),
+      progressOverlayView.topAnchor.constraint(equalTo: tileContentView.topAnchor),
+      progressOverlayView.bottomAnchor.constraint(equalTo: tileContentView.bottomAnchor),
+
+      uploadProgressView.centerXAnchor.constraint(equalTo: progressOverlayView.centerXAnchor),
+      uploadProgressView.centerYAnchor.constraint(equalTo: progressOverlayView.centerYAnchor),
+      uploadProgressView.widthAnchor.constraint(equalToConstant: Metrics.progressRingSize),
+      uploadProgressView.heightAnchor.constraint(equalToConstant: Metrics.progressRingSize),
+
       loadingIndicator.centerXAnchor.constraint(equalTo: tileContentView.centerXAnchor),
       loadingIndicator.centerYAnchor.constraint(equalTo: tileContentView.centerYAnchor),
 
@@ -1293,6 +1497,7 @@ private final class ComposeAttachmentPreviewItemView: UIView {
 
   private func configure(mediaItem: FileMediaItem) {
     loadingIndicator.stopAnimating()
+    setUploadProgress(nil)
     localThumbnailImageView.image = nil
     localThumbnailImageView.isHidden = true
     centerIconView.isHidden = true
@@ -1332,14 +1537,45 @@ private final class ComposeAttachmentPreviewItemView: UIView {
   }
 
   private func configurePendingVideo(thumbnailImage: UIImage?) {
-    loadingIndicator.startAnimating()
+    setUploadProgress(nil)
+    loadingIndicator.stopAnimating()
     overlayIconView.isHidden = true
     extensionBadge.isHidden = true
+    progressOverlayView.isHidden = false
+    uploadProgressView.isHidden = false
+    uploadProgressView.setProgress(0)
     if let thumbnailImage {
       applyPendingThumbnail(thumbnailImage)
       return
     }
     applyFallback(iconName: "video.fill", badgeText: nil)
+  }
+
+  func setUploadProgress(_ progress: UploadProgressSnapshot?) {
+    guard let progress else {
+      progressOverlayView.isHidden = true
+      uploadProgressView.isHidden = true
+      uploadProgressView.setProgress(0)
+      return
+    }
+
+    progressOverlayView.isHidden = false
+    uploadProgressView.isHidden = false
+
+    switch progress.stage {
+    case .processing:
+      loadingIndicator.stopAnimating()
+      uploadProgressView.setProgress(0)
+    case .uploading:
+      loadingIndicator.stopAnimating()
+      uploadProgressView.setProgress(progress.fractionCompleted)
+    case .completed:
+      loadingIndicator.stopAnimating()
+      setUploadProgress(nil)
+    case .failed:
+      loadingIndicator.stopAnimating()
+      setUploadProgress(nil)
+    }
   }
 
   private func applyPhotoPreview(_ photoInfo: PhotoInfo?) {
