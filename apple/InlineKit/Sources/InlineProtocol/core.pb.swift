@@ -99,6 +99,11 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case updateDialogNotificationSettings // = 39
   case readMessages // = 40
   case updatePushNotificationDetails // = 41
+  case createSubthread // = 42
+  case getBotCommands // = 43
+  case setBotCommands // = 44
+  case getPeerBotCommands // = 45
+  case showChatInSidebar // = 46
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -149,6 +154,11 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 39: self = .updateDialogNotificationSettings
     case 40: self = .readMessages
     case 41: self = .updatePushNotificationDetails
+    case 42: self = .createSubthread
+    case 43: self = .getBotCommands
+    case 44: self = .setBotCommands
+    case 45: self = .getPeerBotCommands
+    case 46: self = .showChatInSidebar
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -197,6 +207,11 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .updateDialogNotificationSettings: return 39
     case .readMessages: return 40
     case .updatePushNotificationDetails: return 41
+    case .createSubthread: return 42
+    case .getBotCommands: return 43
+    case .setBotCommands: return 44
+    case .getPeerBotCommands: return 45
+    case .showChatInSidebar: return 46
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -245,6 +260,11 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .updateDialogNotificationSettings,
     .readMessages,
     .updatePushNotificationDetails,
+    .createSubthread,
+    .getBotCommands,
+    .setBotCommands,
+    .getPeerBotCommands,
+    .showChatInSidebar,
   ]
 
 }
@@ -1060,6 +1080,15 @@ public struct Dialog: Sendable {
   /// Clears the value of `notificationSettings`. Subsequent reads from it will return its default value.
   public mutating func clearNotificationSettings() {self._notificationSettings = nil}
 
+  public var sidebarVisible: Bool {
+    get {return _sidebarVisible ?? false}
+    set {_sidebarVisible = newValue}
+  }
+  /// Returns true if `sidebarVisible` has been explicitly set.
+  public var hasSidebarVisible: Bool {return self._sidebarVisible != nil}
+  /// Clears the value of `sidebarVisible`. Subsequent reads from it will return its default value.
+  public mutating func clearSidebarVisible() {self._sidebarVisible = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -1073,6 +1102,7 @@ public struct Dialog: Sendable {
   fileprivate var _chatID: Int64? = nil
   fileprivate var _unreadMark: Bool? = nil
   fileprivate var _notificationSettings: DialogNotificationSettings? = nil
+  fileprivate var _sidebarVisible: Bool? = nil
 }
 
 /// A thread
@@ -1166,6 +1196,26 @@ public struct Chat: Sendable {
   /// Clears the value of `createdBy`. Subsequent reads from it will return its default value.
   public mutating func clearCreatedBy() {self._createdBy = nil}
 
+  /// Structural parent chat for linked subthreads.
+  public var parentChatID: Int64 {
+    get {return _parentChatID ?? 0}
+    set {_parentChatID = newValue}
+  }
+  /// Returns true if `parentChatID` has been explicitly set.
+  public var hasParentChatID: Bool {return self._parentChatID != nil}
+  /// Clears the value of `parentChatID`. Subsequent reads from it will return its default value.
+  public mutating func clearParentChatID() {self._parentChatID = nil}
+
+  /// Parent message anchor when this subthread is a reply thread.
+  public var parentMessageID: Int64 {
+    get {return _parentMessageID ?? 0}
+    set {_parentMessageID = newValue}
+  }
+  /// Returns true if `parentMessageID` has been explicitly set.
+  public var hasParentMessageID: Bool {return self._parentMessageID != nil}
+  /// Clears the value of `parentMessageID`. Subsequent reads from it will return its default value.
+  public mutating func clearParentMessageID() {self._parentMessageID = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -1178,6 +1228,30 @@ public struct Chat: Sendable {
   fileprivate var _peerID: Peer? = nil
   fileprivate var _date: Int64? = nil
   fileprivate var _createdBy: Int64? = nil
+  fileprivate var _parentChatID: Int64? = nil
+  fileprivate var _parentMessageID: Int64? = nil
+}
+
+public struct MessageReplies: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Child chat ID for the reply thread.
+  public var chatID: Int64 = 0
+
+  /// Number of messages currently in the reply thread.
+  public var replyCount: Int32 = 0
+
+  /// True when the viewer has durable unread state in the reply thread.
+  public var hasUnread_p: Bool = false
+
+  /// Recent distinct repliers in newest-first order. Limited server-side.
+  public var recentReplierUserIds: [Int64] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
 }
 
 public struct Message: @unchecked Sendable {
@@ -1352,6 +1426,17 @@ public struct Message: @unchecked Sendable {
   public var hasFwdFrom: Bool {return _storage._fwdFrom != nil}
   /// Clears the value of `fwdFrom`. Subsequent reads from it will return its default value.
   public mutating func clearFwdFrom() {_uniqueStorage()._fwdFrom = nil}
+
+  /// Replies shown under the parent message row when this message has an
+  /// anchored child thread.
+  public var replies: MessageReplies {
+    get {return _storage._replies ?? MessageReplies()}
+    set {_uniqueStorage()._replies = newValue}
+  }
+  /// Returns true if `replies` has been explicitly set.
+  public var hasReplies: Bool {return _storage._replies != nil}
+  /// Clears the value of `replies`. Subsequent reads from it will return its default value.
+  public mutating func clearReplies() {_uniqueStorage()._replies = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -2844,6 +2929,46 @@ public struct RpcCall: Sendable {
     set {input = .updatePushNotificationDetails(newValue)}
   }
 
+  public var createSubthread: CreateSubthreadInput {
+    get {
+      if case .createSubthread(let v)? = input {return v}
+      return CreateSubthreadInput()
+    }
+    set {input = .createSubthread(newValue)}
+  }
+
+  public var getBotCommands: GetBotCommandsInput {
+    get {
+      if case .getBotCommands(let v)? = input {return v}
+      return GetBotCommandsInput()
+    }
+    set {input = .getBotCommands(newValue)}
+  }
+
+  public var setBotCommands: SetBotCommandsInput {
+    get {
+      if case .setBotCommands(let v)? = input {return v}
+      return SetBotCommandsInput()
+    }
+    set {input = .setBotCommands(newValue)}
+  }
+
+  public var getPeerBotCommands: GetPeerBotCommandsInput {
+    get {
+      if case .getPeerBotCommands(let v)? = input {return v}
+      return GetPeerBotCommandsInput()
+    }
+    set {input = .getPeerBotCommands(newValue)}
+  }
+
+  public var showChatInSidebar: ShowChatInSidebarInput {
+    get {
+      if case .showChatInSidebar(let v)? = input {return v}
+      return ShowChatInSidebarInput()
+    }
+    set {input = .showChatInSidebar(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Input: Equatable, Sendable {
@@ -2888,6 +3013,11 @@ public struct RpcCall: Sendable {
     case updateDialogNotificationSettings(UpdateDialogNotificationSettingsInput)
     case readMessages(ReadMessagesInput)
     case updatePushNotificationDetails(UpdatePushNotificationDetailsInput)
+    case createSubthread(CreateSubthreadInput)
+    case getBotCommands(GetBotCommandsInput)
+    case setBotCommands(SetBotCommandsInput)
+    case getPeerBotCommands(GetPeerBotCommandsInput)
+    case showChatInSidebar(ShowChatInSidebarInput)
 
   }
 
@@ -3237,6 +3367,46 @@ public struct RpcResult: @unchecked Sendable {
     set {_uniqueStorage()._result = .updatePushNotificationDetails(newValue)}
   }
 
+  public var createSubthread: CreateSubthreadResult {
+    get {
+      if case .createSubthread(let v)? = _storage._result {return v}
+      return CreateSubthreadResult()
+    }
+    set {_uniqueStorage()._result = .createSubthread(newValue)}
+  }
+
+  public var getBotCommands: GetBotCommandsResult {
+    get {
+      if case .getBotCommands(let v)? = _storage._result {return v}
+      return GetBotCommandsResult()
+    }
+    set {_uniqueStorage()._result = .getBotCommands(newValue)}
+  }
+
+  public var setBotCommands: SetBotCommandsResult {
+    get {
+      if case .setBotCommands(let v)? = _storage._result {return v}
+      return SetBotCommandsResult()
+    }
+    set {_uniqueStorage()._result = .setBotCommands(newValue)}
+  }
+
+  public var getPeerBotCommands: GetPeerBotCommandsResult {
+    get {
+      if case .getPeerBotCommands(let v)? = _storage._result {return v}
+      return GetPeerBotCommandsResult()
+    }
+    set {_uniqueStorage()._result = .getPeerBotCommands(newValue)}
+  }
+
+  public var showChatInSidebar: ShowChatInSidebarResult {
+    get {
+      if case .showChatInSidebar(let v)? = _storage._result {return v}
+      return ShowChatInSidebarResult()
+    }
+    set {_uniqueStorage()._result = .showChatInSidebar(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Result: Equatable, Sendable {
@@ -3281,6 +3451,11 @@ public struct RpcResult: @unchecked Sendable {
     case updateDialogNotificationSettings(UpdateDialogNotificationSettingsResult)
     case readMessages(ReadMessagesResult)
     case updatePushNotificationDetails(UpdatePushNotificationDetailsResult)
+    case createSubthread(CreateSubthreadResult)
+    case getBotCommands(GetBotCommandsResult)
+    case setBotCommands(SetBotCommandsResult)
+    case getPeerBotCommands(GetPeerBotCommandsResult)
+    case showChatInSidebar(ShowChatInSidebarResult)
 
   }
 
@@ -3627,6 +3802,67 @@ public struct GetChatResult: @unchecked Sendable {
     set {_uniqueStorage()._pinnedMessageIds = newValue}
   }
 
+  public var anchorMessage: Message {
+    get {return _storage._anchorMessage ?? Message()}
+    set {_uniqueStorage()._anchorMessage = newValue}
+  }
+  /// Returns true if `anchorMessage` has been explicitly set.
+  public var hasAnchorMessage: Bool {return _storage._anchorMessage != nil}
+  /// Clears the value of `anchorMessage`. Subsequent reads from it will return its default value.
+  public mutating func clearAnchorMessage() {_uniqueStorage()._anchorMessage = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+public struct ShowChatInSidebarInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Peer ID to surface in the sidebar.
+  public var peerID: InputPeer {
+    get {return _peerID ?? InputPeer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {return self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: InputPeer? = nil
+}
+
+public struct ShowChatInSidebarResult: @unchecked Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var chat: Chat {
+    get {return _storage._chat ?? Chat()}
+    set {_uniqueStorage()._chat = newValue}
+  }
+  /// Returns true if `chat` has been explicitly set.
+  public var hasChat: Bool {return _storage._chat != nil}
+  /// Clears the value of `chat`. Subsequent reads from it will return its default value.
+  public mutating func clearChat() {_uniqueStorage()._chat = nil}
+
+  public var dialog: Dialog {
+    get {return _storage._dialog ?? Dialog()}
+    set {_uniqueStorage()._dialog = newValue}
+  }
+  /// Returns true if `dialog` has been explicitly set.
+  public var hasDialog: Bool {return _storage._dialog != nil}
+  /// Clears the value of `dialog`. Subsequent reads from it will return its default value.
+  public mutating func clearDialog() {_uniqueStorage()._dialog = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -3787,6 +4023,140 @@ public struct ListBotsResult: Sendable {
   // methods supported on all messages.
 
   public var bots: [User] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct BotCommand: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var command: String = String()
+
+  public var description_p: String = String()
+
+  public var sortOrder: Int32 {
+    get {return _sortOrder ?? 0}
+    set {_sortOrder = newValue}
+  }
+  /// Returns true if `sortOrder` has been explicitly set.
+  public var hasSortOrder: Bool {return self._sortOrder != nil}
+  /// Clears the value of `sortOrder`. Subsequent reads from it will return its default value.
+  public mutating func clearSortOrder() {self._sortOrder = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _sortOrder: Int32? = nil
+}
+
+public struct PeerBotCommands: @unchecked Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var bot: User {
+    get {return _storage._bot ?? User()}
+    set {_uniqueStorage()._bot = newValue}
+  }
+  /// Returns true if `bot` has been explicitly set.
+  public var hasBot: Bool {return _storage._bot != nil}
+  /// Clears the value of `bot`. Subsequent reads from it will return its default value.
+  public mutating func clearBot() {_uniqueStorage()._bot = nil}
+
+  public var commands: [BotCommand] {
+    get {return _storage._commands}
+    set {_uniqueStorage()._commands = newValue}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+public struct GetBotCommandsInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var botUserID: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct GetBotCommandsResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var commands: [BotCommand] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct SetBotCommandsInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var botUserID: Int64 = 0
+
+  public var commands: [BotCommand] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct SetBotCommandsResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var commands: [BotCommand] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct GetPeerBotCommandsInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var peerID: InputPeer {
+    get {return _peerID ?? InputPeer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {return self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: InputPeer? = nil
+}
+
+public struct GetPeerBotCommandsResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var bots: [PeerBotCommands] = []
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -5385,6 +5755,106 @@ public struct CreateChatResult: @unchecked Sendable {
   fileprivate var _storage = _StorageClass.defaultInstance
 }
 
+public struct CreateSubthreadInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Required parent chat for inherited access and navigation.
+  public var parentChatID: Int64 = 0
+
+  /// Optional parent message anchor. When set, this subthread is also a reply thread.
+  public var parentMessageID: Int64 {
+    get {return _parentMessageID ?? 0}
+    set {_parentMessageID = newValue}
+  }
+  /// Returns true if `parentMessageID` has been explicitly set.
+  public var hasParentMessageID: Bool {return self._parentMessageID != nil}
+  /// Clears the value of `parentMessageID`. Subsequent reads from it will return its default value.
+  public mutating func clearParentMessageID() {self._parentMessageID = nil}
+
+  /// Optional explicit title. Defaults to a reply-derived title when omitted.
+  public var title: String {
+    get {return _title ?? String()}
+    set {_title = newValue}
+  }
+  /// Returns true if `title` has been explicitly set.
+  public var hasTitle: Bool {return self._title != nil}
+  /// Clears the value of `title`. Subsequent reads from it will return its default value.
+  public mutating func clearTitle() {self._title = nil}
+
+  /// Optional explicit description.
+  public var description_p: String {
+    get {return _description_p ?? String()}
+    set {_description_p = newValue}
+  }
+  /// Returns true if `description_p` has been explicitly set.
+  public var hasDescription_p: Bool {return self._description_p != nil}
+  /// Clears the value of `description_p`. Subsequent reads from it will return its default value.
+  public mutating func clearDescription_p() {self._description_p = nil}
+
+  /// Optional explicit emoji.
+  public var emoji: String {
+    get {return _emoji ?? String()}
+    set {_emoji = newValue}
+  }
+  /// Returns true if `emoji` has been explicitly set.
+  public var hasEmoji: Bool {return self._emoji != nil}
+  /// Clears the value of `emoji`. Subsequent reads from it will return its default value.
+  public mutating func clearEmoji() {self._emoji = nil}
+
+  /// Optional direct child participants.
+  public var participants: [InputChatParticipant] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _parentMessageID: Int64? = nil
+  fileprivate var _title: String? = nil
+  fileprivate var _description_p: String? = nil
+  fileprivate var _emoji: String? = nil
+}
+
+public struct CreateSubthreadResult: @unchecked Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var chat: Chat {
+    get {return _storage._chat ?? Chat()}
+    set {_uniqueStorage()._chat = newValue}
+  }
+  /// Returns true if `chat` has been explicitly set.
+  public var hasChat: Bool {return _storage._chat != nil}
+  /// Clears the value of `chat`. Subsequent reads from it will return its default value.
+  public mutating func clearChat() {_uniqueStorage()._chat = nil}
+
+  public var dialog: Dialog {
+    get {return _storage._dialog ?? Dialog()}
+    set {_uniqueStorage()._dialog = newValue}
+  }
+  /// Returns true if `dialog` has been explicitly set.
+  public var hasDialog: Bool {return _storage._dialog != nil}
+  /// Clears the value of `dialog`. Subsequent reads from it will return its default value.
+  public mutating func clearDialog() {_uniqueStorage()._dialog = nil}
+
+  public var anchorMessage: Message {
+    get {return _storage._anchorMessage ?? Message()}
+    set {_uniqueStorage()._anchorMessage = newValue}
+  }
+  /// Returns true if `anchorMessage` has been explicitly set.
+  public var hasAnchorMessage: Bool {return _storage._anchorMessage != nil}
+  /// Clears the value of `anchorMessage`. Subsequent reads from it will return its default value.
+  public mutating func clearAnchorMessage() {_uniqueStorage()._anchorMessage = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _storage = _StorageClass.defaultInstance
+}
+
 public struct GetSpaceMembersInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -5691,6 +6161,14 @@ public struct Update: @unchecked Sendable {
     set {_uniqueStorage()._update = .dialogNotificationSettings(newValue)}
   }
 
+  public var chatOpen: UpdateChatOpen {
+    get {
+      if case .chatOpen(let v)? = _storage._update {return v}
+      return UpdateChatOpen()
+    }
+    set {_uniqueStorage()._update = .chatOpen(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Update: Equatable, Sendable {
@@ -5734,6 +6212,7 @@ public struct Update: @unchecked Sendable {
     case pinnedMessages(UpdatePinnedMessages)
     case chatMoved(UpdateChatMoved)
     case dialogNotificationSettings(UpdateDialogNotificationSettings)
+    case chatOpen(UpdateChatOpen)
 
   }
 
@@ -6242,6 +6721,46 @@ public struct UpdateNewChat: @unchecked Sendable {
   public mutating func clearChat() {_uniqueStorage()._chat = nil}
 
   /// If private chat
+  public var user: User {
+    get {return _storage._user ?? User()}
+    set {_uniqueStorage()._user = newValue}
+  }
+  /// Returns true if `user` has been explicitly set.
+  public var hasUser: Bool {return _storage._user != nil}
+  /// Clears the value of `user`. Subsequent reads from it will return its default value.
+  public mutating func clearUser() {_uniqueStorage()._user = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+/// Update when a chat becomes sidebar-visible for a specific user.
+public struct UpdateChatOpen: @unchecked Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var chat: Chat {
+    get {return _storage._chat ?? Chat()}
+    set {_uniqueStorage()._chat = newValue}
+  }
+  /// Returns true if `chat` has been explicitly set.
+  public var hasChat: Bool {return _storage._chat != nil}
+  /// Clears the value of `chat`. Subsequent reads from it will return its default value.
+  public mutating func clearChat() {_uniqueStorage()._chat = nil}
+
+  public var dialog: Dialog {
+    get {return _storage._dialog ?? Dialog()}
+    set {_uniqueStorage()._dialog = newValue}
+  }
+  /// Returns true if `dialog` has been explicitly set.
+  public var hasDialog: Bool {return _storage._dialog != nil}
+  /// Clears the value of `dialog`. Subsequent reads from it will return its default value.
+  public mutating func clearDialog() {_uniqueStorage()._dialog = nil}
+
   public var user: User {
     get {return _storage._user ?? User()}
     set {_uniqueStorage()._user = newValue}
@@ -7213,6 +7732,11 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     39: .same(proto: "UPDATE_DIALOG_NOTIFICATION_SETTINGS"),
     40: .same(proto: "READ_MESSAGES"),
     41: .same(proto: "UPDATE_PUSH_NOTIFICATION_DETAILS"),
+    42: .same(proto: "CREATE_SUBTHREAD"),
+    43: .same(proto: "GET_BOT_COMMANDS"),
+    44: .same(proto: "SET_BOT_COMMANDS"),
+    45: .same(proto: "GET_PEER_BOT_COMMANDS"),
+    46: .same(proto: "SHOW_CHAT_IN_SIDEBAR"),
   ]
 }
 
@@ -8270,6 +8794,7 @@ extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     7: .standard(proto: "chat_id"),
     8: .standard(proto: "unread_mark"),
     9: .standard(proto: "notification_settings"),
+    10: .standard(proto: "sidebar_visible"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -8287,6 +8812,7 @@ extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
       case 7: try { try decoder.decodeSingularInt64Field(value: &self._chatID) }()
       case 8: try { try decoder.decodeSingularBoolField(value: &self._unreadMark) }()
       case 9: try { try decoder.decodeSingularMessageField(value: &self._notificationSettings) }()
+      case 10: try { try decoder.decodeSingularBoolField(value: &self._sidebarVisible) }()
       default: break
       }
     }
@@ -8324,6 +8850,9 @@ extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     try { if let v = self._notificationSettings {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
     } }()
+    try { if let v = self._sidebarVisible {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 10)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -8337,6 +8866,7 @@ extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     if lhs._chatID != rhs._chatID {return false}
     if lhs._unreadMark != rhs._unreadMark {return false}
     if lhs._notificationSettings != rhs._notificationSettings {return false}
+    if lhs._sidebarVisible != rhs._sidebarVisible {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -8355,6 +8885,8 @@ extension Chat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     8: .standard(proto: "peer_id"),
     9: .same(proto: "date"),
     10: .standard(proto: "created_by"),
+    11: .standard(proto: "parent_chat_id"),
+    12: .standard(proto: "parent_message_id"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -8373,6 +8905,8 @@ extension Chat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
       case 8: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
       case 9: try { try decoder.decodeSingularInt64Field(value: &self._date) }()
       case 10: try { try decoder.decodeSingularInt64Field(value: &self._createdBy) }()
+      case 11: try { try decoder.decodeSingularInt64Field(value: &self._parentChatID) }()
+      case 12: try { try decoder.decodeSingularInt64Field(value: &self._parentMessageID) }()
       default: break
       }
     }
@@ -8413,6 +8947,12 @@ extension Chat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     try { if let v = self._createdBy {
       try visitor.visitSingularInt64Field(value: v, fieldNumber: 10)
     } }()
+    try { if let v = self._parentChatID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 11)
+    } }()
+    try { if let v = self._parentMessageID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 12)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -8427,6 +8967,58 @@ extension Chat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase,
     if lhs._peerID != rhs._peerID {return false}
     if lhs._date != rhs._date {return false}
     if lhs._createdBy != rhs._createdBy {return false}
+    if lhs._parentChatID != rhs._parentChatID {return false}
+    if lhs._parentMessageID != rhs._parentMessageID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension MessageReplies: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "MessageReplies"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "chat_id"),
+    2: .standard(proto: "reply_count"),
+    3: .standard(proto: "has_unread"),
+    4: .standard(proto: "recent_replier_user_ids"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.chatID) }()
+      case 2: try { try decoder.decodeSingularInt32Field(value: &self.replyCount) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self.hasUnread_p) }()
+      case 4: try { try decoder.decodeRepeatedInt64Field(value: &self.recentReplierUserIds) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.chatID != 0 {
+      try visitor.visitSingularInt64Field(value: self.chatID, fieldNumber: 1)
+    }
+    if self.replyCount != 0 {
+      try visitor.visitSingularInt32Field(value: self.replyCount, fieldNumber: 2)
+    }
+    if self.hasUnread_p != false {
+      try visitor.visitSingularBoolField(value: self.hasUnread_p, fieldNumber: 3)
+    }
+    if !self.recentReplierUserIds.isEmpty {
+      try visitor.visitPackedInt64Field(value: self.recentReplierUserIds, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: MessageReplies, rhs: MessageReplies) -> Bool {
+    if lhs.chatID != rhs.chatID {return false}
+    if lhs.replyCount != rhs.replyCount {return false}
+    if lhs.hasUnread_p != rhs.hasUnread_p {return false}
+    if lhs.recentReplierUserIds != rhs.recentReplierUserIds {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -8454,6 +9046,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     16: .same(proto: "entities"),
     17: .standard(proto: "send_mode"),
     18: .standard(proto: "fwd_from"),
+    19: .same(proto: "replies"),
   ]
 
   fileprivate class _StorageClass {
@@ -8476,6 +9069,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     var _entities: MessageEntities? = nil
     var _sendMode: MessageSendMode? = nil
     var _fwdFrom: MessageFwdHeader? = nil
+    var _replies: MessageReplies? = nil
 
     #if swift(>=5.10)
       // This property is used as the initial default value for new instances of the type.
@@ -8509,6 +9103,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       _entities = source._entities
       _sendMode = source._sendMode
       _fwdFrom = source._fwdFrom
+      _replies = source._replies
     }
   }
 
@@ -8545,6 +9140,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
         case 16: try { try decoder.decodeSingularMessageField(value: &_storage._entities) }()
         case 17: try { try decoder.decodeSingularEnumField(value: &_storage._sendMode) }()
         case 18: try { try decoder.decodeSingularMessageField(value: &_storage._fwdFrom) }()
+        case 19: try { try decoder.decodeSingularMessageField(value: &_storage._replies) }()
         case 6000: try { try decoder.decodeSingularBoolField(value: &_storage._hasLink_p) }()
         default: break
         }
@@ -8612,6 +9208,9 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       try { if let v = _storage._fwdFrom {
         try visitor.visitSingularMessageField(value: v, fieldNumber: 18)
       } }()
+      try { if let v = _storage._replies {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 19)
+      } }()
       try { if let v = _storage._hasLink_p {
         try visitor.visitSingularBoolField(value: v, fieldNumber: 6000)
       } }()
@@ -8643,6 +9242,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
         if _storage._entities != rhs_storage._entities {return false}
         if _storage._sendMode != rhs_storage._sendMode {return false}
         if _storage._fwdFrom != rhs_storage._fwdFrom {return false}
+        if _storage._replies != rhs_storage._replies {return false}
         return true
       }
       if !storagesAreEqual {return false}
@@ -10351,6 +10951,11 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     40: .same(proto: "updateDialogNotificationSettings"),
     41: .same(proto: "readMessages"),
     42: .same(proto: "updatePushNotificationDetails"),
+    43: .same(proto: "createSubthread"),
+    44: .same(proto: "getBotCommands"),
+    45: .same(proto: "setBotCommands"),
+    46: .same(proto: "getPeerBotCommands"),
+    47: .same(proto: "showChatInSidebar"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -10893,6 +11498,71 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
           self.input = .updatePushNotificationDetails(v)
         }
       }()
+      case 43: try {
+        var v: CreateSubthreadInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .createSubthread(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .createSubthread(v)
+        }
+      }()
+      case 44: try {
+        var v: GetBotCommandsInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .getBotCommands(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .getBotCommands(v)
+        }
+      }()
+      case 45: try {
+        var v: SetBotCommandsInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .setBotCommands(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .setBotCommands(v)
+        }
+      }()
+      case 46: try {
+        var v: GetPeerBotCommandsInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .getPeerBotCommands(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .getPeerBotCommands(v)
+        }
+      }()
+      case 47: try {
+        var v: ShowChatInSidebarInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .showChatInSidebar(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .showChatInSidebar(v)
+        }
+      }()
       default: break
       }
     }
@@ -11071,6 +11741,26 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       guard case .updatePushNotificationDetails(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 42)
     }()
+    case .createSubthread?: try {
+      guard case .createSubthread(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 43)
+    }()
+    case .getBotCommands?: try {
+      guard case .getBotCommands(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 44)
+    }()
+    case .setBotCommands?: try {
+      guard case .setBotCommands(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 45)
+    }()
+    case .getPeerBotCommands?: try {
+      guard case .getPeerBotCommands(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 46)
+    }()
+    case .showChatInSidebar?: try {
+      guard case .showChatInSidebar(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 47)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -11129,6 +11819,11 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     40: .same(proto: "updateDialogNotificationSettings"),
     41: .same(proto: "readMessages"),
     42: .same(proto: "updatePushNotificationDetails"),
+    43: .same(proto: "createSubthread"),
+    44: .same(proto: "getBotCommands"),
+    45: .same(proto: "setBotCommands"),
+    46: .same(proto: "getPeerBotCommands"),
+    47: .same(proto: "showChatInSidebar"),
   ]
 
   fileprivate class _StorageClass {
@@ -11702,6 +12397,71 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
             _storage._result = .updatePushNotificationDetails(v)
           }
         }()
+        case 43: try {
+          var v: CreateSubthreadResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .createSubthread(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .createSubthread(v)
+          }
+        }()
+        case 44: try {
+          var v: GetBotCommandsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getBotCommands(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getBotCommands(v)
+          }
+        }()
+        case 45: try {
+          var v: SetBotCommandsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .setBotCommands(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .setBotCommands(v)
+          }
+        }()
+        case 46: try {
+          var v: GetPeerBotCommandsResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .getPeerBotCommands(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .getPeerBotCommands(v)
+          }
+        }()
+        case 47: try {
+          var v: ShowChatInSidebarResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .showChatInSidebar(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .showChatInSidebar(v)
+          }
+        }()
         default: break
         }
       }
@@ -11881,6 +12641,26 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
       case .updatePushNotificationDetails?: try {
         guard case .updatePushNotificationDetails(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 42)
+      }()
+      case .createSubthread?: try {
+        guard case .createSubthread(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 43)
+      }()
+      case .getBotCommands?: try {
+        guard case .getBotCommands(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 44)
+      }()
+      case .setBotCommands?: try {
+        guard case .setBotCommands(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 45)
+      }()
+      case .getPeerBotCommands?: try {
+        guard case .getPeerBotCommands(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 46)
+      }()
+      case .showChatInSidebar?: try {
+        guard case .showChatInSidebar(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 47)
       }()
       case nil: break
       }
@@ -12458,12 +13238,14 @@ extension GetChatResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
     1: .same(proto: "chat"),
     2: .same(proto: "dialog"),
     3: .standard(proto: "pinned_message_ids"),
+    4: .standard(proto: "anchor_message"),
   ]
 
   fileprivate class _StorageClass {
     var _chat: Chat? = nil
     var _dialog: Dialog? = nil
     var _pinnedMessageIds: [Int64] = []
+    var _anchorMessage: Message? = nil
 
     #if swift(>=5.10)
       // This property is used as the initial default value for new instances of the type.
@@ -12481,6 +13263,7 @@ extension GetChatResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
       _chat = source._chat
       _dialog = source._dialog
       _pinnedMessageIds = source._pinnedMessageIds
+      _anchorMessage = source._anchorMessage
     }
   }
 
@@ -12502,6 +13285,7 @@ extension GetChatResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
         case 1: try { try decoder.decodeSingularMessageField(value: &_storage._chat) }()
         case 2: try { try decoder.decodeSingularMessageField(value: &_storage._dialog) }()
         case 3: try { try decoder.decodeRepeatedInt64Field(value: &_storage._pinnedMessageIds) }()
+        case 4: try { try decoder.decodeSingularMessageField(value: &_storage._anchorMessage) }()
         default: break
         }
       }
@@ -12523,6 +13307,9 @@ extension GetChatResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
       if !_storage._pinnedMessageIds.isEmpty {
         try visitor.visitPackedInt64Field(value: _storage._pinnedMessageIds, fieldNumber: 3)
       }
+      try { if let v = _storage._anchorMessage {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -12535,6 +13322,127 @@ extension GetChatResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
         if _storage._chat != rhs_storage._chat {return false}
         if _storage._dialog != rhs_storage._dialog {return false}
         if _storage._pinnedMessageIds != rhs_storage._pinnedMessageIds {return false}
+        if _storage._anchorMessage != rhs_storage._anchorMessage {return false}
+        return true
+      }
+      if !storagesAreEqual {return false}
+    }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension ShowChatInSidebarInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ShowChatInSidebarInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "peer_id"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: ShowChatInSidebarInput, rhs: ShowChatInSidebarInput) -> Bool {
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension ShowChatInSidebarResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ShowChatInSidebarResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "chat"),
+    2: .same(proto: "dialog"),
+  ]
+
+  fileprivate class _StorageClass {
+    var _chat: Chat? = nil
+    var _dialog: Dialog? = nil
+
+    #if swift(>=5.10)
+      // This property is used as the initial default value for new instances of the type.
+      // The type itself is protecting the reference to its storage via CoW semantics.
+      // This will force a copy to be made of this reference when the first mutation occurs;
+      // hence, it is safe to mark this as `nonisolated(unsafe)`.
+      static nonisolated(unsafe) let defaultInstance = _StorageClass()
+    #else
+      static let defaultInstance = _StorageClass()
+    #endif
+
+    private init() {}
+
+    init(copying source: _StorageClass) {
+      _chat = source._chat
+      _dialog = source._dialog
+    }
+  }
+
+  fileprivate mutating func _uniqueStorage() -> _StorageClass {
+    if !isKnownUniquelyReferenced(&_storage) {
+      _storage = _StorageClass(copying: _storage)
+    }
+    return _storage
+  }
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    _ = _uniqueStorage()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      while let fieldNumber = try decoder.nextFieldNumber() {
+        // The use of inline closures is to circumvent an issue where the compiler
+        // allocates stack space for every case branch when no optimizations are
+        // enabled. https://github.com/apple/swift-protobuf/issues/1034
+        switch fieldNumber {
+        case 1: try { try decoder.decodeSingularMessageField(value: &_storage._chat) }()
+        case 2: try { try decoder.decodeSingularMessageField(value: &_storage._dialog) }()
+        default: break
+        }
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every if/case branch local when no optimizations
+      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+      // https://github.com/apple/swift-protobuf/issues/1182
+      try { if let v = _storage._chat {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+      } }()
+      try { if let v = _storage._dialog {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+      } }()
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: ShowChatInSidebarResult, rhs: ShowChatInSidebarResult) -> Bool {
+    if lhs._storage !== rhs._storage {
+      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
+        let _storage = _args.0
+        let rhs_storage = _args.1
+        if _storage._chat != rhs_storage._chat {return false}
+        if _storage._dialog != rhs_storage._dialog {return false}
         return true
       }
       if !storagesAreEqual {return false}
@@ -12863,6 +13771,340 @@ extension ListBotsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
   }
 
   public static func ==(lhs: ListBotsResult, rhs: ListBotsResult) -> Bool {
+    if lhs.bots != rhs.bots {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension BotCommand: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "BotCommand"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "command"),
+    2: .same(proto: "description"),
+    3: .standard(proto: "sort_order"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.command) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.description_p) }()
+      case 3: try { try decoder.decodeSingularInt32Field(value: &self._sortOrder) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.command.isEmpty {
+      try visitor.visitSingularStringField(value: self.command, fieldNumber: 1)
+    }
+    if !self.description_p.isEmpty {
+      try visitor.visitSingularStringField(value: self.description_p, fieldNumber: 2)
+    }
+    try { if let v = self._sortOrder {
+      try visitor.visitSingularInt32Field(value: v, fieldNumber: 3)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: BotCommand, rhs: BotCommand) -> Bool {
+    if lhs.command != rhs.command {return false}
+    if lhs.description_p != rhs.description_p {return false}
+    if lhs._sortOrder != rhs._sortOrder {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension PeerBotCommands: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "PeerBotCommands"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "bot"),
+    2: .same(proto: "commands"),
+  ]
+
+  fileprivate class _StorageClass {
+    var _bot: User? = nil
+    var _commands: [BotCommand] = []
+
+    #if swift(>=5.10)
+      // This property is used as the initial default value for new instances of the type.
+      // The type itself is protecting the reference to its storage via CoW semantics.
+      // This will force a copy to be made of this reference when the first mutation occurs;
+      // hence, it is safe to mark this as `nonisolated(unsafe)`.
+      static nonisolated(unsafe) let defaultInstance = _StorageClass()
+    #else
+      static let defaultInstance = _StorageClass()
+    #endif
+
+    private init() {}
+
+    init(copying source: _StorageClass) {
+      _bot = source._bot
+      _commands = source._commands
+    }
+  }
+
+  fileprivate mutating func _uniqueStorage() -> _StorageClass {
+    if !isKnownUniquelyReferenced(&_storage) {
+      _storage = _StorageClass(copying: _storage)
+    }
+    return _storage
+  }
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    _ = _uniqueStorage()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      while let fieldNumber = try decoder.nextFieldNumber() {
+        // The use of inline closures is to circumvent an issue where the compiler
+        // allocates stack space for every case branch when no optimizations are
+        // enabled. https://github.com/apple/swift-protobuf/issues/1034
+        switch fieldNumber {
+        case 1: try { try decoder.decodeSingularMessageField(value: &_storage._bot) }()
+        case 2: try { try decoder.decodeRepeatedMessageField(value: &_storage._commands) }()
+        default: break
+        }
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every if/case branch local when no optimizations
+      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+      // https://github.com/apple/swift-protobuf/issues/1182
+      try { if let v = _storage._bot {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+      } }()
+      if !_storage._commands.isEmpty {
+        try visitor.visitRepeatedMessageField(value: _storage._commands, fieldNumber: 2)
+      }
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: PeerBotCommands, rhs: PeerBotCommands) -> Bool {
+    if lhs._storage !== rhs._storage {
+      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
+        let _storage = _args.0
+        let rhs_storage = _args.1
+        if _storage._bot != rhs_storage._bot {return false}
+        if _storage._commands != rhs_storage._commands {return false}
+        return true
+      }
+      if !storagesAreEqual {return false}
+    }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension GetBotCommandsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetBotCommandsInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "bot_user_id"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.botUserID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.botUserID != 0 {
+      try visitor.visitSingularInt64Field(value: self.botUserID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetBotCommandsInput, rhs: GetBotCommandsInput) -> Bool {
+    if lhs.botUserID != rhs.botUserID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension GetBotCommandsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetBotCommandsResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "commands"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.commands) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.commands.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.commands, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetBotCommandsResult, rhs: GetBotCommandsResult) -> Bool {
+    if lhs.commands != rhs.commands {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension SetBotCommandsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "SetBotCommandsInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "bot_user_id"),
+    2: .same(proto: "commands"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.botUserID) }()
+      case 2: try { try decoder.decodeRepeatedMessageField(value: &self.commands) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.botUserID != 0 {
+      try visitor.visitSingularInt64Field(value: self.botUserID, fieldNumber: 1)
+    }
+    if !self.commands.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.commands, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: SetBotCommandsInput, rhs: SetBotCommandsInput) -> Bool {
+    if lhs.botUserID != rhs.botUserID {return false}
+    if lhs.commands != rhs.commands {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension SetBotCommandsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "SetBotCommandsResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "commands"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.commands) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.commands.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.commands, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: SetBotCommandsResult, rhs: SetBotCommandsResult) -> Bool {
+    if lhs.commands != rhs.commands {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension GetPeerBotCommandsInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetPeerBotCommandsInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "peer_id"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetPeerBotCommandsInput, rhs: GetPeerBotCommandsInput) -> Bool {
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension GetPeerBotCommandsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "GetPeerBotCommandsResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "bots"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.bots) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.bots.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.bots, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GetPeerBotCommandsResult, rhs: GetPeerBotCommandsResult) -> Bool {
     if lhs.bots != rhs.bots {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
@@ -15234,6 +16476,164 @@ extension CreateChatResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImpleme
   }
 }
 
+extension CreateSubthreadInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "CreateSubthreadInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "parent_chat_id"),
+    2: .standard(proto: "parent_message_id"),
+    3: .same(proto: "title"),
+    4: .same(proto: "description"),
+    5: .same(proto: "emoji"),
+    6: .same(proto: "participants"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.parentChatID) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self._parentMessageID) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self._title) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self._description_p) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self._emoji) }()
+      case 6: try { try decoder.decodeRepeatedMessageField(value: &self.participants) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.parentChatID != 0 {
+      try visitor.visitSingularInt64Field(value: self.parentChatID, fieldNumber: 1)
+    }
+    try { if let v = self._parentMessageID {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 2)
+    } }()
+    try { if let v = self._title {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 3)
+    } }()
+    try { if let v = self._description_p {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 4)
+    } }()
+    try { if let v = self._emoji {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 5)
+    } }()
+    if !self.participants.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.participants, fieldNumber: 6)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: CreateSubthreadInput, rhs: CreateSubthreadInput) -> Bool {
+    if lhs.parentChatID != rhs.parentChatID {return false}
+    if lhs._parentMessageID != rhs._parentMessageID {return false}
+    if lhs._title != rhs._title {return false}
+    if lhs._description_p != rhs._description_p {return false}
+    if lhs._emoji != rhs._emoji {return false}
+    if lhs.participants != rhs.participants {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension CreateSubthreadResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "CreateSubthreadResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "chat"),
+    2: .same(proto: "dialog"),
+    3: .standard(proto: "anchor_message"),
+  ]
+
+  fileprivate class _StorageClass {
+    var _chat: Chat? = nil
+    var _dialog: Dialog? = nil
+    var _anchorMessage: Message? = nil
+
+    #if swift(>=5.10)
+      // This property is used as the initial default value for new instances of the type.
+      // The type itself is protecting the reference to its storage via CoW semantics.
+      // This will force a copy to be made of this reference when the first mutation occurs;
+      // hence, it is safe to mark this as `nonisolated(unsafe)`.
+      static nonisolated(unsafe) let defaultInstance = _StorageClass()
+    #else
+      static let defaultInstance = _StorageClass()
+    #endif
+
+    private init() {}
+
+    init(copying source: _StorageClass) {
+      _chat = source._chat
+      _dialog = source._dialog
+      _anchorMessage = source._anchorMessage
+    }
+  }
+
+  fileprivate mutating func _uniqueStorage() -> _StorageClass {
+    if !isKnownUniquelyReferenced(&_storage) {
+      _storage = _StorageClass(copying: _storage)
+    }
+    return _storage
+  }
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    _ = _uniqueStorage()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      while let fieldNumber = try decoder.nextFieldNumber() {
+        // The use of inline closures is to circumvent an issue where the compiler
+        // allocates stack space for every case branch when no optimizations are
+        // enabled. https://github.com/apple/swift-protobuf/issues/1034
+        switch fieldNumber {
+        case 1: try { try decoder.decodeSingularMessageField(value: &_storage._chat) }()
+        case 2: try { try decoder.decodeSingularMessageField(value: &_storage._dialog) }()
+        case 3: try { try decoder.decodeSingularMessageField(value: &_storage._anchorMessage) }()
+        default: break
+        }
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every if/case branch local when no optimizations
+      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+      // https://github.com/apple/swift-protobuf/issues/1182
+      try { if let v = _storage._chat {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+      } }()
+      try { if let v = _storage._dialog {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+      } }()
+      try { if let v = _storage._anchorMessage {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+      } }()
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: CreateSubthreadResult, rhs: CreateSubthreadResult) -> Bool {
+    if lhs._storage !== rhs._storage {
+      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
+        let _storage = _args.0
+        let rhs_storage = _args.1
+        if _storage._chat != rhs_storage._chat {return false}
+        if _storage._dialog != rhs_storage._dialog {return false}
+        if _storage._anchorMessage != rhs_storage._anchorMessage {return false}
+        return true
+      }
+      if !storagesAreEqual {return false}
+    }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
 extension GetSpaceMembersInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "GetSpaceMembersInput"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
@@ -15339,6 +16739,7 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     31: .standard(proto: "pinned_messages"),
     32: .standard(proto: "chat_moved"),
     33: .standard(proto: "dialog_notification_settings"),
+    34: .standard(proto: "chat_open"),
   ]
 
   fileprivate class _StorageClass {
@@ -15772,6 +17173,19 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
             _storage._update = .dialogNotificationSettings(v)
           }
         }()
+        case 34: try {
+          var v: UpdateChatOpen?
+          var hadOneofValue = false
+          if let current = _storage._update {
+            hadOneofValue = true
+            if case .chatOpen(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._update = .chatOpen(v)
+          }
+        }()
         default: break
         }
       }
@@ -15910,6 +17324,10 @@ extension Update: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
       case .dialogNotificationSettings?: try {
         guard case .dialogNotificationSettings(let v)? = _storage._update else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 33)
+      }()
+      case .chatOpen?: try {
+        guard case .chatOpen(let v)? = _storage._update else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 34)
       }()
       case nil: break
       }
@@ -16762,6 +18180,98 @@ extension UpdateNewChat: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
         let _storage = _args.0
         let rhs_storage = _args.1
         if _storage._chat != rhs_storage._chat {return false}
+        if _storage._user != rhs_storage._user {return false}
+        return true
+      }
+      if !storagesAreEqual {return false}
+    }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateChatOpen: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateChatOpen"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "chat"),
+    2: .same(proto: "dialog"),
+    3: .same(proto: "user"),
+  ]
+
+  fileprivate class _StorageClass {
+    var _chat: Chat? = nil
+    var _dialog: Dialog? = nil
+    var _user: User? = nil
+
+    #if swift(>=5.10)
+      // This property is used as the initial default value for new instances of the type.
+      // The type itself is protecting the reference to its storage via CoW semantics.
+      // This will force a copy to be made of this reference when the first mutation occurs;
+      // hence, it is safe to mark this as `nonisolated(unsafe)`.
+      static nonisolated(unsafe) let defaultInstance = _StorageClass()
+    #else
+      static let defaultInstance = _StorageClass()
+    #endif
+
+    private init() {}
+
+    init(copying source: _StorageClass) {
+      _chat = source._chat
+      _dialog = source._dialog
+      _user = source._user
+    }
+  }
+
+  fileprivate mutating func _uniqueStorage() -> _StorageClass {
+    if !isKnownUniquelyReferenced(&_storage) {
+      _storage = _StorageClass(copying: _storage)
+    }
+    return _storage
+  }
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    _ = _uniqueStorage()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      while let fieldNumber = try decoder.nextFieldNumber() {
+        // The use of inline closures is to circumvent an issue where the compiler
+        // allocates stack space for every case branch when no optimizations are
+        // enabled. https://github.com/apple/swift-protobuf/issues/1034
+        switch fieldNumber {
+        case 1: try { try decoder.decodeSingularMessageField(value: &_storage._chat) }()
+        case 2: try { try decoder.decodeSingularMessageField(value: &_storage._dialog) }()
+        case 3: try { try decoder.decodeSingularMessageField(value: &_storage._user) }()
+        default: break
+        }
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every if/case branch local when no optimizations
+      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+      // https://github.com/apple/swift-protobuf/issues/1182
+      try { if let v = _storage._chat {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+      } }()
+      try { if let v = _storage._dialog {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+      } }()
+      try { if let v = _storage._user {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+      } }()
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateChatOpen, rhs: UpdateChatOpen) -> Bool {
+    if lhs._storage !== rhs._storage {
+      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
+        let _storage = _args.0
+        let rhs_storage = _args.1
+        if _storage._chat != rhs_storage._chat {return false}
+        if _storage._dialog != rhs_storage._dialog {return false}
         if _storage._user != rhs_storage._user {return false}
         return true
       }

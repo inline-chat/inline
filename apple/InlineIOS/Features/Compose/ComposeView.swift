@@ -87,6 +87,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   let draftSaveInterval: TimeInterval = 2.0 // Save every 2 seconds
   var isPickerPresented = false
   var activePickerMode: MediaPickerMode = .photos
+  var currentPreviewUsesAttachmentPicker = false
+  weak var attachmentPickerViewController: UIViewController?
 
   // MARK: - UI Components
 

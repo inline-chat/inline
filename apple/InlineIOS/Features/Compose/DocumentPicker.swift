@@ -11,12 +11,7 @@ extension ComposeView: UIDocumentPickerDelegate {
     documentPicker.delegate = self
     documentPicker.allowsMultipleSelection = false
 
-    if let windowScene = window?.windowScene,
-       let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow }),
-       let rootVC = keyWindow.rootViewController
-    {
-      rootVC.present(documentPicker, animated: true)
-    }
+    attachmentFlowPresenter()?.present(documentPicker, animated: true)
   }
 
   func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
@@ -73,12 +68,7 @@ extension ComposeView: UIDocumentPickerDelegate {
     )
     alert.addAction(UIAlertAction(title: "OK", style: .default))
 
-    if let windowScene = window?.windowScene,
-       let keyWindow = windowScene.windows.first(where: { $0.isKeyWindow }),
-       let rootVC = keyWindow.rootViewController
-    {
-      rootVC.present(alert, animated: true)
-    }
+    attachmentFlowPresenter()?.present(alert, animated: true)
   }
 
   func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
