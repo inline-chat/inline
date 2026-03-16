@@ -7,6 +7,7 @@ import type { UpdateGroup } from "@in/server/modules/updates"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { encodeOutputPeerFromChat } from "@in/server/realtime/encoders/encodePeer"
 import { and, eq, inArray } from "drizzle-orm"
+import { emitSidebarChatOpenUpdates, isLinkedSubthread, promoteLinkedSubthreadDialogsToSidebar } from "@in/server/modules/subthreads"
 
 type UnarchiveIfNeededInput = {
   chat: DbChat
@@ -74,6 +75,17 @@ export const unarchiveIfNeeded = async (input: UnarchiveIfNeededInput): Promise<
       { tx },
     )
   })
+
+  if (isLinkedSubthread(chat)) {
+    const { activatedDialogs } = await promoteLinkedSubthreadDialogsToSidebar({
+      chat,
+      userIds: targets.map((target) => target.userId),
+    })
+    await emitSidebarChatOpenUpdates({
+      chat,
+      dialogs: activatedDialogs,
+    })
+  }
 
   const updates = targets.map((target) => ({
     userId: target.userId,

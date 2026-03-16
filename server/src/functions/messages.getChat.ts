@@ -1,4 +1,4 @@
-import type { Chat, Dialog, InputPeer } from "@inline-chat/protocol/core"
+import type { Chat, Dialog, InputPeer, Message } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { UsersModel } from "@in/server/db/models/users"
 import { DialogsModel } from "@in/server/db/models/dialogs"
@@ -8,7 +8,9 @@ import { Log } from "@in/server/utils/log"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { db } from "@in/server/db"
 import { and, desc, eq, isNull, not } from "drizzle-orm"
-import { chats, dialogs, members, chatParticipants, messages, type DbChat, type DbDialog } from "@in/server/db/schema"
+import { chats, dialogs, messages, type DbChat, type DbDialog } from "@in/server/db/schema"
+import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
+import { ensureLinkedSubthreadDialogs, getAnchorMessageForChat, isLinkedSubthread } from "@in/server/modules/subthreads"
 
 type Input = {
   peerId: InputPeer
@@ -16,8 +18,9 @@ type Input = {
 
 type Output = {
   chat: Chat
-  dialog: Dialog
+  dialog?: Dialog
   pinnedMessageIds: bigint[]
+  anchorMessage?: Message
 }
 
 const log = new Log("functions.getChat")
@@ -95,19 +98,13 @@ async function getChatAndDialogForDM(
 async function getChatAndDialogForThread(
   chatId: number,
   currentUserId: number,
-): Promise<{ chat: DbChat; dialog: DbDialog }> {
+): Promise<{ chat: DbChat; dialog?: DbDialog }> {
   const result = await db.query.chats.findFirst({
     where: {
       id: chatId,
     },
     with: {
-      space: true,
       dialogs: {
-        where: {
-          userId: currentUserId,
-        },
-      },
-      participants: {
         where: {
           userId: currentUserId,
         },
@@ -120,9 +117,7 @@ async function getChatAndDialogForThread(
   }
 
   const chat = result
-  const space = result.space
   const dialog = result.dialogs[0]
-  const participant = result.participants[0]
 
   if (chat.type === "private") {
     if (!chat.minUserId || !chat.maxUserId) {
@@ -163,56 +158,23 @@ async function getChatAndDialogForThread(
     return { chat, dialog: newDialog }
   }
 
-  if (!chat.spaceId) {
-    if (!participant) {
-      throw RealtimeRpcError.ChatIdInvalid()
-    }
-
-    if (dialog) {
-      return { chat, dialog }
-    }
-
-    const [newDialog] = await db
-      .insert(dialogs)
-      .values({
-        chatId,
-        userId: currentUserId,
-        spaceId: null,
-      })
-      .returning()
-
-    if (!newDialog) {
-      throw RealtimeRpcError.InternalError()
-    }
-
-    return { chat, dialog: newDialog }
-  }
-
-  if (!space || space.deleted || !chat.spaceId) {
-    throw RealtimeRpcError.ChatIdInvalid()
-  }
-
-  const [spaceMember] = await db
-    .select()
-    .from(members)
-    .where(and(eq(members.spaceId, chat.spaceId), eq(members.userId, currentUserId)))
-
-  if (!spaceMember) {
-    throw RealtimeRpcError.ChatIdInvalid()
-  }
-
-  if (chat.publicThread) {
-    if (!spaceMember.canAccessPublicChats) {
-      throw RealtimeRpcError.ChatIdInvalid()
-    }
-  } else {
-    if (!participant) {
-      throw RealtimeRpcError.ChatIdInvalid()
-    }
-  }
+  await AccessGuards.ensureChatAccess(chat, currentUserId)
 
   if (dialog) {
     return { chat, dialog }
+  }
+
+  if (isLinkedSubthread(chat)) {
+    const { dialogs: ensuredDialogs } = await ensureLinkedSubthreadDialogs({
+      chat,
+      userIds: [currentUserId],
+      sidebarVisible: false,
+    })
+
+    return {
+      chat,
+      dialog: ensuredDialogs.find((existingDialog) => existingDialog.userId === currentUserId),
+    }
   }
 
   log.info("Creating dialog for thread", { chatId, currentUserId, spaceId: chat.spaceId })
@@ -238,7 +200,7 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
   const currentUserId = context.currentUserId
 
   let chat: DbChat
-  let dialog: DbDialog
+  let dialog: DbDialog | undefined
 
   if (inputPeer.type.oneofKind === "user") {
     const peerUserId = Number(inputPeer.type.user.userId)
@@ -270,11 +232,26 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
 
   const [unreadData] = await DialogsModel.getBatchUnreadCounts({
     userId: currentUserId,
-    chatIds: [chat.id],
+    chatIds: dialog ? [chat.id] : [],
   })
 
   const encodedChat = Encoders.chat(chat, { encodingForUserId: currentUserId })
-  const encodedDialog = Encoders.dialog(dialog, { unreadCount: unreadData?.unreadCount ?? 0 })
+  const encodedDialog = dialog ? Encoders.dialog(dialog, { unreadCount: unreadData?.unreadCount ?? 0 }) : undefined
+  const anchorMessage = await getAnchorMessageForChat(chat)
+  const encodedAnchorMessage = anchorMessage
+    ? Encoders.fullMessage({
+        message: anchorMessage,
+        encodingForUserId: currentUserId,
+        encodingForPeer: {
+          peer: {
+            type: {
+              oneofKind: "chat",
+              chat: { chatId: BigInt(chat.parentChatId ?? chat.id) },
+            },
+          },
+        },
+      })
+    : undefined
 
   const pinnedRows = await db
     .select({ messageId: messages.messageId })
@@ -288,5 +265,6 @@ export const getChat = async (input: Input, context: FunctionContext): Promise<O
     chat: encodedChat,
     dialog: encodedDialog,
     pinnedMessageIds,
+    anchorMessage: encodedAnchorMessage,
   }
 }

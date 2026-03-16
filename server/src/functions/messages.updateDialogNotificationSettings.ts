@@ -18,6 +18,7 @@ import { encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import type { ServerUpdate } from "@inline-chat/protocol/server"
 import { RealtimeUpdates } from "@in/server/realtime/message"
+import { isLinkedSubthread } from "@in/server/modules/subthreads"
 
 type Input = {
   peerId: InputPeer
@@ -97,6 +98,7 @@ export const updateDialogNotificationSettings = async (input: Input, context: Fu
         peerUserId: peerUserId ?? null,
         spaceId: chat.type === "thread" ? chat.spaceId : null,
         notificationSettings: nextDbBinary,
+        sidebarVisible: isLinkedSubthread(chat) ? false : true,
       })
     } else if (bytesEqual(existing.notificationSettings, nextDbBinary)) {
       return false

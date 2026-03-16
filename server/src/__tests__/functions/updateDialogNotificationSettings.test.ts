@@ -6,7 +6,7 @@ import {
 } from "@inline-chat/protocol/core"
 import { setupTestLifecycle, testUtils } from "../setup"
 import { db } from "@in/server/db"
-import { dialogs, updates, UpdateBucket } from "@in/server/db/schema"
+import { chats, dialogs, messages, updates, UpdateBucket } from "@in/server/db/schema"
 import { updateDialogNotificationSettings } from "@in/server/functions/messages.updateDialogNotificationSettings"
 import { decodeDialogNotificationSettings } from "@in/server/modules/notifications/dialogNotificationSettings"
 
@@ -217,6 +217,85 @@ describe("updateDialogNotificationSettings", () => {
       .limit(1)
 
     expect(dialogRow).toBeUndefined()
+  })
+
+  test("creates a hidden dialog when linked subthread settings are updated", async () => {
+    const owner = await testUtils.createUser("dialog-notif-thread-owner@example.com")
+    const participant = await testUtils.createUser("dialog-notif-thread-participant@example.com")
+
+    const parentChat = await testUtils.createChat(null, "Parent Thread", "thread", false, owner.id)
+    if (!parentChat) throw new Error("Parent chat not created")
+
+    await testUtils.addParticipant(parentChat.id, owner.id)
+    await testUtils.addParticipant(parentChat.id, participant.id)
+
+    await db.insert(dialogs).values([
+      {
+        chatId: parentChat.id,
+        userId: owner.id,
+        sidebarVisible: true,
+      },
+      {
+        chatId: parentChat.id,
+        userId: participant.id,
+        sidebarVisible: true,
+      },
+    ])
+
+    await db.insert(messages).values({
+      chatId: parentChat.id,
+      messageId: 1,
+      fromId: owner.id,
+      text: "anchor",
+    })
+
+    const [childChat] = await db
+      .insert(chats)
+      .values({
+        type: "thread",
+        title: "Re: anchor",
+        publicThread: false,
+        createdBy: owner.id,
+        parentChatId: parentChat.id,
+        parentMessageId: 1,
+      })
+      .returning()
+
+    if (!childChat) throw new Error("Child chat not created")
+
+    const result = await updateDialogNotificationSettings(
+      {
+        peerId: {
+          type: {
+            oneofKind: "chat",
+            chat: { chatId: BigInt(childChat.id) },
+          },
+        },
+        notificationSettings: {
+          mode: DialogNotificationSettings_Mode.MENTIONS,
+        },
+      },
+      {
+        currentUserId: participant.id,
+        currentSessionId: 1,
+      },
+    )
+
+    expect(result.updates).toHaveLength(1)
+
+    const [dialogRow] = await db
+      .select({
+        sidebarVisible: dialogs.sidebarVisible,
+        notificationSettings: dialogs.notificationSettings,
+      })
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, childChat.id), eq(dialogs.userId, participant.id)))
+      .limit(1)
+
+    expect(dialogRow?.sidebarVisible).toBe(false)
+    expect(decodeDialogNotificationSettings(dialogRow?.notificationSettings)?.mode).toBe(
+      DialogNotificationSettings_Mode.MENTIONS,
+    )
   })
 
   test("rejects invalid mode", async () => {

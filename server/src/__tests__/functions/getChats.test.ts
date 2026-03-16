@@ -101,6 +101,56 @@ describe("getChats", () => {
     expect(hasLastMsg).toBe(true)
   })
 
+  test("excludes linked subthreads whose dialog is hidden from sidebar", async () => {
+    const owner = await testUtils.createUser("hidden-subthread-owner@example.com")
+    const participant = await testUtils.createUser("hidden-subthread-participant@example.com")
+    if (!owner || !participant) throw new Error("Users not created")
+
+    const parentChat = await testUtils.createChat(null, "Parent Thread", "thread", false, owner.id)
+    if (!parentChat) throw new Error("Parent chat not created")
+
+    await testUtils.addParticipant(parentChat.id, owner.id)
+    await testUtils.addParticipant(parentChat.id, participant.id)
+
+    await db.insert(schema.messages).values({
+      chatId: parentChat.id,
+      messageId: 1,
+      fromId: owner.id,
+      text: "anchor",
+    })
+
+    const [childChat] = await db
+      .insert(schema.chats)
+      .values({
+        type: "thread",
+        title: "Re: anchor",
+        publicThread: false,
+        createdBy: owner.id,
+        parentChatId: parentChat.id,
+        parentMessageId: 1,
+      })
+      .returning()
+
+    if (!childChat) throw new Error("Child chat not created")
+
+    await db.insert(schema.dialogs).values({
+      chatId: childChat.id,
+      userId: participant.id,
+      sidebarVisible: false,
+    })
+
+    const hiddenResult = await getChats({}, makeHandlerContext(participant.id))
+    expect(hiddenResult.chats.map((chat) => Number(chat.id))).not.toContain(childChat.id)
+
+    await db
+      .update(schema.dialogs)
+      .set({ sidebarVisible: true })
+      .where(and(eq(schema.dialogs.chatId, childChat.id), eq(schema.dialogs.userId, participant.id)))
+
+    const visibleResult = await getChats({}, makeHandlerContext(participant.id))
+    expect(visibleResult.chats.map((chat) => Number(chat.id))).toContain(childChat.id)
+  })
+
   // test("auto-creates private chats and dialogs for all space members", async () => {
   //   const { space, users } = await testUtils.createSpaceWithMembers("Test Space", [
   //     "user1@example.com",

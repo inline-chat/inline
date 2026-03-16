@@ -6,6 +6,7 @@ import { UsersModel } from "@in/server/db/models/users"
 import type { DbChat } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
+import { getMessageRepliesMap } from "@in/server/modules/subthreads"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { Log } from "@in/server/utils/log"
@@ -33,6 +34,11 @@ export const getMessages = async (input: Input, context: FunctionContext): Promi
   const uniqueIds = uniqueMessageIds(input.messageIds)
   const fullMessages = await MessageModel.getMessagesByIds(chat.id, uniqueIds)
   const orderedMessages = orderMessagesByRequestedIds(input.messageIds, fullMessages)
+  const repliesMap = await getMessageRepliesMap({
+    parentChatId: chat.id,
+    parentMessageIds: orderedMessages.map((message) => message.messageId),
+    userId: context.currentUserId,
+  })
 
   return {
     messages: orderedMessages.map((message) =>
@@ -40,6 +46,7 @@ export const getMessages = async (input: Input, context: FunctionContext): Promi
         message,
         encodingForUserId: context.currentUserId,
         encodingForPeer: { inputPeer: input.peerId },
+        replies: repliesMap.get(message.messageId),
       }),
     ),
   }

@@ -9,6 +9,7 @@ import {
   type MessageAttachment,
   type MessageAttachments,
   type Peer,
+  type MessageReplies,
   MessageEntities,
   MessageSendMode,
 } from "@inline-chat/protocol/core"
@@ -35,6 +36,7 @@ export const encodeMessage = ({
   encodingForUserId,
   encodingForPeer,
   sendMode,
+  replies,
 }: {
   message: DbMessage
   encodingForUserId: number
@@ -45,6 +47,7 @@ export const encodeMessage = ({
   document?: DbFullDocument | undefined
   voice?: DbFullVoice | undefined
   sendMode?: MessageSendMode
+  replies?: MessageReplies
 }): Message => {
   // Decrypt
   let text = message.text ? message.text : undefined
@@ -167,6 +170,7 @@ export const encodeMessage = ({
     entities: entities,
     sendMode: sendMode ?? undefined,
     fwdFrom: fwdFrom,
+    replies,
   }
 
   return messageProto
@@ -176,10 +180,12 @@ export const encodeFullMessage = ({
   message,
   encodingForUserId,
   encodingForPeer,
+  replies,
 }: {
   message: DbFullMessage
   encodingForUserId: number
   encodingForPeer: { peer: Peer } | { inputPeer: InputPeer }
+  replies?: MessageReplies
 }): Message => {
   let peerId: Peer
 
@@ -338,6 +344,7 @@ export const encodeFullMessage = ({
       : undefined,
     entities: message.entities ?? undefined,
     fwdFrom: fwdFrom,
+    replies,
   }
 
   return messageProto

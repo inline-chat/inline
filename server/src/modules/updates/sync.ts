@@ -8,6 +8,7 @@ import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import { Log, LogLevel } from "@in/server/utils/log"
 import { eq } from "drizzle-orm"
+import { getMessageRepliesMap } from "@in/server/modules/subthreads"
 
 const log = new Log("Sync", LogLevel.TRACE)
 
@@ -157,6 +158,11 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
 
   // Fetch from db
   const dbMessages = await MessageModel.getMessagesByIds(chatId, Array.from(messageIds))
+  const repliesMap = await getMessageRepliesMap({
+    parentChatId: chatId,
+    parentMessageIds: dbMessages.map((message) => message.messageId),
+    userId,
+  })
 
   // Store encoded messages in a map
   const msgs = new Map<bigint, Message>()
@@ -165,6 +171,7 @@ async function processChatUpdates(input: ProcessChatUpdatesInput): Promise<Proce
       message,
       encodingForUserId: userId,
       encodingForPeer: { peer: peerId },
+      replies: repliesMap.get(message.messageId),
     })
     msgs.set(encoded.id, encoded)
   }
@@ -493,6 +500,20 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
           dialogNotificationSettings: {
             peerId: payload.userDialogNotificationSettings.peerId,
             notificationSettings: payload.userDialogNotificationSettings.notificationSettings,
+          },
+        },
+      }
+
+    case "userChatOpen":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "chatOpen",
+          chatOpen: {
+            chat: payload.userChatOpen.chat,
+            dialog: payload.userChatOpen.dialog,
+            user: payload.userChatOpen.user,
           },
         },
       }

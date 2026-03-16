@@ -43,5 +43,6 @@ export function encodeDialog(dialog: DbDialog, { unreadCount }: { unreadCount: n
     readMaxId: dialog.readInboxMaxId ? BigInt(dialog.readInboxMaxId) : undefined,
     unreadMark: dialog.unreadMark ?? undefined,
     notificationSettings: decodeDialogNotificationSettings(dialog.notificationSettings),
+    sidebarVisible: dialog.sidebarVisible,
   }
 }

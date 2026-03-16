@@ -5,11 +5,12 @@ import { sendMessage } from "@in/server/functions/messages.sendMessage"
 import type { DbChat, DbUser } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { db } from "@in/server/db"
-import { dialogs, files, users, voices } from "@in/server/db/schema"
+import { chats, dialogs, files, messages, users, voices } from "@in/server/db/schema"
 import { and, eq } from "drizzle-orm"
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import { UpdatesModel } from "@in/server/db/models/updates"
 import { desktopPushSuppressionTracker } from "@in/server/modules/notifications/desktopPushSuppression"
+import { getMessages } from "@in/server/functions/messages.getMessages"
 
 // Test state
 let currentUser: DbUser
@@ -427,5 +428,202 @@ describe("sendMessage", () => {
       )
 
     expect(hasDialogArchivedUpdate).toBe(true)
+  })
+
+  test("promotes mentioned users into sidebar-visible reply-thread dialogs", async () => {
+    const owner = await testUtils.createUser(nextEmail("thread-owner"))
+    const mentioned = await testUtils.createUser(nextEmail("thread-mentioned"))
+    await db.update(users).set({ username: "replythreadmentioned" }).where(eq(users.id, mentioned.id)).execute()
+
+    const parentChat = await testUtils.createChat(null, "Parent Thread", "thread", false, owner.id)
+    if (!parentChat) throw new Error("Parent chat not created")
+
+    await testUtils.addParticipant(parentChat.id, owner.id)
+    await testUtils.addParticipant(parentChat.id, mentioned.id)
+
+    await db.insert(messages).values({
+      chatId: parentChat.id,
+      messageId: 1,
+      fromId: owner.id,
+      text: "anchor",
+    })
+
+    const [childChat] = await db
+      .insert(chats)
+      .values({
+        type: "thread",
+        title: "Re: anchor",
+        publicThread: false,
+        createdBy: owner.id,
+        parentChatId: parentChat.id,
+        parentMessageId: 1,
+      })
+      .returning()
+
+    if (!childChat) throw new Error("Child chat not created")
+
+    await sendMessage(
+      {
+        peerId: {
+          type: { oneofKind: "chat", chat: { chatId: BigInt(childChat.id) } },
+        },
+        message: "hello @replythreadmentioned",
+      },
+      testUtils.functionContext({ userId: owner.id, sessionId: 1 }),
+    )
+
+    const [recipientDialog] = await db
+      .select()
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, childChat.id), eq(dialogs.userId, mentioned.id)))
+      .limit(1)
+
+    expect(recipientDialog?.sidebarVisible).toBe(true)
+
+    const userUpdates = await db.query.updates.findMany({
+      where: {
+        bucket: UpdateBucket.User,
+        entityId: mentioned.id,
+      },
+    })
+
+    const hasChatOpenUpdate = userUpdates
+      .map((update) => UpdatesModel.decrypt(update))
+      .some((update) => update.payload.update.oneofKind === "userChatOpen")
+
+    expect(hasChatOpenUpdate).toBe(true)
+  })
+
+  test("promotes replied-to authors into sidebar-visible reply-thread dialogs", async () => {
+    const owner = await testUtils.createUser(nextEmail("thread-reply-owner"))
+    const repliedUser = await testUtils.createUser(nextEmail("thread-replied-user"))
+
+    const parentChat = await testUtils.createChat(null, "Parent Thread", "thread", false, owner.id)
+    if (!parentChat) throw new Error("Parent chat not created")
+
+    await testUtils.addParticipant(parentChat.id, owner.id)
+    await testUtils.addParticipant(parentChat.id, repliedUser.id)
+
+    await db.insert(messages).values({
+      chatId: parentChat.id,
+      messageId: 1,
+      fromId: owner.id,
+      text: "anchor",
+    })
+
+    const [childChat] = await db
+      .insert(chats)
+      .values({
+        type: "thread",
+        title: "Re: anchor",
+        publicThread: false,
+        createdBy: owner.id,
+        parentChatId: parentChat.id,
+        parentMessageId: 1,
+      })
+      .returning()
+
+    if (!childChat) throw new Error("Child chat not created")
+
+    await sendMessage(
+      {
+        peerId: {
+          type: { oneofKind: "chat", chat: { chatId: BigInt(childChat.id) } },
+        },
+        message: "first",
+      },
+      testUtils.functionContext({ userId: repliedUser.id, sessionId: 1 }),
+    )
+
+    await sendMessage(
+      {
+        peerId: {
+          type: { oneofKind: "chat", chat: { chatId: BigInt(childChat.id) } },
+        },
+        message: "replying",
+        replyToMessageId: 1n,
+      },
+      testUtils.functionContext({ userId: owner.id, sessionId: 1 }),
+    )
+
+    const [recipientDialog] = await db
+      .select()
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, childChat.id), eq(dialogs.userId, repliedUser.id)))
+      .limit(1)
+
+    expect(recipientDialog?.sidebarVisible).toBe(true)
+
+    const parentMessages = await getMessages(
+      {
+        peerId: {
+          type: { oneofKind: "chat", chat: { chatId: BigInt(parentChat.id) } },
+        },
+        messageIds: [1n],
+      },
+      testUtils.functionContext({ userId: owner.id, sessionId: 1 }),
+    )
+
+    expect(parentMessages.messages[0]?.replies?.replyCount).toBe(2)
+    expect(parentMessages.messages[0]?.replies?.recentReplierUserIds).toEqual([
+      BigInt(owner.id),
+      BigInt(repliedUser.id),
+    ])
+  })
+
+  test("keeps the sender's hidden reply-thread dialog hidden on outbound send", async () => {
+    const owner = await testUtils.createUser(nextEmail("thread-hidden-owner"))
+    const participant = await testUtils.createUser(nextEmail("thread-hidden-participant"))
+
+    const parentChat = await testUtils.createChat(null, "Parent Thread", "thread", false, owner.id)
+    if (!parentChat) throw new Error("Parent chat not created")
+
+    await testUtils.addParticipant(parentChat.id, owner.id)
+    await testUtils.addParticipant(parentChat.id, participant.id)
+
+    await db.insert(messages).values({
+      chatId: parentChat.id,
+      messageId: 1,
+      fromId: owner.id,
+      text: "anchor",
+    })
+
+    const [childChat] = await db
+      .insert(chats)
+      .values({
+        type: "thread",
+        title: "Re: anchor",
+        publicThread: false,
+        createdBy: owner.id,
+        parentChatId: parentChat.id,
+        parentMessageId: 1,
+      })
+      .returning()
+
+    if (!childChat) throw new Error("Child chat not created")
+
+    await db.insert(dialogs).values({
+      chatId: childChat.id,
+      userId: owner.id,
+      sidebarVisible: false,
+    })
+
+    await sendMessage(
+      {
+        peerId: {
+          type: { oneofKind: "chat", chat: { chatId: BigInt(childChat.id) } },
+        },
+        message: "still hidden",
+      },
+      testUtils.functionContext({ userId: owner.id, sessionId: 1 }),
+    )
+
+    const [senderDialog] = await db
+      .select()
+      .from(dialogs)
+      .where(and(eq(dialogs.chatId, childChat.id), eq(dialogs.userId, owner.id)))
+      .limit(1)
+
+    expect(senderDialog?.sidebarVisible).toBe(false)
   })
 })

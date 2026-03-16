@@ -11,6 +11,7 @@ import type { ServerUpdate } from "@inline-chat/protocol/server"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { getLastMessageId } from "@in/server/db/models/chats"
 import { InlineError } from "@in/server/types/errors"
+import { emitReplyThreadParentRepliesUpdateIfNeeded } from "@in/server/modules/subthreads"
 
 type Input = {
   peer: InputPeer
@@ -101,6 +102,12 @@ export const readMessages = async (input: Input, context: FunctionContext): Prom
     ]
 
     RealtimeUpdates.pushToUser(context.currentUserId, updates, { skipSessionId: context.currentSessionId })
+
+    await emitReplyThreadParentRepliesUpdateIfNeeded({
+      chatId: updated[0]!.chatId,
+      currentUserId: context.currentUserId,
+    })
+
     return { updates }
   }
 
@@ -189,6 +196,13 @@ export const readMessages = async (input: Input, context: FunctionContext): Prom
 
   if (updates.length > 0) {
     RealtimeUpdates.pushToUser(context.currentUserId, updates, { skipSessionId: context.currentSessionId })
+  }
+
+  if (chatId) {
+    await emitReplyThreadParentRepliesUpdateIfNeeded({
+      chatId,
+      currentUserId: context.currentUserId,
+    })
   }
 
   if (chatId && didAdvanceReadMaxId) {

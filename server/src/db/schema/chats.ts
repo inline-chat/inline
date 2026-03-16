@@ -1,10 +1,10 @@
-import { pgTable, varchar, boolean, pgEnum, unique, check, timestamp } from "drizzle-orm/pg-core"
+import { pgTable, varchar, boolean, pgEnum, unique, check, timestamp, index } from "drizzle-orm/pg-core"
 import { users } from "./users"
 import { spaces } from "./spaces"
 import { sql } from "drizzle-orm"
 import { relations } from "drizzle-orm/_relations"
 import { creationDate, date } from "@in/server/db/schema/common"
-import { integer } from "drizzle-orm/pg-core"
+import { integer, type AnyPgColumn } from "drizzle-orm/pg-core"
 import { messages } from "@in/server/db/schema/messages"
 import { foreignKey } from "drizzle-orm/pg-core"
 import { text } from "drizzle-orm/pg-core"
@@ -35,6 +35,12 @@ export const chats = pgTable(
     /** optional, creator user id (required for home threads) */
     createdBy: integer("created_by").references(() => users.id),
 
+    /** structural parent chat for linked subthreads */
+    parentChatId: integer("parent_chat_id").references((): AnyPgColumn => chats.id),
+
+    /** anchored parent message for reply-thread subthreads */
+    parentMessageId: integer("parent_message_id"),
+
     /** optional, required for private chats, least user id */
     minUserId: integer("min_user_id").references(() => users.id),
     /** optional, required for private chats, greatest user id */
@@ -62,12 +68,30 @@ export const chats = pgTable(
     /** Ensure unique space thread number */
     spaceThreadNumberUniqueContraint: unique("space_thread_number_unique").on(table.spaceId, table.threadNumber),
 
+    /** Allow at most one reply-thread subthread per parent message. */
+    replyThreadParentUniqueConstraint: unique("reply_thread_parent_unique").on(table.parentChatId, table.parentMessageId),
+
     /** Ensure lastMsgId is valid */
     lastMsgIdForeignKey: foreignKey({
       name: "last_msg_id_fk",
       columns: [table.id, table.lastMsgId],
       foreignColumns: [messages.chatId, messages.messageId],
     }),
+
+    /** Ensure anchored parent messages belong to the declared parent chat. */
+    parentMessageForeignKey: foreignKey({
+      name: "parent_message_id_fk",
+      columns: [table.parentChatId, table.parentMessageId],
+      foreignColumns: [messages.chatId, messages.messageId],
+    }),
+
+    /** Message anchors require a structural parent chat. */
+    parentMessageRequiresParentChatConstraint: check(
+      "parent_message_requires_parent_chat",
+      sql`${table.parentMessageId} is null or ${table.parentChatId} is not null`,
+    ),
+
+    parentChatIdIndex: index("chats_parent_chat_id_idx").on(table.parentChatId),
   }),
 )
 

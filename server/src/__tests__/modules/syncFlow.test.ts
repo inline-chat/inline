@@ -11,6 +11,7 @@ import { Functions } from "@in/server/functions"
 import { GetUpdatesResult_ResultType } from "@inline-chat/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { MembersModel } from "@in/server/db/models/members"
+import { dialogs } from "@in/server/db/schema"
 
 const insertServerUpdate = async (params: {
   bucket: UpdateBucket
@@ -218,6 +219,59 @@ describe("Sync core flow", () => {
       throw new Error("Expected participantDelete from user bucket")
     }
     expect(userUpdate.update.participantDelete.chatId).toBe(42n)
+  })
+
+  it("inflates user bucket chatOpen updates", async () => {
+    const user = await testUtils.createUser("chat-open-sync@example.com")
+    const chat = await testUtils.createChat(null, "Sidebar Thread", "thread", false, user.id)
+    if (!chat) {
+      throw new Error("Failed to create chat")
+    }
+
+    await testUtils.addParticipant(chat.id, user.id)
+
+    const [dialog] = await db
+      .insert(dialogs)
+      .values({
+        userId: user.id,
+        chatId: chat.id,
+        spaceId: null,
+        sidebarVisible: true,
+      })
+      .returning()
+
+    if (!dialog) {
+      throw new Error("Failed to create dialog")
+    }
+
+    await insertServerUpdate({
+      bucket: UpdateBucket.User,
+      entityId: user.id,
+      seq: 1,
+      payload: {
+        oneofKind: "userChatOpen",
+        userChatOpen: {
+          chat: Encoders.chat(chat, { encodingForUserId: user.id }),
+          dialog: Encoders.dialog(dialog, { unreadCount: 0 }),
+        },
+      },
+    })
+
+    const { updates: dbUpdates } = await Sync.getUpdates({
+      bucket: { type: UpdateBucket.User, userId: user.id },
+      seqStart: 0,
+      limit: 10,
+    })
+
+    const updates = Sync.inflateUserUpdates(dbUpdates)
+    expect(updates).toHaveLength(1)
+    const [userUpdate] = updates
+    if (!userUpdate || userUpdate.update.oneofKind !== "chatOpen") {
+      throw new Error("Expected chatOpen from user bucket")
+    }
+    expect(userUpdate.update.chatOpen.chat?.id).toBe(BigInt(chat.id))
+    expect(userUpdate.update.chatOpen.dialog?.chatId).toBe(BigInt(chat.id))
+    expect(userUpdate.update.chatOpen.dialog?.sidebarVisible).toBe(true)
   })
 
   it("inflates space bucket updates for member removal", async () => {

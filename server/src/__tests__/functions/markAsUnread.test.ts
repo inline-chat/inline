@@ -5,10 +5,11 @@ import { markAsUnread } from "@in/server/functions/messages.markAsUnread"
 import type { DbChat, DbUser } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { db } from "@in/server/db"
-import { dialogs, updates, UpdateBucket } from "@in/server/db/schema"
+import { chats, dialogs, messages, updates, UpdateBucket } from "@in/server/db/schema"
 import { and, desc, eq } from "drizzle-orm"
 import { handler as readMessagesHandler } from "@in/server/methods/readMessages"
 import { UpdatesModel } from "@in/server/db/models/updates"
+import { getMessages } from "@in/server/functions/messages.getMessages"
 
 // Test state
 let currentUser: DbUser
@@ -185,5 +186,142 @@ describe("markAsUnread", () => {
     if (decrypted.payload.update.oneofKind === "userMarkAsUnread") {
       expect(decrypted.payload.update.userMarkAsUnread.unreadMark).toBe(false)
     }
+  })
+
+  test("reply-thread parent replies summary updates when unread state changes", async () => {
+    const parentChat = await testUtils.createChat(null, "Parent Thread", "thread", false, currentUser.id)
+    if (!parentChat) {
+      throw new Error("Parent chat not created")
+    }
+
+    await testUtils.addParticipant(parentChat.id, currentUser.id)
+    await testUtils.addParticipant(parentChat.id, otherUser.id)
+
+    await db.insert(messages).values({
+      chatId: parentChat.id,
+      messageId: 1,
+      fromId: otherUser.id,
+      text: "anchor",
+    })
+    await db.update(chats).set({ lastMsgId: 1 }).where(eq(chats.id, parentChat.id))
+
+    const [childChat] = await db
+      .insert(chats)
+      .values({
+        type: "thread",
+        title: "Re: anchor",
+        publicThread: false,
+        createdBy: currentUser.id,
+        parentChatId: parentChat.id,
+        parentMessageId: 1,
+      })
+      .returning()
+
+    if (!childChat) {
+      throw new Error("Child chat not created")
+    }
+
+    await db.insert(dialogs).values({
+      chatId: childChat.id,
+      userId: currentUser.id,
+      readInboxMaxId: 1,
+      unreadMark: false,
+      sidebarVisible: false,
+    })
+
+    await db.insert(messages).values({
+      chatId: childChat.id,
+      messageId: 1,
+      fromId: otherUser.id,
+      text: "reply",
+    })
+    await db.update(chats).set({ lastMsgId: 1 }).where(eq(chats.id, childChat.id))
+
+    const initialParentMessages = await getMessages(
+      {
+        peerId: {
+          type: { oneofKind: "chat", chat: { chatId: BigInt(parentChat.id) } },
+        },
+        messageIds: [1n],
+      },
+      context,
+    )
+
+    expect(initialParentMessages.messages[0]?.replies?.hasUnread).toBe(false)
+
+    const [beforeMarkRow] = await db
+      .select()
+      .from(updates)
+      .where(and(eq(updates.bucket, UpdateBucket.Chat), eq(updates.entityId, parentChat.id)))
+      .orderBy(desc(updates.seq))
+      .limit(1)
+
+    const childPeerId: InputPeer = {
+      type: { oneofKind: "chat" as const, chat: { chatId: BigInt(childChat.id) } },
+    }
+
+    await markAsUnread({ peer: childPeerId }, context)
+
+    const afterMarkParentMessages = await getMessages(
+      {
+        peerId: {
+          type: { oneofKind: "chat", chat: { chatId: BigInt(parentChat.id) } },
+        },
+        messageIds: [1n],
+      },
+      context,
+    )
+
+    expect(afterMarkParentMessages.messages[0]?.replies?.hasUnread).toBe(true)
+
+    const [afterMarkRow] = await db
+      .select()
+      .from(updates)
+      .where(and(eq(updates.bucket, UpdateBucket.Chat), eq(updates.entityId, parentChat.id)))
+      .orderBy(desc(updates.seq))
+      .limit(1)
+
+    expect(afterMarkRow).toBeTruthy()
+    expect(afterMarkRow!.seq).toBeGreaterThan(beforeMarkRow?.seq ?? 0)
+
+    const decryptedAfterMark = UpdatesModel.decrypt(afterMarkRow!)
+    expect(decryptedAfterMark.payload.update.oneofKind).toBe("editMessage")
+    if (decryptedAfterMark.payload.update.oneofKind === "editMessage") {
+      expect(Number(decryptedAfterMark.payload.update.editMessage.chatId)).toBe(parentChat.id)
+      expect(Number(decryptedAfterMark.payload.update.editMessage.msgId)).toBe(1)
+    }
+
+    await readMessagesHandler(
+      {
+        peerThreadId: childChat.id.toString(),
+      },
+      {
+        currentUserId: currentUser.id,
+        currentSessionId: 1,
+        ip: undefined,
+      },
+    )
+
+    const afterReadParentMessages = await getMessages(
+      {
+        peerId: {
+          type: { oneofKind: "chat", chat: { chatId: BigInt(parentChat.id) } },
+        },
+        messageIds: [1n],
+      },
+      context,
+    )
+
+    expect(afterReadParentMessages.messages[0]?.replies?.hasUnread).toBe(false)
+
+    const [afterReadRow] = await db
+      .select()
+      .from(updates)
+      .where(and(eq(updates.bucket, UpdateBucket.Chat), eq(updates.entityId, parentChat.id)))
+      .orderBy(desc(updates.seq))
+      .limit(1)
+
+    expect(afterReadRow).toBeTruthy()
+    expect(afterReadRow!.seq).toBeGreaterThan(afterMarkRow!.seq)
   })
 }) 

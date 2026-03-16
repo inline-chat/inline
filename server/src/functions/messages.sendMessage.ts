@@ -2,7 +2,6 @@ import {
   InputPeer,
   MessageAttachment,
   MessageEntities,
-  type MessageEntity,
   MessageEntity_Type,
   MessageSendMode,
   Update,
@@ -12,7 +11,7 @@ import { FileModel, type DbFullPhoto, type DbFullVideo } from "@in/server/db/mod
 import type { DbFullDocument, DbFullVoice } from "@in/server/db/models/files"
 import { MessageModel } from "@in/server/db/models/messages"
 import { db } from "@in/server/db"
-import { dialogs, lower, messageAttachments, users, type DbChat, type DbMessage } from "@in/server/db/schema"
+import { dialogs, messageAttachments, type DbChat, type DbMessage } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { getCachedUserName, UserNamesCache, type UserName } from "@in/server/modules/cache/userNames"
 import { decryptMessage, encryptMessage } from "@in/server/modules/encryption/encryptMessage"
@@ -28,7 +27,6 @@ import { getCachedChatInfo } from "@in/server/modules/cache/chatInfo"
 import { getCachedUserSettings } from "@in/server/modules/cache/userSettings"
 import { UserSettingsNotificationsMode } from "@in/server/db/models/userSettings/types"
 import { encryptBinary } from "@in/server/modules/encryption/encryption"
-import { processMessageText } from "@in/server/modules/message/processText"
 import { isUserMentioned } from "@in/server/modules/message/helpers"
 import { detectHasLink } from "@in/server/modules/message/linkDetection"
 import { decideNotification } from "@in/server/modules/notifications/decision"
@@ -48,6 +46,15 @@ import { processAttachments } from "@in/server/db/models/messages"
 import { and, eq, inArray } from "drizzle-orm"
 import { unarchiveIfNeeded } from "@in/server/modules/message/unarchiveIfNeeded"
 import { desktopPushSuppressionTracker } from "@in/server/modules/notifications/desktopPushSuppression"
+import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
+import {
+  emitSidebarChatOpenUpdates,
+  isLinkedSubthread,
+  isReplyThread,
+  persistMessageRepliesUpdate,
+  promoteLinkedSubthreadDialogsToSidebar,
+  pushMessageRepliesUpdate,
+} from "@in/server/modules/subthreads"
 
 type Input = {
   peerId: InputPeer
@@ -101,22 +108,15 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   // FIXME: create a helper function to get the layer
   const currentUserLayer = connectionManager.getConnectionBySession(currentUserId, context.currentSessionId)?.layer ?? 0
 
-  let text = input.message
-  let entities = input.entities
-
-  // Process message text
-  if (input.parseMarkdown) {
-    const textContent = input.message
-      ? processMessageText({ text: input.message, entities: input.entities })
-      : undefined
-    text = textContent?.text
-    entities = textContent?.entities
-  }
-
-  entities = await parseMissingMentionEntitiesByUsername({
-    text,
-    entities,
-  })
+  const outgoingText = input.message
+    ? await processOutgoingText({
+        text: input.message,
+        entities: input.entities,
+        parseMarkdown: input.parseMarkdown,
+      })
+    : undefined
+  let text = outgoingText?.text
+  let entities = outgoingText?.entities
 
   const hasLink =
     detectHasLink({ entities }) ||
@@ -269,6 +269,23 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   // remove the need to lock the chat row. then we should deliver the update
   // with sequence number so we can ensure gap-free delivery.
   const updateGroup = await getUpdateGroupFromInputPeer(inputPeer, { currentUserId })
+  const sidebarPromotionUserIds = await getLinkedSubthreadSidebarPromotionUserIds({
+    chat,
+    currentUserId,
+    replyToMessageId: replyToMsgIdNumber ?? undefined,
+    entities,
+    updateGroup,
+  })
+  if (sidebarPromotionUserIds.length > 0) {
+    const { activatedDialogs } = await promoteLinkedSubthreadDialogsToSidebar({
+      chat,
+      userIds: sidebarPromotionUserIds,
+    })
+    await emitSidebarChatOpenUpdates({
+      chat,
+      dialogs: activatedDialogs,
+    })
+  }
   const { updates: unarchiveUpdates } = await unarchiveIfNeeded({
     chat,
     updateGroup,
@@ -324,177 +341,85 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     }
   }
 
+  if (isReplyThread(chat) && chat.parentChatId != null && chat.parentMessageId != null) {
+    const parentSummaryUpdate = await persistMessageRepliesUpdate({
+      parentChatId: chat.parentChatId,
+      parentMessageId: chat.parentMessageId,
+    })
+
+    await pushMessageRepliesUpdate({
+      parentChatId: chat.parentChatId,
+      parentMessageId: chat.parentMessageId,
+      currentUserId,
+      update: parentSummaryUpdate,
+    })
+  }
+
   // return new updates
   return { updates: selfUpdates }
 }
 
-type MentionCandidate = {
-  offset: number
-  length: number
-  username: string
-}
-
-const isMentionChar = (char: string): boolean => {
-  const code = char.charCodeAt(0)
-  return (
-    (code >= 48 && code <= 57) || // 0-9
-    (code >= 65 && code <= 90) || // A-Z
-    (code >= 97 && code <= 122) || // a-z
-    code === 95 // _
-  )
-}
-
-const extractMentionCandidates = (text: string): MentionCandidate[] => {
-  const candidates: MentionCandidate[] = []
-
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] !== "@") {
-      continue
-    }
-
-    if (i > 0 && isMentionChar(text[i - 1]!)) {
-      // Skip things like email addresses (foo@bar.com)
-      continue
-    }
-
-    let end = i + 1
-    while (end < text.length && isMentionChar(text[end]!)) {
-      end += 1
-    }
-
-    const username = text.slice(i + 1, end)
-    if (username.length < 2) {
-      continue
-    }
-
-    candidates.push({
-      offset: i,
-      length: end - i,
-      username,
-    })
-
-    i = end - 1
-  }
-
-  return candidates
-}
-
-const getClientEntityRanges = (entities: MessageEntities | undefined): Array<{ start: number; end: number }> => {
-  if (!entities || entities.entities.length === 0) {
+const getMentionedUserIds = (entities: MessageEntities | undefined): number[] => {
+  if (!entities) {
     return []
   }
 
-  return entities.entities
-    .filter((entity): entity is MessageEntity => entity !== undefined)
-    .map((entity) => {
-      const start = Number(entity.offset)
-      const end = Number(entity.offset + entity.length)
-      return { start, end }
-    })
-}
+  const userIds = new Set<number>()
 
-const isRangeOverlappingClientEntity = (
-  range: { start: number; end: number },
-  clientEntityRanges: Array<{ start: number; end: number }>,
-): boolean => {
-  return clientEntityRanges.some((clientRange) => {
-    return range.start < clientRange.end && clientRange.start < range.end
-  })
-}
-
-const parseMissingMentionEntitiesByUsername = async ({
-  text,
-  entities,
-}: {
-  text: string | undefined
-  entities: MessageEntities | undefined
-}): Promise<MessageEntities | undefined> => {
-  if (!text || !text.includes("@")) {
-    return entities
-  }
-
-  const mentionCandidates = extractMentionCandidates(text)
-  if (mentionCandidates.length === 0) {
-    return entities
-  }
-
-  const clientEntityRanges = getClientEntityRanges(entities)
-
-  const unresolvedMentionCandidates = mentionCandidates.filter((candidate) => {
-    return !isRangeOverlappingClientEntity(
-      { start: candidate.offset, end: candidate.offset + candidate.length },
-      clientEntityRanges,
-    )
-  })
-
-  if (unresolvedMentionCandidates.length === 0) {
-    return entities
-  }
-
-  const normalizedUsernames = [...new Set(unresolvedMentionCandidates.map((candidate) => candidate.username.toLowerCase()))]
-  if (normalizedUsernames.length === 0) {
-    return entities
-  }
-
-  const matchedUsers = await db
-    .select({
-      id: users.id,
-      username: users.username,
-    })
-    .from(users)
-    .where(inArray(lower(users.username), normalizedUsernames))
-
-  if (matchedUsers.length === 0) {
-    return entities
-  }
-
-  const userIdByUsername = new Map<string, number>()
-  for (const matchedUser of matchedUsers) {
-    if (!matchedUser.username) {
-      continue
-    }
-    userIdByUsername.set(matchedUser.username.toLowerCase(), matchedUser.id)
-  }
-
-  const parsedMentionEntities: MessageEntity[] = []
-  for (const candidate of unresolvedMentionCandidates) {
-    const userId = userIdByUsername.get(candidate.username.toLowerCase())
-    if (!userId) {
-      continue
-    }
-
-    parsedMentionEntities.push({
-      type: MessageEntity_Type.MENTION,
-      offset: BigInt(candidate.offset),
-      length: BigInt(candidate.length),
-      entity: {
-        oneofKind: "mention",
-        mention: {
-          userId: BigInt(userId),
-        },
-      },
-    })
-  }
-
-  if (parsedMentionEntities.length === 0) {
-    return entities
-  }
-
-  const existingEntities = (entities?.entities ?? []).filter((entity): entity is MessageEntity => entity !== undefined)
-  const combinedEntities = [...existingEntities, ...parsedMentionEntities]
-  combinedEntities.sort((a, b) => {
-    if (a.offset === b.offset) {
-      if (a.length === b.length) {
-        return 0
+  for (const entity of entities.entities) {
+    if (
+      entity &&
+      entity.type === MessageEntity_Type.MENTION &&
+      entity.entity.oneofKind === "mention"
+    ) {
+      const userId = Number(entity.entity.mention.userId)
+      if (Number.isSafeInteger(userId) && userId > 0) {
+        userIds.add(userId)
       }
-      return a.length < b.length ? -1 : 1
     }
-    return a.offset < b.offset ? -1 : 1
-  })
-
-  return {
-    entities: combinedEntities,
   }
+
+  return Array.from(userIds)
+}
+
+const getLinkedSubthreadSidebarPromotionUserIds = async ({
+  chat,
+  currentUserId,
+  replyToMessageId,
+  entities,
+  updateGroup,
+}: {
+  chat: DbChat
+  currentUserId: number
+  replyToMessageId: number | undefined
+  entities: MessageEntities | undefined
+  updateGroup: UpdateGroup
+}): Promise<number[]> => {
+  if (!isLinkedSubthread(chat)) {
+    return []
+  }
+
+  const eligibleUserIds = new Set(updateGroup.userIds.filter((userId) => userId !== currentUserId))
+  const promotedUserIds = new Set<number>()
+
+  for (const mentionedUserId of getMentionedUserIds(entities)) {
+    if (eligibleUserIds.has(mentionedUserId)) {
+      promotedUserIds.add(mentionedUserId)
+    }
+  }
+
+  if (replyToMessageId !== undefined) {
+    try {
+      const repliedToMessage = await MessageModel.getMessage(replyToMessageId, chat.id)
+      if (eligibleUserIds.has(repliedToMessage.fromId)) {
+        promotedUserIds.add(repliedToMessage.fromId)
+      }
+    } catch {
+      // Keep send semantics unchanged if reply target is missing or inaccessible.
+    }
+  }
+
+  return Array.from(promotedUserIds)
 }
 
 type EncodeMessageInput = Parameters<typeof Encoders.message>[0]

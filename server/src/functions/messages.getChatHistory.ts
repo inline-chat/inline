@@ -8,6 +8,7 @@ import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { Log } from "@in/server/utils/log"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
+import { getMessageRepliesMap } from "@in/server/modules/subthreads"
 import type { DbChat } from "@in/server/db/schema"
 
 type Input = {
@@ -129,7 +130,7 @@ export const getChatHistory = async (input: Input, context: FunctionContext): Pr
   }
 
   // get messages
-  const { messages } = await getMessagesWithChatCreation(inputPeer, {
+  const { chat, messages } = await getMessagesWithChatCreation(inputPeer, {
     offsetId: input.offsetId,
     limit: input.limit,
     mode,
@@ -142,12 +143,19 @@ export const getChatHistory = async (input: Input, context: FunctionContext): Pr
     currentUserId: context.currentUserId,
   })
 
+  const repliesMap = await getMessageRepliesMap({
+    parentChatId: chat.id,
+    parentMessageIds: messages.map((message) => message.messageId),
+    userId: context.currentUserId,
+  })
+
   // encode messages
   const encodedMessages = messages.map((message) =>
     Encoders.fullMessage({
       message,
       encodingForUserId: context.currentUserId,
       encodingForPeer: { inputPeer },
+      replies: repliesMap.get(message.messageId),
     }),
   )
 
