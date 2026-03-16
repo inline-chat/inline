@@ -1,4 +1,4 @@
-import { and, eq, or, inArray } from "drizzle-orm"
+import { and, eq, inArray } from "drizzle-orm"
 import { db } from "@in/server/db"
 import { integrations, members, spaces } from "@in/server/db/schema"
 import { type Static, Type } from "@sinclair/typebox"
@@ -16,6 +16,7 @@ export const Response = Type.Object({
   hasNotionConnected: Type.Boolean(),
   hasIntegrationAccess: Type.Boolean(),
   linearTeamId: Type.Optional(Type.String()),
+  notionDatabaseId: Type.Optional(Type.String()),
   notionSpaces: Type.Optional(
     Type.Array(
       Type.Object({
@@ -44,6 +45,7 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
   let hasNotionConnected = false
   let hasIntegrationAccess = false
   let linearTeamId: string | undefined = undefined
+  let notionDatabaseId: string | undefined = undefined
   let notionSpaces: Array<{ spaceId: number; spaceName: string }> | undefined
   let linearSpaces: Array<{ spaceId: number; spaceName: string }> | undefined
 
@@ -65,6 +67,8 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
       hasNotionConnected = spaceIntegrations.some((integration) => integration.provider === "notion")
       hasLinearConnected = spaceIntegrations.some((integration) => integration.provider === "linear")
       linearTeamId = spaceIntegrations.find((integration) => integration.provider === "linear")?.linearTeamId ?? undefined
+      notionDatabaseId =
+        spaceIntegrations.find((integration) => integration.provider === "notion")?.notionDatabaseId ?? undefined
 
       // User has integration access if they're a member of this space and it has integrations
       hasIntegrationAccess = spaceIntegrations.length > 0
@@ -126,6 +130,7 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
     hasNotionConnected,
     hasIntegrationAccess,
     linearTeamId,
+    notionDatabaseId,
     notionSpaces,
     linearSpaces,
   }

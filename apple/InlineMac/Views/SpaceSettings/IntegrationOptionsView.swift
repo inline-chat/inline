@@ -17,6 +17,7 @@ struct IntegrationOptionsView: View {
   @State private var lastLoadedAt: Date?
   @State private var didLoadFromCache = false
   @State private var hadStaleCachedSelection = false
+  @State private var hadStaleNotionSelection = false
 
   private let databasesCacheKey: String
   private let selectedDatabaseCacheKey: String
@@ -35,13 +36,13 @@ struct IntegrationOptionsView: View {
   var body: some View {
     Form {
       if provider == "notion" {
-        Section("Notion Database") {
-          Text("Choose the database where Inline should create \"Will Do\" tasks for this space. Changes save automatically.")
+        Section("Notion Source") {
+          Text("Choose the Notion source where Inline should create \"Will Do\" tasks for this space. Changes save automatically.")
             .font(.footnote)
             .foregroundStyle(.secondary)
 
-          Picker("Database", selection: $selectedDatabase) {
-            Text("Select a database")
+          Picker("Notion Source", selection: $selectedDatabase) {
+            Text("Select a Notion source")
               .tag(nil as String?)
               .disabled(true)
             ForEach(databases, id: \.id) { database in
@@ -55,6 +56,12 @@ struct IntegrationOptionsView: View {
             cacheNotionSelection(newValue)
             saveNotionSelection(newValue)
           }
+
+          Text(notionSelectionSummary)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .lineLimit(2)
+            .truncationMode(.tail)
         }
       } else if provider == "linear" {
         Section("Default team") {
@@ -143,7 +150,7 @@ struct IntegrationOptionsView: View {
 
   private var statusText: String {
     if isLoading {
-      return provider == "linear" ? "Updating teams..." : "Updating databases..."
+      return provider == "linear" ? "Updating teams..." : "Updating Notion sources..."
     }
     if let lastLoadedAt {
       return "Updated \(lastLoadedAt.formatted(date: .abbreviated, time: .shortened))"
@@ -151,7 +158,21 @@ struct IntegrationOptionsView: View {
     if didLoadFromCache {
       return "Showing cached results"
     }
-    return provider == "linear" ? "Loading teams..." : "Loading databases..."
+    return provider == "linear" ? "Loading teams..." : "Loading Notion sources..."
+  }
+
+  private var notionSelectionSummary: String {
+    guard provider == "notion" else { return "" }
+    if hadStaleNotionSelection {
+      return "Your previous Notion selection isn't valid for this space anymore. Select a Notion source again."
+    }
+    guard let selectedDatabase, !selectedDatabase.isEmpty else {
+      return "Select a Notion source to enable \"Will Do\" tasks."
+    }
+    guard let source = databases.first(where: { $0.id == selectedDatabase }) else {
+      return "Selected Notion source"
+    }
+    return "Tasks will be created in \(source.title)."
   }
 
   private var linearSelectionSummary: String {
@@ -256,6 +277,30 @@ struct IntegrationOptionsView: View {
     await MainActor.run { isLoading = false }
   }
 
+  private func fetchCurrentNotionSelection() async {
+    do {
+      let integrations = try await ApiClient.shared.getIntegrations(
+        userId: Auth.shared.getCurrentUserId() ?? 0,
+        spaceId: spaceId
+      )
+      await MainActor.run {
+        hadStaleNotionSelection = false
+        if let sourceId = integrations.notionDatabaseId, !sourceId.isEmpty {
+          selectedDatabase = sourceId
+          cacheNotionSelection(sourceId)
+        } else {
+          if UserDefaults.standard.string(forKey: selectedDatabaseCacheKey)?.isEmpty == false {
+            hadStaleNotionSelection = true
+          }
+          selectedDatabase = nil
+          UserDefaults.standard.removeObject(forKey: selectedDatabaseCacheKey)
+        }
+      }
+    } catch {
+      // best-effort; keep cached selection
+    }
+  }
+
   private func fetchTeams() async {
     await MainActor.run { isLoading = true }
     do {
@@ -303,6 +348,7 @@ struct IntegrationOptionsView: View {
     await MainActor.run { errorMessage = nil }
     if provider == "notion" {
       await fetchDatabases()
+      await fetchCurrentNotionSelection()
     } else if provider == "linear" {
       async let teamsTask: Void = fetchTeams()
       async let selectionTask: Void = fetchCurrentLinearSelection()

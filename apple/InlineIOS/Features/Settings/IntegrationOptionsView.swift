@@ -1,3 +1,4 @@
+import Auth
 import InlineKit
 import SwiftUI
 
@@ -21,10 +22,9 @@ struct IntegrationOptionsView: View {
 
   var body: some View {
     List {
-      // TODO: make footer better
-      Section(footer: Text("Select a database to help AI understand your data")) {
-        Picker("Database", selection: $selectedDatabase) {
-          Text("Select a database").tag(nil as String?)
+      Section(footer: Text("Select the Notion source where Inline should create tasks for this space.")) {
+        Picker("Notion Source", selection: $selectedDatabase) {
+          Text("Select a Notion source").tag(nil as String?)
           ForEach(databases, id: \.id) { database in
             Text("\(database.icon ?? "📄") \(database.title)")
               .tag(database.id as String?)
@@ -52,6 +52,7 @@ struct IntegrationOptionsView: View {
 
       Task(priority: .background) {
         await fetchDatabases()
+        await fetchCurrentSelection()
       }
     }
     .navigationBarTitleDisplayMode(.inline)
@@ -105,6 +106,27 @@ struct IntegrationOptionsView: View {
       }
     } catch {
       print("Error fetching databases: \(error)")
+    }
+  }
+
+  private func fetchCurrentSelection() async {
+    do {
+      let integrations = try await ApiClient.shared.getIntegrations(
+        userId: Auth.shared.getCurrentUserId() ?? 0,
+        spaceId: spaceId
+      )
+
+      await MainActor.run {
+        if let sourceId = integrations.notionDatabaseId, !sourceId.isEmpty {
+          selectedDatabase = sourceId
+          UserDefaults.standard.set(sourceId, forKey: selectedDatabaseCacheKey)
+        } else {
+          selectedDatabase = nil
+          UserDefaults.standard.removeObject(forKey: selectedDatabaseCacheKey)
+        }
+      }
+    } catch {
+      print("Error fetching current Notion source selection: \(error)")
     }
   }
 

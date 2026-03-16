@@ -31,6 +31,32 @@ public enum NotionTaskError: Error, LocalizedError {
   }
 }
 
+public func notionTaskUserFacingMessage(
+  error: Error,
+  fallback: String = "Failed to create Notion task"
+) -> String {
+  let description: String?
+
+  switch error {
+    case let notionTaskError as NotionTaskError:
+      description = notionTaskError.errorDescription
+    case let apiError as APIError:
+      description = apiError.errorDescription
+    case let localizedError as LocalizedError:
+      description = localizedError.errorDescription
+    default:
+      description = nil
+  }
+
+  guard let trimmedDescription = description?.trimmingCharacters(in: .whitespacesAndNewlines),
+        !trimmedDescription.isEmpty
+  else {
+    return fallback
+  }
+
+  return trimmedDescription
+}
+
 // MARK: - Protocols
 
 public protocol NotionTaskManagerDelegate: AnyObject, Sendable {
@@ -117,7 +143,7 @@ public class NotionTaskManager: @unchecked Sendable {
     } catch {
       log.error("Error creating notion task: \(error)")
       delegate?.showErrorToast(
-        "Failed to create Notion task",
+        notionTaskUserFacingMessage(error: error),
         systemImage: "exclamationmark.triangle"
       )
     }
@@ -156,7 +182,7 @@ public class NotionTaskManager: @unchecked Sendable {
     } catch {
       log.error("Error handling will do for DM: \(error)")
       delegate?.showErrorToast(
-        "Failed to create Notion task",
+        notionTaskUserFacingMessage(error: error),
         systemImage: "exclamationmark.triangle"
       )
     }
@@ -197,7 +223,7 @@ public class NotionTaskManager: @unchecked Sendable {
 
       log.error("Error creating notion task: \(error)")
       delegate?.showErrorToast(
-        "Failed to create Notion task",
+        notionTaskUserFacingMessage(error: error),
         systemImage: "exclamationmark.triangle"
       )
     }
@@ -225,13 +251,17 @@ public final class NotionTaskProgressTracker: @unchecked Sendable {
   }
 
   public func startProgress() async {
-    stateQueue.async(flags: .barrier) {
+    stateQueue.sync(flags: .barrier) {
       self._currentStepIndex = 0
       self._isCompleted = false
       self._isFailed = false
     }
 
     for (index, step) in progressSteps.enumerated() {
+      if Task.isCancelled {
+        return
+      }
+
       let shouldContinue = stateQueue.sync {
         !_isCompleted && !_isFailed
       }
@@ -240,7 +270,7 @@ public final class NotionTaskProgressTracker: @unchecked Sendable {
         return
       }
 
-      stateQueue.async(flags: .barrier) {
+      stateQueue.sync(flags: .barrier) {
         self._currentStepIndex = index
       }
 
@@ -250,18 +280,22 @@ public final class NotionTaskProgressTracker: @unchecked Sendable {
         systemImage: step.icon
       )
 
-      try? await Task.sleep(nanoseconds: UInt64(step.estimatedDuration * 1_000_000_000))
+      do {
+        try await Task.sleep(nanoseconds: UInt64(step.estimatedDuration * 1_000_000_000))
+      } catch {
+        return
+      }
     }
   }
 
   public func completeProgress() async {
-    stateQueue.async(flags: .barrier) {
+    stateQueue.sync(flags: .barrier) {
       self._isCompleted = true
     }
   }
 
   public func failProgress() async {
-    stateQueue.async(flags: .barrier) {
+    stateQueue.sync(flags: .barrier) {
       self._isFailed = true
     }
   }
@@ -274,7 +308,7 @@ public final class NotionTaskProgressTracker: @unchecked Sendable {
     guard shouldUpdate else { return }
 
     if let stepIndex = progressSteps.firstIndex(where: { $0.text == stepText }) {
-      stateQueue.async(flags: .barrier) {
+      stateQueue.sync(flags: .barrier) {
         self._currentStepIndex = stepIndex
       }
       let step = progressSteps[stepIndex]
@@ -296,7 +330,7 @@ public final class NotionTaskProgressTracker: @unchecked Sendable {
     guard shouldUpdate else { return }
 
     let stepIndex = stepNumber - 1
-    stateQueue.async(flags: .barrier) {
+    stateQueue.sync(flags: .barrier) {
       self._currentStepIndex = stepIndex
     }
     let step = progressSteps[stepIndex]

@@ -20,6 +20,7 @@ import { encodeMessageAttachmentUpdate } from "../../realtime/encoders/encodeMes
 import { ProtocolConvertors } from "@in/server/types/protocolConvertors"
 import { isDev } from "@in/server/env"
 import { InlineError } from "@in/server/types/errors"
+import { toActionableNotionInlineError } from "@in/server/modules/notion/errors"
 
 export const Input = Type.Object({
   spaceId: Type.Number(),
@@ -261,6 +262,11 @@ export const handler = async (
 
     if (error instanceof InlineError) {
       throw error
+    }
+
+    const actionableError = toActionableNotionInlineError(error)
+    if (actionableError) {
+      throw actionableError
     }
 
     const internalError = new InlineError(InlineError.ApiError.INTERNAL)

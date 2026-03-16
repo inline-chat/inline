@@ -6,6 +6,8 @@ import {
   getSampleDatabasePages,
   getNotionClient,
   formatNotionUsers,
+  persistCanonicalNotionParentId,
+  resolveSelectedNotionParent,
   type NotionUser,
 } from "./notion"
 import { MessageModel, type ProcessedMessage } from "@in/server/db/models/messages"
@@ -17,6 +19,8 @@ import { filterFalsy } from "@in/server/utils/filter"
 import { findTitleProperty, extractTaskTitle, getPropertyDescriptions } from "./schemaGenerator"
 import { formatMessage } from "@in/server/modules/notifications/eval"
 import { systemPrompt14 } from "./prompts"
+import { parseNotionAgentResponse } from "./agentResponse"
+import { NOTION_SETUP_ERROR_MESSAGES } from "./errors"
 
 const log = new Log("NotionAgent", LogLevel.INFO)
 
@@ -36,6 +40,10 @@ const errorTelemetry = (error: unknown) => ({
   errorName: error instanceof Error ? error.name : "UnknownError",
   errorMessage: error instanceof Error ? error.message : String(error),
 })
+
+const isNotionPropertyValueObject = (value: unknown): value is Record<string, unknown> => {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+}
 
 function inlineUserDisplayName(user: UserName | undefined, fallbackUserId: number): string {
   if (user) {
@@ -70,25 +78,30 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
     // First, get the Notion client and database info
     stage = "load_notion_client"
     const clientStart = Date.now()
-    const { client, databaseId } = await getNotionClient(input.spaceId)
+    const { client, databaseId: savedParentId } = await getNotionClient(input.spaceId)
     logDevTelemetry("Loaded Notion client", {
       spaceId: input.spaceId,
       durationMs: Date.now() - clientStart,
     })
 
-    if (!databaseId) {
-      Log.shared.error("No databaseId found", devTelemetry)
-      throw new Error("No databaseId found")
+    if (!savedParentId) {
+      Log.shared.error("No notion parent found", devTelemetry)
+      throw new Error(NOTION_SETUP_ERROR_MESSAGES.parentMissing)
+    }
+
+    const selectedParent = await resolveSelectedNotionParent(input.spaceId, savedParentId, client)
+    if (selectedParent.wasLegacyDatabaseSelection) {
+      await persistCanonicalNotionParentId(input.spaceId, savedParentId, selectedParent.dataSourceId)
     }
 
     // Run all data fetching operations in parallel - this is the biggest optimization
     stage = "load_notion_context"
     const dataFetchStart = Date.now()
-    const [notionUsers, database, samplePages, targetMessage, messages, chatInfo, participantNames, currentUserName] =
+    const [notionUsers, dataSource, samplePages, targetMessage, messages, chatInfo, participantNames, currentUserName] =
       await Promise.all([
         getNotionUsers(input.spaceId, client).then(formatNotionUsers),
-        getActiveDatabaseData(input.spaceId, databaseId, client),
-        getSampleDatabasePages(input.spaceId, databaseId, 3, client),
+        getActiveDatabaseData(input.spaceId, selectedParent.dataSourceId, client),
+        getSampleDatabasePages(input.spaceId, selectedParent.dataSourceId, 3, client),
         MessageModel.getMessage(input.messageId, input.chatId),
         MessageModel.getMessagesAroundTarget(input.chatId, input.messageId, 20, 10),
         getCachedChatInfo(input.chatId),
@@ -114,11 +127,12 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
     logDevTelemetry("Preparing Notion page payload", {
       spaceId: input.spaceId,
       chatId: input.chatId,
-      databaseId: database?.id,
+      databaseId: selectedParent.databaseId,
+      dataSourceId: selectedParent.dataSourceId,
     })
 
-    if (!database) {
-      throw new Error("No active database found")
+    if (!dataSource) {
+      throw new Error("No active data source found")
     }
 
     if (!chatInfo) {
@@ -129,7 +143,7 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
     const promptStart = Date.now()
     const userPrompt = taskPrompt(
       notionUsers,
-      database,
+      dataSource,
       samplePages,
       messages,
       targetMessage,
@@ -163,6 +177,7 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
           content: userPrompt,
         },
       ],
+      response_format: { type: "json_object" },
     })
     logDevTelemetry("Received Notion agent completion", {
       spaceId: input.spaceId,
@@ -194,20 +209,27 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
       estimatedCostUsd: Number(totalPrice.toFixed(4)),
     })
 
-    const parsedResponse = completion.choices[0]?.message?.content
-    if (!parsedResponse) {
+    const responseMessage = completion.choices[0]?.message
+    if (!responseMessage?.content) {
       throw new Error("Failed to generate task data")
     }
+    logDevTelemetry("Notion agent raw response", {
+      ...devTelemetry,
+      responseLength: responseMessage.content.length,
+      responseContent: responseMessage.content,
+    })
 
     stage = "parse_agent_response"
     const parseStart = Date.now()
-    let validatedData: any
+    let validatedData: ReturnType<typeof parseNotionAgentResponse>
     try {
-      validatedData = JSON.parse(parsedResponse)
+      validatedData = parseNotionAgentResponse({
+        content: responseMessage?.content,
+      })
     } catch (err) {
       log.error("Failed to parse Notion agent JSON", err, {
         ...devTelemetry,
-        responseLength: parsedResponse.length,
+        responseLength: responseMessage?.content?.length ?? 0,
       })
       throw new Error("Notion agent returned invalid JSON")
     }
@@ -217,7 +239,7 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
     })
 
     const propertiesFromResponse = validatedData?.properties || {}
-    const descriptionFromResponse = validatedData?.description
+    const markdownFromResponse = validatedData?.markdown
 
     // Use hardcoded icon instead of AI-generated one
     const iconFromResponse = {
@@ -227,64 +249,7 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
       },
     }
 
-    // Transform simplified blocks to proper Notion format
-    const transformedDescription =
-      descriptionFromResponse?.map((block: any) => {
-        const notionBlock: any = {
-          object: "block",
-          type: block.type,
-        }
-
-        if (block.type === "paragraph") {
-          notionBlock.paragraph = {
-            rich_text:
-              block.rich_text?.map((rt: any) => ({
-                type: "text",
-                text: {
-                  content: rt.content || "",
-                  link: rt.url ? { url: rt.url } : null,
-                },
-                annotations: {
-                  bold: false,
-                  italic: false,
-                  strikethrough: false,
-                  underline: false,
-                  code: false,
-                  color: "default",
-                },
-                plain_text: rt.content || "",
-                href: rt.url || null,
-              })) || [],
-            color: "default",
-          }
-        } else if (block.type === "bulleted_list_item") {
-          notionBlock.bulleted_list_item = {
-            rich_text:
-              block.rich_text?.map((rt: any) => ({
-                type: "text",
-                text: {
-                  content: rt.content || "",
-                  link: rt.url ? { url: rt.url } : null,
-                },
-                annotations: {
-                  bold: false,
-                  italic: false,
-                  strikethrough: false,
-                  underline: false,
-                  code: false,
-                  color: "default",
-                },
-                plain_text: rt.content || "",
-                href: rt.url || null,
-              })) || [],
-            color: "default",
-          }
-        }
-
-        return notionBlock
-      }) || undefined
-
-    // Transform the Zod schema output to match Notion API format
+    // Normalize model output to match Notion API format
     stage = "transform_payload"
     const transformStart = Date.now()
     const propertiesData: Record<string, any> = {}
@@ -292,8 +257,18 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
     // Filter out null values and transform to Notion API format
     Object.entries(propertiesFromResponse).forEach(([key, value]) => {
       if (value !== null) {
-        if (value && typeof value === "object" && "date" in value && value.date) {
-          const dateObj = { ...value.date } as any
+        if (!isNotionPropertyValueObject(value)) {
+          logDevTelemetry("Skipping invalid non-object Notion property value", {
+            ...devTelemetry,
+            propertyName: key,
+            valueType: typeof value,
+          })
+          return
+        }
+
+        const dateValue = value["date"]
+        if ("date" in value && dateValue && typeof dateValue === "object" && !Array.isArray(dateValue)) {
+          const dateObj = { ...dateValue } as any
           // Remove empty string end dates
           if (dateObj.end === "") {
             delete dateObj.end
@@ -306,29 +281,25 @@ async function createNotionPage(input: { spaceId: number; chatId: number; messag
     })
 
     // Extract task title using the dynamic helper
-    const titlePropertyName = findTitleProperty(database)
+    const titlePropertyName = findTitleProperty(dataSource)
     const taskTitle = extractTaskTitle(propertiesData, titlePropertyName)
     logDevTelemetry("Transformed Notion properties payload", {
       ...devTelemetry,
       durationMs: Date.now() - transformStart,
       propertiesCount: Object.keys(propertiesData).length,
-      descriptionBlockCount: Array.isArray(transformedDescription) ? transformedDescription.length : 0,
+      markdownLength: markdownFromResponse?.length ?? 0,
     })
 
-    // Create the page with properties and description
+    // Create the page with properties and markdown content
     stage = "create_notion_page"
     const pageCreateStart = Date.now()
 
-    if (!databaseId) {
-      throw new Error("Database ID is required but was null")
-    }
-
     const page = await newNotionPage(
       input.spaceId,
-      databaseId,
+      selectedParent.dataSourceId,
       propertiesData,
       client,
-      transformedDescription || undefined,
+      markdownFromResponse,
       iconFromResponse,
     )
     logDevTelemetry("Created Notion page", {
@@ -370,7 +341,7 @@ export { createNotionPage }
 
 function taskPrompt(
   notionUsers: NotionUser[],
-  database: any,
+  dataSource: any,
   samplePages: any[],
   messages: ProcessedMessage[],
   targetMessage: ProcessedMessage,
@@ -385,11 +356,11 @@ function taskPrompt(
   // Simplify sample pages to reduce token usage - now includes content
   const simplifiedSamplePages = samplePages.slice(0, 2).map((page) => ({
     properties: page.properties,
-    content: page.content, // Now includes the page content/body
+    markdown: typeof page.markdown === "string" ? page.markdown.slice(0, 4000) : "",
   }))
 
-  // Extract status options from database schema
-  const statusProperty = database.properties?.Status || database.properties?.status
+  // Extract status options from data source schema
+  const statusProperty = dataSource.properties?.Status || dataSource.properties?.status
   const statusOptions = statusProperty?.status?.options?.map((option: any) => option.name) || []
 
   const actor = currentUserName ?? participantNames.find((p) => p.id === currentUserId)
@@ -419,7 +390,7 @@ ${limitedMessages.map((message) => formatMessage(message)).join("\n")}
 </conversation_context>
 
 <database_schema>
-Properties: ${getPropertyDescriptions(database)}
+Properties: ${getPropertyDescriptions(dataSource)}
 
 ${statusOptions.length > 0 ? `Available Status Options: ${statusOptions.join(", ")}` : ""}
 </database_schema>
