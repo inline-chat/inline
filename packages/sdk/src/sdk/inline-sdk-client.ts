@@ -85,12 +85,13 @@ export class InlineSdkClient {
 
     const url = resolveRealtimeUrl(this.httpBaseUrl)
     this.transport = options.transport ?? new WebSocketTransport({ url, logger: options.logger })
+    const sdkVersion = getSdkVersion()
     this.protocol = new ProtocolClient({
       transport: this.transport,
       getConnectionInit: () => ({
         token: options.token,
         layer: sdkLayer,
-        clientVersion: getSdkVersion(),
+        ...(sdkVersion ? { clientVersion: sdkVersion } : {}),
       }),
       logger: options.logger,
       defaultRpcTimeoutMs: options.rpcTimeoutMs,

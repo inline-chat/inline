@@ -38,7 +38,6 @@ export const handleConnectionInit = async (
         log.error("Failed to store client version", error)
       })
     } else {
-      log.warn("Ignoring invalid client version", { clientVersion })
       if (buildNumber) {
         storeBuildNumber(userIdFromToken.sessionId, userIdFromToken.userId, buildNumber).catch((error) => {
           log.error("Failed to store build number", error)
