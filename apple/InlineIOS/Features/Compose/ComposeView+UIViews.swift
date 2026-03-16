@@ -141,4 +141,24 @@ extension ComposeView {
     view.isHidden = true
     return view
   }
+
+  func makeAttachmentScrollView() -> UIScrollView {
+    let view = UIScrollView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.showsHorizontalScrollIndicator = false
+    view.showsVerticalScrollIndicator = false
+    view.alwaysBounceHorizontal = true
+    view.alwaysBounceVertical = false
+    view.isHidden = true
+    return view
+  }
+
+  func makeAttachmentStackView() -> UIStackView {
+    let view = UIStackView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.axis = .horizontal
+    view.alignment = .center
+    view.spacing = 8
+    return view
+  }
 }

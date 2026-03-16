@@ -56,14 +56,22 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     case videos
   }
 
+  struct PendingVideoAttachment {
+    let id: String
+    var thumbnailImage: UIImage?
+  }
+
   var attachmentItems: [String: FileMediaItem] = [:]
+  var pendingVideoAttachments: [PendingVideoAttachment] = []
+  var canceledPendingVideoAttachmentIds: Set<String> = []
 
   var canSend: Bool {
     let normalizedText = (textView.text ?? "").replacingOccurrences(of: "\u{FFFC}", with: "")
     let hasText = !normalizedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     let hasAttachments = !attachmentItems.isEmpty
     let hasForward = peerId.map { ChatState.shared.getState(peer: $0).forwardContext != nil } ?? false
-    return hasText || hasAttachments || hasForward
+    let hasPendingVideos = !pendingVideoAttachments.isEmpty
+    return (hasText || hasAttachments || hasForward) && !hasPendingVideos
   }
 
   var onHeightChange: ((CGFloat) -> Void)?
@@ -96,8 +104,11 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   lazy var sendButton = makeSendButton()
   lazy var plusButton = makePlusButton()
   lazy var composeAndButtonContainer = makeComposeAndButtonContainer()
+  lazy var attachmentScrollView = makeAttachmentScrollView()
+  lazy var attachmentStackView = makeAttachmentStackView()
   private lazy var embedContainerView = makeEmbedContainerView()
   var embedContainerHeightConstraint: NSLayoutConstraint?
+  var attachmentContainerHeightConstraint: NSLayoutConstraint?
   private var embedView: ComposeEmbedView?
   private var currentEmbedMessageId: Int64?
   private var currentEmbedMode: ComposeEmbedViewContent.Mode?
@@ -145,7 +156,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       setupSlashCommandManager()
       layoutIfNeeded()
       let hasEmbed = (embedContainerHeightConstraint?.constant ?? 0) > 0
-      if hasEmbed || !(textView.text?.isEmpty ?? true) {
+      if hasEmbed || !attachmentItems.isEmpty || !pendingVideoAttachments.isEmpty || !(textView.text?.isEmpty ?? true) {
         updateHeight()
       }
     }
@@ -156,8 +167,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
     let hasEmbed = (embedContainerHeightConstraint?.constant ?? 0) > 0
 
-    // Update height after layout if text view now has proper bounds and there's text or an embed
-    if textView.bounds.width > 0, hasEmbed || !(textView.text?.isEmpty ?? true) {
+    // Update height after layout if text view now has proper bounds and there's text, attachments, or an embed
+    if textView.bounds.width > 0, hasEmbed || !attachmentItems.isEmpty || !pendingVideoAttachments.isEmpty || !(textView.text?.isEmpty ?? true) {
       updateHeight()
     }
   }
@@ -235,12 +246,15 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
     // Add embed container, textView, and sendButton to the container
     composeAndButtonContainer.addSubview(embedContainerView)
+    composeAndButtonContainer.addSubview(attachmentScrollView)
+    attachmentScrollView.addSubview(attachmentStackView)
     composeAndButtonContainer.addSubview(textView)
     composeAndButtonContainer.addSubview(sendButton)
 
     setupInitialHeight()
     setupConstraints()
     addDropInteraction()
+    refreshAttachmentPreviews()
   }
 
   func clearBackground() {
@@ -259,7 +273,10 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   func setupConstraints() {
     let embedHeightConstraint = embedContainerView.heightAnchor
       .constraint(equalToConstant: 0)
+    let attachmentHeightConstraint = attachmentScrollView.heightAnchor
+      .constraint(equalToConstant: 0)
     embedContainerHeightConstraint = embedHeightConstraint
+    attachmentContainerHeightConstraint = attachmentHeightConstraint
 
     NSLayoutConstraint.activate([
       composeHeightConstraint,
@@ -287,9 +304,21 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       embedContainerView.topAnchor.constraint(equalTo: composeAndButtonContainer.topAnchor),
       embedHeightConstraint,
 
+      // Attachment strip within container
+      attachmentScrollView.leadingAnchor.constraint(equalTo: composeAndButtonContainer.leadingAnchor, constant: 8),
+      attachmentScrollView.trailingAnchor.constraint(equalTo: composeAndButtonContainer.trailingAnchor, constant: -8),
+      attachmentScrollView.topAnchor.constraint(equalTo: embedContainerView.bottomAnchor),
+      attachmentHeightConstraint,
+
+      attachmentStackView.leadingAnchor.constraint(equalTo: attachmentScrollView.contentLayoutGuide.leadingAnchor),
+      attachmentStackView.trailingAnchor.constraint(equalTo: attachmentScrollView.contentLayoutGuide.trailingAnchor),
+      attachmentStackView.topAnchor.constraint(equalTo: attachmentScrollView.contentLayoutGuide.topAnchor),
+      attachmentStackView.bottomAnchor.constraint(equalTo: attachmentScrollView.contentLayoutGuide.bottomAnchor),
+      attachmentStackView.heightAnchor.constraint(equalTo: attachmentScrollView.frameLayoutGuide.heightAnchor),
+
       // TextView constraints within container
       textView.leadingAnchor.constraint(equalTo: composeAndButtonContainer.leadingAnchor, constant: 8),
-      textView.topAnchor.constraint(equalTo: embedContainerView.bottomAnchor, constant: 3),
+      textView.topAnchor.constraint(equalTo: attachmentScrollView.bottomAnchor, constant: 3),
       textView.bottomAnchor.constraint(equalTo: composeAndButtonContainer.bottomAnchor),
       textView.trailingAnchor.constraint(equalTo: sendButton.leadingAnchor, constant: -12),
 
@@ -436,6 +465,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
   func sendMessage(sendMode: MessageSendMode? = nil) {
     guard let peerId else { return }
+    guard pendingVideoAttachments.isEmpty else { return }
     let state = ChatState.shared.getState(peer: peerId)
     let isEditing = state.editingMessageId != nil
     let forwardContext = state.forwardContext
@@ -909,7 +939,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
     // Update state
     attachmentItems.removeValue(forKey: id)
-    updateSendButtonVisibility()
+    handleAttachmentItemsChanged()
 
     log.debug("Removed attachment with id: \(id)")
   }
@@ -924,8 +954,86 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
   func clearAttachments() {
     attachmentItems.removeAll()
-    updateSendButtonVisibility()
+    pendingVideoAttachments.removeAll()
+    canceledPendingVideoAttachmentIds.removeAll()
+    handleAttachmentItemsChanged(animated: false)
     log.debug("Cleared all attachments")
+  }
+
+  @discardableResult
+  func addAttachmentItem(_ mediaItem: FileMediaItem, animated: Bool = true) -> String {
+    let uniqueId = mediaItem.getItemUniqueId()
+    attachmentItems[uniqueId] = mediaItem
+    handleAttachmentItemsChanged(animated: animated)
+    return uniqueId
+  }
+
+  func handleAttachmentItemsChanged(animated: Bool = true) {
+    refreshAttachmentPreviews()
+    updateSendButtonVisibility()
+    updateHeight(animated: animated)
+  }
+
+  func refreshAttachmentPreviews() {
+    attachmentStackView.arrangedSubviews.forEach { view in
+      attachmentStackView.removeArrangedSubview(view)
+      view.removeFromSuperview()
+    }
+
+    let hasAttachments = !attachmentItems.isEmpty || !pendingVideoAttachments.isEmpty
+    attachmentContainerHeightConstraint?.constant = hasAttachments ? ComposeAttachmentPreviewItemView.stripHeight : 0
+    attachmentScrollView.isHidden = !hasAttachments
+
+    guard hasAttachments else { return }
+
+    for pending in pendingVideoAttachments {
+      let preview = ComposeAttachmentPreviewItemView(
+        pendingVideoId: pending.id,
+        thumbnailImage: pending.thumbnailImage
+      ) { [weak self] pendingId in
+        self?.removePendingVideoAttachment(pendingId, userInitiated: true)
+      }
+      attachmentStackView.addArrangedSubview(preview)
+    }
+
+    for (id, mediaItem) in attachmentItems {
+      let preview = ComposeAttachmentPreviewItemView(
+        attachmentId: id,
+        mediaItem: mediaItem
+      ) { [weak self] attachmentId in
+        self?.removeAttachment(attachmentId)
+      }
+      attachmentStackView.addArrangedSubview(preview)
+    }
+  }
+
+  @discardableResult
+  func addPendingVideoAttachment() -> String {
+    let pendingId = "pending_video_\(UUID().uuidString)"
+    canceledPendingVideoAttachmentIds.remove(pendingId)
+    pendingVideoAttachments.append(PendingVideoAttachment(id: pendingId, thumbnailImage: nil))
+    refreshAttachmentPreviews()
+    updateHeight(animated: false)
+    return pendingId
+  }
+
+  func updatePendingVideoAttachmentThumbnail(_ pendingId: String, image: UIImage?) {
+    guard let index = pendingVideoAttachments.firstIndex(where: { $0.id == pendingId }) else { return }
+    pendingVideoAttachments[index].thumbnailImage = image
+    refreshAttachmentPreviews()
+  }
+
+  func removePendingVideoAttachment(_ pendingId: String, animated: Bool = false, userInitiated: Bool = false) {
+    if userInitiated {
+      canceledPendingVideoAttachmentIds.insert(pendingId)
+    }
+    pendingVideoAttachments.removeAll { $0.id == pendingId }
+    refreshAttachmentPreviews()
+    updateHeight(animated: animated)
+  }
+
+  func isPendingVideoAttachmentCanceled(_ pendingId: String) -> Bool {
+    canceledPendingVideoAttachmentIds.contains(pendingId)
   }
 
   func updateSendButtonVisibility() {
@@ -945,4 +1053,337 @@ extension ComposeView: SlashCommandManagerDelegate {
   }
 
   func slashCommandManagerDidDismiss(_ manager: SlashCommandManager) {}
+}
+
+private final class ComposeAttachmentPreviewItemView: UIView {
+  static let stripHeight: CGFloat = 92
+
+  private enum Metrics {
+    static let tileSize: CGFloat = 84
+    static let cornerRadius: CGFloat = 16
+    static let removeButtonSize: CGFloat = 52
+    static let removeBadgeSize: CGFloat = 22
+  }
+
+  private let attachmentId: String
+  private let onRemove: (String) -> Void
+
+  private let tileContentView: UIView = {
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.layer.cornerRadius = Metrics.cornerRadius
+    view.layer.cornerCurve = .continuous
+    view.layer.masksToBounds = true
+    return view
+  }()
+
+  private let tinyThumbnailBackgroundView: InlineTinyThumbnailBackgroundView = {
+    let view = InlineTinyThumbnailBackgroundView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
+
+  private let thumbnailView: PlatformPhotoView = {
+    let view = PlatformPhotoView()
+    view.photoContentMode = .aspectFill
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
+
+  private let localThumbnailImageView: UIImageView = {
+    let imageView = UIImageView()
+    imageView.translatesAutoresizingMaskIntoConstraints = false
+    imageView.contentMode = .scaleAspectFill
+    imageView.clipsToBounds = true
+    imageView.isHidden = true
+    return imageView
+  }()
+
+  private let fallbackView: UIView = {
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.backgroundColor = .tertiarySystemFill
+    return view
+  }()
+
+  private let centerIconView: UIImageView = {
+    let iconView = UIImageView()
+    iconView.translatesAutoresizingMaskIntoConstraints = false
+    iconView.contentMode = .scaleAspectFit
+    iconView.tintColor = .secondaryLabel
+    return iconView
+  }()
+
+  private let extensionBadge: UILabel = {
+    let label = UILabel()
+    label.translatesAutoresizingMaskIntoConstraints = false
+    label.font = .systemFont(ofSize: 9, weight: .semibold)
+    label.textColor = .white
+    label.textAlignment = .center
+    label.backgroundColor = UIColor.black.withAlphaComponent(0.45)
+    label.layer.cornerRadius = 5
+    label.layer.masksToBounds = true
+    label.isHidden = true
+    return label
+  }()
+
+  private let overlayIconView: UIImageView = {
+    let iconView = UIImageView()
+    iconView.translatesAutoresizingMaskIntoConstraints = false
+    iconView.contentMode = .scaleAspectFit
+    iconView.tintColor = .white
+    iconView.layer.shadowColor = UIColor.black.cgColor
+    iconView.layer.shadowOffset = .zero
+    iconView.layer.shadowRadius = 2
+    iconView.layer.shadowOpacity = 0.6
+    iconView.isHidden = true
+    return iconView
+  }()
+
+  private let loadingIndicator: UIActivityIndicatorView = {
+    let view = UIActivityIndicatorView(style: .medium)
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.color = .secondaryLabel
+    view.hidesWhenStopped = true
+    return view
+  }()
+
+  private lazy var removeButton: UIButton = {
+    let button = UIButton(type: .system)
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.backgroundColor = .clear
+    button.addTarget(self, action: #selector(removeTapped), for: .touchUpInside)
+    button.accessibilityLabel = "Remove attachment"
+    return button
+  }()
+
+  private let removeBadgeView: UIView = {
+    let view = UIView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.isUserInteractionEnabled = false
+    view.backgroundColor = .white
+    view.layer.cornerRadius = Metrics.removeBadgeSize / 2
+    view.layer.cornerCurve = .continuous
+    view.layer.shadowColor = UIColor.black.cgColor
+    view.layer.shadowOpacity = 0.18
+    view.layer.shadowRadius = 3
+    view.layer.shadowOffset = CGSize(width: 0, height: 1)
+    return view
+  }()
+
+  private let removeIconView: UIImageView = {
+    let view = UIImageView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.isUserInteractionEnabled = false
+    view.image = UIImage(systemName: "xmark")?.withConfiguration(
+      UIImage.SymbolConfiguration(pointSize: 10, weight: .bold)
+    )
+    view.tintColor = .black
+    return view
+  }()
+
+  init(
+    attachmentId: String,
+    mediaItem: FileMediaItem,
+    onRemove: @escaping (String) -> Void
+  ) {
+    self.attachmentId = attachmentId
+    self.onRemove = onRemove
+    super.init(frame: .zero)
+    setupViews()
+    configure(mediaItem: mediaItem)
+  }
+
+  init(
+    pendingVideoId: String,
+    thumbnailImage: UIImage?,
+    onRemove: @escaping (String) -> Void
+  ) {
+    attachmentId = pendingVideoId
+    self.onRemove = onRemove
+    super.init(frame: .zero)
+    accessibilityIdentifier = pendingVideoId
+    setupViews()
+    configurePendingVideo(thumbnailImage: thumbnailImage)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  @objc private func removeTapped() {
+    onRemove(attachmentId)
+  }
+
+  private func setupViews() {
+    translatesAutoresizingMaskIntoConstraints = false
+    clipsToBounds = false
+
+    addSubview(tileContentView)
+    tileContentView.addSubview(fallbackView)
+    tileContentView.addSubview(tinyThumbnailBackgroundView)
+    tileContentView.addSubview(thumbnailView)
+    tileContentView.addSubview(localThumbnailImageView)
+    tileContentView.addSubview(centerIconView)
+    tileContentView.addSubview(extensionBadge)
+    tileContentView.addSubview(overlayIconView)
+    tileContentView.addSubview(loadingIndicator)
+    addSubview(removeButton)
+    removeButton.addSubview(removeBadgeView)
+    removeBadgeView.addSubview(removeIconView)
+
+    NSLayoutConstraint.activate([
+      widthAnchor.constraint(equalToConstant: Metrics.tileSize),
+      heightAnchor.constraint(equalToConstant: Metrics.tileSize),
+
+      tileContentView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      tileContentView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      tileContentView.topAnchor.constraint(equalTo: topAnchor),
+      tileContentView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+      fallbackView.leadingAnchor.constraint(equalTo: tileContentView.leadingAnchor),
+      fallbackView.trailingAnchor.constraint(equalTo: tileContentView.trailingAnchor),
+      fallbackView.topAnchor.constraint(equalTo: tileContentView.topAnchor),
+      fallbackView.bottomAnchor.constraint(equalTo: tileContentView.bottomAnchor),
+
+      tinyThumbnailBackgroundView.leadingAnchor.constraint(equalTo: tileContentView.leadingAnchor),
+      tinyThumbnailBackgroundView.trailingAnchor.constraint(equalTo: tileContentView.trailingAnchor),
+      tinyThumbnailBackgroundView.topAnchor.constraint(equalTo: tileContentView.topAnchor),
+      tinyThumbnailBackgroundView.bottomAnchor.constraint(equalTo: tileContentView.bottomAnchor),
+
+      thumbnailView.leadingAnchor.constraint(equalTo: tileContentView.leadingAnchor),
+      thumbnailView.trailingAnchor.constraint(equalTo: tileContentView.trailingAnchor),
+      thumbnailView.topAnchor.constraint(equalTo: tileContentView.topAnchor),
+      thumbnailView.bottomAnchor.constraint(equalTo: tileContentView.bottomAnchor),
+
+      localThumbnailImageView.leadingAnchor.constraint(equalTo: tileContentView.leadingAnchor),
+      localThumbnailImageView.trailingAnchor.constraint(equalTo: tileContentView.trailingAnchor),
+      localThumbnailImageView.topAnchor.constraint(equalTo: tileContentView.topAnchor),
+      localThumbnailImageView.bottomAnchor.constraint(equalTo: tileContentView.bottomAnchor),
+
+      centerIconView.centerXAnchor.constraint(equalTo: tileContentView.centerXAnchor),
+      centerIconView.centerYAnchor.constraint(equalTo: tileContentView.centerYAnchor),
+
+      extensionBadge.centerXAnchor.constraint(equalTo: tileContentView.centerXAnchor),
+      extensionBadge.bottomAnchor.constraint(equalTo: tileContentView.bottomAnchor, constant: -4),
+      extensionBadge.leadingAnchor.constraint(greaterThanOrEqualTo: tileContentView.leadingAnchor, constant: 4),
+      extensionBadge.trailingAnchor.constraint(lessThanOrEqualTo: tileContentView.trailingAnchor, constant: -4),
+
+      overlayIconView.centerXAnchor.constraint(equalTo: tileContentView.centerXAnchor),
+      overlayIconView.centerYAnchor.constraint(equalTo: tileContentView.centerYAnchor),
+
+      loadingIndicator.centerXAnchor.constraint(equalTo: tileContentView.centerXAnchor),
+      loadingIndicator.centerYAnchor.constraint(equalTo: tileContentView.centerYAnchor),
+
+      removeButton.topAnchor.constraint(equalTo: topAnchor),
+      removeButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+      removeButton.widthAnchor.constraint(equalToConstant: Metrics.removeButtonSize),
+      removeButton.heightAnchor.constraint(equalToConstant: Metrics.removeButtonSize),
+
+      removeBadgeView.topAnchor.constraint(equalTo: removeButton.topAnchor, constant: 6),
+      removeBadgeView.trailingAnchor.constraint(equalTo: removeButton.trailingAnchor, constant: -6),
+      removeBadgeView.widthAnchor.constraint(equalToConstant: Metrics.removeBadgeSize),
+      removeBadgeView.heightAnchor.constraint(equalToConstant: Metrics.removeBadgeSize),
+
+      removeIconView.centerXAnchor.constraint(equalTo: removeBadgeView.centerXAnchor),
+      removeIconView.centerYAnchor.constraint(equalTo: removeBadgeView.centerYAnchor),
+    ])
+  }
+
+  private func configure(mediaItem: FileMediaItem) {
+    loadingIndicator.stopAnimating()
+    localThumbnailImageView.image = nil
+    localThumbnailImageView.isHidden = true
+    centerIconView.isHidden = true
+    overlayIconView.isHidden = true
+    extensionBadge.isHidden = true
+    thumbnailView.isHidden = false
+    tinyThumbnailBackgroundView.isHidden = true
+
+    switch mediaItem {
+    case let .photo(photoInfo):
+      applyPhotoPreview(photoInfo)
+
+    case let .video(videoInfo):
+      if let thumbnail = videoInfo.thumbnail {
+        applyPhotoPreview(thumbnail)
+      } else {
+        applyFallback(iconName: "video.fill", badgeText: nil)
+      }
+
+    case let .document(documentInfo):
+      if let thumbnail = documentInfo.thumbnail {
+        applyPhotoPreview(thumbnail)
+      } else {
+        applyFallback(
+          iconName: DocumentIconResolver.symbolName(
+            mimeType: documentInfo.document.mimeType,
+            fileName: documentInfo.document.fileName,
+            style: .filled
+          ),
+          badgeText: fileExtension(from: documentInfo.document.fileName)
+        )
+      }
+
+    case .voice:
+      applyFallback(iconName: "waveform", badgeText: nil)
+    }
+  }
+
+  private func configurePendingVideo(thumbnailImage: UIImage?) {
+    loadingIndicator.startAnimating()
+    overlayIconView.isHidden = true
+    extensionBadge.isHidden = true
+    if let thumbnailImage {
+      applyPendingThumbnail(thumbnailImage)
+      return
+    }
+    applyFallback(iconName: "video.fill", badgeText: nil)
+  }
+
+  private func applyPhotoPreview(_ photoInfo: PhotoInfo?) {
+    localThumbnailImageView.image = nil
+    localThumbnailImageView.isHidden = true
+    tinyThumbnailBackgroundView.setPhoto(photoInfo)
+    thumbnailView.setPhoto(photoInfo)
+    centerIconView.isHidden = true
+  }
+
+  private func applyPendingThumbnail(_ image: UIImage) {
+    thumbnailView.setPhoto(nil)
+    thumbnailView.isHidden = true
+    tinyThumbnailBackgroundView.setPhoto(nil)
+
+    localThumbnailImageView.image = image
+    localThumbnailImageView.isHidden = false
+    centerIconView.isHidden = true
+  }
+
+  private func applyFallback(iconName: String, badgeText: String?) {
+    thumbnailView.setPhoto(nil)
+    thumbnailView.isHidden = true
+    tinyThumbnailBackgroundView.setPhoto(nil)
+    localThumbnailImageView.image = nil
+    localThumbnailImageView.isHidden = true
+
+    centerIconView.image = UIImage(systemName: iconName)?.withConfiguration(
+      UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
+    )
+    centerIconView.isHidden = false
+
+    if let badgeText, !badgeText.isEmpty {
+      extensionBadge.text = " \(badgeText.uppercased()) "
+      extensionBadge.isHidden = false
+    } else {
+      extensionBadge.text = nil
+      extensionBadge.isHidden = true
+    }
+  }
+
+  private func fileExtension(from fileName: String?) -> String? {
+    guard let fileName else { return nil }
+    let ext = URL(fileURLWithPath: fileName).pathExtension
+    return ext.isEmpty ? nil : ext
+  }
 }
