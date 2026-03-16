@@ -8,8 +8,6 @@ import { addReaction } from "./messages.addReaction"
 import { deleteReaction } from "./messages.deleteReaction"
 import { editMessage } from "./messages.editMessage"
 import { createChat } from "./messages.createChat"
-import { createSubthread } from "./messages.createSubthread"
-import { showChatInSidebar } from "./messages.showChatInSidebar"
 import { getSpaceMembers } from "./space.getSpaceMembers"
 import { deleteChat } from "./messages.deleteChat"
 import { inviteToSpace } from "./space.inviteToSpace"
@@ -50,8 +48,6 @@ export const Functions = {
     deleteReaction: deleteReaction,
     editMessage: editMessage,
     createChat: createChat,
-    createSubthread: createSubthread,
-    showChatInSidebar: showChatInSidebar,
     deleteChat: deleteChat,
     getChatParticipants: getChatParticipants,
     addChatParticipant: addChatParticipant,
