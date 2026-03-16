@@ -37,6 +37,34 @@ const formatEntitiesJson = (entities: MessageEntities): string => {
   return MessageEntities.toJsonString(entities)
 }
 
+function parseConvertedEntitiesJson(input: { messageId: number; entities: string | null }): MessageEntities | null {
+  if (!input.entities) {
+    return null
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(input.entities)
+
+    if (parsed == null) {
+      return null
+    }
+
+    if (Array.isArray(parsed)) {
+      return MessageEntities.fromJson({ entities: parsed })
+    }
+
+    if (typeof parsed === "object" && "entities" in parsed) {
+      return MessageEntities.fromJson(parsed)
+    }
+
+    log.warn(`Invalid entities format for messageId ${input.messageId}:`, parsed)
+  } catch (error) {
+    log.warn(`Failed to parse entities for messageId ${input.messageId}:`, error)
+  }
+
+  return null
+}
+
 /**
  * Convert entity offsets for one or more messages (batch processing)
  */
@@ -121,26 +149,9 @@ ${input.messages
     }
 
     return result.conversions.map((conversion) => {
-      let entities: MessageEntities | null = null
-
-      if (conversion.entities) {
-        try {
-          let parsed = JSON.parse(conversion.entities)
-          if (Array.isArray(parsed)) {
-            entities = MessageEntities.fromJson({ entities: parsed })
-          } else if (typeof parsed === "object" && "entities" in parsed) {
-            entities = MessageEntities.fromJson(parsed)
-          } else {
-            log.error(`Invalid entities format for messageId ${conversion.messageId}:`, parsed)
-          }
-        } catch (error) {
-          log.error(`Failed to parse entities for messageId ${conversion.messageId}:`, error)
-        }
-      }
-
       return {
         messageId: conversion.messageId,
-        entities,
+        entities: parseConvertedEntitiesJson(conversion),
       }
     })
   } catch (error) {
