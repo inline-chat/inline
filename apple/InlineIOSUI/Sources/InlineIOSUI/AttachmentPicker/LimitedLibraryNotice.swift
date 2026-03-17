@@ -3,32 +3,41 @@ import SwiftUI
 
 public struct LimitedLibraryNotice: View {
   private let action: () -> Void
+  @State private var isPresentingAccessAlert = false
 
   public init(action: @escaping () -> Void) {
     self.action = action
   }
 
   public var body: some View {
-    Button(action: action) {
-      HStack(spacing: 10) {
-        Image(systemName: "exclamationmark.circle.fill")
-          .font(.system(size: 18, weight: .semibold))
-          .foregroundStyle(.orange)
-
+    Button(action: {
+      isPresentingAccessAlert = true
+    }) {
+      HStack(spacing: 8) {
+        Spacer(minLength: 0)
         Text("Limited photos access")
           .font(.subheadline.weight(.regular))
-          .foregroundStyle(.primary)
+          .foregroundStyle(.secondary)
 
-        Spacer(minLength: 0)
+        Image(systemName: "exclamationmark.circle")
+          .font(.system(size: 18, weight: .semibold))
+          .foregroundStyle(.secondary)
       }
-      .padding(.horizontal, 14)
-      .padding(.vertical, 12)
+      .padding(.trailing, 20)
       .contentShape(.rect)
     }
     .buttonStyle(.plain)
-    .attachmentPickerSurface(cornerRadius: 18, interactive: true)
+    .frame(maxWidth: .infinity, alignment: .trailing)
+    .alert("Inline Would Like To Access Your Photos", isPresented: $isPresentingAccessAlert) {
+      Button("Select More Photos...") {
+        action()
+      }
+      Button("Keep Current Selection", role: .cancel) {}
+    } message: {
+      Text("This lets you send photos from your library to Inline.")
+    }
     .accessibilityLabel("Limited photos access")
-    .accessibilityHint("Select more photos to give Inline access")
+    .accessibilityHint("Shows options to keep the current selection or select more photos")
   }
 }
 #endif
