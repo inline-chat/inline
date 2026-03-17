@@ -1,6 +1,11 @@
 #if os(iOS)
+import Combine
 import Photos
 import SwiftUI
+
+public extension Notification.Name {
+  static let attachmentPickerRecentMediaDidChange = Notification.Name("attachmentPickerRecentMediaDidChange")
+}
 
 public struct AttachmentPickerActions {
   public let openCamera: () -> Void
@@ -55,6 +60,11 @@ public struct AttachmentPickerSheet: View {
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
       .task {
         await model.reload()
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .attachmentPickerRecentMediaDidChange)) { _ in
+        Task {
+          await model.reload()
+        }
       }
   }
 
@@ -112,7 +122,7 @@ public struct AttachmentPickerSheet: View {
       listActionButton(
         title: "Library",
         systemImage: "photo.on.rectangle.angled",
-        action: actions.openLibrary
+        action: libraryAction
       )
 
       listActionButton(
@@ -172,6 +182,14 @@ public struct AttachmentPickerSheet: View {
     .accessibilityLabel(title)
   }
 
+  private var libraryAction: () -> Void {
+    if model.showsLimitedAccessNotice {
+      return actions.manageLimitedAccess
+    }
+
+    return actions.openLibrary
+  }
+
   private var emptyStateMessage: String? {
     if model.isLoading {
       return nil
@@ -181,7 +199,7 @@ public struct AttachmentPickerSheet: View {
       case .denied, .restricted:
         return "Allow photo access to see recent media here."
       case .authorized, .limited:
-        return model.recentItems.isEmpty ? "No recent photos or videos yet." : nil
+        return nil
       case .notDetermined:
         return nil
       @unknown default:

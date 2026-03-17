@@ -4,7 +4,7 @@ import Photos
 
 @MainActor
 @Observable
-public final class AttachmentPickerModel {
+public final class AttachmentPickerModel: NSObject, PHPhotoLibraryChangeObserver {
   public enum RecentMediaType: String, Sendable {
     case image
     case video
@@ -63,6 +63,19 @@ public final class AttachmentPickerModel {
       Self.fetchRecentItems(limit: recentLimit)
     }
     authorizationStatus = authorizationStatusProvider()
+    super.init()
+    PHPhotoLibrary.shared().register(self)
+  }
+
+  deinit {
+    PHPhotoLibrary.shared().unregisterChangeObserver(self)
+  }
+
+  nonisolated public func photoLibraryDidChange(_: PHChange) {
+    Task { @MainActor [weak self] in
+      guard let self else { return }
+      await self.reload()
+    }
   }
 
   public func reload() async {
