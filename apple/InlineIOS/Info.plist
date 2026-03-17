@@ -51,6 +51,8 @@
 	<string>Inline needs access to your microphone to record audio messages and videos.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Inline needs access to your photo library to share photos and videos in your conversations.</string>
+	<key>PHPhotoLibraryPreventAutomaticLimitedAccessAlert</key>
+	<true/>
 	<key>NSUserActivityTypes</key>
 	<array>
 		<string>INSendMessageIntent</string>
