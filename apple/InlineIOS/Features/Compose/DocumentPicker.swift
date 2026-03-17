@@ -22,7 +22,7 @@ extension ComposeView: UIDocumentPickerDelegate {
 
   func addFile(_ url: URL) {
     if isVideoFile(url) {
-      addVideo(url)
+      addVideo(url, sendImmediately: true)
       return
     }
 
@@ -39,9 +39,9 @@ extension ComposeView: UIDocumentPickerDelegate {
     do {
       let documentInfo = try FileCache.saveDocument(url: url)
       let mediaItem = FileMediaItem.document(documentInfo)
-      let uniqueId = addAttachmentItem(mediaItem)
+      sendMediaItemImmediately(mediaItem)
 
-      Log.shared.debug("Added file attachment with uniqueId: \(uniqueId)")
+      Log.shared.debug("Sent file immediately from document picker")
       dismissAttachmentPickerIfPresented(animated: true)
     } catch {
       Log.shared.error("Failed to save document", error: error)
@@ -56,7 +56,7 @@ extension ComposeView: UIDocumentPickerDelegate {
   private func showFileError(_ error: Error) {
     let alert = UIAlertController(
       title: "File Error",
-      message: "Failed to add file: \(error.localizedDescription)",
+      message: "Failed to send file: \(error.localizedDescription)",
       preferredStyle: .alert
     )
     alert.addAction(UIAlertAction(title: "OK", style: .default))

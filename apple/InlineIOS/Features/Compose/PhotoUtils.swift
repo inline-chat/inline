@@ -423,9 +423,10 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
   func addVideo(
     _ url: URL,
     removeSourceAfterProcessing: Bool = false,
-    dismissAttachmentPickerOnSuccess: Bool = true
+    dismissAttachmentPickerOnSuccess: Bool = true,
+    sendImmediately: Bool = false
   ) {
-    let pendingId = addPendingVideoAttachment()
+    let pendingId = sendImmediately ? nil : addPendingVideoAttachment()
     Task {
       defer {
         if removeSourceAfterProcessing {
@@ -437,7 +438,9 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
         let immediateThumbnail = immediateVideoThumbnail(from: url)
         if let immediateThumbnail {
           await MainActor.run { [weak self] in
-            self?.updatePendingVideoAttachmentThumbnail(pendingId, image: immediateThumbnail)
+            if let pendingId {
+              self?.updatePendingVideoAttachmentThumbnail(pendingId, image: immediateThumbnail)
+            }
           }
         }
 
@@ -446,10 +449,19 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
 
         await MainActor.run { [weak self] in
           guard let self else { return }
-          let isCanceled = isPendingVideoAttachmentCanceled(pendingId)
-          removePendingVideoAttachment(pendingId, animated: false)
-          guard !isCanceled else { return }
-          _ = addAttachmentItem(mediaItem)
+
+          if let pendingId {
+            let isCanceled = isPendingVideoAttachmentCanceled(pendingId)
+            removePendingVideoAttachment(pendingId, animated: false)
+            guard !isCanceled else { return }
+          }
+
+          if sendImmediately {
+            sendMediaItemImmediately(mediaItem)
+          } else {
+            _ = addAttachmentItem(mediaItem)
+          }
+
           if dismissAttachmentPickerOnSuccess {
             dismissAttachmentPickerIfPresented(animated: true)
           }
@@ -457,7 +469,9 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
       } catch {
         Log.shared.error("Failed to save video", error: error)
         await MainActor.run { [weak self] in
-          self?.removePendingVideoAttachment(pendingId, animated: false)
+          if let pendingId {
+            self?.removePendingVideoAttachment(pendingId, animated: false)
+          }
           self?.showVideoError(error)
         }
       }
