@@ -83,9 +83,7 @@ public struct AttachmentPickerSheet: View {
 
   private var content: some View {
     VStack(alignment: .leading, spacing: 18) {
-      if model.showsLimitedAccessNotice {
-        LimitedLibraryNotice(action: actions.manageLimitedAccess)
-      }
+      mediaHeader
 
       recentStrip
 
@@ -103,6 +101,21 @@ public struct AttachmentPickerSheet: View {
     }
     .padding(.top, 20)
     .padding(.bottom, 24)
+  }
+
+  private var mediaHeader: some View {
+    ZStack(alignment: .leading) {
+      if model.showsLimitedAccessNotice {
+        LimitedLibraryNotice(action: actions.manageLimitedAccess)
+      }
+
+      Text("Select Media")
+        .font(.headline.weight(.semibold))
+        .foregroundStyle(.primary)
+        .padding(.leading, 20)
+        .allowsHitTesting(false)
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   private var recentStrip: some View {
