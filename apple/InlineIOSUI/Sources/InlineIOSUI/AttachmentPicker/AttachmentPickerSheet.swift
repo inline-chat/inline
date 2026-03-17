@@ -166,14 +166,21 @@ public struct AttachmentPickerSheet: View {
   private var bottomSendButtonOverlay: some View {
     if model.selectedRecentItems.isEmpty == false {
       Button(action: sendSelectedItems) {
-        Text(sendSelectedButtonTitle)
-          .font(.body.weight(.semibold))
-          .foregroundStyle(.white)
-          .frame(maxWidth: .infinity)
-          .padding(.vertical, 14)
+        HStack {
+          Spacer(minLength: 0)
+
+          Text(sendSelectedButtonTitle)
+            .font(.body.weight(.semibold))
+            .foregroundStyle(.white)
+
+          Spacer(minLength: 0)
+        }
+        .padding(.vertical, 14)
+        .background(.blue, in: Capsule())
+        .contentShape(.rect)
       }
       .buttonStyle(.plain)
-      .background(.blue, in: Capsule())
+      .frame(maxWidth: .infinity)
       .padding(.horizontal, 28)
       .padding(.bottom, 8)
       .transition(.move(edge: .bottom).combined(with: .opacity))
