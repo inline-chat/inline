@@ -7,6 +7,10 @@ public extension Notification.Name {
   static let attachmentPickerRecentMediaDidChange = Notification.Name("attachmentPickerRecentMediaDidChange")
 }
 
+public enum AttachmentPickerRecentMediaChangeUserInfo {
+  public static let localIdentifiersKey = "localIdentifiers"
+}
+
 public struct AttachmentPickerActions {
   public let openCamera: () -> Void
   public let openLibrary: () -> Void
@@ -58,12 +62,21 @@ public struct AttachmentPickerSheet: View {
   public var body: some View {
     content
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+      .overlay(alignment: .bottom) {
+        bottomSendButtonOverlay
+      }
+      .animation(.easeInOut(duration: 0.22), value: model.selectedRecentItems.isEmpty)
       .task {
         await model.reload()
       }
-      .onReceive(NotificationCenter.default.publisher(for: .attachmentPickerRecentMediaDidChange)) { _ in
+      .onReceive(NotificationCenter.default.publisher(for: .attachmentPickerRecentMediaDidChange)) { notification in
         Task {
-          await model.reload()
+          let localIdentifiers = notification.userInfo?[AttachmentPickerRecentMediaChangeUserInfo.localIdentifiersKey] as? [String]
+          if let localIdentifiers {
+            await model.reload(promotingLocalIdentifiers: localIdentifiers)
+          } else {
+            await model.reload()
+          }
         }
       }
   }
@@ -104,9 +117,7 @@ public struct AttachmentPickerSheet: View {
             onSelectToggle: {
               model.toggleRecentSelection(localIdentifier: item.localIdentifier)
             }
-          ) {
-            actions.openRecentItem(item)
-          }
+          )
         }
       }
       .padding(.horizontal, 12)
@@ -115,10 +126,6 @@ public struct AttachmentPickerSheet: View {
 
   private var actionList: some View {
     VStack(spacing: 18) {
-      if model.selectedRecentItems.isEmpty == false {
-        sendSelectedButton
-      }
-
       listActionButton(
         title: "Library",
         systemImage: "photo.on.rectangle.angled",
@@ -137,28 +144,34 @@ public struct AttachmentPickerSheet: View {
   private var sendSelectedButtonTitle: String {
     let count = model.selectedRecentItems.count
     if count == 1 {
-      return "Send 1 Selected"
+      return "Add 1 photo"
     }
-    return "Send \(count) Selected"
+    return "Add \(count) photos"
   }
 
-  private var sendSelectedButton: some View {
-    HStack {
-      Spacer(minLength: 0)
-      Button(action: {
-        let selectedItems = model.selectedRecentItems
-        guard selectedItems.isEmpty == false else { return }
-        actions.openRecentItems(selectedItems)
-        model.clearRecentSelection()
-      }) {
+  @ViewBuilder
+  private var bottomSendButtonOverlay: some View {
+    if model.selectedRecentItems.isEmpty == false {
+      Button(action: sendSelectedItems) {
         Text(sendSelectedButtonTitle)
           .font(.body.weight(.semibold))
-          .frame(minWidth: 190)
+          .foregroundStyle(.white)
+          .frame(maxWidth: .infinity)
+          .padding(.vertical, 14)
       }
-      .buttonStyle(.borderedProminent)
-      .accessibilityLabel(sendSelectedButtonTitle)
-      Spacer(minLength: 0)
+      .buttonStyle(.plain)
+      .background(.blue, in: Capsule())
+      .padding(.horizontal, 28)
+      .padding(.bottom, 8)
+      .transition(.move(edge: .bottom).combined(with: .opacity))
     }
+  }
+
+  private func sendSelectedItems() {
+    let selectedItems = model.selectedRecentItems
+    guard selectedItems.isEmpty == false else { return }
+    actions.openRecentItems(selectedItems)
+    model.clearRecentSelection()
   }
 
   private func listActionButton(title: String, systemImage: String, action: @escaping () -> Void) -> some View {

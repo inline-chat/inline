@@ -6,6 +6,9 @@ enum AttachmentPickerLibraryActionTarget {
 func resolveAttachmentPickerLibraryActionTarget(
   showsLimitedAccessNotice: Bool
 ) -> AttachmentPickerLibraryActionTarget {
-  _ = showsLimitedAccessNotice
+  if showsLimitedAccessNotice {
+    return .manageLimitedAccess
+  }
+
   return .openLibrary
 }
