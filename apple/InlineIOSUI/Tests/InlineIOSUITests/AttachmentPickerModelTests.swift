@@ -152,4 +152,5 @@ struct AttachmentPickerModelTests {
 
     #expect(model.selectedRecentItems.map(\.localIdentifier) == ["two"])
   }
+
 }
