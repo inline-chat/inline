@@ -4,10 +4,10 @@ import Testing
 
 @Suite("AttachmentPickerSheet")
 struct AttachmentPickerSheetTests {
-  @Test("limited access keeps library row mapped to open library")
-  func limitedAccessKeepsLibraryRowMappedToOpenLibrary() {
+  @Test("limited access maps library row to manage limited access")
+  func limitedAccessMapsLibraryRowToManageLimitedAccess() {
     #expect(
-      resolveAttachmentPickerLibraryActionTarget(showsLimitedAccessNotice: true) == .openLibrary
+      resolveAttachmentPickerLibraryActionTarget(showsLimitedAccessNotice: true) == .manageLimitedAccess
     )
   }
 

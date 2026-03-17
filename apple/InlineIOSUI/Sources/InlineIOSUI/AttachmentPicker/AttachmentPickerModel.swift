@@ -50,6 +50,7 @@ public final class AttachmentPickerModel: NSObject, PHPhotoLibraryChangeObserver
 
   @ObservationIgnored private let authorizationStatusProvider: @Sendable () -> PHAuthorizationStatus
   @ObservationIgnored private let recentItemsProvider: @Sendable () -> [RecentItem]
+  @ObservationIgnored private let recentLimit: Int
 
   public init(
     recentLimit: Int = 20,
@@ -58,6 +59,7 @@ public final class AttachmentPickerModel: NSObject, PHPhotoLibraryChangeObserver
     },
     recentItemsProvider: (@Sendable () -> [RecentItem])? = nil
   ) {
+    self.recentLimit = recentLimit
     self.authorizationStatusProvider = authorizationStatusProvider
     self.recentItemsProvider = recentItemsProvider ?? {
       Self.fetchRecentItems(limit: recentLimit)
@@ -98,6 +100,33 @@ public final class AttachmentPickerModel: NSObject, PHPhotoLibraryChangeObserver
     }
 
     isLoading = false
+  }
+
+  public func reload(promotingLocalIdentifiers localIdentifiers: [String]) async {
+    let uniqueIds = Self.uniqueOrderedIdentifiers(from: localIdentifiers)
+    await reload()
+
+    guard uniqueIds.isEmpty == false else { return }
+
+    let fetchedPromotedItems = await Task.detached(priority: .userInitiated) {
+      Self.fetchRecentItems(localIdentifiers: uniqueIds)
+    }.value
+    guard fetchedPromotedItems.isEmpty == false else { return }
+
+    let promotedById = Dictionary(uniqueKeysWithValues: fetchedPromotedItems.map { ($0.localIdentifier, $0) })
+    let promotedItems = uniqueIds.compactMap { promotedById[$0] }
+    guard promotedItems.isEmpty == false else { return }
+
+    let promotedIds = Set(promotedItems.map(\.localIdentifier))
+    var mergedItems = promotedItems
+    mergedItems.append(contentsOf: recentItems.filter { promotedIds.contains($0.localIdentifier) == false })
+    if mergedItems.count > recentLimit {
+      mergedItems = Array(mergedItems.prefix(recentLimit))
+    }
+
+    recentItems = mergedItems
+    let availableIds = Set(recentItems.map(\.localIdentifier))
+    selectedRecentItemIds = selectedRecentItemIds.intersection(availableIds)
   }
 
   nonisolated static func sortRecentItems(_ items: [RecentItem]) -> [RecentItem] {
@@ -168,6 +197,43 @@ public final class AttachmentPickerModel: NSObject, PHPhotoLibraryChangeObserver
     }
 
     return items
+  }
+
+  private nonisolated static func fetchRecentItems(localIdentifiers: [String]) -> [RecentItem] {
+    let uniqueIds = uniqueOrderedIdentifiers(from: localIdentifiers)
+    guard uniqueIds.isEmpty == false else { return [] }
+
+    let assets = PHAsset.fetchAssets(withLocalIdentifiers: uniqueIds, options: nil)
+    var itemsById: [String: RecentItem] = [:]
+    itemsById.reserveCapacity(uniqueIds.count)
+
+    assets.enumerateObjects { asset, _, _ in
+      guard let mediaType = recentMediaType(for: asset.mediaType) else {
+        return
+      }
+
+      itemsById[asset.localIdentifier] = RecentItem(
+        localIdentifier: asset.localIdentifier,
+        createdAt: asset.creationDate,
+        mediaType: mediaType
+      )
+    }
+
+    return uniqueIds.compactMap { itemsById[$0] }
+  }
+
+  private nonisolated static func uniqueOrderedIdentifiers(from localIdentifiers: [String]) -> [String] {
+    var seen = Set<String>()
+    var ordered: [String] = []
+    ordered.reserveCapacity(localIdentifiers.count)
+
+    for identifier in localIdentifiers where identifier.isEmpty == false {
+      if seen.insert(identifier).inserted {
+        ordered.append(identifier)
+      }
+    }
+
+    return ordered
   }
 
   public func toggleRecentSelection(localIdentifier: String) {

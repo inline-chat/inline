@@ -124,9 +124,13 @@ extension ComposeView: UIAdaptivePresentationControllerDelegate {
 
   private func presentLimitedLibraryManager() {
     guard let presenter = attachmentFlowPresenter() else { return }
-    PHPhotoLibrary.shared().presentLimitedLibraryPicker(from: presenter) { _ in
+    PHPhotoLibrary.shared().presentLimitedLibraryPicker(from: presenter) { localIdentifiers in
       DispatchQueue.main.async {
-        NotificationCenter.default.post(name: .attachmentPickerRecentMediaDidChange, object: nil)
+        NotificationCenter.default.post(
+          name: .attachmentPickerRecentMediaDidChange,
+          object: nil,
+          userInfo: [AttachmentPickerRecentMediaChangeUserInfo.localIdentifiersKey: localIdentifiers]
+        )
       }
     }
   }
