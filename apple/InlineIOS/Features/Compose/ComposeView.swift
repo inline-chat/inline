@@ -266,6 +266,29 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     resetComposeState()
   }
 
+  func sendMediaItemImmediately(_ mediaItem: FileMediaItem) {
+    guard let peerId else {
+      log.debug("No peerId available for immediate media send")
+      return
+    }
+
+    Transactions.shared.mutate(
+      transaction: .sendMessage(
+        .init(
+          text: nil,
+          peerId: peerId,
+          chatId: chatId ?? 0,
+          mediaItems: [mediaItem],
+          replyToMsgId: ChatState.shared.getState(peer: peerId).replyingMessageId,
+          isSticker: nil,
+          entities: nil
+        )
+      )
+    )
+
+    ChatState.shared.clearReplyingMessageId(peer: peerId)
+  }
+
   func setupViews() {
     clearBackground()
 
