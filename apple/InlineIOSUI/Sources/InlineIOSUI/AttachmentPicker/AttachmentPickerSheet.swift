@@ -183,11 +183,14 @@ public struct AttachmentPickerSheet: View {
   }
 
   private var libraryAction: () -> Void {
-    if model.showsLimitedAccessNotice {
-      return actions.manageLimitedAccess
+    switch resolveAttachmentPickerLibraryActionTarget(
+      showsLimitedAccessNotice: model.showsLimitedAccessNotice
+    ) {
+      case .openLibrary:
+        return actions.openLibrary
+      case .manageLimitedAccess:
+        return actions.manageLimitedAccess
     }
-
-    return actions.openLibrary
   }
 
   private var emptyStateMessage: String? {
