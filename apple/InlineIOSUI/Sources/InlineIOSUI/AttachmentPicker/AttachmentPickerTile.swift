@@ -81,6 +81,10 @@ public struct AttachmentPickerRecentTile: View {
         width: AttachmentPickerTileMetrics.thumbnailWidth,
         height: AttachmentPickerTileMetrics.thumbnailHeight
       )
+      .overlay {
+        RoundedRectangle(cornerRadius: AttachmentPickerTileMetrics.cornerRadius, style: .continuous)
+          .strokeBorder(Color.accentColor.opacity(isSelected ? 1 : 0), lineWidth: 3)
+      }
       .overlay(alignment: .topTrailing) {
         AttachmentPickerSelectionCircle(isSelected: isSelected)
           .padding(8)
@@ -99,10 +103,14 @@ private struct AttachmentPickerSelectionCircle: View {
   var body: some View {
     ZStack {
       Circle()
-        .fill(isSelected ? Color.accentColor : .white)
+        .fill(
+          isSelected
+            ? Color.accentColor
+            : Color.black.opacity(0.28)
+        )
       Circle()
         .stroke(
-          isSelected ? Color.accentColor : .black.opacity(0.18),
+          isSelected ? Color.accentColor : .white.opacity(0.68),
           lineWidth: 1
         )
 
