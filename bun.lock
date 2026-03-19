@@ -85,7 +85,7 @@
     },
     "packages/openclaw-inline": {
       "name": "@inline-openclaw/inline",
-      "version": "0.0.14",
+      "version": "0.0.16",
       "dependencies": {
         "@inline-chat/realtime-sdk": "^0.0.8",
         "zod": "^4.1.5",
@@ -103,7 +103,7 @@
     },
     "packages/protocol": {
       "name": "@inline-chat/protocol",
-      "version": "0.0.3",
+      "version": "0.0.4",
       "dependencies": {
         "@protobuf-ts/runtime": "^2.11.1",
       },
@@ -113,7 +113,7 @@
     },
     "packages/sdk": {
       "name": "@inline-chat/realtime-sdk",
-      "version": "0.0.8",
+      "version": "0.0.9",
       "dependencies": {
         "@inline-chat/protocol": "^0.0.3",
         "ws": "^8.18.3",
@@ -149,7 +149,7 @@
         "@inline-chat/oauth-core": "workspace:*",
         "@inline-chat/protocol": "workspace:*",
         "@linear/sdk": "^38.0.0",
-        "@notionhq/client": "^3.0.1",
+        "@notionhq/client": "5.11.0",
         "@prelude.so/sdk": "^0.3.0",
         "@protobuf-ts/plugin": "^2.9.4",
         "@protobuf-ts/runtime": "^2.11.1",
@@ -798,7 +798,7 @@
 
     "@nodelib/fs.walk": ["@nodelib/fs.walk@1.2.8", "", { "dependencies": { "@nodelib/fs.scandir": "2.1.5", "fastq": "^1.6.0" } }, "sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg=="],
 
-    "@notionhq/client": ["@notionhq/client@3.0.1", "", {}, "sha512-vHtFKrRKQg2PZSky1A9fTe+L9/WxNYRJWHmD6ZiBNgeN5jnFmv27ootRl9ROzEm/N+mOxfTo37EnuCHsaPgETg=="],
+    "@notionhq/client": ["@notionhq/client@5.11.0", "", {}, "sha512-bBP3gZvf2yUzwWJ/oEPf/4DWR4wSrZln0ZtVx3mc3RQaQHjl1/cbqECcsUS6RjKc51PY9598s7WRItxd8X1MAw=="],
 
     "@octokit/app": ["@octokit/app@16.1.2", "", { "dependencies": { "@octokit/auth-app": "^8.1.2", "@octokit/auth-unauthenticated": "^7.0.3", "@octokit/core": "^7.0.6", "@octokit/oauth-app": "^8.0.3", "@octokit/plugin-paginate-rest": "^14.0.0", "@octokit/types": "^16.0.0", "@octokit/webhooks": "^14.0.0" } }, "sha512-8j7sEpUYVj18dxvh0KWj6W/l6uAiVRBl1JBDVRqH1VHKAO/G5eRVl4yEoYACjakWers1DjUkcCHyJNQK47JqyQ=="],
 
