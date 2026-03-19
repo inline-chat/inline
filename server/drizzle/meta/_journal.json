@@ -470,6 +470,13 @@
       "when": 1773498141214,
       "tag": "0066_add_dialog_sidebar_visibility",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1773498279000,
+      "tag": "0067_bot_commands",
+      "breakpoints": true
     }
   ]
 }
