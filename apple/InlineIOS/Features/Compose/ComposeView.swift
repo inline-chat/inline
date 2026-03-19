@@ -384,7 +384,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     ])
   }
 
-  func buttonDisappear() {
+  func buttonDisappear(animated: Bool = true) {
     guard isButtonVisible || !ComposeSendButtonState.isEffectivelyHidden(alpha: Double(sendButton.alpha)) else {
       sendButton.isEnabled = false
       sendButton.isUserInteractionEnabled = false
@@ -392,6 +392,18 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       return
     }
     isButtonVisible = false
+
+    guard animated else {
+      sendButton.layer.removeAllAnimations()
+      sendButton.layer.removeAnimation(forKey: "telegram.sendButton.blur")
+      sendButton.layer.filters = nil
+      sendButton.alpha = 0
+      sendButton.transform = .identity
+      sendButton.isEnabled = false
+      sendButton.isUserInteractionEnabled = false
+      sendButton.setNeedsUpdateConfiguration()
+      return
+    }
 
     animateTelegramSendButtonBlur(to: telegramSendButtonBlurRadius)
 
@@ -443,6 +455,18 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       self.sendButton.alpha = 1
       self.sendButton.transform = .identity
     }
+  }
+
+  private func showSendButtonImmediately() {
+    isButtonVisible = true
+    sendButton.layer.removeAllAnimations()
+    sendButton.layer.removeAnimation(forKey: "telegram.sendButton.blur")
+    sendButton.layer.filters = nil
+    sendButton.alpha = 1.0
+    sendButton.transform = .identity
+    sendButton.isEnabled = true
+    sendButton.isUserInteractionEnabled = true
+    sendButton.setNeedsUpdateConfiguration()
   }
 
   private func currentTelegramSendButtonBlurRadius() -> CGFloat {
@@ -986,8 +1010,20 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   private func resetComposeState() {
+    let hadAttachments = !attachmentItems.isEmpty || !pendingVideoAttachments.isEmpty
+    let shouldAnimateHeightReset = ComposeResetBehavior.shouldAnimateHeightResetAfterSend(
+      hadAttachments: hadAttachments
+    )
+    let shouldHideSendButtonImmediately = ComposeResetBehavior.shouldHideSendButtonImmediatelyAfterSend(
+      hadAttachments: hadAttachments
+    )
+
+    if shouldHideSendButtonImmediately {
+      buttonDisappear(animated: false)
+    }
+
     clearDraft()
-    clearAttachments()
+    clearAttachments(shouldUpdateSendButtonVisibility: !shouldHideSendButtonImmediately)
     stopDraftSaveTimer()
     textView.text = ""
 
@@ -997,9 +1033,11 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     textView.font = .systemFont(ofSize: 17)
     textView.typingAttributes[.font] = UIFont.systemFont(ofSize: 17)
 
-    resetHeight()
+    resetHeight(animated: shouldAnimateHeightReset)
     textView.showPlaceholder(true)
-    buttonDisappear()
+    if !shouldHideSendButtonImmediately {
+      buttonDisappear()
+    }
 
     sendButton.configuration?.showsActivityIndicator = false
   }
@@ -1024,7 +1062,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
     // Update state
     attachmentItems.removeValue(forKey: id)
-    handleAttachmentItemsChanged()
+    handleAttachmentItemsChanged(animated: true)
 
     log.debug("Removed attachment with id: \(id)")
   }
@@ -1037,26 +1075,42 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     removeAttachment(id)
   }
 
-  func clearAttachments() {
+  func clearAttachments(shouldUpdateSendButtonVisibility: Bool = true) {
     attachmentItems.removeAll()
     pendingVideoAttachments.removeAll()
     canceledPendingVideoAttachmentIds.removeAll()
-    handleAttachmentItemsChanged(animated: false)
+    handleAttachmentItemsChanged(animated: false, shouldUpdateSendButtonVisibility: shouldUpdateSendButtonVisibility)
     log.debug("Cleared all attachments")
   }
 
   @discardableResult
-  func addAttachmentItem(_ mediaItem: FileMediaItem, animated: Bool = true) -> String {
+  func addAttachmentItem(_ mediaItem: FileMediaItem, animated: Bool = false) -> String {
     let uniqueId = mediaItem.getItemUniqueId()
     attachmentItems[uniqueId] = mediaItem
     handleAttachmentItemsChanged(animated: animated)
     return uniqueId
   }
 
-  func handleAttachmentItemsChanged(animated: Bool = true) {
+  func handleAttachmentItemsChanged(animated: Bool = true, shouldUpdateSendButtonVisibility: Bool = true) {
     syncAttachmentUploadTracking()
-    refreshAttachmentPreviews()
-    updateSendButtonVisibility()
+    UIView.performWithoutAnimation {
+      refreshAttachmentPreviews()
+      attachmentStackView.layoutIfNeeded()
+    }
+    if shouldUpdateSendButtonVisibility {
+      let shouldShowSendButtonImmediately = ComposeSendButtonState.shouldShowImmediatelyForReadyAttachments(
+        hasAttachments: !attachmentItems.isEmpty,
+        hasPendingVideos: !pendingVideoAttachments.isEmpty,
+        canSend: canSend
+      )
+
+      if shouldShowSendButtonImmediately {
+        showSendButtonImmediately()
+      } else {
+        updateSendButtonVisibility()
+      }
+    }
+
     updateHeight(animated: animated)
   }
 

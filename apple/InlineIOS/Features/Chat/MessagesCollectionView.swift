@@ -108,11 +108,12 @@ final class MessagesCollectionView: UICollectionView {
 
   func updateComposeInset(composeHeight: CGFloat) {
     self.composeHeight = composeHeight
-    UIView.animate(withDuration: 0.2) {
-      self.updateContentInsets()
-      if !self.itemsEmpty, self.shouldScrollToBottom {
-        self.safeScrollToTop(animated: false)
+    UIView.performWithoutAnimation {
+      updateContentInsets()
+      if !itemsEmpty, shouldScrollToBottom {
+        safeScrollToTop(animated: false)
       }
+      layoutIfNeeded()
     }
   }
 
@@ -1838,9 +1839,13 @@ private extension MessagesCollectionView {
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-      // Ensure date badge is visible while the user is actively scrolling.
-      dateSeparatorHideWorkItem?.cancel()
-      setDateSeparators(hidden: false, animated: false)
+      let isUserInteractingWithScrollView = scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating
+
+      // Keep the date badge visible only for user-driven scrolling, not programmatic offset/inset updates.
+      if isUserInteractingWithScrollView {
+        dateSeparatorHideWorkItem?.cancel()
+        setDateSeparators(hidden: false, animated: false)
+      }
 
       /// Reminder: textViewVerticalMargin in ComposeView affects scrollView.contentOffset.y number
       /// (textViewVerticalMargin = 7.0  -> contentOffset.y = -64.0 | textViewVerticalMargin = 4.0 -> contentOffset.y =
