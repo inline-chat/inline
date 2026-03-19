@@ -71,7 +71,7 @@ let package = Package(
 
     .testTarget(
       name: "InlineUITests",
-      dependencies: ["InlineUI", "TextProcessing"],
+      dependencies: ["InlineUI", "TextProcessing", "Translation"],
       swiftSettings: swiftSettings
     ),
   ]

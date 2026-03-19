@@ -3,31 +3,21 @@ import Foundation
 import InlineKit
 import Logger
 
+private let translationRequestTimeout: TimeInterval = 20
+
 public actor TranslationViewModel {
-  private let db = AppDatabase.shared
-  private let realtime = Realtime.shared
   private let log = Log.scoped("TranslationViewModel")
-  private var cancellables = Set<AnyCancellable>()
 
   private let peerId: Peer
 
   // Combined state management
-  private var processedMessages: [MessageKey: String] = [:] // messageKey -> targetLanguage
-  private var inProgressRequests: [InProgressRequest: RequestState] = [:]
-
-  // Timeout configuration
-  private let requestTimeout: TimeInterval = 20 // 20 seconds timeout
+  private var processedMessages: [TranslationMessageKey: String] = [:] // messageKey -> targetLanguage
+  private var inProgressRequests = Set<InProgressRequest>()
 
   private struct InProgressRequest: Hashable {
     let peerId: Peer
     let messageIds: Set<Int64>
     let targetLanguage: String
-  }
-
-  private struct RequestState {
-    let request: InProgressRequest
-    let startTime: Date
-    let timeoutTask: Task<Void, Never>
   }
 
   public init(peerId: Peer) {
@@ -50,21 +40,17 @@ public actor TranslationViewModel {
     }
   }
 
-  private func translationStateChanged(enabled: Bool) {
+  private func translationStateChanged(enabled: Bool) async {
     log.debug("Translation state changed to \(enabled) for peer \(peerId)")
     if !enabled {
-      Task {
-        resetState()
-      }
+      await resetState()
     }
   }
 
-  private func resetState() {
-    Task {
-      processedMessages.removeAll()
-      inProgressRequests.removeAll()
-      await TranslatingStatePublisher.shared.removeForPeer(peerId: peerId)
-    }
+  private func resetState() async {
+    processedMessages.removeAll()
+    inProgressRequests.removeAll()
+    await TranslatingStatePublisher.shared.removeForPeer(peerId: peerId)
   }
 
   public nonisolated func messagesDisplayed(messages: [FullMessage]) {
@@ -86,13 +72,6 @@ public actor TranslationViewModel {
     // Do everything on a background thread to avoid impacting UI
     Task(priority: .userInitiated) {
       do {
-        // Check if this exact request is already in progress
-        let requestMessageIds = messagesCopy.map(\.id)
-        if await isRequestInProgress(messageIds: requestMessageIds, targetLanguage: targetLanguage) {
-          log.debug("Translation request already in progress for these messages")
-          return
-        }
-
         // Filter out messages we've already processed for this language
         var newMessages: [FullMessage] = []
         for message in messagesCopy {
@@ -113,49 +92,48 @@ public actor TranslationViewModel {
 
         log.debug("Found \(newMessages.count) new messages to process for translation")
 
-        // Mark this request as in progress with start time
-        await addRequest(messageIds: requestMessageIds, targetLanguage: targetLanguage)
-
-        // Use defer to ensure cleanup happens even if errors occur
-        let cleanupMessageIds = requestMessageIds
-        let cleanupNewMessages = newMessages
-        defer {
-          Task {
-            // First remove from translating state to ensure UI is updated
-            await TranslatingStatePublisher.shared.removeBatch(
-              messageIds: cleanupMessageIds,
-              peerId: self.peerId
-            )
-            // Then clean up our internal state
-            await self.removeRequest(messageIds: cleanupMessageIds, targetLanguage: targetLanguage)
-            await self.markAsProcessed(messages: cleanupNewMessages, targetLanguage: targetLanguage)
-          }
-        }
-
         // 1. Filter messages needing translation
         let messagesNeedingTranslation = try await TranslationManager.shared.filterMessagesNeedingTranslation(
           messages: newMessages,
           targetLanguage: targetLanguage
         )
 
-        guard !messagesNeedingTranslation.isEmpty else {
+        let bookkeeping = TranslationRequestBookkeeping(
+          candidateMessages: newMessages,
+          messagesNeedingTranslation: messagesNeedingTranslation
+        )
+
+        guard !bookkeeping.requestMessageIds.isEmpty else {
           log.debug("No messages need translation")
+          await markAsProcessed(keys: bookkeeping.processedMessageKeys(outcome: .notRequested), targetLanguage: targetLanguage)
           return
         }
 
-        log.debug("Found \(messagesNeedingTranslation.count) messages needing translation")
+        let request = InProgressRequest(
+          peerId: peerId,
+          messageIds: Set(bookkeeping.requestMessageIds),
+          targetLanguage: targetLanguage
+        )
+
+        if await isRequestInProgress(request) {
+          log.debug("Translation request already in progress for these messages")
+          return
+        }
+
+        log.debug("Found \(bookkeeping.requestMessageIds.count) messages needing translation")
+
+        // Mark this request as in progress
+        await addRequest(request)
 
         // 2. Mark messages as being translated (batch operation)
-        let messageIds = messagesNeedingTranslation.map(\.messageId)
         await TranslatingStatePublisher.shared.addBatch(
-          messageIds: messageIds,
+          messageIds: bookkeeping.requestMessageIds,
           peerId: peerId
         )
 
         // 3. Request translations from API with timeout
-        try await withThrowingTaskGroup(of: Void.self) { group in
-          // Add the main translation request
-          group.addTask {
+        do {
+          try await performTranslationRequestWithTimeout {
             try await TranslationManager.shared.requestTranslations(
               messages: messagesNeedingTranslation,
               chatId: messagesNeedingTranslation[0].chatId,
@@ -163,43 +141,36 @@ public actor TranslationViewModel {
             )
           }
 
-          // Add timeout task
-          group.addTask {
-            try await Task.sleep(nanoseconds: UInt64(self.requestTimeout * 1_000_000_000))
-            throw TranslationError.timeout
+          log.debug("Successfully requested translations for \(bookkeeping.requestMessageIds.count) messages")
+
+          await finalizeRequest(
+            request,
+            bookkeeping: bookkeeping,
+            targetLanguage: targetLanguage,
+            outcome: .requestSucceeded
+          )
+
+          // 5. Trigger message updates
+          for message in messagesNeedingTranslation {
+            await MessagesPublisher.shared.messageUpdated(
+              message: message,
+              peer: peerId,
+              animated: true
+            )
           }
 
-          // Wait for either completion or timeout
-          try await group.next()
-          group.cancelAll()
-        }
-
-        log.debug("Successfully requested translations for \(messageIds.count) messages")
-
-        // 4. Remove messages from translating state (batch operation)
-        await TranslatingStatePublisher.shared.removeBatch(
-          messageIds: messageIds,
-          peerId: peerId
-        )
-
-        // 5. Trigger message updates
-        for message in messagesNeedingTranslation {
-          await MessagesPublisher.shared.messageUpdated(
-            message: message,
-            peer: peerId,
-            animated: true
+          log.debug("Completed translation cycle for \(bookkeeping.requestMessageIds.count) messages")
+        } catch {
+          log.error("Failed to process translations", error: error)
+          await finalizeRequest(
+            request,
+            bookkeeping: bookkeeping,
+            targetLanguage: targetLanguage,
+            outcome: .requestFailed
           )
         }
-
-        log.debug("Completed translation cycle for \(messageIds.count) messages")
       } catch {
         log.error("Failed to process translations", error: error)
-        // Clean up translating state in case of error
-        let messageIds = messagesCopy.map(\.id)
-        await TranslatingStatePublisher.shared.removeBatch(
-          messageIds: messageIds,
-          peerId: peerId
-        )
       }
     }
   }
@@ -259,11 +230,13 @@ public actor TranslationViewModel {
         )
 
         // Request translations from API
-        try await TranslationManager.shared.requestTranslations(
-          messages: messagesNeedingTranslation,
-          chatId: messagesNeedingTranslation[0].chatId,
-          peerId: peerId
-        )
+        try await performTranslationRequestWithTimeout {
+          try await TranslationManager.shared.requestTranslations(
+            messages: messagesNeedingTranslation,
+            chatId: messagesNeedingTranslation[0].chatId,
+            peerId: peerId
+          )
+        }
 
         log.debug("Successfully requested translations for \(messageIds.count) messages")
 
@@ -286,7 +259,7 @@ public actor TranslationViewModel {
       } catch {
         log.error("Failed to process translations", error: error)
         // Clean up translating state in case of error
-        let messageIds = messages.map(\.id)
+        let messageIds = messages.map(\.message.messageId)
         await TranslatingStatePublisher.shared.removeBatch(
           messageIds: messageIds,
           peerId: peerId
@@ -297,86 +270,44 @@ public actor TranslationViewModel {
 
   // MARK: - State Management Methods
 
-  struct MessageKey: Hashable {
-    var id: Int64
-    var editDate: Date?
-
-    static func from(_ message: FullMessage) -> MessageKey {
-      MessageKey(id: message.id, editDate: message.message.editDate)
-    }
-  }
-
   private func isProcessed(message: FullMessage, targetLanguage: String) -> Bool {
-    let messageKey = MessageKey.from(message)
+    let messageKey = TranslationMessageKey.from(message)
     if let processedLanguage = processedMessages[messageKey] {
       return processedLanguage == targetLanguage
     }
     return false
   }
 
-  private func markAsProcessed(messages: [FullMessage], targetLanguage: String) {
-    for message in messages {
-      let messageKey = MessageKey.from(message)
-      processedMessages[messageKey] = targetLanguage
+  private func markAsProcessed(keys: [TranslationMessageKey], targetLanguage: String) {
+    for key in keys {
+      processedMessages[key] = targetLanguage
     }
   }
 
-  private func isRequestInProgress(messageIds: [Int64], targetLanguage: String) -> Bool {
-    let request = InProgressRequest(
-      peerId: peerId,
-      messageIds: Set(messageIds),
-      targetLanguage: targetLanguage
-    )
-    return inProgressRequests[request] != nil
+  private func isRequestInProgress(_ request: InProgressRequest) -> Bool {
+    inProgressRequests.contains(request)
   }
 
-  private func addRequest(messageIds: [Int64], targetLanguage: String) {
-    let request = InProgressRequest(
-      peerId: peerId,
-      messageIds: Set(messageIds),
-      targetLanguage: targetLanguage
-    )
-
-    // Start timeout task
-    let timeoutTask = Task {
-      try? await Task.sleep(nanoseconds: UInt64(requestTimeout * 1_000_000_000))
-      handleTimeout(for: request)
-    }
-
-    inProgressRequests[request] = RequestState(
-      request: request,
-      startTime: Date(),
-      timeoutTask: timeoutTask
-    )
+  private func addRequest(_ request: InProgressRequest) {
+    inProgressRequests.insert(request)
   }
 
-  private func removeRequest(messageIds: [Int64], targetLanguage: String) {
-    let request = InProgressRequest(
-      peerId: peerId,
-      messageIds: Set(messageIds),
-      targetLanguage: targetLanguage
-    )
-
-    if let state = inProgressRequests[request] {
-      state.timeoutTask.cancel()
-    }
-    inProgressRequests.removeValue(forKey: request)
+  private func removeRequest(_ request: InProgressRequest) {
+    inProgressRequests.remove(request)
   }
 
-  private func handleTimeout(for request: InProgressRequest) {
-    log.error("Translation request timed out after \(requestTimeout) seconds for messages: \(request.messageIds)")
-    if let state = inProgressRequests[request] {
-      state.timeoutTask.cancel()
-    }
-    inProgressRequests.removeValue(forKey: request)
-
-    // Clean up translating state
-    Task {
-      await TranslatingStatePublisher.shared.removeBatch(
-        messageIds: Array(request.messageIds),
-        peerId: request.peerId
-      )
-    }
+  private func finalizeRequest(
+    _ request: InProgressRequest,
+    bookkeeping: TranslationRequestBookkeeping,
+    targetLanguage: String,
+    outcome: TranslationRequestOutcome
+  ) async {
+    await TranslatingStatePublisher.shared.removeBatch(
+      messageIds: bookkeeping.requestMessageIds,
+      peerId: request.peerId
+    )
+    removeRequest(request)
+    markAsProcessed(keys: bookkeeping.processedMessageKeys(outcome: outcome), targetLanguage: targetLanguage)
   }
 }
 
@@ -384,6 +315,31 @@ public actor TranslationViewModel {
 
 enum TranslationError: Error {
   case timeout
+}
+
+private func performTranslationRequestWithTimeout(
+  seconds: TimeInterval = translationRequestTimeout,
+  operation: @escaping @Sendable () async throws -> Void
+) async throws {
+  try await withThrowingTaskGroup(of: Void.self) { group in
+    group.addTask {
+      try await operation()
+    }
+
+    group.addTask {
+      try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+      throw TranslationError.timeout
+    }
+
+    defer {
+      group.cancelAll()
+    }
+
+    guard let result = try await group.next() else {
+      throw TranslationError.timeout
+    }
+    return result
+  }
 }
 
 @MainActor
