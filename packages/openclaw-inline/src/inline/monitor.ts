@@ -905,12 +905,11 @@ export async function monitorInlineProvider(params: {
         })
 
         const mentionRegexes = core.channel.mentions.buildMentionRegexes(cfg, route.agentId)
-        const wasMentioned =
-          typeof msg.mentioned === "boolean"
-            ? msg.mentioned
-            : mentionRegexes.length
-              ? core.channel.mentions.matchesMentionPatterns(rawBody, mentionRegexes)
-              : false
+        const nativeMentioned = typeof msg.mentioned === "boolean" ? msg.mentioned : false
+        const patternMentioned = mentionRegexes.length
+          ? core.channel.mentions.matchesMentionPatterns(rawBody, mentionRegexes)
+          : false
+        const wasMentioned = nativeMentioned || patternMentioned
         const historyLimit = resolveHistoryLimit({
           isGroup,
           historyLimit: account.config.historyLimit,
