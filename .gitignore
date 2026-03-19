@@ -135,3 +135,6 @@ scripts/.tools/
 
 # Actions
 .action/sparkle/
+
+# OpenClaw inline release artifacts
+packages/openclaw-inline/*.tgz
