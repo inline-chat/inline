@@ -48,10 +48,15 @@ extension ComposeView {
     onHeightChange?(newHeight)
   }
 
-  func resetHeight() {
-    UIView.animate(withDuration: 0.2) {
-      self.composeHeightConstraint.constant = Self.minHeight
-      self.superview?.layoutIfNeeded()
+  func resetHeight(animated: Bool = true) {
+    if animated {
+      UIView.animate(withDuration: 0.2) {
+        self.composeHeightConstraint.constant = Self.minHeight
+        self.superview?.layoutIfNeeded()
+      }
+    } else {
+      composeHeightConstraint.constant = Self.minHeight
+      superview?.layoutIfNeeded()
     }
     onHeightChange?(Self.minHeight)
   }

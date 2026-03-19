@@ -96,6 +96,28 @@ struct ComposeInteractionStateTests {
     #expect(shouldFinalize == false)
   }
 
+  @Test("ready attachments force the send button visible immediately")
+  func sendButtonShowsImmediatelyForReadyAttachments() async throws {
+    let shouldShowImmediately = ComposeSendButtonState.shouldShowImmediatelyForReadyAttachments(
+      hasAttachments: true,
+      hasPendingVideos: false,
+      canSend: true
+    )
+
+    #expect(shouldShowImmediately == true)
+  }
+
+  @Test("pending videos do not force immediate send button visibility")
+  func sendButtonDoesNotShowImmediatelyForPendingVideos() async throws {
+    let shouldShowImmediately = ComposeSendButtonState.shouldShowImmediatelyForReadyAttachments(
+      hasAttachments: true,
+      hasPendingVideos: true,
+      canSend: false
+    )
+
+    #expect(shouldShowImmediately == false)
+  }
+
   @Test("text can send while attachments are still uploading")
   func sendEligibilityAllowsTextDuringUpload() async throws {
     let canSend = ComposeSendEligibility.canSend(
@@ -122,8 +144,21 @@ struct ComposeInteractionStateTests {
     #expect(canSend == false)
   }
 
-  @Test("text only mode is used when text exists and media is not ready")
-  func sendEligibilityUsesTextOnlyModeWhenMediaIsNotReady() async throws {
+  @Test("attachment-only send is allowed while uploads are already in flight")
+  func sendEligibilityAllowsAttachmentOnlyDuringUpload() async throws {
+    let canSend = ComposeSendEligibility.canSend(
+      hasText: false,
+      hasAttachments: true,
+      hasForward: false,
+      hasPendingVideos: false,
+      hasActiveAttachmentUploads: true
+    )
+
+    #expect(canSend == true)
+  }
+
+  @Test("text only mode is used when pending media is not ready")
+  func sendEligibilityUsesTextOnlyModeWhenPendingMediaIsNotReady() async throws {
     let shouldSendTextOnly = ComposeSendEligibility.shouldSendTextOnly(
       hasText: true,
       hasPendingVideos: true,
@@ -131,6 +166,17 @@ struct ComposeInteractionStateTests {
     )
 
     #expect(shouldSendTextOnly == true)
+  }
+
+  @Test("text only mode is not used when uploads are already in flight")
+  func sendEligibilityDoesNotUseTextOnlyModeDuringUpload() async throws {
+    let shouldSendTextOnly = ComposeSendEligibility.shouldSendTextOnly(
+      hasText: true,
+      hasPendingVideos: false,
+      hasActiveAttachmentUploads: true
+    )
+
+    #expect(shouldSendTextOnly == false)
   }
 
   @Test("text only mode is not used when media is ready")
@@ -142,5 +188,32 @@ struct ComposeInteractionStateTests {
     )
 
     #expect(shouldSendTextOnly == false)
+  }
+
+  @Test("sending staged attachments resets compose without animation")
+  func sendResetDoesNotAnimateAfterSendingAttachments() async throws {
+    let shouldAnimateReset = ComposeResetBehavior.shouldAnimateHeightResetAfterSend(
+      hadAttachments: true
+    )
+
+    #expect(shouldAnimateReset == false)
+  }
+
+  @Test("text-only reset keeps the existing height animation behavior")
+  func sendResetCanAnimateWithoutAttachments() async throws {
+    let shouldAnimateReset = ComposeResetBehavior.shouldAnimateHeightResetAfterSend(
+      hadAttachments: false
+    )
+
+    #expect(shouldAnimateReset == true)
+  }
+
+  @Test("sending staged attachments hides the send button immediately")
+  func sendResetHidesButtonImmediatelyAfterSendingAttachments() async throws {
+    let shouldHideImmediately = ComposeResetBehavior.shouldHideSendButtonImmediatelyAfterSend(
+      hadAttachments: true
+    )
+
+    #expect(shouldHideImmediately == true)
   }
 }

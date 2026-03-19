@@ -17,6 +17,18 @@ public struct SendMessageAttachment: Codable, Sendable {
   fileprivate var randomId: Int64?
 }
 
+enum SendMessageUploadCoordinator {
+  static func beginOrJoinUpload<T>(
+    _ startUpload: () async throws -> T
+  ) async throws -> T? {
+    do {
+      return try await startUpload()
+    } catch FileUploadError.uploadAlreadyInProgress {
+      return nil
+    }
+  }
+}
+
 public struct TransactionSendMessage: Transaction {
   // Properties
   public var text: String? = nil
@@ -235,7 +247,14 @@ public struct TransactionSendMessage: Transaction {
 //            }
 //          }
 
-          let localPhotoId = try await FileUploader.shared.uploadPhoto(photoInfo: photoInfo)
+          guard let localPhotoId = photoInfo.photo.id else {
+            throw FileUploadError.invalidPhotoId
+          }
+
+          _ = try await SendMessageUploadCoordinator.beginOrJoinUpload {
+            try await FileUploader.shared.uploadPhoto(photoInfo: photoInfo)
+          }
+
           if let photoServerId = try await FileUploader.shared.waitForUpload(photoLocalId: localPhotoId)?.photoId {
             inputMedia = .fromPhotoId(photoServerId)
           }
@@ -249,13 +268,24 @@ public struct TransactionSendMessage: Transaction {
 //            }
 //          }
 
-          let localVideoId = try await FileUploader.shared.uploadVideo(videoInfo: videoInfo)
+          guard let localVideoId = videoInfo.video.id else {
+            throw FileUploadError.invalidVideoId
+          }
+
+          _ = try await SendMessageUploadCoordinator.beginOrJoinUpload {
+            try await FileUploader.shared.uploadVideo(videoInfo: videoInfo)
+          }
+
           if let videoServerId = try await FileUploader.shared.waitForUpload(videoLocalId: localVideoId)?.videoId {
             inputMedia = .fromVideoId(videoServerId)
           }
 
         case let .document(documentInfo):
-          var localDocumentIdForNotifications = documentInfo.document.id
+          let localDocumentIdForNotifications = documentInfo.document.id
+          guard let localDocumentId = documentInfo.document.id else {
+            throw FileUploadError.invalidDocumentId
+          }
+
           if let localDocumentIdForNotifications {
             Log.shared.debug("📤 Sending DocumentUploadStarted notification for document ID: \(localDocumentIdForNotifications)")
             Task { @MainActor in
@@ -268,18 +298,8 @@ public struct TransactionSendMessage: Transaction {
           }
 
           do {
-            let localDocumentId = try await FileUploader.shared.uploadDocument(documentInfo: documentInfo)
-            localDocumentIdForNotifications = localDocumentId
-
-            if documentInfo.document.id == nil {
-              Log.shared.debug("📤 Sending DocumentUploadStarted notification for document ID: \(localDocumentId)")
-              Task { @MainActor in
-                NotificationCenter.default.post(
-                  name: NSNotification.Name("DocumentUploadStarted"),
-                  object: nil,
-                  userInfo: ["documentId": localDocumentId]
-                )
-              }
+            _ = try await SendMessageUploadCoordinator.beginOrJoinUpload {
+              try await FileUploader.shared.uploadDocument(documentInfo: documentInfo)
             }
 
             if let documentServerId = try await FileUploader.shared.waitForUpload(documentLocalId: localDocumentId)?
@@ -312,7 +332,15 @@ public struct TransactionSendMessage: Transaction {
           }
 
         case let .voice(voiceContent):
-          let localVoiceId = try await FileUploader.shared.uploadVoice(voiceContent: voiceContent)
+          let localVoiceId = voiceContent.voiceID
+          guard localVoiceId != 0 else {
+            throw FileUploadError.invalidVoiceId
+          }
+
+          _ = try await SendMessageUploadCoordinator.beginOrJoinUpload {
+            try await FileUploader.shared.uploadVoice(voiceContent: voiceContent)
+          }
+
           if let voiceServerId = try await FileUploader.shared.waitForUpload(voiceLocalId: localVoiceId)?.voiceId {
             inputMedia = .fromVoiceId(voiceServerId)
           }
