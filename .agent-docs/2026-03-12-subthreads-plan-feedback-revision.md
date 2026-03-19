@@ -14,7 +14,7 @@ Supersedes direction in:
 - reply threads are just subthreads anchored to a parent message
 - the system may later support extra participants outside the parent space
 - public-parent reply threads must inherit access from the parent chat because the parent may later become private
-- users without a dialog do not need background unread accumulation
+- linked reply threads should create a real per-user dialog on first open, but that dialog should stay hidden from sidebar lists until explicitly promoted
 - live message updates should still behave like normal chats for access-eligible users who are online or viewing
 - manual backlinks / references are a later feature, not part of the first subthread launch
 
@@ -49,8 +49,9 @@ The revised recommendation is:
 4. use `parent_chat_id` as the inherited access source in v1
 5. keep `chat_participants` as direct grants, not as a materialized union of inherited access
 6. keep live message delivery chat-like
-7. use dialogs only for users who should have durable per-thread state
-8. keep follow/open-strategy out of the core v1 spec
+7. use dialogs as the durable per-user state container for linked subthreads, while decoupling dialog existence from sidebar visibility
+8. keep follow/open-strategy out of the core v1 spec while still allowing hidden dialogs to carry full thread state
+9. keep hidden-thread promotion logic centralized so product rules can change later without touching multiple read/send/open paths
 
 This gives a clearer model than putting everything into a general graph table up front.
 
@@ -69,6 +70,24 @@ Today’s target flow is:
 - default the title to `Re: <initial part of message>`
 - show a reply summary under the parent message like `2 replies`
 - if unread state exists for that user, show a small unread dot there as well
+
+User-ready stage-2 polish on top of that flow:
+
+- opening or sending in a hidden reply thread must not auto-promote it into the sidebar
+- add an explicit `Show in Sidebar` action backed by a dedicated RPC
+- use a reply-thread glyph in sidebar/chat icons instead of the generic thread hashtag where possible
+- render the anchor context like a real message row, with the `Replies` separator below it and the first date separator above the first actual thread message
+- make the reply summary footer lighter-weight than embedded replies: no blue leading line, slightly wider, subtle hover state, trailing loading affordance while opening
+- add a parent-thread open action from the reply-thread toolbar overflow menu
+- on macOS, inherit reply-thread translation state from the parent thread when navigating in
+
+For v1 realtime, that parent-message reply summary can continue to piggyback on the existing `editMessage` path rather than introducing a dedicated new update type immediately.
+
+That means:
+
+- reply-count changes and recent-replier changes update through the parent message edit path
+- reply-thread unread-state changes can use the same centralized path in v1
+- if read/unread churn in very large threads becomes too noisy later, this is the first candidate to split into a user-scoped summary update
 
 This means the implementation should focus on reply-thread subthreads first, while still using the full data model that can support plain subthreads later.
 
@@ -269,36 +288,43 @@ That avoids a much larger sidebar redesign during subthread rollout.
 
 Linked subthreads should not be eagerly dialog-created for every access-eligible user.
 
-Instead, only materialize dialog rows for the explicit v1 triggers listed later in `Dialog Creation Triggers`.
+Instead, a linked subthread should create a dialog only when a user explicitly opens that thread or otherwise performs an action that needs durable per-user thread state.
 
-Opening a linked subthread should not create a dialog row by itself.
+Opening a linked subthread should create a hidden dialog row for that user on first open.
 
-This keeps subthreads from flooding the sidebar while preserving top-level behavior.
+This keeps subthreads from flooding the sidebar while preserving top-level behavior and reusing the existing dialog-backed state model.
 
 ## Do Not Add Follow State To The Core Spec Yet
 
 `following` and `open_when` are not required for the core subthread implementation.
 
-For v1, the relevant durable per-user primitive is simply:
+For v1, the relevant durable per-user primitives are:
 
 - dialog exists
+- dialog sidebar visibility is explicit
 
 If a linked subthread has a dialog for a user:
 
-- it can appear in sidebar
 - it can accumulate unread
+- it can store read position
 - it can be archived/unarchived
+- it can be pinned/unpinned
 - it can use the existing dialog notification settings
 
-If it has no dialog:
+If that dialog is `sidebar_visible = true`:
 
-- opening it does not create durable server state
-- it does not accumulate durable unread/read state
-- it does not appear in sidebar
+- it appears in sidebar and home lists
 
-This is enough for the feature you are currently specifying.
+If that dialog is `sidebar_visible = false`:
 
-If later you want richer "follow without sidebar" or "open on mention only" behavior, that can be added as a separate dialog policy feature.
+- it stays hidden from sidebar and home lists
+- it is still the durable state container for that user's thread state
+
+If a linked subthread has no dialog for a user:
+
+- it has no durable per-user state yet
+
+This is enough for the feature you are currently specifying while keeping the semantics clean.
 
 ## Realtime, Unread, And Delivery
 
@@ -309,7 +335,8 @@ The earlier plan was too aggressive in tying live delivery to a separate follow 
 Revised rule:
 
 - access-eligible users can still receive normal live message updates
-- dialog existence controls durable unread/archive/sidebar state
+- dialog existence controls durable unread/archive/read state
+- sidebar surfacing is controlled by explicit dialog visibility
 - pin remains dialog-level UI state and does not need a separate follow concept
 
 This preserves the important current-chat behavior:
@@ -321,18 +348,19 @@ This preserves the important current-chat behavior:
 For linked subthreads:
 
 - no dialog row:
-  - no background unread accumulation required
-  - no server-side read position for now when there is no dialog row
-  - no durable sidebar surfacing required
-- dialog row exists:
-  - normal unread/archive semantics apply
-  - pinned or unpinned is independent from unread behavior
+  - no durable per-user thread state exists yet
+- hidden dialog row exists:
+  - normal unread/read/archive/pin/notification semantics apply
+  - the thread remains absent from sidebar and home lists
+- visible dialog row exists:
+  - normal unread/read/archive/pin/notification semantics apply
+  - the thread can appear in sidebar and home lists
 
 Design note:
 
-- keep this implementation flexible enough to add server-side read position later for open dialog-less subthreads without changing the thread model
+- hidden dialogs should be promotable to visible later without changing the underlying thread-state model
 
-This is the line that keeps sidebars and unread state from blowing up.
+This is the line that keeps sidebars from blowing up while preserving real thread state.
 
 ## Current `getUpdateGroup` Implication
 
@@ -343,21 +371,21 @@ That can remain acceptable for live message pushes in v1, but it becomes a perfo
 So the plan should be:
 
 - keep live updates broadly chat-like first
-- keep durable sidebar/unread behavior dialog-gated
+- keep durable unread behavior dialog-gated
+- keep sidebar surfacing gated by explicit dialog visibility
 - later optimize live fanout if subthread scale makes it necessary
 
 ## Dialog Creation Triggers
 
 For linked subthreads, durable dialog rows should be created only when one of these is true:
 
+- the user explicitly opens the subthread
 - the user pins the subthread
-- the user is the creator of the subthread
-- the user is explicitly added as a direct participant to the child subthread
-- the user is the author of the parent message for a reply-thread subthread
-- the user is the author of a message directly replied to inside the subthread
-- the user is `@` mentioned inside the subthread
+- the user explicitly asks to show the thread in sidebar later
 
-Opening a linked subthread should not create a dialog row by itself.
+Additional automatic creation triggers such as creator, anchor author, reply target author, or `@` mention can be added later if product needs them, but they should not be part of the lowest-risk v1.
+
+When a dialog is created by first open, it should default to hidden from sidebar.
 
 This is the v1 dialog-materialization policy for linked subthreads.
 
@@ -377,7 +405,7 @@ Even with a minimal RPC surface, the MVP still needs a few protocol/data additio
 
 - extend `Chat` with `parent_chat_id` and `parent_message_id`
 - add `createSubthread`
-- allow `GetChatResult` to represent "chat opened with no dialog created"
+- allow `GetChatResult` to represent "chat opened and hidden dialog created on first open"
 - expose reply-thread summary on parent messages so the row can render `2 replies` and an unread dot
 
 Recommended extra result field for UX simplicity:
@@ -510,6 +538,7 @@ Agree on:
 - `chat_participants` are direct grants only
 - DM-born subthreads use `type = thread`
 - linked subthreads do not get eager dialogs for all access-eligible users
+- linked subthreads create hidden dialogs on first open
 
 ### Phase 1: Schema + proto
 
@@ -525,10 +554,9 @@ Agree on:
 ### Phase 3: Dialog semantics
 
 - stop eager dialog creation for linked subthreads in general listing flows
-- opening a linked subthread must not create a dialog row
-- create linked-subthread dialogs only for explicit pin and approved auto-materialization triggers
-- no server-side read position for open subthreads that still have no dialog row
-- gate unread/archive behavior on dialog existence
+- opening a linked subthread creates a hidden dialog row for that user
+- keep linked-subthread dialogs hidden from sidebar until explicitly promoted
+- use dialogs as the durable per-user state container for read/unread/archive/pin/notification state
 
 ### Phase 4: UI
 
@@ -554,12 +582,12 @@ That can be handled later at the presentation layer and should not block the cor
 
 Resolved:
 
-- opening a linked subthread does not create a dialog row
+- opening a linked subthread creates a hidden dialog row on first open
 - dialog existence is the durable state boundary
+- sidebar visibility is a separate dialog flag
 - pin does not imply any separate follow concept
-- open subthreads with no dialog row have no server-side read position for now
 
-The implementation should still leave room to add server-side read position later if product semantics change.
+The implementation should still leave room to promote hidden dialogs into visible sidebar items later if product semantics change.
 
 ### 3. Fanout / performance
 
@@ -590,8 +618,10 @@ The revised best plan is:
 - keep `chat_participants` as direct grants only
 - keep top-level dialog/sidebar behavior mostly unchanged
 - avoid eager dialogs for linked subthreads
+- create hidden linked-subthread dialogs on first open
 - keep live message updates chat-like
-- gate durable unread/archive/sidebar behavior on dialog existence
+- gate durable unread/archive behavior on dialog existence
+- gate sidebar surfacing on explicit dialog visibility
 - keep follow/open-strategy out of the v1 subthread spec
 
 That is simpler, less ambiguous, and closer to the product constraints you clarified.
