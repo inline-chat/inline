@@ -35,6 +35,8 @@ import { markAsUnread } from "./messages.markAsUnread"
 import { getUpdatesState } from "./updates.getUpdatesState"
 import { getUpdates } from "./updates.getUpdates"
 import { forwardMessages } from "./messages.forwardMessages"
+import { createSubthread } from "./messages.createSubthread"
+import { showChatInSidebar } from "./messages.showChatInSidebar"
 
 export const Functions = {
   messages: {
@@ -58,6 +60,8 @@ export const Functions = {
     pinMessage: pinMessage,
     updateDialogNotificationSettings: updateDialogNotificationSettings,
     forwardMessages: forwardMessages,
+    createSubthread: createSubthread,
+    showChatInSidebar: showChatInSidebar,
     // until we make tests pass
     //markAsUnread: markAsUnread,
   },
