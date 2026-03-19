@@ -69,9 +69,13 @@ public final class TranslationState: @unchecked Sendable {
   // Subscribe to translation state changes
   @MainActor public func subscribe(peerId: Peer, key: String, completion: @escaping (Bool) -> Void) {
     let key = peerId.toString() + "_" + key
-    let cancellable = subject.sink {
-      completion($0.1)
-    }
+    let cancellable = subject
+      .filter { output in
+        output.0 == peerId
+      }
+      .sink { output in
+        completion(output.1)
+      }
     cancellables[key]?.cancel()
     cancellables[key] = cancellable
   }
