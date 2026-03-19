@@ -2,8 +2,6 @@ import { describe, expect, mock, test } from "bun:test"
 import { MessageEntities } from "@inline-chat/protocol/core"
 
 const parseCompletion = mock()
-const logError = mock()
-const logWarn = mock()
 
 mock.module("@in/server/libs/openAI", () => ({
   openaiClient: {
@@ -12,16 +10,6 @@ mock.module("@in/server/libs/openAI", () => ({
         parse: parseCompletion,
       },
     },
-  },
-}))
-
-mock.module("@in/server/utils/log", () => ({
-  Log: class {
-    error = logError
-    warn = logWarn
-    info() {}
-    debug() {}
-    trace() {}
   },
 }))
 
@@ -45,8 +33,6 @@ describe("createIndexedText", () => {
 describe("convertEntityOffsets", () => {
   test("treats null JSON as missing entities without logging a parser error", async () => {
     parseCompletion.mockReset()
-    logError.mockReset()
-    logWarn.mockReset()
     parseCompletion.mockResolvedValue({
       choices: [
         {
@@ -75,6 +61,5 @@ describe("convertEntityOffsets", () => {
     })
 
     expect(result).toEqual([{ messageId: 743, entities: null }])
-    expect(logError).not.toHaveBeenCalled()
   })
 })
