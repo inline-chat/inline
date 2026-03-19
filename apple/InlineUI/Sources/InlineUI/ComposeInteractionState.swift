@@ -59,6 +59,14 @@ public enum ComposeSendButtonState {
   ) -> Bool {
     finished && !isButtonVisible
   }
+
+  public static func shouldShowImmediatelyForReadyAttachments(
+    hasAttachments: Bool,
+    hasPendingVideos: Bool,
+    canSend: Bool
+  ) -> Bool {
+    hasAttachments && !hasPendingVideos && canSend
+  }
 }
 
 public enum ComposeSendEligibility {
@@ -74,7 +82,7 @@ public enum ComposeSendEligibility {
     }
 
     guard hasAttachments || hasForward else { return false }
-    return !hasPendingVideos && !hasActiveAttachmentUploads
+    return !hasPendingVideos
   }
 
   public static func shouldSendTextOnly(
@@ -82,6 +90,16 @@ public enum ComposeSendEligibility {
     hasPendingVideos: Bool,
     hasActiveAttachmentUploads: Bool
   ) -> Bool {
-    hasText && (hasPendingVideos || hasActiveAttachmentUploads)
+    hasText && hasPendingVideos
+  }
+}
+
+public enum ComposeResetBehavior {
+  public static func shouldAnimateHeightResetAfterSend(hadAttachments: Bool) -> Bool {
+    !hadAttachments
+  }
+
+  public static func shouldHideSendButtonImmediatelyAfterSend(hadAttachments: Bool) -> Bool {
+    hadAttachments
   }
 }
