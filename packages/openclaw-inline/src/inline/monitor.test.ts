@@ -75,6 +75,8 @@ type MonitorSetup = {
     entities?: unknown
   }>>
   mediaByUrl?: Record<string, { contentType?: string; fileName?: string; buffer?: Uint8Array | Buffer }>
+  mentionRegexes?: RegExp[]
+  matchesMentionPatterns?: (text: string, regexes: RegExp[]) => boolean
   dispatchReplyPayload?: { text?: string; replyToId?: string; mediaUrl?: string; mediaUrls?: string[] }
   dispatchReplyPayloads?: Array<{ text?: string; replyToId?: string; mediaUrl?: string; mediaUrls?: string[] }>
   partialReplies?: Array<{ text?: string; mediaUrls?: string[] }>
@@ -420,8 +422,13 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         resolveAgentRoute,
       },
       mentions: {
-        buildMentionRegexes: () => [],
-        matchesMentionPatterns: () => false,
+        buildMentionRegexes: () => setup.mentionRegexes ?? [],
+        matchesMentionPatterns: (text: string, regexes: RegExp[]) => {
+          if (setup.matchesMentionPatterns) {
+            return setup.matchesMentionPatterns(text, regexes)
+          }
+          return regexes.some((regex) => regex.test(text))
+        },
       },
       session: {
         resolveStorePath: () => path.join(os.tmpdir(), "openclaw-inline-tests", "sessions.json"),
@@ -1109,6 +1116,138 @@ describe("inline/monitor", () => {
         expect.objectContaining({
           chatId: 88n,
           text: "group reply",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("treats mention pattern matches as mentions even when native mentioned is false", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 60015n,
+            date: 1_700_000_055n,
+            fromId: 51n,
+            message: "hey boba, can you check this?",
+            mentioned: false,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      mentionRegexes: [/boba/i],
+      dispatchReplyPayload: {
+        text: "on it",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          WasMentioned: true,
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 88n,
+          text: "on it",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("includes prior skipped group messages from chat history when a later message mentions the bot", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 60020n,
+            date: 1_700_000_060n,
+            fromId: 51n,
+            message: "context before mention",
+            mentioned: false,
+          },
+        },
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 60021n,
+            date: 1_700_000_061n,
+            fromId: 51n,
+            message: "@inlinebot can you summarize?",
+            mentioned: true,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      historyByChat: {
+        "88": [
+          {
+            id: 60020n,
+            date: 1_700_000_060n,
+            fromId: 51n,
+            message: "context before mention",
+          },
+          {
+            id: 60021n,
+            date: 1_700_000_061n,
+            fromId: 51n,
+            message: "@inlinebot can you summarize?",
+          },
+        ],
+      },
+      dispatchReplyPayload: {
+        text: "summary",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: expect.stringContaining("#60020 user:51: context before mention"),
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 88n,
+          text: "summary",
         }),
       )
     })
