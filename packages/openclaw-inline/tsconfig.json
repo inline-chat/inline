@@ -7,6 +7,7 @@
     "lib": ["ES2022"],
     "rootDir": "src",
     "outDir": "dist",
+    "declarationDir": "dist",
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
@@ -15,7 +16,8 @@
     "declarationMap": true,
     "sourceMap": true,
     "types": ["node"],
-    "verbatimModuleSyntax": true
+    "verbatimModuleSyntax": true,
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
   },
   "include": ["src/index.ts", "src/runtime.ts", "src/inline/**/*.ts"],
   "exclude": ["src/**/*.test.ts"]
