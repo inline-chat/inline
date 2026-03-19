@@ -4,8 +4,7 @@ import type { OpenClawPluginApi, PluginRuntime } from "openclaw/plugin-sdk"
 describe("plugin entry", () => {
   it("registers the channel and wires runtime", async () => {
     vi.resetModules()
-
-    const pluginMod = await import("./index")
+    const pluginMod = await import("./index.ts")
 
     const runtime = { version: "test" } as unknown as PluginRuntime
     let registered = false
@@ -24,6 +23,6 @@ describe("plugin entry", () => {
     pluginMod.default.register(api)
 
     expect(registered).toBe(true)
-    expect(registeredToolNames).toEqual(["inline_members", "inline_nudge", "inline_forward"])
+    expect(registeredToolNames).toEqual(["inline_members", "inline_update_profile", "inline_nudge", "inline_forward"])
   })
 })

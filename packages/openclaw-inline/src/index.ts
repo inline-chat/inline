@@ -3,6 +3,7 @@ import { emptyPluginConfigSchema } from "openclaw/plugin-sdk"
 import { inlineChannelPlugin } from "./inline/channel.js"
 import { createInlineMessageTools } from "./inline/message-tools.js"
 import { createInlineMembersTool } from "./inline/members-tool.js"
+import { createInlineProfileTool } from "./inline/profile-tool.js"
 import { setInlineRuntime } from "./runtime.js"
 
 const plugin: {
@@ -23,6 +24,9 @@ const plugin: {
     api.registerChannel({ plugin: inlineChannelPlugin })
     api.registerTool((ctx) => createInlineMembersTool(ctx) as AnyAgentTool, {
       names: ["inline_members"],
+    })
+    api.registerTool((ctx) => createInlineProfileTool(ctx) as AnyAgentTool, {
+      names: ["inline_update_profile"],
     })
     api.registerTool((ctx) => createInlineMessageTools(ctx) as AnyAgentTool[], {
       names: ["inline_nudge", "inline_forward"],
