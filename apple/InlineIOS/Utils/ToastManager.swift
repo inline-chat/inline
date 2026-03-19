@@ -46,6 +46,9 @@ class ToastManager: ObservableObject {
     actionTitle: String? = nil,
     shouldStayVisible: Bool = false
   ) {
+    timer?.invalidate()
+    timer = nil
+
     // If this is a progress update for an existing progress toast, update smoothly
     if let currentToast,
        currentToast.shouldStayVisible,
