@@ -153,6 +153,45 @@ struct ProcessEntitiesTests {
     #expect(isBold == true)
   }
 
+  #if os(macOS)
+  @Test("Bold text can use a lighter preferred weight")
+  func testBoldTextWithPreferredWeight() throws {
+    let text = "This is bold text"
+    let entities = createMessageEntities([createBoldEntity(offset: 8, length: 4)])
+
+    let result = ProcessEntities.toAttributedString(
+      text: text,
+      entities: entities,
+      configuration: .init(
+        font: NSFont.systemFont(ofSize: 14),
+        boldWeight: .semibold,
+        textColor: .black,
+        linkColor: .blue
+      )
+    )
+
+    let attributes = result.attributes(at: 8, effectiveRange: nil)
+    let font = try #require(attributes[.font] as? NSFont)
+
+    #expect(NSFontManager.shared.traits(of: font).contains(.boldFontMask))
+    #expect(abs(fontWeight(font) - NSFont.Weight.semibold.rawValue) < 0.1)
+  }
+
+  private func fontWeight(_ font: NSFont) -> CGFloat {
+    let traits = font.fontDescriptor.object(forKey: .traits) as? [NSFontDescriptor.TraitKey: Any]
+
+    if let number = traits?[.weight] as? NSNumber {
+      return CGFloat(truncating: number)
+    }
+
+    if let value = traits?[.weight] as? CGFloat {
+      return value
+    }
+
+    return NSFont.Weight.regular.rawValue
+  }
+  #endif
+
   @Test("URL and text_url entities apply link attributes")
   func testURLAndTextURLEntities() {
     let text = "Go to https://example.com and docs"

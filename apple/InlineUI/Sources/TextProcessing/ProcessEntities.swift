@@ -82,6 +82,7 @@ public struct CodeBlockStyle: Sendable {
 public class ProcessEntities {
   public struct Configuration {
     var font: PlatformFont
+    var boldWeight: PlatformFontWeight?
 
     /// Default color for the text
     var textColor: PlatformColor
@@ -103,6 +104,7 @@ public class ProcessEntities {
 
     public init(
       font: PlatformFont,
+      boldWeight: PlatformFontWeight? = nil,
       textColor: PlatformColor,
       linkColor: PlatformColor,
       convertMentionsToLink: Bool = true,
@@ -111,6 +113,7 @@ public class ProcessEntities {
       inlineCodeBackgroundColor: PlatformColor? = nil
     ) {
       self.font = font
+      self.boldWeight = boldWeight
       self.textColor = textColor
       self.linkColor = linkColor
       self.convertMentionsToLink = convertMentionsToLink
@@ -278,7 +281,10 @@ public class ProcessEntities {
           // Apply bold formatting
           let existingAttributes = attributedString.attributes(at: range.location, effectiveRange: nil)
 
-          let boldFont = createBoldFont(from: existingAttributes[.font] as? PlatformFont ?? configuration.font)
+          let boldFont = createBoldFont(
+            from: existingAttributes[.font] as? PlatformFont ?? configuration.font,
+            preferredWeight: configuration.boldWeight
+          )
 
           attributedString.addAttribute(.font, value: boldFont, range: range)
 
@@ -967,8 +973,11 @@ public class ProcessEntities {
     character == 32 || character == 9
   }
 
-  private static func createBoldFont(from font: PlatformFont) -> PlatformFont {
-    PlatformFontTraits.settingBold(true, on: font)
+  private static func createBoldFont(
+    from font: PlatformFont,
+    preferredWeight: PlatformFontWeight?
+  ) -> PlatformFont {
+    PlatformFontTraits.settingBold(true, on: font, preferredWeight: preferredWeight)
   }
 
   private static func createMonospaceFont(from font: PlatformFont) -> PlatformFont {
