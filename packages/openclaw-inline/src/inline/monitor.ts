@@ -1,9 +1,12 @@
 import { mkdir } from "node:fs/promises"
 import path from "node:path"
 import {
+  buildPendingHistoryContextFromMap,
+  clearHistoryEntriesIfEnabled,
   createReplyPrefixOptions,
   createTypingCallbacks,
   logInboundDrop,
+  recordPendingHistoryEntryIfEnabled,
   resolveChannelMediaMaxBytes,
   resolveControlCommandGate,
   resolveMentionGatingWithBypass,
@@ -56,6 +59,13 @@ type InlineEditStreamState = {
   finalTextAccumulator: string
   failed: boolean
   opChain: Promise<void>
+}
+
+type InlinePendingHistoryEntry = {
+  sender: string
+  body: string
+  timestamp?: number
+  messageId?: string
 }
 
 const DEFAULT_GROUP_HISTORY_LIMIT = 12
@@ -638,6 +648,7 @@ export async function monitorInlineProvider(params: {
   const chatCache = new Map<bigint, CachedChatInfo>()
   const senderProfilesById = new Map<string, SenderProfile>()
   const botMessageIdsByChat = new Map<string, string[]>()
+  const groupPendingHistories = new Map<string, InlinePendingHistoryEntry[]>()
   const hydratedParticipantChats = new Set<string>()
   const participantFetches = new Map<string, Promise<void>>()
   const inboundMediaMaxBytes = resolveInlineMediaMaxBytes({ cfg, account })
@@ -910,6 +921,9 @@ export async function monitorInlineProvider(params: {
           ? core.channel.mentions.matchesMentionPatterns(rawBody, mentionRegexes)
           : false
         const wasMentioned = nativeMentioned || patternMentioned
+        const messageTimestamp = Number(msg.date) * 1000
+        const groupHistoryKey = isGroup ? route.sessionKey : null
+        const pendingHistorySender = senderUsername ? `@${senderUsername}` : senderName ?? `user:${senderId}`
         const historyLimit = resolveHistoryLimit({
           isGroup,
           historyLimit: account.config.historyLimit,
@@ -955,6 +969,20 @@ export async function monitorInlineProvider(params: {
         })
         if (isGroup && mentionGate.shouldSkip) {
           runtime.log?.(`inline: drop group chat ${String(chatId)} (no mention)`)
+          recordPendingHistoryEntryIfEnabled({
+            historyMap: groupPendingHistories,
+            historyKey: groupHistoryKey ?? "",
+            limit: historyLimit,
+            entry:
+              groupHistoryKey && rawBody.trim()
+                ? {
+                    sender: pendingHistorySender,
+                    body: rawBody.trim(),
+                    timestamp: messageTimestamp || Date.now(),
+                    messageId: String(msg.id),
+                  }
+                : null,
+          })
           continue
         }
 
@@ -967,7 +995,7 @@ export async function monitorInlineProvider(params: {
               ...(log ? { log } : {}),
             })
 
-        const timestamp = Number(msg.date) * 1000
+        const timestamp = messageTimestamp
         const fromLabel = isGroup ? `chat:${chatInfo.title ?? String(chatId)}` : `user:${senderId}`
 
         const storePath = core.channel.session.resolveStorePath(cfg.session?.store, { agentId: route.agentId })
@@ -986,7 +1014,7 @@ export async function monitorInlineProvider(params: {
         ]
           .filter(Boolean)
           .join("\n\n")
-        const body = core.channel.reply.formatAgentEnvelope({
+        let body = core.channel.reply.formatAgentEnvelope({
           channel: "Inline",
           from: fromLabel,
           timestamp,
@@ -994,6 +1022,22 @@ export async function monitorInlineProvider(params: {
           envelope: envelopeOptions,
           body: combinedBody || rawBody,
         })
+        if (isGroup && groupHistoryKey) {
+          body = buildPendingHistoryContextFromMap({
+            historyMap: groupPendingHistories,
+            historyKey: groupHistoryKey,
+            limit: historyLimit,
+            currentMessage: body,
+            formatEntry: (entry) =>
+              core.channel.reply.formatAgentEnvelope({
+                channel: "Inline",
+                from: fromLabel,
+                ...(entry.timestamp != null ? { timestamp: entry.timestamp } : {}),
+                envelope: envelopeOptions,
+                body: `${entry.body}${entry.messageId ? ` [id:${entry.messageId} chat:${String(chatId)}]` : ""}`,
+              }),
+          })
+        }
         const commandBody = normalizeInlineCommandBody(rawBody, botUsername)
 
         const ctxPayload = core.channel.reply.finalizeInboundContext({
@@ -1272,6 +1316,13 @@ export async function monitorInlineProvider(params: {
           },
           replyOptions,
         })
+        if (isGroup && groupHistoryKey) {
+          clearHistoryEntriesIfEnabled({
+            historyMap: groupPendingHistories,
+            historyKey: groupHistoryKey,
+            limit: historyLimit,
+          })
+        }
       }
     } catch (err) {
       statusSink?.({ lastError: String(err) })

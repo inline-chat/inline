@@ -1255,6 +1255,70 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("stores skipped group messages as pending context and reuses them on mention when chat history is empty", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 61000n,
+            date: 1_700_000_070n,
+            fromId: 51n,
+            message: "we deployed to staging and saw an error",
+            mentioned: false,
+          },
+        },
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 61001n,
+            date: 1_700_000_071n,
+            fromId: 51n,
+            message: "@inlinebot can you summarize what happened?",
+            mentioned: true,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      dispatchReplyPayload: {
+        text: "summary",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+        historyLimit: 10,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: expect.stringContaining("we deployed to staging and saw an error"),
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 88n,
+          text: "summary",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
   it("normalizes targeted bot commands and bypasses mention gating for the active bot", async () => {
     const harness = await setupMonitorHarness({
       me: {
