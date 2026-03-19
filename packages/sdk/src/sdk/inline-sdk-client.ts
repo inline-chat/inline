@@ -44,6 +44,8 @@ const defaultApiBaseUrl = "https://api.inline.chat"
 const defaultVideoWidth = 1280
 const defaultVideoHeight = 720
 const defaultVideoDuration = 1
+const defaultCatchUpTotalLimit = 1_000
+const defaultColdStartCatchUpWindow = defaultCatchUpTotalLimit
 
 function extractFirstMessageId(updates: Update[] | undefined): bigint | null {
   for (const update of updates ?? []) {
@@ -75,6 +77,7 @@ export class InlineSdkClient {
   private saveInFlight: Promise<void> | null = null
 
   private catchUpInFlightByChatId = new Map<bigint, Promise<void>>()
+  private catchUpRequestedByChatId = new Map<bigint, { endSeq: number; peer?: Peer }>()
 
   constructor(options: InlineSdkClientOptions) {
     this.options = options
@@ -591,7 +594,7 @@ export class InlineSdkClient {
           seq,
           date,
         })
-        await this.catchUpChat({ chatId: payload.chatId, peer: payload.peerId, updateSeq: payload.updateSeq, update })
+        this.requestCatchUpChat({ chatId: payload.chatId, peer: payload.peerId, updateSeq: payload.updateSeq })
         return
       }
 
@@ -623,25 +626,65 @@ export class InlineSdkClient {
     }
   }
 
-  private async catchUpChat(params: { chatId: bigint; peer?: Peer; updateSeq: number; update: Update }) {
-    const key = params.chatId.toString()
-    const lastSeq = this.state.lastSeqByChatId?.[key]
-    const startSeq = lastSeq ?? params.updateSeq // default skip backlog
-    if (params.updateSeq <= startSeq) return
+  private requestCatchUpChat(params: { chatId: bigint; peer?: Peer; updateSeq: number }) {
+    const previous = this.catchUpRequestedByChatId.get(params.chatId)
+    this.catchUpRequestedByChatId.set(params.chatId, {
+      endSeq: Math.max(previous?.endSeq ?? 0, params.updateSeq),
+      peer: params.peer ?? previous?.peer,
+    })
 
     if (this.catchUpInFlightByChatId.has(params.chatId)) {
-      await this.catchUpInFlightByChatId.get(params.chatId)
       return
     }
 
-    const task = this.doCatchUpChat(params.chatId, params.peer, startSeq, params.updateSeq).finally(() => {
-      this.catchUpInFlightByChatId.delete(params.chatId)
-    })
+    const task = this.drainCatchUpChat(params.chatId)
+      .catch((error) => {
+        this.catchUpRequestedByChatId.delete(params.chatId)
+        this.log.warn?.("GET_UPDATES catch-up failed; continuing live delivery", {
+          chatId: params.chatId.toString(),
+          error: extractErrorMessage(error),
+        })
+      })
+      .finally(() => {
+        this.catchUpInFlightByChatId.delete(params.chatId)
+      })
     this.catchUpInFlightByChatId.set(params.chatId, task)
-    await task
   }
 
-  private async doCatchUpChat(chatId: bigint, peer: Peer | undefined, startSeq: number, endSeq: number) {
+  private async drainCatchUpChat(chatId: bigint) {
+    const key = chatId.toString()
+
+    while (true) {
+      const request = this.catchUpRequestedByChatId.get(chatId)
+      if (!request) return
+
+      const lastSeq = this.state.lastSeqByChatId?.[key]
+      const startSeq =
+        lastSeq ??
+        // When we have no per-chat cursor yet, recover a bounded recent window
+        // instead of silently treating the chat as already synchronized.
+        Math.max(0, request.endSeq - defaultColdStartCatchUpWindow)
+      if (request.endSeq <= startSeq) {
+        this.catchUpRequestedByChatId.delete(chatId)
+        return
+      }
+
+      const stop = await this.doCatchUpChat(chatId, request.peer, startSeq, request.endSeq)
+      if (stop) {
+        this.catchUpRequestedByChatId.delete(chatId)
+        return
+      }
+
+      const latest = this.catchUpRequestedByChatId.get(chatId)
+      const syncedSeq = this.state.lastSeqByChatId?.[key] ?? 0
+      if (!latest || latest.endSeq <= syncedSeq) {
+        this.catchUpRequestedByChatId.delete(chatId)
+        return
+      }
+    }
+  }
+
+  private async doCatchUpChat(chatId: bigint, peer: Peer | undefined, startSeq: number, endSeq: number): Promise<boolean> {
     let cursor = startSeq
 
     while (cursor < endSeq) {
@@ -658,7 +701,7 @@ export class InlineSdkClient {
           }),
           startSeq: BigInt(cursor),
           seqEnd: BigInt(endSeq),
-          totalLimit: 1000,
+          totalLimit: defaultCatchUpTotalLimit,
         }),
       })
 
@@ -671,13 +714,13 @@ export class InlineSdkClient {
           this.state.dateCursor = payload.date
         }
         this.scheduleStateSave()
-        return
+        return true
       }
 
       const deliveredSeq = Number(payload.seq ?? 0n)
       if (!Number.isSafeInteger(deliveredSeq)) {
         this.log.warn?.("GET_UPDATES returned non-integer seq; aborting catch-up", { chatId: chatId.toString() })
-        return
+        return true
       }
 
       // Mark the cursor as caught up to this slice before emitting any events.
@@ -692,13 +735,15 @@ export class InlineSdkClient {
       }
       this.scheduleStateSave()
 
-      if (payload.final) return
+      if (payload.final) return true
       if (deliveredSeq <= cursor) {
         this.log.warn?.("GET_UPDATES made no progress; aborting catch-up", { chatId: chatId.toString(), cursor, deliveredSeq })
-        return
+        return true
       }
       cursor = deliveredSeq
     }
+
+    return false
   }
 
   private peerToInputPeer(peer: Peer | undefined, chatId: bigint): InputPeer {
