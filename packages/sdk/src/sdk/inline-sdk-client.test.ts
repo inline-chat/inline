@@ -1373,6 +1373,10 @@ describe("InlineSdkClient", () => {
     )
 
     await waitFor(() => transport.sent.some((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.GET_UPDATES))
+    const getUpdatesCall = transport.sent.find(
+      (m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.GET_UPDATES,
+    )
+    if (!getUpdatesCall || getUpdatesCall.body.oneofKind !== "rpcCall") throw new Error("missing getUpdates call")
     const rpc = transport.sent.find((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.GET_UPDATES)
     if (!rpc || rpc.body.oneofKind !== "rpcCall") throw new Error("missing getUpdates rpc")
 
@@ -1424,6 +1428,362 @@ describe("InlineSdkClient", () => {
     // State persisted (close() flushes).
     expect(store.saved.length).toBeGreaterThan(0)
     expect(store.loaded?.lastSeqByChatId?.["10"]).toBe(5)
+  })
+
+  it("performs reconnect catch-up for a DM chat without stored seq", async () => {
+    const transport = new MockTransport()
+    const store = new MemoryStateStore({ version: 1 })
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+      state: store,
+    })
+
+    await connectAndOpen(client, transport)
+
+    const iter = client.events()[Symbol.asyncIterator]()
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 21n,
+        body: {
+          oneofKind: "message",
+          message: {
+            payload: {
+              oneofKind: "update",
+              update: {
+                updates: [
+                  Update.create({
+                    seq: 3,
+                    date: 101n,
+                    update: {
+                      oneofKind: "chatHasNewUpdates",
+                      chatHasNewUpdates: {
+                        chatId: 10n,
+                        updateSeq: 5,
+                        peerId: { type: { oneofKind: "user", user: { userId: 42n } } },
+                      },
+                    },
+                  }),
+                ],
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    await waitFor(() => transport.sent.some((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.GET_UPDATES))
+    const rpc = transport.sent.find((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.GET_UPDATES)
+    if (!rpc || rpc.body.oneofKind !== "rpcCall") throw new Error("missing getUpdates rpc")
+    if (rpc.body.rpcCall.input.oneofKind !== "getUpdates") throw new Error("missing getUpdates input")
+    expect(rpc.body.rpcCall.input.getUpdates.startSeq).toBe(0n)
+    expect(rpc.body.rpcCall.input.getUpdates.bucket?.type.oneofKind).toBe("chat")
+    expect(rpc.body.rpcCall.input.getUpdates.bucket?.type.chat?.peerId?.type.oneofKind).toBe("user")
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 22n,
+        body: {
+          oneofKind: "rpcResult",
+          rpcResult: {
+            reqMsgId: rpc.id,
+            result: {
+              oneofKind: "getUpdates",
+              getUpdates: {
+                updates: [
+                  Update.create({
+                    seq: 5,
+                    date: 102n,
+                    update: {
+                      oneofKind: "newMessage",
+                      newMessage: {
+                        message: {
+                          id: 99n,
+                          chatId: 10n,
+                          fromId: 42n,
+                          peerId: { type: { oneofKind: "user", user: { userId: 42n } } },
+                          out: false,
+                          date: 102n,
+                        },
+                      },
+                    },
+                  }),
+                ],
+                seq: 5n,
+                date: 102n,
+                resultType: GetUpdatesResult_ResultType.SLICE,
+                final: true,
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    const ev1 = await iter.next()
+    expect(ev1.done).toBe(false)
+    expect(ev1.value.kind).toBe("chat.hasUpdates")
+
+    const ev2 = await iter.next()
+    expect(ev2.done).toBe(false)
+    expect(ev2.value.kind).toBe("message.new")
+    if (ev2.value.kind === "message.new") {
+      expect(ev2.value.chatId).toBe(10n)
+      expect(ev2.value.message.id).toBe(99n)
+    }
+
+    expect(client.exportState().lastSeqByChatId?.["10"]).toBe(5)
+    await client.close()
+  })
+
+  it("does not stall live delivery behind chat catch-up", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+      state: new MemoryStateStore({ version: 1, lastSeqByChatId: { "10": 1 } }),
+    })
+
+    await connectAndOpen(client, transport)
+
+    const iter = client.events()[Symbol.asyncIterator]()
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 30n,
+        body: {
+          oneofKind: "message",
+          message: {
+            payload: {
+              oneofKind: "update",
+              update: {
+                updates: [
+                  Update.create({
+                    seq: 2,
+                    date: 101n,
+                    update: {
+                      oneofKind: "chatHasNewUpdates",
+                      chatHasNewUpdates: {
+                        chatId: 10n,
+                        updateSeq: 5,
+                        peerId: { type: { oneofKind: "chat", chat: { chatId: 10n } } },
+                      },
+                    },
+                  }),
+                ],
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    const ev1 = await iter.next()
+    expect(ev1.done).toBe(false)
+    expect(ev1.value.kind).toBe("chat.hasUpdates")
+
+    await waitFor(() => transport.sent.some((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.GET_UPDATES))
+    const getUpdatesCall = transport.sent.find(
+      (m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.GET_UPDATES,
+    )
+    if (!getUpdatesCall || getUpdatesCall.body.oneofKind !== "rpcCall") throw new Error("missing getUpdates call")
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 31n,
+        body: {
+          oneofKind: "message",
+          message: {
+            payload: {
+              oneofKind: "update",
+              update: {
+                updates: [
+                  Update.create({
+                    seq: 3,
+                    date: 102n,
+                    update: {
+                      oneofKind: "newMessage",
+                      newMessage: {
+                        message: {
+                          id: 77n,
+                          chatId: 20n,
+                          fromId: 8n,
+                          peerId: { type: { oneofKind: "chat", chat: { chatId: 20n } } },
+                          out: false,
+                          date: 102n,
+                        },
+                      },
+                    },
+                  }),
+                ],
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    const liveEvent = await Promise.race([
+      iter.next(),
+      new Promise<{ timeout: true }>((resolve) => setTimeout(() => resolve({ timeout: true }), 25)),
+    ])
+
+    expect("timeout" in liveEvent).toBe(false)
+    if (!("timeout" in liveEvent)) {
+      expect(liveEvent.done).toBe(false)
+      expect(liveEvent.value.kind).toBe("message.new")
+      if (liveEvent.value.kind === "message.new") {
+        expect(liveEvent.value.chatId).toBe(20n)
+        expect(liveEvent.value.message.id).toBe(77n)
+      }
+    }
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 32n,
+        body: {
+          oneofKind: "rpcResult",
+          rpcResult: {
+            reqMsgId: getUpdatesCall.id,
+            result: {
+              oneofKind: "getUpdates",
+              getUpdates: {
+                updates: [],
+                seq: 5n,
+                date: 103n,
+                resultType: GetUpdatesResult_ResultType.SLICE,
+                final: true,
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    await client.close()
+  })
+
+  it("keeps live delivery running when catch-up RPC fails", async () => {
+    const transport = new MockTransport()
+    let warned = 0
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+      state: new MemoryStateStore({ version: 1, lastSeqByChatId: { "10": 1 } }),
+      logger: { warn: () => warned++ } as any,
+    })
+
+    await connectAndOpen(client, transport)
+
+    const iter = client.events()[Symbol.asyncIterator]()
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 40n,
+        body: {
+          oneofKind: "message",
+          message: {
+            payload: {
+              oneofKind: "update",
+              update: {
+                updates: [
+                  Update.create({
+                    seq: 2,
+                    date: 101n,
+                    update: {
+                      oneofKind: "chatHasNewUpdates",
+                      chatHasNewUpdates: {
+                        chatId: 10n,
+                        updateSeq: 5,
+                        peerId: { type: { oneofKind: "chat", chat: { chatId: 10n } } },
+                      },
+                    },
+                  }),
+                ],
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    const ev1 = await iter.next()
+    expect(ev1.done).toBe(false)
+    expect(ev1.value.kind).toBe("chat.hasUpdates")
+
+    await waitFor(() => transport.sent.some((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.GET_UPDATES))
+    const getUpdatesCall = transport.sent.find(
+      (m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.GET_UPDATES,
+    )
+    if (!getUpdatesCall || getUpdatesCall.body.oneofKind !== "rpcCall") throw new Error("missing getUpdates call")
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 41n,
+        body: {
+          oneofKind: "rpcError",
+          rpcError: { reqMsgId: getUpdatesCall.id, errorCode: 2, message: "catch-up failed", code: 500 },
+        },
+      }),
+    )
+
+    await waitFor(() => warned > 0)
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 42n,
+        body: {
+          oneofKind: "message",
+          message: {
+            payload: {
+              oneofKind: "update",
+              update: {
+                updates: [
+                  Update.create({
+                    seq: 3,
+                    date: 102n,
+                    update: {
+                      oneofKind: "newMessage",
+                      newMessage: {
+                        message: {
+                          id: 88n,
+                          chatId: 20n,
+                          fromId: 9n,
+                          peerId: { type: { oneofKind: "chat", chat: { chatId: 20n } } },
+                          out: false,
+                          date: 102n,
+                        },
+                      },
+                    },
+                  }),
+                ],
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    const ev2 = await Promise.race([
+      iter.next(),
+      new Promise<{ timeout: true }>((resolve) => setTimeout(() => resolve({ timeout: true }), 25)),
+    ])
+
+    expect("timeout" in ev2).toBe(false)
+    if (!("timeout" in ev2)) {
+      expect(ev2.done).toBe(false)
+      expect(ev2.value.kind).toBe("message.new")
+      if (ev2.value.kind === "message.new") {
+        expect(ev2.value.chatId).toBe(20n)
+        expect(ev2.value.message.id).toBe(88n)
+      }
+    }
+
+    await client.close()
   })
 
   it("supports sendTyping, updates dateCursor when GET_UPDATES_STATE succeeds, and skips deleteMessages without chat peer", async () => {
@@ -1950,6 +2310,145 @@ describe("InlineSdkClient", () => {
     )
 
     await waitFor(() => client.exportState().lastSeqByChatId?.["10"] === 6)
+    await waitFor(() => client.exportState().dateCursor === 222n)
+    await client.close()
+  })
+
+  it("extends same-chat catch-up when a newer target arrives mid-flight", async () => {
+    const transport = new MockTransport()
+    const store = new MemoryStateStore({ version: 1, lastSeqByChatId: { "10": 1 } })
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+      state: store,
+    })
+
+    await connectAndOpen(client, transport)
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 50n,
+        body: {
+          oneofKind: "message",
+          message: {
+            payload: {
+              oneofKind: "update",
+              update: {
+                updates: [
+                  Update.create({
+                    seq: 2,
+                    date: 101n,
+                    update: {
+                      oneofKind: "chatHasNewUpdates",
+                      chatHasNewUpdates: {
+                        chatId: 10n,
+                        updateSeq: 5,
+                        peerId: { type: { oneofKind: "chat", chat: { chatId: 10n } } },
+                      },
+                    },
+                  }),
+                ],
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    await waitFor(() => transport.sent.some((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.GET_UPDATES))
+    const rpc1 = transport.sent.find((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.GET_UPDATES)
+    if (!rpc1 || rpc1.body.oneofKind !== "rpcCall") throw new Error("missing getUpdates rpc1")
+    if (rpc1.body.rpcCall.input.oneofKind !== "getUpdates") throw new Error("missing getUpdates input1")
+    expect(rpc1.body.rpcCall.input.getUpdates.startSeq).toBe(1n)
+    expect(rpc1.body.rpcCall.input.getUpdates.seqEnd).toBe(5n)
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 51n,
+        body: {
+          oneofKind: "message",
+          message: {
+            payload: {
+              oneofKind: "update",
+              update: {
+                updates: [
+                  Update.create({
+                    seq: 3,
+                    date: 102n,
+                    update: {
+                      oneofKind: "chatHasNewUpdates",
+                      chatHasNewUpdates: {
+                        chatId: 10n,
+                        updateSeq: 8,
+                        peerId: { type: { oneofKind: "chat", chat: { chatId: 10n } } },
+                      },
+                    },
+                  }),
+                ],
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 52n,
+        body: {
+          oneofKind: "rpcResult",
+          rpcResult: {
+            reqMsgId: rpc1.id,
+            result: {
+              oneofKind: "getUpdates",
+              getUpdates: {
+                updates: [],
+                seq: 5n,
+                date: 111n,
+                resultType: GetUpdatesResult_ResultType.SLICE,
+                final: false,
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    await waitFor(
+      () => transport.sent.filter((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.GET_UPDATES).length >= 2,
+    )
+    const rpc2 = transport.sent
+      .filter((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.GET_UPDATES)
+      .at(1)
+    if (!rpc2 || rpc2.body.oneofKind !== "rpcCall") throw new Error("missing getUpdates rpc2")
+    if (rpc2.body.rpcCall.input.oneofKind !== "getUpdates") throw new Error("missing getUpdates input2")
+    expect(rpc2.body.rpcCall.input.getUpdates.startSeq).toBe(5n)
+    expect(rpc2.body.rpcCall.input.getUpdates.seqEnd).toBe(8n)
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 53n,
+        body: {
+          oneofKind: "rpcResult",
+          rpcResult: {
+            reqMsgId: rpc2.id,
+            result: {
+              oneofKind: "getUpdates",
+              getUpdates: {
+                updates: [],
+                seq: 8n,
+                date: 222n,
+                resultType: GetUpdatesResult_ResultType.SLICE,
+                final: false,
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    await waitFor(() => client.exportState().lastSeqByChatId?.["10"] === 8)
     await waitFor(() => client.exportState().dateCursor === 222n)
     await client.close()
   })
