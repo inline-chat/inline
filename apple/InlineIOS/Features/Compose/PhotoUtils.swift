@@ -416,7 +416,7 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     }
 
     if didAddAny {
-      handleAttachmentItemsChanged()
+      handleAttachmentItemsChanged(animated: false)
     }
   }
 
