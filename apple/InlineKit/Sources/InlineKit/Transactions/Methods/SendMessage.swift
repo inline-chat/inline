@@ -268,9 +268,7 @@ public struct TransactionSendMessage: Transaction {
 //            }
 //          }
 
-          guard let localVideoId = videoInfo.video.id else {
-            throw FileUploadError.invalidVideoId
-          }
+          let localVideoId = try await FileUploader.shared.resolveLocalVideoId(for: videoInfo.video)
 
           _ = try await SendMessageUploadCoordinator.beginOrJoinUpload {
             try await FileUploader.shared.uploadVideo(videoInfo: videoInfo)
