@@ -120,8 +120,9 @@ public struct AttachmentPickerSheet: View {
 
   private var recentStrip: some View {
     ScrollView(.horizontal, showsIndicators: false) {
-      HStack(spacing: 8) {
+      HStack(spacing: 12) {
         AttachmentPickerCameraTile(action: actions.openCamera)
+        AttachmentPickerPhotosTile(action: libraryAction)
 
         ForEach(model.recentItems) { item in
           AttachmentPickerRecentTile(
@@ -140,16 +141,12 @@ public struct AttachmentPickerSheet: View {
   private var actionList: some View {
     VStack(spacing: 18) {
       listActionButton(
-        title: "Library",
-        systemImage: "photo.on.rectangle.angled",
-        action: libraryAction
-      )
-
-      listActionButton(
         title: "Files",
         systemImage: "folder",
+        subtitle: "Browse iCloud Drive and on-device files",
         action: actions.openFiles
       )
+      .background(Color.clear)
     }
     .padding(.horizontal, 20)
   }
@@ -194,7 +191,12 @@ public struct AttachmentPickerSheet: View {
     model.clearRecentSelection()
   }
 
-  private func listActionButton(title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+  private func listActionButton(
+    title: String,
+    systemImage: String,
+    subtitle: String? = nil,
+    action: @escaping () -> Void
+  ) -> some View {
     Button(action: action) {
       HStack(spacing: 14) {
         Image(systemName: systemImage)
@@ -202,9 +204,17 @@ public struct AttachmentPickerSheet: View {
           .foregroundStyle(.primary)
           .frame(width: 28)
 
-        Text(title)
-          .font(.body.weight(.regular))
-          .foregroundStyle(.primary)
+        VStack(alignment: .leading, spacing: 2) {
+          Text(title)
+            .font(.body.weight(.regular))
+            .foregroundStyle(.primary)
+
+          if let subtitle {
+            Text(subtitle)
+              .font(.footnote.weight(.regular))
+              .foregroundStyle(.secondary)
+          }
+        }
 
         Spacer(minLength: 0)
       }

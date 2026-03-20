@@ -17,12 +17,50 @@ public struct AttachmentPickerCameraTile: View {
   }
 
   public var body: some View {
+    AttachmentPickerActionTile(
+      title: "Camera",
+      systemImage: "camera",
+      action: action
+    )
+    .accessibilityLabel("Camera")
+  }
+}
+
+public struct AttachmentPickerPhotosTile: View {
+  private let action: () -> Void
+
+  public init(action: @escaping () -> Void) {
+    self.action = action
+  }
+
+  public var body: some View {
+    AttachmentPickerActionTile(
+      title: "Photos",
+      systemImage: "photo.on.rectangle.angled",
+      action: action
+    )
+    .accessibilityLabel("Photos")
+  }
+}
+
+private struct AttachmentPickerActionTile: View {
+  private let title: String
+  private let systemImage: String
+  private let action: () -> Void
+
+  init(title: String, systemImage: String, action: @escaping () -> Void) {
+    self.title = title
+    self.systemImage = systemImage
+    self.action = action
+  }
+
+  var body: some View {
     Button(action: action) {
       VStack(spacing: 6) {
-        Image(systemName: "camera")
+        Image(systemName: systemImage)
           .foregroundStyle(.primary)
 
-        Text("Camera")
+        Text(title)
           .foregroundStyle(.primary)
       }
       .frame(
@@ -36,7 +74,6 @@ public struct AttachmentPickerCameraTile: View {
       .contentShape(.rect(cornerRadius: AttachmentPickerTileMetrics.cornerRadius))
     }
     .buttonStyle(.plain)
-    .accessibilityLabel("Camera")
   }
 }
 
