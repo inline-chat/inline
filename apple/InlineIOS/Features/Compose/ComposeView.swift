@@ -1059,7 +1059,11 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     }
 
     clearDraft()
-    clearAttachments(shouldUpdateSendButtonVisibility: !shouldHideSendButtonImmediately)
+    // Keep already-started uploads alive after tapping send; the transaction may still be awaiting them.
+    clearAttachments(
+      shouldUpdateSendButtonVisibility: !shouldHideSendButtonImmediately,
+      cancelRemovedUploads: false
+    )
     stopDraftSaveTimer()
     textView.text = ""
 
@@ -1111,11 +1115,18 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     removeAttachment(id)
   }
 
-  func clearAttachments(shouldUpdateSendButtonVisibility: Bool = true) {
+  func clearAttachments(
+    shouldUpdateSendButtonVisibility: Bool = true,
+    cancelRemovedUploads: Bool = true
+  ) {
     attachmentItems.removeAll()
     pendingVideoAttachments.removeAll()
     canceledPendingVideoAttachmentIds.removeAll()
-    handleAttachmentItemsChanged(animated: false, shouldUpdateSendButtonVisibility: shouldUpdateSendButtonVisibility)
+    handleAttachmentItemsChanged(
+      animated: false,
+      shouldUpdateSendButtonVisibility: shouldUpdateSendButtonVisibility,
+      cancelRemovedUploads: cancelRemovedUploads
+    )
     log.debug("Cleared all attachments")
   }
 
@@ -1127,8 +1138,12 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     return uniqueId
   }
 
-  func handleAttachmentItemsChanged(animated: Bool = true, shouldUpdateSendButtonVisibility: Bool = true) {
-    syncAttachmentUploadTracking()
+  func handleAttachmentItemsChanged(
+    animated: Bool = true,
+    shouldUpdateSendButtonVisibility: Bool = true,
+    cancelRemovedUploads: Bool = true
+  ) {
+    syncAttachmentUploadTracking(cancelRemovedUploads: cancelRemovedUploads)
     UIView.performWithoutAnimation {
       refreshAttachmentPreviews()
       attachmentStackView.layoutIfNeeded()
@@ -1151,23 +1166,23 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     sendQueuedPendingVideoMessageIfReady()
   }
 
-  private func syncAttachmentUploadTracking() {
+  private func syncAttachmentUploadTracking(cancelRemovedUploads: Bool = true) {
     let currentAttachmentIds = Set(attachmentItems.keys)
 
     for trackedId in Set(attachmentUploadProgress.keys) where !currentAttachmentIds.contains(trackedId) {
-      stopTrackingAttachmentUpload(trackedId, cancelUpload: true)
+      stopTrackingAttachmentUpload(trackedId, cancelUpload: cancelRemovedUploads)
     }
 
     for taskId in Set(attachmentUploadBindingTasks.keys) where !currentAttachmentIds.contains(taskId) {
-      stopTrackingAttachmentUpload(taskId, cancelUpload: true)
+      stopTrackingAttachmentUpload(taskId, cancelUpload: cancelRemovedUploads)
     }
 
     for taskId in Set(attachmentUploadStartTasks.keys) where !currentAttachmentIds.contains(taskId) {
-      stopTrackingAttachmentUpload(taskId, cancelUpload: true)
+      stopTrackingAttachmentUpload(taskId, cancelUpload: cancelRemovedUploads)
     }
 
     for subscriptionId in Set(attachmentUploadSubscriptions.keys) where !currentAttachmentIds.contains(subscriptionId) {
-      stopTrackingAttachmentUpload(subscriptionId, cancelUpload: true)
+      stopTrackingAttachmentUpload(subscriptionId, cancelUpload: cancelRemovedUploads)
     }
 
     for (attachmentId, mediaItem) in attachmentItems {
