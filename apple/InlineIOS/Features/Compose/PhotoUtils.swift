@@ -31,6 +31,17 @@ private func immediateVideoThumbnail(from url: URL) -> UIImage? {
 }
 
 extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+  private enum RecentAssetLoadError: Error {
+    case message(String)
+
+    var message: String {
+      switch self {
+      case let .message(message):
+        return message
+      }
+    }
+  }
+
   private func shouldSendAsFile(_ image: UIImage) -> Bool {
     let width = max(image.size.width, 1)
     let height = max(image.size.height, 1)
@@ -494,75 +505,127 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
   }
 
   func openRecentAsset(localIdentifier: String) {
-    openRecentAsset(localIdentifier: localIdentifier, dismissAttachmentPickerOnSuccess: true)
+    guard localIdentifier.isEmpty == false else { return }
+
+    Task { [weak self] in
+      guard let self else { return }
+
+      let result = await self.loadRecentAssetMediaItem(localIdentifier: localIdentifier)
+
+      await MainActor.run { [weak self] in
+        guard let self else { return }
+
+        switch result {
+        case let .success(mediaItem):
+          let uniqueId = mediaItem.getItemUniqueId()
+          attachmentItems[uniqueId] = mediaItem
+          handleAttachmentItemsChanged(animated: false)
+          dismissAttachmentPickerIfPresented(animated: true)
+        case let .failure(error):
+          showRecentAssetError(message: error.message)
+        }
+      }
+    }
   }
 
   func openRecentAssets(localIdentifiers: [String]) {
     let validIdentifiers = localIdentifiers.filter { $0.isEmpty == false }
     guard validIdentifiers.isEmpty == false else { return }
 
-    for identifier in validIdentifiers {
-      openRecentAsset(localIdentifier: identifier, dismissAttachmentPickerOnSuccess: false)
-    }
-
     dismissAttachmentPickerIfPresented(animated: true)
+
+    Task { [weak self] in
+      guard let self else { return }
+
+      var orderedMediaItems: [FileMediaItem] = []
+      var firstErrorMessage: String?
+
+      for identifier in validIdentifiers {
+        let result = await self.loadRecentAssetMediaItem(localIdentifier: identifier)
+        switch result {
+        case let .success(mediaItem):
+          orderedMediaItems.append(mediaItem)
+        case let .failure(error):
+          let message = error.message
+          if firstErrorMessage == nil {
+            firstErrorMessage = message
+          }
+        }
+      }
+
+      await MainActor.run { [weak self] in
+        guard let self else { return }
+
+        if orderedMediaItems.isEmpty == false {
+          for mediaItem in orderedMediaItems {
+            let uniqueId = mediaItem.getItemUniqueId()
+            attachmentItems[uniqueId] = mediaItem
+          }
+          handleAttachmentItemsChanged(animated: false)
+        }
+
+        if let firstErrorMessage {
+          showRecentAssetError(message: firstErrorMessage)
+        }
+      }
+    }
   }
 
-  private func openRecentAsset(
-    localIdentifier: String,
-    dismissAttachmentPickerOnSuccess: Bool
-  ) {
+  private func loadRecentAssetMediaItem(localIdentifier: String) async -> Result<FileMediaItem, RecentAssetLoadError> {
     let assets = PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier], options: nil)
     guard let asset = assets.firstObject else {
-      showRecentAssetError(message: "Couldn't load that recent media.")
-      return
+      return .failure(.message("Couldn't load that recent media."))
     }
 
     if asset.mediaType == .video {
-      loadRecentVideoAsset(asset, dismissAttachmentPickerOnSuccess: dismissAttachmentPickerOnSuccess)
-      return
+      return await loadRecentVideoMediaItem(from: asset)
     }
 
     guard asset.mediaType == .image else {
-      showRecentAssetError(message: "Unsupported recent media type.")
-      return
+      return .failure(.message("Unsupported recent media type."))
     }
 
+    guard let image = await loadRecentImage(from: asset) else {
+      return .failure(.message("Couldn't open that recent photo."))
+    }
+
+    do {
+      let mediaItem = try makeImageAttachment(image, optimizePhoto: true)
+      return .success(mediaItem)
+    } catch {
+      Log.shared.error("Failed to save photo in attachments", error: error)
+      return .failure(.message("Couldn't open that recent photo."))
+    }
+  }
+
+  private func loadRecentImage(from asset: PHAsset) async -> UIImage? {
     let options = PHImageRequestOptions()
     options.deliveryMode = .highQualityFormat
     options.resizeMode = .none
     options.isNetworkAccessAllowed = true
     options.version = .current
 
-    PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { [weak self] data, _, _, info in
-      if let isCancelled = info?[PHImageCancelledKey] as? Bool, isCancelled {
-        return
-      }
-
-      guard let data, let image = UIImage(data: data) else {
-        DispatchQueue.main.async {
-          self?.showRecentAssetError(message: "Couldn't open that recent photo.")
+    return await withCheckedContinuation { continuation in
+      PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, _, _, info in
+        if let isCancelled = info?[PHImageCancelledKey] as? Bool, isCancelled {
+          continuation.resume(returning: nil)
+          return
         }
-        return
-      }
 
-      DispatchQueue.main.async {
-        self?.addImages([image])
-        if dismissAttachmentPickerOnSuccess {
-          self?.dismissAttachmentPickerIfPresented(animated: true)
+        guard let data, let image = UIImage(data: data) else {
+          continuation.resume(returning: nil)
+          return
         }
+
+        continuation.resume(returning: image)
       }
     }
   }
 
-  private func loadRecentVideoAsset(
-    _ asset: PHAsset,
-    dismissAttachmentPickerOnSuccess: Bool
-  ) {
+  private func loadRecentVideoMediaItem(from asset: PHAsset) async -> Result<FileMediaItem, RecentAssetLoadError> {
     let resources = PHAssetResource.assetResources(for: asset)
     guard let resource = resources.first(where: { [.fullSizeVideo, .video, .pairedVideo].contains($0.type) }) else {
-      showRecentAssetError(message: "Couldn't open that recent video.")
-      return
+      return .failure(.message("Couldn't open that recent video."))
     }
 
     let fileExtension = URL(fileURLWithPath: resource.originalFilename).pathExtension
@@ -574,22 +637,28 @@ extension ComposeView: UIImagePickerControllerDelegate, UINavigationControllerDe
     let options = PHAssetResourceRequestOptions()
     options.isNetworkAccessAllowed = true
 
-    PHAssetResourceManager.default().writeData(for: resource, toFile: tempURL, options: options) { [weak self] error in
-      if let error {
-        try? FileManager.default.removeItem(at: tempURL)
-        DispatchQueue.main.async {
-          self?.showRecentAssetError(message: "Couldn't open that recent video: \(error.localizedDescription)")
-        }
-        return
+    let writeError: Error? = await withCheckedContinuation { continuation in
+      PHAssetResourceManager.default().writeData(for: resource, toFile: tempURL, options: options) { error in
+        continuation.resume(returning: error)
       }
+    }
 
-      DispatchQueue.main.async {
-        self?.addVideo(
-          tempURL,
-          removeSourceAfterProcessing: true,
-          dismissAttachmentPickerOnSuccess: dismissAttachmentPickerOnSuccess
-        )
-      }
+    if let writeError {
+      try? FileManager.default.removeItem(at: tempURL)
+      return .failure(.message("Couldn't open that recent video: \(writeError.localizedDescription)"))
+    }
+
+    defer {
+      try? FileManager.default.removeItem(at: tempURL)
+    }
+
+    do {
+      let immediateThumbnail = immediateVideoThumbnail(from: tempURL)
+      let videoInfo = try await FileCache.saveVideo(url: tempURL, thumbnail: immediateThumbnail)
+      return .success(.video(videoInfo))
+    } catch {
+      Log.shared.error("Failed to save video", error: error)
+      return .failure(.message("Couldn't open that recent video: \(error.localizedDescription)"))
     }
   }
 
@@ -615,7 +684,7 @@ extension ComposeView: PHPickerViewControllerDelegate {
       }
       return
     }
-    
+
     isPickerPresented = false
 
     if activePickerMode == .videos {

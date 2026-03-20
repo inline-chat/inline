@@ -1834,11 +1834,32 @@ private final class ComposeAttachmentPreviewItemView: UIView {
     applyFallback(iconName: "video.fill", badgeText: nil)
   }
 
-  func setUploadProgress(_ _: UploadProgressSnapshot?) {
-    loadingIndicator.stopAnimating()
-    progressOverlayView.isHidden = true
-    uploadProgressView.isHidden = true
-    uploadProgressView.setProgress(0)
+  func setUploadProgress(_ progress: UploadProgressSnapshot?) {
+    guard let progress else {
+      loadingIndicator.stopAnimating()
+      progressOverlayView.isHidden = true
+      uploadProgressView.isHidden = true
+      uploadProgressView.setProgress(0)
+      return
+    }
+
+    progressOverlayView.isHidden = false
+    uploadProgressView.isHidden = false
+
+    switch progress.stage {
+    case .processing:
+      loadingIndicator.stopAnimating()
+      uploadProgressView.setProgress(0)
+    case .uploading:
+      loadingIndicator.stopAnimating()
+      uploadProgressView.setProgress(progress.fractionCompleted)
+    case .completed:
+      loadingIndicator.stopAnimating()
+      setUploadProgress(nil)
+    case .failed:
+      loadingIndicator.stopAnimating()
+      setUploadProgress(nil)
+    }
   }
 
   private func applyPhotoPreview(_ photoInfo: PhotoInfo?) {
