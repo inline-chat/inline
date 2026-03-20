@@ -152,11 +152,7 @@ public struct AttachmentPickerSheet: View {
   }
 
   private var sendSelectedButtonTitle: String {
-    let count = model.selectedRecentItems.count
-    if count == 1 {
-      return "Add 1 photo"
-    }
-    return "Add \(count) photos"
+    attachmentPickerSendSelectedButtonTitle(for: model.selectedRecentItems)
   }
 
   @ViewBuilder
