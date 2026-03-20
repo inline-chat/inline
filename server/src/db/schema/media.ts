@@ -2,7 +2,7 @@ import { bytea, creationDate } from "@in/server/db/schema/common"
 import { files } from "@in/server/db/schema/files"
 import { messages } from "@in/server/db/schema/messages"
 import { relations } from "drizzle-orm/_relations"
-import { pgTable, serial, integer, text, bigint, boolean } from "drizzle-orm/pg-core"
+import { pgTable, serial, integer, text, bigint, boolean, index } from "drizzle-orm/pg-core"
 
 // export const messageMedia = pgTable("message_media", {
 //   id: bigint("id", { mode: "number" }).generatedAlwaysAsIdentity().primaryKey(),
@@ -32,14 +32,20 @@ export const photos = pgTable("photos", {
 export type DbPhoto = typeof photos.$inferSelect
 export type DBNewPhoto = typeof photos.$inferInsert
 
-export const photoSizes = pgTable("photo_sizes", {
-  id: bigint("id", { mode: "number" }).generatedAlwaysAsIdentity().primaryKey(),
-  fileId: integer("file_id").references(() => files.id),
-  photoId: bigint("photo_id", { mode: "number" }).references(() => photos.id),
-  size: text("size", { enum: ["b", "c", "d", "e", "f", "y", "x", "w", "v"] }),
-  width: integer("width"),
-  height: integer("height"),
-})
+export const photoSizes = pgTable(
+  "photo_sizes",
+  {
+    id: bigint("id", { mode: "number" }).generatedAlwaysAsIdentity().primaryKey(),
+    fileId: integer("file_id").references(() => files.id),
+    photoId: bigint("photo_id", { mode: "number" }).references(() => photos.id),
+    size: text("size", { enum: ["b", "c", "d", "e", "f", "y", "x", "w", "v"] }),
+    width: integer("width"),
+    height: integer("height"),
+  },
+  (table) => ({
+    photoIdIndex: index("photo_sizes_photo_id_idx").on(table.photoId),
+  }),
+)
 
 export type DbPhotoSize = typeof photoSizes.$inferSelect
 export type DBNewPhotoSize = typeof photoSizes.$inferInsert

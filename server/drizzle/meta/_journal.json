@@ -477,6 +477,13 @@
       "when": 1773498279000,
       "tag": "0067_bot_commands",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1774011157114,
+      "tag": "0068_add-indexes-for-chat-dialog-media",
+      "breakpoints": true
     }
   ]
 }

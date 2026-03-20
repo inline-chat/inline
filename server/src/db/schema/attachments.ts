@@ -3,7 +3,7 @@ import { files } from "@in/server/db/schema/files"
 import { messages } from "@in/server/db/schema/messages"
 import { users } from "@in/server/db/schema/users"
 import { relations } from "drizzle-orm/_relations"
-import { pgTable, serial, integer, text, bigint, varchar, pgEnum, numeric } from "drizzle-orm/pg-core"
+import { pgTable, serial, integer, text, bigint, varchar, pgEnum, numeric, index } from "drizzle-orm/pg-core"
 import { photos } from "./media"
 
 export const urlPreview = pgTable("url_preview", {
@@ -46,14 +46,20 @@ export const externalTasks = pgTable("external_tasks", {
   date: creationDate,
 })
 
-export const messageAttachments = pgTable("message_attachments", {
-  id: bigint("id", { mode: "number" }).generatedAlwaysAsIdentity().primaryKey(),
-  messageId: bigint("message_id", { mode: "bigint" }).references(() => messages.globalId, { onDelete: "cascade" }),
+export const messageAttachments = pgTable(
+  "message_attachments",
+  {
+    id: bigint("id", { mode: "number" }).generatedAlwaysAsIdentity().primaryKey(),
+    messageId: bigint("message_id", { mode: "bigint" }).references(() => messages.globalId, { onDelete: "cascade" }),
 
-  /** external task id */
-  externalTaskId: bigint("external_task_id", { mode: "bigint" }).references(() => externalTasks.id),
-  urlPreviewId: bigint("url_preview_id", { mode: "bigint" }).references(() => urlPreview.id),
-})
+    /** external task id */
+    externalTaskId: bigint("external_task_id", { mode: "bigint" }).references(() => externalTasks.id),
+    urlPreviewId: bigint("url_preview_id", { mode: "bigint" }).references(() => urlPreview.id),
+  },
+  (table) => ({
+    messageIdIndex: index("message_attachments_message_id_idx").on(table.messageId),
+  }),
+)
 
 export const messageAttachmentsRelations = relations(messageAttachments, ({ one }) => ({
   externalTask: one(externalTasks, {
