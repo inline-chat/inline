@@ -131,17 +131,17 @@ struct ComposeInteractionStateTests {
     #expect(canSend == true)
   }
 
-  @Test("attachment-only send waits for pending media readiness")
-  func sendEligibilityBlocksAttachmentOnlyDuringPendingMedia() async throws {
+  @Test("attachment-only send is allowed while pending video preprocessing is in progress")
+  func sendEligibilityAllowsAttachmentOnlyDuringPendingMedia() async throws {
     let canSend = ComposeSendEligibility.canSend(
       hasText: false,
-      hasAttachments: true,
+      hasAttachments: false,
       hasForward: false,
       hasPendingVideos: true,
       hasActiveAttachmentUploads: false
     )
 
-    #expect(canSend == false)
+    #expect(canSend == true)
   }
 
   @Test("attachment-only send is allowed while uploads are already in flight")
@@ -157,15 +157,28 @@ struct ComposeInteractionStateTests {
     #expect(canSend == true)
   }
 
-  @Test("text only mode is used when pending media is not ready")
-  func sendEligibilityUsesTextOnlyModeWhenPendingMediaIsNotReady() async throws {
+  @Test("pending video only can be sent")
+  func sendEligibilityAllowsPendingVideoOnly() async throws {
+    let canSend = ComposeSendEligibility.canSend(
+      hasText: false,
+      hasAttachments: false,
+      hasForward: false,
+      hasPendingVideos: true,
+      hasActiveAttachmentUploads: false
+    )
+
+    #expect(canSend == true)
+  }
+
+  @Test("pending video sends do not fall back to text only")
+  func sendEligibilityDoesNotUseTextOnlyModeWhenPendingMediaIsNotReady() async throws {
     let shouldSendTextOnly = ComposeSendEligibility.shouldSendTextOnly(
       hasText: true,
       hasPendingVideos: true,
       hasActiveAttachmentUploads: false
     )
 
-    #expect(shouldSendTextOnly == true)
+    #expect(shouldSendTextOnly == false)
   }
 
   @Test("text only mode is not used when uploads are already in flight")
@@ -215,5 +228,23 @@ struct ComposeInteractionStateTests {
     )
 
     #expect(shouldHideImmediately == true)
+  }
+
+  @Test("pending video send is queued until preprocessing completes")
+  func pendingMediaSendQueuesWhileVideosArePending() async throws {
+    let shouldQueue = ComposePendingMediaSendBehavior.shouldQueueSendUntilPendingVideosAreReady(
+      hasPendingVideos: true
+    )
+
+    #expect(shouldQueue == true)
+  }
+
+  @Test("ready media sends immediately without queuing")
+  func pendingMediaSendDoesNotQueueWithoutPendingVideos() async throws {
+    let shouldQueue = ComposePendingMediaSendBehavior.shouldQueueSendUntilPendingVideosAreReady(
+      hasPendingVideos: false
+    )
+
+    #expect(shouldQueue == false)
   }
 }

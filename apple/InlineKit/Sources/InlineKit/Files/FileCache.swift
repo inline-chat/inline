@@ -389,49 +389,19 @@ public actor FileCache: Sendable {
     let durationSeconds = Int(CMTimeGetSeconds(durationTime).rounded())
 
     // Persist the video to app cache.
-    // Keep native MP4 as-is for fast attach and only normalize non-MP4 inputs
-    // to the container format we upload. Avoid lossy cache-time compression here;
-    // upload preprocessing is the single place that should reduce quality.
+    // Keep cache-time work minimal for a faster compose/send path.
+    // Upload preprocessing is responsible for any required normalization/transcode.
     let directory = FileHelpers.getLocalCacheDirectory(for: .videos)
     let fileManager = FileManager.default
-    let sourceExtension = url.pathExtension.lowercased()
-    let needsMp4Transcode = sourceExtension != "mp4"
-    let shouldPreprocess = needsMp4Transcode
-    let localPath = UUID().uuidString + ".mp4"
+    let sourceExtension = url.pathExtension.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+    let finalExtension = sourceExtension.isEmpty ? "mp4" : sourceExtension
+    let localPath = "\(UUID().uuidString).\(finalExtension)"
     let localUrl = directory.appendingPathComponent(localPath)
-
-    var finalWidth = width
-    var finalHeight = height
-    var finalDuration = durationSeconds
-    var fileSize = 0
-
-    if shouldPreprocess {
-      do {
-        let result = try await VideoCompressor.shared.normalizeToMP4(at: url)
-        defer {
-          if fileManager.fileExists(atPath: result.url.path) {
-            try? fileManager.removeItem(at: result.url)
-          }
-        }
-        if fileManager.fileExists(atPath: localUrl.path) {
-          try fileManager.removeItem(at: localUrl)
-        }
-        try fileManager.moveItem(at: result.url, to: localUrl)
-        finalWidth = result.width
-        finalHeight = result.height
-        finalDuration = result.duration
-        fileSize = Int(result.fileSize)
-      } catch {
-        // Non-MP4 inputs must become MP4, so surface preprocessing failure.
-        throw error
-      }
-    } else {
-      if fileManager.fileExists(atPath: localUrl.path) {
-        try fileManager.removeItem(at: localUrl)
-      }
-      try fileManager.copyItem(at: url, to: localUrl)
-      fileSize = FileHelpers.getFileSize(at: localUrl)
+    if fileManager.fileExists(atPath: localUrl.path) {
+      try fileManager.removeItem(at: localUrl)
     }
+    try fileManager.copyItem(at: url, to: localUrl)
+    let fileSize = FileHelpers.getFileSize(at: localUrl)
 
     // Generate or reuse thumbnail
     let thumbImage: PlatformImage? = if let thumbnail {
@@ -445,9 +415,9 @@ public actor FileCache: Sendable {
     } else { nil }
 
     let video = try MediaHelpers.shared.createLocalVideo(
-      width: finalWidth,
-      height: finalHeight,
-      duration: finalDuration,
+      width: width,
+      height: height,
+      duration: durationSeconds,
       size: fileSize,
       thumbnail: thumbnailInfo?.photo,
       localPath: localPath
