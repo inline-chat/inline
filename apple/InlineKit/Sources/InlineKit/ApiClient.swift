@@ -1010,6 +1010,7 @@ public struct GetIntegrations: Codable, Sendable {
   public let hasNotionConnected: Bool
   public let hasIntegrationAccess: Bool
   public let linearTeamId: String?
+  public let notionDatabaseId: String?
   public let notionSpaces: [NotionSpace]?
   public let linearSpaces: [LinearSpace]?
 
