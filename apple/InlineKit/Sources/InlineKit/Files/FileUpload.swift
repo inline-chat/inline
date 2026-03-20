@@ -784,7 +784,7 @@ public actor FileUploader {
     )
   }
 
-  private func resolveLocalVideoId(for video: Video) throws -> Int64 {
+  func resolveLocalVideoId(for video: Video) throws -> Int64 {
     if let id = video.id { return id }
 
     // Try to fetch the video row by temporary/server videoId
