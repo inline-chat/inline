@@ -65,6 +65,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   var attachmentItems: [String: FileMediaItem] = [:]
   var pendingVideoAttachments: [PendingVideoAttachment] = []
   var canceledPendingVideoAttachmentIds: Set<String> = []
+  private var isAwaitingPendingVideoSend = false
+  private var queuedPendingVideoSendMode: MessageSendMode?
   private var attachmentUploadProgress: [String: UploadProgressSnapshot] = [:]
   private var attachmentUploadSubscriptions: [String: AnyCancellable] = [:]
   private var attachmentUploadBindingTasks: [String: Task<Void, Never>] = [:]
@@ -466,7 +468,34 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     sendButton.transform = .identity
     sendButton.isEnabled = true
     sendButton.isUserInteractionEnabled = true
+    sendButton.configuration?.showsActivityIndicator = false
     sendButton.setNeedsUpdateConfiguration()
+  }
+
+  private func queueSendUntilPendingVideosAreReady(sendMode: MessageSendMode?) {
+    guard !isAwaitingPendingVideoSend else { return }
+    isAwaitingPendingVideoSend = true
+    queuedPendingVideoSendMode = sendMode
+    showSendButtonImmediately()
+    sendButton.configuration?.showsActivityIndicator = false
+    sendButton.setNeedsUpdateConfiguration()
+  }
+
+  func cancelQueuedPendingVideoSend() {
+    guard isAwaitingPendingVideoSend else { return }
+    isAwaitingPendingVideoSend = false
+    queuedPendingVideoSendMode = nil
+    sendButton.configuration?.showsActivityIndicator = false
+    updateSendButtonVisibility()
+  }
+
+  private func sendQueuedPendingVideoMessageIfReady() {
+    guard isAwaitingPendingVideoSend, pendingVideoAttachments.isEmpty else { return }
+    let queuedSendMode = queuedPendingVideoSendMode
+    isAwaitingPendingVideoSend = false
+    queuedPendingVideoSendMode = nil
+    sendButton.configuration?.showsActivityIndicator = false
+    sendMessage(sendMode: queuedSendMode)
   }
 
   private func currentTelegramSendButtonBlurRadius() -> CGFloat {
@@ -546,6 +575,13 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     guard let chatId else { return }
     let hasPendingVideos = !pendingVideoAttachments.isEmpty
     let hasActiveUploads = hasActiveAttachmentUploads
+
+    if ComposePendingMediaSendBehavior.shouldQueueSendUntilPendingVideosAreReady(
+      hasPendingVideos: hasPendingVideos
+    ) {
+      queueSendUntilPendingVideosAreReady(sendMode: sendMode)
+      return
+    }
 
     let rawText = (textView.text ?? "")
       .replacingOccurrences(of: "\u{FFFC}", with: "")
@@ -1112,6 +1148,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     }
 
     updateHeight(animated: animated)
+    sendQueuedPendingVideoMessageIfReady()
   }
 
   private func syncAttachmentUploadTracking() {
@@ -1308,8 +1345,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
     let pendingId = "pending_video_\(UUID().uuidString)"
     canceledPendingVideoAttachmentIds.remove(pendingId)
     pendingVideoAttachments.append(PendingVideoAttachment(id: pendingId, thumbnailImage: nil))
-    refreshAttachmentPreviews()
-    updateHeight(animated: false)
+    handleAttachmentItemsChanged(animated: false)
     return pendingId
   }
 
@@ -1324,8 +1360,7 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
       canceledPendingVideoAttachmentIds.insert(pendingId)
     }
     pendingVideoAttachments.removeAll { $0.id == pendingId }
-    refreshAttachmentPreviews()
-    updateHeight(animated: animated)
+    handleAttachmentItemsChanged(animated: animated)
   }
 
   func isPendingVideoAttachmentCanceled(_ pendingId: String) -> Bool {
@@ -1398,6 +1433,13 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   func updateSendButtonVisibility() {
+    if isAwaitingPendingVideoSend {
+      showSendButtonImmediately()
+      sendButton.configuration?.showsActivityIndicator = false
+      sendButton.setNeedsUpdateConfiguration()
+      return
+    }
+
     let shouldEnableSend = canSend
 
     if shouldEnableSend {

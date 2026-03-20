@@ -708,6 +708,7 @@ public actor FileUploader {
     metadata: ApiClient.VideoUploadMetadata?
   ) async throws -> PreparedVideoUploadPayload {
     publishProgress(uploadId: uploadId, progress: .processing(id: uploadId))
+    let requiresMp4Output = inputMimeType.lowercased() != "video/mp4"
 
     let resolvedMetadata = try await resolveVideoUploadMetadata(
       localUrl: localUrl,
@@ -717,7 +718,7 @@ public actor FileUploader {
     do {
       let result = try await VideoCompressor.shared.compressVideo(
         at: localUrl,
-        options: VideoCompressionOptions.uploadDefault()
+        options: VideoCompressionOptions.uploadDefault(forceTranscode: requiresMp4Output)
       )
       let compressedMetadata = ApiClient.VideoUploadMetadata(
         width: result.width,
