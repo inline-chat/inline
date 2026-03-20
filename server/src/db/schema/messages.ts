@@ -88,6 +88,7 @@ export const messages = pgTable(
   (table) => ({
     messageIdPerChatUnique: unique("msg_id_per_chat_unique").on(table.messageId, table.chatId),
     messageIdPerChatIndex: index("msg_id_per_chat_index").on(table.messageId, table.chatId),
+    chatIdMessageIdDescIndex: index("messages_chat_id_message_id_desc_idx").on(table.chatId, table.messageId.desc()),
     randomIdPerSenderIndex: unique("random_id_per_sender_unique").on(table.randomId, table.fromId),
     unreadCountIndex: index("unread_count_index").on(table.chatId, table.messageId, table.fromId),
   }),

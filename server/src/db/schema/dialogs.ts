@@ -1,4 +1,4 @@
-import { pgTable, boolean, unique, integer, text, bytea } from "drizzle-orm/pg-core"
+import { pgTable, boolean, unique, integer, text, bytea, index } from "drizzle-orm/pg-core"
 import { users } from "./users"
 import { spaces } from "./spaces"
 import { relations } from "drizzle-orm/_relations"
@@ -59,6 +59,8 @@ export const dialogs = pgTable(
   },
   (table) => ({
     chatIdUserIdUnique: unique("chat_id_user_id_unique").on(table.chatId, table.userId),
+    userIdChatIdIndex: index("dialogs_user_id_chat_id_idx").on(table.userId, table.chatId),
+    userIdPeerUserIdIndex: index("dialogs_user_id_peer_user_id_idx").on(table.userId, table.peerUserId),
   }),
 )
 
