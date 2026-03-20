@@ -22,6 +22,16 @@ public final class PlatformPhotoView: PlatformView {
     didSet { imageView.updateContentMode(photoContentMode) }
   }
 
+  public var showsLoadingPlaceholder: Bool = true {
+    didSet {
+      if showsLoadingPlaceholder {
+        showPlaceholder()
+      } else {
+        hidePlaceholder()
+      }
+    }
+  }
+
   private let imageView = ImageContainerView()
   private let placeholderView = ShimmerPlaceholderView()
 
@@ -169,7 +179,7 @@ public final class PlatformPhotoView: PlatformView {
   }
 
   private func showPlaceholder() {
-    placeholderView.isHidden = false
+    placeholderView.isHidden = !showsLoadingPlaceholder
   }
 
   private func hidePlaceholder() {
