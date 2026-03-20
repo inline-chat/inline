@@ -14,17 +14,17 @@ mock.module("@in/server/libs/openAI", () => ({
 }))
 
 describe("convertEntityOffsets", () => {
-  const originalDebug = process.env.DEBUG
+  const originalDebug = process.env["DEBUG"]
   const originalWarn = console.warn
 
   afterEach(() => {
     parseCompletion.mockReset()
-    process.env.DEBUG = originalDebug
+    process.env["DEBUG"] = originalDebug
     console.warn = originalWarn
   })
 
   test("treats null JSON as missing entities without logging a parser error", async () => {
-    process.env.DEBUG = "1"
+    process.env["DEBUG"] = "1"
 
     const warnCalls: unknown[][] = []
     console.warn = ((...args: unknown[]) => {
