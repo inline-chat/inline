@@ -1,7 +1,14 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 
 describe("createIndexedText", () => {
+  const originalDebug = process.env["DEBUG"]
+
+  afterEach(() => {
+    process.env["DEBUG"] = originalDebug
+  })
+
   test("indexes basic ASCII by UTF-16 position", async () => {
+    process.env["DEBUG"] = "1"
     const { createIndexedText } = await import("./entityConversion")
     expect(createIndexedText("Hi")).toBe("0H1i")
   })
