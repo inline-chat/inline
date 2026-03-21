@@ -5,6 +5,7 @@ import Combine
 import Foundation
 import GRDB
 import InlineKit
+import InlineMacUI
 import InlineUI
 import Logger
 import Nuke
@@ -126,6 +127,11 @@ class MessageViewAppKit: NSView {
 
   private var hasText: Bool {
     props.layout.hasText
+  }
+
+  private var hasVisibleText: Bool {
+    guard let text = message.text else { return false }
+    return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
   }
 
   private var reactionsOutsideBubble: Bool {
@@ -437,7 +443,7 @@ class MessageViewAppKit: NSView {
 
   /// Reply
   private lazy var replyView: EmbeddedMessageView = {
-    let view = EmbeddedMessageView(style: outgoing ? .white : .colored)
+    let view = EmbeddedMessageView(style: embeddedReplyStyle)
     view.translatesAutoresizingMaskIntoConstraints = false
     view.setRelatedMessage(fullMessage.message)
     if let embeddedMessage = fullMessage.repliedToMessage {
@@ -468,6 +474,21 @@ class MessageViewAppKit: NSView {
       textView.layerContentsRedrawPolicy = .onSetNeedsDisplay
       textView.layer?.drawsAsynchronously = true
       textView.layer?.needsDisplayOnBoundsChange = true
+
+  private var embeddedReplyStyle: EmbeddedMessageView.EmbeddedMessageStyle {
+    let appearance = EmbeddedReplyStyleResolver.appearance(
+      isOutgoing: outgoing,
+      hasPhoto: hasPhoto,
+      hasText: hasVisibleText
+    )
+
+    switch appearance {
+    case .colored:
+      return .colored
+    case .white:
+      return .white
+    }
+  }
 
       let textContainer = textView.textContainer
       textContainer?.widthTracksTextView = false
@@ -2654,6 +2675,7 @@ class MessageViewAppKit: NSView {
       if let animView = swipeAnimationView {
         let yPosition = bubbleView.bounds.midY - animView.bounds.height / 2
         animView.frame.origin = NSPoint(x: bounds.width, y: yPosition)
+      replyView.setStyle(embeddedReplyStyle)
       }
     }
 
