@@ -282,6 +282,12 @@ class EmbeddedMessageView: NSView {
     relatedMessage = message
   }
 
+  func setStyle(_ style: EmbeddedMessageStyle) {
+    guard self.style != style else { return }
+    self.style = style
+    applyResolvedStyle()
+  }
+
   @objc func handleTap(_ gesture: NSClickGestureRecognizer) {
     guard let message else { return }
     guard message.status != .sending, message.status != .failed else { return }
@@ -384,9 +390,7 @@ class EmbeddedMessageView: NSView {
     nameLabel.font = senderFont
     messageLabel.font = messageFont
     updateLabelLayout()
-    rectangleView.layer?.backgroundColor = rectangleColor.cgColor
-    nameLabel.textColor = nameLabelColor
-    applyBackgroundAppearance()
+    applyResolvedStyle()
 
     // Handle photo if available
     let previewPhoto = photoInfo ?? videoInfo?.thumbnail
@@ -440,9 +444,7 @@ class EmbeddedMessageView: NSView {
     nameLabel.font = senderFont
     messageLabel.font = messageFont
     updateLabelLayout()
-    rectangleView.layer?.backgroundColor = rectangleColor.cgColor
-    nameLabel.textColor = nameLabelColor
-    applyBackgroundAppearance()
+    applyResolvedStyle()
   }
 
   private func updateLabelLayout() {
@@ -473,6 +475,13 @@ class EmbeddedMessageView: NSView {
     if !showsLeadingBar {
       textLeadingConstraint?.constant = textLeadingPadding
     }
+  }
+
+  private func applyResolvedStyle() {
+    rectangleView.layer?.backgroundColor = rectangleColor.cgColor
+    nameLabel.textColor = nameLabelColor
+    messageLabel.textColor = textColor
+    applyBackgroundAppearance()
   }
 
   private func forwardDescription(for senderName: String, messageText: String) -> String {
