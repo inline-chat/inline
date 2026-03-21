@@ -18,6 +18,50 @@ const BatchEntityConversionResultSchema = z.object({
   ),
 })
 
+function validateConversions(
+  expectedMessageIds: number[],
+  conversions: Array<{ messageId: number; entities: string | null }>,
+): Array<{ messageId: number; entities: string | null }> {
+  const expectedMessageIdSet = new Set(expectedMessageIds)
+  const receivedMessageIds = conversions.map((conversion) => conversion.messageId)
+  const seenMessageIds = new Set<number>()
+  const validConversions = new Map<number, { messageId: number; entities: string | null }>()
+  const duplicateMessageIds: number[] = []
+  const unexpectedMessageIds: number[] = []
+
+  for (const conversion of conversions) {
+    if (!expectedMessageIdSet.has(conversion.messageId)) {
+      unexpectedMessageIds.push(conversion.messageId)
+      continue
+    }
+
+    if (seenMessageIds.has(conversion.messageId)) {
+      duplicateMessageIds.push(conversion.messageId)
+      continue
+    }
+
+    seenMessageIds.add(conversion.messageId)
+    validConversions.set(conversion.messageId, conversion)
+  }
+
+  const missingMessageIds = expectedMessageIds.filter((messageId) => !validConversions.has(messageId))
+
+  if (missingMessageIds.length > 0 || duplicateMessageIds.length > 0 || unexpectedMessageIds.length > 0) {
+    log.warn("Invalid entity conversion output", {
+      expectedMessageIds,
+      receivedMessageIds,
+      missingMessageIds,
+      duplicateMessageIds,
+      unexpectedMessageIds,
+    })
+  }
+
+  return expectedMessageIds.flatMap((messageId) => {
+    const conversion = validConversions.get(messageId)
+    return conversion ? [conversion] : []
+  })
+}
+
 /**
  * Create indexed text showing UTF-16 character positions like "Hi" -> "0H1i"
  */
@@ -128,9 +172,9 @@ ${input.messages
   log.debug("Entity conversion user prompt:", userPrompt)
 
   const response = await openaiClient.chat.completions.parse({
-    model: "gpt-5-mini" as ChatModel,
+    model: "gpt-5.4-mini" as ChatModel,
     verbosity: "low",
-    reasoning_effort: "minimal",
+    reasoning_effort: "none",
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
@@ -153,7 +197,10 @@ ${input.messages
       throw new Error("Missing parsed entity conversion response")
     }
 
-    return result.conversions.map((conversion) => {
+    return validateConversions(
+      input.messages.map((message) => message.messageId),
+      result.conversions,
+    ).map((conversion) => {
       return {
         messageId: conversion.messageId,
         entities: parseConvertedEntitiesJson(conversion),

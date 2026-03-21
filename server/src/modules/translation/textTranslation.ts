@@ -11,7 +11,9 @@ import { zodResponseFormat } from "openai/helpers/zod"
 
 const log = new Log("modules/translation/textTranslation")
 
-const CONTEXT_MESSAGE_MAX_LENGTH = 240
+const CONTEXT_MESSAGE_MAX_LENGTH = 1024
+const CONTEXT_BLOCK_START = "BEGIN_CONTEXT_MESSAGES"
+const CONTEXT_BLOCK_END = "END_CONTEXT_MESSAGES"
 
 // Schema for text translation only (Step 1)
 const TextTranslationResultSchema = z.object({
@@ -36,6 +38,63 @@ function truncateMessageForContext(text: string | null): string | null {
   return text.substring(0, CONTEXT_MESSAGE_MAX_LENGTH) + "..."
 }
 
+function buildContextMessagesBlock(formattedContextMessages: string[]): string {
+  if (formattedContextMessages.length === 0) {
+    return ""
+  }
+
+  return [
+    "Use the context block only to disambiguate meaning and tone.",
+    `Never translate, quote, summarize, or include text from ${CONTEXT_BLOCK_START} in the output.`,
+    CONTEXT_BLOCK_START,
+    ...formattedContextMessages.map((message) => JSON.stringify(message)),
+    CONTEXT_BLOCK_END,
+  ].join("\n")
+}
+
+function validateTranslations(
+  input: TranslationCallInput,
+  translations: Array<{ messageId: number; translation: string }>,
+): Array<{ messageId: number; translation: string }> {
+  const expectedMessageIds = input.messages.map((message) => message.messageId)
+  const expectedMessageIdSet = new Set(expectedMessageIds)
+  const receivedMessageIds = translations.map((translation) => translation.messageId)
+  const seenMessageIds = new Set<number>()
+  const translationById = new Map<number, { messageId: number; translation: string }>()
+  const duplicateMessageIds: number[] = []
+  const unexpectedMessageIds: number[] = []
+
+  for (const translation of translations) {
+    if (!expectedMessageIdSet.has(translation.messageId)) {
+      unexpectedMessageIds.push(translation.messageId)
+      continue
+    }
+
+    if (seenMessageIds.has(translation.messageId)) {
+      duplicateMessageIds.push(translation.messageId)
+      continue
+    }
+
+    seenMessageIds.add(translation.messageId)
+    translationById.set(translation.messageId, translation)
+  }
+
+  const missingMessageIds = expectedMessageIds.filter((messageId) => !translationById.has(messageId))
+
+  if (missingMessageIds.length > 0 || duplicateMessageIds.length > 0 || unexpectedMessageIds.length > 0) {
+    log.error("Invalid translation output", {
+      expectedMessageIds,
+      receivedMessageIds,
+      missingMessageIds,
+      duplicateMessageIds,
+      unexpectedMessageIds,
+    })
+    throw new Error("Invalid translation output")
+  }
+
+  return expectedMessageIds.map((messageId) => translationById.get(messageId)!)
+}
+
 /**
  * Translate message texts
  */
@@ -58,34 +117,29 @@ export async function translateTexts(
       return `${senderName}: ${truncatedText || "[media/attachment]"}`
     }),
   )
+  const contextMessagesBlock = buildContextMessagesBlock(formattedContextMessages)
 
-  const systemPrompt = `You are a professional translator for Inline app's messages, a work chat app like Slack. 
-        # Instructions 
-        • Translate user message texts to "${languageName} (${input.language})"
-        - Keep parts already in ${languageName} unchanged
+  const systemPrompt = `You are a professional translator for Inline chat app's messages, a work chat app like Slack.
+        # Instructions
+        • Translate user message to "${languageName} (${input.language})"; Keep parts already in ${languageName} unchanged
+        - Find messages by their ID in <message> tags and return translations with corresponding message IDs
+
+        # Guidelines
         - Use informal, conversational tone appropriate for workplace collaboration between teammates
-        - Preserve formatting elements text content: emojis, special characters, code, numbers, URLs, @mentions, emails, and such.
-        - Do not add, remove, summarize, or explain. Output only the translated messages.
-        - Use conversation context to disambiguate meanings and choose the most appropriate translation
-        - Find messages by their id in <message> tags and return translations with corresponding message IDs
-        - Try to preserve original intent, tone, and style considering language differences, nuances, and idioms
-        - Consider regional differences in ${languageName}. For examples, use of ~ in "謝謝~" in Chinese doesn't translate in English and the ~ shouldn't be translated literally.
+        - Preserve formatting (emojis, special characters, code, @mentions, etc.)
+        - Only translate, no summarization/explaination; Output only the translated messages.
+        - Consider regional differences in ${languageName}. eg. use of ~ in "謝謝~" won't make it in English.
+        - Err on the side of translating more of text content than less, users can turn off translation if they want.
 
-         # Conversation Context
-        ${
-          formattedContextMessages.length > 0
-            ? `Here are some previous messages from the chat for context (IMPORTANT: DO NOT translate these, they are for context only):\n<messages_context>\n${formattedContextMessages.join(
-                "\n",
-              )}\n</messages_context>\n`
-            : ""
-        }
+        # Use the conversation context below to guide your translation:
+        ${contextMessagesBlock ? `${contextMessagesBlock}\n` : ""}
         <chat_context>
         ${input.chat.title ? `Title: ${input.chat.title}` : ""}
         Type: ${input.chat.type}
         Date: ${new Date().toLocaleDateString()}
         ${HARDCODED_TRANSLATION_CONTEXT}
-        </chat_context>   
-  
+        </chat_context>
+
         `
 
   const userPrompt = `
@@ -108,9 +162,9 @@ export async function translateTexts(
   log.debug("Text translation user prompt:", userPrompt)
 
   const response = await openaiClient.chat.completions.parse({
-    model: "gpt-5-mini" as ChatModel,
+    model: "gpt-5.4-mini" as ChatModel,
     verbosity: "medium",
-    reasoning_effort: "minimal",
+    reasoning_effort: "none",
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
@@ -132,8 +186,11 @@ export async function translateTexts(
     if (!result) {
       throw new Error("Missing parsed text translation response")
     }
-    return result.translations
+    return validateTranslations(input, result.translations)
   } catch (error) {
+    if (error instanceof Error && error.message === "Invalid translation output") {
+      throw error
+    }
     log.error(`Text translation decoding failed: ${error}`)
     throw new Error(`Text translation decoding failed: ${error}`)
   }
