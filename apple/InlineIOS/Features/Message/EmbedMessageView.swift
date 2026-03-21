@@ -111,6 +111,7 @@ class EmbedMessageView: UIView {
   private lazy var thumbnailView: PlatformPhotoView = {
     let view = PlatformPhotoView()
     view.photoContentMode = .aspectFill
+    view.showsTinyThumbnailBackground = true
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }()
