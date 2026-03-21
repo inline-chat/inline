@@ -22,6 +22,13 @@ public final class PlatformPhotoView: PlatformView {
     didSet { imageView.updateContentMode(photoContentMode) }
   }
 
+  public var showsTinyThumbnailBackground = false {
+    didSet {
+      updateTinyThumbnailBackground()
+    }
+  }
+
+  private let tinyThumbnailBackgroundView = InlineTinyThumbnailBackgroundView()
   private let imageView = ImageContainerView()
   private let placeholderView = ShimmerPlaceholderView()
 
@@ -48,6 +55,7 @@ public final class PlatformPhotoView: PlatformView {
   public func setPhoto(_ photoInfo: PhotoInfo?, reloadMessageOnFinish message: Message? = nil) {
     pendingPhotoInfo = photoInfo
     reloadMessage = message
+    updateTinyThumbnailBackground()
     updateImageIfNeeded()
   }
 
@@ -74,13 +82,20 @@ public final class PlatformPhotoView: PlatformView {
     #endif
     translatesAutoresizingMaskIntoConstraints = false
 
+    tinyThumbnailBackgroundView.translatesAutoresizingMaskIntoConstraints = false
     imageView.translatesAutoresizingMaskIntoConstraints = false
     placeholderView.translatesAutoresizingMaskIntoConstraints = false
 
+    addSubview(tinyThumbnailBackgroundView)
     addSubview(placeholderView)
     addSubview(imageView)
 
     NSLayoutConstraint.activate([
+      tinyThumbnailBackgroundView.leadingAnchor.constraint(equalTo: leadingAnchor),
+      tinyThumbnailBackgroundView.trailingAnchor.constraint(equalTo: trailingAnchor),
+      tinyThumbnailBackgroundView.topAnchor.constraint(equalTo: topAnchor),
+      tinyThumbnailBackgroundView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
       placeholderView.leadingAnchor.constraint(equalTo: leadingAnchor),
       placeholderView.trailingAnchor.constraint(equalTo: trailingAnchor),
       placeholderView.topAnchor.constraint(equalTo: topAnchor),
@@ -93,7 +108,12 @@ public final class PlatformPhotoView: PlatformView {
     ])
 
     imageView.updateContentMode(photoContentMode)
+    updateTinyThumbnailBackground()
     showPlaceholder()
+  }
+
+  private func updateTinyThumbnailBackground() {
+    tinyThumbnailBackgroundView.setPhoto(showsTinyThumbnailBackground ? pendingPhotoInfo : nil)
   }
 
   private func updateImageIfNeeded() {
