@@ -31,7 +31,6 @@ public final class PlatformPhotoView: PlatformView {
       }
     }
   }
-
   public var showsTinyThumbnailBackground = false {
     didSet {
       updateTinyThumbnailBackground()
