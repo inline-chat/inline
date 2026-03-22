@@ -10,6 +10,7 @@ public struct PeerBotCommandSuggestion: Identifiable, Equatable, Sendable {
   public let botId: Int64
   public let botUsername: String?
   public let botDisplayName: String
+  public let botUserInfo: UserInfo
   public let isAmbiguous: Bool
 
   public var id: String {
@@ -194,6 +195,7 @@ public final class PeerBotCommandsViewModel {
           botId: bot.id,
           botUsername: botUsername,
           botDisplayName: botDisplayName,
+          botUserInfo: UserInfo(user: User(from: bot)),
           isAmbiguous: (countsByNormalizedCommand[normalizedCommand] ?? 0) > 1
         )
       }

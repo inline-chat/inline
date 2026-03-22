@@ -20,7 +20,7 @@ final class CommandCompletionMenu: NSView {
 
   enum Layout {
     static let maxHeight: CGFloat = 184
-    static let rowHeight: CGFloat = 44
+    static let rowHeight: CGFloat = 40
   }
 
   override init(frame frameRect: NSRect) {
