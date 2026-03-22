@@ -31,11 +31,21 @@ struct StubSyncStorage: SyncStorage {
 
 /// Wrapper
 public enum Api {
-  public static let realtime = RealtimeV2(
-    transport: WebSocketTransport2(),
-    auth: Auth.shared.handle,
-    applyUpdates: InlineApplyUpdates(),
-    syncStorage: GRDBSyncStorage(),
-    persistenceHandler: DefaultTransactionPersistenceHandler()
-  )
+  public static let realtime: RealtimeV2 = {
+    let realtime = RealtimeV2(
+      transport: WebSocketTransport2(),
+      auth: Auth.shared.handle,
+      applyUpdates: InlineApplyUpdates(),
+      syncStorage: GRDBSyncStorage(),
+      persistenceHandler: DefaultTransactionPersistenceHandler(),
+      blockerResolver: ChatTransactionBlockerResolver()
+    )
+
+    Task(priority: .utility) {
+      guard Auth.shared.handle.token() != nil else { return }
+      try? await ReservedChatIDPool.shared.refillIfNeeded(realtimeV2: realtime)
+    }
+
+    return realtime
+  }()
 }

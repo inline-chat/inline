@@ -193,6 +193,126 @@ final class RealtimeSendTests {
     withExtendedLifetime(realtime) {}
   }
 
+  @Test("send waits for blockers before rpc dispatch")
+  func testSendWaitsForBlockerSatisfaction() async throws {
+    await SendTestRecorder.shared.reset()
+
+    let auth = Auth.mocked(authenticated: true)
+    let transport = BlockedSendTransport()
+    let storage = SendTestSyncStorage()
+    let apply = SendTestApplyUpdates()
+    let realtime = RealtimeV2(
+      transport: transport,
+      auth: auth.handle,
+      applyUpdates: apply,
+      syncStorage: storage
+    )
+
+    let connected = await waitForCondition(timeout: .seconds(2)) {
+      let stateObject = realtime.stateObject
+      return await MainActor.run {
+        stateObject.connectionState == .connected
+      }
+    }
+    #expect(connected)
+
+    let id = UUID()
+    let sendTask = Task {
+      try await realtime.send(BlockedSendTransaction(id: id, chatId: 77))
+    }
+
+    let optimisticRan = await waitForCondition(timeout: .seconds(1)) {
+      await SendTestRecorder.shared.didRunOptimistic(id)
+    }
+    #expect(optimisticRan)
+
+    try await Task.sleep(for: .milliseconds(100))
+    #expect(await transport.didDispatchBlockedMethod() == false)
+
+    await realtime.satisfyTransactionBlockers([.chatCreated(chatId: 77)])
+
+    let result = try await sendTask.value
+    #expect(result == nil)
+    #expect(await transport.didDispatchBlockedMethod())
+    #expect(await SendTestRecorder.shared.didRunApply(id))
+
+    withExtendedLifetime(realtime) {}
+  }
+
+  @Test("failed dependency wakes blocked send and fails it")
+  func testFailedDependencyFailsBlockedSend() async throws {
+    await FailingDependencyResolver.shared.reset()
+    await SendTestRecorder.shared.reset()
+
+    let auth = Auth.mocked(authenticated: true)
+    let transport = DependencyFailureTransport()
+    let storage = SendTestSyncStorage()
+    let apply = SendTestApplyUpdates()
+    let realtime = RealtimeV2(
+      transport: transport,
+      auth: auth.handle,
+      applyUpdates: apply,
+      syncStorage: storage,
+      blockerResolver: FailingDependencyResolver.shared
+    )
+
+    let connected = await waitForCondition(timeout: .seconds(2)) {
+      let stateObject = realtime.stateObject
+      return await MainActor.run {
+        stateObject.connectionState == .connected
+      }
+    }
+    #expect(connected)
+
+    let chatId: Int64 = 88
+    await FailingDependencyResolver.shared.setState(.blocked, for: .chatCreated(chatId: chatId))
+
+    let sendID = UUID()
+    let sendTask = Task {
+      try await realtime.send(BlockedSendTransaction(id: sendID, chatId: chatId))
+    }
+
+    let optimisticRan = await waitForCondition(timeout: .seconds(1)) {
+      await SendTestRecorder.shared.didRunOptimistic(sendID)
+    }
+    #expect(optimisticRan)
+
+    _ = await realtime.sendQueued(FailingCreatorTransaction(chatId: chatId))
+
+    let creatorDispatched = await waitForCondition(timeout: .seconds(1)) {
+      await transport.didDispatchCreatorMethod()
+    }
+    #expect(creatorDispatched)
+
+    do {
+      try await withThrowingTaskGroup(of: Void.self) { group in
+        group.addTask {
+          _ = try await sendTask.value
+          return ()
+        }
+        group.addTask {
+          try await Task.sleep(for: .seconds(2))
+          throw SendTestTimeoutError.timedOut
+        }
+        _ = try await group.next()
+        group.cancelAll()
+      }
+      Issue.record("Expected blocked send to fail after dependency failure")
+    } catch let error as TransactionError {
+      if case .dependencyFailed = error {
+        #expect(await transport.didDispatchBlockedMethod() == false)
+      } else {
+        Issue.record("Unexpected TransactionError: \(error)")
+      }
+    } catch SendTestTimeoutError.timedOut {
+      Issue.record("Timed out waiting for dependency failure")
+    } catch {
+      Issue.record("Unexpected error: \(error)")
+    }
+
+    withExtendedLifetime(realtime) {}
+  }
+
   @Test("protocol session emits connectionError event")
   func testProtocolSessionEmitsConnectionErrorEvent() async throws {
     let auth = Auth.mocked(authenticated: true)
@@ -508,6 +628,208 @@ private actor OptimisticOrderingTransport: Transport {
 }
 
 private let sendOrderingMethod: InlineProtocol.Method = .UNRECOGNIZED(9_999_991)
+private let blockedSendMethod: InlineProtocol.Method = .UNRECOGNIZED(9_999_992)
+private let failingCreatorMethod: InlineProtocol.Method = .UNRECOGNIZED(9_999_993)
+
+private struct BlockedSendTransaction: Transaction, Codable {
+  struct Context: Sendable, Codable {
+    let id: UUID
+    let chatId: Int64
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case context
+  }
+
+  var method: InlineProtocol.Method = blockedSendMethod
+  var type: TransactionKindType = .query()
+  var context: Context
+
+  init(id: UUID, chatId: Int64) {
+    context = Context(id: id, chatId: chatId)
+  }
+
+  var blockers: [TransactionBlocker] {
+    [.chatCreated(chatId: context.chatId)]
+  }
+
+  func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
+    nil
+  }
+
+  func optimistic() async {
+    await SendTestRecorder.shared.markOptimistic(context.id)
+  }
+
+  func apply(_ rpcResult: InlineProtocol.RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {
+    await SendTestRecorder.shared.markApply(context.id)
+  }
+}
+
+private actor BlockedSendTransport: Transport {
+  nonisolated var events: AsyncChannel<TransportEvent> { channel }
+
+  private var started = false
+  private var blockedMethodDispatched = false
+  private let channel = AsyncChannel<TransportEvent>()
+
+  func start() async {
+    guard !started else { return }
+    started = true
+    await channel.send(.connecting)
+    await channel.send(.connected)
+  }
+
+  func stop() async {
+    guard started else { return }
+    started = false
+    await channel.send(.disconnected(errorDescription: "stopped"))
+  }
+
+  func send(_ message: ClientMessage) async throws {
+    switch message.body {
+      case .connectionInit:
+        var open = ServerProtocolMessage()
+        open.id = message.id
+        open.body = .connectionOpen(.init())
+        await channel.send(.message(open))
+
+      case let .rpcCall(rpcCall):
+        if rpcCall.method == blockedSendMethod {
+          blockedMethodDispatched = true
+        }
+
+        var rpcResult = InlineProtocol.RpcResult()
+        rpcResult.reqMsgID = message.id
+        var response = ServerProtocolMessage()
+        response.id = message.id
+        response.body = .rpcResult(rpcResult)
+        await channel.send(.message(response))
+
+      default:
+        break
+    }
+  }
+
+  func didDispatchBlockedMethod() -> Bool {
+    blockedMethodDispatched
+  }
+}
+
+private actor FailingDependencyResolver: TransactionBlockerResolver {
+  static let shared = FailingDependencyResolver()
+
+  private var states: [TransactionBlocker: TransactionBlockerState] = [:]
+
+  func reset() {
+    states.removeAll()
+  }
+
+  func setState(_ state: TransactionBlockerState, for blocker: TransactionBlocker) {
+    states[blocker] = state
+  }
+
+  func state(for blocker: TransactionBlocker) async -> TransactionBlockerState {
+    states[blocker] ?? .blocked
+  }
+}
+
+private struct FailingCreatorTransaction: Transaction, Codable {
+  struct Context: Sendable, Codable {
+    let chatId: Int64
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case context
+  }
+
+  var method: InlineProtocol.Method = failingCreatorMethod
+  var type: TransactionKindType = .mutation()
+  var context: Context
+
+  init(chatId: Int64) {
+    context = Context(chatId: chatId)
+  }
+
+  func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
+    nil
+  }
+
+  func apply(_ rpcResult: InlineProtocol.RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {}
+
+  func failed(error: TransactionError) async {
+    try? await Task.sleep(for: .milliseconds(150))
+    await FailingDependencyResolver.shared.setState(.failed, for: .chatCreated(chatId: context.chatId))
+  }
+}
+
+private actor DependencyFailureTransport: Transport {
+  nonisolated var events: AsyncChannel<TransportEvent> { channel }
+
+  private var started = false
+  private var creatorMethodDispatched = false
+  private var blockedMethodDispatched = false
+  private let channel = AsyncChannel<TransportEvent>()
+
+  func start() async {
+    guard !started else { return }
+    started = true
+    await channel.send(.connecting)
+    await channel.send(.connected)
+  }
+
+  func stop() async {
+    guard started else { return }
+    started = false
+    await channel.send(.disconnected(errorDescription: "stopped"))
+  }
+
+  func send(_ message: ClientMessage) async throws {
+    switch message.body {
+      case .connectionInit:
+        var open = ServerProtocolMessage()
+        open.id = message.id
+        open.body = .connectionOpen(.init())
+        await channel.send(.message(open))
+
+      case let .rpcCall(rpcCall):
+        if rpcCall.method == failingCreatorMethod {
+          creatorMethodDispatched = true
+
+          var rpcError = InlineProtocol.RpcError()
+          rpcError.reqMsgID = message.id
+          rpcError.errorCode = .badRequest
+          rpcError.message = "failed creator"
+          rpcError.code = 400
+
+          var response = ServerProtocolMessage()
+          response.id = message.id
+          response.body = .rpcError(rpcError)
+          await channel.send(.message(response))
+        } else if rpcCall.method == blockedSendMethod {
+          blockedMethodDispatched = true
+
+          var rpcResult = InlineProtocol.RpcResult()
+          rpcResult.reqMsgID = message.id
+          var response = ServerProtocolMessage()
+          response.id = message.id
+          response.body = .rpcResult(rpcResult)
+          await channel.send(.message(response))
+        }
+
+      default:
+        break
+    }
+  }
+
+  func didDispatchCreatorMethod() -> Bool {
+    creatorMethodDispatched
+  }
+
+  func didDispatchBlockedMethod() -> Bool {
+    blockedMethodDispatched
+  }
+}
 
 private struct ReconnectQueueTransaction: Transaction, Codable {
   struct Context: Sendable, Codable {

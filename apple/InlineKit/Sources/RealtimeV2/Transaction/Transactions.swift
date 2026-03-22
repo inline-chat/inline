@@ -3,6 +3,11 @@ import Collections
 import Foundation
 import Logger
 
+enum TransactionDequeueResult {
+  case ready(TransactionWrapper)
+  case failed(TransactionWrapper)
+}
+
 actor Transactions {
   /// Transactions that are queued to be run
   var _queue: OrderedDictionary<TransactionId, TransactionWrapper> = [:]
@@ -23,9 +28,15 @@ actor Transactions {
   // Private
   private let log = Log.scoped("RealtimeV2.Transactions", level: .debug)
   private var persistenceHandler: TransactionPersistenceHandler?
+  private let blockerResolver: (any TransactionBlockerResolver)?
+  private var satisfiedBlockers: Set<TransactionBlocker> = []
 
-  init(persistenceHandler: TransactionPersistenceHandler? = nil) {
+  init(
+    persistenceHandler: TransactionPersistenceHandler? = nil,
+    blockerResolver: (any TransactionBlockerResolver)? = nil
+  ) {
     self.persistenceHandler = persistenceHandler
+    self.blockerResolver = blockerResolver
     Task {
       // load all transactions from disk into queue
       await loadAllFromDisk()
@@ -78,18 +89,25 @@ actor Transactions {
   }
 
   /// Dequeue next transaction from the queue and mark it as in-flight.
-  func dequeue() -> TransactionWrapper? {
-    guard let first = _queue.keys.first else { return nil }
-    let transactionId = first
-    let wrapper = _queue[first]
+  func dequeue() async -> TransactionDequeueResult? {
+    for transactionId in Array(_queue.keys) {
+      guard let wrapper = _queue[transactionId] else { continue }
 
-    // remove from queue
-    _queue.removeValue(forKey: transactionId)
+      switch await blockerState(for: wrapper) {
+        case .ready:
+          _queue.removeValue(forKey: transactionId)
+          inFlight[transactionId] = wrapper
+          return .ready(wrapper)
+        case .failed:
+          _queue.removeValue(forKey: transactionId)
+          deleteFromDisk(transactionId: transactionId)
+          return .failed(wrapper)
+        case .blocked:
+          continue
+      }
+    }
 
-    // add to in-flight
-    inFlight[transactionId] = wrapper
-
-    return wrapper
+    return nil
   }
 
   /// Mark a transaction as running, which means it has an RPC call in progress.
@@ -238,6 +256,16 @@ actor Transactions {
     pendingAckMsgIds.removeAll()
   }
 
+  func satisfy(blockers: [TransactionBlocker]) async {
+    guard !blockers.isEmpty else { return }
+    let previousCount = satisfiedBlockers.count
+    satisfiedBlockers.formUnion(blockers)
+    guard satisfiedBlockers.count != previousCount else { return }
+    Task {
+      await queueStream.send(())
+    }
+  }
+
   /// Cancel all transactions that match the predicate from the queue.
   func cancel(where predicate: @Sendable (TransactionWrapper) -> Bool) {
     for (transactionId, wrapper) in _queue {
@@ -269,6 +297,37 @@ actor Transactions {
       case let .mutation(config):
         config.retryAfterAck
     }
+  }
+
+  private enum BlockerEvaluation {
+    case ready
+    case blocked
+    case failed
+  }
+
+  private func blockerState(for wrapper: TransactionWrapper) async -> BlockerEvaluation {
+    guard !wrapper.transaction.blockers.isEmpty else { return .ready }
+
+    for blocker in wrapper.transaction.blockers {
+      if satisfiedBlockers.contains(blocker) {
+        continue
+      }
+
+      guard let blockerResolver else {
+        return .blocked
+      }
+
+      switch await blockerResolver.state(for: blocker) {
+        case .satisfied:
+          satisfiedBlockers.insert(blocker)
+        case .blocked:
+          return .blocked
+        case .failed:
+          return .failed
+      }
+    }
+
+    return .ready
   }
 
   private func removeRpcMappings(for transactionIds: Set<TransactionId>) {

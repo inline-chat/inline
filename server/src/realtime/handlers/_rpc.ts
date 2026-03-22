@@ -47,6 +47,7 @@ import { pinMessageHandler } from "@in/server/realtime/handlers/messages.pinMess
 import { moveThreadHandler } from "@in/server/realtime/handlers/messages.moveThread"
 import { updateDialogNotificationSettings } from "@in/server/realtime/handlers/messages.updateDialogNotificationSettings"
 import { updatePushNotificationDetailsHandler } from "@in/server/realtime/handlers/user.updatePushNotificationDetails"
+import { reserveChatIds } from "@in/server/realtime/handlers/messages.reserveChatIds"
 
 const log = new Log("rpc")
 
@@ -400,6 +401,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       let result = await updatePushNotificationDetailsHandler(call.input.updatePushNotificationDetails, handlerContext)
       return { oneofKind: "updatePushNotificationDetails", updatePushNotificationDetails: result }
+    }
+
+    case Method.RESERVE_CHAT_IDS: {
+      if (call.input.oneofKind !== "reserveChatIds") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await reserveChatIds(call.input.reserveChatIds, handlerContext)
+      return { oneofKind: "reserveChatIds", reserveChatIds: result }
     }
 
     default:

@@ -6,6 +6,20 @@ public enum TransactionExecutionError: Error {
   case invalid
 }
 
+public enum TransactionBlocker: Hashable, Codable, Sendable {
+  case chatCreated(chatId: Int64)
+}
+
+public enum TransactionBlockerState: Sendable {
+  case blocked
+  case satisfied
+  case failed
+}
+
+public protocol TransactionBlockerResolver: Sendable {
+  func state(for blocker: TransactionBlocker) async -> TransactionBlockerState
+}
+
 public struct QueryConfig: Sendable {
   public init() {}
 }
@@ -50,6 +64,12 @@ public protocol Transaction: Sendable, Codable {
 
   /// Called when the transaction is cancelled
   func cancelled() async
+
+  /// Dependencies that must be satisfied before this transaction can run remotely.
+  var blockers: [TransactionBlocker] { get }
+
+  /// Dependencies that become satisfied after a successful apply.
+  var satisfiedBlockersOnSuccess: [TransactionBlocker] { get }
 }
 
 public extension Transaction {
@@ -68,6 +88,8 @@ public extension Transaction {
   func failed(error: TransactionError) async {
     Log.shared.error("Transaction failed \(debugDescription)", error: error)
   }
+  var blockers: [TransactionBlocker] { [] }
+  var satisfiedBlockersOnSuccess: [TransactionBlocker] { [] }
 
   var input: InlineProtocol.RpcCall.OneOf_Input? {
     input(from: context)

@@ -682,6 +682,7 @@ enum Method {
   SET_BOT_COMMANDS = 44;
   GET_PEER_BOT_COMMANDS = 45;
   SHOW_CHAT_IN_SIDEBAR = 46;
+  RESERVE_CHAT_IDS = 47;
 }
 
 message RpcCall {
@@ -733,6 +734,7 @@ message RpcCall {
     SetBotCommandsInput setBotCommands = 45;
     GetPeerBotCommandsInput getPeerBotCommands = 46;
     ShowChatInSidebarInput showChatInSidebar = 47;
+    ReserveChatIdsInput reserveChatIds = 48;
   }
 }
 
@@ -786,6 +788,7 @@ message RpcResult {
     SetBotCommandsResult setBotCommands = 45;
     GetPeerBotCommandsResult getPeerBotCommands = 46;
     ShowChatInSidebarResult showChatInSidebar = 47;
+    ReserveChatIdsResult reserveChatIds = 48;
   }
 }
 
@@ -1374,6 +1377,15 @@ message SearchMessagesResult { repeated Message messages = 1; }
 
 message InputChatParticipant { int64 user_id = 1; }
 
+message ReserveChatIdsInput { int32 count = 1; }
+
+message ReservedChatId {
+  int64 chat_id = 1;
+  int64 expires_at = 2;
+}
+
+message ReserveChatIdsResult { repeated ReservedChatId reservations = 1; }
+
 message CreateChatInput {
   // Required title
   string title = 1;
@@ -1392,6 +1404,9 @@ message CreateChatInput {
 
   // For public threads, it must be an empty list
   repeated InputChatParticipant participants = 6;
+
+  // Optional previously reserved chat id to claim during creation.
+  optional int64 reserved_chat_id = 7;
 }
 
 message CreateChatResult {

@@ -17,6 +17,7 @@ public struct CreateChatTransaction: Transaction2 {
     public var isPublic: Bool
     public var spaceId: Int64?
     public var participants: [Int64]
+    public var reservedChatId: Int64?
   }
 
   enum CodingKeys: String, CodingKey {
@@ -25,8 +26,22 @@ public struct CreateChatTransaction: Transaction2 {
 
   private var log = Log.scoped("Transactions/CreateChat")
 
-  public init(title: String, emoji: String?, isPublic: Bool, spaceId: Int64?, participants: [Int64]) {
-    context = Context(title: title, emoji: emoji, isPublic: isPublic, spaceId: spaceId, participants: participants)
+  public init(
+    title: String,
+    emoji: String?,
+    isPublic: Bool,
+    spaceId: Int64?,
+    participants: [Int64],
+    reservedChatId: Int64? = nil
+  ) {
+    context = Context(
+      title: title,
+      emoji: emoji,
+      isPublic: isPublic,
+      spaceId: spaceId,
+      participants: participants,
+      reservedChatId: reservedChatId
+    )
   }
 
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
@@ -34,6 +49,7 @@ public struct CreateChatTransaction: Transaction2 {
       $0.title = context.title
       if let spaceId = context.spaceId { $0.spaceID = spaceId }
       if let emoji = context.emoji { $0.emoji = emoji }
+      if let reservedChatId = context.reservedChatId { $0.reservedChatID = reservedChatId }
       $0.isPublic = context.isPublic
       $0.participants = context.participants.map { userId in
         InputChatParticipant.with { $0.userID = Int64(userId) }
@@ -41,7 +57,39 @@ public struct CreateChatTransaction: Transaction2 {
     })
   }
 
+  public var satisfiedBlockersOnSuccess: [TransactionBlocker] {
+    guard let reservedChatId = context.reservedChatId else { return [] }
+    return [.chatCreated(chatId: reservedChatId)]
+  }
+
   // Methods
+  public func optimistic() async {
+    guard let reservedChatId = context.reservedChatId else { return }
+
+    let trimmedTitle = context.title.trimmingCharacters(in: .whitespacesAndNewlines)
+    let chat = Chat(
+      id: reservedChatId,
+      date: Date(),
+      type: .thread,
+      title: trimmedTitle.isEmpty ? nil : trimmedTitle,
+      spaceId: context.spaceId,
+      emoji: context.emoji,
+      isPublic: context.isPublic,
+      createdBy: Auth.shared.getCurrentUserId(),
+      createState: .pending
+    )
+    let dialog = Dialog(optimisticForChat: chat)
+
+    do {
+      try await AppDatabase.shared.dbWriter.write { db in
+        try chat.save(db)
+        try dialog.save(db)
+      }
+    } catch {
+      log.error("Failed to create optimistic chat", error: error)
+    }
+  }
+
   public func apply(_ result: RpcResult.OneOf_Result?) async throws(
     TransactionExecutionError
   ) {
@@ -53,7 +101,10 @@ public struct CreateChatTransaction: Transaction2 {
       // Save chat and dialog to database
       try await AppDatabase.shared.dbWriter.write { db in
         do {
-          let chat = Chat(from: response.chat)
+          var chat = Chat(from: response.chat)
+          if let existingChat = try Chat.fetchOne(db, key: chat.id), chat.lastMsgId == nil {
+            chat.lastMsgId = existingChat.lastMsgId
+          }
           try chat.save(db)
         } catch {
           log.error("Failed to save chat", error: error)
@@ -73,6 +124,18 @@ public struct CreateChatTransaction: Transaction2 {
 
   public func failed(error: TransactionError2) async {
     log.error("Failed to create chat", error: error)
+
+    guard let reservedChatId = context.reservedChatId else { return }
+
+    do {
+      _ = try await AppDatabase.shared.dbWriter.write { db in
+        try Chat
+          .filter(Chat.Columns.id == reservedChatId)
+          .updateAll(db, Chat.Columns.createState.set(to: ChatCreateState.failed.rawValue))
+      }
+    } catch {
+      log.error("Failed to mark chat creation as failed", error: error)
+    }
   }
 }
 
@@ -84,8 +147,16 @@ public extension Transaction2 where Self == CreateChatTransaction {
     emoji: String?,
     isPublic: Bool,
     spaceId: Int64?,
-    participants: [Int64]
+    participants: [Int64],
+    reservedChatId: Int64? = nil
   ) -> CreateChatTransaction {
-    CreateChatTransaction(title: title, emoji: emoji, isPublic: isPublic, spaceId: spaceId, participants: participants)
+    CreateChatTransaction(
+      title: title,
+      emoji: emoji,
+      isPublic: isPublic,
+      spaceId: spaceId,
+      participants: participants,
+      reservedChatId: reservedChatId
+    )
   }
 }

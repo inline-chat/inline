@@ -15,7 +15,7 @@ export const chatTypeEnum = pgEnum("chat_types", ["private", "thread"])
 export const chats = pgTable(
   "chats",
   {
-    id: integer().primaryKey().generatedAlwaysAsIdentity(),
+    id: integer().primaryKey().generatedByDefaultAsIdentity(),
     type: chatTypeEnum().notNull(),
     title: varchar({ length: 150 }),
     description: text(),

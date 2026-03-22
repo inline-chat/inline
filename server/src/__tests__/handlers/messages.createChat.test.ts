@@ -253,4 +253,114 @@ describe("messages.createChat", () => {
       ),
     ).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
   })
+
+  test("uses the exact reserved chat id when createChat claims a reservation", async () => {
+    const currentUser = await testUtils.createUser("reserved-chat-owner@example.com")
+    const otherUser = await testUtils.createUser("reserved-chat-participant@example.com")
+    const reservedChatId = 700_001
+
+    await db.insert(schema.chatIdReservations).values({
+      chatId: reservedChatId,
+      userId: currentUser.id,
+      expiresAt: new Date(Date.now() + 86_400_000),
+    })
+
+    const result = await createChat(
+      {
+        title: "Reserved Thread",
+        isPublic: false,
+        participants: [{ userId: BigInt(otherUser.id) }],
+        reservedChatId: BigInt(reservedChatId),
+      } as Parameters<typeof createChat>[0],
+      {
+        ...mockFunctionContext,
+        currentUserId: currentUser.id,
+      },
+    )
+
+    expect(result.chat.id).toBe(BigInt(reservedChatId))
+  })
+
+  test("rejects using another user's reserved chat id", async () => {
+    const reservationOwner = await testUtils.createUser("reserved-chat-other-owner@example.com")
+    const currentUser = await testUtils.createUser("reserved-chat-current@example.com")
+    const otherUser = await testUtils.createUser("reserved-chat-participant-2@example.com")
+    const reservedChatId = 700_002
+
+    await db.insert(schema.chatIdReservations).values({
+      chatId: reservedChatId,
+      userId: reservationOwner.id,
+      expiresAt: new Date(Date.now() + 86_400_000),
+    })
+
+    await expect(
+      createChat(
+        {
+          title: "Reserved Thread Wrong User",
+          isPublic: false,
+          participants: [{ userId: BigInt(otherUser.id) }],
+          reservedChatId: BigInt(reservedChatId),
+        } as Parameters<typeof createChat>[0],
+        {
+          ...mockFunctionContext,
+          currentUserId: currentUser.id,
+        },
+      ),
+    ).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+  })
+
+  test("rejects expired reserved chat ids", async () => {
+    const currentUser = await testUtils.createUser("reserved-chat-expired@example.com")
+    const otherUser = await testUtils.createUser("reserved-chat-expired-participant@example.com")
+    const reservedChatId = 700_003
+
+    await db.insert(schema.chatIdReservations).values({
+      chatId: reservedChatId,
+      userId: currentUser.id,
+      expiresAt: new Date(Date.now() - 60_000),
+    })
+
+    await expect(
+      createChat(
+        {
+          title: "Reserved Thread Expired",
+          isPublic: false,
+          participants: [{ userId: BigInt(otherUser.id) }],
+          reservedChatId: BigInt(reservedChatId),
+        } as Parameters<typeof createChat>[0],
+        {
+          ...mockFunctionContext,
+          currentUserId: currentUser.id,
+        },
+      ),
+    ).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+  })
+
+  test("rejects already claimed reserved chat ids", async () => {
+    const currentUser = await testUtils.createUser("reserved-chat-claimed@example.com")
+    const otherUser = await testUtils.createUser("reserved-chat-claimed-participant@example.com")
+    const reservedChatId = 700_004
+
+    await db.insert(schema.chatIdReservations).values({
+      chatId: reservedChatId,
+      userId: currentUser.id,
+      claimedAt: new Date(),
+      expiresAt: new Date(Date.now() + 86_400_000),
+    })
+
+    await expect(
+      createChat(
+        {
+          title: "Reserved Thread Claimed",
+          isPublic: false,
+          participants: [{ userId: BigInt(otherUser.id) }],
+          reservedChatId: BigInt(reservedChatId),
+        } as Parameters<typeof createChat>[0],
+        {
+          ...mockFunctionContext,
+          currentUserId: currentUser.id,
+        },
+      ),
+    ).rejects.toMatchObject({ code: RealtimeRpcError.Code.BAD_REQUEST })
+  })
 })
