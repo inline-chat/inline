@@ -39,6 +39,10 @@ describe("inline/config-schema", () => {
         blockStreaming: true,
         streamViaEditMessage: true,
         chunkMode: "newline",
+        commands: {
+          native: false,
+          nativeSkills: true,
+        },
         blockStreamingCoalesce: { minChars: 600, idleMs: 700, maxChars: 2_200 },
         replyToBotWithoutMention: true,
         historyLimit: 12,
@@ -50,6 +54,21 @@ describe("inline/config-schema", () => {
             toolsBySender: {
               "42": { allow: ["message"] },
             },
+          },
+        },
+      }).success,
+    ).toBe(true)
+  })
+
+  it("accepts top-level and group systemPrompt fields", () => {
+    expect(
+      InlineConfigSchema.safeParse({
+        systemPrompt: "Keep replies natural.",
+        groups: {
+          "123": {
+            requireMention: false,
+            systemPrompt: "Do not wrap bare URLs in backticks.",
+            tools: { allow: ["message"] },
           },
         },
       }).success,
