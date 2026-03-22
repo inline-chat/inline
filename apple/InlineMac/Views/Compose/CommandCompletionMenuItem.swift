@@ -3,6 +3,10 @@ import InlineKit
 
 final class CommandCompletionMenuItem: NSTableCellView {
   private let containerView = NSView()
+  private let avatarSize: CGFloat = 22
+  private let avatarLeading: CGFloat = 8
+  private let avatarTextSpacing: CGFloat = 7
+  private var avatarView = ChatIconSwiftUIBridge(.user(.preview), size: 22)
   private let commandLabel = NSTextField()
   private let descriptionLabel = NSTextField()
   private let botLabel = NSTextField()
@@ -33,10 +37,13 @@ final class CommandCompletionMenuItem: NSTableCellView {
     containerView.translatesAutoresizingMaskIntoConstraints = false
     addSubview(containerView)
 
+    avatarView.translatesAutoresizingMaskIntoConstraints = false
+    containerView.addSubview(avatarView)
+
     commandLabel.isBordered = false
     commandLabel.isEditable = false
     commandLabel.backgroundColor = .clear
-    commandLabel.font = .monospacedSystemFont(ofSize: 13, weight: .semibold)
+    commandLabel.font = .systemFont(ofSize: 12, weight: .semibold)
     commandLabel.lineBreakMode = .byTruncatingTail
     commandLabel.translatesAutoresizingMaskIntoConstraints = false
     containerView.addSubview(commandLabel)
@@ -44,7 +51,7 @@ final class CommandCompletionMenuItem: NSTableCellView {
     descriptionLabel.isBordered = false
     descriptionLabel.isEditable = false
     descriptionLabel.backgroundColor = .clear
-    descriptionLabel.font = .systemFont(ofSize: 11, weight: .regular)
+    descriptionLabel.font = .systemFont(ofSize: 10, weight: .regular)
     descriptionLabel.lineBreakMode = .byTruncatingTail
     descriptionLabel.translatesAutoresizingMaskIntoConstraints = false
     containerView.addSubview(descriptionLabel)
@@ -52,7 +59,7 @@ final class CommandCompletionMenuItem: NSTableCellView {
     botLabel.isBordered = false
     botLabel.isEditable = false
     botLabel.backgroundColor = .clear
-    botLabel.font = .systemFont(ofSize: 11, weight: .medium)
+    botLabel.font = .systemFont(ofSize: 10, weight: .medium)
     botLabel.alignment = .right
     botLabel.lineBreakMode = .byTruncatingTail
     botLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -64,17 +71,22 @@ final class CommandCompletionMenuItem: NSTableCellView {
       containerView.topAnchor.constraint(equalTo: topAnchor),
       containerView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-      commandLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 10),
-      commandLabel.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 5),
+      avatarView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: avatarLeading),
+      avatarView.centerYAnchor.constraint(equalTo: containerView.centerYAnchor),
+      avatarView.widthAnchor.constraint(equalToConstant: avatarSize),
+      avatarView.heightAnchor.constraint(equalToConstant: avatarSize),
+
+      commandLabel.leadingAnchor.constraint(equalTo: avatarView.trailingAnchor, constant: avatarTextSpacing),
+      commandLabel.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 4),
 
       botLabel.leadingAnchor.constraint(greaterThanOrEqualTo: commandLabel.trailingAnchor, constant: 8),
-      botLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -10),
+      botLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -8),
       botLabel.centerYAnchor.constraint(equalTo: commandLabel.centerYAnchor),
 
       descriptionLabel.leadingAnchor.constraint(equalTo: commandLabel.leadingAnchor),
-      descriptionLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -10),
-      descriptionLabel.topAnchor.constraint(equalTo: commandLabel.bottomAnchor, constant: 1),
-      descriptionLabel.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -5),
+      descriptionLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -8),
+      descriptionLabel.topAnchor.constraint(equalTo: commandLabel.bottomAnchor, constant: 0),
+      descriptionLabel.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -4),
     ])
 
     commandLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
@@ -84,6 +96,7 @@ final class CommandCompletionMenuItem: NSTableCellView {
   }
 
   func configure(with suggestion: PeerBotCommandSuggestion) {
+    avatarView.update(peerType: .user(suggestion.botUserInfo))
     commandLabel.stringValue = "/\(suggestion.command)"
     descriptionLabel.stringValue = suggestion.description
 
