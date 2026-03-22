@@ -244,7 +244,6 @@ class ChatTitleToolbar: NSToolbarItem {
     if !isEditingTitle {
       nameEditor.stringValue = chatTitle
     }
-    statusView.isHidden = user?.user.isCurrentUser() == true
     iconView.configure()
   }
 
