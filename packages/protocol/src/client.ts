@@ -11,6 +11,7 @@ import type { PartialMessage } from "@protobuf-ts/runtime";
 import { reflectionMergePartial } from "@protobuf-ts/runtime";
 import { MessageType } from "@protobuf-ts/runtime";
 import { RpcCall } from "./core.js";
+import { MessageActions } from "./core.js";
 /**
  * @generated from protobuf message client.MessageContentPayload
  */
@@ -19,6 +20,10 @@ export interface MessageContentPayload {
      * @generated from protobuf field: client.MessageVoiceContent voice = 1;
      */
     voice?: MessageVoiceContent;
+    /**
+     * @generated from protobuf field: MessageActions actions = 2;
+     */
+    actions?: MessageActions;
 }
 /**
  * @generated from protobuf message client.MessageVoiceContent
@@ -78,7 +83,8 @@ export interface Transaction {
 class MessageContentPayload$Type extends MessageType<MessageContentPayload> {
     constructor() {
         super("client.MessageContentPayload", [
-            { no: 1, name: "voice", kind: "message", T: () => MessageVoiceContent }
+            { no: 1, name: "voice", kind: "message", T: () => MessageVoiceContent },
+            { no: 2, name: "actions", kind: "message", T: () => MessageActions }
         ]);
     }
     create(value?: PartialMessage<MessageContentPayload>): MessageContentPayload {
@@ -95,6 +101,9 @@ class MessageContentPayload$Type extends MessageType<MessageContentPayload> {
                 case /* client.MessageVoiceContent voice */ 1:
                     message.voice = MessageVoiceContent.internalBinaryRead(reader, reader.uint32(), options, message.voice);
                     break;
+                case /* MessageActions actions */ 2:
+                    message.actions = MessageActions.internalBinaryRead(reader, reader.uint32(), options, message.actions);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -110,6 +119,9 @@ class MessageContentPayload$Type extends MessageType<MessageContentPayload> {
         /* client.MessageVoiceContent voice = 1; */
         if (message.voice)
             MessageVoiceContent.internalBinaryWrite(message.voice, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* MessageActions actions = 2; */
+        if (message.actions)
+            MessageActions.internalBinaryWrite(message.actions, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

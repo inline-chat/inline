@@ -1051,6 +1051,129 @@ describe("inline/actions", () => {
     expect(close).toHaveBeenCalled()
   })
 
+  it("maps send buttons to inline message actions", async () => {
+    vi.resetModules()
+
+    const sendMessage = vi.fn(async () => ({ messageId: 1n }))
+    const connect = vi.fn(async () => {})
+    const close = vi.fn(async () => {})
+
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {
+        EDIT_MESSAGE: 8,
+      },
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = connect
+        close = close
+        sendMessage = sendMessage
+        invokeRaw = vi.fn(async () => ({ oneofKind: undefined }))
+      },
+    }))
+
+    const { inlineMessageActions } = await import("./actions")
+
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+        },
+      },
+    } satisfies OpenClawConfig
+
+    await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "send",
+      cfg,
+      params: {
+        to: "user:99",
+        message: "with buttons",
+        buttons: [[{ text: "Approve", callback_data: "approve" }]],
+      },
+    } as any)
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 99n,
+        text: "with buttons",
+        actions: expect.objectContaining({
+          rows: [
+            expect.objectContaining({
+              actions: [
+                expect.objectContaining({
+                  actionId: "btn_1_1",
+                  text: "Approve",
+                }),
+              ],
+            }),
+          ],
+        }),
+      }),
+    )
+    const sent = sendMessage.mock.calls[0]?.[0]
+    const data = sent?.actions?.rows?.[0]?.actions?.[0]?.action?.callback?.data
+    expect(data).toBeInstanceOf(Uint8Array)
+    expect(new TextDecoder().decode(data)).toBe("approve")
+  })
+
+  it("passes empty buttons on edit to clear existing actions", async () => {
+    vi.resetModules()
+
+    const invokeRaw = vi.fn(async () => ({ oneofKind: "editMessage", editMessage: { updates: [] } }))
+    const connect = vi.fn(async () => {})
+    const close = vi.fn(async () => {})
+
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {
+        EDIT_MESSAGE: 8,
+      },
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = connect
+        close = close
+        sendMessage = vi.fn(async () => ({ messageId: 1n }))
+        invokeRaw = invokeRaw
+      },
+    }))
+
+    const { inlineMessageActions } = await import("./actions")
+
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+        },
+      },
+    } satisfies OpenClawConfig
+
+    await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "edit",
+      cfg,
+      params: {
+        to: "7",
+        messageId: "10",
+        message: "updated",
+        buttons: [],
+      },
+    } as any)
+
+    expect(invokeRaw).toHaveBeenCalledWith(
+      8,
+      expect.objectContaining({
+        oneofKind: "editMessage",
+        editMessage: expect.objectContaining({
+          messageId: 10n,
+          actions: expect.objectContaining({
+            rows: [],
+          }),
+        }),
+      }),
+    )
+  })
+
   it("rejects disabled actions from config", async () => {
     vi.resetModules()
 

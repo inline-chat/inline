@@ -22,9 +22,11 @@ import { ProtocolClient } from "../realtime/protocol-client.js"
 import { WebSocketTransport } from "../realtime/ws-transport.js"
 import type { Transport } from "../realtime/transport.js"
 import type {
+  InlineSdkAnswerMessageActionParams,
   InlineSdkClientOptions,
   InlineInboundEvent,
   InlineSdkGetMessagesParams,
+  InlineSdkInvokeMessageActionParams,
   InlineSdkSendMessageMedia,
   InlineSdkSendMessageParams,
   InlineSdkState,
@@ -251,6 +253,7 @@ export class InlineSdkClient {
           ...(params.replyToMsgId != null ? { replyToMsgId: asInlineId(params.replyToMsgId, "replyToMsgId") } : {}),
           ...(params.parseMarkdown != null ? { parseMarkdown: params.parseMarkdown } : {}),
           ...(params.entities != null ? { entities: params.entities } : {}),
+          ...(params.actions != null ? { actions: params.actions } : {}),
           ...(params.sendMode === "silent" ? { sendMode: MessageSendMode.MODE_SILENT } : {}),
         },
       })
@@ -382,6 +385,37 @@ export class InlineSdkClient {
       sendComposeAction: {
         peerId,
         ...(params.typing ? { action: UpdateComposeAction_ComposeAction.TYPING } : {}),
+      },
+    })
+  }
+
+  async invokeMessageAction(params: InlineSdkInvokeMessageActionParams): Promise<{ interactionId: bigint }> {
+    const peerId = this.inputPeerFromTarget(params, "invokeMessageAction")
+    const actionId = params.actionId.trim()
+    if (!actionId) {
+      throw new Error("invokeMessageAction: `actionId` must be non-empty")
+    }
+
+    const result = await this.invoke(Method.INVOKE_MESSAGE_ACTION, {
+      oneofKind: "invokeMessageAction",
+      invokeMessageAction: {
+        peerId,
+        messageId: asInlineId(params.messageId, "messageId"),
+        actionId,
+      },
+    })
+
+    return {
+      interactionId: result.invokeMessageAction.interactionId,
+    }
+  }
+
+  async answerMessageAction(params: InlineSdkAnswerMessageActionParams): Promise<void> {
+    await this.invoke(Method.ANSWER_MESSAGE_ACTION, {
+      oneofKind: "answerMessageAction",
+      answerMessageAction: {
+        interactionId: asInlineId(params.interactionId, "interactionId"),
+        ...(params.ui != null ? { ui: params.ui } : {}),
       },
     })
   }
@@ -580,6 +614,34 @@ export class InlineSdkClient {
           emoji: payload.emoji,
           messageId: payload.messageId,
           userId: payload.userId,
+          seq,
+          date,
+        })
+        return
+      }
+
+      case "messageActionInvoked": {
+        const payload = update.update.messageActionInvoked
+        await this.eventStream.send({
+          kind: "message.action.invoke",
+          interactionId: payload.interactionId,
+          chatId: payload.chatId,
+          messageId: payload.messageId,
+          actorUserId: payload.actorUserId,
+          actionId: payload.actionId,
+          data: payload.data,
+          seq,
+          date,
+        })
+        return
+      }
+
+      case "messageActionAnswered": {
+        const payload = update.update.messageActionAnswered
+        await this.eventStream.send({
+          kind: "message.action.answered",
+          interactionId: payload.interactionId,
+          ui: payload.ui,
           seq,
           date,
         })

@@ -2721,4 +2721,129 @@ describe("InlineSdkClient", () => {
 
     await client.close()
   })
+
+  it("emits message action events and supports invoke/answer action helpers", async () => {
+    const transport = new MockTransport()
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+    })
+
+    await connectAndOpen(client, transport)
+    const iter = client.events()[Symbol.asyncIterator]()
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 300n,
+        body: {
+          oneofKind: "message",
+          message: {
+            payload: {
+              oneofKind: "update",
+              update: {
+                updates: [
+                  Update.create({
+                    seq: 7,
+                    date: 701n,
+                    update: {
+                      oneofKind: "messageActionInvoked",
+                      messageActionInvoked: {
+                        interactionId: 99n,
+                        chatId: 20n,
+                        messageId: 88n,
+                        actorUserId: 11n,
+                        actionId: "pick",
+                        data: new Uint8Array([1, 2, 3]),
+                      },
+                    },
+                  }),
+                ],
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    const event = await iter.next()
+    expect(event.done).toBe(false)
+    if (!event.done) {
+      expect(event.value.kind).toBe("message.action.invoke")
+      if (event.value.kind === "message.action.invoke") {
+        expect(event.value.interactionId).toBe(99n)
+        expect(event.value.actionId).toBe("pick")
+        expect(Array.from(event.value.data)).toEqual([1, 2, 3])
+      }
+    }
+
+    const invokePromise = client.invokeMessageAction({
+      chatId: 20n,
+      messageId: 88n,
+      actionId: "pick",
+    })
+    await waitFor(() =>
+      transport.sent.some((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.INVOKE_MESSAGE_ACTION),
+    )
+    const invokeCall = transport.sent.find(
+      (m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.INVOKE_MESSAGE_ACTION,
+    )
+    if (!invokeCall || invokeCall.body.oneofKind !== "rpcCall") throw new Error("missing invokeMessageAction")
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 301n,
+        body: {
+          oneofKind: "rpcResult",
+          rpcResult: {
+            reqMsgId: invokeCall.id,
+            result: {
+              oneofKind: "invokeMessageAction",
+              invokeMessageAction: { interactionId: 123n },
+            },
+          },
+        },
+      }),
+    )
+
+    await expect(invokePromise).resolves.toEqual({ interactionId: 123n })
+
+    const answerPromise = client.answerMessageAction({
+      interactionId: 123n,
+      ui: {
+        kind: {
+          oneofKind: "toast",
+          toast: {
+            text: "ok",
+          },
+        },
+      },
+    })
+    await waitFor(() =>
+      transport.sent.some((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.ANSWER_MESSAGE_ACTION),
+    )
+    const answerCall = transport.sent.find(
+      (m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.ANSWER_MESSAGE_ACTION,
+    )
+    if (!answerCall || answerCall.body.oneofKind !== "rpcCall") throw new Error("missing answerMessageAction")
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 302n,
+        body: {
+          oneofKind: "rpcResult",
+          rpcResult: {
+            reqMsgId: answerCall.id,
+            result: {
+              oneofKind: "answerMessageAction",
+              answerMessageAction: {},
+            },
+          },
+        },
+      }),
+    )
+
+    await answerPromise
+    await client.close()
+  })
 })

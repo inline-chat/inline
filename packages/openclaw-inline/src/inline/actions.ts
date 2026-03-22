@@ -14,6 +14,7 @@ import {
   type Chat,
   type Dialog,
   type Message,
+  type MessageActions,
   type User,
 } from "@inline-chat/realtime-sdk"
 import { resolveInlineAccount, resolveInlineToken } from "./accounts.js"
@@ -85,6 +86,82 @@ const GET_MESSAGES_METHOD =
   ((Method as Record<string, unknown>).GET_MESSAGES as number) > 0
     ? ((Method as Record<string, unknown>).GET_MESSAGES as Method)
     : null
+
+const INLINE_ACTION_MAX_ROWS = 8
+const INLINE_ACTION_MAX_PER_ROW = 8
+
+type InlineReplyMarkupButton = {
+  text: string
+  callback_data: string
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
+}
+
+function normalizeReplyMarkupButtons(raw: unknown): InlineReplyMarkupButton[][] {
+  if (!Array.isArray(raw)) return []
+  const rows: InlineReplyMarkupButton[][] = []
+  for (const candidateRow of raw) {
+    if (!Array.isArray(candidateRow)) continue
+    const row: InlineReplyMarkupButton[] = []
+    for (const candidateButton of candidateRow) {
+      if (!isRecord(candidateButton)) continue
+      const text = typeof candidateButton.text === "string" ? candidateButton.text.trim() : ""
+      const callbackData =
+        typeof candidateButton.callback_data === "string" ? candidateButton.callback_data.trim() : ""
+      if (!text || !callbackData) continue
+      row.push({ text, callback_data: callbackData })
+      if (row.length >= INLINE_ACTION_MAX_PER_ROW) break
+    }
+    if (row.length === 0) continue
+    rows.push(row)
+    if (rows.length >= INLINE_ACTION_MAX_ROWS) break
+  }
+  return rows
+}
+
+function resolveInlineMessageActionsParam(params: Record<string, unknown>): MessageActions | undefined {
+  if (!Object.prototype.hasOwnProperty.call(params, "buttons")) {
+    return undefined
+  }
+
+  let rawButtons: unknown = params.buttons
+  if (typeof rawButtons === "string") {
+    const trimmed = rawButtons.trim()
+    if (!trimmed) {
+      rawButtons = []
+    } else {
+      try {
+        rawButtons = JSON.parse(trimmed) as unknown
+      } catch {
+        throw new Error("inline action: buttons must be valid JSON")
+      }
+    }
+  }
+  if (rawButtons == null) {
+    rawButtons = []
+  }
+  if (!Array.isArray(rawButtons)) {
+    throw new Error("inline action: buttons must be an array of button rows")
+  }
+
+  const rows = normalizeReplyMarkupButtons(rawButtons)
+  return {
+    rows: rows.map((row, rowIndex) => ({
+      actions: row.map((button, buttonIndex) => ({
+        actionId: `btn_${rowIndex + 1}_${buttonIndex + 1}`,
+        text: button.text,
+        action: {
+          oneofKind: "callback",
+          callback: {
+            data: new TextEncoder().encode(button.callback_data),
+          },
+        },
+      })),
+    })),
+  }
+}
 
 function normalizeChatId(raw: string): string {
   const normalized = normalizeInlineTarget(raw) ?? raw.trim()
@@ -727,6 +804,7 @@ export const inlineMessageActions: ChannelMessageActionAdapter = {
         accountId,
         fn: async (client) => {
           const target = resolveMessageSendTargetFromParams(params)
+          const actions = resolveInlineMessageActionsParam(params)
           const sendTarget =
             target.chatId != null ? { chatId: target.chatId } : target.userId != null ? { userId: target.userId } : null
           if (!sendTarget) {
@@ -759,6 +837,7 @@ export const inlineMessageActions: ChannelMessageActionAdapter = {
             const sent = await client.sendMessage({
               ...sendTarget,
               text: message,
+              ...(actions !== undefined ? { actions } : {}),
               ...(replyToMsgId != null ? { replyToMsgId } : {}),
               parseMarkdown,
             })
@@ -784,6 +863,7 @@ export const inlineMessageActions: ChannelMessageActionAdapter = {
               ...sendTarget,
               ...(index === 0 && text ? { text } : {}),
               media,
+              ...(index === 0 && actions !== undefined ? { actions } : {}),
               ...(index === 0 && replyToMsgId != null ? { replyToMsgId } : {}),
               ...(index === 0 && text ? { parseMarkdown } : {}),
             })
@@ -806,6 +886,7 @@ export const inlineMessageActions: ChannelMessageActionAdapter = {
         cfg,
         accountId,
         fn: async (client) => {
+          const actions = resolveInlineMessageActionsParam(params)
           const replyParams =
             normalizedAction === "thread-reply" &&
             params.threadId != null &&
@@ -830,6 +911,7 @@ export const inlineMessageActions: ChannelMessageActionAdapter = {
           const sent = await client.sendMessage({
             chatId,
             text,
+            ...(actions !== undefined ? { actions } : {}),
             replyToMsgId,
             parseMarkdown,
           })
@@ -1009,6 +1091,7 @@ export const inlineMessageActions: ChannelMessageActionAdapter = {
         accountId,
         fn: async (client) => {
           const chatId = resolveChatIdFromParams(params)
+          const actions = resolveInlineMessageActionsParam(params)
           const messageId = parseInlineId(
             readFlexibleId(params, "messageId") ??
               readStringParam(params, "messageId", { required: true }),
@@ -1021,6 +1104,7 @@ export const inlineMessageActions: ChannelMessageActionAdapter = {
               messageId,
               peerId: buildChatPeer(chatId),
               text,
+              ...(actions !== undefined ? { actions } : {}),
               parseMarkdown,
             },
           })

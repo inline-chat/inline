@@ -2,6 +2,8 @@ export { InlineSdkClient } from "./sdk/inline-sdk-client.js"
 export type {
   InlineSdkClientOptions,
   InlineSdkGetMessagesParams,
+  InlineSdkInvokeMessageActionParams,
+  InlineSdkAnswerMessageActionParams,
   InlineSdkSendMessageMedia,
   InlineSdkSendMessageParams,
   InlineSdkState,

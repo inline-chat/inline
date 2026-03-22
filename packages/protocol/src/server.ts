@@ -10,6 +10,7 @@ import { UnknownFieldHandler } from "@protobuf-ts/runtime";
 import type { PartialMessage } from "@protobuf-ts/runtime";
 import { reflectionMergePartial } from "@protobuf-ts/runtime";
 import { MessageType } from "@protobuf-ts/runtime";
+import { MessageActionResponseUi } from "./core.js";
 import { Dialog } from "./core.js";
 import { Chat } from "./core.js";
 import { DialogNotificationSettings } from "./core.js";
@@ -162,6 +163,18 @@ export interface ServerUpdate {
          * @generated from protobuf field: server.ServerUserUpdateChatOpen user_chat_open = 24;
          */
         userChatOpen: ServerUserUpdateChatOpen;
+    } | {
+        oneofKind: "userMessageActionInvoked";
+        /**
+         * @generated from protobuf field: server.ServerUserUpdateMessageActionInvoked user_message_action_invoked = 25;
+         */
+        userMessageActionInvoked: ServerUserUpdateMessageActionInvoked;
+    } | {
+        oneofKind: "userMessageActionAnswered";
+        /**
+         * @generated from protobuf field: server.ServerUserUpdateMessageActionAnswered user_message_action_answered = 26;
+         */
+        userMessageActionAnswered: ServerUserUpdateMessageActionAnswered;
     } | {
         oneofKind: undefined;
     };
@@ -494,6 +507,48 @@ export interface ServerUserUpdateChatOpen {
      */
     user?: User;
 }
+/**
+ * Update for a bot user when someone invokes a callback action on its message.
+ *
+ * @generated from protobuf message server.ServerUserUpdateMessageActionInvoked
+ */
+export interface ServerUserUpdateMessageActionInvoked {
+    /**
+     * @generated from protobuf field: int64 chat_id = 1;
+     */
+    chatId: bigint;
+    /**
+     * @generated from protobuf field: int64 message_id = 2;
+     */
+    messageId: bigint;
+    /**
+     * @generated from protobuf field: int64 actor_user_id = 3;
+     */
+    actorUserId: bigint;
+    /**
+     * @generated from protobuf field: string action_id = 4;
+     */
+    actionId: string;
+    /**
+     * @generated from protobuf field: bytes data = 5;
+     */
+    data: Uint8Array;
+}
+/**
+ * Update for a user when bot answers a previously invoked action.
+ *
+ * @generated from protobuf message server.ServerUserUpdateMessageActionAnswered
+ */
+export interface ServerUserUpdateMessageActionAnswered {
+    /**
+     * @generated from protobuf field: int64 interaction_id = 1;
+     */
+    interactionId: bigint;
+    /**
+     * @generated from protobuf field: optional MessageActionResponseUi ui = 2;
+     */
+    ui?: MessageActionResponseUi;
+}
 // @generated message type with reflection information, may provide speed optimized methods
 class ServerUpdate$Type extends MessageType<ServerUpdate> {
     constructor() {
@@ -520,7 +575,9 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
             { no: 20, name: "user_read_max_id", kind: "message", oneof: "update", T: () => ServerUserUpdateReadMaxId },
             { no: 22, name: "user_mark_as_unread", kind: "message", oneof: "update", T: () => ServerUserUpdateMarkAsUnread },
             { no: 23, name: "user_dialog_notification_settings", kind: "message", oneof: "update", T: () => ServerUserUpdateDialogNotificationSettings },
-            { no: 24, name: "user_chat_open", kind: "message", oneof: "update", T: () => ServerUserUpdateChatOpen }
+            { no: 24, name: "user_chat_open", kind: "message", oneof: "update", T: () => ServerUserUpdateChatOpen },
+            { no: 25, name: "user_message_action_invoked", kind: "message", oneof: "update", T: () => ServerUserUpdateMessageActionInvoked },
+            { no: 26, name: "user_message_action_answered", kind: "message", oneof: "update", T: () => ServerUserUpdateMessageActionAnswered }
         ]);
     }
     create(value?: PartialMessage<ServerUpdate>): ServerUpdate {
@@ -669,6 +726,18 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
                         userChatOpen: ServerUserUpdateChatOpen.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userChatOpen)
                     };
                     break;
+                case /* server.ServerUserUpdateMessageActionInvoked user_message_action_invoked */ 25:
+                    message.update = {
+                        oneofKind: "userMessageActionInvoked",
+                        userMessageActionInvoked: ServerUserUpdateMessageActionInvoked.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userMessageActionInvoked)
+                    };
+                    break;
+                case /* server.ServerUserUpdateMessageActionAnswered user_message_action_answered */ 26:
+                    message.update = {
+                        oneofKind: "userMessageActionAnswered",
+                        userMessageActionAnswered: ServerUserUpdateMessageActionAnswered.internalBinaryRead(reader, reader.uint32(), options, (message.update as any).userMessageActionAnswered)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -750,6 +819,12 @@ class ServerUpdate$Type extends MessageType<ServerUpdate> {
         /* server.ServerUserUpdateChatOpen user_chat_open = 24; */
         if (message.update.oneofKind === "userChatOpen")
             ServerUserUpdateChatOpen.internalBinaryWrite(message.update.userChatOpen, writer.tag(24, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerUserUpdateMessageActionInvoked user_message_action_invoked = 25; */
+        if (message.update.oneofKind === "userMessageActionInvoked")
+            ServerUserUpdateMessageActionInvoked.internalBinaryWrite(message.update.userMessageActionInvoked, writer.tag(25, WireType.LengthDelimited).fork(), options).join();
+        /* server.ServerUserUpdateMessageActionAnswered user_message_action_answered = 26; */
+        if (message.update.oneofKind === "userMessageActionAnswered")
+            ServerUserUpdateMessageActionAnswered.internalBinaryWrite(message.update.userMessageActionAnswered, writer.tag(26, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -1906,3 +1981,136 @@ class ServerUserUpdateChatOpen$Type extends MessageType<ServerUserUpdateChatOpen
  * @generated MessageType for protobuf message server.ServerUserUpdateChatOpen
  */
 export const ServerUserUpdateChatOpen = new ServerUserUpdateChatOpen$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerUserUpdateMessageActionInvoked$Type extends MessageType<ServerUserUpdateMessageActionInvoked> {
+    constructor() {
+        super("server.ServerUserUpdateMessageActionInvoked", [
+            { no: 1, name: "chat_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "message_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "actor_user_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 4, name: "action_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "data", kind: "scalar", T: 12 /*ScalarType.BYTES*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ServerUserUpdateMessageActionInvoked>): ServerUserUpdateMessageActionInvoked {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.chatId = 0n;
+        message.messageId = 0n;
+        message.actorUserId = 0n;
+        message.actionId = "";
+        message.data = new Uint8Array(0);
+        if (value !== undefined)
+            reflectionMergePartial<ServerUserUpdateMessageActionInvoked>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerUserUpdateMessageActionInvoked): ServerUserUpdateMessageActionInvoked {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 chat_id */ 1:
+                    message.chatId = reader.int64().toBigInt();
+                    break;
+                case /* int64 message_id */ 2:
+                    message.messageId = reader.int64().toBigInt();
+                    break;
+                case /* int64 actor_user_id */ 3:
+                    message.actorUserId = reader.int64().toBigInt();
+                    break;
+                case /* string action_id */ 4:
+                    message.actionId = reader.string();
+                    break;
+                case /* bytes data */ 5:
+                    message.data = reader.bytes();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerUserUpdateMessageActionInvoked, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 chat_id = 1; */
+        if (message.chatId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.chatId);
+        /* int64 message_id = 2; */
+        if (message.messageId !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.messageId);
+        /* int64 actor_user_id = 3; */
+        if (message.actorUserId !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.actorUserId);
+        /* string action_id = 4; */
+        if (message.actionId !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.actionId);
+        /* bytes data = 5; */
+        if (message.data.length)
+            writer.tag(5, WireType.LengthDelimited).bytes(message.data);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerUserUpdateMessageActionInvoked
+ */
+export const ServerUserUpdateMessageActionInvoked = new ServerUserUpdateMessageActionInvoked$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ServerUserUpdateMessageActionAnswered$Type extends MessageType<ServerUserUpdateMessageActionAnswered> {
+    constructor() {
+        super("server.ServerUserUpdateMessageActionAnswered", [
+            { no: 1, name: "interaction_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "ui", kind: "message", T: () => MessageActionResponseUi }
+        ]);
+    }
+    create(value?: PartialMessage<ServerUserUpdateMessageActionAnswered>): ServerUserUpdateMessageActionAnswered {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.interactionId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<ServerUserUpdateMessageActionAnswered>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ServerUserUpdateMessageActionAnswered): ServerUserUpdateMessageActionAnswered {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 interaction_id */ 1:
+                    message.interactionId = reader.int64().toBigInt();
+                    break;
+                case /* optional MessageActionResponseUi ui */ 2:
+                    message.ui = MessageActionResponseUi.internalBinaryRead(reader, reader.uint32(), options, message.ui);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ServerUserUpdateMessageActionAnswered, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 interaction_id = 1; */
+        if (message.interactionId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.interactionId);
+        /* optional MessageActionResponseUi ui = 2; */
+        if (message.ui)
+            MessageActionResponseUi.internalBinaryWrite(message.ui, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message server.ServerUserUpdateMessageActionAnswered
+ */
+export const ServerUserUpdateMessageActionAnswered = new ServerUserUpdateMessageActionAnswered$Type();
