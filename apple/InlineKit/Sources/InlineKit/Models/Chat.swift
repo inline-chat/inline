@@ -8,6 +8,11 @@ public enum ChatType: String, Codable, Sendable {
   case thread
 }
 
+public enum ChatCreateState: String, Codable, DatabaseValueConvertible, Sendable {
+  case pending
+  case failed
+}
+
 public struct ApiChat: Codable, Hashable, Sendable {
   public var id: Int64
   public var date: Int
@@ -33,6 +38,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var emoji: String?
   public var isPublic: Bool?
   public var createdBy: Int64?
+  public var createState: ChatCreateState?
 
   public enum Columns {
     static let id = Column(CodingKeys.id)
@@ -45,6 +51,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     static let emoji = Column(CodingKeys.emoji)
     static let isPublic = Column(CodingKeys.isPublic)
     static let createdBy = Column(CodingKeys.createdBy)
+    static let createState = Column(CodingKeys.createState)
   }
 
   public static let space = belongsTo(Space.self)
@@ -81,7 +88,9 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public init(
     id: Int64 = Int64.random(in: 1 ... 50_000), date: Date, type: ChatType, title: String?,
     spaceId: Int64?, peerUserId: Int64? = nil, lastMsgId: Int64? = nil, emoji: String? = nil,
-    createdBy: Int64? = nil
+    isPublic: Bool? = nil,
+    createdBy: Int64? = nil,
+    createState: ChatCreateState? = nil
   ) {
     self.id = id
     self.date = date
@@ -91,7 +100,9 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     self.peerUserId = peerUserId
     self.lastMsgId = lastMsgId
     self.emoji = emoji
+    self.isPublic = isPublic
     self.createdBy = createdBy
+    self.createState = createState
   }
 }
 
@@ -188,6 +199,7 @@ public extension Chat {
       }
     lastMsgId = from.lastMsgId
     emoji = from.emoji
+    createState = nil
   }
 
   static func fromTimestamp(from: Int) -> Date {
@@ -205,6 +217,7 @@ public extension Chat {
     emoji = from.hasEmoji ? from.emoji : nil
     isPublic = from.hasIsPublic ? from.isPublic : nil
     createdBy = from.hasCreatedBy ? from.createdBy : nil
+    createState = nil
 
     if case let .user(peerUser) = from.peerID.type {
       peerUserId = peerUser.userID

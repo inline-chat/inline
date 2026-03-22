@@ -5,6 +5,7 @@ export { schema }
 export const relations = defineRelations(
   {
     chats: schema.chats,
+    chatIdReservations: schema.chatIdReservations,
     chatParticipants: schema.chatParticipants,
     dialogs: schema.dialogs,
     messages: schema.messages,
@@ -41,6 +42,14 @@ export const relations = defineRelations(
         optional: true,
       }),
       botCommands: r.many.botCommands(),
+      chatIdReservations: r.many.chatIdReservations(),
+    },
+
+    chatIdReservations: {
+      user: r.one.users({
+        from: r.chatIdReservations.userId,
+        to: r.users.id,
+      }),
     },
 
     botCommands: {

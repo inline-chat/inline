@@ -15,6 +15,7 @@ struct CreateSpaceChat: View {
   @State private var selectedPeople: Set<Int64> = []
   @FormState var formState
 
+  @Environment(\.auth) var auth
   @Environment(\.appDatabase) var db
   @Environment(\.realtimeV2) var realtimeV2
   @Environment(\.dismiss) private var dismiss
@@ -168,27 +169,32 @@ struct CreateSpaceChat: View {
     Task {
       if chatTitle.isEmpty { return }
       do {
+        guard let currentUserId = auth.currentUserId else {
+          formState.failed(error: "You're signed out. Please log in again.")
+          return
+        }
+
         formState.startLoading()
         let title = chatTitle
         let emoji = selectedEmoji.isEmpty ? nil : selectedEmoji
         let isPublic = isPublic
         let spaceId = selectedSpaceId
-        let participants = isPublic ? [] : selectedPeople.map(\.self)
+        var participants = isPublic ? [] : selectedPeople.map(\.self)
+        if !isPublic, participants.isEmpty {
+          participants = [currentUserId]
+        }
 
-        try await Api.realtime.send(.createChat(
+        let chatId = try await realtimeV2.createThreadLocally(
           title: title,
           emoji: emoji,
           isPublic: isPublic,
           spaceId: spaceId,
           participants: Array(participants)
-        ))
+        )
 
-        // For now, we'll wait a bit and then dismiss - in a real app you'd want to handle the success callback
         formState.succeeded()
-
-        // Navigate to the created chat - we'll need to wait for the transaction to complete
-        // For now, just dismiss
         dismiss()
+        nav.push(.chat(peer: .thread(id: chatId)))
 
       } catch {
         formState.failed(error: error.localizedDescription)

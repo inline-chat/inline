@@ -60,6 +60,7 @@ public actor RealtimeV2 {
     applyUpdates: ApplyUpdates,
     syncStorage: SyncStorage,
     persistenceHandler: TransactionPersistenceHandler? = nil,
+    blockerResolver: (any TransactionBlockerResolver)? = nil,
   ) {
     self.auth = auth
     session = ProtocolSession(transport: transport, auth: auth)
@@ -73,7 +74,7 @@ public actor RealtimeV2 {
     connectionManager = ConnectionManager(session: session, constraints: initialConstraints)
     let syncConfig = RealtimeConfigStore.initialSyncConfig()
     sync = Sync(applyUpdates: applyUpdates, syncStorage: syncStorage, client: session, config: syncConfig)
-    transactions = Transactions(persistenceHandler: persistenceHandler)
+    transactions = Transactions(persistenceHandler: persistenceHandler, blockerResolver: blockerResolver)
     stateObject = RealtimeState()
     authAdapter = AuthConnectionAdapter(auth: auth, manager: connectionManager)
     lifecycleAdapter = LifecycleConnectionAdapter(manager: connectionManager)
@@ -194,9 +195,15 @@ public actor RealtimeV2 {
           continue
         }
 
-        while let transaction = await self.transactions.dequeue() {
-          self.log.trace("Dequeued transaction \(transaction.id)")
-          await self.runTransaction(transaction)
+        while let dequeueResult = await self.transactions.dequeue() {
+          switch dequeueResult {
+            case let .ready(transaction):
+              self.log.trace("Dequeued transaction \(transaction.id)")
+              await self.runTransaction(transaction)
+            case let .failed(transaction):
+              self.log.trace("Dropping blocked transaction \(transaction.id) after dependency failure")
+              await self.failQueuedTransaction(transaction, error: .dependencyFailed)
+          }
         }
       }
     }.store(in: &tasks)
@@ -260,6 +267,7 @@ public actor RealtimeV2 {
     Task.detached {
       do {
         try await transaction.apply(rpcResult)
+        await self.transactions.satisfy(blockers: transaction.satisfiedBlockersOnSuccess)
         Task {
           await self.getAndRemoveContinuation(for: transactionId)?.resume(returning: rpcResult)
         }
@@ -267,6 +275,7 @@ public actor RealtimeV2 {
         // This for some reason did not work
         // let error = TransactionError.executionError(error)
         await transaction.failed(error: TransactionError.invalid)
+        await self.transactions.signalQueue()
         Task {
           await self.getAndRemoveContinuation(for: transactionId)?
             .resume(throwing: TransactionError.invalid)
@@ -285,11 +294,18 @@ public actor RealtimeV2 {
 
     log.error("Transaction \(transactionId) failed with error", error: error)
 
-    Task.detached {
-      await transaction.failed(error: error)
-    }
+    await transaction.failed(error: error)
     transactionContinuations[transactionId]?.resume(throwing: error)
     transactionContinuations.removeValue(forKey: transactionId)
+    await transactions.signalQueue()
+  }
+
+  private func failQueuedTransaction(_ transactionWrapper: TransactionWrapper, error: TransactionError) async {
+    let transaction = transactionWrapper.transaction
+    let transactionId = transactionWrapper.id
+
+    await transaction.failed(error: error)
+    getAndRemoveContinuation(for: transactionId)?.resume(throwing: error)
   }
 
   private func getAndRemoveContinuation(for transactionId: TransactionId) -> CheckedContinuation<
@@ -318,11 +334,11 @@ public actor RealtimeV2 {
       log.warning(
         "Failing acked transaction without retryAfterAck after reconnect: \(transactionId) \(transaction.debugDescription)"
       )
-      Task.detached {
-        await transaction.failed(error: .ackedButNoResultAfterReconnect)
-      }
+      await transaction.failed(error: .ackedButNoResultAfterReconnect)
       getAndRemoveContinuation(for: transactionId)?.resume(throwing: TransactionError.ackedButNoResultAfterReconnect)
     }
+
+    await transactions.signalQueue()
   }
 
   /// Store the continuation for a transaction from actor context
@@ -383,6 +399,10 @@ public actor RealtimeV2 {
 
   public func applyUpdates(_ updates: [InlineProtocol.Update]) {
     Task { await sync.process(updates: updates) }
+  }
+
+  public func satisfyTransactionBlockers(_ blockers: [TransactionBlocker]) async {
+    await transactions.satisfy(blockers: blockers)
   }
 
   /// Low-level RPC call that bypasses the transaction system.

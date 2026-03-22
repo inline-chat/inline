@@ -13,10 +13,9 @@ struct CreateThread: View {
   @FormState var formState
 
   @EnvironmentObject var nav: Navigation
-  @Environment(\.appDatabase) var database
+  @Environment(\.auth) var auth
+  @Environment(\.realtimeV2) var realtimeV2
   @Environment(\.dismiss) var dismiss
-  @EnvironmentObject var dataManager: DataManager
-
 
   var spaceId: Int64
 
@@ -92,19 +91,25 @@ struct CreateThread: View {
   func submit() {
     Task {
       do {
-        formState.startLoading()
-        let threadId = try await dataManager.createThread(spaceId: spaceId, title: name, emoji: selectedEmoji)
-
-        if let threadId {
-          // First fetch dialogs to ensure the thread is in the list
-          try await dataManager.getDialogs(spaceId: spaceId)
-
-          formState.succeeded()
-          dismiss()
-
-          nav.push(.chat(peer: .thread(id: threadId)))
+        guard let currentUserId = auth.currentUserId else {
+          formState.failed(error: "You're signed out. Please log in again.")
+          return
         }
+
+        formState.startLoading()
+        let threadId = try await realtimeV2.createThreadLocally(
+          title: name,
+          emoji: selectedEmoji.isEmpty ? nil : selectedEmoji,
+          isPublic: false,
+          spaceId: spaceId,
+          participants: [currentUserId]
+        )
+
+        formState.succeeded()
+        dismiss()
+        nav.push(.chat(peer: .thread(id: threadId)))
       } catch {
+        formState.failed(error: error.localizedDescription)
         Log.shared.error("Failed to create thread", error: error)
       }
     }

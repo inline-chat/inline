@@ -15,6 +15,7 @@ export const createChat = async (input: CreateChatInput, handlerContext: Handler
       description: input.description,
       isPublic: input.isPublic,
       participants: input.participants,
+      reservedChatId: input.reservedChatId,
     },
     {
       currentSessionId: handlerContext.sessionId,

@@ -37,6 +37,7 @@ import { getUpdates } from "./updates.getUpdates"
 import { forwardMessages } from "./messages.forwardMessages"
 import { createSubthread } from "./messages.createSubthread"
 import { showChatInSidebar } from "./messages.showChatInSidebar"
+import { reserveChatIds } from "./messages.reserveChatIds"
 
 export const Functions = {
   messages: {
@@ -62,6 +63,7 @@ export const Functions = {
     forwardMessages: forwardMessages,
     createSubthread: createSubthread,
     showChatInSidebar: showChatInSidebar,
+    reserveChatIds: reserveChatIds,
     // until we make tests pass
     //markAsUnread: markAsUnread,
   },

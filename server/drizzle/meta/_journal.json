@@ -484,6 +484,13 @@
       "when": 1774011157114,
       "tag": "0068_add-indexes-for-chat-dialog-media",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1774040033076,
+      "tag": "0069_reserve-chat-ids",
+      "breakpoints": true
     }
   ]
 }

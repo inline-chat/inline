@@ -19,26 +19,20 @@ enum NewThreadAction {
       }
 
       do {
-        let result = try await dependencies.realtimeV2.send(
-          .createChat(
-            title: resolvedTitle,
-            emoji: nil,
-            isPublic: false,
-            spaceId: spaceId,
-            participants: [currentUserId]
-          )
+        let chatId = try await dependencies.realtimeV2.createThreadLocally(
+          title: resolvedTitle,
+          emoji: nil,
+          isPublic: false,
+          spaceId: spaceId,
+          participants: [currentUserId]
         )
 
         await MainActor.run {
           ToastCenter.shared.dismiss()
-          if case let .createChat(response) = result {
-            dependencies.nav2?.requestOpenChat(
-              peer: .thread(id: response.chat.id),
-              database: dependencies.database
-            )
-          } else {
-            ToastCenter.shared.showError("Failed to create thread.")
-          }
+          dependencies.nav2?.requestOpenChat(
+            peer: .thread(id: chatId),
+            database: dependencies.database
+          )
         }
       } catch {
         await MainActor.run {
