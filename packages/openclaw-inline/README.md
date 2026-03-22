@@ -178,6 +178,21 @@ The plugin also registers a dedicated `inline_members` tool for space-member dis
 - Optional filters: `query`, `userId`, `limit`, `accountId`
 - Returned members include explicit DM targets like `user:123`
 
+The plugin also registers `inline_bot_commands` for bot slash command management (v1):
+
+- `action: "get"` -> calls `getMyCommands`
+- `action: "set"` -> calls `setMyCommands` with Telegram-style `commands[]`
+- `action: "delete"` -> calls `deleteMyCommands`
+- Limits follow Inline Bot API: max `100` commands, `command` max `32`, `description` max `256`, charset `^[a-z0-9_]+$`
+
+Native command sync (Telegram-style startup behavior):
+
+- On `gateway_start`, the plugin clears + re-registers default native commands for each enabled/configured Inline account.
+- Default commands now mirror OpenClaw native defaults (for example: `/status`, `/model`, `/exec`, `/usage`, etc.).
+- When available in `openclaw/plugin-sdk`, the plugin uses the same command + skill sources as native providers (Telegram/Slack/Discord), including plugin command specs.
+- Disable startup sync globally with `commands.native: false`, or per-channel with `channels.inline.commands.native: false`.
+- Disable native skill command inclusion with `commands.nativeSkills: false`, or per-channel with `channels.inline.commands.nativeSkills: false`.
+
 Multi-account:
 
 ```yaml

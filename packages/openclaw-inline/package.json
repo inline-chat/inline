@@ -32,7 +32,7 @@
   "devDependencies": {
     "@types/node": "^20.11.30",
     "@vitest/coverage-v8": "4.0.16",
-    "openclaw": "^2026.2.9",
+    "openclaw": "^2026.3.13",
     "typescript": "^5.8.3",
     "vitest": "^4.0.16"
   },

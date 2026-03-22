@@ -579,7 +579,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
     reply: true,
     groupManagement: true,
     threads: false,
-    nativeCommands: false,
+    nativeCommands: true,
     blockStreaming: true,
   },
   streaming: {

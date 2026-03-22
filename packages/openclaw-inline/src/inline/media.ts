@@ -224,7 +224,7 @@ export async function uploadInlineMediaFromUrl(params: {
     )
     const normalizedExt = normalizeExt(loaded.fileName)
     uploadType = chooseUploadType({
-      kind: loaded.kind,
+      kind: loaded.kind ?? "unknown",
       ...(detectedMime ? { mime: detectedMime } : {}),
       ...(normalizedExt ? { ext: normalizedExt } : {}),
     })
