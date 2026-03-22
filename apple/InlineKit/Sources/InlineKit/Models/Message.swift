@@ -32,6 +32,37 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   TableRecord,
   Sendable, Equatable
 {
+  enum CodingKeys: String, CodingKey {
+    case globalId
+    case randomId
+    case messageId
+    case date
+    case text
+    case peerUserId
+    case peerThreadId
+    case chatId
+    case fromId
+    case mentioned
+    case out
+    case pinned
+    case editDate
+    case fileId
+    case status
+    case repliedToMessageId
+    case forwardFromPeerUserId
+    case forwardFromPeerThreadId
+    case forwardFromMessageId
+    case forwardFromUserId
+    case photoId
+    case videoId
+    case documentId
+    case contentPayload
+    case transactionId
+    case isSticker
+    case hasLink
+    case entities
+  }
+
   // Locally autoincremented id
   public var globalId: Int64?
 
@@ -91,6 +122,27 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   public var isSticker: Bool?
   public var hasLink: Bool?
   public var entities: MessageEntities?
+
+  public var actions: InlineProtocol.MessageActions? {
+    get {
+      guard let contentPayload, contentPayload.hasActions else { return nil }
+      return contentPayload.actions
+    }
+    set {
+      var payload = contentPayload ?? Client_MessageContentPayload()
+      if let newValue {
+        payload.actions = newValue
+      } else {
+        payload.clearActions()
+      }
+
+      if payload.hasVoice || payload.hasActions {
+        contentPayload = payload
+      } else {
+        contentPayload = nil
+      }
+    }
+  }
 
   public var hasForwardHeader: Bool {
     forwardFromUserId != nil
@@ -263,6 +315,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     videoId: Int64? = nil,
     documentId: Int64? = nil,
     contentPayload: Client_MessageContentPayload? = nil,
+    actions: InlineProtocol.MessageActions? = nil,
     transactionId: String? = nil,
     isSticker: Bool? = nil,
     hasLink: Bool? = nil,
@@ -291,6 +344,9 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     self.videoId = videoId
     self.documentId = documentId
     self.contentPayload = contentPayload
+    if let actions {
+      self.actions = actions
+    }
     self.transactionId = transactionId
     self.isSticker = isSticker
     self.hasLink = hasLink
@@ -353,6 +409,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       videoId: from.media.video.hasVideo ? from.media.video.video.id : nil,
       documentId: from.media.document.hasDocument ? from.media.document.document.id : nil,
       contentPayload: from.media.voice.hasVoice ? Self.contentPayload(from: from.media.voice.voice) : nil,
+      actions: from.hasActions ? from.actions : nil,
       isSticker: from.isSticker,
       hasLink: from.hasHasLink_p ? from.hasLink_p : nil,
       entities: from.hasEntities ? from.entities : nil
@@ -534,13 +591,22 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
           merged.voice = existing.voice
         }
       }
-      return merged
+
+      if incoming.hasActions || existing.hasActions {
+        if incoming.hasActions {
+          merged.actions = incoming.actions
+        } else if existing.hasActions {
+          merged.actions = existing.actions
+        }
+      }
+
+      return (merged.hasVoice || merged.hasActions) ? merged : nil
 
     case let (incoming?, nil):
-      return incoming
+      return (incoming.hasVoice || incoming.hasActions) ? incoming : nil
 
     case let (nil, existing?):
-      return existing
+      return (existing.hasVoice || existing.hasActions) ? existing : nil
 
     case (nil, nil):
       return nil
@@ -697,6 +763,7 @@ public extension Message {
         documentId = documentId ?? existing.documentId
         videoId = videoId ?? existing.videoId
         contentPayload = Message.mergedContentPayload(incoming: contentPayload, existing: existing.contentPayload)
+        actions = actions ?? existing.actions
         hasLink = hasLink ?? existing.hasLink
         entities = entities ?? existing.entities
         transactionId = existing.transactionId
@@ -749,6 +816,7 @@ public extension ApiMessage {
       message.fileId = existing.fileId
       message.text = existing.text
       message.contentPayload = existing.contentPayload
+      message.actions = existing.actions
       message.transactionId = existing.transactionId
       message.hasLink = existing.hasLink
       message.editDate = editDate.map { Date(timeIntervalSince1970: TimeInterval($0)) }
@@ -812,6 +880,7 @@ public extension Message {
       message.transactionId = message.transactionId ?? existing.transactionId
       message.isSticker = message.isSticker ?? existing.isSticker
       message.hasLink = message.hasLink ?? existing.hasLink
+      message.actions = message.actions ?? existing.actions
       message.editDate = message.editDate ?? existing.editDate
       message.repliedToMessageId = message.repliedToMessageId ?? existing.repliedToMessageId
       message.forwardFromPeerUserId = message.forwardFromPeerUserId ?? existing.forwardFromPeerUserId
