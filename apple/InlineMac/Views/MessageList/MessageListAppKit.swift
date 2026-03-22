@@ -62,6 +62,7 @@ class MessageListAppKit: NSViewController {
   private var deferredTranslationTask: Task<Void, Never>?
   private var hasDeferredInitialTranslation = false
   private var needsUnreadUpdateOnActive = false
+  private var didRunInitialUnreadSync = false
   private var appActivityObserverId: UUID?
 
   init(
@@ -912,6 +913,10 @@ class MessageListAppKit: NSViewController {
 
       scrollToBottom(animated: false)
       markMessagesSeen()
+      if !didRunInitialUnreadSync {
+        didRunInitialUnreadSync = true
+        updateUnreadIfNeeded()
+      }
 
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
         guard let self else { return }
