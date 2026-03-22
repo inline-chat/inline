@@ -56,7 +56,7 @@
     "libphonenumber-js": "^1.12.7",
     "nanoid": "^5.0.7",
     "nanoid-dictionary": "^4.3.0",
-    "openai": "^6.27.0",
+    "openai": "^6.32.0",
     "postgres": "^3.4.7",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
