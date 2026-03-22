@@ -491,6 +491,13 @@
       "when": 1774040033076,
       "tag": "0069_reserve-chat-ids",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1774195522899,
+      "tag": "0070_message-actions",
+      "breakpoints": true
     }
   ]
 }

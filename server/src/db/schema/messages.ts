@@ -36,6 +36,11 @@ export const messages = pgTable(
     entitiesIv: bytea("entities_iv"),
     entitiesTag: bytea("entities_tag"),
 
+    /** interactive message actions */
+    actionsEncrypted: bytea("actions_encrypted"),
+    actionsIv: bytea("actions_iv"),
+    actionsTag: bytea("actions_tag"),
+
     /** required, chat it belongs to */
     chatId: integer("chat_id")
       .notNull()

@@ -38,6 +38,8 @@ import { forwardMessages } from "./messages.forwardMessages"
 import { createSubthread } from "./messages.createSubthread"
 import { showChatInSidebar } from "./messages.showChatInSidebar"
 import { reserveChatIds } from "./messages.reserveChatIds"
+import { invokeMessageAction } from "./messages.invokeMessageAction"
+import { answerMessageAction } from "./messages.answerMessageAction"
 
 export const Functions = {
   messages: {
@@ -64,6 +66,8 @@ export const Functions = {
     createSubthread: createSubthread,
     showChatInSidebar: showChatInSidebar,
     reserveChatIds: reserveChatIds,
+    invokeMessageAction: invokeMessageAction,
+    answerMessageAction: answerMessageAction,
     // until we make tests pass
     //markAsUnread: markAsUnread,
   },

@@ -9,8 +9,9 @@ import {
   type MessageAttachment,
   type MessageAttachments,
   type Peer,
-  type MessageReplies,
-  MessageEntities,
+    type MessageReplies,
+    MessageActions,
+    MessageEntities,
   MessageSendMode,
 } from "@inline-chat/protocol/core"
 import { encodePeer, encodePeerFromInputPeer } from "@in/server/realtime/encoders/encodePeer"
@@ -71,6 +72,16 @@ export const encodeMessage = ({
   }
 
   const hasLink = message.hasLink ?? (detectHasLink({ entities }) ? true : undefined)
+
+  let actions: MessageActions | undefined = undefined
+  if (message.actionsEncrypted && message.actionsIv && message.actionsTag) {
+    const decryptedActions = decryptBinary({
+      encrypted: message.actionsEncrypted,
+      iv: message.actionsIv,
+      authTag: message.actionsTag,
+    })
+    actions = MessageActions.fromBinary(decryptedActions)
+  }
 
   let peerId: Peer
 
@@ -171,6 +182,7 @@ export const encodeMessage = ({
     sendMode: sendMode ?? undefined,
     fwdFrom: fwdFrom,
     replies,
+    actions,
   }
 
   return messageProto
@@ -345,6 +357,7 @@ export const encodeFullMessage = ({
     entities: message.entities ?? undefined,
     fwdFrom: fwdFrom,
     replies,
+    actions: message.actions ?? undefined,
   }
 
   return messageProto

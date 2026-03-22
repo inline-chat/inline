@@ -1,5 +1,6 @@
 import {
   InputPeer,
+  MessageActions,
   MessageAttachment,
   MessageEntities,
   MessageEntity_Type,
@@ -10,6 +11,7 @@ import { ChatModel } from "@in/server/db/models/chats"
 import { FileModel, type DbFullPhoto, type DbFullVideo } from "@in/server/db/models/files"
 import type { DbFullDocument, DbFullVoice } from "@in/server/db/models/files"
 import { MessageModel } from "@in/server/db/models/messages"
+import { UsersModel } from "@in/server/db/models/users"
 import { db } from "@in/server/db"
 import { dialogs, messageAttachments, type DbChat, type DbMessage } from "@in/server/db/schema"
 import type { FunctionContext } from "@in/server/functions/_types"
@@ -47,6 +49,7 @@ import { and, eq, inArray } from "drizzle-orm"
 import { unarchiveIfNeeded } from "@in/server/modules/message/unarchiveIfNeeded"
 import { desktopPushSuppressionTracker } from "@in/server/modules/notifications/desktopPushSuppression"
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
+import { normalizeAndValidateMessageActions } from "@in/server/modules/message/messageActions"
 import {
   emitSidebarChatOpenUpdates,
   isLinkedSubthread,
@@ -69,6 +72,7 @@ type Input = {
   sendDate?: number
   isSticker?: boolean
   entities?: MessageEntities
+  actions?: MessageActions
   sendMode?: MessageSendMode
   forwardHeader?: {
     fromPeerId: InputPeer
@@ -124,6 +128,13 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
 
   // Encrypt
   const encryptedMessage = text ? encryptMessage(text) : undefined
+  const normalizedActions = normalizeAndValidateMessageActions(input.actions)
+  if (normalizedActions !== undefined) {
+    const sender = await UsersModel.getUserById(currentUserId)
+    if (!sender?.bot) {
+      throw RealtimeRpcError.BadRequest()
+    }
+  }
 
   // photo, video, document, voice ids
   let dbFullPhoto: DbFullPhoto | undefined
@@ -151,6 +162,8 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   // encrypt entities
   const binaryEntities = entities ? MessageEntities.toBinary(entities) : undefined
   const encryptedEntities = binaryEntities && binaryEntities.length > 0 ? encryptBinary(binaryEntities) : undefined
+  const binaryActions = normalizedActions ? MessageActions.toBinary(normalizedActions) : undefined
+  const encryptedActions = binaryActions && binaryActions.length > 0 ? encryptBinary(binaryActions) : undefined
 
   let fwdFromPeerUserId: number | null = null
   let fwdFromPeerChatId: number | null = null
@@ -204,6 +217,9 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
       entitiesEncrypted: encryptedEntities?.encrypted ?? null,
       entitiesIv: encryptedEntities?.iv ?? null,
       entitiesTag: encryptedEntities?.authTag ?? null,
+      actionsEncrypted: encryptedActions?.encrypted ?? null,
+      actionsIv: encryptedActions?.iv ?? null,
+      actionsTag: encryptedActions?.authTag ?? null,
     }))
   } catch (error) {
     if (error instanceof Error && error.message.includes("random_id_per_sender_unique") && input.randomId) {

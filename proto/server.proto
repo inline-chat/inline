@@ -37,6 +37,8 @@ message ServerUpdate {
     ServerUserUpdateMarkAsUnread user_mark_as_unread = 22;
     ServerUserUpdateDialogNotificationSettings user_dialog_notification_settings = 23;
     ServerUserUpdateChatOpen user_chat_open = 24;
+    ServerUserUpdateMessageActionInvoked user_message_action_invoked = 25;
+    ServerUserUpdateMessageActionAnswered user_message_action_answered = 26;
   }
 }
 
@@ -170,4 +172,19 @@ message ServerUserUpdateChatOpen {
   Chat chat = 1;
   Dialog dialog = 2;
   optional User user = 3;
+}
+
+// Update for a bot user when someone invokes a callback action on its message.
+message ServerUserUpdateMessageActionInvoked {
+  int64 chat_id = 1;
+  int64 message_id = 2;
+  int64 actor_user_id = 3;
+  string action_id = 4;
+  bytes data = 5;
+}
+
+// Update for a user when bot answers a previously invoked action.
+message ServerUserUpdateMessageActionAnswered {
+  int64 interaction_id = 1;
+  optional MessageActionResponseUi ui = 2;
 }
