@@ -34,6 +34,7 @@ with Sparkle (non-TestFlight) and preparing DMG artifacts.
 - `release-direct.ts`: uploads DMG and/or appcast to R2 with cache headers.
 - `upload-dsyms.ts`: uploads zipped `.dSYM` bundles to Sentry using Sentry's API.
 - `release-app.ts`: runs the local release pipeline (build → upload dSYMs → upload DMG → update appcast → upload appcast), with an interactive TUI (shows progress, skipped steps, and failures clearly).
+- `build-local-app.sh`: builds a local Sparkle-enabled `Inline.app` bundle for testing without signing, DMG creation, notarization, or upload steps.
 - `update-version.ts`: bumps the InlineMac marketing version, creates a `macos-vX.Y.Z` tag, and pushes to trigger CI.
 - `appcast-only.sh`: updates the appcast only (no rebuild), with validation.
 
@@ -171,6 +172,14 @@ bash scripts/macos/build-direct.sh
 ```
 
 The resulting DMG is written to `build/macos-direct/Inline.dmg`.
+
+To build just a local `.app` bundle for testing, without the release/notarization flow:
+
+```bash
+bun run build:macos:local-app
+```
+
+The app bundle is written to `build/InlineMacDirectLocal/Build/Products/Release/Inline.app`.
 
 ## Local Release (Stable/Beta)
 
