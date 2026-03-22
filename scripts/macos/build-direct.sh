@@ -26,6 +26,7 @@ OVERWRITE_DMG=${OVERWRITE_DMG:-0}
 SIGN_RETRY_COUNT=${SIGN_RETRY_COUNT:-3}
 SIGN_RETRY_DELAY_SECONDS=${SIGN_RETRY_DELAY_SECONDS:-2}
 PAUSE_BEFORE_NOTARIZE=${PAUSE_BEFORE_NOTARIZE:-0}
+DEBUG_BUILD=${DEBUG_BUILD:-0}
 
 if [[ -z "${SPARKLE_PUBLIC_KEY:-}" && -n "${MACOS_SPARKLE_PUBLIC_KEY:-}" ]]; then
   SPARKLE_PUBLIC_KEY="${MACOS_SPARKLE_PUBLIC_KEY}"
@@ -85,19 +86,31 @@ mkdir -p "${OUTPUT_DIR}"
 BUILD_LOG_PATH="${OUTPUT_DIR}/xcodebuild.log"
 
 set +e
+swift_conditions='$(inherited) SPARKLE'
+if [[ "${DEBUG_BUILD}" == "1" ]]; then
+  swift_conditions='$(inherited) SPARKLE DEBUG_BUILD'
+fi
+
+xcodebuild_args=(
+  -project "${ROOT_DIR}/apple/Inline.xcodeproj"
+  -scheme "${SCHEME}"
+  -configuration Release
+  -derivedDataPath "${DERIVED_DATA}"
+  "SWIFT_ACTIVE_COMPILATION_CONDITIONS=${swift_conditions}"
+  "FRAMEWORK_SEARCH_PATHS=${SPARKLE_FRAMEWORK_PATH}"
+  "OTHER_LDFLAGS=-framework Sparkle"
+  "CODE_SIGN_ENTITLEMENTS=InlineMac/InlineMacDirect.entitlements"
+  CODE_SIGNING_ALLOWED=NO
+  CODE_SIGNING_REQUIRED=NO
+  CODE_SIGN_STYLE=Manual
+  PROVISIONING_PROFILE_SPECIFIER=
+)
+if [[ "${DEBUG_BUILD}" == "1" ]]; then
+  xcodebuild_args+=("ASSETCATALOG_COMPILER_APPICON_NAME=InlineDebugAppIcon")
+fi
+
 xcodebuild \
-  -project "${ROOT_DIR}/apple/Inline.xcodeproj" \
-  -scheme "${SCHEME}" \
-  -configuration Release \
-  -derivedDataPath "${DERIVED_DATA}" \
-  SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) SPARKLE' \
-  FRAMEWORK_SEARCH_PATHS="${SPARKLE_FRAMEWORK_PATH}" \
-  OTHER_LDFLAGS="-framework Sparkle" \
-  CODE_SIGN_ENTITLEMENTS="InlineMac/InlineMacDirect.entitlements" \
-  CODE_SIGNING_ALLOWED=NO \
-  CODE_SIGNING_REQUIRED=NO \
-  CODE_SIGN_STYLE=Manual \
-  PROVISIONING_PROFILE_SPECIFIER="" 2>&1 | tee "${BUILD_LOG_PATH}"
+  "${xcodebuild_args[@]}" 2>&1 | tee "${BUILD_LOG_PATH}"
 xcodebuild_ec=${PIPESTATUS[0]}
 set -e
 if [[ "${xcodebuild_ec}" -ne 0 ]]; then
@@ -155,6 +168,10 @@ plist_set_integer() {
 
 plist_set_string "CFBundleVersion" "${BUILD_NUMBER}"
 plist_set_string "InlineCommit" "${INLINE_COMMIT}"
+if [[ "${DEBUG_BUILD}" == "1" ]]; then
+  plist_set_string "CFBundleDisplayName" "Inline Debug"
+  plist_set_string "CFBundleName" "Inline Debug"
+fi
 plist_set_string "SUPublicEDKey" "${SPARKLE_PUBLIC_KEY}"
 plist_set_string "SUFeedURL" "${APPCAST_URL}"
 plist_set_bool "SUEnableAutomaticChecks" "true"

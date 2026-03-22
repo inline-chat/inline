@@ -112,19 +112,26 @@ if [[ ! -d "${SPARKLE_FRAMEWORK_PATH}" ]]; then
 fi
 
 set +e
+swift_conditions='$(inherited) SPARKLE DEBUG_BUILD'
+
+xcodebuild_args=(
+  -project "${ROOT_DIR}/apple/Inline.xcodeproj"
+  -scheme "${SCHEME}"
+  -configuration Release
+  -derivedDataPath "${DERIVED_DATA}"
+  "SWIFT_ACTIVE_COMPILATION_CONDITIONS=${swift_conditions}"
+  "FRAMEWORK_SEARCH_PATHS=${SPARKLE_FRAMEWORK_PATH}"
+  "OTHER_LDFLAGS=-framework Sparkle"
+  "CODE_SIGN_ENTITLEMENTS=InlineMac/InlineMacDirect.entitlements"
+  CODE_SIGNING_ALLOWED=NO
+  CODE_SIGNING_REQUIRED=NO
+  CODE_SIGN_STYLE=Manual
+  PROVISIONING_PROFILE_SPECIFIER=
+)
+xcodebuild_args+=("ASSETCATALOG_COMPILER_APPICON_NAME=InlineDebugAppIcon")
+
 xcodebuild \
-  -project "${ROOT_DIR}/apple/Inline.xcodeproj" \
-  -scheme "${SCHEME}" \
-  -configuration Release \
-  -derivedDataPath "${DERIVED_DATA}" \
-  SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) SPARKLE' \
-  FRAMEWORK_SEARCH_PATHS="${SPARKLE_FRAMEWORK_PATH}" \
-  OTHER_LDFLAGS="-framework Sparkle" \
-  CODE_SIGN_ENTITLEMENTS="InlineMac/InlineMacDirect.entitlements" \
-  CODE_SIGNING_ALLOWED=NO \
-  CODE_SIGNING_REQUIRED=NO \
-  CODE_SIGN_STYLE=Manual \
-  PROVISIONING_PROFILE_SPECIFIER="" 2>&1 | tee "${BUILD_LOG_PATH}"
+  "${xcodebuild_args[@]}" 2>&1 | tee "${BUILD_LOG_PATH}"
 xcodebuild_ec=${PIPESTATUS[0]}
 set -e
 if [[ "${xcodebuild_ec}" -ne 0 ]]; then
@@ -181,6 +188,8 @@ plist_set_integer() {
 
 plist_set_string "CFBundleVersion" "${BUILD_NUMBER}"
 plist_set_string "InlineCommit" "${INLINE_COMMIT}"
+plist_set_string "CFBundleDisplayName" "Inline Debug"
+plist_set_string "CFBundleName" "Inline Debug"
 if [[ -n "${SPARKLE_PUBLIC_KEY:-}" ]]; then
   plist_set_string "SUPublicEDKey" "${SPARKLE_PUBLIC_KEY}"
 else
@@ -202,3 +211,4 @@ fi
 echo "Local app build complete."
 echo "  App: ${APP_PATH}"
 echo "  Build log: ${BUILD_LOG_PATH}"
+echo "  Debug flavor: enabled (DEBUG_BUILD)"

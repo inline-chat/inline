@@ -7,6 +7,14 @@ final class LaunchAtLoginController {
   private var cancellables = Set<AnyCancellable>()
 
   func start() {
+#if DEBUG_BUILD
+    // Local debug builds should never auto-register login items.
+    if AppSettings.shared.launchAtLogin {
+      AppSettings.shared.launchAtLogin = false
+    }
+    log.info("Launch at login is disabled for DEBUG_BUILD.")
+    return
+#endif
     AppSettings.shared.$launchAtLogin
       .removeDuplicates()
       .sink { [weak self] isEnabled in
