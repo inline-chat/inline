@@ -15,6 +15,7 @@ import {
 } from "openclaw/plugin-sdk"
 import { InlineSdkClient, JsonFileStateStore, Method, type Message } from "@inline-chat/realtime-sdk"
 import { resolveInlineToken, type ResolvedInlineAccount } from "./accounts.js"
+import { INLINE_FORMATTING_NOTE, buildInlineSystemPrompt } from "./message-formatting.js"
 import { resolveInlineGroupRequireMention } from "./policy.js"
 import { getInlineRuntime } from "../runtime.js"
 import { uploadInlineMediaFromUrl } from "./media.js"
@@ -76,8 +77,6 @@ const REACTION_TARGET_LOOKUP_LIMIT = 8
 const REPLY_TARGET_LOOKUP_LIMIT = 8
 const ATTACHMENT_CONTEXT_LIMIT = 6
 const DEFAULT_INLINE_MEDIA_MAX_BYTES = 300 * 1024 * 1024
-const INLINE_FORMATTING_NOTE =
-  "Inline formatting note: prefer bullet lists over markdown tables. If a table is necessary, render it inside a fenced code block."
 const GET_MESSAGES_METHOD =
   typeof (Method as Record<string, unknown>).GET_MESSAGES === "number" &&
   Number.isInteger((Method as Record<string, unknown>).GET_MESSAGES) &&
@@ -143,6 +142,18 @@ function buildInlineSenderName(params: {
 }): string | undefined {
   const name = [params.firstName, params.lastName].filter(Boolean).join(" ").trim()
   return name || undefined
+}
+
+function resolveInlineSystemPrompt(params: {
+  account: ResolvedInlineAccount
+  groupId?: string
+}): string {
+  const groupPrompt = params.groupId
+    ? params.account.config.groups?.[params.groupId]?.systemPrompt?.trim()
+    : undefined
+  return [buildInlineSystemPrompt(params.account.config.systemPrompt), groupPrompt]
+    .filter((entry): entry is string => Boolean(entry))
+    .join("\n\n")
 }
 
 function rewriteNumericMentionsToUsernames(text: string, senderProfilesById: Map<string, SenderProfile>): string {
@@ -813,7 +824,12 @@ export async function monitorInlineProvider(params: {
 
         const configAllowFrom = normalizeAllowlist(account.config.allowFrom)
         const configGroupAllowFrom = normalizeAllowlist(account.config.groupAllowFrom)
-        const storeAllowFrom = await core.channel.pairing.readAllowFromStore(CHANNEL_ID).catch(() => [])
+        const storeAllowFrom = await core.channel.pairing
+          .readAllowFromStore({
+            channel: CHANNEL_ID,
+            accountId: account.accountId,
+          })
+          .catch(() => [])
         const storeAllowList = normalizeAllowlist(storeAllowFrom)
 
         const effectiveAllowFrom = [...configAllowFrom, ...storeAllowList].filter(Boolean)
@@ -868,6 +884,7 @@ export async function monitorInlineProvider(params: {
                 const { code, created } = await core.channel.pairing.upsertPairingRequest({
                   channel: CHANNEL_ID,
                   id: senderId,
+                  accountId: account.accountId,
                   meta: {},
                   // Pass adapter explicitly to avoid relying on registry lookup for plugin channels.
                   pairingAdapter: { idLabel: "inlineUserId", normalizeAllowEntry },
@@ -1039,6 +1056,10 @@ export async function monitorInlineProvider(params: {
           })
         }
         const commandBody = normalizeInlineCommandBody(rawBody, botUsername)
+        const systemPrompt = resolveInlineSystemPrompt({
+          account,
+          ...(isGroup ? { groupId: String(chatId) } : {}),
+        })
 
         const ctxPayload = core.channel.reply.finalizeInboundContext({
           Body: body,
@@ -1064,6 +1085,7 @@ export async function monitorInlineProvider(params: {
           Timestamp: timestamp || Date.now(),
           WasMentioned: mentionGate.effectiveWasMentioned,
           CommandAuthorized: commandAuthorized,
+          GroupSystemPrompt: systemPrompt,
           OriginatingChannel: CHANNEL_ID,
           OriginatingTo: `inline:${String(chatId)}`,
         })

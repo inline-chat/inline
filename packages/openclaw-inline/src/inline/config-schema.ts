@@ -26,8 +26,16 @@ const InlineActionsSchema = z
 const InlineGroupSchema = z
   .object({
     requireMention: z.boolean().optional(),
+    systemPrompt: z.string().optional(),
     tools: ToolPolicySchema,
     toolsBySender: z.record(z.string(), ToolPolicySchema).optional(),
+  })
+  .strict()
+
+const InlineCommandsSchema = z
+  .object({
+    native: z.union([z.boolean(), z.literal("auto")]).optional(),
+    nativeSkills: z.union([z.boolean(), z.literal("auto")]).optional(),
   })
   .strict()
 
@@ -40,6 +48,7 @@ export const InlineAccountSchemaBase = z
     tokenFile: z.string().optional(),
     dmPolicy: DmPolicySchema.optional().default("pairing"),
     allowFrom: z.array(z.string()).optional(),
+    systemPrompt: z.string().optional(),
     groupAllowFrom: z.array(z.string()).optional(),
     groupPolicy: GroupPolicySchema.optional().default("allowlist"),
     groups: z.record(z.string(), InlineGroupSchema.optional()).optional(),
@@ -55,6 +64,7 @@ export const InlineAccountSchemaBase = z
     blockStreaming: z.boolean().optional(),
     streamViaEditMessage: z.boolean().optional(),
     blockStreamingCoalesce: BlockStreamingCoalesceSchema.optional(),
+    commands: InlineCommandsSchema.optional(),
   })
   .strict()
 

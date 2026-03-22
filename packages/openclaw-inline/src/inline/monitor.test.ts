@@ -89,6 +89,13 @@ function buildAccount(overrides?: {
   groupPolicy?: "allowlist" | "open" | "disabled"
   allowFrom?: string[]
   groupAllowFrom?: string[]
+  systemPrompt?: string
+  groups?: Record<string, {
+    requireMention?: boolean
+    systemPrompt?: string
+    tools?: { allow?: string[]; deny?: string[] }
+    toolsBySender?: Record<string, { allow?: string[]; deny?: string[] }>
+  }>
   requireMention?: boolean
   replyToBotWithoutMention?: boolean
   historyLimit?: number
@@ -115,6 +122,8 @@ function buildAccount(overrides?: {
       allowFrom: overrides?.allowFrom ?? [],
       groupPolicy: overrides?.groupPolicy ?? "allowlist",
       groupAllowFrom: overrides?.groupAllowFrom ?? [],
+      systemPrompt: overrides?.systemPrompt,
+      groups: overrides?.groups,
       requireMention: overrides?.requireMention ?? true,
       replyToBotWithoutMention: overrides?.replyToBotWithoutMention,
       historyLimit: overrides?.historyLimit,
@@ -1897,6 +1906,115 @@ describe("inline/monitor", () => {
           Body: expect.stringContaining(
             'Current message entities:\nmention "Alice" -> user:99 | text link "docs" -> https://example.com/current-docs',
           ),
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("passes top-level systemPrompt guidance on direct messages", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 91n,
+          message: {
+            id: 7402n,
+            date: 1_700_000_220n,
+            fromId: 52n,
+            message: "check the docs",
+          } as any,
+        },
+      ],
+      chats: {
+        "91": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyPayload: {
+        text: "looks good",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        dmPolicy: "open",
+        systemPrompt: "Keep replies short.",
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalled()
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          GroupSystemPrompt: expect.stringContaining("Keep replies short."),
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          GroupSystemPrompt: expect.stringContaining("Do not wrap bare URLs in inline code"),
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("passes top-level and group-specific systemPrompt via GroupSystemPrompt", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 7402n,
+            date: 1_700_000_220n,
+            fromId: 52n,
+            message: "check the docs",
+          } as any,
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Design" },
+      },
+      dispatchReplyPayload: {
+        text: "looks good",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        dmPolicy: "open",
+        groupPolicy: "open",
+        requireMention: false,
+        systemPrompt: "Keep replies short.",
+        groups: {
+          "88": {
+            requireMention: false,
+            systemPrompt: "Use markdown links when helpful.",
+            tools: { allow: ["message"] },
+          },
+        },
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalled()
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          GroupSystemPrompt: expect.stringContaining("Keep replies short."),
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          GroupSystemPrompt: expect.stringContaining("Use markdown links when helpful."),
         }),
       )
     })
