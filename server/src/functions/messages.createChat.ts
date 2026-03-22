@@ -8,6 +8,7 @@ import { encodeChat } from "@in/server/realtime/encoders/encodeChat"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { dialogs } from "@in/server/db/schema"
+import { chatIdReservations } from "@in/server/db/schema/chatIdReservations"
 import { Update } from "@inline-chat/protocol/core"
 import { getUpdateGroup } from "@in/server/modules/updates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
@@ -29,6 +30,7 @@ export async function createChat(
     description?: string
     isPublic?: boolean
     participants?: { userId: bigint }[]
+    reservedChatId?: bigint
   },
   context: FunctionContext,
 ): Promise<{ chat: Chat; dialog: Dialog }> {
@@ -38,6 +40,13 @@ export async function createChat(
     throw new RealtimeRpcError(RealtimeRpcError.Code.BAD_REQUEST, "Space ID is invalid", 400)
   }
   const resolvedSpaceId = spaceId as number
+  const reservedChatId = input.reservedChatId !== undefined ? Number(input.reservedChatId) : undefined
+  if (
+    input.reservedChatId !== undefined &&
+    (reservedChatId === undefined || Number.isNaN(reservedChatId) || !Number.isSafeInteger(reservedChatId) || reservedChatId <= 0)
+  ) {
+    throw RealtimeRpcError.BadRequest()
+  }
 
   const isPublic = input.isPublic ?? (hasSpaceId ? true : false)
 
@@ -119,6 +128,89 @@ export async function createChat(
       .then((result) => result[0]?.maxThreadNumber ?? 0)
 
     threadNumber = maxThreadNumber + 1
+  }
+
+  if (reservedChatId !== undefined) {
+    const { chat: createdChat, dialog: createdDialog } = await db.transaction(async (tx) => {
+      const [reservation] = await tx
+        .select()
+        .from(chatIdReservations)
+        .where(eq(chatIdReservations.chatId, reservedChatId))
+        .for("update")
+        .limit(1)
+
+      if (
+        !reservation ||
+        reservation.userId !== context.currentUserId ||
+        reservation.claimedAt !== null ||
+        reservation.expiresAt.getTime() <= Date.now()
+      ) {
+        throw RealtimeRpcError.BadRequest()
+      }
+
+      const [chat] = await tx
+        .insert(chats)
+        .values({
+          id: reservedChatId,
+          type: "thread",
+          spaceId: hasSpaceId ? resolvedSpaceId : null,
+          title: input.title,
+          publicThread: isPublic,
+          date: new Date(),
+          threadNumber: threadNumber,
+          emoji: input.emoji ?? null,
+          description: input.description ?? null,
+          createdBy: context.currentUserId,
+        })
+        .returning()
+
+      if (!chat) {
+        throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to create chat", 500)
+      }
+
+      if (isPublic === false && input.participants) {
+        const participants = input.participants.map((p) => ({
+          chatId: chat.id,
+          userId: Number(p.userId),
+          date: new Date(),
+        }))
+
+        await tx.insert(chatParticipants).values(participants)
+        participants.forEach((p) => AccessGuardsCache.setChatParticipant(p.chatId, p.userId))
+      }
+
+      const [dialog] = await tx
+        .insert(dialogs)
+        .values({
+          chatId: chat.id,
+          userId: context.currentUserId,
+          spaceId: hasSpaceId ? resolvedSpaceId : null,
+          date: new Date(),
+        })
+        .returning()
+
+      if (!dialog) {
+        throw new RealtimeRpcError(RealtimeRpcError.Code.INTERNAL_ERROR, "Failed to create dialog", 500)
+      }
+
+      await tx
+        .update(chatIdReservations)
+        .set({
+          claimedAt: new Date(),
+        })
+        .where(eq(chatIdReservations.chatId, reservedChatId))
+
+      return { chat, dialog }
+    })
+
+    const encodedDialog = Encoders.dialog(createdDialog, { unreadCount: 0 })
+    const persisted = await persistNewChatUpdate(createdChat.id)
+    await pushUpdates({ chat: createdChat, currentUserId: context.currentUserId, update: persisted })
+
+    return {
+      chat: encodeChat(createdChat, { encodingForUserId: context.currentUserId }),
+      dialog: encodedDialog,
+    }
   }
 
   const chat = await db

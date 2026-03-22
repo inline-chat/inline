@@ -706,6 +706,18 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("reserved chat ids") { db in
+      try db.create(table: "reservedChatId") { t in
+        t.primaryKey("chatId", .integer).notNull().unique()
+        t.column("expiresAt", .datetime).notNull()
+        t.column("createdAt", .datetime).notNull()
+      }
+
+      try db.alter(table: "chat") { t in
+        t.add(column: "createState", .text)
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

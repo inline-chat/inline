@@ -24,6 +24,7 @@ struct CreateChatView: View {
   @State private var selectedSpaceName: String?
   @FormState var formState
 
+  @Environment(\.auth) var auth
   @Environment(\.realtimeV2) var realtimeV2
   @EnvironmentStateObject private var spaceViewModel: FullSpaceViewModel
 
@@ -93,25 +94,29 @@ struct CreateChatView: View {
   private func createChat() {
     Task {
       do {
+        guard let currentUserId = auth.currentUserId else {
+          formState.failed(error: "You're signed out. Please log in again.")
+          return
+        }
+
         formState.startLoading()
         // For public threads the server requires an empty participants list
-        let participants: [Int64] = selectedChatType == .public ? [] : selectedParticipants.map(\.self)
+        var participants: [Int64] = selectedChatType == .public ? [] : selectedParticipants.map(\.self)
+        if selectedChatType == .private, participants.isEmpty {
+          participants = [currentUserId]
+        }
 
-        let result = try await realtimeV2.send(
-          .createChat(
-            title: text,
-            emoji: emoji.isEmpty ? nil : emoji,
-            isPublic: selectedChatType == .public,
-            spaceId: selectedSpaceId ?? spaceId ?? 0,
-            participants: participants
-          )
+        let chatId = try await realtimeV2.createThreadLocally(
+          title: text,
+          emoji: emoji.isEmpty ? nil : emoji,
+          isPublic: selectedChatType == .public,
+          spaceId: selectedSpaceId ?? spaceId ?? 0,
+          participants: participants
         )
 
-        if case let .createChat(createChatResult) = result {
-          formState.succeeded()
-          router.popToRoot()
-          router.push(.chat(peer: .thread(id: createChatResult.chat.id)))
-        }
+        formState.succeeded()
+        router.popToRoot()
+        router.push(.chat(peer: .thread(id: chatId)))
       } catch {
         formState.failed(error: error.localizedDescription)
         Log.shared.error("Failed to create chat", error: error)

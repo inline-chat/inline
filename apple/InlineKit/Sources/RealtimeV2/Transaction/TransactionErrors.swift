@@ -6,6 +6,7 @@ public enum TransactionError: Error {
   case timeout
   case invalid
   case ackedButNoResultAfterReconnect
+  case dependencyFailed
 }
 
 extension TransactionError {

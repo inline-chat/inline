@@ -10,7 +10,12 @@ class NewTransactionsTests {
   func testEmptyQueue() async throws {
     let transactions = Transactions()
     let result = await transactions.dequeue()
-    #expect(result == nil)
+    switch result {
+      case nil:
+        #expect(Bool(true))
+      default:
+        Issue.record("Expected empty queue to return nil")
+    }
   }
 
   @Test("adds to queue and returns in dequeue")
@@ -18,7 +23,11 @@ class NewTransactionsTests {
     let transactions = Transactions()
     let id = await transactions.queue(transaction: MockTransaction())
     let result = await transactions.dequeue()
-    #expect(result?.id == id)
+    if case let .ready(wrapper)? = result {
+      #expect(wrapper.id == id)
+    } else {
+      Issue.record("Expected queued transaction to dequeue as ready")
+    }
   }
 
   @Test("adds to inflight on dequeue")
@@ -208,6 +217,73 @@ class NewTransactionsTests {
     #expect(transaction1.id != transaction2.id)
     #expect(transaction1.date <= Date())
   }
+
+  @Test("dequeue skips blocked transactions and runs later ready work")
+  func testDequeueSkipsBlockedTransactions() async throws {
+    let resolver = MockBlockerResolver()
+    let transactions = Transactions(blockerResolver: resolver)
+
+    let blockedID = await transactions.queue(
+      transaction: BlockedTransaction(blockers: [.chatCreated(chatId: 1)])
+    )
+    let readyID = await transactions.queue(transaction: MockTransaction())
+
+    let first = await transactions.dequeue()
+    if case let .ready(wrapper)? = first {
+      #expect(wrapper.id == readyID)
+    } else {
+      Issue.record("Expected ready transaction to bypass blocked head-of-line work")
+    }
+
+    let blockedStillQueued = await transactions.isInQueue(transactionId: blockedID)
+    #expect(blockedStillQueued)
+  }
+
+  @Test("dequeue returns failed for transactions with failed blockers")
+  func testDequeueFailsTransactionsWithFailedBlockers() async throws {
+    let resolver = MockBlockerResolver()
+    await resolver.setState(.failed, for: .chatCreated(chatId: 9))
+
+    let transactions = Transactions(blockerResolver: resolver)
+    let id = await transactions.queue(
+      transaction: BlockedTransaction(blockers: [.chatCreated(chatId: 9)])
+    )
+
+    let result = await transactions.dequeue()
+    if case let .failed(wrapper)? = result {
+      #expect(wrapper.id == id)
+    } else {
+      Issue.record("Expected failed blocker to drop queued transaction")
+    }
+
+    let stillQueued = await transactions.isInQueue(transactionId: id)
+    #expect(!stillQueued)
+  }
+
+  @Test("satisfied blockers unblock queued transactions")
+  func testSatisfiedBlockersUnblockQueuedTransactions() async throws {
+    let resolver = MockBlockerResolver()
+    let transactions = Transactions(blockerResolver: resolver)
+    let blocker = TransactionBlocker.chatCreated(chatId: 7)
+    let id = await transactions.queue(transaction: BlockedTransaction(blockers: [blocker]))
+
+    let initial = await transactions.dequeue()
+    switch initial {
+      case nil:
+        #expect(Bool(true))
+      default:
+        Issue.record("Expected blocked transaction to stay queued")
+    }
+
+    await transactions.satisfy(blockers: [blocker])
+
+    let result = await transactions.dequeue()
+    if case let .ready(wrapper)? = result {
+      #expect(wrapper.id == id)
+    } else {
+      Issue.record("Expected satisfied blocker to release queued transaction")
+    }
+  }
 }
 
 // MARK: - Helpers
@@ -243,4 +319,44 @@ private struct MockTransaction: Transaction, Codable {
 
   func optimistic() async {}
   func failed(error: TransactionError) async {}
+}
+
+private actor MockBlockerResolver: TransactionBlockerResolver {
+  private var states: [TransactionBlocker: TransactionBlockerState] = [:]
+
+  func setState(_ state: TransactionBlockerState, for blocker: TransactionBlocker) {
+    states[blocker] = state
+  }
+
+  func state(for blocker: TransactionBlocker) async -> TransactionBlockerState {
+    states[blocker] ?? .blocked
+  }
+}
+
+private struct BlockedTransaction: Transaction, Codable {
+  struct Context: Sendable, Codable {
+    let blockers: [TransactionBlocker]
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case context
+  }
+
+  var method: InlineProtocol.Method = .UNRECOGNIZED(0)
+  var type: TransactionKindType = .query()
+  var context: Context
+
+  init(blockers: [TransactionBlocker]) {
+    context = Context(blockers: blockers)
+  }
+
+  var blockers: [TransactionBlocker] {
+    context.blockers
+  }
+
+  func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
+    nil
+  }
+
+  func apply(_ rpcResult: InlineProtocol.RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {}
 }

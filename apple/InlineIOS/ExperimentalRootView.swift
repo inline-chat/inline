@@ -320,28 +320,17 @@ private struct ExperimentalAuthedRootView: View {
 
     Task {
       do {
-        let result = try await realtimeV2.send(
-          .createChat(
-            title: "",
-            emoji: nil,
-            isPublic: false,
-            spaceId: spaceId,
-            participants: [currentUserId]
-          )
+        let chatId = try await realtimeV2.createThreadLocally(
+          title: "",
+          emoji: nil,
+          isPublic: false,
+          spaceId: spaceId,
+          participants: [currentUserId]
         )
 
         await MainActor.run {
           isCreatingThread = false
-
-          if case let .createChat(response) = result {
-            router.push(.chat(peer: .thread(id: response.chat.id)), for: router.selectedTab)
-          } else {
-            ToastManager.shared.showToast(
-              "Failed to create thread.",
-              type: .error,
-              systemImage: "exclamationmark.triangle"
-            )
-          }
+          router.push(.chat(peer: .thread(id: chatId)), for: router.selectedTab)
         }
       } catch {
         await MainActor.run {

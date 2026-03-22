@@ -160,6 +160,10 @@ public struct SendMessageTransaction: Transaction2 {
     context.peerId
   }
 
+  public var blockers: [TransactionBlocker] {
+    [.chatCreated(chatId: context.chatId)]
+  }
+
   // Methods
   public func optimistic() async {
     log.debug("Optimistic send message")
