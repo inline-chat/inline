@@ -19,6 +19,7 @@ class MainSidebarItemCell: NSView {
   private var currentLeadingContent: LeadingContent?
   private var currentTitleText = ""
   private var currentMessageText = ""
+  private var currentMessageUsesAccentColor = false
   private var currentBadgeState = BadgeState(unread: false, pinned: false)
   private var unreadBadgeAnimationToken: UInt = 0
   private var currentArchiveState: Bool?
@@ -134,6 +135,11 @@ class MainSidebarItemCell: NSView {
   private enum LeadingContent: Equatable {
     case action(MainSidebarList.ActionItem)
     case avatar(ChatIcon.PeerType)
+  }
+
+  private struct MessagePreviewState: Equatable {
+    let text: String
+    let usesAccentColor: Bool
   }
 
   private struct BadgeState: Equatable {
@@ -449,10 +455,11 @@ class MainSidebarItemCell: NSView {
       currentTitleText = titleText
     }
 
-    let messageText = messagePreviewText()
-    if currentMessageText != messageText {
-      configureMessagePreview(messageText: messageText)
-      currentMessageText = messageText
+    let messagePreviewState = messagePreviewState()
+    if currentMessageText != messagePreviewState.text || currentMessageUsesAccentColor != messagePreviewState.usesAccentColor {
+      configureMessagePreview(messagePreviewState: messagePreviewState)
+      currentMessageText = messagePreviewState.text
+      currentMessageUsesAccentColor = messagePreviewState.usesAccentColor
     }
 
     let nextBadgeState = BadgeState(
@@ -492,6 +499,7 @@ class MainSidebarItemCell: NSView {
     currentLeadingContent = nil
     currentTitleText = ""
     currentMessageText = ""
+    currentMessageUsesAccentColor = false
     currentBadgeState = BadgeState(unread: false, pinned: false)
     hasConfiguredBadges = false
     currentArchiveState = nil
@@ -820,9 +828,9 @@ class MainSidebarItemCell: NSView {
     nameLabel.textColor = .labelColor
   }
 
-  private func configureMessagePreview(messageText: String) {
-    messageLabel.stringValue = messageText
-    messageLabel.textColor = .secondaryLabelColor
+  private func configureMessagePreview(messagePreviewState: MessagePreviewState) {
+    messageLabel.stringValue = messagePreviewState.text
+    messageLabel.textColor = messagePreviewState.usesAccentColor ? .accent : .secondaryLabelColor
     messageLabel.isHidden = isActionItem || !displayMode.showsMessagePreview
   }
 
@@ -840,33 +848,45 @@ class MainSidebarItemCell: NSView {
       composeActionsCancellable = ComposeActions.shared.$actions
         .receive(on: DispatchQueue.main)
         .sink { [weak self] _ in
-          guard let self, self.item?.peerId?.isPrivate == true else { return }
+          guard let self, self.item?.peerId != nil else { return }
           self.refreshMessagePreview()
         }
     }
   }
 
   private func refreshMessagePreview() {
-    let messageText = messagePreviewText()
-    guard currentMessageText != messageText else { return }
-    configureMessagePreview(messageText: messageText)
-    currentMessageText = messageText
+    let nextMessagePreviewState = messagePreviewState()
+    guard
+      currentMessageText != nextMessagePreviewState.text ||
+        currentMessageUsesAccentColor != nextMessagePreviewState.usesAccentColor
+    else { return }
+    configureMessagePreview(messagePreviewState: nextMessagePreviewState)
+    currentMessageText = nextMessagePreviewState.text
+    currentMessageUsesAccentColor = nextMessagePreviewState.usesAccentColor
   }
 
-  private func messagePreviewText() -> String {
+  private func messagePreviewState() -> MessagePreviewState {
     if let draftText = item?.draftPreviewText {
-      return draftText
+      return MessagePreviewState(text: draftText, usesAccentColor: false)
     }
-    if let typingText = typingPreviewText() {
+    if let composeActionText = composeActionPreviewText() {
+      return MessagePreviewState(text: composeActionText, usesAccentColor: true)
+    }
+    return MessagePreviewState(text: item?.sidebarLastMessagePreviewText ?? "", usesAccentColor: false)
+  }
+
+  private func composeActionPreviewText() -> String? {
+    guard displayMode.showsMessagePreview else { return nil }
+    guard let peer = item?.peerId else { return nil }
+
+    if let typingText = ComposeActions.shared.getTypingDisplayText(for: peer), !typingText.isEmpty {
       return typingText
     }
-    return item?.sidebarLastMessagePreviewText ?? ""
-  }
 
-  private func typingPreviewText() -> String? {
-    guard displayMode.showsMessagePreview else { return nil }
-    guard let peer = item?.peerId, peer.isPrivate else { return nil }
-    return ComposeActions.shared.getTypingDisplayText(for: peer)
+    guard let action = ComposeActions.shared.getComposeAction(for: peer)?.action, action != .typing else {
+      return nil
+    }
+    return action.toHumanReadable()
   }
 
   private func applyDisplayMode(_ mode: MainSidebarList.DisplayMode) {
@@ -879,11 +899,19 @@ class MainSidebarItemCell: NSView {
     messageLabel.font = .systemFont(ofSize: mode.messageFontSize, weight: .regular)
     messageLabel.isHidden = isActionItem || !mode.showsMessagePreview
     contentStackView.spacing = mode.messageLineSpacing
-    let messageText = messagePreviewText()
-    if currentMessageText != messageText {
-      currentMessageText = messageText
+    let nextMessagePreviewState = messagePreviewState()
+    if currentMessageText != nextMessagePreviewState.text ||
+      currentMessageUsesAccentColor != nextMessagePreviewState.usesAccentColor
+    {
+      currentMessageText = nextMessagePreviewState.text
+      currentMessageUsesAccentColor = nextMessagePreviewState.usesAccentColor
     }
-    configureMessagePreview(messageText: currentMessageText)
+    configureMessagePreview(
+      messagePreviewState: MessagePreviewState(
+        text: currentMessageText,
+        usesAccentColor: currentMessageUsesAccentColor
+      )
+    )
     updateTrackingArea()
   }
 
