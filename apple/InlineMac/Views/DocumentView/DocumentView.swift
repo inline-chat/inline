@@ -454,7 +454,7 @@ class DocumentView: NSView {
     // Only cancel if we're in downloading state
     if case .downloading = documentState {
       // Cancel the download
-      FileDownloader.shared.cancelDocumentDownload(documentId: documentInfo.document.documentId)
+      FileDownloader.shared.cancelDocumentDownload(documentId: documentInfo.id)
 
       // Reset state
       documentState = .needsDownload
@@ -481,9 +481,6 @@ class DocumentView: NSView {
 
     // Prevent overlapping downloads for the same document by cancelling any existing task
     cancelExistingDownloadIfAny()
-
-    // Check if download is already in progress by subscribing to progress
-    let documentId = documentInfo.document.documentId
 
     // If we're already downloading, don't start a new download
     if case .downloading = documentState {
@@ -639,18 +636,15 @@ class DocumentView: NSView {
           documentState = .locallyAvailable
           stopMonitoringProgress()
         } else if let error = progress.error {
-          // Download failed
           Log.shared.error("Document download failed: \(error)")
           documentState = .needsDownload
           stopMonitoringProgress()
         } else if FileDownloader.shared.isDocumentDownloadActive(documentId: documentId) {
-          // Download is active - update progress
           documentState = .downloading(
             bytesReceived: progress.bytesReceived,
             totalBytes: progress.totalBytes > 0 ? progress.totalBytes : Int64(documentInfo.document.size ?? 0)
           )
         } else if progress.bytesReceived > 0 {
-          // We have progress but no active task - might be completing
           documentState = .downloading(
             bytesReceived: progress.bytesReceived,
             totalBytes: progress.totalBytes > 0 ? progress.totalBytes : Int64(documentInfo.document.size ?? 0)

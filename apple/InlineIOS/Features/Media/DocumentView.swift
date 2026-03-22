@@ -768,7 +768,7 @@ class DocumentView: UIView {
       }
     }
 
-    // Use documentInfo.id to match what FileDownloader uses
+    // Use DocumentInfo.id consistently so forwarded copies follow the same progress stream.
     guard let documentInfo else { return .needsDownload }
     let documentId = documentInfo.id
     if FileDownloader.shared.isDocumentDownloadActive(documentId: documentId) {

@@ -403,7 +403,7 @@ class MinimalMessageViewAppKit: NSView {
       desiredView = voiceMessageView
     } else {
       if let documentInfo = fullMessage.documentInfo {
-        documentView?.update(with: documentInfo)
+        documentView?.update(with: documentInfo, fullMessage: fullMessage)
       }
       desiredView = documentView
     }
