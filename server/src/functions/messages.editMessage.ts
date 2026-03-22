@@ -1,6 +1,7 @@
-import type { InputPeer, MessageEntities, Update } from "@inline-chat/protocol/core"
+import type { InputPeer, MessageActions, MessageEntities, Update } from "@inline-chat/protocol/core"
 import { ChatModel } from "@in/server/db/models/chats"
 import { MessageModel } from "@in/server/db/models/messages"
+import { UsersModel } from "@in/server/db/models/users"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { Updates } from "@in/server/modules/updates/updates"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
@@ -12,12 +13,15 @@ import { connectionManager } from "../ws/connections"
 import { encodeDate, encodeDateStrict } from "@in/server/realtime/encoders/helpers"
 import type { UpdateSeqAndDate } from "@in/server/db/models/updates"
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
+import { normalizeAndValidateMessageActions } from "@in/server/modules/message/messageActions"
+import { RealtimeRpcError } from "@in/server/realtime/errors"
 
 type Input = {
   messageId: bigint
   peer: InputPeer
   text: string
   entities?: MessageEntities
+  actions?: MessageActions
   parseMarkdown?: boolean
 }
 
@@ -29,6 +33,13 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
   const chatId = await ChatModel.getChatIdFromInputPeer(input.peer, context)
   const currentUserId = context.currentUserId
   const fullMessage = await MessageModel.getMessage(Number(input.messageId), chatId)
+  const normalizedActions = normalizeAndValidateMessageActions(input.actions)
+  if (normalizedActions !== undefined) {
+    const sender = await UsersModel.getUserById(currentUserId)
+    if (!sender?.bot) {
+      throw RealtimeRpcError.BadRequest()
+    }
+  }
   const outgoingText = await processOutgoingText({
     text: input.text,
     entities: input.entities,
@@ -40,6 +51,7 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
     chatId,
     text: outgoingText.text,
     entities: outgoingText.entities,
+    actions: normalizedActions,
   })
 
   if (!message) {

@@ -518,6 +518,36 @@ function convertUserUpdate(decrypted: DecryptedUpdate, userId: number): Update |
         },
       }
 
+    case "userMessageActionInvoked":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "messageActionInvoked",
+          messageActionInvoked: {
+            interactionId: BigInt(seq),
+            chatId: payload.userMessageActionInvoked.chatId,
+            messageId: payload.userMessageActionInvoked.messageId,
+            actorUserId: payload.userMessageActionInvoked.actorUserId,
+            actionId: payload.userMessageActionInvoked.actionId,
+            data: payload.userMessageActionInvoked.data,
+          },
+        },
+      }
+
+    case "userMessageActionAnswered":
+      return {
+        seq,
+        date,
+        update: {
+          oneofKind: "messageActionAnswered",
+          messageActionAnswered: {
+            interactionId: payload.userMessageActionAnswered.interactionId,
+            ui: payload.userMessageActionAnswered.ui,
+          },
+        },
+      }
+
     default:
       log.warn("Unhandled user update", { type: payload.oneofKind })
       return null

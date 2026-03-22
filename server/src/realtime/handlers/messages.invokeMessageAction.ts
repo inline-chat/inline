@@ -1,24 +1,21 @@
-import { EditMessageInput, EditMessageResult } from "@inline-chat/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { Functions } from "@in/server/functions"
+import type { InvokeMessageActionInput, InvokeMessageActionResult } from "@inline-chat/protocol/core"
 
-export const editMessage = async (
-  input: EditMessageInput,
+export const invokeMessageAction = async (
+  input: InvokeMessageActionInput,
   handlerContext: HandlerContext,
-): Promise<EditMessageResult> => {
+): Promise<InvokeMessageActionResult> => {
   if (!input.peerId) {
     throw RealtimeRpcError.PeerIdInvalid()
   }
 
-  const result = await Functions.messages.editMessage(
+  const result = await Functions.messages.invokeMessageAction(
     {
+      peerId: input.peerId,
       messageId: input.messageId,
-      peer: input.peerId,
-      text: input.text,
-      entities: input.entities,
-      actions: input.actions,
-      parseMarkdown: input.parseMarkdown ?? undefined,
+      actionId: input.actionId,
     },
     {
       currentSessionId: handlerContext.sessionId,
@@ -26,5 +23,7 @@ export const editMessage = async (
     },
   )
 
-  return { updates: result.updates }
+  return {
+    interactionId: result.interactionId,
+  }
 }

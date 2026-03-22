@@ -197,6 +197,44 @@ message MessageReplies {
   repeated int64 recent_replier_user_ids = 4;
 }
 
+message MessageActions { repeated MessageActionRow rows = 1; }
+
+message MessageActionRow { repeated MessageAction actions = 1; }
+
+message MessageAction {
+  // Bot-defined stable identifier for this button/action.
+  string action_id = 1;
+
+  // Display label.
+  string text = 2;
+
+  oneof action {
+    MessageActionCallback callback = 3;
+    MessageActionCopyText copy_text = 4;
+  }
+}
+
+message MessageActionCallback {
+  // Opaque payload parsed by bot.
+  bytes data = 1;
+}
+
+message MessageActionCopyText {
+  // Text copied client-side without notifying the bot.
+  string text = 1;
+}
+
+message MessageActionResponseUi {
+  oneof kind {
+    MessageActionToast toast = 1;
+    // Reserved for future expandability:
+    // 2 => alert
+    // 3 => open_url
+  }
+}
+
+message MessageActionToast { string text = 1; }
+
 message Message {
   int64 id = 1;
 
@@ -255,6 +293,9 @@ message Message {
   // Replies shown under the parent message row when this message has an
   // anchored child thread.
   optional MessageReplies replies = 19;
+
+  // Optional interactive actions (bot messages only).
+  optional MessageActions actions = 20;
 }
 
 enum MessageSendMode {
@@ -683,6 +724,8 @@ enum Method {
   GET_PEER_BOT_COMMANDS = 45;
   SHOW_CHAT_IN_SIDEBAR = 46;
   RESERVE_CHAT_IDS = 47;
+  INVOKE_MESSAGE_ACTION = 48;
+  ANSWER_MESSAGE_ACTION = 49;
 }
 
 message RpcCall {
@@ -735,6 +778,8 @@ message RpcCall {
     GetPeerBotCommandsInput getPeerBotCommands = 46;
     ShowChatInSidebarInput showChatInSidebar = 47;
     ReserveChatIdsInput reserveChatIds = 48;
+    InvokeMessageActionInput invokeMessageAction = 49;
+    AnswerMessageActionInput answerMessageAction = 50;
   }
 }
 
@@ -789,6 +834,8 @@ message RpcResult {
     GetPeerBotCommandsResult getPeerBotCommands = 46;
     ShowChatInSidebarResult showChatInSidebar = 47;
     ReserveChatIdsResult reserveChatIds = 48;
+    InvokeMessageActionResult invokeMessageAction = 49;
+    AnswerMessageActionResult answerMessageAction = 50;
   }
 }
 
@@ -1208,6 +1255,11 @@ message EditMessageInput {
   string text = 3;
   optional MessageEntities entities = 7;
   optional bool parse_markdown = 8;
+  // Optional action replacement:
+  // - absent: keep current actions
+  // - present + empty rows: clear actions
+  // - present + non-empty rows: replace actions
+  optional MessageActions actions = 9;
 }
 
 message EditMessageResult { repeated Update updates = 1; }
@@ -1275,9 +1327,30 @@ message SendMessageInput {
 
   // Special send mode for this message
   optional MessageSendMode send_mode = 9;
+
+  // Optional interactive actions (bot messages only).
+  optional MessageActions actions = 10;
 }
 
 message SendMessageResult { repeated Update updates = 2; }
+
+message InvokeMessageActionInput {
+  InputPeer peer_id = 1;
+  int64 message_id = 2;
+  string action_id = 3;
+}
+
+message InvokeMessageActionResult {
+  // Scoped to the target bot (its user bucket seq).
+  int64 interaction_id = 1;
+}
+
+message AnswerMessageActionInput {
+  int64 interaction_id = 1;
+  optional MessageActionResponseUi ui = 2;
+}
+
+message AnswerMessageActionResult {}
 
 message ForwardMessagesInput {
   // Source chat/user peer
@@ -1487,6 +1560,8 @@ message Update {
     UpdateChatMoved chat_moved = 32;
     UpdateDialogNotificationSettings dialog_notification_settings = 33;
     UpdateChatOpen chat_open = 34;
+    UpdateMessageActionInvoked message_action_invoked = 35;
+    UpdateMessageActionAnswered message_action_answered = 36;
   }
 }
 
@@ -1649,6 +1724,20 @@ message UpdateChatOpen {
   Chat chat = 1;
   Dialog dialog = 2;
   optional User user = 3;
+}
+
+message UpdateMessageActionInvoked {
+  int64 interaction_id = 1;
+  int64 chat_id = 2;
+  int64 message_id = 3;
+  int64 actor_user_id = 4;
+  string action_id = 5;
+  bytes data = 6;
+}
+
+message UpdateMessageActionAnswered {
+  int64 interaction_id = 1;
+  optional MessageActionResponseUi ui = 2;
 }
 
 // Update when a chat is deleted

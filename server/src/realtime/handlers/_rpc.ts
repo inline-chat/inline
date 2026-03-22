@@ -48,6 +48,8 @@ import { moveThreadHandler } from "@in/server/realtime/handlers/messages.moveThr
 import { updateDialogNotificationSettings } from "@in/server/realtime/handlers/messages.updateDialogNotificationSettings"
 import { updatePushNotificationDetailsHandler } from "@in/server/realtime/handlers/user.updatePushNotificationDetails"
 import { reserveChatIds } from "@in/server/realtime/handlers/messages.reserveChatIds"
+import { invokeMessageAction } from "@in/server/realtime/handlers/messages.invokeMessageAction"
+import { answerMessageAction } from "@in/server/realtime/handlers/messages.answerMessageAction"
 import { createSubthread } from "@in/server/realtime/handlers/messages.createSubthread"
 
 const log = new Log("rpc")
@@ -403,6 +405,7 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       let result = await updatePushNotificationDetailsHandler(call.input.updatePushNotificationDetails, handlerContext)
       return { oneofKind: "updatePushNotificationDetails", updatePushNotificationDetails: result }
     }
+
     case Method.CREATE_SUBTHREAD: {
       if (call.input.oneofKind !== "createSubthread") {
         throw RealtimeRpcError.BadRequest()
@@ -411,13 +414,28 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       return { oneofKind: "createSubthread", createSubthread: result }
     }
 
-
     case Method.RESERVE_CHAT_IDS: {
       if (call.input.oneofKind !== "reserveChatIds") {
         throw RealtimeRpcError.BadRequest()
       }
       const result = await reserveChatIds(call.input.reserveChatIds, handlerContext)
       return { oneofKind: "reserveChatIds", reserveChatIds: result }
+    }
+
+    case Method.INVOKE_MESSAGE_ACTION: {
+      if (call.input.oneofKind !== "invokeMessageAction") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await invokeMessageAction(call.input.invokeMessageAction, handlerContext)
+      return { oneofKind: "invokeMessageAction", invokeMessageAction: result }
+    }
+
+    case Method.ANSWER_MESSAGE_ACTION: {
+      if (call.input.oneofKind !== "answerMessageAction") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await answerMessageAction(call.input.answerMessageAction, handlerContext)
+      return { oneofKind: "answerMessageAction", answerMessageAction: result }
     }
 
     default:

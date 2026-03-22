@@ -1,4 +1,4 @@
-import { MessageEntities, type InputPeer, type MessageTranslation } from "@inline-chat/protocol/core"
+import { MessageActions, MessageEntities, type InputPeer, type MessageTranslation } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import { ModelError } from "@in/server/db/models/_errors"
 import { ChatModel } from "@in/server/db/models/chats"
@@ -75,10 +75,19 @@ export type MessageMediaFilter = "photos" | "videos" | "photo_video" | "document
 
 export type ProcessedMessage = Omit<
   DbMessage,
-  "textEncrypted" | "textIv" | "textTag" | "entitiesEncrypted" | "entitiesIv" | "entitiesTag"
+  | "textEncrypted"
+  | "textIv"
+  | "textTag"
+  | "entitiesEncrypted"
+  | "entitiesIv"
+  | "entitiesTag"
+  | "actionsEncrypted"
+  | "actionsIv"
+  | "actionsTag"
 > & {
   text: string | null
   entities: MessageEntities | null
+  actions?: MessageActions | null
 }
 
 export type ProcessedMessageTranslation = Omit<
@@ -97,9 +106,18 @@ export type ProcessedMessageAndTranslation = ProcessedMessage & {
 
 export type DbFullMessage = Omit<
   DbMessage,
-  "textEncrypted" | "textIv" | "textTag" | "entitiesEncrypted" | "entitiesIv" | "entitiesTag"
+  | "textEncrypted"
+  | "textIv"
+  | "textTag"
+  | "entitiesEncrypted"
+  | "entitiesIv"
+  | "entitiesTag"
+  | "actionsEncrypted"
+  | "actionsIv"
+  | "actionsTag"
 > & {
   entities: MessageEntities | null
+  actions?: MessageActions | null
   from: DbUser
   reactions: DbReaction[]
   photo: DbFullPhoto | null
@@ -459,6 +477,16 @@ function processMessage(message: DbInputFullMessage): DbFullMessage {
             }),
           )
         : null,
+    actions:
+      message.actionsEncrypted && message.actionsIv && message.actionsTag
+        ? MessageActions.fromBinary(
+            decryptBinary({
+              encrypted: message.actionsEncrypted,
+              iv: message.actionsIv,
+              authTag: message.actionsTag,
+            }),
+          )
+        : null,
     photo: message.photo ? FileModel.processFullPhoto(message.photo) : null,
     video: message.video ? FileModel.processFullVideo(message.video) : null,
     document: message.document ? FileModel.processFullDocument(message.document) : null,
@@ -641,17 +669,20 @@ type EditMessageInput = {
   chatId: number
   text: string
   entities?: MessageEntities
+  actions?: MessageActions
 }
 
 async function editMessage(input: EditMessageInput): Promise<{
   message: DbMessage
   update: UpdateSeqAndDate
 }> {
-  let { messageId, chatId, text, entities } = input
+  let { messageId, chatId, text, entities, actions } = input
 
   const encryptedMessage = text ? encryptMessage(text) : undefined
   const binaryEntities = entities ? MessageEntities.toBinary(entities) : undefined
   const encryptedEntities = binaryEntities && binaryEntities?.length > 0 ? encryptBinary(binaryEntities) : undefined
+  const binaryActions = actions ? MessageActions.toBinary(actions) : undefined
+  const encryptedActions = binaryActions && binaryActions.length > 0 ? encryptBinary(binaryActions) : undefined
   const hasLink = detectHasLink({ entities })
 
   let { message, update } = await db.transaction(async (tx) => {
@@ -680,22 +711,40 @@ async function editMessage(input: EditMessageInput): Promise<{
       entity: chat,
     })
 
+    const updatePayload: Record<string, unknown> = {
+      editDate: new Date(),
+      // text
+      textEncrypted: encryptedMessage?.encrypted,
+      textIv: encryptedMessage?.iv,
+      textTag: encryptedMessage?.authTag,
+      // entities
+      entitiesEncrypted: encryptedEntities?.encrypted,
+      entitiesIv: encryptedEntities?.iv,
+      entitiesTag: encryptedEntities?.authTag,
+      hasLink: hasLink,
+    }
+
+    // Optional action replacement semantics:
+    // - undefined => keep existing
+    // - empty rows => clear
+    // - non-empty rows => replace
+    if (actions !== undefined) {
+      if ((actions.rows?.length ?? 0) === 0) {
+        updatePayload["actionsEncrypted"] = null
+        updatePayload["actionsIv"] = null
+        updatePayload["actionsTag"] = null
+      } else {
+        updatePayload["actionsEncrypted"] = encryptedActions?.encrypted ?? null
+        updatePayload["actionsIv"] = encryptedActions?.iv ?? null
+        updatePayload["actionsTag"] = encryptedActions?.authTag ?? null
+      }
+    }
+
     let [msgs] = await Promise.all([
       // Edit message
       db
         .update(messages)
-        .set({
-          editDate: new Date(),
-          // text
-          textEncrypted: encryptedMessage?.encrypted,
-          textIv: encryptedMessage?.iv,
-          textTag: encryptedMessage?.authTag,
-          // entities
-          entitiesEncrypted: encryptedEntities?.encrypted,
-          entitiesIv: encryptedEntities?.iv,
-          entitiesTag: encryptedEntities?.authTag,
-          hasLink: hasLink,
-        })
+        .set(updatePayload)
         .where(and(eq(messages.chatId, chatId), eq(messages.messageId, messageId)))
         .returning(),
 
@@ -933,6 +982,12 @@ async function getNonFullMessagesRange(chatId: number, offsetId: number, limit: 
             decryptBinary({ encrypted: msg.entitiesEncrypted, iv: msg.entitiesIv, authTag: msg.entitiesTag }),
           )
         : null,
+    actions:
+      msg.actionsEncrypted && msg.actionsIv && msg.actionsTag
+        ? MessageActions.fromBinary(
+            decryptBinary({ encrypted: msg.actionsEncrypted, iv: msg.actionsIv, authTag: msg.actionsTag }),
+          )
+        : null,
   }))
 }
 
@@ -964,6 +1019,12 @@ async function getNonFullMessagesFromNewToOld(input: {
       msg.entitiesEncrypted && msg.entitiesIv && msg.entitiesTag
         ? MessageEntities.fromBinary(
             decryptBinary({ encrypted: msg.entitiesEncrypted, iv: msg.entitiesIv, authTag: msg.entitiesTag }),
+          )
+        : null,
+    actions:
+      msg.actionsEncrypted && msg.actionsIv && msg.actionsTag
+        ? MessageActions.fromBinary(
+            decryptBinary({ encrypted: msg.actionsEncrypted, iv: msg.actionsIv, authTag: msg.actionsTag }),
           )
         : null,
   }))
@@ -1011,6 +1072,12 @@ async function getMessagesAroundTarget(
       msg.entitiesEncrypted && msg.entitiesIv && msg.entitiesTag
         ? MessageEntities.fromBinary(
             decryptBinary({ encrypted: msg.entitiesEncrypted, iv: msg.entitiesIv, authTag: msg.entitiesTag }),
+          )
+        : null,
+    actions:
+      msg.actionsEncrypted && msg.actionsIv && msg.actionsTag
+        ? MessageActions.fromBinary(
+            decryptBinary({ encrypted: msg.actionsEncrypted, iv: msg.actionsIv, authTag: msg.actionsTag }),
           )
         : null,
   }))
