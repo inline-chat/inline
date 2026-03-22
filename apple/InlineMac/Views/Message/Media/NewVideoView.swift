@@ -65,112 +65,127 @@ private final class VideoOverlayViewModel: ObservableObject {
   }
 }
 
-private final class VideoOverlayView: NSView {
-  private final class ProgressRingView: NSView {
-    private enum Constants {
-      static let lineWidth: CGFloat = 1.75
-      static let minVisibleProgress: CGFloat = 0.06
-      static let rotationDuration: CFTimeInterval = 1.5
-      static let ringInset: CGFloat = 1
-      static let rotationKey = "circularProgressRotation"
-    }
+final class CircularTransferRingView: NSView {
+  struct Configuration {
+    var lineWidth: CGFloat
+    var minVisibleProgress: CGFloat
+    var rotationDuration: CFTimeInterval
+    var ringInset: CGFloat
+    var strokeColor: NSColor
 
-    private let progressLayer = CAShapeLayer()
-    private var displayedProgress: CGFloat = Constants.minVisibleProgress
+    static let videoDefault = Configuration(
+      lineWidth: 1.75,
+      minVisibleProgress: 0.06,
+      rotationDuration: 1.5,
+      ringInset: 1,
+      strokeColor: .white
+    )
+  }
 
-    override init(frame frameRect: NSRect) {
-      super.init(frame: frameRect)
-      wantsLayer = true
-      translatesAutoresizingMaskIntoConstraints = false
-      layer?.addSublayer(progressLayer)
+  private enum Constants {
+    static let rotationKey = "circularProgressRotation"
+  }
 
-      progressLayer.fillColor = NSColor.clear.cgColor
-      progressLayer.strokeColor = NSColor.white.cgColor
-      progressLayer.lineWidth = Constants.lineWidth
-      progressLayer.lineCap = .round
-      progressLayer.strokeStart = 0
-      progressLayer.strokeEnd = displayedProgress
-    }
+  private let configuration: Configuration
+  private let progressLayer = CAShapeLayer()
+  private var displayedProgress: CGFloat
 
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+  init(configuration: Configuration = .videoDefault) {
+    self.configuration = configuration
+    displayedProgress = configuration.minVisibleProgress
+    super.init(frame: .zero)
+    wantsLayer = true
+    translatesAutoresizingMaskIntoConstraints = false
+    layer?.addSublayer(progressLayer)
 
-    override var isHidden: Bool {
-      didSet {
-        if isHidden {
-          resetProgress()
-        }
-        updateRotationAnimation()
+    progressLayer.fillColor = NSColor.clear.cgColor
+    progressLayer.strokeColor = configuration.strokeColor.cgColor
+    progressLayer.lineWidth = configuration.lineWidth
+    progressLayer.lineCap = .round
+    progressLayer.strokeStart = 0
+    progressLayer.strokeEnd = displayedProgress
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+  override var isHidden: Bool {
+    didSet {
+      if isHidden {
+        resetProgress()
       }
-    }
-
-    override func viewDidMoveToWindow() {
-      super.viewDidMoveToWindow()
       updateRotationAnimation()
-    }
-
-    override func layout() {
-      super.layout()
-      updatePath()
-    }
-
-    func setProgress(_ progress: CGFloat) {
-      let clamped = max(0, min(progress, 1))
-      if clamped <= 0.0001 {
-        displayedProgress = Constants.minVisibleProgress
-      } else {
-        let adjusted = max(Constants.minVisibleProgress, clamped)
-        displayedProgress = max(displayedProgress, adjusted)
-      }
-
-      CATransaction.begin()
-      CATransaction.setAnimationDuration(0.12)
-      CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .linear))
-      progressLayer.strokeEnd = displayedProgress
-      CATransaction.commit()
-      isHidden = false
-    }
-
-    private func updatePath() {
-      progressLayer.frame = bounds
-
-      let diameter = min(bounds.width, bounds.height)
-      let radius = max(0, (diameter / 2) - (Constants.lineWidth / 2) - Constants.ringInset)
-      let center = CGPoint(x: bounds.width / 2, y: bounds.height / 2)
-      let path = CGMutablePath()
-      path.addArc(
-        center: center,
-        radius: radius,
-        startAngle: -.pi / 2,
-        endAngle: (CGFloat.pi * 3) / 2,
-        clockwise: false
-      )
-      progressLayer.path = path
-    }
-
-    private func resetProgress() {
-      displayedProgress = Constants.minVisibleProgress
-      progressLayer.strokeEnd = displayedProgress
-    }
-
-    private func updateRotationAnimation() {
-      guard !isHidden, window != nil else {
-        progressLayer.removeAnimation(forKey: Constants.rotationKey)
-        return
-      }
-
-      guard progressLayer.animation(forKey: Constants.rotationKey) == nil else { return }
-
-      let animation = CABasicAnimation(keyPath: "transform.rotation.z")
-      animation.fromValue = 0
-      animation.toValue = CGFloat.pi * 2
-      animation.duration = Constants.rotationDuration
-      animation.repeatCount = .infinity
-      animation.timingFunction = CAMediaTimingFunction(name: .linear)
-      progressLayer.add(animation, forKey: Constants.rotationKey)
     }
   }
 
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    updateRotationAnimation()
+  }
+
+  override func layout() {
+    super.layout()
+    updatePath()
+  }
+
+  func setProgress(_ progress: CGFloat) {
+    let clamped = max(0, min(progress, 1))
+    if clamped <= 0.0001 {
+      displayedProgress = configuration.minVisibleProgress
+    } else {
+      let adjusted = max(configuration.minVisibleProgress, clamped)
+      displayedProgress = max(displayedProgress, adjusted)
+    }
+
+    CATransaction.begin()
+    CATransaction.setAnimationDuration(0.12)
+    CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .linear))
+    progressLayer.strokeEnd = displayedProgress
+    CATransaction.commit()
+    isHidden = false
+  }
+
+  private func updatePath() {
+    progressLayer.frame = bounds
+
+    let diameter = min(bounds.width, bounds.height)
+    let radius = max(0, (diameter / 2) - (configuration.lineWidth / 2) - configuration.ringInset)
+    let center = CGPoint(x: bounds.width / 2, y: bounds.height / 2)
+    let path = CGMutablePath()
+    path.addArc(
+      center: center,
+      radius: radius,
+      startAngle: -.pi / 2,
+      endAngle: (CGFloat.pi * 3) / 2,
+      clockwise: false
+    )
+    progressLayer.path = path
+  }
+
+  private func resetProgress() {
+    displayedProgress = configuration.minVisibleProgress
+    progressLayer.strokeEnd = displayedProgress
+  }
+
+  private func updateRotationAnimation() {
+    guard !isHidden, window != nil else {
+      progressLayer.removeAnimation(forKey: Constants.rotationKey)
+      return
+    }
+
+    guard progressLayer.animation(forKey: Constants.rotationKey) == nil else { return }
+
+    let animation = CABasicAnimation(keyPath: "transform.rotation.z")
+    animation.fromValue = 0
+    animation.toValue = CGFloat.pi * 2
+    animation.duration = configuration.rotationDuration
+    animation.repeatCount = .infinity
+    animation.timingFunction = CAMediaTimingFunction(name: .linear)
+    progressLayer.add(animation, forKey: Constants.rotationKey)
+  }
+}
+
+private final class VideoOverlayView: NSView {
   fileprivate let cancelButton: NSButton = {
     let button = NSButton()
     button.bezelStyle = .shadowlessSquare
@@ -216,7 +231,7 @@ private final class VideoOverlayView: NSView {
     return iv
   }()
 
-  private let progressRing = ProgressRingView()
+  private let progressRing = CircularTransferRingView()
 
   private var cancellable: AnyCancellable?
 

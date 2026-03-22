@@ -2,12 +2,15 @@ import AppKit
 import Cocoa
 import Combine
 import Foundation
+import GRDB
 import InlineKit
 import Logger
 
 class DocumentView: NSView {
   private var height = Theme.documentViewHeight
   private static var iconCircleSize: CGFloat = 36
+  private static var uploadRingSize: CGFloat = 32
+  private static var uploadCancelButtonSize: CGFloat = 18
   private static var iconSpacing: CGFloat = 8
   private static var textsSpacing: CGFloat = 2
 
@@ -20,10 +23,15 @@ class DocumentView: NSView {
     case locallyAvailable
     case needsDownload
     case downloading(bytesReceived: Int64, totalBytes: Int64)
+    case uploadProcessing
+    case uploading(bytesSent: Int64, totalBytes: Int64)
   }
 
-  private var progressSubscription: AnyCancellable?
-  private var isDownloading = false
+  private var downloadProgressSubscription: AnyCancellable?
+  private var uploadProgressSubscription: AnyCancellable?
+  private var uploadProgressBindingTask: Task<Void, Never>?
+  private var uploadProgressLocalId: Int64?
+  private var uploadProgressSnapshot: UploadProgressSnapshot?
   private var white = false
   private var locallyAvailableFileURL: URL?
 
@@ -51,6 +59,38 @@ class DocumentView: NSView {
     imageView.symbolConfiguration = config
 
     return imageView
+  }()
+
+  private lazy var uploadProgressRing: CircularTransferRingView = {
+    let ring = CircularTransferRingView(
+      configuration: .init(
+        lineWidth: 1.5,
+        minVisibleProgress: 0.06,
+        rotationDuration: 1.5,
+        ringInset: 1,
+        strokeColor: white ? .white : .systemBlue
+      )
+    )
+    ring.isHidden = true
+    return ring
+  }()
+
+  private lazy var uploadCancelButton: NSButton = {
+    let button = NSButton()
+    button.bezelStyle = .shadowlessSquare
+    button.isBordered = false
+    button.imagePosition = .imageOnly
+    button.translatesAutoresizingMaskIntoConstraints = false
+    let config = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+    button.image = NSImage(systemSymbolName: Symbol.cancel, accessibilityDescription: "Cancel Upload")?
+      .withSymbolConfiguration(config)
+    button.contentTintColor = white ? .white : .systemBlue
+    button.setButtonType(.momentaryChange)
+    button.focusRingType = .none
+    button.target = self
+    button.action = #selector(cancelPendingUpload)
+    button.isHidden = true
+    return button
   }()
 
   private let cancelIcon: NSImageView = {
@@ -150,8 +190,8 @@ class DocumentView: NSView {
   }
 
   private func stopMonitoringProgress() {
-    progressSubscription?.cancel()
-    progressSubscription = nil
+    downloadProgressSubscription?.cancel()
+    downloadProgressSubscription = nil
   }
 
   private func cancelExistingDownloadIfAny() {
@@ -183,6 +223,7 @@ class DocumentView: NSView {
     documentState = determineDocumentState(documentInfo)
 
     setupView()
+    syncUploadProgressBinding()
     updateUI()
     updateButtonState()
 
@@ -220,6 +261,8 @@ class DocumentView: NSView {
 
     // Add icon to container first
     iconContainer.addSubview(iconView)
+    iconContainer.addSubview(uploadProgressRing)
+    iconContainer.addSubview(uploadCancelButton)
     iconContainer.addSubview(cancelIcon)
     iconContainer.setContentHuggingPriority(.defaultHigh, for: .horizontal)
     iconContainer.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
@@ -260,6 +303,17 @@ class DocumentView: NSView {
       iconView.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
       iconView.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
 
+      // Upload ring
+      uploadProgressRing.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
+      uploadProgressRing.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
+      uploadProgressRing.widthAnchor.constraint(equalToConstant: Self.uploadRingSize),
+      uploadProgressRing.heightAnchor.constraint(equalToConstant: Self.uploadRingSize),
+
+      uploadCancelButton.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
+      uploadCancelButton.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
+      uploadCancelButton.widthAnchor.constraint(equalToConstant: Self.uploadCancelButtonSize),
+      uploadCancelButton.heightAnchor.constraint(equalToConstant: Self.uploadCancelButtonSize),
+
       // Cancel
       cancelIcon.widthAnchor.constraint(equalToConstant: Self.iconCircleSize),
       cancelIcon.heightAnchor.constraint(equalToConstant: Self.iconCircleSize),
@@ -297,8 +351,7 @@ class DocumentView: NSView {
 
   private func updateUI() {
     fileNameLabel.stringValue = documentInfo.document.fileName ?? "Unknown File"
-    fileSizeLabel.stringValue = FileHelpers
-      .formatFileSize(UInt64(documentInfo.document.size ?? 0))
+    updateButtonState()
     updateIconForCurrentState()
   }
 
@@ -314,10 +367,13 @@ class DocumentView: NSView {
       case .downloading:
         // Icon hidden while cancel is visible; keep the last file icon ready for completion
         iconView.image = NSImage(systemSymbolName: fileTypeSymbolName(), accessibilityDescription: nil)
+      case .uploadProcessing, .uploading:
+        iconView.image = NSImage(systemSymbolName: fileTypeSymbolName(), accessibilityDescription: nil)
     }
 
     // Keep the cancel icon color aligned with bubble style
     cancelIcon.contentTintColor = white ? .white : NSColor.systemBlue
+    uploadCancelButton.contentTintColor = white ? .white : NSColor.systemBlue
   }
 
   private func fileTypeSymbolName() -> String {
@@ -333,6 +389,8 @@ class DocumentView: NSView {
       case .locallyAvailable:
         // Show normal document view
         iconView.isHidden = false
+        uploadProgressRing.isHidden = true
+        uploadCancelButton.isHidden = true
         cancelIcon.isHidden = true
         actionButton.isHidden = false
         fileSizeLabel.stringValue = FileHelpers.formatFileSize(UInt64(documentInfo.document.size ?? 0))
@@ -343,6 +401,8 @@ class DocumentView: NSView {
       case .needsDownload:
         // Show download button
         iconView.isHidden = false
+        uploadProgressRing.isHidden = true
+        uploadCancelButton.isHidden = true
         cancelIcon.isHidden = true
         actionButton.isHidden = false
         fileSizeLabel.stringValue = FileHelpers.formatFileSize(UInt64(documentInfo.document.size ?? 0))
@@ -353,6 +413,8 @@ class DocumentView: NSView {
       case let .downloading(bytesReceived, totalBytes):
         // Show download progress
         iconView.isHidden = true
+        uploadProgressRing.isHidden = true
+        uploadCancelButton.isHidden = true
         cancelIcon.isHidden = false
         actionButton.isHidden = true
 
@@ -364,6 +426,25 @@ class DocumentView: NSView {
         let downloadedStr = FileHelpers.formatFileSize(UInt64(bytesReceived))
         let totalStr = FileHelpers.formatFileSize(UInt64(totalBytes))
         fileSizeLabel.stringValue = "\(downloadedStr) / \(totalStr)"
+
+      case .uploadProcessing:
+        iconView.isHidden = true
+        cancelIcon.isHidden = true
+        uploadProgressRing.isHidden = false
+        uploadCancelButton.isHidden = false
+        actionButton.isHidden = true
+        uploadProgressRing.setProgress(0)
+        fileSizeLabel.stringValue = "Processing"
+
+      case let .uploading(bytesSent, totalBytes):
+        iconView.isHidden = true
+        cancelIcon.isHidden = true
+        uploadProgressRing.isHidden = false
+        uploadCancelButton.isHidden = false
+        actionButton.isHidden = true
+        let fractionCompleted = totalBytes > 0 ? CGFloat(Double(bytesSent) / Double(totalBytes)) : 0
+        uploadProgressRing.setProgress(fractionCompleted)
+        fileSizeLabel.stringValue = uploadProgressLabel(bytesSent: bytesSent, totalBytes: totalBytes)
     }
   }
 
@@ -379,7 +460,16 @@ class DocumentView: NSView {
       documentState = .needsDownload
 
       // Clean up subscription
-      progressSubscription = nil
+      stopMonitoringProgress()
+    }
+  }
+
+  @objc private func cancelPendingUpload() {
+    switch documentState {
+    case .uploadProcessing, .uploading:
+      cancelPendingDocumentMessage()
+    default:
+      return
     }
   }
 
@@ -441,9 +531,8 @@ class DocumentView: NSView {
   }
 
   deinit {
-    // Only cancel the subscription, not the download
-    progressSubscription?.cancel()
-    progressSubscription = nil
+    stopMonitoringProgress()
+    clearUploadProgressBinding(resetState: true)
   }
 
   @objc private func handleClose() {
@@ -456,22 +545,19 @@ class DocumentView: NSView {
       showInFinder()
     case .needsDownload:
       downloadAction()
-    case .downloading:
+    case .downloading, .uploadProcessing, .uploading:
       break
     }
   }
 
-  func update(with documentInfo: DocumentInfo) {
+  func update(with documentInfo: DocumentInfo, fullMessage: FullMessage? = nil) {
     // Update document info
     self.documentInfo = documentInfo
-    locallyAvailableFileURL = Self.localDocumentURL(for: documentInfo)
-
-    // Check if the document is already downloaded
-    if documentInfo.document.localPath != nil {
-      documentState = .locallyAvailable
-      updateUI()
-      return
+    if let fullMessage {
+      self.fullMessage = fullMessage
     }
+    locallyAvailableFileURL = Self.localDocumentURL(for: documentInfo)
+    syncUploadProgressBinding()
 
     // Set initial state
     documentState = determineDocumentState(documentInfo)
@@ -481,9 +567,7 @@ class DocumentView: NSView {
     if case .downloading = documentState {
       startMonitoringProgress()
     } else {
-      // Cancel subscription if not downloading
-      progressSubscription?.cancel()
-      progressSubscription = nil
+      stopMonitoringProgress()
     }
   }
 
@@ -495,47 +579,56 @@ class DocumentView: NSView {
   // MARK: - Document State Management
 
   private func determineDocumentState(_ documentInfo: DocumentInfo) -> DocumentState {
-    // First check if the file exists locally
-    if isDocumentAvailableLocally() {
+    switch pendingUploadDisplayState() {
+    case .inactive:
+      break
+    case .processing:
+      return .uploadProcessing
+    case let .uploading(bytesSent, totalBytes):
+      return .uploading(bytesSent: bytesSent, totalBytes: totalBytes)
+    }
+
+    if isDocumentAvailableLocally(documentInfo) {
       return .locallyAvailable
     }
 
-    // Then check if a download is in progress
-    let documentId = documentInfo.document.documentId
+    let documentId = documentInfo.id
     if FileDownloader.shared.isDocumentDownloadActive(documentId: documentId) {
-      // A download is active, start with 0 progress
       return .downloading(bytesReceived: 0, totalBytes: Int64(documentInfo.document.size ?? 0))
     }
 
-    // Otherwise, the document needs to be downloaded
     return .needsDownload
   }
 
-  private func isDocumentAvailableLocally() -> Bool {
-    guard let localPath = documentInfo.document.localPath else {
+  private func pendingUploadDisplayState() -> DocumentPendingUploadDisplayState {
+    DocumentPendingUploadDisplayState.resolve(
+      isPendingMessage: isPendingOutgoingUploadMessage(),
+      localDocumentId: documentInfo.document.id,
+      progress: uploadProgressSnapshot
+    )
+  }
+
+  private func isPendingOutgoingUploadMessage() -> Bool {
+    fullMessage?.message.status == .sending
+  }
+
+  private func isDocumentAvailableLocally(_ documentInfo: DocumentInfo) -> Bool {
+    guard let localPath = documentInfo.document.localPath, !localPath.isEmpty else {
       return false
     }
 
     return true
-
-    // Too agressive
-    // Check if the file actually exists
-//    let cacheDirectory = FileHelpers.getLocalCacheDirectory(for: .documents)
-//    let fileURL = cacheDirectory.appendingPathComponent(localPath)
-//    return FileManager.default.fileExists(atPath: fileURL.path)
   }
 
   // MARK: - Progress Monitoring
 
   private func startMonitoringProgress() {
-    // Cancel any existing subscription
-    progressSubscription?.cancel()
+    downloadProgressSubscription?.cancel()
 
-    Log.shared.info("Starting progress subscription for document \(documentInfo.document.documentId)")
+    Log.shared.info("Starting progress subscription for document \(documentInfo.id)")
 
-    // Start a new subscription
     let documentId = documentInfo.id
-    progressSubscription = FileDownloader.shared.documentProgressPublisher(documentId: documentId)
+    downloadProgressSubscription = FileDownloader.shared.documentProgressPublisher(documentId: documentId)
       .receive(on: DispatchQueue.main)
       .sink { [weak self] progress in
         guard let self else { return }
@@ -564,6 +657,105 @@ class DocumentView: NSView {
           )
         }
       }
+  }
+
+  private func syncUploadProgressBinding() {
+    guard isPendingOutgoingUploadMessage(), let documentLocalId = documentInfo.document.id else {
+      clearUploadProgressBinding(resetState: true)
+      return
+    }
+
+    if uploadProgressLocalId == documentLocalId,
+       uploadProgressBindingTask != nil || uploadProgressSubscription != nil
+    {
+      return
+    }
+
+    clearUploadProgressBinding(resetState: false)
+    uploadProgressLocalId = documentLocalId
+    uploadProgressBindingTask = Task { @MainActor [weak self] in
+      guard let self else { return }
+
+      let publisher = await FileUploader.shared.documentProgressPublisher(documentLocalId: documentLocalId)
+      guard !Task.isCancelled, self.uploadProgressLocalId == documentLocalId else { return }
+
+      self.uploadProgressBindingTask = nil
+      self.uploadProgressSubscription = publisher
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] progress in
+          guard let self else { return }
+
+          self.uploadProgressSnapshot = progress
+          self.documentState = self.determineDocumentState(self.documentInfo)
+
+          switch progress.stage {
+          case .failed, .completed:
+            self.clearUploadProgressBinding(resetState: false)
+          case .processing, .uploading:
+            break
+          }
+        }
+    }
+  }
+
+  private func clearUploadProgressBinding(resetState: Bool) {
+    uploadProgressBindingTask?.cancel()
+    uploadProgressBindingTask = nil
+    uploadProgressSubscription?.cancel()
+    uploadProgressSubscription = nil
+    uploadProgressLocalId = nil
+    if resetState {
+      uploadProgressSnapshot = nil
+    }
+  }
+
+  private func uploadProgressLabel(bytesSent: Int64, totalBytes: Int64) -> String {
+    "\(formatTransferBytes(bytesSent)) / \(formatTransferBytes(totalBytes))"
+  }
+
+  private func formatTransferBytes(_ bytes: Int64) -> String {
+    ByteCountFormatter.string(fromByteCount: max(0, bytes), countStyle: .file)
+  }
+
+  private func cancelPendingDocumentMessage() {
+    guard let fullMessage, let documentLocalId = documentInfo.document.id else { return }
+
+    clearUploadProgressBinding(resetState: false)
+
+    Task {
+      await FileUploader.shared.cancelDocumentUpload(documentLocalId: documentLocalId)
+    }
+
+    if let transactionId = fullMessage.message.transactionId, !transactionId.isEmpty {
+      Transactions.shared.cancel(transactionId: transactionId)
+    } else if let randomId = fullMessage.message.randomId {
+      Task {
+        Api.realtime.cancelTransaction(where: {
+          guard $0.transaction.method == .sendMessage else { return false }
+          guard case let .sendMessage(input) = $0.transaction.input else { return false }
+          return input.randomID == randomId
+        })
+      }
+    }
+
+    Task(priority: .userInitiated) { [message = fullMessage.message] in
+      let chatId = message.chatId
+      let messageId = message.messageId
+      let peerId = message.peerId
+
+      do {
+        try await AppDatabase.shared.dbWriter.write { db in
+          try Message
+            .filter(Column("chatId") == chatId)
+            .filter(Column("messageId") == messageId)
+            .deleteAll(db)
+        }
+
+        MessagesPublisher.shared.messagesDeleted(messageIds: [messageId], peer: peerId)
+      } catch {
+        Log.shared.error("Failed to delete local message row for document cancel", error: error)
+      }
+    }
   }
 }
 

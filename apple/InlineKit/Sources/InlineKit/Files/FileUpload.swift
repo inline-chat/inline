@@ -112,6 +112,36 @@ public enum UploadStatus {
   case failed
 }
 
+public enum DocumentPendingUploadDisplayState: Equatable, Sendable {
+  case inactive
+  case processing
+  case uploading(bytesSent: Int64, totalBytes: Int64)
+
+  public static func resolve(
+    isPendingMessage: Bool,
+    localDocumentId: Int64?,
+    progress: UploadProgressSnapshot?
+  ) -> DocumentPendingUploadDisplayState {
+    guard isPendingMessage, localDocumentId != nil else {
+      return .inactive
+    }
+
+    guard let progress else {
+      return .processing
+    }
+
+    switch progress.stage {
+    case .processing:
+      return .processing
+    case .uploading, .completed:
+      let totalBytes = max(progress.totalBytes, progress.bytesSent)
+      return .uploading(bytesSent: progress.bytesSent, totalBytes: totalBytes)
+    case .failed:
+      return .inactive
+    }
+  }
+}
+
 public actor FileUploader {
   public static let shared = FileUploader()
 
@@ -598,6 +628,10 @@ public actor FileUploader {
 
   public func cancelVideoUpload(videoLocalId: Int64) {
     cancel(uploadId: getUploadId(videoId: videoLocalId))
+  }
+
+  public func cancelDocumentUpload(documentLocalId: Int64) {
+    cancel(uploadId: getUploadId(documentId: documentLocalId))
   }
 
   public func cancelVoiceUpload(voiceLocalId: Int64) {

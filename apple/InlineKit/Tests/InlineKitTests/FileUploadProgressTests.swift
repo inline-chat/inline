@@ -69,4 +69,37 @@ struct FileUploadProgressTests {
     #expect(snapshot.totalBytes == 3_000)
     #expect(snapshot.fractionCompleted == 1.0)
   }
+
+  @Test("pending document upload defaults to processing before progress arrives")
+  func testPendingDocumentUploadDefaultsToProcessing() {
+    let state = DocumentPendingUploadDisplayState.resolve(
+      isPendingMessage: true,
+      localDocumentId: 42,
+      progress: nil
+    )
+
+    #expect(state == .processing)
+  }
+
+  @Test("pending document upload exposes byte progress while uploading")
+  func testPendingDocumentUploadUploadingState() {
+    let state = DocumentPendingUploadDisplayState.resolve(
+      isPendingMessage: true,
+      localDocumentId: 42,
+      progress: .uploading(id: "document_42", bytesSent: 512, totalBytes: 1024)
+    )
+
+    #expect(state == .uploading(bytesSent: 512, totalBytes: 1024))
+  }
+
+  @Test("document upload state is inactive for non-pending messages")
+  func testPendingDocumentUploadInactiveWhenMessageIsNotPending() {
+    let state = DocumentPendingUploadDisplayState.resolve(
+      isPendingMessage: false,
+      localDocumentId: 42,
+      progress: .uploading(id: "document_42", bytesSent: 512, totalBytes: 1024)
+    )
+
+    #expect(state == .inactive)
+  }
 }
