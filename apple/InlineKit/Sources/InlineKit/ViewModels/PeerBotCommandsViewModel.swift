@@ -41,18 +41,31 @@ public final class PeerBotCommandsViewModel {
   }
 
   public typealias Fetcher = @Sendable (Peer) async throws -> [InlineProtocol.PeerBotCommands]
+  public typealias UserInfoResolver = @MainActor (Int64, InlineProtocol.User) -> UserInfo
 
   public private(set) var peer: Peer
   public private(set) var loadState: LoadState = .idle
   public private(set) var botGroups: [InlineProtocol.PeerBotCommands] = []
 
   @ObservationIgnored private let fetcher: Fetcher
+  @ObservationIgnored private let userInfoResolver: UserInfoResolver
   @ObservationIgnored private let log = Log.scoped("PeerBotCommandsViewModel")
   @ObservationIgnored private var cache: [Peer: [InlineProtocol.PeerBotCommands]] = [:]
 
   public init(peer: Peer, fetcher: @escaping Fetcher) {
     self.peer = peer
     self.fetcher = fetcher
+    userInfoResolver = PeerBotCommandsViewModel.resolveUserInfo
+  }
+
+  public init(
+    peer: Peer,
+    fetcher: @escaping Fetcher,
+    userInfoResolver: @escaping UserInfoResolver
+  ) {
+    self.peer = peer
+    self.fetcher = fetcher
+    self.userInfoResolver = userInfoResolver
   }
 
   public convenience init(peer: Peer) {
@@ -60,7 +73,7 @@ public final class PeerBotCommandsViewModel {
   }
 
   public var suggestions: [PeerBotCommandSuggestion] {
-    Self.flattenSuggestions(from: botGroups)
+    Self.flattenSuggestions(from: botGroups, userInfoResolver: userInfoResolver)
   }
 
   public var shouldAttemptLoad: Bool {
@@ -172,7 +185,10 @@ public final class PeerBotCommandsViewModel {
     return result.bots
   }
 
-  private static func flattenSuggestions(from groups: [InlineProtocol.PeerBotCommands]) -> [PeerBotCommandSuggestion] {
+  private static func flattenSuggestions(
+    from groups: [InlineProtocol.PeerBotCommands],
+    userInfoResolver: UserInfoResolver
+  ) -> [PeerBotCommandSuggestion] {
     var countsByNormalizedCommand: [String: Int] = [:]
     for group in groups {
       for command in group.commands {
@@ -185,6 +201,7 @@ public final class PeerBotCommandsViewModel {
       let bot = group.bot
       let botUsername = bot.username.nilIfEmpty
       let botDisplayName = displayName(for: bot)
+      let botUserInfo = userInfoResolver(bot.id, bot)
 
       return group.commands.map { command in
         let normalizedCommand = command.command.lowercased()
@@ -195,11 +212,18 @@ public final class PeerBotCommandsViewModel {
           botId: bot.id,
           botUsername: botUsername,
           botDisplayName: botDisplayName,
-          botUserInfo: UserInfo(user: User(from: bot)),
+          botUserInfo: botUserInfo,
           isAmbiguous: (countsByNormalizedCommand[normalizedCommand] ?? 0) > 1
         )
       }
     }
+  }
+
+  private static func resolveUserInfo(botId: Int64, fallbackProtocolUser: InlineProtocol.User) -> UserInfo {
+    if let cached = ObjectCache.shared.getUser(id: botId) {
+      return cached
+    }
+    return UserInfo(user: User(from: fallbackProtocolUser))
   }
 
   private static func displayName(for user: InlineProtocol.User) -> String {
