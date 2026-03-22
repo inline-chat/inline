@@ -1,6 +1,17 @@
 ## Orientation
 
-- Inline is a multi-client work chat app: backend (`server/` Bun/TS), Apple clients (`apple/` SwiftUI/UIKit/AppKit), web (`web/` React/TanStack), and shared protobufs (`proto/`).
+- Inline is a work chat app
+- Key paths: 
+  - `server/` Backend (Bun/TS)
+  - `apple/` macOS/iOS clients (SwiftUI/UIKit/AppKit)
+  - `web/` web app (React/TanStack, not started) 
+  - `desktop/` Windows app (Electron, not started)
+  - `proto/` protobufs
+  - `cli/` client cli (Rust)
+  - `packages/mcp/` MCP
+  - `packages/openclaw-inline/` OpenClaw plugin
+  - `packages/bot-api/` bot API client (HTTP, TypeScript)
+  - `packages/sdk/` realtime SDK (WS, TypeScript)
 - Shared Swift packages: `apple/InlineKit`, `apple/InlineUI`, `apple/InlineProtocol`; app targets: `apple/InlineIOS`, `apple/InlineXIOS`, `apple/InlineMac`.
 - Backend structure: `src/functions`, `src/realtime`, `src/db`.
 - Use `bun` for JS/TS tooling (not npm/yarn); keep IDs as `Int64` (`Id`/`ID`) and timestamps in seconds unless API requires ms.
@@ -9,7 +20,6 @@
 ## Critical Rules
 
 - Never revert/discard/reset/clean work unless explicitly asked; ask before one-way deletion commands (`rm`, restore/reset/checkout) unless explicitly requested.
-- If unexpected changes appear in a file you are editing, stop and ask. Ignore unrelated file changes.
 - When the worktree is dirty, continue without stopping for unrelated modified/untracked files. Only stop if unexpected changes appear in the specific file/hunk currently being edited.
 - Never read, write or touch `.env` files.
 
@@ -20,6 +30,7 @@
 - On "push", `git pull --rebase` is allowed; if conflicts occur, stop and ask before resolving.
 - Scope commits to your changes unless user asks for "commit all".
 - When unrecognized files exist, continue and focus only on relevant files.
+- When a file contains unrelated changes, only stage the hunks you changed manually. Do not blindly add files.
 
 ## Working Rules
 
@@ -35,6 +46,7 @@
 - New UI work must stay in new UI components; do not modify legacy sidebar/old UI.
 - When asked to write a plan or save your investigation, make a file in `.agent-docs/` named `YYYY-MM-DD-title-kebab-case.md`.
 - In final handoff/review/push, call out security risks, possible performance regressions, and state production readiness.
+- Do just the right amount of engineering, not over engineer, and not under engineer. Simple and elegant solutions are often better than prematuraly complex solutions that go beyond the scope and spec.
 
 ## Reminders
 
@@ -65,7 +77,7 @@
 - Prefer new feature work in `apple/InlineIOSUI` and `apple/InlineMacUI`; use legacy targets only when tightly coupled.
 - Minimum versions: iOS 18, macOS 15.
 - Prefer Swift Testing (`import Testing`, `@Test`, `@Suite`) and Observation (`@Observable`, `@Bindable`).
-- Do not run full app `xcodebuild`; ask user. Allowed: focused package builds/tests (for example `swift test`, `swift build`).
+- Prefer focused package builds/tests (for example `swift test`, `swift build`, swift syntax typecheck) over full `xcodebuild` if fits your scope.
 - `AppDatabase` migrations are in `InlineKit/Sources/InlineKit/Database.swift`; append new migrations at the bottom.
 - For protobuf blobs in DB, follow the `DraftMessage` typed-model + `ProtocolHelpers` + `DatabaseValueConvertible` pattern.
 - Use `Log.scoped`; avoid main-thread heavy work; prefer Swift concurrency and composable views.
