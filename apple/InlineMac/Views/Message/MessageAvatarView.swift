@@ -5,18 +5,25 @@ import SwiftUI
 
 class UserAvatarView: NSView {
   private var userInfo: UserInfo?
-
-  private var user: User? {
-    userInfo?.user
-  }
-
   private var size: CGFloat
+  private var currentRenderSignature: RenderSignature?
 
   private var hostingView: NSHostingView<UserAvatar>?
+
+  private struct RenderSignature: Equatable {
+    let userId: Int64
+    let firstName: String?
+    let lastName: String?
+    let username: String?
+    let phoneNumber: String?
+    let email: String?
+    let avatarIdentity: String?
+  }
 
   init(userInfo: UserInfo, size: CGFloat = Theme.messageAvatarSize) {
     self.userInfo = userInfo
     self.size = size
+    currentRenderSignature = Self.renderSignature(for: userInfo)
 
     super.init(frame: NSRect(
       x: 0,
@@ -49,33 +56,44 @@ class UserAvatarView: NSView {
   }
 
   func update(userInfo: UserInfo) {
-    guard self.userInfo != userInfo else { return }
+    let nextRenderSignature = Self.renderSignature(for: userInfo)
+    guard currentRenderSignature != nextRenderSignature else { return }
     self.userInfo = userInfo
+    currentRenderSignature = nextRenderSignature
     updateAvatar()
   }
 
   private func updateAvatar() {
     guard let userInfo else { return }
 
-    // Remove existing hosting view
-    hostingView?.removeFromSuperview()
-
-    // Create new SwiftUI view
-    let swiftUIView = UserAvatar(
+    let rootView = UserAvatar(
       userInfo: userInfo,
       size: size,
       ignoresSafeArea: true
     )
-    let newHostingView = NSHostingView(rootView: swiftUIView)
 
-    // 4. For manual layout, set this to true
-    newHostingView.translatesAutoresizingMaskIntoConstraints = true
+    if let hostingView {
+      hostingView.rootView = rootView
+    } else {
+      let newHostingView = NSHostingView(rootView: rootView)
+      newHostingView.translatesAutoresizingMaskIntoConstraints = true
+      newHostingView.frame = bounds
+      addSubview(newHostingView)
+      hostingView = newHostingView
+    }
+  }
 
-    // 5. Set initial frame
-    newHostingView.frame = bounds
-
-    addSubview(newHostingView)
-    hostingView = newHostingView
+  private static func renderSignature(for userInfo: UserInfo) -> RenderSignature {
+    let user = userInfo.user
+    return RenderSignature(
+      userId: user.id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      username: user.username,
+      phoneNumber: user.phoneNumber,
+      email: user.email,
+      avatarIdentity: userInfo.stableAvatarIdentity
+    )
   }
 
   override var intrinsicContentSize: NSSize {

@@ -35,6 +35,14 @@ final class UserAvatarView: UIView {
 
   private var size: CGFloat = 32
   private var nameForInitials: String = ""
+  private var widthConstraint: NSLayoutConstraint?
+  private var heightConstraint: NSLayoutConstraint?
+  private var currentRenderSignature: RenderSignature?
+
+  private struct RenderSignature: Equatable {
+    let userId: Int64
+    let avatarIdentity: String?
+  }
 
   // MARK: - Initialization
 
@@ -81,22 +89,33 @@ final class UserAvatarView: UIView {
   func configure(with userInfo: UserInfo, size: CGFloat = 32) {
     self.size = size
     let user = userInfo.user
+    let renderSignature = RenderSignature(
+      userId: user.id,
+      avatarIdentity: userInfo.stableAvatarIdentity
+    )
     
     configureSize()
     configureInitials(for: user)
     configureColors()
-    loadImage(for: user, userInfo: userInfo)
+    loadImage(for: user, userInfo: userInfo, renderSignature: renderSignature)
   }
   
   // MARK: - Private Configuration Methods
   
   private func configureSize() {
-    guard constraints.isEmpty else { return }
-    
-    NSLayoutConstraint.activate([
-      widthAnchor.constraint(equalToConstant: size),
-      heightAnchor.constraint(equalToConstant: size),
-    ])
+    if let widthConstraint {
+      widthConstraint.constant = size
+    } else {
+      widthConstraint = widthAnchor.constraint(equalToConstant: size)
+      widthConstraint?.isActive = true
+    }
+
+    if let heightConstraint {
+      heightConstraint.constant = size
+    } else {
+      heightConstraint = heightAnchor.constraint(equalToConstant: size)
+      heightConstraint?.isActive = true
+    }
   }
   
   private func configureInitials(for user: User) {
@@ -120,25 +139,43 @@ final class UserAvatarView: UIView {
     ]
   }
   
-  private func loadImage(for user: User, userInfo: UserInfo) {
+  private func loadImage(for user: User, userInfo: UserInfo, renderSignature: RenderSignature) {
     let localUrl = user.getLocalURL()
     let remoteUrl = user.getRemoteURL()
 
     if localUrl != nil || remoteUrl != nil {
-      loadProfileImage(localUrl: localUrl, remoteUrl: remoteUrl, userInfo: userInfo)
+      loadProfileImage(
+        localUrl: localUrl,
+        remoteUrl: remoteUrl,
+        userInfo: userInfo,
+        renderSignature: renderSignature
+      )
     } else {
+      currentRenderSignature = renderSignature
       showInitials()
     }
   }
 
   // MARK: - Image Loading
   
-  private func loadProfileImage(localUrl: URL?, remoteUrl: URL?, userInfo: UserInfo) {
+  private func loadProfileImage(
+    localUrl: URL?,
+    remoteUrl: URL?,
+    userInfo: UserInfo,
+    renderSignature: RenderSignature
+  ) {
     guard let imageUrl = localUrl ?? remoteUrl else {
+      currentRenderSignature = renderSignature
       showInitials()
       return
     }
 
+    if currentRenderSignature == renderSignature, imageView.imageView.image != nil {
+      hideInitials()
+      return
+    }
+
+    currentRenderSignature = renderSignature
     hideInitials()
     configureImageRequest(for: imageUrl)
     setupImageHandlers()

@@ -421,3 +421,46 @@ public extension User {
     }
   }
 }
+
+public extension File {
+  var stableAvatarIdentity: String? {
+    if let fileUniqueId = normalizedAvatarIdentityValue(fileUniqueId) {
+      return "unique:\(fileUniqueId)"
+    }
+    if let fileId = normalizedAvatarIdentityValue(id) {
+      return "id:\(fileId)"
+    }
+    if let localPath = normalizedAvatarIdentityValue(localPath) {
+      return "local:\(localPath)"
+    }
+    return nil
+  }
+}
+
+public extension User {
+  var stableAvatarIdentity: String? {
+    if let fileUniqueId = normalizedAvatarIdentityValue(profileFileUniqueId) {
+      return "unique:\(fileUniqueId)"
+    }
+    if let fileId = normalizedAvatarIdentityValue(profileFileId) {
+      return "id:\(fileId)"
+    }
+    if let localPath = normalizedAvatarIdentityValue(profileLocalPath) {
+      return "local:\(localPath)"
+    }
+    return nil
+  }
+}
+
+public extension UserInfo {
+  var stableAvatarIdentity: String? {
+    profilePhoto?.first?.stableAvatarIdentity ?? user.stableAvatarIdentity
+  }
+}
+
+private func normalizedAvatarIdentityValue(_ value: String?) -> String? {
+  guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+    return nil
+  }
+  return trimmed
+}

@@ -859,7 +859,7 @@ private struct ExperimentalSidebarChatIcon: View, Equatable {
     }
 
     private static func profilePhotoId(_ userInfo: UserInfo) -> String? {
-      userInfo.profilePhoto?.first?.id ?? userInfo.user.profileFileId
+      userInfo.stableAvatarIdentity
     }
 
     private struct UserNameSignature: Hashable {
