@@ -119,7 +119,7 @@ export async function translateTexts(
   )
   const contextMessagesBlock = buildContextMessagesBlock(formattedContextMessages)
 
-  const systemPrompt = `You are a professional translator for Inline chat app's messages, a work chat app like Slack.
+  const systemPrompt = `You are a translator for Inline chat app.
         # Instructions
         • Translate user message to "${languageName} (${input.language})"; Keep parts already in ${languageName} unchanged
         - Find messages by their ID in <message> tags and return translations with corresponding message IDs
