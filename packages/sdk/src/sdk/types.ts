@@ -1,5 +1,7 @@
 import type {
   Message,
+  MessageActionResponseUi,
+  MessageActions,
   MessageEntities,
   Method,
   Peer,
@@ -42,6 +44,7 @@ export type InlineSdkSendMessageParams =
       parseMarkdown?: boolean
       sendMode?: "silent"
       entities?: MessageEntities
+      actions?: MessageActions
     }
   | {
       userId: InlineIdLike
@@ -52,7 +55,27 @@ export type InlineSdkSendMessageParams =
       parseMarkdown?: boolean
       sendMode?: "silent"
       entities?: MessageEntities
+      actions?: MessageActions
     }
+
+export type InlineSdkInvokeMessageActionParams =
+  | {
+      chatId: InlineIdLike
+      userId?: never
+      messageId: InlineIdLike
+      actionId: string
+    }
+  | {
+      userId: InlineIdLike
+      chatId?: never
+      messageId: InlineIdLike
+      actionId: string
+    }
+
+export type InlineSdkAnswerMessageActionParams = {
+  interactionId: InlineIdLike
+  ui?: MessageActionResponseUi
+}
 
 export type InlineSdkGetMessagesParams =
   | {
@@ -100,6 +123,24 @@ export type InlineInboundEvent =
   | { kind: "message.delete"; chatId: InlineId; messageIds: InlineId[]; seq: number; date: InlineUnixSeconds }
   | { kind: "reaction.add"; chatId: InlineId; reaction: Reaction; seq: number; date: InlineUnixSeconds }
   | { kind: "reaction.delete"; chatId: InlineId; emoji: string; messageId: InlineId; userId: InlineId; seq: number; date: InlineUnixSeconds }
+  | {
+      kind: "message.action.invoke"
+      interactionId: InlineId
+      chatId: InlineId
+      messageId: InlineId
+      actorUserId: InlineId
+      actionId: string
+      data: Uint8Array
+      seq: number
+      date: InlineUnixSeconds
+    }
+  | {
+      kind: "message.action.answered"
+      interactionId: InlineId
+      ui?: MessageActionResponseUi
+      seq: number
+      date: InlineUnixSeconds
+    }
   | { kind: "chat.hasUpdates"; chatId: InlineId; seq: number; date: InlineUnixSeconds }
   | { kind: "space.hasUpdates"; spaceId: InlineId; seq: number; date: InlineUnixSeconds }
 
@@ -157,6 +198,8 @@ export const rpcInputKindByMethod = {
   36: "rotateBotToken",
   37: "updateBotProfile",
   38: "getMessages",
+  48: "invokeMessageAction",
+  49: "answerMessageAction",
 } as const satisfies Record<number, RpcInputKind | undefined>
 
 export const rpcResultKindByMethod = {
@@ -199,6 +242,8 @@ export const rpcResultKindByMethod = {
   36: "rotateBotToken",
   37: "updateBotProfile",
   38: "getMessages",
+  48: "invokeMessageAction",
+  49: "answerMessageAction",
 } as const satisfies Record<number, RpcResultKind | undefined>
 
 type RpcInputKindByMethod = typeof rpcInputKindByMethod

@@ -14,6 +14,7 @@ type MonitorHarness = {
     recordInboundSession: ReturnType<typeof vi.fn>
     finalizeInboundContext: ReturnType<typeof vi.fn>
     dispatchReply: ReturnType<typeof vi.fn>
+    answerMessageAction: ReturnType<typeof vi.fn>
     upsertPairingRequest: ReturnType<typeof vi.fn>
     buildPairingReply: ReturnType<typeof vi.fn>
     readAllowFromStore: ReturnType<typeof vi.fn>
@@ -62,6 +63,17 @@ type MonitorSetup = {
         seq?: number
         date?: bigint
       }
+    | {
+        kind: "message.action.invoke"
+        chatId: bigint
+        interactionId: bigint
+        messageId: bigint
+        actorUserId: bigint
+        actionId: string
+        data: Uint8Array
+        seq?: number
+        date?: bigint
+      }
   >
   chats: Record<string, { kind: "direct" | "group"; title?: string }>
   participants?: Record<string, Array<{ id: bigint; username?: string; firstName?: string; lastName?: string }>>
@@ -77,8 +89,22 @@ type MonitorSetup = {
   mediaByUrl?: Record<string, { contentType?: string; fileName?: string; buffer?: Uint8Array | Buffer }>
   mentionRegexes?: RegExp[]
   matchesMentionPatterns?: (text: string, regexes: RegExp[]) => boolean
-  dispatchReplyPayload?: { text?: string; replyToId?: string; mediaUrl?: string; mediaUrls?: string[] }
-  dispatchReplyPayloads?: Array<{ text?: string; replyToId?: string; mediaUrl?: string; mediaUrls?: string[] }>
+  dispatchReplyPayload?: {
+    text?: string
+    replyToId?: string
+    mediaUrl?: string
+    mediaUrls?: string[]
+    buttons?: Array<Array<{ text?: string; callback_data?: string }>>
+    channelData?: Record<string, unknown>
+  }
+  dispatchReplyPayloads?: Array<{
+    text?: string
+    replyToId?: string
+    mediaUrl?: string
+    mediaUrls?: string[]
+    buttons?: Array<Array<{ text?: string; callback_data?: string }>>
+    channelData?: Record<string, unknown>
+  }>
   partialReplies?: Array<{ text?: string; mediaUrls?: string[] }>
   partialRepliesConcurrent?: boolean
   sendMessageDelayMs?: number
@@ -162,6 +188,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
     return { messageId: 1n }
   })
   const uploadFile = vi.fn(async () => ({ fileUniqueId: "INP_1", photoId: 200n }))
+  const answerMessageAction = vi.fn(async () => {})
   const fetchRemoteMedia = vi.fn(async ({ url }: { url: string }) => {
     const media = setup.mediaByUrl?.[url]
     return {
@@ -311,6 +338,21 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
           continue
         }
 
+        if (event.kind === "message.action.invoke") {
+          yield {
+            kind: event.kind,
+            chatId: event.chatId,
+            interactionId: event.interactionId,
+            messageId: event.messageId,
+            actorUserId: event.actorUserId,
+            actionId: event.actionId,
+            data: event.data,
+            seq: event.seq ?? 1,
+            date: event.date ?? 1_700_000_000n,
+          }
+          continue
+        }
+
         yield {
           kind: event.kind,
           chatId: event.chatId,
@@ -333,6 +375,8 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         GET_CHAT_PARTICIPANTS: 13,
         EDIT_MESSAGE: 8,
         GET_MESSAGES: 38,
+        INVOKE_MESSAGE_ACTION: 48,
+        ANSWER_MESSAGE_ACTION: 49,
       },
       InlineSdkClient: class {
         constructor(_opts: unknown) {}
@@ -357,6 +401,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         sendMessage = sendMessage
         uploadFile = uploadFile
         sendTyping = vi.fn(async () => {})
+        answerMessageAction = answerMessageAction
         invokeRaw = invokeRaw
         invokeUncheckedRaw = this.invokeRaw
         close = vi.fn(async () => {})
@@ -466,6 +511,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       recordInboundSession,
       finalizeInboundContext,
       dispatchReply,
+      answerMessageAction,
       upsertPairingRequest,
       buildPairingReply,
       readAllowFromStore,
@@ -538,6 +584,184 @@ describe("inline/monitor", () => {
         }),
       )
     })
+
+    await handle.stop()
+  })
+
+  it("handles message action callbacks and answers interaction after reply dispatch", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.action.invoke",
+          chatId: 7n,
+          interactionId: 22n,
+          messageId: 1001n,
+          actorUserId: 42n,
+          actionId: "pick",
+          data: new Uint8Array([123, 34, 107, 34, 58, 49, 125]), // {"k":1}
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyPayload: {
+        text: "received",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 7n,
+          text: "received",
+        }),
+      )
+      expect(harness.calls.answerMessageAction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          interactionId: 22n,
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          MessageActionInteractionId: "22",
+          MessageActionId: "pick",
+          MessageActionDataBase64: "eyJrIjoxfQ==",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("maps telegram-style buttons to inline message actions on text replies", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1002n,
+            date: 1_700_000_001n,
+            fromId: 42n,
+            message: "show options",
+          },
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyPayload: {
+        text: "choose one",
+        channelData: {
+          telegram: {
+            buttons: [[{ text: "Option A", callback_data: "cmd:a" }]],
+          },
+        },
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 7n,
+          text: "choose one",
+          actions: expect.objectContaining({
+            rows: [
+              expect.objectContaining({
+                actions: [
+                  expect.objectContaining({
+                    actionId: "btn_1_1",
+                    text: "Option A",
+                  }),
+                ],
+              }),
+            ],
+          }),
+        }),
+      )
+    })
+
+    const sent = harness.calls.sendMessage.mock.calls[0]?.[0]
+    const buttonData = sent?.actions?.rows?.[0]?.actions?.[0]?.action?.callback?.data
+    expect(buttonData).toBeInstanceOf(Uint8Array)
+    expect(new TextDecoder().decode(buttonData)).toBe("cmd:a")
+
+    await handle.stop()
+  })
+
+  it("attaches telegram-style buttons only to the first media send", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1003n,
+            date: 1_700_000_002n,
+            fromId: 42n,
+            message: "send media",
+          },
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyPayload: {
+        text: "media caption",
+        mediaUrls: ["https://example.com/a.jpg", "https://example.com/b.jpg"],
+        channelData: {
+          telegram: {
+            buttons: [[{ text: "Open", callback_data: "cmd:open" }]],
+          },
+        },
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.sendMessage).toHaveBeenCalledTimes(2)
+      expect(harness.calls.sendMessage).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          chatId: 7n,
+          actions: expect.any(Object),
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          chatId: 7n,
+        }),
+      )
+    })
+
+    const firstSend = harness.calls.sendMessage.mock.calls[0]?.[0]
+    const secondSend = harness.calls.sendMessage.mock.calls[1]?.[0]
+    expect(firstSend?.actions?.rows?.[0]?.actions?.[0]?.text).toBe("Open")
+    expect(secondSend?.actions).toBeUndefined()
 
     await handle.stop()
   })
