@@ -123,6 +123,9 @@ public actor UpdatesEngine: Sendable {
         case let .dialogNotificationSettings(dialogNotificationSettings):
           try dialogNotificationSettings.apply(db)
 
+        case let .messageActionAnswered(messageActionAnswered):
+          messageActionAnswered.apply()
+
         default:
           break
       }
@@ -561,6 +564,8 @@ extension InlineProtocol.UpdateEditMessage {
 
 extension InlineProtocol.UpdateNewChat {
   func apply(_ db: Database) throws {
+    let chat = Chat(from: chat)
+
     if hasUser {
       Log.shared.debug("saving user \(user)")
       do {
@@ -573,18 +578,35 @@ extension InlineProtocol.UpdateNewChat {
 
     Log.shared.debug("saving chat \(chat)")
     do {
-      let chat = Chat(from: chat)
       try chat.save(db)
     } catch {
       Log.shared.error("Failed to save chat", error: error)
     }
 
     do {
-      let dialog = Dialog(optimisticForChat: Chat(from: chat))
+      let dialog = Dialog(optimisticForChat: chat)
       Log.shared.debug("saving dialog \(dialog)")
       try dialog.save(db)
     } catch {
       Log.shared.error("Failed to save dialog", error: error)
+    }
+  }
+}
+
+extension InlineProtocol.UpdateMessageActionAnswered {
+  func apply() {
+    let toastText: String? = {
+      guard hasUi else { return nil }
+      guard case let .toast(toast) = ui.kind else { return nil }
+      let trimmed = toast.text.trimmingCharacters(in: .whitespacesAndNewlines)
+      return trimmed.isEmpty ? nil : trimmed
+    }()
+
+    Task { @MainActor in
+      MessageActionInteractionState.shared.finish(
+        interactionId: interactionID,
+        toastText: toastText
+      )
     }
   }
 }

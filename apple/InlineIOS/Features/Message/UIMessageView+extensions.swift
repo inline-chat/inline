@@ -1,6 +1,7 @@
 import Auth
 import GRDB
 import InlineKit
+import InlineProtocol
 import InlineUI
 import Logger
 import Nuke
@@ -153,6 +154,56 @@ extension UIMessageView {
     view.translatesAutoresizingMaskIntoConstraints = false
 
     return view
+  }
+
+  func createMessageActionsContainer() -> UIStackView {
+    let stack = UIStackView()
+    stack.axis = .vertical
+    stack.spacing = 4
+    stack.alignment = .fill
+    stack.distribution = .fill
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    return stack
+  }
+
+  func createMessageActionRowStack() -> UIStackView {
+    let stack = UIStackView()
+    stack.axis = .horizontal
+    stack.spacing = 4
+    stack.alignment = .fill
+    stack.distribution = .fillEqually
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    return stack
+  }
+
+  func createMessageActionButton(for action: InlineProtocol.MessageAction) -> MessageActionButton {
+    let button = MessageActionButton(type: .system)
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.messageAction = action
+    button.actionId = action.actionID.trimmingCharacters(in: .whitespacesAndNewlines)
+    button.baseTitle = action.text
+    button.setTitle(action.text, for: .normal)
+    button.titleLabel?.font = .systemFont(ofSize: 13, weight: .medium)
+    button.titleLabel?.lineBreakMode = .byTruncatingTail
+    button.contentEdgeInsets = UIEdgeInsets(top: 7, left: 10, bottom: 7, right: 10)
+    button.layer.cornerRadius = 10
+    button.layer.borderWidth = 1 / UIScreen.main.scale
+    button.clipsToBounds = true
+
+    let resolvedTextColor = outgoing ? UIColor.white : (ThemeManager.shared.selected.primaryTextColor ?? .label)
+    button.setTitleColor(resolvedTextColor, for: .normal)
+    button.setTitleColor(resolvedTextColor.withAlphaComponent(0.45), for: .disabled)
+
+    if outgoing {
+      button.backgroundColor = UIColor.white.withAlphaComponent(0.13)
+      button.layer.borderColor = UIColor.white.withAlphaComponent(0.28).cgColor
+    } else {
+      button.backgroundColor = ThemeManager.shared.selected.incomingBubbleBackground.withAlphaComponent(0.75)
+      button.layer.borderColor = UIColor.separator.withAlphaComponent(0.45).cgColor
+    }
+
+    button.addTarget(self, action: #selector(handleMessageActionButtonTap), for: .touchUpInside)
+    return button
   }
 }
 

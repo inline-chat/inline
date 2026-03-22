@@ -5,6 +5,8 @@ import Combine
 import Foundation
 import GRDB
 import InlineKit
+import struct InlineProtocol.MessageAction
+import struct InlineProtocol.MessageActionRow
 import InlineMacUI
 import InlineUI
 import Logger
@@ -15,6 +17,10 @@ import TextProcessing
 import Throttler
 import Translation
 
+private enum MessageActionInvokeError: Error {
+  case invalidResponse
+}
+
 class MessageViewAppKit: NSView {
   private let feature_relayoutOnBoundsChange = true
   private let log = Log.scoped("MessageView", enableTracing: true)
@@ -23,6 +29,8 @@ class MessageViewAppKit: NSView {
   private let dependencies: AppDependencies?
   private var props: MessageViewProps
   private var translationStateCancellable: AnyCancellable?
+  private var messageActionLoadingCancellable: AnyCancellable?
+  private var messageActionAnsweredCancellable: AnyCancellable?
   private var notionAccessCancellable: AnyCancellable?
   private var from: User {
     fullMessage.from ?? User.deletedInstance
@@ -369,11 +377,153 @@ class MessageViewAppKit: NSView {
   ///
   /// Will do tasks, Loom embeds, etc.
   private var attachmentsView: MessageAttachmentsView?
+  private var messageActionRowsView: MessageActionRowsView?
 
   private func createAttachmentsView() -> MessageAttachmentsView? {
     let view = MessageAttachmentsView(attachments: fullMessage.attachments, message: message)
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
+  }
+
+  private var renderableMessageActionRows: [MessageActionRow] {
+    guard let actions = message.actions else { return [] }
+
+    return actions.rows.compactMap { row in
+      let filtered = row.actions.filter { action in
+        !action.actionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+          !action.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+          action.action != nil
+      }
+      guard !filtered.isEmpty else { return nil }
+
+      var next = MessageActionRow()
+      next.actions = filtered
+      return next
+    }
+  }
+
+  private func loadingActionIdsForCurrentMessage() -> Set<String> {
+    let keys = MessageActionInteractionState.shared.loadingPublisher.value
+    return Set(
+      keys
+        .filter { $0.peerId == message.peerId && $0.messageId == message.messageId }
+        .map(\.actionId)
+    )
+  }
+
+  private func syncMessageActionRowsView(message: FullMessage, props: MessageViewProps) {
+    guard props.layout.hasActionsRows, !renderableMessageActionRows.isEmpty else {
+      messageActionRowsView?.removeFromSuperview()
+      messageActionRowsView = nil
+      clearMessageActionRowsConstraints()
+      return
+    }
+
+    let view = messageActionRowsView ?? MessageActionRowsView()
+    if view.superview == nil {
+      addSubview(view)
+    }
+
+    view.onActionTap = { [weak self] action in
+      self?.handleMessageActionTap(action)
+    }
+
+    view.configure(
+      rows: renderableMessageActionRows,
+      loadingActionIds: loadingActionIdsForCurrentMessage(),
+      outgoing: message.message.out == true,
+      rowHeight: 28
+    )
+
+    messageActionRowsView = view
+  }
+
+  private func setupMessageActionStateObservation() {
+    messageActionLoadingCancellable = MessageActionInteractionState.shared.loadingPublisher
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] _ in
+        self?.refreshMessageActionRowsView()
+      }
+
+    messageActionAnsweredCancellable = MessageActionInteractionState.shared.answeredPublisher
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] event in
+        guard let self else { return }
+        guard event.key.peerId == message.peerId, event.key.messageId == message.messageId else { return }
+
+        refreshMessageActionRowsView()
+
+        if let toastText = event.toastText {
+          ToastCenter.shared.showInfo(toastText)
+        }
+      }
+  }
+
+  private func refreshMessageActionRowsView() {
+    guard let messageActionRowsView else { return }
+    messageActionRowsView.configure(
+      rows: renderableMessageActionRows,
+      loadingActionIds: loadingActionIdsForCurrentMessage(),
+      outgoing: outgoing,
+      rowHeight: 28
+    )
+  }
+
+  private func handleMessageActionTap(_ action: MessageAction) {
+    switch action.action {
+      case .callback:
+        invokeMessageCallbackAction(action)
+      case let .copyText(copyText):
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(copyText.text, forType: .string)
+        ToastCenter.shared.showSuccess("Copied")
+      case nil:
+        break
+    }
+  }
+
+  private func invokeMessageCallbackAction(_ action: MessageAction) {
+    let actionId = action.actionID.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !actionId.isEmpty else { return }
+
+    let loadingKey = MessageActionInteractionState.LoadingKey(
+      peerId: message.peerId,
+      messageId: message.messageId,
+      actionId: actionId
+    )
+
+    guard MessageActionInteractionState.shared.begin(key: loadingKey) else { return }
+    refreshMessageActionRowsView()
+
+    Task {
+      do {
+        let result = try await Api.realtime.send(
+          .invokeMessageAction(
+            peerId: message.peerId,
+            messageId: message.messageId,
+            actionId: actionId
+          )
+        )
+
+        guard case let .invokeMessageAction(response) = result else {
+          throw MessageActionInvokeError.invalidResponse
+        }
+
+        await MainActor.run {
+          MessageActionInteractionState.shared.attachInteractionId(
+            response.interactionID,
+            for: loadingKey
+          )
+          refreshMessageActionRowsView()
+        }
+      } catch {
+        await MainActor.run {
+          MessageActionInteractionState.shared.fail(key: loadingKey)
+          refreshMessageActionRowsView()
+          ToastCenter.shared.showError("Action failed")
+        }
+      }
+    }
   }
 
   private func syncForwardHeaderView(for props: MessageViewProps) {
@@ -442,6 +592,21 @@ class MessageViewAppKit: NSView {
   }
 
   /// Reply
+  private var embeddedReplyStyle: EmbeddedMessageView.EmbeddedMessageStyle {
+    let appearance = EmbeddedReplyStyleResolver.appearance(
+      isOutgoing: outgoing,
+      hasPhoto: hasPhoto,
+      hasText: hasVisibleText
+    )
+
+    switch appearance {
+    case .colored:
+      return .colored
+    case .white:
+      return .white
+    }
+  }
+
   private lazy var replyView: EmbeddedMessageView = {
     let view = EmbeddedMessageView(style: embeddedReplyStyle)
     view.translatesAutoresizingMaskIntoConstraints = false
@@ -474,21 +639,6 @@ class MessageViewAppKit: NSView {
       textView.layerContentsRedrawPolicy = .onSetNeedsDisplay
       textView.layer?.drawsAsynchronously = true
       textView.layer?.needsDisplayOnBoundsChange = true
-
-  private var embeddedReplyStyle: EmbeddedMessageView.EmbeddedMessageStyle {
-    let appearance = EmbeddedReplyStyleResolver.appearance(
-      isOutgoing: outgoing,
-      hasPhoto: hasPhoto,
-      hasText: hasVisibleText
-    )
-
-    switch appearance {
-    case .colored:
-      return .colored
-    case .white:
-      return .white
-    }
-  }
 
       let textContainer = textView.textContainer
       textContainer?.widthTracksTextView = false
@@ -652,6 +802,8 @@ class MessageViewAppKit: NSView {
       NotificationCenter.default.removeObserver(observer)
     }
     translationStateCancellable?.cancel()
+    messageActionLoadingCancellable?.cancel()
+    messageActionAnsweredCancellable?.cancel()
   }
 
   private func setupView() {
@@ -703,6 +855,8 @@ class MessageViewAppKit: NSView {
       setupEntityClickHandling()
     }
 
+    syncMessageActionRowsView(message: fullMessage, props: props)
+
     if hasReactions {
       setupReactions(animate: false)
     }
@@ -720,6 +874,7 @@ class MessageViewAppKit: NSView {
 
     // Setup translation state observation
     setupTranslationStateObservation()
+    setupMessageActionStateObservation()
   }
 
   private func setupTranslationStateObservation() {
@@ -967,7 +1122,7 @@ class MessageViewAppKit: NSView {
       )
       if reactionsOutsideBubble {
         reactionViewTopConstraint = reactionsView.topAnchor.constraint(
-          equalTo: bubbleView.bottomAnchor,
+          equalTo: (messageActionRowsView?.bottomAnchor ?? bubbleView.bottomAnchor),
           constant: props.layout.reactionsOutsideBubbleTopInset
         )
         if outgoing {
@@ -1013,6 +1168,20 @@ class MessageViewAppKit: NSView {
       transparentOutgoingStyle: shouldUseTransparentOutgoingReactions,
       animate: false
     )
+  }
+
+  private func clearMessageActionRowsConstraints() {
+    NSLayoutConstraint.deactivate([
+      messageActionRowsWidthConstraint,
+      messageActionRowsHeightConstraint,
+      messageActionRowsTopConstraint,
+      messageActionRowsSideConstraint,
+    ].compactMap(\.self))
+
+    messageActionRowsWidthConstraint = nil
+    messageActionRowsHeightConstraint = nil
+    messageActionRowsTopConstraint = nil
+    messageActionRowsSideConstraint = nil
   }
 
   private func updateReactions(prev _: FullMessage, next: FullMessage, props: MessageViewProps) {
@@ -1290,6 +1459,30 @@ class MessageViewAppKit: NSView {
       ]
     )
 
+    if let actionsRows = layout.actionsRows, let messageActionRowsView {
+      messageActionRowsWidthConstraint = messageActionRowsView.widthAnchor.constraint(equalToConstant: actionsRows.size.width)
+      messageActionRowsHeightConstraint = messageActionRowsView.heightAnchor.constraint(equalToConstant: actionsRows.size.height)
+      messageActionRowsTopConstraint = messageActionRowsView.topAnchor.constraint(
+        equalTo: bubbleView.bottomAnchor,
+        constant: actionsRows.spacing.top
+      )
+
+      if outgoing {
+        messageActionRowsSideConstraint = messageActionRowsView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor)
+      } else {
+        messageActionRowsSideConstraint = messageActionRowsView.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor)
+      }
+
+      constraints.append(
+        contentsOf: [
+          messageActionRowsWidthConstraint,
+          messageActionRowsHeightConstraint,
+          messageActionRowsTopConstraint,
+          messageActionRowsSideConstraint,
+        ].compactMap(\.self)
+      )
+    }
+
     // Text
 
     if let text = layout.text {
@@ -1328,7 +1521,7 @@ class MessageViewAppKit: NSView {
       )
       if layout.reactionsOutsideBubble {
         reactionViewTopConstraint = reactionsView.topAnchor.constraint(
-          equalTo: bubbleView.bottomAnchor,
+          equalTo: (messageActionRowsView?.bottomAnchor ?? bubbleView.bottomAnchor),
           constant: layout.reactionsOutsideBubbleTopInset
         )
         if outgoing {
@@ -1539,6 +1732,10 @@ class MessageViewAppKit: NSView {
   private var documentViewHeightConstraint: NSLayoutConstraint?
 
   private var attachmentsViewTopConstraint: NSLayoutConstraint?
+  private var messageActionRowsWidthConstraint: NSLayoutConstraint?
+  private var messageActionRowsHeightConstraint: NSLayoutConstraint?
+  private var messageActionRowsTopConstraint: NSLayoutConstraint?
+  private var messageActionRowsSideConstraint: NSLayoutConstraint?
 
   private var reactionViewWidthConstraint: NSLayoutConstraint!
   private var reactionViewHeightConstraint: NSLayoutConstraint!
@@ -1559,6 +1756,7 @@ class MessageViewAppKit: NSView {
 
   override func updateConstraints() {
     var skipUpdates = false
+    var didRebuildMessageActionRowConstraints = false
     if isInitialUpdateConstraint {
       setupConstraints()
       isInitialUpdateConstraint = false
@@ -1589,6 +1787,55 @@ class MessageViewAppKit: NSView {
           ),
         ])
       }
+    }
+
+    if let actionsRows = props.layout.actionsRows, let messageActionRowsView {
+      let expectedSideAttribute: NSLayoutConstraint.Attribute = outgoing ? .trailing : .leading
+      let hasUnexpectedSideConstraint =
+        messageActionRowsSideConstraint?.firstAttribute != expectedSideAttribute
+
+      if messageActionRowsWidthConstraint == nil
+        || messageActionRowsHeightConstraint == nil
+        || messageActionRowsTopConstraint == nil
+        || messageActionRowsSideConstraint == nil
+        || hasUnexpectedSideConstraint
+      {
+        clearMessageActionRowsConstraints()
+        didRebuildMessageActionRowConstraints = true
+
+        messageActionRowsWidthConstraint = messageActionRowsView.widthAnchor.constraint(
+          equalToConstant: actionsRows.size.width
+        )
+        messageActionRowsHeightConstraint = messageActionRowsView.heightAnchor.constraint(
+          equalToConstant: actionsRows.size.height
+        )
+        messageActionRowsTopConstraint = messageActionRowsView.topAnchor.constraint(
+          equalTo: bubbleView.bottomAnchor,
+          constant: actionsRows.spacing.top
+        )
+
+        if outgoing {
+          messageActionRowsSideConstraint = messageActionRowsView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor)
+        } else {
+          messageActionRowsSideConstraint = messageActionRowsView.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor)
+        }
+
+        NSLayoutConstraint.activate([
+          messageActionRowsWidthConstraint,
+          messageActionRowsHeightConstraint,
+          messageActionRowsTopConstraint,
+          messageActionRowsSideConstraint,
+        ].compactMap(\.self))
+      }
+    } else {
+      if messageActionRowsWidthConstraint != nil
+        || messageActionRowsHeightConstraint != nil
+        || messageActionRowsTopConstraint != nil
+        || messageActionRowsSideConstraint != nil
+      {
+        didRebuildMessageActionRowConstraints = true
+      }
+      clearMessageActionRowsConstraints()
     }
 
     // From this point on, only updates happen (no setup)
@@ -1790,11 +2037,29 @@ class MessageViewAppKit: NSView {
       }
     }
 
+    if let actionsRows = props.layout.actionsRows,
+       let messageActionRowsWidthConstraint,
+       let messageActionRowsHeightConstraint,
+       let messageActionRowsTopConstraint
+    {
+      if messageActionRowsWidthConstraint.constant != actionsRows.size.width {
+        messageActionRowsWidthConstraint.constant = actionsRows.size.width
+      }
+
+      if messageActionRowsHeightConstraint.constant != actionsRows.size.height {
+        messageActionRowsHeightConstraint.constant = actionsRows.size.height
+      }
+
+      if messageActionRowsTopConstraint.constant != actionsRows.spacing.top {
+        messageActionRowsTopConstraint.constant = actionsRows.spacing.top
+      }
+    }
+
     // Update reaction constraints
     if let reactionsPlan = props.layout.reactions,
        let reactionViewWidthConstraint,
        let reactionViewHeightConstraint,
-       let reactionViewTopConstraint
+       let existingReactionViewTopConstraint = reactionViewTopConstraint
     {
       log.trace("Updating reactions view constraints for message \(reactionsPlan.size)")
       if reactionViewWidthConstraint.constant != reactionsPlan.size.width {
@@ -1808,8 +2073,15 @@ class MessageViewAppKit: NSView {
       let reactionTopConstant = props.layout.reactionsOutsideBubble
         ? props.layout.reactionsOutsideBubbleTopInset
         : props.layout.reactionsViewTop
-      if reactionViewTopConstraint.constant != reactionTopConstant {
-        reactionViewTopConstraint.constant = reactionTopConstant
+      if props.layout.reactionsOutsideBubble {
+        existingReactionViewTopConstraint.isActive = false
+        self.reactionViewTopConstraint = reactionsView?.topAnchor.constraint(
+          equalTo: (messageActionRowsView?.bottomAnchor ?? bubbleView.bottomAnchor),
+          constant: reactionTopConstant
+        )
+        self.reactionViewTopConstraint?.isActive = true
+      } else if existingReactionViewTopConstraint.constant != reactionTopConstant {
+        existingReactionViewTopConstraint.constant = reactionTopConstant
       }
       if props.layout.reactionsOutsideBubble, outgoing {
         if let reactionViewTrailingConstraint,
@@ -1834,7 +2106,7 @@ class MessageViewAppKit: NSView {
       )
       if props.layout.reactionsOutsideBubble {
         reactionViewTopConstraint = reactionsView.topAnchor.constraint(
-          equalTo: bubbleView.bottomAnchor,
+          equalTo: (messageActionRowsView?.bottomAnchor ?? bubbleView.bottomAnchor),
           constant: props.layout.reactionsOutsideBubbleTopInset
         )
         if outgoing {
@@ -1958,6 +2230,7 @@ class MessageViewAppKit: NSView {
       configuration: .init(
         // FIXME: Extract to a variable
         font: .systemFont(ofSize: props.layout.fontSize),
+        boldWeight: .semibold,
         textColor: textColor,
         linkColor: mentionColor,
         codeBlockBackgroundColor: codeBlockBackgroundColor,
@@ -2489,6 +2762,7 @@ class MessageViewAppKit: NSView {
     // update internal props
     self.fullMessage = fullMessage
     syncForwardHeaderView(for: props)
+    syncMessageActionRowsView(message: fullMessage, props: props)
 
     if props.layout.document != nil {
       if documentContainerView.superview == nil {
@@ -2504,6 +2778,7 @@ class MessageViewAppKit: NSView {
     // Update related message for reply view
     if hasReply {
       replyView.setRelatedMessage(fullMessage.message)
+      replyView.setStyle(embeddedReplyStyle)
       if let embeddedMessage = fullMessage.repliedToMessage {
         replyView.update(with: embeddedMessage, kind: .replyInMessage)
       }
@@ -2675,7 +2950,6 @@ class MessageViewAppKit: NSView {
       if let animView = swipeAnimationView {
         let yPosition = bubbleView.bounds.midY - animView.bounds.height / 2
         animView.frame.origin = NSPoint(x: bounds.width, y: yPosition)
-      replyView.setStyle(embeddedReplyStyle)
       }
     }
 
@@ -3271,6 +3545,190 @@ extension MessageViewAppKit: NSMenuDelegate {
 
     menu.delegate = self
     return menu
+  }
+}
+
+final class MessageActionRowsView: NSView {
+  var onActionTap: ((MessageAction) -> Void)?
+
+  private let rowsStack: NSStackView = {
+    let stack = NSStackView()
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    stack.orientation = .vertical
+    stack.spacing = 4
+    stack.alignment = .leading
+    stack.distribution = .fill
+    return stack
+  }()
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    translatesAutoresizingMaskIntoConstraints = false
+    addSubview(rowsStack)
+
+    NSLayoutConstraint.activate([
+      rowsStack.topAnchor.constraint(equalTo: topAnchor),
+      rowsStack.leadingAnchor.constraint(equalTo: leadingAnchor),
+      rowsStack.trailingAnchor.constraint(equalTo: trailingAnchor),
+      rowsStack.bottomAnchor.constraint(equalTo: bottomAnchor),
+    ])
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  func configure(
+    rows: [MessageActionRow],
+    loadingActionIds: Set<String>,
+    outgoing: Bool,
+    rowHeight: CGFloat
+  ) {
+    rowsStack.arrangedSubviews.forEach { row in
+      rowsStack.removeArrangedSubview(row)
+      row.removeFromSuperview()
+    }
+
+    for row in rows {
+      let rowStack = NSStackView()
+      rowStack.translatesAutoresizingMaskIntoConstraints = false
+      rowStack.orientation = .horizontal
+      rowStack.spacing = 4
+      rowStack.alignment = .centerY
+      rowStack.distribution = .fillEqually
+
+      for action in row.actions {
+        let itemView = MessageActionButtonRowItemView()
+        let actionId = action.actionID.trimmingCharacters(in: .whitespacesAndNewlines)
+        itemView.configure(
+          action: action,
+          isLoading: loadingActionIds.contains(actionId),
+          outgoing: outgoing,
+          rowHeight: rowHeight
+        )
+        itemView.onTap = { [weak self] tappedAction in
+          self?.onActionTap?(tappedAction)
+        }
+        rowStack.addArrangedSubview(itemView)
+      }
+
+      rowsStack.addArrangedSubview(rowStack)
+    }
+  }
+}
+
+final class MessageActionButtonRowItemView: NSView {
+  var onTap: ((MessageAction) -> Void)?
+
+  private let button: NSButton = {
+    let button = NSButton(title: "", target: nil, action: nil)
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.isBordered = false
+    button.cell?.lineBreakMode = .byTruncatingTail
+    button.font = .systemFont(ofSize: 12, weight: .medium)
+    button.setButtonType(.momentaryChange)
+    button.imagePosition = .noImage
+    return button
+  }()
+
+  private let spinner: NSProgressIndicator = {
+    let spinner = NSProgressIndicator()
+    spinner.translatesAutoresizingMaskIntoConstraints = false
+    spinner.style = .spinning
+    spinner.controlSize = .small
+    spinner.isDisplayedWhenStopped = false
+    return spinner
+  }()
+
+  private var heightConstraint: NSLayoutConstraint?
+  private var action: MessageAction?
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    translatesAutoresizingMaskIntoConstraints = false
+    wantsLayer = true
+
+    addSubview(button)
+    addSubview(spinner)
+
+    NSLayoutConstraint.activate([
+      button.topAnchor.constraint(equalTo: topAnchor),
+      button.leadingAnchor.constraint(equalTo: leadingAnchor),
+      button.trailingAnchor.constraint(equalTo: trailingAnchor),
+      button.bottomAnchor.constraint(equalTo: bottomAnchor),
+      spinner.centerXAnchor.constraint(equalTo: centerXAnchor),
+      spinner.centerYAnchor.constraint(equalTo: centerYAnchor),
+    ])
+
+    button.target = self
+    button.action = #selector(handleTap)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  func configure(
+    action: MessageAction,
+    isLoading: Bool,
+    outgoing: Bool,
+    rowHeight: CGFloat
+  ) {
+    self.action = action
+
+    let title = action.text
+    let textColor: NSColor = outgoing ? .white : .labelColor
+    let disabledColor = textColor.withAlphaComponent(0.45)
+    button.attributedTitle = NSAttributedString(
+      string: title,
+      attributes: [
+        .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+        .foregroundColor: textColor,
+      ]
+    )
+    button.contentTintColor = textColor
+
+    if isLoading {
+      spinner.startAnimation(nil)
+      button.alphaValue = 0
+      button.isEnabled = false
+    } else {
+      spinner.stopAnimation(nil)
+      button.alphaValue = 1
+      button.isEnabled = true
+    }
+
+    let borderColor: NSColor
+    let backgroundColor: NSColor
+    if outgoing {
+      borderColor = NSColor.white.withAlphaComponent(0.28)
+      backgroundColor = NSColor.white.withAlphaComponent(0.12)
+    } else {
+      borderColor = NSColor.separatorColor.withAlphaComponent(0.5)
+      backgroundColor = Theme.messageBubbleSecondaryBgColor.withAlphaComponent(0.85)
+    }
+
+    layer?.cornerRadius = max(8, floor(rowHeight * 0.34))
+    layer?.borderWidth = 1
+    layer?.borderColor = borderColor.cgColor
+    layer?.backgroundColor = backgroundColor.cgColor
+
+    button.contentTintColor = isLoading ? disabledColor : textColor
+
+    if let heightConstraint {
+      heightConstraint.constant = rowHeight
+    } else {
+      let next = heightAnchor.constraint(equalToConstant: rowHeight)
+      next.isActive = true
+      heightConstraint = next
+    }
+  }
+
+  @objc private func handleTap() {
+    guard let action else { return }
+    onTap?(action)
   }
 }
 

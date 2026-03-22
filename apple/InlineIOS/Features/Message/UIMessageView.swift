@@ -12,12 +12,45 @@ import TextProcessing
 import Translation
 import UIKit
 
+final class MessageActionButton: UIButton {
+  var messageAction: InlineProtocol.MessageAction?
+  var actionId: String = ""
+  var baseTitle: String = ""
+  let spinner = UIActivityIndicatorView(style: .medium)
+
+  override init(frame: CGRect) {
+    super.init(frame: frame)
+
+    spinner.translatesAutoresizingMaskIntoConstraints = false
+    spinner.hidesWhenStopped = true
+    spinner.transform = CGAffineTransform(scaleX: 0.82, y: 0.82)
+    addSubview(spinner)
+
+    NSLayoutConstraint.activate([
+      spinner.centerXAnchor.constraint(equalTo: centerXAnchor),
+      spinner.centerYAnchor.constraint(equalTo: centerYAnchor),
+    ])
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+}
+
+private enum MessageActionInvokeError: Error {
+  case invalidResponse
+}
+
 class UIMessageView: UIView {
   // MARK: - Properties
 
   let fullMessage: FullMessage
   let spaceId: Int64
   private var translationCancellable: AnyCancellable?
+  private var messageActionLoadingCancellable: AnyCancellable?
+  private var messageActionAnsweredCancellable: AnyCancellable?
+  private var messageActionButtonsById: [String: MessageActionButton] = [:]
   private var isTranslating = false {
     didSet {
       if isTranslating {
@@ -188,6 +221,27 @@ class UIMessageView: UIView {
     !fullMessage.reactions.isEmpty && !shouldShowReactionsOutsideBubble
   }
 
+  private var messageActionRows: [InlineProtocol.MessageActionRow] {
+    guard let actions = message.actions else { return [] }
+
+    return actions.rows.compactMap { row in
+      let filtered = row.actions.filter { action in
+        !action.actionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+          !action.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+          action.action != nil
+      }
+      guard !filtered.isEmpty else { return nil }
+
+      var cleaned = InlineProtocol.MessageActionRow()
+      cleaned.actions = filtered
+      return cleaned
+    }
+  }
+
+  private var hasMessageActionRows: Bool {
+    !messageActionRows.isEmpty
+  }
+
   var isEmojiOnlyMessage: Bool {
     if message.repliedToMessageId != nil || message.forwardFromUserId != nil {
       return false
@@ -299,6 +353,7 @@ class UIMessageView: UIView {
   lazy var voiceMessageViewController = createVoiceMessageViewController()
   lazy var messageAttachmentEmbed = createMessageAttachmentEmbed()
   lazy var metadataView = createMessageTimeAndStatus()
+  lazy var messageActionsContainer = createMessageActionsContainer()
   private weak var metadataContainerView: UIStackView?
 
   lazy var reactionsFlowView: ReactionsFlowView = {
@@ -336,6 +391,8 @@ class UIMessageView: UIView {
 
   deinit {
     translationCancellable?.cancel()
+    messageActionLoadingCancellable?.cancel()
+    messageActionAnsweredCancellable?.cancel()
   }
 
   init(fullMessage: FullMessage, spaceId: Int64) {
@@ -413,6 +470,7 @@ class UIMessageView: UIView {
     setupVideoViewIfNeeded()
     setupDocumentViewIfNeeded()
     setupMessageContainer()
+    setupMessageActionsIfNeeded()
     setupExternalReactionsIfNeeded()
 
     addGestureRecognizer()
@@ -555,6 +613,161 @@ class UIMessageView: UIView {
     } else {
       constraints.append(reactionsFlowView.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor))
       constraints.append(reactionsFlowView.trailingAnchor.constraint(lessThanOrEqualTo: bubbleView.trailingAnchor))
+    }
+
+    NSLayoutConstraint.activate(constraints)
+  }
+
+  private func setupMessageActionsIfNeeded() {
+    guard hasMessageActionRows else { return }
+
+    if messageActionsContainer.superview == nil {
+      addSubview(messageActionsContainer)
+    }
+
+    messageActionButtonsById.removeAll(keepingCapacity: true)
+    messageActionsContainer.arrangedSubviews.forEach { subview in
+      messageActionsContainer.removeArrangedSubview(subview)
+      subview.removeFromSuperview()
+    }
+
+    for row in messageActionRows {
+      let rowStack = createMessageActionRowStack()
+      for action in row.actions {
+        let button = createMessageActionButton(for: action)
+        rowStack.addArrangedSubview(button)
+        messageActionButtonsById[button.actionId] = button
+      }
+      messageActionsContainer.addArrangedSubview(rowStack)
+    }
+
+    setupMessageActionStateSubscriptions()
+    updateMessageActionButtonsLoadingState()
+  }
+
+  private func setupMessageActionStateSubscriptions() {
+    messageActionLoadingCancellable?.cancel()
+    messageActionAnsweredCancellable?.cancel()
+
+    messageActionLoadingCancellable = MessageActionInteractionState.shared.loadingPublisher
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] _ in
+        self?.updateMessageActionButtonsLoadingState()
+      }
+
+    messageActionAnsweredCancellable = MessageActionInteractionState.shared.answeredPublisher
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] event in
+        guard let self else { return }
+        guard event.key.peerId == message.peerId, event.key.messageId == message.messageId else { return }
+
+        if let toastText = event.toastText {
+          ToastManager.shared.showToast(
+            toastText,
+            type: .info
+          )
+        }
+      }
+  }
+
+  private func updateMessageActionButtonsLoadingState() {
+    guard !messageActionButtonsById.isEmpty else { return }
+
+    for (actionId, button) in messageActionButtonsById {
+      let key = MessageActionInteractionState.LoadingKey(
+        peerId: message.peerId,
+        messageId: message.messageId,
+        actionId: actionId
+      )
+      let isLoading = MessageActionInteractionState.shared.isLoading(key: key)
+
+      button.isEnabled = !isLoading
+      button.titleLabel?.alpha = isLoading ? 0 : 1
+      if isLoading {
+        button.spinner.color = outgoing ? .white : ThemeManager.shared.selected.accent
+        button.spinner.startAnimating()
+      } else {
+        button.spinner.stopAnimating()
+      }
+    }
+  }
+
+  @objc func handleMessageActionButtonTap(_ sender: MessageActionButton) {
+    guard let action = sender.messageAction else { return }
+
+    switch action.action {
+      case .callback:
+        invokeMessageCallbackAction(action)
+      case let .copyText(copyText):
+        UIPasteboard.general.string = copyText.text
+        ToastManager.shared.showToast(
+          "Copied",
+          type: .success,
+          systemImage: "doc.on.doc"
+        )
+      case nil:
+        break
+    }
+  }
+
+  private func invokeMessageCallbackAction(_ action: InlineProtocol.MessageAction) {
+    let actionId = action.actionID.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !actionId.isEmpty else { return }
+
+    let loadingKey = MessageActionInteractionState.LoadingKey(
+      peerId: message.peerId,
+      messageId: message.messageId,
+      actionId: actionId
+    )
+
+    guard MessageActionInteractionState.shared.begin(key: loadingKey) else { return }
+    updateMessageActionButtonsLoadingState()
+
+    Task {
+      do {
+        let result = try await Api.realtime.send(
+          .invokeMessageAction(
+            peerId: message.peerId,
+            messageId: message.messageId,
+            actionId: actionId
+          )
+        )
+
+        guard case let .invokeMessageAction(response) = result else {
+          throw MessageActionInvokeError.invalidResponse
+        }
+
+        await MainActor.run {
+          MessageActionInteractionState.shared.attachInteractionId(
+            response.interactionID,
+            for: loadingKey
+          )
+        }
+      } catch {
+        await MainActor.run {
+          MessageActionInteractionState.shared.fail(key: loadingKey)
+          ToastManager.shared.showToast(
+            "Action failed",
+            type: .error,
+            systemImage: "exclamationmark.triangle"
+          )
+        }
+      }
+    }
+  }
+
+  private func setupMessageActionsConstraints() {
+    var constraints: [NSLayoutConstraint] = [
+      messageActionsContainer.topAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: 4),
+      messageActionsContainer.widthAnchor.constraint(lessThanOrEqualTo: bubbleView.widthAnchor),
+    ]
+
+    if outgoing {
+      constraints.append(messageActionsContainer.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor))
+      constraints.append(messageActionsContainer.leadingAnchor.constraint(greaterThanOrEqualTo: bubbleView.leadingAnchor))
+    } else {
+      constraints.append(messageActionsContainer.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor))
+      constraints.append(messageActionsContainer.trailingAnchor.constraint(lessThanOrEqualTo: bubbleView.trailingAnchor))
     }
 
     NSLayoutConstraint.activate(constraints)
@@ -1040,7 +1253,6 @@ class UIMessageView: UIView {
         if NSLocationInRange(characterIndex, range),
            let userId = value as? Int64
         {
-          print("Mention tapped for user ID: \(userId)")
           NotificationCenter.default.post(
             name: Notification.Name("MentionTapped"),
             object: nil,
@@ -1360,8 +1572,14 @@ class UIMessageView: UIView {
 
     NSLayoutConstraint.activate(baseConstraints + constraints)
 
+    if hasMessageActionRows {
+      setupMessageActionsConstraints()
+    }
+
     if shouldShowReactionsOutsideBubble {
       setupExternalReactionsConstraints()
+    } else if hasMessageActionRows {
+      messageActionsContainer.bottomAnchor.constraint(equalTo: bottomAnchor).isActive = true
     } else {
       bubbleView.bottomAnchor.constraint(equalTo: bottomAnchor).isActive = true
     }

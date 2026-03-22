@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import InlineKit
+import InlineProtocol
 import Logger
 import TextProcessing
 import Translation
@@ -42,6 +43,11 @@ class MessageSizeCalculator {
   static let minimalStickerMaxSide: CGFloat = 120
   static let minimalDocumentMaxWidth: CGFloat = 420
   static let minimalAttachmentsMaxWidth: CGFloat = 560
+  static let messageActionsMinWidth: CGFloat = 180
+  static let messageActionButtonMinWidth: CGFloat = 110
+  static let messageActionRowSpacing: CGFloat = 4
+  static let bubbleMessageActionRowHeight: CGFloat = 28
+  static let minimalMessageActionRowHeight: CGFloat = 24
   // Core Text typographic settings
   private let typographicSettings: [NSAttributedString.Key: Any]
 
@@ -234,6 +240,8 @@ class MessageSizeCalculator {
     /// reactions
     var reactions: LayoutPlan?
 
+    var actionsRows: LayoutPlan?
+
     /// layout for each reaction
     var reactionItems: [String: LayoutPlan]
 
@@ -273,6 +281,7 @@ class MessageSizeCalculator {
     var hasDocument: Bool { document != nil }
     var hasReactions: Bool { reactions != nil }
     var hasAttachments: Bool { attachments != nil }
+    var hasActionsRows: Bool { actionsRows != nil }
     var placesTimeAboveReactions: Bool {
       emojiMessage && hasReactions && !reactionsOutsideBubble
     }
@@ -461,10 +470,44 @@ class MessageSizeCalculator {
   }
 
   // Use a more efficient cache key
+  private func actionRows(for message: FullMessage) -> [InlineProtocol.MessageActionRow] {
+    guard let actions = message.message.actions else { return [] }
+
+    return actions.rows.compactMap { row in
+      let filtered = row.actions.filter { action in
+        !action.actionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+          !action.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+          action.action != nil
+      }
+      guard !filtered.isEmpty else { return nil }
+
+      var next = InlineProtocol.MessageActionRow()
+      next.actions = filtered
+      return next
+    }
+  }
+
+  private func actionRowsSignature(for message: FullMessage) -> String {
+    let rows = actionRows(for: message)
+    guard !rows.isEmpty else { return "0" }
+    return rows.map { String($0.actions.count) }.joined(separator: ",")
+  }
+
+  private func minimumActionRowsWidth(
+    for rows: [InlineProtocol.MessageActionRow],
+    parentAvailableWidth: CGFloat
+  ) -> CGFloat {
+    let maxButtonsInRow = rows.map { $0.actions.count }.max() ?? 1
+    let rowBasedMinimum = CGFloat(maxButtonsInRow) * Self.messageActionButtonMinWidth
+      + CGFloat(max(maxButtonsInRow - 1, 0)) * Self.messageActionRowSpacing
+    let proposed = max(Self.messageActionsMinWidth, rowBasedMinimum)
+    return min(parentAvailableWidth, proposed)
+  }
+
   private func cacheKey(for message: FullMessage, width: CGFloat, props: MessageViewInputProps) -> NSString {
     // Hash-based approach is faster than string concatenation
     let hashValue =
-      "\(message.id)_\(message.displayText?.hashValue ?? 0)_\(Int(width))_\(props.toString())_\(message.message.entities?.entities.count ?? 0)"
+      "\(message.id)_\(message.displayText?.hashValue ?? 0)_\(Int(width))_\(props.toString())_\(message.message.entities?.entities.count ?? 0)_\(actionRowsSignature(for: message))"
     return NSString(string: "\(hashValue)")
   }
 
@@ -523,6 +566,8 @@ class MessageSizeCalculator {
     let hasReactions = message.reactions.count > 0
     let renderableAttachments = message.attachments.filter(\.isRenderableAttachment)
     let hasAttachments = !renderableAttachments.isEmpty
+    let renderableActionRows = actionRows(for: message)
+    let hasActionRows = !renderableActionRows.isEmpty
     let isOutgoing = message.message.out == true
     var isSingleLine = false
     var isSticker = message.message.isSticker == true
@@ -567,6 +612,7 @@ class MessageSizeCalculator {
         entities: message.message.entities,
         configuration: .init(
           font: font,
+          boldWeight: .semibold,
           textColor: textColor(for: .bubble, outgoing: isOutgoing),
           linkColor: linkColor(for: .bubble, outgoing: isOutgoing)
         )
@@ -781,6 +827,7 @@ class MessageSizeCalculator {
     var forwardHeaderPlan: LayoutPlan?
     var replyPlan: LayoutPlan?
     var reactionsPlan: LayoutPlan?
+    var actionsRowsPlan: LayoutPlan?
     var reactionItemsPlan: [String: LayoutPlan] = [:]
     var reactionsOutsideBubble = false
     let reactionsOutsideBubbleTopInset: CGFloat = 4.0
@@ -1137,6 +1184,20 @@ class MessageSizeCalculator {
       bubbleWidth = max(bubbleWidth, timePlan.size.width + timePlan.spacing.horizontalTotal)
     }
 
+    if hasActionRows {
+      let rowCount = renderableActionRows.count
+      let height = CGFloat(rowCount) * Self.bubbleMessageActionRowHeight
+        + CGFloat(max(rowCount - 1, 0)) * Self.messageActionRowSpacing
+      let minWidth = minimumActionRowsWidth(
+        for: renderableActionRows,
+        parentAvailableWidth: parentAvailableWidth
+      )
+      actionsRowsPlan = LayoutPlan(
+        size: CGSize(width: max(bubbleWidth, minWidth), height: height),
+        spacing: NSEdgeInsets(top: 4, left: 0, bottom: 0, right: 0)
+      )
+    }
+
     bubblePlan.size = CGSize(width: bubbleWidth, height: bubbleHeight)
     bubblePlan.spacing = .zero
 
@@ -1161,6 +1222,14 @@ class MessageSizeCalculator {
 
     wrapperHeight += bubblePlan.spacing.top
     wrapperHeight += bubblePlan.spacing.bottom
+
+    if let actionsRowsPlan {
+      wrapperHeight += actionsRowsPlan.spacing.top
+      wrapperHeight += actionsRowsPlan.size.height
+      wrapperHeight += actionsRowsPlan.spacing.bottom
+      let avatarWidth = (avatarPlan?.size.width ?? 0) + (avatarPlan?.spacing.horizontalTotal ?? 0)
+      wrapperWidth = max(wrapperWidth, avatarWidth + actionsRowsPlan.size.width)
+    }
 
     if reactionsOutsideBubble, let reactionsPlan {
       wrapperHeight += reactionsOutsideBubbleTopInset
@@ -1197,6 +1266,7 @@ class MessageSizeCalculator {
       forwardHeader: forwardHeaderPlan,
       reply: replyPlan,
       reactions: reactionsPlan,
+      actionsRows: actionsRowsPlan,
       reactionItems: reactionItemsPlan,
       reactionsOutsideBubble: reactionsOutsideBubble,
       reactionsOutsideBubbleTopInset: reactionsOutsideBubble ? reactionsOutsideBubbleTopInset : 0,
@@ -1238,6 +1308,8 @@ class MessageSizeCalculator {
     let hasReactions = message.reactions.count > 0
     let renderableAttachments = message.attachments.filter(\.isRenderableAttachment)
     let hasAttachments = !renderableAttachments.isEmpty
+    let renderableActionRows = actionRows(for: message)
+    let hasActionRows = !renderableActionRows.isEmpty
     let isOutgoing = message.message.out == true
     var textSize: CGSize?
     var photoSize: CGSize?
@@ -1270,6 +1342,7 @@ class MessageSizeCalculator {
         entities: message.message.entities,
         configuration: .init(
           font: font,
+          boldWeight: .semibold,
           textColor: textColor(for: .minimal, outgoing: isOutgoing),
           linkColor: linkColor(for: .minimal, outgoing: isOutgoing)
         )
@@ -1386,6 +1459,7 @@ class MessageSizeCalculator {
     var forwardHeaderPlan: LayoutPlan?
     var replyPlan: LayoutPlan?
     var reactionsPlan: LayoutPlan?
+    var actionsRowsPlan: LayoutPlan?
     var reactionItemsPlan: [String: LayoutPlan] = [:]
     let reactionsOutsideBubble = false
     var timePlan: LayoutPlan?
@@ -1610,6 +1684,21 @@ class MessageSizeCalculator {
       bubbleHeight += reactionsPlan.spacing.bottom
       bubbleWidth = max(bubbleWidth, reactionsPlan.size.width + reactionsPlan.spacing.horizontalTotal)
     }
+
+    if hasActionRows {
+      let rowCount = renderableActionRows.count
+      let height = CGFloat(rowCount) * Self.minimalMessageActionRowHeight
+        + CGFloat(max(rowCount - 1, 0)) * Self.messageActionRowSpacing
+      let minWidth = minimumActionRowsWidth(
+        for: renderableActionRows,
+        parentAvailableWidth: parentAvailableWidth
+      )
+      actionsRowsPlan = LayoutPlan(
+        size: CGSize(width: max(bubbleWidth, minWidth), height: height),
+        spacing: NSEdgeInsets(top: 4, left: 0, bottom: 0, right: 0)
+      )
+    }
+
     bubblePlan.size = CGSize(width: bubbleWidth, height: bubbleHeight)
     bubblePlan.spacing = .zero
 
@@ -1624,6 +1713,16 @@ class MessageSizeCalculator {
       (avatarPlan?.size.width ?? Self.minimalAvatarSize) +
       (avatarPlan?.spacing.horizontalTotal ?? (Theme.messageSidePadding + Theme.messageHorizontalStackSpacing))
     wrapperWidth += reservedAvatarSlotWidth
+
+    if let actionsRowsPlan {
+      wrapperHeight += actionsRowsPlan.spacing.top
+      wrapperHeight += actionsRowsPlan.size.height
+      wrapperHeight += actionsRowsPlan.spacing.bottom
+      let reservedAvatarSlotWidth =
+        (avatarPlan?.size.width ?? Self.minimalAvatarSize) +
+        (avatarPlan?.spacing.horizontalTotal ?? (Theme.messageSidePadding + Theme.messageHorizontalStackSpacing))
+      wrapperWidth = max(wrapperWidth, reservedAvatarSlotWidth + actionsRowsPlan.size.width)
+    }
 
     wrapperPlan.size = CGSize(
       width: wrapperWidth,
@@ -1651,6 +1750,7 @@ class MessageSizeCalculator {
       forwardHeader: forwardHeaderPlan,
       reply: replyPlan,
       reactions: reactionsPlan,
+      actionsRows: actionsRowsPlan,
       reactionItems: reactionItemsPlan,
       reactionsOutsideBubble: reactionsOutsideBubble,
       reactionsOutsideBubbleTopInset: 0,

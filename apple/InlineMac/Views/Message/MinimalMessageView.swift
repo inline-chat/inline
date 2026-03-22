@@ -5,6 +5,8 @@ import Combine
 import Foundation
 import GRDB
 import InlineKit
+import struct InlineProtocol.MessageAction
+import struct InlineProtocol.MessageActionRow
 import InlineUI
 import Logger
 import Nuke
@@ -14,6 +16,10 @@ import TextProcessing
 import Throttler
 import Translation
 
+private enum MessageActionInvokeError: Error {
+  case invalidResponse
+}
+
 class MinimalMessageViewAppKit: NSView {
   private let feature_relayoutOnBoundsChange = true
   private let log = Log.scoped("MinimalMessageView", enableTracing: true)
@@ -22,6 +28,8 @@ class MinimalMessageViewAppKit: NSView {
   private let dependencies: AppDependencies?
   private var props: MessageViewProps
   private var translationStateCancellable: AnyCancellable?
+  private var messageActionLoadingCancellable: AnyCancellable?
+  private var messageActionAnsweredCancellable: AnyCancellable?
   private var notionAccessCancellable: AnyCancellable?
   private var from: User {
     fullMessage.from ?? User.deletedInstance
@@ -360,11 +368,153 @@ class MinimalMessageViewAppKit: NSView {
   ///
   /// Will do tasks, Loom embeds, etc.
   private var attachmentsView: MessageAttachmentsView?
+  private var messageActionRowsView: MessageActionRowsView?
 
   private func createAttachmentsView() -> MessageAttachmentsView? {
     let view = MessageAttachmentsView(attachments: fullMessage.attachments, message: message)
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
+  }
+
+  private var renderableMessageActionRows: [MessageActionRow] {
+    guard let actions = message.actions else { return [] }
+
+    return actions.rows.compactMap { row in
+      let filtered = row.actions.filter { action in
+        !action.actionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+          !action.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+          action.action != nil
+      }
+      guard !filtered.isEmpty else { return nil }
+
+      var next = MessageActionRow()
+      next.actions = filtered
+      return next
+    }
+  }
+
+  private func loadingActionIdsForCurrentMessage() -> Set<String> {
+    let keys = MessageActionInteractionState.shared.loadingPublisher.value
+    return Set(
+      keys
+        .filter { $0.peerId == message.peerId && $0.messageId == message.messageId }
+        .map(\.actionId)
+    )
+  }
+
+  private func syncMessageActionRowsView(message: FullMessage, props: MessageViewProps) {
+    guard props.layout.hasActionsRows, !renderableMessageActionRows.isEmpty else {
+      messageActionRowsView?.removeFromSuperview()
+      messageActionRowsView = nil
+      clearMessageActionRowsConstraints()
+      return
+    }
+
+    let view = messageActionRowsView ?? MessageActionRowsView()
+    if view.superview == nil {
+      addSubview(view)
+    }
+
+    view.onActionTap = { [weak self] action in
+      self?.handleMessageActionTap(action)
+    }
+
+    view.configure(
+      rows: renderableMessageActionRows,
+      loadingActionIds: loadingActionIdsForCurrentMessage(),
+      outgoing: message.message.out == true,
+      rowHeight: 24
+    )
+
+    messageActionRowsView = view
+  }
+
+  private func setupMessageActionStateObservation() {
+    messageActionLoadingCancellable = MessageActionInteractionState.shared.loadingPublisher
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] _ in
+        self?.refreshMessageActionRowsView()
+      }
+
+    messageActionAnsweredCancellable = MessageActionInteractionState.shared.answeredPublisher
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] event in
+        guard let self else { return }
+        guard event.key.peerId == message.peerId, event.key.messageId == message.messageId else { return }
+
+        refreshMessageActionRowsView()
+
+        if let toastText = event.toastText {
+          ToastCenter.shared.showInfo(toastText)
+        }
+      }
+  }
+
+  private func refreshMessageActionRowsView() {
+    guard let messageActionRowsView else { return }
+    messageActionRowsView.configure(
+      rows: renderableMessageActionRows,
+      loadingActionIds: loadingActionIdsForCurrentMessage(),
+      outgoing: outgoing,
+      rowHeight: 24
+    )
+  }
+
+  private func handleMessageActionTap(_ action: MessageAction) {
+    switch action.action {
+      case .callback:
+        invokeMessageCallbackAction(action)
+      case let .copyText(copyText):
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(copyText.text, forType: .string)
+        ToastCenter.shared.showSuccess("Copied")
+      case nil:
+        break
+    }
+  }
+
+  private func invokeMessageCallbackAction(_ action: MessageAction) {
+    let actionId = action.actionID.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !actionId.isEmpty else { return }
+
+    let loadingKey = MessageActionInteractionState.LoadingKey(
+      peerId: message.peerId,
+      messageId: message.messageId,
+      actionId: actionId
+    )
+
+    guard MessageActionInteractionState.shared.begin(key: loadingKey) else { return }
+    refreshMessageActionRowsView()
+
+    Task {
+      do {
+        let result = try await Api.realtime.send(
+          .invokeMessageAction(
+            peerId: message.peerId,
+            messageId: message.messageId,
+            actionId: actionId
+          )
+        )
+
+        guard case let .invokeMessageAction(response) = result else {
+          throw MessageActionInvokeError.invalidResponse
+        }
+
+        await MainActor.run {
+          MessageActionInteractionState.shared.attachInteractionId(
+            response.interactionID,
+            for: loadingKey
+          )
+          refreshMessageActionRowsView()
+        }
+      } catch {
+        await MainActor.run {
+          MessageActionInteractionState.shared.fail(key: loadingKey)
+          refreshMessageActionRowsView()
+          ToastCenter.shared.showError("Action failed")
+        }
+      }
+    }
   }
 
   private func syncForwardHeaderView(for props: MessageViewProps) {
@@ -622,6 +772,8 @@ class MinimalMessageViewAppKit: NSView {
       NotificationCenter.default.removeObserver(observer)
     }
     translationStateCancellable?.cancel()
+    messageActionLoadingCancellable?.cancel()
+    messageActionAnsweredCancellable?.cancel()
   }
 
   private func setupView() {
@@ -674,6 +826,8 @@ class MinimalMessageViewAppKit: NSView {
       setupEntityClickHandling()
     }
 
+    syncMessageActionRowsView(message: fullMessage, props: props)
+
     if hasReactions {
       setupReactions(animate: false)
     }
@@ -692,6 +846,7 @@ class MinimalMessageViewAppKit: NSView {
 
     // Setup translation state observation
     setupTranslationStateObservation()
+    setupMessageActionStateObservation()
   }
 
   private func setupTranslationStateObservation() {
@@ -939,7 +1094,7 @@ class MinimalMessageViewAppKit: NSView {
       )
       if reactionsOutsideBubble {
         reactionViewTopConstraint = reactionsView.topAnchor.constraint(
-          equalTo: bubbleView.bottomAnchor,
+          equalTo: (messageActionRowsView?.bottomAnchor ?? bubbleView.bottomAnchor),
           constant: props.layout.reactionsOutsideBubbleTopInset
         )
         reactionViewLeadingConstraint = reactionsView.leadingAnchor.constraint(
@@ -978,6 +1133,20 @@ class MinimalMessageViewAppKit: NSView {
       transparentOutgoingStyle: false,
       animate: false
     )
+  }
+
+  private func clearMessageActionRowsConstraints() {
+    NSLayoutConstraint.deactivate([
+      messageActionRowsWidthConstraint,
+      messageActionRowsHeightConstraint,
+      messageActionRowsTopConstraint,
+      messageActionRowsSideConstraint,
+    ].compactMap(\.self))
+
+    messageActionRowsWidthConstraint = nil
+    messageActionRowsHeightConstraint = nil
+    messageActionRowsTopConstraint = nil
+    messageActionRowsSideConstraint = nil
   }
 
   private func updateReactions(prev _: FullMessage, next: FullMessage, props: MessageViewProps) {
@@ -1252,6 +1421,25 @@ class MinimalMessageViewAppKit: NSView {
       ]
     )
 
+    if let actionsRows = layout.actionsRows, let messageActionRowsView {
+      messageActionRowsWidthConstraint = messageActionRowsView.widthAnchor.constraint(equalToConstant: actionsRows.size.width)
+      messageActionRowsHeightConstraint = messageActionRowsView.heightAnchor.constraint(equalToConstant: actionsRows.size.height)
+      messageActionRowsTopConstraint = messageActionRowsView.topAnchor.constraint(
+        equalTo: bubbleView.bottomAnchor,
+        constant: actionsRows.spacing.top
+      )
+      messageActionRowsSideConstraint = messageActionRowsView.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor)
+
+      constraints.append(
+        contentsOf: [
+          messageActionRowsWidthConstraint,
+          messageActionRowsHeightConstraint,
+          messageActionRowsTopConstraint,
+          messageActionRowsSideConstraint,
+        ].compactMap(\.self)
+      )
+    }
+
     // Text
 
     if let text = layout.text {
@@ -1286,7 +1474,7 @@ class MinimalMessageViewAppKit: NSView {
       )
       if layout.reactionsOutsideBubble {
         reactionViewTopConstraint = reactionsView.topAnchor.constraint(
-          equalTo: bubbleView.bottomAnchor,
+          equalTo: (messageActionRowsView?.bottomAnchor ?? bubbleView.bottomAnchor),
           constant: layout.reactionsOutsideBubbleTopInset
         )
         reactionViewLeadingConstraint = reactionsView.leadingAnchor.constraint(
@@ -1490,6 +1678,10 @@ class MinimalMessageViewAppKit: NSView {
   private var documentViewHeightConstraint: NSLayoutConstraint?
 
   private var attachmentsViewTopConstraint: NSLayoutConstraint?
+  private var messageActionRowsWidthConstraint: NSLayoutConstraint?
+  private var messageActionRowsHeightConstraint: NSLayoutConstraint?
+  private var messageActionRowsTopConstraint: NSLayoutConstraint?
+  private var messageActionRowsSideConstraint: NSLayoutConstraint?
 
   private var reactionViewWidthConstraint: NSLayoutConstraint!
   private var reactionViewHeightConstraint: NSLayoutConstraint!
@@ -1510,6 +1702,7 @@ class MinimalMessageViewAppKit: NSView {
 
   override func updateConstraints() {
     var skipUpdates = false
+    var didRebuildMessageActionRowConstraints = false
     if isInitialUpdateConstraint {
       setupConstraints()
       isInitialUpdateConstraint = false
@@ -1540,6 +1733,49 @@ class MinimalMessageViewAppKit: NSView {
           ),
         ])
       }
+    }
+
+    if let actionsRows = props.layout.actionsRows, let messageActionRowsView {
+      let hasUnexpectedSideConstraint =
+        messageActionRowsSideConstraint?.firstAttribute != .leading
+
+      if messageActionRowsWidthConstraint == nil
+        || messageActionRowsHeightConstraint == nil
+        || messageActionRowsTopConstraint == nil
+        || messageActionRowsSideConstraint == nil
+        || hasUnexpectedSideConstraint
+      {
+        clearMessageActionRowsConstraints()
+        didRebuildMessageActionRowConstraints = true
+
+        messageActionRowsWidthConstraint = messageActionRowsView.widthAnchor.constraint(
+          equalToConstant: actionsRows.size.width
+        )
+        messageActionRowsHeightConstraint = messageActionRowsView.heightAnchor.constraint(
+          equalToConstant: actionsRows.size.height
+        )
+        messageActionRowsTopConstraint = messageActionRowsView.topAnchor.constraint(
+          equalTo: bubbleView.bottomAnchor,
+          constant: actionsRows.spacing.top
+        )
+        messageActionRowsSideConstraint = messageActionRowsView.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor)
+
+        NSLayoutConstraint.activate([
+          messageActionRowsWidthConstraint,
+          messageActionRowsHeightConstraint,
+          messageActionRowsTopConstraint,
+          messageActionRowsSideConstraint,
+        ].compactMap(\.self))
+      }
+    } else {
+      if messageActionRowsWidthConstraint != nil
+        || messageActionRowsHeightConstraint != nil
+        || messageActionRowsTopConstraint != nil
+        || messageActionRowsSideConstraint != nil
+      {
+        didRebuildMessageActionRowConstraints = true
+      }
+      clearMessageActionRowsConstraints()
     }
 
     // From this point on, only updates happen (no setup)
@@ -1765,11 +2001,29 @@ class MinimalMessageViewAppKit: NSView {
       }
     }
 
+    if let actionsRows = props.layout.actionsRows,
+       let messageActionRowsWidthConstraint,
+       let messageActionRowsHeightConstraint,
+       let messageActionRowsTopConstraint
+    {
+      if messageActionRowsWidthConstraint.constant != actionsRows.size.width {
+        messageActionRowsWidthConstraint.constant = actionsRows.size.width
+      }
+
+      if messageActionRowsHeightConstraint.constant != actionsRows.size.height {
+        messageActionRowsHeightConstraint.constant = actionsRows.size.height
+      }
+
+      if messageActionRowsTopConstraint.constant != actionsRows.spacing.top {
+        messageActionRowsTopConstraint.constant = actionsRows.spacing.top
+      }
+    }
+
     // Update reaction constraints
     if let reactionsPlan = props.layout.reactions,
        let reactionViewWidthConstraint,
        let reactionViewHeightConstraint,
-       let reactionViewTopConstraint
+       let existingReactionViewTopConstraint = reactionViewTopConstraint
     {
       log.trace("Updating reactions view constraints for message \(reactionsPlan.size)")
       if reactionViewWidthConstraint.constant != reactionsPlan.size.width {
@@ -1783,8 +2037,15 @@ class MinimalMessageViewAppKit: NSView {
       let reactionTopConstant = props.layout.reactionsOutsideBubble
         ? props.layout.reactionsOutsideBubbleTopInset
         : props.layout.reactionsViewTop
-      if reactionViewTopConstraint.constant != reactionTopConstant {
-        reactionViewTopConstraint.constant = reactionTopConstant
+      if props.layout.reactionsOutsideBubble {
+        existingReactionViewTopConstraint.isActive = false
+        self.reactionViewTopConstraint = reactionsView?.topAnchor.constraint(
+          equalTo: (messageActionRowsView?.bottomAnchor ?? bubbleView.bottomAnchor),
+          constant: reactionTopConstant
+        )
+        self.reactionViewTopConstraint?.isActive = true
+      } else if existingReactionViewTopConstraint.constant != reactionTopConstant {
+        existingReactionViewTopConstraint.constant = reactionTopConstant
       }
       if let reactionViewLeadingConstraint,
          reactionViewLeadingConstraint.constant != reactionsPlan.spacing.left
@@ -1801,7 +2062,7 @@ class MinimalMessageViewAppKit: NSView {
       )
       if props.layout.reactionsOutsideBubble {
         reactionViewTopConstraint = reactionsView.topAnchor.constraint(
-          equalTo: bubbleView.bottomAnchor,
+          equalTo: (messageActionRowsView?.bottomAnchor ?? bubbleView.bottomAnchor),
           constant: props.layout.reactionsOutsideBubbleTopInset
         )
         reactionViewLeadingConstraint = reactionsView.leadingAnchor.constraint(
@@ -1918,6 +2179,7 @@ class MinimalMessageViewAppKit: NSView {
       configuration: .init(
         // FIXME: Extract to a variable
         font: .systemFont(ofSize: props.layout.fontSize),
+        boldWeight: .semibold,
         textColor: textColor,
         linkColor: mentionColor,
         codeBlockBackgroundColor: codeBlockBackgroundColor,
@@ -2449,6 +2711,7 @@ class MinimalMessageViewAppKit: NSView {
     // update internal props
     self.fullMessage = fullMessage
     syncForwardHeaderView(for: props)
+    syncMessageActionRowsView(message: fullMessage, props: props)
 
     if props.layout.document != nil {
       if documentContainerView.superview == nil {
