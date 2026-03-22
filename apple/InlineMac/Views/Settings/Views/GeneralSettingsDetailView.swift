@@ -6,7 +6,15 @@ struct GeneralSettingsDetailView: View {
   var body: some View {
     Form {
       Section("Startup") {
+#if DEBUG_BUILD
+        Toggle("Launch at Login", isOn: .constant(false))
+          .disabled(true)
+        Text("Disabled for local debug builds.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+#else
         Toggle("Launch at Login", isOn: $appSettings.launchAtLogin)
+#endif
       }
 
       Section("Files") {

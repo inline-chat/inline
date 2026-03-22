@@ -35,6 +35,7 @@ with Sparkle (non-TestFlight) and preparing DMG artifacts.
 - `upload-dsyms.ts`: uploads zipped `.dSYM` bundles to Sentry using Sentry's API.
 - `release-app.ts`: runs the local release pipeline (build → upload dSYMs → upload DMG → update appcast → upload appcast), with an interactive TUI (shows progress, skipped steps, and failures clearly).
 - `build-local-app.sh`: builds a local Sparkle-enabled `Inline.app` bundle for testing without signing, DMG creation, notarization, or upload steps.
+  It always uses `DEBUG_BUILD`, sets app naming to `Inline Debug`, and disables login-item registration in app code.
 - `update-version.ts`: bumps the InlineMac marketing version, creates a `macos-vX.Y.Z` tag, and pushes to trigger CI.
 - `appcast-only.sh`: updates the appcast only (no rebuild), with validation.
 
@@ -100,6 +101,7 @@ Choose one of the two auth methods below.
 - `DMG_PATH` — output DMG path (default: `build/macos-direct/Inline.dmg`)
 - `SKIP_NOTARIZE=1` — skip notarization (dev only)
 - `PAUSE_BEFORE_NOTARIZE=1` — pause after build/sign/DMG so you can test locally before notarization continues
+- `DEBUG_BUILD=1` — enable debug-build behavior gate (adds `DEBUG_BUILD` swift compile condition)
 - `UPLOAD_MODE` — for `release-direct.ts`: `all` (default), `dmg`, or `appcast`
 
 ### CI Secrets Mapping (GitHub Actions)
@@ -168,6 +170,8 @@ bun run scripts/macos/update-version.ts --undo
 export SPARKLE_PUBLIC_KEY="..."
 export MACOS_CERTIFICATE_NAME="Developer ID Application: ..."
 export SKIP_NOTARIZE=1
+# Optional local debug flavor for behavior gating:
+# export DEBUG_BUILD=1
 bash scripts/macos/build-direct.sh
 ```
 
@@ -180,6 +184,7 @@ bun run build:macos:local-app
 ```
 
 The app bundle is written to `build/InlineMacDirectLocal/Build/Products/Release/Inline.app`.
+This local build always uses `DEBUG_BUILD` and the app appears as `Inline Debug`.
 
 ## Local Release (Stable/Beta)
 
