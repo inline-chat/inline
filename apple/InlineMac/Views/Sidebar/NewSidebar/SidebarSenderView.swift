@@ -84,14 +84,8 @@ class SidebarSenderView: NSStackView {
     self.userInfo = userInfo
     self.inlineWithMessage = inlineWithMessage
 
-    // Update avatar
-    avatarView.removeFromSuperview()
-    avatarView = UserAvatarView(
-      userInfo: userInfo,
-      size: Self.avatarSize
-    )
-    avatarView.translatesAutoresizingMaskIntoConstraints = false
-    insertArrangedSubview(avatarView, at: 0)
+    // Update avatar without recreating the view to avoid image reload flicker.
+    avatarView.update(userInfo: userInfo)
 
     // Update name
     nameLabel.stringValue = user.firstName ??

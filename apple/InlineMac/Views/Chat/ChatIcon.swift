@@ -38,7 +38,7 @@ struct ChatIcon: View {
     }
 
     private static func profilePhotoId(_ userInfo: UserInfo) -> String? {
-      userInfo.profilePhoto?.first?.id ?? userInfo.user.profileFileId
+      userInfo.stableAvatarIdentity
     }
 
     private struct UserNameSignature: Hashable {

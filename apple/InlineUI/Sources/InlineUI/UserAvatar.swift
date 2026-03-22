@@ -7,13 +7,12 @@ import SwiftUI
 
 public struct UserAvatar: View, Equatable {
   public nonisolated static func == (lhs: UserAvatar, rhs: UserAvatar) -> Bool {
-    lhs.firstName == rhs.firstName && lhs.lastName == rhs.lastName && lhs.email == rhs.email
+    lhs.userId == rhs.userId
+      && lhs.firstName == rhs.firstName && lhs.lastName == rhs.lastName && lhs.email == rhs.email
       && lhs.username == rhs.username && lhs.size == rhs.size
       && lhs.ignoresSafeArea == rhs.ignoresSafeArea
       && lhs.backgroundOpacity == rhs.backgroundOpacity
-      // FIXME: This causes flicker because every time we fetch there is a new URL
-      && lhs.remoteUrl == rhs.remoteUrl
-      && lhs.fileId == rhs.fileId && lhs.localUrl == rhs.localUrl
+      && lhs.stableAvatarIdentity == rhs.stableAvatarIdentity
   }
 
   let firstName: String?
@@ -25,8 +24,7 @@ public struct UserAvatar: View, Equatable {
   let userId: Int64
   let backgroundOpacity: Double
 
-  var file: File? = nil
-  var fileId: String? = nil
+  var stableAvatarIdentity: String? = nil
   var remoteUrl: URL? = nil
   var localUrl: URL? = nil
 
@@ -54,6 +52,7 @@ public struct UserAvatar: View, Equatable {
     self.size = size
     remoteUrl = user.getRemoteURL()
     localUrl = user.getLocalURL()
+    stableAvatarIdentity = user.stableAvatarIdentity
     self.ignoresSafeArea = ignoresSafeArea
     self.backgroundOpacity = backgroundOpacity
     nameForInitials = Self.getNameForInitials(user: user)
@@ -67,10 +66,9 @@ public struct UserAvatar: View, Equatable {
   ) {
     let user = userInfo.user
     userId = user.id
-    file = userInfo.profilePhoto?.first
-    fileId = userInfo.profilePhoto?.first?.id
     remoteUrl = user.getRemoteURL() // ?? userInfo.profilePhoto?.first?.getRemoteURL()
     localUrl = user.getLocalURL() // ?? userInfo.profilePhoto?.first?.getLocalURL()
+    stableAvatarIdentity = userInfo.stableAvatarIdentity
     firstName = user.firstName
     lastName = user.lastName
     email = user.email

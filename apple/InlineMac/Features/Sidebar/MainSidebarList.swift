@@ -149,9 +149,7 @@ class MainSidebarList: NSView {
       username: String?,
       email: String?,
       phoneNumber: String?,
-      profileFileUniqueId: String?,
-      profileCdnUrl: String?,
-      profileLocalPath: String?,
+      profilePhotoIdentity: String?,
       bot: Bool
     )
     case chat(
@@ -1104,21 +1102,19 @@ class MainSidebarList: NSView {
 
     let messagePreview = item.sidebarBasePreviewText
 
-    let peerSignature: PeerSignature = if let user = item.user?.user {
-      .user(
-        id: user.id,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        username: user.username,
-        email: user.email,
-        phoneNumber: user.phoneNumber,
-        profileFileUniqueId: user.profileFileUniqueId,
-        profileCdnUrl: user.profileCdnUrl,
-        profileLocalPath: user.profileLocalPath,
-        bot: user.bot
+    let peerSignature: PeerSignature = if let userInfo = item.user {
+      PeerSignature.user(
+        id: userInfo.user.id,
+        firstName: userInfo.user.firstName,
+        lastName: userInfo.user.lastName,
+        username: userInfo.user.username,
+        email: userInfo.user.email,
+        phoneNumber: userInfo.user.phoneNumber,
+        profilePhotoIdentity: userInfo.stableAvatarIdentity,
+        bot: userInfo.user.bot
       )
     } else if let chat = item.chat {
-      .chat(
+      PeerSignature.chat(
         id: chat.id,
         type: chat.type,
         title: chat.title,
@@ -1126,7 +1122,7 @@ class MainSidebarList: NSView {
         createdBy: chat.createdBy
       )
     } else {
-      .deleted
+      PeerSignature.deleted
     }
 
     return ChatRenderSignature(
