@@ -8,7 +8,7 @@ protocol SlashCommandCompletionDelegate: AnyObject {
 
 final class SlashCommandCompletionView: UIView {
   static let maxHeight: CGFloat = 216
-  static let itemHeight: CGFloat = 64
+  static let itemHeight: CGFloat = 56
 
   weak var delegate: SlashCommandCompletionDelegate?
 
@@ -161,42 +161,61 @@ final class SlashCommandCompletionView: UIView {
     containerView.translatesAutoresizingMaskIntoConstraints = false
     containerView.tag = index
 
+    let avatarView = UserAvatarView()
+    avatarView.configure(with: suggestion.botUserInfo, size: 30)
+    avatarView.translatesAutoresizingMaskIntoConstraints = false
+
     let commandLabel = UILabel()
-    commandLabel.font = .monospacedSystemFont(ofSize: 16, weight: .semibold)
+    commandLabel.font = .systemFont(ofSize: 14, weight: .semibold)
     commandLabel.text = "/\(suggestion.command)"
     commandLabel.textColor = .label
+    commandLabel.lineBreakMode = .byTruncatingTail
 
     let botLabel = UILabel()
-    botLabel.font = .systemFont(ofSize: 13, weight: .medium)
+    botLabel.font = .systemFont(ofSize: 12, weight: .medium)
     botLabel.textColor = .secondaryLabel
     botLabel.textAlignment = .right
     botLabel.text = suggestion.isAmbiguous ? (suggestion.botLabel ?? suggestion.botDisplayName) : nil
-    botLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+    botLabel.lineBreakMode = .byTruncatingTail
 
     let descriptionLabel = UILabel()
-    descriptionLabel.font = .systemFont(ofSize: 14)
+    descriptionLabel.font = .systemFont(ofSize: 12, weight: .regular)
     descriptionLabel.textColor = .secondaryLabel
     descriptionLabel.numberOfLines = 1
     descriptionLabel.text = suggestion.description
+    descriptionLabel.lineBreakMode = .byTruncatingTail
 
     let topRow = UIStackView(arrangedSubviews: [commandLabel, botLabel])
     topRow.axis = .horizontal
     topRow.alignment = .center
-    topRow.spacing = 8
+    topRow.spacing = 6
 
-    let stack = UIStackView(arrangedSubviews: [topRow, descriptionLabel])
-    stack.axis = .vertical
-    stack.spacing = 4
-    stack.translatesAutoresizingMaskIntoConstraints = false
-    containerView.addSubview(stack)
+    let labelsStack = UIStackView(arrangedSubviews: [topRow, descriptionLabel])
+    labelsStack.axis = .vertical
+    labelsStack.spacing = 2
+    labelsStack.translatesAutoresizingMaskIntoConstraints = false
+
+    let rowStack = UIStackView(arrangedSubviews: [avatarView, labelsStack])
+    rowStack.axis = .horizontal
+    rowStack.alignment = .center
+    rowStack.spacing = 8
+    rowStack.translatesAutoresizingMaskIntoConstraints = false
+
+    containerView.addSubview(rowStack)
 
     NSLayoutConstraint.activate([
-      stack.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 12),
-      stack.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -12),
-      stack.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 10),
-      stack.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -10),
+      avatarView.widthAnchor.constraint(equalToConstant: 30),
+      avatarView.heightAnchor.constraint(equalToConstant: 30),
+
+      rowStack.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 12),
+      rowStack.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -12),
+      rowStack.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 8),
+      rowStack.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -8),
       containerView.heightAnchor.constraint(equalToConstant: Self.itemHeight),
     ])
+
+    commandLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+    botLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
     let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleRowTap(_:)))
     containerView.addGestureRecognizer(tapGesture)
