@@ -14,6 +14,7 @@
     "release:cli:dry-run": "bun run release-cli.ts release-dry-run",
     "release:macos": "bun run macos/release-direct.ts",
     "macos:update-version": "bun run macos/update-version.ts",
+    "macos:build-local-app": "bash macos/build-local-app.sh",
     "macos:build-direct": "bash macos/build-direct.sh",
     "macos:release-app": "bun run macos/release-app.ts",
     "macos:appcast-only": "bash macos/appcast-only.sh"

@@ -34,6 +34,7 @@
     "lint:all": "bun run lint:server && bun run lint:web && bun run lint:admin",
     "release:cli": "cd scripts && bun run release:cli",
     "release:cli:install": "cd scripts && bun run release:cli:install",
+    "build:macos:local-app": "cd scripts && bun run macos:build-local-app",
     "release:macos": "cd scripts && bun run macos:release-app"
   },
   "overrides": {
