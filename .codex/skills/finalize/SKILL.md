@@ -5,18 +5,13 @@ metadata:
   short-description: Finalize work to commit
 ---
 
-# High-level work
-
-User is mostly happy with the outcome and has probably done some manual QA checklist and is ready to finish up the task at hand to be committed and released to production.
+User is happy with the outcome and has probably done some manual QA checklist and is ready to finish up the task at hand to be committed and released to production. Keep this quick.
 
 # Instructions
 
-- Review the work done so far. See section on review criteria below.
-- Clean up. See section on clean up workflow.
+- Review the work done so far as a final pass.
+- Clean up if needed. See section on clean up workflow.
 - Run related tests/lint/typecheck. If change is UI code, make sure we didn't break any other UI that uses the view we modified. 
-- Prepare a list of changes, and a commit message.
-- If the scope is large, summarize work using the skill before committing. If the scope is minimal and review is safe, commit.
-- If `$summarize-work` was run immediately before this, move faster: avoid re-reading files and proceed to commit after minimal checks.
 
 # Review criteria
 
@@ -36,10 +31,3 @@ User is mostly happy with the outcome and has probably done some manual QA check
 - `git status` clean of unrelated changes (ignore but do not touch).
 - Scan for debug logs and remove if not required.
 - Verify no secrets or hardcoded prod values were introduced.
-
-# Test scope
-- Run minimal, focused tests only; ask before heavy commands.
-
-# Commit prep
-- Propose a commit message in repo style.
-- End with “Production readiness” note and any risks.
