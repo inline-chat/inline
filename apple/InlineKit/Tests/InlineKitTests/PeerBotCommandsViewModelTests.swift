@@ -101,6 +101,33 @@ struct PeerBotCommandsViewModelTests {
     #expect(viewModel.suggestions.map(\.command) == ["help"])
   }
 
+  @Test("uses resolver hydrated bot user info")
+  func usesResolverHydratedUserInfo() async throws {
+    let peer = Peer.thread(id: 100)
+    let cachedPath = "avatars/bot-1.jpg"
+
+    let viewModel = PeerBotCommandsViewModel(
+      peer: peer,
+      fetcher: { _ in
+        [Self.makeGroup(botId: 1, username: "alpha", commands: [("help", "Show help")])]
+      },
+      userInfoResolver: { botId, _ in
+        var cachedUser = User(
+          id: botId,
+          email: nil,
+          firstName: "Cached",
+          username: "alpha"
+        )
+        cachedUser.profileLocalPath = cachedPath
+        return UserInfo(user: cachedUser)
+      }
+    )
+
+    await viewModel.ensureLoaded()
+    let suggestion = try #require(viewModel.suggestions.first)
+    #expect(suggestion.botUserInfo.user.profileLocalPath == cachedPath)
+  }
+
   private nonisolated static func makeGroup(
     botId: Int64,
     username: String,
