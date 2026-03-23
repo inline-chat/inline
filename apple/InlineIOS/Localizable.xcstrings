@@ -465,9 +465,6 @@
     "Creating..." : {
 
     },
-    "Database" : {
-
-    },
     "Debug" : {
 
     },
@@ -827,6 +824,9 @@
     "Notion" : {
 
     },
+    "Notion Source" : {
+
+    },
     "of %lld" : {
 
     },
@@ -961,10 +961,7 @@
     "Search members" : {
 
     },
-    "Select a database" : {
-
-    },
-    "Select a database to help AI understand your data" : {
+    "Select a Notion source" : {
 
     },
     "Select a space" : {
@@ -977,6 +974,9 @@
 
     },
     "Select Space" : {
+
+    },
+    "Select the Notion source where Inline should create tasks for this space." : {
 
     },
     "Sending Code..." : {
