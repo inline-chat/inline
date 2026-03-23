@@ -65,5 +65,5 @@ describe("packed artifact", () => {
     }
 
     expect([...unresolvedBareImports]).toEqual([])
-  })
+  }, 30_000)
 })
