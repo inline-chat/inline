@@ -641,6 +641,225 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("renders native command menu buttons for /subagents and skips agent dispatch", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1004n,
+            date: 1_700_000_003n,
+            fromId: 42n,
+            message: "/subagents",
+          },
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyPayload: {
+        text: "should not dispatch",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 7n,
+          text: expect.stringContaining("/subagents"),
+          actions: expect.any(Object),
+        }),
+      )
+    })
+
+    const sent = harness.calls.sendMessage.mock.calls[0]?.[0]
+    const firstButtonData = sent?.actions?.rows?.[0]?.actions?.[0]?.action?.callback?.data
+    expect(firstButtonData).toBeInstanceOf(Uint8Array)
+    expect(new TextDecoder().decode(firstButtonData)).toBe("/subagents list")
+
+    await handle.stop()
+  })
+
+  it("uses slash callback payload as CommandBody for command routing", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.action.invoke",
+          chatId: 7n,
+          interactionId: 23n,
+          messageId: 1005n,
+          actorUserId: 42n,
+          actionId: "toggle",
+          data: new TextEncoder().encode("/verbose on"),
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyPayload: {
+        text: "verbose enabled",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          CommandBody: "/verbose on",
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 7n,
+          text: "verbose enabled",
+          parseMarkdown: true,
+        }),
+      )
+      expect(harness.calls.invokeRaw).not.toHaveBeenCalledWith(
+        8,
+        expect.objectContaining({
+          oneofKind: "editMessage",
+          editMessage: expect.objectContaining({
+            messageId: 1005n,
+          }),
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("sends model picker callback replies as new messages", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.action.invoke",
+          chatId: 7n,
+          interactionId: 24n,
+          messageId: 1007n,
+          actorUserId: 42n,
+          actionId: "pick",
+          data: new TextEncoder().encode("mdl_list_openai_2"),
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyPayload: {
+        text: "pick model",
+        channelData: {
+          telegram: {
+            buttons: [[{ text: "openai/gpt-4.1", callback_data: "mdl_sel_openai/gpt-4.1" }]],
+          },
+        },
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          CommandBody: "/models openai 2",
+          Surface: "telegram",
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 7n,
+          text: "pick model",
+          parseMarkdown: true,
+          actions: expect.any(Object),
+        }),
+      )
+    })
+
+    const sent = harness.calls.sendMessage.mock.calls.find((call) => call[0]?.text === "pick model")?.[0]
+    const buttonData = sent?.actions?.rows?.[0]?.actions?.[0]?.action?.callback?.data
+    expect(buttonData).toBeInstanceOf(Uint8Array)
+    expect(new TextDecoder().decode(buttonData)).toBe("/model openai/gpt-4.1")
+
+    expect(harness.calls.invokeRaw).not.toHaveBeenCalledWith(
+      8,
+      expect.objectContaining({
+        oneofKind: "editMessage",
+      }),
+    )
+
+    await handle.stop()
+  })
+
+  it("answers callback interactions even when compat command menu short-circuits before dispatch", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.action.invoke",
+          chatId: 7n,
+          interactionId: 25n,
+          messageId: 1008n,
+          actorUserId: 42n,
+          actionId: "subagents",
+          data: new TextEncoder().encode("/subagents"),
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyPayload: {
+        text: "should not dispatch",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 7n,
+          text: expect.stringContaining("/subagents"),
+          actions: expect.any(Object),
+        }),
+      )
+      expect(harness.calls.answerMessageAction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          interactionId: 25n,
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
   it("maps telegram-style buttons to inline message actions on text replies", async () => {
     const harness = await setupMonitorHarness({
       events: [
@@ -701,6 +920,69 @@ describe("inline/monitor", () => {
     const buttonData = sent?.actions?.rows?.[0]?.actions?.[0]?.action?.callback?.data
     expect(buttonData).toBeInstanceOf(Uint8Array)
     expect(new TextDecoder().decode(buttonData)).toBe("cmd:a")
+
+    await handle.stop()
+  })
+
+  it("rewrites telegram model callbacks to slash command payloads", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1006n,
+            date: 1_700_000_004n,
+            fromId: 42n,
+            message: "show model picker",
+          },
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyPayload: {
+        text: "pick model",
+        channelData: {
+          telegram: {
+            buttons: [
+              [
+                { text: "Browse", callback_data: "mdl_prov" },
+                { text: "OpenAI Page 2", callback_data: "mdl_list_openai_2" },
+              ],
+              [{ text: "openai/gpt-4.1", callback_data: "mdl_sel_openai/gpt-4.1" }],
+            ],
+          },
+        },
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 7n,
+          text: "pick model",
+          actions: expect.any(Object),
+        }),
+      )
+    })
+
+    const sent = harness.calls.sendMessage.mock.calls[0]?.[0]
+    const row1Btn1 = sent?.actions?.rows?.[0]?.actions?.[0]?.action?.callback?.data
+    const row1Btn2 = sent?.actions?.rows?.[0]?.actions?.[1]?.action?.callback?.data
+    const row2Btn1 = sent?.actions?.rows?.[1]?.actions?.[0]?.action?.callback?.data
+
+    expect(new TextDecoder().decode(row1Btn1)).toBe("/models")
+    expect(new TextDecoder().decode(row1Btn2)).toBe("/models openai 2")
+    expect(new TextDecoder().decode(row2Btn1)).toBe("/model openai/gpt-4.1")
 
     await handle.stop()
   })

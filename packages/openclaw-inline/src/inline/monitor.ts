@@ -20,6 +20,7 @@ import { resolveInlineGroupRequireMention } from "./policy.js"
 import { getInlineRuntime } from "../runtime.js"
 import { uploadInlineMediaFromUrl } from "./media.js"
 import { summarizeInlineMessageContent } from "./message-content.js"
+import { resolveInlineCompatNativeCommandMenu } from "./command-menu-compat.js"
 
 const CHANNEL_ID = "inline" as const
 
@@ -162,6 +163,49 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function normalizeReplyMarkupButtons(raw: unknown): InlineReplyMarkupButton[][] {
+  return normalizeReplyMarkupButtonsWith(raw)
+}
+
+function mapInlineModelPickerCallbackToCommand(raw: string): string | undefined {
+  const trimmed = raw.trim()
+  if (!trimmed) return undefined
+
+  if (trimmed === "mdl_prov" || trimmed === "mdl_back") {
+    return "/models"
+  }
+
+  const listMatch = trimmed.match(/^mdl_list_([a-z0-9_-]+)_(\d+)$/i)
+  if (listMatch?.[1] && listMatch[2]) {
+    const provider = listMatch[1].trim()
+    const page = Number.parseInt(listMatch[2], 10)
+    if (provider && Number.isFinite(page) && page > 0) {
+      return `/models ${provider} ${String(page)}`
+    }
+  }
+
+  const standardSelectionMatch = trimmed.match(/^mdl_sel_(.+)$/)
+  if (standardSelectionMatch?.[1]?.trim()) {
+    return `/model ${standardSelectionMatch[1].trim()}`
+  }
+
+  const compactSelectionMatch = trimmed.match(/^mdl_sel\/(.+)$/)
+  if (compactSelectionMatch?.[1]?.trim()) {
+    return `/model ${compactSelectionMatch[1].trim()}`
+  }
+
+  return undefined
+}
+
+function normalizeInlineActionCallbackData(raw: string): string {
+  const trimmed = raw.trim()
+  if (!trimmed) return ""
+  return mapInlineModelPickerCallbackToCommand(trimmed) ?? trimmed
+}
+
+function normalizeReplyMarkupButtonsWith(
+  raw: unknown,
+  options?: { mapCallbackData?: (value: string) => string },
+): InlineReplyMarkupButton[][] {
   if (!Array.isArray(raw)) return []
 
   const rows: InlineReplyMarkupButton[][] = []
@@ -171,8 +215,9 @@ function normalizeReplyMarkupButtons(raw: unknown): InlineReplyMarkupButton[][] 
     for (const candidateButton of candidateRow) {
       if (!isRecord(candidateButton)) continue
       const text = typeof candidateButton.text === "string" ? candidateButton.text.trim() : ""
-      const callbackData =
+      const callbackDataRaw =
         typeof candidateButton.callback_data === "string" ? candidateButton.callback_data.trim() : ""
+      const callbackData = options?.mapCallbackData ? options.mapCallbackData(callbackDataRaw) : callbackDataRaw
       if (!text || !callbackData) continue
       row.push({ text, callback_data: callbackData })
       if (row.length >= INLINE_ACTION_MAX_PER_ROW) break
@@ -192,6 +237,7 @@ function resolveInlineReplyActions(payload: Record<string, unknown>): MessageAct
 
   let rawButtons: unknown = undefined
   let hasExplicitButtons = false
+  let mapCallbackData: ((value: string) => string) | undefined
 
   if (inlineData && Object.prototype.hasOwnProperty.call(inlineData, "buttons")) {
     rawButtons = inlineData.buttons
@@ -199,6 +245,7 @@ function resolveInlineReplyActions(payload: Record<string, unknown>): MessageAct
   } else if (telegramData && Object.prototype.hasOwnProperty.call(telegramData, "buttons")) {
     rawButtons = telegramData.buttons
     hasExplicitButtons = true
+    mapCallbackData = normalizeInlineActionCallbackData
   } else if (Object.prototype.hasOwnProperty.call(payload, "buttons")) {
     rawButtons = payload.buttons
     hasExplicitButtons = true
@@ -206,7 +253,9 @@ function resolveInlineReplyActions(payload: Record<string, unknown>): MessageAct
 
   if (!hasExplicitButtons) return undefined
 
-  const rows = normalizeReplyMarkupButtons(rawButtons)
+  const rows = normalizeReplyMarkupButtonsWith(rawButtons, {
+    ...(mapCallbackData ? { mapCallbackData } : {}),
+  })
   return {
     rows: rows.map((row, rowIndex) => ({
       actions: row.map((button, buttonIndex) => ({
@@ -244,6 +293,22 @@ async function answerInlineMessageAction(client: InlineSdkClient, interactionId:
       answerMessageAction: { interactionId },
     })
   }
+}
+
+function resolveCallbackCommandBodyFromActionData(params: {
+  data: Uint8Array
+  botUsername?: string
+}): string | undefined {
+  const decoded = callbackDataToUtf8(params.data)
+  if (!decoded) return undefined
+  const normalized = normalizeInlineActionCallbackData(decoded)
+  if (!normalized.startsWith("/")) return undefined
+  return normalizeInlineCommandBody(normalized, params.botUsername)
+}
+
+function shouldUseTelegramSurfaceForModelCommands(commandBody: string): boolean {
+  const normalized = commandBody.trim().toLowerCase()
+  return normalized === "/model" || normalized.startsWith("/model ") || normalized === "/models" || normalized.startsWith("/models ")
 }
 
 function buildInlineSenderName(params: {
@@ -1013,6 +1078,22 @@ export async function monitorInlineProvider(params: {
           ...(configGroupAllowFrom.length > 0 ? configGroupAllowFrom : configAllowFrom),
           ...storeAllowList,
         ].filter(Boolean)
+        const callbackCommandBody = callbackActionEvent
+          ? resolveCallbackCommandBodyFromActionData({
+              data: callbackActionEvent.data,
+              ...(botUsername ? { botUsername } : {}),
+            })
+          : undefined
+        let callbackActionAnswered = false
+        const answerCallbackIfNeeded = async () => {
+          if (!callbackActionEvent || callbackActionAnswered) return
+          await answerInlineMessageAction(client, callbackActionEvent.interactionId)
+          callbackActionAnswered = true
+        }
+        // Temporary rollback: callback-driven workflows send new messages
+        // instead of editing the original message in-place.
+        const shouldEditCallbackTargetInPlace = false
+        const normalizedCommandBody = callbackCommandBody ?? normalizeInlineCommandBody(rawBody, botUsername)
 
         const allowTextCommands = core.channel.commands.shouldHandleTextCommands({
           cfg,
@@ -1022,7 +1103,7 @@ export async function monitorInlineProvider(params: {
         const allowForCommands = isGroup ? effectiveGroupAllowFrom : effectiveAllowFrom
         const senderAllowedForCommands = allowlistMatch({ allowFrom: allowForCommands, senderId })
         const hasControlCommand = core.channel.text.hasControlCommand(
-          rawBody,
+          callbackCommandBody ?? rawBody,
           cfg,
           botUsername ? { botUsername } : undefined,
         )
@@ -1039,18 +1120,27 @@ export async function monitorInlineProvider(params: {
             log?.info(
               `[${account.accountId}] inline: drop group chat=${String(chatId)} (groupPolicy=disabled)`,
             )
+            await answerCallbackIfNeeded().catch((error) => {
+              runtime.error?.(`inline callback answer failed: ${String(error)}`)
+            })
             continue
           }
           if (groupPolicy === "allowlist") {
             const allowed = allowlistMatch({ allowFrom: effectiveGroupAllowFrom, senderId })
             if (!allowed) {
               log?.info(`[${account.accountId}] inline: drop group sender=${senderId} (groupPolicy=allowlist)`)
+              await answerCallbackIfNeeded().catch((error) => {
+                runtime.error?.(`inline callback answer failed: ${String(error)}`)
+              })
               continue
             }
           }
         } else {
           if (dmPolicy === "disabled") {
             log?.info(`[${account.accountId}] inline: drop DM sender=${senderId} (dmPolicy=disabled)`)
+            await answerCallbackIfNeeded().catch((error) => {
+              runtime.error?.(`inline callback answer failed: ${String(error)}`)
+            })
             continue
           }
           if (dmPolicy !== "open") {
@@ -1082,6 +1172,9 @@ export async function monitorInlineProvider(params: {
                 }
               }
               log?.info(`[${account.accountId}] inline: drop DM sender=${senderId} (dmPolicy=${dmPolicy})`)
+              await answerCallbackIfNeeded().catch((error) => {
+                runtime.error?.(`inline callback answer failed: ${String(error)}`)
+              })
               continue
             }
           }
@@ -1093,6 +1186,9 @@ export async function monitorInlineProvider(params: {
             channel: CHANNEL_ID,
             reason: "control command (unauthorized)",
             target: senderId,
+          })
+          await answerCallbackIfNeeded().catch((error) => {
+            runtime.error?.(`inline callback answer failed: ${String(error)}`)
           })
           continue
         }
@@ -1176,6 +1272,34 @@ export async function monitorInlineProvider(params: {
                   }
                 : null,
           })
+          await answerCallbackIfNeeded().catch((error) => {
+            runtime.error?.(`inline callback answer failed: ${String(error)}`)
+          })
+          continue
+        }
+
+        const parseMarkdown = account.config.parseMarkdown ?? true
+        const nativeCommandMenu = resolveInlineCompatNativeCommandMenu(normalizedCommandBody)
+        if (nativeCommandMenu) {
+          const menuActions = resolveInlineReplyActions({
+            channelData: {
+              inline: {
+                buttons: nativeCommandMenu.buttons,
+              },
+            },
+          })
+          const sent = await client.sendMessage({
+            chatId,
+            text: nativeCommandMenu.title,
+            ...(menuActions ? { actions: menuActions } : {}),
+          })
+          if (sent.messageId != null) {
+            rememberBotMessageId(botMessageIdsByChat, chatId, sent.messageId)
+          }
+          statusSink?.({ lastOutboundAt: Date.now() })
+          await answerCallbackIfNeeded().catch((error) => {
+            runtime.error?.(`inline callback answer failed: ${String(error)}`)
+          })
           continue
         }
 
@@ -1231,7 +1355,9 @@ export async function monitorInlineProvider(params: {
               }),
           })
         }
-        const commandBody = normalizeInlineCommandBody(rawBody, botUsername)
+        const effectiveSurface = shouldUseTelegramSurfaceForModelCommands(normalizedCommandBody)
+          ? "telegram"
+          : CHANNEL_ID
         const systemPrompt = resolveInlineSystemPrompt({
           account,
           ...(isGroup ? { groupId: String(chatId) } : {}),
@@ -1240,7 +1366,7 @@ export async function monitorInlineProvider(params: {
         const ctxPayload = core.channel.reply.finalizeInboundContext({
           Body: body,
           RawBody: rawBody,
-          CommandBody: commandBody,
+          CommandBody: normalizedCommandBody,
           From: isGroup ? `inline:chat:${String(chatId)}` : `inline:${senderId}`,
           To: `inline:${String(chatId)}`,
           SessionKey: route.sessionKey,
@@ -1252,7 +1378,7 @@ export async function monitorInlineProvider(params: {
           ...(senderName ? { SenderName: senderName } : {}),
           ...(senderUsername ? { SenderUsername: senderUsername } : {}),
           Provider: CHANNEL_ID,
-          Surface: CHANNEL_ID,
+          Surface: effectiveSurface,
           MessageSid: String(msg.id),
           ...(msg.replyToMsgId != null ? { ReplyToId: String(msg.replyToMsgId) } : {}),
           ...(historyContext.replyToSenderId != null ? { ReplyToSenderId: historyContext.replyToSenderId } : {}),
@@ -1319,8 +1445,7 @@ export async function monitorInlineProvider(params: {
               })
             : {}
 
-        const parseMarkdown = account.config.parseMarkdown ?? true
-        const streamViaEditMessage = account.config.streamViaEditMessage === true
+        const streamViaEditMessage = account.config.streamViaEditMessage === true && !shouldEditCallbackTargetInPlace
         const defaultReplyToMsgId = isGroup && msg.replyToMsgId != null ? msg.id : undefined
         const disableBlockStreaming =
           streamViaEditMessage
@@ -1550,9 +1675,9 @@ export async function monitorInlineProvider(params: {
             replyOptions,
           })
         } finally {
-          if (callbackActionEvent) {
+          if (callbackActionEvent && !callbackActionAnswered) {
             try {
-              await answerInlineMessageAction(client, callbackActionEvent.interactionId)
+              await answerCallbackIfNeeded()
             } catch (error) {
               runtime.error?.(`inline callback answer failed: ${String(error)}`)
             }
