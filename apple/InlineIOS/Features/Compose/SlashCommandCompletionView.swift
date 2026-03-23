@@ -1,4 +1,5 @@
 import InlineKit
+import InlineIOSUI
 import UIKit
 
 protocol SlashCommandCompletionDelegate: AnyObject {
@@ -102,12 +103,14 @@ final class SlashCommandCompletionView: UIView {
     self.suggestions = suggestions
     selectedIndex = suggestions.isEmpty ? 0 : min(selectedIndex, suggestions.count - 1)
     rebuildRows()
+    updateHeight()
   }
 
   func show() {
     guard !suggestions.isEmpty else { return }
 
     isHidden = false
+    updateHeight()
     UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseOut]) {
       self.alpha = 1.0
       self.transform = .identity
@@ -234,6 +237,21 @@ final class SlashCommandCompletionView: UIView {
     guard stackView.arrangedSubviews.indices.contains(selectedIndex) else { return }
     let selectedView = stackView.arrangedSubviews[selectedIndex]
     scrollView.scrollRectToVisible(selectedView.frame.insetBy(dx: 0, dy: -8), animated: false)
+  }
+
+  private func updateHeight() {
+    let constrainedHeight = suggestionListHeight(
+      itemCount: suggestions.count,
+      itemHeight: Self.itemHeight,
+      maxVisibleItems: 4,
+      maxHeight: Self.maxHeight
+    )
+
+    if let heightConstraint = constraints.first(where: { $0.firstAttribute == .height }) {
+      heightConstraint.constant = constrainedHeight
+    } else {
+      heightAnchor.constraint(equalToConstant: constrainedHeight).isActive = true
+    }
   }
 
   @objc
