@@ -66,7 +66,13 @@ export const editMessage = async (input: Input, context: FunctionContext): Promi
     document: fullMessage.document ?? undefined,
   }
 
-  let { selfUpdates } = await pushUpdates({ inputPeer: input.peer, messageInfo, currentUserId, update })
+  let { selfUpdates } = await pushUpdates({
+    inputPeer: input.peer,
+    messageInfo,
+    currentUserId,
+    update,
+    actionsOverride: normalizedActions,
+  })
 
   return { updates: selfUpdates }
 }
@@ -84,11 +90,13 @@ const pushUpdates = async ({
   messageInfo,
   currentUserId,
   update,
+  actionsOverride,
 }: {
   inputPeer: InputPeer
   messageInfo: MessageInfo
   currentUserId: number
   update: UpdateSeqAndDate
+  actionsOverride?: MessageActions
 }): Promise<{ selfUpdates: Update[]; updateGroup: UpdateGroup }> => {
   const updateGroup = await getUpdateGroupFromInputPeer(inputPeer, { currentUserId })
 
@@ -99,6 +107,14 @@ const pushUpdates = async ({
       const encodingForUserId = userId
       const encodingForInputPeer: InputPeer =
         userId === currentUserId ? inputPeer : { type: { oneofKind: "user", user: { userId: BigInt(currentUserId) } } }
+      const encodedMessage = Encoders.message({
+        ...messageInfo,
+        encodingForPeer: { inputPeer: encodingForInputPeer },
+        encodingForUserId,
+      })
+      if (actionsOverride !== undefined) {
+        encodedMessage.actions = actionsOverride
+      }
 
       let newMessageUpdate: Update = {
         date: encodeDateStrict(update.date),
@@ -107,11 +123,7 @@ const pushUpdates = async ({
         update: {
           oneofKind: "editMessage",
           editMessage: {
-            message: Encoders.message({
-              ...messageInfo,
-              encodingForPeer: { inputPeer: encodingForInputPeer },
-              encodingForUserId,
-            }),
+            message: encodedMessage,
           },
         },
       }
@@ -133,6 +145,15 @@ const pushUpdates = async ({
     })
   } else if (updateGroup.type === "threadUsers") {
     updateGroup.userIds.forEach((userId) => {
+      const encodedMessage = Encoders.message({
+        ...messageInfo,
+        encodingForPeer: { inputPeer },
+        encodingForUserId: userId,
+      })
+      if (actionsOverride !== undefined) {
+        encodedMessage.actions = actionsOverride
+      }
+
       // New updates
       let editMessageUpdate: Update = {
         date: encodeDateStrict(update.date),
@@ -141,11 +162,7 @@ const pushUpdates = async ({
         update: {
           oneofKind: "editMessage",
           editMessage: {
-            message: Encoders.message({
-              ...messageInfo,
-              encodingForPeer: { inputPeer },
-              encodingForUserId: userId,
-            }),
+            message: encodedMessage,
           },
         },
       }

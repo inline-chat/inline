@@ -1,5 +1,10 @@
 import { beforeAll, describe, expect, test } from "bun:test"
-import { InputPeer, Message, MessageEntity_Type, type EditMessageResult } from "@inline-chat/protocol/core"
+import {
+  InputPeer,
+  Message,
+  MessageEntity_Type,
+  type EditMessageResult,
+} from "@inline-chat/protocol/core"
 import { setupTestDatabase, testUtils } from "../setup"
 import { sendMessage } from "@in/server/functions/messages.sendMessage"
 import { editMessage } from "@in/server/functions/messages.editMessage"
@@ -117,5 +122,56 @@ describe("editMessage function", () => {
     expect(message?.message).toBe("check @editmentioned")
     expect(message?.entities).toEqual(sentMessage?.entities)
     expect(message?.entities?.entities[0]?.type).toBe(MessageEntity_Type.BOLD)
+  })
+
+  test("includes explicit empty actions in edit updates when clearing bot buttons", async () => {
+    await db.update(users).set({ bot: true }).where(eq(users.id, currentUser.id)).execute()
+
+    const sent = await sendMessage(
+      {
+        peerId: privateChatPeerId,
+        message: "with buttons",
+        actions: {
+          rows: [
+            {
+              actions: [
+                {
+                  actionId: "approve",
+                  text: "Approve",
+                  action: {
+                    oneofKind: "callback",
+                    callback: {
+                      data: new Uint8Array([1, 2, 3]),
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+      context,
+    )
+
+    const sentMessageId = sent.updates[0]?.update.oneofKind === "updateMessageId"
+      ? sent.updates[0].update.updateMessageId?.messageId
+      : undefined
+    expect(sentMessageId).toBeTruthy()
+
+    const result = await editMessage(
+      {
+        messageId: sentMessageId!,
+        peer: privateChatPeerId,
+        text: "buttons cleared",
+        actions: { rows: [] },
+      },
+      context,
+    )
+
+    const editedMessage = extractEditedMessage(result)
+    expect(editedMessage).toBeTruthy()
+    expect(editedMessage?.message).toBe("buttons cleared")
+    expect(editedMessage?.actions).toBeTruthy()
+    expect(editedMessage?.actions?.rows).toEqual([])
   })
 })
