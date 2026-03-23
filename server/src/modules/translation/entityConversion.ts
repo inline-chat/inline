@@ -5,6 +5,7 @@ import { MessageEntities } from "@inline-chat/protocol/core"
 import { openaiClient } from "@in/server/libs/openAI"
 import { Log } from "@in/server/utils/log"
 import { zodResponseFormat } from "openai/helpers/zod"
+import { createIndexedText } from "./entityConversionHelpers"
 
 const log = new Log("modules/translation/entityConversion")
 
@@ -60,21 +61,6 @@ function validateConversions(
     const conversion = validConversions.get(messageId)
     return conversion ? [conversion] : []
   })
-}
-
-/**
- * Create indexed text showing UTF-16 character positions like "Hi" -> "0H1i"
- */
-export function createIndexedText(text: string): string {
-  let out = ""
-  let index = 0
-
-  for (const char of text) {
-    out += `${index}${char}`
-    index += char.length
-  }
-
-  return out
 }
 
 const formatEntitiesJson = (entities: MessageEntities): string => {
