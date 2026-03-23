@@ -25,11 +25,20 @@ type ReleaseOptions = {
   skip: Set<string>;
   dryRun: boolean;
   pauseBeforeNotarize: boolean;
+  rollback: boolean;
+  rollbackToBuild: string;
+  rollbackStepsBack: number;
 };
 
 type ParsedArgs = Omit<ReleaseOptions, "channel" | "releaseTag"> & {
   channel?: "stable" | "beta";
   releaseTag?: string;
+};
+
+type RollbackMetadata = {
+  selectedBuild: string;
+  selectedUrl: string;
+  removedBuilds: string[];
 };
 
 type ReleaseContext = ReleaseOptions & {
@@ -39,6 +48,7 @@ type ReleaseContext = ReleaseOptions & {
   signUpdatePath: string;
   appcastPath: string;
   appcastOutputPath: string;
+  rollbackMetaPath: string;
   buildNumber: string;
   version: string;
   commit: string;
@@ -46,6 +56,9 @@ type ReleaseContext = ReleaseOptions & {
   baseUrl: string;
   dmgUrl: string;
   appcastUrl: string;
+  rollbackSelectedBuild: string;
+  rollbackSelectedUrl: string;
+  rollbackRemovedBuilds: string[];
 };
 
 function usage(): string {
@@ -63,6 +76,9 @@ function usage(): string {
     "  --skip <ids>                     Skip steps (comma-separated or repeatable)",
     "                                  Known ids: build, upload-sentry-dsyms, post-check, upload-dmg, verify-dmg, gen-appcast, validate-appcast, upload-appcast, github",
     "                                  Aliases: upload (upload-dmg+upload-appcast), appcast (gen+validate+upload)",
+    "  --rollback                       Roll back the live appcast to an older build already present in the channel feed",
+    "  --rollback-to-build <build>      Target build to restore (default: previous appcast item)",
+    "  --rollback-steps-back <n>        Pick the Nth previous appcast item (default: 1)",
     "  --pause-before-notarize          Pause after app/DMG build so you can test locally, then continue notarization",
     "  --dry-run                         Print what would run, without executing the pipeline",
     "  --skip-build                      Alias for --skip build",
@@ -71,6 +87,7 @@ function usage(): string {
     "Notes:",
     "  - This script intentionally does not auto-load scripts/.env. Export env vars in your shell.",
     "  - Skipped steps stay visible in the TUI as disabled, so you can see the full pipeline at a glance.",
+    "  - --rollback only republishes appcast.xml; it does not rebuild or downgrade already-installed builds.",
   ].join("\n");
 }
 
@@ -90,6 +107,9 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   const skip = new Set<string>();
   let dryRun = false;
   let pauseBeforeNotarize = false;
+  let rollback = false;
+  let rollbackToBuild = "";
+  let rollbackStepsBack = 1;
 
   const resolveFromRoot = (p: string): string => {
     if (!p) return p;
@@ -135,6 +155,26 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
       skipGithubRelease = true;
       continue;
     }
+    if (arg === "--rollback") {
+      rollback = true;
+      continue;
+    }
+    if (arg === "--rollback-to-build") {
+      rollbackToBuild = eat(i).trim();
+      if (!rollbackToBuild) die(`Missing value for ${arg}`);
+      i++;
+      continue;
+    }
+    if (arg === "--rollback-steps-back") {
+      const raw = eat(i).trim();
+      const value = Number.parseInt(raw, 10);
+      if (!Number.isInteger(value) || value < 1) {
+        die(`Invalid --rollback-steps-back: ${raw}`);
+      }
+      rollbackStepsBack = value;
+      i++;
+      continue;
+    }
     if (arg === "--dry-run") {
       dryRun = true;
       continue;
@@ -167,6 +207,28 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
     appPath = resolve(derivedData, "Build/Products/Release/Inline.app");
   }
 
+  if (rollbackToBuild && !rollback) {
+    die("--rollback-to-build requires --rollback");
+  }
+  if (rollbackStepsBack !== 1 && !rollback) {
+    die("--rollback-steps-back requires --rollback");
+  }
+  if (rollback && rollbackToBuild && rollbackStepsBack !== 1) {
+    die("Use either --rollback-to-build or --rollback-steps-back, not both.");
+  }
+  if (rollback && skip.size > 0) {
+    die("--skip is not supported with --rollback.");
+  }
+  if (rollback && pauseBeforeNotarize) {
+    die("--pause-before-notarize is not supported with --rollback.");
+  }
+  if (rollback && releaseTag) {
+    die("--release-tag is not supported with --rollback.");
+  }
+  if (rollback && skipGithubRelease) {
+    die("--skip-github-release is not supported with --rollback.");
+  }
+
   return {
     channel,
     derivedData,
@@ -178,6 +240,9 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
     skip,
     dryRun,
     pauseBeforeNotarize,
+    rollback,
+    rollbackToBuild,
+    rollbackStepsBack,
   };
 }
 
@@ -490,8 +555,10 @@ async function main() {
 
   let keepTempDir = false;
   const parsedRaw = parseArgs(process.argv.slice(2), rootDir);
-  validateSkipIds(parsedRaw.skip);
-  const parsed0 = computeSkipOptions(parsedRaw);
+  if (!parsedRaw.rollback) {
+    validateSkipIds(parsedRaw.skip);
+  }
+  const parsed0 = parsedRaw.rollback ? parsedRaw : computeSkipOptions(parsedRaw);
   let channel = parsed0.channel;
   if (!channel) {
     if (!interactive) {
@@ -504,7 +571,7 @@ async function main() {
       console.log(`Using channel: ${channel}`);
     }
   }
-  const releaseTag = parsed0.releaseTag || (channel === "beta" ? "tip" : "");
+  const releaseTag = parsed0.rollback ? "" : parsed0.releaseTag || (channel === "beta" ? "tip" : "");
   const opts: ReleaseOptions = {
     channel,
     derivedData: parsed0.derivedData,
@@ -516,6 +583,9 @@ async function main() {
     skip: parsed0.skip,
     dryRun: parsed0.dryRun,
     pauseBeforeNotarize: parsed0.pauseBeforeNotarize,
+    rollback: parsed0.rollback,
+    rollbackToBuild: parsed0.rollbackToBuild,
+    rollbackStepsBack: parsed0.rollbackStepsBack,
   };
 
   // Temp dir is created up-front so we can point to it on failures.
@@ -532,6 +602,7 @@ async function main() {
     signUpdatePath: resolve(tempDir, "sign_update.txt"),
     appcastPath: resolve(tempDir, "appcast.xml"),
     appcastOutputPath: resolve(tempDir, "appcast_new.xml"),
+    rollbackMetaPath: resolve(tempDir, "rollback_meta.json"),
     buildNumber: "",
     version: "",
     commit: "",
@@ -539,11 +610,16 @@ async function main() {
     baseUrl: "",
     dmgUrl: "",
     appcastUrl: "",
+    rollbackSelectedBuild: "",
+    rollbackSelectedUrl: "",
+    rollbackRemovedBuilds: [],
     ...opts,
   };
 
   ui.setHintLine(
-    `Channel: ${opts.channel}${opts.releaseTag ? `  Tag: ${opts.releaseTag}` : ""}${opts.pauseBeforeNotarize ? "  Pause before notarize" : ""}${opts.dryRun ? "  Dry run" : ""}`,
+    opts.rollback
+      ? `Rollback  Channel: ${opts.channel}${opts.rollbackToBuild ? `  Build: ${opts.rollbackToBuild}` : `  Steps back: ${opts.rollbackStepsBack}`}${opts.dryRun ? "  Dry run" : ""}`
+      : `Release  Channel: ${opts.channel}${opts.releaseTag ? `  Tag: ${opts.releaseTag}` : ""}${opts.pauseBeforeNotarize ? "  Pause before notarize" : ""}${opts.dryRun ? "  Dry run" : ""}`,
   );
 
   const tasks: Task[] = [];
@@ -553,12 +629,14 @@ async function main() {
     for (const c of ["bun", "python3", "curl", "git"]) {
       if (!commandExists(c)) missing.push(c);
     }
-    if (taskEnabled(opts, "build")) {
+    if (ctx.rollback) {
+      // Rollback only needs feed editing + upload tooling.
+    } else if (taskEnabled(opts, "build")) {
       for (const c of ["xcodebuild", "xcrun", "codesign", "security", "create-dmg", "rsync", "unzip", "perl"]) {
         if (!commandExists(c)) missing.push(c);
       }
     }
-    if (taskEnabled(opts, "upload-sentry-dsyms")) {
+    if (!ctx.rollback && taskEnabled(opts, "upload-sentry-dsyms")) {
       for (const c of ["ditto"]) {
         if (!commandExists(c)) missing.push(c);
       }
@@ -567,12 +645,12 @@ async function main() {
         else throw new Error("upload-sentry-dsyms requires SENTRY_AUTH_TOKEN or an authenticated `sentry` CLI session.");
       }
     }
-    if (taskEnabled(opts, "post-check")) {
+    if (!ctx.rollback && taskEnabled(opts, "post-check")) {
       for (const c of ["hdiutil", "spctl", "lipo"]) {
         if (!commandExists(c)) missing.push(c);
       }
     }
-    if (!opts.skipGithubRelease && opts.releaseTag) {
+    if (!ctx.rollback && !opts.skipGithubRelease && opts.releaseTag) {
       if (!commandExists("gh")) missing.push("gh");
     }
     if (ctx.pauseBeforeNotarize && taskEnabled(opts, "build") && !interactive) {
@@ -599,88 +677,235 @@ async function main() {
     run: runPreflight,
   });
 
-  tasks.push({
-    id: "build",
-    title: "Build, sign, DMG, notarize (build-direct.sh)",
-    enabled: taskEnabled(opts, "build"),
-    skipReason: taskEnabled(opts, "build") ? undefined : "operator requested",
-    dryRun: (ctx, ui) => {
-      ui.info("Would run:");
-      ui.info(`  bash scripts/macos/build-direct.sh`);
-      ui.info("With env:");
-      ui.info(`  CHANNEL=${ctx.channel}`);
-      ui.info(`  DERIVED_DATA=${ctx.derivedData}`);
-      ui.info(`  DMG_PATH=${ctx.dmgPath}`);
-      ui.info(`  SPARKLE_DIR=${ctx.sparkleDir}`);
-      ui.info(`  PAUSE_BEFORE_NOTARIZE=${ctx.pauseBeforeNotarize ? "1" : "0"}`);
-      ui.info("build-direct.sh enforces signing/notarization env vars.");
-    },
-    run: async (ctx, ui) => {
-      // Let build-direct.sh enforce its own env requirements. We only pass paths/options through.
-      ui.info(`Running build script; output in ${ctx.tempDir}`);
-      await runStreaming(ui, ["bash", resolve(ctx.rootDir, "scripts/macos/build-direct.sh")], {
-        cwd: ctx.rootDir,
-        env: {
-          CHANNEL: ctx.channel,
-          DERIVED_DATA: ctx.derivedData,
-          DMG_PATH: ctx.dmgPath,
-          SPARKLE_DIR: ctx.sparkleDir,
-          PAUSE_BEFORE_NOTARIZE: ctx.pauseBeforeNotarize ? "1" : "0",
-        },
-      });
-    },
-  });
+  if (opts.rollback) {
+    tasks.push({
+      id: "fetch-appcast",
+      title: "Fetch current appcast",
+      enabled: true,
+      dryRun: (ctx, ui) => {
+        ui.info("Would run:");
+        ui.info("  curl -fsSL <PUBLIC_RELEASES_R2_PUBLIC_BASE_URL>/mac/<channel>/appcast.xml -o <temp>/appcast.xml");
+        ui.info("Requires env:");
+        ui.info("  PUBLIC_RELEASES_R2_PUBLIC_BASE_URL");
+      },
+      run: async (ctx, ui) => {
+        ctx.baseUrl = trimTrailingSlash(requireEnv("PUBLIC_RELEASES_R2_PUBLIC_BASE_URL"));
+        ctx.appcastUrl = `${ctx.baseUrl}/mac/${ctx.channel}/appcast.xml`;
+        await runStreaming(ui, ["curl", "-fsSL", ctx.appcastUrl, "-o", ctx.appcastPath], { cwd: ctx.rootDir });
+      },
+    });
 
-  tasks.push({
-    id: "upload-sentry-dsyms",
-    title: "Upload dSYMs to Sentry",
-    enabled: taskEnabled(opts, "upload-sentry-dsyms"),
-    skipReason: taskEnabled(opts, "upload-sentry-dsyms") ? undefined : "operator requested",
-    dryRun: (ctx, ui) => {
-      ui.info("Would run:");
-      ui.info(`  bun run scripts/macos/upload-dsyms.ts --search-root ${resolve(ctx.derivedData, "Build/Products/Release")}`);
-      ui.info("Auth:");
-      ui.info("  Uses SENTRY_AUTH_TOKEN if set, otherwise resolves the token from `sentry auth token`.");
-      ui.info("Optional env:");
-      ui.info("  SENTRY_ORG (default: usenoor), SENTRY_PROJECT (default: inline-ios-macos), SENTRY_API_URL (default: https://us.sentry.io)");
-    },
-    run: async (ctx, ui) => {
-      const searchRoot = resolve(ctx.derivedData, "Build/Products/Release");
-      if (!existsSync(searchRoot)) {
-        throw new Error(`Release products directory not found at ${searchRoot}`);
-      }
-      await runStreaming(
-        ui,
-        ["bun", "run", resolve(ctx.rootDir, "scripts/macos/upload-dsyms.ts"), "--search-root", searchRoot],
-        { cwd: ctx.rootDir },
-      );
-    },
-  });
+    tasks.push({
+      id: "prepare-rollback",
+      title: "Generate rolled-back appcast",
+      enabled: true,
+      dryRun: (ctx, ui) => {
+        ui.info("Would run:");
+        ui.info(
+          ctx.rollbackToBuild
+            ? `  python3 scripts/macos/rollback_appcast.py --appcast <temp>/appcast.xml --output <temp>/appcast_new.xml --metadata-output <temp>/rollback_meta.json --target-build ${ctx.rollbackToBuild}`
+            : `  python3 scripts/macos/rollback_appcast.py --appcast <temp>/appcast.xml --output <temp>/appcast_new.xml --metadata-output <temp>/rollback_meta.json --steps-back ${ctx.rollbackStepsBack}`,
+        );
+      },
+      run: async (ctx, ui) => {
+        await runStreaming(
+          ui,
+          [
+            "python3",
+            resolve(ctx.rootDir, "scripts/macos/rollback_appcast.py"),
+            "--appcast",
+            ctx.appcastPath,
+            "--output",
+            ctx.appcastOutputPath,
+            "--metadata-output",
+            ctx.rollbackMetaPath,
+            ...(ctx.rollbackToBuild
+              ? ["--target-build", ctx.rollbackToBuild]
+              : ["--steps-back", String(ctx.rollbackStepsBack)]),
+          ],
+          { cwd: ctx.rootDir },
+        );
 
-  tasks.push({
-    id: "post-check",
-    title: "Post-check DMG (staple, codesign, gatekeeper)",
-    enabled: taskEnabled(opts, "post-check"),
-    skipReason: taskEnabled(opts, "post-check") ? undefined : "operator requested",
-    dryRun: (ctx, ui) => {
-      ui.info("Would run:");
-      ui.info(`  bash scripts/macos/post-check.sh`);
-      ui.info("With env:");
-      ui.info(`  DMG_PATH=${ctx.dmgPath}`);
-      ui.info(`  APP_PATH=${ctx.appPath}`);
-    },
-    run: async (ctx, ui) => {
-      await runStreaming(ui, ["bash", resolve(ctx.rootDir, "scripts/macos/post-check.sh")], {
-        cwd: ctx.rootDir,
-        env: {
-          DMG_PATH: ctx.dmgPath,
-        },
-      });
-    },
-  });
+        const metadata = JSON.parse(await Bun.file(ctx.rollbackMetaPath).text()) as RollbackMetadata;
+        ctx.rollbackSelectedBuild = metadata.selectedBuild;
+        ctx.rollbackSelectedUrl = metadata.selectedUrl;
+        ctx.rollbackRemovedBuilds = metadata.removedBuilds;
+        ctx.buildNumber = metadata.selectedBuild;
+        ctx.dmgUrl = metadata.selectedUrl;
 
-  tasks.push({
-    id: "upload-dmg",
+        ui.info(`Rollback target build: ${ctx.rollbackSelectedBuild}`);
+        if (ctx.rollbackRemovedBuilds.length > 0) {
+          ui.info(`Removing newer builds from feed: ${ctx.rollbackRemovedBuilds.join(", ")}`);
+        }
+      },
+    });
+
+    tasks.push({
+      id: "verify-rollback-dmg",
+      title: "Verify rollback DMG availability",
+      enabled: true,
+      dryRun: (ctx, ui) => {
+        ui.info("Would run:");
+        ui.info("  curl -fsI <selected-rollback-dmg-url>");
+      },
+      run: async (ctx, ui) => {
+        if (!ctx.dmgUrl) {
+          throw new Error("Rollback DMG URL missing. prepare-rollback must run first.");
+        }
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          ui.info(`curl -I ${ctx.dmgUrl} (attempt ${attempt}/3)`);
+          const res = spawnSync({ cmd: ["curl", "-fsI", ctx.dmgUrl], stdout: "pipe", stderr: "pipe" });
+          if (res.exitCode === 0) return;
+          if (attempt === 3) {
+            const err = new TextDecoder().decode(res.stderr).trim();
+            throw new Error(`Rollback DMG not reachable at ${ctx.dmgUrl}${err ? `\n${err}` : ""}`);
+          }
+          await sleep(1000);
+        }
+      },
+    });
+
+    tasks.push({
+      id: "validate-appcast",
+      title: "Validate rolled-back appcast",
+      enabled: true,
+      dryRun: (ctx, ui) => {
+        ui.info("Would run:");
+        ui.info("  python3 scripts/macos/validate_appcast.py --appcast <temp>/appcast_new.xml --require-build <selected-build> --require-url <selected-rollback-dmg-url>");
+      },
+      run: async (ctx, ui) => {
+        if (!ctx.buildNumber || !ctx.dmgUrl) {
+          throw new Error("Rollback metadata missing. prepare-rollback must run first.");
+        }
+        await runStreaming(
+          ui,
+          [
+            "python3",
+            resolve(ctx.rootDir, "scripts/macos/validate_appcast.py"),
+            "--appcast",
+            ctx.appcastOutputPath,
+            "--require-build",
+            ctx.buildNumber,
+            "--require-url",
+            ctx.dmgUrl,
+          ],
+          { cwd: ctx.rootDir },
+        );
+      },
+    });
+
+    tasks.push({
+      id: "upload-appcast",
+      title: "Upload rolled-back appcast to R2",
+      enabled: true,
+      dryRun: (ctx, ui) => {
+        ui.info("Would run:");
+        ui.info(`  UPLOAD_MODE=appcast CHANNEL=${ctx.channel} APPCAST_PATH=<temp>/appcast_new.xml BUILD_NUMBER=<selected-build> bun run scripts/macos/release-direct.ts`);
+        ui.info("Requires env:");
+        ui.info("  PUBLIC_RELEASES_R2_ACCESS_KEY_ID, PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY, PUBLIC_RELEASES_R2_BUCKET, PUBLIC_RELEASES_R2_ENDPOINT");
+      },
+      run: async (ctx, ui) => {
+        if (!ctx.buildNumber) {
+          throw new Error("Rollback build number missing. prepare-rollback must run first.");
+        }
+        requireEnv("PUBLIC_RELEASES_R2_ACCESS_KEY_ID");
+        requireEnv("PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY");
+        requireEnv("PUBLIC_RELEASES_R2_BUCKET");
+        requireEnv("PUBLIC_RELEASES_R2_ENDPOINT");
+        await runStreaming(ui, ["bun", "run", resolve(ctx.rootDir, "scripts/macos/release-direct.ts")], {
+          cwd: ctx.rootDir,
+          env: {
+            UPLOAD_MODE: "appcast",
+            CHANNEL: ctx.channel,
+            APPCAST_PATH: ctx.appcastOutputPath,
+            BUILD_NUMBER: ctx.buildNumber,
+          },
+        });
+      },
+    });
+  } else {
+    tasks.push({
+      id: "build",
+      title: "Build, sign, DMG, notarize (build-direct.sh)",
+      enabled: taskEnabled(opts, "build"),
+      skipReason: taskEnabled(opts, "build") ? undefined : "operator requested",
+      dryRun: (ctx, ui) => {
+        ui.info("Would run:");
+        ui.info(`  bash scripts/macos/build-direct.sh`);
+        ui.info("With env:");
+        ui.info(`  CHANNEL=${ctx.channel}`);
+        ui.info(`  DERIVED_DATA=${ctx.derivedData}`);
+        ui.info(`  DMG_PATH=${ctx.dmgPath}`);
+        ui.info(`  SPARKLE_DIR=${ctx.sparkleDir}`);
+        ui.info(`  PAUSE_BEFORE_NOTARIZE=${ctx.pauseBeforeNotarize ? "1" : "0"}`);
+        ui.info("build-direct.sh enforces signing/notarization env vars.");
+      },
+      run: async (ctx, ui) => {
+        // Let build-direct.sh enforce its own env requirements. We only pass paths/options through.
+        ui.info(`Running build script; output in ${ctx.tempDir}`);
+        await runStreaming(ui, ["bash", resolve(ctx.rootDir, "scripts/macos/build-direct.sh")], {
+          cwd: ctx.rootDir,
+          env: {
+            CHANNEL: ctx.channel,
+            DERIVED_DATA: ctx.derivedData,
+            DMG_PATH: ctx.dmgPath,
+            SPARKLE_DIR: ctx.sparkleDir,
+            PAUSE_BEFORE_NOTARIZE: ctx.pauseBeforeNotarize ? "1" : "0",
+          },
+        });
+      },
+    });
+
+    tasks.push({
+      id: "upload-sentry-dsyms",
+      title: "Upload dSYMs to Sentry",
+      enabled: taskEnabled(opts, "upload-sentry-dsyms"),
+      skipReason: taskEnabled(opts, "upload-sentry-dsyms") ? undefined : "operator requested",
+      dryRun: (ctx, ui) => {
+        ui.info("Would run:");
+        ui.info(`  bun run scripts/macos/upload-dsyms.ts --search-root ${resolve(ctx.derivedData, "Build/Products/Release")}`);
+        ui.info("Auth:");
+        ui.info("  Uses SENTRY_AUTH_TOKEN if set, otherwise resolves the token from `sentry auth token`.");
+        ui.info("Optional env:");
+        ui.info("  SENTRY_ORG (default: usenoor), SENTRY_PROJECT (default: inline-ios-macos), SENTRY_API_URL (default: https://us.sentry.io)");
+      },
+      run: async (ctx, ui) => {
+        const searchRoot = resolve(ctx.derivedData, "Build/Products/Release");
+        if (!existsSync(searchRoot)) {
+          throw new Error(`Release products directory not found at ${searchRoot}`);
+        }
+        await runStreaming(
+          ui,
+          ["bun", "run", resolve(ctx.rootDir, "scripts/macos/upload-dsyms.ts"), "--search-root", searchRoot],
+          { cwd: ctx.rootDir },
+        );
+      },
+    });
+
+    tasks.push({
+      id: "post-check",
+      title: "Post-check DMG (staple, codesign, gatekeeper)",
+      enabled: taskEnabled(opts, "post-check"),
+      skipReason: taskEnabled(opts, "post-check") ? undefined : "operator requested",
+      dryRun: (ctx, ui) => {
+        ui.info("Would run:");
+        ui.info(`  bash scripts/macos/post-check.sh`);
+        ui.info("With env:");
+        ui.info(`  DMG_PATH=${ctx.dmgPath}`);
+        ui.info(`  APP_PATH=${ctx.appPath}`);
+      },
+      run: async (ctx, ui) => {
+        await runStreaming(ui, ["bash", resolve(ctx.rootDir, "scripts/macos/post-check.sh")], {
+          cwd: ctx.rootDir,
+          env: {
+            DMG_PATH: ctx.dmgPath,
+          },
+        });
+      },
+    });
+
+    tasks.push({
+      id: "upload-dmg",
     title: "Upload DMG to R2",
     enabled: taskEnabled(opts, "upload-dmg"),
     skipReason: taskEnabled(opts, "upload-dmg") ? undefined : "operator requested",
@@ -720,10 +945,10 @@ async function main() {
         },
       });
     },
-  });
+    });
 
-  tasks.push({
-    id: "verify-dmg",
+    tasks.push({
+      id: "verify-dmg",
     title: "Verify DMG availability (HEAD request)",
     enabled: taskEnabled(opts, "verify-dmg"),
     skipReason: taskEnabled(opts, "verify-dmg") ? undefined : "operator requested",
@@ -755,10 +980,10 @@ async function main() {
         await sleep(2000);
       }
     },
-  });
+    });
 
-  tasks.push({
-    id: "gen-appcast",
+    tasks.push({
+      id: "gen-appcast",
     title: "Generate appcast (sign_update + update_appcast.py)",
     enabled: taskEnabled(opts, "gen-appcast"),
     skipReason: taskEnabled(opts, "gen-appcast") ? undefined : "operator requested",
@@ -857,10 +1082,10 @@ async function main() {
         },
       });
     },
-  });
+    });
 
-  tasks.push({
-    id: "validate-appcast",
+    tasks.push({
+      id: "validate-appcast",
     title: "Validate appcast",
     enabled: taskEnabled(opts, "validate-appcast"),
     skipReason: taskEnabled(opts, "validate-appcast") ? undefined : "operator requested",
@@ -883,10 +1108,10 @@ async function main() {
         cwd: ctx.rootDir,
       });
     },
-  });
+    });
 
-  tasks.push({
-    id: "upload-appcast",
+    tasks.push({
+      id: "upload-appcast",
     title: "Upload appcast to R2",
     enabled: taskEnabled(opts, "upload-appcast"),
     skipReason: taskEnabled(opts, "upload-appcast") ? undefined : "operator requested",
@@ -917,13 +1142,13 @@ async function main() {
         },
       });
     },
-  });
+    });
 
   // `github` is controllable via both `--skip-github-release` and `--skip github`.
   // Keep the `enabled` computation consistent with other tasks by also checking `taskEnabled`.
-  const githubEnabled = Boolean(opts.releaseTag && !opts.skipGithubRelease && taskEnabled(opts, "github"));
-  tasks.push({
-    id: "github",
+    const githubEnabled = Boolean(opts.releaseTag && !opts.skipGithubRelease && taskEnabled(opts, "github"));
+    tasks.push({
+      id: "github",
     title: "Update GitHub tag/release and upload DMG",
     enabled: githubEnabled,
     skipReason: githubEnabled
@@ -958,7 +1183,8 @@ async function main() {
 
       await runStreaming(ui, ["gh", "release", "upload", ctx.releaseTag, ctx.dmgPath, "--clobber"], { cwd: ctx.rootDir });
     },
-  });
+    });
+  }
 
   // Initialize UI and run tasks.
   ui.init(tasks);
@@ -1011,7 +1237,7 @@ async function main() {
     process.exit(1);
   }
 
-  ui.info("Release pipeline complete.");
+  ui.info(opts.rollback ? "Rollback appcast publish complete." : "Release pipeline complete.");
 }
 
 await main();
