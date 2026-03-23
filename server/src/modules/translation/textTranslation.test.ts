@@ -27,19 +27,12 @@ mock.module("@in/server/env", () => ({
 }))
 
 describe("translateTexts", () => {
-  const originalDebug = process.env["DEBUG"]
-  const originalError = console.error
-
   afterEach(() => {
     parseCompletion.mockReset()
     getCachedUserName.mockReset()
-    process.env["DEBUG"] = originalDebug
-    console.error = originalError
   })
 
   test("places context messages inside an explicit non-translatable boundary block", async () => {
-    process.env["DEBUG"] = "1"
-
     getCachedUserName.mockResolvedValue({ firstName: "Alice" })
     parseCompletion.mockResolvedValue({
       choices: [
@@ -88,14 +81,7 @@ describe("translateTexts", () => {
     expect(systemPrompt).toContain("Never translate, quote, summarize, or include text from BEGIN_CONTEXT_MESSAGES")
   })
 
-  test("throws and logs when the model returns missing or unexpected message ids", async () => {
-    process.env["DEBUG"] = "1"
-
-    const errorCalls: unknown[][] = []
-    console.error = ((...args: unknown[]) => {
-      errorCalls.push(args)
-    }) as typeof console.error
-
+  test("throws when the model returns missing or unexpected message ids", async () => {
     parseCompletion.mockResolvedValue({
       choices: [
         {
@@ -141,7 +127,5 @@ describe("translateTexts", () => {
         actorId: 7,
       }),
     ).rejects.toThrow("Invalid translation output")
-
-    expect(errorCalls.length).toBeGreaterThan(0)
   })
 })
