@@ -130,6 +130,7 @@ export async function translateTexts(
         - Only translate, no summarization/explaination; Output only the translated messages.
         - Consider regional differences in ${languageName}. eg. use of ~ in "謝謝~" won't make it in English.
         - Err on the side of translating more of text content than less, users can turn off translation if they want.
+        - Translate and return the complete message content.
 
         # Use the conversation context below to guide your translation:
         ${contextMessagesBlock ? `${contextMessagesBlock}\n` : ""}
