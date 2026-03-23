@@ -3,6 +3,8 @@ import Auth
 import Combine
 import GRDB
 import InlineKit
+import struct InlineProtocol.MessageAction
+import struct InlineProtocol.MessageActionRow
 import InlineUI
 import Logger
 import Nuke
@@ -13,7 +15,7 @@ import Translation
 import UIKit
 
 final class MessageActionButton: UIButton {
-  var messageAction: InlineProtocol.MessageAction?
+  var messageAction: MessageAction?
   var actionId: String = ""
   var baseTitle: String = ""
   let spinner = UIActivityIndicatorView(style: .medium)
@@ -221,7 +223,7 @@ class UIMessageView: UIView {
     !fullMessage.reactions.isEmpty && !shouldShowReactionsOutsideBubble
   }
 
-  private var messageActionRows: [InlineProtocol.MessageActionRow] {
+  private var messageActionRows: [MessageActionRow] {
     guard let actions = message.actions else { return [] }
 
     return actions.rows.compactMap { row in
@@ -232,7 +234,7 @@ class UIMessageView: UIView {
       }
       guard !filtered.isEmpty else { return nil }
 
-      var cleaned = InlineProtocol.MessageActionRow()
+      var cleaned = MessageActionRow()
       cleaned.actions = filtered
       return cleaned
     }
@@ -710,7 +712,7 @@ class UIMessageView: UIView {
     }
   }
 
-  private func invokeMessageCallbackAction(_ action: InlineProtocol.MessageAction) {
+  private func invokeMessageCallbackAction(_ action: MessageAction) {
     let actionId = action.actionID.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !actionId.isEmpty else { return }
 
