@@ -219,6 +219,33 @@ bun run macos:release-app -- --dry-run
 Local release artifacts (signing key, sign_update output, appcast files) are
 written under `build/macos-release-tmp/` and cleaned up each run.
 
+## Roll Back a Bad Release
+
+If a bad direct-distribution build is already uploaded, you can roll the live
+Sparkle feed back to an older build that is still present in the channel appcast.
+This republishes only `appcast.xml`; it does not rebuild or delete any DMGs.
+
+```bash
+bun run release:macos -- --channel beta --rollback
+```
+
+To pick a specific build instead of the previous appcast item:
+
+```bash
+bun run release:macos -- --channel beta --rollback --rollback-to-build 12345
+```
+
+Dry run:
+
+```bash
+bun run release:macos -- --channel beta --rollback --dry-run
+```
+
+Important limitation: Sparkle will not silently downgrade users who already
+installed the bad build. Rolling back the appcast mainly protects users who
+have not updated yet by making the older build the latest one still advertised
+in the feed.
+
 ## Appcast Only (No Rebuild)
 
 ```bash
