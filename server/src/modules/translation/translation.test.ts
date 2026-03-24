@@ -1,26 +1,22 @@
 import { describe, expect, mock, test } from "bun:test"
 
-const translateTexts = mock()
-const convertEntityOffsets = mock()
-
-mock.module("./textTranslation", () => ({
-  translateTexts,
-}))
-
-mock.module("./entityConversion", () => ({
-  convertEntityOffsets,
-}))
-
 describe("TranslationModule.translateMessages", () => {
   test("keeps raw translated text when entity conversion fails", async () => {
+    const translateTexts = mock()
+    const convertEntityOffsets = mock()
+
     translateTexts.mockReset()
     convertEntityOffsets.mockReset()
 
     translateTexts.mockResolvedValue([{ messageId: 741, translation: "salam donya" }])
     convertEntityOffsets.mockRejectedValue(new Error("entity conversion failed"))
 
-    const { TranslationModule } = await import("./translation")
-    const result = await TranslationModule.translateMessages({
+    const { createTranslationModule } = await import("./translation")
+    const translationModule = createTranslationModule({
+      translateTexts,
+      convertEntityOffsets,
+    })
+    const result = await translationModule.translateMessages({
       messages: [
         {
           id: 1,
