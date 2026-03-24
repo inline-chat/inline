@@ -7,21 +7,17 @@ COPY server ./server
 COPY web ./web
 COPY packages ./packages
 COPY scripts ./scripts
-RUN bunx turbo prune @inline-chat/mcp --docker --out-dir out
+RUN bun scripts/docker/prune-workspace.ts @inline-chat/mcp out
 
 FROM base AS development-dependencies
 COPY --from=pruner /usr/src/app/out/json/ ./
 COPY --from=pruner /usr/src/app/out/bun.lock ./bun.lock
-# Bun requires every declared workspace path to exist in the install context,
-# so trim the root workspace globs to the pruned subset before installing.
-RUN bun -e 'const fs = require("fs"); const pkg = JSON.parse(fs.readFileSync("package.json", "utf8")); pkg.workspaces = (pkg.workspaces || []).filter((workspace) => { if (workspace.includes("*")) { const base = workspace.slice(0, workspace.indexOf("*")).replace(/\/$/, ""); return fs.existsSync(base); } return fs.existsSync(`${workspace}/package.json`); }); fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");' \
-  && bun install --frozen-lockfile
+RUN bun install --frozen-lockfile
 
 FROM base AS production-dependencies
 COPY --from=pruner /usr/src/app/out/json/ ./
 COPY --from=pruner /usr/src/app/out/bun.lock ./bun.lock
-RUN bun -e 'const fs = require("fs"); const pkg = JSON.parse(fs.readFileSync("package.json", "utf8")); pkg.workspaces = (pkg.workspaces || []).filter((workspace) => { if (workspace.includes("*")) { const base = workspace.slice(0, workspace.indexOf("*")).replace(/\/$/, ""); return fs.existsSync(base); } return fs.existsSync(`${workspace}/package.json`); }); fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");' \
-  && bun install --frozen-lockfile --production
+RUN bun install --frozen-lockfile --production
 
 FROM base AS build
 COPY --from=development-dependencies /usr/src/app/ ./
