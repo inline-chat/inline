@@ -138,3 +138,6 @@ scripts/.tools/
 
 # OpenClaw inline release artifacts
 packages/openclaw-inline/*.tgz
+
+# Local agent docs
+.agent-docs/
