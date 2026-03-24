@@ -24,7 +24,7 @@ RUN bun -e 'const fs = require("fs"); const pkg = JSON.parse(fs.readFileSync("pa
   && bun install --frozen-lockfile --production
 
 FROM base AS build
-COPY --from=development-dependencies /usr/src/app/node_modules ./node_modules
+COPY --from=development-dependencies /usr/src/app/ ./
 COPY --from=pruner /usr/src/app/out/full/ ./
 RUN cd packages/protocol && bun run build
 RUN cd packages/sdk && bun run build
