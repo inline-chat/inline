@@ -8,19 +8,36 @@ import { isProd, HARDCODED_TRANSLATION_CONTEXT } from "@in/server/env"
 
 const log = new Log("modules/translation")
 
-export const TranslationModule = {
-  translateMessages,
+type TranslationDependencies = {
+  translateTexts: typeof translateTexts
+  convertEntityOffsets: typeof convertEntityOffsets
 }
+
+export function createTranslationModule(deps: TranslationDependencies) {
+  return {
+    translateMessages(input: TranslationCallInput) {
+      return translateMessages(input, deps)
+    },
+  }
+}
+
+export const TranslationModule = createTranslationModule({
+  translateTexts,
+  convertEntityOffsets,
+})
 
 if (!HARDCODED_TRANSLATION_CONTEXT && isProd) {
   log.warn("HARDCODED_TRANSLATION_CONTEXT is not available")
 }
 
-async function translateMessages(input: TranslationCallInput): Promise<InputTranslation[]> {
+async function translateMessages(
+  input: TranslationCallInput,
+  deps: TranslationDependencies,
+): Promise<InputTranslation[]> {
   log.info(`Translating ${input.messages.length} messages to ${input.language} using 2-step process`)
 
   // Step 1: Translate text content only
-  const textTranslations = await translateTexts(input)
+  const textTranslations = await deps.translateTexts(input)
 
   // Step 2: Convert entity offsets for messages that have entities
   // Collect messages that need entity conversion
@@ -44,7 +61,7 @@ async function translateMessages(input: TranslationCallInput): Promise<InputTran
       }`,
     )
     try {
-      entityResults = await convertEntityOffsets({
+      entityResults = await deps.convertEntityOffsets({
         messages: messagesWithEntities.map(({ translation, originalMessage }) => ({
           messageId: translation.messageId,
           originalText: originalMessage.text!,
