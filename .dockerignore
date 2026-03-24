@@ -1,5 +1,13 @@
 .git
 .agent-docs
+.action
+.codex
+.vscode
+apple
+build
+cli
+desktop
 **/.DS_Store
 **/node_modules
 **/dist
+**/.turbo
