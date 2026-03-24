@@ -24,7 +24,7 @@ See: [Realtime API](/docs/realtime-api)
 
 ## Repository
 
-Inline is open source and includes backend, Apple clients, web app, admin app, shared protocol definitions, and SDK packages.
+Inline is open source and includes backend, Apple clients, the web app, and shared protocol definitions and SDK packages. The admin app lives in a separate repository.
 
 Start here: [inline-chat/inline on GitHub](https://github.com/inline-chat/inline)  
 More setup and architecture details are in the README.

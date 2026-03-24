@@ -22,6 +22,6 @@ Auth comes from `SENTRY_AUTH_TOKEN`, or locally from an authenticated modern `se
 
 Xcode Cloud:
 
-- Place `ci_scripts/ci_post_xcodebuild.sh` at the repo root.
+- Use `scripts/apple/ci_post_xcodebuild.sh`.
 - Set `SENTRY_AUTH_TOKEN` in the workflow environment.
 - The script uploads from `CI_ARCHIVE_PATH/dSYMs` when `CI_XCODEBUILD_ACTION=archive`.

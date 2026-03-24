@@ -298,7 +298,6 @@ async function promptPickChannel(): Promise<"stable" | "beta"> {
       const answer = (await ask("Select channel: [1] stable  [2] beta (default)  > ")).trim().toLowerCase();
       if (!answer || answer === "2" || answer === "beta" || answer === "b") return "beta";
       if (answer === "1" || answer === "stable" || answer === "s") return "stable";
-      // eslint-disable-next-line no-console
       console.log("Please enter 1/stable or 2/beta.");
     }
   } finally {
@@ -563,11 +562,9 @@ async function main() {
   if (!channel) {
     if (!interactive) {
       channel = "beta";
-      // eslint-disable-next-line no-console
       console.log("No --channel provided; defaulting to beta.");
     } else {
       channel = await promptPickChannel();
-      // eslint-disable-next-line no-console
       console.log(`Using channel: ${channel}`);
     }
   }

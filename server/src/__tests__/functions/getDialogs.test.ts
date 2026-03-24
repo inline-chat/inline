@@ -28,8 +28,6 @@ describe("getDialogs", () => {
       expect(result.users.length).toBe(1)
       expect(result.users[0]?.email).toBe("empty@example.com")
     } catch (err) {
-      // Log the full result for debugging
-      // eslint-disable-next-line no-console
       console.error("Test failed: returns empty arrays when user has no dialogs", JSON.stringify(result, null, 2))
       throw err
     }
@@ -70,8 +68,6 @@ describe("getDialogs", () => {
       expect(result.dialogs.length).toBeGreaterThanOrEqual(2)
       expect(result.messages.length).toBeGreaterThanOrEqual(2)
     } catch (err) {
-      // Log the full result for debugging
-      // eslint-disable-next-line no-console
       console.error(
         "Test failed: returns dialogs for public and private threads in a space",
         JSON.stringify(result, null, 2),
@@ -102,8 +98,6 @@ describe("getDialogs", () => {
       expect(result.dialogs.length).toBeGreaterThanOrEqual(1)
       expect(result.messages.length).toBeGreaterThanOrEqual(1)
     } catch (err) {
-      // Log the full result for debugging
-      // eslint-disable-next-line no-console
       console.error(
         "Test failed: returns direct messages when using a dedicated DM spaceId",
         JSON.stringify(result, null, 2),

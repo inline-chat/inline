@@ -109,7 +109,7 @@
 
 ## Admin
 
-- Admin frontend: `admin/` (Vite + TanStack Router); backend: `server/src/controllers/admin.ts`.
+- Admin frontend lives in the separate repo at `~/dev/inline-chat/admin`; backend remains `server/src/controllers/admin.ts`.
 - Keep admin endpoints under `/admin` with origin allowlist + admin session cookie.
 - Never load remote assets/scripts/styles/fonts in admin UI.
 - Require valid admin session for all admin endpoints; use step-up checks for sensitive actions.

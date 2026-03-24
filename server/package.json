@@ -16,8 +16,8 @@
     "db:drop": "drizzle-kit drop --out drizzle",
     "db:studio": "drizzle-kit studio --port 8010 --schema src/db/schema/index.ts --out drizzle --dialect postgresql",
     "drizzle:up": "drizzle-kit up --dialect=postgresql",
-    "lint": "bunx oxlint --ignore-path ../.eslintignore",
-    "lint:fix": "bunx oxlint --ignore-path ../.eslintignore --fix"
+    "lint": "bunx oxlint --ignore-path ../.oxlintignore",
+    "lint:fix": "bunx oxlint --ignore-path ../.oxlintignore --fix"
   },
   "overrides": {
     "elysia": "=1.1.26",
