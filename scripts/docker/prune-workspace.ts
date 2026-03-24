@@ -1,4 +1,4 @@
-import { access, readFile, writeFile } from "fs/promises"
+import { access, copyFile, readFile, writeFile } from "fs/promises"
 import { dirname, resolve } from "path"
 import { fileURLToPath } from "url"
 
@@ -23,8 +23,11 @@ if (exitCode !== 0) {
   process.exit(exitCode)
 }
 
-await patchWorkspaces(resolve(outputDir, "json/package.json"))
+const jsonDir = resolve(outputDir, "json")
+
+await patchWorkspaces(resolve(jsonDir, "package.json"))
 await patchWorkspaces(resolve(outputDir, "full/package.json"))
+await regenerateLockfile(jsonDir, resolve(outputDir, "bun.lock"))
 
 async function patchWorkspaces(packageJsonPath: string) {
   const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
@@ -66,4 +69,19 @@ async function pathExists(path: string) {
   } catch {
     return false
   }
+}
+
+async function regenerateLockfile(installDir: string, outputLockfilePath: string) {
+  const install = Bun.spawn(["bun", "install", "--lockfile-only"], {
+    cwd: installDir,
+    stdout: "inherit",
+    stderr: "inherit",
+  })
+
+  const exitCode = await install.exited
+  if (exitCode !== 0) {
+    process.exit(exitCode)
+  }
+
+  await copyFile(resolve(installDir, "bun.lock"), outputLockfilePath)
 }
