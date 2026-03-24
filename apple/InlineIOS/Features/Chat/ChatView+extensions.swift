@@ -1,6 +1,7 @@
 import Auth
 import InlineKit
 import InlineUI
+import Logger
 import RealtimeV2
 import SwiftUI
 
@@ -180,6 +181,43 @@ struct ChatToolbarLeadingView: View {
         isChatHeaderPressed = pressing
       }
     }, perform: {})
+  }
+}
+
+struct ShowInSidebarToolbarButton: View {
+  let peer: Peer
+  let database: AppDatabase
+
+  @Environment(\.realtimeV2) private var realtimeV2
+  @StateObject private var state: ShowInSidebarState
+  @State private var isSubmitting = false
+
+  init(peer: Peer, database: AppDatabase) {
+    self.peer = peer
+    self.database = database
+    _state = StateObject(wrappedValue: ShowInSidebarState(peer: peer, db: database))
+  }
+
+  var body: some View {
+    if state.isHiddenLinkedThread {
+      Button {
+        guard !isSubmitting else { return }
+        isSubmitting = true
+        Task {
+          defer { isSubmitting = false }
+          do {
+            _ = try await realtimeV2.send(.showChatInSidebar(peer: peer))
+          } catch {
+            Log.shared.error("Failed to show chat in sidebar", error: error)
+          }
+        }
+      } label: {
+        Image(systemName: "sidebar.left")
+      }
+      .disabled(isSubmitting)
+      .accessibilityLabel("Show in Sidebar")
+      .help("Show in Sidebar")
+    }
   }
 }
 

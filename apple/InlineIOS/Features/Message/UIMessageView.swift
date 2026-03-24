@@ -49,6 +49,7 @@ class UIMessageView: UIView {
 
   let fullMessage: FullMessage
   let spaceId: Int64
+  private let showsReplyThreadFooter: Bool
   private var translationCancellable: AnyCancellable?
   private var messageActionLoadingCancellable: AnyCancellable?
   private var messageActionAnsweredCancellable: AnyCancellable?
@@ -219,6 +220,10 @@ class UIMessageView: UIView {
     (hasMedia || isSticker) && !message.hasText && !fullMessage.reactions.isEmpty
   }
 
+  private var shouldShowReplyThreadFooter: Bool {
+    showsReplyThreadFooter && message.replyThreadChatId != nil && message.replyThreadReplyCount > 0
+  }
+
   private var shouldShowReactionsInsideBubble: Bool {
     !fullMessage.reactions.isEmpty && !shouldShowReactionsOutsideBubble
   }
@@ -357,6 +362,14 @@ class UIMessageView: UIView {
   lazy var metadataView = createMessageTimeAndStatus()
   lazy var messageActionsContainer = createMessageActionsContainer()
   private weak var metadataContainerView: UIStackView?
+  lazy var replyThreadFooterView: ReplyThreadFooterView = {
+    let view = ReplyThreadFooterView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.onTap = { [weak self] in
+      self?.handleReplyThreadFooterTap()
+    }
+    return view
+  }()
 
   lazy var reactionsFlowView: ReactionsFlowView = {
     let overrides = shouldUseTransparentOutgoingReactions ? transparentOutgoingReactionOverrides : nil
@@ -397,9 +410,10 @@ class UIMessageView: UIView {
     messageActionAnsweredCancellable?.cancel()
   }
 
-  init(fullMessage: FullMessage, spaceId: Int64) {
+  init(fullMessage: FullMessage, spaceId: Int64, showsReplyThreadFooter: Bool = true) {
     self.fullMessage = fullMessage
     self.spaceId = spaceId
+    self.showsReplyThreadFooter = showsReplyThreadFooter
 
     super.init(frame: .zero)
 
@@ -474,6 +488,7 @@ class UIMessageView: UIView {
     setupMessageContainer()
     setupMessageActionsIfNeeded()
     setupExternalReactionsIfNeeded()
+    setupReplyThreadFooterIfNeeded()
 
     addGestureRecognizer()
     setupDoubleTapGestureRecognizer()
@@ -532,6 +547,10 @@ class UIMessageView: UIView {
 
     // Remove shine effect
     stopShineAnimation()
+
+    if shouldShowReplyThreadFooter {
+      replyThreadFooterView.reset()
+    }
 
     // Reset appearance-related properties
     bubbleView.backgroundColor = bubbleColor
@@ -602,10 +621,8 @@ class UIMessageView: UIView {
 
   private func setupExternalReactionsConstraints() {
     let spacing: CGFloat = 3
-    let bottomPadding: CGFloat = spacing + 2
     var constraints: [NSLayoutConstraint] = [
       reactionsFlowView.topAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: spacing),
-      reactionsFlowView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -bottomPadding),
       reactionsFlowView.widthAnchor.constraint(lessThanOrEqualTo: bubbleView.widthAnchor),
     ]
 
@@ -913,6 +930,26 @@ class UIMessageView: UIView {
       name: Notification.Name("ScrollToRepliedMessage"),
       object: nil,
       userInfo: ["repliedToMessageId": repliedId, "chatId": message.chatId]
+    )
+  }
+
+  private func setupReplyThreadFooterIfNeeded() {
+    guard shouldShowReplyThreadFooter else { return }
+
+    replyThreadFooterView.configure(
+      replyCount: message.replyThreadReplyCount,
+      hasUnread: message.hasUnreadReplyThread,
+      recentReplierUserIds: message.replyThreadRecentReplierUserIds
+    )
+    addSubview(replyThreadFooterView)
+  }
+
+  private func handleReplyThreadFooterTap() {
+    guard let childChatId = message.replyThreadChatId else { return }
+    NotificationCenter.default.post(
+      name: Notification.Name("OpenReplyThread"),
+      object: nil,
+      userInfo: ["childChatId": childChatId]
     )
   }
 
@@ -1580,6 +1617,30 @@ class UIMessageView: UIView {
 
     if shouldShowReactionsOutsideBubble {
       setupExternalReactionsConstraints()
+    }
+
+    if shouldShowReplyThreadFooter {
+      let footerTopAnchor: NSLayoutYAxisAnchor = if hasMessageActionRows {
+        messageActionsContainer.bottomAnchor
+      } else if shouldShowReactionsOutsideBubble {
+        reactionsFlowView.bottomAnchor
+      } else {
+        bubbleView.bottomAnchor
+      }
+      NSLayoutConstraint.activate([
+        replyThreadFooterView.topAnchor.constraint(equalTo: footerTopAnchor, constant: 6),
+        replyThreadFooterView.heightAnchor.constraint(equalToConstant: ReplyThreadFooterView.LayoutMetrics.height),
+        replyThreadFooterView.widthAnchor.constraint(lessThanOrEqualTo: bubbleView.widthAnchor),
+        replyThreadFooterView.bottomAnchor.constraint(equalTo: bottomAnchor),
+      ])
+
+      if outgoing {
+        replyThreadFooterView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor).isActive = true
+      } else {
+        replyThreadFooterView.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor).isActive = true
+      }
+    } else if shouldShowReactionsOutsideBubble {
+      reactionsFlowView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -5).isActive = true
     } else if hasMessageActionRows {
       messageActionsContainer.bottomAnchor.constraint(equalTo: bottomAnchor).isActive = true
     } else {

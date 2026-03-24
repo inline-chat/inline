@@ -6,11 +6,19 @@ public class ChatContainerView: UIView {
   let peerId: Peer
   let chatId: Int64?
   let spaceId: Int64
+  let parentChatId: Int64?
+  let parentMessageId: Int64?
 
   private weak var edgePanGestureRecognizer: UIScreenEdgePanGestureRecognizer?
 
   private lazy var messagesCollectionView: MessagesCollectionView = {
-    let collectionView = MessagesCollectionView(peerId: peerId, chatId: chatId ?? 0, spaceId: spaceId)
+    let collectionView = MessagesCollectionView(
+      peerId: peerId,
+      chatId: chatId ?? 0,
+      spaceId: spaceId,
+      parentChatId: parentChatId,
+      parentMessageId: parentMessageId
+    )
     collectionView.translatesAutoresizingMaskIntoConstraints = false
     return collectionView
   }()
@@ -96,10 +104,18 @@ public class ChatContainerView: UIView {
     edgePanGestureRecognizer?.removeTarget(self, action: #selector(handleEdgePan(_:)))
   }
 
-  init(peerId: Peer, chatId: Int64?, spaceId: Int64) {
+  init(
+    peerId: Peer,
+    chatId: Int64?,
+    spaceId: Int64,
+    parentChatId: Int64?,
+    parentMessageId: Int64?
+  ) {
     self.peerId = peerId
     self.chatId = chatId
     self.spaceId = spaceId
+    self.parentChatId = parentChatId
+    self.parentMessageId = parentMessageId
 
     super.init(frame: .zero)
     setupViews()
@@ -463,11 +479,19 @@ struct ChatViewUIKit: UIViewRepresentable {
   let peerId: Peer
   let chatId: Int64?
   let spaceId: Int64
+  let parentChatId: Int64?
+  let parentMessageId: Int64?
   @EnvironmentObject var data: DataManager
   @EnvironmentObject var fullChatViewModel: FullChatViewModel
 
   func makeUIView(context _: Context) -> ChatContainerView {
-    let view = ChatContainerView(peerId: peerId, chatId: chatId, spaceId: spaceId)
+    let view = ChatContainerView(
+      peerId: peerId,
+      chatId: chatId,
+      spaceId: spaceId,
+      parentChatId: parentChatId,
+      parentMessageId: parentMessageId
+    )
 
     if let draftMessage = fullChatViewModel.chatItem?.dialog.draftMessage {
       view.composeView.loadDraft(from: draftMessage)

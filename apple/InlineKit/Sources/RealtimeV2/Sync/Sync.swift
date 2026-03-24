@@ -488,7 +488,7 @@ actor Sync {
         .space(id: payload.member.spaceID)
       case .joinSpace:
         .user
-      case .updateUserStatus, .updateUserSettings, .dialogArchived, .dialogNotificationSettings:
+      case .updateUserStatus, .updateUserSettings, .dialogArchived, .dialogNotificationSettings, .chatOpen:
         .user
       case let .newChat(payload):
         .chat(peer: payload.chat.peerID)
@@ -653,6 +653,8 @@ actor BucketActor {
       case .chatMoved:
         true
       case .joinSpace:
+        true
+      case .chatOpen:
         true
       case .newMessage, .editMessage, .messageAttachment:
         enableMessageUpdates

@@ -35,6 +35,8 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var spaceId: Int64?
   public var peerUserId: Int64?
   public var lastMsgId: Int64?
+  public var parentChatId: Int64?
+  public var parentMessageId: Int64?
   public var emoji: String?
   public var isPublic: Bool?
   public var createdBy: Int64?
@@ -48,6 +50,8 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     static let spaceId = Column(CodingKeys.spaceId)
     static let peerUserId = Column(CodingKeys.peerUserId)
     static let lastMsgId = Column(CodingKeys.lastMsgId)
+    static let parentChatId = Column(CodingKeys.parentChatId)
+    static let parentMessageId = Column(CodingKeys.parentMessageId)
     static let emoji = Column(CodingKeys.emoji)
     static let isPublic = Column(CodingKeys.isPublic)
     static let createdBy = Column(CodingKeys.createdBy)
@@ -87,7 +91,8 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
 
   public init(
     id: Int64 = Int64.random(in: 1 ... 50_000), date: Date, type: ChatType, title: String?,
-    spaceId: Int64?, peerUserId: Int64? = nil, lastMsgId: Int64? = nil, emoji: String? = nil,
+    spaceId: Int64?, peerUserId: Int64? = nil, lastMsgId: Int64? = nil,
+    parentChatId: Int64? = nil, parentMessageId: Int64? = nil, emoji: String? = nil,
     isPublic: Bool? = nil,
     createdBy: Int64? = nil,
     createState: ChatCreateState? = nil
@@ -99,6 +104,8 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     self.spaceId = spaceId
     self.peerUserId = peerUserId
     self.lastMsgId = lastMsgId
+    self.parentChatId = parentChatId
+    self.parentMessageId = parentMessageId
     self.emoji = emoji
     self.isPublic = isPublic
     self.createdBy = createdBy
@@ -214,6 +221,8 @@ public extension Chat {
     title = from.title.isEmpty ? nil : from.title
     spaceId = from.hasSpaceID ? from.spaceID : nil
     lastMsgId = from.hasLastMsgID ? from.lastMsgID : nil
+    parentChatId = from.hasParentChatID ? from.parentChatID : nil
+    parentMessageId = from.hasParentMessageID ? from.parentMessageID : nil
     emoji = from.hasEmoji ? from.emoji : nil
     isPublic = from.hasIsPublic ? from.isPublic : nil
     createdBy = from.hasCreatedBy ? from.createdBy : nil

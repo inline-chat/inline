@@ -706,6 +706,27 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("reply thread metadata") { db in
+      try db.alter(table: "chat") { t in
+        t.add(column: "parentChatId", .integer).references("chat", column: "id", onDelete: .setNull)
+        t.add(column: "parentMessageId", .integer)
+      }
+
+      try db.alter(table: "message") { t in
+        t.add(column: "replyThreadSummary", .blob)
+      }
+    }
+
+    migrator.registerMigration("message replies rename") { db in
+      try db.execute(sql: "ALTER TABLE message RENAME COLUMN replyThreadSummary TO replies")
+    }
+
+    migrator.registerMigration("dialog sidebar visibility") { db in
+      try db.alter(table: "dialog") { t in
+        t.add(column: "sidebarVisible", .boolean)
+      }
+    }
+
     migrator.registerMigration("reserved chat ids") { db in
       try db.create(table: "reservedChatId") { t in
         t.primaryKey("chatId", .integer).notNull().unique()

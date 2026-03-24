@@ -64,6 +64,7 @@ extension MainSplitView {
         ]
 
         if case .thread = peer {
+          items.append(.showInSidebar(peer: peer))
           items.append(.participants(peer: peer))
         }
 

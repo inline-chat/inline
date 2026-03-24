@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import GRDB
 import InlineKit
 import Logger
 import SwiftUI
@@ -19,15 +20,58 @@ class MessageListAppKit: NSViewController {
 
   // MARK: - Interleaved rows (messages + day separators)
 
-  private enum RowItem: Equatable, Hashable {
-    case daySeparator(dayStart: Date)
-    case message(id: Int64) // FullMessage.id (stable list identity)
+  private struct RowItem: Equatable, Hashable {
+    enum ID: Equatable, Hashable {
+      case replyThreadSeparator
+      case replyThreadAnchor
+      case daySeparator(dayStart: Date)
+      case message(id: Int64)
+    }
+
+    enum Content: Equatable, Hashable {
+      case replyThreadSeparator
+      case replyThreadAnchor(messageId: Int64?)
+      case daySeparator(dayStart: Date)
+      case message(id: Int64)
+    }
+
+    let id: ID
+    let content: Content
+
+    static let replyThreadSeparator = RowItem(
+      id: .replyThreadSeparator,
+      content: .replyThreadSeparator
+    )
+
+    static func replyThreadAnchor(messageId: Int64?) -> RowItem {
+      RowItem(
+        id: .replyThreadAnchor,
+        content: .replyThreadAnchor(messageId: messageId)
+      )
+    }
+
+    static func daySeparator(dayStart: Date) -> RowItem {
+      RowItem(
+        id: .daySeparator(dayStart: dayStart),
+        content: .daySeparator(dayStart: dayStart)
+      )
+    }
+
+    static func message(id: Int64) -> RowItem {
+      RowItem(
+        id: .message(id: id),
+        content: .message(id: id)
+      )
+    }
   }
 
   private var rowItems: [RowItem] = []
   private var messageIndexById: [Int64: Int] = [:]
   private var rowIndexByMessageId: [Int64: Int] = [:]
   private var dayStartsInRowItems: Set<Date> = []
+  private var replyThreadAnchorMessage: FullMessage?
+  private var replyThreadAnchorObservation: AnyCancellable?
+  private var hasRequestedReplyThreadAnchorFetch = false
 
   private let log = Log.scoped("MessageListAppKit", enableTracing: false)
   private let sizeCalculator = MessageSizeCalculator.shared
@@ -94,7 +138,9 @@ class MessageListAppKit: NSViewController {
     }
 
     sizeCalculator.prepareForUse()
+    loadInitialReplyThreadAnchorIfAvailable()
     rebuildRowItems()
+    startReplyThreadAnchorObservationIfNeeded()
 
     // observe data
     viewModel.observe { [weak self] update in
@@ -171,9 +217,9 @@ class MessageListAppKit: NSViewController {
     let view = PinnedMessageHeaderView(dependencies: dependencies, peerId: peerId, chatId: chatId)
     view.onHeightChange = { [weak self] height in
       guard let self else { return }
-      pinnedHeaderHeight = height
-      pinnedHeaderHeightConstraint?.constant = height
-      updateScrollViewInsets()
+      self.pinnedHeaderHeight = height
+      self.pinnedHeaderHeightConstraint?.constant = height
+      self.updateScrollViewInsets()
     }
     return view
   }()
@@ -183,14 +229,19 @@ class MessageListAppKit: NSViewController {
     rowIndexByMessageId.removeAll(keepingCapacity: true)
     dayStartsInRowItems.removeAll(keepingCapacity: true)
 
-    guard !messages.isEmpty else {
-      rowItems = []
-      return
-    }
-
     let calendar = Calendar.autoupdatingCurrent
     var newRowItems: [RowItem] = []
-    newRowItems.reserveCapacity(messages.count + 8)
+    newRowItems.reserveCapacity(messages.count + 10)
+
+    if chat?.parentChatId != nil, chat?.parentMessageId != nil {
+      newRowItems.append(.replyThreadAnchor(messageId: replyThreadAnchorMessage?.id))
+      newRowItems.append(.replyThreadSeparator)
+    }
+
+    guard !messages.isEmpty else {
+      rowItems = newRowItems
+      return
+    }
 
     var previousDayStart: Date?
 
@@ -210,9 +261,22 @@ class MessageListAppKit: NSViewController {
     rowItems = newRowItems
 
     for (row, item) in rowItems.enumerated() {
-      if case let .message(id) = item {
+      if case let .message(id) = item.id {
         rowIndexByMessageId[id] = row
       }
+    }
+  }
+
+  private func loadInitialReplyThreadAnchorIfAvailable() {
+    guard let reference = replyThreadAnchorReference() else {
+      replyThreadAnchorMessage = nil
+      return
+    }
+
+    replyThreadAnchorMessage = try? dependencies.database.reader.read { db in
+      try FullMessage.queryRequest()
+        .filter(Column("messageId") == reference.parentMessageId && Column("chatId") == reference.parentChatId)
+        .fetchOne(db)
     }
   }
 
@@ -221,10 +285,142 @@ class MessageListAppKit: NSViewController {
     return rowItems[row]
   }
 
+  private func rowStructureIds(_ items: [RowItem]) -> [RowItem.ID] {
+    items.map(\.id)
+  }
+
+  private func rowsHaveSameStructure(_ lhs: [RowItem], _ rhs: [RowItem]) -> Bool {
+    rowStructureIds(lhs) == rowStructureIds(rhs)
+  }
+
+  private func replyThreadAnchorReference() -> (parentChatId: Int64, parentMessageId: Int64)? {
+    guard let parentChatId = chat?.parentChatId, let parentMessageId = chat?.parentMessageId else {
+      return nil
+    }
+    return (parentChatId, parentMessageId)
+  }
+
+  private func startReplyThreadAnchorObservationIfNeeded() {
+    guard let reference = replyThreadAnchorReference() else {
+      replyThreadAnchorMessage = nil
+      replyThreadAnchorObservation?.cancel()
+      replyThreadAnchorObservation = nil
+      return
+    }
+
+    AppDatabase.shared.warnIfInMemoryDatabaseForObservation("MessageListAppKit.replyThreadAnchor")
+    replyThreadAnchorObservation = ValueObservation
+      .tracking { db in
+        try FullMessage.queryRequest()
+          .filter(Column("messageId") == reference.parentMessageId && Column("chatId") == reference.parentChatId)
+          .fetchOne(db)
+      }
+      .publisher(in: AppDatabase.shared.dbWriter, scheduling: .immediate)
+      .receive(on: DispatchQueue.main)
+      .sink(
+        receiveCompletion: { [weak self] completion in
+          self?.log.error("Reply-thread anchor observation failed: \(completion)")
+        },
+        receiveValue: { [weak self] message in
+          self?.handleReplyThreadAnchorMessageChange(message)
+        }
+      )
+  }
+
+  private func handleReplyThreadAnchorMessageChange(_ message: FullMessage?) {
+    guard replyThreadAnchorMessage != message else { return }
+    let oldRowItems = rowItems
+    replyThreadAnchorMessage = message
+    rebuildRowItems()
+
+    if message == nil {
+      fetchReplyThreadAnchorIfNeeded()
+    }
+
+    reloadReplyThreadAnchorRow(oldRowItems: oldRowItems)
+  }
+
+  private func fetchReplyThreadAnchorIfNeeded() {
+    guard !hasRequestedReplyThreadAnchorFetch else { return }
+    guard let reference = replyThreadAnchorReference() else { return }
+    hasRequestedReplyThreadAnchorFetch = true
+
+    Task {
+      let parentPeer = try? await AppDatabase.shared.reader.read { db -> Peer? in
+        guard let parentChat = try Chat.fetchOne(db, id: reference.parentChatId) else {
+          return nil
+        }
+        if let peerUserId = parentChat.peerUserId {
+          return .user(id: peerUserId)
+        }
+        return .thread(id: parentChat.id)
+      }
+
+      guard let parentPeer else { return }
+      await TargetMessagesFetcher.shared.ensureCached(
+        peer: parentPeer,
+        chatId: reference.parentChatId,
+        messageIds: [reference.parentMessageId]
+      )
+    }
+  }
+
+  private func reloadReplyThreadAnchorRow(oldRowItems: [RowItem]) {
+    guard let anchorRow = rowItems.firstIndex(where: { $0.id == .replyThreadAnchor }) else { return }
+    guard isViewLoaded else { return }
+
+    guard oldRowItems.map(\.id) == rowItems.map(\.id) else {
+      tableView.reloadData()
+      return
+    }
+
+    let rows = IndexSet(integer: anchorRow)
+    let columns = IndexSet(integer: 0)
+    CATransaction.begin()
+    NSAnimationContext.beginGrouping()
+    NSAnimationContext.current.duration = 0
+    tableView.noteHeightOfRows(withIndexesChanged: rows)
+    tableView.reloadData(forRowIndexes: rows, columnIndexes: columns)
+    NSAnimationContext.endGrouping()
+    CATransaction.commit()
+  }
+
+  private func leadingReplyThreadPrefixCount(in items: [RowItem]) -> Int {
+    var count = 0
+
+    for item in items {
+      switch item.id {
+        case .replyThreadSeparator, .replyThreadAnchor:
+          count += 1
+        default:
+          return count
+      }
+    }
+
+    return count
+  }
+
   private func messageStableId(forRow row: Int) -> Int64? {
     guard let item = rowItem(at: row) else { return nil }
-    if case let .message(id) = item { return id }
+    if case let .message(id) = item.id { return id }
     return nil
+  }
+
+  private func messageContent(forRow row: Int) -> (message: FullMessage, inputProps: MessageViewInputProps, index: Int?)? {
+    guard let item = rowItem(at: row) else { return nil }
+
+    switch item.content {
+      case .replyThreadAnchor:
+        guard let anchorMessage = replyThreadAnchorMessage else { return nil }
+        return (anchorMessage, replyThreadAnchorProps(), nil)
+
+      case let .message(id):
+        guard let messageIndex = messageIndexById[id], messages.indices.contains(messageIndex) else { return nil }
+        return (messages[messageIndex], messageProps(for: row), messageIndex)
+
+      default:
+        return nil
+    }
   }
 
   private func toggleToolbarVisibility(_ hide: Bool) {
@@ -1107,21 +1303,34 @@ class MessageListAppKit: NSViewController {
         let diff = newRowCount - oldRowCount
 
         if diff > 0 {
+          let fixedPrefixCount = leadingReplyThreadPrefixCount(in: oldRowItems)
+          let oldRowsAfterPrefix = Array(oldRowItems.dropFirst(fixedPrefixCount))
+          let newRowsAfterPrefix = Array(rowItems.dropFirst(fixedPrefixCount))
+
           // Only apply incremental inserts when it's provably a pure prefix insert.
-          if rowItems.suffix(oldRowCount).elementsEqual(oldRowItems) {
+          if rowStructureIds(Array(rowItems.suffix(oldRowCount))) == rowStructureIds(oldRowItems) {
             let newIndexes = IndexSet(0 ..< diff)
             tableView.beginUpdates()
             tableView.insertRows(at: newIndexes, withAnimation: .none)
             tableView.endUpdates()
           } else if
-            oldRowCount > 1,
-            newRowCount > 1,
-            rowItems.first == oldRowItems.first,
-            rowItems.suffix(oldRowCount - 1).elementsEqual(oldRowItems.dropFirst())
+            oldRowsAfterPrefix.count > 0,
+            rowStructureIds(Array(newRowsAfterPrefix.suffix(oldRowsAfterPrefix.count))) == rowStructureIds(oldRowsAfterPrefix)
+          {
+            let newIndexes = IndexSet(integersIn: fixedPrefixCount ..< (fixedPrefixCount + diff))
+            tableView.beginUpdates()
+            tableView.insertRows(at: newIndexes, withAnimation: .none)
+            tableView.endUpdates()
+          } else if
+            oldRowsAfterPrefix.count > 1,
+            newRowsAfterPrefix.count > 1,
+            newRowsAfterPrefix.first?.id == oldRowsAfterPrefix.first?.id,
+            rowStructureIds(Array(newRowsAfterPrefix.dropFirst().suffix(oldRowsAfterPrefix.count - 1))) == rowStructureIds(Array(oldRowsAfterPrefix.dropFirst()))
           {
             // Common case: loading older messages that are on the same day as the first visible message.
-            // The first day separator stays in place, and new message rows are inserted right after it.
-            let newIndexes = IndexSet(integersIn: 1 ..< (1 + diff))
+            // The first post-prefix separator stays in place, and new message rows are inserted right after it.
+            let insertionStart = fixedPrefixCount + 1
+            let newIndexes = IndexSet(integersIn: insertionStart ..< (insertionStart + diff))
             tableView.beginUpdates()
             tableView.insertRows(at: newIndexes, withAnimation: .none)
             tableView.endUpdates()
@@ -1231,10 +1440,10 @@ class MessageListAppKit: NSViewController {
         log.trace("applying add changes")
 
         // Do incremental inserts only for provably-correct prefix/suffix insertions.
-        if newRowCount > oldRowCount, newRowItems.starts(with: oldRowItems) {
+        if newRowCount > oldRowCount, rowStructureIds(Array(newRowItems.prefix(oldRowCount))) == rowStructureIds(oldRowItems) {
           let inserted = IndexSet(integersIn: oldRowCount ..< newRowCount)
           applyStructuralInsert(animated: true, inserted: inserted)
-        } else if newRowCount > oldRowCount, newRowItems.suffix(oldRowCount).elementsEqual(oldRowItems) {
+        } else if newRowCount > oldRowCount, rowStructureIds(Array(newRowItems.suffix(oldRowCount))) == rowStructureIds(oldRowItems) {
           let inserted = IndexSet(integersIn: 0 ..< (newRowCount - oldRowCount))
           applyStructuralInsert(animated: true, inserted: inserted)
         } else {
@@ -1243,13 +1452,13 @@ class MessageListAppKit: NSViewController {
         handleIncomingMessages(newMessages)
 
       case let .deleted(deletedIds, _):
-        if newRowCount < oldRowCount, oldRowItems.starts(with: newRowItems) {
+        if newRowCount < oldRowCount, rowStructureIds(Array(oldRowItems.prefix(newRowCount))) == rowStructureIds(newRowItems) {
           let removed = IndexSet(integersIn: newRowCount ..< oldRowCount)
           applyStructuralRemove(animated: true, removed: removed)
           break
         }
 
-        if newRowCount < oldRowCount, oldRowItems.suffix(newRowCount).elementsEqual(newRowItems) {
+        if newRowCount < oldRowCount, rowStructureIds(Array(oldRowItems.suffix(newRowCount))) == rowStructureIds(newRowItems) {
           let removed = IndexSet(integersIn: 0 ..< (oldRowCount - newRowCount))
           applyStructuralRemove(animated: true, removed: removed)
           break
@@ -1267,7 +1476,7 @@ class MessageListAppKit: NSViewController {
             // Find the closest separator above the message in the old model.
             var cursor = messageRow - 1
             while cursor >= 0 {
-              if case let .daySeparator(dayStart) = oldRowItems[cursor] {
+              if case let .daySeparator(dayStart) = oldRowItems[cursor].id {
                 removedDayStarts.insert(dayStart)
                 break
               }
@@ -1278,7 +1487,7 @@ class MessageListAppKit: NSViewController {
           for dayStart in removedDayStarts {
             if !dayStartsInRowItems.contains(dayStart) {
               // Remove that separator too (if it existed in the old model).
-              if let separatorIndex = oldRowItems.firstIndex(of: .daySeparator(dayStart: dayStart)) {
+              if let separatorIndex = oldRowItems.firstIndex(where: { $0.id == .daySeparator(dayStart: dayStart) }) {
                 removedIndexes.insert(separatorIndex)
               }
             }
@@ -1295,7 +1504,7 @@ class MessageListAppKit: NSViewController {
               remaining.append(item)
             }
 
-            if remaining == newRowItems {
+            if rowsHaveSameStructure(remaining, newRowItems) {
               applyStructuralRemove(animated: true, removed: removed)
               break
             }
@@ -1308,7 +1517,7 @@ class MessageListAppKit: NSViewController {
         _ = updatedMessages // silence unused warning
 
         // Only do row-level reloads when structure is unchanged.
-        guard oldRowItems == newRowItems else {
+        guard rowsHaveSameStructure(oldRowItems, newRowItems) else {
           reloadAll(animated: animated == true)
           break
         }
@@ -1518,29 +1727,29 @@ class MessageListAppKit: NSViewController {
 
   private func updateHeightsForRows(at indexSet: IndexSet) {
     for row in indexSet {
-      if let rowView = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? MessageTableCell {
-        let inputProps = messageProps(for: row)
-        if let message = message(forRow: row) {
-          let (_, _, _, plan) = calculateSize(
-            for: message,
-            with: inputProps,
-            tableWidth: tableWidth()
-          )
+      if let rowView = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? MessageTableCell,
+         let content = messageContent(forRow: row)
+      {
+        let (_, _, _, plan) = calculateSize(
+          for: content.message,
+          with: content.inputProps,
+          tableWidth: tableWidth()
+        )
 
-          let props = MessageViewProps(
-            firstInGroup: inputProps.firstInGroup,
-            isLastMessage: inputProps.isLastMessage,
-            isFirstMessage: inputProps.isFirstMessage,
-            isRtl: inputProps.isRtl,
-            isDM: chat?.type == .privateChat,
-            renderStyle: inputProps.renderStyle,
-            index: messageIndexById[message.id],
-            translated: inputProps.translated,
-            layout: plan,
-          )
+        let props = MessageViewProps(
+          firstInGroup: content.inputProps.firstInGroup,
+          isLastMessage: content.inputProps.isLastMessage,
+          isFirstMessage: content.inputProps.isFirstMessage,
+          isRtl: content.inputProps.isRtl,
+          isDM: chat?.type == .privateChat,
+          renderStyle: content.inputProps.renderStyle,
+          index: content.index,
+          translated: content.inputProps.translated,
+          layout: plan,
+          showsReplyThreadFooter: content.inputProps.showsReplyThreadFooter
+        )
 
-          rowView.updateSizeWithProps(props: props)
-        }
+        rowView.updateSizeWithProps(props: props)
       }
     }
   }
@@ -1567,9 +1776,8 @@ class MessageListAppKit: NSViewController {
     Task(priority: .userInitiated) { [weak self] in
       guard let self else { return }
       for row in rowsToUpdate {
-        guard let message = message(forRow: row) else { continue }
-        let props = messageProps(for: row)
-        let _ = calculateSize(for: message, with: props, tableWidth: width_)
+        guard let content = messageContent(forRow: row) else { continue }
+        let _ = calculateSize(for: content.message, with: content.inputProps, tableWidth: width_)
       }
     }
   }
@@ -1599,7 +1807,8 @@ class MessageListAppKit: NSViewController {
         isDM: chat?.type == .privateChat,
         isRtl: false,
         translated: false,
-        renderStyle: messageRenderStyle
+        renderStyle: messageRenderStyle,
+        showsReplyThreadFooter: true
       )
     }
 
@@ -1610,7 +1819,21 @@ class MessageListAppKit: NSViewController {
       isDM: chat?.type == .privateChat,
       isRtl: false,
       translated: message.isTranslated,
-      renderStyle: messageRenderStyle
+      renderStyle: messageRenderStyle,
+      showsReplyThreadFooter: true
+    )
+  }
+
+  private func replyThreadAnchorProps() -> MessageViewInputProps {
+    MessageViewInputProps(
+      firstInGroup: true,
+      isLastMessage: true,
+      isFirstMessage: true,
+      isDM: chat?.type == .privateChat,
+      isRtl: false,
+      translated: replyThreadAnchorMessage?.isTranslated ?? false,
+      renderStyle: messageRenderStyle,
+      showsReplyThreadFooter: false
     )
   }
 
@@ -1828,6 +2051,198 @@ final class DateSeparatorTableCell: NSView {
   }
 }
 
+final class ReplyThreadSeparatorTableCell: NSView {
+  static let height: CGFloat = 28
+
+  private let label = NSTextField(labelWithString: "")
+
+  override init(frame: NSRect) {
+    super.init(frame: frame)
+    setupView()
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  private func setupView() {
+    wantsLayer = true
+    layer?.backgroundColor = .clear
+
+    label.translatesAutoresizingMaskIntoConstraints = false
+    label.font = .systemFont(ofSize: 12, weight: .medium)
+    label.textColor = .secondaryLabelColor
+    label.alignment = .center
+    label.lineBreakMode = .byTruncatingTail
+
+    addSubview(label)
+
+    NSLayoutConstraint.activate([
+      label.centerXAnchor.constraint(equalTo: centerXAnchor),
+      label.centerYAnchor.constraint(equalTo: centerYAnchor),
+      label.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 12),
+      label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
+    ])
+  }
+
+  func configure(title: String) {
+    label.stringValue = title
+  }
+}
+
+final class ReplyThreadAnchorTableCell: NSView {
+  static let height: CGFloat = Theme.embeddedMessageHeight + 18
+
+  private let log = Log.scoped("ReplyThreadAnchorTableCell")
+  private let embedView: EmbedMessageView = {
+    let view = EmbedMessageView(style: .colored)
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }()
+
+  private var parentChatId: Int64?
+  private var parentMessageId: Int64?
+  private var parentPeer: Peer?
+  private var parentChatObservation: AnyCancellable?
+  private var anchorObservation: AnyCancellable?
+  private var hasRequestedFetch = false
+
+  override init(frame: NSRect) {
+    super.init(frame: frame)
+    setupView()
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  deinit {
+    resetObservations()
+  }
+
+  private func setupView() {
+    wantsLayer = true
+    layer?.backgroundColor = .clear
+
+    embedView.showsBackground = true
+    embedView.showsLeadingBar = true
+    embedView.textLeadingPadding = 8
+    embedView.textTrailingPadding = 8
+
+    addSubview(embedView)
+
+    NSLayoutConstraint.activate([
+      embedView.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+      embedView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+      embedView.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -16),
+      embedView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
+    ])
+  }
+
+  func configure(parentChatId: Int64?, parentMessageId: Int64?) {
+    guard self.parentChatId != parentChatId || self.parentMessageId != parentMessageId else { return }
+
+    resetObservations()
+    self.parentChatId = parentChatId
+    self.parentMessageId = parentMessageId
+    self.parentPeer = nil
+    self.hasRequestedFetch = false
+
+    guard let parentChatId, let parentMessageId else {
+      embedView.showNotLoaded(
+        kind: .replyInMessage,
+        senderName: "Reply thread",
+        messageText: "Original message unavailable"
+      )
+      return
+    }
+
+    embedView.showNotLoaded(
+      kind: .replyInMessage,
+      senderName: "Reply thread",
+      messageText: "Loading original message…"
+    )
+
+    AppDatabase.shared.warnIfInMemoryDatabaseForObservation("ReplyThreadAnchorTableCell.parentChat")
+    parentChatObservation = ValueObservation
+      .tracking { db in
+        try Chat.fetchOne(db, id: parentChatId)
+      }
+      .publisher(in: AppDatabase.shared.dbWriter, scheduling: .immediate)
+      .receive(on: DispatchQueue.main)
+      .sink(
+        receiveCompletion: { [weak self] completion in
+          self?.log.error("Reply thread parent chat observation failed: \(completion)")
+        },
+        receiveValue: { [weak self] chat in
+          self?.parentPeer = chat?.peerId.toPeer()
+          self?.requestFetchIfNeeded()
+        }
+      )
+
+    AppDatabase.shared.warnIfInMemoryDatabaseForObservation("ReplyThreadAnchorTableCell.anchorMessage")
+    anchorObservation = ValueObservation
+      .tracking { db in
+        try FullMessage.queryRequest()
+          .filter(Column("messageId") == parentMessageId && Column("chatId") == parentChatId)
+          .fetchOne(db)
+      }
+      .publisher(in: AppDatabase.shared.dbWriter, scheduling: .immediate)
+      .receive(on: DispatchQueue.main)
+      .sink(
+        receiveCompletion: { [weak self] completion in
+          self?.log.error("Reply thread anchor observation failed: \(completion)")
+        },
+        receiveValue: { [weak self] message in
+          self?.updateAnchorMessage(message)
+        }
+      )
+  }
+
+  private func updateAnchorMessage(_ message: FullMessage?) {
+    if let message {
+      embedView.configure(
+        fullMessage: message,
+        kind: .replyInMessage,
+        outgoing: false,
+        isOnlyEmoji: false,
+        style: .replyBubble
+      )
+      return
+    }
+
+    embedView.showNotLoaded(
+      kind: .replyInMessage,
+      senderName: "Reply thread",
+      messageText: "Original message unavailable"
+    )
+    requestFetchIfNeeded()
+  }
+
+  private func requestFetchIfNeeded() {
+    guard !hasRequestedFetch else { return }
+    guard let parentChatId, let parentMessageId, let parentPeer else { return }
+    hasRequestedFetch = true
+
+    Task {
+      await TargetMessagesFetcher.shared.ensureCached(
+        peer: parentPeer,
+        chatId: parentChatId,
+        messageIds: [parentMessageId]
+      )
+    }
+  }
+
+  private func resetObservations() {
+    parentChatObservation?.cancel()
+    parentChatObservation = nil
+    anchorObservation?.cancel()
+    anchorObservation = nil
+  }
+}
+
 extension MessageListAppKit: NSTableViewDataSource {
   func numberOfRows(in tableView: NSTableView) -> Int {
     rowItems.count
@@ -1895,7 +2310,55 @@ extension MessageListAppKit: NSTableViewDelegate {
     log.trace("Making/using view for row \(row)")
     #endif
 
-    switch item {
+    switch item.content {
+      case .replyThreadSeparator:
+        let identifier = NSUserInterfaceItemIdentifier("ReplyThreadSeparatorCell")
+        let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? ReplyThreadSeparatorTableCell
+          ?? ReplyThreadSeparatorTableCell()
+        cell.identifier = identifier
+        cell.configure(title: "Replies")
+        return cell
+
+      case .replyThreadAnchor:
+        if let content = messageContent(forRow: row) {
+          let identifier = NSUserInterfaceItemIdentifier("ReplyThreadAnchorMessageCell")
+          let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? MessageTableCell
+            ?? MessageTableCell()
+          cell.identifier = identifier
+          cell.setDependencies(dependencies)
+
+          let inputProps = content.inputProps
+          let (_, _, _, layoutPlan) = calculateSize(
+            for: content.message,
+            with: inputProps,
+            tableWidth: tableWidth()
+          )
+
+          let props = MessageViewProps(
+            firstInGroup: inputProps.firstInGroup,
+            isLastMessage: inputProps.isLastMessage,
+            isFirstMessage: inputProps.isFirstMessage,
+            isRtl: inputProps.isRtl,
+            isDM: inputProps.isDM,
+            renderStyle: inputProps.renderStyle,
+            index: content.index,
+            translated: inputProps.translated,
+            layout: layoutPlan,
+            showsReplyThreadFooter: false
+          )
+
+          cell.setScrollState(scrollState)
+          cell.configure(with: content.message, props: props, animate: false)
+          return cell
+        }
+
+        let identifier = NSUserInterfaceItemIdentifier("ReplyThreadAnchorPlaceholderCell")
+        let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? ReplyThreadAnchorTableCell
+          ?? ReplyThreadAnchorTableCell()
+        cell.identifier = identifier
+        cell.configure(parentChatId: chat?.parentChatId, parentMessageId: chat?.parentMessageId)
+        return cell
+
       case let .daySeparator(dayStart):
         let identifier = NSUserInterfaceItemIdentifier("DateSeparatorCell")
         let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? DateSeparatorTableCell
@@ -1949,7 +2412,21 @@ extension MessageListAppKit: NSTableViewDelegate {
     log.trace("Noting height change for row \(row)")
     #endif
 
-    switch item {
+    switch item.content {
+      case .replyThreadSeparator:
+        return ReplyThreadSeparatorTableCell.height
+
+      case .replyThreadAnchor:
+        if let content = messageContent(forRow: row) {
+          let (_, _, _, plan) = calculateSize(
+            for: content.message,
+            with: content.inputProps,
+            tableWidth: ceil(tableView.bounds.width)
+          )
+          return plan.totalHeight
+        }
+        return ReplyThreadAnchorTableCell.height
+
       case .daySeparator:
         return DateSeparatorTableCell.height
 
@@ -2268,6 +2745,8 @@ extension MessageListAppKit {
 
     // Clear all callbacks
     scrollToBottomButton.onClick = nil
+    replyThreadAnchorObservation?.cancel()
+    replyThreadAnchorObservation = nil
 
     // Dispose view model
     viewModel.dispose()

@@ -32,6 +32,28 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   TableRecord,
   Sendable, Equatable
 {
+  private struct CodableReplies: Codable {
+    let chatID: Int64
+    let replyCount: Int32
+    let hasUnread_p: Bool
+    let recentReplierUserIds: [Int64]
+
+    init(_ replies: InlineProtocol.MessageReplies) {
+      chatID = replies.chatID
+      replyCount = replies.replyCount
+      hasUnread_p = replies.hasUnread_p
+      recentReplierUserIds = replies.recentReplierUserIds
+    }
+
+    var proto: InlineProtocol.MessageReplies {
+      var replies = InlineProtocol.MessageReplies()
+      replies.chatID = chatID
+      replies.replyCount = replyCount
+      replies.hasUnread_p = hasUnread_p
+      replies.recentReplierUserIds = recentReplierUserIds
+      return replies
+    }
+  }
   enum CodingKeys: String, CodingKey {
     case globalId
     case randomId
@@ -57,6 +79,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     case videoId
     case documentId
     case contentPayload
+    case replies
     case transactionId
     case isSticker
     case hasLink
@@ -118,6 +141,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   public var videoId: Int64?
   public var documentId: Int64?
   public var contentPayload: Client_MessageContentPayload?
+  public var replies: InlineProtocol.MessageReplies?
   public var transactionId: String?
   public var isSticker: Bool?
   public var hasLink: Bool?
@@ -181,6 +205,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     public static let videoId = Column(CodingKeys.videoId)
     public static let documentId = Column(CodingKeys.documentId)
     public static let contentPayload = Column(CodingKeys.contentPayload)
+    public static let replies = Column(CodingKeys.replies)
     public static let hasLink = Column(CodingKeys.hasLink)
     public static let entities = Column(CodingKeys.entities)
   }
@@ -291,6 +316,43 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     request(for: Message.translations)
   }
 
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+
+    self.init(
+      messageId: try container.decode(Int64.self, forKey: .messageId),
+      randomId: try container.decodeIfPresent(Int64.self, forKey: .randomId),
+      fromId: try container.decode(Int64.self, forKey: .fromId),
+      date: try container.decode(Date.self, forKey: .date),
+      text: try container.decodeIfPresent(String.self, forKey: .text),
+      peerUserId: try container.decodeIfPresent(Int64.self, forKey: .peerUserId),
+      peerThreadId: try container.decodeIfPresent(Int64.self, forKey: .peerThreadId),
+      chatId: try container.decode(Int64.self, forKey: .chatId),
+      out: try container.decodeIfPresent(Bool.self, forKey: .out),
+      mentioned: try container.decodeIfPresent(Bool.self, forKey: .mentioned),
+      pinned: try container.decodeIfPresent(Bool.self, forKey: .pinned),
+      editDate: try container.decodeIfPresent(Date.self, forKey: .editDate),
+      status: try container.decodeIfPresent(MessageSendingStatus.self, forKey: .status),
+      repliedToMessageId: try container.decodeIfPresent(Int64.self, forKey: .repliedToMessageId),
+      forwardFromPeerUserId: try container.decodeIfPresent(Int64.self, forKey: .forwardFromPeerUserId),
+      forwardFromPeerThreadId: try container.decodeIfPresent(Int64.self, forKey: .forwardFromPeerThreadId),
+      forwardFromMessageId: try container.decodeIfPresent(Int64.self, forKey: .forwardFromMessageId),
+      forwardFromUserId: try container.decodeIfPresent(Int64.self, forKey: .forwardFromUserId),
+      fileId: try container.decodeIfPresent(String.self, forKey: .fileId),
+      photoId: try container.decodeIfPresent(Int64.self, forKey: .photoId),
+      videoId: try container.decodeIfPresent(Int64.self, forKey: .videoId),
+      documentId: try container.decodeIfPresent(Int64.self, forKey: .documentId),
+      contentPayload: try container.decodeIfPresent(Client_MessageContentPayload.self, forKey: .contentPayload),
+      replies: try container.decodeIfPresent(CodableReplies.self, forKey: .replies)?.proto,
+      transactionId: try container.decodeIfPresent(String.self, forKey: .transactionId),
+      isSticker: try container.decodeIfPresent(Bool.self, forKey: .isSticker),
+      hasLink: try container.decodeIfPresent(Bool.self, forKey: .hasLink),
+      entities: try container.decodeIfPresent(MessageEntities.self, forKey: .entities)
+    )
+
+    globalId = try container.decodeIfPresent(Int64.self, forKey: .globalId)
+  }
+
   public init(
     messageId: Int64,
     randomId: Int64? = nil,
@@ -316,6 +378,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     documentId: Int64? = nil,
     contentPayload: Client_MessageContentPayload? = nil,
     actions: InlineProtocol.MessageActions? = nil,
+    replies: InlineProtocol.MessageReplies? = nil,
     transactionId: String? = nil,
     isSticker: Bool? = nil,
     hasLink: Bool? = nil,
@@ -347,6 +410,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     if let actions {
       self.actions = actions
     }
+    self.replies = replies
     self.transactionId = transactionId
     self.isSticker = isSticker
     self.hasLink = hasLink
@@ -410,10 +474,44 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       documentId: from.media.document.hasDocument ? from.media.document.document.id : nil,
       contentPayload: from.media.voice.hasVoice ? Self.contentPayload(from: from.media.voice.voice) : nil,
       actions: from.hasActions ? from.actions : nil,
+      replies: from.hasReplies ? from.replies : nil,
       isSticker: from.isSticker,
       hasLink: from.hasHasLink_p ? from.hasLink_p : nil,
       entities: from.hasEntities ? from.entities : nil
     )
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encodeIfPresent(globalId, forKey: .globalId)
+    try container.encodeIfPresent(randomId, forKey: .randomId)
+    try container.encode(messageId, forKey: .messageId)
+    try container.encode(date, forKey: .date)
+    try container.encodeIfPresent(text, forKey: .text)
+    try container.encodeIfPresent(peerUserId, forKey: .peerUserId)
+    try container.encodeIfPresent(peerThreadId, forKey: .peerThreadId)
+    try container.encode(chatId, forKey: .chatId)
+    try container.encode(fromId, forKey: .fromId)
+    try container.encodeIfPresent(mentioned, forKey: .mentioned)
+    try container.encodeIfPresent(out, forKey: .out)
+    try container.encodeIfPresent(pinned, forKey: .pinned)
+    try container.encodeIfPresent(editDate, forKey: .editDate)
+    try container.encodeIfPresent(fileId, forKey: .fileId)
+    try container.encodeIfPresent(status, forKey: .status)
+    try container.encodeIfPresent(repliedToMessageId, forKey: .repliedToMessageId)
+    try container.encodeIfPresent(forwardFromPeerUserId, forKey: .forwardFromPeerUserId)
+    try container.encodeIfPresent(forwardFromPeerThreadId, forKey: .forwardFromPeerThreadId)
+    try container.encodeIfPresent(forwardFromMessageId, forKey: .forwardFromMessageId)
+    try container.encodeIfPresent(forwardFromUserId, forKey: .forwardFromUserId)
+    try container.encodeIfPresent(photoId, forKey: .photoId)
+    try container.encodeIfPresent(videoId, forKey: .videoId)
+    try container.encodeIfPresent(documentId, forKey: .documentId)
+    try container.encodeIfPresent(contentPayload, forKey: .contentPayload)
+    try container.encodeIfPresent(replies.map(CodableReplies.init), forKey: .replies)
+    try container.encodeIfPresent(transactionId, forKey: .transactionId)
+    try container.encodeIfPresent(isSticker, forKey: .isSticker)
+    try container.encodeIfPresent(hasLink, forKey: .hasLink)
+    try container.encodeIfPresent(entities, forKey: .entities)
   }
 
   public static let preview = Message(
@@ -764,6 +862,7 @@ public extension Message {
         videoId = videoId ?? existing.videoId
         contentPayload = Message.mergedContentPayload(incoming: contentPayload, existing: existing.contentPayload)
         actions = actions ?? existing.actions
+        replies = replies ?? existing.replies
         hasLink = hasLink ?? existing.hasLink
         entities = entities ?? existing.entities
         transactionId = existing.transactionId
@@ -817,6 +916,7 @@ public extension ApiMessage {
       message.text = existing.text
       message.contentPayload = existing.contentPayload
       message.actions = existing.actions
+      message.replies = existing.replies
       message.transactionId = existing.transactionId
       message.hasLink = existing.hasLink
       message.editDate = editDate.map { Date(timeIntervalSince1970: TimeInterval($0)) }
@@ -881,6 +981,7 @@ public extension Message {
       message.isSticker = message.isSticker ?? existing.isSticker
       message.hasLink = message.hasLink ?? existing.hasLink
       message.actions = message.actions ?? existing.actions
+      message.replies = message.replies ?? existing.replies
       message.editDate = message.editDate ?? existing.editDate
       message.repliedToMessageId = message.repliedToMessageId ?? existing.repliedToMessageId
       message.forwardFromPeerUserId = message.forwardFromPeerUserId ?? existing.forwardFromPeerUserId
@@ -1059,6 +1160,23 @@ public extension Message {
 
   var hasVoice: Bool {
     voiceContent != nil
+  }
+
+  var replyThreadChatId: Int64? {
+    guard let replies, replies.chatID > 0 else { return nil }
+    return replies.chatID
+  }
+
+  var replyThreadReplyCount: Int {
+    Int(replies?.replyCount ?? 0)
+  }
+
+  var hasUnreadReplyThread: Bool {
+    replies?.hasUnread_p == true
+  }
+
+  var replyThreadRecentReplierUserIds: [Int64] {
+    replies?.recentReplierUserIds ?? []
   }
 
   var voiceRemoteId: Int64? {

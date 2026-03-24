@@ -69,6 +69,9 @@ public actor UpdatesEngine: Sendable {
         case let .newChat(newChat):
           try newChat.apply(db)
 
+        case let .chatOpen(chatOpen):
+          try chatOpen.apply(db)
+
         case let .deleteChat(deleteChat):
           try deleteChat.apply(db)
 
@@ -577,16 +580,21 @@ extension InlineProtocol.UpdateNewChat {
     }
 
     Log.shared.debug("saving chat \(chat)")
+    let savedChat = Chat(from: chat)
     do {
-      try chat.save(db)
+      try savedChat.save(db)
     } catch {
       Log.shared.error("Failed to save chat", error: error)
     }
 
+    // Linked reply threads stay directly routable but should not appear as optimistic sidebar items
+    // until the server explicitly returns dialog visibility state.
+    guard savedChat.parentMessageId == nil else { return }
+
     do {
-      let dialog = Dialog(optimisticForChat: chat)
+      let dialog = Dialog(optimisticForChat: savedChat)
       Log.shared.debug("saving dialog \(dialog)")
-      try dialog.save(db)
+      try dialog.save(db, onConflict: .replace)
     } catch {
       Log.shared.error("Failed to save dialog", error: error)
     }
@@ -607,6 +615,35 @@ extension InlineProtocol.UpdateMessageActionAnswered {
         interactionId: interactionID,
         toastText: toastText
       )
+    }
+  }
+}
+
+extension InlineProtocol.UpdateChatOpen {
+  func apply(_ db: Database) throws {
+    if hasUser {
+      do {
+        _ = try User.save(db, user: user)
+      } catch {
+        Log.shared.error("Failed to save chatOpen user", error: error)
+      }
+    }
+
+    if hasChat {
+      do {
+        let savedChat = Chat(from: chat)
+        try savedChat.save(db)
+      } catch {
+        Log.shared.error("Failed to save chatOpen chat", error: error)
+      }
+    }
+
+    if hasDialog {
+      do {
+        _ = try dialog.saveFull(db)
+      } catch {
+        Log.shared.error("Failed to save chatOpen dialog", error: error)
+      }
     }
   }
 }

@@ -22,10 +22,11 @@ struct MessageViewInputProps: Equatable, Codable, Hashable {
   var isRtl: Bool
   var translated: Bool
   var renderStyle: MessageRenderStyle
+  var showsReplyThreadFooter: Bool = true
 
   /// Used in cache key
   func toString() -> String {
-    "\(firstInGroup ? "FG" : "")\(isLastMessage == true ? "LM" : "")\(isFirstMessage == true ? "FM" : "")\(isRtl ? "RTL" : "")\(isDM ? "DM" : "")\(translated ? "TR" : "")\(renderStyle == .minimal ? "MN" : "BB")"
+    "\(firstInGroup ? "FG" : "")\(isLastMessage == true ? "LM" : "")\(isFirstMessage == true ? "FM" : "")\(isRtl ? "RTL" : "")\(isDM ? "DM" : "")\(translated ? "TR" : "")\(renderStyle == .minimal ? "MN" : "BB")\(showsReplyThreadFooter ? "" : "RF0")"
   }
 }
 
@@ -39,6 +40,7 @@ struct MessageViewProps: Equatable, Codable, Hashable {
   var index: Int?
   var translated: Bool
   var layout: MessageSizeCalculator.LayoutPlans
+  var showsReplyThreadFooter: Bool = true
 
   func equalExceptSize(_ rhs: MessageViewProps) -> Bool {
     firstInGroup == rhs.firstInGroup &&
@@ -47,6 +49,7 @@ struct MessageViewProps: Equatable, Codable, Hashable {
       isRtl == rhs.isRtl &&
       isDM == rhs.isDM &&
       renderStyle == rhs.renderStyle &&
-      translated == rhs.translated
+      translated == rhs.translated &&
+      showsReplyThreadFooter == rhs.showsReplyThreadFooter
   }
 }

@@ -20,11 +20,13 @@ final class MessagesCollectionView: UICollectionView {
   static var contextMenuOpen: Bool = false
   private var lastKnownNavBarHeight: CGFloat = 0
 
-  init(peerId: Peer, chatId: Int64, spaceId: Int64) {
+  init(peerId: Peer, chatId: Int64, spaceId: Int64, parentChatId: Int64?, parentMessageId: Int64?) {
     self.peerId = peerId
     self.chatId = chatId
     self.spaceId = spaceId
-    let layout = MessagesCollectionView.createLayout()
+    let layout = MessagesCollectionView.createLayout(
+      showsReplyThreadContext: parentChatId != nil && parentMessageId != nil
+    )
     coordinator = Coordinator(peerId: peerId, chatId: chatId, spaceId: spaceId)
 
     super.init(frame: .zero, collectionViewLayout: layout)
@@ -58,6 +60,11 @@ final class MessagesCollectionView: UICollectionView {
       DateSeparatorView.self,
       forSupplementaryViewOfKind: UICollectionView.elementKindSectionFooter,
       withReuseIdentifier: DateSeparatorView.reuseIdentifier
+    )
+    register(
+      ReplyThreadContextSupplementaryView.self,
+      forSupplementaryViewOfKind: ReplyThreadContextSupplementaryView.elementKind,
+      withReuseIdentifier: ReplyThreadContextSupplementaryView.reuseIdentifier
     )
 
     transform = CGAffineTransform(scaleX: 1, y: -1)
@@ -408,8 +415,10 @@ final class MessagesCollectionView: UICollectionView {
     }
   }
 
-  private static func createLayout() -> UICollectionViewLayout {
-    AnimatedCompositionalLayout.createSectionedLayout()
+  private static func createLayout(showsReplyThreadContext: Bool) -> UICollectionViewLayout {
+    AnimatedCompositionalLayout.createSectionedLayout(
+      showsReplyThreadContext: showsReplyThreadContext
+    )
   }
 
   // TODO: Handle far reply scroll
@@ -576,8 +585,6 @@ private extension MessagesCollectionView {
       // Subscribe to translation state changes
       TranslationState.shared.subject
         .sink { [weak self] peer, _ in
-          print("👽 TranslationState update")
-
           guard let self, peer == self.peerId else { return }
           var snapshot = dataSource.snapshot()
           let ids = messages.map(\.id)
@@ -672,6 +679,26 @@ private extension MessagesCollectionView {
       return message.peerId
     }
 
+    private func replyInThread(_ message: Message) {
+      Task { @MainActor in
+        do {
+          let childChatId = try await ReplyThreads.resolveChatId(for: message)
+          NotificationCenter.default.post(
+            name: Notification.Name("OpenReplyThread"),
+            object: nil,
+            userInfo: ["childChatId": childChatId]
+          )
+        } catch {
+          Log.shared.error("Failed to open reply thread", error: error)
+          ToastManager.shared.showToast(
+            "Failed to open reply thread",
+            type: .error,
+            systemImage: "exclamationmark.triangle"
+          )
+        }
+      }
+    }
+
     func setupDataSource(_ collectionView: UICollectionView) {
       currentCollectionView = collectionView
 
@@ -721,6 +748,19 @@ private extension MessagesCollectionView {
       // Configure supplementary view provider for date separators
       dataSource.supplementaryViewProvider = { [weak self] collectionView, kind, indexPath in
         guard let self else { return nil }
+
+        if kind == ReplyThreadContextSupplementaryView.elementKind {
+          guard let contextView = collectionView.dequeueReusableSupplementaryView(
+            ofKind: kind,
+            withReuseIdentifier: ReplyThreadContextSupplementaryView.reuseIdentifier,
+            for: indexPath
+          ) as? ReplyThreadContextSupplementaryView else {
+            return nil
+          }
+
+          contextView.configure(chatId: chatId, spaceId: spaceId)
+          return contextView
+        }
 
         if kind == UICollectionView.elementKindSectionFooter {
           guard let footerView = collectionView.dequeueReusableSupplementaryView(
@@ -1194,7 +1234,6 @@ private extension MessagesCollectionView {
       }
 
       guard let fullMessage = targetMessage else {
-        print("Could not find message for tag: \(sender.tag), baseTag: \(baseTag)")
         return
       }
       let message = fullMessage.message
@@ -1475,6 +1514,14 @@ private extension MessagesCollectionView {
           ChatState.shared.setReplyingMessageId(peer: message.peerId, id: message.messageId)
         }
         actions.append(replyAction)
+
+        let replyInThreadAction = UIAction(
+          title: "Reply in Thread",
+          image: UIImage(systemName: "text.bubble")
+        ) { [weak self] _ in
+          self?.replyInThread(message)
+        }
+        actions.append(replyInThreadAction)
 
         let forwardAction = UIAction(title: "Forward", image: UIImage(systemName: "arrowshape.turn.up.right")) {
           [weak self] _ in

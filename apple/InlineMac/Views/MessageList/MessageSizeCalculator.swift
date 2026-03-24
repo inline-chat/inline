@@ -237,6 +237,9 @@ class MessageSizeCalculator {
     /// reply is always above text
     var reply: LayoutPlan?
 
+    /// reply thread footer is rendered below the bubble/reactions cluster
+    var replyThreadFooter: LayoutPlan?
+
     /// reactions
     var reactions: LayoutPlan?
 
@@ -277,6 +280,7 @@ class MessageSizeCalculator {
     var hasAvatar: Bool { avatar != nil }
     var hasName: Bool { name != nil }
     var hasReply: Bool { reply != nil }
+    var hasReplyThreadFooter: Bool { replyThreadFooter != nil }
     var hasForwardHeader: Bool { forwardHeader != nil }
     var hasDocument: Bool { document != nil }
     var hasReactions: Bool { reactions != nil }
@@ -506,8 +510,9 @@ class MessageSizeCalculator {
 
   private func cacheKey(for message: FullMessage, width: CGFloat, props: MessageViewInputProps) -> NSString {
     // Hash-based approach is faster than string concatenation
+    let replyUsersKey = message.message.replyThreadRecentReplierUserIds.map(String.init).joined(separator: ",")
     let hashValue =
-      "\(message.id)_\(message.displayText?.hashValue ?? 0)_\(Int(width))_\(props.toString())_\(message.message.entities?.entities.count ?? 0)_\(actionRowsSignature(for: message))"
+      "\(message.id)_\(message.displayText?.hashValue ?? 0)_\(Int(width))_\(props.toString())_\(message.message.entities?.entities.count ?? 0)_\(actionRowsSignature(for: message))_rt\(message.message.replyThreadChatId ?? 0)_\(message.message.replyThreadReplyCount)_\(message.message.hasUnreadReplyThread ? 1 : 0)_\(replyUsersKey)"
     return NSString(string: "\(hashValue)")
   }
 
@@ -826,6 +831,7 @@ class MessageSizeCalculator {
     var documentPlan: LayoutPlan?
     var forwardHeaderPlan: LayoutPlan?
     var replyPlan: LayoutPlan?
+    var replyThreadFooterPlan: LayoutPlan?
     var reactionsPlan: LayoutPlan?
     var actionsRowsPlan: LayoutPlan?
     var reactionItemsPlan: [String: LayoutPlan] = [:]
@@ -920,6 +926,25 @@ class MessageSizeCalculator {
         bottom: 3.0,
         right: bubbleContentHorizontalInset
       )
+    }
+
+    if props.showsReplyThreadFooter,
+       message.message.replyThreadChatId != nil,
+       message.message.replyThreadReplyCount > 0
+    {
+      replyThreadFooterPlan = LayoutPlan(size: .zero, spacing: .zero)
+      replyThreadFooterPlan!.size = CGSize(
+        width: min(
+          availableWidth,
+          ReplyThreadFooterView.width(
+            replyCount: message.message.replyThreadReplyCount,
+            hasUnread: message.message.hasUnreadReplyThread,
+            avatarCount: message.message.replyThreadRecentReplierUserIds.count
+          )
+        ),
+        height: ReplyThreadFooterView.LayoutMetrics.height
+      )
+      replyThreadFooterPlan!.spacing = .init(top: 6.0, left: 0, bottom: 0, right: 0)
     }
 
     // MARK: - Photo
@@ -1242,6 +1267,16 @@ class MessageSizeCalculator {
       )
     }
 
+    if let replyThreadFooterPlan {
+      wrapperHeight += replyThreadFooterPlan.spacing.top
+      wrapperHeight += replyThreadFooterPlan.size.height
+      let avatarWidth = (avatarPlan?.size.width ?? 0) + (avatarPlan?.spacing.horizontalTotal ?? 0)
+      wrapperWidth = max(
+        wrapperWidth,
+        avatarWidth + replyThreadFooterPlan.size.width + replyThreadFooterPlan.spacing.horizontalTotal
+      )
+    }
+
     wrapperPlan.size = CGSize(width: wrapperWidth, height: wrapperHeight)
     wrapperPlan.spacing = .init(
       top: wrapperTopSpacing + Theme.messageOuterVerticalPadding,
@@ -1265,6 +1300,7 @@ class MessageSizeCalculator {
       attachments: attachmentsPlan,
       forwardHeader: forwardHeaderPlan,
       reply: replyPlan,
+      replyThreadFooter: replyThreadFooterPlan,
       reactions: reactionsPlan,
       actionsRows: actionsRowsPlan,
       reactionItems: reactionItemsPlan,
@@ -1458,6 +1494,7 @@ class MessageSizeCalculator {
     var documentPlan: LayoutPlan?
     var forwardHeaderPlan: LayoutPlan?
     var replyPlan: LayoutPlan?
+    var replyThreadFooterPlan: LayoutPlan?
     var reactionsPlan: LayoutPlan?
     var actionsRowsPlan: LayoutPlan?
     var reactionItemsPlan: [String: LayoutPlan] = [:]
@@ -1544,6 +1581,25 @@ class MessageSizeCalculator {
         bottom: 4.0,
         right: 0
       )
+    }
+
+    if props.showsReplyThreadFooter,
+       message.message.replyThreadChatId != nil,
+       message.message.replyThreadReplyCount > 0
+    {
+      replyThreadFooterPlan = LayoutPlan(size: .zero, spacing: .zero)
+      replyThreadFooterPlan!.size = CGSize(
+        width: min(
+          availableWidth,
+          ReplyThreadFooterView.width(
+            replyCount: message.message.replyThreadReplyCount,
+            hasUnread: message.message.hasUnreadReplyThread,
+            avatarCount: message.message.replyThreadRecentReplierUserIds.count
+          )
+        ),
+        height: ReplyThreadFooterView.LayoutMetrics.height
+      )
+      replyThreadFooterPlan!.spacing = .init(top: 6.0, left: 0, bottom: 0, right: 0)
     }
 
     if let photoSize {
@@ -1718,10 +1774,16 @@ class MessageSizeCalculator {
       wrapperHeight += actionsRowsPlan.spacing.top
       wrapperHeight += actionsRowsPlan.size.height
       wrapperHeight += actionsRowsPlan.spacing.bottom
-      let reservedAvatarSlotWidth =
-        (avatarPlan?.size.width ?? Self.minimalAvatarSize) +
-        (avatarPlan?.spacing.horizontalTotal ?? (Theme.messageSidePadding + Theme.messageHorizontalStackSpacing))
       wrapperWidth = max(wrapperWidth, reservedAvatarSlotWidth + actionsRowsPlan.size.width)
+    }
+
+    if let replyThreadFooterPlan {
+      wrapperHeight += replyThreadFooterPlan.spacing.top
+      wrapperHeight += replyThreadFooterPlan.size.height
+      wrapperWidth = max(
+        wrapperWidth,
+        reservedAvatarSlotWidth + replyThreadFooterPlan.size.width + replyThreadFooterPlan.spacing.horizontalTotal
+      )
     }
 
     wrapperPlan.size = CGSize(
@@ -1749,6 +1811,7 @@ class MessageSizeCalculator {
       attachments: attachmentsPlan,
       forwardHeader: forwardHeaderPlan,
       reply: replyPlan,
+      replyThreadFooter: replyThreadFooterPlan,
       reactions: reactionsPlan,
       actionsRows: actionsRowsPlan,
       reactionItems: reactionItemsPlan,

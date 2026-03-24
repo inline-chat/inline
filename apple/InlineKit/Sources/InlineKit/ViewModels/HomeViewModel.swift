@@ -162,6 +162,7 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
       .including(
         optional: Dialog.space
       )
+      .filter(Dialog.sidebarVisibleFilter())
 //      .including(
 //        optional: Dialog.peerThread
 //          .forKey(CodingKeys.chat)

@@ -375,7 +375,6 @@ class MinimalMessageViewAppKit: NSView {
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
   }
-
   private var renderableMessageActionRows: [MessageActionRow] {
     guard let actions = message.actions else { return [] }
 
@@ -515,6 +514,52 @@ class MinimalMessageViewAppKit: NSView {
         }
       }
     }
+  }
+
+  private var replyThreadFooterView: ReplyThreadFooterView?
+
+  private func ensureReplyThreadFooterView() -> ReplyThreadFooterView {
+    if let replyThreadFooterView {
+      return replyThreadFooterView
+    }
+
+    let view = ReplyThreadFooterView()
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.onClick = { [weak self] in
+      self?.handleReplyThreadFooterClick()
+    }
+    replyThreadFooterView = view
+    return view
+  }
+
+  private func syncReplyThreadFooterView(for props: MessageViewProps) {
+    guard props.layout.replyThreadFooter != nil,
+          let childChatId = message.replyThreadChatId,
+          childChatId > 0,
+          message.replyThreadReplyCount > 0
+    else {
+      replyThreadFooterView?.reset()
+      replyThreadFooterView?.removeFromSuperview()
+      resetReplyThreadFooterConstraints()
+      return
+    }
+
+    let replyThreadFooterView = ensureReplyThreadFooterView()
+    if replyThreadFooterView.superview == nil {
+      addSubview(replyThreadFooterView)
+    }
+
+    replyThreadFooterView.configure(
+      replyCount: message.replyThreadReplyCount,
+      hasUnread: message.hasUnreadReplyThread,
+      recentReplierUserIds: message.replyThreadRecentReplierUserIds
+    )
+    replyThreadFooterView.setLoading(false)
+  }
+
+  private func handleReplyThreadFooterClick() {
+    guard let childChatId = message.replyThreadChatId else { return }
+    openChat(peer: .thread(id: childChatId))
   }
 
   private func syncForwardHeaderView(for props: MessageViewProps) {
@@ -836,6 +881,8 @@ class MinimalMessageViewAppKit: NSView {
       attachmentsView = createAttachmentsView()
       contentView.addSubview(attachmentsView!)
     }
+
+    syncReplyThreadFooterView(for: props)
 
     addSubview(timeAndStateView)
     timeAndStateView.isHidden = true
@@ -1652,6 +1699,75 @@ class MinimalMessageViewAppKit: NSView {
         videoView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: video.spacing.left),
       ])
     }
+
+    if let footer = layout.replyThreadFooter {
+      ensureReplyThreadFooterConstraints(
+        footer: footer,
+        anchorToReactions: layout.reactionsOutsideBubble && reactionsView != nil
+      )
+      constraints.append(contentsOf: [
+        replyThreadFooterTopConstraint,
+        replyThreadFooterLeadingConstraint,
+        replyThreadFooterWidthConstraint,
+        replyThreadFooterHeightConstraint,
+      ].compactMap { $0 })
+    }
+  }
+
+  private func resetReplyThreadFooterConstraints() {
+    NSLayoutConstraint.deactivate([
+      replyThreadFooterTopConstraint,
+      replyThreadFooterLeadingConstraint,
+      replyThreadFooterTrailingConstraint,
+      replyThreadFooterWidthConstraint,
+      replyThreadFooterHeightConstraint,
+    ].compactMap { $0 })
+    replyThreadFooterTopConstraint = nil
+    replyThreadFooterLeadingConstraint = nil
+    replyThreadFooterTrailingConstraint = nil
+    replyThreadFooterWidthConstraint = nil
+    replyThreadFooterHeightConstraint = nil
+    replyThreadFooterAnchoredToReactions = false
+  }
+
+  private func ensureReplyThreadFooterConstraints(
+    footer: MessageSizeCalculator.LayoutPlan,
+    anchorToReactions: Bool
+  ) {
+    guard let replyThreadFooterView, replyThreadFooterView.superview != nil else { return }
+
+    let needsRebuild =
+      replyThreadFooterTopConstraint == nil ||
+      replyThreadFooterWidthConstraint == nil ||
+      replyThreadFooterHeightConstraint == nil ||
+      replyThreadFooterAnchoredToReactions != anchorToReactions ||
+      (replyThreadFooterLeadingConstraint == nil)
+
+    if needsRebuild {
+      resetReplyThreadFooterConstraints()
+
+      let anchorView: NSView = if anchorToReactions, let reactionsView {
+        reactionsView
+      } else {
+        bubbleView
+      }
+
+      replyThreadFooterTopConstraint = replyThreadFooterView.topAnchor.constraint(
+        equalTo: anchorView.bottomAnchor,
+        constant: footer.spacing.top
+      )
+      replyThreadFooterWidthConstraint = replyThreadFooterView.widthAnchor.constraint(equalToConstant: footer.size.width)
+      replyThreadFooterHeightConstraint = replyThreadFooterView.heightAnchor.constraint(equalToConstant: footer.size.height)
+      replyThreadFooterLeadingConstraint = replyThreadFooterView.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor)
+
+      NSLayoutConstraint.activate([
+        replyThreadFooterTopConstraint,
+        replyThreadFooterLeadingConstraint,
+        replyThreadFooterWidthConstraint,
+        replyThreadFooterHeightConstraint,
+      ].compactMap { $0 })
+      replyThreadFooterAnchoredToReactions = anchorToReactions
+    }
   }
 
   // MARK: - Constraints
@@ -1682,6 +1798,13 @@ class MinimalMessageViewAppKit: NSView {
   private var messageActionRowsHeightConstraint: NSLayoutConstraint?
   private var messageActionRowsTopConstraint: NSLayoutConstraint?
   private var messageActionRowsSideConstraint: NSLayoutConstraint?
+
+  private var replyThreadFooterTopConstraint: NSLayoutConstraint?
+  private var replyThreadFooterLeadingConstraint: NSLayoutConstraint?
+  private var replyThreadFooterTrailingConstraint: NSLayoutConstraint?
+  private var replyThreadFooterWidthConstraint: NSLayoutConstraint?
+  private var replyThreadFooterHeightConstraint: NSLayoutConstraint?
+  private var replyThreadFooterAnchoredToReactions = false
 
   private var reactionViewWidthConstraint: NSLayoutConstraint!
   private var reactionViewHeightConstraint: NSLayoutConstraint!
@@ -2086,6 +2209,30 @@ class MinimalMessageViewAppKit: NSView {
         reactionViewLeadingConstraint,
         reactionViewTrailingConstraint,
       ].compactMap(\.self))
+    }
+
+    if let footer = props.layout.replyThreadFooter {
+      let replyThreadFooterView = ensureReplyThreadFooterView()
+      if replyThreadFooterView.superview == nil {
+        addSubview(replyThreadFooterView)
+      }
+
+      ensureReplyThreadFooterConstraints(
+        footer: footer,
+        anchorToReactions: props.layout.reactionsOutsideBubble && reactionsView != nil
+      )
+
+      if replyThreadFooterTopConstraint?.constant != footer.spacing.top {
+        replyThreadFooterTopConstraint?.constant = footer.spacing.top
+      }
+      if replyThreadFooterWidthConstraint?.constant != footer.size.width {
+        replyThreadFooterWidthConstraint?.constant = footer.size.width
+      }
+      if replyThreadFooterHeightConstraint?.constant != footer.size.height {
+        replyThreadFooterHeightConstraint?.constant = footer.size.height
+      }
+    } else {
+      resetReplyThreadFooterConstraints()
     }
 
     if let time = props.layout.time {
@@ -2712,6 +2859,7 @@ class MinimalMessageViewAppKit: NSView {
     self.fullMessage = fullMessage
     syncForwardHeaderView(for: props)
     syncMessageActionRowsView(message: fullMessage, props: props)
+    syncReplyThreadFooterView(for: props)
 
     if props.layout.document != nil {
       if documentContainerView.superview == nil {
@@ -3050,6 +3198,8 @@ class MinimalMessageViewAppKit: NSView {
     shineEffectView?.stopAnimation()
     shineEffectView?.removeFromSuperview()
     shineEffectView = nil
+
+    replyThreadFooterView?.reset()
 
     // Re-setup translation state observation
     setupTranslationStateObservation()

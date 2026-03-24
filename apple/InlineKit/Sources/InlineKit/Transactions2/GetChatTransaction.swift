@@ -40,8 +40,8 @@ public struct GetChatTransaction: Transaction2 {
 
     log.trace("getChat result: \(response)")
 
-    guard response.hasChat, response.hasDialog else {
-      log.error("getChat result missing chat or dialog")
+    guard response.hasChat else {
+      log.error("getChat result missing chat")
       throw TransactionExecutionError.invalid
     }
 
@@ -55,16 +55,21 @@ public struct GetChatTransaction: Transaction2 {
           throw error
         }
 
-        do {
-          let dialog = Dialog(from: response.dialog)
-          let dialogId = Dialog.getDialogId(peerId: dialog.peerId)
-          let existingDialog = try Dialog.fetchOne(db, id: dialogId)
-          if existingDialog == nil {
-            try dialog.save(db)
+        if response.hasDialog {
+          do {
+            _ = try response.dialog.saveFull(db)
+          } catch {
+            log.error("Failed to save dialog", error: error)
+            throw error
           }
-        } catch {
-          log.error("Failed to save dialog", error: error)
-          throw error
+        }
+
+        if response.hasAnchorMessage {
+          do {
+            _ = try Message.save(db, protocolMessage: response.anchorMessage, publishChanges: false)
+          } catch {
+            log.error("Failed to save anchor message", error: error)
+          }
         }
 
         do {

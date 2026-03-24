@@ -34,9 +34,21 @@ final class AnimatedCompositionalLayout: UICollectionViewCompositionalLayout {
     return attributes
   }
 
-  static func createSectionedLayout() -> UICollectionViewCompositionalLayout {
+  static func createSectionedLayout(showsReplyThreadContext: Bool) -> UICollectionViewCompositionalLayout {
     let configuration = UICollectionViewCompositionalLayoutConfiguration()
     configuration.scrollDirection = .vertical
+    if showsReplyThreadContext {
+      let contextSize = NSCollectionLayoutSize(
+        widthDimension: .fractionalWidth(1.0),
+        heightDimension: .estimated(ReplyThreadContextSupplementaryView.estimatedHeight)
+      )
+      let contextItem = NSCollectionLayoutBoundarySupplementaryItem(
+        layoutSize: contextSize,
+        elementKind: ReplyThreadContextSupplementaryView.elementKind,
+        alignment: .bottom
+      )
+      configuration.boundarySupplementaryItems = [contextItem]
+    }
 
     let layout = AnimatedCompositionalLayout(sectionProvider: { _, _ in
       // Message item

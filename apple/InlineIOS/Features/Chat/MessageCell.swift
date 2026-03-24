@@ -411,7 +411,7 @@ extension MessageCollectionViewCell {
   }
 
   func setupBaseMessageConstraints() {
-    let newMessageView = UIMessageView(fullMessage: message, spaceId: spaceId)
+    let newMessageView = UIMessageView(fullMessage: message, spaceId: spaceId, showsReplyThreadFooter: true)
     newMessageView.translatesAutoresizingMaskIntoConstraints = false
     newMessageView.onPhotoTap = { [weak self] message, sourceView, sourceImage, url in
       self?.onPhotoTap?(message, sourceView, sourceImage, url)

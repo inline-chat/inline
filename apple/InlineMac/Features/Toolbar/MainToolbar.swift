@@ -14,6 +14,7 @@ enum MainToolbarItemIdentifier: Hashable, Sendable {
   case navigationButtons
   case title
   case spacer
+  case showInSidebar(peer: Peer)
   case translationIcon(peer: Peer)
   case participants(peer: Peer)
   case chatTitle(peer: Peer)
@@ -189,6 +190,12 @@ class MainToolbarView: NSView {
             .id(peer.id)
         )
 
+      case let .showInSidebar(peer):
+        return makeHostingView(
+          ShowInSidebarToolbarButton(peer: peer, database: dependencies.database)
+            .id(peer.id)
+        )
+
       case let .nudge(peer):
         return makeHostingView(
           NudgeButton(peer: peer)
@@ -301,7 +308,7 @@ class MainToolbarView: NSView {
 private extension MainToolbarItemIdentifier {
   var isTrailingActionItem: Bool {
     switch self {
-      case .notifications, .participants, .nudge, .translationIcon, .menu:
+      case .showInSidebar, .notifications, .participants, .nudge, .translationIcon, .menu:
         return true
       case .navigationButtons, .title, .spacer, .chatTitle:
         return false
@@ -619,6 +626,7 @@ private final class ChatToolbarMenuModel: ObservableObject {
   @Published private(set) var isArchived: Bool = false
   @Published private(set) var canRename: Bool = false
   @Published private(set) var chatSpaceId: Int64? = nil
+  @Published private(set) var parentPeer: Peer? = nil
 
   private let peer: Peer
   private let db: AppDatabase
@@ -699,17 +707,65 @@ private final class ChatToolbarMenuModel: ObservableObject {
 
     db.warnIfInMemoryDatabaseForObservation("ChatToolbarMenuModel.chat")
     chatCancellable = ValueObservation
-      .tracking { db in
-        try Chat.fetchOne(db, id: chatId)
+      .tracking { db -> (spaceId: Int64?, parentPeer: Peer?)? in
+        guard let chat = try Chat.fetchOne(db, id: chatId) else { return nil }
+
+        let parentPeer: Peer? = if let parentChatId = chat.parentChatId,
+                                   let parentChat = try Chat.fetchOne(db, id: parentChatId)
+        {
+          parentChat.peerId.toPeer()
+        } else {
+          nil
+        }
+
+        return (spaceId: chat.spaceId, parentPeer: parentPeer)
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .receive(on: DispatchQueue.main)
       .sink(
         receiveCompletion: { _ in },
-        receiveValue: { [weak self] chat in
-          self?.chatSpaceId = chat?.spaceId
+        receiveValue: { [weak self] value in
+          self?.chatSpaceId = value?.spaceId
+          self?.parentPeer = value?.parentPeer
         }
       )
+  }
+}
+
+private struct ShowInSidebarToolbarButton: View {
+  let peer: Peer
+  let database: AppDatabase
+
+  @Environment(\.realtimeV2) private var realtimeV2
+  @StateObject private var state: ShowInSidebarState
+  @State private var isSubmitting = false
+
+  init(peer: Peer, database: AppDatabase) {
+    self.peer = peer
+    self.database = database
+    _state = StateObject(wrappedValue: ShowInSidebarState(peer: peer, db: database))
+  }
+
+  var body: some View {
+    if state.isHiddenLinkedThread {
+      Button {
+        guard !isSubmitting else { return }
+        isSubmitting = true
+        Task {
+          defer { isSubmitting = false }
+          do {
+            _ = try await realtimeV2.send(.showChatInSidebar(peer: peer))
+          } catch {
+            Log.shared.error("Failed to show chat in sidebar", error: error)
+          }
+        }
+      } label: {
+        Image(systemName: "sidebar.left")
+      }
+      .buttonStyle(ToolbarButtonStyle())
+      .disabled(isSubmitting)
+      .help("Show in Sidebar")
+    }
   }
 }
 
@@ -735,6 +791,12 @@ private struct ChatToolbarMenu: View {
 
   var body: some View {
     Menu {
+      if let parentPeer = model.parentPeer {
+        Button(parentActionTitle(for: parentPeer), systemImage: "arrow.turn.up.left") {
+          openParentChat(parentPeer)
+        }
+      }
+
       Button("Chat Info", systemImage: "info.circle") {
         openChatInfo()
       }
@@ -852,6 +914,20 @@ private struct ChatToolbarMenu: View {
       nav2.navigate(to: .chatInfo(peer: peer))
     } else {
       dependencies.nav.open(.chatInfo(peer: peer))
+    }
+  }
+
+  private func parentActionTitle(for parentPeer: Peer) -> String {
+    parentPeer.isThread ? "Open Parent Thread" : "Open Parent Chat"
+  }
+
+  private func openParentChat(_ parentPeer: Peer) {
+    Task { @MainActor in
+      if let nav2 = dependencies.nav2 {
+        await nav2.openChat(peer: parentPeer, database: dependencies.database)
+      } else {
+        dependencies.nav.open(.chat(peer: parentPeer))
+      }
     }
   }
 

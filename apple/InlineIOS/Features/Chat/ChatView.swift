@@ -24,6 +24,7 @@ struct ChatView: View {
   @Environment(\.scenePhase) var scenePhase
   @Environment(\.realtimeV2) var realtimeV2
   @Environment(\.colorScheme) var colorScheme
+  @Environment(\.appDatabase) var database
 
   static let formatter = RelativeDateTimeFormatter()
 
@@ -53,7 +54,9 @@ struct ChatView: View {
         ChatViewUIKit(
           peerId: peerId,
           chatId: chat.id,
-          spaceId: chat.spaceId ?? 0
+          spaceId: chat.spaceId ?? 0,
+          parentChatId: chat.parentChatId,
+          parentMessageId: chat.parentMessageId
         )
         .edgesIgnoringSafeArea(.all)
       }
@@ -94,6 +97,9 @@ struct ChatView: View {
           }
         }
       } else {
+        ToolbarItem(placement: .primaryAction) {
+          ShowInSidebarToolbarButton(peer: peerId, database: database)
+        }
         ToolbarItem(placement: .primaryAction) {
           TranslationButton(peer: peerId)
             .tint(ThemeManager.shared.accentColor)
@@ -226,6 +232,15 @@ struct ChatView: View {
         )
         Log.shared.error("NavigateToForwardedMessage: missing chat for peer \(targetPeer)")
       }
+    }
+    .onReceive(
+      NotificationCenter.default
+        .publisher(for: Notification.Name("OpenReplyThread"))
+    ) { notification in
+      guard let childChatId = notification.userInfo?["childChatId"] as? Int64 else { return }
+      let targetPeer = Peer.thread(id: childChatId)
+      guard targetPeer != peerId else { return }
+      router.push(.chat(peer: targetPeer))
     }
     .onReceive(
       NotificationCenter.default

@@ -294,11 +294,12 @@ public extension FullMessage {
 
 public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
   @Published public private(set) var chatItem: SpaceChatItem?
+  @Published public private(set) var directChat: Chat?
 
   public var messageIdToGlobalId: [Int64: Int64] = [:]
 
   public var chat: Chat? {
-    chatItem?.chat
+    chatItem?.chat ?? directChat
   }
 
   public var peerUser: User? {
@@ -310,6 +311,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
   }
 
   private var chatCancellable: AnyCancellable?
+  private var directChatCancellable: AnyCancellable?
   private var historyRefetchTask: Task<Void, Never>?
   private var lastHistoryRefetchTime: CFTimeInterval = 0
   private let historyRefetchCooldown: CFTimeInterval = 1.0
@@ -376,7 +378,34 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
               // Important Note
               // Only update if the dialog is different, ignore chat and message for performance reasons
               chatItem = fullChat
+            } else if fullChat == nil {
+              self?.chatItem = nil
             }
+          }
+        )
+
+    observeDirectThreadChatIfNeeded()
+  }
+
+  private func observeDirectThreadChatIfNeeded() {
+    guard case let .thread(threadId) = peer else {
+      directChat = nil
+      directChatCancellable?.cancel()
+      directChatCancellable = nil
+      return
+    }
+
+    db.warnIfInMemoryDatabaseForObservation("FullChatViewModel.directThreadChat")
+    directChatCancellable =
+      ValueObservation
+        .tracking { db in
+          try Chat.fetchOne(db, id: threadId)
+        }
+        .publisher(in: db.dbWriter, scheduling: .immediate)
+        .sink(
+          receiveCompletion: { Log.shared.error("Failed to get direct thread chat \($0)") },
+          receiveValue: { [weak self] chat in
+            self?.directChat = chat
           }
         )
   }
@@ -472,26 +501,33 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
   /// Query chat from database directly
   private func queryChatFromDatabase() async throws -> Chat? {
     let peer_ = peer
-    let chatItem = try await db.reader.read { db in
+    return try await db.reader.read { db in
       switch peer_ {
         case .user:
           try Dialog
             .spaceChatItemQueryForUser()
             .filter(id: Dialog.getDialogId(peerId: peer_))
-            .fetchOne(db)
+            .fetchOne(db)?
+            .chat
         case .thread:
-          try Dialog
+          if let chatItem = try Dialog
             .spaceChatItemQueryForChat()
             .filter(id: Dialog.getDialogId(peerId: peer_))
             .fetchOne(db)
+          {
+            chatItem.chat
+          } else if let threadId = peer_.asThreadId() {
+            try Chat.fetchOne(db, id: threadId)
+          } else {
+            nil
+          }
       }
     }
-    return chatItem?.chat
   }
 
   /// Ensure chat is loaded, if not fetch it
   public func ensureChat() async throws -> Chat? {
-    if let chatItem, let chat = chatItem.chat {
+    if let chat {
       return chat
     }
 
@@ -510,7 +546,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
         fetchChat()
       }
 
-      return chatItem?.chat
+      return chat
     } catch {
       Log.shared.error("Failed to ensure chat", error: error)
       throw error
