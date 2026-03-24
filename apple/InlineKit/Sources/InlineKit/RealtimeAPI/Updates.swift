@@ -567,7 +567,7 @@ extension InlineProtocol.UpdateEditMessage {
 
 extension InlineProtocol.UpdateNewChat {
   func apply(_ db: Database) throws {
-    let chat = Chat(from: chat)
+    let savedChat = Chat(from: chat)
 
     if hasUser {
       Log.shared.debug("saving user \(user)")
@@ -579,8 +579,7 @@ extension InlineProtocol.UpdateNewChat {
       }
     }
 
-    Log.shared.debug("saving chat \(chat)")
-    let savedChat = Chat(from: chat)
+    Log.shared.debug("saving chat \(savedChat)")
     do {
       try savedChat.save(db)
     } catch {
