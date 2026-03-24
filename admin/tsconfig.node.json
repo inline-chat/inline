@@ -1,7 +1,0 @@
-{
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "types": ["bun", "node"]
-  },
-  "include": ["serve.ts", "vite.config.ts"]
-}

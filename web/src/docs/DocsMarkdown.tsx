@@ -69,7 +69,6 @@ function PreWithCopy({ children, ...props }: { children?: ReactNode; [key: strin
       >
         {copied ? <CheckIcon size={16} /> : <CopyIcon size={16} />}
       </button>
-      {/* eslint-disable-next-line react/jsx-props-no-spreading */}
       <pre {...props}>{children}</pre>
     </div>
   )
@@ -90,7 +89,6 @@ export function DocsMarkdown({ markdown, className }: DocsMarkdownProps) {
 
   const heading =
     (Tag: "h1" | "h2" | "h3" | "h4") =>
-    // eslint-disable-next-line react/display-name
     ({ children }: { children?: ReactNode }) => {
       const text = nodeText(children)
       const id = slugger.slug(text)
@@ -170,7 +168,6 @@ export function DocsMarkdown({ markdown, className }: DocsMarkdownProps) {
           )
         },
         img: ({ src, alt, ...props }) => {
-          // eslint-disable-next-line jsx-a11y/alt-text
           return <img src={src} alt={alt ?? ""} loading="lazy" {...props} />
         },
         pre: ({ children, ...props }) => <PreWithCopy {...props}>{children}</PreWithCopy>,

@@ -7,7 +7,6 @@ WORKDIR /usr/src/app
 FROM base AS install
 RUN mkdir -p /temp/dev
 COPY package.json bun.lock /temp/dev/
-COPY admin/package.json /temp/dev/admin/
 COPY web/package.json /temp/dev/web/
 COPY web/packages/auth/package.json /temp/dev/web/packages/auth/
 COPY web/packages/client/package.json /temp/dev/web/packages/client/
@@ -31,7 +30,6 @@ RUN cd /temp/dev && bun install --frozen-lockfile
 # install with --production (exclude devDependencies)
 RUN mkdir -p /temp/prod
 COPY package.json bun.lock /temp/prod/
-COPY admin/package.json /temp/prod/admin/
 COPY web/package.json /temp/prod/web/
 COPY web/packages/auth/package.json /temp/prod/web/packages/auth/
 COPY web/packages/client/package.json /temp/prod/web/packages/client/

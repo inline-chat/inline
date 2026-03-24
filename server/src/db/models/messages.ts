@@ -887,8 +887,6 @@ export function processAttachments(
   })[],
 ): ProcessedMessageAttachment[] {
   return attachments.map((attachment) => {
-    // Omit externalTask and linkEmbed from the initial spread
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { externalTask, linkEmbed, ...rest } = attachment
     let processed: ProcessedMessageAttachment = { ...rest }
 
