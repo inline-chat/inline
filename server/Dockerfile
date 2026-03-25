@@ -2,7 +2,7 @@ FROM oven/bun:1 AS base
 WORKDIR /usr/src/app
 
 FROM base AS pruner
-COPY package.json bun.lock bunfig.toml turbo.json ./
+COPY package.json bun.lock bunfig.toml ./
 COPY server ./server
 COPY web ./web
 COPY packages ./packages
