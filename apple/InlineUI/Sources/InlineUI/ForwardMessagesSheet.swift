@@ -174,36 +174,31 @@ public struct ForwardMessagesSheet: View {
   }
 
   private func handleMacKeyDown(_ event: NSEvent) -> NSEvent? {
-    let disallowedModifiers = event.modifierFlags.intersection([.command, .control, .option])
-    guard disallowedModifiers.isEmpty else {
-      return event
+    let textInputFocused = isTextInputFocused(in: event.window)
+
+    if let action = ForwardMessagesMacKeyBindings.action(
+      keyCode: event.keyCode,
+      charactersIgnoringModifiers: event.charactersIgnoringModifiers,
+      modifierFlags: event.modifierFlags,
+      isTextInputFocused: textInputFocused,
+      hasSearchText: !model.searchText.isEmpty
+    ) {
+      switch action {
+        case let .moveHighlightedChat(offset):
+          moveHighlightedChat(by: offset)
+          return nil
+        case .toggleHighlightedSelection:
+          return handleSpaceKey() ? nil : event
+        case .activateHighlightedChat:
+          return activateHighlightedChat() ? nil : event
+        case .backspaceSearch:
+          focusSearchField()
+          model.searchText.removeLast()
+          return nil
+      }
     }
 
-    switch event.keyCode {
-      case 125:
-        moveHighlightedChat(by: 1)
-        return nil
-      case 126:
-        moveHighlightedChat(by: -1)
-        return nil
-      case 49:
-        return handleSpaceKey() ? nil : event
-      case 36:
-        return activateHighlightedChat() ? nil : event
-      case 51:
-        guard !isTextInputFocused(in: event.window),
-              !model.searchText.isEmpty
-        else {
-          return event
-        }
-        focusSearchField()
-        model.searchText.removeLast()
-        return nil
-      default:
-        break
-    }
-
-    guard !isTextInputFocused(in: event.window),
+    guard !textInputFocused,
           let characters = event.characters,
           characters.contains(where: { !$0.isWhitespace }),
           characters.rangeOfCharacter(from: .controlCharacters) == nil
