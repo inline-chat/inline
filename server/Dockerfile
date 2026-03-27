@@ -41,12 +41,9 @@ COPY --from=build /usr/src/app/server/dist ./server/dist
 COPY --from=build /usr/src/app/packages/oauth-core/dist ./packages/oauth-core/dist
 COPY --from=build /usr/src/app/packages/protocol/dist ./packages/protocol/dist
 
-RUN apt-get update && apt-get install -y --no-install-recommends curl wget && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
 USER bun
 EXPOSE 8000/tcp
-
-HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=5 \
-  CMD sh -c 'curl -fsS "http://127.0.0.1:${PORT:-8000}/healthz" > /dev/null || exit 1'
 
 ENTRYPOINT [ "bun", "run", "server/dist/index.js" ]
