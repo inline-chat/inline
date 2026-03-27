@@ -36,6 +36,7 @@
 
 - Use existing logging for production logs (`Log`, `server/src/utils/log.ts`).
 - Avoid unsafe Swift/typescript patterns (`Any`/`any` where avoidable, force unwraps, `try!`, unsafe casts).
+- Prefer minimizing dependencies and external tooling; do not add new dependencies unless the ongoing maintenance cost is clearly justified.
 - Keep commits atomic and scoped; do not amend existing commits.
 - Before committing, verify staged files (`git diff --cached --name-only`); prefer `scripts/committer "<msg>" <file...>`.
 - Write commit message in lowercase, include scope like this: `macos: fix ...`; scopes include: macos|ios|server|mcp|sdk|cli|openclaw|apple|web|docs|website; for general changes either no prefix or generic ones: eg. chore
