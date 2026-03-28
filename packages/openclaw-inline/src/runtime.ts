@@ -1,4 +1,4 @@
-import type { PluginRuntime } from "openclaw/plugin-sdk"
+import type { PluginRuntime } from "openclaw/plugin-sdk/core"
 
 let runtime: PluginRuntime | null = null
 
@@ -12,4 +12,3 @@ export function getInlineRuntime(): PluginRuntime {
   }
   return runtime
 }
-

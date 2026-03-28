@@ -1,8 +1,8 @@
-import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "openclaw/plugin-sdk"
-import type { OpenClawConfig } from "openclaw/plugin-sdk"
+import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
 import { readFile } from "node:fs/promises"
 import type { InlineRuntimeConfig } from "./config-schema.js"
 import { InlineRuntimeConfigSchema } from "./config-schema.js"
+import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "../openclaw-compat.js"
 
 export type ResolvedInlineAccount = {
   accountId: string

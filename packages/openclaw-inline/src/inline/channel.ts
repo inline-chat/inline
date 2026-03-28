@@ -1,11 +1,4 @@
-import {
-  buildChannelConfigSchema,
-  DEFAULT_ACCOUNT_ID,
-  formatPairingApproveHint,
-  PAIRING_APPROVED_MESSAGE,
-  type ChannelPlugin,
-  type OpenClawConfig,
-} from "openclaw/plugin-sdk"
+import type { ChannelPlugin, OpenClawConfig } from "openclaw/plugin-sdk/core"
 import { InlineSdkClient, Method, type Chat, type Dialog, type User } from "@inline-chat/realtime-sdk"
 import { InlineConfigSchema } from "./config-schema.js"
 import {
@@ -20,6 +13,12 @@ import { monitorInlineProvider } from "./monitor.js"
 import { resolveInlineGroupRequireMention, resolveInlineGroupToolPolicy } from "./policy.js"
 import { inlineMessageActions } from "./actions.js"
 import { getInlineRuntime } from "../runtime.js"
+import {
+  buildChannelConfigSchema,
+  DEFAULT_ACCOUNT_ID,
+  formatPairingApproveHint,
+  PAIRING_APPROVED_MESSAGE,
+} from "../openclaw-compat.js"
 import { uploadInlineMediaFromUrl } from "./media.js"
 
 const activeMonitors = new Map<string, { stop: () => Promise<void>; done: Promise<void> }>()

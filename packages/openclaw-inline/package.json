@@ -1,6 +1,6 @@
 {
   "name": "@inline-openclaw/inline",
-  "version": "0.0.21",
+  "version": "0.0.22",
   "type": "module",
   "files": [
     "dist",
@@ -32,7 +32,7 @@
   "devDependencies": {
     "@types/node": "^20.11.30",
     "@vitest/coverage-v8": "4.0.16",
-    "openclaw": "^2026.3.13",
+    "openclaw": "^2026.3.24",
     "typescript": "^5.8.3",
     "vitest": "^4.0.16"
   },

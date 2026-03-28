@@ -1,11 +1,7 @@
-import {
-  detectMime,
-  loadWebMedia,
-  type AnyAgentTool,
-  type OpenClawConfig,
-} from "openclaw/plugin-sdk"
+import type { AnyAgentTool, OpenClawConfig } from "openclaw/plugin-sdk/core"
 import { InlineSdkClient, Method } from "@inline-chat/realtime-sdk"
 import { resolveInlineAccount, resolveInlineToken } from "./accounts.js"
+import { getInlineRuntime } from "../runtime.js"
 
 type InlineProfileToolArgs = {
   name?: string
@@ -19,6 +15,16 @@ type InlineProfileToolResult = {
   content: Array<{ type: "text"; text: string }>
   details: unknown
 }
+
+type InlineLoadedMedia = Awaited<ReturnType<ReturnType<typeof getInlineRuntime>["media"]["loadWebMedia"]>>
+type LoadWebMediaCompat = (
+  mediaUrl: string,
+  maxBytes?: number,
+  options?: {
+    ssrfPolicy?: unknown
+    localRoots?: string[] | "any"
+  },
+) => Promise<InlineLoadedMedia>
 
 const InlineProfileToolParameters = {
   type: "object",
@@ -91,11 +97,27 @@ function resolvePhotoSource(args: InlineProfileToolArgs): string | undefined {
   return readTrimmedString(args.photoPath) ?? readTrimmedString(args.photoUrl)
 }
 
+function looksLikeLocalMediaSource(mediaUrl: string): boolean {
+  return !/^https?:\/\//i.test(mediaUrl.trim())
+}
+
 async function uploadProfilePhoto(client: InlineSdkClient, rawSource: string): Promise<string> {
-  const loaded = await loadWebMedia(rawSource)
+  const runtimeMedia = getInlineRuntime().media
+  const loadWebMediaCompat = runtimeMedia.loadWebMedia as unknown as LoadWebMediaCompat
+  let loaded: InlineLoadedMedia
+  try {
+    loaded = await runtimeMedia.loadWebMedia(rawSource)
+  } catch (error) {
+    const message = String(error)
+    const deniedLocalPath = /not under an allowed directory/i.test(message)
+    if (!deniedLocalPath || !looksLikeLocalMediaSource(rawSource)) {
+      throw error
+    }
+    loaded = await loadWebMediaCompat(rawSource, undefined, { localRoots: "any" })
+  }
   const contentType =
     loaded.contentType ??
-    (await detectMime({
+    (await runtimeMedia.detectMime({
       buffer: loaded.buffer,
       ...(loaded.fileName ? { filePath: loaded.fileName } : {}),
     })) ??

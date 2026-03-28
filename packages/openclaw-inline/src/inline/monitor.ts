@@ -1,18 +1,14 @@
 import { mkdir } from "node:fs/promises"
 import path from "node:path"
 import {
+  DEFAULT_GROUP_HISTORY_LIMIT,
   buildPendingHistoryContextFromMap,
   clearHistoryEntriesIfEnabled,
-  createReplyPrefixOptions,
-  createTypingCallbacks,
-  logInboundDrop,
+  createChannelReplyPipelineCompat,
   recordPendingHistoryEntryIfEnabled,
-  resolveChannelMediaMaxBytes,
-  resolveControlCommandGate,
-  resolveMentionGatingWithBypass,
-  type OpenClawConfig,
-  type RuntimeEnv,
-} from "openclaw/plugin-sdk"
+} from "../sdk-runtime-compat.js"
+import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
+import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env"
 import { InlineSdkClient, JsonFileStateStore, Method, type Message, type MessageActions } from "@inline-chat/realtime-sdk"
 import { resolveInlineToken, type ResolvedInlineAccount } from "./accounts.js"
 import { INLINE_FORMATTING_NOTE, buildInlineSystemPrompt } from "./message-formatting.js"
@@ -21,6 +17,12 @@ import { getInlineRuntime } from "../runtime.js"
 import { uploadInlineMediaFromUrl } from "./media.js"
 import { summarizeInlineMessageContent } from "./message-content.js"
 import { resolveInlineCompatNativeCommandMenu } from "./command-menu-compat.js"
+import {
+  logInboundDrop,
+  resolveChannelMediaMaxBytes,
+  resolveControlCommandGate,
+  resolveMentionGatingWithBypass,
+} from "../openclaw-compat.js"
 
 const CHANNEL_ID = "inline" as const
 
@@ -45,6 +47,7 @@ type HistoryContext = {
   historyText: string | null
   attachmentText: string | null
   entityText: string | null
+  inboundHistory: InlinePendingHistoryEntry[]
   repliedToBot: boolean
   replyToSenderId: string | null
 }
@@ -70,7 +73,6 @@ type InlinePendingHistoryEntry = {
   messageId?: string
 }
 
-const DEFAULT_GROUP_HISTORY_LIMIT = 12
 const DEFAULT_DM_HISTORY_LIMIT = 6
 const HISTORY_LINE_MAX_CHARS = 280
 const BOT_MESSAGE_CACHE_LIMIT = 500
@@ -528,14 +530,61 @@ function resolveHistorySenderLabel(params: {
 }
 
 function resolveHistoryLimit(params: {
+  cfg: OpenClawConfig
   isGroup: boolean
   historyLimit: number | undefined
   dmHistoryLimit: number | undefined
 }): number {
   if (params.isGroup) {
-    return params.historyLimit ?? DEFAULT_GROUP_HISTORY_LIMIT
+    return Math.max(0, params.historyLimit ?? params.cfg.messages?.groupChat?.historyLimit ?? DEFAULT_GROUP_HISTORY_LIMIT)
   }
-  return params.dmHistoryLimit ?? params.historyLimit ?? DEFAULT_DM_HISTORY_LIMIT
+  return Math.max(0, params.dmHistoryLimit ?? params.historyLimit ?? DEFAULT_DM_HISTORY_LIMIT)
+}
+
+function historyEntryDedupeKey(entry: InlinePendingHistoryEntry): string {
+  if (entry.messageId) return `id:${entry.messageId}`
+  return `ts:${entry.timestamp ?? "unknown"}:${entry.sender}:${entry.body}`
+}
+
+function mergeInboundHistoryEntries(params: {
+  historyContextEntries: InlinePendingHistoryEntry[]
+  pendingEntries: InlinePendingHistoryEntry[]
+  limit: number
+}): Array<{ sender: string; body: string; timestamp?: number }> {
+  if (params.limit <= 0) return []
+
+  const deduped: InlinePendingHistoryEntry[] = []
+  const seen = new Set<string>()
+  for (const entry of [...params.historyContextEntries, ...params.pendingEntries]) {
+    const key = historyEntryDedupeKey(entry)
+    if (seen.has(key)) continue
+    seen.add(key)
+    deduped.push(entry)
+  }
+
+  return deduped.slice(-params.limit).map((entry) => ({
+    sender: entry.sender,
+    body: entry.body,
+    ...(entry.timestamp != null ? { timestamp: entry.timestamp } : {}),
+  }))
+}
+
+function buildInlineBodyForAgent(params: {
+  rawBody: string
+  currentAttachmentText: string | null
+  currentEntityText: string | null
+}): string {
+  return (
+    [
+      params.rawBody,
+      params.currentAttachmentText && params.currentAttachmentText !== params.rawBody
+        ? `Current media/attachments:\n${params.currentAttachmentText}`
+        : null,
+      params.currentEntityText ? `Current message entities:\n${params.currentEntityText}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n\n") || params.rawBody
+  )
 }
 
 function resolveInlineMediaMaxBytes(params: {
@@ -692,6 +741,7 @@ async function buildHistoryContext(params: {
   const lines: string[] = []
   const attachmentLines: string[] = []
   const entityLines: string[] = []
+  const inboundHistory: InlinePendingHistoryEntry[] = []
 
   if (params.historyLimit > 0) {
     const messages = await loadChatHistoryMessages({
@@ -732,6 +782,12 @@ async function buildHistoryContext(params: {
           meId: params.meId,
           senderProfilesById: params.senderProfilesById,
         })
+        inboundHistory.push({
+          sender: label,
+          body: text,
+          ...(item.date != null ? { timestamp: Number(item.date) * 1000 } : {}),
+          messageId: String(item.id),
+        })
         const replySuffix = item.replyToMsgId != null ? ` ->${String(item.replyToMsgId)}` : ""
         lines.push(`#${String(item.id)}${replySuffix} ${label}: ${text}`)
         const attachmentText = normalizeHistoryText(content.attachmentText)
@@ -768,6 +824,7 @@ async function buildHistoryContext(params: {
       historyText: null,
       attachmentText: attachmentLines.length ? attachmentLines.slice(-ATTACHMENT_CONTEXT_LIMIT).join("\n") : null,
       entityText: entityLines.length ? entityLines.slice(-ATTACHMENT_CONTEXT_LIMIT).join("\n") : null,
+      inboundHistory,
       repliedToBot,
       replyToSenderId,
     }
@@ -780,6 +837,7 @@ async function buildHistoryContext(params: {
     entityText: entityLines.length
       ? `Recent message entities:\n${entityLines.slice(-ATTACHMENT_CONTEXT_LIMIT).join("\n")}`
       : null,
+    inboundHistory,
     repliedToBot,
     replyToSenderId,
   }
@@ -1180,7 +1238,7 @@ export async function monitorInlineProvider(params: {
           }
         }
 
-        if (commandGate.shouldBlock) {
+        if (isGroup && commandGate.shouldBlock) {
           logInboundDrop({
             log: (m) => runtime.log?.(m),
             channel: CHANNEL_ID,
@@ -1214,6 +1272,7 @@ export async function monitorInlineProvider(params: {
         const groupHistoryKey = isGroup ? route.sessionKey : null
         const pendingHistorySender = senderUsername ? `@${senderUsername}` : senderName ?? `user:${senderId}`
         const historyLimit = resolveHistoryLimit({
+          cfg,
           isGroup,
           historyLimit: account.config.historyLimit,
           dmHistoryLimit: account.config.dmHistoryLimit,
@@ -1229,7 +1288,14 @@ export async function monitorInlineProvider(params: {
           botMessageIdsByChat,
         }).catch((err) => {
           statusSink?.({ lastError: `getChatHistory failed: ${String(err)}` })
-          return { historyText: null, attachmentText: null, entityText: null, repliedToBot: false, replyToSenderId: null }
+          return {
+            historyText: null,
+            attachmentText: null,
+            entityText: null,
+            inboundHistory: [],
+            repliedToBot: false,
+            replyToSenderId: null,
+          }
         })
         const implicitMention =
           ((reactionEvent != null || callbackActionEvent != null) && isGroup) ||
@@ -1355,6 +1421,19 @@ export async function monitorInlineProvider(params: {
               }),
           })
         }
+        const inboundHistory =
+          isGroup && groupHistoryKey
+            ? mergeInboundHistoryEntries({
+                historyContextEntries: historyContext.inboundHistory,
+                pendingEntries: groupPendingHistories.get(groupHistoryKey) ?? [],
+                limit: historyLimit,
+              })
+            : []
+        const bodyForAgent = buildInlineBodyForAgent({
+          rawBody,
+          currentAttachmentText,
+          currentEntityText,
+        })
         const effectiveSurface = shouldUseTelegramSurfaceForModelCommands(normalizedCommandBody)
           ? "telegram"
           : CHANNEL_ID
@@ -1365,6 +1444,8 @@ export async function monitorInlineProvider(params: {
 
         const ctxPayload = core.channel.reply.finalizeInboundContext({
           Body: body,
+          BodyForAgent: bodyForAgent,
+          ...(isGroup ? { InboundHistory: inboundHistory } : {}),
           RawBody: rawBody,
           CommandBody: normalizedCommandBody,
           From: isGroup ? `inline:chat:${String(chatId)}` : `inline:${senderId}`,
@@ -1419,31 +1500,34 @@ export async function monitorInlineProvider(params: {
           onRecordError: (err) => runtime.error?.(`inline: failed updating session meta: ${String(err)}`),
         })
 
-        const prefixConfig = (
-          typeof createReplyPrefixOptions === "function"
-            ? createReplyPrefixOptions({
-                cfg,
-                agentId: route.agentId,
-                channel: CHANNEL_ID,
-                accountId: account.accountId,
-              })
-            : {}
-        ) as { onModelSelected?: unknown } & Record<string, unknown>
-        const onModelSelected =
-          typeof prefixConfig.onModelSelected === "function"
-            ? (prefixConfig.onModelSelected as (ctx: unknown) => void)
-            : undefined
-        const { onModelSelected: _ignoredOnModelSelected, ...prefixOptions } = prefixConfig
-
-        const typingCallbacks =
-          typeof createTypingCallbacks === "function"
-            ? createTypingCallbacks({
-                start: () => client.sendTyping({ chatId, typing: true }),
-                stop: () => client.sendTyping({ chatId, typing: false }),
-                onStartError: (err) => runtime.error?.(`inline typing start failed: ${String(err)}`),
-                onStopError: (err) => runtime.error?.(`inline typing stop failed: ${String(err)}`),
-              })
-            : {}
+        const replyPipeline = await createChannelReplyPipelineCompat({
+          cfg,
+          agentId: route.agentId,
+          channel: CHANNEL_ID,
+          accountId: account.accountId,
+          typing: {
+            start: () => client.sendTyping({ chatId, typing: true }),
+            stop: () => client.sendTyping({ chatId, typing: false }),
+            onStartError: (err) => runtime.error?.(`inline typing start failed: ${String(err)}`),
+            onStopError: (err) => runtime.error?.(`inline typing stop failed: ${String(err)}`),
+          },
+        })
+        const onModelSelected = replyPipeline.onModelSelected
+        const typingCallbacks = replyPipeline.typingCallbacks
+        const prefixOptions = {
+          ...(replyPipeline.responsePrefix !== undefined
+            ? { responsePrefix: replyPipeline.responsePrefix }
+            : {}),
+          ...(replyPipeline.enableSlackInteractiveReplies !== undefined
+            ? { enableSlackInteractiveReplies: replyPipeline.enableSlackInteractiveReplies }
+            : {}),
+          ...(replyPipeline.responsePrefixContextProvider
+            ? {
+                responsePrefixContextProvider:
+                  replyPipeline.responsePrefixContextProvider as never,
+              }
+            : {}),
+        }
 
         const streamViaEditMessage = account.config.streamViaEditMessage === true && !shouldEditCallbackTargetInPlace
         const defaultReplyToMsgId = isGroup && msg.replyToMsgId != null ? msg.id : undefined
@@ -1462,7 +1546,7 @@ export async function monitorInlineProvider(params: {
           opChain: Promise.resolve(),
         }
         const replyOptions = {
-          ...(onModelSelected ? { onModelSelected } : {}),
+          ...(onModelSelected ? { onModelSelected: onModelSelected as (ctx: unknown) => void } : {}),
           blockReplyTimeoutMs: 25_000,
           ...(streamViaEditMessage
             ? {
@@ -1532,7 +1616,7 @@ export async function monitorInlineProvider(params: {
             cfg,
             dispatcherOptions: {
               ...prefixOptions,
-              ...typingCallbacks,
+              ...(typingCallbacks ? { typingCallbacks } : {}),
               deliver: async (payload) => {
                 const rawText = payload.text ?? ""
                 const mediaList = payload.mediaUrls?.length

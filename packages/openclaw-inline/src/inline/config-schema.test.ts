@@ -45,7 +45,7 @@ describe("inline/config-schema", () => {
         },
         blockStreamingCoalesce: { minChars: 600, idleMs: 700, maxChars: 2_200 },
         replyToBotWithoutMention: true,
-        historyLimit: 12,
+        historyLimit: 25,
         dmHistoryLimit: 6,
         groups: {
           "123": {
