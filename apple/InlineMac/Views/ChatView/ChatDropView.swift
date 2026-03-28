@@ -1,10 +1,12 @@
 import AppKit
+import InlineMacUI
 
 class ChatDropView: NSView {
   var dropHandler: ((NSDraggingInfo) -> Bool)?
 
   override init(frame: NSRect) {
     super.init(frame: frame)
+    identifier = LocalDragSurfaceGuard.chatSurfaceIdentifier
     registerForDraggedTypes([
       .fileURL,
       .tiff,
@@ -23,15 +25,24 @@ class ChatDropView: NSView {
     checkForValidDraggedItems(sender) ? .copy : []
   }
 
+  override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+    checkForValidDraggedItems(sender) ? .copy : []
+  }
+
   override func draggingExited(_ sender: NSDraggingInfo?) {
     // Visual feedback could go here
   }
 
   override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-    dropHandler?(sender) ?? false
+    guard checkForValidDraggedItems(sender) else { return false }
+    return dropHandler?(sender) ?? false
   }
 
   private func checkForValidDraggedItems(_ sender: NSDraggingInfo) -> Bool {
+    if LocalDragSurfaceGuard.isDragFromSameSurface(source: sender.draggingSource, destinationView: self) {
+      return false
+    }
+
     // Check for files
     if sender.draggingPasteboard.canReadObject(forClasses: [NSURL.self, NSImage.self], options: nil) {
       return true
