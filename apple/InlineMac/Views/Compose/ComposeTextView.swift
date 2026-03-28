@@ -1,5 +1,6 @@
 import AppKit
 import InlineKit
+import InlineMacUI
 import TextProcessing
 
 protocol ComposeTextViewDelegate: NSTextViewDelegate {
@@ -631,6 +632,10 @@ class ComposeNSTextView: NSTextView {
   }
 
   override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+    if LocalDragSurfaceGuard.isDragFromSameSurface(source: sender.draggingSource, destinationView: self) {
+      return []
+    }
+
     let pasteboard = sender.draggingPasteboard
     return canHandlePasteboard(pasteboard) ? .copy : super.draggingEntered(sender)
   }
@@ -656,6 +661,10 @@ class ComposeNSTextView: NSTextView {
   }
 
   override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+    if LocalDragSurfaceGuard.isDragFromSameSurface(source: sender.draggingSource, destinationView: self) {
+      return false
+    }
+
     // Prefer routing non-text content through our attachment pipeline.
     if handleAttachments(from: sender.draggingPasteboard, includeText: false) {
       return true
