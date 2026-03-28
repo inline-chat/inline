@@ -1,10 +1,11 @@
-import { jsonResult, type AnyAgentTool, type OpenClawConfig } from "openclaw/plugin-sdk"
+import type { AnyAgentTool, OpenClawConfig } from "openclaw/plugin-sdk/core"
 import { resolveInlineAccount, resolveInlineToken } from "./accounts.js"
 import {
   callInlineBotApi,
   normalizeInlineBotCommandName,
   type InlineBotCommand,
 } from "./bot-commands-api.js"
+import { jsonResult } from "../openclaw-compat.js"
 
 type InlineBotCommandsToolArgs = {
   action: "get" | "set" | "delete"

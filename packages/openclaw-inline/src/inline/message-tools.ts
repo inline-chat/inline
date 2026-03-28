@@ -1,11 +1,8 @@
-import {
-  jsonResult,
-  type AnyAgentTool,
-  type OpenClawConfig,
-} from "openclaw/plugin-sdk"
+import type { AnyAgentTool, OpenClawConfig } from "openclaw/plugin-sdk/core"
 import { InlineSdkClient, Method } from "@inline-chat/realtime-sdk"
 import { resolveInlineAccount, resolveInlineToken } from "./accounts.js"
 import { normalizeInlineTarget } from "./normalize.js"
+import { jsonResult } from "../openclaw-compat.js"
 
 type InlineMessageToolContext = {
   config?: OpenClawConfig

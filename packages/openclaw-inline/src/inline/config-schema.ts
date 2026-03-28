@@ -1,11 +1,11 @@
+import { z } from "zod"
 import {
   BlockStreamingCoalesceSchema,
   DmPolicySchema,
   GroupPolicySchema,
   ToolPolicySchema,
   requireOpenAllowFrom,
-} from "openclaw/plugin-sdk"
-import { z } from "zod"
+} from "../openclaw-compat.js"
 
 const InlineActionsSchema = z
   .object({

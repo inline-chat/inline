@@ -1,13 +1,10 @@
-import {
-  createActionGate,
-  jsonResult,
-  readReactionParams,
-  readNumberParam,
-  readStringParam,
-  type ChannelMessageActionAdapter,
-  type ChannelMessageActionName,
-  type OpenClawConfig,
-} from "openclaw/plugin-sdk"
+import type {
+  ChannelMessageActionAdapter,
+  ChannelMessageActionName,
+  ChannelMessageToolDiscovery,
+  ChannelMessageToolSchemaContribution,
+} from "openclaw/plugin-sdk/channel-contract"
+import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
 import {
   InlineSdkClient,
   Method,
@@ -22,6 +19,14 @@ import { uploadInlineMediaFromUrl } from "./media.js"
 import { summarizeInlineMessageContent } from "./message-content.js"
 import { normalizeInlineTarget } from "./normalize.js"
 import { buildInlineUserDisplayName, getSpaceMembersWithUsers } from "./space-members.js"
+import {
+  createActionGate,
+  jsonResult,
+  readReactionParams,
+  readNumberParam,
+  readStringParam,
+} from "../openclaw-compat.js"
+import { createMessageToolButtonsSchemaCompat } from "../sdk-runtime-compat.js"
 
 type InlineActionGateKey =
   | "send"
@@ -744,6 +749,56 @@ function listAllActions(): ChannelMessageActionName[] {
   return Array.from(out)
 }
 
+function listEnabledInlineActions(cfg: OpenClawConfig): ChannelMessageActionName[] {
+  const account = resolveInlineAccount({ cfg, accountId: null })
+  if (!account.enabled || !account.configured) return []
+
+  const gate = createActionGate((account.config.actions ?? {}) as Record<string, boolean | undefined>)
+  const actions = new Set<ChannelMessageActionName>()
+  for (const group of ACTION_GROUPS) {
+    if (!gate(group.key, group.defaultEnabled)) continue
+    for (const action of group.actions) {
+      actions.add(action)
+    }
+  }
+  return Array.from(actions)
+}
+
+function supportsInlineMessageButtons(actions: readonly ChannelMessageActionName[]): boolean {
+  return actions.some((action) => action === "send" || action === "reply" || action === "thread-reply" || action === "edit")
+}
+
+function describeInlineMessageTool({
+  cfg,
+}: Parameters<NonNullable<ChannelMessageActionAdapter["describeMessageTool"]>>[0]): ChannelMessageToolDiscovery {
+  const actions = listEnabledInlineActions(cfg)
+  if (actions.length === 0) {
+    return {
+      actions: [],
+      capabilities: [],
+      schema: null,
+    }
+  }
+
+  const buttonsEnabled = supportsInlineMessageButtons(actions)
+  const capabilities: Array<"interactive" | "buttons"> = buttonsEnabled ? ["interactive", "buttons"] : []
+  const schema: ChannelMessageToolSchemaContribution[] = buttonsEnabled
+    ? [
+        {
+          properties: {
+            buttons: createMessageToolButtonsSchemaCompat() as unknown as ChannelMessageToolSchemaContribution["properties"][string],
+          },
+        },
+      ]
+    : []
+
+  return {
+    actions,
+    capabilities,
+    schema,
+  }
+}
+
 function isActionEnabled(params: {
   cfg: OpenClawConfig
   accountId?: string | null
@@ -761,21 +816,18 @@ function isActionEnabled(params: {
   return gate(key, group.defaultEnabled)
 }
 
-export const inlineMessageActions: ChannelMessageActionAdapter = {
-  listActions: ({ cfg }) => {
-    const account = resolveInlineAccount({ cfg, accountId: null })
-    if (!account.enabled || !account.configured) return []
+type LegacyInlineMessageActionAdapter = {
+  listActions?: (params: { cfg: OpenClawConfig }) => ChannelMessageActionName[]
+  supportsButtons?: (params: { cfg: OpenClawConfig }) => boolean
+  supportsCards?: (params: { cfg: OpenClawConfig }) => boolean
+}
 
-    const gate = createActionGate((account.config.actions ?? {}) as Record<string, boolean | undefined>)
-    const actions = new Set<ChannelMessageActionName>()
-    for (const group of ACTION_GROUPS) {
-      if (!gate(group.key, group.defaultEnabled)) continue
-      for (const action of group.actions) {
-        actions.add(action)
-      }
-    }
-    return Array.from(actions)
-  },
+export const inlineMessageActions = {
+  describeMessageTool: describeInlineMessageTool,
+  listActions: ({ cfg }: { cfg: OpenClawConfig }) => listEnabledInlineActions(cfg),
+  supportsButtons: ({ cfg }: { cfg: OpenClawConfig }) =>
+    supportsInlineMessageButtons(listEnabledInlineActions(cfg)),
+  supportsCards: () => false,
   supportsAction: ({ action }) => SUPPORTED_ACTIONS.includes(action),
   extractToolSend: ({ args }) => {
     const action = typeof args.action === "string" ? args.action.trim() : ""
@@ -1705,6 +1757,6 @@ export const inlineMessageActions: ChannelMessageActionAdapter = {
 
     throw new Error(`Action ${action} is not supported for provider inline.`)
   },
-}
+} satisfies ChannelMessageActionAdapter & LegacyInlineMessageActionAdapter
 
 export const inlineSupportedActions = listAllActions()

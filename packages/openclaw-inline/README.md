@@ -94,7 +94,7 @@ channels:
     replyToBotWithoutMention: true # if true, replies to bot messages can bypass mention requirement
 
     # Inbound context history (used to build richer thread context for the agent):
-    historyLimit: 12      # group chats
+    historyLimit: 50      # group chats
     dmHistoryLimit: 6     # direct messages
 
     # Streaming + chunking:

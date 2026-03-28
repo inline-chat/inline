@@ -13,6 +13,51 @@ function mockRealtimeSdk(overrides: Record<string, unknown>): void {
   })
 }
 
+function mockOpenClawMediaSdk(overrides?: {
+  loadWebMedia?: ReturnType<typeof vi.fn>
+  detectMime?: ReturnType<typeof vi.fn>
+  extensionForMime?: ReturnType<typeof vi.fn>
+}): void {
+  vi.doMock("openclaw/plugin-sdk/web-media", async () => {
+    const actual = await vi.importActual<Record<string, unknown>>("openclaw/plugin-sdk/web-media")
+    return {
+      ...actual,
+      ...(overrides?.loadWebMedia ? { loadWebMedia: overrides.loadWebMedia } : {}),
+    }
+  })
+  vi.doMock("openclaw/plugin-sdk/media-runtime", async () => {
+    const actual = await vi.importActual<Record<string, unknown>>("openclaw/plugin-sdk/media-runtime")
+    return {
+      ...actual,
+      ...(overrides?.detectMime ? { detectMime: overrides.detectMime } : {}),
+      ...(overrides?.extensionForMime ? { extensionForMime: overrides.extensionForMime } : {}),
+    }
+  })
+}
+
+async function setInlineTestRuntime(options?: {
+  loadWebMedia?: ReturnType<typeof vi.fn>
+  detectMime?: ReturnType<typeof vi.fn>
+}): Promise<void> {
+  const runtimeMod = await import("../runtime")
+  runtimeMod.setInlineRuntime({
+    version: "test",
+    state: { resolveStateDir: () => "/tmp" },
+    channel: { text: { chunkMarkdownText: (text: string) => [text] } },
+    media: {
+      loadWebMedia:
+        options?.loadWebMedia ??
+        vi.fn(async () => ({
+          buffer: Buffer.from([1, 2, 3]),
+          contentType: "application/octet-stream",
+          kind: "document",
+          fileName: "attachment.bin",
+        })),
+      detectMime: options?.detectMime ?? vi.fn(async () => undefined),
+    },
+  } as unknown as PluginRuntime)
+}
+
 describe("inline/channel", () => {
   it("declares minimal capabilities (no subthreads/parents)", async () => {
     vi.resetModules()
@@ -200,12 +245,7 @@ describe("inline/channel", () => {
     })
 
     // The channel plugin uses getInlineRuntime() for state dir + chunker.
-    const runtimeMod = await import("../runtime")
-    runtimeMod.setInlineRuntime({
-      version: "test",
-      state: { resolveStateDir: () => "/tmp" },
-      channel: { text: { chunkMarkdownText: (t: string) => [t] } },
-    } as unknown as PluginRuntime)
+    await setInlineTestRuntime()
 
     const { inlineChannelPlugin } = await import("./channel")
 
@@ -249,12 +289,15 @@ describe("inline/channel", () => {
       },
     })
 
-    const runtimeMod = await import("../runtime")
-    runtimeMod.setInlineRuntime({
-      version: "test",
-      state: { resolveStateDir: () => "/tmp" },
-      channel: { text: { chunkMarkdownText: (t: string) => [t] } },
-    } as unknown as PluginRuntime)
+    await setInlineTestRuntime({
+      loadWebMedia: vi.fn(async () => ({
+        buffer: Buffer.from([1, 2, 3]),
+        contentType: "image/png",
+        kind: "image",
+        fileName: "image.png",
+      })),
+      detectMime: vi.fn(async () => "image/png"),
+    })
 
     const { inlineChannelPlugin } = await import("./channel")
 
@@ -310,12 +353,15 @@ describe("inline/channel", () => {
       },
     })
 
-    const runtimeMod = await import("../runtime")
-    runtimeMod.setInlineRuntime({
-      version: "test",
-      state: { resolveStateDir: () => "/tmp" },
-      channel: { text: { chunkMarkdownText: (t: string) => [t] } },
-    } as unknown as PluginRuntime)
+    await setInlineTestRuntime({
+      loadWebMedia: vi.fn(async () => ({
+        buffer: Buffer.from([1, 2, 3]),
+        contentType: undefined,
+        kind: "image",
+        fileName: undefined,
+      })),
+      detectMime: vi.fn(async () => undefined),
+    })
 
     const { inlineChannelPlugin } = await import("./channel")
     const cfg = {
@@ -367,12 +413,7 @@ describe("inline/channel", () => {
       },
     })
 
-    const runtimeMod = await import("../runtime")
-    runtimeMod.setInlineRuntime({
-      version: "test",
-      state: { resolveStateDir: () => "/tmp" },
-      channel: { text: { chunkMarkdownText: (t: string) => [t] } },
-    } as unknown as PluginRuntime)
+    await setInlineTestRuntime()
 
     const { inlineChannelPlugin } = await import("./channel")
     const cfg = {
@@ -424,12 +465,15 @@ describe("inline/channel", () => {
       },
     })
 
-    const runtimeMod = await import("../runtime")
-    runtimeMod.setInlineRuntime({
-      version: "test",
-      state: { resolveStateDir: () => "/tmp" },
-      channel: { text: { chunkMarkdownText: (t: string) => [t] } },
-    } as unknown as PluginRuntime)
+    await setInlineTestRuntime({
+      loadWebMedia: vi.fn(async () => ({
+        buffer: Buffer.from([1, 2, 3]),
+        contentType: "image/png",
+        kind: "image",
+        fileName: "image.png",
+      })),
+      detectMime: vi.fn(async () => "image/png"),
+    })
 
     const { inlineChannelPlugin } = await import("./channel")
     const cfg = {
@@ -482,12 +526,7 @@ describe("inline/channel", () => {
       },
     })
 
-    const runtimeMod = await import("../runtime")
-    runtimeMod.setInlineRuntime({
-      version: "test",
-      state: { resolveStateDir: () => "/tmp" },
-      channel: { text: { chunkMarkdownText: (t: string) => [t] } },
-    } as unknown as PluginRuntime)
+    await setInlineTestRuntime()
 
     const { inlineChannelPlugin } = await import("./channel")
     const cfg = {
@@ -528,12 +567,15 @@ describe("inline/channel", () => {
       },
     })
 
-    const runtimeMod = await import("../runtime")
-    runtimeMod.setInlineRuntime({
-      version: "test",
-      state: { resolveStateDir: () => "/tmp" },
-      channel: { text: { chunkMarkdownText: (t: string) => [t] } },
-    } as unknown as PluginRuntime)
+    await setInlineTestRuntime({
+      loadWebMedia: vi.fn(async () => ({
+        buffer: Buffer.from([1, 2, 3]),
+        contentType: "image/png",
+        kind: "image",
+        fileName: "image.png",
+      })),
+      detectMime: vi.fn(async () => "image/png"),
+    })
 
     const { inlineChannelPlugin } = await import("./channel")
 
@@ -603,21 +645,15 @@ describe("inline/channel", () => {
       },
     })
 
-    vi.doMock("openclaw/plugin-sdk", async () => {
-      const actual = await vi.importActual<Record<string, unknown>>("openclaw/plugin-sdk")
-      return {
-        ...actual,
-        loadWebMedia,
-        detectMime: vi.fn(async () => "image/png"),
-      }
+    mockOpenClawMediaSdk({
+      loadWebMedia,
+      detectMime: vi.fn(async () => "image/png"),
     })
 
-    const runtimeMod = await import("../runtime")
-    runtimeMod.setInlineRuntime({
-      version: "test",
-      state: { resolveStateDir: () => "/tmp" },
-      channel: { text: { chunkMarkdownText: (t: string) => [t] } },
-    } as unknown as PluginRuntime)
+    await setInlineTestRuntime({
+      loadWebMedia,
+      detectMime: vi.fn(async () => "image/png"),
+    })
 
     const { inlineChannelPlugin } = await import("./channel")
 
@@ -682,26 +718,25 @@ describe("inline/channel", () => {
       },
     })
 
-    vi.doMock("openclaw/plugin-sdk", async () => {
-      const actual = await vi.importActual<Record<string, unknown>>("openclaw/plugin-sdk")
-      return {
-        ...actual,
-        loadWebMedia: vi.fn(async () => ({
-          buffer: Buffer.from([1, 2, 3]),
-          contentType: "image/png",
-          kind: "image",
-          fileName: "image.png",
-        })),
-        detectMime: vi.fn(async () => "image/png"),
-      }
+    mockOpenClawMediaSdk({
+      loadWebMedia: vi.fn(async () => ({
+        buffer: Buffer.from([1, 2, 3]),
+        contentType: "image/png",
+        kind: "image",
+        fileName: "image.png",
+      })),
+      detectMime: vi.fn(async () => "image/png"),
     })
 
-    const runtimeMod = await import("../runtime")
-    runtimeMod.setInlineRuntime({
-      version: "test",
-      state: { resolveStateDir: () => "/tmp" },
-      channel: { text: { chunkMarkdownText: (t: string) => [t] } },
-    } as unknown as PluginRuntime)
+    await setInlineTestRuntime({
+      loadWebMedia: vi.fn(async () => ({
+        buffer: Buffer.from([1, 2, 3]),
+        contentType: "image/png",
+        kind: "image",
+        fileName: "image.png",
+      })),
+      detectMime: vi.fn(async () => "image/png"),
+    })
 
     const { inlineChannelPlugin } = await import("./channel")
 
@@ -755,26 +790,25 @@ describe("inline/channel", () => {
       },
     })
 
-    vi.doMock("openclaw/plugin-sdk", async () => {
-      const actual = await vi.importActual<Record<string, unknown>>("openclaw/plugin-sdk")
-      return {
-        ...actual,
-        loadWebMedia: vi.fn(async () => ({
-          buffer: Buffer.from([1, 2, 3]),
-          contentType: undefined,
-          kind: "image",
-          fileName: undefined,
-        })),
-        detectMime: vi.fn(async () => undefined),
-      }
+    mockOpenClawMediaSdk({
+      loadWebMedia: vi.fn(async () => ({
+        buffer: Buffer.from([1, 2, 3]),
+        contentType: undefined,
+        kind: "image",
+        fileName: undefined,
+      })),
+      detectMime: vi.fn(async () => undefined),
     })
 
-    const runtimeMod = await import("../runtime")
-    runtimeMod.setInlineRuntime({
-      version: "test",
-      state: { resolveStateDir: () => "/tmp" },
-      channel: { text: { chunkMarkdownText: (t: string) => [t] } },
-    } as unknown as PluginRuntime)
+    await setInlineTestRuntime({
+      loadWebMedia: vi.fn(async () => ({
+        buffer: Buffer.from([1, 2, 3]),
+        contentType: "image/png",
+        kind: "image",
+        fileName: "image.png",
+      })),
+      detectMime: vi.fn(async () => "image/png"),
+    })
 
     const { inlineChannelPlugin } = await import("./channel")
 
@@ -841,21 +875,15 @@ describe("inline/channel", () => {
       },
     })
 
-    vi.doMock("openclaw/plugin-sdk", async () => {
-      const actual = await vi.importActual<Record<string, unknown>>("openclaw/plugin-sdk")
-      return {
-        ...actual,
-        loadWebMedia,
-        detectMime: vi.fn(async () => "image/jpeg"),
-      }
+    mockOpenClawMediaSdk({
+      loadWebMedia,
+      detectMime: vi.fn(async () => "image/jpeg"),
     })
 
-    const runtimeMod = await import("../runtime")
-    runtimeMod.setInlineRuntime({
-      version: "test",
-      state: { resolveStateDir: () => "/tmp" },
-      channel: { text: { chunkMarkdownText: (t: string) => [t] } },
-    } as unknown as PluginRuntime)
+    await setInlineTestRuntime({
+      loadWebMedia,
+      detectMime: vi.fn(async () => "image/jpeg"),
+    })
 
     const { inlineChannelPlugin } = await import("./channel")
 
@@ -916,26 +944,25 @@ describe("inline/channel", () => {
       },
     })
 
-    vi.doMock("openclaw/plugin-sdk", async () => {
-      const actual = await vi.importActual<Record<string, unknown>>("openclaw/plugin-sdk")
-      return {
-        ...actual,
-        loadWebMedia: vi.fn(async () => ({
-          buffer: Buffer.from([1, 2, 3]),
-          contentType: "image/png",
-          kind: "image",
-          fileName: "image.png",
-        })),
-        detectMime: vi.fn(async () => "image/png"),
-      }
+    mockOpenClawMediaSdk({
+      loadWebMedia: vi.fn(async () => ({
+        buffer: Buffer.from([1, 2, 3]),
+        contentType: "image/png",
+        kind: "image",
+        fileName: "image.png",
+      })),
+      detectMime: vi.fn(async () => "image/png"),
     })
 
-    const runtimeMod = await import("../runtime")
-    runtimeMod.setInlineRuntime({
-      version: "test",
-      state: { resolveStateDir: () => "/tmp" },
-      channel: { text: { chunkMarkdownText: (t: string) => [t] } },
-    } as unknown as PluginRuntime)
+    await setInlineTestRuntime({
+      loadWebMedia: vi.fn(async () => ({
+        buffer: Buffer.from([1, 2, 3]),
+        contentType: "image/png",
+        kind: "image",
+        fileName: "image.png",
+      })),
+      detectMime: vi.fn(async () => "image/png"),
+    })
 
     const { inlineChannelPlugin } = await import("./channel")
 

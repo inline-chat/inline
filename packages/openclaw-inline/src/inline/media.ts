@@ -1,12 +1,9 @@
 import path from "node:path"
 import type { InlineSdkClient, InlineSdkSendMessageMedia } from "@inline-chat/realtime-sdk"
-import {
-  detectMime,
-  extensionForMime,
-  loadWebMedia,
-  resolveChannelMediaMaxBytes,
-  type OpenClawConfig,
-} from "openclaw/plugin-sdk"
+import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
+import { resolveChannelMediaMaxBytes } from "../openclaw-compat.js"
+import { extensionForMimeCompat } from "../sdk-runtime-compat.js"
+import { getInlineRuntime } from "../runtime.js"
 
 const DEFAULT_MEDIA_MAX_MB = 300
 const SUPPORTED_INLINE_PHOTO_MIME = new Set(["image/jpeg", "image/png", "image/gif"])
@@ -16,6 +13,7 @@ const DEFAULT_VIDEO_HEIGHT = 720
 const DEFAULT_VIDEO_DURATION = 1
 
 type InlineUploadType = "photo" | "video" | "document"
+type InlineLoadedMedia = Awaited<ReturnType<ReturnType<typeof getInlineRuntime>["media"]["loadWebMedia"]>>
 type LoadWebMediaCompat = (
   mediaUrl: string,
   maxBytes?: number,
@@ -23,10 +21,7 @@ type LoadWebMediaCompat = (
     ssrfPolicy?: unknown
     localRoots?: string[] | "any"
   },
-) => Promise<Awaited<ReturnType<typeof loadWebMedia>>>
-
-// openclaw@2026.2.9 types expose only ssrfPolicy, while newer runtimes also support localRoots.
-const loadWebMediaCompat = loadWebMedia as unknown as LoadWebMediaCompat
+) => Promise<InlineLoadedMedia>
 
 function looksLikeLocalMediaSource(mediaUrl: string): boolean {
   return !/^https?:\/\//i.test(mediaUrl.trim())
@@ -83,7 +78,7 @@ function ensureUploadFileName(params: {
     if (ext) return baseName
   }
 
-  const inferredExt = params.ext ?? extensionForMime(params.mime) ?? undefined
+  const inferredExt = params.ext ?? extensionForMimeCompat(params.mime) ?? undefined
   const fallbackExt =
     inferredExt ??
     (params.uploadType === "photo" ? "jpg" : params.uploadType === "video" ? "mp4" : "bin")
@@ -192,13 +187,15 @@ export async function uploadInlineMediaFromUrl(params: {
     cfg: params.cfg,
     accountId: params.accountId ?? null,
   })
-  let loaded: Awaited<ReturnType<typeof loadWebMedia>> | undefined
+  const runtimeMedia = getInlineRuntime().media
+  const loadWebMediaCompat = runtimeMedia.loadWebMedia as unknown as LoadWebMediaCompat
+  let loaded: InlineLoadedMedia | undefined
   let detectedMime: string | undefined
   let uploadType: InlineUploadType | undefined
   let fileName: string | undefined
   try {
     try {
-      loaded = await loadWebMedia(params.mediaUrl, maxBytes)
+      loaded = await runtimeMedia.loadWebMedia(params.mediaUrl, maxBytes)
     } catch (error) {
       const message = String(error)
       const deniedLocalPath = /not under an allowed directory/i.test(message)
@@ -217,7 +214,7 @@ export async function uploadInlineMediaFromUrl(params: {
 
     detectedMime = normalizeMime(
       loaded.contentType ??
-        (await detectMime({
+        (await runtimeMedia.detectMime({
           buffer: loaded.buffer,
           ...(loaded.fileName ? { filePath: loaded.fileName } : {}),
         })),

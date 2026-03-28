@@ -449,12 +449,60 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       }),
     }
   })
+  vi.doMock("openclaw/plugin-sdk/channel-reply-pipeline", async () => {
+    const actual = await vi.importActual<Record<string, unknown>>(
+      "openclaw/plugin-sdk/channel-reply-pipeline",
+    )
+    return {
+      ...actual,
+      createChannelReplyPipeline: vi.fn(() => ({
+        onModelSelected: vi.fn(),
+      })),
+    }
+  })
+  vi.doMock("openclaw/plugin-sdk/web-media", async () => {
+    const actual = await vi.importActual<Record<string, unknown>>("openclaw/plugin-sdk/web-media")
+    return {
+      ...actual,
+      loadWebMedia: vi.fn(async () => ({
+        buffer: Buffer.from([1, 2, 3]),
+        contentType: "image/png",
+        kind: "image",
+        fileName: "image.png",
+      })),
+    }
+  })
+  vi.doMock("openclaw/plugin-sdk/media-runtime", async () => {
+    const actual = await vi.importActual<Record<string, unknown>>("openclaw/plugin-sdk/media-runtime")
+    return {
+      ...actual,
+      detectMime: vi.fn(async () => "image/png"),
+      extensionForMime: vi.fn((mime: string | undefined) => {
+        if (mime === "image/png") return "png"
+        if (mime === "image/jpeg") return "jpg"
+        if (mime === "video/mp4") return "mp4"
+        return undefined
+      }),
+    }
+  })
 
   const runtimeMod = await import("../runtime")
   runtimeMod.setInlineRuntime({
     version: "test",
     state: {
       resolveStateDir: () => path.join(os.tmpdir(), "openclaw-inline-tests"),
+    },
+    media: {
+      loadWebMedia: vi.fn(async (mediaUrl: string) => {
+        const media = setup.mediaByUrl?.[mediaUrl]
+        return {
+          buffer: Buffer.from(media?.buffer ?? [1, 2, 3]),
+          contentType: media?.contentType ?? "image/png",
+          kind: "image",
+          fileName: media?.fileName ?? "image.png",
+        }
+      }),
+      detectMime: vi.fn(async () => "image/png"),
     },
     channel: {
       pairing: {
@@ -1757,12 +1805,170 @@ describe("inline/monitor", () => {
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
           Body: expect.stringContaining("#60020 user:51: context before mention"),
+          BodyForAgent: "@inlinebot can you summarize?",
+          InboundHistory: [
+            expect.objectContaining({
+              sender: "user:51",
+              body: "context before mention",
+            }),
+          ],
         }),
       )
       expect(harness.calls.sendMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           chatId: 88n,
           text: "summary",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("includes recent chat history on a first mention even when pending history is empty", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 60031n,
+            date: 1_700_000_071n,
+            fromId: 51n,
+            message: "@inlinebot can you catch up?",
+            mentioned: true,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      historyByChat: {
+        "88": [
+          {
+            id: 60028n,
+            date: 1_700_000_068n,
+            fromId: 52n,
+            message: "we changed the deployment config",
+          },
+          {
+            id: 60029n,
+            date: 1_700_000_069n,
+            fromId: 53n,
+            message: "staging looks stable now",
+          },
+          {
+            id: 60030n,
+            date: 1_700_000_070n,
+            fromId: 51n,
+            message: "can someone summarize this for the bot?",
+          },
+          {
+            id: 60031n,
+            date: 1_700_000_071n,
+            fromId: 51n,
+            message: "@inlinebot can you catch up?",
+          },
+        ],
+      },
+      dispatchReplyPayload: {
+        text: "caught up",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: expect.stringContaining("#60028 user:52: we changed the deployment config"),
+          BodyForAgent: "@inlinebot can you catch up?",
+          InboundHistory: [
+            expect.objectContaining({
+              sender: "user:52",
+              body: "we changed the deployment config",
+            }),
+            expect.objectContaining({
+              sender: "user:53",
+              body: "staging looks stable now",
+            }),
+            expect.objectContaining({
+              sender: "user:51",
+              body: "can someone summarize this for the bot?",
+            }),
+          ],
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 88n,
+          text: "caught up",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("does not stall on a first mention when both pending history and fetched chat history are empty", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 60040n,
+            date: 1_700_000_080n,
+            fromId: 51n,
+            message: "@inlinebot are you here?",
+            mentioned: true,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      historyByChat: {
+        "88": [],
+      },
+      dispatchReplyPayload: {
+        text: "yes",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          BodyForAgent: "@inlinebot are you here?",
+          InboundHistory: [],
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 88n,
+          text: "yes",
         }),
       )
     })
@@ -1821,12 +2027,112 @@ describe("inline/monitor", () => {
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
           Body: expect.stringContaining("we deployed to staging and saw an error"),
+          BodyForAgent: "@inlinebot can you summarize what happened?",
+          InboundHistory: [
+            expect.objectContaining({
+              sender: "user:51",
+              body: "we deployed to staging and saw an error",
+            }),
+          ],
         }),
       )
       expect(harness.calls.sendMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           chatId: 88n,
           text: "summary",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("uses cfg.messages.groupChat.historyLimit for pending mention-gated context when account historyLimit is unset", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 62000n,
+            date: 1_700_000_080n,
+            fromId: 51n,
+            message: "first skipped line",
+            mentioned: false,
+          },
+        },
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 62001n,
+            date: 1_700_000_081n,
+            fromId: 51n,
+            message: "second skipped line",
+            mentioned: false,
+          },
+        },
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 62002n,
+            date: 1_700_000_082n,
+            fromId: 51n,
+            message: "third skipped line",
+            mentioned: false,
+          },
+        },
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 62003n,
+            date: 1_700_000_083n,
+            fromId: 51n,
+            message: "@inlinebot summarize the latest lines",
+            mentioned: true,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      dispatchReplyPayload: {
+        text: "summary",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        messages: {
+          groupChat: {
+            historyLimit: 2,
+          },
+        },
+      } as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          InboundHistory: [
+            expect.objectContaining({ body: "second skipped line" }),
+            expect.objectContaining({ body: "third skipped line" }),
+          ],
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          InboundHistory: expect.arrayContaining([expect.objectContaining({ body: "first skipped line" })]),
         }),
       )
     })

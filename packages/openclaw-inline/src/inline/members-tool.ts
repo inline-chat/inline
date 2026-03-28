@@ -1,4 +1,4 @@
-import type { AnyAgentTool, OpenClawConfig } from "openclaw/plugin-sdk"
+import type { AnyAgentTool, OpenClawConfig } from "openclaw/plugin-sdk/core"
 import { InlineSdkClient } from "@inline-chat/realtime-sdk"
 import { resolveInlineAccount, resolveInlineToken } from "./accounts.js"
 import { getSpaceMembersWithUsers, type InlineSpaceMemberRecord } from "./space-members.js"

@@ -1,4 +1,5 @@
-import { normalizeAccountId as normalizePluginAccountId, type OpenClawConfig } from "openclaw/plugin-sdk"
+import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
+import { normalizeAccountId as normalizePluginAccountId } from "../openclaw-compat.js"
 
 type InlineToolPolicy = Record<string, unknown>
 

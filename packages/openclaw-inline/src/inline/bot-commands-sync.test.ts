@@ -214,12 +214,18 @@ describe("inline/bot-commands-sync", () => {
       { name: "bad-cmd", description: "Should be skipped" },
     ])
 
-    vi.doMock("openclaw/plugin-sdk", async () => {
-      const actual = await vi.importActual<Record<string, unknown>>("openclaw/plugin-sdk")
+    vi.doMock("openclaw/plugin-sdk/command-auth", async () => {
+      const actual = await vi.importActual<Record<string, unknown>>("openclaw/plugin-sdk/command-auth")
       return {
         ...actual,
         listSkillCommandsForAgents,
         listNativeCommandSpecsForConfig,
+      }
+    })
+    vi.doMock("openclaw/plugin-sdk/plugin-runtime", async () => {
+      const actual = await vi.importActual<Record<string, unknown>>("openclaw/plugin-sdk/plugin-runtime")
+      return {
+        ...actual,
         getPluginCommandSpecs,
       }
     })
@@ -269,5 +275,64 @@ describe("inline/bot-commands-sync", () => {
     expect(names).toContain("weather_skill")
     expect(names).toContain("plugin_cmd")
     expect(names).not.toContain("bad-cmd")
+  })
+
+  it("falls back cleanly when command-auth module exists without helper exports", async () => {
+    vi.resetModules()
+
+    vi.doMock("openclaw/plugin-sdk/command-auth", async () => {
+      const actual = await vi.importActual<Record<string, unknown>>("openclaw/plugin-sdk/command-auth")
+      return {
+        ...actual,
+        listSkillCommandsForAgents: undefined,
+        listNativeCommandSpecsForConfig: undefined,
+      }
+    })
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith("/bot/deleteMyCommands") || url.endsWith("/bot/setMyCommands")) {
+        return new Response(JSON.stringify({ ok: true, result: {} }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }
+      return new Response(JSON.stringify({ ok: false, error_code: 404, description: "not found" }), {
+        status: 404,
+        headers: { "content-type": "application/json" },
+      })
+    })
+    globalThis.fetch = fetchMock as typeof fetch
+
+    const { syncInlineNativeCommands } = await import("./bot-commands-sync")
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+    }
+    const result = await syncInlineNativeCommands({
+      cfg: {
+        channels: {
+          inline: {
+            token: "inline-bot-token",
+            baseUrl: "https://api.inline.chat",
+          },
+        },
+      } satisfies OpenClawConfig,
+      logger,
+    })
+
+    expect(result).toEqual({
+      attempted: 1,
+      synced: 1,
+      failed: 0,
+    })
+
+    const setBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as {
+      commands: Array<{ command: string }>
+    }
+    const names = setBody.commands.map((entry) => entry.command)
+    expect(names).toContain("help")
+    expect(names).toContain("status")
+    expect(names).not.toContain("weather_skill")
   })
 })

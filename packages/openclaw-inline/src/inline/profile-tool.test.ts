@@ -39,11 +39,17 @@ vi.mock("@inline-chat/realtime-sdk", () => ({
   },
 }))
 
-vi.mock("openclaw/plugin-sdk", async () => {
-  const actual = await vi.importActual<Record<string, unknown>>("openclaw/plugin-sdk")
+vi.mock("openclaw/plugin-sdk/web-media", async () => {
+  const actual = await vi.importActual<Record<string, unknown>>("openclaw/plugin-sdk/web-media")
   return {
     ...actual,
     loadWebMedia,
+  }
+})
+vi.mock("openclaw/plugin-sdk/media-runtime", async () => {
+  const actual = await vi.importActual<Record<string, unknown>>("openclaw/plugin-sdk/media-runtime")
+  return {
+    ...actual,
     detectMime,
   }
 })
@@ -57,6 +63,17 @@ describe("inline/profile-tool", () => {
     invokeRaw.mockClear()
     loadWebMedia.mockClear()
     detectMime.mockClear()
+
+    return import("../runtime").then((runtimeMod) => {
+      runtimeMod.setInlineRuntime({
+        version: "test",
+        state: { resolveStateDir: () => "/tmp" },
+        media: {
+          loadWebMedia,
+          detectMime,
+        },
+      } as any)
+    })
   })
 
   it("updates bot profile name and photo", async () => {
