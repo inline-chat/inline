@@ -11,6 +11,8 @@ class ChatTitleToolbar: NSToolbarItem {
   private var dependencies: AppDependencies
   private var iconSize: CGFloat = Theme.chatToolbarIconSize
   private var chatSubscription: AnyCancellable?
+  private var replyThreadParentSubscription: AnyCancellable?
+  private var replyThreadParentViewModel: ReplyThreadParentViewModel?
   private var isEditingTitle = false
 
   private lazy var iconView = ChatIconView(peer: peer, iconSize: iconSize)
@@ -45,6 +47,20 @@ class ChatTitleToolbar: NSToolbarItem {
     return tf
   }()
 
+  private let parentThreadLabel: NSTextField = {
+    let tf = NSTextField(labelWithString: "")
+    tf.font = .systemFont(ofSize: 11, weight: .medium)
+    tf.textColor = .secondaryLabelColor
+    tf.maximumNumberOfLines = 1
+    tf.usesSingleLineMode = true
+    tf.lineBreakMode = .byTruncatingTail
+    tf.cell?.lineBreakMode = .byTruncatingTail
+    tf.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    tf.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    tf.isHidden = true
+    return tf
+  }()
+
   private let nameEditor: NSTextField = {
     let tf = NSTextField(string: "")
     tf.font = .systemFont(ofSize: 13, weight: .semibold)
@@ -62,7 +78,7 @@ class ChatTitleToolbar: NSToolbarItem {
   }()
 
   private lazy var textStack: NSStackView = {
-    let stack = NSStackView(views: [nameLabel, nameEditor, statusView])
+    let stack = NSStackView(views: [nameLabel, nameEditor, parentThreadLabel, statusView])
     stack.orientation = .vertical
     stack.alignment = .leading
     stack.spacing = 0
@@ -84,6 +100,7 @@ class ChatTitleToolbar: NSToolbarItem {
     setupInteraction()
     configure()
     subscribeToChatUpdates()
+    observeReplyThreadParentIfNeeded()
   }
 
   private let containerView: NSView = {
@@ -244,6 +261,7 @@ class ChatTitleToolbar: NSToolbarItem {
     if !isEditingTitle {
       nameEditor.stringValue = chatTitle
     }
+    updateParentThreadContext()
     iconView.configure()
   }
 
@@ -255,6 +273,29 @@ class ChatTitleToolbar: NSToolbarItem {
           self?.configure()
         }
       }
+  }
+
+  private func observeReplyThreadParentIfNeeded() {
+    guard case let .thread(chatId) = peer else { return }
+
+    let parentViewModel = ReplyThreadParentViewModel(chatId: chatId)
+    replyThreadParentViewModel = parentViewModel
+    replyThreadParentSubscription = parentViewModel.$parentChat
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] _ in
+        self?.updateParentThreadContext()
+      }
+  }
+
+  private func updateParentThreadContext() {
+    guard let chat, chat.isReplyThread else {
+      parentThreadLabel.isHidden = true
+      parentThreadLabel.stringValue = ""
+      return
+    }
+
+    parentThreadLabel.stringValue = replyThreadParentViewModel?.parentTitle ?? "Parent thread"
+    parentThreadLabel.isHidden = false
   }
 }
 
@@ -498,6 +539,9 @@ final class ChatStatusView: NSView {
 
     // Check chat state
     if let chat {
+      if chat.isReplyThread {
+        return .empty
+      }
       if chat.isPublic == true {
         return .publicChat
       } else if chat.isPublic == false {

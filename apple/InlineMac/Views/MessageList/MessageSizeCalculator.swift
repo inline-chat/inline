@@ -112,6 +112,42 @@ class MessageSizeCalculator {
     }
   }
 
+  private func replyThreadFooterText(for replies: MessageReplies) -> String {
+    let replyCount = Int(replies.replyCount)
+    return replyCount == 1 ? "1 reply" : "\(replyCount) replies"
+  }
+
+  private func replyThreadFooterMinWidth(for replies: MessageReplies) -> CGFloat {
+    let unreadWidth = replies.hasUnread_p ? ReplyThreadFooterMetrics.unreadDotSize : 0
+    let unreadSpacing = replies.hasUnread_p ? ReplyThreadFooterMetrics.interItemSpacing : 0
+    let avatarCount = min(replies.recentReplierUserIds.count, ReplyThreadFooterMetrics.maxVisibleAvatars)
+    let avatarWidth: CGFloat
+    if avatarCount > 0 {
+      avatarWidth = ReplyThreadFooterMetrics.avatarSize
+        + CGFloat(max(avatarCount - 1, 0))
+        * (ReplyThreadFooterMetrics.avatarSize - ReplyThreadFooterMetrics.avatarOverlap)
+    } else {
+      avatarWidth = 0
+    }
+    let avatarSpacing = avatarCount > 0 ? ReplyThreadFooterMetrics.interItemSpacing : 0
+
+    let font = NSFont.systemFont(ofSize: 13, weight: replies.hasUnread_p ? .semibold : .medium)
+    let labelWidth = ceil(
+      (replyThreadFooterText(for: replies) as NSString)
+        .size(withAttributes: [.font: font]).width
+    )
+
+    return ReplyThreadFooterMetrics.horizontalInset
+      + unreadWidth
+      + unreadSpacing
+      + avatarWidth
+      + avatarSpacing
+      + labelWidth
+      + ReplyThreadFooterMetrics.interItemSpacing
+      + 10
+      + ReplyThreadFooterMetrics.horizontalInset
+  }
+
   init() {
     textStorage = NSTextStorage()
     layoutManager = NSLayoutManager()
@@ -242,6 +278,8 @@ class MessageSizeCalculator {
 
     var actionsRows: LayoutPlan?
 
+    var replyThreadFooter: LayoutPlan?
+
     /// layout for each reaction
     var reactionItems: [String: LayoutPlan]
 
@@ -282,6 +320,7 @@ class MessageSizeCalculator {
     var hasReactions: Bool { reactions != nil }
     var hasAttachments: Bool { attachments != nil }
     var hasActionsRows: Bool { actionsRows != nil }
+    var hasReplyThreadFooter: Bool { replyThreadFooter != nil }
     var placesTimeAboveReactions: Bool {
       emojiMessage && hasReactions && !reactionsOutsideBubble
     }
@@ -828,6 +867,7 @@ class MessageSizeCalculator {
     var replyPlan: LayoutPlan?
     var reactionsPlan: LayoutPlan?
     var actionsRowsPlan: LayoutPlan?
+    var replyThreadFooterPlan: LayoutPlan?
     var reactionItemsPlan: [String: LayoutPlan] = [:]
     var reactionsOutsideBubble = false
     let reactionsOutsideBubbleTopInset: CGFloat = 4.0
@@ -1198,8 +1238,24 @@ class MessageSizeCalculator {
       )
     }
 
+    if let replies = message.message.replies,
+       message.message.chatId == props.displayChatId,
+       replies.chatID > 0,
+       replies.replyCount > 0
+    {
+      replyThreadFooterPlan = LayoutPlan(
+        size: CGSize(width: 0, height: ReplyThreadFooterMetrics.footerHeight),
+        spacing: .zero
+      )
+      bubbleWidth = max(bubbleWidth, replyThreadFooterMinWidth(for: replies))
+      bubbleHeight += ReplyThreadFooterMetrics.footerHeight
+    }
+
     bubblePlan.size = CGSize(width: bubbleWidth, height: bubbleHeight)
     bubblePlan.spacing = .zero
+    if replyThreadFooterPlan != nil {
+      replyThreadFooterPlan?.size.width = bubbleWidth
+    }
 
     // MARK: - Wrapper
 
@@ -1267,6 +1323,7 @@ class MessageSizeCalculator {
       reply: replyPlan,
       reactions: reactionsPlan,
       actionsRows: actionsRowsPlan,
+      replyThreadFooter: replyThreadFooterPlan,
       reactionItems: reactionItemsPlan,
       reactionsOutsideBubble: reactionsOutsideBubble,
       reactionsOutsideBubbleTopInset: reactionsOutsideBubble ? reactionsOutsideBubbleTopInset : 0,
@@ -1460,6 +1517,7 @@ class MessageSizeCalculator {
     var replyPlan: LayoutPlan?
     var reactionsPlan: LayoutPlan?
     var actionsRowsPlan: LayoutPlan?
+    var replyThreadFooterPlan: LayoutPlan?
     var reactionItemsPlan: [String: LayoutPlan] = [:]
     let reactionsOutsideBubble = false
     var timePlan: LayoutPlan?
@@ -1699,8 +1757,24 @@ class MessageSizeCalculator {
       )
     }
 
+    if let replies = message.message.replies,
+       message.message.chatId == props.displayChatId,
+       replies.chatID > 0,
+       replies.replyCount > 0
+    {
+      replyThreadFooterPlan = LayoutPlan(
+        size: CGSize(width: 0, height: ReplyThreadFooterMetrics.footerHeight),
+        spacing: .zero
+      )
+      bubbleWidth = max(bubbleWidth, replyThreadFooterMinWidth(for: replies))
+      bubbleHeight += ReplyThreadFooterMetrics.footerHeight
+    }
+
     bubblePlan.size = CGSize(width: bubbleWidth, height: bubbleHeight)
     bubblePlan.spacing = .zero
+    if replyThreadFooterPlan != nil {
+      replyThreadFooterPlan?.size.width = bubbleWidth
+    }
 
     var wrapperWidth: CGFloat = bubblePlan.size.width
     var wrapperHeight: CGFloat = bubblePlan.size.height
@@ -1751,6 +1825,7 @@ class MessageSizeCalculator {
       reply: replyPlan,
       reactions: reactionsPlan,
       actionsRows: actionsRowsPlan,
+      replyThreadFooter: replyThreadFooterPlan,
       reactionItems: reactionItemsPlan,
       reactionsOutsideBubble: reactionsOutsideBubble,
       reactionsOutsideBubbleTopInset: 0,

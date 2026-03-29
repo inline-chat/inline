@@ -149,4 +149,72 @@ describe("messages.deleteMessage", () => {
       expect(Number(decrypted.payload.update.editMessage.msgId)).toBe(1)
     }
   })
+
+  test("deleting an anchored parent message orphans the linked reply thread instead of failing", async () => {
+    const currentUser = await testUtils.createUser("reply-delete-anchor@example.com")
+
+    const parentChat = await testUtils.createChat(null, "Parent Thread", "thread", false, currentUser.id)
+    if (!parentChat) {
+      throw new Error("Parent chat not created")
+    }
+
+    await testUtils.addParticipant(parentChat.id, currentUser.id)
+
+    await db.insert(schema.messages).values({
+      chatId: parentChat.id,
+      messageId: 1,
+      fromId: currentUser.id,
+      text: "anchor",
+    })
+    await db.update(schema.chats).set({ lastMsgId: 1 }).where(eq(schema.chats.id, parentChat.id))
+
+    const [childChat] = await db
+      .insert(schema.chats)
+      .values({
+        type: "thread",
+        title: "Re: anchor",
+        publicThread: false,
+        createdBy: currentUser.id,
+        parentChatId: parentChat.id,
+        parentMessageId: 1,
+      })
+      .returning()
+
+    if (!childChat) {
+      throw new Error("Child chat not created")
+    }
+
+    await testUtils.addParticipant(childChat.id, currentUser.id)
+
+    await expect(
+      deleteMessage(
+        {
+          peer: {
+            type: {
+              oneofKind: "chat",
+              chat: { chatId: BigInt(parentChat.id) },
+            },
+          },
+          messageIds: [1n],
+        },
+        testUtils.functionContext({ userId: currentUser.id }),
+      ),
+    ).resolves.toBeTruthy()
+
+    const [orphanedChildChat] = await db
+      .select()
+      .from(schema.chats)
+      .where(eq(schema.chats.id, childChat.id))
+      .limit(1)
+
+    const [deletedMessage] = await db
+      .select()
+      .from(schema.messages)
+      .where(and(eq(schema.messages.chatId, parentChat.id), eq(schema.messages.messageId, 1)))
+      .limit(1)
+
+    expect(orphanedChildChat?.parentChatId).toBe(parentChat.id)
+    expect(orphanedChildChat?.parentMessageId).toBeNull()
+    expect(deletedMessage).toBeUndefined()
+  })
 })

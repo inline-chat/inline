@@ -15,6 +15,7 @@ struct ChatView: View {
   @State var isChatHeaderPressed = false
   @State private var pageState: PageState = .initial
   @State private var attemptedUntitledCleanupOnExit = false
+  @State private var attemptedReplyThreadParentFetch = false
 
   @EnvironmentStateObject var fullChatViewModel: FullChatViewModel
 
@@ -163,6 +164,15 @@ struct ChatView: View {
     }
     .onReceive(
       NotificationCenter.default
+        .publisher(for: Notification.Name("NavigateToThread"))
+    ) { notification in
+      guard let threadId = notification.userInfo?["peerThreadId"] as? Int64 else { return }
+      let targetPeer = Peer.thread(id: threadId)
+      guard targetPeer != peerId else { return }
+      router.push(.chat(peer: targetPeer))
+    }
+    .onReceive(
+      NotificationCenter.default
         .publisher(for: Notification.Name("NavigateToForwardedMessage"))
     ) { notification in
       guard let messageId = notification.userInfo?["messageId"] as? Int64 else { return }
@@ -261,15 +271,41 @@ struct ChatView: View {
   private func fetchChatIfNeeded() async {
     if fullChatViewModel.chat != nil {
       pageState = .loaded
+      ToastManager.shared.hideReplyThreadLoadingToastIfNeeded()
       fullChatViewModel.refetchHistoryOnly()
+      await refetchReplyThreadParentIfNeeded()
     } else {
       pageState = .loading
       do {
         _ = try await fullChatViewModel.ensureChat()
         pageState = .loaded
+        ToastManager.shared.hideReplyThreadLoadingToastIfNeeded()
+        await refetchReplyThreadParentIfNeeded()
       } catch {
+        ToastManager.shared.hideReplyThreadLoadingToastIfNeeded()
         pageState = .error(error)
       }
+    }
+  }
+
+  private func refetchReplyThreadParentIfNeeded() async {
+    guard let chat = fullChatViewModel.chat,
+          chat.parentChatId != nil,
+          let parentChatId = chat.parentChatId,
+          let parentMessageId = chat.parentMessageId,
+          !attemptedReplyThreadParentFetch
+    else {
+      return
+    }
+
+    let hasParentMessage = (try? FullMessage.get(messageId: parentMessageId, chatId: parentChatId)) != nil
+    guard !hasParentMessage else { return }
+
+    attemptedReplyThreadParentFetch = true
+    do {
+      _ = try await realtimeV2.send(.getChat(peer: peerId))
+    } catch {
+      Log.shared.error("Failed to refetch reply-thread parent message", error: error)
     }
   }
 

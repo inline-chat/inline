@@ -22,10 +22,11 @@ struct MessageViewInputProps: Equatable, Codable, Hashable {
   var isRtl: Bool
   var translated: Bool
   var renderStyle: MessageRenderStyle
+  var displayChatId: Int64?
 
   /// Used in cache key
   func toString() -> String {
-    "\(firstInGroup ? "FG" : "")\(isLastMessage == true ? "LM" : "")\(isFirstMessage == true ? "FM" : "")\(isRtl ? "RTL" : "")\(isDM ? "DM" : "")\(translated ? "TR" : "")\(renderStyle == .minimal ? "MN" : "BB")"
+    "\(firstInGroup ? "FG" : "")\(isLastMessage == true ? "LM" : "")\(isFirstMessage == true ? "FM" : "")\(isRtl ? "RTL" : "")\(isDM ? "DM" : "")\(translated ? "TR" : "")\(renderStyle == .minimal ? "MN" : "BB")_dc\(displayChatId ?? 0)"
   }
 }
 
@@ -36,6 +37,7 @@ struct MessageViewProps: Equatable, Codable, Hashable {
   var isRtl: Bool
   var isDM: Bool = false
   var renderStyle: MessageRenderStyle = .bubble
+  var displayChatId: Int64?
   var index: Int?
   var translated: Bool
   var layout: MessageSizeCalculator.LayoutPlans
@@ -47,6 +49,7 @@ struct MessageViewProps: Equatable, Codable, Hashable {
       isRtl == rhs.isRtl &&
       isDM == rhs.isDM &&
       renderStyle == rhs.renderStyle &&
+      displayChatId == rhs.displayChatId &&
       translated == rhs.translated
   }
 }

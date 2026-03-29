@@ -179,11 +179,12 @@ final class MessagesCollectionView: UICollectionView {
   var itemsEmpty: Bool { coordinator.messages.isEmpty }
 
   private func findIndexPath(for messageId: Int64) -> IndexPath? {
-    for (sectionIndex, section) in coordinator.viewModel.sections.enumerated() {
-      for (itemIndex, message) in section.messages.enumerated() {
+    for (sectionIndex, section) in coordinator.sections.enumerated() {
+      for itemIndex in section.items.indices {
+        let indexPath = IndexPath(item: itemIndex, section: sectionIndex)
+        guard let message = coordinator.message(at: indexPath) else { continue }
         if message.message.messageId == messageId {
           let indexPath = IndexPath(item: itemIndex, section: sectionIndex)
-          // Validate the index path before returning
           if isValidIndexPath(indexPath) {
             return indexPath
           }
@@ -196,9 +197,9 @@ final class MessagesCollectionView: UICollectionView {
   private func isValidIndexPath(_ indexPath: IndexPath) -> Bool {
     // Check both view model and collection view data source to avoid race conditions
     guard indexPath.section >= 0,
-          indexPath.section < coordinator.viewModel.numberOfSections(),
+          indexPath.section < coordinator.numberOfSections(),
           indexPath.item >= 0,
-          indexPath.item < coordinator.viewModel.numberOfItems(in: indexPath.section),
+          indexPath.item < coordinator.numberOfItems(in: indexPath.section),
           indexPath.section < numberOfSections,
           indexPath.item < numberOfItems(inSection: indexPath.section)
     else {
@@ -219,8 +220,8 @@ final class MessagesCollectionView: UICollectionView {
 
   private func safeScrollToTop(animated: Bool = true) {
     // Check both view model and data source to avoid race conditions
-    guard coordinator.viewModel.numberOfSections() > 0,
-          coordinator.viewModel.numberOfItems(in: 0) > 0,
+    guard coordinator.numberOfSections() > 0,
+          coordinator.numberOfItems(in: 0) > 0,
           numberOfSections > 0,
           numberOfItems(inSection: 0) > 0
     else {
@@ -389,8 +390,8 @@ final class MessagesCollectionView: UICollectionView {
 
   private func animateScrollToBottom(duration: TimeInterval) {
     // Check both view model and data source to avoid race conditions
-    guard coordinator.viewModel.numberOfSections() > 0,
-          coordinator.viewModel.numberOfItems(in: 0) > 0,
+    guard coordinator.numberOfSections() > 0,
+          coordinator.numberOfItems(in: 0) > 0,
           numberOfSections > 0,
           numberOfItems(inSection: 0) > 0 else { return }
 
@@ -446,7 +447,7 @@ extension MessagesCollectionView: UICollectionViewDataSourcePrefetching {
   func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
     // Get messages on main actor, then move heavy work to background
     let messagesToPrefetch: [FullMessage] = indexPaths.compactMap { indexPath in
-      coordinator.viewModel.message(at: indexPath)
+      coordinator.message(at: indexPath)
     }.filter { $0.photoInfo != nil }
 
     if !messagesToPrefetch.isEmpty {
@@ -460,7 +461,7 @@ extension MessagesCollectionView: UICollectionViewDataSourcePrefetching {
   func collectionView(_ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]) {
     // Get messages on main actor, then move heavy work to background
     let messagesToCancel: [FullMessage] = indexPaths.compactMap { indexPath in
-      coordinator.viewModel.message(at: indexPath)
+      coordinator.message(at: indexPath)
     }.filter { $0.photoInfo != nil }
 
     if !messagesToCancel.isEmpty {
@@ -504,9 +505,14 @@ extension MessagesCollectionView: UICollectionViewDataSourcePrefetching {
 
 private extension MessagesCollectionView {
   class Coordinator: NSObject, UICollectionViewDelegateFlowLayout {
+    private enum ThreadNavigationError: Error {
+      case invalidResponse
+    }
+
     private var currentCollectionView: UICollectionView?
     let viewModel: MessagesSectionedViewModel
     private let translationViewModel: TranslationViewModel
+    private var replyThreadParentViewModel: ReplyThreadParentViewModel?
     private var hasAnalyzedInitialMessages = false
     private let peerId: Peer
     private let chatId: Int64
@@ -554,9 +560,33 @@ private extension MessagesCollectionView {
       collectionContextMenu?.dismissMenu()
     }
 
-    private var dataSource: UICollectionViewDiffableDataSource<Date, FullMessage.ID>!
+    private var dataSource: UICollectionViewDiffableDataSource<Date, MessagesSectionedViewModel.Item>!
     var messages: [FullMessage] {
-      viewModel.sections.flatMap(\.messages)
+      viewModel.displayedMessages
+    }
+
+    var sections: [MessagesSectionedViewModel.MessageSection] {
+      viewModel.sections
+    }
+
+    func message(at indexPath: IndexPath) -> FullMessage? {
+      viewModel.message(at: indexPath)
+    }
+
+    func numberOfSections() -> Int {
+      viewModel.numberOfSections()
+    }
+
+    func numberOfItems(in section: Int) -> Int {
+      viewModel.numberOfItems(in: section)
+    }
+
+    func section(at index: Int) -> MessagesSectionedViewModel.MessageSection? {
+      viewModel.section(at: index)
+    }
+
+    func item(at indexPath: IndexPath) -> MessagesSectionedViewModel.Item? {
+      viewModel.item(at: indexPath)
     }
 
     init(peerId: Peer, chatId: Int64, spaceId: Int64) {
@@ -567,6 +597,12 @@ private extension MessagesCollectionView {
       translationViewModel = TranslationViewModel(peerId: peerId)
 
       super.init()
+
+      if peerId.isThread {
+        let parentViewModel = ReplyThreadParentViewModel(chatId: chatId)
+        replyThreadParentViewModel = parentViewModel
+        viewModel.setReplyThreadAnchorMessage(parentViewModel.parentMessage)
+      }
 
       viewModel.observe { [weak self] update in
         self?.applyUpdate(update)
@@ -580,18 +616,31 @@ private extension MessagesCollectionView {
 
           guard let self, peer == self.peerId else { return }
           var snapshot = dataSource.snapshot()
-          let ids = messages.map(\.id)
-          // Safety check: only reconfigure items that actually exist in the snapshot
-          let existingIds = ids.filter { snapshot.itemIdentifiers.contains($0) }
-          if !existingIds.isEmpty {
-            snapshot.reconfigureItems(existingIds)
+          let items = sections.flatMap(\.items)
+          let existingItems = items.filter { snapshot.itemIdentifiers.contains($0) }
+          if !existingItems.isEmpty {
+            snapshot.reconfigureItems(existingItems)
             safeApplySnapshot(snapshot, animatingDifferences: true)
           }
         }
         .store(in: &cancellables)
 
+      observeReplyThreadParentIfNeeded()
+
       // Setup NotionTaskManager delegate
       setupNotionTaskManager()
+    }
+
+    private func observeReplyThreadParentIfNeeded() {
+      guard let parentViewModel = replyThreadParentViewModel else { return }
+
+      parentViewModel.$parentMessage
+        .receive(on: DispatchQueue.main)
+        .sink { [weak self] parentMessage in
+          guard let self else { return }
+          self.viewModel.setReplyThreadAnchorMessage(parentMessage)
+        }
+        .store(in: &cancellables)
     }
 
     func dispose() {
@@ -661,6 +710,52 @@ private extension MessagesCollectionView {
       }
     }
 
+    private func openThread(chatId: Int64) {
+      ToastManager.shared.showReplyThreadLoadingToast()
+      NotificationCenter.default.post(
+        name: Notification.Name("NavigateToThread"),
+        object: nil,
+        userInfo: ["peerThreadId": chatId]
+      )
+    }
+
+    private func openOrCreateReplyThread(for fullMessage: FullMessage) {
+      let message = fullMessage.message
+
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+
+        if let replies = message.replies, replies.chatID > 0 {
+          self.openThread(chatId: replies.chatID)
+          return
+        }
+
+        ToastManager.shared.showReplyThreadLoadingToast()
+
+        do {
+          let result = try await Api.realtime.send(
+            .createSubthread(
+              parentChatId: message.chatId,
+              parentMessageId: message.messageId
+            )
+          )
+
+          guard case let .createSubthread(response) = result, response.hasChat else {
+            throw ThreadNavigationError.invalidResponse
+          }
+
+          self.openThread(chatId: response.chat.id)
+        } catch {
+          Log.shared.error("Failed to open or create reply thread", error: error)
+          ToastManager.shared.showToast(
+            "Couldn't open thread",
+            type: .error,
+            systemImage: "exclamationmark.triangle"
+          )
+        }
+      }
+    }
+
     private func chatPeerId(for message: Message) -> Peer {
       do {
         if let chat = try AppDatabase.shared.reader.read({ db in try Chat.fetchOne(db, id: message.chatId) }) {
@@ -677,15 +772,16 @@ private extension MessagesCollectionView {
 
       let cellRegistration = UICollectionView.CellRegistration<
         MessageCollectionViewCell,
-        FullMessage.ID
-      > { [weak self] cell, indexPath, messageId in
-        guard let self, let message = viewModel.messagesByID[messageId] else { return }
-        let isFromDifferentSender = isMessageFromDifferentSender(at: indexPath)
+        MessagesSectionedViewModel.Item
+      > { [weak self] cell, indexPath, item in
+        guard let self, let message = self.viewModel.fullMessage(for: item) else { return }
+        let isFromDifferentSender = self.isMessageFromDifferentSender(at: indexPath)
 
         cell.configure(
           with: message,
           fromOtherSender: isFromDifferentSender,
-          spaceId: spaceId
+          spaceId: self.spaceId,
+          currentChatId: self.chatId
         )
 
         cell.onUserTap = { [weak self] userId in
@@ -708,13 +804,13 @@ private extension MessagesCollectionView {
         }
       }
 
-      dataSource = UICollectionViewDiffableDataSource<Date, FullMessage.ID>(
+      dataSource = UICollectionViewDiffableDataSource<Date, MessagesSectionedViewModel.Item>(
         collectionView: collectionView
-      ) { collectionView, indexPath, messageId in
+      ) { collectionView, indexPath, item in
         collectionView.dequeueConfiguredReusableCell(
           using: cellRegistration,
           for: indexPath,
-          item: messageId
+          item: item
         )
       }
 
@@ -732,7 +828,7 @@ private extension MessagesCollectionView {
           }
 
           // Safely get section with bounds checking
-          if let section = viewModel.section(at: indexPath.section) {
+          if let section = self.section(at: indexPath.section) {
             footerView.configure(with: section.dayString)
           } else {
             // Fallback for invalid section
@@ -750,14 +846,14 @@ private extension MessagesCollectionView {
     }
 
     private func isMessageFromDifferentSender(at indexPath: IndexPath) -> Bool {
-      guard let currentMessage = viewModel.message(at: indexPath) else { return true }
+      guard let currentMessage = message(at: indexPath) else { return true }
 
       // Check previous message within the same section
       let previousIndexPath = IndexPath(item: indexPath.item + 1, section: indexPath.section)
 
       // Ensure the previous index path is valid before checking
-      if previousIndexPath.item < viewModel.numberOfItems(in: indexPath.section),
-         let previousMessage = viewModel.message(at: previousIndexPath)
+      if previousIndexPath.item < numberOfItems(in: indexPath.section),
+         let previousMessage = message(at: previousIndexPath)
       {
         return currentMessage.message.fromId != previousMessage.message.fromId
       }
@@ -765,10 +861,10 @@ private extension MessagesCollectionView {
       // If no previous message in this section, check last message of previous section
       if indexPath.section > 0 {
         let previousSection = indexPath.section - 1
-        let previousSectionItemCount = viewModel.numberOfItems(in: previousSection)
+        let previousSectionItemCount = numberOfItems(in: previousSection)
         if previousSectionItemCount > 0 {
           let lastMessageInPreviousSection = IndexPath(item: 0, section: previousSection)
-          if let lastMessage = viewModel.message(at: lastMessageInPreviousSection) {
+          if let lastMessage = message(at: lastMessageInPreviousSection) {
             return currentMessage.message.fromId != lastMessage.message.fromId
           }
         }
@@ -778,17 +874,13 @@ private extension MessagesCollectionView {
     }
 
     private func setInitialData(animated: Bool? = false) {
-      var snapshot = NSDiffableDataSourceSnapshot<Date, FullMessage.ID>()
+      var snapshot = NSDiffableDataSourceSnapshot<Date, MessagesSectionedViewModel.Item>()
 
-      // Add sections and their messages using dates as stable identifiers
-      for section in viewModel.sections {
+      for section in sections {
         snapshot.appendSections([section.date])
-        let messageIds = section.messages.map(\.id)
-        snapshot.appendItems(messageIds, toSection: section.date)
+        snapshot.appendItems(section.items, toSection: section.date)
       }
 
-      // Reconfigure only items that already exist in both snapshots so reused cells
-      // rebuild their content when underlying data changes (e.g., replies load later).
       let currentIds = Set(dataSource.snapshot().itemIdentifiers)
       let nextIds = Set(snapshot.itemIdentifiers)
       let idsToReconfigure = Array(currentIds.intersection(nextIds))
@@ -805,7 +897,7 @@ private extension MessagesCollectionView {
     }
 
     private func safeApplySnapshot(
-      _ snapshot: NSDiffableDataSourceSnapshot<Date, FullMessage.ID>,
+      _ snapshot: NSDiffableDataSourceSnapshot<Date, MessagesSectionedViewModel.Item>,
       animatingDifferences: Bool,
       withCustomTiming: Bool = false,
       completion: (() -> Void)? = nil
@@ -837,39 +929,69 @@ private extension MessagesCollectionView {
       }
     }
 
+    private func insertItems(
+      _ itemsToInsert: [MessagesSectionedViewModel.Item],
+      into snapshot: inout NSDiffableDataSourceSnapshot<Date, MessagesSectionedViewModel.Item>,
+      orderedSectionItems: [MessagesSectionedViewModel.Item],
+      sectionDate: Date
+    ) {
+      guard !itemsToInsert.isEmpty else { return }
+
+      for item in itemsToInsert {
+        guard snapshot.itemIdentifiers.contains(item) == false,
+              let orderedIndex = orderedSectionItems.firstIndex(of: item)
+        else {
+          continue
+        }
+
+        let itemsBefore = orderedSectionItems[..<orderedIndex].reversed()
+        if let previousItem = itemsBefore.first(where: { snapshot.itemIdentifiers.contains($0) }) {
+          snapshot.insertItems([item], afterItem: previousItem)
+          continue
+        }
+
+        let nextStartIndex = orderedSectionItems.index(after: orderedIndex)
+        let itemsAfter = orderedSectionItems[nextStartIndex...]
+        if let nextItem = itemsAfter.first(where: { snapshot.itemIdentifiers.contains($0) }) {
+          snapshot.insertItems([item], beforeItem: nextItem)
+          continue
+        }
+
+        snapshot.appendItems([item], toSection: sectionDate)
+      }
+    }
+
     func applyUpdate(_ update: MessagesSectionedViewModel.SectionedMessagesChangeSet) {
       switch update {
         case let .reload(animated):
           setInitialData(animated: animated)
 
-        case let .sectionsChanged(sections):
+        case .sectionsChanged:
           setInitialData(animated: true)
 
-        case let .messagesAdded(sectionIndex, messageIds):
+        case let .itemsAdded(sectionIndex, itemIDs):
           var snapshot = dataSource.snapshot()
 
-          // Validate section index
-          guard sectionIndex >= 0, sectionIndex < viewModel.numberOfSections() else {
+          guard sectionIndex >= 0, sectionIndex < numberOfSections() else {
             setInitialData(animated: true)
             return
           }
 
-          // Check if this is the first section (most recent)
           let shouldScroll = sectionIndex == 0
           let wasAtBottom = (currentCollectionView as? MessagesCollectionView)?.shouldScrollToBottom ?? false
 
-          // Convert section index to date
-          guard let section = viewModel.section(at: sectionIndex) else {
+          guard let section = section(at: sectionIndex) else {
             setInitialData(animated: true)
             return
           }
           let sectionDate = section.date
 
-          if let firstItemInSection = snapshot.itemIdentifiers(inSection: sectionDate).first {
-            snapshot.insertItems(messageIds, beforeItem: firstItemInSection)
-          } else {
-            snapshot.appendItems(messageIds, toSection: sectionDate)
+          guard snapshot.sectionIdentifiers.contains(sectionDate) else {
+            setInitialData(animated: true)
+            return
           }
+
+          insertItems(itemIDs, into: &snapshot, orderedSectionItems: section.items, sectionDate: sectionDate)
 
           DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
             guard let self else { return }
@@ -884,22 +1006,22 @@ private extension MessagesCollectionView {
           }
           handleIncomingMessages()
 
-        case let .messagesDeleted(_, messageIds):
+        case let .itemsDeleted(_, itemIDs):
           var snapshot = dataSource.snapshot()
-          snapshot.deleteItems(messageIds)
+          snapshot.deleteItems(itemIDs.filter { snapshot.itemIdentifiers.contains($0) })
           safeApplySnapshot(snapshot, animatingDifferences: true)
 
-        case let .messagesUpdated(_, messageIds, animated):
+        case let .itemsUpdated(_, itemIDs, animated):
           var snapshot = dataSource.snapshot()
-          // Safety check: only reconfigure items that actually exist in the snapshot
-          let existingIds = messageIds.filter { snapshot.itemIdentifiers.contains($0) }
+          let existingIds = itemIDs.filter { snapshot.itemIdentifiers.contains($0) }
           if !existingIds.isEmpty {
             snapshot.reconfigureItems(existingIds)
-            safeApplySnapshot(snapshot, animatingDifferences: animated ?? false)
+            safeApplySnapshot(snapshot, animatingDifferences: animated ?? false) { [weak self] in
+              self?.currentCollectionView?.performBatchUpdates(nil)
+            }
           }
 
         case .multiSectionUpdate:
-          // Multiple sections affected - do a full data reload for simplicity
           setInitialData(animated: true)
       }
     }
@@ -991,9 +1113,7 @@ private extension MessagesCollectionView {
     }
 
     private func buildImageItems() -> [ImageViewerItem] {
-      let photoMessages = viewModel.sections
-        .flatMap(\.messages)
-        .filter { $0.photoInfo != nil && $0.message.isSticker != true }
+      let photoMessages = messages.filter { $0.photoInfo != nil && $0.message.isSticker != true }
 
       let sortedMessages = photoMessages.sorted { left, right in
         if left.message.date != right.message.date {
@@ -1182,15 +1302,12 @@ private extension MessagesCollectionView {
 
       // Find the message by searching through all sections
       var targetMessage: FullMessage?
-      for section in viewModel.sections {
-        for message in section.messages {
-          let messageBaseTag = Int(message.message.messageId % Int64(Int.max / 10_000))
-          if messageBaseTag == baseTag {
-            targetMessage = message
-            break
-          }
+      for message in messages {
+        let messageBaseTag = Int(message.message.messageId % Int64(Int.max / 10_000))
+        if messageBaseTag == baseTag {
+          targetMessage = message
+          break
         }
-        if targetMessage != nil { break }
       }
 
       guard let fullMessage = targetMessage else {
@@ -1229,7 +1346,7 @@ private extension MessagesCollectionView {
       layout collectionViewLayout: UICollectionViewLayout,
       sizeForItemAt indexPath: IndexPath
     ) -> CGSize {
-      guard let message = viewModel.message(at: indexPath) else {
+      guard let message = message(at: indexPath) else {
         return .zero
       }
 
@@ -1298,7 +1415,7 @@ private extension MessagesCollectionView {
       point: CGPoint
     ) -> UIContextMenuConfiguration? {
       guard let indexPath = indexPaths.first,
-            let fullMessage = viewModel.message(at: indexPath) else { return nil }
+            let fullMessage = message(at: indexPath) else { return nil }
       let message = fullMessage.message
       let cell = currentCollectionView?.cellForItem(at: indexPath) as! MessageCollectionViewCell
 
@@ -1475,6 +1592,14 @@ private extension MessagesCollectionView {
           ChatState.shared.setReplyingMessageId(peer: message.peerId, id: message.messageId)
         }
         actions.append(replyAction)
+
+        let replyInThreadAction = UIAction(
+          title: "Reply in Thread",
+          image: UIImage(systemName: "bubble.left.and.text.bubble.right")
+        ) { [weak self] _ in
+          self?.openOrCreateReplyThread(for: fullMessage)
+        }
+        actions.append(replyInThreadAction)
 
         let forwardAction = UIAction(title: "Forward", image: UIImage(systemName: "arrowshape.turn.up.right")) {
           [weak self] _ in
@@ -1880,25 +2005,9 @@ private extension MessagesCollectionView {
         let isWithinBounds = scrollView.contentOffset.y <= maxOffset
         let isNearTop = scrollView.contentOffset.y >= (maxOffset - threshold)
 
-        if isNearTop, isWithinBounds, maxOffset > 0 {
+        if isNearTop, isWithinBounds, maxOffset > 0, viewModel.canLoadOlderFromLocal {
           viewModel.loadBatch(at: .older)
-          scheduleUpdateItems()
         }
-      }
-    }
-
-    func scheduleUpdateItems() {
-      updateItemsSafely()
-    }
-
-    private func updateItemsSafely() {
-      let currentSnapshot = dataSource.snapshot()
-      let currentIds = Set(currentSnapshot.itemIdentifiers)
-      let availableIds = Set(messages.map(\.id))
-      let missingIds = availableIds.subtracting(currentIds)
-
-      if !missingIds.isEmpty {
-        setInitialData(animated: false)
       }
     }
 
@@ -2256,49 +2365,41 @@ extension MessagesCollectionView.Coordinator: InlineKit.NotionTaskManagerDelegat
   private func handleTranslationForUpdateInner(_ update: MessagesSectionedViewModel.SectionedMessagesChangeSet) async {
     switch update {
       case .reload:
-        // For reload, trigger translation on all current messages
-        await translationViewModel.messagesDisplayed(messages: viewModel.messages)
+        translationViewModel.messagesDisplayed(messages: messages)
 
-        // Also analyze for translation detection on initial load
-        if !hasAnalyzedInitialMessages, !viewModel.messages.isEmpty {
-          await TranslationDetector.shared.analyzeMessages(peer: peerId, messages: viewModel.messages)
+        if !hasAnalyzedInitialMessages, !messages.isEmpty {
+          await TranslationDetector.shared.analyzeMessages(peer: peerId, messages: messages)
           hasAnalyzedInitialMessages = true
         }
 
-      case let .messagesAdded(_, messageIds):
-        // For added messages, get them from the viewModel and trigger translation
-        let addedMessages = messageIds.compactMap { messageId in
-          viewModel.messagesByID[messageId]
+      case let .itemsAdded(_, itemIDs):
+        let addedMessages = itemIDs.compactMap { item in
+          viewModel.fullMessage(for: item)
         }
         if !addedMessages.isEmpty {
-          await translationViewModel.messagesDisplayed(messages: addedMessages)
+          translationViewModel.messagesDisplayed(messages: addedMessages)
 
-          // Also analyze new messages for translation detection if we haven't done initial analysis
           if !hasAnalyzedInitialMessages {
             await TranslationDetector.shared.analyzeMessages(peer: peerId, messages: addedMessages)
             hasAnalyzedInitialMessages = true
           }
         }
 
-      case let .messagesUpdated(_, messageIds, _):
-        // For updated messages, get them from the viewModel and trigger translation
-        let updatedMessages = messageIds.compactMap { messageId in
-          viewModel.messagesByID[messageId]
+      case let .itemsUpdated(_, itemIDs, _):
+        let updatedMessages = itemIDs.compactMap { item in
+          viewModel.fullMessage(for: item)
         }
         if !updatedMessages.isEmpty {
-          await translationViewModel.messagesDisplayed(messages: updatedMessages)
+          translationViewModel.messagesDisplayed(messages: updatedMessages)
         }
 
       case .sectionsChanged:
-        // For section changes, trigger translation on all current messages
-        await translationViewModel.messagesDisplayed(messages: viewModel.messages)
+        translationViewModel.messagesDisplayed(messages: messages)
 
-      case let .multiSectionUpdate(sections: sections):
-        // For section changes, trigger translation on all current messages
-        await translationViewModel.messagesDisplayed(messages: viewModel.messages)
+      case .multiSectionUpdate:
+        translationViewModel.messagesDisplayed(messages: messages)
 
-      case .messagesDeleted:
-        // No action needed for deletes
+      case .itemsDeleted:
         break
     }
   }

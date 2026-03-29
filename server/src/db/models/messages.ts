@@ -596,6 +596,9 @@ async function deleteMessages(
   update: UpdateSeqAndDate
 }> {
   log.trace("deleteMessages", { messageIds, chatId })
+  const messageIdsAsNumbers = Array.from(
+    new Set(messageIds.map((id) => Number(id)).filter((id) => Number.isSafeInteger(id) && id > 0)),
+  )
 
   // Use a transaction with FOR UPDATE to lock the row while we're working with it
   let { update } = await db.transaction(async (tx) => {
@@ -606,16 +609,20 @@ async function deleteMessages(
     // Clear first to allow for deleting
     await tx.update(chats).set({ lastMsgId: null }).where(eq(chats.id, chatId))
 
+    if (messageIdsAsNumbers.length > 0) {
+      await tx
+        .update(chats)
+        .set({ parentMessageId: null })
+        .where(and(eq(chats.parentChatId, chatId), inArray(chats.parentMessageId, messageIdsAsNumbers)))
+    }
+
     // Delete message
     let deleted = await tx
       .delete(messages)
       .where(
         and(
           eq(messages.chatId, chatId),
-          inArray(
-            messages.messageId,
-            messageIds.map((id) => Number(id)),
-          ),
+          inArray(messages.messageId, messageIdsAsNumbers),
         ),
       )
       .returning()

@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import GRDB
 import InlineKit
 import Logger
 import SwiftUI
@@ -13,18 +14,22 @@ class MessageListAppKit: NSViewController {
   private var chat: Chat?
   private var chatId: Int64 { chat?.id ?? 0 }
   var viewModel: MessagesProgressiveViewModel
-  private var messages: [FullMessage] { viewModel.messages }
-  private var state: ChatState
-  private let messageRenderStyle: MessageRenderStyle
-
-  // MARK: - Interleaved rows (messages + day separators)
-
+  private var messages: [FullMessage] {
+    ReplyThreadMessageProjection.project(parentMessage: projectedParentMessage, replies: viewModel.messages)
+  }
   private enum RowItem: Equatable, Hashable {
     case daySeparator(dayStart: Date)
-    case message(id: Int64) // FullMessage.id (stable list identity)
+    case message(id: Int64)
   }
-
   private var rowItems: [RowItem] = []
+  private var state: ChatState
+  private let messageRenderStyle: MessageRenderStyle
+  private var projectedParentMessage: FullMessage?
+  private var replyThreadParentViewModel: ReplyThreadParentViewModel?
+  private var replyThreadParentCancellable: AnyCancellable?
+  private var attemptedReplyThreadParentFetch = false
+
+  // MARK: - Interleaved rows (messages + day separators)
   private var messageIndexById: [Int64: Int] = [:]
   private var rowIndexByMessageId: [Int64: Int] = [:]
   private var dayStartsInRowItems: Set<Date> = []
@@ -94,6 +99,7 @@ class MessageListAppKit: NSViewController {
     }
 
     sizeCalculator.prepareForUse()
+    observeReplyThreadParentIfNeeded()
     rebuildRowItems()
 
     // observe data
@@ -178,6 +184,52 @@ class MessageListAppKit: NSViewController {
     return view
   }()
 
+  private func observeReplyThreadParentIfNeeded() {
+    guard chat?.isReplyThread == true else { return }
+    guard replyThreadParentViewModel == nil else { return }
+
+    let parentViewModel = ReplyThreadParentViewModel(chatId: chatId)
+    replyThreadParentViewModel = parentViewModel
+    projectedParentMessage = parentViewModel.parentMessage
+    replyThreadParentCancellable = parentViewModel.$parentMessage
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] parentMessage in
+        guard let self else { return }
+        projectedParentMessage = parentMessage
+        applyUpdate(.reload(animated: true))
+      }
+
+    Task { [weak self] in
+      await self?.fetchReplyThreadParentIfNeeded()
+    }
+  }
+
+  @MainActor
+  private func fetchReplyThreadParentIfNeeded() async {
+    guard let chat, chat.isReplyThread else { return }
+    guard let parentChatId = chat.parentChatId, let parentMessageId = chat.parentMessageId else { return }
+    guard !attemptedReplyThreadParentFetch else { return }
+    guard projectedParentMessage == nil else { return }
+
+    do {
+      let existingParentMessage = try await dependencies.database.reader.read { db in
+        try FullMessage
+          .queryRequest()
+          .filter(Column("chatId") == parentChatId && Column("messageId") == parentMessageId)
+          .fetchOne(db)
+      }
+
+      if existingParentMessage != nil {
+        return
+      }
+
+      attemptedReplyThreadParentFetch = true
+      _ = try await dependencies.realtimeV2.send(.getChat(peer: peerId))
+    } catch {
+      log.error("Failed to fetch reply-thread parent message", error: error)
+    }
+  }
+
   private func rebuildRowItems() {
     messageIndexById.removeAll(keepingCapacity: true)
     rowIndexByMessageId.removeAll(keepingCapacity: true)
@@ -188,15 +240,17 @@ class MessageListAppKit: NSViewController {
       return
     }
 
+    for (index, message) in messages.enumerated() {
+      messageIndexById[message.id] = index
+    }
+
     let calendar = Calendar.autoupdatingCurrent
     var newRowItems: [RowItem] = []
     newRowItems.reserveCapacity(messages.count + 8)
 
     var previousDayStart: Date?
 
-    for (index, message) in messages.enumerated() {
-      messageIndexById[message.id] = index
-
+    for message in messages {
       let dayStart = calendar.startOfDay(for: message.message.date)
       if previousDayStart == nil || dayStart != previousDayStart {
         newRowItems.append(.daySeparator(dayStart: dayStart))
@@ -1066,6 +1120,16 @@ class MessageListAppKit: NSViewController {
           return
         }
 
+        let hasStrictlyOlderMessage = result.messages.contains { Int64($0.id) < beforeMessageId }
+        if !hasStrictlyOlderMessage {
+          if let boundary = noRemoteOlderBeforeMessageId {
+            noRemoteOlderBeforeMessageId = max(boundary, beforeMessageId)
+          } else {
+            noRemoteOlderBeforeMessageId = beforeMessageId
+          }
+          return
+        }
+
         if result.messages.isEmpty {
           if let boundary = noRemoteOlderBeforeMessageId {
             noRemoteOlderBeforeMessageId = max(boundary, beforeMessageId)
@@ -1092,7 +1156,7 @@ class MessageListAppKit: NSViewController {
 
     Task { [weak self] in
       guard let self else { return }
-      let oldestMessageIdBeforeLoad = messages.first?.message.messageId
+      let oldestMessageIdBeforeLoad = viewModel.oldestLoadedMessageId
       var didInsertRows = false
       // Preserve scroll position from bottom if we're loading at top
       maintainingBottomScroll { [weak self] in
@@ -1164,11 +1228,11 @@ class MessageListAppKit: NSViewController {
       !isUserScrolling // to prevent jitter when user is scrolling
 
     let oldRowItems = rowItems
-    let oldRowCount = oldRowItems.count
     let oldRowIndexByMessageId = rowIndexByMessageId
 
     rebuildRowItems()
     let newRowItems = rowItems
+    let oldRowCount = oldRowItems.count
     let newRowCount = newRowItems.count
 
     func reloadAll(animated: Bool) {
@@ -1243,6 +1307,7 @@ class MessageListAppKit: NSViewController {
         handleIncomingMessages(newMessages)
 
       case let .deleted(deletedIds, _):
+
         if newRowCount < oldRowCount, oldRowItems.starts(with: newRowItems) {
           let removed = IndexSet(integersIn: newRowCount ..< oldRowCount)
           applyStructuralRemove(animated: true, removed: removed)
@@ -1304,8 +1369,7 @@ class MessageListAppKit: NSViewController {
 
         reloadAll(animated: true)
 
-      case let .updated(updatedMessages, indexSet, animated):
-        _ = updatedMessages // silence unused warning
+      case let .updated(updatedMessages, _, animated):
 
         // Only do row-level reloads when structure is unchanged.
         guard oldRowItems == newRowItems else {
@@ -1313,15 +1377,8 @@ class MessageListAppKit: NSViewController {
           break
         }
 
-        // Map message indices -> stable ids -> row indices.
-        var rowsToReload = IndexSet()
-        for messageIndex in indexSet {
-          guard messages.indices.contains(messageIndex) else { continue }
-          let stableId = messages[messageIndex].id
-          if let row = rowIndexByMessageId[stableId] {
-            rowsToReload.insert(row)
-          }
-        }
+        let rowsToReload = ReplyThreadMessageProjection
+          .rowIndexesForUpdatedMessages(updatedMessages, rowIndexByStableId: rowIndexByMessageId)
 
         if rowsToReload.isEmpty {
           isPerformingUpdate = false
@@ -1345,9 +1402,9 @@ class MessageListAppKit: NSViewController {
           isPerformingUpdate = false
         }
 
-      case .reload:
+      case let .reload(animated):
         log.trace("reloading data")
-        reloadAll(animated: false)
+        reloadAll(animated: animated ?? false)
     }
   }
 
@@ -1534,6 +1591,7 @@ class MessageListAppKit: NSViewController {
             isRtl: inputProps.isRtl,
             isDM: chat?.type == .privateChat,
             renderStyle: inputProps.renderStyle,
+            displayChatId: inputProps.displayChatId,
             index: messageIndexById[message.id],
             translated: inputProps.translated,
             layout: plan,
@@ -1599,7 +1657,8 @@ class MessageListAppKit: NSViewController {
         isDM: chat?.type == .privateChat,
         isRtl: false,
         translated: false,
-        renderStyle: messageRenderStyle
+        renderStyle: messageRenderStyle,
+        displayChatId: chatId
       )
     }
 
@@ -1610,7 +1669,8 @@ class MessageListAppKit: NSViewController {
       isDM: chat?.type == .privateChat,
       isRtl: false,
       translated: message.isTranslated,
-      renderStyle: messageRenderStyle
+      renderStyle: messageRenderStyle,
+      displayChatId: chatId
     )
   }
 
@@ -1740,8 +1800,7 @@ class MessageListAppKit: NSViewController {
   }
 
   private func latestMessageId() -> Int64? {
-    let latest = viewModel.reversed ? messages.first : messages.last
-    return latest?.message.messageId
+    viewModel.newestLoadedMessageId ?? projectedParentMessage?.message.messageId
   }
 
   private func markMessagesSeen() {
@@ -1846,6 +1905,9 @@ extension MessageListAppKit: NSTableViewDelegate {
 
     let current = messages[index]
     let previous = messages[index - 1]
+    if previous.message.chatId != current.message.chatId {
+      return true
+    }
     if previous.message.fromId != current.message.fromId {
       return true
     }
@@ -1929,6 +1991,7 @@ extension MessageListAppKit: NSTableViewDelegate {
           isRtl: inputProps.isRtl,
           isDM: chat?.type == .privateChat,
           renderStyle: inputProps.renderStyle,
+          displayChatId: inputProps.displayChatId,
           index: messageIndex,
           translated: inputProps.translated,
           layout: layoutPlan
@@ -2052,10 +2115,13 @@ extension MessageListAppKit {
       }
 
       // TODO: Load more to get to it
-      if let first = messages.first, first.message.messageId > msgId, viewModel.canLoadOlderFromLocal {
+      if let oldestLoadedMessageId = viewModel.oldestLoadedMessageId,
+         oldestLoadedMessageId > msgId,
+         viewModel.canLoadOlderFromLocal
+      {
         log
           .debug(
-            "Loading batch at top to find message because first message id = \(first.message.messageId) and what we want is \(msgId)"
+            "Loading batch at top to find message because oldest loaded message id = \(oldestLoadedMessageId) and what we want is \(msgId)"
           )
         loadBatch(at: .older)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in

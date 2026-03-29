@@ -376,35 +376,7 @@ extension InlineProtocol.UpdateDeleteMessages {
     }
 
     do {
-      // let chat = try Chat.fetchOne(db, id: chatId)
-      let chatId = chat.id
-      var prevChatLastMsgId = chat.lastMsgId
-
-      // Delete messages
-      for messageId in messageIds {
-        // Update last message first
-        if prevChatLastMsgId == messageId {
-          let previousMessage = try Message
-            .filter(Column("chatId") == chat.id)
-            .order(Column("date").desc, Column("messageId").desc)
-            .limit(1, offset: 1)
-            .fetchOne(db)
-
-          var updatedChat = chat
-          updatedChat.lastMsgId = previousMessage?.messageId
-          try updatedChat.save(db)
-
-          // Track the newly promoted last message so consecutive deletions
-          // keep advancing the chat tail correctly.
-          prevChatLastMsgId = previousMessage?.messageId
-        }
-
-        // TODO: Optimize this to use keys
-        try Message
-          .filter(Column("messageId") == messageId)
-          .filter(Column("chatId") == chatId)
-          .deleteAll(db)
-      }
+      try Message.deleteMessages(db, messageIds: messageIds, chatId: chat.id)
 
       if publishChanges {
         Task(priority: .userInitiated) { @MainActor in

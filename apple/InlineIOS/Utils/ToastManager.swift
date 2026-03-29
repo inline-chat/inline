@@ -31,12 +31,25 @@ struct ToastData: Identifiable {
 
 class ToastManager: ObservableObject {
   static let shared = ToastManager()
+  static let replyThreadLoadingMessage = "Opening thread…"
 
   @Published private(set) var currentToast: ToastData?
   private var timer: Timer?
   private var progressToastId: UUID?
 
   private init() {}
+
+  func showReplyThreadLoadingToast() {
+    showToast(Self.replyThreadLoadingMessage, type: .loading, systemImage: "ellipsis.message")
+  }
+
+  func hideReplyThreadLoadingToastIfNeeded() {
+    guard let currentToast else { return }
+    guard currentToast.message == Self.replyThreadLoadingMessage else { return }
+    if case .loading = currentToast.type {
+      hideToast()
+    }
+  }
 
   func showToast(
     _ message: String,

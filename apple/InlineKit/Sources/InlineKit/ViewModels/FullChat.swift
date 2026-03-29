@@ -339,27 +339,54 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
     fetchChat()
   }
 
+  static func resolveChatItem(in db: Database, for peer: Peer) throws -> SpaceChatItem? {
+    switch peer {
+      case .user:
+        return try Dialog
+          .spaceChatItemQueryForUser()
+          .filter(id: Dialog.getDialogId(peerId: peer))
+          .fetchOne(db)
+
+      case let .thread(chatId):
+        if let dialogChatItem = try Dialog
+          .spaceChatItemQueryForChat()
+          .filter(id: Dialog.getDialogId(peerId: peer))
+          .fetchOne(db)
+        {
+          return dialogChatItem
+        }
+
+        guard let chat = try Chat.fetchOne(db, id: chatId) else {
+          return nil
+        }
+
+        let syntheticDialog = Dialog(
+          id: Dialog.getDialogId(peerThreadId: chatId),
+          peerUserId: nil,
+          peerThreadId: chatId,
+          spaceId: chat.spaceId,
+          unreadCount: nil,
+          readInboxMaxId: nil,
+          readOutboxMaxId: nil,
+          pinned: nil,
+          draftMessage: nil,
+          archived: nil,
+          chatId: chatId,
+          unreadMark: nil,
+          notificationSettings: nil
+        )
+
+        return SpaceChatItem(dialog: syntheticDialog, chat: chat)
+    }
+  }
+
   func fetchChat() {
     let peerId = peer
     db.warnIfInMemoryDatabaseForObservation("FullChatViewModel.chatItem")
     chatCancellable =
       ValueObservation
         .tracking { db in
-          switch peerId {
-            case .user:
-              // Fetch private chat
-              try Dialog
-                .spaceChatItemQueryForUser()
-                .filter(id: Dialog.getDialogId(peerId: peerId))
-                .fetchOne(db)
-
-            case .thread:
-              // Fetch thread chat
-              try Dialog
-                .spaceChatItemQueryForChat()
-                .filter(id: Dialog.getDialogId(peerId: peerId))
-                .fetchOne(db)
-          }
+          try Self.resolveChatItem(in: db, for: peerId)
         }
         .publisher(in: db.dbWriter, scheduling: .immediate)
         .sink(
@@ -473,18 +500,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
   private func queryChatFromDatabase() async throws -> Chat? {
     let peer_ = peer
     let chatItem = try await db.reader.read { db in
-      switch peer_ {
-        case .user:
-          try Dialog
-            .spaceChatItemQueryForUser()
-            .filter(id: Dialog.getDialogId(peerId: peer_))
-            .fetchOne(db)
-        case .thread:
-          try Dialog
-            .spaceChatItemQueryForChat()
-            .filter(id: Dialog.getDialogId(peerId: peer_))
-            .fetchOne(db)
-      }
+      try Self.resolveChatItem(in: db, for: peer_)
     }
     return chatItem?.chat
   }

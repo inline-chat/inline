@@ -31,6 +31,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
   var fromOtherSender: Bool = false
   var message: FullMessage!
   var spaceId: Int64 = 0
+  var currentChatId: Int64 = 0
 
   // MARK: - Sizes
 
@@ -71,12 +72,37 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     fatalError("init(coder:) has not been implemented")
   }
 
-  func configure(with message: FullMessage, fromOtherSender: Bool, spaceId: Int64) {
+  func configure(with message: FullMessage, fromOtherSender: Bool, spaceId: Int64, currentChatId: Int64) {
     let newOutgoing = message.message.out == true
+
+    if let currentMessage = self.message,
+       let messageView,
+       currentMessage.message.chatId == message.message.chatId,
+       currentMessage.message.messageId == message.message.messageId,
+       self.fromOtherSender == fromOtherSender,
+       self.spaceId == spaceId,
+       self.currentChatId == currentChatId,
+       outgoing == newOutgoing,
+       messageView.canApplyReplyThreadUpdate(from: message)
+    {
+      prevText = message.displayText
+      self.message = message
+      self.fromOtherSender = fromOtherSender
+      self.spaceId = spaceId
+      self.currentChatId = currentChatId
+      isThread = message.peerId.isThread
+      outgoing = newOutgoing
+      canReply = message.canReply
+      messageView.applyReplyThreadUpdate(from: message, animated: true)
+      setNeedsLayout()
+      layoutIfNeeded()
+      updateSwipeAvailability()
+      return
+    }
 
     if self.message != nil {
       if prevText == message.displayText, self.message == message,
-         self.fromOtherSender == fromOtherSender, self.spaceId == spaceId,
+         self.fromOtherSender == fromOtherSender, self.spaceId == spaceId, self.currentChatId == currentChatId,
          outgoing == newOutgoing
       {
         // skip only if everything is exact match including outgoing state
@@ -89,6 +115,7 @@ class MessageCollectionViewCell: UICollectionViewCell, UIGestureRecognizerDelega
     self.message = message
     self.fromOtherSender = fromOtherSender
     self.spaceId = spaceId
+    self.currentChatId = currentChatId
     isThread = message.peerId.isThread
     outgoing = newOutgoing
     canReply = message.canReply
@@ -411,7 +438,7 @@ extension MessageCollectionViewCell {
   }
 
   func setupBaseMessageConstraints() {
-    let newMessageView = UIMessageView(fullMessage: message, spaceId: spaceId)
+    let newMessageView = UIMessageView(fullMessage: message, spaceId: spaceId, currentChatId: currentChatId)
     newMessageView.translatesAutoresizingMaskIntoConstraints = false
     newMessageView.onPhotoTap = { [weak self] message, sourceView, sourceImage, url in
       self?.onPhotoTap?(message, sourceView, sourceImage, url)

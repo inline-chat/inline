@@ -6,15 +6,25 @@ import Logger
 extension Client_MessageContentPayload: Codable {
   private enum CodingKeys: String, CodingKey {
     case voice
+    case actions
+    case replies
   }
 
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     let voice = try container.decodeIfPresent(Client_MessageVoiceContent.self, forKey: .voice)
+    let actions = try container.decodeIfPresent(InlineProtocol.MessageActions.self, forKey: .actions)
+    let replies = try container.decodeIfPresent(InlineProtocol.MessageReplies.self, forKey: .replies)
 
     self.init()
     if let voice {
       self.voice = voice
+    }
+    if let actions {
+      self.actions = actions
+    }
+    if let replies {
+      self.replies = replies
     }
   }
 
@@ -22,6 +32,12 @@ extension Client_MessageContentPayload: Codable {
     var container = encoder.container(keyedBy: CodingKeys.self)
     if hasVoice {
       try container.encode(voice, forKey: .voice)
+    }
+    if hasActions {
+      try container.encode(actions, forKey: .actions)
+    }
+    if hasReplies {
+      try container.encode(replies, forKey: .replies)
     }
   }
 }
@@ -62,6 +78,33 @@ extension Client_MessageVoiceContent: Codable {
     try container.encode(localRelativePath, forKey: .localRelativePath)
     try container.encode(size, forKey: .size)
     try container.encode(transcription, forKey: .transcription)
+  }
+}
+
+extension InlineProtocol.MessageReplies: Codable {
+  private enum CodingKeys: String, CodingKey {
+    case chatID
+    case replyCount
+    case hasUnread
+    case recentReplierUserIds
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+
+    self.init()
+    chatID = try container.decode(Int64.self, forKey: .chatID)
+    replyCount = try container.decode(Int32.self, forKey: .replyCount)
+    hasUnread_p = try container.decode(Bool.self, forKey: .hasUnread)
+    recentReplierUserIds = try container.decodeIfPresent([Int64].self, forKey: .recentReplierUserIds) ?? []
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(chatID, forKey: .chatID)
+    try container.encode(replyCount, forKey: .replyCount)
+    try container.encode(hasUnread_p, forKey: .hasUnread)
+    try container.encode(recentReplierUserIds, forKey: .recentReplierUserIds)
   }
 }
 

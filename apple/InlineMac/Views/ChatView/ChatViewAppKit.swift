@@ -144,10 +144,16 @@ class ChatViewAppKit: NSViewController {
       case .loading:
         showSpinner()
       case let .loaded(chat):
+        if chat.isReplyThread {
+          ToastCenter.shared.dismiss()
+        }
         setupChatComponents(chat: chat)
         // PERF MARK: end chat navigation signpost (remove when done).
         dependencies.nav2?.endChatNavigationSignpost(peer: peerId, reason: "loaded")
       case let .error(error):
+        if peerId.isThread {
+          ToastCenter.shared.dismiss()
+        }
         showError(error: error)
         // PERF MARK: end chat navigation signpost (remove when done).
         dependencies.nav2?.endChatNavigationSignpost(peer: peerId, reason: "error")
@@ -254,11 +260,17 @@ class ChatViewAppKit: NSViewController {
           }
         } else {
           await MainActor.run {
+            if self.peerId.isThread {
+              ToastCenter.shared.dismiss()
+            }
             state = .error(ChatViewError.failedToLoad)
           }
         }
       } catch {
         await MainActor.run {
+          if self.peerId.isThread {
+            ToastCenter.shared.dismiss()
+          }
           state = .error(error)
         }
       }

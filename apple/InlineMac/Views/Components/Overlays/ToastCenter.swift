@@ -20,12 +20,17 @@ extension ToastPresenting {
 @MainActor
 final class ToastCenter {
   static let shared = ToastCenter()
+  static let replyThreadLoadingMessage = "Opening thread…"
   private init() {}
 
   weak var presenter: (any ToastPresenting)?
 
   func showLoading(_ message: String, actionTitle: String? = nil, action: (@MainActor () -> Void)? = nil) {
     presenter?.showLoading(message, actionTitle: actionTitle, action: action)
+  }
+
+  func showReplyThreadLoading() {
+    showLoading(Self.replyThreadLoadingMessage)
   }
 
   func showInfo(_ message: String) {

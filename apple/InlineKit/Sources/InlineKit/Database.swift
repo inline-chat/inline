@@ -718,6 +718,13 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("reply thread parents") { db in
+      try db.alter(table: "chat") { t in
+        t.add(column: "parentChatId", .integer)
+        t.add(column: "parentMessageId", .integer)
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

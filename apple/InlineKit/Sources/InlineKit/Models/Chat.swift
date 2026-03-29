@@ -38,6 +38,8 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var emoji: String?
   public var isPublic: Bool?
   public var createdBy: Int64?
+  public var parentChatId: Int64?
+  public var parentMessageId: Int64?
   public var createState: ChatCreateState?
 
   public enum Columns {
@@ -51,6 +53,8 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     static let emoji = Column(CodingKeys.emoji)
     static let isPublic = Column(CodingKeys.isPublic)
     static let createdBy = Column(CodingKeys.createdBy)
+    static let parentChatId = Column(CodingKeys.parentChatId)
+    static let parentMessageId = Column(CodingKeys.parentMessageId)
     static let createState = Column(CodingKeys.createState)
   }
 
@@ -90,6 +94,8 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     spaceId: Int64?, peerUserId: Int64? = nil, lastMsgId: Int64? = nil, emoji: String? = nil,
     isPublic: Bool? = nil,
     createdBy: Int64? = nil,
+    parentChatId: Int64? = nil,
+    parentMessageId: Int64? = nil,
     createState: ChatCreateState? = nil
   ) {
     self.id = id
@@ -102,18 +108,29 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     self.emoji = emoji
     self.isPublic = isPublic
     self.createdBy = createdBy
+    self.parentChatId = parentChatId
+    self.parentMessageId = parentMessageId
     self.createState = createState
   }
 }
 
 public extension Chat {
-  public var humanReadableTitle: String? {
+  var humanReadableTitle: String? {
     if let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines),
        trimmed.isEmpty == false
     {
       return trimmed
     }
     return type == .thread ? "Untitled" : nil
+  }
+
+  var isReplyThread: Bool {
+    parentChatId != nil && parentMessageId != nil
+  }
+
+  var parentPeer: Peer? {
+    guard let parentChatId else { return nil }
+    return .thread(id: parentChatId)
   }
 
   var peerId: InlineProtocol.Peer {
@@ -199,6 +216,8 @@ public extension Chat {
       }
     lastMsgId = from.lastMsgId
     emoji = from.emoji
+    parentChatId = nil
+    parentMessageId = nil
     createState = nil
   }
 
@@ -217,6 +236,8 @@ public extension Chat {
     emoji = from.hasEmoji ? from.emoji : nil
     isPublic = from.hasIsPublic ? from.isPublic : nil
     createdBy = from.hasCreatedBy ? from.createdBy : nil
+    parentChatId = from.hasParentChatID ? from.parentChatID : nil
+    parentMessageId = from.hasParentMessageID ? from.parentMessageID : nil
     createState = nil
 
     if case let .user(peerUser) = from.peerID.type {

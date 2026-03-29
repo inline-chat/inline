@@ -120,6 +120,25 @@ struct ChatToolbarLeadingView: View {
     }
   }
 
+  @ViewBuilder
+  private var replyThreadContextView: some View {
+    if let chatId = fullChatViewModel.chat?.id,
+       fullChatViewModel.chat?.isReplyThread == true
+    {
+      ReplyThreadToolbarContextView(chatId: chatId)
+    }
+  }
+
+  @ViewBuilder
+  private var secondaryLineView: some View {
+    let subtitle = getCurrentSubtitle()
+    if !subtitle.text.isEmpty {
+      subtitleView
+    } else {
+      replyThreadContextView
+    }
+  }
+
   var body: some View {
     HStack(spacing: 8) {
       if isThreadChat {
@@ -163,7 +182,7 @@ struct ChatToolbarLeadingView: View {
           .lineLimit(1)
           .truncationMode(.tail)
           .allowsTightening(true)
-        subtitleView
+        secondaryLineView
       }
     }
     // Important: do not use `fixedSize()` here. In a navigation bar toolbar item (principal/leading),
@@ -180,6 +199,29 @@ struct ChatToolbarLeadingView: View {
         isChatHeaderPressed = pressing
       }
     }, perform: {})
+  }
+}
+
+@MainActor
+private struct ReplyThreadToolbarContextView: View {
+  @StateObject private var parentViewModel: ReplyThreadParentViewModel
+
+  init(chatId: Int64) {
+    _parentViewModel = StateObject(wrappedValue: ReplyThreadParentViewModel(chatId: chatId))
+  }
+
+  private var parentTitle: String {
+    parentViewModel.parentTitle
+  }
+
+  var body: some View {
+    Text(parentTitle)
+      .font(.caption2)
+      .foregroundStyle(.secondary)
+      .lineLimit(1)
+      .truncationMode(.tail)
+      .allowsTightening(true)
+      .padding(.bottom, -1)
   }
 }
 

@@ -10,7 +10,7 @@ final class UserAvatarView: UIView {
 
   private let imageView: LazyImageView = {
     let view = LazyImageView()
-    view.contentMode = .scaleAspectFit
+    view.contentMode = .scaleAspectFill
     view.clipsToBounds = true
     view.translatesAutoresizingMaskIntoConstraints = false
     return view
@@ -38,6 +38,7 @@ final class UserAvatarView: UIView {
   private var widthConstraint: NSLayoutConstraint?
   private var heightConstraint: NSLayoutConstraint?
   private var currentRenderSignature: RenderSignature?
+  private var currentImageURL: URL?
 
   private struct RenderSignature: Equatable {
     let userId: Int64
@@ -152,6 +153,8 @@ final class UserAvatarView: UIView {
       )
     } else {
       currentRenderSignature = renderSignature
+      currentImageURL = nil
+      clearImage()
       showInitials()
     }
   }
@@ -166,17 +169,25 @@ final class UserAvatarView: UIView {
   ) {
     guard let imageUrl = localUrl ?? remoteUrl else {
       currentRenderSignature = renderSignature
+      currentImageURL = nil
+      clearImage()
       showInitials()
       return
     }
 
-    if currentRenderSignature == renderSignature, imageView.imageView.image != nil {
-      hideInitials()
+    if currentRenderSignature == renderSignature, currentImageURL == imageUrl {
+      if imageView.imageView.image != nil {
+        hideInitials()
+      } else {
+        showInitials()
+      }
       return
     }
 
+    clearImage()
     currentRenderSignature = renderSignature
-    hideInitials()
+    currentImageURL = imageUrl
+    showInitials()
     configureImageRequest(for: imageUrl)
     setupImageHandlers()
     cacheImageIfNeeded(localUrl: localUrl, remoteUrl: remoteUrl, userId: userInfo.user.id)
@@ -199,6 +210,7 @@ final class UserAvatarView: UIView {
 
     imageView.onFailure = { [weak self] _ in
       DispatchQueue.main.async {
+        self?.currentImageURL = nil
         self?.showInitials()
       }
     }
@@ -227,8 +239,12 @@ final class UserAvatarView: UIView {
   private func showInitials() {
     UIView.performWithoutAnimation {
       initialsLabel.isHidden = false
-      imageView.request = nil
     }
+  }
+
+  private func clearImage() {
+    imageView.request = nil
+    imageView.imageView.image = nil
   }
 
   func currentImage() -> UIImage? {

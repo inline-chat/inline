@@ -136,7 +136,28 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
         payload.clearActions()
       }
 
-      if payload.hasVoice || payload.hasActions {
+      if payload.hasVoice || payload.hasActions || payload.hasReplies {
+        contentPayload = payload
+      } else {
+        contentPayload = nil
+      }
+    }
+  }
+
+  public var replies: InlineProtocol.MessageReplies? {
+    get {
+      guard let contentPayload, contentPayload.hasReplies else { return nil }
+      return contentPayload.replies
+    }
+    set {
+      var payload = contentPayload ?? Client_MessageContentPayload()
+      if let newValue {
+        payload.replies = newValue
+      } else {
+        payload.clearReplies()
+      }
+
+      if payload.hasVoice || payload.hasActions || payload.hasReplies {
         contentPayload = payload
       } else {
         contentPayload = nil
@@ -414,6 +435,10 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       hasLink: from.hasHasLink_p ? from.hasLink_p : nil,
       entities: from.hasEntities ? from.entities : nil
     )
+
+    if from.hasReplies {
+      replies = from.replies
+    }
   }
 
   public static let preview = Message(
@@ -600,13 +625,19 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
         }
       }
 
-      return (merged.hasVoice || merged.hasActions) ? merged : nil
+      if incoming.hasReplies {
+        merged.replies = incoming.replies
+      } else if existing.hasReplies {
+        merged.replies = existing.replies
+      }
+
+      return (merged.hasVoice || merged.hasActions || merged.hasReplies) ? merged : nil
 
     case let (incoming?, nil):
-      return (incoming.hasVoice || incoming.hasActions) ? incoming : nil
+      return (incoming.hasVoice || incoming.hasActions || incoming.hasReplies) ? incoming : nil
 
     case let (nil, existing?):
-      return (existing.hasVoice || existing.hasActions) ? existing : nil
+      return (existing.hasVoice || existing.hasActions || existing.hasReplies) ? existing : nil
 
     case (nil, nil):
       return nil
@@ -763,7 +794,9 @@ public extension Message {
         documentId = documentId ?? existing.documentId
         videoId = videoId ?? existing.videoId
         contentPayload = Message.mergedContentPayload(incoming: contentPayload, existing: existing.contentPayload)
-        actions = actions ?? existing.actions
+        if actions == nil, let existingActions = existing.actions {
+          actions = existingActions
+        }
         hasLink = hasLink ?? existing.hasLink
         entities = entities ?? existing.entities
         transactionId = existing.transactionId
@@ -874,13 +907,19 @@ public extension Message {
       message.status = existing.status
       message.fileId = existing.fileId
       message.date = existing.date // keep optimistic date for now until we fix message reordering
+      message.contentPayload = mergedContentPayload(
+        incoming: message.contentPayload,
+        existing: existing.contentPayload
+      )
       message.photoId = message.photoId ?? existing.photoId
       message.videoId = message.videoId ?? existing.videoId
       message.documentId = message.documentId ?? existing.documentId
       message.transactionId = message.transactionId ?? existing.transactionId
       message.isSticker = message.isSticker ?? existing.isSticker
       message.hasLink = message.hasLink ?? existing.hasLink
-      message.actions = message.actions ?? existing.actions
+      if message.actions == nil, let existingActions = existing.actions {
+        message.actions = existingActions
+      }
       message.editDate = message.editDate ?? existing.editDate
       message.repliedToMessageId = message.repliedToMessageId ?? existing.repliedToMessageId
       message.forwardFromPeerUserId = message.forwardFromPeerUserId ?? existing.forwardFromPeerUserId
@@ -1119,8 +1158,11 @@ public extension Message {
     chatId: Int64,
     deleteMedia: Bool = false
   ) throws {
+    guard messageIds.isEmpty == false else { return }
+
     // Fetch the chat once so we can update its `lastMsgId` if needed.
     let chat = try Chat.fetchOne(db, id: chatId)
+    try orphanLinkedReplyThreads(db, parentChatId: chatId, parentMessageIds: messageIds)
 
     // Keep track of the current `lastMsgId` so we can update it when we delete it.
     var prevChatLastMsgId = chat?.lastMsgId
@@ -1142,7 +1184,7 @@ public extension Message {
         // Preserve the information that we have already handled the current
         // `lastMsgId` so subsequent deletions in the same batch don't repeat
         // the update work unnecessarily.
-        prevChatLastMsgId = messageId
+        prevChatLastMsgId = previousMessage?.messageId
       }
 
       // Remove the message itself.
@@ -1151,5 +1193,21 @@ public extension Message {
         .filter(Column("chatId") == chatId)
         .deleteAll(db)
     }
+  }
+
+  private static func orphanLinkedReplyThreads(
+    _ db: Database,
+    parentChatId: Int64,
+    parentMessageIds: [Int64]
+  ) throws {
+    guard parentMessageIds.isEmpty == false else { return }
+
+    try Chat
+      .filter(Chat.Columns.parentChatId == parentChatId)
+      .filter(parentMessageIds.contains(Chat.Columns.parentMessageId))
+      .updateAll(
+        db,
+        [Chat.Columns.parentMessageId.set(to: nil as Int64?)]
+      )
   }
 }

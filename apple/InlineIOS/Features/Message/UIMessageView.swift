@@ -47,8 +47,9 @@ private enum MessageActionInvokeError: Error {
 class UIMessageView: UIView {
   // MARK: - Properties
 
-  let fullMessage: FullMessage
+  private(set) var fullMessage: FullMessage
   let spaceId: Int64
+  private let currentChatId: Int64
   private var translationCancellable: AnyCancellable?
   private var messageActionLoadingCancellable: AnyCancellable?
   private var messageActionAnsweredCancellable: AnyCancellable?
@@ -244,6 +245,11 @@ class UIMessageView: UIView {
     !messageActionRows.isEmpty
   }
 
+  private var shouldShowReplyThreadFooter: Bool {
+    guard let replies = message.replies else { return false }
+    return message.chatId == currentChatId && replies.replyCount > 0 && replies.chatID > 0
+  }
+
   var isEmojiOnlyMessage: Bool {
     if message.repliedToMessageId != nil || message.forwardFromUserId != nil {
       return false
@@ -356,6 +362,7 @@ class UIMessageView: UIView {
   lazy var messageAttachmentEmbed = createMessageAttachmentEmbed()
   lazy var metadataView = createMessageTimeAndStatus()
   lazy var messageActionsContainer = createMessageActionsContainer()
+  private lazy var replyThreadFooterView = createReplyThreadFooterView()
   private weak var metadataContainerView: UIStackView?
 
   lazy var reactionsFlowView: ReactionsFlowView = {
@@ -397,9 +404,10 @@ class UIMessageView: UIView {
     messageActionAnsweredCancellable?.cancel()
   }
 
-  init(fullMessage: FullMessage, spaceId: Int64) {
+  init(fullMessage: FullMessage, spaceId: Int64, currentChatId: Int64) {
     self.fullMessage = fullMessage
     self.spaceId = spaceId
+    self.currentChatId = currentChatId
 
     super.init(frame: .zero)
 
@@ -472,6 +480,7 @@ class UIMessageView: UIView {
     setupVideoViewIfNeeded()
     setupDocumentViewIfNeeded()
     setupMessageContainer()
+    setupReplyThreadFooterIfNeeded(animated: false)
     setupMessageActionsIfNeeded()
     setupExternalReactionsIfNeeded()
 
@@ -523,6 +532,30 @@ class UIMessageView: UIView {
 
   public func refreshAppearance() {
     setupAppearance()
+  }
+
+  func canApplyReplyThreadUpdate(from updatedFullMessage: FullMessage) -> Bool {
+    guard fullMessage.message.chatId == updatedFullMessage.message.chatId,
+          fullMessage.message.messageId == updatedFullMessage.message.messageId
+    else {
+      return false
+    }
+
+    var current = fullMessage
+    var updated = updatedFullMessage
+    current.message.replies = nil
+    updated.message.replies = nil
+    return current == updated
+  }
+
+  func applyReplyThreadUpdate(from updatedFullMessage: FullMessage, animated: Bool) {
+    fullMessage = updatedFullMessage
+    if !fullMessage.reactions.isEmpty {
+      setupReactionsIfNeeded()
+    }
+    setupReplyThreadFooterIfNeeded(animated: animated)
+    setNeedsUpdateConstraints()
+    invalidateIntrinsicContentSize()
   }
 
   func reset() {
@@ -821,6 +854,60 @@ class UIMessageView: UIView {
       )
     } else {
       embedView.showNotLoaded(kind: .replyInMessage, outgoing: outgoing, isOnlyEmoji: isEmojiOnlyMessage)
+    }
+  }
+
+  private func setupReplyThreadFooterIfNeeded(animated: Bool) {
+    guard shouldShowReplyThreadFooter, let replies = message.replies else {
+      removeReplyThreadFooterIfNeeded(animated: animated)
+      return
+    }
+
+    replyThreadFooterView.configure(replies: replies, animated: animated)
+    replyThreadFooterView.onTap = { threadChatId in
+      ToastManager.shared.showReplyThreadLoadingToast()
+      NotificationCenter.default.post(
+        name: Notification.Name("NavigateToThread"),
+        object: nil,
+        userInfo: ["peerThreadId": threadChatId]
+      )
+    }
+
+    if replyThreadFooterView.superview == nil {
+      replyThreadFooterView.alpha = animated ? 0 : 1
+      containerStack.addArrangedSubview(replyThreadFooterView)
+      setNeedsUpdateConstraints()
+      invalidateIntrinsicContentSize()
+      if animated {
+        UIView.animate(withDuration: 0.22) {
+          self.replyThreadFooterView.alpha = 1
+          self.containerStack.layoutIfNeeded()
+        }
+      }
+    }
+  }
+
+  private func removeReplyThreadFooterIfNeeded(animated: Bool) {
+    guard replyThreadFooterView.superview != nil else { return }
+
+    let removeFooter = {
+      self.containerStack.removeArrangedSubview(self.replyThreadFooterView)
+      self.replyThreadFooterView.removeFromSuperview()
+      self.setNeedsUpdateConstraints()
+      self.invalidateIntrinsicContentSize()
+    }
+
+    guard animated else {
+      removeFooter()
+      return
+    }
+
+    UIView.animate(withDuration: 0.2, animations: {
+      self.replyThreadFooterView.alpha = 0
+      self.containerStack.layoutIfNeeded()
+    }) { _ in
+      removeFooter()
+      self.replyThreadFooterView.alpha = 1
     }
   }
 

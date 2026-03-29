@@ -122,6 +122,12 @@ extension UIMessageView {
     return view
   }
 
+  func createReplyThreadFooterView() -> ReplyThreadFooterView {
+    let view = ReplyThreadFooterView(outgoing: outgoing)
+    view.translatesAutoresizingMaskIntoConstraints = false
+    return view
+  }
+
   func createDocumentView() -> DocumentView {
     let view = DocumentView(fullMessage: fullMessage, outgoing: outgoing)
     view.translatesAutoresizingMaskIntoConstraints = false
