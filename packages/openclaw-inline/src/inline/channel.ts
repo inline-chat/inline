@@ -8,6 +8,7 @@ import {
   resolveInlineToken,
   type ResolvedInlineAccount,
 } from "./accounts.js"
+import { isInlineReplyThreadsEnabled, resolveInlineReplyThreadChatId } from "./reply-threads.js"
 import { looksLikeInlineTargetId, normalizeInlineTarget } from "./normalize.js"
 import { monitorInlineProvider } from "./monitor.js"
 import { resolveInlineGroupRequireMention, resolveInlineGroupToolPolicy } from "./policy.js"
@@ -358,6 +359,7 @@ async function sendMessageInline(params: {
   text: string
   accountId?: string | null
   replyToId?: string | null
+  threadId?: string | number | null
 }): Promise<{ messageId: string; chatId: string }> {
   const account = resolveInlineAccount({ cfg: params.cfg, accountId: params.accountId ?? null })
   if (!account.configured || !account.baseUrl) {
@@ -385,9 +387,18 @@ async function sendMessageInline(params: {
       context: "sendText",
       target,
     })
+    const effectiveChatId =
+      resolvedTarget.kind === "chat"
+        ? resolveInlineReplyThreadChatId({
+            cfg: params.cfg,
+            accountId: account.accountId,
+            parentChatId: resolvedTarget.targetId,
+            threadId: params.threadId ?? null,
+          })
+        : null
     const result = await client
       .sendMessage({
-        ...buildInlineSendTarget(resolvedTarget),
+        ...(effectiveChatId != null ? { chatId: effectiveChatId } : buildInlineSendTarget(resolvedTarget)),
         text: params.text,
         ...(replyToMsgId != null ? { replyToMsgId } : {}),
         parseMarkdown: account.config.parseMarkdown ?? true,
@@ -404,7 +415,8 @@ async function sendMessageInline(params: {
       result.messageId != null ? String(result.messageId) : BigInt(Date.now()).toString()
     return {
       messageId: bestEffort,
-      chatId: formatInlineResultChatId(resolvedTarget),
+      chatId:
+        effectiveChatId != null ? String(effectiveChatId) : formatInlineResultChatId(resolvedTarget),
     }
   } finally {
     await client.close().catch(() => {})
@@ -418,6 +430,7 @@ async function sendMediaInline(params: {
   mediaUrl: string
   accountId?: string | null
   replyToId?: string | null
+  threadId?: string | number | null
 }): Promise<{ messageId: string; chatId: string }> {
   const account = resolveInlineAccount({ cfg: params.cfg, accountId: params.accountId ?? null })
   if (!account.configured || !account.baseUrl) {
@@ -444,6 +457,15 @@ async function sendMediaInline(params: {
       context: "sendMedia",
       target,
     })
+    const effectiveChatId =
+      resolvedTarget.kind === "chat"
+        ? resolveInlineReplyThreadChatId({
+            cfg: params.cfg,
+            accountId: account.accountId,
+            parentChatId: resolvedTarget.targetId,
+            threadId: params.threadId ?? null,
+          })
+        : null
     const media = await uploadInlineMediaFromUrl({
       client,
       cfg: params.cfg,
@@ -452,7 +474,7 @@ async function sendMediaInline(params: {
     })
     const result = await client
       .sendMessage({
-        ...buildInlineSendTarget(resolvedTarget),
+        ...(effectiveChatId != null ? { chatId: effectiveChatId } : buildInlineSendTarget(resolvedTarget)),
         ...(caption ? { text: caption } : {}),
         media,
         ...(replyToMsgId != null ? { replyToMsgId } : {}),
@@ -470,7 +492,8 @@ async function sendMediaInline(params: {
       result.messageId != null ? String(result.messageId) : BigInt(Date.now()).toString()
     return {
       messageId: bestEffort,
-      chatId: formatInlineResultChatId(resolvedTarget),
+      chatId:
+        effectiveChatId != null ? String(effectiveChatId) : formatInlineResultChatId(resolvedTarget),
     }
   } finally {
     await client.close().catch(() => {})
@@ -577,7 +600,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
     edit: true,
     reply: true,
     groupManagement: true,
-    threads: false,
+    threads: true,
     nativeCommands: true,
     blockStreaming: true,
   },
@@ -677,11 +700,47 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       }),
   },
 
+  threading: {
+    resolveReplyToMode: () => "off",
+    buildToolContext: ({ cfg, accountId, context, hasRepliedRef }) => {
+      if (!isInlineReplyThreadsEnabled({ cfg, accountId: accountId ?? null })) {
+        return undefined
+      }
+      const currentChannelId = context.To?.trim() || undefined
+      if (!currentChannelId) {
+        return undefined
+      }
+      return {
+        currentChannelId,
+        ...(context.MessageThreadId != null
+          ? { currentThreadTs: String(context.MessageThreadId) }
+          : {}),
+        ...(context.CurrentMessageId != null ? { currentMessageId: context.CurrentMessageId } : {}),
+        replyToMode: "off" as const,
+        ...(hasRepliedRef ? { hasRepliedRef } : {}),
+      }
+    },
+    resolveReplyTransport: ({ cfg, accountId, threadId, replyToId }) => {
+      if (!isInlineReplyThreadsEnabled({ cfg, accountId: accountId ?? null })) {
+        return null
+      }
+      return {
+        threadId: threadId != null ? String(threadId) : null,
+        replyToId: replyToId ?? null,
+      }
+    },
+  },
+
   agentPrompt: {
-    messageToolHints: () => [
+    messageToolHints: ({ cfg, accountId }) => [
       "- Inline targeting: omit `target` to reply in the current chat.",
       "- Inline explicit targets: `chat:<chatId>` for chats and `user:<userId>` for direct users. Prefer `user:` for DM user targets.",
       "- Inline special tools: use `inline_nudge` to send a nudge, and `inline_forward` to forward message ids between chats or users.",
+      ...(isInlineReplyThreadsEnabled({ cfg, accountId: accountId ?? null })
+        ? [
+            "- Inline reply threads are enabled: use `thread-reply` to send into a real reply thread, with `threadId` set to the reply-thread chat id.",
+          ]
+        : []),
     ],
   },
 
@@ -852,6 +911,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
           text,
           accountId: accountId ?? null,
           replyToId: effectiveReplyToId,
+          threadId: null,
         })
         return { channel: "inline", to, messageId: result.messageId, chatId: result.chatId }
       }
@@ -868,6 +928,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
           mediaUrl,
           accountId: accountId ?? null,
           replyToId: isFirst ? effectiveReplyToId : null,
+          threadId: null,
         })
       }
 
@@ -878,6 +939,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
           text,
           accountId: accountId ?? null,
           replyToId: effectiveReplyToId,
+          threadId: null,
         })
         return { channel: "inline", to, messageId: result.messageId, chatId: result.chatId }
       }
@@ -891,6 +953,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
         text,
         accountId: accountId ?? null,
         replyToId: replyToId ?? null,
+        threadId: threadId ?? null,
       })
       return { channel: "inline", to, messageId: result.messageId, chatId: result.chatId }
     },
@@ -902,6 +965,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
           text,
           accountId: accountId ?? null,
           replyToId: replyToId ?? null,
+          threadId: threadId ?? null,
         })
         return { channel: "inline", to, messageId: result.messageId, chatId: result.chatId }
       }
@@ -914,6 +978,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
         mediaUrl,
         accountId: accountId ?? null,
         replyToId: replyToId ?? null,
+        threadId: threadId ?? null,
       })
       return { channel: "inline", to, messageId: result.messageId, chatId: result.chatId }
     },

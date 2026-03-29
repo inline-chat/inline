@@ -59,7 +59,7 @@ async function setInlineTestRuntime(options?: {
 }
 
 describe("inline/channel", () => {
-  it("declares minimal capabilities (no subthreads/parents)", async () => {
+  it("declares platform thread support", async () => {
     vi.resetModules()
     const { inlineChannelPlugin } = await import("./channel")
 
@@ -67,12 +67,47 @@ describe("inline/channel", () => {
     expect(inlineChannelPlugin.capabilities.media).toBe(true)
     expect(inlineChannelPlugin.capabilities.reactions).toBe(true)
     expect(inlineChannelPlugin.capabilities.reply).toBe(true)
-    expect(inlineChannelPlugin.capabilities.threads).toBe(false)
-    expect(inlineChannelPlugin.threading).toBeUndefined()
+    expect(inlineChannelPlugin.capabilities.threads).toBe(true)
+    expect(inlineChannelPlugin.threading).toBeDefined()
     expect(inlineChannelPlugin.streaming?.blockStreamingCoalesceDefaults).toEqual({
       minChars: 1500,
       idleMs: 1000,
     })
+  })
+
+  it("only advertises native reply thread guidance when replyThreads is enabled", async () => {
+    vi.resetModules()
+    const { inlineChannelPlugin } = await import("./channel")
+
+    const disabledHints =
+      inlineChannelPlugin.agentPrompt?.messageToolHints?.({
+        cfg: {
+          channels: {
+            inline: {
+              token: "token",
+              capabilities: { replyThreads: false },
+            },
+          },
+        } as OpenClawConfig,
+        accountId: "default",
+      } as any) ?? []
+
+    expect(disabledHints.join("\n")).not.toContain("reply thread")
+
+    const enabledHints =
+      inlineChannelPlugin.agentPrompt?.messageToolHints?.({
+        cfg: {
+          channels: {
+            inline: {
+              token: "token",
+              capabilities: { replyThreads: true },
+            },
+          },
+        } as OpenClawConfig,
+        accountId: "default",
+      } as any) ?? []
+
+    expect(enabledHints.join("\n").toLowerCase()).toContain("reply thread")
   })
 
   it("keeps gateway startAccount pending until monitor completion", async () => {
@@ -621,6 +656,53 @@ describe("inline/channel", () => {
     expect(close).toHaveBeenCalled()
   })
 
+  it("outbound sendText routes into the child reply-thread chat when replyThreads is enabled", async () => {
+    vi.resetModules()
+
+    const connect = vi.fn(async () => {})
+    const sendMessage = vi.fn(async () => ({ messageId: null }))
+    const close = vi.fn(async () => {})
+
+    mockRealtimeSdk({
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = connect
+        sendMessage = sendMessage
+        close = close
+      },
+    })
+
+    await setInlineTestRuntime()
+
+    const { inlineChannelPlugin } = await import("./channel")
+
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+          capabilities: {
+            replyThreads: true,
+          },
+        },
+      },
+    } satisfies OpenClawConfig
+
+    await inlineChannelPlugin.outbound.sendText?.({
+      cfg,
+      to: "chat:7",
+      text: "hi",
+      accountId: "default",
+      threadId: "42",
+    } as any)
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: 42n, text: "hi" }),
+    )
+    expect(connect).toHaveBeenCalled()
+    expect(close).toHaveBeenCalled()
+  })
+
   it("outbound sendMedia uploads and sends Inline media", async () => {
     vi.resetModules()
 
@@ -695,6 +777,73 @@ describe("inline/channel", () => {
           photoId: 101n,
         },
         parseMarkdown: true,
+      }),
+    )
+    expect(close).toHaveBeenCalled()
+  })
+
+  it("outbound sendMedia routes into the child reply-thread chat when replyThreads is enabled", async () => {
+    vi.resetModules()
+
+    const connect = vi.fn(async () => {})
+    const uploadFile = vi.fn(async () => ({ fileUniqueId: "INP_1", photoId: 101n }))
+    const sendMessage = vi.fn(async () => ({ messageId: 55n }))
+    const close = vi.fn(async () => {})
+    const loadWebMedia = vi.fn(async () => ({
+      buffer: Buffer.from([1, 2, 3]),
+      contentType: "image/png",
+      kind: "image",
+      fileName: "image.png",
+    }))
+
+    mockRealtimeSdk({
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = connect
+        uploadFile = uploadFile
+        sendMessage = sendMessage
+        close = close
+      },
+    })
+
+    mockOpenClawMediaSdk({
+      loadWebMedia,
+      detectMime: vi.fn(async () => "image/png"),
+    })
+
+    await setInlineTestRuntime({
+      loadWebMedia,
+      detectMime: vi.fn(async () => "image/png"),
+    })
+
+    const { inlineChannelPlugin } = await import("./channel")
+
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+          capabilities: {
+            replyThreads: true,
+          },
+          parseMarkdown: true,
+        },
+      },
+    } satisfies OpenClawConfig
+
+    await inlineChannelPlugin.outbound.sendMedia?.({
+      cfg,
+      to: "chat:7",
+      text: "caption",
+      mediaUrl: "https://example.com/image.png",
+      accountId: "default",
+      threadId: "42",
+    } as any)
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: 42n,
+        text: "caption",
       }),
     )
     expect(close).toHaveBeenCalled()

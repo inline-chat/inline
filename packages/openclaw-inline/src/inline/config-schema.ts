@@ -23,6 +23,12 @@ const InlineActionsSchema = z
   })
   .strict()
 
+const InlineCapabilitiesSchema = z
+  .object({
+    replyThreads: z.boolean().optional(),
+  })
+  .strict()
+
 const InlineGroupSchema = z
   .object({
     requireMention: z.boolean().optional(),
@@ -46,6 +52,7 @@ export const InlineAccountSchemaBase = z
     baseUrl: z.string().optional(),
     token: z.string().optional(),
     tokenFile: z.string().optional(),
+    capabilities: InlineCapabilitiesSchema.optional(),
     dmPolicy: DmPolicySchema.optional().default("pairing"),
     allowFrom: z.array(z.string()).optional(),
     systemPrompt: z.string().optional(),
