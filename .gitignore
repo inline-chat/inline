@@ -123,7 +123,7 @@ dist/
 # AI
 test_write_permission
 
-# Rust 
+# Rust
 cli/target
 cli/dist
 
@@ -141,3 +141,7 @@ packages/openclaw-inline/*.tgz
 
 # Local agent docs
 .agent-docs/
+
+.superpowers/
+
+docs/superpowers
