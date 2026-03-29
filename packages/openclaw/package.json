@@ -27,7 +27,7 @@
     "zod": "^4.1.5"
   },
   "peerDependencies": {
-    "openclaw": ">=2026.2.9"
+    "openclaw": ">=2026.3.28"
   },
   "devDependencies": {
     "@types/node": "^20.11.30",
