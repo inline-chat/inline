@@ -57,7 +57,7 @@
         "typescript": "^5.8.3",
       },
     },
-    "packages/openclaw-inline": {
+    "packages/openclaw": {
       "name": "@inline-openclaw/inline",
       "version": "0.0.21",
       "dependencies": {
@@ -610,7 +610,7 @@
 
     "@inline-chat/web": ["@inline-chat/web@workspace:web"],
 
-    "@inline-openclaw/inline": ["@inline-openclaw/inline@workspace:packages/openclaw-inline"],
+    "@inline-openclaw/inline": ["@inline-openclaw/inline@workspace:packages/openclaw"],
 
     "@inline/auth": ["@inline/auth@workspace:web/packages/auth"],
 

@@ -54,7 +54,7 @@
     },
     "install": {
       "npmSpec": "@inline-openclaw/inline",
-      "localPath": "packages/openclaw-inline",
+      "localPath": "packages/openclaw",
       "defaultChoice": "npm"
     }
   },
