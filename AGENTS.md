@@ -9,7 +9,7 @@
   - `proto/` protobufs
   - `cli/` client cli (Rust)
   - `packages/mcp/` MCP
-  - `packages/openclaw-inline/` OpenClaw plugin
+  - `packages/openclaw/` OpenClaw plugin
   - `packages/bot-api/` bot API client (HTTP, TypeScript)
   - `packages/sdk/` realtime SDK (WS, TypeScript)
 - Shared Swift packages: `apple/InlineKit`, `apple/InlineUI`, `apple/InlineProtocol`; app targets: `apple/InlineIOS`, `apple/InlineXIOS`, `apple/InlineMac`.

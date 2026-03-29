@@ -49,9 +49,9 @@ openclaw plugins update inline
 From a local checkout (dev):
 
 ```sh
-cd /path/to/inline/packages/openclaw-inline
+cd /path/to/inline/packages/openclaw
 bun run build
-openclaw plugins install --link /path/to/inline/packages/openclaw-inline
+openclaw plugins install --link /path/to/inline/packages/openclaw
 ```
 
 ## Configure
