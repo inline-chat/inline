@@ -15,6 +15,7 @@ import {
   type User,
 } from "@inline-chat/realtime-sdk"
 import { resolveInlineAccount, resolveInlineToken } from "./accounts.js"
+import { isInlineReplyThreadsEnabled } from "./reply-threads.js"
 import { uploadInlineMediaFromUrl } from "./media.js"
 import { summarizeInlineMessageContent } from "./message-content.js"
 import { normalizeInlineTarget } from "./normalize.js"
@@ -91,6 +92,12 @@ const GET_MESSAGES_METHOD =
   ((Method as Record<string, unknown>).GET_MESSAGES as number) > 0
     ? ((Method as Record<string, unknown>).GET_MESSAGES as Method)
     : null
+const CREATE_SUBTHREAD_METHOD =
+  typeof (Method as Record<string, unknown>).CREATE_SUBTHREAD === "number" &&
+  Number.isInteger((Method as Record<string, unknown>).CREATE_SUBTHREAD) &&
+  ((Method as Record<string, unknown>).CREATE_SUBTHREAD as number) > 0
+    ? ((Method as Record<string, unknown>).CREATE_SUBTHREAD as Method)
+    : (43 as Method)
 
 const INLINE_ACTION_MAX_ROWS = 8
 const INLINE_ACTION_MAX_PER_ROW = 8
@@ -934,11 +941,51 @@ export const inlineMessageActions = {
     if (normalizedAction === "reply" || normalizedAction === "thread-reply") {
       const parseMarkdown =
         resolveInlineAccount({ cfg, accountId: accountId ?? null }).config.parseMarkdown ?? true
+      const replyThreadsEnabled =
+        normalizedAction === "thread-reply" &&
+        isInlineReplyThreadsEnabled({ cfg, accountId: accountId ?? null })
       return await withInlineClient({
         cfg,
         accountId,
         fn: async (client) => {
           const actions = resolveInlineMessageActionsParam(params)
+          if (replyThreadsEnabled) {
+            const rawThreadId =
+              readFlexibleId(params, "threadId") ??
+              readStringParam(params, "threadId")
+            if (!rawThreadId) {
+              throw new Error(
+                "inline thread-reply: threadId is required when reply threads are enabled",
+              )
+            }
+            const chatId = parseInlineId(rawThreadId, "threadId")
+            const replyToMsgId = parseOptionalInlineId(
+              readFlexibleId(params, "messageId") ??
+                readFlexibleId(params, "replyTo") ??
+                readFlexibleId(params, "replyToId") ??
+                readStringParam(params, "messageId") ??
+                readStringParam(params, "replyTo") ??
+                readStringParam(params, "replyToId"),
+              "messageId",
+            )
+            const text =
+              readStringParam(params, "message") ??
+              readStringParam(params, "text", { required: true, allowEmpty: true })
+            const sent = await client.sendMessage({
+              chatId,
+              text,
+              ...(actions !== undefined ? { actions } : {}),
+              ...(replyToMsgId != null ? { replyToMsgId } : {}),
+              parseMarkdown,
+            })
+            return jsonResult({
+              ok: true,
+              chatId: String(chatId),
+              threadId: String(chatId),
+              messageId: sent.messageId != null ? String(sent.messageId) : null,
+              replyToId: replyToMsgId != null ? String(replyToMsgId) : null,
+            })
+          }
           const replyParams =
             normalizedAction === "thread-reply" &&
             params.threadId != null &&
@@ -1283,6 +1330,9 @@ export const inlineMessageActions = {
     }
 
     if (normalizedAction === "channel-create" || normalizedAction === "thread-create") {
+      const replyThreadsEnabled =
+        normalizedAction === "thread-create" &&
+        isInlineReplyThreadsEnabled({ cfg, accountId: accountId ?? null })
       return await withInlineClient({
         cfg,
         accountId,
@@ -1312,6 +1362,49 @@ export const inlineMessageActions = {
             values: participantRefs,
             label: "participant",
           })
+
+          if (replyThreadsEnabled) {
+            const parentChatId = resolveChatIdFromParams(params)
+            const parentMessageId = parseOptionalInlineId(
+              readFlexibleId(params, "parentMessageId") ??
+                readFlexibleId(params, "messageId") ??
+                readFlexibleId(params, "replyTo") ??
+                readFlexibleId(params, "replyToId") ??
+                readStringParam(params, "parentMessageId") ??
+                readStringParam(params, "messageId") ??
+                readStringParam(params, "replyTo") ??
+                readStringParam(params, "replyToId"),
+              "parentMessageId",
+            )
+
+            const result = await client.invokeRaw(CREATE_SUBTHREAD_METHOD, {
+              oneofKind: "createSubthread",
+              createSubthread: {
+                parentChatId,
+                ...(parentMessageId != null ? { parentMessageId } : {}),
+                title,
+                ...(description ? { description } : {}),
+                ...(emoji ? { emoji } : {}),
+                participants: dedupedParticipants.map((userId) => ({ userId })),
+              },
+            })
+            if (result.oneofKind !== "createSubthread") {
+              throw new Error(
+                `inline action: expected createSubthread result, got ${String(result.oneofKind)}`,
+              )
+            }
+            return jsonResult(
+              toJsonSafe({
+                ok: true,
+                title,
+                parentChatId: String(parentChatId),
+                parentMessageId: parentMessageId != null ? String(parentMessageId) : null,
+                chat: result.createSubthread.chat ?? null,
+                dialog: result.createSubthread.dialog ?? null,
+                anchorMessage: result.createSubthread.anchorMessage ?? null,
+              }),
+            )
+          }
 
           const result = await client.invokeRaw(Method.CREATE_CHAT, {
             oneofKind: "createChat",

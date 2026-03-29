@@ -1174,6 +1174,168 @@ describe("inline/actions", () => {
     )
   })
 
+  it("requires threadId for thread-reply when replyThreads is enabled", async () => {
+    vi.resetModules()
+
+    const connect = vi.fn(async () => {})
+    const close = vi.fn(async () => {})
+    const sendMessage = vi.fn(async () => ({ messageId: 88n }))
+
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {},
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = connect
+        close = close
+        sendMessage = sendMessage
+      },
+    }))
+
+    const { inlineMessageActions } = await import("./actions")
+
+    await expect(
+      inlineMessageActions.handleAction?.({
+        channel: "inline",
+        action: "thread-reply",
+        cfg: {
+          channels: {
+            inline: {
+              token: "token",
+              baseUrl: "https://api.inline.chat",
+              capabilities: {
+                replyThreads: true,
+              },
+            },
+          },
+        } as OpenClawConfig,
+        params: {
+          to: "7",
+          replyToId: "10",
+          message: "thread reply body",
+        },
+      } as any),
+    ).rejects.toThrow("inline thread-reply: threadId is required when reply threads are enabled")
+  })
+
+  it("sends thread-reply into the child reply-thread chat when enabled", async () => {
+    vi.resetModules()
+
+    const connect = vi.fn(async () => {})
+    const close = vi.fn(async () => {})
+    const sendMessage = vi.fn(async () => ({ messageId: 88n }))
+
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {},
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = connect
+        close = close
+        sendMessage = sendMessage
+      },
+    }))
+
+    const { inlineMessageActions } = await import("./actions")
+
+    await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "thread-reply",
+      cfg: {
+        channels: {
+          inline: {
+            token: "token",
+            baseUrl: "https://api.inline.chat",
+            capabilities: {
+              replyThreads: true,
+            },
+          },
+        },
+      } as OpenClawConfig,
+      params: {
+        to: "7",
+        threadId: "77",
+        replyToId: "10",
+        message: "thread reply body",
+      },
+    } as any)
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: 77n,
+        text: "thread reply body",
+        replyToMsgId: 10n,
+      }),
+    )
+  })
+
+  it("uses createSubthread for thread-create when enabled", async () => {
+    vi.resetModules()
+
+    const connect = vi.fn(async () => {})
+    const close = vi.fn(async () => {})
+    const getMe = vi.fn(async () => ({ userId: 500n, firstName: "Inline", username: "inline-bot" }))
+    const invokeRaw = vi.fn(async (method: number) => {
+      if (method !== 43) {
+        throw new Error(`unexpected method ${String(method)}`)
+      }
+      return {
+        oneofKind: "createSubthread",
+        createSubthread: {
+          chat: { id: 71n, title: "Follow-up thread", parentChatId: 7n, parentMessageId: 10n },
+          dialog: { chatId: 71n },
+          anchorMessage: { id: 10n, fromId: 42n, message: "anchor" },
+        },
+      }
+    })
+
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {
+        CREATE_SUBTHREAD: 43,
+      },
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = connect
+        close = close
+        getMe = getMe
+        invokeRaw = invokeRaw
+      },
+    }))
+
+    const { inlineMessageActions } = await import("./actions")
+
+    await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "thread-create",
+      cfg: {
+        channels: {
+          inline: {
+            token: "token",
+            baseUrl: "https://api.inline.chat",
+            capabilities: {
+              replyThreads: true,
+            },
+          },
+        },
+      } as OpenClawConfig,
+      params: {
+        to: "7",
+        replyToId: "10",
+        threadName: "Follow-up thread",
+      },
+    } as any)
+
+    expect(invokeRaw).toHaveBeenCalledWith(
+      43,
+      expect.objectContaining({
+        oneofKind: "createSubthread",
+        createSubthread: expect.objectContaining({
+          parentChatId: 7n,
+          parentMessageId: 10n,
+          title: "Follow-up thread",
+        }),
+      }),
+    )
+  })
+
   it("rejects disabled actions from config", async () => {
     vi.resetModules()
 

@@ -2,6 +2,30 @@ import { describe, expect, it } from "vitest"
 import { InlineAccountSchema, InlineConfigSchema, InlineRuntimeConfigSchema } from "./config-schema"
 
 describe("inline/config-schema", () => {
+  it("accepts top-level reply thread capability config", () => {
+    expect(
+      InlineConfigSchema.safeParse({
+        capabilities: {
+          replyThreads: true,
+        },
+      }).success,
+    ).toBe(true)
+  })
+
+  it("accepts account-level reply thread capability config", () => {
+    expect(
+      InlineConfigSchema.safeParse({
+        accounts: {
+          work: {
+            capabilities: {
+              replyThreads: true,
+            },
+          },
+        },
+      }).success,
+    ).toBe(true)
+  })
+
   it("accepts dmPolicy=open only when allowFrom includes *", () => {
     expect(
       InlineConfigSchema.safeParse({ dmPolicy: "open", allowFrom: ["*"] }).success,
@@ -13,7 +37,11 @@ describe("inline/config-schema", () => {
 
   it("accounts schema applies the same open allowFrom rule", () => {
     expect(
-      InlineAccountSchema.safeParse({ dmPolicy: "open", allowFrom: ["*"] }).success,
+      InlineAccountSchema.safeParse({
+        dmPolicy: "open",
+        allowFrom: ["*"],
+        capabilities: { replyThreads: true },
+      }).success,
     ).toBe(true)
     expect(
       InlineAccountSchema.safeParse({ dmPolicy: "open", allowFrom: ["2"] }).success,
