@@ -16,6 +16,11 @@ import { resolveInlineGroupRequireMention } from "./policy.js"
 import { getInlineRuntime } from "../runtime.js"
 import { uploadInlineMediaFromUrl } from "./media.js"
 import { summarizeInlineMessageContent } from "./message-content.js"
+import {
+  isInlineReplyThreadsEnabled,
+  loadInlineReplyThreadAnchorMessage,
+  loadInlineReplyThreadMetadata,
+} from "./reply-threads.js"
 import { resolveInlineCompatNativeCommandMenu } from "./command-menu-compat.js"
 import {
   logInboundDrop,
@@ -71,6 +76,21 @@ type InlinePendingHistoryEntry = {
   body: string
   timestamp?: number
   messageId?: string
+}
+
+type InlineReplyThreadContext = {
+  childChatId: bigint
+  parentChatId: bigint
+  parentChatTitle: string | null
+  threadLabel: string | null
+  anchorMessage: Message | null
+}
+
+type InlineHistoryEntryPayload = {
+  line: string | null
+  attachmentLine: string | null
+  entityLine: string | null
+  inboundEntry: InlinePendingHistoryEntry | null
 }
 
 const DEFAULT_DM_HISTORY_LIMIT = 6
@@ -569,6 +589,115 @@ function mergeInboundHistoryEntries(params: {
   }))
 }
 
+function buildInlineHistoryEntryPayload(params: {
+  message: Message
+  senderProfilesById: Map<string, SenderProfile>
+  meId: bigint
+  syntheticMessageId?: string
+}): InlineHistoryEntryPayload {
+  const content = summarizeInlineMessageContent(params.message)
+  const text = normalizeHistoryText(content.text)
+  if (!text) {
+    return {
+      line: null,
+      attachmentLine: null,
+      entityLine: null,
+      inboundEntry: null,
+    }
+  }
+
+  const label = resolveHistorySenderLabel({
+    senderId: params.message.fromId,
+    meId: params.meId,
+    senderProfilesById: params.senderProfilesById,
+  })
+  const replySuffix = params.message.replyToMsgId != null ? ` ->${String(params.message.replyToMsgId)}` : ""
+  const messageId = params.syntheticMessageId ?? String(params.message.id)
+  const attachmentText = normalizeHistoryText(content.attachmentText)
+  const entityText = normalizeHistoryText(content.entityText)
+
+  return {
+    line: `#${String(params.message.id)}${replySuffix} ${label}: ${text}`,
+    attachmentLine: attachmentText ? `#${String(params.message.id)}${replySuffix} ${label}: ${attachmentText}` : null,
+    entityLine: entityText ? `#${String(params.message.id)}${replySuffix} ${label}: ${entityText}` : null,
+    inboundEntry: {
+      sender: label,
+      body: text,
+      ...(params.message.date != null ? { timestamp: Number(params.message.date) * 1000 } : {}),
+      messageId,
+    },
+  }
+}
+
+function appendInlineHistoryEntry(
+  target: {
+    lines: string[]
+    attachmentLines: string[]
+    entityLines: string[]
+    inboundHistory: InlinePendingHistoryEntry[]
+  },
+  entry: InlineHistoryEntryPayload,
+): void {
+  if (!entry.inboundEntry || !entry.line) return
+  target.inboundHistory.push(entry.inboundEntry)
+  target.lines.push(entry.line)
+  if (entry.attachmentLine) {
+    target.attachmentLines.push(entry.attachmentLine)
+  }
+  if (entry.entityLine) {
+    target.entityLines.push(entry.entityLine)
+  }
+}
+
+function prependLabeledHistoryLine(params: {
+  existing: string | null
+  heading: string
+  line: string | null
+}): string | null {
+  if (!params.line) return params.existing
+  const prefix = `${params.heading}\n`
+  const existingBody = params.existing?.startsWith(prefix) ? params.existing.slice(prefix.length) : params.existing
+  return existingBody ? `${prefix}${params.line}\n${existingBody}` : `${prefix}${params.line}`
+}
+
+function prependInlineReplyThreadAnchor(params: {
+  historyContext: HistoryContext
+  anchorMessage: Message
+  parentChatId: bigint
+  senderProfilesById: Map<string, SenderProfile>
+  meId: bigint
+}): HistoryContext {
+  const entry = buildInlineHistoryEntryPayload({
+    message: params.anchorMessage,
+    senderProfilesById: params.senderProfilesById,
+    meId: params.meId,
+    syntheticMessageId: `anchor:${String(params.parentChatId)}:${String(params.anchorMessage.id)}`,
+  })
+  if (!entry.inboundEntry || !entry.line) {
+    return params.historyContext
+  }
+
+  return {
+    ...params.historyContext,
+    inboundHistory: [entry.inboundEntry, ...params.historyContext.inboundHistory],
+    historyText: prependLabeledHistoryLine({
+      existing: params.historyContext.historyText,
+      heading: "Recent thread messages (oldest -> newest):",
+      line: entry.line,
+    }),
+    attachmentText: prependLabeledHistoryLine({
+      existing: params.historyContext.attachmentText,
+      heading: "Recent media/attachments:",
+      line: entry.attachmentLine,
+    }),
+    entityText: prependLabeledHistoryLine({
+      existing: params.historyContext.entityText,
+      heading: "Recent message entities:",
+      line: entry.entityLine,
+    }),
+  }
+}
+
 function buildInlineBodyForAgent(params: {
   rawBody: string
   currentAttachmentText: string | null
@@ -722,6 +851,50 @@ async function resolveInlineInboundMedia(params: {
   return out
 }
 
+async function resolveInlineInboundReplyThreadContext(params: {
+  replyThreadsEnabled: boolean
+  client: InlineSdkClient
+  chatId: bigint
+  chatInfo: CachedChatInfo
+  chatCache: Map<bigint, CachedChatInfo>
+}): Promise<InlineReplyThreadContext | null> {
+  if (params.chatInfo.kind === "direct" || !params.replyThreadsEnabled) {
+    return null
+  }
+
+  const metadata = await loadInlineReplyThreadMetadata({
+    client: params.client,
+    chatId: params.chatId,
+  })
+  if (!metadata) {
+    return null
+  }
+
+  const parentChatInfo =
+    metadata.parentChatId === params.chatId
+      ? params.chatInfo
+      : await resolveChatInfo(params.client, params.chatCache, metadata.parentChatId).catch(() => ({
+          kind: "group" as const,
+          title: null,
+        }))
+  const anchorMessage =
+    metadata.parentMessageId != null
+      ? await loadInlineReplyThreadAnchorMessage({
+          client: params.client,
+          parentChatId: metadata.parentChatId,
+          parentMessageId: metadata.parentMessageId,
+        }).catch(() => null)
+      : null
+
+  return {
+    childChatId: metadata.childChatId,
+    parentChatId: metadata.parentChatId,
+    parentChatTitle: parentChatInfo.title ?? null,
+    threadLabel: metadata.title ?? params.chatInfo.title ?? null,
+    anchorMessage,
+  }
+}
+
 async function buildHistoryContext(params: {
   client: InlineSdkClient
   chatId: bigint
@@ -773,31 +946,19 @@ async function buildHistoryContext(params: {
           replyToSenderId = String(item.fromId)
           repliedToBot = item.fromId === params.meId
         }
-
-        const content = summarizeInlineMessageContent(item)
-        const text = normalizeHistoryText(content.text)
-        if (!text) continue
-        const label = resolveHistorySenderLabel({
-          senderId: item.fromId,
-          meId: params.meId,
-          senderProfilesById: params.senderProfilesById,
-        })
-        inboundHistory.push({
-          sender: label,
-          body: text,
-          ...(item.date != null ? { timestamp: Number(item.date) * 1000 } : {}),
-          messageId: String(item.id),
-        })
-        const replySuffix = item.replyToMsgId != null ? ` ->${String(item.replyToMsgId)}` : ""
-        lines.push(`#${String(item.id)}${replySuffix} ${label}: ${text}`)
-        const attachmentText = normalizeHistoryText(content.attachmentText)
-        if (attachmentText) {
-          attachmentLines.push(`#${String(item.id)}${replySuffix} ${label}: ${attachmentText}`)
-        }
-        const entityText = normalizeHistoryText(content.entityText)
-        if (entityText) {
-          entityLines.push(`#${String(item.id)}${replySuffix} ${label}: ${entityText}`)
-        }
+        appendInlineHistoryEntry(
+          {
+            lines,
+            attachmentLines,
+            entityLines,
+            inboundHistory,
+          },
+          buildInlineHistoryEntryPayload({
+            message: item,
+            senderProfilesById: params.senderProfilesById,
+            meId: params.meId,
+          }),
+        )
       }
     }
   }
@@ -1082,6 +1243,21 @@ export async function monitorInlineProvider(params: {
         }
 
         const isGroup = chatInfo.kind !== "direct"
+        const replyThreadsEnabled =
+          account.config.capabilities?.replyThreads === true ||
+          isInlineReplyThreadsEnabled({ cfg, accountId: account.accountId })
+        const replyThreadContext = await resolveInlineInboundReplyThreadContext({
+          replyThreadsEnabled,
+          client,
+          chatId,
+          chatInfo,
+          chatCache,
+        }).catch((err) => {
+          statusSink?.({ lastError: `getChat (reply thread) failed: ${String(err)}` })
+          return null
+        })
+        const effectiveChatId = replyThreadContext?.parentChatId ?? chatId
+        const effectiveGroupTitle = replyThreadContext?.parentChatTitle ?? chatInfo.title ?? null
         const senderId = String(msg.fromId)
         await hydrateChatParticipants(chatId)
         const senderProfile = senderProfilesById.get(senderId)
@@ -1258,7 +1434,7 @@ export async function monitorInlineProvider(params: {
           peer: {
             kind: isGroup ? "group" : "direct",
             // DM sessions should be stable per sender. Group sessions should be stable per chat.
-            id: isGroup ? String(chatId) : senderId,
+            id: isGroup ? String(effectiveChatId) : senderId,
           },
         })
 
@@ -1269,7 +1445,11 @@ export async function monitorInlineProvider(params: {
           : false
         const wasMentioned = nativeMentioned || patternMentioned
         const messageTimestamp = Number(msg.date) * 1000
-        const groupHistoryKey = isGroup ? route.sessionKey : null
+        const groupHistoryKey = isGroup
+          ? replyThreadContext
+            ? `${route.sessionKey}:thread:${String(replyThreadContext.childChatId)}`
+            : route.sessionKey
+          : null
         const pendingHistorySender = senderUsername ? `@${senderUsername}` : senderName ?? `user:${senderId}`
         const historyLimit = resolveHistoryLimit({
           cfg,
@@ -1297,17 +1477,27 @@ export async function monitorInlineProvider(params: {
             replyToSenderId: null,
           }
         })
+        const effectiveHistoryContext =
+          replyThreadContext?.anchorMessage != null
+            ? prependInlineReplyThreadAnchor({
+                historyContext,
+                anchorMessage: replyThreadContext.anchorMessage,
+                parentChatId: replyThreadContext.parentChatId,
+                senderProfilesById,
+                meId,
+              })
+            : historyContext
         const implicitMention =
           ((reactionEvent != null || callbackActionEvent != null) && isGroup) ||
           (isGroup &&
             (account.config.replyToBotWithoutMention ?? false) &&
             msg.replyToMsgId != null &&
-            historyContext.repliedToBot)
+            effectiveHistoryContext.repliedToBot)
 
         const requireMention = isGroup
           ? resolveInlineGroupRequireMention({
               cfg,
-              groupId: String(chatId),
+              groupId: String(effectiveChatId),
               accountId: account.accountId,
               requireMentionDefault: account.config.requireMention ?? false,
             })
@@ -1379,15 +1569,15 @@ export async function monitorInlineProvider(params: {
             })
 
         const timestamp = messageTimestamp
-        const fromLabel = isGroup ? `chat:${chatInfo.title ?? String(chatId)}` : `user:${senderId}`
+        const fromLabel = isGroup ? `chat:${effectiveGroupTitle ?? String(effectiveChatId)}` : `user:${senderId}`
 
         const storePath = core.channel.session.resolveStorePath(cfg.session?.store, { agentId: route.agentId })
         const envelopeOptions = core.channel.reply.resolveEnvelopeFormatOptions(cfg)
         const previousTimestamp = core.channel.session.readSessionUpdatedAt({ storePath, sessionKey: route.sessionKey })
         const combinedBody = [
-          historyContext.historyText,
-          historyContext.attachmentText,
-          historyContext.entityText,
+          effectiveHistoryContext.historyText,
+          effectiveHistoryContext.attachmentText,
+          effectiveHistoryContext.entityText,
           INLINE_FORMATTING_NOTE,
           `Current message:\n${rawBody}`,
           currentAttachmentText && currentAttachmentText !== rawBody
@@ -1424,7 +1614,7 @@ export async function monitorInlineProvider(params: {
         const inboundHistory =
           isGroup && groupHistoryKey
             ? mergeInboundHistoryEntries({
-                historyContextEntries: historyContext.inboundHistory,
+                historyContextEntries: effectiveHistoryContext.inboundHistory,
                 pendingEntries: groupPendingHistories.get(groupHistoryKey) ?? [],
                 limit: historyLimit,
               })
@@ -1439,7 +1629,7 @@ export async function monitorInlineProvider(params: {
           : CHANNEL_ID
         const systemPrompt = resolveInlineSystemPrompt({
           account,
-          ...(isGroup ? { groupId: String(chatId) } : {}),
+          ...(isGroup ? { groupId: String(effectiveChatId) } : {}),
         })
 
         const ctxPayload = core.channel.reply.finalizeInboundContext({
@@ -1448,22 +1638,25 @@ export async function monitorInlineProvider(params: {
           ...(isGroup ? { InboundHistory: inboundHistory } : {}),
           RawBody: rawBody,
           CommandBody: normalizedCommandBody,
-          From: isGroup ? `inline:chat:${String(chatId)}` : `inline:${senderId}`,
-          To: `inline:${String(chatId)}`,
+          From: isGroup ? `inline:chat:${String(effectiveChatId)}` : `inline:${senderId}`,
+          To: `inline:${String(effectiveChatId)}`,
           SessionKey: route.sessionKey,
+          ...(replyThreadContext ? { ParentSessionKey: route.sessionKey } : {}),
           AccountId: route.accountId,
           ChatType: isGroup ? "group" : "direct",
           ConversationLabel: fromLabel,
-          ...(isGroup ? { GroupSubject: chatInfo.title ?? String(chatId) } : {}),
+          ...(isGroup ? { GroupSubject: effectiveGroupTitle ?? String(effectiveChatId) } : {}),
           SenderId: senderId,
           ...(senderName ? { SenderName: senderName } : {}),
           ...(senderUsername ? { SenderUsername: senderUsername } : {}),
           Provider: CHANNEL_ID,
           Surface: effectiveSurface,
           MessageSid: String(msg.id),
+          ...(replyThreadContext ? { MessageThreadId: String(replyThreadContext.childChatId) } : {}),
+          ...(replyThreadContext?.threadLabel ? { ThreadLabel: replyThreadContext.threadLabel } : {}),
           ...(msg.replyToMsgId != null ? { ReplyToId: String(msg.replyToMsgId) } : {}),
-          ...(historyContext.replyToSenderId != null ? { ReplyToSenderId: historyContext.replyToSenderId } : {}),
-          ...(msg.replyToMsgId != null ? { ReplyToWasBot: historyContext.repliedToBot } : {}),
+          ...(effectiveHistoryContext.replyToSenderId != null ? { ReplyToSenderId: effectiveHistoryContext.replyToSenderId } : {}),
+          ...(msg.replyToMsgId != null ? { ReplyToWasBot: effectiveHistoryContext.repliedToBot } : {}),
           ...(callbackActionEvent
             ? {
                 MessageActionInteractionId: String(callbackActionEvent.interactionId),
@@ -1480,7 +1673,7 @@ export async function monitorInlineProvider(params: {
           CommandAuthorized: commandAuthorized,
           GroupSystemPrompt: systemPrompt,
           OriginatingChannel: CHANNEL_ID,
-          OriginatingTo: `inline:${String(chatId)}`,
+          OriginatingTo: `inline:${String(effectiveChatId)}`,
         })
 
         await core.channel.session.recordInboundSession({
@@ -1492,7 +1685,7 @@ export async function monitorInlineProvider(params: {
                 updateLastRoute: {
                   sessionKey: route.mainSessionKey,
                   channel: CHANNEL_ID,
-                  to: `inline:${String(chatId)}`,
+                  to: `inline:${String(effectiveChatId)}`,
                   accountId: route.accountId,
                 },
               }
