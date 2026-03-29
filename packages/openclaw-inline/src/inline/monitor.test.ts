@@ -75,7 +75,12 @@ type MonitorSetup = {
         date?: bigint
       }
   >
-  chats: Record<string, { kind: "direct" | "group"; title?: string }>
+  chats: Record<string, {
+    kind: "direct" | "group"
+    title?: string
+    parentChatId?: bigint
+    parentMessageId?: bigint
+  }>
   participants?: Record<string, Array<{ id: bigint; username?: string; firstName?: string; lastName?: string }>>
   historyByChat?: Record<string, Array<{
     id: bigint
@@ -130,6 +135,7 @@ function buildAccount(overrides?: {
   blockStreaming?: boolean
   streamViaEditMessage?: boolean
   mediaMaxMb?: number
+  replyThreads?: boolean
 }) {
   return {
     accountId: "default",
@@ -158,6 +164,7 @@ function buildAccount(overrides?: {
       blockStreaming: overrides?.blockStreaming,
       streamViaEditMessage: overrides?.streamViaEditMessage,
       mediaMaxMb: overrides?.mediaMaxMb,
+      capabilities: overrides?.replyThreads != null ? { replyThreads: overrides.replyThreads } : undefined,
       textChunkLimit: 4000,
     },
   } as any
@@ -245,6 +252,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       getMe?: Record<string, never>
       getChatParticipants?: { chatId?: bigint }
       getChatHistory?: { peerId?: { type?: { oneofKind?: string; chat?: { chatId?: bigint } } } }
+      getChat?: { peerId?: { type?: { oneofKind?: string; chat?: { chatId?: bigint } } } }
       editMessage?: {
         messageId?: bigint
         peerId?: { type?: { oneofKind?: string; chat?: { chatId?: bigint } } }
@@ -284,6 +292,27 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         oneofKind: "getChatHistory",
         getChatHistory: {
           messages: setup.historyByChat?.[chatId] ?? [],
+        },
+      }
+    }
+    if (method === 25 && input?.oneofKind === "getChat") {
+      const chatId = String(input.getChat?.peerId?.type?.chat?.chatId ?? "")
+      const info = setup.chats[chatId]
+      if (!info || info.kind === "direct") {
+        return {
+          oneofKind: "getChat",
+          getChat: {},
+        }
+      }
+      return {
+        oneofKind: "getChat",
+        getChat: {
+          chat: {
+            id: BigInt(chatId),
+            title: info.title ?? `chat-${chatId}`,
+            ...(info.parentChatId != null ? { parentChatId: info.parentChatId } : {}),
+            ...(info.parentMessageId != null ? { parentMessageId: info.parentMessageId } : {}),
+          },
         },
       }
     }
@@ -372,6 +401,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       Method: {
         GET_ME: 1,
         GET_CHAT_HISTORY: 5,
+        GET_CHAT: 25,
         GET_CHAT_PARTICIPANTS: 13,
         EDIT_MESSAGE: 8,
         GET_MESSAGES: 38,
@@ -396,6 +426,8 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
             chatId,
             title: info.title ?? "Group",
             peer: { type: { oneofKind: "chat", chat: { chatId } } },
+            ...(info.parentChatId != null ? { parentChatId: info.parentChatId } : {}),
+            ...(info.parentMessageId != null ? { parentMessageId: info.parentMessageId } : {}),
           }
         })
         sendMessage = sendMessage
@@ -629,6 +661,179 @@ describe("inline/monitor", () => {
           text: "agent reply",
           replyToMsgId: 555n,
           parseMarkdown: true,
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("uses parent chat targeting and thread metadata for inbound reply-thread messages", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7100n,
+          message: {
+            id: 61002n,
+            date: 1_700_000_010n,
+            fromId: 42n,
+            message: "can you handle this reply thread?",
+          },
+        },
+      ],
+      chats: {
+        "7000": { kind: "group", title: "Deploy Room" },
+        "7100": {
+          kind: "group",
+          title: "Re: deploy plan",
+          parentChatId: 7000n,
+          parentMessageId: 5000n,
+        },
+      },
+      historyByChat: {
+        "7000": [
+          {
+            id: 4999n,
+            date: 1_700_000_001n,
+            fromId: 51n,
+            message: "unrelated parent chat line",
+          },
+          {
+            id: 5000n,
+            date: 1_700_000_002n,
+            fromId: 41n,
+            message: "Parent thread anchor",
+          },
+        ],
+        "7100": [
+          {
+            id: 61001n,
+            date: 1_700_000_009n,
+            fromId: 51n,
+            message: "thread follow-up context",
+          },
+          {
+            id: 61002n,
+            date: 1_700_000_010n,
+            fromId: 42n,
+            message: "can you handle this reply thread?",
+          },
+        ],
+      },
+      dispatchReplyPayload: {
+        text: "thread reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: false, replyThreads: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.resolveAgentRoute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          peer: { kind: "group", id: "7000" },
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          To: "inline:7000",
+          OriginatingTo: "inline:7000",
+          GroupSubject: "Deploy Room",
+          MessageThreadId: "7100",
+          ThreadLabel: "Re: deploy plan",
+          Body: expect.stringContaining("Parent thread anchor"),
+          InboundHistory: expect.arrayContaining([
+            expect.objectContaining({ body: "Parent thread anchor" }),
+            expect.objectContaining({ body: "thread follow-up context" }),
+          ]),
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          InboundHistory: expect.not.arrayContaining([
+            expect.objectContaining({ body: "unrelated parent chat line" }),
+          ]),
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 7100n,
+          text: "thread reply",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("falls back to current non-threaded behavior when reply-thread metadata is unavailable", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7200n,
+          message: {
+            id: 62002n,
+            date: 1_700_000_020n,
+            fromId: 42n,
+            message: "reply thread metadata missing",
+          },
+        },
+      ],
+      chats: {
+        "7200": { kind: "group", title: "Unknown Child Chat" },
+      },
+      historyByChat: {
+        "7200": [
+          {
+            id: 62001n,
+            date: 1_700_000_019n,
+            fromId: 51n,
+            message: "normal child chat context",
+          },
+          {
+            id: 62002n,
+            date: 1_700_000_020n,
+            fromId: 42n,
+            message: "reply thread metadata missing",
+          },
+        ],
+      },
+      dispatchReplyPayload: {
+        text: "fallback reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ groupPolicy: "open", requireMention: false, replyThreads: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.resolveAgentRoute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          peer: { kind: "group", id: "7200" },
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          To: "inline:7200",
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext.mock.calls[0]?.[0]).not.toHaveProperty("MessageThreadId")
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 7200n,
+          text: "fallback reply",
         }),
       )
     })
