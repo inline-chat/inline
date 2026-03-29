@@ -10,15 +10,24 @@ Create bot/token guide: `docs/create-inline-bot.md`.
 Supports:
 
 - Inline DMs (`ChatType=direct`)
-- Inline chats (including top-level thread-style chats) as conversations (`ChatType=group`)
+- Inline chats as conversations (`ChatType=group`)
 - Message replies: OpenClaw `replyToId` is mapped to Inline `replyToMsgId` (message id).
+- Optional native reply threads: enable `channels.inline.capabilities.replyThreads: true` to expose Inline reply-thread chats as OpenClaw threads.
 - Native media upload/send for images, videos, and documents from `mediaUrl` payloads.
 - Emoji reactions via message tool actions (`react`, `reactions`).
 - Reaction events on bot-authored messages are surfaced back to the agent as inbound context.
 
-Non-goals (for now):
+By default, native reply threads stay off to preserve the old compatibility behavior. When disabled:
 
-- Subthreads: Inline “replyTo” is a message reply, not a thread identifier. We do not expose OpenClaw subthread mode yet (`capabilities.threads=false`).
+- `replyToId` remains an Inline message reply only.
+- `thread-reply` keeps the legacy compatibility path.
+- `thread-create` keeps the legacy chat-creation alias behavior.
+
+When enabled:
+
+- inbound reply-thread messages use the parent chat as the base conversation target and the child reply-thread chat id as `MessageThreadId`
+- outbound `thread-reply` sends into the child reply-thread chat
+- `thread-create` creates a real Inline reply thread instead of a plain chat alias
 
 ## Install
 
@@ -90,6 +99,8 @@ channels:
     groupPolicy: "allowlist" # allowlist|open|disabled
     groupAllowFrom:
       - "inline:123" # or "user:123" or just "123"
+    capabilities:
+      replyThreads: false # optional, default false; enable native Inline reply-thread support
     requireMention: true # optional: default is false
     replyToBotWithoutMention: true # if true, replies to bot messages can bypass mention requirement
 
@@ -117,6 +128,26 @@ channels:
           "42":
             allow: ["message"]
 ```
+
+Per-account override:
+
+```yaml
+channels:
+  inline:
+    capabilities:
+      replyThreads: false
+    accounts:
+      work:
+        token: "<INLINE_BOT_TOKEN>"
+        capabilities:
+          replyThreads: true
+```
+
+Reply behavior summary:
+
+- `replyToId` is always an Inline message id.
+- Native reply threads are separate and use OpenClaw `threadId`.
+- Keep `replyThreads` off if you only want classic message replies.
 
 If you set `dmPolicy: "open"`, set `allowFrom: ["*"]`.
 
@@ -150,6 +181,12 @@ Direct DM sends can also target `user:<id>`.
 - Message lifecycle: `delete`, `unsend`
 - Pins: `pin`, `unpin`, `list-pins`
 - Space permissions: `permissions`
+
+Native thread semantics are behind `channels.inline.capabilities.replyThreads`:
+
+- disabled: `thread-reply` behaves like the old compatibility reply path
+- enabled: `thread-reply` expects `threadId` to be the child reply-thread chat id, while `to` stays the parent chat id
+- enabled: `thread-create` creates a real reply thread from a parent chat and optional `replyToId` anchor
 
 You can gate action groups from config:
 

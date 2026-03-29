@@ -35,8 +35,20 @@ Notes:
 - For reply-driven group flows, set `channels.inline.replyToBotWithoutMention: true`.
 - Group mention requirement is off by default; set `channels.inline.requireMention: true` if you want strict mentions.
 - Inline uses the native OpenClaw group-history default by default; set `channels.inline.historyLimit` to override it, or use `messages.groupChat.historyLimit` as a global fallback.
+- Native Inline reply threads are off by default. Enable `channels.inline.capabilities.replyThreads: true` if you want OpenClaw `threadId` to map to real Inline reply-thread chats.
+- `replyToId` is still a message reply id. Enabling `replyThreads` adds native thread behavior; it does not replace ordinary message replies.
+- You can override the thread toggle per account with `channels.inline.accounts.<account>.capabilities.replyThreads`.
 - Message actions include reply/read/search/edit/reactions/channel and participant management; gate groups via `channels.inline.actions.*`.
 - Media uploads (image/video/document) are enabled by default for `mediaUrl` sends; set `channels.inline.mediaMaxMb` if you need a lower cap.
+
+Example native-thread toggle:
+
+```yaml
+channels:
+  inline:
+    capabilities:
+      replyThreads: true
+```
 
 ## 3) Start Gateway
 
