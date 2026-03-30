@@ -157,7 +157,9 @@ class MainSidebarList: NSView {
       type: ChatType,
       title: String?,
       emoji: String?,
-      createdBy: Int64?
+      createdBy: Int64?,
+      parentChatId: Int64?,
+      parentMessageId: Int64?
     )
     case deleted
   }
@@ -1119,7 +1121,9 @@ class MainSidebarList: NSView {
         type: chat.type,
         title: chat.title,
         emoji: chat.emoji,
-        createdBy: chat.createdBy
+        createdBy: chat.createdBy,
+        parentChatId: chat.parentChatId,
+        parentMessageId: chat.parentMessageId
       )
     } else {
       PeerSignature.deleted
