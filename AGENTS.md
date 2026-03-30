@@ -78,7 +78,7 @@
 - Prefer new feature work in `apple/InlineIOSUI` and `apple/InlineMacUI`; use legacy targets only when tightly coupled.
 - Minimum versions: iOS 18, macOS 15.
 - Prefer Swift Testing (`import Testing`, `@Test`, `@Suite`) and Observation (`@Observable`, `@Bindable`).
-- Prefer focused package builds/tests (for example `swift test`, `swift build`, swift syntax typecheck) over full `xcodebuild` if fits your scope.
+- Prefer focused package builds/tests (for example `swift test`, `swift build`, swift syntax typecheck) over full `xcodebuild`. don't run `xcodebuild` yourself.
 - `AppDatabase` migrations are in `InlineKit/Sources/InlineKit/Database.swift`; append new migrations at the bottom.
 - For protobuf blobs in DB, follow the `DraftMessage` typed-model + `ProtocolHelpers` + `DatabaseValueConvertible` pattern.
 - Use `Log.scoped`; avoid main-thread heavy work; prefer Swift concurrency and composable views.
