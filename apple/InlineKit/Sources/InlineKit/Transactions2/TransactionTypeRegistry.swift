@@ -42,6 +42,7 @@ public enum TransactionTypeRegistry {
       case is UpdateBotProfileTransaction: "update_bot_profile"
       case is UpdatePushNotificationDetailsTransaction: "update_push_notification_details"
       case is InvokeMessageActionTransaction: "invoke_message_action"
+      case is ShowChatInSidebarTransaction: "show_chat_in_sidebar"
       default: "unknown"
     }
   }
@@ -88,6 +89,8 @@ public enum TransactionTypeRegistry {
         return try decoder.decode(UpdatePushNotificationDetailsTransaction.self, from: data)
       case "invoke_message_action":
         return try decoder.decode(InvokeMessageActionTransaction.self, from: data)
+      case "show_chat_in_sidebar":
+        return try decoder.decode(ShowChatInSidebarTransaction.self, from: data)
       default: throw TransactionTypeError.unknownTransactionType(type)
     }
   }

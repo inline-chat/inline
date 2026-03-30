@@ -617,6 +617,7 @@ private final class DialogNotificationToolbarButton: NSButton {
 private final class ChatToolbarMenuModel: ObservableObject {
   @Published private(set) var isPinned: Bool = false
   @Published private(set) var isArchived: Bool = false
+  @Published private(set) var isSidebarVisible: Bool = true
   @Published private(set) var canRename: Bool = false
   @Published private(set) var chatSpaceId: Int64? = nil
 
@@ -648,6 +649,7 @@ private final class ChatToolbarMenuModel: ObservableObject {
           guard let self else { return }
           self.isPinned = dialog?.pinned ?? false
           self.isArchived = dialog?.archived ?? false
+          self.isSidebarVisible = dialog?.sidebarVisible != false
         }
       )
   }
@@ -757,6 +759,12 @@ private struct ChatToolbarMenu: View {
         }
       }
 
+      if peer.isThread, model.isSidebarVisible == false {
+        Button("Keep in Sidebar", systemImage: "sidebar.left") {
+          keepInSidebar()
+        }
+      }
+
       Button("Load chat history", systemImage: "arrow.down.circle") {
         loadLast1000Messages()
       }
@@ -852,6 +860,18 @@ private struct ChatToolbarMenu: View {
       nav2.navigate(to: .chatInfo(peer: peer))
     } else {
       dependencies.nav.open(.chatInfo(peer: peer))
+    }
+  }
+
+  private func keepInSidebar() {
+    Task(priority: .userInitiated) {
+      do {
+        _ = try await realtimeV2.send(.showChatInSidebar(peerId: peer))
+      } catch {
+        await MainActor.run {
+          ToastCenter.shared.showError("Failed to keep chat in sidebar")
+        }
+      }
     }
   }
 
