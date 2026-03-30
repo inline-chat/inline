@@ -1567,7 +1567,11 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     }
 
     updateSendButtonIfNeeded()
-    saveDraftWithDebounce()
+    if isEmptyTrimmed {
+      clearDraft()
+    } else {
+      saveDraftWithDebounce()
+    }
   }
 
   private func handleStickerDetectionIfNeeded(for textView: NSTextView) {
@@ -1960,10 +1964,16 @@ extension ComposeAppKit {
   }
 
   private func saveDraft() {
+    guard !isEmptyTrimmed else {
+      clearDraft()
+      return
+    }
     Drafts.shared.update(peerId: peerId, attributedString: textEditor.attributedString)
   }
 
   private func clearDraft() {
+    draftDebounceTask?.cancel()
+    draftDebounceTask = nil
     Drafts.shared.clear(peerId: peerId)
   }
 
