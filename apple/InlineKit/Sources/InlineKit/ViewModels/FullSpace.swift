@@ -174,8 +174,7 @@ public final class FullSpaceViewModel: ObservableObject {
       ValueObservation
         .tracking { db in
           try Dialog
-            .spaceChatItemQuery()
-            .filter(Column("spaceId") == spaceId)
+            .sidebarSpaceChatItemQuery(spaceId: spaceId)
             .fetchAll(db)
         }
         .publisher(in: db.dbWriter, scheduling: .immediate)
