@@ -123,6 +123,9 @@ public actor UpdatesEngine: Sendable {
         case let .dialogNotificationSettings(dialogNotificationSettings):
           try dialogNotificationSettings.apply(db)
 
+        case let .chatOpen(chatOpen):
+          try chatOpen.apply(db)
+
         case let .messageActionAnswered(messageActionAnswered):
           messageActionAnswered.apply()
 
@@ -960,6 +963,24 @@ extension InlineProtocol.UpdateDialogNotificationSettings {
       Log.shared.debug("Updated dialog notification settings")
     } else {
       Log.shared.warning("Could not find dialog for peer \(peerID.toPeer()) to update notification settings")
+    }
+  }
+}
+
+extension InlineProtocol.UpdateChatOpen {
+  func apply(_ db: Database) throws {
+    Log.shared.debug("update chat open for chat \(chat.id)")
+
+    do {
+      if hasUser {
+        _ = try User.save(db, user: user)
+      }
+
+      let updatedChat = Chat(from: chat)
+      try updatedChat.save(db)
+      _ = try dialog.saveFull(db)
+    } catch {
+      Log.shared.error("Failed to apply chat open update", error: error)
     }
   }
 }

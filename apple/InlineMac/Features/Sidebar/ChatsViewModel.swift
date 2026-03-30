@@ -101,8 +101,7 @@ final class ChatsViewModel: ObservableObject {
       ValueObservation
         .tracking { db in
           try Dialog
-            .spaceChatItemQuery()
-            .filter(Column("spaceId") == spaceId)
+            .sidebarSpaceChatItemQuery(spaceId: spaceId)
             .fetchAll(db)
         }
         .publisher(in: db.dbWriter, scheduling: .immediate)

@@ -31,6 +31,7 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
   public var chatId: Int64?
   public var unreadMark: Bool?
   public var notificationSettings: DialogNotificationSettings?
+  public var sidebarVisible: Bool? = nil
 
   public enum Columns {
     public static let id = Column(CodingKeys.id)
@@ -46,6 +47,7 @@ public struct Dialog: FetchableRecord, Identifiable, Codable, Hashable, Persista
     public static let chatId = Column(CodingKeys.chatId)
     public static let unreadMark = Column(CodingKeys.unreadMark)
     public static let notificationSettings = Column(CodingKeys.notificationSettings)
+    public static let sidebarVisible = Column(CodingKeys.sidebarVisible)
   }
 
   public static let space = belongsTo(Space.self)
@@ -103,6 +105,7 @@ public extension Dialog {
     archived = from.archived
     unreadCount = from.unreadCount
     notificationSettings = nil
+    sidebarVisible = nil
   }
 
   // Called when user clicks a user for the first time
@@ -123,6 +126,7 @@ public extension Dialog {
     unreadCount = nil
     chatId = nil
     notificationSettings = nil
+    sidebarVisible = nil
   }
 
   init(optimisticForChat chat: Chat) {
@@ -145,6 +149,7 @@ public extension Dialog {
     unreadCount = nil
     chatId = chat.id
     notificationSettings = nil
+    sidebarVisible = true
   }
 
   init(from: InlineProtocol.Dialog) {
@@ -171,6 +176,7 @@ public extension Dialog {
     draftMessage = nil
     chatId = from.hasChatID ? from.chatID : nil
     notificationSettings = from.hasNotificationSettings ? from.notificationSettings : nil
+    sidebarVisible = from.hasSidebarVisible ? from.sidebarVisible : nil
   }
 
   static func getDialogId(peerUserId: Int64) -> Int64 {
@@ -220,7 +226,8 @@ public extension Dialog {
       archived: false,
       chatId: nil,
       unreadMark: nil,
-      notificationSettings: nil
+      notificationSettings: nil,
+      sidebarVisible: nil
     )
   }
 
@@ -238,7 +245,8 @@ public extension Dialog {
       archived: false,
       chatId: nil,
       unreadMark: nil,
-      notificationSettings: nil
+      notificationSettings: nil,
+      sidebarVisible: nil
     )
   }
 }
@@ -260,6 +268,7 @@ public extension ApiDialog {
       dialog.draftMessage = existing.draftMessage
       dialog.notificationSettings = existing.notificationSettings
       dialog.unreadMark = existing.unreadMark
+      dialog.sidebarVisible = existing.sidebarVisible
       try dialog.save(db)
     } else {
       try dialog.save(db, onConflict: .replace)
@@ -283,6 +292,9 @@ public extension InlineProtocol.Dialog {
       if !hasNotificationSettings {
         newDialog.notificationSettings = existing.notificationSettings
       }
+      if !hasSidebarVisible {
+        newDialog.sidebarVisible = existing.sidebarVisible
+      }
       try newDialog.save(db, onConflict: .replace)
       return newDialog
     } else {
@@ -294,11 +306,22 @@ public extension InlineProtocol.Dialog {
 }
 
 public extension Dialog {
+  static func applyingSidebarVisibilityFilter<T: DerivableRequest>(_ request: T) -> T {
+    request.filter(Columns.sidebarVisible == nil || Columns.sidebarVisible == true)
+  }
+
   static func get(peerId: Peer) -> QueryInterfaceRequest<Dialog> {
     Dialog
       .filter(
         Column("id") == Dialog.getDialogId(peerId: peerId)
       )
+  }
+
+  static func sidebarSpaceChatItemQuery(spaceId: Int64) -> QueryInterfaceRequest<SpaceChatItem> {
+    applyingSidebarVisibilityFilter(
+      spaceChatItemQuery()
+        .filter(Columns.spaceId == spaceId)
+    )
   }
 
   // use for array fetches

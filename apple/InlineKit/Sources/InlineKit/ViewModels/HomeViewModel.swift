@@ -121,7 +121,7 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
 
   // Add a static method to create the request
   public static func all() -> QueryInterfaceRequest<HomeChatItem> {
-    Dialog
+    var request = Dialog
       .including(
         optional: Dialog.peerUser
           .forKey(CodingKeys.user)
@@ -162,6 +162,9 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
       .including(
         optional: Dialog.space
       )
+
+    request = Dialog.applyingSidebarVisibilityFilter(request)
+
 //      .including(
 //        optional: Dialog.peerThread
 //          .forKey(CodingKeys.chat)
@@ -175,7 +178,7 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
 //              )
 //          )
 //      )
-      .asRequest(of: HomeChatItem.self)
+    return request.asRequest(of: HomeChatItem.self)
   }
 }
 

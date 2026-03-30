@@ -25,6 +25,8 @@ public struct ApiChat: Codable, Hashable, Sendable {
   public var emoji: String?
   public var publicThread: Bool?
   public var createdBy: Int64?
+  public var parentChatId: Int64?
+  public var parentMessageId: Int64?
 }
 
 public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, PersistableRecord, Sendable {
@@ -38,6 +40,8 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
   public var emoji: String?
   public var isPublic: Bool?
   public var createdBy: Int64?
+  public var parentChatId: Int64? = nil
+  public var parentMessageId: Int64? = nil
   public var createState: ChatCreateState?
 
   public enum Columns {
@@ -51,6 +55,8 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     static let emoji = Column(CodingKeys.emoji)
     static let isPublic = Column(CodingKeys.isPublic)
     static let createdBy = Column(CodingKeys.createdBy)
+    static let parentChatId = Column(CodingKeys.parentChatId)
+    static let parentMessageId = Column(CodingKeys.parentMessageId)
     static let createState = Column(CodingKeys.createState)
   }
 
@@ -90,6 +96,8 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     spaceId: Int64?, peerUserId: Int64? = nil, lastMsgId: Int64? = nil, emoji: String? = nil,
     isPublic: Bool? = nil,
     createdBy: Int64? = nil,
+    parentChatId: Int64? = nil,
+    parentMessageId: Int64? = nil,
     createState: ChatCreateState? = nil
   ) {
     self.id = id
@@ -102,6 +110,8 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
     self.emoji = emoji
     self.isPublic = isPublic
     self.createdBy = createdBy
+    self.parentChatId = parentChatId
+    self.parentMessageId = parentMessageId
     self.createState = createState
   }
 }
@@ -130,6 +140,10 @@ public extension Chat {
     } else {
       .with { $0.chat.chatID = id }
     }
+  }
+
+  public var isReplyThread: Bool {
+    parentMessageId != nil
   }
 }
 
@@ -184,6 +198,8 @@ public extension Chat {
     }
     isPublic = from.publicThread
     createdBy = from.createdBy
+    parentChatId = from.parentChatId
+    parentMessageId = from.parentMessageId
     spaceId = from.spaceId
     type = from.type == "private" ? .privateChat : .thread
     peerUserId =
@@ -217,6 +233,8 @@ public extension Chat {
     emoji = from.hasEmoji ? from.emoji : nil
     isPublic = from.hasIsPublic ? from.isPublic : nil
     createdBy = from.hasCreatedBy ? from.createdBy : nil
+    parentChatId = from.hasParentChatID ? from.parentChatID : nil
+    parentMessageId = from.hasParentMessageID ? from.parentMessageID : nil
     createState = nil
 
     if case let .user(peerUser) = from.peerID.type {
@@ -243,6 +261,44 @@ public extension Chat {
           // Fetch thread chat
           try Chat.filter(Column("id") == id).fetchOne(db)
       }
+    }
+  }
+
+  static func getReplyThread(
+    parentChatId: Int64,
+    parentMessageId: Int64,
+    database: AppDatabase = .shared
+  ) throws -> Chat? {
+    try database.reader.read { db in
+      try Chat
+        .filter(Columns.parentChatId == parentChatId)
+        .filter(Columns.parentMessageId == parentMessageId)
+        .order(Columns.id.desc)
+        .fetchOne(db)
+    }
+  }
+
+  static func getReplyThreadPeerIfNavigable(
+    parentChatId: Int64,
+    parentMessageId: Int64,
+    database: AppDatabase = .shared
+  ) throws -> Peer? {
+    try database.reader.read { db in
+      guard let chat = try Chat
+        .filter(Columns.parentChatId == parentChatId)
+        .filter(Columns.parentMessageId == parentMessageId)
+        .order(Columns.id.desc)
+        .fetchOne(db)
+      else {
+        return nil
+      }
+
+      let peer: Peer = .thread(id: chat.id)
+      guard try Dialog.get(peerId: peer).fetchOne(db) != nil else {
+        return nil
+      }
+
+      return peer
     }
   }
 }

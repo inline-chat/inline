@@ -56,15 +56,19 @@ public struct GetChatTransaction: Transaction2 {
         }
 
         do {
-          let dialog = Dialog(from: response.dialog)
-          let dialogId = Dialog.getDialogId(peerId: dialog.peerId)
-          let existingDialog = try Dialog.fetchOne(db, id: dialogId)
-          if existingDialog == nil {
-            try dialog.save(db)
-          }
+          _ = try response.dialog.saveFull(db)
         } catch {
           log.error("Failed to save dialog", error: error)
           throw error
+        }
+
+        if response.hasAnchorMessage {
+          do {
+            _ = try Message.save(db, protocolMessage: response.anchorMessage, publishChanges: false)
+          } catch {
+            log.error("Failed to save anchor message", error: error)
+            throw error
+          }
         }
 
         do {
