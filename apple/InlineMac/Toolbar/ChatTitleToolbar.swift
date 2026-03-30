@@ -318,6 +318,8 @@ final class ToolbarTitleLabel: NSTextField {
 final class ChatStatusView: NSView {
   private var timer: Timer?
   private var dependencies: AppDependencies
+  private var parentChatCancellable: AnyCancellable?
+  private var observedParentChatId: Int64?
 
   // Connection state tracking
   private var displayedConnectionState: RealtimeConnectionState? {
@@ -385,11 +387,14 @@ final class ChatStatusView: NSView {
 
     if case let .thread(chatId) = peer {
       ObjectCache.shared.getChatPublisher(id: chatId).sink { [weak self] _ in
+        self?.updateParentChatSubscription()
         DispatchQueue.main.async {
           self?.updateLabel()
         }
       }.store(in: &cancellables)
     }
+
+    updateParentChatSubscription()
 
     // connection state updates
     Task {
@@ -428,6 +433,7 @@ final class ChatStatusView: NSView {
 
   private enum StatusState {
     case connecting(String)
+    case parentChat(String)
     case publicChat
     case privateChat
     case composing(String) // Changed to String to support custom typing text
@@ -439,6 +445,7 @@ final class ChatStatusView: NSView {
     var label: String {
       switch self {
         case let .connecting(message): message
+        case let .parentChat(title): title
         case .publicChat: "public"
         case .privateChat: "private"
         case let .composing(text): text // Use custom typing text
@@ -498,6 +505,11 @@ final class ChatStatusView: NSView {
 
     // Check chat state
     if let chat {
+      if chat.isReplyThread, let parentChatId = chat.parentChatId {
+        let parentTitle = ObjectCache.shared.getChat(id: parentChatId)?.humanReadableTitle ?? "Thread"
+        return .parentChat(parentTitle)
+      }
+
       if chat.isPublic == true {
         return .publicChat
       } else if chat.isPublic == false {
@@ -585,6 +597,32 @@ final class ChatStatusView: NSView {
   private func stopTimer() {
     timer?.invalidate()
     timer = nil
+  }
+
+  private func updateParentChatSubscription() {
+    guard case .thread = peer else {
+      parentChatCancellable?.cancel()
+      parentChatCancellable = nil
+      observedParentChatId = nil
+      return
+    }
+
+    guard let parentChatId = chat?.parentChatId else {
+      parentChatCancellable?.cancel()
+      parentChatCancellable = nil
+      observedParentChatId = nil
+      return
+    }
+
+    guard observedParentChatId != parentChatId else { return }
+    observedParentChatId = parentChatId
+    parentChatCancellable?.cancel()
+    parentChatCancellable = ObjectCache.shared.getChatPublisher(id: parentChatId)
+      .sink { [weak self] _ in
+        DispatchQueue.main.async {
+          self?.updateLabel()
+        }
+      }
   }
 }
 

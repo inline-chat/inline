@@ -13,7 +13,11 @@ struct SidebarChatIcon: View, Equatable {
   var body: some View {
     switch peer {
       case let .chat(chat):
-        ThreadIcon(emoji: normalizedEmoji(chat.emoji), size: size)
+        ThreadIcon(
+          emoji: normalizedEmoji(chat.emoji),
+          isReplyThread: chat.isReplyThread,
+          size: size
+        )
       case let .user(userInfo):
         UserAvatar(userInfo: userInfo, size: size)
       case let .savedMessage(user):
@@ -30,6 +34,7 @@ struct SidebarChatIcon: View, Equatable {
 
 private struct ThreadIcon: View {
   let emoji: String?
+  let isReplyThread: Bool
   let size: CGFloat
 
   @Environment(\.colorScheme) private var colorScheme
@@ -71,7 +76,7 @@ private struct ThreadIcon: View {
           Text(emoji)
             .font(.system(size: emojiPointSize, weight: .regular))
         } else {
-          Image(systemName: "number")
+          Image(systemName: isReplyThread ? "arrowshape.turn.up.left" : "number")
             .font(.system(size: symbolPointSize, weight: .medium))
             .foregroundColor(Self.symbolForeground)
         }

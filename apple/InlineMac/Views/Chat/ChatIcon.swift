@@ -14,6 +14,8 @@ struct ChatIcon: View {
           return lhsChat.id == rhsChat.id
             && lhsChat.title == rhsChat.title
             && lhsChat.emoji == rhsChat.emoji
+            && lhsChat.parentChatId == rhsChat.parentChatId
+            && lhsChat.parentMessageId == rhsChat.parentMessageId
 
         case let (.user(lhsUserInfo), .user(rhsUserInfo)):
           return userNameSignature(lhsUserInfo.user) == userNameSignature(rhsUserInfo.user)
@@ -60,7 +62,7 @@ struct ChatIcon: View {
         InitialsCircle(
           name: thread.title ?? "",
           size: size,
-          symbol: "number",
+          symbol: thread.isReplyThread ? "arrowshape.turn.up.left" : "number",
           symbolWeight: .medium,
           emoji: thread.emoji,
           backgroundOpacity: backgroundOpacity
