@@ -20,6 +20,10 @@ private enum MessageActionInvokeError: Error {
   case invalidResponse
 }
 
+private enum ReplyThreadOpenError: Error {
+  case invalidResponse
+}
+
 class MinimalMessageViewAppKit: NSView {
   private let feature_relayoutOnBoundsChange = true
   private let log = Log.scoped("MinimalMessageView", enableTracing: true)
@@ -2410,6 +2414,69 @@ class MinimalMessageViewAppKit: NSView {
     state.setReplyingToMsgId(fullMessage.message.messageId)
   }
 
+  @objc private func replyInThread() {
+    focusWindowIfNeeded()
+
+    Task { @MainActor in
+      guard let dependencies else {
+        ToastCenter.shared.showError("Failed to open thread")
+        return
+      }
+
+      if let cachedPeer = cachedReplyThreadPeer(dependencies: dependencies) {
+        openReplyThread(peer: cachedPeer, dependencies: dependencies)
+        return
+      }
+
+      ToastCenter.shared.showLoading("Creating thread…")
+
+      do {
+        let rpcResult = try await dependencies.realtimeV2.send(
+          .createSubthread(
+            parentChatId: message.chatId,
+            parentMessageId: message.messageId
+          )
+        )
+
+        guard case let .createSubthread(response) = rpcResult, response.hasChat else {
+          throw ReplyThreadOpenError.invalidResponse
+        }
+
+        let threadPeer: Peer = .thread(id: response.chat.id)
+        _ = try await dependencies.realtimeV2.send(.getChat(peer: threadPeer))
+        _ = try await dependencies.realtimeV2.send(.getChatHistory(peer: threadPeer))
+
+        ToastCenter.shared.dismiss()
+        openReplyThread(peer: threadPeer, dependencies: dependencies)
+      } catch {
+        ToastCenter.shared.dismiss()
+        ToastCenter.shared.showError("Failed to open thread")
+        log.error("Failed to open reply thread", error: error)
+      }
+    }
+  }
+
+  private func cachedReplyThreadPeer(dependencies: AppDependencies) -> Peer? {
+    do {
+      return try Chat.getReplyThreadPeerIfNavigable(
+        parentChatId: message.chatId,
+        parentMessageId: message.messageId,
+        database: dependencies.database
+      )
+    } catch {
+      log.error("Failed to resolve cached reply thread peer", error: error)
+      return nil
+    }
+  }
+
+  private func openReplyThread(peer: Peer, dependencies: AppDependencies) {
+    if let nav2 = dependencies.nav2 {
+      nav2.navigate(to: .chat(peer: peer))
+    } else {
+      Nav.main.open(.chat(peer: peer))
+    }
+  }
+
   @objc private func forwardMessage() {
     guard let window, let presentingController = window.contentViewController else { return }
 
@@ -3253,6 +3320,13 @@ extension MinimalMessageViewAppKit: NSMenuDelegate {
       let replyItem = NSMenuItem(title: "Reply", action: #selector(reply), keyEquivalent: "r")
       replyItem.image = NSImage(systemSymbolName: "arrowshape.turn.up.left", accessibilityDescription: "Reply")
       menu.addItem(replyItem)
+
+      let replyInThreadItem = NSMenuItem(title: "Reply in Thread", action: #selector(replyInThread), keyEquivalent: "")
+      replyInThreadItem.image = NSImage(
+        systemSymbolName: "arrowshape.turn.up.left.circle",
+        accessibilityDescription: "Reply in Thread"
+      )
+      menu.addItem(replyInThreadItem)
 
       let forwardItem = NSMenuItem(title: "Forward", action: #selector(forwardMessage), keyEquivalent: "")
       forwardItem.image = NSImage(systemSymbolName: "arrowshape.turn.up.right", accessibilityDescription: "Forward")
