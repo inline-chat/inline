@@ -45,7 +45,7 @@
 - Run focused tests/typechecks for affected areas; add/update tests for new features and regressions.
 - Web is WIP. Do not extend requested changes or investigations to `web/` unless explicitly asked.
 - New UI work must stay in new UI components; do not modify legacy sidebar/old UI.
-- When asked to write a plan or save your investigation, make a file in `.agent-docs/` named `YYYY-MM-DD-title-kebab-case.md`.
+- When asked to write a plan or save your investigation, make a file in `.context/` named `YYYY-MM-DD-title-kebab-case.md`.
 - In final handoff/review/push, call out security risks, possible performance regressions, and state production readiness.
 - Do just the right amount of engineering, not over engineer, and not under engineer. Simple and elegant solutions are often better than prematuraly complex solutions that go beyond the scope and spec.
 

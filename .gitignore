@@ -140,8 +140,5 @@ scripts/.tools/
 packages/openclaw-inline/*.tgz
 
 # Local agent docs
-.agent-docs/
-
 .superpowers/
-
 docs/superpowers
