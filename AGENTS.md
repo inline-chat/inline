@@ -48,8 +48,19 @@
 - When asked to write a plan or save your investigation, make a file in `.context/` named `YYYY-MM-DD-title-kebab-case.md`.
 - In final handoff/review/push, call out security risks, possible performance regressions, and state production readiness.
 - Do just the right amount of engineering, not over engineer, and not under engineer. Simple and elegant solutions are often better than prematuraly complex solutions that go beyond the scope and spec.
-- Use shorter function/variables names as much as possible, avoid long phrasal function names when we can keep it simply unless required.
+
+## Style Guide
+- Use shorter function/variables names as much as possible, avoid long phrasal function names when we can keep it simply unless required. Don't use weird abbreviations like `idxes`; `msg`, `id`, `ctx` and alike are fine.
 - Keep control flow simple by avoiding nested ifs as much as possible; prefer switch/matching and early return if applicable. 
+- In classes/modules, group/separate types, variables and methods (public and private); sort methods by most important/most used; keep one-time used functions to minimum.
+- After writing a new module, do a second pass to check and fix: 
+  - Avoid duplication of logic that makes modules harder to maintain.
+  - Avoid making huge functions, split if it makes sense. Unless it hurts it more.
+  - Simplify logic if possible by using more suitable standard library methods, reusing logic, using better native APIs, extracting common helpers per best practices.
+  - Don't write unneccessary comments unless the module is complicated or purpose is not immediately clear.
+
+## Security
+- Always pin dependencies; Keep dependencies to minimum; Do not install new dependencies for simple tasks that we can create our own version in house.
 
 ## Reminders
 
