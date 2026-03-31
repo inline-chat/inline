@@ -24,8 +24,8 @@ struct SpacePickerMenu: View {
   var body: some View {
     let selectedSpaceId = selectedSpaceId ?? $localSelectedSpaceId
     let activeSpace = selectedSpace(selectedSpaceId.wrappedValue)
-    let displayedConnectionState = realtimeState.displayedConnectionState
-    let title = displayedConnectionState?.title
+    let visibleConnectionState = connectionStateForToolbar(activeSpace: activeSpace)
+    let title = visibleConnectionState?.title
       ?? activeSpace?.displayName
       ?? (onSelectHome != nil ? "Home" : "Spaces")
     let createSpace = onCreateSpace ?? { router.push(.createSpace) }
@@ -80,6 +80,22 @@ struct SpacePickerMenu: View {
     }
 
     return nil
+  }
+
+  private func connectionStateForToolbar(activeSpace: Space?) -> RealtimeConnectionState? {
+    if let displayedConnectionState = realtimeState.displayedConnectionState {
+      return displayedConnectionState
+    }
+
+    // Avoid showing an empty placeholder on cold startup before the delayed
+    // displayed connection state appears.
+    guard activeSpace == nil else { return nil }
+    switch realtimeState.connectionState {
+      case .connected:
+        return nil
+      case .connecting, .updating:
+        return realtimeState.connectionState
+    }
   }
 }
 
