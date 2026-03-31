@@ -9,6 +9,13 @@ public class ChatContainerView: UIView {
 
   private weak var edgePanGestureRecognizer: UIScreenEdgePanGestureRecognizer?
 
+  private lazy var keyboardDismissTapGestureRecognizer: UITapGestureRecognizer = {
+    let gesture = UITapGestureRecognizer(target: self, action: #selector(handleTapOutsideCompose))
+    gesture.cancelsTouchesInView = false
+    gesture.delegate = self
+    return gesture
+  }()
+
   private lazy var messagesCollectionView: MessagesCollectionView = {
     let collectionView = MessagesCollectionView(peerId: peerId, chatId: chatId ?? 0, spaceId: spaceId)
     collectionView.translatesAutoresizingMaskIntoConstraints = false
@@ -123,6 +130,7 @@ public class ChatContainerView: UIView {
     backgroundColor = ThemeManager.shared.selected.backgroundColor
 
     addSubview(messagesCollectionView)
+    messagesCollectionView.addGestureRecognizer(keyboardDismissTapGestureRecognizer)
     addSubview(pinnedHeaderView)
     addSubview(composeBlurBackgroundView)
     addSubview(composeContainerView)
@@ -447,6 +455,11 @@ public class ChatContainerView: UIView {
     }
   }
 
+  @objc private func handleTapOutsideCompose() {
+    guard composeView.textView.isFirstResponder else { return }
+    composeView.textView.resignFirstResponder()
+  }
+
   private func findViewController() -> UIViewController? {
     var responder: UIResponder? = self
     while let nextResponder = responder?.next {
@@ -456,6 +469,15 @@ public class ChatContainerView: UIView {
       responder = nextResponder
     }
     return nil
+  }
+}
+
+extension ChatContainerView: UIGestureRecognizerDelegate {
+  public func gestureRecognizer(
+    _ gestureRecognizer: UIGestureRecognizer,
+    shouldRecognizeSimultaneouslyWith _: UIGestureRecognizer
+  ) -> Bool {
+    gestureRecognizer === keyboardDismissTapGestureRecognizer
   }
 }
 
