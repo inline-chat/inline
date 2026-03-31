@@ -48,6 +48,8 @@
 - When asked to write a plan or save your investigation, make a file in `.context/` named `YYYY-MM-DD-title-kebab-case.md`.
 - In final handoff/review/push, call out security risks, possible performance regressions, and state production readiness.
 - Do just the right amount of engineering, not over engineer, and not under engineer. Simple and elegant solutions are often better than prematuraly complex solutions that go beyond the scope and spec.
+- Use shorter function/variables names as much as possible, avoid long phrasal function names when we can keep it simply unless required.
+- Keep control flow simple by avoiding nested ifs as much as possible; prefer switch/matching and early return if applicable. 
 
 ## Reminders
 
