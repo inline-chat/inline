@@ -132,6 +132,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 //        try? await DataManager.shared.updateStatus(online: true)
 //      }
 //    }
+    restoreMainWindowAfterActivationIfNeeded()
   }
 
   @MainActor private func setupMainWindow() {
@@ -151,6 +152,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     controller.showWindow(nil)
     mainWindowController = controller
+  }
+
+  /// CMD+Tab can activate the app without triggering `applicationShouldHandleReopen`.
+  /// If we become active with no visible windows, restore the main window.
+  @MainActor private func restoreMainWindowAfterActivationIfNeeded() {
+    let hasVisibleWindows = NSApp.windows.contains { window in
+      window.isVisible && !window.isMiniaturized
+    }
+    guard !hasVisibleWindows else { return }
+
+    setupMainWindow()
+    mainWindowController?.window?.makeKeyAndOrderFront(nil)
   }
 
   /// Bring Inline to the front and ensure the main window exists.
