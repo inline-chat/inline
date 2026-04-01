@@ -81,8 +81,13 @@ async function insertTranslations(inputTranslations: InputTranslation[]): Promis
         .values(dbTranslationsToPersist)
         .onConflictDoUpdate({
           target: [translations.messageId, translations.chatId, translations.language],
+          // Prevent late stale jobs from overwriting newer translations.
+          setWhere: sql.raw(
+            `excluded.${translations.msgRev.name} >= "message_translations"."${translations.msgRev.name}"`,
+          ),
           set: {
             date: sql.raw(`excluded.${translations.date.name}`),
+            msgRev: sql.raw(`excluded.${translations.msgRev.name}`),
             translation: sql.raw(`excluded.${translations.translation.name}`),
             translationIv: sql.raw(`excluded.${translations.translationIv.name}`),
             translationTag: sql.raw(`excluded.${translations.translationTag.name}`),

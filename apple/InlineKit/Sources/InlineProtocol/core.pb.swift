@@ -1593,6 +1593,16 @@ public struct Message: @unchecked Sendable {
   /// Clears the value of `actions`. Subsequent reads from it will return its default value.
   public mutating func clearActions() {_uniqueStorage()._actions = nil}
 
+  /// Monotonic edit revision for the message. Increments on every edit.
+  public var rev: Int64 {
+    get {return _storage._rev ?? 0}
+    set {_uniqueStorage()._rev = newValue}
+  }
+  /// Returns true if `rev` has been explicitly set.
+  public var hasRev: Bool {return _storage._rev != nil}
+  /// Clears the value of `rev`. Subsequent reads from it will return its default value.
+  public mutating func clearRev() {_uniqueStorage()._rev = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -5129,6 +5139,9 @@ public struct MessageTranslation: Sendable {
   public var hasEntities: Bool {return self._entities != nil}
   /// Clears the value of `entities`. Subsequent reads from it will return its default value.
   public mutating func clearEntities() {self._entities = nil}
+
+  /// Source message edit revision used for staleness checks.
+  public var msgRev: Int64 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -9758,6 +9771,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     18: .standard(proto: "fwd_from"),
     19: .same(proto: "replies"),
     20: .same(proto: "actions"),
+    21: .same(proto: "rev"),
   ]
 
   fileprivate class _StorageClass {
@@ -9782,6 +9796,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     var _fwdFrom: MessageFwdHeader? = nil
     var _replies: MessageReplies? = nil
     var _actions: MessageActions? = nil
+    var _rev: Int64? = nil
 
     #if swift(>=5.10)
       // This property is used as the initial default value for new instances of the type.
@@ -9817,6 +9832,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       _fwdFrom = source._fwdFrom
       _replies = source._replies
       _actions = source._actions
+      _rev = source._rev
     }
   }
 
@@ -9855,6 +9871,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
         case 18: try { try decoder.decodeSingularMessageField(value: &_storage._fwdFrom) }()
         case 19: try { try decoder.decodeSingularMessageField(value: &_storage._replies) }()
         case 20: try { try decoder.decodeSingularMessageField(value: &_storage._actions) }()
+        case 21: try { try decoder.decodeSingularInt64Field(value: &_storage._rev) }()
         case 6000: try { try decoder.decodeSingularBoolField(value: &_storage._hasLink_p) }()
         default: break
         }
@@ -9928,6 +9945,9 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       try { if let v = _storage._actions {
         try visitor.visitSingularMessageField(value: v, fieldNumber: 20)
       } }()
+      try { if let v = _storage._rev {
+        try visitor.visitSingularInt64Field(value: v, fieldNumber: 21)
+      } }()
       try { if let v = _storage._hasLink_p {
         try visitor.visitSingularBoolField(value: v, fieldNumber: 6000)
       } }()
@@ -9961,6 +9981,7 @@ extension Message: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
         if _storage._fwdFrom != rhs_storage._fwdFrom {return false}
         if _storage._replies != rhs_storage._replies {return false}
         if _storage._actions != rhs_storage._actions {return false}
+        if _storage._rev != rhs_storage._rev {return false}
         return true
       }
       if !storagesAreEqual {return false}
@@ -15996,6 +16017,7 @@ extension MessageTranslation: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
     3: .same(proto: "translation"),
     4: .same(proto: "date"),
     5: .same(proto: "entities"),
+    6: .standard(proto: "msg_rev"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -16009,6 +16031,7 @@ extension MessageTranslation: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
       case 3: try { try decoder.decodeSingularStringField(value: &self.translation) }()
       case 4: try { try decoder.decodeSingularInt64Field(value: &self.date) }()
       case 5: try { try decoder.decodeSingularMessageField(value: &self._entities) }()
+      case 6: try { try decoder.decodeSingularInt64Field(value: &self.msgRev) }()
       default: break
       }
     }
@@ -16034,6 +16057,9 @@ extension MessageTranslation: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
     try { if let v = self._entities {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
     } }()
+    if self.msgRev != 0 {
+      try visitor.visitSingularInt64Field(value: self.msgRev, fieldNumber: 6)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -16043,6 +16069,7 @@ extension MessageTranslation: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
     if lhs.translation != rhs.translation {return false}
     if lhs.date != rhs.date {return false}
     if lhs._entities != rhs._entities {return false}
+    if lhs.msgRev != rhs.msgRev {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

@@ -731,6 +731,16 @@ public extension AppDatabase {
       }
     }
 
+    migrator.registerMigration("message and translation rev") { db in
+      try db.alter(table: "message") { t in
+        t.add(column: "rev", .integer).notNull().defaults(to: 0)
+      }
+
+      try db.alter(table: "translation") { t in
+        t.add(column: "msgRev", .integer).notNull().defaults(to: 0)
+      }
+    }
+
     /// TODOs:
     /// - Add indexes for performance
     /// - Add timestamp integer types instead of Date for performance and faster sort, less storage

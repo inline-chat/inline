@@ -84,8 +84,13 @@ async function translateMessages(
   const entityMap = new Map(entityResults.map((r) => [r.messageId, r.entities]))
 
   const translationsWithEntities = textTranslations.map((translation) => {
+    const sourceMessage = input.messages.find((m) => m.messageId === translation.messageId)
+    if (!sourceMessage) {
+      throw new Error(`Original message not found for messageId: ${translation.messageId}`)
+    }
     const entities = entityMap.get(translation.messageId) || null
     const date = new Date()
+    const msgRev = sourceMessage.rev ?? 0
     return {
       translation: translation.translation,
       messageId: translation.messageId,
@@ -93,6 +98,7 @@ async function translateMessages(
       language: input.language,
       entities,
       date,
+      msgRev,
     }
   })
 

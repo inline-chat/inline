@@ -14,6 +14,7 @@ public struct ApiMessage: Codable, Hashable, Sendable {
   public var pinned: Bool?
   public var out: Bool?
   public var editDate: Int?
+  public var rev: Int64?
   public var date: Int
   public var repliedToMessageId: Int64?
   public var photo: [ApiPhoto]?
@@ -46,6 +47,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     case out
     case pinned
     case editDate
+    case rev
     case fileId
     case status
     case repliedToMessageId
@@ -107,6 +109,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
   public var out: Bool?
   public var pinned: Bool?
   public var editDate: Date?
+  public var rev: Int64
   public var fileId: String?
   public var status: MessageSendingStatus?
   public var repliedToMessageId: Int64?
@@ -170,6 +173,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     public static let out = Column(CodingKeys.out)
     public static let pinned = Column(CodingKeys.pinned)
     public static let editDate = Column(CodingKeys.editDate)
+    public static let rev = Column(CodingKeys.rev)
     public static let status = Column(CodingKeys.status)
     public static let repliedToMessageId = Column(CodingKeys.repliedToMessageId)
     public static let forwardFromPeerUserId = Column(CodingKeys.forwardFromPeerUserId)
@@ -304,6 +308,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     mentioned: Bool? = nil,
     pinned: Bool? = nil,
     editDate: Date? = nil,
+    rev: Int64 = 0,
     status: MessageSendingStatus? = nil,
     repliedToMessageId: Int64? = nil,
     forwardFromPeerUserId: Int64? = nil,
@@ -329,6 +334,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     self.peerUserId = peerUserId
     self.peerThreadId = peerThreadId
     self.editDate = editDate
+    self.rev = rev
     self.chatId = chatId
     self.out = out
     self.mentioned = mentioned
@@ -374,6 +380,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       mentioned: from.mentioned,
       pinned: from.pinned,
       editDate: from.editDate.map { Date(timeIntervalSince1970: TimeInterval($0)) },
+      rev: from.rev ?? 0,
       status: from.out == true ? MessageSendingStatus.sent : nil,
       repliedToMessageId: from.replyToMsgId,
       isSticker: from.isSticker,
@@ -398,6 +405,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       mentioned: from.mentioned,
       pinned: false,
       editDate: from.hasEditDate ? Date(timeIntervalSince1970: TimeInterval(from.editDate)) : nil,
+      rev: from.hasRev ? from.rev : 0,
       status: from.out == true ? MessageSendingStatus.sent : nil,
       repliedToMessageId: from.hasReplyToMsgID ? from.replyToMsgID : nil,
       forwardFromPeerUserId: forwardPeer?.asUserId(),
@@ -766,6 +774,7 @@ public extension Message {
         actions = actions ?? existing.actions
         hasLink = hasLink ?? existing.hasLink
         entities = entities ?? existing.entities
+        rev = max(rev, existing.rev)
         transactionId = existing.transactionId
         isExisting = true
       }
@@ -820,6 +829,7 @@ public extension ApiMessage {
       message.transactionId = existing.transactionId
       message.hasLink = existing.hasLink
       message.editDate = editDate.map { Date(timeIntervalSince1970: TimeInterval($0)) }
+      message.rev = max(message.rev, existing.rev)
       // ... anything else?
     } else {
       // attach main photo
@@ -882,6 +892,7 @@ public extension Message {
       message.hasLink = message.hasLink ?? existing.hasLink
       message.actions = message.actions ?? existing.actions
       message.editDate = message.editDate ?? existing.editDate
+      message.rev = max(message.rev, existing.rev)
       message.repliedToMessageId = message.repliedToMessageId ?? existing.repliedToMessageId
       message.forwardFromPeerUserId = message.forwardFromPeerUserId ?? existing.forwardFromPeerUserId
       message.forwardFromPeerThreadId = message.forwardFromPeerThreadId ?? existing.forwardFromPeerThreadId

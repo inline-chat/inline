@@ -10,6 +10,8 @@ export const translations = pgTable(
   {
     id: bigint("id", { mode: "number" }).generatedAlwaysAsIdentity().primaryKey(),
     date: creationDate,
+    // Source message edit revision used for stale detection.
+    msgRev: integer("msg_rev").notNull().default(0),
 
     messageId: bigint("message_id", { mode: "number" }).notNull(),
     chatId: bigint("chat_id", { mode: "number" })

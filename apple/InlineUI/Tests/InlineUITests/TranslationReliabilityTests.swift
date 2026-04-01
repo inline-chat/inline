@@ -18,7 +18,7 @@ struct TranslationReliabilityTests {
     #expect(bookkeeping.requestMessageIds == [41])
     #expect(
       bookkeeping.processedMessageKeys(outcome: .requestSucceeded) == [
-        TranslationMessageKey(messageId: 41, editDate: nil),
+        TranslationMessageKey(messageId: 41, rev: 0),
       ]
     )
   }
@@ -35,7 +35,7 @@ struct TranslationReliabilityTests {
 
     #expect(
       bookkeeping.processedMessageKeys(outcome: .requestFailed) == [
-        TranslationMessageKey(messageId: 42, editDate: nil),
+        TranslationMessageKey(messageId: 42, rev: 0),
       ]
     )
   }

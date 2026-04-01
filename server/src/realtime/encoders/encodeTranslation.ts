@@ -25,6 +25,7 @@ export const encodeTranslation = ({ translation }: { translation: DbTranslation 
     language: translation.language,
     translation: translationText ?? "",
     date: encodeDateStrict(translation.date),
+    msgRev: BigInt(translation.msgRev),
     entities,
   }
 
@@ -41,6 +42,7 @@ export const encodeUnencryptedTranslation = ({
     language: translation.language,
     translation: translation.translation ?? "",
     date: encodeDateStrict(translation.date),
+    msgRev: BigInt(translation.msgRev),
     entities: translation.entities ?? undefined,
   }
 }

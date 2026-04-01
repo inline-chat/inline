@@ -88,10 +88,12 @@ export async function translateMessages(
     // Filter out messages that already have translations
     const messagesToTranslate = msgs.filter((msg) => {
       const existingTranslation = existingTranslations.find((t) => t.messageId === msg.messageId)
+      const messageRevision = msg.rev ?? 0
 
       if (existingTranslation) {
-        if (msg.editDate && msg.editDate > existingTranslation.date) {
-          // Edit date is newer than existing translation, so we should translate it
+        const translationMsgRevision = existingTranslation.msgRev ?? 0
+        if (messageRevision > translationMsgRevision) {
+          // Message revision is newer than existing translation, so we should translate it
           // Important: drop it from the list of existing translations so we don't try to translate it again
           existingTranslations = existingTranslations.filter((t) => t.messageId !== msg.messageId)
           return true

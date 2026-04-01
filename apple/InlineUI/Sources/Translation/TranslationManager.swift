@@ -52,8 +52,10 @@ actor TranslationManager {
 
       // Check if translation already exists using FullMessage's translations
       if let translation = fullMessage.translation(for: targetLanguage) {
+        let messageRevision = message.rev
+        let translationMsgRevision = translation.msgRev
         // Check if it's stale
-        if let editDate = message.editDate, editDate > translation.date {
+        if messageRevision > translationMsgRevision {
           // Translation is older than message, so we should translate and update it
           log.trace("Translation is older than message edit, translating message \(message.messageId)")
         } else {

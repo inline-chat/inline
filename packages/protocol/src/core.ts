@@ -767,6 +767,12 @@ export interface Message {
      * @generated from protobuf field: optional MessageActions actions = 20;
      */
     actions?: MessageActions;
+    /**
+     * Monotonic edit revision for the message. Increments on every edit.
+     *
+     * @generated from protobuf field: optional int64 rev = 21;
+     */
+    rev?: bigint;
 }
 /**
  * @generated from protobuf message MessageFwdHeader
@@ -3280,6 +3286,12 @@ export interface MessageTranslation {
      * @generated from protobuf field: optional MessageEntities entities = 5;
      */
     entities?: MessageEntities;
+    /**
+     * Source message edit revision used for staleness checks.
+     *
+     * @generated from protobuf field: int64 msg_rev = 6;
+     */
+    msgRev: bigint;
 }
 /**
  * @generated from protobuf message GetMeInput
@@ -7245,7 +7257,8 @@ class Message$Type extends MessageType<Message> {
             { no: 17, name: "send_mode", kind: "enum", opt: true, T: () => ["MessageSendMode", MessageSendMode] },
             { no: 18, name: "fwd_from", kind: "message", T: () => MessageFwdHeader },
             { no: 19, name: "replies", kind: "message", T: () => MessageReplies },
-            { no: 20, name: "actions", kind: "message", T: () => MessageActions }
+            { no: 20, name: "actions", kind: "message", T: () => MessageActions },
+            { no: 21, name: "rev", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<Message>): Message {
@@ -7327,6 +7340,9 @@ class Message$Type extends MessageType<Message> {
                 case /* optional MessageActions actions */ 20:
                     message.actions = MessageActions.internalBinaryRead(reader, reader.uint32(), options, message.actions);
                     break;
+                case /* optional int64 rev */ 21:
+                    message.rev = reader.int64().toBigInt();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -7402,6 +7418,9 @@ class Message$Type extends MessageType<Message> {
         /* optional MessageActions actions = 20; */
         if (message.actions)
             MessageActions.internalBinaryWrite(message.actions, writer.tag(20, WireType.LengthDelimited).fork(), options).join();
+        /* optional int64 rev = 21; */
+        if (message.rev !== undefined)
+            writer.tag(21, WireType.Varint).int64(message.rev);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -13473,7 +13492,8 @@ class MessageTranslation$Type extends MessageType<MessageTranslation> {
             { no: 2, name: "language", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "translation", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 4, name: "date", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
-            { no: 5, name: "entities", kind: "message", T: () => MessageEntities }
+            { no: 5, name: "entities", kind: "message", T: () => MessageEntities },
+            { no: 6, name: "msg_rev", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<MessageTranslation>): MessageTranslation {
@@ -13482,6 +13502,7 @@ class MessageTranslation$Type extends MessageType<MessageTranslation> {
         message.language = "";
         message.translation = "";
         message.date = 0n;
+        message.msgRev = 0n;
         if (value !== undefined)
             reflectionMergePartial<MessageTranslation>(this, message, value);
         return message;
@@ -13505,6 +13526,9 @@ class MessageTranslation$Type extends MessageType<MessageTranslation> {
                     break;
                 case /* optional MessageEntities entities */ 5:
                     message.entities = MessageEntities.internalBinaryRead(reader, reader.uint32(), options, message.entities);
+                    break;
+                case /* int64 msg_rev */ 6:
+                    message.msgRev = reader.int64().toBigInt();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -13533,6 +13557,9 @@ class MessageTranslation$Type extends MessageType<MessageTranslation> {
         /* optional MessageEntities entities = 5; */
         if (message.entities)
             MessageEntities.internalBinaryWrite(message.entities, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        /* int64 msg_rev = 6; */
+        if (message.msgRev !== 0n)
+            writer.tag(6, WireType.Varint).int64(message.msgRev);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
