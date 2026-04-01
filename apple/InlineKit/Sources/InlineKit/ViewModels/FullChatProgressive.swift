@@ -31,9 +31,11 @@ public class MessagesProgressiveViewModel {
   public private(set) var newestLoadedMessageId: Int64?
   public private(set) var canLoadOlderFromLocal: Bool = false
   public private(set) var canLoadNewerFromLocal: Bool = false
+  public private(set) var threadAnchor: FullMessage?
 
   public struct InitialState: Sendable {
     public let messages: [FullMessage]
+    public let threadAnchor: FullMessage?
     public let oldestLoadedMessageId: Int64?
     public let newestLoadedMessageId: Int64?
     public let canLoadOlderFromLocal: Bool
@@ -41,12 +43,14 @@ public class MessagesProgressiveViewModel {
 
     public init(
       messages: [FullMessage],
+      threadAnchor: FullMessage? = nil,
       oldestLoadedMessageId: Int64?,
       newestLoadedMessageId: Int64?,
       canLoadOlderFromLocal: Bool,
       canLoadNewerFromLocal: Bool
     ) {
       self.messages = messages
+      self.threadAnchor = threadAnchor
       self.oldestLoadedMessageId = oldestLoadedMessageId
       self.newestLoadedMessageId = newestLoadedMessageId
       self.canLoadOlderFromLocal = canLoadOlderFromLocal
@@ -90,7 +94,11 @@ public class MessagesProgressiveViewModel {
     self.reversed = reversed
     if let initialState {
       applyInitialState(initialState)
+      if threadAnchor == nil {
+        loadThreadAnchorFromLocalIfNeeded()
+      }
     } else {
+      loadThreadAnchorFromLocalIfNeeded()
       // get initial batch
       loadMessages(.limit(initialLimit))
     }
@@ -109,6 +117,7 @@ public class MessagesProgressiveViewModel {
 
   private func applyInitialState(_ state: InitialState) {
     messages = state.messages
+    threadAnchor = state.threadAnchor
     if messages.isEmpty {
       minDate = .init()
       maxDate = .init()
@@ -119,6 +128,33 @@ public class MessagesProgressiveViewModel {
     newestLoadedMessageId = state.newestLoadedMessageId
     canLoadOlderFromLocal = state.canLoadOlderFromLocal
     canLoadNewerFromLocal = state.canLoadNewerFromLocal
+  }
+
+  private func loadThreadAnchorFromLocalIfNeeded() {
+    guard case let .thread(threadId) = peer else {
+      threadAnchor = nil
+      return
+    }
+
+    do {
+      let anchor: FullMessage? = try db.reader.read { db -> FullMessage? in
+        guard let chat = try Chat.fetchOne(db, id: threadId),
+              let parentChatId = chat.parentChatId,
+              let parentMessageId = chat.parentMessageId
+        else {
+          return nil
+        }
+
+        return try FullMessage.queryRequest()
+          .filter(Column("chatId") == parentChatId)
+          .filter(Column("messageId") == parentMessageId)
+          .fetchOne(db)
+      }
+      threadAnchor = anchor
+    } catch {
+      log.error("Failed to load thread anchor message", error: error)
+      threadAnchor = nil
+    }
   }
 
   // Set an observer to update the UI
@@ -200,6 +236,14 @@ public class MessagesProgressiveViewModel {
 
       // .messageId, then globalID out for lists
       case let .delete(messageDelete):
+        if let threadAnchor,
+           messageDelete.peer == threadAnchor.peerId,
+           messageDelete.messageIds.contains(threadAnchor.message.messageId)
+        {
+          loadThreadAnchorFromLocalIfNeeded()
+          return MessagesChangeSet.reload(animated: nil)
+        }
+
         if messageDelete.peer == peer {
           let deletedIndices = messages.enumerated()
             .filter { messageDelete.messageIds.contains($0.element.message.messageId) }
@@ -221,6 +265,11 @@ public class MessagesProgressiveViewModel {
         }
 
       case let .update(messageUpdate):
+        if let threadAnchor, messageUpdate.message.id == threadAnchor.id {
+          self.threadAnchor = messageUpdate.message
+          return MessagesChangeSet.updated([messageUpdate.message], indexSet: [], animated: messageUpdate.animated ?? true)
+        }
+
         if messageUpdate.peer == peer {
           guard let index = messages.firstIndex(where: { $0.id == messageUpdate.message.id }) else {
             // not in our range
@@ -233,8 +282,16 @@ public class MessagesProgressiveViewModel {
           return MessagesChangeSet.updated([messageUpdate.message], indexSet: [index], animated: messageUpdate.animated)
         }
 
-      case let .reload(peer, animated):
-        if peer == self.peer {
+      case let .reload(reloadPeer, animated):
+        if let threadAnchor, reloadPeer == threadAnchor.peerId {
+          loadThreadAnchorFromLocalIfNeeded()
+          if let updatedAnchor = self.threadAnchor {
+            return MessagesChangeSet.updated([updatedAnchor], indexSet: [], animated: animated ?? true)
+          }
+          return MessagesChangeSet.reload(animated: animated)
+        }
+
+        if reloadPeer == self.peer {
           if atBottom {
             log.trace("Reloading messages at bottom")
             // Since user is still at bottom and haven't moved this means we need to ignore the range and show them the
