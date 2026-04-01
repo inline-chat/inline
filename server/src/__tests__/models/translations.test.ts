@@ -38,6 +38,7 @@ describe("TranslationModel.insertTranslations", () => {
         entities: null,
         language: "es",
         date: new Date(),
+        msgRev: 0,
       },
       {
         chatId: chat.id,
@@ -46,6 +47,7 @@ describe("TranslationModel.insertTranslations", () => {
         entities: null,
         language: "es",
         date: new Date(),
+        msgRev: 0,
       },
     ]
 

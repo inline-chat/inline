@@ -296,6 +296,9 @@ message Message {
 
   // Optional interactive actions (bot messages only).
   optional MessageActions actions = 20;
+
+  // Monotonic edit revision for the message. Increments on every edit.
+  optional int64 rev = 21;
 }
 
 enum MessageSendMode {
@@ -1232,6 +1235,9 @@ message MessageTranslation {
 
   // Entities in the translation
   optional MessageEntities entities = 5;
+
+  // Source message edit revision used for staleness checks.
+  int64 msg_rev = 6;
 }
 
 message GetMeInput {}

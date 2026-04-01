@@ -13,6 +13,8 @@ public struct Translation: FetchableRecord, Identifiable, Codable, Hashable, Per
   public var entities: MessageEntities?
   public var language: String
   public var date: Date
+  /// Source message edit revision used for stale checks.
+  public var msgRev: Int64
 
   public enum Columns {
     static let id = Column(CodingKeys.id)
@@ -22,6 +24,7 @@ public struct Translation: FetchableRecord, Identifiable, Codable, Hashable, Per
     static let entities = Column(CodingKeys.entities)
     static let language = Column(CodingKeys.language)
     static let date = Column(CodingKeys.date)
+    static let msgRev = Column(CodingKeys.msgRev)
   }
 
   public static let message = belongsTo(
@@ -44,7 +47,8 @@ public struct Translation: FetchableRecord, Identifiable, Codable, Hashable, Per
     translation: String,
     entities: MessageEntities?,
     language: String,
-    date: Date
+    date: Date,
+    msgRev: Int64
   ) {
     self.id = id
     self.messageId = messageId
@@ -53,6 +57,7 @@ public struct Translation: FetchableRecord, Identifiable, Codable, Hashable, Per
     self.entities = entities
     self.language = language
     self.date = date
+    self.msgRev = msgRev
   }
 
   public init(from: InlineProtocol.MessageTranslation, chatId: Int64) {
@@ -62,7 +67,8 @@ public struct Translation: FetchableRecord, Identifiable, Codable, Hashable, Per
       translation: from.translation,
       entities: from.entities,
       language: from.language,
-      date: Date(timeIntervalSince1970: TimeInterval(from.date))
+      date: Date(timeIntervalSince1970: TimeInterval(from.date)),
+      msgRev: from.msgRev
     )
   }
 }

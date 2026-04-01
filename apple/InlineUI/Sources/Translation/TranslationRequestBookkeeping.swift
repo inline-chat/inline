@@ -9,19 +9,19 @@ enum TranslationRequestOutcome: Sendable {
 
 struct TranslationMessageKey: Hashable, Sendable {
   let messageId: Int64
-  let editDate: Date?
+  let rev: Int64
 
-  init(messageId: Int64, editDate: Date?) {
+  init(messageId: Int64, rev: Int64) {
     self.messageId = messageId
-    self.editDate = editDate
+    self.rev = rev
   }
 
   static func from(_ message: FullMessage) -> Self {
-    Self(messageId: message.message.messageId, editDate: message.message.editDate)
+    Self(messageId: message.message.messageId, rev: message.message.rev)
   }
 
   static func from(_ message: Message) -> Self {
-    Self(messageId: message.messageId, editDate: message.editDate)
+    Self(messageId: message.messageId, rev: message.rev)
   }
 }
 

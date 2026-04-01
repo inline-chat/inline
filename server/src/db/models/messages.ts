@@ -27,7 +27,7 @@ import { type DbMessageAttachment } from "@in/server/db/schema/attachments"
 import { decryptMessage, encryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { Log, LogLevel } from "@in/server/utils/log"
-import { and, asc, desc, eq, gt, inArray, isNull, lt, not, or } from "drizzle-orm"
+import { and, asc, desc, eq, gt, inArray, isNull, lt, not, or, sql } from "drizzle-orm"
 import { decrypt, decryptBinary, encryptBinary } from "@in/server/modules/encryption/encryption"
 import type { DbExternalTask, DbLinkEmbed } from "@in/server/db/schema/attachments"
 import { Encryption2 } from "@in/server/modules/encryption/encryption2"
@@ -713,6 +713,7 @@ async function editMessage(input: EditMessageInput): Promise<{
 
     const updatePayload: Record<string, unknown> = {
       editDate: new Date(),
+      rev: sql`${messages.rev} + 1`,
       // text
       textEncrypted: encryptedMessage?.encrypted,
       textIv: encryptedMessage?.iv,

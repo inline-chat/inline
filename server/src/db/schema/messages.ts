@@ -55,6 +55,8 @@ export const messages = pgTable(
 
     /** when it was edited. if null indicated it hasn't been edited */
     editDate: timestamp("edit_date", { mode: "date", precision: 3 }),
+    /** monotonic edit revision, increments on every edit */
+    rev: integer("rev").notNull().default(0),
 
     date: creationDate,
 
