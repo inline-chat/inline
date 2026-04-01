@@ -39,7 +39,7 @@ final class ChatRowListViewModel {
   private var rowIdxsByMsgId: [Int64: IndexSet] = [:]
 
   private(set) var unreadBeforeMsgId: Int64?
-  private(set) var parentMsgIds: Set<Int64> = []
+  var threadAnchor: FullMessage? { progressiveViewModel.threadAnchor }
 
   var rowCount: Int { rows.count }
   var canLoadOlderFromLocal: Bool { progressiveViewModel.canLoadOlderFromLocal }
@@ -89,9 +89,8 @@ final class ChatRowListViewModel {
   }
 
   @discardableResult
-  func rebuildFromViewModel(unreadBeforeMsgId: Int64?, parentMsgIds: Set<Int64>) -> UpdateKind {
+  func rebuildFromViewModel(unreadBeforeMsgId: Int64?) -> UpdateKind {
     self.unreadBeforeMsgId = unreadBeforeMsgId
-    self.parentMsgIds = parentMsgIds
     return rebuildFromViewModel()
   }
 
@@ -122,8 +121,13 @@ final class ChatRowListViewModel {
   }
 
   func messageStableId(forRow row: Int) -> Int64? {
-    guard case let .message(id)? = self.row(at: row) else { return nil }
-    return id
+    guard let row = self.row(at: row) else { return nil }
+    switch row {
+      case let .message(id), let .parentMessage(id):
+        return id
+      case .daySeparator, .unreadSeparator:
+        return nil
+    }
   }
 
   func messageIndex(forStableMessageId id: Int64) -> Int? {
@@ -156,7 +160,7 @@ final class ChatRowListViewModel {
     let newRows = Self.makeRows(
       messages: messages,
       unreadBeforeMsgId: unreadBeforeMsgId,
-      parentMsgIds: parentMsgIds
+      parentMessageStableId: threadAnchor?.id
     )
 
     guard let removed = removalIdxs(from: oldRows, to: newRows) else {
@@ -174,9 +178,13 @@ final class ChatRowListViewModel {
     let prevMessages = messages
     let prevMsgIdxById = msgIdxById
     messages = progressiveViewModel.messages
+    let anchorId = threadAnchor?.id
 
     for msg in updated {
       guard let prevIdx = prevMsgIdxById[msg.id], prevMessages.indices.contains(prevIdx) else {
+        if anchorId == msg.id {
+          continue
+        }
         rebuildRows()
         return .reloadAll
       }
@@ -186,6 +194,17 @@ final class ChatRowListViewModel {
         rebuildRows()
         return .reloadAll
       }
+    }
+
+    if let anchorId,
+       updated.contains(where: { $0.id == anchorId }),
+       !rows.contains(where: {
+         if case let .parentMessage(id) = $0 { return id == anchorId }
+         return false
+       })
+    {
+      rebuildRows()
+      return .reloadAll
     }
 
     indexMsgs()
@@ -219,7 +238,7 @@ final class ChatRowListViewModel {
     let newRows = Self.makeRows(
       messages: new,
       unreadBeforeMsgId: unreadBeforeMsgId,
-      parentMsgIds: parentMsgIds
+      parentMessageStableId: threadAnchor?.id
     )
 
     switch transition {
@@ -241,15 +260,25 @@ final class ChatRowListViewModel {
         return inserted.isEmpty ? .none : .insert(inserted)
 
       case .prepend:
-        guard newRows.count >= oldRows.count,
-              newRows.suffix(oldRows.count).elementsEqual(oldRows)
-        else {
+        guard newRows.count >= oldRows.count else {
+          setRows(newRows)
+          return .reloadAll
+        }
+        let insertedCount = newRows.count - oldRows.count
+        if insertedCount == 0 {
+          setRows(newRows)
+          return .none
+        }
+
+        let commonPrefix = commonPrefixRowCount(oldRows, newRows)
+        let oldSuffix = oldRows.dropFirst(commonPrefix)
+        let newSuffix = newRows.dropFirst(commonPrefix + insertedCount)
+        guard oldSuffix.elementsEqual(newSuffix) else {
           setRows(newRows)
           return .reloadAll
         }
 
-        let insertedCount = newRows.count - oldRows.count
-        let inserted = IndexSet(integersIn: 0 ..< insertedCount)
+        let inserted = IndexSet(integersIn: commonPrefix ..< (commonPrefix + insertedCount))
         setRows(newRows)
         return inserted.isEmpty ? .none : .insert(inserted)
 
@@ -351,6 +380,15 @@ final class ChatRowListViewModel {
     lhs.count == rhs.count && zip(lhs, rhs).allSatisfy { $0.id == $1.id }
   }
 
+  private func commonPrefixRowCount(_ oldRows: [Row], _ newRows: [Row]) -> Int {
+    var idx = 0
+    let upperBound = min(oldRows.count, newRows.count)
+    while idx < upperBound, oldRows[idx] == newRows[idx] {
+      idx += 1
+    }
+    return idx
+  }
+
   // MARK: - Row Building
 
   private func rebuildRows() {
@@ -358,7 +396,7 @@ final class ChatRowListViewModel {
       Self.makeRows(
         messages: messages,
         unreadBeforeMsgId: unreadBeforeMsgId,
-        parentMsgIds: parentMsgIds
+        parentMessageStableId: threadAnchor?.id
       )
     )
   }
@@ -371,12 +409,14 @@ final class ChatRowListViewModel {
   private static func makeRows(
     messages: [FullMessage],
     unreadBeforeMsgId: Int64?,
-    parentMsgIds: Set<Int64>
+    parentMessageStableId: Int64?
   ) -> [Row] {
-    guard !messages.isEmpty else { return [] }
-
     var out: [Row] = []
-    out.reserveCapacity(messages.count + 8)
+    out.reserveCapacity(messages.count + 9)
+
+    if let parentMessageStableId {
+      out.append(.parentMessage(id: parentMessageStableId))
+    }
 
     var prevDayStart: Date?
     var didInsertUnread = false
@@ -391,10 +431,6 @@ final class ChatRowListViewModel {
       if !didInsertUnread, unreadBeforeMsgId == msg.id {
         out.append(.unreadSeparator(anchorMessageId: msg.id))
         didInsertUnread = true
-      }
-
-      if parentMsgIds.contains(msg.id) {
-        out.append(.parentMessage(id: msg.id))
       }
 
       out.append(.message(id: msg.id))

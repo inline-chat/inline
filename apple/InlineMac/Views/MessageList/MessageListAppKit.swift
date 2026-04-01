@@ -181,10 +181,29 @@ class MessageListAppKit: NSViewController {
     chatRows.messageStableId(forRow: row)
   }
 
-  private func messageAndIndex(forStableId stableId: Int64) -> (message: FullMessage, index: Int)? {
-    guard let messageIndex = chatRows.messageIndex(forStableMessageId: stableId) else { return nil }
-    guard messages.indices.contains(messageIndex) else { return nil }
-    return (messages[messageIndex], messageIndex)
+  private var threadAnchor: FullMessage? {
+    chatRows.threadAnchor
+  }
+
+  private func messageAndIndex(forStableId stableId: Int64) -> (message: FullMessage, index: Int?)? {
+    if let messageIndex = chatRows.messageIndex(forStableMessageId: stableId),
+       messages.indices.contains(messageIndex)
+    {
+      return (messages[messageIndex], messageIndex)
+    }
+
+    if let threadAnchor, threadAnchor.id == stableId {
+      return (threadAnchor, nil)
+    }
+
+    return nil
+  }
+
+  private func interactionMode(for row: Int) -> MessageInteractionMode {
+    if case .parentMessage? = rowItem(at: row) {
+      return .threadAnchor
+    }
+    return .normal
   }
 
   private func toggleToolbarVisibility(_ hide: Bool) {
@@ -1426,6 +1445,7 @@ class MessageListAppKit: NSViewController {
             renderStyle: inputProps.renderStyle,
             index: chatRows.messageIndex(forStableMessageId: message.id),
             translated: inputProps.translated,
+            interactionMode: interactionMode(for: row),
             layout: plan,
           )
 
@@ -1480,6 +1500,18 @@ class MessageListAppKit: NSViewController {
   }
 
   private func messageProps(for row: Int) -> MessageViewInputProps {
+    if case .parentMessage? = rowItem(at: row) {
+      return MessageViewInputProps(
+        firstInGroup: true,
+        isLastMessage: true,
+        isFirstMessage: true,
+        isDM: false,
+        isRtl: false,
+        translated: message(forRow: row)?.isTranslated ?? false,
+        renderStyle: messageRenderStyle
+      )
+    }
+
     guard let message = message(forRow: row) else {
       return MessageViewInputProps(
         firstInGroup: true,
@@ -1820,7 +1852,12 @@ extension MessageListAppKit: NSTableViewDelegate {
     return cell
   }
 
-  private func makeMessageCell(tableView: NSTableView, stableId: Int64, row: Int) -> NSView? {
+  private func makeMessageCell(
+    tableView: NSTableView,
+    stableId: Int64,
+    row: Int,
+    interactive: Bool = true
+  ) -> NSView? {
     guard let messageAndIndex = messageAndIndex(forStableId: stableId) else { return nil }
     let message = messageAndIndex.message
 
@@ -1829,6 +1866,7 @@ extension MessageListAppKit: NSTableViewDelegate {
       ?? MessageTableCell()
     cell.identifier = identifier
     cell.setDependencies(dependencies)
+    cell.interactionEnabled = interactive
 
     let inputProps = messageProps(for: row)
     let (_, _, _, layoutPlan) = calculateSize(
@@ -1846,6 +1884,7 @@ extension MessageListAppKit: NSTableViewDelegate {
       renderStyle: inputProps.renderStyle,
       index: messageAndIndex.index,
       translated: inputProps.translated,
+      interactionMode: interactionMode(for: row),
       layout: layoutPlan
     )
 
@@ -1889,11 +1928,8 @@ extension MessageListAppKit: NSTableViewDelegate {
         )
 
       case .parentMessage:
-        return makeLabeledSeparatorCell(
-          tableView: tableView,
-          identifier: NSUserInterfaceItemIdentifier("ParentMessageCell"),
-          text: NSLocalizedString("Parent message", comment: "Parent message row label")
-        )
+        guard let id = messageStableId(forRow: row) else { return nil }
+        return makeMessageCell(tableView: tableView, stableId: id, row: row)
 
       case let .message(id):
         return makeMessageCell(tableView: tableView, stableId: id, row: row)
@@ -1912,10 +1948,10 @@ extension MessageListAppKit: NSTableViewDelegate {
       case .daySeparator:
         return DateSeparatorTableCell.height
 
-      case .unreadSeparator, .parentMessage:
+      case .unreadSeparator:
         return LabeledSeparatorTableCell.height
 
-      case let .message(id):
+      case let .message(id), let .parentMessage(id):
         guard let message = messageAndIndex(forStableId: id)?.message else { return defaultRowHeight }
         let props = messageProps(for: row)
         let tableWidth = ceil(tableView.bounds.width)

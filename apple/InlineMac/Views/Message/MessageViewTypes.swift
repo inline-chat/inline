@@ -14,6 +14,11 @@ enum MessageRenderStyle: String, Codable, CaseIterable, Hashable {
   }
 }
 
+enum MessageInteractionMode: String, Codable, Hashable {
+  case normal
+  case threadAnchor
+}
+
 struct MessageViewInputProps: Equatable, Codable, Hashable {
   var firstInGroup: Bool
   var isLastMessage: Bool
@@ -38,6 +43,7 @@ struct MessageViewProps: Equatable, Codable, Hashable {
   var renderStyle: MessageRenderStyle = .bubble
   var index: Int?
   var translated: Bool
+  var interactionMode: MessageInteractionMode = .normal
   var layout: MessageSizeCalculator.LayoutPlans
 
   func equalExceptSize(_ rhs: MessageViewProps) -> Bool {
@@ -47,6 +53,7 @@ struct MessageViewProps: Equatable, Codable, Hashable {
       isRtl == rhs.isRtl &&
       isDM == rhs.isDM &&
       renderStyle == rhs.renderStyle &&
+      interactionMode == rhs.interactionMode &&
       translated == rhs.translated
   }
 }

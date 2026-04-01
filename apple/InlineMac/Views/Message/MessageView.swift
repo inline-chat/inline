@@ -102,6 +102,10 @@ class MessageViewAppKit: NSView {
     message.out == true
   }
 
+  private var isAnchorMessage: Bool {
+    props.interactionMode == .threadAnchor
+  }
+
   private var hasLegacyPhoto: Bool {
     if let file = fullMessage.file, file.fileType == .photo {
       return true
@@ -2423,6 +2427,7 @@ class MessageViewAppKit: NSView {
   }
 
   @objc private func pinMessage() {
+    guard !isAnchorMessage else { return }
     Task(priority: .userInitiated) { @MainActor in
       let peer = chatPeerId()
       try await Api.realtime.send(.pinMessage(
@@ -2434,6 +2439,7 @@ class MessageViewAppKit: NSView {
   }
 
   @objc private func unpinMessage() {
+    guard !isAnchorMessage else { return }
     Task(priority: .userInitiated) { @MainActor in
       let peer = chatPeerId()
       try await Api.realtime.send(.pinMessage(
@@ -2456,6 +2462,7 @@ class MessageViewAppKit: NSView {
   }
 
   @objc private func reply() {
+    guard !isAnchorMessage else { return }
     let state = ChatsManager
       .get(
         for: fullMessage.peerId,
@@ -2466,6 +2473,7 @@ class MessageViewAppKit: NSView {
   }
 
   @objc private func replyInThread() {
+    guard !isAnchorMessage else { return }
     focusWindowIfNeeded()
 
     Task { @MainActor in
@@ -2669,6 +2677,7 @@ class MessageViewAppKit: NSView {
   }
 
   @objc private func editMessage() {
+    guard !isAnchorMessage else { return }
     let state = ChatsManager
       .get(
         for: fullMessage.peerId,
@@ -2679,6 +2688,7 @@ class MessageViewAppKit: NSView {
   }
 
   @objc private func handleWillDo() {
+    guard !isAnchorMessage else { return }
     guard let window else { return }
 
     Task { @MainActor in
@@ -2697,6 +2707,7 @@ class MessageViewAppKit: NSView {
   }
 
   @objc private func handleCreateLinearIssue() {
+    guard !isAnchorMessage else { return }
     guard let window else { return }
 
     Task { @MainActor in
@@ -2901,7 +2912,7 @@ class MessageViewAppKit: NSView {
     timeAndStateView.updateMessage(fullMessage, overlay: isTimeOverlay)
 
     // Ensure swipe UI is reset if message cannot be replied to
-    if !self.fullMessage.canReply {
+    if !self.fullMessage.canReply || self.isAnchorMessage {
       layer?.transform = CATransform3DIdentity
       swipeAnimationView?.alphaValue = 0
       isSwipeInProgress = false
@@ -2988,7 +2999,7 @@ class MessageViewAppKit: NSView {
 
   override func scrollWheel(with event: NSEvent) {
     // Do not allow swipe-to-reply if message cannot be replied to
-    if !fullMessage.canReply {
+    if !fullMessage.canReply || isAnchorMessage {
       // Ensure UI is reset and pass through
       layer?.transform = CATransform3DIdentity
       swipeAnimationView?.alphaValue = 0
@@ -3073,7 +3084,7 @@ class MessageViewAppKit: NSView {
         // Check if swipe was far enough to trigger reply
         if abs(swipeOffset) > swipeThreshold, direction == "left" {
           // Guard again in case state changed mid-gesture
-          guard fullMessage.canReply else {
+          guard fullMessage.canReply, !isAnchorMessage else {
             // Reset and exit
             NSAnimationContext.runAnimationGroup { context in
               context.duration = 0.2
@@ -3354,7 +3365,7 @@ extension MessageViewAppKit: NSMenuDelegate {
     let regularMessage = message.status != .sending && message.status != .failed
 
     // Reply
-    if regularMessage {
+    if regularMessage, !isAnchorMessage {
       let replyItem = NSMenuItem(title: "Reply", action: #selector(reply), keyEquivalent: "r")
       replyItem.image = NSImage(systemSymbolName: "arrowshape.turn.up.left", accessibilityDescription: "Reply")
       menu.addItem(replyItem)
@@ -3372,13 +3383,13 @@ extension MessageViewAppKit: NSMenuDelegate {
     }
 
     // Edit
-    if message.out == true, message.status == .sent {
+    if !isAnchorMessage, message.out == true, message.status == .sent {
       let editItem = NSMenuItem(title: "Edit", action: #selector(editMessage), keyEquivalent: "e")
       editItem.image = NSImage(systemSymbolName: "square.and.pencil", accessibilityDescription: "Edit")
       menu.addItem(editItem)
     }
 
-    if regularMessage {
+    if regularMessage, !isAnchorMessage {
       let pinned = isMessagePinned()
       let pinTitle = pinned ? "Unpin" : "Pin"
       let pinAction = pinned ? #selector(unpinMessage) : #selector(pinMessage)
@@ -3400,7 +3411,7 @@ extension MessageViewAppKit: NSMenuDelegate {
     // Integrations section (separator above + below)
     var integrationItems: [NSMenuItem] = []
 
-    if regularMessage, NotionTaskService.shared.hasAccess {
+    if regularMessage, !isAnchorMessage, NotionTaskService.shared.hasAccess {
       let willDoItem = NSMenuItem(title: "Create Notion Task", action: #selector(handleWillDo), keyEquivalent: "")
       willDoItem.image = NSImage(
         systemSymbolName: "circle.badge.plus",
@@ -3409,7 +3420,7 @@ extension MessageViewAppKit: NSMenuDelegate {
       integrationItems.append(willDoItem)
     }
 
-    if regularMessage, hasText {
+    if regularMessage, !isAnchorMessage, hasText {
       if message.peerId.isThread {
         if let spaceId = (try? Chat.getByPeerId(peerId: message.peerId)?.spaceId) {
           if LinearIntegrationService.shared.isConnected(spaceId: spaceId) == nil {

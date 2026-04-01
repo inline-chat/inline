@@ -23,6 +23,7 @@ actor ChatOpenPreloader {
 
     return try await database.reader.read { db in
       let chatItem = try Self.fetchChatItem(peer: peer, db: db)
+      let threadAnchor = try Self.fetchThreadAnchorMessage(peer: peer, chatItem: chatItem, db: db)
       let messages = try Self.fetchInitialMessages(peer: peer, limit: initialLimit, db: db)
 
       let messageIds = messages.map(\.message.messageId)
@@ -44,6 +45,7 @@ actor ChatOpenPreloader {
 
       let messagesInitialState = MessagesProgressiveViewModel.InitialState(
         messages: messages,
+        threadAnchor: threadAnchor,
         oldestLoadedMessageId: oldestLoadedMessageId,
         newestLoadedMessageId: newestLoadedMessageId,
         canLoadOlderFromLocal: canLoadOlderFromLocal,
@@ -89,6 +91,29 @@ actor ChatOpenPreloader {
       .fetchAll(db)
 
     return batch.reversed()
+  }
+
+  private static func fetchThreadAnchorMessage(
+    peer: Peer,
+    chatItem: SpaceChatItem?,
+    db: Database
+  ) throws -> FullMessage? {
+    guard case let .thread(threadId) = peer else { return nil }
+
+    let chat: Chat?
+    if let cachedChat = chatItem?.chat {
+      chat = cachedChat
+    } else {
+      chat = try Chat.fetchOne(db, id: threadId)
+    }
+    guard let chat, let parentChatId = chat.parentChatId, let parentMessageId = chat.parentMessageId else {
+      return nil
+    }
+
+    return try FullMessage.queryRequest()
+      .filter(Column("chatId") == parentChatId)
+      .filter(Column("messageId") == parentMessageId)
+      .fetchOne(db)
   }
 
   private static func hasLocalMessages(
