@@ -167,10 +167,23 @@ final class ChatsViewModel: ObservableObject {
       let pinned1 = lhs.dialog?.pinned ?? false
       let pinned2 = rhs.dialog?.pinned ?? false
       if pinned1 != pinned2 { return pinned1 }
+      if pinned1, pinned2 {
+        return stableOrder(lhs, rhs)
+      }
       let date1 = sortDate(for: lhs)
       let date2 = sortDate(for: rhs)
+      if date1 == date2 {
+        return stableOrder(lhs, rhs)
+      }
       return date1 > date2
     }
+  }
+
+  private func stableOrder(_ lhs: ChatListItem, _ rhs: ChatListItem) -> Bool {
+    if lhs.id.rawValue != rhs.id.rawValue {
+      return lhs.id.rawValue > rhs.id.rawValue
+    }
+    return lhs.id.kind.rawValue > rhs.id.kind.rawValue
   }
 
   private func sortDate(for item: ChatListItem) -> Date {

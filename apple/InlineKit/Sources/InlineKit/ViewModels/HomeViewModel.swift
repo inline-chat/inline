@@ -295,10 +295,16 @@ public extension HomeViewModel {
       let pinned1 = item1.dialog.pinned ?? false
       let pinned2 = item2.dialog.pinned ?? false
       if pinned1 != pinned2 { return pinned1 }
+      if pinned1, pinned2 {
+        return item1.id > item2.id
+      }
 
       // Then sort by date
       let date1 = item1.lastMessage?.message.date ?? item1.chat?.date ?? Date.distantPast
       let date2 = item2.lastMessage?.message.date ?? item2.chat?.date ?? Date.distantPast
+      if date1 == date2 {
+        return item1.id > item2.id
+      }
       return date1 > date2
     }
   }
