@@ -13,6 +13,7 @@ class MessageListAppKit: NSViewController {
   private var chat: Chat?
   private var chatId: Int64 { chat?.id ?? 0 }
   private let chatRows: ChatRowListViewModel
+  private let showUnreadAfter: Int64?
   var viewModel: MessagesProgressiveViewModel { chatRows.progressiveViewModel }
   private var messages: [FullMessage] { chatRows.messages }
   private var state: ChatState
@@ -60,11 +61,13 @@ class MessageListAppKit: NSViewController {
     dependencies: AppDependencies,
     peerId: Peer,
     chat: Chat,
+    showUnreadAfter: Int64? = nil,
     initialState: MessagesProgressiveViewModel.InitialState? = nil
   ) {
     self.dependencies = dependencies
     self.peerId = peerId
     self.chat = chat
+    self.showUnreadAfter = showUnreadAfter
     chatRows = ChatRowListViewModel(peer: peerId, initialState: initialState)
     messageRenderStyle = AppSettings.shared.messageRenderStyle
     state = ChatsManager
@@ -170,7 +173,7 @@ class MessageListAppKit: NSViewController {
   }()
 
   private func rebuildRowItems() {
-    _ = chatRows.rebuildFromViewModel()
+    _ = chatRows.rebuildFromViewModel(showUnreadAfter: showUnreadAfter)
   }
 
   private func rowItem(at row: Int) -> ChatRowListViewModel.Row? {
@@ -1749,48 +1752,6 @@ final class DateSeparatorTableCell: NSView {
   }
 }
 
-final class LabeledSeparatorTableCell: NSView {
-  static let height: CGFloat = 30
-
-  private let label = NSTextField(labelWithString: "")
-  private var currentText: String?
-
-  override init(frame: NSRect) {
-    super.init(frame: frame)
-    setupView()
-  }
-
-  @available(*, unavailable)
-  required init?(coder: NSCoder) {
-    fatalError("init(coder:) has not been implemented")
-  }
-
-  private func setupView() {
-    wantsLayer = true
-    layer?.backgroundColor = .clear
-
-    label.translatesAutoresizingMaskIntoConstraints = false
-    label.font = .systemFont(ofSize: 11, weight: .medium)
-    label.textColor = .secondaryLabelColor
-    label.alignment = .center
-    label.lineBreakMode = .byTruncatingTail
-    addSubview(label)
-
-    NSLayoutConstraint.activate([
-      label.centerXAnchor.constraint(equalTo: centerXAnchor),
-      label.centerYAnchor.constraint(equalTo: centerYAnchor),
-      label.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 12),
-      label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
-    ])
-  }
-
-  func configure(text: String) {
-    guard currentText != text else { return }
-    currentText = text
-    label.stringValue = text
-  }
-}
-
 extension MessageListAppKit: NSTableViewDataSource {
   func numberOfRows(in tableView: NSTableView) -> Int {
     chatRows.rowCount
@@ -1840,23 +1801,10 @@ extension MessageListAppKit: NSTableViewDelegate {
     return index == 0
   }
 
-  private func makeLabeledSeparatorCell(
-    tableView: NSTableView,
-    identifier: NSUserInterfaceItemIdentifier,
-    text: String
-  ) -> NSView {
-    let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? LabeledSeparatorTableCell
-      ?? LabeledSeparatorTableCell()
-    cell.identifier = identifier
-    cell.configure(text: text)
-    return cell
-  }
-
   private func makeMessageCell(
     tableView: NSTableView,
     stableId: Int64,
-    row: Int,
-    interactive: Bool = true
+    row: Int
   ) -> NSView? {
     guard let messageAndIndex = messageAndIndex(forStableId: stableId) else { return nil }
     let message = messageAndIndex.message
@@ -1866,7 +1814,6 @@ extension MessageListAppKit: NSTableViewDelegate {
       ?? MessageTableCell()
     cell.identifier = identifier
     cell.setDependencies(dependencies)
-    cell.interactionEnabled = interactive
 
     let inputProps = messageProps(for: row)
     let (_, _, _, layoutPlan) = calculateSize(
@@ -1921,11 +1868,12 @@ extension MessageListAppKit: NSTableViewDelegate {
         return cell
 
       case .unreadSeparator:
-        return makeLabeledSeparatorCell(
-          tableView: tableView,
-          identifier: NSUserInterfaceItemIdentifier("UnreadSeparatorCell"),
-          text: NSLocalizedString("Unread messages", comment: "Unread separator label")
-        )
+        let identifier = NSUserInterfaceItemIdentifier("UnreadSeparatorCell")
+        let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? UnreadSeparatorTableCell
+          ?? UnreadSeparatorTableCell()
+        cell.identifier = identifier
+        cell.configure(text: NSLocalizedString("Unread messages", comment: "Unread separator label"))
+        return cell
 
       case .parentMessage:
         guard let id = messageStableId(forRow: row) else { return nil }
@@ -1949,7 +1897,7 @@ extension MessageListAppKit: NSTableViewDelegate {
         return DateSeparatorTableCell.height
 
       case .unreadSeparator:
-        return LabeledSeparatorTableCell.height
+        return UnreadSeparatorTableCell.height
 
       case let .message(id), let .parentMessage(id):
         guard let message = messageAndIndex(forStableId: id)?.message else { return defaultRowHeight }

@@ -205,6 +205,7 @@ class ChatViewAppKit: NSViewController {
       dependencies: dependencies,
       peerId: peerId,
       chat: chat,
+      showUnreadAfter: unreadBoundaryAtOpen(),
       initialState: preparedPayload?.messagesInitialState
     )
     addChild(messageListVC_)
@@ -243,6 +244,16 @@ class ChatViewAppKit: NSViewController {
     ])
 
     consumePendingDropAttachmentsIfPossible()
+  }
+
+  private func unreadBoundaryAtOpen() -> Int64? {
+    let openDialog = preparedPayload?.chatItem?.dialog ?? dialog
+    guard let openDialog else { return nil }
+
+    let hasUnread = (openDialog.unreadCount ?? 0) > 0
+    guard hasUnread else { return nil }
+
+    return openDialog.readInboxMaxId ?? 0
   }
 
   private func fetchChat() {

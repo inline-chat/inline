@@ -7,7 +7,7 @@ final class ChatRowListViewModel {
 
   enum Row: Equatable, Hashable {
     case daySeparator(dayStart: Date)
-    case unreadSeparator(anchorMessageId: Int64?)
+    case unreadSeparator
     case parentMessage(id: Int64)
     case message(id: Int64)
   }
@@ -38,7 +38,7 @@ final class ChatRowListViewModel {
   private var rowIdxByMsgId: [Int64: Int] = [:]
   private var rowIdxsByMsgId: [Int64: IndexSet] = [:]
 
-  private(set) var unreadBeforeMsgId: Int64?
+  private(set) var showUnreadAfter: Int64?
   var threadAnchor: FullMessage? { progressiveViewModel.threadAnchor }
 
   var rowCount: Int { rows.count }
@@ -89,8 +89,8 @@ final class ChatRowListViewModel {
   }
 
   @discardableResult
-  func rebuildFromViewModel(unreadBeforeMsgId: Int64?) -> UpdateKind {
-    self.unreadBeforeMsgId = unreadBeforeMsgId
+  func rebuildFromViewModel(showUnreadAfter: Int64?) -> UpdateKind {
+    self.showUnreadAfter = showUnreadAfter
     return rebuildFromViewModel()
   }
 
@@ -157,11 +157,7 @@ final class ChatRowListViewModel {
     }
 
     let oldRows = rows
-    let newRows = Self.makeRows(
-      messages: messages,
-      unreadBeforeMsgId: unreadBeforeMsgId,
-      parentMessageStableId: threadAnchor?.id
-    )
+    let newRows = makeRows(for: messages)
 
     guard let removed = removalIdxs(from: oldRows, to: newRows) else {
       setRows(newRows)
@@ -235,11 +231,7 @@ final class ChatRowListViewModel {
   private func applyMutationTransition(from old: [FullMessage], to new: [FullMessage]) -> UpdateKind {
     let transition = mutationTransition(from: old, to: new)
     let oldRows = rows
-    let newRows = Self.makeRows(
-      messages: new,
-      unreadBeforeMsgId: unreadBeforeMsgId,
-      parentMessageStableId: threadAnchor?.id
-    )
+    let newRows = makeRows(for: new)
 
     switch transition {
       case .none:
@@ -392,13 +384,7 @@ final class ChatRowListViewModel {
   // MARK: - Row Building
 
   private func rebuildRows() {
-    setRows(
-      Self.makeRows(
-        messages: messages,
-        unreadBeforeMsgId: unreadBeforeMsgId,
-        parentMessageStableId: threadAnchor?.id
-      )
-    )
+    setRows(makeRows(for: messages))
   }
 
   private func setRows(_ newRows: [Row]) {
@@ -406,9 +392,17 @@ final class ChatRowListViewModel {
     reindex()
   }
 
+  private func makeRows(for messages: [FullMessage]) -> [Row] {
+    Self.makeRows(
+      messages: messages,
+      showUnreadAfter: showUnreadAfter,
+      parentMessageStableId: threadAnchor?.id
+    )
+  }
+
   private static func makeRows(
     messages: [FullMessage],
-    unreadBeforeMsgId: Int64?,
+    showUnreadAfter: Int64?,
     parentMessageStableId: Int64?
   ) -> [Row] {
     var out: [Row] = []
@@ -428,8 +422,11 @@ final class ChatRowListViewModel {
         prevDayStart = dayStart
       }
 
-      if !didInsertUnread, unreadBeforeMsgId == msg.id {
-        out.append(.unreadSeparator(anchorMessageId: msg.id))
+      if !didInsertUnread,
+         let showUnreadAfter,
+         msg.message.messageId > showUnreadAfter
+      {
+        out.append(.unreadSeparator)
         didInsertUnread = true
       }
 
