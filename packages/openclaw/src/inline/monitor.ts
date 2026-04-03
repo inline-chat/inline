@@ -95,6 +95,7 @@ type InlineHistoryEntryPayload = {
 
 const DEFAULT_DM_HISTORY_LIMIT = 6
 const HISTORY_LINE_MAX_CHARS = 280
+const URL_LIKE_PATTERN = /https?:\/\/\S+/i
 const BOT_MESSAGE_CACHE_LIMIT = 500
 const REACTION_TARGET_LOOKUP_LIMIT = 8
 const REPLY_TARGET_LOOKUP_LIMIT = 8
@@ -505,6 +506,8 @@ function normalizeHistoryText(raw: string | undefined): string {
   const compact = (raw ?? "").replace(/\s+/g, " ").trim()
   if (!compact) return ""
   if (compact.length <= HISTORY_LINE_MAX_CHARS) return compact
+  // Keep full URLs for media/file discoverability in history context.
+  if (URL_LIKE_PATTERN.test(compact)) return compact
   return `${compact.slice(0, HISTORY_LINE_MAX_CHARS - 1)}…`
 }
 
@@ -765,6 +768,8 @@ function buildInlineAttachmentPlaceholder(content: ReturnType<typeof summarizeIn
       return "<media:video>"
     case "document":
       return "<media:document>"
+    case "voice":
+      return "<media:audio>"
     default:
       return ""
   }
@@ -1105,6 +1110,7 @@ export async function monitorInlineProvider(params: {
         const rawEvent = event as Record<string, unknown>
         let msg: Message
         let rawBody = ""
+        let currentContent: ReturnType<typeof summarizeInlineMessageContent> | null = null
         let currentAttachmentText: string | null = null
         let currentEntityText: string | null = null
         let reactionEvent: { action: "added" | "removed"; emoji: string; targetMessageId: bigint } | null = null
@@ -1124,10 +1130,10 @@ export async function monitorInlineProvider(params: {
             ...event.message,
             chatId: event.chatId,
           } as Message
-          const content = summarizeInlineMessageContent(msg)
-          rawBody = buildInlineInboundBodyText(content)
-          currentAttachmentText = content.attachmentText || null
-          currentEntityText = content.entityText || null
+          currentContent = summarizeInlineMessageContent(msg)
+          rawBody = buildInlineInboundBodyText(currentContent)
+          currentAttachmentText = currentContent.attachmentText || null
+          currentEntityText = currentContent.entityText || null
           if (!rawBody) continue
 
           // Ignore echoes / our own outbound messages.
@@ -1514,15 +1520,18 @@ export async function monitorInlineProvider(params: {
         })
         if (isGroup && mentionGate.shouldSkip) {
           runtime.log?.(`inline: drop group chat ${String(chatId)} (no mention)`)
+          const pendingBody =
+            normalizeHistoryText(currentContent?.text) ??
+            normalizeHistoryText(rawBody)
           recordPendingHistoryEntryIfEnabled({
             historyMap: groupPendingHistories,
             historyKey: groupHistoryKey ?? "",
             limit: historyLimit,
             entry:
-              groupHistoryKey && rawBody.trim()
+              groupHistoryKey && pendingBody
                 ? {
                     sender: pendingHistorySender,
-                    body: rawBody.trim(),
+                    body: pendingBody,
                     timestamp: messageTimestamp || Date.now(),
                     messageId: String(msg.id),
                   }
