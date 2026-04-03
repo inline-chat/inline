@@ -16,7 +16,7 @@ const INLINE_MESSAGE_ENTITY_TYPE = {
 
 export type InlineMessageMediaSummary =
   | {
-      kind: "photo" | "video" | "document" | "nudge"
+      kind: "photo" | "video" | "document" | "voice" | "nudge"
       id: string | null
       url: string | null
       fileName?: string | null
@@ -27,6 +27,21 @@ export type InlineMessageMediaSummary =
       durationSeconds?: number | null
     }
   | null
+
+type InlineMediaOneofCompat =
+  | NonNullable<NonNullable<Message["media"]>["media"]>
+  | {
+      oneofKind: "photo" | "video" | "document" | "voice" | "nudge" | undefined
+      photo?: { photo?: { id?: bigint; sizes?: Array<{ w?: number; h?: number; size?: number; cdnUrl?: string }> } }
+      video?: {
+        video?: { id?: bigint; cdnUrl?: string; size?: number; w?: number; h?: number; duration?: number }
+      }
+      document?: {
+        document?: { id?: bigint; cdnUrl?: string; fileName?: string; mimeType?: string; size?: number }
+      }
+      voice?: { voice?: { id?: bigint; cdnUrl?: string; mimeType?: string; size?: number; duration?: number } }
+      nudge?: Record<string, never>
+    }
 
 export type InlineMessageAttachmentSummary =
   | {
@@ -120,11 +135,22 @@ function bestPhotoSize(photo: {
 }
 
 function messageMediaSummary(message: Message): InlineMessageMediaSummary {
-  const media = message.media?.media
+  const mediaContainer = message.media as unknown as { media?: InlineMediaOneofCompat } | InlineMediaOneofCompat | undefined
+  const media =
+    mediaContainer && typeof mediaContainer === "object"
+      ? ("media" in mediaContainer &&
+          mediaContainer.media &&
+          typeof mediaContainer.media === "object" &&
+          "oneofKind" in mediaContainer.media
+          ? mediaContainer.media
+          : "oneofKind" in mediaContainer
+            ? mediaContainer
+            : null)
+      : null
   if (!media) return null
 
   if (media.oneofKind === "photo") {
-    const photo = media.photo.photo
+    const photo = media.photo?.photo
     const bestSize = photo ? bestPhotoSize(photo) : { cdnUrl: null, width: null, height: null, sizeBytes: null }
     return {
       kind: "photo",
@@ -137,7 +163,7 @@ function messageMediaSummary(message: Message): InlineMessageMediaSummary {
   }
 
   if (media.oneofKind === "video") {
-    const video = media.video.video
+    const video = media.video?.video
     return {
       kind: "video",
       id: video?.id?.toString() ?? null,
@@ -150,7 +176,7 @@ function messageMediaSummary(message: Message): InlineMessageMediaSummary {
   }
 
   if (media.oneofKind === "document") {
-    const document = media.document.document
+    const document = media.document?.document
     return {
       kind: "document",
       id: document?.id?.toString() ?? null,
@@ -158,6 +184,18 @@ function messageMediaSummary(message: Message): InlineMessageMediaSummary {
       fileName: document?.fileName ?? null,
       mimeType: document?.mimeType ?? null,
       sizeBytes: document?.size ?? null,
+    }
+  }
+
+  if (media.oneofKind === "voice") {
+    const voice = media.voice?.voice
+    return {
+      kind: "voice",
+      id: voice?.id?.toString() ?? null,
+      url: voice?.cdnUrl ?? null,
+      mimeType: voice?.mimeType ?? null,
+      sizeBytes: voice?.size ?? null,
+      durationSeconds: voice?.duration ?? null,
     }
   }
 
@@ -311,6 +349,9 @@ function formatMediaSummary(media: Exclude<InlineMessageMediaSummary, null>): st
   }
   if (media.kind === "video") {
     return media.url ? `video attachment: ${media.url}` : "video attachment"
+  }
+  if (media.kind === "voice") {
+    return media.url ? `audio attachment: ${media.url}` : "audio attachment"
   }
 
   const label = media.fileName ? `document attachment (${media.fileName})` : "document attachment"

@@ -2252,6 +2252,80 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("stores skipped attachment-only messages as media-aware pending context", async () => {
+    const longMediaUrl = `https://cdn.inline.chat/pending-photo.jpg?token=${"a".repeat(420)}`
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 61010n,
+            date: 1_700_000_072n,
+            fromId: 51n,
+            message: "",
+            mentioned: false,
+            media: {
+              oneofKind: "photo",
+              photo: {
+                photo: {
+                  id: 904n,
+                  sizes: [{ w: 1200, h: 900, size: 22_222, cdnUrl: longMediaUrl }],
+                },
+              },
+            },
+          } as any,
+        },
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 61011n,
+            date: 1_700_000_073n,
+            fromId: 51n,
+            message: "@inlinebot summarize skipped media",
+            mentioned: true,
+          },
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      dispatchReplyPayload: {
+        text: "summary",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+        historyLimit: 10,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: expect.stringContaining(`image attachment: ${longMediaUrl}`),
+          InboundHistory: [
+            expect.objectContaining({
+              sender: "user:51",
+              body: `image attachment: ${longMediaUrl}`,
+            }),
+          ],
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
   it("uses cfg.messages.groupChat.historyLimit for pending mention-gated context when account historyLimit is unset", async () => {
     const harness = await setupMonitorHarness({
       events: [
@@ -2589,6 +2663,88 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("includes previous flattened image-only messages in history context", async () => {
+    const longMediaUrl = `https://cdn.inline.chat/history-photo.jpg?token=${"b".repeat(420)}`
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 7305n,
+            date: 1_700_000_114n,
+            fromId: 51n,
+            message: "please review this update",
+            mentioned: true,
+          } as any,
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      historyByChat: {
+        "88": [
+          {
+            id: 7300n,
+            date: 1_700_000_109n,
+            fromId: 52n,
+            message: "",
+            media: {
+              oneofKind: "photo",
+              photo: {
+                photo: {
+                  id: 901n,
+                  sizes: [{ w: 1200, h: 900, size: 12345, cdnUrl: longMediaUrl }],
+                },
+              },
+            },
+          } as any,
+        ],
+      },
+      dispatchReplyPayload: {
+        text: "got it",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+        historyLimit: 10,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalled()
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: expect.stringContaining(
+            `Recent thread messages (oldest -> newest):\n#7300 user:52: image attachment: ${longMediaUrl}`,
+          ),
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: expect.stringContaining(
+            `Recent media/attachments:\n#7300 user:52: image attachment: ${longMediaUrl}`,
+          ),
+          InboundHistory: expect.arrayContaining([
+            expect.objectContaining({
+              sender: "user:52",
+              body: `image attachment: ${longMediaUrl}`,
+            }),
+          ]),
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
   it("exposes attachment-only documents with placeholder text and media metadata", async () => {
     const harness = await setupMonitorHarness({
       events: [
@@ -2671,6 +2827,77 @@ describe("inline/monitor", () => {
           MediaPaths: ["/tmp/spec.pdf"],
           MediaUrls: ["/tmp/spec.pdf"],
           MediaTypes: ["application/pdf"],
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("supports flattened media oneof payloads for attachment-only images", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 88n,
+          message: {
+            id: 7304n,
+            date: 1_700_000_113n,
+            fromId: 51n,
+            message: "",
+            mentioned: true,
+            media: {
+              oneofKind: "photo",
+              photo: {
+                photo: {
+                  id: 903n,
+                  sizes: [{ w: 1280, h: 720, size: 67_890, cdnUrl: "https://cdn.inline.chat/flattened-photo.jpg" }],
+                },
+              },
+            },
+          } as any,
+        },
+      ],
+      chats: {
+        "88": { kind: "group", title: "Project Room" },
+      },
+      mediaByUrl: {
+        "https://cdn.inline.chat/flattened-photo.jpg": {
+          contentType: "image/jpeg",
+          fileName: "flattened-photo.jpg",
+        },
+      },
+      dispatchReplyPayload: {
+        text: "saw it",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({
+        groupPolicy: "open",
+        requireMention: true,
+      }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalled()
+      expect(harness.calls.fetchRemoteMedia).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: "https://cdn.inline.chat/flattened-photo.jpg",
+          filePathHint: "flattened-photo.jpg",
+        }),
+      )
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          Body: expect.stringMatching(
+            /Current message:\n<media:image>[\s\S]*Current media\/attachments:\nimage attachment: https:\/\/cdn\.inline\.chat\/flattened-photo\.jpg/,
+          ),
+          RawBody: "<media:image>",
+          CommandBody: "<media:image>",
         }),
       )
     })

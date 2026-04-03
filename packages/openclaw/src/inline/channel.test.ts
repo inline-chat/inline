@@ -93,6 +93,7 @@ describe("inline/channel", () => {
       } as any) ?? []
 
     expect(disabledHints.join("\n")).not.toContain("reply thread")
+    expect(disabledHints.join("\n")).toContain("attachmentUrls")
 
     const enabledHints =
       inlineChannelPlugin.agentPrompt?.messageToolHints?.({
@@ -108,6 +109,7 @@ describe("inline/channel", () => {
       } as any) ?? []
 
     expect(enabledHints.join("\n").toLowerCase()).toContain("reply thread")
+    expect(enabledHints.join("\n")).toContain("attachmentUrls")
   })
 
   it("keeps gateway startAccount pending until monitor completion", async () => {

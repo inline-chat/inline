@@ -897,6 +897,87 @@ describe("inline/actions", () => {
     })
   })
 
+  it("returns media summaries for flattened media payloads in read results", async () => {
+    vi.resetModules()
+
+    const invokeRaw = vi.fn(async (method: number) => {
+      if (method === 5) {
+        return {
+          oneofKind: "getChatHistory",
+          getChatHistory: {
+            messages: [
+              {
+                id: 272n,
+                fromId: 42n,
+                date: 1_700_000_020n,
+                message: "",
+                out: false,
+                media: {
+                  oneofKind: "photo",
+                  photo: {
+                    photo: {
+                      id: 903n,
+                      sizes: [{ w: 1280, h: 720, size: 67_890, cdnUrl: "https://cdn.inline.chat/image-272.jpg" }],
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        }
+      }
+      throw new Error(`unexpected method ${String(method)}`)
+    })
+
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {
+        GET_CHAT_HISTORY: 5,
+      },
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = vi.fn(async () => {})
+        close = vi.fn(async () => {})
+        invokeRaw = invokeRaw
+      },
+    }))
+
+    const { inlineMessageActions } = await import("./actions")
+
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+        },
+      },
+    } satisfies OpenClawConfig
+
+    const result = await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "read",
+      cfg,
+      params: { to: "7", limit: 1 },
+    } as any)
+
+    expect(result).toMatchObject({
+      details: {
+        messages: [
+          expect.objectContaining({
+            id: "272",
+            text: "image attachment: https://cdn.inline.chat/image-272.jpg",
+            rawText: "",
+            attachmentText: "image attachment: https://cdn.inline.chat/image-272.jpg",
+            attachmentUrls: ["https://cdn.inline.chat/image-272.jpg"],
+            media: expect.objectContaining({
+              kind: "photo",
+              url: "https://cdn.inline.chat/image-272.jpg",
+            }),
+          }),
+        ],
+      },
+    })
+  })
+
   it("returns structured entities for read results", async () => {
     vi.resetModules()
 
@@ -996,6 +1077,87 @@ describe("inline/actions", () => {
               },
             ],
             links: ["https://example.com/docs"],
+          }),
+        ],
+      },
+    })
+  })
+
+  it("returns media summaries for flattened media payloads in search results", async () => {
+    vi.resetModules()
+
+    const invokeRaw = vi.fn(async (method: number) => {
+      if (method === 31) {
+        return {
+          oneofKind: "searchMessages",
+          searchMessages: {
+            messages: [
+              {
+                id: 280n,
+                fromId: 42n,
+                date: 1_700_000_030n,
+                message: "",
+                out: false,
+                media: {
+                  oneofKind: "photo",
+                  photo: {
+                    photo: {
+                      id: 905n,
+                      sizes: [{ w: 640, h: 640, size: 12_345, cdnUrl: "https://cdn.inline.chat/search-photo.jpg" }],
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        }
+      }
+      throw new Error(`unexpected method ${String(method)}`)
+    })
+
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {
+        SEARCH_MESSAGES: 31,
+      },
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = vi.fn(async () => {})
+        close = vi.fn(async () => {})
+        invokeRaw = invokeRaw
+      },
+    }))
+
+    const { inlineMessageActions } = await import("./actions")
+
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+        },
+      },
+    } satisfies OpenClawConfig
+
+    const result = await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "search",
+      cfg,
+      params: { to: "7", query: "photo", limit: 1 },
+    } as any)
+
+    expect(result).toMatchObject({
+      details: {
+        query: "photo",
+        messages: [
+          expect.objectContaining({
+            id: "280",
+            text: "image attachment: https://cdn.inline.chat/search-photo.jpg",
+            attachmentText: "image attachment: https://cdn.inline.chat/search-photo.jpg",
+            attachmentUrls: ["https://cdn.inline.chat/search-photo.jpg"],
+            media: expect.objectContaining({
+              kind: "photo",
+              url: "https://cdn.inline.chat/search-photo.jpg",
+            }),
           }),
         ],
       },
