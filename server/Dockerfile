@@ -4,7 +4,7 @@ WORKDIR /usr/src/app
 FROM base AS pruner
 COPY package.json bun.lock bunfig.toml ./
 COPY server ./server
-COPY web ./web
+COPY landing ./landing
 COPY packages ./packages
 COPY scripts ./scripts
 RUN bun scripts/docker/prune-workspace.ts @inline-chat/server out

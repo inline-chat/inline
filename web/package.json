@@ -2,44 +2,12 @@
   "name": "@inline-chat/web",
   "private": true,
   "type": "module",
+  "version": "0.0.0",
   "scripts": {
-    "dev": "vite dev",
-    "build": "vite build",
-    "start": "bun run .output/server/index.mjs",
-    "typecheck": "tsc",
-    "test": "vitest run",
-    "test:watch": "vitest"
-  },
-  "dependencies": {
-    "@inline/client": "workspace:*",
-    "@stylexjs/babel-plugin": "^0.16.0",
-    "@stylexjs/postcss-plugin": "^0.16.0",
-    "@stylexjs/stylex": "^0.16.0",
-    "@tailwindcss/postcss": "^4.1.13",
-    "@tailwindcss/vite": "^4.1.13",
-    "@tanstack/react-router": "^1.132.27",
-    "@tanstack/react-start": "^1.132.27",
-    "@vitejs/plugin-react": "^5.0.4",
-    "framer-motion": "^11.18.1",
-    "isbot": "^5.1.17",
-    "motion": "^12.23.22",
-    "nitro": "latest",
-    "react": "^19.1.1",
-    "react-dom": "^19.1.1",
-    "react-markdown": "^9.0.3",
-    "remark-gfm": "^4.0.0"
-  },
-  "devDependencies": {
-    "@types/node": "^20",
-    "@types/react": "^19.0.1",
-    "@types/react-dom": "^19.0.1",
-    "autoprefixer": "^10.4.20",
-    "postcss": "^8.5.6",
-    "tailwindcss": "^4.1.13",
-    "typescript": "^5.7.2",
-    "vite": "^7.1.7",
-    "vite-plugin-stylex": "^0.13.0",
-    "vite-tsconfig-paths": "^5.1.4",
-    "vitest": "^4.0.16"
+    "dev": "echo \"web workspace is ready; initialize Vite app next\"",
+    "build": "echo \"web workspace is ready; initialize Vite app next\"",
+    "typecheck": "echo \"web workspace is ready; initialize Vite app next\"",
+    "test": "echo \"web workspace is ready; initialize Vite app next\"",
+    "lint": "echo \"web workspace is ready; initialize Vite app next\""
   }
 }

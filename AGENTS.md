@@ -4,7 +4,7 @@
 - Key paths: 
   - `server/` Backend (Bun/TS)
   - `apple/` macOS/iOS clients (SwiftUI/UIKit/AppKit)
-  - `web/` web app (React/TanStack, not started) 
+  - `landing/` web app (React/TanStack, not started) 
   - `desktop/` Windows app (Electron, not started)
   - `proto/` protobufs
   - `cli/` client cli (Rust)
@@ -43,11 +43,12 @@
 - If undoing your own changes in a file with other uncommitted edits, ask first.
 - Regenerate protobufs when contracts change (`bun run generate:proto`); run focused `swift build` for touched Swift packages.
 - Run focused tests/typechecks for affected areas; add/update tests for new features and regressions.
-- Web is WIP. Do not extend requested changes or investigations to `web/` unless explicitly asked.
+- Web is WIP. Do not extend requested changes or investigations to `landing/` unless explicitly asked.
 - New UI work must stay in new UI components; do not modify legacy sidebar/old UI.
 - When asked to write a plan or save your investigation, make a file in `.context/` named `YYYY-MM-DD-title-kebab-case.md`.
 - In final handoff/review/push, call out security risks, possible performance regressions, and state production readiness.
 - Do just the right amount of engineering, not over engineer, and not under engineer. Simple and elegant solutions are often better than prematuraly complex solutions that go beyond the scope and spec.
+- When adding colors, ensure the color supports light/dark theming and if it's not a one-off color, add it to the platforms theme class/module.
 
 ## Style Guide
 - Use shorter function/variables names as much as possible, avoid long phrasal function names when we can keep it simply unless required. Don't use weird abbreviations like `idxes`; `msg`, `id`, `ctx` and alike are fine.
@@ -116,9 +117,9 @@
 ## Web & Docs
 
 - Web stack: TanStack Router + Vite + StyleX/Tailwind; keep SSR-safe patterns.
-- Web commands: `cd web && bun run dev|build|typecheck`.
+- Web commands: `cd landing && bun run dev|build|typecheck`.
 - Prefer existing tokens/utilities over ad-hoc CSS; keep light/dark behavior consistent.
-- Docs: routes in `web/src/routes/docs/`, content in `web/src/docs/content/`, nav in `web/src/docs/nav.ts`.
+- Docs: routes in `landing/src/routes/docs/`, content in `landing/src/docs/content/`, nav in `landing/src/docs/nav.ts`.
 - Docs additions: add markdown page + route + nav entry; keep writing concise and practical.
 
 ## Admin
