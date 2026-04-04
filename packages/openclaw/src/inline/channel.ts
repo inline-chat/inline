@@ -735,8 +735,9 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
     messageToolHints: ({ cfg, accountId }) => [
       "- Inline targeting: omit `target` to reply in the current chat.",
       "- Inline explicit targets: `chat:<chatId>` for chats and `user:<userId>` for direct users. Prefer `user:` for DM user targets.",
+      "- Inline discovery: use `channel-list` to discover available chats and users. Use `scope: groups|peers|all` when helpful, and reuse returned `target` values.",
       "- Inline reactions: pass `messageId` for `react` when you have it; on inbound turns, the current inbound message id can be used as fallback.",
-      "- Inline history tools: `read` and `search` return media-aware message payloads (`media`, `attachments`, `attachmentUrls`) so image-only history remains discoverable.",
+      "- Inline history tools: `read` and `search` return media-aware message payloads (`media`, `attachments`, `attachmentUrls`) so image-only history remains discoverable. `search` is chat-scoped; run it per chat.",
       "- Inline special tools: use `inline_nudge` to send a nudge, and `inline_forward` to forward message ids between chats or users.",
       ...(isInlineReplyThreadsEnabled({ cfg, accountId: accountId ?? null })
         ? [
