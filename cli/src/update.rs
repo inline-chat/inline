@@ -290,6 +290,26 @@ fn current_target() -> &'static str {
         } else {
             "unknown"
         }
+    } else if cfg!(target_os = "linux") {
+        if cfg!(target_arch = "aarch64") {
+            if cfg!(target_env = "musl") {
+                "aarch64-unknown-linux-musl"
+            } else if cfg!(target_env = "gnu") {
+                "aarch64-unknown-linux-gnu"
+            } else {
+                "unknown"
+            }
+        } else if cfg!(target_arch = "x86_64") {
+            if cfg!(target_env = "musl") {
+                "x86_64-unknown-linux-musl"
+            } else if cfg!(target_env = "gnu") {
+                "x86_64-unknown-linux-gnu"
+            } else {
+                "unknown"
+            }
+        } else {
+            "unknown"
+        }
     } else {
         "unknown"
     }

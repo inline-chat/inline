@@ -71,18 +71,32 @@ download_file() {
 }
 
 detect_target() {
-  local os arch
+  local os arch libc
   os="$(uname -s)"
   arch="$(uname -m)"
 
-  if [ "$os" != "Darwin" ]; then
-    error "Unsupported OS: $os (macOS only)"
-  fi
-
-  case "$arch" in
-    arm64) echo "aarch64-apple-darwin" ;;
-    x86_64) echo "x86_64-apple-darwin" ;;
-    *) error "Unsupported architecture: $arch" ;;
+  case "$os" in
+    Darwin)
+      case "$arch" in
+        arm64) echo "aarch64-apple-darwin" ;;
+        x86_64) echo "x86_64-apple-darwin" ;;
+        *) error "Unsupported architecture: $arch" ;;
+      esac
+      ;;
+    Linux)
+      libc="gnu"
+      if command_exists ldd && ldd --version 2>&1 | grep -qi musl; then
+        libc="musl"
+      fi
+      case "$arch" in
+        aarch64|arm64) echo "aarch64-unknown-linux-${libc}" ;;
+        x86_64|amd64) echo "x86_64-unknown-linux-${libc}" ;;
+        *) error "Unsupported architecture: $arch" ;;
+      esac
+      ;;
+    *)
+      error "Unsupported OS: $os"
+      ;;
   esac
 }
 

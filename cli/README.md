@@ -17,6 +17,8 @@ brew install --cask inline
 curl -fsSL https://inline.chat/cli/install.sh | sh
 ```
 
+Supports macOS and Linux (x86_64/aarch64).
+
 ## (Optional) Add the skill to Claude/Codex
 
 Use the skill markdown at `cli/skill/SKILL.md`. Ask your agent to "create a skill"
