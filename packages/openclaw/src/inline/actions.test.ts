@@ -790,6 +790,313 @@ describe("inline/actions", () => {
     )
   })
 
+  it("accepts message-prefixed ids for react actions", async () => {
+    vi.resetModules()
+
+    const connect = vi.fn(async () => {})
+    const close = vi.fn(async () => {})
+    const getMe = vi.fn(async () => {
+      throw new Error("getMe unavailable")
+    })
+    const invokeRaw = vi.fn(async (method: number) => {
+      if (method === 6) {
+        return { oneofKind: "addReaction", addReaction: { updates: [] } }
+      }
+      throw new Error(`unexpected method ${String(method)}`)
+    })
+
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {
+        ADD_REACTION: 6,
+      },
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = connect
+        close = close
+        getMe = getMe
+        invokeRaw = invokeRaw
+      },
+    }))
+
+    const { inlineMessageActions } = await import("./actions")
+
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+        },
+      },
+    } satisfies OpenClawConfig
+
+    await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "react",
+      cfg,
+      params: { to: "7", messageId: "message 322", emoji: "✔️" },
+    } as any)
+
+    expect(invokeRaw).toHaveBeenCalledWith(
+      6,
+      expect.objectContaining({
+        oneofKind: "addReaction",
+        addReaction: expect.objectContaining({
+          emoji: "✔️",
+          messageId: 322n,
+          peerId: expect.objectContaining({
+            type: expect.objectContaining({
+              oneofKind: "chat",
+            }),
+          }),
+        }),
+      }),
+    )
+    expect(connect).toHaveBeenCalled()
+    expect(close).toHaveBeenCalled()
+  })
+
+  it("treats duplicate react failures as already-present success", async () => {
+    vi.resetModules()
+
+    const invokeRaw = vi.fn(async (method: number) => {
+      if (method === 6) {
+        throw new Error('duplicate key value violates unique constraint "unique_reaction_per_emoji"')
+      }
+      throw new Error(`unexpected method ${String(method)}`)
+    })
+
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {
+        ADD_REACTION: 6,
+      },
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = vi.fn(async () => {})
+        close = vi.fn(async () => {})
+        getMe = vi.fn(async () => {
+          throw new Error("getMe unavailable")
+        })
+        invokeRaw = invokeRaw
+      },
+    }))
+
+    const { inlineMessageActions } = await import("./actions")
+
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+        },
+      },
+    } satisfies OpenClawConfig
+
+    const result = await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "react",
+      cfg,
+      params: { to: "7", messageId: "322", emoji: "✔️" },
+    } as any)
+
+    expect(result?.details).toEqual(
+      expect.objectContaining({
+        ok: true,
+        chatId: "7",
+        messageId: "322",
+        emoji: "✔️",
+        remove: false,
+        alreadyPresent: true,
+      }),
+    )
+    expect(invokeRaw).toHaveBeenCalledWith(
+      6,
+      expect.objectContaining({
+        oneofKind: "addReaction",
+      }),
+    )
+  })
+
+  it("falls back to toolContext.currentMessageId for react", async () => {
+    vi.resetModules()
+
+    const invokeRaw = vi.fn(async (method: number) => {
+      if (method === 6) {
+        return { oneofKind: "addReaction", addReaction: { updates: [] } }
+      }
+      throw new Error(`unexpected method ${String(method)}`)
+    })
+
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {
+        ADD_REACTION: 6,
+      },
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = vi.fn(async () => {})
+        close = vi.fn(async () => {})
+        getMe = vi.fn(async () => {
+          throw new Error("getMe unavailable")
+        })
+        invokeRaw = invokeRaw
+      },
+    }))
+
+    const { inlineMessageActions } = await import("./actions")
+
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+        },
+      },
+    } satisfies OpenClawConfig
+
+    await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "react",
+      cfg,
+      params: { to: "7", emoji: "✔️" },
+      toolContext: { currentMessageId: "322" },
+    } as any)
+
+    expect(invokeRaw).toHaveBeenCalledWith(
+      6,
+      expect.objectContaining({
+        oneofKind: "addReaction",
+        addReaction: expect.objectContaining({
+          messageId: 322n,
+        }),
+      }),
+    )
+  })
+
+  it("soft-fails react when message id is missing", async () => {
+    vi.resetModules()
+
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {
+        ADD_REACTION: 6,
+      },
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = vi.fn(async () => {})
+        close = vi.fn(async () => {})
+        getMe = vi.fn(async () => ({ userId: 42n }))
+        invokeRaw = vi.fn(async () => ({ oneofKind: "addReaction", addReaction: { updates: [] } }))
+      },
+    }))
+
+    const { inlineMessageActions } = await import("./actions")
+
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+        },
+      },
+    } satisfies OpenClawConfig
+
+    const result = await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "react",
+      cfg,
+      params: { to: "7", emoji: "✔️" },
+    } as any)
+
+    expect(result?.details).toEqual(
+      expect.objectContaining({
+        ok: false,
+        reason: "missing_message_id",
+      }),
+    )
+  })
+
+  it("soft-fails react on generic add-reaction errors", async () => {
+    vi.resetModules()
+
+    const invokeRaw = vi.fn(async (method: number) => {
+      if (method === 6) {
+        throw new Error("network glitch")
+      }
+      throw new Error(`unexpected method ${String(method)}`)
+    })
+
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {
+        ADD_REACTION: 6,
+      },
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = vi.fn(async () => {})
+        close = vi.fn(async () => {})
+        getMe = vi.fn(async () => {
+          throw new Error("getMe unavailable")
+        })
+        invokeRaw = invokeRaw
+      },
+    }))
+
+    const { inlineMessageActions } = await import("./actions")
+
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+        },
+      },
+    } satisfies OpenClawConfig
+
+    const result = await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "react",
+      cfg,
+      params: { to: "7", messageId: "322", emoji: "✔️" },
+    } as any)
+
+    expect(result?.details).toEqual(
+      expect.objectContaining({
+        ok: false,
+        reason: "error",
+        hint: "Reaction failed. Do not retry.",
+      }),
+    )
+  })
+
+  it("soft-fails react when reactions are disabled by config", async () => {
+    vi.resetModules()
+
+    const { inlineMessageActions } = await import("./actions")
+
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+          actions: {
+            reactions: false,
+          },
+        },
+      },
+    } satisfies OpenClawConfig
+
+    const result = await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "react",
+      cfg,
+      params: { to: "7", messageId: "322", emoji: "✔️" },
+    } as any)
+
+    expect(result?.details).toEqual(
+      expect.objectContaining({
+        ok: false,
+        reason: "disabled",
+      }),
+    )
+  })
+
   it("returns attachment-aware text and urls for read results", async () => {
     vi.resetModules()
 

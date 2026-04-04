@@ -227,11 +227,38 @@ function parseInlineId(raw: unknown, label: string): bigint {
       throw new Error(`inline action: missing ${label}`)
     }
     if (!/^[0-9]+$/.test(trimmed)) {
+      if (/message/i.test(label)) {
+        const prefixed = trimmed.match(/^(?:message|msg)\s*#?\s*([0-9]+)$/i)?.[1]
+        if (prefixed) {
+          return BigInt(prefixed)
+        }
+      }
       throw new Error(`inline action: invalid ${label} "${raw}"`)
     }
     return BigInt(trimmed)
   }
   throw new Error(`inline action: missing ${label}`)
+}
+
+function resolveReactionMessageId(params: {
+  args: Record<string, unknown>
+  toolContext?: { currentMessageId?: string | number | null }
+}): string | undefined {
+  const explicit =
+    readFlexibleId(params.args, "messageId") ??
+    readStringParam(params.args, "messageId")
+  if (explicit) {
+    return explicit
+  }
+  const fromContext = params.toolContext?.currentMessageId
+  if (typeof fromContext === "number" && Number.isFinite(fromContext)) {
+    return String(Math.trunc(fromContext))
+  }
+  if (typeof fromContext === "string") {
+    const trimmed = fromContext.trim()
+    return trimmed || undefined
+  }
+  return undefined
 }
 
 function parseOptionalInlineId(raw: unknown, label: string): bigint | undefined {
@@ -614,6 +641,37 @@ async function loadMessageReactions(params: {
   return Array.from(byEmoji.values())
 }
 
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (typeof error === "string") return error
+  if (error && typeof error === "object" && "message" in error && typeof error.message === "string") {
+    return error.message
+  }
+  return String(error)
+}
+
+function isDuplicateReactionError(error: unknown): boolean {
+  const text = getErrorMessage(error).toLowerCase()
+  return (
+    text.includes("unique_reaction_per_emoji") ||
+    (text.includes("duplicate") && text.includes("reaction")) ||
+    text.includes("duplicate key value violates unique constraint")
+  )
+}
+
+async function reactionAlreadyExists(params: {
+  client: InlineSdkClient
+  chatId: bigint
+  messageId: bigint
+  emoji: string
+}): Promise<boolean> {
+  const me = await params.client.getMe().catch(() => null)
+  if (!me?.userId) return false
+  const myId = String(me.userId)
+  const reactions = await loadMessageReactions(params).catch(() => [])
+  return reactions.some((reaction) => reaction.emoji === params.emoji && reaction.userIds.includes(myId))
+}
+
 async function findMessageById(params: {
   client: InlineSdkClient
   chatId: bigint
@@ -845,11 +903,18 @@ export const inlineMessageActions = {
     if (!/^(user:)?[0-9]+$/i.test(normalized)) return null
     return { to: normalized }
   },
-  handleAction: async ({ action, params, cfg, accountId }) => {
+  handleAction: async ({ action, params, cfg, accountId, toolContext }) => {
     if (!SUPPORTED_ACTIONS.includes(action)) {
       throw new Error(`Action ${action} is not supported for provider inline.`)
     }
     if (!isActionEnabled({ cfg, accountId: accountId ?? null, action })) {
+      if (action === "react") {
+        return jsonResult({
+          ok: false,
+          reason: "disabled",
+          hint: "Inline reactions are disabled via channels.inline.actions.reactions. Do not retry.",
+        })
+      }
       throw new Error(`inline action: ${action} is disabled by channels.inline.actions`)
     }
 
@@ -1030,11 +1095,28 @@ export const inlineMessageActions = {
         accountId,
         fn: async (client) => {
           const chatId = resolveChatIdFromParams(params)
-          const messageId = parseInlineId(
-            readFlexibleId(params, "messageId") ??
-              readStringParam(params, "messageId", { required: true }),
-            "messageId",
+          const rawMessageId = resolveReactionMessageId(
+            toolContext != null
+              ? { args: params, toolContext }
+              : { args: params },
           )
+          if (!rawMessageId) {
+            return jsonResult({
+              ok: false,
+              reason: "missing_message_id",
+              hint: "Inline reaction requires a valid messageId (or inbound context fallback). Do not retry.",
+            })
+          }
+          let messageId: bigint
+          try {
+            messageId = parseInlineId(rawMessageId, "messageId")
+          } catch {
+            return jsonResult({
+              ok: false,
+              reason: "missing_message_id",
+              hint: "Inline reaction requires a valid messageId (or inbound context fallback). Do not retry.",
+            })
+          }
           const { emoji, remove, isEmpty } = readReactionParams(params, {
             removeErrorMessage: "Emoji is required to remove an Inline reaction.",
           })
@@ -1043,32 +1125,79 @@ export const inlineMessageActions = {
           }
 
           if (remove) {
-            const result = await client.invokeRaw(Method.DELETE_REACTION, {
-              oneofKind: "deleteReaction",
-              deleteReaction: {
+            try {
+              const result = await client.invokeRaw(Method.DELETE_REACTION, {
+                oneofKind: "deleteReaction",
+                deleteReaction: {
+                  emoji,
+                  peerId: buildChatPeer(chatId),
+                  messageId,
+                },
+              })
+              if (result.oneofKind !== "deleteReaction") {
+                throw new Error(
+                  `inline action: expected deleteReaction result, got ${String(result.oneofKind)}`,
+                )
+              }
+            } catch {
+              return jsonResult({
+                ok: false,
+                reason: "error",
                 emoji,
-                peerId: buildChatPeer(chatId),
-                messageId,
-              },
-            })
-            if (result.oneofKind !== "deleteReaction") {
-              throw new Error(
-                `inline action: expected deleteReaction result, got ${String(result.oneofKind)}`,
-              )
+                remove: true,
+                hint: "Reaction failed. Do not retry.",
+              })
             }
           } else {
-            const result = await client.invokeRaw(Method.ADD_REACTION, {
-              oneofKind: "addReaction",
-              addReaction: {
-                emoji,
+            if (
+              await reactionAlreadyExists({
+                client,
+                chatId,
                 messageId,
-                peerId: buildChatPeer(chatId),
-              },
-            })
-            if (result.oneofKind !== "addReaction") {
-              throw new Error(
-                `inline action: expected addReaction result, got ${String(result.oneofKind)}`,
-              )
+                emoji,
+              })
+            ) {
+              return jsonResult({
+                ok: true,
+                chatId: String(chatId),
+                messageId: String(messageId),
+                emoji,
+                remove: false,
+                alreadyPresent: true,
+              })
+            }
+
+            try {
+              const result = await client.invokeRaw(Method.ADD_REACTION, {
+                oneofKind: "addReaction",
+                addReaction: {
+                  emoji,
+                  messageId,
+                  peerId: buildChatPeer(chatId),
+                },
+              })
+              if (result.oneofKind !== "addReaction") {
+                throw new Error(
+                  `inline action: expected addReaction result, got ${String(result.oneofKind)}`,
+                )
+              }
+            } catch (error) {
+              if (!isDuplicateReactionError(error)) {
+                return jsonResult({
+                  ok: false,
+                  reason: "error",
+                  emoji,
+                  hint: "Reaction failed. Do not retry.",
+                })
+              }
+              return jsonResult({
+                ok: true,
+                chatId: String(chatId),
+                messageId: String(messageId),
+                emoji,
+                remove: false,
+                alreadyPresent: true,
+              })
             }
           }
 
