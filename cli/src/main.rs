@@ -1820,6 +1820,7 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         emoji,
                         is_public: args.public,
                         participants,
+                        reserved_chat_id: None,
                     };
                     let result = realtime
                         .call_rpc(
@@ -2611,6 +2612,8 @@ async fn run(cli: Cli, started_at: Instant) -> Result<(), Box<dyn std::error::Er
                         peer_id: Some(peer),
                         text,
                         entities: None,
+                        parse_markdown: None,
+                        actions: None,
                     };
                     let result = realtime
                         .call_rpc(
@@ -3223,6 +3226,7 @@ async fn send_message(
         entities,
         parse_markdown: Some(parse_markdown),
         send_mode: None,
+        actions: None,
     };
 
     let result = realtime
@@ -4866,6 +4870,19 @@ fn message_media_summary(message: &proto::Message) -> Option<MediaSummary> {
                 url,
             })
         }
+        Some(proto::message_media::Media::Voice(voice)) => {
+            let voice = voice.voice.as_ref()?;
+            Some(MediaSummary {
+                kind: "voice".to_string(),
+                file_name: None,
+                mime_type: Some(voice.mime_type.clone()),
+                size: Some(voice.size),
+                duration: Some(voice.duration),
+                width: None,
+                height: None,
+                url: voice.cdn_url.clone(),
+            })
+        }
         Some(proto::message_media::Media::Nudge(_)) => Some(MediaSummary {
             kind: "nudge".to_string(),
             file_name: None,
@@ -5153,6 +5170,10 @@ async fn download_message_media(
             };
             (url, "photo")
         }
+        Some(proto::message_media::Media::Voice(voice)) => {
+            let voice = voice.voice.as_ref();
+            (voice.and_then(|clip| clip.cdn_url.clone()), "voice")
+        }
         Some(proto::message_media::Media::Nudge(_)) => (None, "nudge"),
         None => (None, "media"),
     };
@@ -5202,6 +5223,15 @@ fn media_file_name(media: &proto::MessageMedia) -> Option<String> {
             };
             Some(format!("photo-{}.{}", photo.id, ext))
         }
+        Some(proto::message_media::Media::Voice(voice)) => voice.voice.as_ref().map(|voice| {
+            let ext = match voice.mime_type.as_str() {
+                "audio/mpeg" => "mp3",
+                "audio/wav" | "audio/x-wav" => "wav",
+                "audio/flac" => "flac",
+                _ => "ogg",
+            };
+            format!("voice-{}.{}", voice.id, ext)
+        }),
         Some(proto::message_media::Media::Nudge(_)) => None,
         None => None,
     }
