@@ -17,37 +17,26 @@ const signingIdentity = process.env.APPLE_SIGNING_IDENTITY;
 const appleId = process.env.APPLE_ID;
 const applePassword = process.env.APPLE_PASSWORD;
 const appleTeamId = process.env.APPLE_TEAM_ID;
+const defaultTargets = [
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-unknown-linux-gnu",
+] as const;
+const supportedTargets = [
+  ...defaultTargets,
+  "aarch64-unknown-linux-musl",
+  "x86_64-unknown-linux-musl",
+] as const;
 
 const command = process.argv[2] ?? "release";
 
-if (command === "upload-install") {
-  const { r2, publicBaseUrl, prefix } = getR2Context();
-  const installPath = join(cliDir, "install.sh");
-  await uploadFile(r2, `${prefix}/install.sh`, installPath, "text/x-shellscript");
-  console.log(`Uploaded install.sh to ${publicBaseUrl}/${prefix}/install.sh`);
-} else if (command === "build") {
-  await runBuild();
-} else if (command === "sign-notarize") {
-  const context = await getReleaseContext();
-  await runBuild(context);
-  await signAndNotarize(context);
-} else if (command === "release-dry-run") {
-  const context = await getReleaseContext();
-  await runBuild(context);
-  await signAndNotarize(context);
-  console.log("Dry run complete (build + sign + notarize + verify).");
-} else if (command === "package-manifest") {
-  const { r2, publicBaseUrl, prefix } = getR2Context();
-  await runPackageManifest(r2, publicBaseUrl, prefix);
-} else if (command === "update-homebrew") {
-  const context = await getReleaseContext();
-  await updateHomebrewCask(context);
-} else if (command === "release") {
-  const { r2, publicBaseUrl, prefix } = getR2Context();
-  await runRelease(r2, publicBaseUrl, prefix);
-} else {
-  throw new Error(`Unknown command: ${command}`);
+if (command !== "release") {
+  throw new Error(`Unknown command: ${command}. Only 'release' is supported.`);
 }
+
+const { r2, publicBaseUrl, prefix } = getR2Context();
+await runRelease(r2, publicBaseUrl, prefix);
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -172,35 +161,71 @@ async function runRelease(r2: S3Client, publicBaseUrl: string, prefix: string) {
   console.log(`Manifest: ${publicBaseUrl}/${prefix}/manifest.json`);
   console.log(`Install: ${publicBaseUrl}/${prefix}/install.sh`);
   console.log(`Install command: curl -fsSL ${publicBaseUrl}/${prefix}/install.sh | sh`);
-  printManualSteps();
 }
 
-async function runBuild(context?: ReleaseContext) {
-  const resolvedContext = context ?? (await getReleaseContext());
-  for (const target of resolvedContext.targets) {
-    await runCommand("cargo", ["build", "--release", "--target", target], { cwd: cliDir });
+function isLinuxTarget(target: string): boolean {
+  return target.includes("-unknown-linux-");
+}
+
+async function ensureRustTargetsInstalled(targets: readonly string[]) {
+  const result = await runCommandCapture("rustup", ["target", "list", "--installed"]);
+  if (result.exitCode !== 0) {
+    throw new Error(`Failed to read installed Rust targets: ${result.stderr || result.stdout}`);
+  }
+
+  const installed = new Set(
+    result.stdout
+      .split("\n")
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0),
+  );
+  const missing = targets.filter((target) => !installed.has(target));
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing Rust targets: ${missing.join(", ")}. Install with: rustup target add ${missing.join(" ")}`,
+    );
+  }
+}
+
+async function hasCargoZigbuild(): Promise<boolean> {
+  const result = await runCommandCapture("cargo", ["zigbuild", "--help"], { cwd: cliDir });
+  return result.exitCode === 0;
+}
+
+async function buildArgsForTarget(target: string, canZigbuild: boolean): Promise<string[]> {
+  if (!isLinuxTarget(target) || process.platform === "linux") {
+    return ["build", "--release", "--locked", "--target", target];
+  }
+  if (!canZigbuild) {
+    throw new Error(
+      `Building ${target} on ${process.platform} requires cargo-zigbuild. Install with: cargo install cargo-zigbuild --locked`,
+    );
+  }
+  return ["zigbuild", "--release", "--locked", "--target", target];
+}
+
+async function runBuild(context: ReleaseContext) {
+  await ensureRustTargetsInstalled(context.targets);
+  const canZigbuild = await hasCargoZigbuild();
+
+  for (const target of context.targets) {
+    const args = await buildArgsForTarget(target, canZigbuild);
+    await runCommand("cargo", args, { cwd: cliDir });
   }
   console.log("Build complete.");
-  if (!context) {
-    printManualSteps();
-  }
 }
 
 async function runPackageManifest(
   r2: S3Client,
   publicBaseUrl: string,
   prefix: string,
-  context?: ReleaseContext,
+  context: ReleaseContext,
 ) {
-  const resolvedContext = context ?? (await getReleaseContext());
-  const manifest = await buildManifest(resolvedContext, publicBaseUrl, prefix, r2);
+  const manifest = await buildManifest(context, publicBaseUrl, prefix, r2);
   const manifestPath = join(distDir, "manifest.json");
   await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
   await uploadFile(r2, `${prefix}/manifest.json`, manifestPath, "application/json");
   console.log("Manifest packaged and uploaded.");
-  if (!context) {
-    printManualSteps();
-  }
 }
 
 async function uploadInstall(r2: S3Client, prefix: string) {
@@ -259,6 +284,12 @@ async function buildManifest(
 }
 
 async function signAndNotarize(context: ReleaseContext) {
+  const macTargets = context.targets.filter((target) => target.endsWith("-apple-darwin"));
+  if (macTargets.length === 0) {
+    console.log("Skipping sign/notarize (no macOS targets selected).");
+    return;
+  }
+
   if (!signingIdentity || !appleId || !applePassword || !appleTeamId) {
     throw new Error(
       "Missing signing/notarization env vars: APPLE_SIGNING_IDENTITY, APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID",
@@ -278,7 +309,7 @@ async function signAndNotarize(context: ReleaseContext) {
     10,
   );
 
-  for (const target of context.targets) {
+  for (const target of macTargets) {
     const binaryPath = join(cliDir, "target", target, "release", "inline");
     const zipName = `inline-cli-${context.version}-${target}-notarize.zip`;
     const zipPath = join(context.releaseDir, zipName);
@@ -379,6 +410,22 @@ async function updateHomebrewCask(context: ReleaseContext) {
     return;
   }
 
+  const armTarget = "aarch64-apple-darwin";
+  const intelTarget = "x86_64-apple-darwin";
+  const linuxArmTarget = "aarch64-unknown-linux-gnu";
+  const linuxIntelTarget = "x86_64-unknown-linux-gnu";
+  if (
+    !context.targets.includes(armTarget) ||
+    !context.targets.includes(intelTarget) ||
+    !context.targets.includes(linuxArmTarget) ||
+    !context.targets.includes(linuxIntelTarget)
+  ) {
+    console.log(
+      "Skipping Homebrew cask update (required targets not present: macOS arm/intel + Linux gnu arm/intel).",
+    );
+    return;
+  }
+
   const caskPath = join(homebrewTapPath, "Casks", "inline.rb");
   const caskRelativePath = join("Casks", "inline.rb");
   await stat(caskPath).catch(() => {
@@ -397,8 +444,6 @@ async function updateHomebrewCask(context: ReleaseContext) {
     throw new Error("Homebrew tap has uncommitted changes. Commit/stash before release.");
   }
 
-  const armTarget = "aarch64-apple-darwin";
-  const intelTarget = "x86_64-apple-darwin";
   const armArtifact = join(
     context.releaseDir,
     `inline-cli-${context.version}-${armTarget}.tar.gz`,
@@ -407,25 +452,38 @@ async function updateHomebrewCask(context: ReleaseContext) {
     context.releaseDir,
     `inline-cli-${context.version}-${intelTarget}.tar.gz`,
   );
+  const linuxArmArtifact = join(
+    context.releaseDir,
+    `inline-cli-${context.version}-${linuxArmTarget}.tar.gz`,
+  );
+  const linuxIntelArtifact = join(
+    context.releaseDir,
+    `inline-cli-${context.version}-${linuxIntelTarget}.tar.gz`,
+  );
 
   const armSha = await sha256File(armArtifact);
   const intelSha = await sha256File(intelArtifact);
+  const linuxArmSha = await sha256File(linuxArmArtifact);
+  const linuxIntelSha = await sha256File(linuxIntelArtifact);
 
   const contents = await readFile(caskPath, "utf8");
   const versionPattern = /version\s+"[^"]+"/;
-  const shaPattern =
-    /sha256\s+arm:\s+"[a-f0-9]{64}",\s*\n\s*intel:\s+"[a-f0-9]{64}"/;
+  const shaPattern = /sha256[\s\S]*?\n\n  url /m;
 
   if (!versionPattern.test(contents) || !shaPattern.test(contents)) {
     throw new Error(`Failed to locate version/sha256 entries in ${caskPath}`);
   }
 
+  const shaBlock = [
+    `sha256 arm:          "${armSha}",`,
+    `       intel:        "${intelSha}",`,
+    `       arm64_linux:  "${linuxArmSha}",`,
+    `       x86_64_linux: "${linuxIntelSha}"`,
+  ].join("\n");
+
   const updated = contents
     .replace(versionPattern, `version "${context.version}"`)
-    .replace(
-      shaPattern,
-      `sha256 arm: "${armSha}",\n         intel: "${intelSha}"`,
-    );
+    .replace(shaPattern, `${shaBlock}\n\n  url `);
 
   if (updated === contents) {
     console.log("Homebrew cask already up to date.");
@@ -520,7 +578,7 @@ async function publishGitHubRelease(context: ReleaseContext) {
 
 async function getReleaseContext(): Promise<ReleaseContext> {
   const version = await readCargoVersion(join(cliDir, "Cargo.toml"));
-  const targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"] as const;
+  const targets = getReleaseTargets();
 
   await mkdir(distDir, { recursive: true });
   const releaseDir = join(distDir, `v${version}`);
@@ -531,14 +589,31 @@ async function getReleaseContext(): Promise<ReleaseContext> {
   return { version, targets, releaseDir };
 }
 
-function printManualSteps() {
-  console.log("Manual steps (run individually if you need to repeat only one):");
-  console.log("  bun tsx scripts/release-cli.ts build");
-  console.log("  bun tsx scripts/release-cli.ts sign-notarize");
-  console.log("  bun tsx scripts/release-cli.ts package-manifest");
-  console.log("  bun tsx scripts/release-cli.ts upload-install");
-  console.log("  bun tsx scripts/release-cli.ts update-homebrew");
-  console.log("  bun tsx scripts/release-cli.ts release-dry-run");
+function getReleaseTargets(): string[] {
+  const raw = process.env.INLINE_CLI_TARGETS?.trim();
+  if (!raw) {
+    return [...defaultTargets];
+  }
+
+  const targets = raw
+    .split(",")
+    .map((target) => target.trim())
+    .filter((target) => target.length > 0);
+  if (targets.length === 0) {
+    throw new Error("INLINE_CLI_TARGETS is set but empty.");
+  }
+
+  const supported = new Set<string>(supportedTargets);
+  const invalid = targets.filter((target) => !supported.has(target));
+  if (invalid.length > 0) {
+    throw new Error(
+      `Unsupported target(s): ${invalid.join(", ")}. Supported targets: ${supportedTargets.join(
+        ", ",
+      )}`,
+    );
+  }
+
+  return [...new Set(targets)];
 }
 
 type UpdateManifest = {

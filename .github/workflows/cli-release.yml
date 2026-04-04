@@ -1,0 +1,128 @@
+name: CLI Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to release from"
+        required: true
+        default: "main"
+      targets:
+        description: "Optional comma-separated release targets override"
+        required: false
+        default: ""
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-26
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.ref }}
+
+      - name: Preflight Secrets
+        env:
+          INLINE_HOMEBREW_TAP_TOKEN: ${{ secrets.INLINE_HOMEBREW_TAP_TOKEN }}
+          PUBLIC_RELEASES_R2_ACCESS_KEY_ID: ${{ secrets.PUBLIC_RELEASES_R2_ACCESS_KEY_ID }}
+          PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY: ${{ secrets.PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY }}
+          PUBLIC_RELEASES_R2_BUCKET: ${{ secrets.PUBLIC_RELEASES_R2_BUCKET }}
+          PUBLIC_RELEASES_R2_ENDPOINT: ${{ secrets.PUBLIC_RELEASES_R2_ENDPOINT }}
+          PUBLIC_RELEASES_R2_PUBLIC_BASE_URL: ${{ secrets.PUBLIC_RELEASES_R2_PUBLIC_BASE_URL }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          required=(
+            INLINE_HOMEBREW_TAP_TOKEN
+            PUBLIC_RELEASES_R2_ACCESS_KEY_ID
+            PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY
+            PUBLIC_RELEASES_R2_BUCKET
+            PUBLIC_RELEASES_R2_ENDPOINT
+            PUBLIC_RELEASES_R2_PUBLIC_BASE_URL
+            APPLE_SIGNING_IDENTITY
+            APPLE_ID
+            APPLE_PASSWORD
+            APPLE_TEAM_ID
+          )
+          missing=0
+          for name in "${required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing required secret: ${name}" >&2
+              missing=1
+            fi
+          done
+          if [[ "${missing}" -ne 0 ]]; then
+            exit 1
+          fi
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.1"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Rust builds
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            cli -> target
+
+      - name: Install Release Toolchain
+        run: |
+          set -euo pipefail
+          rustup target add x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu
+          brew list zig >/dev/null 2>&1 || brew install zig
+          cargo install cargo-zigbuild --version 0.21.8 --locked
+
+      - name: Clone Homebrew Tap
+        env:
+          INLINE_HOMEBREW_TAP_TOKEN: ${{ secrets.INLINE_HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          git clone "https://x-access-token:${INLINE_HOMEBREW_TAP_TOKEN}@github.com/inline-chat/homebrew-inline.git" homebrew-inline
+
+      - name: Configure Git Identity
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Run CLI Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INLINE_HOMEBREW_TAP_PATH: ${{ github.workspace }}/homebrew-inline
+          PUBLIC_RELEASES_R2_ACCESS_KEY_ID: ${{ secrets.PUBLIC_RELEASES_R2_ACCESS_KEY_ID }}
+          PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY: ${{ secrets.PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY }}
+          PUBLIC_RELEASES_R2_BUCKET: ${{ secrets.PUBLIC_RELEASES_R2_BUCKET }}
+          PUBLIC_RELEASES_R2_ENDPOINT: ${{ secrets.PUBLIC_RELEASES_R2_ENDPOINT }}
+          PUBLIC_RELEASES_R2_PUBLIC_BASE_URL: ${{ secrets.PUBLIC_RELEASES_R2_PUBLIC_BASE_URL }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TARGETS_OVERRIDE: ${{ github.event.inputs.targets }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${TARGETS_OVERRIDE}" ]]; then
+            export INLINE_CLI_TARGETS="${TARGETS_OVERRIDE}"
+          fi
+          bun run scripts/release-cli.ts release
