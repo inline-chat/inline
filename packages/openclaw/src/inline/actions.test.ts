@@ -1097,6 +1097,163 @@ describe("inline/actions", () => {
     )
   })
 
+  it("returns bot-friendly channel-list groups and peers with targets", async () => {
+    vi.resetModules()
+
+    const invokeRaw = vi.fn(async (method: number) => {
+      if (method === 17) {
+        return {
+          oneofKind: "getChats",
+          getChats: {
+            chats: [
+              {
+                id: 7n,
+                title: "Alice DM",
+                spaceId: 22n,
+                isPublic: false,
+                peerId: {
+                  type: {
+                    oneofKind: "user",
+                    user: { userId: 99n },
+                  },
+                },
+              },
+              {
+                id: 8n,
+                title: "Eng Group",
+                spaceId: 22n,
+                isPublic: true,
+                peerId: {
+                  type: {
+                    oneofKind: "chat",
+                    chat: { chatId: 8n },
+                  },
+                },
+              },
+            ],
+            dialogs: [
+              { chatId: 7n, unreadCount: 2, archived: false, pinned: true },
+              { chatId: 8n, unreadCount: 0, archived: false, pinned: false },
+            ],
+            users: [
+              { id: 99n, username: "alice", firstName: "Alice" },
+              { id: 42n, username: "bob", firstName: "Bob" },
+            ],
+          },
+        }
+      }
+      throw new Error(`unexpected method ${String(method)}`)
+    })
+
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {
+        GET_CHATS: 17,
+      },
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = vi.fn(async () => {})
+        close = vi.fn(async () => {})
+        invokeRaw = invokeRaw
+      },
+    }))
+
+    const { inlineMessageActions } = await import("./actions")
+
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+        },
+      },
+    } satisfies OpenClawConfig
+
+    const result = await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "channel-list",
+      cfg,
+      params: {},
+    } as any)
+
+    expect(result?.details).toMatchObject({
+      ok: true,
+      scope: "all",
+      count: 2,
+      groupsCount: 1,
+      peersCount: 2,
+      chats: expect.arrayContaining([expect.objectContaining({ id: "7", target: "chat:7" })]),
+      groups: expect.arrayContaining([expect.objectContaining({ id: "8", target: "chat:8" })]),
+      peers: expect.arrayContaining([expect.objectContaining({ id: "99", target: "user:99", name: "Alice" })]),
+    })
+  })
+
+  it("supports channel-list scope filtering for peers", async () => {
+    vi.resetModules()
+
+    const invokeRaw = vi.fn(async (method: number) => {
+      if (method === 17) {
+        return {
+          oneofKind: "getChats",
+          getChats: {
+            chats: [
+              {
+                id: 7n,
+                title: "Alice DM",
+                peerId: {
+                  type: {
+                    oneofKind: "user",
+                    user: { userId: 99n },
+                  },
+                },
+              },
+            ],
+            dialogs: [],
+            users: [{ id: 99n, username: "alice", firstName: "Alice" }],
+          },
+        }
+      }
+      throw new Error(`unexpected method ${String(method)}`)
+    })
+
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {
+        GET_CHATS: 17,
+      },
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = vi.fn(async () => {})
+        close = vi.fn(async () => {})
+        invokeRaw = invokeRaw
+      },
+    }))
+
+    const { inlineMessageActions } = await import("./actions")
+
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+        },
+      },
+    } satisfies OpenClawConfig
+
+    const result = await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "channel-list",
+      cfg,
+      params: { scope: "peers", query: "alice" },
+    } as any)
+
+    expect(result?.details).toMatchObject({
+      ok: true,
+      scope: "peers",
+      chats: [],
+      groups: [],
+      peers: [expect.objectContaining({ id: "99", target: "user:99" })],
+    })
+  })
+
   it("returns attachment-aware text and urls for read results", async () => {
     vi.resetModules()
 

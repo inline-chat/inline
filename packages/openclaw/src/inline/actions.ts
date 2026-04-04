@@ -586,6 +586,7 @@ function mapChatEntry(params: {
 
   return {
     id: String(params.chat.id),
+    target: `chat:${String(params.chat.id)}`,
     title: params.chat.title,
     spaceId: params.chat.spaceId != null ? String(params.chat.spaceId) : null,
     isPublic: params.chat.isPublic ?? false,
@@ -599,13 +600,33 @@ function mapChatEntry(params: {
         ? {
             kind: "user",
             id: String(peer.user.userId),
+            target: `user:${String(peer.user.userId)}`,
             username: peerUser?.username ?? null,
             name: peerUser ? buildInlineUserDisplayName(peerUser) : null,
           }
         : peer?.oneofKind === "chat"
-          ? { kind: "chat", id: String(peer.chat.chatId) }
+          ? { kind: "chat", id: String(peer.chat.chatId), target: `chat:${String(peer.chat.chatId)}` }
           : null,
   }
+}
+
+function normalizeInlineListQuery(query: string | undefined): string {
+  return query?.trim().toLowerCase() ?? ""
+}
+
+function mapUserPeerEntry(user: User) {
+  return {
+    id: String(user.id),
+    target: `user:${String(user.id)}`,
+    username: user.username ?? null,
+    name: buildInlineUserDisplayName(user),
+    bot: user.bot ?? false,
+  }
+}
+
+function matchesInlineListQuery(text: string, query: string): boolean {
+  if (!query) return true
+  return text.toLowerCase().includes(query)
 }
 
 async function loadMessageReactions(params: {
@@ -1412,11 +1433,9 @@ export const inlineMessageActions = {
         cfg,
         accountId,
         fn: async (client) => {
-          const query =
-            readStringParam(params, "query") ??
-            readStringParam(params, "q") ??
-            undefined
+          const query = readStringParam(params, "query") ?? readStringParam(params, "q") ?? undefined
           const limit = Math.max(1, Math.min(200, readNumberParam(params, "limit", { integer: true }) ?? 50))
+          const scope = (readStringParam(params, "scope") ?? readStringParam(params, "kind") ?? "all").toLowerCase()
           const result = await client.invokeRaw(Method.GET_CHATS, {
             oneofKind: "getChats",
             getChats: {},
@@ -1427,31 +1446,48 @@ export const inlineMessageActions = {
 
           const dialogByChatId = buildDialogMap(result.getChats.dialogs ?? [])
           const usersById = buildUserMap(result.getChats.users ?? [])
-          const entries = (result.getChats.chats ?? []).map((chat) =>
-            mapChatEntry({ chat, dialogByChatId, usersById }),
-          )
+          const chats = (result.getChats.chats ?? []).map((chat) => mapChatEntry({ chat, dialogByChatId, usersById }))
+          const groups = chats.filter((entry) => entry.peer?.kind !== "user")
+          const peers = (result.getChats.users ?? []).map((user) => mapUserPeerEntry(user))
 
-          const normalizedQuery = query?.trim().toLowerCase() ?? ""
-          const filtered = normalizedQuery
-            ? entries.filter((entry) => {
-                const haystack = [
-                  entry.id,
-                  entry.title,
-                  entry.peer?.kind === "user" ? entry.peer.username ?? "" : "",
-                  entry.peer?.kind === "user" ? entry.peer.name ?? "" : "",
-                ]
-                  .join("\n")
-                  .toLowerCase()
-                return haystack.includes(normalizedQuery)
-              })
-            : entries
+          const normalizedQuery = normalizeInlineListQuery(query)
+          const filteredChats = chats.filter((entry) =>
+            matchesInlineListQuery(
+              [entry.id, entry.target, entry.title, entry.peer?.kind === "user" ? entry.peer.username ?? "" : "", entry.peer?.kind === "user" ? entry.peer.name ?? "" : ""].join(
+                "\n",
+              ),
+              normalizedQuery,
+            ),
+          )
+          const filteredGroups = groups.filter((entry) =>
+            matchesInlineListQuery([entry.id, entry.target, entry.title].join("\n"), normalizedQuery),
+          )
+          const filteredPeers = peers.filter((entry) =>
+            matchesInlineListQuery([entry.id, entry.target, entry.username ?? "", entry.name ?? ""].join("\n"), normalizedQuery),
+          )
 
           return jsonResult(
             toJsonSafe({
               ok: true,
+              scope,
               query: query ?? null,
-              count: filtered.length,
-              chats: filtered.slice(0, limit),
+              count: filteredChats.length,
+              groupsCount: filteredGroups.length,
+              peersCount: filteredPeers.length,
+              chats:
+                scope === "groups" || scope === "group" || scope === "channels" || scope === "channel"
+                  ? []
+                  : scope === "peers" || scope === "peer" || scope === "members" || scope === "member" || scope === "users" || scope === "user"
+                    ? []
+                    : filteredChats.slice(0, limit),
+              groups:
+                scope === "peers" || scope === "peer" || scope === "members" || scope === "member" || scope === "users" || scope === "user"
+                  ? []
+                  : filteredGroups.slice(0, limit),
+              peers:
+                scope === "groups" || scope === "group" || scope === "channels" || scope === "channel"
+                  ? []
+                  : filteredPeers.slice(0, limit),
             }),
           )
         },
