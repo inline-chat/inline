@@ -469,10 +469,10 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
     }
   }
 
-  /// Query chat from database directly
-  private func queryChatFromDatabase() async throws -> Chat? {
+  /// Query chat item from database directly.
+  private func queryChatItemFromDatabase() async throws -> SpaceChatItem? {
     let peer_ = peer
-    let chatItem = try await db.reader.read { db in
+    return try await db.reader.read { db in
       switch peer_ {
         case .user:
           try Dialog
@@ -486,7 +486,11 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
             .fetchOne(db)
       }
     }
-    return chatItem?.chat
+  }
+
+  /// Query chat from database directly.
+  private func queryChatFromDatabase() async throws -> Chat? {
+    try await queryChatItemFromDatabase()?.chat
   }
 
   /// Ensure chat is loaded, if not fetch it
@@ -496,6 +500,14 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
     }
 
     let peer_ = peer
+    let cachedChatItem = try await queryChatItemFromDatabase()
+
+    if let cachedChatItem {
+      await MainActor.run {
+        self.chatItem = cachedChatItem
+      }
+    }
+
     do {
       // Wait for getChat transaction to complete and save to database
       _ = try await Api.realtime.send(.getChat(peer: peer_))
@@ -505,13 +517,19 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
         try? await DataManager.shared.getUser(id: userId)
       }
 
-      // Update UI by fetching from database observation
-      await MainActor.run {
-        fetchChat()
+      if let loadedChatItem = try await queryChatItemFromDatabase() {
+        await MainActor.run {
+          self.chatItem = loadedChatItem
+        }
+        return loadedChatItem.chat
       }
 
-      return chatItem?.chat
+      return cachedChatItem?.chat
     } catch {
+      if let cachedChatItem {
+        Log.shared.warning("Failed to refresh chat from server, using cached chat for \(peer_)")
+        return cachedChatItem.chat
+      }
       Log.shared.error("Failed to ensure chat", error: error)
       throw error
     }

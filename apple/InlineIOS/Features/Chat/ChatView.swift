@@ -34,6 +34,23 @@ struct ChatView: View {
     case error(Error)
   }
 
+  private enum RenderState {
+    case content
+    case loading
+    case error(Error)
+  }
+
+  private enum ChatLoadError: LocalizedError {
+    case unavailable
+
+    var errorDescription: String? {
+      switch self {
+        case .unavailable:
+          "Chat is not available."
+      }
+    }
+  }
+
   init(
     peer: Peer,
     preview: Bool = false,
@@ -49,24 +66,9 @@ struct ChatView: View {
 
   var body: some View {
     ZStack(alignment: .top) {
-      if let chat = fullChatViewModel.chat {
-        ChatViewUIKit(
-          peerId: peerId,
-          chatId: chat.id,
-          spaceId: chat.spaceId ?? 0
-        )
-        .edgesIgnoringSafeArea(.all)
-      }
-
+      chatContent
       ChatViewHeader(navBarHeight: $navBarHeight)
-
-      if case .loading = pageState {
-        loadingOverlay
-      }
-
-      if case let .error(error) = pageState {
-        errorOverlay(error: error)
-      }
+      renderOverlay
     }
     .toolbarColorScheme(colorScheme == .dark ? .dark : .light, for: .navigationBar)
     .toolbarBackground(.hidden, for: .navigationBar)
@@ -114,11 +116,15 @@ struct ChatView: View {
     .task {
       await fetchChatIfNeeded()
     }
+    .onChange(of: fullChatViewModel.chat?.id) { _, chatId in
+      guard chatId != nil else { return }
+      pageState = .loaded
+    }
     .onDisappear {
       scheduleUntitledThreadCleanupIfNeeded()
     }
     .onChange(of: scenePhase) { _, newPhase in
-      if newPhase == .active, fullChatViewModel.chat != nil {
+      if newPhase == .active, fullChatViewModel.chat != nil, case .loaded = pageState {
         fullChatViewModel.refetchHistoryOnly()
       }
     }
@@ -258,18 +264,66 @@ struct ChatView: View {
     .environment(router)
   }
 
+  @MainActor
   private func fetchChatIfNeeded() async {
     if fullChatViewModel.chat != nil {
       pageState = .loaded
       fullChatViewModel.refetchHistoryOnly()
-    } else {
-      pageState = .loading
-      do {
-        _ = try await fullChatViewModel.ensureChat()
+      return
+    }
+
+    pageState = .loading
+    do {
+      let chat = try await fullChatViewModel.ensureChat()
+      if chat != nil || fullChatViewModel.chat != nil {
         pageState = .loaded
-      } catch {
+        fullChatViewModel.refetchHistoryOnly()
+      } else {
+        pageState = .error(ChatLoadError.unavailable)
+      }
+    } catch {
+      if fullChatViewModel.chat != nil {
+        pageState = .loaded
+      } else {
         pageState = .error(error)
       }
+    }
+  }
+
+  @ViewBuilder
+  private var chatContent: some View {
+    if let chat = fullChatViewModel.chat {
+      ChatViewUIKit(
+        peerId: peerId,
+        chatId: chat.id,
+        spaceId: chat.spaceId ?? 0
+      )
+      .edgesIgnoringSafeArea(.all)
+    }
+  }
+
+  @ViewBuilder
+  private var renderOverlay: some View {
+    switch renderState {
+      case .content:
+        EmptyView()
+      case .loading:
+        loadingOverlay
+      case let .error(error):
+        errorOverlay(error: error)
+    }
+  }
+
+  private var renderState: RenderState {
+    if fullChatViewModel.chat != nil {
+      return .content
+    }
+
+    switch pageState {
+      case .error(let error):
+        return .error(error)
+      case .initial, .loading, .loaded:
+        return .loading
     }
   }
 
@@ -303,15 +357,7 @@ struct ChatView: View {
           .padding(.horizontal)
 
         Button("Retry") {
-          Task {
-            pageState = .loading
-            do {
-              _ = try await fullChatViewModel.ensureChat()
-              pageState = .loaded
-            } catch {
-              pageState = .error(error)
-            }
-          }
+          Task { await fetchChatIfNeeded() }
         }
         .buttonStyle(.borderedProminent)
       }
