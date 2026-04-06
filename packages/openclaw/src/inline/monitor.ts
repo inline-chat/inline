@@ -86,6 +86,11 @@ type InlineReplyThreadContext = {
   anchorMessage: Message | null
 }
 
+type InlineDispatchReplyInfo = {
+  kind?: string
+  reason?: string
+}
+
 type InlineHistoryEntryPayload = {
   line: string | null
   attachmentLine: string | null
@@ -101,6 +106,7 @@ const REACTION_TARGET_LOOKUP_LIMIT = 8
 const REPLY_TARGET_LOOKUP_LIMIT = 8
 const ATTACHMENT_CONTEXT_LIMIT = 6
 const DEFAULT_INLINE_MEDIA_MAX_BYTES = 300 * 1024 * 1024
+const EMPTY_RESPONSE_FALLBACK = "No response generated. Please try again."
 const GET_MESSAGES_METHOD =
   typeof (Method as Record<string, unknown>).GET_MESSAGES === "number" &&
   Number.isInteger((Method as Record<string, unknown>).GET_MESSAGES) &&
@@ -1747,65 +1753,133 @@ export async function monitorInlineProvider(params: {
           failed: false,
           opChain: Promise.resolve(),
         }
+        let finalDeliveredForCurrentAssistantMessage = false
+        const resetEditStreamForAssistantMessage = async (): Promise<void> => {
+          await editStreamState.opChain
+          const hasActiveState =
+            editStreamState.messageId != null ||
+            editStreamState.accumulatedText.length > 0 ||
+            editStreamState.lastPartialText.length > 0 ||
+            editStreamState.finalTextAccumulator.length > 0
+          if (!hasActiveState) return
+          editStreamState.messageId = null
+          editStreamState.accumulatedText = ""
+          editStreamState.lastPartialText = ""
+          editStreamState.finalTextAccumulator = ""
+          editStreamState.failed = false
+          finalDeliveredForCurrentAssistantMessage = false
+        }
+        const resetEditStreamOnBoundary = async (): Promise<void> => {
+          if (!streamViaEditMessage) return
+          await resetEditStreamForAssistantMessage()
+        }
+        const handlePartialStreamPayload = async (payload: {
+          text?: string
+          mediaUrls?: string[]
+        }): Promise<void> => {
+          if (editStreamState.failed) return
+          if ((payload.mediaUrls?.length ?? 0) > 0) return
+          const partialText = typeof payload.text === "string" ? payload.text : ""
+          if (!partialText || partialText === editStreamState.lastPartialText) return
+          editStreamState.lastPartialText = partialText
+
+          const nextText = rewriteNumericMentionsToUsernames(
+            extractCompleteParagraphText(partialText),
+            senderProfilesById,
+          ).trim()
+          if (!nextText || nextText === editStreamState.accumulatedText) return
+
+          editStreamState.opChain = editStreamState.opChain.then(async () => {
+            if (editStreamState.failed) return
+            if (!nextText || nextText === editStreamState.accumulatedText) return
+
+            try {
+              if (editStreamState.messageId == null) {
+                const sent = await client.sendMessage({
+                  chatId,
+                  text: nextText,
+                  ...(defaultReplyToMsgId != null ? { replyToMsgId: defaultReplyToMsgId } : {}),
+                  parseMarkdown,
+                })
+                if (sent.messageId == null) {
+                  throw new Error("inline edit stream: sendMessage returned no messageId")
+                }
+                editStreamState.messageId = sent.messageId
+                rememberBotMessageId(botMessageIdsByChat, chatId, sent.messageId)
+              } else {
+                const result = await client.invokeRaw(Method.EDIT_MESSAGE, {
+                  oneofKind: "editMessage",
+                  editMessage: {
+                    messageId: editStreamState.messageId,
+                    peerId: buildChatPeer(chatId),
+                    text: nextText,
+                    parseMarkdown,
+                  },
+                })
+                if (result.oneofKind !== "editMessage") {
+                  throw new Error(
+                    `inline edit stream: expected editMessage result, got ${String(result.oneofKind)}`,
+                  )
+                }
+              }
+              editStreamState.accumulatedText = nextText
+              statusSink?.({ lastOutboundAt: Date.now() })
+            } catch (error) {
+              editStreamState.failed = true
+              runtime.error?.(`inline edit stream failed: ${String(error)}`)
+            }
+          })
+          await editStreamState.opChain
+        }
         const replyOptions = {
           ...(onModelSelected ? { onModelSelected: onModelSelected as (ctx: unknown) => void } : {}),
           blockReplyTimeoutMs: 25_000,
           ...(streamViaEditMessage
             ? {
+                onAssistantMessageStart: async () => {
+                  await resetEditStreamOnBoundary()
+                },
+              }
+            : {}),
+          ...(streamViaEditMessage
+            ? {
                 onPartialReply: async (payload: { text?: string; mediaUrls?: string[] }) => {
-                  if (editStreamState.failed) return
-                  if ((payload.mediaUrls?.length ?? 0) > 0) return
-                  const partialText = typeof payload.text === "string" ? payload.text : ""
-                  if (!partialText || partialText === editStreamState.lastPartialText) return
-                  editStreamState.lastPartialText = partialText
-
-                  const nextText = rewriteNumericMentionsToUsernames(
-                    extractCompleteParagraphText(partialText),
-                    senderProfilesById,
-                  ).trim()
-                  if (!nextText || nextText === editStreamState.accumulatedText) return
-
-                  editStreamState.opChain = editStreamState.opChain.then(async () => {
-                    if (editStreamState.failed) return
-                    if (!nextText || nextText === editStreamState.accumulatedText) return
-
-                    try {
-                      if (editStreamState.messageId == null) {
-                        const sent = await client.sendMessage({
-                          chatId,
-                          text: nextText,
-                          ...(defaultReplyToMsgId != null ? { replyToMsgId: defaultReplyToMsgId } : {}),
-                          parseMarkdown,
-                        })
-                        if (sent.messageId == null) {
-                          throw new Error("inline edit stream: sendMessage returned no messageId")
-                        }
-                        editStreamState.messageId = sent.messageId
-                        rememberBotMessageId(botMessageIdsByChat, chatId, sent.messageId)
-                      } else {
-                        const result = await client.invokeRaw(Method.EDIT_MESSAGE, {
-                          oneofKind: "editMessage",
-                          editMessage: {
-                            messageId: editStreamState.messageId,
-                            peerId: buildChatPeer(chatId),
-                            text: nextText,
-                            parseMarkdown,
-                          },
-                        })
-                        if (result.oneofKind !== "editMessage") {
-                          throw new Error(
-                            `inline edit stream: expected editMessage result, got ${String(result.oneofKind)}`,
-                          )
-                        }
-                      }
-                      editStreamState.accumulatedText = nextText
-                      statusSink?.({ lastOutboundAt: Date.now() })
-                    } catch (error) {
-                      editStreamState.failed = true
-                      runtime.error?.(`inline edit stream failed: ${String(error)}`)
-                    }
-                  })
+                  await handlePartialStreamPayload(payload)
+                },
+              }
+            : {}),
+          ...(streamViaEditMessage
+            ? {
+                onReasoningStream: async (payload: { text?: string; mediaUrls?: string[] }) => {
+                  await handlePartialStreamPayload(payload)
+                },
+              }
+            : {}),
+          ...(streamViaEditMessage
+            ? {
+                onReasoningEnd: async () => {
                   await editStreamState.opChain
+                },
+              }
+            : {}),
+          ...(streamViaEditMessage
+            ? {
+                onToolStart: async () => {
+                  await resetEditStreamOnBoundary()
+                },
+              }
+            : {}),
+          ...(streamViaEditMessage
+            ? {
+                onCompactionStart: async () => {
+                  await resetEditStreamOnBoundary()
+                },
+              }
+            : {}),
+          ...(streamViaEditMessage
+            ? {
+                onCompactionEnd: async () => {
+                  await resetEditStreamOnBoundary()
                 },
               }
             : {}),
@@ -1813,13 +1887,27 @@ export async function monitorInlineProvider(params: {
         }
 
         try {
-          await core.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
+          let delivered = false
+          let skippedNonSilent = false
+          let failedNonSilent = false
+          let dispatchError: unknown = null
+          try {
+            await core.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
             ctx: ctxPayload,
             cfg,
             dispatcherOptions: {
               ...prefixOptions,
               ...(typingCallbacks ? { typingCallbacks } : {}),
-              deliver: async (payload) => {
+              deliver: async (
+                payload: {
+                  text?: string
+                  mediaUrl?: string
+                  mediaUrls?: string[]
+                  replyToId?: string
+                  channelData?: Record<string, unknown>
+                },
+                info?: InlineDispatchReplyInfo,
+              ) => {
                 const rawText = payload.text ?? ""
                 const mediaList = payload.mediaUrls?.length
                   ? payload.mediaUrls
@@ -1828,6 +1916,7 @@ export async function monitorInlineProvider(params: {
                     : []
                 const outboundText = rewriteNumericMentionsToUsernames(rawText, senderProfilesById)
                 const outboundActions = resolveInlineReplyActions(payload as Record<string, unknown>)
+                const infoKind = typeof info?.kind === "string" ? info.kind : undefined
 
                 let replyToMsgId: bigint | undefined
                 if (payload.replyToId != null) {
@@ -1862,6 +1951,7 @@ export async function monitorInlineProvider(params: {
                     parseMarkdown,
                   })
                   rememberSent(sent.messageId)
+                  delivered = true
                 }
 
                 const updateStreamedMessage = async (text: string, actions?: MessageActions): Promise<boolean> => {
@@ -1898,6 +1988,14 @@ export async function monitorInlineProvider(params: {
                 }
 
                 if (mediaList.length === 0) {
+                  if (
+                    streamViaEditMessage &&
+                    infoKind === "final" &&
+                    finalDeliveredForCurrentAssistantMessage &&
+                    editStreamState.messageId != null
+                  ) {
+                    await resetEditStreamForAssistantMessage()
+                  }
                   if (streamViaEditMessage && editStreamState.messageId != null) {
                     if (outboundText.trim()) {
                       editStreamState.finalTextAccumulator += outboundText
@@ -1906,6 +2004,10 @@ export async function monitorInlineProvider(params: {
                       return
                     }
                     await updateStreamedMessage(editStreamState.finalTextAccumulator, outboundActions)
+                    delivered = true
+                    if (infoKind === "final") {
+                      finalDeliveredForCurrentAssistantMessage = true
+                    }
                     statusSink?.({ lastOutboundAt: Date.now() })
                     return
                   }
@@ -1945,6 +2047,7 @@ export async function monitorInlineProvider(params: {
                       ...(caption ? { parseMarkdown } : {}),
                     })
                     rememberSent(sent.messageId)
+                    delivered = true
                   } catch (error) {
                     runtime.error?.(`inline media upload failed; falling back to url text (${String(error)})`)
                     const fallbackText = caption
@@ -1956,10 +2059,42 @@ export async function monitorInlineProvider(params: {
 
                 statusSink?.({ lastOutboundAt: Date.now() })
               },
-              onError: (err, info) => runtime.error?.(`inline ${info.kind} reply failed: ${String(err)}`),
+              onSkip: (_payload, info) => {
+                if (info?.reason !== "silent") {
+                  skippedNonSilent = true
+                }
+              },
+              onError: (err, info) => {
+                failedNonSilent = true
+                runtime.error?.(`inline ${info?.kind ?? "final"} reply failed: ${String(err)}`)
+              },
             },
             replyOptions,
           })
+          } catch (error) {
+            dispatchError = error
+            runtime.error?.(`inline dispatch failed: ${String(error)}`)
+          }
+
+          if (!delivered && streamViaEditMessage && editStreamState.messageId != null) {
+            delivered = true
+          }
+          if (!delivered && (dispatchError != null || skippedNonSilent || failedNonSilent)) {
+            const fallbackText =
+              dispatchError != null
+                ? "Something went wrong while processing your request. Please try again."
+                : EMPTY_RESPONSE_FALLBACK
+            const sent = await client.sendMessage({
+              chatId,
+              text: fallbackText,
+              ...(defaultReplyToMsgId != null ? { replyToMsgId: defaultReplyToMsgId } : {}),
+              parseMarkdown,
+            })
+            if (sent.messageId != null) {
+              rememberBotMessageId(botMessageIdsByChat, chatId, sent.messageId)
+            }
+            statusSink?.({ lastOutboundAt: Date.now() })
+          }
         } finally {
           if (callbackActionEvent && !callbackActionAnswered) {
             try {
