@@ -4,6 +4,7 @@ import {
   setAccountEnabledInConfigSection,
 } from "openclaw/plugin-sdk/core"
 import { buildDmGroupAccountAllowlistAdapter } from "openclaw/plugin-sdk/allowlist-config-edit"
+import { buildTokenChannelStatusSummary } from "openclaw/plugin-sdk/status-helpers"
 import { InlineSdkClient, Method, type Chat, type Dialog, type User } from "@inline-chat/realtime-sdk"
 import { InlineConfigSchema } from "./config-schema.js"
 import {
@@ -1246,17 +1247,10 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       lastStartAt: null,
       lastStopAt: null,
       lastError: null,
+      lastProbeAt: null,
     },
     collectStatusIssues: collectInlineStatusIssues,
-    buildChannelSummary: ({ snapshot }) => ({
-      configured: snapshot.configured ?? false,
-      running: snapshot.running ?? false,
-      lastStartAt: snapshot.lastStartAt ?? null,
-      lastStopAt: snapshot.lastStopAt ?? null,
-      lastError: snapshot.lastError ?? null,
-      lastInboundAt: snapshot.lastInboundAt ?? null,
-      lastOutboundAt: snapshot.lastOutboundAt ?? null,
-    }),
+    buildChannelSummary: ({ snapshot }) => buildTokenChannelStatusSummary(snapshot),
     probeAccount: async ({ account, timeoutMs }) => await probeInlineAccount(account, timeoutMs),
     formatCapabilitiesProbe: ({ probe }) => formatInlineCapabilitiesProbeLines(probe),
     buildAccountSnapshot: ({ account, runtime, probe }) => ({
@@ -1272,6 +1266,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       lastError: runtime?.lastError ?? null,
       lastInboundAt: runtime?.lastInboundAt ?? null,
       lastOutboundAt: runtime?.lastOutboundAt ?? null,
+      lastProbeAt: runtime?.lastProbeAt ?? null,
       ...(probe !== undefined ? { probe } : {}),
     }),
   },
