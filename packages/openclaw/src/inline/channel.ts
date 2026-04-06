@@ -21,6 +21,11 @@ import {
   PAIRING_APPROVED_MESSAGE,
 } from "../openclaw-compat.js"
 import { uploadInlineMediaFromUrl } from "./media.js"
+import { inlineSetupAdapter } from "./setup-core.js"
+import { inlineSetupWizard } from "./setup-surface.js"
+import type { InlineProbe } from "./probe.js"
+import { probeInlineAccount } from "./probe.js"
+import { collectInlineStatusIssues } from "./status-issues.js"
 
 const activeMonitors = new Map<string, { stop: () => Promise<void>; done: Promise<void> }>()
 
@@ -57,6 +62,93 @@ function parseInlineId(raw: unknown): bigint | undefined {
     }
   }
   return undefined
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null
+  }
+  return value as Record<string, unknown>
+}
+
+function clearInlineCredentialFields(record: Record<string, unknown>): { changed: boolean; cleared: boolean } {
+  let changed = false
+  let cleared = false
+  for (const key of ["token", "tokenFile"] as const) {
+    if (!Object.hasOwn(record, key)) {
+      continue
+    }
+    const raw = record[key]
+    if (typeof raw === "string" && raw.trim()) {
+      cleared = true
+    }
+    delete record[key]
+    changed = true
+  }
+  return { changed, cleared }
+}
+
+function clearInlineAccountCredentials(params: {
+  cfg: OpenClawConfig
+  accountId: string
+}): { cfg: OpenClawConfig; changed: boolean; cleared: boolean } {
+  const channels = asRecord(params.cfg.channels)
+  const inline = asRecord(channels?.inline)
+  if (!channels || !inline) {
+    return { cfg: params.cfg, changed: false, cleared: false }
+  }
+
+  const nextInline: Record<string, unknown> = { ...inline }
+  let changed = false
+  let cleared = false
+
+  if (params.accountId === DEFAULT_ACCOUNT_ID) {
+    const base = clearInlineCredentialFields(nextInline)
+    changed = changed || base.changed
+    cleared = cleared || base.cleared
+  }
+
+  const accounts = asRecord(nextInline.accounts)
+  if (accounts) {
+    const nextAccounts: Record<string, unknown> = { ...accounts }
+    const accountEntry = asRecord(nextAccounts[params.accountId])
+    if (accountEntry) {
+      const nextAccountEntry: Record<string, unknown> = { ...accountEntry }
+      const entry = clearInlineCredentialFields(nextAccountEntry)
+      if (entry.changed) {
+        changed = true
+        cleared = cleared || entry.cleared
+        if (Object.keys(nextAccountEntry).length > 0) {
+          nextAccounts[params.accountId] = nextAccountEntry
+        } else {
+          delete nextAccounts[params.accountId]
+        }
+      }
+    }
+    if (changed) {
+      if (Object.keys(nextAccounts).length > 0) {
+        nextInline.accounts = nextAccounts
+      } else {
+        delete nextInline.accounts
+      }
+    }
+  }
+
+  if (!changed) {
+    return { cfg: params.cfg, changed: false, cleared: false }
+  }
+
+  return {
+    cfg: {
+      ...params.cfg,
+      channels: {
+        ...channels,
+        inline: nextInline,
+      },
+    },
+    changed: true,
+    cleared,
+  }
 }
 
 type InlineOutboundContext = "sendText" | "sendMedia"
@@ -224,6 +316,32 @@ function buildInlineDisplayName(params: {
   const username = params.username?.trim()
   if (username) return `@${username}`
   return "Unknown"
+}
+
+function formatInlineCapabilitiesProbeLines(probe: unknown): Array<{ text: string; tone?: "error" | "success" }> {
+  const details = probe as InlineProbe | undefined
+  if (!details) {
+    return []
+  }
+  if (!details.ok) {
+    if (details.error?.trim()) {
+      return [{ text: `Probe failed: ${details.error}`, tone: "error" }]
+    }
+    return [{ text: "Probe failed", tone: "error" }]
+  }
+  const lines: Array<{ text: string; tone?: "error" | "success" }> = []
+  if (details.user) {
+    const username = details.user.username ? ` @${details.user.username}` : ""
+    const botLabel = details.user.bot ? " [bot]" : ""
+    lines.push({
+      text: `Identity: ${details.user.name}${username} (${details.user.id})${botLabel}`,
+      tone: "success",
+    })
+  }
+  if (details.baseUrl) {
+    lines.push({ text: `Base URL: ${details.baseUrl}` })
+  }
+  return lines
 }
 
 function toInlineUserDirectoryEntry(user: User) {
@@ -609,6 +727,8 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
   },
   reload: { configPrefixes: ["channels.inline"] },
   configSchema: buildChannelConfigSchema(InlineConfigSchema),
+  setup: inlineSetupAdapter,
+  setupWizard: inlineSetupWizard,
 
   config: {
     listAccountIds: (cfg) => listInlineAccountIds(cfg),
@@ -995,6 +1115,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       lastStopAt: null,
       lastError: null,
     },
+    collectStatusIssues: collectInlineStatusIssues,
     buildChannelSummary: ({ snapshot }) => ({
       configured: snapshot.configured ?? false,
       running: snapshot.running ?? false,
@@ -1004,7 +1125,9 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       lastInboundAt: snapshot.lastInboundAt ?? null,
       lastOutboundAt: snapshot.lastOutboundAt ?? null,
     }),
-    buildAccountSnapshot: ({ account, runtime }) => ({
+    probeAccount: async ({ account, timeoutMs }) => await probeInlineAccount(account, timeoutMs),
+    formatCapabilitiesProbe: ({ probe }) => formatInlineCapabilitiesProbeLines(probe),
+    buildAccountSnapshot: ({ account, runtime, probe }) => ({
       accountId: account.accountId,
       name: account.name,
       enabled: account.enabled,
@@ -1017,6 +1140,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       lastError: runtime?.lastError ?? null,
       lastInboundAt: runtime?.lastInboundAt ?? null,
       lastOutboundAt: runtime?.lastOutboundAt ?? null,
+      ...(probe !== undefined ? { probe } : {}),
     }),
   },
 
@@ -1079,6 +1203,35 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
         running: false,
         lastStopAt: Date.now(),
       })
+    },
+    logoutAccount: async ({ accountId, cfg }) => {
+      const cleanup = clearInlineAccountCredentials({ cfg, accountId })
+      if (cleanup.changed) {
+        return {
+          cleared: cleanup.cleared,
+          loggedOut: cleanup.cleared,
+          cfg: cleanup.cfg,
+          message: cleanup.cleared
+            ? "Inline credentials cleared from config. Restart gateway to apply."
+            : "Inline credential fields removed from config.",
+        }
+      }
+
+      const envToken = process.env.INLINE_TOKEN?.trim() ?? ""
+      if (accountId === DEFAULT_ACCOUNT_ID && envToken) {
+        return {
+          cleared: false,
+          loggedOut: false,
+          message:
+            "No Inline credentials found in config. INLINE_TOKEN is set in env; unset it and restart gateway to fully log out.",
+        }
+      }
+
+      return {
+        cleared: false,
+        loggedOut: false,
+        message: "No Inline credentials found in config for this account.",
+      }
     },
   },
 }
