@@ -1,3 +1,5 @@
+import { createMessageToolButtonsSchema } from "openclaw/plugin-sdk/channel-actions"
+
 const HISTORY_CONTEXT_MARKER = "[Chat messages since your last reply - for context]"
 const CURRENT_MESSAGE_MARKER = "[Current message - respond to this]"
 const MAX_HISTORY_KEYS = 1000
@@ -157,24 +159,17 @@ export function recordPendingHistoryEntryIfEnabled<T extends HistoryEntry>(param
   })
 }
 
+const TYPEBOX_OPTIONAL_SYMBOL = Symbol.for("TypeBox.Optional")
+
+function markTypeBoxOptional<T extends Record<string, unknown>>(schema: T): T {
+  ;(schema as Record<symbol, unknown>)[TYPEBOX_OPTIONAL_SYMBOL] = "Optional"
+  return schema
+}
+
 export function createMessageToolButtonsSchemaCompat() {
-  return {
-    type: "array",
-    description: "Button rows for channels that support button-style actions.",
-    items: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["text", "callback_data"],
-        properties: {
-          text: { type: "string" },
-          callback_data: { type: "string" },
-          style: { type: "string", enum: ["danger", "success", "primary"] },
-        },
-      },
-    },
-  } as unknown as Record<string, unknown>
+  return markTypeBoxOptional(
+    createMessageToolButtonsSchema() as unknown as Record<string, unknown>,
+  ) as unknown as Record<string, unknown>
 }
 
 export function extensionForMimeCompat(mime: string | undefined): string | undefined {
