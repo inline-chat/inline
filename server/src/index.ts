@@ -35,6 +35,7 @@ import { Log, LogLevel } from "@in/server/utils/log"
 import { realtime } from "@in/server/realtime"
 import { integrationsRouter } from "./controllers/integrations/integrationsRouter"
 import { admin } from "./controllers/admin"
+import { media } from "./controllers/media"
 import type { Server } from "bun"
 import { EventEmitter } from "events"
 
@@ -70,6 +71,7 @@ export const app = new Elysia()
   .use(waitlist)
   .use(there)
   .use(integrationsRouter)
+  .use(media)
   .use(admin)
 
   .use(
