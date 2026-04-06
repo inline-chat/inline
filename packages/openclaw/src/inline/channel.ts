@@ -1,4 +1,9 @@
 import type { ChannelPlugin, OpenClawConfig } from "openclaw/plugin-sdk/core"
+import {
+  deleteAccountFromConfigSection,
+  setAccountEnabledInConfigSection,
+} from "openclaw/plugin-sdk/core"
+import { buildDmGroupAccountAllowlistAdapter } from "openclaw/plugin-sdk/allowlist-config-edit"
 import { InlineSdkClient, Method, type Chat, type Dialog, type User } from "@inline-chat/realtime-sdk"
 import { InlineConfigSchema } from "./config-schema.js"
 import {
@@ -206,6 +211,50 @@ function parseInlineOutboundTarget(params: {
     normalizedNumeric: normalizedTarget,
     explicitKind,
     raw: params.raw,
+  }
+}
+
+function parseInlineExplicitTarget(raw: string): { to: string; chatType: "direct" | "group" } | null {
+  const parsed = parseInlineOutboundTarget({
+    raw,
+    context: "sendText",
+  })
+  if (parsed.kind === "user") {
+    return { to: `user:${parsed.normalizedNumeric}`, chatType: "direct" }
+  }
+  return { to: `chat:${parsed.normalizedNumeric}`, chatType: "group" }
+}
+
+function formatInlineTargetDisplay(params: {
+  target: string
+  display?: string | undefined
+  kind?: string | undefined
+}): string {
+  const explicit = params.display?.trim()
+  if (explicit) {
+    return explicit
+  }
+  const parsed = parseInlineExplicitTarget(params.target.trim())
+  if (!parsed) {
+    return params.target.trim()
+  }
+  if (parsed.chatType === "direct" || params.kind === "user") {
+    return parsed.to
+  }
+  return parsed.to
+}
+
+function normalizeInlineConversationId(raw: string): string | null {
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  const withoutProvider = trimmed.replace(/^inline:/i, "").trim()
+  if (!withoutProvider) return null
+  try {
+    const parsed = parseInlineExplicitTarget(withoutProvider)
+    if (!parsed) return null
+    return `inline:${parsed.to}`
+  } catch {
+    return null
   }
 }
 
@@ -734,6 +783,21 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
     listAccountIds: (cfg) => listInlineAccountIds(cfg),
     resolveAccount: (cfg, accountId) => resolveInlineAccount({ cfg, accountId: accountId ?? null }),
     defaultAccountId: (cfg) => resolveDefaultInlineAccountId(cfg),
+    setAccountEnabled: ({ cfg, accountId, enabled }) =>
+      setAccountEnabledInConfigSection({
+        cfg,
+        sectionKey: "inline",
+        accountId,
+        enabled,
+        allowTopLevel: true,
+      }),
+    deleteAccount: ({ cfg, accountId }) =>
+      deleteAccountFromConfigSection({
+        cfg,
+        sectionKey: "inline",
+        accountId,
+        clearBaseFields: ["token", "tokenFile", "name", "enabled"],
+      }),
     isConfigured: (account) => account.configured,
     describeAccount: (account) => ({
       accountId: account.accountId,
@@ -795,6 +859,51 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
       return [
         "- Inline groups: groupPolicy=\"open\" with no group rules means every group can trigger replies. Consider channels.inline.groupPolicy=\"allowlist\".",
       ]
+    },
+  },
+  allowlist: buildDmGroupAccountAllowlistAdapter({
+    channelId: "inline",
+    resolveAccount: ({ cfg, accountId }) => resolveInlineAccount({ cfg, accountId: accountId ?? null }),
+    normalize: ({ values }) =>
+      values
+        .map((entry) => String(entry).trim())
+        .filter(Boolean)
+        .map((entry) => normalizeInlineAllowEntry(entry)),
+    resolveDmAllowFrom: (account) => account.config.allowFrom ?? [],
+    resolveGroupAllowFrom: (account) => account.config.groupAllowFrom ?? [],
+    resolveDmPolicy: (account) => account.config.dmPolicy,
+    resolveGroupPolicy: (account) => account.config.groupPolicy,
+  }),
+  bindings: {
+    compileConfiguredBinding: ({ conversationId }) => {
+      const normalized = normalizeInlineConversationId(conversationId)
+      if (!normalized) {
+        return null
+      }
+      return { conversationId: normalized }
+    },
+    matchInboundConversation: ({ compiledBinding, conversationId, parentConversationId }) => {
+      const expected = normalizeInlineConversationId(compiledBinding.conversationId)
+      if (!expected) {
+        return null
+      }
+      const incoming = normalizeInlineConversationId(conversationId)
+      const parent = parentConversationId ? normalizeInlineConversationId(parentConversationId) : null
+      if (incoming && incoming === expected) {
+        return {
+          conversationId: incoming,
+          ...(parent ? { parentConversationId: parent } : {}),
+          matchPriority: 2,
+        }
+      }
+      if (incoming && parent && parent === expected) {
+        return {
+          conversationId: incoming,
+          parentConversationId: parent,
+          matchPriority: 1,
+        }
+      }
+      return null
     },
   },
 
@@ -869,6 +978,29 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
 
   messaging: {
     normalizeTarget: normalizeInlineTarget,
+    parseExplicitTarget: ({ raw }) => {
+      try {
+        const parsed = parseInlineExplicitTarget(raw)
+        if (!parsed) return null
+        return { to: parsed.to, chatType: parsed.chatType }
+      } catch {
+        return null
+      }
+    },
+    inferTargetChatType: ({ to }) => {
+      try {
+        const parsed = parseInlineExplicitTarget(to)
+        return parsed?.chatType
+      } catch {
+        return undefined
+      }
+    },
+    formatTargetDisplay: ({ target, display, kind }) =>
+      formatInlineTargetDisplay({
+        target,
+        ...(display !== undefined ? { display } : {}),
+        ...(kind !== undefined ? { kind } : {}),
+      }),
     targetResolver: {
       looksLikeId: looksLikeInlineTargetId,
       hint: "<chatId | chat:<chatId> | user:<userId>>",

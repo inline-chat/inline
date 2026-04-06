@@ -74,10 +74,95 @@ describe("inline/channel", () => {
     expect(inlineChannelPlugin.status?.collectStatusIssues).toBeDefined()
     expect(inlineChannelPlugin.status?.probeAccount).toBeDefined()
     expect(inlineChannelPlugin.gateway?.logoutAccount).toBeDefined()
+    expect(inlineChannelPlugin.allowlist).toBeDefined()
+    expect(inlineChannelPlugin.bindings).toBeDefined()
     expect(inlineChannelPlugin.streaming?.blockStreamingCoalesceDefaults).toEqual({
       minChars: 1500,
       idleMs: 1000,
     })
+  })
+
+  it("supports inline bindings normalization and parent matching", async () => {
+    vi.resetModules()
+    const { inlineChannelPlugin } = await import("./channel")
+
+    const compiled = inlineChannelPlugin.bindings?.compileConfiguredBinding({
+      binding: {} as any,
+      conversationId: "inline:123",
+    } as any)
+    expect(compiled).toEqual({ conversationId: "inline:chat:123" })
+
+    const exact = inlineChannelPlugin.bindings?.matchInboundConversation({
+      binding: {} as any,
+      compiledBinding: compiled,
+      conversationId: "chat:123",
+      parentConversationId: undefined,
+    } as any)
+    expect(exact).toEqual({
+      conversationId: "inline:chat:123",
+      matchPriority: 2,
+    })
+
+    const parentMatch = inlineChannelPlugin.bindings?.matchInboundConversation({
+      binding: {} as any,
+      compiledBinding: compiled,
+      conversationId: "inline:chat:555",
+      parentConversationId: "inline:123",
+    } as any)
+    expect(parentMatch).toEqual({
+      conversationId: "inline:chat:555",
+      parentConversationId: "inline:chat:123",
+      matchPriority: 1,
+    })
+  })
+
+  it("provides explicit target parsing + chat-type inference for messaging", async () => {
+    vi.resetModules()
+    const { inlineChannelPlugin } = await import("./channel")
+
+    const user = inlineChannelPlugin.messaging?.parseExplicitTarget?.({ raw: "user:42" })
+    const group = inlineChannelPlugin.messaging?.parseExplicitTarget?.({ raw: "inline:7" })
+    const invalid = inlineChannelPlugin.messaging?.parseExplicitTarget?.({ raw: "bad-target" })
+
+    expect(user).toEqual({ to: "user:42", chatType: "direct" })
+    expect(group).toEqual({ to: "chat:7", chatType: "group" })
+    expect(invalid).toBeNull()
+
+    expect(inlineChannelPlugin.messaging?.inferTargetChatType?.({ to: "user:42" })).toBe("direct")
+    expect(inlineChannelPlugin.messaging?.inferTargetChatType?.({ to: "chat:7" })).toBe("group")
+  })
+
+  it("config adapters support account enable/disable + delete", async () => {
+    vi.resetModules()
+    const { inlineChannelPlugin } = await import("./channel")
+
+    const baseCfg = {
+      channels: {
+        inline: {
+          token: "token",
+          accounts: {
+            ops: {
+              token: "ops-token",
+            },
+          },
+        },
+      },
+    } satisfies OpenClawConfig
+
+    const disabled = inlineChannelPlugin.config.setAccountEnabled?.({
+      cfg: baseCfg,
+      accountId: "ops",
+      enabled: false,
+    } as any)
+    const resolvedDisabled = inlineChannelPlugin.config.resolveAccount(disabled as OpenClawConfig, "ops")
+    expect(resolvedDisabled.enabled).toBe(false)
+
+    const deleted = inlineChannelPlugin.config.deleteAccount?.({
+      cfg: baseCfg,
+      accountId: "ops",
+    } as any)
+    const ids = inlineChannelPlugin.config.listAccountIds(deleted as OpenClawConfig)
+    expect(ids.includes("ops")).toBe(false)
   })
 
   it("setup wizard resolves configured state from inline token config", async () => {
