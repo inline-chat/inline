@@ -378,6 +378,67 @@ describe("inline/channel", () => {
     expect(issues.some((issue) => issue.accountId === "ops" && issue.kind === "auth")).toBe(true)
   })
 
+  it("status includes lastProbeAt in channel summary and account snapshots", async () => {
+    vi.resetModules()
+    const { inlineChannelPlugin } = await import("./channel")
+
+    const channelSummary = inlineChannelPlugin.status?.buildChannelSummary?.({
+      account: {} as any,
+      cfg: {} as OpenClawConfig,
+      defaultAccountId: "default",
+      snapshot: {
+        configured: true,
+        running: true,
+        lastStartAt: 100,
+        lastStopAt: null,
+        lastError: null,
+        lastProbeAt: 222,
+      } as any,
+    } as any)
+
+    expect(channelSummary).toEqual(
+      expect.objectContaining({
+        configured: true,
+        running: true,
+        lastStartAt: 100,
+        lastProbeAt: 222,
+      }),
+    )
+
+    const accountSnapshot = inlineChannelPlugin.status?.buildAccountSnapshot?.({
+      cfg: {} as OpenClawConfig,
+      account: {
+        accountId: "default",
+        name: "Default",
+        enabled: true,
+        configured: true,
+        baseUrl: "https://api.inline.chat",
+        token: "token",
+        tokenFile: null,
+      } as any,
+      runtime: {
+        running: true,
+        lastStartAt: 333,
+        lastStopAt: null,
+        lastError: null,
+        lastInboundAt: null,
+        lastOutboundAt: null,
+        lastProbeAt: 444,
+      } as any,
+      probe: {
+        ok: true,
+      },
+    } as any)
+
+    expect(accountSnapshot).toEqual(
+      expect.objectContaining({
+        lastStartAt: 333,
+        lastProbeAt: 444,
+        probe: { ok: true },
+      }),
+    )
+  })
+
   it("resolves group mention + tool policy from channels.inline.groups", async () => {
     vi.resetModules()
     const { inlineChannelPlugin } = await import("./channel")
