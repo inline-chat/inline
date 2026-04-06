@@ -25,7 +25,7 @@ async function listJsFiles(dir: string): Promise<string[]> {
 }
 
 describe("packed artifact", () => {
-  it("does not ship unresolved runtime package imports beyond the OpenClaw peer", async () => {
+  it("does not ship unresolved runtime package imports beyond OpenClaw SDK peers", async () => {
     const packDir = await mkdtemp(path.join(tmpdir(), "inline-openclaw-pack-"))
     const extractDir = await mkdtemp(path.join(tmpdir(), "inline-openclaw-extract-"))
     const packageDir = path.resolve(__dirname, "..", "..")
@@ -56,7 +56,8 @@ describe("packed artifact", () => {
           specifier.startsWith("./") ||
           specifier.startsWith("../") ||
           specifier.startsWith("node:") ||
-          specifier === "openclaw/plugin-sdk"
+          specifier === "openclaw/plugin-sdk" ||
+          specifier.startsWith("openclaw/plugin-sdk/")
         ) {
           continue
         }
