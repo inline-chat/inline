@@ -72,6 +72,7 @@ export const R2_ACCESS_KEY_ID = process.env["R2_ACCESS_KEY_ID"] as string
 export const R2_SECRET_ACCESS_KEY = process.env["R2_SECRET_ACCESS_KEY"] as string
 export const R2_BUCKET = process.env["R2_BUCKET"] as string
 export const R2_ENDPOINT = process.env["R2_ENDPOINT"] as string
+export const FILES_PROXY_SIGNING_KEY = process.env["FILES_PROXY_SIGNING_KEY"]
 
 export const PRELUDE_API_TOKEN = process.env["PRELUDE_API_TOKEN"] as string
 
@@ -155,6 +156,7 @@ const optionalVariables = [
   "HARDCODED_TRANSLATION_CONTEXT",
   "NOTION_CLIENT_ID",
   "NOTION_CLIENT_SECRET",
+  "FILES_PROXY_SIGNING_KEY",
 ]
 
 optionalVariables.forEach((variable) => {

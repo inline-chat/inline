@@ -1,6 +1,6 @@
 import type { DbFile } from "@in/server/db/schema"
-import { decrypt, decryptBinary } from "@in/server/modules/encryption/encryption"
-import { getSignedUrl } from "@in/server/modules/files/path"
+import { decryptBinary } from "@in/server/modules/encryption/encryption"
+import { getSignedMediaPhotoUrl } from "@in/server/modules/files/path"
 import { getStrippedThumbnailDimensions } from "@in/server/modules/files/strippedThumbnail"
 import { Photo_Format, PhotoSize, type Photo } from "@inline-chat/protocol/core"
 import type { DbFullPhoto, DbFullPhotoSize } from "@in/server/db/models/files"
@@ -11,8 +11,7 @@ const encodePhotoSize = (size: DbFullPhotoSize): PhotoSize | null => {
 
   if (!file) return null
 
-  const path = file.path
-  const url = path ? getSignedUrl(path) : null
+  const url = getSignedMediaPhotoUrl(file.fileUniqueId)
 
   let proto: PhotoSize = {
     type: size.size ?? "f",
@@ -67,12 +66,7 @@ export const encodePhoto = ({ photo }: { photo: DbFullPhoto }) => {
 }
 
 export const encodePhotoLegacy = ({ file }: { file: DbFile }) => {
-  const path =
-    file.pathEncrypted && file.pathIv && file.pathTag
-      ? decrypt({ encrypted: file.pathEncrypted, iv: file.pathIv, authTag: file.pathTag })
-      : null
-
-  const url = path ? getSignedUrl(path) : null
+  const url = getSignedMediaPhotoUrl(file.fileUniqueId)
 
   let proto: Photo = {
     id: BigInt(file.id),

@@ -1,8 +1,7 @@
 import type { DbFile, DbUser } from "@in/server/db/schema"
 import { User, UserStatus_Status } from "@inline-chat/protocol/core"
 import { encodeDate } from "@in/server/realtime/encoders/helpers"
-import { decrypt } from "@in/server/modules/encryption/encryption"
-import { getSignedUrl } from "@in/server/modules/files/path"
+import { getSignedMediaPhotoUrl } from "@in/server/modules/files/path"
 
 export const encodeUser = ({
   user,
@@ -15,12 +14,7 @@ export const encodeUser = ({
 }): User => {
   let cdnUrl: string | undefined = undefined
   if (photoFile) {
-    const path =
-      photoFile.pathEncrypted && photoFile.pathIv && photoFile.pathTag
-        ? decrypt({ encrypted: photoFile.pathEncrypted, iv: photoFile.pathIv, authTag: photoFile.pathTag })
-        : null
-
-    cdnUrl = path ? getSignedUrl(path) ?? undefined : undefined
+    cdnUrl = getSignedMediaPhotoUrl(photoFile.fileUniqueId) ?? undefined
   }
 
   return {

@@ -1,6 +1,5 @@
 import { UsersModel } from "@in/server/db/models/users"
-import { decrypt } from "@in/server/modules/encryption/encryption"
-import { getSignedUrl } from "@in/server/modules/files/path"
+import { getSignedMediaPhotoUrl } from "@in/server/modules/files/path"
 import { Log } from "@in/server/utils/log"
 
 const log = new Log("cache.userPhotos")
@@ -27,14 +26,7 @@ export async function getCachedUserProfilePhotoUrl(userId: number): Promise<stri
 
     let cdnUrl: string | undefined
     if (photoFile) {
-      const path =
-        photoFile.pathEncrypted && photoFile.pathIv && photoFile.pathTag
-          ? decrypt({ encrypted: photoFile.pathEncrypted, iv: photoFile.pathIv, authTag: photoFile.pathTag })
-          : null
-
-      if (path) {
-        cdnUrl = getSignedUrl(path) ?? undefined
-      }
+      cdnUrl = getSignedMediaPhotoUrl(photoFile.fileUniqueId) ?? undefined
     }
 
     cachedUserPhotos.set(userId, {

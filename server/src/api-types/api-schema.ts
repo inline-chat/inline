@@ -14,8 +14,7 @@ import { Type, type TSchema, type StaticEncode } from "@sinclair/typebox"
 import { Value } from "@sinclair/typebox/value"
 import type { DbReaction } from "../db/schema/reactions"
 import { InlineError } from "@in/server/types/errors"
-import { decrypt } from "@in/server/modules/encryption/encryption"
-import { getSignedUrl } from "@in/server/modules/files/path"
+import { getSignedMediaPhotoUrl } from "@in/server/modules/files/path"
 
 // const BigIntString = Type.Transform(Type.BigInt())
 //   .Decode((value) => String(value))
@@ -62,12 +61,7 @@ export const encodePhotoInfo = (file: DbFile): PhotoInfo => {
     throw new InlineError(InlineError.ApiError.INTERNAL)
   }
 
-  const path =
-    file.pathEncrypted && file.pathIv && file.pathTag
-      ? decrypt({ encrypted: file.pathEncrypted, iv: file.pathIv, authTag: file.pathTag })
-      : null
-
-  const url = path ? getSignedUrl(path) : null
+  const url = getSignedMediaPhotoUrl(file.fileUniqueId)
 
   return Value.Encode(PhotoInfo, {
     fileUniqueId: file.fileUniqueId,
