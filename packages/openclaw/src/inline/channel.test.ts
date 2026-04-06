@@ -69,10 +69,40 @@ describe("inline/channel", () => {
     expect(inlineChannelPlugin.capabilities.reply).toBe(true)
     expect(inlineChannelPlugin.capabilities.threads).toBe(true)
     expect(inlineChannelPlugin.threading).toBeDefined()
+    expect(inlineChannelPlugin.setup).toBeDefined()
+    expect(inlineChannelPlugin.setupWizard).toBeDefined()
+    expect(inlineChannelPlugin.status?.collectStatusIssues).toBeDefined()
+    expect(inlineChannelPlugin.status?.probeAccount).toBeDefined()
+    expect(inlineChannelPlugin.gateway?.logoutAccount).toBeDefined()
     expect(inlineChannelPlugin.streaming?.blockStreamingCoalesceDefaults).toEqual({
       minChars: 1500,
       idleMs: 1000,
     })
+  })
+
+  it("setup wizard resolves configured state from inline token config", async () => {
+    vi.resetModules()
+    const { inlineSetupWizard } = await import("./setup-surface")
+
+    const configured = await inlineSetupWizard.status.resolveConfigured({
+      cfg: {
+        channels: {
+          inline: {
+            token: "token",
+          },
+        },
+      } as OpenClawConfig,
+    })
+    const unconfigured = await inlineSetupWizard.status.resolveConfigured({
+      cfg: {
+        channels: {
+          inline: {},
+        },
+      } as OpenClawConfig,
+    })
+
+    expect(configured).toBe(true)
+    expect(unconfigured).toBe(false)
   })
 
   it("only advertises native reply thread guidance when replyThreads is enabled", async () => {
@@ -184,6 +214,83 @@ describe("inline/channel", () => {
     await startPromise
 
     expect(stop).toHaveBeenCalled()
+  })
+
+  it("gateway logoutAccount clears configured credentials", async () => {
+    vi.resetModules()
+    const { inlineChannelPlugin } = await import("./channel")
+
+    const result = await inlineChannelPlugin.gateway?.logoutAccount?.({
+      accountId: "default",
+      cfg: {
+        channels: {
+          inline: {
+            token: "token-default",
+            tokenFile: "/tmp/default-token",
+            accounts: {
+              ops: {
+                token: "token-ops",
+                tokenFile: "/tmp/ops-token",
+              },
+            },
+          },
+        },
+      } as OpenClawConfig,
+      account: {
+        accountId: "default",
+      } as any,
+      runtime: {} as any,
+      log: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      },
+    } as any)
+
+    const nextCfg = result?.cfg as OpenClawConfig
+    const inlineCfg = (nextCfg.channels?.inline ?? {}) as {
+      token?: string
+      tokenFile?: string
+      accounts?: Record<string, { token?: string; tokenFile?: string }>
+    }
+
+    expect(result?.cleared).toBe(true)
+    expect(inlineCfg.token).toBeUndefined()
+    expect(inlineCfg.tokenFile).toBeUndefined()
+    expect(inlineCfg.accounts?.ops?.token).toBe("token-ops")
+    expect(inlineCfg.accounts?.ops?.tokenFile).toBe("/tmp/ops-token")
+  })
+
+  it("collects status issues for unconfigured and runtime failures", async () => {
+    vi.resetModules()
+    const { collectInlineStatusIssues } = await import("./status-issues")
+
+    const issues = collectInlineStatusIssues([
+      {
+        accountId: "default",
+        enabled: true,
+        configured: false,
+      },
+      {
+        accountId: "ops",
+        enabled: true,
+        configured: true,
+        baseUrl: "[missing]",
+        lastError: "401 unauthorized",
+        probe: {
+          ok: false,
+          error: "request failed: 401",
+        },
+      },
+    ])
+
+    expect(issues.some((issue) => issue.accountId === "default" && issue.kind === "config")).toBe(
+      true,
+    )
+    expect(issues.some((issue) => issue.accountId === "ops" && issue.kind === "config")).toBe(
+      true,
+    )
+    expect(issues.some((issue) => issue.accountId === "ops" && issue.kind === "auth")).toBe(true)
   })
 
   it("resolves group mention + tool policy from channels.inline.groups", async () => {
