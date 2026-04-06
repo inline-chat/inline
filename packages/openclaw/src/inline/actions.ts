@@ -4,6 +4,11 @@ import type {
   ChannelMessageToolDiscovery,
   ChannelMessageToolSchemaContribution,
 } from "openclaw/plugin-sdk/channel-contract"
+import {
+  normalizeInteractiveReply,
+  reduceInteractiveReply,
+  type InteractiveReplyButton,
+} from "openclaw/plugin-sdk/interactive-runtime"
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
 import {
   InlineSdkClient,
@@ -14,7 +19,7 @@ import {
   type MessageActions,
   type User,
 } from "@inline-chat/realtime-sdk"
-import { resolveInlineAccount, resolveInlineToken } from "./accounts.js"
+import { listInlineAccountIds, resolveInlineAccount, resolveInlineToken } from "./accounts.js"
 import { isInlineReplyThreadsEnabled } from "./reply-threads.js"
 import { uploadInlineMediaFromUrl } from "./media.js"
 import { summarizeInlineMessageContent } from "./message-content.js"
@@ -133,9 +138,94 @@ function normalizeReplyMarkupButtons(raw: unknown): InlineReplyMarkupButton[][] 
   return rows
 }
 
+function chunkInteractiveButtons(
+  buttons: readonly InteractiveReplyButton[],
+  rows: InlineReplyMarkupButton[][],
+) {
+  for (let i = 0; i < buttons.length; i += INLINE_ACTION_MAX_PER_ROW) {
+    const row = buttons
+      .slice(i, i + INLINE_ACTION_MAX_PER_ROW)
+      .map((button) => {
+        const text = button.label.trim()
+        const callbackData = button.value.trim()
+        if (!text || !callbackData) {
+          return null
+        }
+        return { text, callback_data: callbackData }
+      })
+      .filter((button): button is InlineReplyMarkupButton => button != null)
+
+    if (row.length === 0) continue
+    rows.push(row)
+    if (rows.length >= INLINE_ACTION_MAX_ROWS) return
+  }
+}
+
+function resolveInlineInteractiveButtonsParam(
+  params: Record<string, unknown>,
+): InlineReplyMarkupButton[][] | undefined {
+  if (!Object.prototype.hasOwnProperty.call(params, "interactive")) {
+    return undefined
+  }
+
+  let rawInteractive = params.interactive
+  if (typeof rawInteractive === "string") {
+    const trimmed = rawInteractive.trim()
+    if (!trimmed) {
+      return undefined
+    }
+    try {
+      rawInteractive = JSON.parse(trimmed) as unknown
+    } catch {
+      throw new Error("inline action: interactive must be valid JSON")
+    }
+  }
+
+  const interactive = normalizeInteractiveReply(rawInteractive)
+  if (!interactive) {
+    return undefined
+  }
+
+  const rows = reduceInteractiveReply(interactive, [] as InlineReplyMarkupButton[][], (state, block) => {
+    if (state.length >= INLINE_ACTION_MAX_ROWS) {
+      return state
+    }
+    if (block.type === "buttons") {
+      chunkInteractiveButtons(block.buttons, state)
+      return state
+    }
+    if (block.type === "select") {
+      chunkInteractiveButtons(
+        block.options.map((option) => ({ label: option.label, value: option.value })),
+        state,
+      )
+    }
+    return state
+  })
+  return rows.length > 0 ? rows : undefined
+}
+
+function toInlineMessageActions(rows: InlineReplyMarkupButton[][]): MessageActions {
+  return {
+    rows: rows.map((row, rowIndex) => ({
+      actions: row.map((button, buttonIndex) => ({
+        actionId: `btn_${rowIndex + 1}_${buttonIndex + 1}`,
+        text: button.text,
+        action: {
+          oneofKind: "callback",
+          callback: {
+            data: new TextEncoder().encode(button.callback_data),
+          },
+        },
+      })),
+    })),
+  }
+}
+
 function resolveInlineMessageActionsParam(params: Record<string, unknown>): MessageActions | undefined {
   if (!Object.prototype.hasOwnProperty.call(params, "buttons")) {
-    return undefined
+    const interactiveRows = resolveInlineInteractiveButtonsParam(params)
+    return interactiveRows ? toInlineMessageActions(interactiveRows) : undefined
   }
 
   let rawButtons: unknown = params.buttons
@@ -159,20 +249,7 @@ function resolveInlineMessageActionsParam(params: Record<string, unknown>): Mess
   }
 
   const rows = normalizeReplyMarkupButtons(rawButtons)
-  return {
-    rows: rows.map((row, rowIndex) => ({
-      actions: row.map((button, buttonIndex) => ({
-        actionId: `btn_${rowIndex + 1}_${buttonIndex + 1}`,
-        text: button.text,
-        action: {
-          oneofKind: "callback",
-          callback: {
-            data: new TextEncoder().encode(button.callback_data),
-          },
-        },
-      })),
-    })),
-  }
+  return toInlineMessageActions(rows)
 }
 
 function normalizeChatId(raw: string): string {
@@ -836,13 +913,17 @@ function listAllActions(): ChannelMessageActionName[] {
 }
 
 function listEnabledInlineActions(cfg: OpenClawConfig): ChannelMessageActionName[] {
-  const account = resolveInlineAccount({ cfg, accountId: null })
-  if (!account.enabled || !account.configured) return []
+  const gates = listInlineAccountIds(cfg)
+    .map((accountId) => resolveInlineAccount({ cfg, accountId }))
+    .filter((account) => account.enabled && account.configured)
+    .map((account) =>
+      createActionGate((account.config.actions ?? {}) as Record<string, boolean | undefined>),
+    )
+  if (gates.length === 0) return []
 
-  const gate = createActionGate((account.config.actions ?? {}) as Record<string, boolean | undefined>)
   const actions = new Set<ChannelMessageActionName>()
   for (const group of ACTION_GROUPS) {
-    if (!gate(group.key, group.defaultEnabled)) continue
+    if (!gates.some((gate) => gate(group.key, group.defaultEnabled))) continue
     for (const action of group.actions) {
       actions.add(action)
     }

@@ -89,6 +89,57 @@ describe("inline/actions", () => {
     expect(actions.length).toBeGreaterThan(0)
   })
 
+  it("unions discovery across configured enabled accounts", async () => {
+    vi.resetModules()
+    const { inlineMessageActions } = await import("./actions")
+
+    const actions =
+      inlineMessageActions.listActions?.({
+        cfg: {
+          channels: {
+            inline: {
+              token: "default-token",
+              enabled: false,
+              accounts: {
+                work: {
+                  enabled: true,
+                  token: "work-token",
+                  baseUrl: "https://api.inline.chat",
+                },
+              },
+            },
+          },
+        } as OpenClawConfig,
+      }) ?? []
+
+    expect(actions).toContain("send")
+    expect(actions).toContain("read")
+    expect(actions.length).toBeGreaterThan(0)
+  })
+
+  it("keeps message-tool buttons schema optional", async () => {
+    vi.resetModules()
+    const { inlineMessageActions } = await import("./actions")
+
+    const discovery = inlineMessageActions.describeMessageTool?.({
+      cfg: {
+        channels: {
+          inline: {
+            token: "token",
+            baseUrl: "https://api.inline.chat",
+          },
+        },
+      } as OpenClawConfig,
+    })
+
+    const schema = Array.isArray(discovery?.schema) ? discovery.schema[0] : discovery?.schema
+    const buttonsSchema = schema?.properties?.buttons as Record<string | symbol, unknown> | undefined
+
+    expect(discovery?.capabilities).toEqual(["interactive", "buttons"])
+    expect(buttonsSchema).toBeDefined()
+    expect(buttonsSchema?.[Symbol.for("TypeBox.Optional")]).toBe("Optional")
+  })
+
   it("extracts explicit user targets for send routing", async () => {
     vi.resetModules()
     const { inlineMessageActions } = await import("./actions")
@@ -1734,6 +1785,96 @@ describe("inline/actions", () => {
               ],
             }),
           ],
+        }),
+      }),
+    )
+    const sent = sendMessage.mock.calls[0]?.[0]
+    const data = sent?.actions?.rows?.[0]?.actions?.[0]?.action?.callback?.data
+    expect(data).toBeInstanceOf(Uint8Array)
+    expect(new TextDecoder().decode(data)).toBe("approve")
+  })
+
+  it("maps shared interactive payload to inline message actions when buttons are omitted", async () => {
+    vi.resetModules()
+
+    const sendMessage = vi.fn(async () => ({ messageId: 1n }))
+    const connect = vi.fn(async () => {})
+    const close = vi.fn(async () => {})
+
+    vi.doMock("@inline-chat/realtime-sdk", () => ({
+      Method: {
+        EDIT_MESSAGE: 8,
+      },
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = connect
+        close = close
+        sendMessage = sendMessage
+        invokeRaw = vi.fn(async () => ({ oneofKind: undefined }))
+      },
+    }))
+
+    const { inlineMessageActions } = await import("./actions")
+
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+        },
+      },
+    } satisfies OpenClawConfig
+
+    await inlineMessageActions.handleAction?.({
+      channel: "inline",
+      action: "send",
+      cfg,
+      params: {
+        to: "user:99",
+        message: "with interactive",
+        interactive: {
+          blocks: [
+            {
+              type: "buttons",
+              buttons: [{ label: "Approve", value: "approve", style: "success" }],
+            },
+            {
+              type: "select",
+              placeholder: "Pick one",
+              options: [
+                { label: "Option A", value: "a" },
+                { label: "Option B", value: "b" },
+              ],
+            },
+          ],
+        },
+      },
+    } as any)
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 99n,
+        text: "with interactive",
+        actions: expect.objectContaining({
+          rows: expect.arrayContaining([
+            expect.objectContaining({
+              actions: expect.arrayContaining([
+                expect.objectContaining({
+                  text: "Approve",
+                }),
+              ]),
+            }),
+            expect.objectContaining({
+              actions: expect.arrayContaining([
+                expect.objectContaining({
+                  text: "Option A",
+                }),
+                expect.objectContaining({
+                  text: "Option B",
+                }),
+              ]),
+            }),
+          ]),
         }),
       }),
     )
