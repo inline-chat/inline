@@ -111,7 +111,15 @@ type MonitorSetup = {
     channelData?: Record<string, unknown>
   }>
   partialReplies?: Array<{ text?: string; mediaUrls?: string[] }>
+  reasoningReplies?: Array<{ text?: string; mediaUrls?: string[] }>
   partialRepliesConcurrent?: boolean
+  assistantMessageStartBeforePayloadIndexes?: number[]
+  toolStartBeforePayloadIndexes?: number[]
+  compactionStartBeforePayloadIndexes?: number[]
+  compactionEndBeforePayloadIndexes?: number[]
+  payloadInfoKinds?: Array<"final" | "partial" | "error">
+  skipInfos?: Array<{ reason?: string }>
+  dispatchErrorInfos?: Array<{ kind?: string }>
   sendMessageDelayMs?: number
 }
 
@@ -236,11 +244,41 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         await replyOptions?.onPartialReply?.(partial)
       }
     }
-    for (const payload of setup.dispatchReplyPayloads ?? []) {
-      await dispatcherOptions.deliver(payload)
+    for (const partial of setup.reasoningReplies ?? []) {
+      await replyOptions?.onReasoningStream?.(partial)
     }
-    if (!setup.dispatchReplyPayload) return
-    await dispatcherOptions.deliver(setup.dispatchReplyPayload)
+    if ((setup.reasoningReplies?.length ?? 0) > 0) {
+      await replyOptions?.onReasoningEnd?.()
+    }
+    const payloads = [...(setup.dispatchReplyPayloads ?? []), ...(setup.dispatchReplyPayload ? [setup.dispatchReplyPayload] : [])]
+    for (let index = 0; index < payloads.length; index += 1) {
+      if (setup.assistantMessageStartBeforePayloadIndexes?.includes(index)) {
+        await replyOptions?.onAssistantMessageStart?.()
+      }
+      if (setup.toolStartBeforePayloadIndexes?.includes(index)) {
+        await replyOptions?.onToolStart?.({ name: "tool.test" })
+      }
+      if (setup.compactionStartBeforePayloadIndexes?.includes(index)) {
+        await replyOptions?.onCompactionStart?.()
+      }
+      if (setup.compactionEndBeforePayloadIndexes?.includes(index)) {
+        await replyOptions?.onCompactionEnd?.()
+      }
+      const payload = payloads[index]
+      if (!payload) continue
+      const kind = setup.payloadInfoKinds?.[index]
+      if (kind) {
+        await dispatcherOptions.deliver(payload, { kind })
+      } else {
+        await dispatcherOptions.deliver(payload)
+      }
+    }
+    for (const skipInfo of setup.skipInfos ?? []) {
+      await dispatcherOptions.onSkip?.({ isError: false }, skipInfo)
+    }
+    for (const errInfo of setup.dispatchErrorInfos ?? []) {
+      await dispatcherOptions.onError?.(new Error("dispatch error"), { kind: errInfo.kind ?? "final" })
+    }
   })
   const upsertPairingRequest = vi.fn(async () => ({ code: "PAIR-123", created: true }))
   const buildPairingReply = vi.fn(() => "PAIRING_REPLY")
@@ -1711,6 +1749,204 @@ describe("inline/monitor", () => {
             text: "first **paragraph**\n\nsecond paragraph",
             parseMarkdown: true,
           }),
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("rotates streamed edit messages on assistant message boundaries", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 670n,
+          message: {
+            id: 5701n,
+            date: 1_700_000_010n,
+            fromId: 42n,
+            message: "dm",
+          },
+        },
+      ],
+      chats: {
+        "670": { kind: "direct", title: "Alice" },
+      },
+      partialReplies: [{ text: "first update\n\n" }],
+      dispatchReplyPayloads: [{ text: "first update" }, { text: "second update" }],
+      assistantMessageStartBeforePayloadIndexes: [1],
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open", streamViaEditMessage: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      const args = harness.calls.dispatchReply.mock.calls[0]?.[0]
+      expect(typeof args?.replyOptions?.onAssistantMessageStart).toBe("function")
+      expect(harness.calls.sendMessage).toHaveBeenCalledTimes(2)
+      expect(harness.calls.sendMessage).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          chatId: 670n,
+          text: "first update",
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          chatId: 670n,
+          text: "second update",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("rotates streamed edit messages on tool-start boundaries", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 671n,
+          message: {
+            id: 5702n,
+            date: 1_700_000_011n,
+            fromId: 42n,
+            message: "dm",
+          },
+        },
+      ],
+      chats: {
+        "671": { kind: "direct", title: "Alice" },
+      },
+      partialReplies: [{ text: "first update\n\n" }],
+      dispatchReplyPayloads: [{ text: "first update" }, { text: "second update" }],
+      toolStartBeforePayloadIndexes: [1],
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open", streamViaEditMessage: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      const args = harness.calls.dispatchReply.mock.calls[0]?.[0]
+      expect(typeof args?.replyOptions?.onToolStart).toBe("function")
+      expect(harness.calls.sendMessage).toHaveBeenCalledTimes(2)
+      expect(harness.calls.sendMessage).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          chatId: 671n,
+          text: "first update",
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          chatId: 671n,
+          text: "second update",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("splits repeated final payloads into separate messages when stream boundaries are absent", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 672n,
+          message: {
+            id: 5703n,
+            date: 1_700_000_012n,
+            fromId: 42n,
+            message: "dm",
+          },
+        },
+      ],
+      chats: {
+        "672": { kind: "direct", title: "Alice" },
+      },
+      partialReplies: [{ text: "first update\n\n" }],
+      dispatchReplyPayloads: [{ text: "first update" }, { text: "second update" }],
+      payloadInfoKinds: ["final", "final"],
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open", streamViaEditMessage: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.sendMessage).toHaveBeenCalledTimes(2)
+      expect(harness.calls.sendMessage).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          chatId: 672n,
+          text: "first update",
+        }),
+      )
+      expect(harness.calls.sendMessage).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          chatId: 672n,
+          text: "second update",
+        }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("sends a fallback reply when dispatch skips non-silently and nothing is delivered", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 673n,
+          message: {
+            id: 5704n,
+            date: 1_700_000_013n,
+            fromId: 42n,
+            message: "dm",
+          },
+        },
+      ],
+      chats: {
+        "673": { kind: "direct", title: "Alice" },
+      },
+      skipInfos: [{ reason: "policy" }],
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.sendMessage).toHaveBeenCalledTimes(1)
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 673n,
+          text: "No response generated. Please try again.",
         }),
       )
     })
