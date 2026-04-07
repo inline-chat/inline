@@ -26,7 +26,7 @@ actor Transactions {
   var queueStream: AsyncChannel<Void> = AsyncChannel()
 
   // Private
-  private let log = Log.scoped("RealtimeV2.Transactions", level: .debug)
+  private let log = Log.scoped("RealtimeV2.Transactions", level: .info)
   private var persistenceHandler: TransactionPersistenceHandler?
   private let blockerResolver: (any TransactionBlockerResolver)?
   private var satisfiedBlockers: Set<TransactionBlocker> = []
@@ -400,7 +400,7 @@ actor Transactions {
 
           // Trigger failed() for expired transactions
           for expiredTransaction in expiredTransactions {
-            log.debug("Transaction \(expiredTransaction.id) expired, calling failed()")
+          log.trace("Transaction \(expiredTransaction.id) expired, calling failed()")
             await expiredTransaction.transaction.failed(error: .timeout)
 
             // Delete expired transaction from disk
@@ -416,7 +416,7 @@ actor Transactions {
 
           log.info("Loaded \(validTransactions.count) transactions from disk, expired \(expiredTransactions.count)")
         } else {
-          log.debug("No persistence handler available, skipping load from disk")
+          log.trace("No persistence handler available, skipping load from disk")
         }
       } catch {
         log.error("Failed to load transactions from disk", error: error)

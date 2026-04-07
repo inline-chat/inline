@@ -3,7 +3,7 @@ import Logger
 import InlineKit
 
 public class UserLocale {
-  private static let log = Log.scoped("UserLocale", enableTracing: false)
+  private static let log = Log.scoped("UserLocale", level: .info)
   private static let preferredTranslationLanguageKey = "preferred_translation_language"
   
   // In-memory cache for preferred translation language
@@ -76,14 +76,14 @@ public class UserLocale {
       cachedPreferredLanguage = stored
       cacheLoaded = true
 
-      log.debug("Retrieved preferred translation language: \(stored ?? "nil")")
+      log.trace("Retrieved preferred translation language: \(stored ?? "nil")")
       return stored
     }
   }
   
   /// Set the user's preferred translation language
   public static func setPreferredTranslationLanguage(_ languageCode: String?) {
-    log.debug("Setting preferred translation language to: \(languageCode ?? "nil")")
+    log.trace("Setting preferred translation language to: \(languageCode ?? "nil")")
     
     cacheLock.withLock {
       // Update cache

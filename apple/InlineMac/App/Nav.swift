@@ -50,7 +50,7 @@ struct NavEntry: Hashable, Codable, Equatable {
 class Nav: ObservableObject {
   static let main = Nav()
 
-  private let log = Log.scoped("Nav", enableTracing: false)
+  private let log = Log.scoped("Nav", level: .info)
   private let maxHistoryLength = 200
   private var saveStateTask: Task<Void, Never>?
 
@@ -228,7 +228,7 @@ extension Nav {
       let data = try encoder.encode(state)
       try data.write(to: stateFileURL)
     } catch {
-      Log.shared.error("Failed to save navigation state: \(error.localizedDescription)")
+      log.error("Failed to save navigation state: \(error.localizedDescription)")
     }
   }
 
@@ -249,7 +249,7 @@ extension Nav {
       reflectHistoryChange()
       // }
     } catch {
-      Log.shared.error("Failed to load navigation state: \(error.localizedDescription)")
+      log.error("Failed to load navigation state: \(error.localizedDescription)")
       // If loading fails, reset to default state
       reset()
     }

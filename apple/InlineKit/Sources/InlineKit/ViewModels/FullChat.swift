@@ -314,6 +314,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
   private var lastHistoryRefetchTime: CFTimeInterval = 0
   private let historyRefetchCooldown: CFTimeInterval = 1.0
   private var didStartChatObservation = false
+  private let log = Log.scoped("FullChat", level: .info)
 
   private var db: AppDatabase
   public var peer: Peer
@@ -363,7 +364,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
         }
         .publisher(in: db.dbWriter, scheduling: .immediate)
         .sink(
-          receiveCompletion: { Log.shared.error("Failed to get full chat \($0)") },
+          receiveCompletion: { [log] in log.error("Failed to get full chat \($0)") },
           receiveValue: { [weak self] (fullChat: SpaceChatItem?) in
             if let self,
                let fullChat,
@@ -403,7 +404,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
                 try await DataManager.shared.getUser(id: userId)
               }
             } catch {
-              Log.shared.error("Failed to refetch user info \(error)")
+              log.error("Failed to refetch user info \(error)")
             }
           }
         }
@@ -415,7 +416,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
             try await DataManager.shared.getUser(id: userId)
           }
         } catch {
-          Log.shared.error("Failed to refetch user info \(error)")
+          log.error("Failed to refetch user info \(error)")
         }
       }
 
@@ -426,7 +427,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
   }
 
   public func refetchChatView() {
-    Log.shared.debug("Refetching chat view for peer \(peer)")
+    log.trace("Refetching chat view for peer \(peer)")
     Task {
       await refetchChatViewAsync()
     }
@@ -434,7 +435,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
 
   @MainActor
   public func refetchHistoryOnly() {
-    Log.shared.debug("Refetching history only for peer \(peer)")
+    log.trace("Refetching history only for peer \(peer)")
     let now = CACurrentMediaTime()
     if historyRefetchTask != nil || now - lastHistoryRefetchTime < historyRefetchCooldown {
       return
@@ -462,7 +463,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
           do {
             try await DataManager.shared.getUser(id: userId)
           } catch {
-            Log.shared.error("Failed to refetch user info \(error)")
+            log.error("Failed to refetch user info \(error)")
           }
         }
       }
@@ -530,7 +531,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
         Log.shared.warning("Failed to refresh chat from server, using cached chat for \(peer_)")
         return cachedChatItem.chat
       }
-      Log.shared.error("Failed to ensure chat", error: error)
+      log.error("Failed to ensure chat", error: error)
       throw error
     }
   }

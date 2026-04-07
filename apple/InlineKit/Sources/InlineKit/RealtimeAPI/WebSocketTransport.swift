@@ -65,7 +65,7 @@ actor WebSocketTransport: NSObject, Sendable {
   // Internals
   private var stateObservers: [StateObserverFn] = []
   private var messageHandler: ((ServerProtocolMessage) -> Void)? = nil
-  private var log = Log.scoped("Realtime_TransportWS", enableTracing: false)
+  private var log = Log.scoped("Realtime_TransportWS", level: .info)
   private var pathMonitor: NWPathMonitor?
   private let pingInFlight = ManagedAtomic<Bool>(false)
   private var reconnectionToken: UInt64 = 0
@@ -76,7 +76,7 @@ actor WebSocketTransport: NSObject, Sendable {
   private let pingTimeoutConstrained: TimeInterval = 10.0 // 3G / constrained paths
 
   override init() {
-    log.debug("Initializing WebSocketTransport")
+    log.info("Initializing WebSocketTransport")
     // Create session configuration
     let configuration = URLSessionConfiguration.default
     configuration.shouldUseExtendedBackgroundIdleMode = true
@@ -160,7 +160,7 @@ actor WebSocketTransport: NSObject, Sendable {
   private func disconnectIfInBackground() async {
     // Only disconnect if still in background
     if isInBackground, connectionState == .connected {
-      log.debug("Disconnecting due to extended background time")
+      log.trace("Disconnecting due to extended background time")
       await cancelTasks()
       connectionState = .disconnected
       notifyStateChange()
@@ -185,7 +185,7 @@ actor WebSocketTransport: NSObject, Sendable {
   private func cleanupBackgroundResources() async {
     // Only disconnect if we've been in background for more than 30 seconds
     if connectionState == .connected {
-      log.debug("Disconnecting due to extended background time")
+      log.trace("Disconnecting due to extended background time")
       await cancelTasks()
       connectionState = .disconnected
       notifyStateChange()
@@ -250,7 +250,7 @@ actor WebSocketTransport: NSObject, Sendable {
     reconnectionAttempts = 0
 
     msgTask = Task {
-      log.debug("starting message receiving")
+      log.trace("starting message receiving")
       await receiveMessages()
     }
   }
@@ -261,7 +261,7 @@ actor WebSocketTransport: NSObject, Sendable {
       return
     }
 
-    log.debug("Starting to run")
+    log.info("Starting to run")
     running = true
     setupNetworkMonitoring()
     startBackgroundObservers()
@@ -297,7 +297,7 @@ actor WebSocketTransport: NSObject, Sendable {
     setupConnectionTimeout(foregroundTransition: foregroundTransition)
 
     let url = URL(string: urlString)!
-    log.debug("connecting to \(urlString)")
+    log.info("Connecting to \(urlString)")
     webSocketTask = session!.webSocketTask(with: url)
     webSocketTask?.priority = URLSessionTask.highPriority
     webSocketTask?.resume()
@@ -331,7 +331,7 @@ actor WebSocketTransport: NSObject, Sendable {
     // Notify state change as final action
     notifyStateChange()
 
-    log.debug("Transport stopped completely")
+    log.info("Transport stopped completely")
   }
 
   // Track network quality
@@ -525,24 +525,24 @@ actor WebSocketTransport: NSObject, Sendable {
   }
 
   private func receiveMessages() async {
-    log.debug("waiting for messages")
+    log.trace("waiting for messages")
     guard let webSocketTask else { return }
 
     while running, connectionState == .connected, !Task.isCancelled {
       do {
         let message = try await webSocketTask.receive()
-        log.debug("got message")
+        log.trace("got message")
         switch message {
           case .string:
             // unsupported
             break
 
           case let .data(data):
-            log.debug("got data message \(data.count) bytes")
+            log.trace("got data message \(data.count) bytes")
 
             do {
               let message = try ServerProtocolMessage(serializedBytes: data)
-              log.debug("decoded message \(message.id)")
+              log.trace("decoded message \(message.id)")
               notifyMessageReceived(message)
             } catch {
               log.error("Invalid message format", error: error)

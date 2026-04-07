@@ -3,7 +3,7 @@ import Foundation
 import InlineProtocol
 import Logger
 
-private let log = Log.scoped("UserSettings")
+private let log = Log.scoped("UserSettings", level: .info)
 
 @MainActor
 public class INUserSettings {
@@ -54,13 +54,13 @@ public class INUserSettings {
 
   private func loadFromUserDefaults() {
     guard let data = UserDefaults.shared.data(forKey: Self.notificationSettingsKey) else {
-      log.debug("No cached notification settings found")
+      log.info("No cached notification settings found")
       return
     }
 
     do {
       let cachedSettings = try JSONDecoder().decode(NotificationSettingsManager.self, from: data)
-      log.debug("Loaded cached notification settings")
+      log.info("Loaded cached notification settings")
 
       // Update current settings with cached values
       notification.mode = cachedSettings.mode
@@ -78,7 +78,7 @@ public class INUserSettings {
     do {
       let data = try JSONEncoder().encode(notification)
       UserDefaults.shared.set(data, forKey: Self.notificationSettingsKey)
-      log.debug("Saved notification settings to UserDefaults")
+      log.trace("Saved notification settings to UserDefaults")
     } catch {
       log.error("Failed to encode notification settings: \(error)")
     }
@@ -113,7 +113,7 @@ public class INUserSettings {
   }
 
   private func saveToRealtime() async {
-    log.debug("Saving notification settings to Realtime")
+    log.trace("Saving notification settings to Realtime")
     do {
       try await Api.realtime.send(.updateUserSettings(notificationSettings: notification))
     } catch {
@@ -124,14 +124,14 @@ public class INUserSettings {
   private func fetch() {
     // Load data from app groups data continaer
     Task.detached {
-      log.debug("Loading user settings")
+      log.info("Loading user settings")
       let data = try await Realtime.shared.invoke(
         .getUserSettings,
         input: .getUserSettings(.with { _ in })
       )
 
       if case let .getUserSettings(result) = data {
-        log.debug("User settings loaded: \(result)")
+        log.info("User settings loaded")
 
         Task { @MainActor [weak self] in
           self?.update(from: result)
@@ -144,7 +144,7 @@ public class INUserSettings {
 
   private func update(from data: InlineProtocol.GetUserSettingsResult) {
     // Save data to app groups data container
-    log.debug("Updating from user settings")
+    log.trace("Updating from user settings")
 
     if data.userSettings.hasNotificationSettings {
       isApplyingServerUpdate = true

@@ -21,7 +21,7 @@ class MessageListAppKit: NSViewController {
 
   // MARK: - Interleaved chat rows (messages + UI-only rows)
 
-  private let log = Log.scoped("MessageListAppKit", enableTracing: false)
+  private let log = Log.scoped("MessageListAppKit", level: .info)
   private let sizeCalculator = MessageSizeCalculator.shared
   private let defaultRowHeight = 45.0
 
@@ -1511,7 +1511,8 @@ class MessageListAppKit: NSViewController {
         isDM: false,
         isRtl: false,
         translated: message(forRow: row)?.isTranslated ?? false,
-        renderStyle: messageRenderStyle
+        renderStyle: messageRenderStyle,
+        interactionMode: interactionMode(for: row)
       )
     }
 
@@ -1523,7 +1524,8 @@ class MessageListAppKit: NSViewController {
         isDM: chat?.type == .privateChat,
         isRtl: false,
         translated: false,
-        renderStyle: messageRenderStyle
+        renderStyle: messageRenderStyle,
+        interactionMode: interactionMode(for: row)
       )
     }
 
@@ -1534,7 +1536,8 @@ class MessageListAppKit: NSViewController {
       isDM: chat?.type == .privateChat,
       isRtl: false,
       translated: message.isTranslated,
-      renderStyle: messageRenderStyle
+      renderStyle: messageRenderStyle,
+      interactionMode: interactionMode(for: row)
     )
   }
 
@@ -1565,7 +1568,7 @@ class MessageListAppKit: NSViewController {
   deinit {
     dispose()
 
-    Log.shared.debug("🗑️ Deinit: \(type(of: self)) - \(self)")
+    log.trace("Deinit: \(type(of: self)) - \(self)")
   }
 
   // MARK: - Translation
@@ -1982,7 +1985,7 @@ extension MessageListAppKit {
           publish: false
         )
         if loadedAroundTarget {
-          log.debug("Loaded local around-target window for message \(msgId), reason=\(reason.rawValue)")
+          log.trace("Loaded local around-target window for message \(msgId), reason=\(reason.rawValue)")
           rebuildRowItems()
           tableView.reloadData()
 
@@ -2083,7 +2086,7 @@ extension MessageListAppKit {
   private func highlightMessage(at row: Int) {
     // Verify row is still valid (tableView state may have changed during animation)
     guard row >= 0, row < tableView.numberOfRows else {
-      log.debug("Cannot highlight message at row \(row) - tableView has \(tableView.numberOfRows) rows")
+      log.trace("Cannot highlight message at row \(row) - tableView has \(tableView.numberOfRows) rows")
       return
     }
 
@@ -2229,6 +2232,6 @@ extension MessageListAppKit {
     view.removeFromSuperview()
     removeFromParent()
 
-    Log.shared.debug("🗑️🧹 MessageListAppKit disposed: \(self)")
+    log.trace("MessageListAppKit disposed: \(self)")
   }
 }

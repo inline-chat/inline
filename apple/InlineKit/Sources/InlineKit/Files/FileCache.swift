@@ -14,7 +14,7 @@ public actor FileCache: Sendable {
   public static let shared = FileCache()
 
   private let database = AppDatabase.shared
-  private let log = Log.scoped("FileCache")
+  private let log = Log.scoped("FileCache", level: .info)
 
   var downloadingPhotos: [Int64: Task<Void, Never>] = [:]
   // TODO: Create a message asset downloader middleware over the file cache which tracks messages and downloads, but for now we do it in this file directly

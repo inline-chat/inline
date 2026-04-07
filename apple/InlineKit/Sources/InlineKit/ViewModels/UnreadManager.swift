@@ -76,7 +76,7 @@ public final class UnreadManager: Sendable {
 
   // This is called when chat opens initially
   public func readMessages(_ maxId: Int64, in peerId: Peer, chatId: Int64) {
-    log.debug("readMessages")
+    log.trace("readMessages")
     // TODO: update local DB with locally computed new unread count
     // let's just zero it, until later when we need to calculate exactly how many messages are unread still locally and
     // avoid applying old remote unread count, etc.
@@ -94,7 +94,7 @@ public final class UnreadManager: Sendable {
 
   // Useful in context menu to mark all messages as read
   public func readAll(_ peerId: Peer, chatId: Int64) {
-    log.debug("readAll")
+    log.trace("readAll")
     let localDialogId = Dialog.getDialogId(peerId: peerId)
 
     Task(priority: .userInitiated) {

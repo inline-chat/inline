@@ -82,7 +82,7 @@ public class MessagesProgressiveViewModel {
 
   private lazy var initialLimit: Int = Self.defaultInitialLimit()
 
-  private let log = Log.scoped("MessagesViewModel", enableTracing: false)
+  private let log = Log.scoped("MessagesViewModel", level: .info)
   private let db = AppDatabase.shared
   private var cancellable = Set<AnyCancellable>()
   private var callback: ((_ changeSet: MessagesChangeSet) -> Void)?
@@ -650,7 +650,7 @@ public class MessagesProgressiveViewModel {
       var messagesBatch = try fetchAdditionalMessages(request: request)
       let rawCount = messagesBatch.count
 
-      log.debug("loaded additional messages: \(rawCount)")
+      log.trace("loaded additional messages: \(rawCount)")
 
       messagesBatch = sort(batch: messagesBatch)
       messagesBatch = Self.batchDedupedAtCursor(messagesBatch, existingMessages: messages, cursor: request.cursor)
@@ -788,7 +788,7 @@ public final class MessagesPublisher {
   }
 
   public func messageUpdatedSync(message: Message, peer: Peer, animated: Bool?) {
-    Log.shared.debug("Message updated: \(message)")
+    log.trace("Message updated: \(message)")
     //    Log.shared.debug("Message updated: \(message.messageId)")
     let fullMessage = try? db.reader.read { db in
       let query = FullMessage.queryRequest()

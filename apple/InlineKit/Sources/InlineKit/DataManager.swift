@@ -17,7 +17,7 @@ enum DataManagerError: Error {
 @MainActor
 public class DataManager: ObservableObject {
   private var database: AppDatabase
-  private var log = Log.scoped("DataManager", enableTracing: false)
+  private var log = Log.scoped("DataManager", level: .info)
 
   public init(database: AppDatabase) {
     self.database = database
@@ -26,7 +26,7 @@ public class DataManager: ObservableObject {
   public static let shared = DataManager(database: AppDatabase.shared)
 
   public func fetchMe() async throws -> User {
-    log.debug("fetchMe")
+    log.trace("fetchMe")
     do {
       let result = try await ApiClient.shared.getMe()
 
@@ -36,13 +36,13 @@ public class DataManager: ObservableObject {
 
       return user
     } catch {
-      Log.shared.error("Error fetching user", error: error)
+      log.error("Error fetching user", error: error)
       throw error
     }
   }
 
   public func createSpace(name: String) async throws -> Int64? {
-    log.debug("createSpace")
+    log.trace("createSpace")
     do {
       let result = try await ApiClient.shared.createSpace(name: name)
       let space = Space(from: result.space)
@@ -50,30 +50,30 @@ public class DataManager: ObservableObject {
         do {
           try space.save(db)
         } catch {
-          Log.shared.error("Failed to save space", error: error)
+          log.error("Failed to save space", error: error)
         }
         do {
           try Member(from: result.member).save(db)
         } catch {
-          Log.shared.error("Failed to save member", error: error)
+          log.error("Failed to save member", error: error)
         }
         do {
           try result.chats.forEach { chat in
             try Chat(from: chat).save(db)
           }
         } catch {
-          Log.shared.error("Failed to save chat", error: error)
+          log.error("Failed to save chat", error: error)
         }
       }
       return space.id
     } catch {
-      Log.shared.error("Failed to create space", error: error)
+      log.error("Failed to create space", error: error)
       throw error
     }
   }
 
   public func createThread(spaceId: Int64, title: String, emoji: String? = nil) async throws -> Int64? {
-    log.debug("createThread")
+    log.trace("createThread")
     do {
       let result = try await ApiClient.shared.createThread(title: title, spaceId: spaceId, emoji: emoji)
       // Create the chat
@@ -84,13 +84,13 @@ public class DataManager: ObservableObject {
       return chat.id
 
     } catch {
-      Log.shared.error("Failed to create thread", error: error)
+      log.error("Failed to create thread", error: error)
       throw error
     }
   }
 
   public func createPrivateChat(userId: Int64) async throws -> Peer {
-    log.debug("createPrivateChat")
+    log.trace("createPrivateChat")
     do {
       let result = try await ApiClient.shared.createPrivateChat(userId: userId)
 
@@ -103,13 +103,13 @@ public class DataManager: ObservableObject {
 
       return Peer.user(id: result.user.id)
     } catch {
-      Log.shared.error("Failed to create private chat", error: error)
+      log.error("Failed to create private chat", error: error)
       throw error
     }
   }
 
   public func createPrivateChatWithOptimistic(user: ApiUser) async throws {
-    log.debug("createPrivateChat with optimistic")
+    log.trace("createPrivateChat with optimistic")
 
     // Optimistic
     try await database.dbWriter.write { db in
@@ -117,7 +117,7 @@ public class DataManager: ObservableObject {
       let dialog = Dialog(optimisticForUserId: user.id)
       try dialog.save(db, onConflict: .ignore)
     }
-    log.debug("saved optimistic")
+    log.trace("saved optimistic")
 
     let userId = user.id
 
@@ -133,7 +133,7 @@ public class DataManager: ObservableObject {
         let dialog = Dialog(from: result.dialog)
         try dialog.save(db, onConflict: .replace)
       }
-      Log.shared.info("Created private chat with \(user.anyName) with chatID: \(result.chat.id)")
+      log.info("Created private chat with \(user.anyName) with chatID: \(result.chat.id)")
     } catch {
       Log.shared.error("Failed to create private chat", error: error)
       throw error
@@ -144,7 +144,7 @@ public class DataManager: ObservableObject {
   /// Get list of user spaces and saves them
   @discardableResult
   public func getSpaces() async throws -> [Space] {
-    log.debug("getSpaces")
+    log.trace("getSpaces")
     do {
       let result = try await ApiClient.shared.getSpaces()
 
@@ -171,7 +171,7 @@ public class DataManager: ObservableObject {
 
   /// Get one user
   public func getUser(id: Int64) async throws {
-    log.debug("getUser")
+    log.trace("getUser")
     do {
       let result = try await ApiClient.shared.getUser(userId: id)
 
@@ -184,7 +184,7 @@ public class DataManager: ObservableObject {
   }
 
   public func deleteSpace(spaceId: Int64) async throws {
-    log.debug("deleteSpace")
+    log.trace("deleteSpace")
     do {
       try await database.dbWriter.write { db in
         try Space.deleteOne(db, id: spaceId)
@@ -204,13 +204,13 @@ public class DataManager: ObservableObject {
       let _ = try await ApiClient.shared.deleteSpace(spaceId: spaceId)
 
     } catch {
-      Log.shared.error("Failed to delete space", error: error)
+      log.error("Failed to delete space", error: error)
       throw error
     }
   }
 
   public func leaveSpace(spaceId: Int64) async throws {
-    log.debug("leaveSpace")
+    log.trace("leaveSpace")
     do {
       try await database.dbWriter.write { db in
         try Space.deleteOne(db, id: spaceId)
@@ -226,14 +226,14 @@ public class DataManager: ObservableObject {
 
       let _ = try await ApiClient.shared.leaveSpace(spaceId: spaceId)
     } catch {
-      Log.shared.error("Failed to leave space", error: error)
+      log.error("Failed to leave space", error: error)
       throw error
     }
   }
 
   @discardableResult
   public func getPrivateChats() async throws -> [Chat] {
-    log.debug("getPrivateChats")
+    log.trace("getPrivateChats")
     do {
       let result = try await ApiClient.shared.getPrivateChats()
 
@@ -271,7 +271,7 @@ public class DataManager: ObservableObject {
 
         return chats
       }
-      log.debug("fetched private chats")
+      log.trace("fetched private chats")
       return chats
     } catch {
       log.error("Failed to get private chats", error: error)
@@ -280,7 +280,7 @@ public class DataManager: ObservableObject {
   }
 
   public func getDialogs(spaceId: Int64) async throws {
-    log.debug("get dialogs")
+    log.trace("get dialogs")
     do {
       // Fetch
       let result = try await ApiClient.shared.getDialogs(spaceId: spaceId)
@@ -332,7 +332,7 @@ public class DataManager: ObservableObject {
         }
       }
 
-      log.debug("saved dialogs")
+      log.trace("saved dialogs")
     } catch {
       log.error("Failed to get dialogs", error: error)
       throw error
@@ -373,7 +373,7 @@ public class DataManager: ObservableObject {
       }
     }
 
-    log.debug(
+    log.trace(
       "getChatHistory with peerUserId: \(String(describing: finalPeerUserId)), peerThreadId: \(String(describing: finalPeerThreadId))"
     )
 
@@ -413,7 +413,7 @@ public class DataManager: ObservableObject {
   }
 
   public func updateStatus(online: Bool) async throws {
-    log.debug("updateStatus: \(online)")
+    log.trace("updateStatus: \(online)")
     let _ = try await ApiClient.shared.updateStatus(online: online)
   }
 
@@ -610,7 +610,7 @@ public class DataManager: ObservableObject {
   }
 
   public func updateTimezone() async throws {
-    log.debug("updateTimezone")
+    log.trace("updateTimezone")
     let timeZone = TimeZone.current.identifier
 
     do {
