@@ -204,6 +204,9 @@ public actor RealtimeAPI: Sendable {
       let msg = wrapMessage(body: .connectionInit(.with {
         $0.token = token
         $0.buildNumber = getBuildNumber()
+        #if os(macOS)
+        $0.osVersion = getOSVersion()
+        #endif
       }))
       try await transport.send(msg)
     } catch {
@@ -397,5 +400,10 @@ extension RealtimeAPI {
   private func getBuildNumber() -> Int32 {
     (Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String)
       .flatMap { Int32($0) } ?? 0
+  }
+
+  private func getOSVersion() -> String {
+    let version = ProcessInfo.processInfo.operatingSystemVersion
+    return "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
   }
 }

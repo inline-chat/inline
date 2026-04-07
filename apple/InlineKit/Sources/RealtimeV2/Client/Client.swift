@@ -164,6 +164,11 @@ actor ProtocolSession: ProtocolSessionType {
       .flatMap { Int32($0) } ?? 0
   }
 
+  private func getOSVersion() -> String {
+    let version = ProcessInfo.processInfo.operatingSystemVersion
+    return "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
+  }
+
   // MARK: - Connection Initialization
 
   /// Send connection initialization message with authentication token
@@ -184,6 +189,9 @@ actor ProtocolSession: ProtocolSessionType {
     let msg = wrapMessage(body: .connectionInit(.with {
       $0.token = token
       $0.buildNumber = getBuildNumber()
+      #if os(macOS)
+      $0.osVersion = getOSVersion()
+      #endif
       /// Layer 2 Changes:
       /// - Contains a fix that doesn't send updates on send message back into the same session.
       $0.layer = 2

@@ -27,6 +27,9 @@ message ConnectionInit {
 
   // Client version (semver)
   optional string client_version = 4;
+
+  // OS version (semver)
+  optional string os_version = 5;
 }
 
 message ServerProtocolMessage {
