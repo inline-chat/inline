@@ -508,6 +508,16 @@ public struct ConnectionInit: Sendable {
   /// Clears the value of `clientVersion`. Subsequent reads from it will return its default value.
   public mutating func clearClientVersion() {self._clientVersion = nil}
 
+  /// OS version (semver)
+  public var osVersion: String {
+    get {return _osVersion ?? String()}
+    set {_osVersion = newValue}
+  }
+  /// Returns true if `osVersion` has been explicitly set.
+  public var hasOsVersion: Bool {return self._osVersion != nil}
+  /// Clears the value of `osVersion`. Subsequent reads from it will return its default value.
+  public mutating func clearOsVersion() {self._osVersion = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -515,6 +525,7 @@ public struct ConnectionInit: Sendable {
   fileprivate var _buildNumber: Int32? = nil
   fileprivate var _layer: UInt32? = nil
   fileprivate var _clientVersion: String? = nil
+  fileprivate var _osVersion: String? = nil
 }
 
 public struct ServerProtocolMessage: Sendable {
@@ -8327,6 +8338,7 @@ extension ConnectionInit: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
     2: .standard(proto: "build_number"),
     3: .same(proto: "layer"),
     4: .standard(proto: "client_version"),
+    5: .standard(proto: "os_version"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -8339,6 +8351,7 @@ extension ConnectionInit: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
       case 2: try { try decoder.decodeSingularInt32Field(value: &self._buildNumber) }()
       case 3: try { try decoder.decodeSingularUInt32Field(value: &self._layer) }()
       case 4: try { try decoder.decodeSingularStringField(value: &self._clientVersion) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self._osVersion) }()
       default: break
       }
     }
@@ -8361,6 +8374,9 @@ extension ConnectionInit: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
     try { if let v = self._clientVersion {
       try visitor.visitSingularStringField(value: v, fieldNumber: 4)
     } }()
+    try { if let v = self._osVersion {
+      try visitor.visitSingularStringField(value: v, fieldNumber: 5)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -8369,6 +8385,7 @@ extension ConnectionInit: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
     if lhs._buildNumber != rhs._buildNumber {return false}
     if lhs._layer != rhs._layer {return false}
     if lhs._clientVersion != rhs._clientVersion {return false}
+    if lhs._osVersion != rhs._osVersion {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

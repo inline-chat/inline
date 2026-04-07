@@ -8,15 +8,16 @@ import { eq } from "drizzle-orm"
 setupTestLifecycle()
 
 describe("handleConnectionInit", () => {
-  test("ignores invalid client version without warning and falls back to build number", async () => {
+  test("falls back to build number and stores valid os version", async () => {
     const user = await testUtils.createUser("connection-init@test.com")
-    const { token, session } = await testUtils.createSessionForUser(user.id, { clientType: "ios" })
+    const { token, session } = await testUtils.createSessionForUser(user.id, { clientType: "macos" })
 
     await handleConnectionInit(
       {
         token,
         clientVersion: "unknown",
         buildNumber: 123,
+        osVersion: "15.2.1",
         layer: 2,
       },
       {
@@ -29,12 +30,13 @@ describe("handleConnectionInit", () => {
     )
 
     const updatedSession = await db
-      .select({ clientVersion: sessions.clientVersion })
+      .select({ clientVersion: sessions.clientVersion, osVersion: sessions.osVersion })
       .from(sessions)
       .where(eq(sessions.id, session.id))
       .limit(1)
       .then((rows) => rows[0])
 
     expect(updatedSession?.clientVersion).toBe("123")
+    expect(updatedSession?.osVersion).toBe("15.2.1")
   })
 })

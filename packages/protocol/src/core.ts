@@ -81,6 +81,12 @@ export interface ConnectionInit {
      * @generated from protobuf field: optional string client_version = 4;
      */
     clientVersion?: string;
+    /**
+     * OS version (semver)
+     *
+     * @generated from protobuf field: optional string os_version = 5;
+     */
+    osVersion?: string;
 }
 /**
  * @generated from protobuf message ServerProtocolMessage
@@ -5558,7 +5564,8 @@ class ConnectionInit$Type extends MessageType<ConnectionInit> {
             { no: 1, name: "token", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 2, name: "build_number", kind: "scalar", opt: true, T: 5 /*ScalarType.INT32*/ },
             { no: 3, name: "layer", kind: "scalar", opt: true, T: 13 /*ScalarType.UINT32*/ },
-            { no: 4, name: "client_version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
+            { no: 4, name: "client_version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "os_version", kind: "scalar", opt: true, T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<ConnectionInit>): ConnectionInit {
@@ -5585,6 +5592,9 @@ class ConnectionInit$Type extends MessageType<ConnectionInit> {
                 case /* optional string client_version */ 4:
                     message.clientVersion = reader.string();
                     break;
+                case /* optional string os_version */ 5:
+                    message.osVersion = reader.string();
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -5609,6 +5619,9 @@ class ConnectionInit$Type extends MessageType<ConnectionInit> {
         /* optional string client_version = 4; */
         if (message.clientVersion !== undefined)
             writer.tag(4, WireType.LengthDelimited).string(message.clientVersion);
+        /* optional string os_version = 5; */
+        if (message.osVersion !== undefined)
+            writer.tag(5, WireType.LengthDelimited).string(message.osVersion);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);

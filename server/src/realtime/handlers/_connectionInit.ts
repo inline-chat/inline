@@ -16,7 +16,7 @@ export const handleConnectionInit = async (
 ): Promise<ConnectionOpen> => {
   // user still unauthenticated here.
 
-  let { token, buildNumber, layer, clientVersion } = init
+  let { token, buildNumber, layer, clientVersion, osVersion } = init
   let userIdFromToken = await getUserIdFromToken(token)
 
   log.debug(
@@ -30,24 +30,25 @@ export const handleConnectionInit = async (
     buildNumber,
     "clientVersion",
     clientVersion,
+    "osVersion",
+    osVersion,
   )
 
-  if (clientVersion) {
-    if (validateUpToFourSegementSemver(clientVersion)) {
-      storeClientVersion(userIdFromToken.sessionId, userIdFromToken.userId, clientVersion).catch((error) => {
-        log.error("Failed to store client version", error)
-      })
-    } else {
-      if (buildNumber) {
-        storeBuildNumber(userIdFromToken.sessionId, userIdFromToken.userId, buildNumber).catch((error) => {
-          log.error("Failed to store build number", error)
-        })
-      }
-    }
-  } else if (buildNumber) {
-    // Save build number to session
-    storeBuildNumber(userIdFromToken.sessionId, userIdFromToken.userId, buildNumber).catch((error) => {
-      log.error("Failed to store build number", error)
+  const nextClientVersion = validateUpToFourSegementSemver(clientVersion ?? "")
+    ? clientVersion
+    : buildNumber
+      ? buildNumber.toString()
+      : undefined
+  const nextOsVersion = validateUpToFourSegementSemver(osVersion ?? "") ? osVersion : undefined
+
+  if (nextClientVersion || nextOsVersion) {
+    storeSessionInfo(
+      userIdFromToken.sessionId,
+      userIdFromToken.userId,
+      nextClientVersion,
+      nextOsVersion,
+    ).catch((error) => {
+      log.error("Failed to store session client metadata", error)
     })
   }
 
@@ -62,16 +63,11 @@ export const handleConnectionInit = async (
   return {}
 }
 
-async function storeBuildNumber(sessionId: number, userId: number, buildNumber: number) {
-  await db
-    .update(sessions)
-    .set({ clientVersion: buildNumber.toString() })
-    .where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId)))
-}
+async function storeSessionInfo(sessionId: number, userId: number, clientVersion?: string, osVersion?: string) {
+  const values: { clientVersion?: string; osVersion?: string } = {}
+  if (clientVersion) values.clientVersion = clientVersion
+  if (osVersion) values.osVersion = osVersion
+  if (!Object.keys(values).length) return
 
-async function storeClientVersion(sessionId: number, userId: number, clientVersion: string) {
-  await db
-    .update(sessions)
-    .set({ clientVersion })
-    .where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId)))
+  await db.update(sessions).set(values).where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId)))
 }
