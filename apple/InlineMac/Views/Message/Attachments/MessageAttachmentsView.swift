@@ -37,7 +37,7 @@ class MessageAttachmentsView: NSStackView {
 
   // MARK: - Internals
 
-  private var log = Log.scoped("MessageAttachmentsView", enableTracing: true)
+  private var log = Log.scoped("MessageAttachmentsView", enableTracing: false)
 
   // MARK: - Methods
 

@@ -10,7 +10,7 @@ import { Log, LogLevel } from "@in/server/utils/log"
 import { eq } from "drizzle-orm"
 import { getMessageRepliesMap } from "@in/server/modules/subthreads"
 
-const log = new Log("Sync", LogLevel.TRACE)
+const log = new Log("Sync", LogLevel.DEBUG)
 
 export const Sync = {
   getUpdates: getUpdates,
