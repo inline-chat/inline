@@ -1,13 +1,24 @@
 import { Log } from "@in/server/utils/log"
-import { API_BASE_URL, INLINE_ALERTS_BOT_TOKEN, INLINE_ALERTS_CHAT_ID, TELEGRAM_ALERTS_CHAT_ID, TELEGRAM_TOKEN } from "@in/server/env"
+import {
+  API_BASE_URL,
+  INLINE_ALERTS_BOT_TOKEN,
+  INLINE_ALERTS_CHAT_ID,
+  TELEGRAM_ALERTS_CHAT_ID,
+  TELEGRAM_TOKEN,
+  isDev,
+} from "@in/server/env"
+
+const shouldSendAlerts = () => !isDev
 
 export const sendBotEvent = (text: string) => {
+  if (!shouldSendAlerts()) return
   // Fire-and-forget. These notifications are best-effort and should never affect the caller.
   void sendTelegramBotEvent(text)
   void sendInlineBotEvent(text)
 }
 
 export const sendInlineOnlyBotEvent = (text: string) => {
+  if (!shouldSendAlerts()) return
   // Internal alerts path: avoid forwarding sensitive admin details to third-party channels.
   void sendInlineBotEvent(text)
 }
