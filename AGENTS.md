@@ -115,6 +115,7 @@
 - Encrypt user-sensitive data at rest using existing patterns (`src/modules/encryption/encryption2.ts`).
 - Backend checks from `server/`: `bun test`, `bun run lint`, `bun run typecheck`.
 - User data integrity and correctness must be considered during shutdown, DB downtime, burst requests, and such.
+- Don't run the server dev server without explicitly being asked.
 
 ## Web & Docs
 
@@ -133,6 +134,10 @@
 - Cookies: `httpOnly`, `secure` in production, `sameSite: "strict"`, scoped to admin API domain.
 - Rate-limit auth flows; never expose decrypted secrets to clients.
 - Admin metrics should exclude deleted users and bots by default.
+
+## OpenClaw plugin
+
+- When asked to do a test build: Build the package, replace dist of local openclaw installation plugin with the dist, restart gateway, confirm it's healthy, ask to try.
 
 ## Glossary
 
