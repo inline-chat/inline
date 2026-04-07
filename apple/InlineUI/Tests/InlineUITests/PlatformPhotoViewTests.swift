@@ -21,12 +21,15 @@ struct PlatformPhotoViewTests {
     let view = PlatformPhotoView()
     view.frame = CGRect(x: 0, y: 0, width: 32, height: 32)
     view.showsTinyThumbnailBackground = true
+    let strippedBytes = Data(base64Encoded: "ARkoAAwDAQACEQMRAD8AqUUUV0mAUUUUAFFFFABRRRQAUUUUAFFFFAE=")
+    #expect(strippedBytes != nil)
+    guard let strippedBytes else { return }
 
     let photo = Photo(photoId: 42, format: .jpeg)
     let photoInfo = PhotoInfo(
       photo: photo,
       sizes: [
-        PhotoSize(photoId: 42, type: "s", width: 40, height: 30, size: 6, bytes: Data([1, 30, 40, 1, 2, 3])),
+        PhotoSize(photoId: 42, type: "s", width: 40, height: 30, size: Int64(strippedBytes.count), bytes: strippedBytes),
       ]
     )
 
