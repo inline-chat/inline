@@ -45,7 +45,7 @@ public struct DeleteChatTransaction: Transaction2 {
         try Dialog.deleteOne(db, key: dialogId)
 
         // Could also mark chat as deleted if we have a flag for that
-        if let chat = try Chat.getByPeerId(peerId: context.peerId) {
+        if let chat = try Chat.getByPeerId(db: db, peerId: context.peerId) {
           // Note: This is optimistic - if the server fails, this will be reverted
           try Chat.deleteOne(db, key: chat.id)
         }

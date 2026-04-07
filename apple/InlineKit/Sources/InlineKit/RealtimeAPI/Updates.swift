@@ -373,7 +373,7 @@ extension InlineProtocol.UpdateDeleteMessages {
   }
 
   func apply(_ db: Database, publishChanges: Bool) throws {
-    guard let chat = try Chat.getByPeerId(peerId: peerID.toPeer()) else {
+    guard let chat = try Chat.getByPeerId(db: db, peerId: peerID.toPeer()) else {
       Log.shared.error("Failed to find chat for peer \(peerID.toPeer())")
       return
     }
@@ -885,7 +885,7 @@ extension InlineProtocol.UpdateChatMoved {
 extension InlineProtocol.UpdatePinnedMessages {
   func apply(_ db: Database) throws {
     let peer = peerID.toPeer()
-    guard let chat = try Chat.getByPeerId(peerId: peer) else { return }
+    guard let chat = try Chat.getByPeerId(db: db, peerId: peer) else { return }
 
     do {
       try PinnedMessage.filter(Column("chatId") == chat.id).deleteAll(db)

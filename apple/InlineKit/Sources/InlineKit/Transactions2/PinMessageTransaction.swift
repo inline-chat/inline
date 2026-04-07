@@ -36,7 +36,7 @@ public struct PinMessageTransaction: Transaction2 {
   public func optimistic() async {
     do {
       try await AppDatabase.shared.dbWriter.write { db in
-        guard let chat = try Chat.getByPeerId(peerId: context.peer) else {
+        guard let chat = try Chat.getByPeerId(db: db, peerId: context.peer) else {
           log.warning("Failed to resolve chat for optimistic pin")
           return
         }

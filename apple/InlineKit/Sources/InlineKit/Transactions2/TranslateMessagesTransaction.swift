@@ -54,7 +54,7 @@ public struct TranslateMessagesTransaction: Transaction2 {
     do {
       try await AppDatabase.shared.dbWriter.write { db in
         // FIXME: see if we can get chatId from outside to save one query
-        guard let chat = try Chat.getByPeerId(peerId: peerId) else {
+        guard let chat = try Chat.getByPeerId(db: db, peerId: peerId) else {
           log.error("could not find chat")
           return
         }
