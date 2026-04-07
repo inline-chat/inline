@@ -91,7 +91,7 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   public static let shared = ApiClient()
   public init() {}
 
-  private let log = Log.scoped("ApiClient")
+  private let log = Log.scoped("ApiClient", level: .trace)
 
   public struct UploadTransferProgress: Sendable, Equatable {
     public let bytesSent: Int64
@@ -153,6 +153,54 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
   public var baseURL: String { Self.baseURL }
 
   private let decoder = JSONDecoder()
+  private let maxLoggedErrorBodyLength = 2_000
+
+  private func parseAPIError(_ data: Data) -> APIError? {
+    guard !data.isEmpty else {
+      return nil
+    }
+
+    if let apiResponse = try? decoder.decode(APIResponse<EmptyPayload>.self, from: data),
+       case let .error(error, errorCode, description) = apiResponse
+    {
+      return APIError.error(error: error, errorCode: errorCode, description: description)
+    }
+
+    return nil
+  }
+
+  private func formatErrorBody(_ data: Data) -> String {
+    guard !data.isEmpty else {
+      return "<empty>"
+    }
+
+    guard let body = String(data: data, encoding: .utf8)?
+      .trimmingCharacters(in: .whitespacesAndNewlines),
+      !body.isEmpty
+    else {
+      return "<non-utf8 body: \(data.count) bytes>"
+    }
+
+    if body.count <= maxLoggedErrorBodyLength {
+      return body
+    }
+
+    let endIdx = body.index(body.startIndex, offsetBy: maxLoggedErrorBodyLength)
+    return "\(body[..<endIdx])… (truncated, \(body.count) chars)"
+  }
+
+  private func logHTTPError(
+    method: String,
+    url: URL,
+    response: HTTPURLResponse,
+    data: Data
+  ) {
+    let requestId = response.value(forHTTPHeaderField: "x-request-id")
+      ?? response.value(forHTTPHeaderField: "X-Request-Id")
+      ?? "n/a"
+    let body = formatErrorBody(data)
+    log.error("HTTP \(response.statusCode) \(method) \(url.absoluteString) requestId=\(requestId) body=\(body)")
+  }
 
   private func request<T: Decodable & Sendable>(
     _ path: Path,
@@ -198,6 +246,22 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
         case 429:
           throw APIError.rateLimited
         default:
+          if let apiError = parseAPIError(data) {
+            logHTTPError(
+              method: request.httpMethod ?? "GET",
+              url: url,
+              response: httpResponse,
+              data: data
+            )
+            throw apiError
+          }
+
+          logHTTPError(
+            method: request.httpMethod ?? "GET",
+            url: url,
+            response: httpResponse,
+            data: data
+          )
           throw APIError.httpError(statusCode: httpResponse.statusCode)
       }
     } catch let decodingError as DecodingError {
@@ -248,6 +312,22 @@ public final class ApiClient: ObservableObject, @unchecked Sendable {
         case 429:
           throw APIError.rateLimited
         default:
+          if let apiError = parseAPIError(data) {
+            logHTTPError(
+              method: request.httpMethod ?? "POST",
+              url: url,
+              response: httpResponse,
+              data: data
+            )
+            throw apiError
+          }
+
+          logHTTPError(
+            method: request.httpMethod ?? "POST",
+            url: url,
+            response: httpResponse,
+            data: data
+          )
           throw APIError.httpError(statusCode: httpResponse.statusCode)
       }
     } catch let decodingError as DecodingError {
