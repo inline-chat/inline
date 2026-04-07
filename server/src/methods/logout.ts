@@ -7,6 +7,7 @@ import { type Static, Type } from "@sinclair/typebox"
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import { connectionManager } from "../ws/connections"
 import { BotAlerts } from "@in/server/modules/bot-events/alerts"
+import { SessionsModel } from "@in/server/db/models/sessions"
 
 export const Input = Type.Object({})
 
@@ -17,10 +18,23 @@ export const handler = async (
   context: HandlerContext,
 ): Promise<Static<typeof Response>> => {
   try {
+    const session = await SessionsModel.getById(context.currentSessionId).catch(() => null)
+
     await db.delete(sessions).where(eq(sessions.id, context.currentSessionId))
 
     // Best-effort internal alert (should never affect the user action).
-    BotAlerts.logout({ userId: context.currentUserId })
+    BotAlerts.logout({
+      userId: context.currentUserId,
+      device: session
+        ? {
+            deviceName: session.personalData.deviceName,
+            deviceId: session.deviceId,
+            clientType: session.clientType,
+            clientVersion: session.clientVersion,
+            osVersion: session.osVersion,
+          }
+        : undefined,
+    })
 
     setTimeout(() => {
       connectionManager.sessionLoggedOut(context.currentUserId, context.currentSessionId)
