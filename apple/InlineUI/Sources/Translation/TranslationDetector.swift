@@ -26,7 +26,7 @@ public final class TranslationDetector: @unchecked Sendable {
     public let detectedLanguages: [(language: String, confidence: Double)]
   }
 
-  private let log = Log.scoped("TranslationDetector")
+  private let log = Log.scoped("TranslationDetector", level: .info)
   private let publisher = PassthroughSubject<DetectionResult, Never>()
 
   private init() {}
@@ -44,7 +44,7 @@ public final class TranslationDetector: @unchecked Sendable {
       TranslationAlertDismiss.shared.isDismissedForPeer(peer)
     }
     if isDismissed {
-      log.debug("Translation alert dismissed for peer: \(peer.id)")
+      log.trace("Translation alert dismissed for peer: \(peer.id)")
       return
     }
 
@@ -76,8 +76,8 @@ public final class TranslationDetector: @unchecked Sendable {
 
         // If we found a message in a different language, stop and publish true
         if hypotheses.contains(where: { $0.language != userLanguage }) {
-          self.log.debug("Found message in different language: \(hypotheses)")
-          self.log.debug("Translation needed: true")
+          self.log.trace("Found message in different language: \(hypotheses)")
+          self.log.trace("Translation needed: true")
 
           let result = DetectionResult(
             peer: peerSnapshot,
@@ -94,8 +94,8 @@ public final class TranslationDetector: @unchecked Sendable {
       }
 
       // If we get here, all messages were in the user's language
-      self.log.debug("All messages in user's language")
-      self.log.debug("Translation needed: false")
+      self.log.trace("All messages in user's language")
+      self.log.trace("Translation needed: false")
 
       let result = DetectionResult(
         peer: peerSnapshot,

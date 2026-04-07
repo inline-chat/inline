@@ -12,6 +12,7 @@ class DocumentView: UIView {
   private var fullMessage: FullMessage?
   private var outgoing: Bool
   private var isBeingRemoved = false
+  private static let log = Log.scoped("DocumentView", level: .info)
 
 
   enum DocumentState: Equatable {
@@ -87,7 +88,7 @@ class DocumentView: UIView {
        message.status == .sending,
        message.documentId != nil
     {
-      Log.shared.debug("📤 Message is sending with document - setting uploading state")
+      Self.log.trace("📤 Message is sending with document - setting uploading state")
       documentState = .uploading(bytesSent: 0, totalBytes: Int64(document?.size ?? 0))
       startMonitoringUploadProgress()
     }
@@ -459,7 +460,7 @@ class DocumentView: UIView {
             self.documentState = .locallyAvailable
 
           case let .failure(error):
-            Log.shared.error("Document download failed:", error: error)
+            Self.log.error("Document download failed:", error: error)
             self.documentState = .needsDownload
         }
       }
@@ -481,7 +482,7 @@ class DocumentView: UIView {
 
   func cancelUpload() {
     if case .uploading = documentState {
-      Log.shared.debug("Upload cancellation requested - cancelling message transaction")
+      Self.log.trace("Upload cancellation requested - cancelling message transaction")
 
       // Mark as being removed to prevent further interactions
       isBeingRemoved = true
@@ -491,7 +492,7 @@ class DocumentView: UIView {
          let transactionId = message.transactionId,
          !transactionId.isEmpty
       {
-        Log.shared.debug("Canceling message with transaction ID: \(transactionId)")
+        Self.log.trace("Canceling message with transaction ID: \(transactionId)")
         Transactions.shared.cancel(transactionId: transactionId)
 
         // Delete the message from the database
@@ -514,7 +515,7 @@ class DocumentView: UIView {
         // Don't immediately remove the view - let MessagesPublisher handle the UI updates
         // The message collection view will properly remove the entire message cell
       } else {
-        Log.shared.warning("No transaction ID found for message - cannot cancel upload")
+        Self.log.warning("No transaction ID found for message - cannot cancel upload")
       }
 
       hideUploadingSpinner()
@@ -525,34 +526,31 @@ class DocumentView: UIView {
   }
 
   func openFile() {
-    Log.shared.debug("📄 openFile() called")
+    Self.log.trace("📄 openFile() called")
 
     guard
       let document,
       let localPath = document.localPath
     else {
-      Log.shared
-        .error(
+      Self.log.error(
           "📄 Cannot open document: No local path available - document: \(document?.fileName ?? "nil"), localPath: \(document?.localPath ?? "nil")"
         )
       return
     }
 
-    Log.shared
-      .debug(
+    Self.log.trace(
         "📄 Document details - fileName: \(document.fileName ?? "unknown"), localPath: \(localPath), size: \(document.size ?? 0)"
       )
 
     let cacheDirectory = FileHelpers.getLocalCacheDirectory(for: .documents)
     let fileURL = cacheDirectory.appendingPathComponent(localPath)
 
-    Log.shared.debug("📄 Full file path: \(fileURL.path)")
-    Log.shared.debug("📄 Cache directory: \(cacheDirectory.path)")
+    Self.log.trace("📄 Full file path: \(fileURL.path)")
+    Self.log.trace("📄 Cache directory: \(cacheDirectory.path)")
 
     guard FileManager.default.fileExists(atPath: fileURL.path) else {
-      Log.shared.error("📄 File does not exist at path: \(fileURL.path)")
-      Log.shared
-        .debug("📄 Directory contents: \(try? FileManager.default.contentsOfDirectory(atPath: cacheDirectory.path))")
+      Self.log.error("📄 File does not exist at path: \(fileURL.path)")
+      Self.log.trace("📄 Directory contents: \(try? FileManager.default.contentsOfDirectory(atPath: cacheDirectory.path))")
       documentState = .needsDownload
       return
     }
@@ -560,9 +558,9 @@ class DocumentView: UIView {
     // Get file attributes for debugging
     do {
       let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
-      Log.shared.debug("📄 File attributes: \(attributes)")
+      Self.log.trace("📄 File attributes: \(attributes)")
     } catch {
-      Log.shared.error("📄 Failed to get file attributes: \(error)")
+      Self.log.error("📄 Failed to get file attributes: \(error)")
     }
 
     documentURL = fileURL
@@ -572,29 +570,28 @@ class DocumentView: UIView {
     let problematicExtensions = ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx"]
 
     if problematicExtensions.contains(fileExtension) {
-      Log.shared
-        .debug("📄 File type .\(fileExtension) may cause QuickLook crashes - using UIDocumentInteractionController")
+      Self.log.trace("📄 File type .\(fileExtension) may cause QuickLook crashes - using UIDocumentInteractionController")
       openWithDocumentInteraction(fileURL: fileURL)
       return
     }
 
-    Log.shared.debug("📄 About to check QLPreviewController.canPreview for: \(fileURL)")
+    Self.log.trace("📄 About to check QLPreviewController.canPreview for: \(fileURL)")
 
     // Check if QuickLook can preview this file
     let canPreview = QLPreviewController.canPreview(fileURL as QLPreviewItem)
-    Log.shared.debug("📄 QLPreviewController.canPreview result: \(canPreview)")
+    Self.log.trace("📄 QLPreviewController.canPreview result: \(canPreview)")
 
     if canPreview {
-      Log.shared.debug("📄 Using QuickLook for preview")
+      Self.log.trace("📄 Using QuickLook for preview")
       openWithQuickLook(fileURL: fileURL)
     } else {
-      Log.shared.debug("📄 QuickLook can't preview, using UIDocumentInteractionController")
+      Self.log.trace("📄 QuickLook can't preview, using UIDocumentInteractionController")
       openWithDocumentInteraction(fileURL: fileURL)
     }
   }
 
   private func openWithQuickLook(fileURL: URL) {
-    Log.shared.debug("📄 openWithQuickLook() called for: \(fileURL)")
+    Self.log.trace("📄 openWithQuickLook() called for: \(fileURL)")
 
     let previewController = QLPreviewController()
     previewController.dataSource = self
@@ -602,19 +599,19 @@ class DocumentView: UIView {
     self.previewController = previewController
 
     guard let viewController = findViewController() else {
-      Log.shared.error("📄 Cannot find view controller to present QuickLook preview")
-      Log.shared.debug("📄 Falling back to document interaction")
+      Self.log.error("📄 Cannot find view controller to present QuickLook preview")
+      Self.log.trace("📄 Falling back to document interaction")
       openWithDocumentInteraction(fileURL: fileURL)
       return
     }
 
-    Log.shared.debug("📄 Found view controller: \(type(of: viewController))")
-    Log.shared.debug("📄 About to present QLPreviewController")
+    Self.log.trace("📄 Found view controller: \(type(of: viewController))")
+    Self.log.trace("📄 About to present QLPreviewController")
 
     DispatchQueue.main.async {
-      Log.shared.debug("📄 Presenting QLPreviewController on main thread")
+      Self.log.trace("📄 Presenting QLPreviewController on main thread")
       viewController.present(previewController, animated: true) {
-        Log.shared.debug("📄 QLPreviewController presentation completed")
+        Self.log.trace("📄 QLPreviewController presentation completed")
       }
     }
   }
@@ -625,20 +622,20 @@ class DocumentView: UIView {
     self.documentInteractionController = documentInteractionController
 
     guard let viewController = findViewController() else {
-      Log.shared.error("Cannot find view controller to present document interaction")
+      Self.log.error("Cannot find view controller to present document interaction")
       return
     }
 
     // Try to present preview first
     if documentInteractionController.presentPreview(animated: true) {
-      Log.shared.debug("Presented document preview using UIDocumentInteractionController")
+      Self.log.trace("Presented document preview using UIDocumentInteractionController")
     } else {
       // If preview fails, show options menu
       let rect = bounds
       if documentInteractionController.presentOptionsMenu(from: rect, in: self, animated: true) {
-        Log.shared.debug("Presented document options menu using UIDocumentInteractionController")
+        Self.log.trace("Presented document options menu using UIDocumentInteractionController")
       } else {
-        Log.shared.error("Failed to present document using UIDocumentInteractionController")
+        Self.log.error("Failed to present document using UIDocumentInteractionController")
         showDocumentError()
       }
     }
@@ -709,7 +706,7 @@ class DocumentView: UIView {
     let fallbackTotalBytes = Int64(document.size ?? 0)
 
     guard let localDocumentId = document.id else {
-      Log.shared.warning("Document upload progress unavailable without local document ID")
+      Self.log.warning("Document upload progress unavailable without local document ID")
       DispatchQueue.main.async { [weak self] in
         self?.updateUploadProgress(bytesSent: 0, totalBytes: fallbackTotalBytes)
       }
@@ -791,12 +788,12 @@ class DocumentView: UIView {
       .sink { [weak self] progress in
         guard let self else { return }
 
-        Log.shared.debug("📄 Document \(documentId) progress: \(progress)")
+        Self.log.trace("📄 Document \(documentId) progress: \(progress)")
 
         if progress.isComplete {
           documentState = .locallyAvailable
         } else if let error = progress.error {
-          Log.shared.error("Document download failed:", error: error)
+          Self.log.error("Document download failed:", error: error)
           documentState = .needsDownload
         } else if FileDownloader.shared.isDocumentDownloadActive(documentId: documentId) {
           documentState = .downloading(
@@ -826,8 +823,7 @@ class DocumentView: UIView {
     let notificationDocumentId = notification.userInfo?["documentId"] as? Int64
     let currentDocumentId = document?.id
 
-    Log.shared
-      .debug(
+    Self.log.trace(
         "📤 Upload notification received - notification ID: \(notificationDocumentId ?? -1), current ID: \(currentDocumentId ?? -1)"
       )
 
@@ -835,11 +831,11 @@ class DocumentView: UIView {
           let document,
           document.id == documentId
     else {
-      Log.shared.debug("📤 Upload notification ignored - IDs don't match")
+      Self.log.trace("📤 Upload notification ignored - IDs don't match")
       return
     }
 
-    Log.shared.debug("📤 Document upload started for document ID: \(documentId)")
+    Self.log.trace("📤 Document upload started for document ID: \(documentId)")
     DispatchQueue.main.async { [weak self] in
       self?.setUploadingState()
     }
@@ -851,7 +847,7 @@ class DocumentView: UIView {
           document.id == documentId
     else { return }
 
-    Log.shared.debug("Document upload completed for document ID: \(documentId)")
+    Self.log.trace("Document upload completed for document ID: \(documentId)")
     DispatchQueue.main.async { [weak self] in
       self?.completeUpload()
     }
@@ -864,7 +860,7 @@ class DocumentView: UIView {
     else { return }
 
     let error = notification.userInfo?["error"] as? Error
-    Log.shared.error("Document upload failed for document ID: \(documentId)", error: error)
+    Self.log.error("Document upload failed for document ID: \(documentId)", error: error)
     DispatchQueue.main.async { [weak self] in
       self?.failUpload()
     }
@@ -877,14 +873,14 @@ class DocumentView: UIView {
     else { return }
 
     let newStatus = notification.userInfo?["status"] as? MessageSendingStatus
-    Log.shared.debug("📤 Message status changed for message \(messageId): \(String(describing: newStatus))")
+    Self.log.trace("📤 Message status changed for message \(messageId): \(String(describing: newStatus))")
 
     // If message is no longer sending and has document, complete upload
     if newStatus != .sending,
        fullMessage.message.documentId != nil,
        case .uploading = documentState
     {
-      Log.shared.debug("📤 Message no longer sending - completing upload")
+      Self.log.trace("📤 Message no longer sending - completing upload")
       DispatchQueue.main.async { [weak self] in
         self?.completeUpload()
       }
@@ -966,21 +962,21 @@ extension DocumentView {
 
 extension DocumentView: QLPreviewControllerDataSource, QLPreviewControllerDelegate {
   func numberOfPreviewItems(in controller: QLPreviewController) -> Int {
-    Log.shared.debug("📄 numberOfPreviewItems called - returning: \(documentURL != nil ? 1 : 0)")
+    Self.log.trace("📄 numberOfPreviewItems called - returning: \(documentURL != nil ? 1 : 0)")
     return documentURL != nil ? 1 : 0
   }
 
   func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
-    Log.shared.debug("📄 previewItemAt index: \(index) - URL: \(documentURL?.path ?? "nil")")
+    Self.log.trace("📄 previewItemAt index: \(index) - URL: \(documentURL?.path ?? "nil")")
     guard let documentURL else {
-      Log.shared.error("📄 No documentURL available for preview item")
+      Self.log.error("📄 No documentURL available for preview item")
       fatalError("No document URL available")
     }
     return documentURL as QLPreviewItem
   }
 
   func previewControllerDidDismiss(_ controller: QLPreviewController) {
-    Log.shared.debug("📄 previewControllerDidDismiss called")
+    Self.log.trace("📄 previewControllerDidDismiss called")
     previewController = nil
   }
 }

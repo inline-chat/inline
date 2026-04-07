@@ -36,7 +36,7 @@ public enum RealtimeAPIEvent: Sendable {
 public actor RealtimeAPI: Sendable {
   var transport: WebSocketTransport
   var msgQueue = MsgQueue()
-  var log = Log.scoped("Realtime_Core")
+  var log = Log.scoped("Realtime_Core", level: .info)
   var state: RunState = .paused
   var runTask: Task<Void, Never>?
   var stateChannel = AsyncChannel<Void>()
@@ -52,7 +52,7 @@ public actor RealtimeAPI: Sendable {
   private var rpcCalls: [UInt64: CheckedContinuation<RpcResult.OneOf_Result?, any Error>] = [:]
 
   public init() {
-    log.debug("initilized realtime core")
+    log.info("Initialized realtime core")
     transport = WebSocketTransport()
     sync = Sync()
     Task { [weak self] in
@@ -73,7 +73,7 @@ public actor RealtimeAPI: Sendable {
   public func start() async throws {
     guard !started else { return }
 
-    log.debug("starting realtime API")
+    log.info("Starting realtime API")
 
     guard let _ = Auth.shared.getToken() else {
       log.error("No token available")
@@ -94,7 +94,7 @@ public actor RealtimeAPI: Sendable {
 
   public func stopAndReset() async {
     guard started else { return }
-    log.debug("stopping and clearing realtime API")
+    log.info("Stopping and clearing realtime API")
     started = false
 
     // Clear message queue and pending RPC calls
@@ -130,7 +130,7 @@ public actor RealtimeAPI: Sendable {
     // Wait a moment to ensure all tasks have settled
     try? await Task.sleep(for: .milliseconds(100)) // 100ms
 
-    log.debug("stopped realtime API")
+    log.info("Stopped realtime API")
   }
 
   // MARK: - Runloop
@@ -174,25 +174,25 @@ public actor RealtimeAPI: Sendable {
 
   private func handleFailedMessageSend() {
     // trigger a reconnect?
-    log.debug("failed to send a message")
+    log.trace("failed to send a message")
   }
 
   private func pauseDelivery() async {
     guard state != .paused else { return }
     state = .paused
     await stateChannel.send(())
-    log.debug("paused")
+    log.trace("paused")
   }
 
   private func resumeDelivery() async {
     guard state != .flowing else { return }
     state = .flowing
     await stateChannel.send(())
-    log.debug("flowing")
+    log.trace("flowing")
   }
 
   private func authenticate() async {
-    log.debug("authenticating")
+    log.trace("authenticating")
     // Send connection init
     do {
       guard let token = Auth.shared.getToken() else {
@@ -200,7 +200,7 @@ public actor RealtimeAPI: Sendable {
         throw RealtimeAPIError.notAuthorized
       }
       // Do not log the token (sensitive).
-      log.debug("sending connection init")
+    log.trace("sending connection init")
       let msg = wrapMessage(body: .connectionInit(.with {
         $0.token = token
         $0.buildNumber = getBuildNumber()
@@ -231,7 +231,7 @@ extension RealtimeAPI {
     .OneOf_Result?
   {
     if state == .paused, discardIfNotConnected {
-      log.debug("flowing paused, discarding")
+    log.trace("flowing paused, discarding")
       throw RealtimeAPIError.notConnected
     }
 
@@ -240,7 +240,7 @@ extension RealtimeAPI {
       $0.input = input
     }))
 
-    log.debug("invoking method: \(method)")
+    log.trace("invoking method: \(method)")
 
     return try await withCheckedThrowingContinuation { continuation in
       rpcCalls[message.id] = continuation
@@ -286,7 +286,7 @@ extension RealtimeAPI {
 
 extension RealtimeAPI {
   private func setUpTransport() async {
-    log.debug("setting up transport")
+    log.trace("setting up transport")
     await transport.addStateObserver { [weak self] state, networkAvailable in
       Task { [weak self] in
         await self?.transportStateChanged(state: state, networkAvailable: networkAvailable)
@@ -321,7 +321,7 @@ extension RealtimeAPI {
   }
 
   private func transportMessageReceived(message: ServerProtocolMessage) async {
-    log.debug("received message")
+    log.trace("received message")
     switch message.body {
       case .connectionOpen:
         log.info("Connection established")

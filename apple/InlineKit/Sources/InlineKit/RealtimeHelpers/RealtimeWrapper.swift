@@ -18,7 +18,7 @@ public final actor Realtime: Sendable {
   public static let shared = Realtime()
 
   private let db = AppDatabase.shared
-  private let log = Log.scoped("RealtimeWrapper", enableTracing: false)
+  private let log = Log.scoped("RealtimeWrapper", level: .info)
   private var api: RealtimeAPI
   private var eventsTask: Task<Void, Never>?
   private var started = false
@@ -46,7 +46,7 @@ public final actor Realtime: Sendable {
         if isLoggedIn {
           DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             Task {
-              self?.log.debug("user logged in, starting realtime")
+              self?.log.info("User logged in, starting realtime")
               await self?.ensureStarted()
             }
           }
@@ -72,7 +72,7 @@ public final actor Realtime: Sendable {
   }
 
   public func start() {
-    log.debug("Starting realtime connection")
+    log.info("Starting realtime connection")
 
     // Init
     // updates = UpdatesEngine()
@@ -87,7 +87,7 @@ public final actor Realtime: Sendable {
       guard let self else { return }
       for await event in await api.eventsChannel {
         guard !Task.isCancelled else { break }
-        log.debug("Received api event: \(event)")
+        log.trace("Received api event: \(event)")
         switch event {
           case let .stateUpdate(state):
             Task { @MainActor in
@@ -106,7 +106,7 @@ public final actor Realtime: Sendable {
     Task {
       do {
         try await api.start()
-        log.debug("Realtime API started successfully")
+        log.info("Realtime API started successfully")
       } catch {
         log.error("Error starting realtime", error: error)
 
@@ -137,7 +137,7 @@ public final actor Realtime: Sendable {
   }
 
   public func loggedOut() {
-    log.debug("User logged out, stopping realtime")
+    log.info("User logged out, stopping realtime")
 
     // Reset state on main actor first
     Task { @MainActor in
@@ -153,7 +153,7 @@ public final actor Realtime: Sendable {
     Task {
       await api.stopAndReset()
     }
-    log.debug("Realtime API stopped after logout")
+    log.info("Realtime API stopped after logout")
   }
 }
 

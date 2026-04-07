@@ -8,7 +8,7 @@ class ComposeTextEditor: NSView {
 
   public let scrollView: ComposeScrollView
   public let textView: ComposeNSTextView
-  private let log = Log.scoped("ComposeTextEditor", enableTracing: false)
+  private let log = Log.scoped("ComposeTextEditor", level: .info)
 
   // MARK: - Theme
 
@@ -185,7 +185,7 @@ class ComposeTextEditor: NSView {
 
     configureTextContainer()
     let hasTextKit2 = textView.textLayoutManager != nil
-    log.debug("Compose text engine: textKit2=\(hasTextKit2), textKit1LayoutManager=\(textView.layoutManager != nil)")
+    log.trace("Compose text engine: textKit2=\(hasTextKit2), textKit1LayoutManager=\(textView.layoutManager != nil)")
     if !hasTextKit2 {
       log.error("Compose text view is not using TextKit 2")
     }
@@ -379,7 +379,7 @@ class ComposeTextEditor: NSView {
         (minHeight - lineHeight) / 2 :
         verticalPadding
     )
-    log.debug("Updating text view insets: \(newInsets)")
+    log.trace("Updating text view insets: \(newInsets)")
 
     textView.textContainerInset = newInsets
 

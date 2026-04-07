@@ -9,7 +9,7 @@ import SwiftUI
 class MainWindowController: NSWindowController, NSWindowDelegate {
   private var dependencies: AppDependencies
   private var keyMonitor: KeyMonitor
-  private var log = Log.scoped("MainWindowController")
+  private var log = Log.scoped("MainWindowController", level: .info)
 
   private var nav2: Nav2 = .init()
 
@@ -118,7 +118,7 @@ class MainWindowController: NSWindowController, NSWindowDelegate {
   }
 
   private func setupMainSplitView() {
-    log.debug("Setting up main split view")
+    log.info("Setting up main split view")
 
     autoCollapsedSidebar = false
     window?.isMovableByWindowBackground = false
@@ -163,11 +163,11 @@ class MainWindowController: NSWindowController, NSWindowDelegate {
   private var cancellables: Set<AnyCancellable> = []
   private func subscribe() {
     dependencies.viewModel.$topLevelRoute.receive(on: DispatchQueue.main).sink { route in
-      self.log.debug("Top level route changed: \(route)")
+      self.log.trace("Top level route changed: \(route)")
 
       // Prevent re-open
       if route == self.currentTopLevelRoute {
-        self.log.debug("Skipped top level change")
+        self.log.trace("Skipped top level change")
         return
       }
       DispatchQueue.main.async {
@@ -330,7 +330,7 @@ class MainWindowController: NSWindowController, NSWindowDelegate {
 class LegacyMainWindowController: NSWindowController {
   private var dependencies: AppDependencies
   private var keyMonitor: KeyMonitor
-  private var log = Log.scoped("LegacyMainWindowController")
+  private var log = Log.scoped("LegacyMainWindowController", level: .info)
 
   private var topLevelRoute: TopLevelRoute {
     dependencies.viewModel.topLevelRoute
@@ -428,7 +428,7 @@ class LegacyMainWindowController: NSWindowController {
   }
 
   private func setupMainSplitView() {
-    log.debug("Setting up main split view")
+    log.info("Setting up main split view")
 
     // re-add rootData so it has fresh user ID
     dependencies.rootData = RootData(db: dependencies.database, auth: dependencies.auth)
@@ -492,11 +492,11 @@ class LegacyMainWindowController: NSWindowController {
   private var cancellables: Set<AnyCancellable> = []
   private func subscribe() {
     dependencies.viewModel.$topLevelRoute.receive(on: DispatchQueue.main).sink { route in
-      self.log.debug("Top level route changed: \(route)")
+      self.log.trace("Top level route changed: \(route)")
 
       // Prevent re-open
       if route == self.currentTopLevelRoute {
-        self.log.debug("Skipped top level change")
+        self.log.trace("Skipped top level change")
         return
       }
       DispatchQueue.main.async {

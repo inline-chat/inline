@@ -98,7 +98,7 @@ struct Nav2Entry: Codable {
 
 /// Manages navigation per window
 @Observable class Nav2 {
-  @ObservationIgnored private let log = Log.scoped("Nav2", enableTracing: false)
+  @ObservationIgnored private let log = Log.scoped("Nav2", level: .info)
   @ObservationIgnored private var saveStateTask: Task<Void, Never>?
   @ObservationIgnored private let navigationSignpostLog = OSLog(subsystem: "InlineMac", category: "Navigation")
   @ObservationIgnored private var activeChatNavigation: (peer: Peer, id: OSSignpostID)?
@@ -401,7 +401,7 @@ struct Nav2Entry: Codable {
       let data = try encoder.encode(state)
       try data.write(to: stateFileURL)
     } catch {
-      Log.shared.error("Failed to save navigation state: \(error.localizedDescription)")
+      log.error("Failed to save navigation state: \(error.localizedDescription)")
     }
   }
 
@@ -417,9 +417,9 @@ struct Nav2Entry: Codable {
       tabs = state.tabs
       activeTabIndex = state.activeTabIndex
       normalizeState()
-      log.debug("Loaded nav state \(tabs.count) tabs, active \(activeTabIndex)")
+      log.info("Loaded nav state \(tabs.count) tabs, active \(activeTabIndex)")
     } catch {
-      Log.shared.error("Failed to load navigation state: \(error.localizedDescription)")
+      log.error("Failed to load navigation state: \(error.localizedDescription)")
       // If loading fails, reset to default state
       reset()
     }

@@ -8,6 +8,8 @@ public final class Analytics: Sendable {
 
   private init() {}
 
+  private static let log = Log.scoped("Analytics", level: .info)
+
   #if DEBUG
   static let debugBuild = true
   #else
@@ -38,7 +40,7 @@ public final class Analytics: Sendable {
   /// Starts Sentry
   public static func start() {
     if debugBuild, !runInDebugBuilds {
-      Log.shared.debug("Analytics: debug build, skipping start")
+      log.trace("Analytics: debug build, skipping start")
       return
     }
 
@@ -68,12 +70,12 @@ public final class Analytics: Sendable {
       }
     }
 
-    Log.shared.info("Analytics: starting")
+    log.info("Analytics: starting")
 
     // IF AUTHed
     if Auth.shared.getIsLoggedIn() {
       Task {
-        Log.shared.debug("Analytics: identifying user")
+        log.trace("Analytics: identifying user")
         await Self.identify()
       }
     }
@@ -96,13 +98,13 @@ public final class Analytics: Sendable {
       identify(userId: userId, email: nil, name: nil, username: nil)
     }
 
-    Log.shared.debug("Analytics: identified user")
+    log.trace("Analytics: identified user")
   }
 
   /// Clears the user from Sentry
   public static func logout() {
     SentrySDK.setUser(nil)
-    Log.shared.debug("Analytics: logged out")
+    log.trace("Analytics: logged out")
   }
 
   /// Identifies the user in Sentry
