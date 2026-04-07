@@ -660,6 +660,68 @@ Done!`)
       expect(result.text).toBe("one and two")
       expect(result.entities).toHaveLength(2)
     })
+
+    test("link URL supports nested parentheses", () => {
+      const result = parseMarkdown("[wiki](https://en.wikipedia.org/wiki/Function_(mathematics))")
+      expect(result.text).toBe("wiki")
+      expect(result.entities).toHaveLength(1)
+      expect(result.entities[0]!.type).toBe(MessageEntity_Type.TEXT_URL)
+      expect(result.entities[0]!.entity).toEqual({
+        oneofKind: "textUrl",
+        textUrl: { url: "https://en.wikipedia.org/wiki/Function_(mathematics)" },
+      })
+    })
+
+    test("link URL supports multiple nested parentheses", () => {
+      const result = parseMarkdown("[label](https://example.com/a(b(c)d)e)")
+      expect(result.text).toBe("label")
+      expect(result.entities).toHaveLength(1)
+      expect(result.entities[0]!.entity).toEqual({
+        oneofKind: "textUrl",
+        textUrl: { url: "https://example.com/a(b(c)d)e" },
+      })
+    })
+
+    test("unbalanced markdown link parentheses stay unchanged", () => {
+      const result = parseMarkdown("[label](https://example.com/a(b)")
+      expect(result.text).toBe("[label](https://example.com/a(b)")
+      expect(result.entities).toHaveLength(0)
+    })
+  })
+
+  describe("unicode and boundary edge cases", () => {
+    test("handles cjk text with markdown entities", () => {
+      const result = parseMarkdown("你好 **世界** [链接](https://example.com)")
+      expect(result.text).toBe("你好 世界 链接")
+      expect(result.entities).toHaveLength(2)
+      expect(result.entities[0]).toMatchObject({
+        type: MessageEntity_Type.BOLD,
+        offset: BigInt(3),
+        length: BigInt(2),
+      })
+      expect(result.entities[1]).toMatchObject({
+        type: MessageEntity_Type.TEXT_URL,
+        offset: BigInt(6),
+        length: BigInt(2),
+      })
+    })
+
+    test("handles emoji offsets correctly", () => {
+      const result = parseMarkdown("emoji 😀 **bold** end")
+      expect(result.text).toBe("emoji 😀 bold end")
+      expect(result.entities).toHaveLength(1)
+      expect(result.entities[0]).toMatchObject({
+        type: MessageEntity_Type.BOLD,
+        offset: BigInt(9),
+        length: BigInt(4),
+      })
+    })
+
+    test("underscore emphasis does not parse inside snake_case words", () => {
+      const result = parseMarkdown("foo_bar_baz")
+      expect(result.text).toBe("foo_bar_baz")
+      expect(result.entities).toHaveLength(0)
+    })
   })
 })
 

@@ -30,13 +30,16 @@ import type { HandlerContext } from "../controllers/helpers"
 import { getApnProvider } from "../libs/apn"
 import { SessionsModel } from "@in/server/db/models/sessions"
 import { encryptMessage } from "@in/server/modules/encryption/encryptMessage"
+import { encryptBinary } from "@in/server/modules/encryption/encryption"
 import { TInputId } from "@in/server/types/methods"
 import { isProd } from "@in/server/env"
 import { getFileByUniqueId } from "@in/server/db/models/files"
 import { debugDelay, delay } from "@in/server/utils/helpers/time"
 import { RealtimeUpdates } from "@in/server/realtime/message"
-import { Update } from "@inline-chat/protocol/core"
+import { MessageEntities, Update } from "@inline-chat/protocol/core"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
+import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
+import { detectHasLink } from "@in/server/modules/message/linkDetection"
 
 export const Input = Type.Object({
   peerId: Optional(TInputPeerInfo),
@@ -63,6 +66,7 @@ export const Input = Type.Object({
   ),
 
   isSticker: Optional(Type.Boolean()),
+  parseMarkdown: Optional(Type.Boolean()),
 })
 
 type Input = Static<typeof Input>
@@ -95,8 +99,22 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
   // Get or validate chat ID from peer info
   const chatId = await getChatIdFromPeer(peerId, context)
 
+  const outgoingText = input.text
+    ? await processOutgoingText({
+        text: input.text,
+        entities: undefined,
+        parseMarkdown: input.parseMarkdown ?? true,
+      })
+    : undefined
+
+  const text = outgoingText?.text
+  const entities = outgoingText?.entities
+
   // Encrypt
-  const encryptedText = input.text ? encryptMessage(input.text) : undefined
+  const encryptedText = text ? encryptMessage(text) : undefined
+  const binaryEntities = entities ? MessageEntities.toBinary(entities) : undefined
+  const encryptedEntities = binaryEntities && binaryEntities.length > 0 ? encryptBinary(binaryEntities) : undefined
+  const hasLink = detectHasLink({ entities }) ? true : undefined
 
   // File
   let file: DbFile | undefined
@@ -140,12 +158,16 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
         textEncrypted: encryptedText?.encrypted ?? null,
         textIv: encryptedText?.iv ?? null,
         textTag: encryptedText?.authTag ?? null,
+        entitiesEncrypted: encryptedEntities?.encrypted ?? null,
+        entitiesIv: encryptedEntities?.iv ?? null,
+        entitiesTag: encryptedEntities?.authTag ?? null,
         messageId: nextId,
         replyToMsgId: replyToMsgId ?? null,
         randomId: randomId ?? null,
         fileId: file?.id ?? null,
         date: messageDate,
         isSticker: input.isSticker ?? false,
+        hasLink,
       })
       .returning()
 
@@ -193,7 +215,7 @@ export const handler = async (input: Input, context: HandlerContext): Promise<Re
       userId: Number(input.peerUserId),
       title,
       chatId,
-      message: input.text ?? "🖼️ Photo", // if no text, it's image for now!!!
+      message: text ?? "🖼️ Photo", // if no text, it's image for now!!!
       currentUserId: context.currentUserId,
       currentUser,
     })
