@@ -172,6 +172,12 @@ final class AppSettings: ObservableObject {
     }
   }
 
+  @Published var enableReplyThreadMenuItems: Bool {
+    didSet {
+      UserDefaults.standard.set(enableReplyThreadMenuItems, forKey: ExperimentalFeatureFlags.replyThreadMenuItemsKey)
+    }
+  }
+
   // MARK: - Updates
 
   @Published var autoUpdateChannel: AutoUpdateChannel {
@@ -219,6 +225,7 @@ final class AppSettings: ObservableObject {
     enableNewMacUI = UserDefaults.standard.bool(forKey: "enableNewMacUI")
     showMainTabStrip = UserDefaults.standard.object(forKey: "showMainTabStrip") as? Bool ?? false
     enableVoiceMessages = UserDefaults.standard.bool(forKey: ExperimentalFeatureFlags.voiceMessagesKey)
+    enableReplyThreadMenuItems = UserDefaults.standard.bool(forKey: ExperimentalFeatureFlags.replyThreadMenuItemsKey)
     if let storedChannel = UserDefaults.standard.string(forKey: "autoUpdateChannel"),
        !storedChannel.isEmpty,
        let channel = AutoUpdateChannel(rawValue: storedChannel) {

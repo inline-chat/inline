@@ -12,6 +12,7 @@ struct ExperimentalSettingsDetailView: View {
       Section("Experimental") {
         Toggle("Enable new Mac UI", isOn: $appSettings.enableNewMacUI)
         Toggle("Enable voice messages", isOn: $appSettings.enableVoiceMessages)
+        Toggle("Enable reply thread", isOn: $appSettings.enableReplyThreadMenuItems)
         Picker("Message style", selection: $appSettings.messageRenderStyle) {
           ForEach(MessageRenderStyle.allCases, id: \.self) { style in
             Text(style.title).tag(style)
