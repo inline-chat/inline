@@ -49,6 +49,8 @@
 - In final handoff/review/push, call out security risks, possible performance regressions, and state production readiness.
 - Do just the right amount of engineering, not over engineer, and not under engineer. Simple and elegant solutions are often better than prematuraly complex solutions that go beyond the scope and spec.
 - When adding colors, ensure the color supports light/dark theming and if it's not a one-off color, add it to the platforms theme class/module.
+- Don't put implicit DB read/write calls in computed variables, keep them pure.
+- When commiting file(s) with multiple changes/fixes, add a concise bullet list of specific items in the commit description; if fixing regressions or tricky bugs in non-conventional ways, add a very short explaination in commit description. Keep it under ~300 characters.
 
 ## Style Guide
 - Use shorter function/variables names as much as possible, avoid long phrasal function names when we can keep it simply unless required. Don't use weird abbreviations like `idxes`; `msg`, `id`, `ctx` and alike are fine.
