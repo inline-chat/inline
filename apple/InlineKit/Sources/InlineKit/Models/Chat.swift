@@ -263,44 +263,6 @@ public extension Chat {
       }
     }
   }
-
-  static func getReplyThread(
-    parentChatId: Int64,
-    parentMessageId: Int64,
-    database: AppDatabase = .shared
-  ) throws -> Chat? {
-    try database.reader.read { db in
-      try Chat
-        .filter(Columns.parentChatId == parentChatId)
-        .filter(Columns.parentMessageId == parentMessageId)
-        .order(Columns.id.desc)
-        .fetchOne(db)
-    }
-  }
-
-  static func getReplyThreadPeerIfNavigable(
-    parentChatId: Int64,
-    parentMessageId: Int64,
-    database: AppDatabase = .shared
-  ) throws -> Peer? {
-    try database.reader.read { db in
-      guard let chat = try Chat
-        .filter(Columns.parentChatId == parentChatId)
-        .filter(Columns.parentMessageId == parentMessageId)
-        .order(Columns.id.desc)
-        .fetchOne(db)
-      else {
-        return nil
-      }
-
-      let peer: Peer = .thread(id: chat.id)
-      guard try Dialog.get(peerId: peer).fetchOne(db) != nil else {
-        return nil
-      }
-
-      return peer
-    }
-  }
 }
 
 public extension Chat {

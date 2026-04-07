@@ -25,9 +25,14 @@ private enum ReplyThreadOpenError: Error {
   case invalidResponse
 }
 
+private enum ReplyThreadOpenSource {
+  case menu
+  case threadSummary
+}
+
 class MessageViewAppKit: NSView {
   private let feature_relayoutOnBoundsChange = true
-  private let log = Log.scoped("MessageView", enableTracing: true)
+  private let log = Log.scoped("MessageView", enableTracing: false)
   static let avatarSize: CGFloat = Theme.messageAvatarSize
   private(set) var fullMessage: FullMessage
   private let dependencies: AppDependencies?
@@ -135,6 +140,10 @@ class MessageViewAppKit: NSView {
 
   private var hasReply: Bool {
     props.layout.hasReply
+  }
+
+  private var hasReplyThreadSummary: Bool {
+    props.layout.hasReplyThreadSummary
   }
 
   private var hasForwardHeader: Bool {
@@ -440,7 +449,8 @@ class MessageViewAppKit: NSView {
       rows: renderableMessageActionRows,
       loadingActionIds: loadingActionIdsForCurrentMessage(),
       outgoing: message.message.out == true,
-      rowHeight: 28
+      rowHeight: 28,
+      messageFontSize: props.layout.fontSize
     )
 
     messageActionRowsView = view
@@ -473,7 +483,8 @@ class MessageViewAppKit: NSView {
       rows: renderableMessageActionRows,
       loadingActionIds: loadingActionIdsForCurrentMessage(),
       outgoing: outgoing,
-      rowHeight: 28
+      rowHeight: 28,
+      messageFontSize: props.layout.fontSize
     )
   }
 
@@ -624,6 +635,49 @@ class MessageViewAppKit: NSView {
     }
     return view
   }()
+
+  private lazy var replyThreadSummaryView: ReplyThreadSummaryView = {
+    let view = ReplyThreadSummaryView(style: embeddedReplyStyle)
+    view.translatesAutoresizingMaskIntoConstraints = false
+    view.isHidden = true
+    view.onTap = { [weak self] in
+      self?.openReplyThreadFlow(source: .threadSummary)
+    }
+    return view
+  }()
+
+  private func shouldShowReplyThreadSummary(for props: MessageViewProps) -> Bool {
+    props.layout.hasReplyThreadSummary
+      && props.interactionMode != .threadAnchor
+      && message.hasReplyThreadSummary
+  }
+
+  private func updateReplyThreadSummaryView(for props: MessageViewProps) {
+    replyThreadSummaryView.setStyle(embeddedReplyStyle)
+    guard shouldShowReplyThreadSummary(for: props) else {
+      replyThreadSummaryView.isHidden = true
+      replyThreadSummaryView.setLoading(false)
+      return
+    }
+    guard let summary = message.replyThreadSummary else {
+      replyThreadSummaryView.isHidden = true
+      replyThreadSummaryView.setLoading(false)
+      return
+    }
+
+    replyThreadSummaryView.update(
+      replyCount: Int(summary.replyCount),
+      recentAuthors: recentReplyThreadAuthors(),
+      hasUnread: summary.hasUnread_p
+    )
+    replyThreadSummaryView.isHidden = false
+  }
+
+  private func recentReplyThreadAuthors() -> [UserInfo] {
+    message.replyThreadRecentReplierUserIds.compactMap { userId in
+      ObjectCache.shared.getCachedUser(id: userId)
+    }
+  }
 
   private var useTextKit2: Bool = true
 
@@ -845,6 +899,8 @@ class MessageViewAppKit: NSView {
       contentView.addSubview(replyView)
     }
 
+    contentView.addSubview(replyThreadSummaryView)
+
     if hasPhoto {
       contentView.addSubview(photoView)
     }
@@ -873,6 +929,8 @@ class MessageViewAppKit: NSView {
       attachmentsView = createAttachmentsView()
       contentView.addSubview(attachmentsView!)
     }
+
+    updateReplyThreadSummaryView(for: props)
 
     addSubview(timeAndStateView)
 
@@ -1636,6 +1694,32 @@ class MessageViewAppKit: NSView {
       )
     }
 
+    let replyThreadSummaryLayout = layout.replyThreadSummary
+    let showsReplyThreadSummary = shouldShowReplyThreadSummary(for: props)
+    replyThreadSummaryViewTopConstraint = replyThreadSummaryView.topAnchor.constraint(
+      equalTo: contentView.topAnchor,
+      constant: layout.replyThreadSummaryContentViewTop
+    )
+    replyThreadSummaryViewLeadingConstraint = replyThreadSummaryView.leadingAnchor.constraint(
+      equalTo: contentView.leadingAnchor,
+      constant: replyThreadSummaryLayout?.spacing.left ?? 0
+    )
+    replyThreadSummaryViewTrailingConstraint = replyThreadSummaryView.trailingAnchor.constraint(
+      equalTo: contentView.trailingAnchor,
+      constant: -(replyThreadSummaryLayout?.spacing.right ?? 0)
+    )
+    replyThreadSummaryViewHeightConstraint = replyThreadSummaryView.heightAnchor.constraint(
+      equalToConstant: showsReplyThreadSummary ? (replyThreadSummaryLayout?.size.height ?? 0) : 0
+    )
+    constraints.append(
+      contentsOf: [
+        replyThreadSummaryViewTopConstraint!,
+        replyThreadSummaryViewLeadingConstraint!,
+        replyThreadSummaryViewTrailingConstraint!,
+        replyThreadSummaryViewHeightConstraint!,
+      ]
+    )
+
     // Document
     if let document = layout.document {
       documentViewTopConstraint = documentContainerView.topAnchor.constraint(
@@ -1730,6 +1814,10 @@ class MessageViewAppKit: NSView {
   private var videoViewTopConstraint: NSLayoutConstraint?
 
   private var replyViewTopConstraint: NSLayoutConstraint?
+  private var replyThreadSummaryViewTopConstraint: NSLayoutConstraint?
+  private var replyThreadSummaryViewLeadingConstraint: NSLayoutConstraint?
+  private var replyThreadSummaryViewTrailingConstraint: NSLayoutConstraint?
+  private var replyThreadSummaryViewHeightConstraint: NSLayoutConstraint?
   private var forwardHeaderTopConstraint: NSLayoutConstraint?
   private var forwardHeaderLeadingConstraint: NSLayoutConstraint?
   private var forwardHeaderTrailingConstraint: NSLayoutConstraint?
@@ -1881,6 +1969,20 @@ class MessageViewAppKit: NSView {
       if replyViewTopConstraint.constant != props.layout.replyContentTop {
         replyViewTopConstraint.constant = props.layout.replyContentTop
       }
+    }
+
+    if let replyThreadSummaryViewTopConstraint,
+       let replyThreadSummaryViewLeadingConstraint,
+       let replyThreadSummaryViewTrailingConstraint,
+       let replyThreadSummaryViewHeightConstraint
+    {
+      let summaryPlan = props.layout.replyThreadSummary
+      let showSummary = shouldShowReplyThreadSummary(for: props)
+      replyThreadSummaryViewTopConstraint.constant = props.layout.replyThreadSummaryContentViewTop
+      replyThreadSummaryViewLeadingConstraint.constant = summaryPlan?.spacing.left ?? 0
+      replyThreadSummaryViewTrailingConstraint.constant = -(summaryPlan?.spacing.right ?? 0)
+      replyThreadSummaryViewHeightConstraint.constant = showSummary ? (summaryPlan?.size.height ?? 0) : 0
+      replyThreadSummaryView.isHidden = !showSummary
     }
 
     if let forwardHeader = props.layout.forwardHeader {
@@ -2471,21 +2573,38 @@ class MessageViewAppKit: NSView {
   }
 
   @objc private func replyInThread() {
+    openReplyThreadFlow(source: .menu)
+  }
+
+  private func openReplyThreadFlow(source: ReplyThreadOpenSource) {
     guard !isAnchorMessage else { return }
     focusWindowIfNeeded()
+    let useInlineSpinner = source == .threadSummary && hasReplyThreadSummary
+
+    if useInlineSpinner {
+      replyThreadSummaryView.setLoading(true)
+    }
 
     Task { @MainActor in
+      defer {
+        if useInlineSpinner {
+          replyThreadSummaryView.setLoading(false)
+        }
+      }
+
       guard let dependencies else {
         ToastCenter.shared.showError("Failed to open thread")
         return
       }
 
-      if let cachedPeer = cachedReplyThreadPeer(dependencies: dependencies) {
-        openReplyThread(peer: cachedPeer, dependencies: dependencies)
+      if let existingPeer = message.replyThreadPeer {
+        openReplyThread(peer: existingPeer, dependencies: dependencies)
         return
       }
 
-      ToastCenter.shared.showLoading("Creating thread…")
+      if !useInlineSpinner {
+        ToastCenter.shared.showLoading("Creating thread…")
+      }
 
       do {
         let rpcResult = try await dependencies.realtimeV2.send(
@@ -2500,29 +2619,18 @@ class MessageViewAppKit: NSView {
         }
 
         let threadPeer: Peer = .thread(id: response.chat.id)
-        _ = try await dependencies.realtimeV2.send(.getChat(peer: threadPeer))
-        _ = try await dependencies.realtimeV2.send(.getChatHistory(peer: threadPeer))
 
-        ToastCenter.shared.dismiss()
+        if !useInlineSpinner {
+          ToastCenter.shared.dismiss()
+        }
         openReplyThread(peer: threadPeer, dependencies: dependencies)
       } catch {
-        ToastCenter.shared.dismiss()
+        if !useInlineSpinner {
+          ToastCenter.shared.dismiss()
+        }
         ToastCenter.shared.showError("Failed to open thread")
         log.error("Failed to open reply thread", error: error)
       }
-    }
-  }
-
-  private func cachedReplyThreadPeer(dependencies: AppDependencies) -> Peer? {
-    do {
-      return try Chat.getReplyThreadPeerIfNavigable(
-        parentChatId: message.chatId,
-        parentMessageId: message.messageId,
-        database: dependencies.database
-      )
-    } catch {
-      log.error("Failed to resolve cached reply thread peer", error: error)
-      return nil
     }
   }
 
@@ -2852,13 +2960,14 @@ class MessageViewAppKit: NSView {
     }
 
     // Update related message for reply view
-    if hasReply {
+    if props.layout.hasReply {
       replyView.setRelatedMessage(fullMessage.message)
       replyView.setStyle(embeddedReplyStyle)
       if let embeddedMessage = fullMessage.repliedToMessage {
         replyView.update(with: embeddedMessage, kind: .replyInMessage)
       }
     }
+    updateReplyThreadSummaryView(for: props)
 
     // Update props and reflect changes
     updatePropsAndUpdateLayout(props: props, disableTextRelayout: true, animate: animate)
@@ -3164,6 +3273,8 @@ class MessageViewAppKit: NSView {
     shineEffectView?.stopAnimation()
     shineEffectView?.removeFromSuperview()
     shineEffectView = nil
+    replyThreadSummaryView.isHidden = true
+    replyThreadSummaryView.setLoading(false)
 
     // Re-setup translation state observation
     setupTranslationStateObservation()
@@ -3368,12 +3479,18 @@ extension MessageViewAppKit: NSMenuDelegate {
       replyItem.image = NSImage(systemSymbolName: "arrowshape.turn.up.left", accessibilityDescription: "Reply")
       menu.addItem(replyItem)
 
-      let replyInThreadItem = NSMenuItem(title: "Reply in Thread", action: #selector(replyInThread), keyEquivalent: "")
-      replyInThreadItem.image = NSImage(
-        systemSymbolName: "arrowshape.turn.up.left.circle",
-        accessibilityDescription: "Reply in Thread"
-      )
-      menu.addItem(replyInThreadItem)
+      if AppSettings.shared.enableReplyThreadMenuItems {
+        let replyInThreadItem = NSMenuItem(
+          title: "Reply in Thread",
+          action: #selector(replyInThread),
+          keyEquivalent: ""
+        )
+        replyInThreadItem.image = NSImage(
+          systemSymbolName: "arrowshape.turn.up.left.circle",
+          accessibilityDescription: "Reply in Thread"
+        )
+        menu.addItem(replyInThreadItem)
+      }
 
       let forwardItem = NSMenuItem(title: "Forward", action: #selector(forwardMessage), keyEquivalent: "")
       forwardItem.image = NSImage(systemSymbolName: "arrowshape.turn.up.right", accessibilityDescription: "Forward")
@@ -3666,7 +3783,8 @@ final class MessageActionRowsView: NSView {
     rows: [MessageActionRow],
     loadingActionIds: Set<String>,
     outgoing: Bool,
-    rowHeight: CGFloat
+    rowHeight: CGFloat,
+    messageFontSize: CGFloat
   ) {
     rowsStack.arrangedSubviews.forEach { row in
       rowsStack.removeArrangedSubview(row)
@@ -3688,7 +3806,8 @@ final class MessageActionRowsView: NSView {
           action: action,
           isLoading: loadingActionIds.contains(actionId),
           outgoing: outgoing,
-          rowHeight: rowHeight
+          rowHeight: rowHeight,
+          messageFontSize: messageFontSize
         )
         itemView.onTap = { [weak self] tappedAction in
           self?.onActionTap?(tappedAction)
@@ -3702,6 +3821,14 @@ final class MessageActionRowsView: NSView {
 }
 
 final class MessageActionButtonRowItemView: NSView {
+  private struct AppearanceStyle {
+    var title: String
+    var isLoading: Bool
+    var outgoing: Bool
+    var rowHeight: CGFloat
+    var messageFontSize: CGFloat
+  }
+
   var onTap: ((MessageAction) -> Void)?
 
   private let button: NSButton = {
@@ -3726,6 +3853,7 @@ final class MessageActionButtonRowItemView: NSView {
 
   private var heightConstraint: NSLayoutConstraint?
   private var action: MessageAction?
+  private var appearanceStyle: AppearanceStyle?
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -3746,6 +3874,7 @@ final class MessageActionButtonRowItemView: NSView {
 
     button.target = self
     button.action = #selector(handleTap)
+    button.focusRingType = .none
   }
 
   @available(*, unavailable)
@@ -3757,23 +3886,50 @@ final class MessageActionButtonRowItemView: NSView {
     action: MessageAction,
     isLoading: Bool,
     outgoing: Bool,
-    rowHeight: CGFloat
+    rowHeight: CGFloat,
+    messageFontSize: CGFloat
   ) {
     self.action = action
+    appearanceStyle = AppearanceStyle(
+      title: action.text,
+      isLoading: isLoading,
+      outgoing: outgoing,
+      rowHeight: rowHeight,
+      messageFontSize: messageFontSize
+    )
+    applyAppearance()
 
-    let title = action.text
-    let textColor: NSColor = outgoing ? .white : .labelColor
+    if let heightConstraint {
+      heightConstraint.constant = rowHeight
+    } else {
+      let next = heightAnchor.constraint(equalToConstant: rowHeight)
+      next.isActive = true
+      heightConstraint = next
+    }
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    applyAppearance()
+  }
+
+  private func applyAppearance() {
+    guard let appearanceStyle else { return }
+
+    let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    let fontSize = max(11, min(appearanceStyle.messageFontSize, appearanceStyle.rowHeight - 8))
+    let textColor: NSColor = appearanceStyle.outgoing ? .white : .labelColor
     let disabledColor = textColor.withAlphaComponent(0.45)
+
     button.attributedTitle = NSAttributedString(
-      string: title,
+      string: appearanceStyle.title,
       attributes: [
-        .font: NSFont.systemFont(ofSize: 12, weight: .medium),
-        .foregroundColor: textColor,
+        .font: NSFont.systemFont(ofSize: fontSize, weight: .medium),
+        .foregroundColor: appearanceStyle.isLoading ? disabledColor : textColor,
       ]
     )
-    button.contentTintColor = textColor
 
-    if isLoading {
+    if appearanceStyle.isLoading {
       spinner.startAnimation(nil)
       button.alphaValue = 0
       button.isEnabled = false
@@ -3785,28 +3941,19 @@ final class MessageActionButtonRowItemView: NSView {
 
     let borderColor: NSColor
     let backgroundColor: NSColor
-    if outgoing {
-      borderColor = NSColor.white.withAlphaComponent(0.28)
-      backgroundColor = NSColor.white.withAlphaComponent(0.12)
+    if appearanceStyle.outgoing {
+      borderColor = NSColor.white.withAlphaComponent(isDark ? 0.34 : 0.28)
+      backgroundColor = NSColor.white.withAlphaComponent(isDark ? 0.18 : 0.14)
     } else {
-      borderColor = NSColor.separatorColor.withAlphaComponent(0.5)
-      backgroundColor = Theme.messageBubbleSecondaryBgColor.withAlphaComponent(0.85)
+      borderColor = NSColor.separatorColor.withAlphaComponent(isDark ? 0.5 : 0.35)
+      backgroundColor = Theme.messageBubbleSecondaryBgColor.withAlphaComponent(isDark ? 0.92 : 0.9)
     }
 
-    layer?.cornerRadius = max(8, floor(rowHeight * 0.34))
+    layer?.cornerRadius = max(8, floor(appearanceStyle.rowHeight * 0.36))
+    layer?.cornerCurve = .continuous
     layer?.borderWidth = 1
     layer?.borderColor = borderColor.cgColor
     layer?.backgroundColor = backgroundColor.cgColor
-
-    button.contentTintColor = isLoading ? disabledColor : textColor
-
-    if let heightConstraint {
-      heightConstraint.constant = rowHeight
-    } else {
-      let next = heightAnchor.constraint(equalToConstant: rowHeight)
-      next.isActive = true
-      heightConstraint = next
-    }
   }
 
   @objc private func handleTap() {
