@@ -267,7 +267,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     log.debug("Opening chat for user ID: \(userId)")
 
     // Navigate to the user chat
-    dependencies.nav.open(.chat(peer: .user(id: userId)))
+    let peer: Peer = .user(id: userId)
+    if let nav2 = dependencies.nav2 {
+      nav2.requestOpenChat(peer: peer, database: dependencies.database)
+    } else {
+      dependencies.nav.open(.chat(peer: peer))
+    }
   }
 
   private func initializeServices() {

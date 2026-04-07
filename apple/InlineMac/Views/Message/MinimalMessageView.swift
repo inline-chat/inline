@@ -1276,9 +1276,7 @@ class MinimalMessageViewAppKit: NSView {
     guard let user = fullMessage.senderInfo?.user else { return }
 
     Task { @MainActor in
-      // TODO: Fix this so if user clicks on a message from a user they don't have a chat with, it creates a chat
-      // let _ = try await DataManager.shared.createPrivateChat(userId: user.id)
-      Nav.main.open(.chat(peer: .user(id: user.id)))
+      openChat(peer: .user(id: user.id))
     }
   }
 
