@@ -404,7 +404,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
                 try await DataManager.shared.getUser(id: userId)
               }
             } catch {
-              log.error("Failed to refetch user info \(error)")
+              self.log.error("Failed to refetch user info \(error)")
             }
           }
         }
@@ -463,7 +463,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
           do {
             try await DataManager.shared.getUser(id: userId)
           } catch {
-            log.error("Failed to refetch user info \(error)")
+            self.log.error("Failed to refetch user info \(error)")
           }
         }
       }
