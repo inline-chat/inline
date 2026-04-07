@@ -41,7 +41,7 @@ public actor TranslationViewModel {
   }
 
   private func translationStateChanged(enabled: Bool) async {
-    log.debug("Translation state changed to \(enabled) for peer \(peerId)")
+    log.trace("Translation state changed to \(enabled) for peer \(peerId)")
     if !enabled {
       await resetState()
     }
@@ -54,17 +54,17 @@ public actor TranslationViewModel {
   }
 
   public nonisolated func messagesDisplayed(messages: [FullMessage]) {
-    log.debug("Processing \(messages.count) messages for translation, peer: \(peerId)")
+    log.trace("Processing \(messages.count) messages for translation, peer: \(peerId)")
 
     // Check if translation is enabled for this peer
     guard TranslationState.shared.isTranslationEnabled(for: peerId) else {
-      log.debug("Translation disabled for peer \(peerId)")
+      log.trace("Translation disabled for peer \(peerId)")
       return
     }
 
     // Get user's preferred language
     let targetLanguage = UserLocale.getCurrentLanguage()
-    log.debug("Target language: \(targetLanguage)")
+    log.trace("Target language: \(targetLanguage)")
 
     // Create a copy of messages to avoid data races
     let messagesCopy = messages
@@ -86,11 +86,11 @@ public actor TranslationViewModel {
         }
 
         guard !newMessages.isEmpty else {
-          log.debug("No new messages need translation processing")
+          log.trace("No new messages need translation processing")
           return
         }
 
-        log.debug("Found \(newMessages.count) new messages to process for translation")
+        log.trace("Found \(newMessages.count) new messages to process for translation")
 
         // 1. Filter messages needing translation
         let messagesNeedingTranslation = try await TranslationManager.shared.filterMessagesNeedingTranslation(
@@ -104,7 +104,7 @@ public actor TranslationViewModel {
         )
 
         guard !bookkeeping.requestMessageIds.isEmpty else {
-          log.debug("No messages need translation")
+          log.trace("No messages need translation")
           await markAsProcessed(keys: bookkeeping.processedMessageKeys(outcome: .notRequested), targetLanguage: targetLanguage)
           return
         }
@@ -116,11 +116,11 @@ public actor TranslationViewModel {
         )
 
         if await isRequestInProgress(request) {
-          log.debug("Translation request already in progress for these messages")
+          log.trace("Translation request already in progress for these messages")
           return
         }
 
-        log.debug("Found \(bookkeeping.requestMessageIds.count) messages needing translation")
+        log.trace("Found \(bookkeeping.requestMessageIds.count) messages needing translation")
 
         // Mark this request as in progress
         await addRequest(request)
@@ -141,7 +141,7 @@ public actor TranslationViewModel {
             )
           }
 
-          log.debug("Successfully requested translations for \(bookkeeping.requestMessageIds.count) messages")
+          log.trace("Successfully requested translations for \(bookkeeping.requestMessageIds.count) messages")
 
           await finalizeRequest(
             request,
@@ -159,7 +159,7 @@ public actor TranslationViewModel {
             )
           }
 
-          log.debug("Completed translation cycle for \(bookkeeping.requestMessageIds.count) messages")
+          log.trace("Completed translation cycle for \(bookkeeping.requestMessageIds.count) messages")
         } catch {
           log.error("Failed to process translations", error: error)
           await finalizeRequest(
@@ -184,17 +184,17 @@ public actor TranslationViewModel {
   public nonisolated static func translateMessages(for peerId: Peer, messages: [FullMessage]) {
     let log = Log.scoped("TranslationViewModel")
 
-    log.debug("Processing \(messages.count) messages for translation, peer: \(peerId)")
+    log.trace("Processing \(messages.count) messages for translation, peer: \(peerId)")
 
     // Check if translation is enabled for this peer
     guard TranslationState.shared.isTranslationEnabled(for: peerId) else {
-      log.debug("Translation disabled for peer \(peerId)")
+      log.trace("Translation disabled for peer \(peerId)")
       return
     }
 
     // Get user's preferred language
     let targetLanguage = UserLocale.getCurrentLanguage()
-    log.debug("Target language: \(targetLanguage)")
+    log.trace("Target language: \(targetLanguage)")
 
     // Do everything on a background thread to avoid impacting UI
     Task(priority: .userInitiated) {
@@ -205,7 +205,7 @@ public actor TranslationViewModel {
         }
 
         guard !validMessages.isEmpty else {
-          log.debug("No valid messages to process for translation")
+          log.trace("No valid messages to process for translation")
           return
         }
 
@@ -216,11 +216,11 @@ public actor TranslationViewModel {
         )
 
         guard !messagesNeedingTranslation.isEmpty else {
-          log.debug("No messages need translation")
+          log.trace("No messages need translation")
           return
         }
 
-        log.debug("Found \(messagesNeedingTranslation.count) messages needing translation")
+        log.trace("Found \(messagesNeedingTranslation.count) messages needing translation")
 
         // Mark messages as being translated
         let messageIds = messagesNeedingTranslation.map(\.messageId)
@@ -238,7 +238,7 @@ public actor TranslationViewModel {
           )
         }
 
-        log.debug("Successfully requested translations for \(messageIds.count) messages")
+        log.trace("Successfully requested translations for \(messageIds.count) messages")
 
         // Remove messages from translating state
         await TranslatingStatePublisher.shared.removeBatch(
@@ -255,7 +255,7 @@ public actor TranslationViewModel {
           )
         }
 
-        log.debug("Completed translation cycle for \(messageIds.count) messages")
+        log.trace("Completed translation cycle for \(messageIds.count) messages")
       } catch {
         log.error("Failed to process translations", error: error)
         // Clean up translating state in case of error
@@ -393,7 +393,7 @@ public final class TranslatingStatePublisher {
     Task {
       await state.addBatch(messageIds: messageIds, peerId: peerId)
       let currentState = await state.translating
-      log.debug("Added batch of \(messageIds.count) messages to translating state")
+      log.trace("Added batch of \(messageIds.count) messages to translating state")
       publisher.send(currentState)
     }
   }
@@ -402,7 +402,7 @@ public final class TranslatingStatePublisher {
     Task {
       await state.removeBatch(messageIds: messageIds, peerId: peerId)
       let currentState = await state.translating
-      log.debug("Removed batch of \(messageIds.count) messages from translating state")
+      log.trace("Removed batch of \(messageIds.count) messages from translating state")
       publisher.send(currentState)
     }
   }
@@ -411,7 +411,7 @@ public final class TranslatingStatePublisher {
     Task {
       await state.removeForPeer(peerId: peerId)
       let currentState = await state.translating
-      log.debug("Removed \(currentState.count) messages for peer \(peerId) from translating state")
+      log.trace("Removed \(currentState.count) messages for peer \(peerId) from translating state")
       publisher.send(currentState)
     }
   }

@@ -52,7 +52,7 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
     let purpose = purpose
     let log = log
 
-    log.debug("🔍 Fetching participants for chatId: \(chatId)")
+    log.trace("Fetching participants for chatId: \(chatId)")
 
     let chatId = chatId
     db.warnIfInMemoryDatabaseForObservation("ChatParticipantsWithMembersViewModel.participants")
@@ -64,7 +64,7 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
 
         // DMs: mention candidates should only include the peer (not chat_participants).
         if let chat, chat.type == .privateChat, let peerUserId = chat.peerUserId {
-          log.debug("🔍 DM chat, fetching peer user")
+          log.trace("DM chat, fetching peer user")
           let peer = try User
             .filter(Column("id") == peerUserId)
             .including(all: User.photos.forKey(UserInfo.CodingKeys.profilePhoto))
@@ -79,7 +79,7 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
           if let spaceId = chat.spaceId {
             switch purpose {
             case .mentionCandidates:
-              log.debug("🔍 Space thread, fetching space members for mention candidates")
+              log.trace("Space thread, fetching space members for mention candidates")
               let spaceMembers = try Member
                 .fullMemberQuery()
                 .filter(Column("spaceId") == spaceId)
@@ -89,7 +89,7 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
 
             case .participantsList:
               if chat.isPublic == true {
-                log.debug("🔍 Public space thread, fetching space members")
+                log.trace("Public space thread, fetching space members")
                 let spaceMembers = try Member
                   .fullMemberQuery()
                   .filter(Column("spaceId") == spaceId)
@@ -98,7 +98,7 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
                 return spaceMembers.map(\.userInfo)
               }
 
-              log.debug("🔍 Private space thread, fetching chat participants")
+              log.trace("Private space thread, fetching chat participants")
               return try ChatParticipant
                 .including(
                   required: ChatParticipant.user
@@ -112,11 +112,11 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
 
           if purpose == .mentionCandidates {
             // Non-space threads: users use @mentions to add new participants, so show all known users.
-            log.debug("🔍 Home thread mention candidates, fetching all known users")
+            log.trace("Home thread mention candidates, fetching all known users")
             return Self.filterMentionCandidates(try Self.fetchAllKnownUsers(db))
           }
 
-          log.debug("🔍 Home thread, fetching chat participants")
+          log.trace("Home thread, fetching chat participants")
           let participants = try ChatParticipant
             .including(
               required: ChatParticipant.user
@@ -130,7 +130,7 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
         }
 
         if purpose == .mentionCandidates {
-          log.debug("🔍 Missing chat, falling back to local users for mention candidates")
+          log.trace("Missing chat, falling back to local users for mention candidates")
           return Self.filterMentionCandidates(try Self.fetchAllKnownUsers(db))
         }
 
@@ -144,14 +144,14 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
           }
         },
         receiveValue: { [weak self] participants in
-          self?.log.debug("🔍 Updated participants: \(participants.count) users")
+          self?.log.trace("Updated participants: \(participants.count) users")
           self?.participants = participants
         }
       )
   }
 
   public func refetchParticipants() async {
-    log.debug("🔍 Refetching participants...")
+    log.trace("Refetching participants...")
     let chatId = chatId
 
     do {
@@ -167,7 +167,7 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
          let spaceId = chat.spaceId
       {
         if purpose == .mentionCandidates || chat.isPublic == true {
-          log.debug("🔍 Also fetching space members for space thread, spaceId: \(spaceId)")
+          log.trace("Also fetching space members for space thread, spaceId: \(spaceId)")
           try await Api.realtime.send(.getSpaceMembers(spaceId: spaceId))
         }
       }

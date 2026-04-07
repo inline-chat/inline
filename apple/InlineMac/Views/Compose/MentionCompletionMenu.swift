@@ -132,13 +132,13 @@ class MentionCompletionMenu: NSView {
   }
 
   func updateParticipants(_ participants: [UserInfo]) {
-    log.debug("🔍 MentionMenu updateParticipants: received \(participants.count) participants")
+    log.trace("MentionMenu updateParticipants: received \(participants.count) participants")
     self.participants = participants
     filterParticipants(with: "")
   }
 
   func filterParticipants(with query: String) {
-    log.debug("🔍 MentionMenu filterParticipants: query='\(query)', total participants=\(participants.count)")
+    log.trace("MentionMenu filterParticipants: query='\(query)', total participants=\(participants.count)")
 
     if query.isEmpty {
       filteredParticipants = participants.filter { participant in
@@ -176,7 +176,7 @@ class MentionCompletionMenu: NSView {
 
     selectedIndex = 0
 
-    log.debug("🔍 MentionMenu filterParticipants: filtered to \(filteredParticipants.count) participants")
+    log.trace("MentionMenu filterParticipants: filtered to \(filteredParticipants.count) participants")
 
     DispatchQueue.main.async { [weak self] in
       self?.updateTableViewAndHeight()
@@ -216,11 +216,11 @@ class MentionCompletionMenu: NSView {
 
   func show(animated: Bool = true) {
     guard !isVisible else {
-      log.debug("🔍 MentionMenu show: already visible")
+      log.trace("MentionMenu show: already visible")
       return
     }
 
-    log.debug("🔍 MentionMenu show: showing menu with \(filteredParticipants.count) participants")
+    log.trace("MentionMenu show: showing menu with \(filteredParticipants.count) participants")
     isVisible = true
     isHidden = false
 
@@ -234,7 +234,7 @@ class MentionCompletionMenu: NSView {
       alphaValue = 1.0
     }
 
-    log.debug("🔍 MentionMenu show: menu should now be visible, alphaValue=\(alphaValue), isHidden=\(isHidden)")
+    log.trace("MentionMenu show: menu should now be visible, alphaValue=\(alphaValue), isHidden=\(isHidden)")
   }
 
   func hide(animated: Bool = true) {
