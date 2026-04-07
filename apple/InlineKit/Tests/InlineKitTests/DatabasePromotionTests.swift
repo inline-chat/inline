@@ -42,6 +42,14 @@ final class DatabasePromotionTests {
     let profile = _dbPromotionTestUserProfile
     #expect(ProjectConfig.userProfile == profile)
 
+    // `AppDatabase.shared` is process-global and may have been initialized by other tests already.
+    // Force a known in-memory baseline so this test doesn't depend on suite order/keychain state.
+    let forcedInMemory = try DatabaseQueue(
+      configuration: AppDatabase.makeConfiguration(passphrase: "123")
+    )
+    AppDatabase.shared.swapWriter(forcedInMemory)
+    #expect(AppDatabase.shared.dbWriter is DatabaseQueue)
+
     let dbURL = try databaseURLForTestProfile(profile)
     let dirURL = dbURL.deletingLastPathComponent()
 
@@ -56,7 +64,7 @@ final class DatabasePromotionTests {
     try FileManager.default.createDirectory(at: dirURL, withIntermediateDirectories: true)
 
     // 1) Create an encrypted DB file with a passphrase that we won't provide to `makeShared()`.
-    // This forces `AppDatabase.shared` to fall back to an in-memory DB.
+    // This ensures promotion can't succeed until we rotate the file to a known candidate key.
     let badPassphrase = "badpass_" + UUID().uuidString
     do {
       let pool = try DatabasePool(
@@ -68,8 +76,6 @@ final class DatabasePromotionTests {
       }
       withExtendedLifetime(pool) {}
     }
-
-    #expect(AppDatabase.shared.dbWriter is DatabaseQueue)
 
     // 2) Simulate "credentials/key available later" by rotating the persistent file to a known
     // candidate passphrase. `makeShared()` will then be able to open it.
