@@ -46,6 +46,7 @@ public class DataManager: ObservableObject {
     do {
       let result = try await ApiClient.shared.createSpace(name: name)
       let space = Space(from: result.space)
+      let log = self.log
       try await database.dbWriter.write { db in
         do {
           try space.save(db)
