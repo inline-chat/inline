@@ -139,7 +139,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
         payload.clearActions()
       }
 
-      if payload.hasVoice || payload.hasActions {
+      if payload.hasVoice || payload.hasActions || payload.hasReplies {
         contentPayload = payload
       } else {
         contentPayload = nil
@@ -416,7 +416,7 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
       photoId: from.media.photo.hasPhoto ? from.media.photo.photo.id : nil,
       videoId: from.media.video.hasVideo ? from.media.video.video.id : nil,
       documentId: from.media.document.hasDocument ? from.media.document.document.id : nil,
-      contentPayload: from.media.voice.hasVoice ? Self.contentPayload(from: from.media.voice.voice) : nil,
+      contentPayload: Self.contentPayload(from: from),
       actions: from.hasActions ? from.actions : nil,
       isSticker: from.isSticker,
       hasLink: from.hasHasLink_p ? from.hasLink_p : nil,
@@ -582,6 +582,19 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
     }
   }
 
+  private static func contentPayload(from message: InlineProtocol.Message) -> Client_MessageContentPayload? {
+    var payload = Client_MessageContentPayload()
+
+    if message.media.voice.hasVoice {
+      payload.voice = contentPayload(from: message.media.voice.voice).voice
+    }
+    if message.hasReplies {
+      payload.replies = message.replies
+    }
+
+    return (payload.hasVoice || payload.hasActions || payload.hasReplies) ? payload : nil
+  }
+
   private static func mergedContentPayload(
     incoming: Client_MessageContentPayload?,
     existing: Client_MessageContentPayload?
@@ -608,13 +621,21 @@ public struct Message: FetchableRecord, Identifiable, Codable, Hashable, Persist
         }
       }
 
-      return (merged.hasVoice || merged.hasActions) ? merged : nil
+      if incoming.hasReplies || existing.hasReplies {
+        if incoming.hasReplies {
+          merged.replies = incoming.replies
+        } else if existing.hasReplies {
+          merged.replies = existing.replies
+        }
+      }
+
+      return (merged.hasVoice || merged.hasActions || merged.hasReplies) ? merged : nil
 
     case let (incoming?, nil):
-      return (incoming.hasVoice || incoming.hasActions) ? incoming : nil
+      return (incoming.hasVoice || incoming.hasActions || incoming.hasReplies) ? incoming : nil
 
     case let (nil, existing?):
-      return (existing.hasVoice || existing.hasActions) ? existing : nil
+      return (existing.hasVoice || existing.hasActions || existing.hasReplies) ? existing : nil
 
     case (nil, nil):
       return nil
@@ -898,6 +919,10 @@ public extension Message {
       message.forwardFromPeerThreadId = message.forwardFromPeerThreadId ?? existing.forwardFromPeerThreadId
       message.forwardFromMessageId = message.forwardFromMessageId ?? existing.forwardFromMessageId
       message.forwardFromUserId = message.forwardFromUserId ?? existing.forwardFromUserId
+      message.contentPayload = mergedContentPayload(
+        incoming: message.contentPayload,
+        existing: existing.contentPayload
+      )
 
       if protocolMessage.hasReactions {
         for reaction in protocolMessage.reactions.reactions {
@@ -1098,20 +1123,38 @@ public extension Message {
   }
 
   mutating func setVoiceContent(_ voiceContent: Client_MessageVoiceContent?) {
-    switch voiceContent {
-    case let voiceContent?:
-      contentPayload = Client_MessageContentPayload.with {
-        $0.voice = voiceContent
-      }
-    case nil:
-      contentPayload = nil
+    var payload = contentPayload ?? Client_MessageContentPayload()
+    if let voiceContent {
+      payload.voice = voiceContent
+    } else {
+      payload.clearVoice()
     }
+    contentPayload = (payload.hasVoice || payload.hasActions || payload.hasReplies) ? payload : nil
   }
 
   mutating func setVoiceLocalRelativePath(_ localRelativePath: String?) {
     guard var voiceContent else { return }
     voiceContent.localRelativePath = localRelativePath ?? ""
     setVoiceContent(voiceContent)
+  }
+
+  public var replyThreadSummary: MessageReplies? {
+    guard let contentPayload, contentPayload.hasReplies else { return nil }
+    return contentPayload.replies
+  }
+
+  public var replyThreadPeer: Peer? {
+    guard let replyThreadSummary, replyThreadSummary.chatID > 0 else { return nil }
+    return .thread(id: replyThreadSummary.chatID)
+  }
+
+  public var replyThreadRecentReplierUserIds: [Int64] {
+    replyThreadSummary?.recentReplierUserIds ?? []
+  }
+
+  public var hasReplyThreadSummary: Bool {
+    guard let replyThreadSummary else { return false }
+    return replyThreadSummary.replyCount > 0
   }
 }
 
