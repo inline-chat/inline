@@ -44,12 +44,22 @@ public struct Client_MessageContentPayload: Sendable {
   /// Clears the value of `actions`. Subsequent reads from it will return its default value.
   public mutating func clearActions() {self._actions = nil}
 
+  public var replies: MessageReplies {
+    get {return _replies ?? MessageReplies()}
+    set {_replies = newValue}
+  }
+  /// Returns true if `replies` has been explicitly set.
+  public var hasReplies: Bool {return self._replies != nil}
+  /// Clears the value of `replies`. Subsequent reads from it will return its default value.
+  public mutating func clearReplies() {self._replies = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _voice: Client_MessageVoiceContent? = nil
   fileprivate var _actions: MessageActions? = nil
+  fileprivate var _replies: MessageReplies? = nil
 }
 
 public struct Client_MessageVoiceContent: @unchecked Sendable {
@@ -112,6 +122,7 @@ extension Client_MessageContentPayload: SwiftProtobuf.Message, SwiftProtobuf._Me
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .same(proto: "voice"),
     2: .same(proto: "actions"),
+    3: .same(proto: "replies"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -122,6 +133,7 @@ extension Client_MessageContentPayload: SwiftProtobuf.Message, SwiftProtobuf._Me
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularMessageField(value: &self._voice) }()
       case 2: try { try decoder.decodeSingularMessageField(value: &self._actions) }()
+      case 3: try { try decoder.decodeSingularMessageField(value: &self._replies) }()
       default: break
       }
     }
@@ -138,12 +150,16 @@ extension Client_MessageContentPayload: SwiftProtobuf.Message, SwiftProtobuf._Me
     try { if let v = self._actions {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
     } }()
+    try { if let v = self._replies {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Client_MessageContentPayload, rhs: Client_MessageContentPayload) -> Bool {
     if lhs._voice != rhs._voice {return false}
     if lhs._actions != rhs._actions {return false}
+    if lhs._replies != rhs._replies {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
