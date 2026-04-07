@@ -438,7 +438,7 @@ public extension Realtime {
     let peerID = input.peerID
 
     try await db.dbWriter.write { db in
-      guard let chat = try Chat.getByPeerId(peerId: peerID.toPeer()) else {
+      guard let chat = try Chat.getByPeerId(db: db, peerId: peerID.toPeer()) else {
         self.log.error("could not find chat")
         return
       }

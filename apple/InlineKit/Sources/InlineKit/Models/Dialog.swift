@@ -415,7 +415,7 @@ public extension Dialog {
   func deleteFromLocalDatabase() async throws {
     try await AppDatabase.shared.dbWriter.write { db in
       // Use peerId to fetch the associated chat
-      if var chat = try Chat.getByPeerId(peerId: self.peerId) {
+      if var chat = try Chat.getByPeerId(db: db, peerId: self.peerId) {
         chat.lastMsgId = nil
         try chat.save(db)
         try Message.filter(Column("chatId") == chat.id).deleteAll(db)
