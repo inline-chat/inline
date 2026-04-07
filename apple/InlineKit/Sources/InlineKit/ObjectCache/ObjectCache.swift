@@ -34,6 +34,10 @@ public class ObjectCache {
     return user
   }
 
+  public func getCachedUser(id userId: Int64) -> UserInfo? {
+    users[userId]
+  }
+
   public func getUserPublisher(id userId: Int64) -> PassthroughSubject<UserInfo?, Never> {
     if userPublishers[userId] == nil {
       userPublishers[userId] = PassthroughSubject<UserInfo?, Never>()

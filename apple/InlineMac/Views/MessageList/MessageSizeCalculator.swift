@@ -48,6 +48,7 @@ class MessageSizeCalculator {
   static let messageActionRowSpacing: CGFloat = 4
   static let bubbleMessageActionRowHeight: CGFloat = 28
   static let minimalMessageActionRowHeight: CGFloat = 24
+  static let replyThreadSummaryHeight: CGFloat = 30
   // Core Text typographic settings
   private let typographicSettings: [NSAttributedString.Key: Any]
 
@@ -237,6 +238,9 @@ class MessageSizeCalculator {
     /// reply is always above text
     var reply: LayoutPlan?
 
+    /// reply thread summary is rendered near the bottom of the bubble.
+    var replyThreadSummary: LayoutPlan?
+
     /// reactions
     var reactions: LayoutPlan?
 
@@ -277,6 +281,7 @@ class MessageSizeCalculator {
     var hasAvatar: Bool { avatar != nil }
     var hasName: Bool { name != nil }
     var hasReply: Bool { reply != nil }
+    var hasReplyThreadSummary: Bool { replyThreadSummary != nil }
     var hasForwardHeader: Bool { forwardHeader != nil }
     var hasDocument: Bool { document != nil }
     var hasReactions: Bool { reactions != nil }
@@ -317,6 +322,8 @@ class MessageSizeCalculator {
         photo.spacing.bottom
       } else if let document {
         document.spacing.bottom
+      } else if let replyThreadSummary {
+        replyThreadSummary.spacing.bottom
       } else {
         0.0
       }
@@ -383,6 +390,32 @@ class MessageSizeCalculator {
       return top
     }
 
+    var replyThreadSummaryContentViewTop: CGFloat {
+      var top: CGFloat = replyThreadSummary?.spacing.top ?? 0
+      if let forwardHeader {
+        top += forwardHeader.spacing.top + forwardHeader.size.height + forwardHeader.spacing.bottom
+      }
+      if let reply {
+        top += reply.spacing.top + reply.size.height + reply.spacing.bottom
+      }
+      if let video {
+        top += video.spacing.top + video.size.height + video.spacing.bottom
+      }
+      if let photo {
+        top += photo.spacing.top + photo.size.height + photo.spacing.bottom
+      }
+      if let document {
+        top += document.spacing.top + document.size.height + document.spacing.bottom
+      }
+      if let text {
+        top += text.spacing.top + text.size.height + text.spacing.bottom
+      }
+      if let attachments {
+        top += attachments.spacing.top + attachments.size.height + attachments.spacing.bottom
+      }
+      return top
+    }
+
     var timeViewTop: CGFloat {
       var top: CGFloat = time?.spacing.top ?? 0
       if let forwardHeader {
@@ -405,6 +438,9 @@ class MessageSizeCalculator {
       }
       if let attachments {
         top += attachments.spacing.top + attachments.size.height + attachments.spacing.bottom
+      }
+      if let replyThreadSummary {
+        top += replyThreadSummary.spacing.top + replyThreadSummary.size.height + replyThreadSummary.spacing.bottom
       }
       return top
     }
@@ -434,6 +470,9 @@ class MessageSizeCalculator {
       }
       if let attachments {
         top += attachments.spacing.top + attachments.size.height + attachments.spacing.bottom
+      }
+      if let replyThreadSummary {
+        top += replyThreadSummary.spacing.top + replyThreadSummary.size.height + replyThreadSummary.spacing.bottom
       }
       if placesTimeAboveReactions, let time {
         top += time.spacing.top + time.size.height + time.spacing.bottom
@@ -566,6 +605,7 @@ class MessageSizeCalculator {
     let hasReactions = message.reactions.count > 0
     let renderableAttachments = message.attachments.filter(\.isRenderableAttachment)
     let hasAttachments = !renderableAttachments.isEmpty
+    let hasReplyThreadSummary = props.interactionMode != .threadAnchor && message.message.hasReplyThreadSummary
     let renderableActionRows = actionRows(for: message)
     let hasActionRows = !renderableActionRows.isEmpty
     let isOutgoing = message.message.out == true
@@ -574,10 +614,12 @@ class MessageSizeCalculator {
     var textSize: CGSize?
     var photoSize: CGSize?
     var videoSize: CGSize?
-    let isTextOnly: Bool = hasText && !hasMedia && !hasDocument && !hasAttachments
+    let isTextOnly: Bool = hasText && !hasMedia && !hasDocument && !hasAttachments && !hasReplyThreadSummary
     let emojiInfo: (count: Int, isAllEmojis: Bool) = isTextOnly ? text.emojiInfo : (0, false)
     // TODO: remove has reply once we confirm reply embed style looks good with emojis
-    let emojiMessage = !hasReply && !hasForwardHeader && isTextOnly && emojiInfo.isAllEmojis && emojiInfo.count > 0
+    let emojiMessage =
+      !hasReply && !hasForwardHeader && !hasReplyThreadSummary && isTextOnly &&
+      emojiInfo.isAllEmojis && emojiInfo.count > 0
     let isPngPhotoWithoutCaption = isPNGPhotoMessage(message) && !hasNonEmptyCaption(message)
     let hasBubbleColor = hasBubbleColor(
       style: .bubble,
@@ -805,6 +847,10 @@ class MessageSizeCalculator {
       isSingleLine = false
     }
 
+    if isSingleLine, hasReplyThreadSummary {
+      isSingleLine = false
+    }
+
     // MARK: - Layout Plans
 
     // we prepare our plans and after done with calculations we will use them to calculate the final size
@@ -826,6 +872,7 @@ class MessageSizeCalculator {
     var documentPlan: LayoutPlan?
     var forwardHeaderPlan: LayoutPlan?
     var replyPlan: LayoutPlan?
+    var replyThreadSummaryPlan: LayoutPlan?
     var reactionsPlan: LayoutPlan?
     var actionsRowsPlan: LayoutPlan?
     var reactionItemsPlan: [String: LayoutPlan] = [:]
@@ -1007,6 +1054,21 @@ class MessageSizeCalculator {
       }
     }
 
+    // MARK: - Reply Thread Summary
+
+    if hasReplyThreadSummary {
+      let summaryWidth = max(200, min(parentAvailableWidth, 260))
+      replyThreadSummaryPlan = LayoutPlan(size: .zero, spacing: .zero)
+      replyThreadSummaryPlan!.size.height = Self.replyThreadSummaryHeight
+      replyThreadSummaryPlan!.size.width = summaryWidth
+      replyThreadSummaryPlan!.spacing = .init(
+        top: 6.0,
+        left: bubbleContentHorizontalInset,
+        bottom: 3.0,
+        right: bubbleContentHorizontalInset
+      )
+    }
+
     // MARK: - Reactions
 
     if hasReactions {
@@ -1165,6 +1227,15 @@ class MessageSizeCalculator {
       bubbleHeight += attachmentsPlan.spacing.bottom
       bubbleWidth = max(bubbleWidth, attachmentsPlan.size.width + attachmentsPlan.spacing.horizontalTotal)
     }
+    if let replyThreadSummaryPlan {
+      bubbleHeight += replyThreadSummaryPlan.spacing.top
+      bubbleHeight += replyThreadSummaryPlan.size.height
+      bubbleHeight += replyThreadSummaryPlan.spacing.bottom
+      bubbleWidth = max(
+        bubbleWidth,
+        replyThreadSummaryPlan.size.width + replyThreadSummaryPlan.spacing.horizontalTotal
+      )
+    }
     if let reactionsPlan {
       if !reactionsOutsideBubble {
         bubbleHeight += reactionsPlan.size.height
@@ -1265,6 +1336,7 @@ class MessageSizeCalculator {
       attachments: attachmentsPlan,
       forwardHeader: forwardHeaderPlan,
       reply: replyPlan,
+      replyThreadSummary: replyThreadSummaryPlan,
       reactions: reactionsPlan,
       actionsRows: actionsRowsPlan,
       reactionItems: reactionItemsPlan,
@@ -1308,6 +1380,7 @@ class MessageSizeCalculator {
     let hasReactions = message.reactions.count > 0
     let renderableAttachments = message.attachments.filter(\.isRenderableAttachment)
     let hasAttachments = !renderableAttachments.isEmpty
+    let hasReplyThreadSummary = props.interactionMode != .threadAnchor && message.message.hasReplyThreadSummary
     let renderableActionRows = actionRows(for: message)
     let hasActionRows = !renderableActionRows.isEmpty
     let isOutgoing = message.message.out == true
@@ -1315,9 +1388,11 @@ class MessageSizeCalculator {
     var photoSize: CGSize?
     var videoSize: CGSize?
 
-    let isTextOnly = hasText && !hasMedia && !hasDocument && !hasAttachments
+    let isTextOnly = hasText && !hasMedia && !hasDocument && !hasAttachments && !hasReplyThreadSummary
     let emojiInfo: (count: Int, isAllEmojis: Bool) = isTextOnly ? text.emojiInfo : (0, false)
-    let emojiMessage = !hasReply && !hasForwardHeader && isTextOnly && emojiInfo.isAllEmojis && emojiInfo.count > 0
+    let emojiMessage =
+      !hasReply && !hasForwardHeader && !hasReplyThreadSummary && isTextOnly &&
+      emojiInfo.isAllEmojis && emojiInfo.count > 0
     let isSingleLine = false
 
     // Font size
@@ -1458,6 +1533,7 @@ class MessageSizeCalculator {
     var documentPlan: LayoutPlan?
     var forwardHeaderPlan: LayoutPlan?
     var replyPlan: LayoutPlan?
+    var replyThreadSummaryPlan: LayoutPlan?
     var reactionsPlan: LayoutPlan?
     var actionsRowsPlan: LayoutPlan?
     var reactionItemsPlan: [String: LayoutPlan] = [:]
@@ -1596,6 +1672,18 @@ class MessageSizeCalculator {
       }
     }
 
+    if hasReplyThreadSummary {
+      replyThreadSummaryPlan = LayoutPlan(size: .zero, spacing: .zero)
+      replyThreadSummaryPlan!.size.height = Self.replyThreadSummaryHeight
+      replyThreadSummaryPlan!.size.width = max(200, min(260, parentAvailableWidth))
+      replyThreadSummaryPlan!.spacing = .init(
+        top: 4.0,
+        left: 0,
+        bottom: 4.0,
+        right: 0
+      )
+    }
+
     if hasReactions {
       reactionsPlan = LayoutPlan(
         size: .zero,
@@ -1679,6 +1767,15 @@ class MessageSizeCalculator {
       bubbleHeight += attachmentsPlan.spacing.bottom
       bubbleWidth = max(bubbleWidth, attachmentsPlan.size.width + attachmentsPlan.spacing.horizontalTotal)
     }
+    if let replyThreadSummaryPlan {
+      bubbleHeight += replyThreadSummaryPlan.spacing.top
+      bubbleHeight += replyThreadSummaryPlan.size.height
+      bubbleHeight += replyThreadSummaryPlan.spacing.bottom
+      bubbleWidth = max(
+        bubbleWidth,
+        replyThreadSummaryPlan.size.width + replyThreadSummaryPlan.spacing.horizontalTotal
+      )
+    }
     if let reactionsPlan {
       bubbleHeight += reactionsPlan.size.height
       bubbleHeight += reactionsPlan.spacing.bottom
@@ -1749,6 +1846,7 @@ class MessageSizeCalculator {
       attachments: attachmentsPlan,
       forwardHeader: forwardHeaderPlan,
       reply: replyPlan,
+      replyThreadSummary: replyThreadSummaryPlan,
       reactions: reactionsPlan,
       actionsRows: actionsRowsPlan,
       reactionItems: reactionItemsPlan,
