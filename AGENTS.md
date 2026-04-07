@@ -102,6 +102,7 @@
 - For Apple docs, use `https://sosumi.ai/...` mirror of Developer docs via `curl` instead of web search.
 - Liquid Glass: gate with `#available` (iOS/macOS 26+), apply after layout/appearance, wrap related views in `GlassEffectContainer`, use `.interactive()` only for tappable elements.
 - macOS releases: `bun run release:macos -- --channel <stable|beta>` or `cd scripts && bun run macos:release-app -- --channel <stable|beta>`.
+- Local macOS direct app test build: `cd scripts && bun run macos:build-local-app -- --channel <stable|beta>`; output app: `build/InlineMacDirectLocal/Build/Products/Release/Inline.app`.
 - TestFlight is deprecated for macOS distribution; Sparkle/DMG direct build is primary.
 - send-message and open-chat paths are latency-critical; progressive/message-list changes must avoid regressions and include focused perf validation.
 
