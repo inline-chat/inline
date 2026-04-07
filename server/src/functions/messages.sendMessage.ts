@@ -775,13 +775,29 @@ async function sendNotifications(input: SendPushForMsgInput) {
   const trimmedText = unencryptedText?.trim()
   const isUrgentNudge = isNudge && trimmedText === "🚨"
 
-  // get sender of replied message ID if any
+  // A direct reply (replyToMsgId) targets a concrete message in this chat.
   const repliedToSenderId = messageInfo.message.replyToMsgId
     ? await MessageModel.getSenderIdForMessage({
         chatId: messageInfo.message.chatId,
         messageId: messageInfo.message.replyToMsgId,
       })
     : undefined
+
+  // In linked reply threads (anchored by parentMessageId), each child message is
+  // semantically a reply to the anchor message. We treat the anchor author as a
+  // reply/mention target so Mentions/ImportantOnly users don't miss thread activity.
+  const replyThreadAnchorSenderId =
+    chat.parentChatId != null && chat.parentMessageId != null
+      ? await MessageModel.getSenderIdForMessage({
+          chatId: chat.parentChatId,
+          messageId: chat.parentMessageId,
+        })
+      : undefined
+  const replyMentionUserIds = new Set<number>(
+    [repliedToSenderId, replyThreadAnchorSenderId].filter(
+      (userId): userId is number => userId != null && Number.isSafeInteger(userId) && userId > 0,
+    ),
+  )
 
   // AI
   let evalResult: NotificationEvalResult | undefined
@@ -804,7 +820,7 @@ async function sendNotifications(input: SendPushForMsgInput) {
     // Only evaluate if any participant has set to ImportantOnly and is mentioned
     const needsAIEval = participantSettings.some((setting) => {
       let zenMode = setting.settings?.notifications.mode === UserSettingsNotificationsMode.ImportantOnly
-      let isReplyToUser = setting.userId === repliedToSenderId
+      let isReplyToUser = replyMentionUserIds.has(setting.userId)
       let isExplicitlyMentioned = unencryptedEntities ? isUserMentioned(unencryptedEntities, setting.userId) : false
       let isMentioned = isDM || isExplicitlyMentioned || isReplyToUser
 
@@ -877,7 +893,7 @@ async function sendNotifications(input: SendPushForMsgInput) {
       messageInfo,
       messageText,
       messageEntities,
-      repliedToSenderId,
+      replyMentionUserIds,
       chat,
       evalResult,
       isNudge,
@@ -898,7 +914,7 @@ async function sendNotificationToUser({
   messageInfo,
   messageText,
   messageEntities,
-  repliedToSenderId,
+  replyMentionUserIds,
   chat,
   evalResult,
   isNudge,
@@ -914,7 +930,7 @@ async function sendNotificationToUser({
   messageInfo: MessageInfo
   messageText: string | undefined
   messageEntities: MessageEntities | undefined
-  repliedToSenderId: number | undefined
+  replyMentionUserIds: Set<number>
   chat?: DbChat
   evalResult?: NotificationEvalResult
   isNudge: boolean
@@ -935,9 +951,8 @@ async function sendNotificationToUser({
     dialogNotificationSettings,
   })
 
-  // TODO: evaluate reply to a user as a mention
   const isDM = inputPeer.type.oneofKind === "user"
-  const isReplyToUser = repliedToSenderId === userId
+  const isReplyToUser = replyMentionUserIds.has(userId)
   const isExplicitlyMentioned = messageEntities ? isUserMentioned(messageEntities, userId) : false
 
   const decision = decideNotification({
