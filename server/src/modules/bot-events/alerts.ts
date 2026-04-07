@@ -13,6 +13,15 @@ type AlertUser = {
   firstName: string | null
   lastName: string | null
   username: string | null
+  email: string | null
+}
+
+type AlertDevice = {
+  deviceName?: string | null
+  deviceId?: string | null
+  clientType?: string | null
+  clientVersion?: string | null
+  osVersion?: string | null
 }
 
 async function getAlertUser(userId: number): Promise<AlertUser | null> {
@@ -23,6 +32,7 @@ async function getAlertUser(userId: number): Promise<AlertUser | null> {
         firstName: users.firstName,
         lastName: users.lastName,
         username: users.username,
+        email: users.email,
       })
       .from(users)
       .where(eq(users.id, userId))
@@ -46,6 +56,20 @@ function userLabel(user: AlertUser): string {
   if (user.username) return `@${user.username}`
   if (name) return name
   return `User ${user.id}`
+}
+
+function deviceDetails(device?: AlertDevice): string {
+  if (!device) return "unknown device"
+
+  const parts: string[] = []
+  if (device.deviceName) parts.push(device.deviceName)
+
+  const client = [device.clientType, device.clientVersion].filter(Boolean).join(" ")
+  if (client) parts.push(client)
+  if (device.osVersion) parts.push(`os ${device.osVersion}`)
+  if (parts.length === 0 && device.deviceId) parts.push(`device ${device.deviceId}`)
+
+  return parts.length > 0 ? parts.join(", ") : "unknown device"
 }
 
 function escapeMarkdownLinkLabel(label: string): string {
@@ -96,11 +120,23 @@ export const BotAlerts = {
     })()
   },
 
-  logout(props: { userId: number }) {
+  login(props: { userId: number; device?: AlertDevice }) {
     void (async () => {
       const user = await getAlertUser(props.userId)
       const userText = user ? adminUserLink(user) : "Someone"
-      sendInlineOnlyBotEvent(`Logout: ${userText} logged out.`)
+      const emailText = user?.email ?? "no email"
+      const deviceText = deviceDetails(props.device)
+      sendInlineOnlyBotEvent(`Login: ${userText} (${emailText}) on ${deviceText}.`)
+    })()
+  },
+
+  logout(props: { userId: number; device?: AlertDevice }) {
+    void (async () => {
+      const user = await getAlertUser(props.userId)
+      const userText = user ? adminUserLink(user) : "Someone"
+      const emailText = user?.email ?? "no email"
+      const deviceText = deviceDetails(props.device)
+      sendInlineOnlyBotEvent(`Logout: ${userText} (${emailText}) on ${deviceText}.`)
     })()
   },
 }

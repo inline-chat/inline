@@ -15,6 +15,7 @@ import parsePhoneNumber from "libphonenumber-js"
 import { prelude } from "@in/server/libs/prelude"
 import { sendBotEvent } from "@in/server/modules/bot-events"
 import { maskPhoneNumber } from "@in/server/utils/privacy"
+import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 
 export const Input = Type.Object({
   phoneNumber: Type.String(),
@@ -104,7 +105,7 @@ export const handler = async (
     // save session
     let { token, tokenHash } = await generateToken(userId)
 
-    let _ = await SessionsModel.create({
+    const session = await SessionsModel.create({
       userId,
       tokenHash,
       personalData: {
@@ -119,6 +120,18 @@ export const handler = async (
       clientVersion: clientVersion ?? undefined,
       osVersion: osVersion ?? undefined,
       deviceId: input.deviceId ?? undefined,
+    })
+
+    // Best-effort internal alert (should never affect the user action).
+    BotAlerts.login({
+      userId,
+      device: {
+        deviceName: session.personalData.deviceName,
+        deviceId: session.deviceId,
+        clientType: session.clientType,
+        clientVersion: session.clientVersion,
+        osVersion: session.osVersion,
+      },
     })
 
     return { userId: userId, token: token, user: encodeUserInfo(user) }

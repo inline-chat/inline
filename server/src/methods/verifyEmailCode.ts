@@ -15,6 +15,7 @@ import { sendBotEvent } from "@in/server/modules/bot-events"
 import { DEMO_CODE, DEMO_EMAIL } from "@in/server/env"
 import { maskEmail } from "@in/server/utils/privacy"
 import { verifyEmailLoginChallenge } from "@in/server/modules/auth/emailLoginChallenges"
+import { BotAlerts } from "@in/server/modules/bot-events/alerts"
 
 export const Input = Type.Object({
   email: Type.String(),
@@ -100,7 +101,7 @@ export const handler = async (
   // store sha256 of token in db
   let { token, tokenHash } = await generateToken(userId)
 
-  let _ = await SessionsModel.create({
+  const session = await SessionsModel.create({
     userId,
     tokenHash,
     deviceId: input.deviceId ?? undefined,
@@ -115,6 +116,18 @@ export const handler = async (
     clientType: clientType ?? "web",
     clientVersion: clientVersion ?? undefined,
     osVersion: osVersion ?? undefined,
+  })
+
+  // Best-effort internal alert (should never affect the user action).
+  BotAlerts.login({
+    userId,
+    device: {
+      deviceName: session.personalData.deviceName,
+      deviceId: session.deviceId,
+      clientType: session.clientType,
+      clientVersion: session.clientVersion,
+      osVersion: session.osVersion,
+    },
   })
 
   return { userId: userId, token: token, user: encodeUserInfo(user) }
