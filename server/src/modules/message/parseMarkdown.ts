@@ -187,32 +187,67 @@ function findInlineCode(text: string, matches: Match[]): void {
 }
 
 function findLinks(text: string, matches: Match[]): void {
-  const regex = /\[([^\]]+)\]\(([^)]+)\)/g
-  let match: RegExpExecArray | null
-
-  while ((match = regex.exec(text)) !== null) {
-    const linkText = match[1] ?? ""
-    const url = match[2] ?? ""
-
-    if (linkText.length > 0 && url.length > 0) {
-      const parsedLinkText = parseNestedContent(linkText, {
-        allowedTypes: new Set([
-          MessageEntity_Type.BOLD,
-          MessageEntity_Type.ITALIC,
-          MessageEntity_Type.CODE,
-          MessageEntity_Type.PRE,
-        ]),
-      })
-
-      matches.push({
-        start: match.index,
-        end: match.index + match[0].length,
-        content: parsedLinkText.text,
-        type: MessageEntity_Type.TEXT_URL,
-        url,
-        nestedEntities: parsedLinkText.entities,
-      })
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== "[") {
+      continue
     }
+
+    const textEnd = text.indexOf("]", i + 1)
+    if (textEnd === -1) {
+      continue
+    }
+
+    if (text[textEnd + 1] !== "(") {
+      continue
+    }
+
+    const linkText = text.slice(i + 1, textEnd)
+    if (!linkText) {
+      continue
+    }
+
+    let urlStart = textEnd + 2
+    let depth = 1
+    let cursor = urlStart
+    while (cursor < text.length && depth > 0) {
+      const char = text[cursor]
+      if (char === "(") {
+        depth += 1
+      } else if (char === ")") {
+        depth -= 1
+      }
+      cursor += 1
+    }
+
+    if (depth !== 0) {
+      continue
+    }
+
+    const urlEnd = cursor - 1
+    const url = text.slice(urlStart, urlEnd)
+    if (!url) {
+      continue
+    }
+
+    const parsedLinkText = parseNestedContent(linkText, {
+      allowedTypes: new Set([
+        MessageEntity_Type.BOLD,
+        MessageEntity_Type.ITALIC,
+        MessageEntity_Type.CODE,
+        MessageEntity_Type.PRE,
+      ]),
+    })
+
+    matches.push({
+      start: i,
+      end: cursor,
+      content: parsedLinkText.text,
+      type: MessageEntity_Type.TEXT_URL,
+      url,
+      nestedEntities: parsedLinkText.entities,
+    })
+
+    i = cursor - 1
   }
 }
 
@@ -257,7 +292,7 @@ function findBold(text: string, matches: Match[]): void {
 
 function findItalic(text: string, matches: Match[]): void {
   // Match *text* or _text_ but not ** or __
-  const regex = /(?<!\*)\*(?!\*)(.+?)\*(?!\*)|(?<!_)_(?!_)(.+?)_(?!_)/g
+  const regex = /(?<!\*)\*(?!\*)(.+?)\*(?!\*)|(?<![\p{L}\p{N}_])_(?!_)(.+?)(?<!_)_(?![\p{L}\p{N}_])/gu
   let match: RegExpExecArray | null
 
   while ((match = regex.exec(text)) !== null) {
