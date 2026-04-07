@@ -461,14 +461,14 @@ class ComposeAppKit: NSView {
     // Subscribe to participants updates
     chatParticipantsViewModel?.$participants
       .sink { [weak self] participants in
-        Log.shared.trace("🔍 Participants updated: \(participants.count) participants")
+        self?.log.trace("Participants updated: \(participants.count) participants")
         self?.mentionCompletionMenu?.updateParticipants(participants)
       }
       .store(in: &cancellables)
 
     // Fetch participants from server
     Task {
-      Log.shared.trace("🔍 Fetching chat participants from server...")
+      log.trace("Fetching chat participants from server")
       await chatParticipantsViewModel?.refetchParticipants()
     }
   }
@@ -478,11 +478,11 @@ class ComposeAppKit: NSView {
           menu.superview == nil,
           let parentView = parentChatView?.view
     else {
-      Log.shared.debug("🔍 addMentionMenuToSuperview: menu already has superview, is nil, or no parent chat view")
+      log.trace("addMentionMenuToSuperview: menu already has superview, is nil, or no parent chat view")
       return
     }
 
-    Log.shared.debug("🔍 addMentionMenuToSuperview: adding menu to ChatViewAppKit's view")
+    log.trace("addMentionMenuToSuperview: adding menu to ChatViewAppKit's view")
 
     // Add menu to the parent chat view
     parentView.addSubview(menu)
@@ -499,7 +499,7 @@ class ComposeAppKit: NSView {
     ]
 
     NSLayoutConstraint.activate(mentionMenuConstraints)
-    Log.shared.debug("🔍 addMentionMenuToSuperview: menu positioned above compose view")
+    log.trace("addMentionMenuToSuperview: menu positioned above compose view")
   }
 
   private func setupSlashCommandCompletion() {
@@ -531,7 +531,7 @@ class ComposeAppKit: NSView {
   }
 
   private func showMentionCompletion(for query: String) {
-    Log.shared.debug("🔍 showMentionCompletion: query='\(query)'")
+    log.trace("showMentionCompletion: query='\(query)'")
 
     // Ensure menu is added to view hierarchy
     addMentionMenuToSuperview()
@@ -894,7 +894,7 @@ class ComposeAppKit: NSView {
           self.attachments.removeImageView(id: pendingId)
           self.updateHeight(animate: true)
         }
-        Log.shared.error("Failed to save photo in attachments", error: error)
+        log.error("Failed to save photo in attachments", error: error)
       }
     }
 
@@ -959,7 +959,7 @@ class ComposeAppKit: NSView {
           self.attachments.removeVideoView(id: pendingId)
           self.updateHeight(animate: true)
         }
-        Log.shared.error("Failed to save video in attachments", error: error)
+        log.error("Failed to save video in attachments", error: error)
       }
     }
 
@@ -989,7 +989,7 @@ class ComposeAppKit: NSView {
       // Update State
       attachmentItems[uniqueId] = mediaItem
     } catch {
-      Log.shared.error("Failed to save document", error: error)
+      log.error("Failed to save document", error: error)
     }
   }
 
@@ -1875,7 +1875,7 @@ private extension ComposeAppKit {
           )
         )
       } catch {
-        Log.shared.error("Failed to auto-add mentioned user", error: error)
+        log.error("Failed to auto-add mentioned user", error: error)
       }
     }
   }

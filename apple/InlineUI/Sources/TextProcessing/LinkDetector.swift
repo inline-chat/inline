@@ -118,14 +118,14 @@ public final class LinkDetector: Sendable {
   public func detectLinks(in text: String) -> [LinkMatch] {
     guard !text.isEmpty else { return [] }
 
-    log.debug("🔍 Starting link detection for text: '\(text)'")
+    log.trace("Starting link detection for text: '\(text)'")
 
     var matches: [LinkMatch] = []
     var handledRanges: Set<NSRange> = []
 
     // First, detect full http/https URLs using custom regex (handles very long or exotic URLs)
     let fullURLMatches = detectFullURLLinks(in: text, excluding: handledRanges)
-    log.debug("🔍 Full URL detector found \(fullURLMatches.count) matches")
+    log.trace("Full URL detector found \(fullURLMatches.count) matches")
     matches.append(contentsOf: fullURLMatches)
     for match in fullURLMatches {
       handledRanges.insert(match.range)
@@ -133,13 +133,13 @@ public final class LinkDetector: Sendable {
 
     // Finally, detect bare domains with whitelisted TLDs (e.g. "inline.chat")
     let bareDomainMatches = detectBareDomainLinks(in: text, excluding: handledRanges)
-    log.debug("🔍 Bare domain detector found \(bareDomainMatches.count) matches")
+    log.trace("Bare domain detector found \(bareDomainMatches.count) matches")
     matches.append(contentsOf: bareDomainMatches)
 
     // Sort matches by range location to maintain order
     matches.sort { $0.range.location < $1.range.location }
 
-    log.debug("🔍 Total detected links: \(matches.count)")
+    log.trace("Total detected links: \(matches.count)")
     return matches
   }
 
@@ -228,13 +228,13 @@ public final class LinkDetector: Sendable {
     let range = NSRange(location: 0, length: text.utf16.count)
     let matches = Self.bareDomainRegex.matches(in: text, options: [], range: range)
 
-    log.debug("🔍 Bare domain regex found \(matches.count) matches in text: '\(text)'")
+    log.trace("Bare domain regex found \(matches.count) matches in text: '\(text)'")
 
     return matches.compactMap { match in
       // Skip if this range overlaps with already handled ranges
       let overlaps = handledRanges.contains { NSIntersectionRange($0, match.range).length > 0 }
       guard !overlaps else {
-        log.debug("🔍 Skipping overlapping range: \(match.range)")
+        log.trace("Skipping overlapping range: \(match.range)")
         return nil
       }
 
@@ -243,7 +243,7 @@ public final class LinkDetector: Sendable {
         let precedingRange = NSRange(location: match.range.location - 1, length: 1)
         let precedingChar = (text as NSString).substring(with: precedingRange)
         if precedingChar == "@" {
-          log.debug("🔍 Skipping domain preceded by @ (likely an email address): \(match.range)")
+          log.trace("Skipping domain preceded by @ (likely an email address): \(match.range)")
           return nil
         }
       }
@@ -253,7 +253,7 @@ public final class LinkDetector: Sendable {
         let protocolCheckRange = NSRange(location: match.range.location - 3, length: 3)
         let precedingThree = (text as NSString).substring(with: protocolCheckRange)
         if precedingThree == "://" {
-          log.debug("🔍 Skipping domain preceded by :// (likely part of another URL scheme): \(match.range)")
+          log.trace("Skipping domain preceded by :// (likely part of another URL scheme): \(match.range)")
           return nil
         }
       }
@@ -264,7 +264,7 @@ public final class LinkDetector: Sendable {
         let precedingScalar = (text as NSString).substring(with: precedingRange).unicodeScalars.first!
         let allowedPreceding = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "([{\"'"))
         if !allowedPreceding.contains(precedingScalar) {
-          log.debug("🔍 Skipping domain due to invalid preceding character: \(precedingScalar)")
+          log.trace("Skipping domain due to invalid preceding character: \(precedingScalar)")
           return nil
         }
       }
@@ -286,16 +286,16 @@ public final class LinkDetector: Sendable {
         .lowercased()
       let tld = hostCandidate?.split(separator: ".").last.map(String.init)
       if let tld, Self.excludedBareDomainTLDs.contains(tld) {
-        log.debug("🔍 Skipping bare domain due to excluded TLD: \(tld)")
+        log.trace("Skipping bare domain due to excluded TLD: \(tld)")
         return nil
       }
 
-      log.debug("🔍 Found bare domain with optional path: '\(urlSubstring)' at range \(adjustedRange)")
+      log.trace("Found bare domain with optional path: '\(urlSubstring)' at range \(adjustedRange)")
 
       // Add https:// protocol to make it a valid URL
       let urlString = "https://\(urlSubstring)"
       guard let url = URL(string: urlString) else {
-        log.debug("🔍 Failed to create URL from: '\(urlString)'")
+        log.trace("Failed to create URL from: '\(urlString)'")
         return nil
       }
 
@@ -385,13 +385,13 @@ public final class LinkDetector: Sendable {
       "Regular text without links",
     ]
 
-    log.debug("🔍 Testing regexes...")
+    log.trace("Testing regexes...")
 
     for testCase in testCases {
       let matches = detectLinks(in: testCase)
-      log.debug("🔍 Test case '\(testCase)': \(matches.count) links detected")
+      log.trace("Test case '\(testCase)': \(matches.count) links detected")
       for match in matches {
-        log.debug("🔍   - URL: \(match.url), range: \(match.range), whitelisted: \(match.isWhitelistedTLD)")
+        log.trace("  - URL: \(match.url), range: \(match.range), whitelisted: \(match.isWhitelistedTLD)")
       }
     }
   }
