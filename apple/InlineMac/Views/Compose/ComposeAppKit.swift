@@ -10,7 +10,7 @@ import TextProcessing
 class ComposeAppKit: NSView {
   // MARK: - Internals
 
-  private var log = Log.scoped("Compose", enableTracing: true)
+  private var log = Log.scoped("Compose", enableTracing: false)
 
   // MARK: - Props
 
@@ -90,6 +90,7 @@ class ComposeAppKit: NSView {
   // Features
   private var feature_animateHeightChanges = false // for now until fixing how to update list view smoothly
   private var isHandlingStickerInsertion = false
+  private lazy var paragraphDirectionController = ComposeParagraphDirectionController(textView: textEditor.textView)
   private let stickerDetector = ComposeStickerDetector()
   private let rightButtonSpacing: CGFloat = 6
   private var silentModeButtonWidthConstraint: NSLayoutConstraint?
@@ -1535,6 +1536,8 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   func textDidChange(_ notification: Notification) {
     guard let textView = notification.object as? NSTextView else { return }
 
+    paragraphDirectionController.textDidChange()
+
     // Prevent mention style leakage to new text
     textView.updateTypingAttributesIfNeeded()
 
@@ -1604,12 +1607,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func calculateContentHeight(for textView: NSTextView) -> CGFloat {
-    guard let layoutManager = textView.layoutManager,
-          let textContainer = textView.textContainer
-    else { return 0 }
-
-    layoutManager.ensureLayout(for: textContainer)
-    return layoutManager.usedRect(for: textContainer).height
+    contentHeight(for: textView)
   }
 
   func updateContentHeight(for textView: NSTextView) {
@@ -1617,12 +1615,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func updateHeightIfNeeded(for textView: NSTextView, animate: Bool = false) {
-    guard let layoutManager = textView.layoutManager,
-          let textContainer = textView.textContainer
-    else { return }
-
-    layoutManager.ensureLayout(for: textContainer)
-    let contentHeight = layoutManager.usedRect(for: textContainer).height
+    let contentHeight = contentHeight(for: textView)
 
     if abs(textViewContentHeight - contentHeight) < 8.0 {
       // minimal change to height ignore
@@ -1637,8 +1630,23 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
     updateHeight(animate: animate)
   }
 
+  private func contentHeight(for textView: NSTextView) -> CGFloat {
+    if let layoutManager = textView.layoutManager,
+       let textContainer = textView.textContainer
+    {
+      layoutManager.ensureLayout(for: textContainer)
+      return layoutManager.usedRect(for: textContainer).height
+    }
+
+    guard let textLayoutManager = textView.textLayoutManager else { return 0 }
+    textLayoutManager.textViewportLayoutController.layoutViewport()
+    return textLayoutManager.usageBoundsForTextContainer.height
+  }
+
   func textViewDidChangeSelection(_ notification: Notification) {
     guard let textView = notification.object as? NSTextView else { return }
+
+    paragraphDirectionController.selectionDidChange()
 
     // Reset typing attributes when cursor moves to prevent mention style leakage
     textView.updateTypingAttributesIfNeeded()
@@ -1705,7 +1713,7 @@ extension ComposeAppKit: NSTextViewDelegate, ComposeTextViewDelegate {
   }
 
   func textViewDidGainFocus(_ textView: NSTextView) {
-    // TODO: Show mentions menu if needed
+    paragraphDirectionController.didGainFocus()
   }
 
   func textViewDidLoseFocus(_ textView: NSTextView) {
@@ -1910,6 +1918,7 @@ extension ComposeAppKit {
   func setAttributedString(_ attributedString: NSAttributedString) {
     // Set as compose text
     textEditor.replaceAttributedString(attributedString)
+    paragraphDirectionController.refreshAllParagraphDirections()
     textEditor.showPlaceholder(text.isEmpty)
 
     // Measure new height
@@ -1942,13 +1951,7 @@ extension ComposeAppKit {
         entities: draft.entities
       )
     } else {
-      attributedString = NSAttributedString(
-        string: draft.text,
-        attributes: [
-          .font: ComposeTextEditor.font,
-          .foregroundColor: ComposeTextEditor.textColor
-        ]
-      )
+      attributedString = textEditor.createAttributedString(draft.text)
     }
 
     // `didLayout()` is called after layout in normal flow. Only force layout

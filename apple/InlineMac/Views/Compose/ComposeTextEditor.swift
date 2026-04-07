@@ -55,22 +55,35 @@ class ComposeTextEditor: NSView {
 
   // Does not preserve selection
   func replaceAttributedString(_ attributedString: NSAttributedString) {
-    textView.setAttributedText(attributedString, preserveSelection: false)
+    let normalized = normalizeParagraphStyle(in: attributedString)
+    textView.setAttributedText(normalized, preserveSelection: false)
     // Reset typing attributes if string is empty to prevent formatting carryover
-    if attributedString.string.isEmpty {
+    if normalized.string.isEmpty {
       textView.typingAttributes = [
+        .paragraphStyle: paragraphStyle,
         .font: font,
         .foregroundColor: textColor,
+        .underlineStyle: 0,
       ]
     }
   }
 
-  private lazy var paragraphStyle = {
-    let paragraph = NSParagraphStyle.default.mutableCopy() as! NSMutableParagraphStyle
-    paragraph.lineSpacing = 0.0
+  static func makeParagraphStyle(from existing: NSParagraphStyle? = nil) -> NSParagraphStyle {
+    let paragraph = (existing?.mutableCopy() as? NSMutableParagraphStyle)
+      ?? (NSParagraphStyle.default.mutableCopy() as! NSMutableParagraphStyle)
+    if existing == nil {
+      paragraph.lineSpacing = 0.0
+    }
+    paragraph.alignment = .natural
     paragraph.baseWritingDirection = .natural
-    return paragraph
-  }()
+    return paragraph.copy() as! NSParagraphStyle
+  }
+
+  static var defaultParagraphStyle: NSParagraphStyle {
+    makeParagraphStyle()
+  }
+
+  private lazy var paragraphStyle = Self.defaultParagraphStyle
 
   private lazy var placeholder: NonInteractiveTextField = {
     let label = NonInteractiveTextField(label: "Message")
@@ -88,7 +101,7 @@ class ComposeTextEditor: NSView {
 
   init(initiallySingleLine: Bool = false) {
     scrollView = ComposeScrollView()
-    textView = ComposeNSTextView()
+    textView = Self.makeTextView()
 
     self.initiallySingleLine = initiallySingleLine
 
@@ -120,6 +133,7 @@ class ComposeTextEditor: NSView {
     textView.font = font
     textView.backgroundColor = .clear
     textView.textColor = .labelColor
+    textView.alignment = .natural
     textView.allowsUndo = true
     textView.isAutomaticDashSubstitutionEnabled = false
     textView.isVerticallyResizable = true
@@ -169,8 +183,12 @@ class ComposeTextEditor: NSView {
       )
     }
 
-    textView.textContainer?.widthTracksTextView = true
-    textView.textContainer?.lineFragmentPadding = horizontalPadding
+    configureTextContainer()
+    let hasTextKit2 = textView.textLayoutManager != nil
+    log.debug("Compose text engine: textKit2=\(hasTextKit2), textKit1LayoutManager=\(textView.layoutManager != nil)")
+    if !hasTextKit2 {
+      log.error("Compose text view is not using TextKit 2")
+    }
 
     textView.delegate = delegate
 
@@ -195,6 +213,15 @@ class ComposeTextEditor: NSView {
     return (font.ascender - font.descender + font.leading) * lineHeightMultiple
   }
 
+  private func configureTextContainer() {
+    textView.textContainer?.widthTracksTextView = true
+    textView.textContainer?.lineFragmentPadding = horizontalPadding
+  }
+
+  private static func makeTextView() -> ComposeNSTextView {
+    ComposeNSTextView(usingTextLayoutManager: true)
+  }
+
   func setHeight(_ height: CGFloat) {
     heightConstraint.constant = height
   }
@@ -204,17 +231,22 @@ class ComposeTextEditor: NSView {
   }
 
   var initialPlaceholderPosition: CGPoint? = nil
-  var isPlaceholderVisible: Bool = true
+  var isPlaceholderVisible: Bool = false
 
   func showPlaceholder(_ show: Bool) {
-    if show {
-      addSubview(placeholder)
+    if isPlaceholderVisible == show, !(show && placeholder.superview == nil) { return }
+    isPlaceholderVisible = show
 
-      NSLayoutConstraint.activate([
-        placeholder.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalPadding),
-        placeholder.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalPadding),
-        placeholder.centerYAnchor.constraint(equalTo: centerYAnchor),
-      ])
+    if show {
+      if placeholder.superview == nil {
+        addSubview(placeholder)
+        NSLayoutConstraint.activate([
+          placeholder.leadingAnchor.constraint(equalTo: leadingAnchor, constant: horizontalPadding),
+          placeholder.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -horizontalPadding),
+          placeholder.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        layoutSubtreeIfNeeded()
+      }
     }
 
     if initialPlaceholderPosition == nil {
@@ -222,10 +254,6 @@ class ComposeTextEditor: NSView {
     }
 
     let initialPosition = initialPlaceholderPosition ?? .zero
-
-    guard isPlaceholderVisible != show else { return }
-
-    isPlaceholderVisible = show
 
     let offsetX = 15.0
     let offsetY = 0.0
@@ -375,14 +403,38 @@ class ComposeTextEditor: NSView {
       .underlineStyle: 0,
     ]
   }
+
+  private func normalizeParagraphStyle(in attributedString: NSAttributedString) -> NSAttributedString {
+    guard attributedString.length > 0 else { return attributedString }
+
+    let mutable = NSMutableAttributedString(attributedString: attributedString)
+    let text = mutable.string as NSString
+    var location = 0
+
+    while location < text.length {
+      let range = text.paragraphRange(for: NSRange(location: location, length: 0))
+      let existing = mutable.attribute(.paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle
+      let style = Self.makeParagraphStyle(from: existing)
+      mutable.addAttribute(.paragraphStyle, value: style, range: range)
+      location = NSMaxRange(range)
+    }
+
+    return mutable
+  }
 }
 
 // MARK: - NSTextView Extensions for Attributed String Helpers
 
 extension NSTextView {
+  var defaultParagraphStyle: NSParagraphStyle {
+    let current = typingAttributes[.paragraphStyle] as? NSParagraphStyle
+    return ComposeTextEditor.makeParagraphStyle(from: current)
+  }
+
   /// Default attributes for this text view
   var defaultTypingAttributes: [NSAttributedString.Key: Any] {
     [
+      .paragraphStyle: defaultParagraphStyle,
       // Use a stable base font instead of `self.font` (which can be mutated by the text system based on
       // selection/paste), otherwise resets can accidentally "lock in" monospace after pasting code blocks.
       .font: ComposeTextEditor.font,
@@ -455,6 +507,9 @@ extension NSTextView {
     let monospaceFont = NSFont.monospacedSystemFont(ofSize: currentFont.pointSize, weight: .regular)
 
     var newTypingAttributes = defaultTypingAttributes
+    if let paragraphStyle = attributes[.paragraphStyle] as? NSParagraphStyle {
+      newTypingAttributes[.paragraphStyle] = ComposeTextEditor.makeParagraphStyle(from: paragraphStyle)
+    }
     newTypingAttributes[.font] = monospaceFont
 
     // Preserve preCode or inlineCode attribute for continued typing
@@ -483,6 +538,7 @@ extension ComposeTextEditor {
   /// Create attributed string using this editor's font
   func createAttributedString(_ text: String) -> NSAttributedString {
     NSAttributedString(string: text, attributes: [
+      .paragraphStyle: paragraphStyle,
       .font: font,
       .foregroundColor: NSColor.labelColor,
     ])
@@ -491,6 +547,7 @@ extension ComposeTextEditor {
   /// Create empty attributed string using this editor's font
   func createEmptyAttributedString() -> NSAttributedString {
     NSAttributedString(string: "", attributes: [
+      .paragraphStyle: paragraphStyle,
       .font: font,
       .foregroundColor: NSColor.labelColor,
     ])
