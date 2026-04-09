@@ -1511,7 +1511,6 @@ private final class ComposeAttachmentPreviewItemView: UIView {
     static let cornerRadius: CGFloat = 16
     static let removeButtonSize: CGFloat = 22
     static let removeBadgeSize: CGFloat = 22
-    static let progressRingSize: CGFloat = 28
   }
 
   private let attachmentId: String
@@ -1590,30 +1589,6 @@ private final class ComposeAttachmentPreviewItemView: UIView {
     iconView.layer.shadowOpacity = 0.6
     iconView.isHidden = true
     return iconView
-  }()
-
-  private let progressOverlayView: UIView = {
-    let view = UIView()
-    view.translatesAutoresizingMaskIntoConstraints = false
-    view.backgroundColor = UIColor.black.withAlphaComponent(0.4)
-    view.isUserInteractionEnabled = false
-    view.isHidden = true
-    return view
-  }()
-
-  private let uploadProgressView: CircularProgressHostingView = {
-    let view = CircularProgressHostingView()
-    view.translatesAutoresizingMaskIntoConstraints = false
-    view.isHidden = true
-    return view
-  }()
-
-  private let loadingIndicator: UIActivityIndicatorView = {
-    let view = UIActivityIndicatorView(style: .medium)
-    view.translatesAutoresizingMaskIntoConstraints = false
-    view.color = .secondaryLabel
-    view.hidesWhenStopped = true
-    return view
   }()
 
   private lazy var removeButton: UIButton = {
@@ -1703,9 +1678,6 @@ private final class ComposeAttachmentPreviewItemView: UIView {
     tileContentView.addSubview(centerIconView)
     tileContentView.addSubview(extensionBadge)
     tileContentView.addSubview(overlayIconView)
-    tileContentView.addSubview(progressOverlayView)
-    progressOverlayView.addSubview(uploadProgressView)
-    tileContentView.addSubview(loadingIndicator)
     addSubview(removeButton)
     removeButton.addSubview(removeBadgeView)
     removeBadgeView.addSubview(removeIconView)
@@ -1753,19 +1725,6 @@ private final class ComposeAttachmentPreviewItemView: UIView {
       overlayIconView.centerXAnchor.constraint(equalTo: tileContentView.centerXAnchor),
       overlayIconView.centerYAnchor.constraint(equalTo: tileContentView.centerYAnchor),
 
-      progressOverlayView.leadingAnchor.constraint(equalTo: tileContentView.leadingAnchor),
-      progressOverlayView.trailingAnchor.constraint(equalTo: tileContentView.trailingAnchor),
-      progressOverlayView.topAnchor.constraint(equalTo: tileContentView.topAnchor),
-      progressOverlayView.bottomAnchor.constraint(equalTo: tileContentView.bottomAnchor),
-
-      uploadProgressView.centerXAnchor.constraint(equalTo: progressOverlayView.centerXAnchor),
-      uploadProgressView.centerYAnchor.constraint(equalTo: progressOverlayView.centerYAnchor),
-      uploadProgressView.widthAnchor.constraint(equalToConstant: Metrics.progressRingSize),
-      uploadProgressView.heightAnchor.constraint(equalToConstant: Metrics.progressRingSize),
-
-      loadingIndicator.centerXAnchor.constraint(equalTo: tileContentView.centerXAnchor),
-      loadingIndicator.centerYAnchor.constraint(equalTo: tileContentView.centerYAnchor),
-
       removeButton.topAnchor.constraint(equalTo: topAnchor, constant: 6),
       removeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
       removeButton.widthAnchor.constraint(equalToConstant: Metrics.removeButtonSize),
@@ -1782,7 +1741,6 @@ private final class ComposeAttachmentPreviewItemView: UIView {
   }
 
   private func configure(mediaItem: FileMediaItem) {
-    loadingIndicator.stopAnimating()
     setUploadProgress(nil)
     localThumbnailImageView.image = nil
     localThumbnailImageView.isHidden = true
@@ -1824,7 +1782,6 @@ private final class ComposeAttachmentPreviewItemView: UIView {
 
   private func configurePendingVideo(thumbnailImage: UIImage?) {
     setUploadProgress(nil)
-    loadingIndicator.stopAnimating()
     overlayIconView.isHidden = true
     extensionBadge.isHidden = true
     if let thumbnailImage {
@@ -1835,31 +1792,7 @@ private final class ComposeAttachmentPreviewItemView: UIView {
   }
 
   func setUploadProgress(_ progress: UploadProgressSnapshot?) {
-    guard let progress else {
-      loadingIndicator.stopAnimating()
-      progressOverlayView.isHidden = true
-      uploadProgressView.isHidden = true
-      uploadProgressView.setProgress(0)
-      return
-    }
-
-    progressOverlayView.isHidden = false
-    uploadProgressView.isHidden = false
-
-    switch progress.stage {
-    case .processing:
-      loadingIndicator.stopAnimating()
-      uploadProgressView.setProgress(0)
-    case .uploading:
-      loadingIndicator.stopAnimating()
-      uploadProgressView.setProgress(progress.fractionCompleted)
-    case .completed:
-      loadingIndicator.stopAnimating()
-      setUploadProgress(nil)
-    case .failed:
-      loadingIndicator.stopAnimating()
-      setUploadProgress(nil)
-    }
+    _ = progress
   }
 
   private func applyPhotoPreview(_ photoInfo: PhotoInfo?) {
