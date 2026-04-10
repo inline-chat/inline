@@ -257,9 +257,6 @@ function requireUploadFile(file: File | undefined): File {
   if (file.size > MAX_FILE_SIZE) {
     throw new InlineError(ApiError.FILE_TOO_LARGE)
   }
-  if (!file.type?.trim()) {
-    throw uploadBadRequest("Uploaded file is missing MIME type")
-  }
   return file
 }
 

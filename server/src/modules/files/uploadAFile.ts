@@ -45,7 +45,8 @@ export async function uploadFile(
 
     const fileUniqueId = generateFileUniqueId(fileType)
     const prefix = nanoid(32)
-    const path = `${fileUniqueId}/${prefix}.${normalizedMetadata.extension}`
+    const suffix = normalizedMetadata.extension ? `.${normalizedMetadata.extension}` : ""
+    const path = `${fileUniqueId}/${prefix}${suffix}`
     const bucketPath = `${FILES_PATH_PREFIX}/${path}`
 
     // Upload file to bucket
@@ -120,10 +121,6 @@ export async function uploadFile(
 
 function normalizeMetadata(metadata: FileMetadata): FileMetadata {
   const extension = metadata.extension.trim().toLowerCase()
-  if (!extension) {
-    throw badRequest("Upload metadata is missing file extension")
-  }
-
   const mimeType = metadata.mimeType.trim()
   if (!mimeType) {
     throw badRequest("Upload metadata is missing MIME type")

@@ -180,19 +180,14 @@ export const getDocumentMetadataAndValidate = async (
 
   let size = file.size
   let mimeType = file.type.trim()
-  let extension = fileName.split(".").pop()?.toLowerCase()
+  let extension = extractDocumentExtension(fileName)
 
   if (size === 0) {
     throw badRequest("Uploaded document is empty")
   }
 
-  if (!mimeType) {
-    throw badRequest("Uploaded document is missing MIME type")
-  }
-
-  if (!extension) {
-    throw new InlineError(InlineError.ApiError.DOCUMENT_INVALID_EXTENSION)
-  }
+  extension = normalizeDocumentExtension(extension)
+  mimeType = mimeType || inferDocumentMimeType(extension)
 
   // Validate file size
   if (size > maxDocumentFileSize) {
@@ -206,6 +201,24 @@ const validVoiceMimeTypes = ["audio/ogg"]
 const validVoiceExtensions = ["ogg", "oga"]
 const maxVoiceFileSize = 20_000_000 // 20MB
 const maxVoiceWaveformBytes = 2048
+const documentMimeTypesByExtension: Record<string, string> = {
+  csv: "text/csv",
+  html: "text/html",
+  htm: "text/html",
+  js: "text/javascript",
+  json: "application/json",
+  md: "text/markdown",
+  ovpn: "application/x-openvpn-profile",
+  pdf: "application/pdf",
+  py: "text/x-python",
+  sh: "application/x-sh",
+  svg: "image/svg+xml",
+  txt: "text/plain",
+  xml: "application/xml",
+  yaml: "application/yaml",
+  yml: "application/yaml",
+  zip: "application/zip",
+}
 
 export const getVoiceMetadataAndValidate = async (
   file: File,
@@ -275,6 +288,34 @@ function decodeFileName(fileName: string | undefined, fallback: string): string 
     log.error("Failed to decode filename", { error, raw })
     return raw
   }
+}
+
+function inferDocumentMimeType(extension: string): string {
+  const normalized = extension.trim().toLowerCase()
+  if (!normalized) {
+    return "application/octet-stream"
+  }
+
+  return documentMimeTypesByExtension[normalized] ?? "application/octet-stream"
+}
+
+function extractDocumentExtension(fileName: string): string | undefined {
+  const trimmed = fileName.trim()
+  const lastDot = trimmed.lastIndexOf(".")
+  if (lastDot <= 0 || lastDot === trimmed.length - 1) {
+    return undefined
+  }
+
+  return trimmed.slice(lastDot + 1).toLowerCase()
+}
+
+function normalizeDocumentExtension(extension: string | undefined): string {
+  const normalized = extension?.trim().toLowerCase()
+  if (!normalized) {
+    return ""
+  }
+
+  return normalized
 }
 
 function badRequest(description: string): InlineError {
