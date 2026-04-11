@@ -1349,6 +1349,11 @@ export async function monitorInlineProvider(params: {
           await answerInlineMessageAction(client, callbackActionEvent.interactionId)
           callbackActionAnswered = true
         }
+        if (callbackActionEvent) {
+          await answerCallbackIfNeeded().catch((error) => {
+            runtime.error?.(`inline callback answer failed: ${String(error)}`)
+          })
+        }
         const shouldEditCallbackTargetInPlace = callbackActionEvent != null
         const normalizedCommandBody = callbackCommandBody ?? normalizeInlineCommandBody(rawBody, botUsername)
 
