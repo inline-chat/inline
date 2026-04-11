@@ -105,6 +105,7 @@
 - Local macOS direct app test build: `cd scripts && bun run macos:build-local-app -- --channel <stable|beta>`; output app: `build/InlineMacDirectLocal/Build/Products/Release/Inline.app`.
 - TestFlight is deprecated for macOS distribution; Sparkle/DMG direct build is primary.
 - send-message and open-chat paths are latency-critical; progressive/message-list changes must avoid regressions and include focused perf validation.
+- Xcode project uses filesystem-synced groups.
 
 ## Backend
 
