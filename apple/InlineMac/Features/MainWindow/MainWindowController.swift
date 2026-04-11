@@ -9,7 +9,7 @@ import SwiftUI
 class MainWindowController: NSWindowController, NSWindowDelegate {
   private var dependencies: AppDependencies
   private var keyMonitor: KeyMonitor
-  private var log = Log.scoped("MainWindowController", level: .info)
+  private var log = Log.scoped("MainWindowController")
 
   private var nav2: Nav2 = .init()
 
@@ -330,7 +330,7 @@ class MainWindowController: NSWindowController, NSWindowDelegate {
 class LegacyMainWindowController: NSWindowController {
   private var dependencies: AppDependencies
   private var keyMonitor: KeyMonitor
-  private var log = Log.scoped("LegacyMainWindowController", level: .info)
+  private var log = Log.scoped("LegacyMainWindowController")
 
   private var topLevelRoute: TopLevelRoute {
     dependencies.viewModel.topLevelRoute

@@ -5,7 +5,7 @@ import Logger
 
 /// Registers a system-global hotkey (works even when Inline isn't focused) and triggers a handler.
 final class GlobalFocusHotkeyController {
-  private let log = Log.scoped("GlobalFocusHotkeyController", level: .info)
+  private let log = Log.scoped("GlobalFocusHotkeyController")
 
   private var hotKeyRef: EventHotKeyRef?
   private var eventHandlerRef: EventHandlerRef?

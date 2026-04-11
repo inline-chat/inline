@@ -21,7 +21,7 @@ class MessageListAppKit: NSViewController {
 
   // MARK: - Interleaved chat rows (messages + UI-only rows)
 
-  private let log = Log.scoped("MessageListAppKit", level: .info)
+  private let log = Log.scoped("MessageListAppKit")
   private let sizeCalculator = MessageSizeCalculator.shared
   private let defaultRowHeight = 45.0
 

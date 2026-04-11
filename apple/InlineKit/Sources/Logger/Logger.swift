@@ -168,7 +168,7 @@ extension Log: Logging {
     function: String = #function,
     line: Int = #line
   ) {
-    #if DEBUG
+    #if DEBUG || DEBUG_BUILD
     log(message(), level: .debug, file: file, function: function, line: line)
     #endif
   }
@@ -180,7 +180,7 @@ extension Log: Logging {
     line: Int = #line
   ) {
     guard level == .trace else { return }
-    #if DEBUG
+    #if DEBUG || DEBUG_BUILD
     log(message(), level: .trace, file: file, function: function, line: line)
     #endif
   }

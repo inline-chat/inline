@@ -107,7 +107,7 @@ public struct SyncStats: Sendable {
 }
 
 actor Sync {
-  private var log = Log.scoped("RealtimeV2.Sync", level: .info)
+  private var log = Log.scoped("RealtimeV2.Sync")
 
   private var applyUpdates: ApplyUpdates
   private var syncStorage: SyncStorage
@@ -570,7 +570,7 @@ actor FetchLimiter {
 
 /// Actor responsible for fetching and applying updates for a single bucket (chat, space, or user).
 actor BucketActor {
-  private var log = Log.scoped("RealtimeV2.Sync.BucketActor", level: .info)
+  private var log = Log.scoped("RealtimeV2.Sync.BucketActor")
 
   private static let maxTotalUpdates: Int64 = 1000
 

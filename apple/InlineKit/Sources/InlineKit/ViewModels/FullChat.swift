@@ -314,7 +314,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
   private var lastHistoryRefetchTime: CFTimeInterval = 0
   private let historyRefetchCooldown: CFTimeInterval = 1.0
   private var didStartChatObservation = false
-  private let log = Log.scoped("FullChat", level: .info)
+  private let log = Log.scoped("FullChat")
 
   private var db: AppDatabase
   public var peer: Peer

@@ -26,7 +26,7 @@ actor Transactions {
   var queueStream: AsyncChannel<Void> = AsyncChannel()
 
   // Private
-  private let log = Log.scoped("RealtimeV2.Transactions", level: .info)
+  private let log = Log.scoped("RealtimeV2.Transactions")
   private var persistenceHandler: TransactionPersistenceHandler?
   private let blockerResolver: (any TransactionBlockerResolver)?
   private var satisfiedBlockers: Set<TransactionBlocker> = []

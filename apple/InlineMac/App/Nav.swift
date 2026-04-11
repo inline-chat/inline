@@ -50,7 +50,7 @@ struct NavEntry: Hashable, Codable, Equatable {
 class Nav: ObservableObject {
   static let main = Nav()
 
-  private let log = Log.scoped("Nav", level: .info)
+  private let log = Log.scoped("Nav")
   private let maxHistoryLength = 200
   private var saveStateTask: Task<Void, Never>?
 

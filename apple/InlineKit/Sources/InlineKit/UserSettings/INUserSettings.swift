@@ -3,7 +3,7 @@ import Foundation
 import InlineProtocol
 import Logger
 
-private let log = Log.scoped("UserSettings", level: .info)
+private let log = Log.scoped("UserSettings")
 
 @MainActor
 public class INUserSettings {
