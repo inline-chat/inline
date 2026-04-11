@@ -270,7 +270,11 @@ final class MessageActionButtonView: NSView {
       animator().alphaValue = alpha
     }
 
-    layer?.setAffineTransform(CGAffineTransform(scaleX: scale, y: scale))
+    CATransaction.begin()
+    CATransaction.setAnimationDuration(0.12)
+    CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeInEaseOut))
+    layer?.transform = CATransform3DMakeScale(scale, scale, 1)
+    CATransaction.commit()
   }
 
   @objc private func handleTap() {
