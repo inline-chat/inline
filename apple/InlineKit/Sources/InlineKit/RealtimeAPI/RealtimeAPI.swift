@@ -4,6 +4,7 @@ import Combine
 import Foundation
 import InlineProtocol
 import Logger
+import Sentry
 
 public enum RealtimeAPIState: Sendable {
   case waitingForNetwork
@@ -193,6 +194,7 @@ public actor RealtimeAPI: Sendable {
 
   private func authenticate() async {
     log.trace("authenticating")
+    addRealtimeBreadcrumb("Sending connection init", stage: "connection_init_start")
     // Send connection init
     do {
       guard let token = Auth.shared.getToken() else {
@@ -209,9 +211,26 @@ public actor RealtimeAPI: Sendable {
         #endif
       }))
       try await transport.send(msg)
+      var breadcrumbData: [String: Any] = [
+        "build_number": getBuildNumber(),
+      ]
+      #if os(macOS)
+      breadcrumbData["os_version"] = getOSVersion()
+      #endif
+      addRealtimeBreadcrumb(
+        "Connection init sent",
+        stage: "connection_init_sent",
+        data: breadcrumbData
+      )
     } catch {
       // TODO: Handle
       log.error("Failed to send connection init", error: error)
+      addRealtimeBreadcrumb(
+        "Connection init failed",
+        stage: "connection_init_failed",
+        level: .warning,
+        error: error
+      )
     }
   }
 
@@ -328,6 +347,7 @@ extension RealtimeAPI {
     switch message.body {
       case .connectionOpen:
         log.info("Connection established")
+        addRealtimeBreadcrumb("Protocol connection open received", stage: "connection_open")
         await resumeDelivery()
 
       case let .rpcResult(result):
@@ -356,6 +376,30 @@ extension RealtimeAPI {
     Task {
       await sync.handle(updates: updates.updates)
     }
+  }
+}
+
+private extension RealtimeAPI {
+  func addRealtimeBreadcrumb(
+    _ message: String,
+    stage: String,
+    level: SentryLevel = .info,
+    error: Error? = nil,
+    data: [String: Any] = [:]
+  ) {
+    var data = data
+    data["stage"] = stage
+    data["state"] = String(describing: state)
+    if let error {
+      let nsError = error as NSError
+      data["error_domain"] = nsError.domain
+      data["error_code"] = nsError.code
+    }
+
+    let crumb = Breadcrumb(level: level, category: "realtime.protocol")
+    crumb.message = message
+    crumb.data = data
+    SentrySDK.addBreadcrumb(crumb)
   }
 }
 
