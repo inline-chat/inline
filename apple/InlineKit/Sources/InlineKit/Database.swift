@@ -1036,28 +1036,40 @@ public extension AppDatabase {
   ///
   /// Note: any observers that captured the old `DatabaseReader`/`DatabaseWriter` instance directly
   /// (e.g. GRDB `ValueObservation.publisher(in:)`) must be created *after* this promotion runs.
+  private static func reopenPersistentWriterForShared() -> (any DatabaseWriter)? {
+    let reopened = makeShared()
+    guard reopened.dbWriter is DatabasePool else {
+      return nil
+    }
+    return reopened.dbWriter
+  }
+
   @discardableResult
-  static func promoteSharedToPersistentIfPossible() async -> Bool {
+  static func promoteToPersistentIfPossible(
+    _ db: AppDatabase,
+    reopenWriter: @escaping @Sendable () -> (any DatabaseWriter)?
+  ) async -> Bool {
     // Already persistent.
-    if shared.dbWriter is DatabasePool {
+    if db.dbWriter is DatabasePool {
       return false
     }
 
     let newWriter: (any DatabaseWriter)? = await Task.detached(priority: .userInitiated) {
-      let reopened = makeShared()
-      guard reopened.dbWriter is DatabasePool else {
-        return nil
-      }
-      return reopened.dbWriter
+      reopenWriter()
     }.value
 
-    guard let newWriter else {
+    guard let newWriter, newWriter is DatabasePool else {
       return false
     }
 
-    shared.swapWriter(newWriter)
+    db.swapWriter(newWriter)
     log.info("Promoted in-memory database to persistent database writer")
     return true
+  }
+
+  @discardableResult
+  static func promoteSharedToPersistentIfPossible() async -> Bool {
+    await promoteToPersistentIfPossible(shared, reopenWriter: reopenPersistentWriterForShared)
   }
 
   /// Shared in-memory DB used as the default SwiftUI environment fallback.

@@ -1,70 +1,24 @@
-import Auth
 import Foundation
 import GRDB
-import InlineConfig
 import Testing
-import Darwin
 
 @testable import InlineKit
 
-private let _dbPromotionTestUserProfile: String = {
-  if let existing = ProjectConfig.userProfile, existing.isEmpty == false {
-    return existing
-  }
-
-  let profile = "dbpromo_" + UUID().uuidString.replacingOccurrences(of: "-", with: "")
-  // Tests can't modify `CommandLine.arguments` in Swift 6 language mode, so we use an env var
-  // override supported by `ProjectConfig.userProfile`.
-  setenv("INLINE_USER_PROFILE", profile, 1)
-  return profile
-}()
-
-private func databaseURLForTestProfile(_ profile: String) throws -> URL {
-  let fileManager = FileManager.default
-  let appSupportURL = try fileManager.url(
-    for: .applicationSupportDirectory,
-    in: .userDomainMask,
-    appropriateFor: nil,
-    create: false
-  )
-
-  let directoryURL = appSupportURL.appendingPathComponent("Database_\(profile)", isDirectory: true)
-  try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-
-  return directoryURL.appendingPathComponent("db.sqlite")
-}
-
 @Suite("Database Promotion")
 final class DatabasePromotionTests {
-  @Test("promotes shared DB from in-memory to persistent once the persistent DB becomes openable")
-  func promotesSharedToPersistentIfPossible() async throws {
-    // Ensure we do not touch any real user database/keychain items.
-    let profile = _dbPromotionTestUserProfile
-    #expect(ProjectConfig.userProfile == profile)
+  @Test("promotes in-memory DB to persistent once the persistent DB becomes openable")
+  func promotesToPersistentIfPossible() async throws {
+    let db = AppDatabase.empty()
+    #expect(db.dbWriter is DatabaseQueue)
 
-    // `AppDatabase.shared` is process-global and may have been initialized by other tests already.
-    // Force a known in-memory baseline so this test doesn't depend on suite order/keychain state.
-    let forcedInMemory = try DatabaseQueue(
-      configuration: AppDatabase.makeConfiguration(passphrase: "123")
-    )
-    AppDatabase.shared.swapWriter(forcedInMemory)
-    #expect(AppDatabase.shared.dbWriter is DatabaseQueue)
-
-    let dbURL = try databaseURLForTestProfile(profile)
-    let dirURL = dbURL.deletingLastPathComponent()
-
-    // Start from a clean directory for this profile.
-    do {
-      if FileManager.default.fileExists(atPath: dirURL.path) {
-        try FileManager.default.removeItem(at: dirURL)
-      }
-    } catch {
-      // Best-effort cleanup; never fail the test for not being able to delete a previous run.
-    }
+    let dirURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("inline-dbpromo-\(UUID().uuidString)", isDirectory: true)
+    let dbURL = dirURL.appendingPathComponent("db.sqlite")
     try FileManager.default.createDirectory(at: dirURL, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dirURL) }
 
-    // 1) Create an encrypted DB file with a passphrase that we won't provide to `makeShared()`.
-    // This ensures promotion can't succeed until we rotate the file to a known candidate key.
+    // 1) Create an encrypted DB file with a passphrase that we won't provide to the reopen closure.
+    // This ensures promotion can't succeed until we rotate the file to a known passphrase.
     let badPassphrase = "badpass_" + UUID().uuidString
     do {
       let pool = try DatabasePool(
@@ -78,7 +32,7 @@ final class DatabasePromotionTests {
     }
 
     // 2) Simulate "credentials/key available later" by rotating the persistent file to a known
-    // candidate passphrase. `makeShared()` will then be able to open it.
+    // passphrase used by our reopen closure.
     do {
       let pool = try DatabasePool(
         path: dbURL.path,
@@ -90,70 +44,37 @@ final class DatabasePromotionTests {
       withExtendedLifetime(pool) {}
     }
 
-    // 3) Promote in-place: `shared` swaps from in-memory to persistent writer.
-    let didPromote = await AppDatabase.promoteSharedToPersistentIfPossible()
-    #expect(didPromote)
-    #expect(AppDatabase.shared.dbWriter is DatabasePool)
-
-    // 4) Write something through `shared` and verify it actually hit the persistent file.
-    try await AppDatabase.shared.dbWriter.write { db in
-      try db.execute(sql: "CREATE TABLE IF NOT EXISTS db_promo_test(value TEXT NOT NULL)")
-      try db.execute(sql: "INSERT INTO db_promo_test(value) VALUES (?)", arguments: ["ok"])
-    }
-
-    var candidatePassphrases: [String] = []
-    switch DatabaseKeyStore.load() {
-    case .available(let key):
-      candidatePassphrases.append(key)
-    case .locked, .notFound, .error:
-      break
-    }
-    if let token = Auth.shared.getToken(), !candidatePassphrases.contains(token) {
-      candidatePassphrases.append(token)
-    }
-    candidatePassphrases.append("123")
-
-    var openedPool: DatabasePool?
-    for passphrase in candidatePassphrases {
+    // 3) Promote in-place from in-memory to persistent writer for this isolated DB instance.
+    let didPromote = await AppDatabase.promoteToPersistentIfPossible(db) {
       do {
-        let pool = try DatabasePool(
+        return try DatabasePool(
           path: dbURL.path,
-          configuration: AppDatabase.makeConfiguration(passphrase: passphrase)
+          configuration: AppDatabase.makeConfiguration(passphrase: "123")
         )
-        let count = try await pool.read { db in
-          try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM db_promo_test") ?? 0
-        }
-        if count == 1 {
-          openedPool = pool
-          break
-        }
       } catch {
-        continue
+        return nil
       }
     }
+    #expect(didPromote)
+    #expect(db.dbWriter is DatabasePool)
 
-    #expect(openedPool != nil)
+    // 4) Write through the promoted writer and verify it actually hit the persistent file.
+    try await db.dbWriter.write { sqlDb in
+      try sqlDb.execute(sql: "CREATE TABLE IF NOT EXISTS db_promo_test(value TEXT NOT NULL)")
+      try sqlDb.execute(sql: "INSERT INTO db_promo_test(value) VALUES (?)", arguments: ["ok"])
+    }
+
+    let verificationPool = try DatabasePool(
+      path: dbURL.path,
+      configuration: AppDatabase.makeConfiguration(passphrase: "123")
+    )
+    let count = try await verificationPool.read { sqlDb in
+      try Int.fetchOne(sqlDb, sql: "SELECT COUNT(*) FROM db_promo_test") ?? 0
+    }
+    #expect(count == 1)
 
     // Idempotent: once persistent, subsequent promotions are no-ops.
-    let didPromoteAgain = await AppDatabase.promoteSharedToPersistentIfPossible()
+    let didPromoteAgain = await AppDatabase.promoteToPersistentIfPossible(db) { nil }
     #expect(didPromoteAgain == false)
-
-    // Best-effort cleanup: swap back to in-memory to release the file handle, then delete.
-    openedPool = nil
-    do {
-      let inMemory = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
-      AppDatabase.shared.swapWriter(inMemory)
-    } catch {
-      // ignore
-    }
-    do {
-      try FileManager.default.removeItem(at: dirURL)
-    } catch {
-      // ignore
-    }
-
-    // Best-effort cleanup of keychain items under this test profile.
-    DatabaseKeyStore.delete()
-    await Auth.shared.logOut()
   }
 }
