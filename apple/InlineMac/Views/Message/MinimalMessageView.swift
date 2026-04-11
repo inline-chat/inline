@@ -411,11 +411,10 @@ class MinimalMessageViewAppKit: NSView {
   }
 
   private func loadingActionIdsForCurrentMessage() -> Set<String> {
-    let keys = MessageActionInteractionState.shared.loadingPublisher.value
-    return Set(
-      keys
-        .filter { $0.peerId == message.peerId && $0.messageId == message.messageId }
-        .map(\.actionId)
+    MessageActionInteractionState.shared.loadingActionIds(
+      peerId: message.peerId,
+      messageId: message.messageId,
+      rev: message.rev
     )
   }
 
@@ -499,6 +498,7 @@ class MinimalMessageViewAppKit: NSView {
     let loadingKey = MessageActionInteractionState.LoadingKey(
       peerId: message.peerId,
       messageId: message.messageId,
+      rev: message.rev,
       actionId: actionId
     )
 

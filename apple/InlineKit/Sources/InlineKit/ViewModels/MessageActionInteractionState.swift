@@ -9,11 +9,13 @@ public final class MessageActionInteractionState {
   public struct LoadingKey: Hashable, Sendable {
     public let peerId: Peer
     public let messageId: Int64
+    public let rev: Int64
     public let actionId: String
 
-    public init(peerId: Peer, messageId: Int64, actionId: String) {
+    public init(peerId: Peer, messageId: Int64, rev: Int64, actionId: String) {
       self.peerId = peerId
       self.messageId = messageId
+      self.rev = rev
       self.actionId = actionId.trimmingCharacters(in: .whitespacesAndNewlines)
     }
   }
@@ -44,7 +46,7 @@ public final class MessageActionInteractionState {
   private var interactionByKey: [LoadingKey: Int64] = [:]
   private var pendingFinishByInteraction: [Int64: PendingFinish] = [:]
 
-  private init() {}
+  init() {}
 
   @discardableResult
   public func begin(key: LoadingKey) -> Bool {
@@ -108,6 +110,14 @@ public final class MessageActionInteractionState {
 
   public func isLoading(key: LoadingKey) -> Bool {
     loading.contains(key)
+  }
+
+  public func loadingActionIds(peerId: Peer, messageId: Int64, rev: Int64) -> Set<String> {
+    Set(
+      loading
+        .filter { $0.peerId == peerId && $0.messageId == messageId && $0.rev == rev }
+        .map(\.actionId)
+    )
   }
 
   private func complete(interactionId: Int64, key: LoadingKey, toastText: String?) {

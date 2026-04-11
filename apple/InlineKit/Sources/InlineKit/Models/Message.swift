@@ -792,7 +792,6 @@ public extension Message {
         documentId = documentId ?? existing.documentId
         videoId = videoId ?? existing.videoId
         contentPayload = Message.mergedContentPayload(incoming: contentPayload, existing: existing.contentPayload)
-        actions = actions ?? existing.actions
         hasLink = hasLink ?? existing.hasLink
         entities = entities ?? existing.entities
         rev = max(rev, existing.rev)
@@ -911,7 +910,6 @@ public extension Message {
       message.transactionId = message.transactionId ?? existing.transactionId
       message.isSticker = message.isSticker ?? existing.isSticker
       message.hasLink = message.hasLink ?? existing.hasLink
-      message.actions = message.actions ?? existing.actions
       message.editDate = message.editDate ?? existing.editDate
       message.rev = max(message.rev, existing.rev)
       message.repliedToMessageId = message.repliedToMessageId ?? existing.repliedToMessageId
@@ -923,6 +921,9 @@ public extension Message {
         incoming: message.contentPayload,
         existing: existing.contentPayload
       )
+      if !protocolMessage.hasActions {
+        message.actions = nil
+      }
 
       if protocolMessage.hasReactions {
         for reaction in protocolMessage.reactions.reactions {
