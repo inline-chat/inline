@@ -169,8 +169,8 @@ plist_set_integer() {
 plist_set_string "CFBundleVersion" "${BUILD_NUMBER}"
 plist_set_string "InlineCommit" "${INLINE_COMMIT}"
 if [[ "${DEBUG_BUILD}" == "1" ]]; then
-  plist_set_string "CFBundleDisplayName" "Inline Debug"
-  plist_set_string "CFBundleName" "Inline Debug"
+  plist_set_string "CFBundleDisplayName" "Inline (Dev Build)"
+  plist_set_string "CFBundleName" "Inline (Dev Build)"
 fi
 plist_set_string "SUPublicEDKey" "${SPARKLE_PUBLIC_KEY}"
 plist_set_string "SUFeedURL" "${APPCAST_URL}"

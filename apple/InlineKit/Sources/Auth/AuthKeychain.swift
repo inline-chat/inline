@@ -20,6 +20,22 @@ enum KeychainReadOutcome<Value> {
 }
 
 enum AuthKeychainConfig {
+  static func keychainBasePrefix(userProfile: String?) -> String {
+    #if os(macOS)
+    #if DEBUG
+    return "inline_dev_"
+    #else
+    return "inline_"
+    #endif
+    #elseif os(iOS)
+    #if DEBUG
+    return "inline_dev_"
+    #else
+    return ""
+    #endif
+    #endif
+  }
+
   static func userDefaultsPrefix(mocked: Bool, namespace: String? = nil) -> String {
     if mocked {
       if let namespace, !namespace.isEmpty {
@@ -39,21 +55,10 @@ enum AuthKeychainConfig {
       return "mock"
     }
 
-    #if os(macOS)
-    #if DEBUG
-    var prefix = "inline_dev_"
-    #else
-    var prefix = "inline_"
-    #endif
-    #elseif os(iOS)
-    #if DEBUG
-    var prefix = "inline_dev_"
-    #else
-    var prefix = ""
-    #endif
-    #endif
+    let userProfile = ProjectConfig.userProfile
+    var prefix = keychainBasePrefix(userProfile: userProfile)
 
-    if let userProfile = ProjectConfig.userProfile {
+    if let userProfile {
       prefix = "\(prefix)\(userProfile)_"
     }
 
