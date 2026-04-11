@@ -5,12 +5,14 @@ ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 
 SPARKLE_VERSION=${SPARKLE_VERSION:-2.7.3}
 SCHEME=${SCHEME:-"Inline (macOS)"}
+CONFIGURATION=${CONFIGURATION:-DevBuild}
 CHANNEL=${CHANNEL:-stable}
+SIGN_BUILD=${SIGN_BUILD:-auto}
 APPCAST_URL=${APPCAST_URL:-"https://public-assets.inline.chat/mac/${CHANNEL}/appcast.xml"}
 SPARKLE_SCHEDULED_CHECK_INTERVAL=${SPARKLE_SCHEDULED_CHECK_INTERVAL:-3600}
 SPARKLE_DIR=${SPARKLE_DIR:-"${ROOT_DIR}/.action/sparkle"}
 DERIVED_DATA=${DERIVED_DATA:-"${ROOT_DIR}/build/InlineMacDirectLocal"}
-APP_PATH=${APP_PATH:-"${DERIVED_DATA}/Build/Products/Release/Inline.app"}
+APP_PATH=${APP_PATH:-"${DERIVED_DATA}/Build/Products/${CONFIGURATION}/Inline (Dev Build).app"}
 OUTPUT_DIR=${OUTPUT_DIR:-"${ROOT_DIR}/build/macos-local-app"}
 BUILD_LOG_PATH="${OUTPUT_DIR}/xcodebuild.log"
 
@@ -27,15 +29,22 @@ creation, notarization, or upload steps.
 
 Options:
   --channel <stable|beta>         Update channel to embed in Info.plist
+  --configuration <name>          Xcode build configuration (default: DevBuild)
   --derived-data <path>           Xcode derived data path
   --app-path <path>               App bundle output path
+  --sign                          Require post-build local signing
+  --skip-sign                     Skip post-build local signing
   --sparkle-dir <path>            Sparkle download/cache directory
   --scheme <name>                 Xcode scheme (default: Inline (macOS))
   -h, --help                      Show help
 
 Optional env:
+  SIGN_BUILD                      auto|always|never (default: auto)
   SPARKLE_PUBLIC_KEY              Embedded into SUPublicEDKey when set
   MACOS_SPARKLE_PUBLIC_KEY        Alias for SPARKLE_PUBLIC_KEY
+  MACOS_CERTIFICATE_NAME          Signing identity used by sign-direct.sh
+  MACOS_PROVISIONING_PROFILE_BASE64 / _PATH
+                                  Required for APS/keychain entitlements when signing
   APPCAST_URL                     Override Sparkle feed URL
   SPARKLE_SCHEDULED_CHECK_INTERVAL Override Sparkle check interval in seconds
 EOF
@@ -61,14 +70,27 @@ while [[ $# -gt 0 ]]; do
       APPCAST_URL="https://public-assets.inline.chat/mac/${CHANNEL}/appcast.xml"
       shift 2
       ;;
+    --configuration)
+      CONFIGURATION="${2:-}"
+      APP_PATH="${DERIVED_DATA}/Build/Products/${CONFIGURATION}/Inline (Dev Build).app"
+      shift 2
+      ;;
     --derived-data)
       DERIVED_DATA="$(resolve_path "${2:-}")"
-      APP_PATH="${DERIVED_DATA}/Build/Products/Release/Inline.app"
+      APP_PATH="${DERIVED_DATA}/Build/Products/${CONFIGURATION}/Inline (Dev Build).app"
       shift 2
       ;;
     --app-path)
       APP_PATH="$(resolve_path "${2:-}")"
       shift 2
+      ;;
+    --sign)
+      SIGN_BUILD="always"
+      shift
+      ;;
+    --skip-sign)
+      SIGN_BUILD="never"
+      shift
       ;;
     --sparkle-dir)
       SPARKLE_DIR="$(resolve_path "${2:-}")"
@@ -89,6 +111,14 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+case "${SIGN_BUILD}" in
+  auto|always|never) ;;
+  *)
+    echo "Invalid SIGN_BUILD: ${SIGN_BUILD}" >&2
+    exit 1
+    ;;
+esac
 
 for cmd in xcodebuild curl unzip rsync git; do
   if ! command -v "${cmd}" >/dev/null 2>&1; then
@@ -117,7 +147,7 @@ swift_conditions='$(inherited) SPARKLE DEBUG_BUILD'
 xcodebuild_args=(
   -project "${ROOT_DIR}/apple/Inline.xcodeproj"
   -scheme "${SCHEME}"
-  -configuration Release
+  -configuration "${CONFIGURATION}"
   -derivedDataPath "${DERIVED_DATA}"
   "SWIFT_ACTIVE_COMPILATION_CONDITIONS=${swift_conditions}"
   "FRAMEWORK_SEARCH_PATHS=${SPARKLE_FRAMEWORK_PATH}"
@@ -188,8 +218,8 @@ plist_set_integer() {
 
 plist_set_string "CFBundleVersion" "${BUILD_NUMBER}"
 plist_set_string "InlineCommit" "${INLINE_COMMIT}"
-plist_set_string "CFBundleDisplayName" "Inline Debug"
-plist_set_string "CFBundleName" "Inline Debug"
+plist_set_string "CFBundleDisplayName" "Inline (Dev Build)"
+plist_set_string "CFBundleName" "Inline (Dev Build)"
 if [[ -n "${SPARKLE_PUBLIC_KEY:-}" ]]; then
   plist_set_string "SUPublicEDKey" "${SPARKLE_PUBLIC_KEY}"
 else
@@ -208,7 +238,37 @@ if [[ ! -d "${FRAMEWORKS_DIR}/Sparkle.framework" ]]; then
   exit 1
 fi
 
+sign_local_app() {
+  MACOS_CERTIFICATE_NAME="${MACOS_CERTIFICATE_NAME:-}" \
+  MACOS_PROVISIONING_PROFILE_BASE64="${MACOS_PROVISIONING_PROFILE_BASE64:-}" \
+  MACOS_PROVISIONING_PROFILE_PATH="${MACOS_PROVISIONING_PROFILE_PATH:-}" \
+    bash "${ROOT_DIR}/scripts/macos/sign-direct.sh" \
+      --app-path "${APP_PATH}" \
+      --entitlements-path "${ROOT_DIR}/apple/InlineMac/InlineMacDirect.entitlements" \
+      --output-dir "${OUTPUT_DIR}"
+}
+
+signed_build="no"
+case "${SIGN_BUILD}" in
+  always)
+    sign_local_app
+    signed_build="yes"
+    ;;
+  auto)
+    if [[ -n "${MACOS_CERTIFICATE_NAME:-}" ]]; then
+      sign_local_app
+      signed_build="yes"
+    else
+      echo "MACOS_CERTIFICATE_NAME is not set; leaving local app unsigned." >&2
+    fi
+    ;;
+  never)
+    echo "Skipping local codesign (--skip-sign)." >&2
+    ;;
+esac
+
 echo "Local app build complete."
 echo "  App: ${APP_PATH}"
 echo "  Build log: ${BUILD_LOG_PATH}"
 echo "  Debug flavor: enabled (DEBUG_BUILD)"
+echo "  Signed: ${signed_build}"

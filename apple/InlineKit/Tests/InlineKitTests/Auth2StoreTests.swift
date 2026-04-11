@@ -171,6 +171,11 @@ final class Auth2StoreTests {
     #expect(DatabaseKeyStore.load(mocked: true, namespace: h.namespace) == .notFound)
   }
 
+  @Test("release-style builds use the production keychain base prefix")
+  func releaseStyleBuildUsesProductionKeychainPrefix() {
+    #expect(AuthKeychainConfig.keychainBasePrefix(userProfile: nil) == "inline_")
+  }
+
   @Test("refreshFromStorage does not regress authenticated -> locked (transient keychain lock)")
   func refreshDoesNotRegressAuthenticatedToLocked() async {
     let namespace = UUID().uuidString

@@ -5,6 +5,7 @@ public enum ProjectConfig {
   enum ConfigurationKey: String {
     case devHost = "DEV_HOST"
     case useProductionApi = "USE_PRODUCTION_API"
+    case inlineUserProfile = "INLINE_USER_PROFILE"
   }
 
   enum Error: Swift.Error {
@@ -81,15 +82,36 @@ public enum ProjectConfig {
     getArgumentValue(for: key, in: CommandLine.arguments)
   }
 
-  public static var userProfile: String? {
-    if let env = getenv("INLINE_USER_PROFILE"),
-       let value = String(validatingCString: env),
-       value.isEmpty == false
-    {
-      return value
+  static func resolvedUserProfile(
+    envValue: String?,
+    argValue: String?,
+    configValue: String?
+  ) -> String? {
+    if let envValue, envValue.isEmpty == false {
+      return envValue
     }
+    if let argValue, argValue.isEmpty == false {
+      return argValue
+    }
+    if let configValue, configValue.isEmpty == false {
+      return configValue
+    }
+    return nil
+  }
 
-    let arg = getArgumentValue(for: .userProfile)
-    return arg?.isEmpty == true ? nil : arg
+  public static var userProfile: String? {
+    let envValue: String? =
+      if let env = getenv("INLINE_USER_PROFILE") {
+        String(validatingCString: env)
+      } else {
+        nil
+      }
+    let argValue = getArgumentValue(for: .userProfile)
+    let configValue: String? = try? value(for: .inlineUserProfile)
+    return resolvedUserProfile(
+      envValue: envValue,
+      argValue: argValue,
+      configValue: configValue
+    )
   }
 }

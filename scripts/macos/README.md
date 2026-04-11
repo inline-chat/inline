@@ -34,8 +34,8 @@ with Sparkle (non-TestFlight) and preparing DMG artifacts.
 - `release-direct.ts`: uploads DMG and/or appcast to R2 with cache headers.
 - `upload-dsyms.ts`: uploads zipped `.dSYM` bundles to Sentry using Sentry's API.
 - `release-app.ts`: runs the local release pipeline (build → upload dSYMs → upload DMG → update appcast → upload appcast), with an interactive TUI (shows progress, skipped steps, and failures clearly).
-- `build-local-app.sh`: builds a local Sparkle-enabled `Inline.app` bundle for testing without signing, DMG creation, notarization, or upload steps.
-  It always uses `DEBUG_BUILD`, sets app naming to `Inline Debug`, and disables login-item registration in app code.
+- `build-local-app.sh`: builds a local Sparkle-enabled `Inline (Dev Build).app` bundle for testing without DMG creation, notarization, or upload steps.
+  It always uses `DEBUG_BUILD`, defaults to the `DevBuild` config, disables login-item registration in app code, and can post-sign the app locally by reusing `sign-direct.sh`.
 - `update-version.ts`: bumps the InlineMac marketing version, creates a `macos-vX.Y.Z` tag, and pushes to trigger CI.
 - `appcast-only.sh`: updates the appcast only (no rebuild), with validation.
 
@@ -183,8 +183,8 @@ To build just a local `.app` bundle for testing, without the release/notarizatio
 bun run build:macos:local-app
 ```
 
-The app bundle is written to `build/InlineMacDirectLocal/Build/Products/Release/Inline.app`.
-This local build always uses `DEBUG_BUILD` and the app appears as `Inline Debug`.
+The app bundle is written to `build/InlineMacDirectLocal/Build/Products/DevBuild/Inline (Dev Build).app`.
+This local build always uses `DEBUG_BUILD`, appears as `Inline (Dev Build)`, and will post-sign automatically when `MACOS_CERTIFICATE_NAME` is set. Use `--sign` to require signing or `--skip-sign` to force an unsigned build.
 
 ## Local Release (Stable/Beta)
 

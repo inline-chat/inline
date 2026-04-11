@@ -53,4 +53,36 @@ struct ProjectConfigTests {
 
     #expect(value == nil)
   }
+
+  @Test("prefers env over argument over config for user profile")
+  func resolvesUserProfilePrecedence() {
+    #expect(
+      ProjectConfig.resolvedUserProfile(
+        envValue: "env",
+        argValue: "arg",
+        configValue: "config"
+      ) == "env"
+    )
+    #expect(
+      ProjectConfig.resolvedUserProfile(
+        envValue: nil,
+        argValue: "arg",
+        configValue: "config"
+      ) == "arg"
+    )
+    #expect(
+      ProjectConfig.resolvedUserProfile(
+        envValue: nil,
+        argValue: nil,
+        configValue: "config"
+      ) == "config"
+    )
+    #expect(
+      ProjectConfig.resolvedUserProfile(
+        envValue: "",
+        argValue: "",
+        configValue: ""
+      ) == nil
+    )
+  }
 }

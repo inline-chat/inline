@@ -16,6 +16,8 @@
 	</array>
 	<key>DEV_HOST</key>
 	<string>$(DEV_HOST)</string>
+	<key>INLINE_USER_PROFILE</key>
+	<string>$(INLINE_USER_PROFILE)</string>
 	<key>NSObservationTrackingEnabled</key>
 	<true/>
 	<key>USE_PRODUCTION_API</key>
