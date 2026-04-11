@@ -12,6 +12,11 @@ export class TransportError extends Error {
   }
 }
 
+export type TransportReconnectOptions = {
+  skipDelay?: boolean
+  cause?: string
+}
+
 export type Transport = {
   // Async event stream of transport lifecycle + received messages.
   events: AsyncIterable<TransportEvent>
@@ -19,5 +24,6 @@ export type Transport = {
   stop: () => Promise<void>
   send: (message: ClientMessage) => Promise<void>
   stopConnection: () => Promise<void>
-  reconnect: (options?: { skipDelay?: boolean }) => Promise<void>
+  reconnect: (options?: TransportReconnectOptions) => Promise<void>
+  getDiagnostics?: () => unknown
 }

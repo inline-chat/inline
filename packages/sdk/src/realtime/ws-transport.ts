@@ -1,7 +1,7 @@
 import { WebSocket } from "ws"
 import { ClientMessage, ServerProtocolMessage } from "@inline-chat/protocol/core"
 import { AsyncChannel } from "../utils/async-channel.js"
-import { TransportError, type Transport } from "./transport.js"
+import { TransportError, type Transport, type TransportReconnectOptions } from "./transport.js"
 import type { TransportEvent } from "./types.js"
 import type { InlineSdkLogger } from "../sdk/logger.js"
 
@@ -23,6 +23,18 @@ export class WebSocketTransport implements Transport {
 
   private socket: WebSocket | null = null
   private reconnectionTimer: ReturnType<typeof setTimeout> | null = null
+  private lastConnectStartedAt: number | null = null
+  private lastConnectedAt: number | null = null
+  private lastDisconnectedAt: number | null = null
+  private lastMessageAt: number | null = null
+  private lastCloseCode: number | null = null
+  private lastCloseReason: string | null = null
+  private lastErrorAt: number | null = null
+  private lastErrorMessage: string | null = null
+  private lastReconnectScheduledAt: number | null = null
+  private lastReconnectDelayMs: number | null = null
+  private lastReconnectCause: string | null = null
+  private reconnectCount = 0
 
   constructor(options: WebSocketTransportOptions) {
     this.url = options.url
@@ -52,7 +64,7 @@ export class WebSocketTransport implements Transport {
     this.cleanUpPreviousConnection()
   }
 
-  async reconnect(options?: { skipDelay?: boolean }) {
+  async reconnect(options?: TransportReconnectOptions) {
     const skipDelay = options?.skipDelay ?? false
 
     await this.setConnecting()
@@ -60,7 +72,15 @@ export class WebSocketTransport implements Transport {
 
     this.connectionAttemptNo = (this.connectionAttemptNo + 1) >>> 0
     const delaySeconds = this.getReconnectionDelaySeconds(this.connectionAttemptNo)
-    this.log.debug?.("reconnect scheduled", { attempt: this.connectionAttemptNo, delaySeconds })
+    const delayMs = Math.round(delaySeconds * 1000)
+    const cause = options?.cause?.trim() || "unspecified"
+    this.lastReconnectScheduledAt = Date.now()
+    this.lastReconnectDelayMs = delayMs
+    this.lastReconnectCause = cause
+    this.reconnectCount += 1
+    this.log.warn?.(
+      `WebSocket reconnect scheduled (attempt=${this.connectionAttemptNo}, delayMs=${delayMs}, cause=${cause})`,
+    )
 
     this.reconnectionTimer = setTimeout(() => {
       this.reconnectionTimer = null
@@ -113,6 +133,7 @@ export class WebSocketTransport implements Transport {
   private async openConnection() {
     if (this.state === "idle") return
 
+    this.lastConnectStartedAt = Date.now()
     const socket = new WebSocket(this.url)
     this.socket = socket
 
@@ -139,6 +160,8 @@ export class WebSocketTransport implements Transport {
 
     this.connectionAttemptNo = 0
     this.state = "connected"
+    this.lastConnectedAt = Date.now()
+    this.lastDisconnectedAt = null
     await this.events.send({ type: "connected" })
   }
 
@@ -147,6 +170,7 @@ export class WebSocketTransport implements Transport {
     try {
       const payload = this.coerceBinary(data)
       const message = ServerProtocolMessage.fromBinary(payload)
+      this.lastMessageAt = Date.now()
       await this.events.send({ type: "message", message })
     } catch (error) {
       this.log.error?.("Failed to decode message", error)
@@ -164,15 +188,26 @@ export class WebSocketTransport implements Transport {
   private async handleClose(socket: WebSocket, code: number, reason: Buffer) {
     if (this.socket !== socket) return
     if (this.state === "idle") return
-    this.log.warn?.("WebSocket closed", { code, reason: reason.toString("utf8") })
-    await this.reconnect()
+    const reasonText = stringifyCloseReason(reason)
+    this.lastDisconnectedAt = Date.now()
+    this.lastCloseCode = code
+    this.lastCloseReason = reasonText
+    const connectedForMs =
+      this.lastConnectedAt != null ? Math.max(0, this.lastDisconnectedAt - this.lastConnectedAt) : null
+    this.log.warn?.(
+      `WebSocket closed (code=${code}, reason=${reasonText || "none"}${connectedForMs != null ? `, connectedForMs=${connectedForMs}` : ""})`,
+    )
+    await this.reconnect({ cause: `socket-close:${code}${reasonText ? `:${reasonText}` : ""}` })
   }
 
   private async handleError(socket: WebSocket, error: unknown) {
     if (this.socket !== socket) return
     if (this.state === "idle") return
-    this.log.error?.("WebSocket error", error)
-    await this.reconnect()
+    const summary = summarizeError(error)
+    this.lastErrorAt = Date.now()
+    this.lastErrorMessage = summary
+    this.log.error?.(`WebSocket error: ${summary}`)
+    await this.reconnect({ cause: `socket-error:${summary}` })
   }
 
   private async setIdle() {
@@ -185,5 +220,49 @@ export class WebSocketTransport implements Transport {
     if (this.state === "connecting") return
     this.state = "connecting"
     await this.events.send({ type: "connecting" })
+  }
+
+  getDiagnostics() {
+    return {
+      kind: "websocket",
+      url: redactUrlForDiagnostics(this.url),
+      state: this.state,
+      connectionAttemptNo: this.connectionAttemptNo,
+      reconnectCount: this.reconnectCount,
+      lastConnectStartedAt: this.lastConnectStartedAt,
+      lastConnectedAt: this.lastConnectedAt,
+      lastDisconnectedAt: this.lastDisconnectedAt,
+      lastMessageAt: this.lastMessageAt,
+      lastCloseCode: this.lastCloseCode,
+      lastCloseReason: this.lastCloseReason,
+      lastErrorAt: this.lastErrorAt,
+      lastErrorMessage: this.lastErrorMessage,
+      lastReconnectScheduledAt: this.lastReconnectScheduledAt,
+      lastReconnectDelayMs: this.lastReconnectDelayMs,
+      lastReconnectCause: this.lastReconnectCause,
+      socketReadyState: this.socket?.readyState ?? null,
+    }
+  }
+}
+
+function stringifyCloseReason(reason: Buffer): string {
+  const text = reason.toString("utf8").trim()
+  return text
+}
+
+function summarizeError(error: unknown): string {
+  if (error instanceof Error) {
+    const code = typeof (error as Error & { code?: unknown }).code === "string" ? (error as Error & { code: string }).code : null
+    return code ? `${error.name}: ${error.message} (code=${code})` : `${error.name}: ${error.message}`
+  }
+  return String(error)
+}
+
+function redactUrlForDiagnostics(raw: string): string {
+  try {
+    const url = new URL(raw)
+    return `${url.protocol}//${url.host}${url.pathname}`
+  } catch {
+    return raw
   }
 }

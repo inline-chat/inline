@@ -235,6 +235,29 @@ describe("WebSocketTransport", () => {
     randomSpy.mockRestore()
   })
 
+  it("records close diagnostics for debugging", async () => {
+    vi.useFakeTimers()
+    const { WebSocketTransport } = await import("./ws-transport")
+    const { WebSocket } = await import("ws")
+
+    const transport = new WebSocketTransport({ url: "ws://example.test/socket?token=secret" })
+    await transport.start()
+    const sock = (WebSocket as any).__getLast()
+    sock.__open()
+    sock.__close(1006, "bye")
+    await Promise.resolve()
+
+    let diagnostics = transport.getDiagnostics()
+    expect(diagnostics.url).toBe("ws://example.test/socket")
+    expect(diagnostics.lastCloseCode).toBe(1006)
+    expect(diagnostics.lastCloseReason).toBe("bye")
+    await vi.advanceTimersByTimeAsync(0)
+    diagnostics = transport.getDiagnostics()
+    expect(diagnostics.lastReconnectCause).toBe("socket-close:1006:bye")
+
+    vi.useRealTimers()
+  })
+
   it("private handlers ignore events when transport is idle / socket mismatched", async () => {
     vi.useFakeTimers()
 

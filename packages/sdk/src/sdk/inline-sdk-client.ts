@@ -170,6 +170,14 @@ export class InlineSdkClient {
     await this.protocol.stopTransport()
   }
 
+  getDiagnostics() {
+    return {
+      started: this.started,
+      baseUrl: this.httpBaseUrl,
+      protocol: this.protocol.getDiagnostics(),
+    }
+  }
+
   private rejectOpen(error: Error) {
     this.openRejecter?.(error)
     this.openResolver = null

@@ -53,6 +53,11 @@ export class ProtocolClient {
   private reconnectionTimer: ReturnType<typeof setTimeout> | null = null
   private authenticationTimeout: ReturnType<typeof setTimeout> | null = null
   private listenersStarted = false
+  private lastConnectingAt: number | null = null
+  private lastOpenAt: number | null = null
+  private lastTransportMessageAt: number | null = null
+  private lastFailureAt: number | null = null
+  private lastFailureReason: string | null = null
 
   constructor(options: ProtocolClientOptions) {
     this.transport = options.transport
@@ -87,8 +92,11 @@ export class ProtocolClient {
     }
   }
 
-  async reconnect(options?: { skipDelay?: boolean }) {
-    await this.transport.reconnect({ skipDelay: options?.skipDelay })
+  async reconnect(options?: { skipDelay?: boolean; cause?: string }) {
+    await this.transport.reconnect({
+      skipDelay: options?.skipDelay,
+      cause: options?.cause ?? this.lastFailureReason ?? "protocol-reconnect",
+    })
   }
 
   async sendRpc(method: Method, input: RpcCall["input"] = emptyRpcInput): Promise<bigint> {
@@ -162,6 +170,7 @@ export class ProtocolClient {
   }
 
   private async handleTransportMessage(message: ServerProtocolMessage) {
+    this.lastTransportMessageAt = Date.now()
     switch (message.body.oneofKind) {
       case "connectionOpen":
         await this.connectionOpen()
@@ -194,7 +203,7 @@ export class ProtocolClient {
         this.pingPong.pong(message.body.pong.nonce)
         break
       case "connectionError":
-        this.handleClientFailure()
+        this.handleClientFailure(describeConnectionError(message.body.connectionError))
         break
       default:
         break
@@ -219,12 +228,13 @@ export class ProtocolClient {
       this.startAuthenticationTimeout()
     } catch (error) {
       this.log.error?.("Failed to authenticate", error)
-      this.handleClientFailure()
+      this.handleClientFailure(`authenticate failed: ${summarizeError(error)}`)
     }
   }
 
   private async connectionOpen() {
     this.state = "open"
+    this.lastOpenAt = Date.now()
     await this.events.send({ type: "open" })
     this.stopAuthenticationTimeout()
     if (this.reconnectionTimer) {
@@ -237,7 +247,9 @@ export class ProtocolClient {
   }
 
   private async connecting() {
+    this.pingPong.stop()
     this.state = "connecting"
+    this.lastConnectingAt = Date.now()
     await this.events.send({ type: "connecting" })
   }
 
@@ -252,7 +264,7 @@ export class ProtocolClient {
     this.stopAuthenticationTimeout()
     this.authenticationTimeout = setTimeout(() => {
       if (this.state === "open") return
-      this.handleClientFailure()
+      this.handleClientFailure("authentication timeout after 10000ms")
     }, 10_000)
   }
 
@@ -262,20 +274,26 @@ export class ProtocolClient {
     this.authenticationTimeout = null
   }
 
-  private handleClientFailure() {
+  private handleClientFailure(reason = "connection failure") {
     this.pingPong.stop()
     this.stopAuthenticationTimeout()
     this.state = "connecting"
+    this.lastFailureAt = Date.now()
+    this.lastFailureReason = reason
 
     if (this.reconnectionTimer) {
       clearTimeout(this.reconnectionTimer)
     }
 
     this.connectionAttemptNo = (this.connectionAttemptNo + 1) >>> 0
+    const delayMs = Math.round(this.getReconnectionDelay() * 1000)
+    this.log.warn?.(
+      `Protocol reconnect scheduled (attempt=${this.connectionAttemptNo}, delayMs=${delayMs}, reason=${reason})`,
+    )
     this.reconnectionTimer = setTimeout(() => {
       if (this.state === "open") return
       void this.reconnect({ skipDelay: true })
-    }, this.getReconnectionDelay() * 1000)
+    }, delayMs)
   }
 
   private getReconnectionDelay() {
@@ -371,11 +389,27 @@ export class ProtocolClient {
       .send(pending.message)
       .catch((error) => {
         this.log.warn?.("Failed to send RPC request; waiting for reconnect", error)
-        this.handleClientFailure()
+        this.handleClientFailure(`rpc send failed: ${summarizeError(error)}`)
       })
       .finally(() => {
         pending.sending = false
       })
+  }
+
+  getDiagnostics() {
+    return {
+      state: this.state,
+      connectionAttemptNo: this.connectionAttemptNo,
+      pendingRpcCount: this.pendingRpcRequests.size,
+      lastConnectingAt: this.lastConnectingAt,
+      lastOpenAt: this.lastOpenAt,
+      lastTransportMessageAt: this.lastTransportMessageAt,
+      lastFailureAt: this.lastFailureAt,
+      lastFailureReason: this.lastFailureReason,
+      ping: this.pingPong.getDiagnostics(),
+      transport:
+        typeof this.transport.getDiagnostics === "function" ? this.transport.getDiagnostics() : null,
+    }
   }
 }
 
@@ -396,4 +430,18 @@ export class ProtocolClientError extends Error {
     super(details?.message ?? code)
     this.name = `ProtocolClientError:${code}`
   }
+}
+
+function summarizeError(error: unknown): string {
+  if (error instanceof Error) {
+    return `${error.name}: ${error.message}`
+  }
+  return String(error)
+}
+
+function describeConnectionError(error: unknown): string {
+  const value = typeof error === "object" && error !== null ? (error as Record<string, unknown>) : null
+  const code = typeof value?.code === "number" ? value.code : null
+  const message = typeof value?.message === "string" && value.message.trim() ? value.message.trim() : "unknown"
+  return `server connection error${code != null ? ` (code=${code})` : ""}: ${message}`
 }
