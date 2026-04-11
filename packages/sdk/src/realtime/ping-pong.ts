@@ -10,6 +10,9 @@ export class PingPongService {
   private sleepResolver: (() => void) | null = null
 
   private pings = new Map<bigint, number>()
+  private lastPingAt: number | null = null
+  private lastPongAt: number | null = null
+  private lastTimeoutAt: number | null = null
 
   constructor(options?: { logger?: InlineSdkLogger; crypto?: Crypto | null }) {
     this.log = options?.logger ?? {}
@@ -41,13 +44,16 @@ export class PingPongService {
 
     const nonce = this.randomNonce()
     await client.sendPing(nonce)
-    this.pings.set(nonce, Date.now())
+    const now = Date.now()
+    this.lastPingAt = now
+    this.pings.set(nonce, now)
   }
 
   pong(nonce: bigint) {
     const pingDate = this.pings.get(nonce)
     if (!pingDate) return
     this.pings.delete(nonce)
+    this.lastPongAt = Date.now()
   }
 
   private async loop() {
@@ -69,11 +75,21 @@ export class PingPongService {
     if (client.state !== "open") return
 
     const now = Date.now()
-    const hasTimedOutPing = [...this.pings.values()].some((timestamp) => now - timestamp > 30_000)
-    if (!hasTimedOutPing) return
+    const oldestPendingPingAt = [...this.pings.values()].reduce<number | null>(
+      (oldest, timestamp) => (oldest == null || timestamp < oldest ? timestamp : oldest),
+      null,
+    )
+    if (oldestPendingPingAt == null) return
 
-    this.log.warn?.("Ping timeout, reconnecting")
-    await client.reconnect()
+    const oldestPendingAgeMs = now - oldestPendingPingAt
+    if (oldestPendingAgeMs <= 30_000) return
+
+    this.lastTimeoutAt = now
+    this.log.warn?.(
+      `Ping timeout, reconnecting (pending=${this.pings.size}, oldestPendingAgeMs=${oldestPendingAgeMs}${this.lastPongAt != null ? `, lastPongAgeMs=${now - this.lastPongAt}` : ""})`,
+    )
+    this.reset()
+    await client.reconnect({ cause: "ping-timeout" })
   }
 
   private async sleep(ms: number) {
@@ -111,6 +127,23 @@ export class PingPongService {
     }
 
     return BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER))
+  }
+
+  getDiagnostics() {
+    const now = Date.now()
+    const oldestPendingPingAt = [...this.pings.values()].reduce<number | null>(
+      (oldest, timestamp) => (oldest == null || timestamp < oldest ? timestamp : oldest),
+      null,
+    )
+    return {
+      running: this.running,
+      pendingCount: this.pings.size,
+      lastPingAt: this.lastPingAt,
+      lastPongAt: this.lastPongAt,
+      lastTimeoutAt: this.lastTimeoutAt,
+      oldestPendingPingAt,
+      oldestPendingPingAgeMs: oldestPendingPingAt != null ? now - oldestPendingPingAt : null,
+    }
   }
 }
 

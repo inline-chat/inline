@@ -560,6 +560,29 @@ describe("ProtocolClient", () => {
     vi.useRealTimers()
   })
 
+  it("clears stale ping state when the transport re-enters connecting", async () => {
+    const transport = new MockTransport()
+    const client = new ProtocolClient({
+      transport,
+      getConnectionInit: () => ({ token: "t" }),
+    })
+
+    await client.startTransport()
+    await transport.connect()
+    await transport.emitMessage(
+      ServerProtocolMessage.create({ id: 1n, body: { oneofKind: "connectionOpen", connectionOpen: {} } }),
+    )
+    await waitForOpen(client)
+
+    await client.pingPong.ping()
+    expect(client.getDiagnostics().ping.pendingCount).toBe(1)
+
+    await transport.events.send({ type: "connecting" })
+
+    expect(client.getDiagnostics().ping.pendingCount).toBe(0)
+    expect(client.getDiagnostics().ping.running).toBe(false)
+  })
+
   it("reconnection timer callback no-ops if state becomes open before it fires", async () => {
     vi.useFakeTimers()
     const transport = new MockTransport()
