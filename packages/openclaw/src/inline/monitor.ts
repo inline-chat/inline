@@ -184,6 +184,19 @@ type InlineReplyMarkupButton = {
   callback_data: string
 }
 
+function buildInlineInboundMessageSid(params: {
+  msgId: bigint
+  callbackActionEvent?: {
+    interactionId: bigint
+    targetMessageId: bigint
+  } | null
+}): string {
+  if (params.callbackActionEvent) {
+    return `callback:${String(params.callbackActionEvent.targetMessageId)}:${String(params.callbackActionEvent.interactionId)}`
+  }
+  return String(params.msgId)
+}
+
 const INLINE_ACTION_MAX_ROWS = 8
 const INLINE_ACTION_MAX_PER_ROW = 8
 
@@ -1336,9 +1349,7 @@ export async function monitorInlineProvider(params: {
           await answerInlineMessageAction(client, callbackActionEvent.interactionId)
           callbackActionAnswered = true
         }
-        // Temporary rollback: callback-driven workflows send new messages
-        // instead of editing the original message in-place.
-        const shouldEditCallbackTargetInPlace = false
+        const shouldEditCallbackTargetInPlace = callbackActionEvent != null
         const normalizedCommandBody = callbackCommandBody ?? normalizeInlineCommandBody(rawBody, botUsername)
 
         const allowTextCommands = core.channel.commands.shouldHandleTextCommands({
@@ -1559,13 +1570,38 @@ export async function monitorInlineProvider(params: {
               },
             },
           })
-          const sent = await client.sendMessage({
-            chatId,
-            text: nativeCommandMenu.title,
-            ...(menuActions ? { actions: menuActions } : {}),
-          })
-          if (sent.messageId != null) {
-            rememberBotMessageId(botMessageIdsByChat, chatId, sent.messageId)
+          let deliveredNativeMenu = false
+          if (shouldEditCallbackTargetInPlace && callbackActionEvent) {
+            try {
+              const result = await client.invokeRaw(Method.EDIT_MESSAGE, {
+                oneofKind: "editMessage",
+                editMessage: {
+                  messageId: callbackActionEvent.targetMessageId,
+                  peerId: buildChatPeer(chatId),
+                  text: nativeCommandMenu.title,
+                  ...(menuActions ? { actions: menuActions } : {}),
+                  parseMarkdown,
+                },
+              })
+              if (result.oneofKind !== "editMessage") {
+                throw new Error(
+                  `inline native command menu: expected editMessage result, got ${String(result.oneofKind)}`,
+                )
+              }
+              deliveredNativeMenu = true
+            } catch (error) {
+              runtime.error?.(`inline native command menu edit failed; falling back to send (${String(error)})`)
+            }
+          }
+          if (!deliveredNativeMenu) {
+            const sent = await client.sendMessage({
+              chatId,
+              text: nativeCommandMenu.title,
+              ...(menuActions ? { actions: menuActions } : {}),
+            })
+            if (sent.messageId != null) {
+              rememberBotMessageId(botMessageIdsByChat, chatId, sent.messageId)
+            }
           }
           statusSink?.({ lastOutboundAt: Date.now() })
           await answerCallbackIfNeeded().catch((error) => {
@@ -1666,7 +1702,10 @@ export async function monitorInlineProvider(params: {
           ...(senderUsername ? { SenderUsername: senderUsername } : {}),
           Provider: CHANNEL_ID,
           Surface: effectiveSurface,
-          MessageSid: String(msg.id),
+          MessageSid: buildInlineInboundMessageSid({
+            msgId: msg.id,
+            ...(callbackActionEvent ? { callbackActionEvent } : {}),
+          }),
           ...(replyThreadContext ? { MessageThreadId: String(replyThreadContext.childChatId) } : {}),
           ...(replyThreadContext?.threadLabel ? { ThreadLabel: replyThreadContext.threadLabel } : {}),
           ...(msg.replyToMsgId != null ? { ReplyToId: String(msg.replyToMsgId) } : {}),
@@ -1737,6 +1776,18 @@ export async function monitorInlineProvider(params: {
             : {}),
         }
 
+        const callbackTargetMessage =
+          shouldEditCallbackTargetInPlace && callbackActionEvent
+            ? await findChatMessageById({
+                client,
+                chatId,
+                messageId: callbackActionEvent.targetMessageId,
+                limit: REPLY_TARGET_LOOKUP_LIMIT,
+                meId,
+                botMessageIdsByChat,
+              }).catch(() => null)
+            : null
+
         const streamViaEditMessage = account.config.streamViaEditMessage === true && !shouldEditCallbackTargetInPlace
         const defaultReplyToMsgId = isGroup && msg.replyToMsgId != null ? msg.id : undefined
         const disableBlockStreaming =
@@ -1746,8 +1797,8 @@ export async function monitorInlineProvider(params: {
             ? !account.config.blockStreaming
             : undefined
         const editStreamState: InlineEditStreamState = {
-          messageId: null,
-          accumulatedText: "",
+          messageId: shouldEditCallbackTargetInPlace ? callbackActionEvent?.targetMessageId ?? null : null,
+          accumulatedText: callbackTargetMessage?.message ?? "",
           lastPartialText: "",
           finalTextAccumulator: "",
           failed: false,
@@ -1959,7 +2010,7 @@ export async function monitorInlineProvider(params: {
                   if (editStreamState.messageId == null) return false
                   const nextText = text.trim()
                   const textForEdit = nextText || editStreamState.accumulatedText
-                  if (!textForEdit) return true
+                  if (!textForEdit && actions === undefined) return true
                   const shouldSkipTextUpdate =
                     !editStreamState.failed && textForEdit === editStreamState.accumulatedText
                   if (shouldSkipTextUpdate && actions === undefined) return true
@@ -1988,6 +2039,15 @@ export async function monitorInlineProvider(params: {
                 }
 
                 if (mediaList.length === 0) {
+                  if (shouldEditCallbackTargetInPlace && editStreamState.messageId != null) {
+                    if (!outboundText.trim() && outboundActions === undefined) {
+                      return
+                    }
+                    await updateStreamedMessage(outboundText, outboundActions)
+                    delivered = true
+                    statusSink?.({ lastOutboundAt: Date.now() })
+                    return
+                  }
                   if (
                     streamViaEditMessage &&
                     infoKind === "final" &&
