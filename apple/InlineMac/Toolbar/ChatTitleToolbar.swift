@@ -116,6 +116,10 @@ class ChatTitleToolbar: NSToolbarItem {
   }
 
   private func setupInteraction() {
+    iconView.onClick = { [weak self] in
+      self?.handleAvatarClick()
+    }
+
     nameLabel.onSingleClick = { [weak self] in
       self?.handleTitleClick()
     }
@@ -132,6 +136,10 @@ class ChatTitleToolbar: NSToolbarItem {
     beginTitleEditing()
   }
 
+  @objc private func handleAvatarClick() {
+    openChatInfo()
+  }
+
   @objc private func handleTitleDoubleClick() {
     beginTitleEditing()
   }
@@ -145,6 +153,14 @@ class ChatTitleToolbar: NSToolbarItem {
     menu.addItem(renameItem)
 
     NSMenu.popUpContextMenu(menu, with: event, for: nameLabel)
+  }
+
+  private func openChatInfo() {
+    if let nav2 = dependencies.nav2 {
+      nav2.navigate(to: .chatInfo(peer: peer))
+    } else {
+      dependencies.nav.open(.chatInfo(peer: peer))
+    }
   }
 
   @objc private func handleRenameMenu() {
@@ -644,6 +660,9 @@ final class ChatIconView: NSView {
   private let iconSize: CGFloat
   private let peer: Peer
   private var currentAvatar: NSView?
+  private weak var clickTargetView: NSView?
+  private var clickRecognizer: NSClickGestureRecognizer?
+  var onClick: (() -> Void)?
 
   init(peer: Peer, iconSize: CGFloat) {
     self.peer = peer
@@ -711,11 +730,33 @@ final class ChatIconView: NSView {
     ])
 
     currentAvatar = avatar
+    updateClickHandling(for: avatar)
   }
 
   private func setupConstraints() {
     translatesAutoresizingMaskIntoConstraints = false
     widthAnchor.constraint(equalToConstant: iconSize).isActive = true
     heightAnchor.constraint(equalToConstant: iconSize).isActive = true
+  }
+
+  private func updateClickHandling(for avatar: NSView?) {
+    if let clickRecognizer, let clickTargetView {
+      clickTargetView.removeGestureRecognizer(clickRecognizer)
+    }
+    clickRecognizer = nil
+    clickTargetView = nil
+
+    guard onClick != nil, let avatar else { return }
+
+    let recognizer = NSClickGestureRecognizer(target: self, action: #selector(handleAvatarClick))
+    recognizer.buttonMask = 0x1
+    avatar.addGestureRecognizer(recognizer)
+    avatar.toolTip = "Open Chat Info"
+    clickRecognizer = recognizer
+    clickTargetView = avatar
+  }
+
+  @objc private func handleAvatarClick() {
+    onClick?()
   }
 }

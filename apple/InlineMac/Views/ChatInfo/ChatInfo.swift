@@ -11,6 +11,8 @@ struct ChatInfo: View {
   @Environment(\.realtimeV2) private var realtimeV2
   @EnvironmentStateObject var fullChat: FullChatViewModel
   @EnvironmentStateObject private var documentsState: ChatInfoDocumentsState
+  @EnvironmentStateObject private var linksState: ChatInfoLinksState
+  @EnvironmentStateObject private var participantsState: ChatInfoParticipantsState
   @StateObject private var appSettings = AppSettings.shared
 
   let peerId: Peer
@@ -103,15 +105,13 @@ struct ChatInfo: View {
     )
   }
 
-  private var isPrivateThread: Bool {
-    guard case .thread = peerId else { return false }
-    guard let isPublic = fullChat.chat?.isPublic else { return false }
-    return isPublic == false
+  private var shouldShowParticipantsTab: Bool {
+    chatId != nil
   }
 
   private var availableTabs: [ChatInfoTab] {
     var tabs: [ChatInfoTab] = [.files, .media, .links]
-    if isPrivateThread {
+    if shouldShowParticipantsTab {
       tabs.append(.participants)
     }
     return tabs
@@ -134,13 +134,19 @@ struct ChatInfo: View {
     _documentsState = EnvironmentStateObject { env in
       ChatInfoDocumentsState(db: env.appDatabase, peer: peerId)
     }
+    _linksState = EnvironmentStateObject { env in
+      ChatInfoLinksState(db: env.appDatabase, peer: peerId)
+    }
+    _participantsState = EnvironmentStateObject { env in
+      ChatInfoParticipantsState(db: env.appDatabase)
+    }
   }
 
   var body: some View {
     ScrollView {
-      VStack(spacing: 24) {
+      VStack(alignment: .leading, spacing: 24) {
         header
-        infoForm
+        infoCard
 
         Picker("Tabs", selection: $selectedTab) {
           ForEach(availableTabs, id: \.self) { tab in
@@ -149,26 +155,28 @@ struct ChatInfo: View {
         }
         .pickerStyle(.segmented)
         .labelsHidden()
-        .padding(.horizontal, 16)
+        .frame(maxWidth: .infinity)
 
         tabContent
       }
+      .frame(maxWidth: .infinity, alignment: .topLeading)
       .padding(.top, 16)
       .padding(.bottom, 24)
+      .padding(.horizontal, 16)
     }
     .frame(maxWidth: .infinity, alignment: .top)
     .onAppear {
-      updateDocumentsChatId()
+      updateViewModels()
       ensureSelectedTab()
       syncTranslationState()
     }
     .task(id: permissionsTaskKey) {
       await loadVisibilityPermissions()
     }
-    .onChange(of: chatId) { _ in
-      updateDocumentsChatId()
+    .onChange(of: chatId) { _, _ in
+      updateViewModels()
     }
-    .onChange(of: availableTabsKey) { _ in
+    .onChange(of: availableTabsKey) { _, _ in
       ensureSelectedTab()
     }
     .onReceive(TranslationState.shared.subject) { event in
@@ -196,97 +204,119 @@ struct ChatInfo: View {
         .padding(.top, 8)
 
       Text(chatTitle)
-        .font(.title2)
+        .font(.title3)
         .fontWeight(.semibold)
+
+      Text(chatTypeLabel)
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
     }
     .frame(maxWidth: .infinity)
   }
 
-  private var infoForm: some View {
-    VStack(spacing: 0) {
-      ChatInfoDetailRow(title: "Chat ID") {
-        if let chatId {
-          Button {
-            copyThreadIdToClipboard(chatId)
-          } label: {
-            Text(String(chatId))
-              .font(.system(.body, design: .monospaced))
-          }
-          .buttonStyle(.plain)
-        } else {
-          Text("—")
-            .foregroundStyle(.secondary)
-        }
-      }
-
-      Divider()
-
-      ChatInfoDetailRow(title: "Chat Type") {
-        Text(chatTypeLabel)
-      }
-
-      Divider()
-
-      ChatInfoDetailRow(title: "Notifications") {
-        Picker("Notifications", selection: Binding(
-          get: { notificationSelection },
-          set: { newSelection in
-            updateNotificationSettings(newSelection)
-          }
-        )) {
-          Text(DialogNotificationSettingSelection.global.title).tag(DialogNotificationSettingSelection.global)
-          Text(DialogNotificationSettingSelection.all.title).tag(DialogNotificationSettingSelection.all)
-          Text(DialogNotificationSettingSelection.mentions.title).tag(DialogNotificationSettingSelection.mentions)
-          Text(DialogNotificationSettingSelection.none.title).tag(DialogNotificationSettingSelection.none)
-        }
-        .labelsHidden()
-        .pickerStyle(.menu)
-        .frame(maxWidth: 180)
-      }
-
-      if appSettings.translationUIEnabled {
-        Divider()
-
-        ChatInfoDetailRow(title: "Translation") {
-          HStack(spacing: 10) {
-            Toggle("", isOn: translationBinding)
-              .labelsHidden()
-              .toggleStyle(.switch)
-              .accessibilityLabel("Translate messages")
-
-            Button("Options") {
-              showTranslationOptions = true
+  private var infoCard: some View {
+    GroupBox {
+      VStack(alignment: .leading, spacing: 0) {
+        infoRow("Chat ID") {
+          if let chatId {
+            Button {
+              copyThreadIdToClipboard(chatId)
+            } label: {
+              Label {
+                Text(String(chatId))
+                  .font(.system(.body, design: .monospaced))
+              } icon: {
+                Image(systemName: "doc.on.doc")
+                  .foregroundStyle(.secondary)
+              }
             }
-            .foregroundStyle(.secondary)
-            .buttonStyle(.link)
+            .buttonStyle(.plain)
+          } else {
+            Text("—")
+              .foregroundStyle(.secondary)
           }
         }
-      }
 
-      if shouldShowVisibilityRow {
         Divider()
 
-        ChatInfoDetailRow(title: "Visibility") {
-          HStack(spacing: 8) {
-            Text(visibilityLabel)
-              .foregroundStyle(canToggleVisibility ? .primary : .secondary)
+        infoRow("Chat Type") {
+          Text(chatTypeLabel)
+            .foregroundStyle(.secondary)
+        }
 
-            Toggle("", isOn: visibilityBinding)
-              .labelsHidden()
-              .accessibilityLabel("Visibility")
-              .toggleStyle(.switch)
-              .disabled(!canToggleVisibility)
+        Divider()
+
+        infoRow("Notifications") {
+          Picker(
+            "Notifications",
+            selection: Binding(
+              get: { notificationSelection },
+              set: { newSelection in
+                updateNotificationSettings(newSelection)
+              }
+            )
+          ) {
+            Text(DialogNotificationSettingSelection.global.title).tag(DialogNotificationSettingSelection.global)
+            Text(DialogNotificationSettingSelection.all.title).tag(DialogNotificationSettingSelection.all)
+            Text(DialogNotificationSettingSelection.mentions.title).tag(DialogNotificationSettingSelection.mentions)
+            Text(DialogNotificationSettingSelection.none.title).tag(DialogNotificationSettingSelection.none)
+          }
+          .labelsHidden()
+          .pickerStyle(.menu)
+          .frame(maxWidth: 220, alignment: .trailing)
+        }
+
+        if appSettings.translationUIEnabled {
+          Divider()
+
+          infoRow("Translation") {
+            HStack(spacing: 10) {
+              Toggle("Translate messages", isOn: translationBinding)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .accessibilityLabel("Translate messages")
+
+              Button("Options…") {
+                showTranslationOptions = true
+              }
+              .buttonStyle(.link)
+            }
+          }
+        }
+
+        if shouldShowVisibilityRow {
+          Divider()
+
+          infoRow("Visibility") {
+            HStack(spacing: 8) {
+              Text(visibilityLabel)
+                .foregroundStyle(canToggleVisibility ? .primary : .secondary)
+
+              Toggle("Visibility", isOn: visibilityBinding)
+                .labelsHidden()
+                .accessibilityLabel("Visibility")
+                .toggleStyle(.switch)
+                .disabled(!canToggleVisibility)
+            }
+          }
+
+          if !canToggleVisibility {
+            Text("Only the chat creator, owner, or admin can change visibility.")
+              .font(.footnote)
+              .foregroundStyle(.secondary)
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .padding(.leading, 154)
+              .padding(.bottom, 8)
           }
         }
       }
+      .padding(14)
+      .frame(maxWidth: .infinity, alignment: .leading)
+    } label: {
+      Label("Info", systemImage: "info.circle")
+        .font(.headline)
     }
-    .background(
-      RoundedRectangle(cornerRadius: 12)
-        .fill(Color(nsColor: .windowBackgroundColor))
-        .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 2)
-    )
     .frame(maxWidth: .infinity, alignment: .leading)
-    .padding(.horizontal, 16)
     .sheet(isPresented: $showVisibilityPicker) {
       if let chat = fullChat.chat,
          let spaceId = chat.spaceId,
@@ -309,6 +339,22 @@ struct ChatInfo: View {
   }
 
   @ViewBuilder
+  private func infoRow<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+    HStack(alignment: .center, spacing: 12) {
+      Text(title)
+        .foregroundStyle(.secondary)
+        .frame(width: 140, alignment: .leading)
+
+      Spacer(minLength: 0)
+
+      content()
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(.vertical, 10)
+    .padding(.horizontal, 2)
+  }
+
+  @ViewBuilder
   private var tabContent: some View {
     switch selectedTab {
       case .files:
@@ -316,9 +362,9 @@ struct ChatInfo: View {
       case .media:
         comingSoonView(title: "Media", message: "Media browsing is coming soon.")
       case .links:
-        comingSoonView(title: "Links", message: "Links browsing is coming soon.")
+        linksTab
       case .participants:
-        comingSoonView(title: "Participants", message: "Participants management is coming soon.")
+        participantsTab
     }
   }
 
@@ -326,6 +372,39 @@ struct ChatInfo: View {
   private var filesTab: some View {
     if let documentsViewModel = documentsState.documentsViewModel {
       ChatInfoFilesList(documentsViewModel: documentsViewModel)
+    } else {
+      HStack {
+        Spacer()
+        ProgressView()
+          .controlSize(.small)
+        Spacer()
+      }
+      .padding(.vertical, 32)
+    }
+  }
+
+  @ViewBuilder
+  private var linksTab: some View {
+    if let linksViewModel = linksState.linksViewModel {
+      ChatInfoLinksList(linksViewModel: linksViewModel)
+    } else {
+      HStack {
+        Spacer()
+        ProgressView()
+          .controlSize(.small)
+        Spacer()
+      }
+      .padding(.vertical, 32)
+    }
+  }
+
+  @ViewBuilder
+  private var participantsTab: some View {
+    if let participantsViewModel = participantsState.participantsViewModel {
+      ChatInfoParticipantsList(
+        participantsViewModel: participantsViewModel,
+        currentUserId: dependencies?.auth.currentUserId
+      )
     } else {
       HStack {
         Spacer()
@@ -356,9 +435,11 @@ struct ChatInfo: View {
     }
   }
 
-  private func updateDocumentsChatId() {
+  private func updateViewModels() {
     guard let chatId, chatId > 0 else { return }
     documentsState.updateChatId(chatId)
+    linksState.updateChatId(chatId)
+    participantsState.updateChatId(chatId)
   }
 
   private func syncTranslationState() {
@@ -465,24 +546,6 @@ private enum ChatInfoTab: String, CaseIterable, Hashable {
   }
 }
 
-private struct ChatInfoDetailRow<Content: View>: View {
-  let title: String
-  @ViewBuilder let content: () -> Content
-
-  var body: some View {
-    HStack(spacing: 12) {
-      Text(title)
-        .foregroundStyle(.secondary)
-
-      Spacer()
-
-      content()
-    }
-    .padding(.horizontal, 12)
-    .padding(.vertical, 10)
-  }
-}
-
 @MainActor
 private final class ChatInfoDocumentsState: ObservableObject {
   @Published private(set) var documentsViewModel: ChatDocumentsViewModel?
@@ -504,6 +567,50 @@ private final class ChatInfoDocumentsState: ObservableObject {
   }
 }
 
+@MainActor
+private final class ChatInfoLinksState: ObservableObject {
+  @Published private(set) var linksViewModel: ChatLinksViewModel?
+
+  private let db: AppDatabase
+  private let peer: Peer
+  private var currentChatId: Int64 = 0
+
+  init(db: AppDatabase, peer: Peer) {
+    self.db = db
+    self.peer = peer
+  }
+
+  func updateChatId(_ chatId: Int64) {
+    guard chatId > 0 else { return }
+    guard chatId != currentChatId else { return }
+    currentChatId = chatId
+    linksViewModel = ChatLinksViewModel(db: db, chatId: chatId, peer: peer)
+  }
+}
+
+@MainActor
+private final class ChatInfoParticipantsState: ObservableObject {
+  @Published private(set) var participantsViewModel: ChatParticipantsWithMembersViewModel?
+
+  private let db: AppDatabase
+  private var currentChatId: Int64 = 0
+
+  init(db: AppDatabase) {
+    self.db = db
+  }
+
+  func updateChatId(_ chatId: Int64) {
+    guard chatId > 0 else { return }
+    guard chatId != currentChatId else { return }
+    currentChatId = chatId
+    participantsViewModel = ChatParticipantsWithMembersViewModel(
+      db: db,
+      chatId: chatId,
+      purpose: .participantsList
+    )
+  }
+}
+
 private struct ChatInfoFilesList: View {
   @ObservedObject var documentsViewModel: ChatDocumentsViewModel
 
@@ -518,7 +625,7 @@ private struct ChatInfoFilesList: View {
         LazyVStack(alignment: .leading, spacing: 8) {
           ForEach(documentsViewModel.groupedDocumentMessages, id: \.date) { group in
             VStack(alignment: .leading, spacing: 6) {
-              Text(formatDate(group.date))
+              Text(chatInfoDateLabel(group.date))
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(.secondary)
                 .padding(.horizontal, 16)
@@ -545,23 +652,234 @@ private struct ChatInfoFilesList: View {
       await documentsViewModel.loadInitial()
     }
   }
+}
 
-  private func formatDate(_ date: Date) -> String {
-    let calendar = Calendar.current
-    let now = Date()
+private struct ChatInfoLinksList: View {
+  @ObservedObject var linksViewModel: ChatLinksViewModel
 
-    if calendar.isDateInToday(date) {
-      return "Today"
-    } else if calendar.isDateInYesterday(date) {
-      return "Yesterday"
-    } else if calendar.isDate(date, equalTo: now, toGranularity: .weekOfYear) {
-      let formatter = DateFormatter()
-      formatter.dateFormat = "EEEE"
-      return formatter.string(from: date)
-    } else {
-      let formatter = DateFormatter()
-      formatter.dateFormat = "MMMM d, yyyy"
-      return formatter.string(from: date)
+  var body: some View {
+    Group {
+      if linksViewModel.linkMessages.isEmpty {
+        Text("No links found in this chat.")
+          .foregroundStyle(.secondary)
+          .frame(maxWidth: .infinity, alignment: .center)
+          .padding(.vertical, 32)
+      } else {
+        LazyVStack(alignment: .leading, spacing: 12) {
+          ForEach(linksViewModel.groupedLinkMessages, id: \.date) { group in
+            VStack(alignment: .leading, spacing: 8) {
+              Text(chatInfoDateLabel(group.date))
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+              ForEach(group.messages, id: \.id) { linkMessage in
+                ChatInfoLinkRow(linkMessage: linkMessage)
+                  .onAppear {
+                    Task {
+                      await linksViewModel.loadMoreIfNeeded(currentMessageId: linkMessage.message.messageId)
+                    }
+                  }
+              }
+            }
+            .padding(.horizontal, 16)
+          }
+        }
+      }
+    }
+    .task {
+      await linksViewModel.loadInitial()
+    }
+  }
+}
+
+private struct ChatInfoLinkRow: View {
+  let linkMessage: LinkMessage
+  @Environment(\.openURL) private var openURL
+
+  private static let detector: NSDataDetector? = {
+    try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+  }()
+
+  private var url: URL? {
+    parseURL(linkMessage.urlPreview?.url) ?? firstURL(from: linkMessage.message.text)
+  }
+
+  private var title: String {
+    if let title = linkMessage.urlPreview?.title?.trimmingCharacters(in: .whitespacesAndNewlines),
+       !title.isEmpty
+    {
+      return title
+    }
+    if let host = url?.host, !host.isEmpty {
+      return host
+    }
+    if let text = linkMessage.message.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+       !text.isEmpty
+    {
+      return text
+    }
+    return "Link"
+  }
+
+  private var subtitle: String? {
+    if let absolute = url?.absoluteString, !absolute.isEmpty {
+      return absolute
+    }
+    if let text = linkMessage.message.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+       !text.isEmpty
+    {
+      return text
+    }
+    return nil
+  }
+
+  var body: some View {
+    Button {
+      guard let url else { return }
+      openURL(url)
+    } label: {
+      HStack(alignment: .top, spacing: 10) {
+        Image(systemName: "link")
+          .foregroundStyle(.secondary)
+          .font(.system(size: 12, weight: .semibold))
+          .padding(.top, 2)
+
+        VStack(alignment: .leading, spacing: 2) {
+          Text(title)
+            .font(.body)
+            .foregroundStyle(.primary)
+            .lineLimit(1)
+
+          if let subtitle {
+            Text(subtitle)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .lineLimit(2)
+          }
+        }
+
+        Spacer(minLength: 8)
+      }
+      .padding(.horizontal, 10)
+      .padding(.vertical, 8)
+      .background(
+        RoundedRectangle(cornerRadius: 10)
+          .fill(Color(nsColor: .windowBackgroundColor))
+      )
+    }
+    .buttonStyle(.plain)
+    .disabled(url == nil)
+  }
+
+  private func parseURL(_ rawValue: String?) -> URL? {
+    guard let rawValue else { return nil }
+    let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+
+    if let url = URL(string: trimmed),
+       let scheme = url.scheme?.lowercased(),
+       ["http", "https"].contains(scheme)
+    {
+      return url
+    }
+
+    if let url = URL(string: "https://\(trimmed)"),
+       let scheme = url.scheme?.lowercased(),
+       ["http", "https"].contains(scheme)
+    {
+      return url
+    }
+
+    return nil
+  }
+
+  private func firstURL(from text: String?) -> URL? {
+    guard let text, !text.isEmpty, let detector = Self.detector else { return nil }
+    let range = NSRange(text.startIndex..., in: text)
+    var foundURL: URL?
+
+    detector.enumerateMatches(in: text, options: [], range: range) { match, _, stop in
+      guard let matchURL = match?.url else { return }
+      if let parsedURL = parseURL(matchURL.absoluteString) {
+        foundURL = parsedURL
+        stop.pointee = true
+      }
+    }
+
+    return foundURL
+  }
+}
+
+private struct ChatInfoParticipantsList: View {
+  @ObservedObject var participantsViewModel: ChatParticipantsWithMembersViewModel
+  let currentUserId: Int64?
+
+  private var sortedParticipants: [UserInfo] {
+    participantsViewModel.participants.sorted { lhs, rhs in
+      let lhsName = lhs.user.displayName.lowercased()
+      let rhsName = rhs.user.displayName.lowercased()
+      if lhsName == rhsName {
+        return lhs.user.id < rhs.user.id
+      }
+      return lhsName < rhsName
+    }
+  }
+
+  var body: some View {
+    Group {
+      if sortedParticipants.isEmpty {
+        Text("No participants found in this chat.")
+          .foregroundStyle(.secondary)
+          .frame(maxWidth: .infinity, alignment: .center)
+          .padding(.vertical, 32)
+      } else {
+        VStack(alignment: .leading, spacing: 10) {
+          Text("\(sortedParticipants.count) participant\(sortedParticipants.count == 1 ? "" : "s")")
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.secondary)
+
+          LazyVStack(alignment: .leading, spacing: 8) {
+            ForEach(sortedParticipants, id: \.id) { participant in
+              HStack(spacing: 10) {
+                UserAvatar(user: participant.user, size: 26)
+
+                VStack(alignment: .leading, spacing: 1) {
+                  HStack(spacing: 6) {
+                    Text(participant.user.displayName)
+                      .font(.body)
+                      .lineLimit(1)
+
+                    if participant.user.id == currentUserId {
+                      Text("You")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    }
+                  }
+
+                  if let username = participant.user.username, !username.isEmpty {
+                    Text("@\(username)")
+                      .font(.caption)
+                      .foregroundStyle(.secondary)
+                      .lineLimit(1)
+                  }
+                }
+
+                Spacer(minLength: 8)
+              }
+              .padding(.horizontal, 10)
+              .padding(.vertical, 7)
+              .background(
+                RoundedRectangle(cornerRadius: 10)
+                  .fill(Color(nsColor: .windowBackgroundColor))
+              )
+            }
+          }
+        }
+        .padding(.horizontal, 16)
+      }
+    }
+    .task {
+      await participantsViewModel.refetchParticipants()
     }
   }
 }
@@ -591,6 +909,27 @@ private struct ChatInfoDocumentRow: NSViewRepresentable {
       attachments: []
     )
   }
+}
+
+private func chatInfoDateLabel(_ date: Date) -> String {
+  let calendar = Calendar.current
+  let now = Date()
+
+  if calendar.isDateInToday(date) {
+    return "Today"
+  }
+  if calendar.isDateInYesterday(date) {
+    return "Yesterday"
+  }
+  if calendar.isDate(date, equalTo: now, toGranularity: .weekOfYear) {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "EEEE"
+    return formatter.string(from: date)
+  }
+
+  let formatter = DateFormatter()
+  formatter.dateFormat = "MMMM d, yyyy"
+  return formatter.string(from: date)
 }
 
 // TODO: Previews
