@@ -224,7 +224,7 @@ final class MessageActionButtonView: NSView {
     let appearance = effectiveAppearance
     let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
     let fontSize = max(11, min(appearanceStyle.messageFontSize, appearanceStyle.rowHeight - 8))
-    let textColor: NSColor = (appearanceStyle.outgoing ? .white : .labelColor).resolvedColor(with: appearance)
+    let textColor: NSColor = (appearanceStyle.outgoing ? NSColor.white : NSColor.labelColor).resolvedColor(with: appearance)
     let disabledColor = textColor.withAlphaComponent(0.45)
 
     button.attributedTitle = NSAttributedString(
