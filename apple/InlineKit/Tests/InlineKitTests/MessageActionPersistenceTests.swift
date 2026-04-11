@@ -17,6 +17,22 @@ struct MessageActionPersistenceTests {
   func protocolUpdatesWithoutActionsClearStaleActions() throws {
     let dbQueue = try makeInMemoryDB()
     try dbQueue.write { db in
+      let user = User(id: 1, email: "bot@example.com", firstName: "Bot", lastName: nil, username: "bot")
+      try user.insert(db)
+
+      let peerUser = User(id: 9, email: "peer@example.com", firstName: "Peer", lastName: nil, username: "peer")
+      try peerUser.insert(db)
+
+      let chat = Chat(
+        id: 44,
+        date: Date(timeIntervalSince1970: 1),
+        type: .privateChat,
+        title: nil,
+        spaceId: nil,
+        peerUserId: 9
+      )
+      try chat.insert(db)
+
       var stale = Message(
         messageId: 7,
         fromId: 1,
@@ -64,7 +80,7 @@ struct MessageActionPersistenceTests {
 
       _ = try Message.save(db, protocolMessage: proto, publishChanges: false)
 
-      let saved = try #require(Message.fetchOne(db, key: ["messageId": 7, "chatId": 44]))
+      let saved = try #require(try Message.fetchOne(db, key: ["messageId": 7, "chatId": 44]))
       #expect(saved.text == "after")
       #expect(saved.actions == nil)
       #expect(saved.voiceContent?.voiceID == 123)
