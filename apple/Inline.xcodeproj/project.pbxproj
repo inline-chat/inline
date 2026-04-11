@@ -145,6 +145,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				InlineAppIcon.icon,
+				InlineAppIconDebug.icon,
 				InlineAppIconDev.icon,
 			);
 			target = CD2661642CA01E3E00EB186F /* InlineMac */;
@@ -153,6 +154,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				InlineAppIcon.icon,
+				InlineAppIconDebug.icon,
 				InlineAppIconDev.icon,
 			);
 			target = C38A28362CA5AB8F00D3DFB8 /* InlineIOS */;
