@@ -2846,4 +2846,85 @@ describe("InlineSdkClient", () => {
     await answerPromise
     await client.close()
   })
+
+  it("replays user-bucket message action events after reconnect when lastUserSeq is stored", async () => {
+    const transport = new MockTransport()
+    const store = new MemoryStateStore({ version: 1, lastUserSeq: 54 })
+    const client = new InlineSdkClient({
+      baseUrl: "https://api.inline.chat",
+      token: "test-token",
+      transport,
+      state: store,
+    })
+
+    await connectAndOpen(client, transport)
+    const iter = client.events()[Symbol.asyncIterator]()
+
+    await waitFor(() =>
+      transport.sent.some((m) => m.body.oneofKind === "rpcCall" && m.body.rpcCall.method === Method.GET_UPDATES),
+    )
+    const rpc = transport.sent.find(
+      (m) =>
+        m.body.oneofKind === "rpcCall" &&
+        m.body.rpcCall.method === Method.GET_UPDATES &&
+        m.body.rpcCall.input.oneofKind === "getUpdates" &&
+        m.body.rpcCall.input.getUpdates.bucket?.type.oneofKind === "user",
+    )
+    if (!rpc || rpc.body.oneofKind !== "rpcCall") throw new Error("missing user getUpdates rpc")
+    if (rpc.body.rpcCall.input.oneofKind !== "getUpdates") throw new Error("missing getUpdates input")
+    expect(rpc.body.rpcCall.input.getUpdates.startSeq).toBe(54n)
+    expect(rpc.body.rpcCall.input.getUpdates.bucket?.type.oneofKind).toBe("user")
+
+    await transport.emitMessage(
+      ServerProtocolMessage.create({
+        id: 302n,
+        body: {
+          oneofKind: "rpcResult",
+          rpcResult: {
+            reqMsgId: rpc.id,
+            result: {
+              oneofKind: "getUpdates",
+              getUpdates: {
+                updates: [
+                  Update.create({
+                    seq: 55,
+                    date: 702n,
+                    update: {
+                      oneofKind: "messageActionInvoked",
+                      messageActionInvoked: {
+                        interactionId: 55n,
+                        chatId: 20n,
+                        messageId: 88n,
+                        actorUserId: 11n,
+                        actionId: "pick",
+                        data: new Uint8Array([4, 5, 6]),
+                      },
+                    },
+                  }),
+                ],
+                seq: 55n,
+                date: 702n,
+                resultType: GetUpdatesResult_ResultType.SLICE,
+                final: true,
+              },
+            },
+          },
+        },
+      }),
+    )
+
+    const event = await iter.next()
+    expect(event.done).toBe(false)
+    if (!event.done) {
+      expect(event.value.kind).toBe("message.action.invoke")
+      if (event.value.kind === "message.action.invoke") {
+        expect(event.value.interactionId).toBe(55n)
+        expect(event.value.actionId).toBe("pick")
+        expect(Array.from(event.value.data)).toEqual([4, 5, 6])
+      }
+    }
+
+    expect(client.exportState().lastUserSeq).toBe(55)
+    await client.close()
+  })
 })
