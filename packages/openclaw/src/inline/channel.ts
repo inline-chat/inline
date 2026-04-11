@@ -1253,22 +1253,31 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
     buildChannelSummary: ({ snapshot }) => buildTokenChannelStatusSummary(snapshot),
     probeAccount: async ({ account, timeoutMs }) => await probeInlineAccount(account, timeoutMs),
     formatCapabilitiesProbe: ({ probe }) => formatInlineCapabilitiesProbeLines(probe),
-    buildAccountSnapshot: ({ account, runtime, probe }) => ({
-      accountId: account.accountId,
-      name: account.name,
-      enabled: account.enabled,
-      configured: account.configured,
-      baseUrl: account.baseUrl ? "[set]" : "[missing]",
-      tokenSource: account.token ? "config" : account.tokenFile ? "file" : "missing",
-      running: runtime?.running ?? false,
-      lastStartAt: runtime?.lastStartAt ?? null,
-      lastStopAt: runtime?.lastStopAt ?? null,
-      lastError: runtime?.lastError ?? null,
-      lastInboundAt: runtime?.lastInboundAt ?? null,
-      lastOutboundAt: runtime?.lastOutboundAt ?? null,
-      lastProbeAt: runtime?.lastProbeAt ?? null,
-      ...(probe !== undefined ? { probe } : {}),
-    }),
+    buildAccountSnapshot: ({ account, runtime, probe }) => {
+      const snapshot = {
+        accountId: account.accountId,
+        name: account.name,
+        enabled: account.enabled,
+        configured: account.configured,
+        baseUrl: account.baseUrl ? "[set]" : "[missing]",
+        tokenSource: account.token ? "config" : account.tokenFile ? "file" : "missing",
+        running: runtime?.running ?? false,
+        lastStartAt: runtime?.lastStartAt ?? null,
+        lastStopAt: runtime?.lastStopAt ?? null,
+        lastError: runtime?.lastError ?? null,
+        lastInboundAt: runtime?.lastInboundAt ?? null,
+        lastOutboundAt: runtime?.lastOutboundAt ?? null,
+        lastProbeAt: runtime?.lastProbeAt ?? null,
+        ...(probe !== undefined ? { probe } : {}),
+      } as Record<string, unknown>
+
+      const diagnostics = (runtime as { diagnostics?: unknown } | undefined)?.diagnostics
+      if (diagnostics !== undefined) {
+        snapshot.diagnostics = diagnostics
+      }
+
+      return snapshot as any
+    },
   },
 
   gateway: {

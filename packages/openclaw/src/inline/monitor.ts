@@ -1,6 +1,15 @@
 import { mkdir } from "node:fs/promises"
 import path from "node:path"
 import {
+  buildCommandTextFromArgs,
+  findCommandByNativeName,
+  parseCommandArgs,
+  resolveCommandArgMenu,
+} from "openclaw/plugin-sdk/native-command-registry"
+import { resolveDefaultModelForAgent } from "openclaw/plugin-sdk/agent-runtime"
+import { applyModelOverrideToSessionEntry, updateSessionStore } from "openclaw/plugin-sdk/config-runtime"
+import { buildModelsProviderData } from "openclaw/plugin-sdk/models-provider-runtime"
+import {
   DEFAULT_GROUP_HISTORY_LIMIT,
   buildPendingHistoryContextFromMap,
   clearHistoryEntriesIfEnabled,
@@ -21,7 +30,6 @@ import {
   loadInlineReplyThreadAnchorMessage,
   loadInlineReplyThreadMetadata,
 } from "./reply-threads.js"
-import { resolveInlineCompatNativeCommandMenu } from "./command-menu-compat.js"
 import {
   logInboundDrop,
   resolveChannelMediaMaxBytes,
@@ -36,7 +44,12 @@ type InlineMonitorHandle = {
   done: Promise<void>
 }
 
-type StatusSink = (patch: { lastInboundAt?: number; lastOutboundAt?: number; lastError?: string }) => void
+type StatusSink = (patch: {
+  lastInboundAt?: number
+  lastOutboundAt?: number
+  lastError?: string
+  diagnostics?: unknown
+}) => void
 
 type CachedChatInfo = {
   kind: "direct" | "group"
@@ -89,6 +102,24 @@ type InlineReplyThreadContext = {
 type InlineDispatchReplyInfo = {
   kind?: string
   reason?: string
+}
+
+function summarizeSdkMeta(meta: unknown): string {
+  if (meta == null) return ""
+  if (meta instanceof Error) return `${meta.name}: ${meta.message}`
+  if (typeof meta === "string") return meta
+  try {
+    const json = JSON.stringify(meta)
+    return json === undefined ? String(meta) : json
+  } catch {
+    return String(meta)
+  }
+}
+
+function formatSdkLogLine(message: string, meta?: unknown): string {
+  const detail = summarizeSdkMeta(meta)
+  if (!detail) return message
+  return `${message} ${detail}`
 }
 
 type InlineHistoryEntryPayload = {
@@ -184,6 +215,15 @@ type InlineReplyMarkupButton = {
   callback_data: string
 }
 
+type InlineModelPickerCallback =
+  | { type: "providers" | "back" }
+  | { type: "list"; provider: string; page: number }
+  | { type: "select"; provider?: string; model: string }
+
+type InlineModelPickerSelection =
+  | { kind: "resolved"; provider: string; model: string }
+  | { kind: "ambiguous"; model: string }
+
 function buildInlineInboundMessageSid(params: {
   msgId: bigint
   callbackActionEvent?: {
@@ -208,40 +248,149 @@ function normalizeReplyMarkupButtons(raw: unknown): InlineReplyMarkupButton[][] 
   return normalizeReplyMarkupButtonsWith(raw)
 }
 
-function mapInlineModelPickerCallbackToCommand(raw: string): string | undefined {
-  const trimmed = raw.trim()
-  if (!trimmed) return undefined
+function resolveInlineNativeCommandMenu(params: {
+  commandBody: string
+  cfg: OpenClawConfig
+}): {
+  title: string
+  buttons: InlineReplyMarkupButton[][]
+} | null {
+  const normalized = params.commandBody.trim()
+  const match = normalized.match(/^\/([^\s]+)(?:\s+([\s\S]+))?$/)
+  if (!match?.[1]) return null
 
-  if (trimmed === "mdl_prov" || trimmed === "mdl_back") {
-    return "/models"
+  const command = findCommandByNativeName(match[1], "telegram")
+  if (!command) return null
+
+  const args = parseCommandArgs(command, match[2])
+  const menu = resolveCommandArgMenu({
+    command,
+    ...(args ? { args } : {}),
+    cfg: params.cfg,
+  })
+  if (!menu) return null
+
+  const title = menu.title ?? `Choose ${menu.arg.description || menu.arg.name} for /${command.nativeName}.`
+  const rows: InlineReplyMarkupButton[][] = []
+  for (let index = 0; index < menu.choices.length; index += 2) {
+    const slice = menu.choices.slice(index, index + 2)
+    rows.push(
+      slice.map((choice) => ({
+        text: choice.label,
+        callback_data: buildCommandTextFromArgs(command, {
+          values: { [menu.arg.name]: choice.value },
+        }),
+      })),
+    )
   }
+
+  return { title, buttons: rows }
+}
+
+function mapInlineModelPickerCallbackToCommand(raw: string): string | undefined {
+  const callback = parseInlineModelPickerCallback(raw)
+  if (!callback) return undefined
+  switch (callback.type) {
+    case "providers":
+    case "back":
+      return "/models"
+    case "list":
+      return `/models ${callback.provider} ${String(callback.page)}`
+    case "select":
+      return callback.provider ? `/model ${callback.provider}/${callback.model}` : `/model ${callback.model}`
+  }
+}
+
+function parseInlineModelPickerCallback(raw: string): InlineModelPickerCallback | null {
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+
+  if (trimmed === "mdl_prov") return { type: "providers" }
+  if (trimmed === "mdl_back") return { type: "back" }
 
   const listMatch = trimmed.match(/^mdl_list_([a-z0-9_-]+)_(\d+)$/i)
   if (listMatch?.[1] && listMatch[2]) {
     const provider = listMatch[1].trim()
     const page = Number.parseInt(listMatch[2], 10)
     if (provider && Number.isFinite(page) && page > 0) {
-      return `/models ${provider} ${String(page)}`
+      return { type: "list", provider, page }
     }
   }
 
   const standardSelectionMatch = trimmed.match(/^mdl_sel_(.+)$/)
   if (standardSelectionMatch?.[1]?.trim()) {
-    return `/model ${standardSelectionMatch[1].trim()}`
+    const modelRef = standardSelectionMatch[1].trim()
+    const slashIndex = modelRef.indexOf("/")
+    if (slashIndex > 0 && slashIndex < modelRef.length - 1) {
+      return {
+        type: "select",
+        provider: modelRef.slice(0, slashIndex),
+        model: modelRef.slice(slashIndex + 1),
+      }
+    }
   }
 
   const compactSelectionMatch = trimmed.match(/^mdl_sel\/(.+)$/)
   if (compactSelectionMatch?.[1]?.trim()) {
-    return `/model ${compactSelectionMatch[1].trim()}`
+    return { type: "select", model: compactSelectionMatch[1].trim() }
   }
 
-  return undefined
+  return null
+}
+
+function resolveInlineModelPickerSelection(params: {
+  callback: Extract<InlineModelPickerCallback, { type: "select" }>
+  providers: readonly string[]
+  byProvider: ReadonlyMap<string, ReadonlySet<string>>
+}): InlineModelPickerSelection {
+  if (params.callback.provider) {
+    return {
+      kind: "resolved",
+      provider: params.callback.provider,
+      model: params.callback.model,
+    }
+  }
+
+  const matchingProviders = params.providers.filter((id) => params.byProvider.get(id)?.has(params.callback.model))
+  if (matchingProviders.length === 1 && matchingProviders[0]) {
+    return {
+      kind: "resolved",
+      provider: matchingProviders[0],
+      model: params.callback.model,
+    }
+  }
+
+  return {
+    kind: "ambiguous",
+    model: params.callback.model,
+  }
+}
+
+function buildInlineModelProviderButtons(providers: Array<{ id: string; count: number }>): InlineReplyMarkupButton[][] {
+  const rows: InlineReplyMarkupButton[][] = []
+  for (let index = 0; index < providers.length; index += 2) {
+    const slice = providers.slice(index, index + 2)
+    rows.push(
+      slice.map((provider) => ({
+        text: `${provider.id} (${provider.count})`,
+        callback_data: `mdl_list_${provider.id}_1`,
+      })),
+    )
+  }
+  return rows
 }
 
 function normalizeInlineActionCallbackData(raw: string): string {
   const trimmed = raw.trim()
   if (!trimmed) return ""
   return mapInlineModelPickerCallbackToCommand(trimmed) ?? trimmed
+}
+
+function normalizeInlineTelegramButtonCallbackData(raw: string): string {
+  const trimmed = raw.trim()
+  if (!trimmed) return ""
+  if (parseInlineModelPickerCallback(trimmed)) return trimmed
+  return normalizeInlineActionCallbackData(trimmed)
 }
 
 function normalizeReplyMarkupButtonsWith(
@@ -287,7 +436,7 @@ function resolveInlineReplyActions(payload: Record<string, unknown>): MessageAct
   } else if (telegramData && Object.prototype.hasOwnProperty.call(telegramData, "buttons")) {
     rawButtons = telegramData.buttons
     hasExplicitButtons = true
-    mapCallbackData = normalizeInlineActionCallbackData
+    mapCallbackData = normalizeInlineTelegramButtonCallbackData
   } else if (Object.prototype.hasOwnProperty.call(payload, "buttons")) {
     rawButtons = payload.buttons
     hasExplicitButtons = true
@@ -1048,14 +1197,29 @@ export async function monitorInlineProvider(params: {
   const statePath = path.join(stateDir, "channels", "inline", `${account.accountId}.json`)
   await mkdir(path.dirname(statePath), { recursive: true })
 
+  let client: InlineSdkClient | null = null
+  const pushDiagnostics = (patch?: { lastError?: string; lastInboundAt?: number; lastOutboundAt?: number }) => {
+    statusSink?.({
+      ...(patch ?? {}),
+      ...(client ? { diagnostics: client.getDiagnostics() } : {}),
+    })
+  }
   const sdkLog = {
-    debug: (msg: string) => log?.debug?.(msg),
-    info: (msg: string) => log?.info(msg),
-    warn: (msg: string) => log?.warn(msg),
-    error: (msg: string) => log?.error(msg),
+    debug: (msg: string, meta?: unknown) => log?.debug?.(formatSdkLogLine(msg, meta)),
+    info: (msg: string, meta?: unknown) => log?.info(formatSdkLogLine(msg, meta)),
+    warn: (msg: string, meta?: unknown) => {
+      const line = formatSdkLogLine(msg, meta)
+      log?.warn(line)
+      pushDiagnostics({ lastError: line })
+    },
+    error: (msg: string, meta?: unknown) => {
+      const line = formatSdkLogLine(msg, meta)
+      log?.error(line)
+      pushDiagnostics({ lastError: line })
+    },
   }
 
-  const client = new InlineSdkClient({
+  client = new InlineSdkClient({
     baseUrl: account.baseUrl,
     token,
     logger: sdkLog,
@@ -1063,6 +1227,7 @@ export async function monitorInlineProvider(params: {
   })
 
   await client.connect(abortSignal)
+  pushDiagnostics()
   const meResult = await client.invokeRaw(Method.GET_ME, {
     oneofKind: "getMe",
     getMe: {},
@@ -1073,6 +1238,7 @@ export async function monitorInlineProvider(params: {
   const meId = meResult.getMe.user.id
   const botUsername = normalizeInlineUsername(meResult.getMe.user.username)?.toLowerCase()
   log?.info(`[${account.accountId}] inline connected (me=${String(meId)})`)
+  pushDiagnostics()
 
   const chatCache = new Map<bigint, CachedChatInfo>()
   const senderProfilesById = new Map<string, SenderProfile>()
@@ -1566,7 +1732,10 @@ export async function monitorInlineProvider(params: {
         }
 
         const parseMarkdown = account.config.parseMarkdown ?? true
-        const nativeCommandMenu = resolveInlineCompatNativeCommandMenu(normalizedCommandBody)
+        const nativeCommandMenu = resolveInlineNativeCommandMenu({
+          commandBody: normalizedCommandBody,
+          cfg,
+        })
         if (nativeCommandMenu) {
           const menuActions = resolveInlineReplyActions({
             channelData: {
@@ -1608,6 +1777,122 @@ export async function monitorInlineProvider(params: {
               rememberBotMessageId(botMessageIdsByChat, chatId, sent.messageId)
             }
           }
+          statusSink?.({ lastOutboundAt: Date.now() })
+          await answerCallbackIfNeeded().catch((error) => {
+            runtime.error?.(`inline callback answer failed: ${String(error)}`)
+          })
+          continue
+        }
+
+        const modelPickerCallbackData = callbackActionEvent ? callbackDataToUtf8(callbackActionEvent.data) : undefined
+        const modelPickerCallback = modelPickerCallbackData
+          ? parseInlineModelPickerCallback(modelPickerCallbackData)
+          : null
+        if (shouldEditCallbackTargetInPlace && callbackActionEvent && modelPickerCallback?.type === "select") {
+          const deliverModelPickerEdit = async (
+            text: string,
+            buttons: InlineReplyMarkupButton[][],
+          ): Promise<void> => {
+            const actions = resolveInlineReplyActions({
+              channelData: {
+                inline: {
+                  buttons,
+                },
+              },
+            }) ?? { rows: [] }
+            try {
+              const result = await client.invokeRaw(Method.EDIT_MESSAGE, {
+                oneofKind: "editMessage",
+                editMessage: {
+                  messageId: callbackActionEvent.targetMessageId,
+                  peerId: buildChatPeer(chatId),
+                  text,
+                  actions,
+                  parseMarkdown,
+                },
+              })
+              if (result.oneofKind !== "editMessage") {
+                throw new Error(
+                  `inline model picker edit: expected editMessage result, got ${String(result.oneofKind)}`,
+                )
+              }
+            } catch (error) {
+              runtime.error?.(`inline model picker edit failed; falling back to send (${String(error)})`)
+              const sent = await client.sendMessage({
+                chatId,
+                text,
+                actions,
+                parseMarkdown,
+              })
+              if (sent.messageId != null) {
+                rememberBotMessageId(botMessageIdsByChat, chatId, sent.messageId)
+              }
+            }
+          }
+
+          const { byProvider, providers } = await buildModelsProviderData(cfg, route.agentId)
+          const providerButtons = buildInlineModelProviderButtons(
+            providers.map((provider) => ({
+              id: provider,
+              count: byProvider.get(provider)?.size ?? 0,
+            })),
+          )
+          const selection = resolveInlineModelPickerSelection({
+            callback: modelPickerCallback,
+            providers,
+            byProvider,
+          })
+
+          if (selection.kind !== "resolved") {
+            await deliverModelPickerEdit(
+              `Could not resolve model "${selection.model}".\n\nSelect a provider:`,
+              providerButtons,
+            )
+          } else {
+            const modelSet = byProvider.get(selection.provider)
+            if (!modelSet?.has(selection.model)) {
+              await deliverModelPickerEdit(`❌ Model "${selection.provider}/${selection.model}" is not allowed.`, [])
+            } else {
+              try {
+                const storePath = core.channel.session.resolveStorePath(cfg.session?.store, {
+                  agentId: route.agentId,
+                })
+                const resolvedDefault = resolveDefaultModelForAgent({
+                  cfg,
+                  agentId: route.agentId,
+                })
+                const isDefaultSelection =
+                  selection.provider === resolvedDefault.provider && selection.model === resolvedDefault.model
+
+                await updateSessionStore(storePath, (store) => {
+                  const entry = store[route.sessionKey] ?? {
+                    sessionId: route.sessionKey,
+                    updatedAt: Date.now(),
+                  }
+                  store[route.sessionKey] = entry
+                  applyModelOverrideToSessionEntry({
+                    entry,
+                    selection: {
+                      provider: selection.provider,
+                      model: selection.model,
+                      isDefault: isDefaultSelection,
+                    },
+                  })
+                })
+
+                const actionText = isDefaultSelection
+                  ? "reset to default"
+                  : `changed to **${selection.provider}/${selection.model}**`
+                await deliverModelPickerEdit(
+                  `✅ Model ${actionText}\n\nThis model will be used for your next message.`,
+                  [],
+                )
+              } catch (error) {
+                await deliverModelPickerEdit(`❌ Failed to change model: ${String(error)}`, [])
+              }
+            }
+          }
+
           statusSink?.({ lastOutboundAt: Date.now() })
           await answerCallbackIfNeeded().catch((error) => {
             runtime.error?.(`inline callback answer failed: ${String(error)}`)
@@ -2045,10 +2330,11 @@ export async function monitorInlineProvider(params: {
 
                 if (mediaList.length === 0) {
                   if (shouldEditCallbackTargetInPlace && editStreamState.messageId != null) {
+                    const callbackEditActions = outboundActions ?? { rows: [] }
                     if (!outboundText.trim() && outboundActions === undefined) {
                       return
                     }
-                    await updateStreamedMessage(outboundText, outboundActions)
+                    await updateStreamedMessage(outboundText, callbackEditActions)
                     delivered = true
                     statusSink?.({ lastOutboundAt: Date.now() })
                     return
@@ -2183,6 +2469,11 @@ export async function monitorInlineProvider(params: {
     }
   })()
 
+  const diagnosticsTimer = setInterval(() => {
+    pushDiagnostics()
+  }, 15_000)
+  diagnosticsTimer.unref?.()
+
   let stopPromise: Promise<void> | null = null
   const stop = async () => {
     if (stopPromise) {
@@ -2190,6 +2481,7 @@ export async function monitorInlineProvider(params: {
       return
     }
     stopPromise = (async () => {
+      clearInterval(diagnosticsTimer)
       await client.close().catch(() => {})
       await loop.catch(() => {})
     })()

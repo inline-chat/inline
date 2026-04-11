@@ -117,7 +117,7 @@ describe("inline/actions", () => {
     expect(actions.length).toBeGreaterThan(0)
   })
 
-  it("keeps message-tool buttons schema optional", async () => {
+  it("uses the SDK message-tool buttons schema", async () => {
     vi.resetModules()
     const { inlineMessageActions } = await import("./actions")
 
@@ -137,7 +137,8 @@ describe("inline/actions", () => {
 
     expect(discovery?.capabilities).toEqual(["interactive", "buttons"])
     expect(buttonsSchema).toBeDefined()
-    expect(buttonsSchema?.[Symbol.for("TypeBox.Optional")]).toBe("Optional")
+    expect(buttonsSchema?.type).toBe("array")
+    expect(buttonsSchema?.description).toBe("Button rows for channels that support button-style actions.")
   })
 
   it("extracts explicit user targets for send routing", async () => {
