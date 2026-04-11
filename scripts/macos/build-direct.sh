@@ -106,7 +106,7 @@ xcodebuild_args=(
   PROVISIONING_PROFILE_SPECIFIER=
 )
 if [[ "${DEBUG_BUILD}" == "1" ]]; then
-  xcodebuild_args+=("ASSETCATALOG_COMPILER_APPICON_NAME=InlineDebugAppIcon")
+  xcodebuild_args+=("ASSETCATALOG_COMPILER_APPICON_NAME=InlineAppIconDebug")
 fi
 
 xcodebuild \
