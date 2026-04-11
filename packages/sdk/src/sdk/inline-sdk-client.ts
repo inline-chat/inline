@@ -80,6 +80,7 @@ export class InlineSdkClient {
 
   private catchUpInFlightByChatId = new Map<bigint, Promise<void>>()
   private catchUpRequestedByChatId = new Map<bigint, { endSeq: number; peer?: Peer }>()
+  private userCatchUpInFlight: Promise<void> | null = null
 
   constructor(options: InlineSdkClientOptions) {
     this.options = options
@@ -184,6 +185,7 @@ export class InlineSdkClient {
       version: 1,
       ...(this.state.dateCursor != null ? { dateCursor: this.state.dateCursor } : {}),
       ...(this.state.lastSeqByChatId != null ? { lastSeqByChatId: { ...this.state.lastSeqByChatId } } : {}),
+      ...(this.state.lastUserSeq != null ? { lastUserSeq: this.state.lastUserSeq } : {}),
     }
   }
 
@@ -517,6 +519,7 @@ export class InlineSdkClient {
 
     // Best-effort: do not block `connect()` on cursor initialization.
     void this.initializeDateCursor()
+    void this.requestCatchUpUser()
   }
 
   private async initializeDateCursor() {
@@ -622,6 +625,10 @@ export class InlineSdkClient {
 
       case "messageActionInvoked": {
         const payload = update.update.messageActionInvoked
+        if (this.shouldSkipUserSeq(seq)) {
+          return
+        }
+        this.bumpUserSeq(seq)
         await this.eventStream.send({
           kind: "message.action.invoke",
           interactionId: payload.interactionId,
@@ -638,6 +645,10 @@ export class InlineSdkClient {
 
       case "messageActionAnswered": {
         const payload = update.update.messageActionAnswered
+        if (this.shouldSkipUserSeq(seq)) {
+          return
+        }
+        this.bumpUserSeq(seq)
         await this.eventStream.send({
           kind: "message.action.answered",
           interactionId: payload.interactionId,
@@ -685,6 +696,97 @@ export class InlineSdkClient {
     if (seq > prev) {
       this.state.lastSeqByChatId[key] = seq
       this.scheduleStateSave()
+    }
+  }
+
+  private shouldSkipUserSeq(seq: number) {
+    if (!Number.isFinite(seq)) return false
+    const lastUserSeq = this.state.lastUserSeq ?? 0
+    return seq > 0 && seq <= lastUserSeq
+  }
+
+  private bumpUserSeq(seq: number) {
+    if (!Number.isFinite(seq) || seq <= 0) return
+    const prev = this.state.lastUserSeq ?? 0
+    if (seq > prev) {
+      this.state.lastUserSeq = seq
+      this.scheduleStateSave()
+    }
+  }
+
+  private requestCatchUpUser() {
+    const lastUserSeq = this.state.lastUserSeq ?? 0
+    if (lastUserSeq <= 0) {
+      return
+    }
+    if (this.userCatchUpInFlight) {
+      return
+    }
+
+    this.userCatchUpInFlight = this.doCatchUpUser(lastUserSeq)
+      .catch((error) => {
+        this.log.warn?.("GET_UPDATES user catch-up failed; continuing live delivery", {
+          error: extractErrorMessage(error),
+        })
+      })
+      .finally(() => {
+        this.userCatchUpInFlight = null
+      })
+  }
+
+  private async doCatchUpUser(startSeq: number) {
+    let cursor = startSeq
+
+    while (true) {
+      const result = await this.invoke(Method.GET_UPDATES, {
+        oneofKind: "getUpdates",
+        getUpdates: GetUpdatesInput.create({
+          bucket: UpdateBucket.create({
+            type: {
+              oneofKind: "user",
+              user: {},
+            },
+          }),
+          startSeq: BigInt(cursor),
+          totalLimit: defaultCatchUpTotalLimit,
+        }),
+      })
+
+      const payload = result.getUpdates
+      const deliveredSeq = Number(payload.seq ?? 0n)
+      if (!Number.isSafeInteger(deliveredSeq)) {
+        this.log.warn?.("GET_UPDATES user catch-up returned non-integer seq; aborting", { deliveredSeq })
+        return
+      }
+
+      if (payload.resultType === GetUpdatesResult_ResultType.TOO_LONG) {
+        this.log.warn?.("GET_UPDATES user catch-up too long; fast-forwarding cursor", { seq: deliveredSeq })
+        this.bumpUserSeq(deliveredSeq)
+        if (payload.date !== 0n) {
+          this.state.dateCursor = payload.date
+        }
+        this.scheduleStateSave()
+        return
+      }
+
+      for (const update of payload.updates) {
+        await this.handleUpdate(update)
+      }
+
+      this.bumpUserSeq(deliveredSeq)
+      if (payload.date !== 0n) {
+        this.state.dateCursor = payload.date
+      }
+      this.scheduleStateSave()
+
+      if (payload.final) {
+        return
+      }
+      if (deliveredSeq <= cursor) {
+        this.log.warn?.("GET_UPDATES user catch-up made no progress; aborting", { cursor, deliveredSeq })
+        return
+      }
+      cursor = deliveredSeq
     }
   }
 
@@ -879,6 +981,7 @@ export class InlineSdkClient {
       version: 1,
       ...(this.state.dateCursor != null ? { dateCursor: this.state.dateCursor } : {}),
       ...(this.state.lastSeqByChatId != null ? { lastSeqByChatId: { ...this.state.lastSeqByChatId } } : {}),
+      ...(this.state.lastUserSeq != null ? { lastUserSeq: this.state.lastUserSeq } : {}),
     }
 
     this.saveInFlight = store

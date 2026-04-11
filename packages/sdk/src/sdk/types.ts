@@ -148,6 +148,7 @@ export type InlineSdkState = {
   version: 1
   dateCursor?: InlineUnixSeconds
   lastSeqByChatId?: Record<string, number>
+  lastUserSeq?: number
 }
 
 export interface InlineSdkStateStore {
