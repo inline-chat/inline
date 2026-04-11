@@ -4,7 +4,7 @@ import Network
 
 @available(*, deprecated, message: "Replaced by ConnectionManager-managed ping loop in RealtimeV2.")
 actor PingPongService {
-  private let log = Log.scoped("RealtimeV2.PingPongService", level: .info)
+  private let log = Log.scoped("RealtimeV2.PingPongService")
 
   init() {}
 

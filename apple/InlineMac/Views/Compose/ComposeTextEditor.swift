@@ -8,7 +8,7 @@ class ComposeTextEditor: NSView {
 
   public let scrollView: ComposeScrollView
   public let textView: ComposeNSTextView
-  private let log = Log.scoped("ComposeTextEditor", level: .info)
+  private let log = Log.scoped("ComposeTextEditor")
 
   // MARK: - Theme
 

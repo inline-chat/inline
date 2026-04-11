@@ -36,7 +36,7 @@ public enum RealtimeAPIEvent: Sendable {
 public actor RealtimeAPI: Sendable {
   var transport: WebSocketTransport
   var msgQueue = MsgQueue()
-  var log = Log.scoped("Realtime_Core", level: .info)
+  var log = Log.scoped("Realtime_Core")
   var state: RunState = .paused
   var runTask: Task<Void, Never>?
   var stateChannel = AsyncChannel<Void>()

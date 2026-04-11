@@ -98,7 +98,7 @@ struct Nav2Entry: Codable {
 
 /// Manages navigation per window
 @Observable class Nav2 {
-  @ObservationIgnored private let log = Log.scoped("Nav2", level: .info)
+  @ObservationIgnored private let log = Log.scoped("Nav2")
   @ObservationIgnored private var saveStateTask: Task<Void, Never>?
   @ObservationIgnored private let navigationSignpostLog = OSLog(subsystem: "InlineMac", category: "Navigation")
   @ObservationIgnored private var activeChatNavigation: (peer: Peer, id: OSSignpostID)?

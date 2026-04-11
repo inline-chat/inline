@@ -8,7 +8,7 @@ public final class Analytics: Sendable {
 
   private init() {}
 
-  private static let log = Log.scoped("Analytics", level: .info)
+  private static let log = Log.scoped("Analytics")
 
   #if DEBUG
   static let debugBuild = true
