@@ -4,6 +4,7 @@ import InlineConfig
 import InlineProtocol
 import Logger
 import Network
+import Sentry
 
 #if canImport(UIKit)
 import UIKit
@@ -13,6 +14,29 @@ enum TransportConnectionState {
   case disconnected
   case connecting
   case connected
+}
+
+private enum TransportOrigin: String {
+  case connectStart = "connect_start"
+  case didOpen = "did_open"
+  case connectTimeout = "connect_timeout"
+  case receive = "receive"
+  case ping = "ping"
+  case didClose = "did_close"
+  case didComplete = "did_complete"
+  case networkPath = "network_path"
+  case reconnectScheduled = "reconnect_scheduled"
+  case ensureConnected = "ensure_connected"
+}
+
+private extension TransportConnectionState {
+  var sentryValue: String {
+    switch self {
+      case .disconnected: "disconnected"
+      case .connecting: "connecting"
+      case .connected: "connected"
+    }
+  }
 }
 
 /// This is a stateless websocket transport layer that can be used to send and receive messages.
@@ -70,6 +94,11 @@ actor WebSocketTransport: NSObject, Sendable {
   private let pingInFlight = ManagedAtomic<Bool>(false)
   private var reconnectionToken: UInt64 = 0
   private var scheduledReconnectDelay: TimeInterval? = nil
+  private var connectStartedAt: Date?
+  private var connectedAt: Date?
+  private var lastMessageAt: Date?
+  private var lastPingSuccessAt: Date?
+  private var lastNetworkChangeAt: Date?
 
   // Ping timeouts (in seconds)
   private let pingTimeoutNormal: TimeInterval = 6.0 // Wi-Fi / LTE
@@ -80,7 +109,6 @@ actor WebSocketTransport: NSObject, Sendable {
     // Create session configuration
     let configuration = URLSessionConfiguration.default
     configuration.shouldUseExtendedBackgroundIdleMode = true
-    configuration.timeoutIntervalForResource = 300
     configuration.timeoutIntervalForRequest = 30
     configuration.waitsForConnectivity = false // Don't wait, try immediately
     configuration.httpMaximumConnectionsPerHost = 1 // Allow multiple connections
@@ -243,7 +271,9 @@ actor WebSocketTransport: NSObject, Sendable {
 
     // Update state
     connectionState = .connected
+    connectedAt = Date()
     notifyStateChange()
+    addTransportBreadcrumb("WebSocket opened", origin: .didOpen)
 
     setupPingPong()
 
@@ -292,11 +322,21 @@ actor WebSocketTransport: NSObject, Sendable {
 
     // Now update state
     connectionState = .connecting
+    connectStartedAt = Date()
+    connectedAt = nil
+    lastPingSuccessAt = nil
     notifyStateChange()
 
     setupConnectionTimeout(foregroundTransition: foregroundTransition)
 
     let url = URL(string: urlString)!
+    addTransportBreadcrumb(
+      "Starting websocket connect",
+      origin: .connectStart,
+      data: [
+        "foreground_transition": foregroundTransition,
+      ]
+    )
     log.info("Connecting to \(urlString)")
     webSocketTask = session!.webSocketTask(with: url)
     webSocketTask?.priority = URLSessionTask.highPriority
@@ -366,6 +406,7 @@ actor WebSocketTransport: NSObject, Sendable {
   }
 
   private func notifyMessageReceived(_ message: ServerProtocolMessage) {
+    lastMessageAt = Date()
     messageHandler?(message)
   }
 
@@ -387,7 +428,7 @@ actor WebSocketTransport: NSObject, Sendable {
           try await sendPing()
         } catch {
           log.trace("Ping failed, treating as disconnect…")
-          await handleDisconnection(error: error)
+          await handleDisconnection(error: error, origin: .ensureConnected)
         }
 
       case .connecting:
@@ -427,10 +468,20 @@ actor WebSocketTransport: NSObject, Sendable {
 
         } catch {
           consecutiveFailures += 1
-          log.error("Ping failed (\(consecutiveFailures)/2)", error: error)
+          addTransportBreadcrumb(
+            "Ping failed",
+            origin: .ping,
+            level: consecutiveFailures >= maxConsecutivePingFailures ? .warning : .info,
+            error: error,
+            data: [
+              "consecutive_failures": consecutiveFailures,
+              "max_consecutive_failures": maxConsecutivePingFailures,
+            ]
+          )
+          log.warning("Ping failed (\(consecutiveFailures)/2)")
 
           if consecutiveFailures >= maxConsecutivePingFailures {
-            await handleDisconnection(error: error)
+            await handleDisconnection(error: error, origin: .ping)
             break
           }
         }
@@ -486,6 +537,7 @@ actor WebSocketTransport: NSObject, Sendable {
       do {
         try await group.next()
         group.cancelAll()
+        lastPingSuccessAt = Date()
       } catch {
         group.cancelAll()
         throw error
@@ -503,11 +555,22 @@ actor WebSocketTransport: NSObject, Sendable {
       try? await Task.sleep(for: .seconds(timeout))
 
       if self.connectionState == .connecting, !Task.isCancelled, running {
-        log.error("Connection timeout after \(timeout)s")
+        self.addTransportBreadcrumb(
+          "Connect timeout fired",
+          origin: .connectTimeout,
+          level: .warning,
+          data: [
+            "timeout_s": timeout,
+          ]
+        )
+        self.log.warning("Connection timeout after \(timeout)s")
 
         // Create a new task to avoid potential deadlock
         Task {
-          await handleDisconnection()
+          await handleDisconnection(
+            error: TransportError.connectionTimeout,
+            origin: .connectTimeout
+          )
         }
       }
     }
@@ -556,9 +619,10 @@ actor WebSocketTransport: NSObject, Sendable {
       } catch {
         if error is CancellationError { break }
 
-        log.error("Error receiving messages", error: error)
+        addTransportBreadcrumb("Receive failed", origin: .receive, level: .warning, error: error)
+        log.warning("Error receiving messages")
         if running {
-          await handleDisconnection()
+          await handleDisconnection(error: error, origin: .receive)
         }
       }
     }
@@ -582,7 +646,9 @@ actor WebSocketTransport: NSObject, Sendable {
   private func handleDisconnection(
     closeCode: URLSessionWebSocketTask.CloseCode? = nil,
     reason: Data? = nil,
-    error: Error? = nil
+    error: Error? = nil,
+    origin: TransportOrigin = .didClose,
+    httpStatus: Int? = nil
   ) async {
     let priorState = connectionState
     let priorTaskState = webSocketTask?.state
@@ -591,7 +657,20 @@ actor WebSocketTransport: NSObject, Sendable {
     // sometimes still reports `.running` when the connection is actually
     // defunct, so we avoid early-returning here.
     connectionState = .disconnected
+    connectedAt = nil
     notifyStateChange()
+
+    addTransportBreadcrumb(
+      "Handling websocket disconnection",
+      origin: origin,
+      level: error == nil ? .info : .warning,
+      error: error,
+      closeCode: closeCode,
+      httpStatus: httpStatus,
+      data: [
+        "reason_bytes": reason?.count ?? 0,
+      ]
+    )
 
     if let error {
       // Capture details for diagnostics. Avoid including secrets; URLs are ok.
@@ -629,7 +708,29 @@ actor WebSocketTransport: NSObject, Sendable {
       if let recoverySuggestion = nsError.userInfo[NSLocalizedRecoverySuggestionErrorKey] as? String {
         details += " recoverySuggestion=\(recoverySuggestion)"
       }
-      log.error("Disconnected with error (\(details))", error: error)
+      log.warning("Disconnected with error (\(details))")
+      if shouldCaptureIssue(error: error, closeCode: closeCode, origin: origin) {
+        await captureTransportIssue(
+          message: "WebSocket disconnected with error",
+          origin: origin,
+          error: error,
+          closeCode: closeCode,
+          httpStatus: httpStatus,
+          data: [
+            "details": details,
+          ]
+        )
+      }
+    } else if shouldCaptureIssue(error: nil, closeCode: closeCode, origin: origin) {
+      await captureTransportIssue(
+        message: "WebSocket closed unexpectedly",
+        origin: origin,
+        closeCode: closeCode,
+        httpStatus: httpStatus,
+        data: [
+          "reason_bytes": reason?.count ?? 0,
+        ]
+      )
     }
 
     if let closeCode {
@@ -698,6 +799,14 @@ actor WebSocketTransport: NSObject, Sendable {
     reconnectionToken = reconnectionToken &+ 1
     let token = reconnectionToken
 
+    addTransportBreadcrumb(
+      "Scheduling websocket reconnect",
+      origin: .reconnectScheduled,
+      data: [
+        "immediate": immediate,
+        "delay_s": delay,
+      ]
+    )
     log.trace("Scheduling reconnection after \(delay) seconds")
 
     reconnectionTask = Task { [token] in
@@ -741,11 +850,17 @@ extension WebSocketTransport {
   private func setNetworkAvailable(_ available: Bool) async {
     guard networkAvailable != available else { return }
     networkAvailable = available
+    lastNetworkChangeAt = Date()
+    addTransportBreadcrumb(
+      available ? "Network became available" : "Network became unavailable",
+      origin: .networkPath,
+      data: [
+        "available": available,
+      ]
+    )
 
     if !available {
       log.trace("Network is unavailable")
-      await cancelTasks()
-      connectionState = .disconnected
       notifyStateChange()
     } else {
       log.trace("Network became available")
@@ -833,7 +948,7 @@ extension WebSocketTransport {
       log.trace("Ignoring didClose for stale WebSocket task")
       return
     }
-    await handleDisconnection(closeCode: closeCode, reason: reason)
+    await handleDisconnection(closeCode: closeCode, reason: reason, origin: .didClose)
   }
 
   private func handleCompletionIfCurrent(task: URLSessionTask, error: Error, httpStatus: Int?) async {
@@ -843,9 +958,258 @@ extension WebSocketTransport {
       log.trace("Ignoring didCompleteWithError for stale WebSocket task")
       return
     }
-    if let httpStatus {
-      log.error("WebSocket task completed with HTTP status \(httpStatus)")
+    addTransportBreadcrumb(
+      "WebSocket task completed with error",
+      origin: .didComplete,
+      level: .warning,
+      error: error,
+      httpStatus: httpStatus
+    )
+    await handleDisconnection(error: error, origin: .didComplete, httpStatus: httpStatus)
+  }
+}
+
+private extension WebSocketTransport {
+  func addTransportBreadcrumb(
+    _ message: String,
+    origin: TransportOrigin,
+    level: SentryLevel = .info,
+    error: Error? = nil,
+    closeCode: URLSessionWebSocketTask.CloseCode? = nil,
+    httpStatus: Int? = nil,
+    data: [String: Any] = [:]
+  ) {
+    let crumb = Breadcrumb(level: level, category: "realtime.transport")
+    crumb.message = message
+    crumb.data = sentryData(
+      origin: origin,
+      error: error,
+      closeCode: closeCode,
+      httpStatus: httpStatus,
+      data: data
+    )
+    SentrySDK.addBreadcrumb(crumb)
+  }
+
+  func captureTransportIssue(
+    message: String,
+    origin: TransportOrigin,
+    error: Error? = nil,
+    closeCode: URLSessionWebSocketTask.CloseCode? = nil,
+    httpStatus: Int? = nil,
+    data: [String: Any] = [:]
+  ) async {
+    let sentryData = sentryData(
+      origin: origin,
+      error: error,
+      closeCode: closeCode,
+      httpStatus: httpStatus,
+      data: data
+    )
+    let tags = sentryTags(origin: origin, error: error, closeCode: closeCode)
+    let fingerprint = sentryFingerprint(origin: origin, error: error, closeCode: closeCode, httpStatus: httpStatus)
+
+    if let error {
+      _ = SentrySDK.capture(error: error) { scope in
+        scope.setLevel(.error)
+        scope.setFingerprint(fingerprint)
+        tags.forEach { scope.setTag(value: $1, key: $0) }
+        sentryData.forEach { scope.setExtra(value: $1, key: $0) }
+        scope.setExtra(value: message, key: "message")
+      }
+    } else {
+      _ = SentrySDK.capture(message: message) { scope in
+        scope.setLevel(.warning)
+        scope.setFingerprint(fingerprint)
+        tags.forEach { scope.setTag(value: $1, key: $0) }
+        sentryData.forEach { scope.setExtra(value: $1, key: $0) }
+      }
     }
-    await handleDisconnection(error: error)
+  }
+
+  func shouldCaptureIssue(
+    error: Error?,
+    closeCode: URLSessionWebSocketTask.CloseCode?,
+    origin: TransportOrigin
+  ) -> Bool {
+    if let error {
+      if case TransportError.connectionTimeout = error {
+        return true
+      }
+
+      let nsError = error as NSError
+      if nsError.domain == NSURLErrorDomain {
+        switch nsError.code {
+          case NSURLErrorCancelled,
+            NSURLErrorTimedOut,
+            NSURLErrorNotConnectedToInternet,
+            NSURLErrorSecureConnectionFailed,
+            NSURLErrorNetworkConnectionLost:
+            return false
+          default:
+            return true
+        }
+      }
+
+      return true
+    }
+
+    guard origin == .didClose, let closeCode else { return false }
+    return closeCode != .normalClosure && closeCode != .goingAway
+  }
+
+  func sentryTags(
+    origin: TransportOrigin,
+    error: Error?,
+    closeCode: URLSessionWebSocketTask.CloseCode?
+  ) -> [String: String] {
+    var tags: [String: String] = [
+      "scope": "Realtime_TransportWS",
+      "ws_origin": origin.rawValue,
+      "transport_state": connectionState.sentryValue,
+      "network_available": networkAvailable ? "true" : "false",
+      "in_background": isInBackground ? "true" : "false",
+    ]
+
+    if let pathMonitor {
+      let path = pathMonitor.currentPath
+      tags["nw_path_status"] = switch path.status {
+        case .satisfied: "satisfied"
+        case .unsatisfied: "unsatisfied"
+        case .requiresConnection: "requires_connection"
+        @unknown default: "unknown"
+      }
+    }
+
+    if let closeCode {
+      tags["ws_close_code"] = String(closeCode.rawValue)
+    }
+
+    if let (kind, _, _) = errorDescriptor(error) {
+      tags["ws_error_kind"] = kind
+    }
+
+    return tags
+  }
+
+  func sentryFingerprint(
+    origin: TransportOrigin,
+    error: Error?,
+    closeCode: URLSessionWebSocketTask.CloseCode?,
+    httpStatus: Int?
+  ) -> [String] {
+    var fingerprint = ["realtime-transport", origin.rawValue]
+
+    if let (kind, domain, code) = errorDescriptor(error) {
+      fingerprint.append(kind)
+      fingerprint.append(domain)
+      fingerprint.append(code)
+    } else if let closeCode {
+      fingerprint.append("close")
+      fingerprint.append(String(closeCode.rawValue))
+    }
+
+    if let httpStatus, httpStatus != 101 {
+      fingerprint.append("http")
+      fingerprint.append(String(httpStatus))
+    }
+
+    return fingerprint
+  }
+
+  func sentryData(
+    origin: TransportOrigin,
+    error: Error? = nil,
+    closeCode: URLSessionWebSocketTask.CloseCode? = nil,
+    httpStatus: Int? = nil,
+    data extra: [String: Any] = [:]
+  ) -> [String: Any] {
+    var data: [String: Any] = [
+      "ws_origin": origin.rawValue,
+      "transport_state": connectionState.sentryValue,
+      "running": running,
+      "network_available": networkAvailable,
+      "in_background": isInBackground,
+      "reconnect_attempt": reconnectionAttempts,
+      "ping_in_flight": pingInFlight.load(ordering: .relaxed),
+      "request_timeout_s": 30,
+      "url": urlString,
+    ]
+
+    if let scheduledReconnectDelay {
+      data["scheduled_reconnect_delay_s"] = scheduledReconnectDelay
+    }
+
+    if let pathMonitor {
+      let path = pathMonitor.currentPath
+      data["nw_path_status"] = switch path.status {
+        case .satisfied: "satisfied"
+        case .unsatisfied: "unsatisfied"
+        case .requiresConnection: "requires_connection"
+        @unknown default: "unknown"
+      }
+      data["nw_path_expensive"] = path.isExpensive
+      data["nw_path_constrained"] = path.isConstrained
+    }
+
+    if let closeCode {
+      data["ws_close_code"] = closeCode.rawValue
+    }
+
+    if let httpStatus {
+      data["http_status"] = httpStatus
+    }
+
+    if let connectStartedAt {
+      data["since_connect_start_s"] = Date().timeIntervalSince(connectStartedAt)
+    }
+    if let connectedAt {
+      data["since_connected_s"] = Date().timeIntervalSince(connectedAt)
+    }
+    if let lastMessageAt {
+      data["since_last_message_s"] = Date().timeIntervalSince(lastMessageAt)
+    }
+    if let lastPingSuccessAt {
+      data["since_last_ping_ok_s"] = Date().timeIntervalSince(lastPingSuccessAt)
+    }
+    if let lastNetworkChangeAt {
+      data["since_last_network_change_s"] = Date().timeIntervalSince(lastNetworkChangeAt)
+    }
+
+    if let (kind, domain, code) = errorDescriptor(error) {
+      data["ws_error_kind"] = kind
+      data["error_domain"] = domain
+      data["error_code"] = code
+    }
+
+    extra.forEach { data[$0.key] = $0.value }
+    return data
+  }
+
+  func errorDescriptor(_ error: Error?) -> (kind: String, domain: String, code: String)? {
+    guard let error else { return nil }
+
+    if let error = error as? TransportError {
+      switch error {
+        case .connectionTimeout:
+          return ("transport", "TransportError", "connectionTimeout")
+        case .notConnected:
+          return ("transport", "TransportError", "notConnected")
+        case .invalidURL:
+          return ("transport", "TransportError", "invalidURL")
+        case .invalidResponse:
+          return ("transport", "TransportError", "invalidResponse")
+        case .invalidData:
+          return ("transport", "TransportError", "invalidData")
+        case let .connectionError(inner):
+          let nsError = inner as NSError
+          return ("transport_wrapped", nsError.domain, String(nsError.code))
+        case .unknown:
+          return ("transport", "TransportError", "unknown")
+      }
+    }
+
+    let nsError = error as NSError
+    return ("nserror", nsError.domain, String(nsError.code))
   }
 }
