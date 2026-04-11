@@ -14,32 +14,6 @@ import TextProcessing
 import Translation
 import UIKit
 
-final class MessageActionButton: UIButton {
-  var messageAction: MessageAction?
-  var actionId: String = ""
-  var baseTitle: String = ""
-  let spinner = UIActivityIndicatorView(style: .medium)
-
-  override init(frame: CGRect) {
-    super.init(frame: frame)
-
-    spinner.translatesAutoresizingMaskIntoConstraints = false
-    spinner.hidesWhenStopped = true
-    spinner.transform = CGAffineTransform(scaleX: 0.82, y: 0.82)
-    addSubview(spinner)
-
-    NSLayoutConstraint.activate([
-      spinner.centerXAnchor.constraint(equalTo: centerXAnchor),
-      spinner.centerYAnchor.constraint(equalTo: centerYAnchor),
-    ])
-  }
-
-  @available(*, unavailable)
-  required init?(coder: NSCoder) {
-    fatalError("init(coder:) has not been implemented")
-  }
-}
-
 private enum MessageActionInvokeError: Error {
   case invalidResponse
 }
@@ -679,18 +653,13 @@ class UIMessageView: UIView {
       let key = MessageActionInteractionState.LoadingKey(
         peerId: message.peerId,
         messageId: message.messageId,
+        rev: message.rev,
         actionId: actionId
       )
       let isLoading = MessageActionInteractionState.shared.isLoading(key: key)
 
-      button.isEnabled = !isLoading
-      button.titleLabel?.alpha = isLoading ? 0 : 1
-      if isLoading {
-        button.spinner.color = outgoing ? .white : ThemeManager.shared.selected.accent
-        button.spinner.startAnimating()
-      } else {
-        button.spinner.stopAnimating()
-      }
+      button.refreshStyle()
+      button.setLoading(isLoading)
     }
   }
 
@@ -719,6 +688,7 @@ class UIMessageView: UIView {
     let loadingKey = MessageActionInteractionState.LoadingKey(
       peerId: message.peerId,
       messageId: message.messageId,
+      rev: message.rev,
       actionId: actionId
     )
 
