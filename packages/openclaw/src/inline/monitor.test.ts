@@ -879,7 +879,7 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("handles message action callbacks by editing the target message and answering afterward", async () => {
+  it("handles message action callbacks by answering immediately and editing the target message", async () => {
     const harness = await setupMonitorHarness({
       events: [
         {
@@ -912,6 +912,7 @@ describe("inline/monitor", () => {
     })
 
     await waitFor(() => {
+      expect(harness.calls.answerMessageAction).toHaveBeenCalledTimes(1)
       expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
         8,
         expect.objectContaining({
@@ -937,6 +938,20 @@ describe("inline/monitor", () => {
         }),
       )
     })
+
+    expect(harness.calls.answerMessageAction.mock.invocationCallOrder[0]).toBeLessThan(
+      harness.calls.dispatchReply.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    )
+    const editCall = harness.calls.invokeRaw.mock.calls.find(
+      (call) =>
+        call[0] === 8 &&
+        call[1]?.oneofKind === "editMessage" &&
+        call[1]?.editMessage?.messageId === 1001n,
+    )
+    const editOrder = editCall
+      ? harness.calls.invokeRaw.mock.invocationCallOrder[harness.calls.invokeRaw.mock.calls.indexOf(editCall)]
+      : Number.POSITIVE_INFINITY
+    expect(harness.calls.answerMessageAction.mock.invocationCallOrder[0]).toBeLessThan(editOrder)
 
     await handle.stop()
   })
@@ -1227,6 +1242,7 @@ describe("inline/monitor", () => {
 
     await waitFor(() => {
       expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+      expect(harness.calls.answerMessageAction).toHaveBeenCalledTimes(1)
       expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
         8,
         expect.objectContaining({
@@ -1246,6 +1262,17 @@ describe("inline/monitor", () => {
         }),
       )
     })
+
+    const compatEditCall = harness.calls.invokeRaw.mock.calls.find(
+      (call) =>
+        call[0] === 8 &&
+        call[1]?.oneofKind === "editMessage" &&
+        call[1]?.editMessage?.messageId === 1008n,
+    )
+    const compatEditOrder = compatEditCall
+      ? harness.calls.invokeRaw.mock.invocationCallOrder[harness.calls.invokeRaw.mock.calls.indexOf(compatEditCall)]
+      : Number.POSITIVE_INFINITY
+    expect(harness.calls.answerMessageAction.mock.invocationCallOrder[0]).toBeLessThan(compatEditOrder)
 
     await handle.stop()
   })
