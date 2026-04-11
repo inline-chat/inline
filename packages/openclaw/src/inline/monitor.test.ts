@@ -879,7 +879,7 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("handles message action callbacks and answers interaction after reply dispatch", async () => {
+  it("handles message action callbacks by editing the target message and answering afterward", async () => {
     const harness = await setupMonitorHarness({
       events: [
         {
@@ -895,6 +895,9 @@ describe("inline/monitor", () => {
       chats: {
         "7": { kind: "direct", title: "Alice" },
       },
+      historyByChat: {
+        "7": [{ id: 1001n, date: 1_700_000_000n, fromId: 777n, message: "original" }],
+      },
       dispatchReplyPayload: {
         text: "received",
       },
@@ -909,12 +912,18 @@ describe("inline/monitor", () => {
     })
 
     await waitFor(() => {
-      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        8,
         expect.objectContaining({
-          chatId: 7n,
-          text: "received",
+          oneofKind: "editMessage",
+          editMessage: expect.objectContaining({
+            messageId: 1001n,
+            text: "received",
+            parseMarkdown: true,
+          }),
         }),
       )
+      expect(harness.calls.sendMessage).not.toHaveBeenCalled()
       expect(harness.calls.answerMessageAction).toHaveBeenCalledWith(
         expect.objectContaining({
           interactionId: 22n,
@@ -981,7 +990,7 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("uses slash callback payload as CommandBody for command routing", async () => {
+  it("uses slash callback payload as CommandBody and edits the callback target", async () => {
     const harness = await setupMonitorHarness({
       events: [
         {
@@ -996,6 +1005,9 @@ describe("inline/monitor", () => {
       ],
       chats: {
         "7": { kind: "direct", title: "Alice" },
+      },
+      historyByChat: {
+        "7": [{ id: 1005n, date: 1_700_000_000n, fromId: 777n, message: "Verbose?" }],
       },
       dispatchReplyPayload: {
         text: "verbose enabled",
@@ -1016,28 +1028,24 @@ describe("inline/monitor", () => {
           CommandBody: "/verbose on",
         }),
       )
-      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
-        expect.objectContaining({
-          chatId: 7n,
-          text: "verbose enabled",
-          parseMarkdown: true,
-        }),
-      )
-      expect(harness.calls.invokeRaw).not.toHaveBeenCalledWith(
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
         8,
         expect.objectContaining({
           oneofKind: "editMessage",
           editMessage: expect.objectContaining({
             messageId: 1005n,
+            text: "verbose enabled",
+            parseMarkdown: true,
           }),
         }),
       )
+      expect(harness.calls.sendMessage).not.toHaveBeenCalled()
     })
 
     await handle.stop()
   })
 
-  it("sends model picker callback replies as new messages", async () => {
+  it("edits model picker callback replies in place", async () => {
     const harness = await setupMonitorHarness({
       events: [
         {
@@ -1052,6 +1060,9 @@ describe("inline/monitor", () => {
       ],
       chats: {
         "7": { kind: "direct", title: "Alice" },
+      },
+      historyByChat: {
+        "7": [{ id: 1007n, date: 1_700_000_000n, fromId: 777n, message: "Pick a model" }],
       },
       dispatchReplyPayload: {
         text: "pick model",
@@ -1078,27 +1089,106 @@ describe("inline/monitor", () => {
           Surface: "telegram",
         }),
       )
-      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        8,
         expect.objectContaining({
-          chatId: 7n,
-          text: "pick model",
-          parseMarkdown: true,
-          actions: expect.any(Object),
+          oneofKind: "editMessage",
+          editMessage: expect.objectContaining({
+            messageId: 1007n,
+            text: "pick model",
+            parseMarkdown: true,
+            actions: expect.any(Object),
+          }),
         }),
       )
     })
 
-    const sent = harness.calls.sendMessage.mock.calls.find((call) => call[0]?.text === "pick model")?.[0]
-    const buttonData = sent?.actions?.rows?.[0]?.actions?.[0]?.action?.callback?.data
+    expect(harness.calls.sendMessage).not.toHaveBeenCalled()
+
+    const editPayload = harness.calls.invokeRaw.mock.calls.find(
+      (call) => call[0] === 8 && call[1]?.oneofKind === "editMessage" && call[1]?.editMessage?.messageId === 1007n,
+    )?.[1]
+    const buttonData = editPayload?.editMessage?.actions?.rows?.[0]?.actions?.[0]?.action?.callback?.data
     expect(buttonData).toBeInstanceOf(Uint8Array)
     expect(new TextDecoder().decode(buttonData)).toBe("/model openai/gpt-4.1")
 
-    expect(harness.calls.invokeRaw).not.toHaveBeenCalledWith(
-      8,
+    await handle.stop()
+  })
+
+  it("assigns unique inbound message ids to repeated callbacks on the same target message", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.action.invoke",
+          chatId: 7n,
+          interactionId: 24n,
+          messageId: 1007n,
+          actorUserId: 42n,
+          actionId: "first",
+          data: new TextEncoder().encode("/verbose on"),
+        },
+        {
+          kind: "message.action.invoke",
+          chatId: 7n,
+          interactionId: 25n,
+          messageId: 1007n,
+          actorUserId: 42n,
+          actionId: "second",
+          data: new TextEncoder().encode("/verbose off"),
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice" },
+      },
+      historyByChat: {
+        "7": [{ id: 1007n, date: 1_700_000_000n, fromId: 777n, message: "Pick an option" }],
+      },
+      dispatchReplyPayload: {
+        text: "updated",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledTimes(2)
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        8,
+        expect.objectContaining({
+          oneofKind: "editMessage",
+          editMessage: expect.objectContaining({
+            messageId: 1007n,
+            text: "updated",
+          }),
+        }),
+      )
+    })
+
+    expect(harness.calls.finalizeInboundContext.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
-        oneofKind: "editMessage",
+        MessageSid: "callback:1007:24",
+        MessageActionInteractionId: "24",
+        MessageActionId: "first",
       }),
     )
+    expect(harness.calls.finalizeInboundContext.mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({
+        MessageSid: "callback:1007:25",
+        MessageActionInteractionId: "25",
+        MessageActionId: "second",
+      }),
+    )
+
+    const callbackEdits = harness.calls.invokeRaw.mock.calls.filter(
+      (call) => call[0] === 8 && call[1]?.oneofKind === "editMessage" && call[1]?.editMessage?.messageId === 1007n,
+    )
+    expect(callbackEdits).toHaveLength(2)
 
     await handle.stop()
   })
@@ -1119,6 +1209,9 @@ describe("inline/monitor", () => {
       chats: {
         "7": { kind: "direct", title: "Alice" },
       },
+      historyByChat: {
+        "7": [{ id: 1008n, date: 1_700_000_000n, fromId: 777n, message: "Choose a command" }],
+      },
       dispatchReplyPayload: {
         text: "should not dispatch",
       },
@@ -1134,13 +1227,19 @@ describe("inline/monitor", () => {
 
     await waitFor(() => {
       expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
-      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        8,
         expect.objectContaining({
-          chatId: 7n,
-          text: expect.stringContaining("/subagents"),
-          actions: expect.any(Object),
+          oneofKind: "editMessage",
+          editMessage: expect.objectContaining({
+            messageId: 1008n,
+            text: expect.stringContaining("/subagents"),
+            actions: expect.any(Object),
+            parseMarkdown: true,
+          }),
         }),
       )
+      expect(harness.calls.sendMessage).not.toHaveBeenCalled()
       expect(harness.calls.answerMessageAction).toHaveBeenCalledWith(
         expect.objectContaining({
           interactionId: 25n,
