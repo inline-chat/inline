@@ -43,7 +43,14 @@ export async function callInlineBotApi<T>(params: {
     if (params.body !== undefined) {
       request.body = JSON.stringify(params.body)
     }
-    const response = await fetch(url, request)
+    let response: Response
+    try {
+      response = await fetch(url, request)
+    } catch (error) {
+      throw new Error(
+        `inline_bot_commands: ${params.method} ${redactInlineBotApiUrl(url)} fetch failed: ${summarizeInlineBotApiError(error)}`,
+      )
+    }
     const payload = (await response.json().catch(() => null)) as InlineBotApiResponse<T> | null
     return { response, payload }
   }
@@ -79,4 +86,20 @@ export async function callInlineBotApi<T>(params: {
     return resolve(pathResult)
   }
   return resolve(headerResult)
+}
+
+function summarizeInlineBotApiError(error: unknown): string {
+  if (error instanceof Error) {
+    return `${error.name}: ${error.message}`
+  }
+  return String(error)
+}
+
+function redactInlineBotApiUrl(raw: string): string {
+  try {
+    const url = new URL(raw)
+    return `${url.protocol}//${url.host}${url.pathname.replace(/\/bot[^/]*\//, "/bot<redacted>/")}`
+  } catch {
+    return raw.replace(/\/bot[^/]*\//, "/bot<redacted>/")
+  }
 }

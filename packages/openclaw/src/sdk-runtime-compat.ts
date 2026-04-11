@@ -1,5 +1,3 @@
-import { createMessageToolButtonsSchema } from "openclaw/plugin-sdk/channel-actions"
-
 const HISTORY_CONTEXT_MARKER = "[Chat messages since your last reply - for context]"
 const CURRENT_MESSAGE_MARKER = "[Current message - respond to this]"
 const MAX_HISTORY_KEYS = 1000
@@ -159,19 +157,6 @@ export function recordPendingHistoryEntryIfEnabled<T extends HistoryEntry>(param
   })
 }
 
-const TYPEBOX_OPTIONAL_SYMBOL = Symbol.for("TypeBox.Optional")
-
-function markTypeBoxOptional<T extends Record<string, unknown>>(schema: T): T {
-  ;(schema as Record<symbol, unknown>)[TYPEBOX_OPTIONAL_SYMBOL] = "Optional"
-  return schema
-}
-
-export function createMessageToolButtonsSchemaCompat() {
-  return markTypeBoxOptional(
-    createMessageToolButtonsSchema() as unknown as Record<string, unknown>,
-  ) as unknown as Record<string, unknown>
-}
-
 export function extensionForMimeCompat(mime: string | undefined): string | undefined {
   const normalized = mime?.trim().toLowerCase()
   if (!normalized) return undefined
@@ -281,69 +266,6 @@ export async function createChannelReplyPipelineCompat(params: {
         : params.typing
         ? { typingCallbacks: createInlineTypingCallbacks(params.typing) }
         : {}),
-    }
-  }
-}
-
-export async function loadNativeCommandHelpersCompat(): Promise<{
-  available: boolean
-  listNativeCommandSpecsForConfig: (
-    cfg: unknown,
-    params?: { skillCommands?: Array<{ name: string; description: string }> },
-  ) => Array<{ name: string; description: string }>
-  listSkillCommandsForAgents: (params: {
-    cfg: unknown
-  }) => Array<{ name: string; description: string }>
-}> {
-  try {
-    const sdk = await import("openclaw/plugin-sdk/command-auth")
-    const listNativeCommandSpecsForConfig =
-      typeof sdk.listNativeCommandSpecsForConfig === "function"
-        ? (sdk.listNativeCommandSpecsForConfig as (
-            cfg: unknown,
-            params?: { skillCommands?: Array<{ name: string; description: string }> },
-          ) => Array<{ name: string; description: string }>)
-        : null
-    const listSkillCommandsForAgents =
-      typeof sdk.listSkillCommandsForAgents === "function"
-        ? (sdk.listSkillCommandsForAgents as (params: {
-            cfg: unknown
-          }) => Array<{ name: string; description: string }>)
-        : null
-    if (!listNativeCommandSpecsForConfig || !listSkillCommandsForAgents) {
-      throw new Error("command-auth helpers unavailable")
-    }
-    return {
-      available: true,
-      listNativeCommandSpecsForConfig,
-      listSkillCommandsForAgents,
-    }
-  } catch {
-    return {
-      available: false,
-      listNativeCommandSpecsForConfig: () => [],
-      listSkillCommandsForAgents: () => [],
-    }
-  }
-}
-
-export async function loadPluginCommandSpecsCompat(provider: string): Promise<{
-  available: boolean
-  specs: Array<{ name: string; description: string }>
-}> {
-  try {
-    const sdk = await import("openclaw/plugin-sdk/plugin-runtime")
-    if (typeof sdk.getPluginCommandSpecs !== "function") {
-      throw new Error("plugin runtime command helper unavailable")
-    }
-    return {
-      available: true,
-      specs: (sdk.getPluginCommandSpecs as (provider?: string) => Array<{ name: string; description: string }>)(provider),
-    }
-  } catch {
-    return {
-      available: false,
-      specs: [],
     }
   }
 }

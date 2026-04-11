@@ -2,6 +2,44 @@ import os from "node:os"
 import path from "node:path"
 import { describe, expect, it, vi } from "vitest"
 
+const modelRuntimeMocks = vi.hoisted(() => ({
+  buildModelsProviderData: vi.fn(),
+  resolveDefaultModelForAgent: vi.fn(),
+  updateSessionStore: vi.fn(),
+  applyModelOverrideToSessionEntry: vi.fn(),
+}))
+
+vi.mock("openclaw/plugin-sdk/models-provider-runtime", async () => {
+  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/models-provider-runtime")>(
+    "openclaw/plugin-sdk/models-provider-runtime",
+  )
+  return {
+    ...actual,
+    buildModelsProviderData: modelRuntimeMocks.buildModelsProviderData,
+  }
+})
+
+vi.mock("openclaw/plugin-sdk/agent-runtime", async () => {
+  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/agent-runtime")>(
+    "openclaw/plugin-sdk/agent-runtime",
+  )
+  return {
+    ...actual,
+    resolveDefaultModelForAgent: modelRuntimeMocks.resolveDefaultModelForAgent,
+  }
+})
+
+vi.mock("openclaw/plugin-sdk/config-runtime", async () => {
+  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/config-runtime")>(
+    "openclaw/plugin-sdk/config-runtime",
+  )
+  return {
+    ...actual,
+    updateSessionStore: modelRuntimeMocks.updateSessionStore,
+    applyModelOverrideToSessionEntry: modelRuntimeMocks.applyModelOverrideToSessionEntry,
+  }
+})
+
 type MonitorHarness = {
   monitorInlineProvider: typeof import("./monitor")["monitorInlineProvider"]
   calls: {
@@ -195,6 +233,41 @@ async function waitFor(assertion: () => void, timeoutMs = 1_500): Promise<void> 
 
 async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness> {
   vi.resetModules()
+
+  const resolveMockModelRef = (cfg?: any) => {
+    const raw = typeof cfg?.agents?.defaults?.model === "string" ? cfg.agents.defaults.model.trim() : ""
+    const slashIndex = raw.indexOf("/")
+    if (slashIndex > 0 && slashIndex < raw.length - 1) {
+      return {
+        provider: raw.slice(0, slashIndex),
+        model: raw.slice(slashIndex + 1),
+      }
+    }
+    return {
+      provider: "openai",
+      model: "gpt-4.1",
+    }
+  }
+
+  modelRuntimeMocks.buildModelsProviderData.mockReset().mockImplementation(async (cfg?: any) => {
+    const ref = resolveMockModelRef(cfg)
+    return {
+      byProvider: new Map([[ref.provider, new Set([ref.model])]]),
+      providers: [ref.provider],
+      resolvedDefault: ref,
+    }
+  })
+  modelRuntimeMocks.resolveDefaultModelForAgent.mockReset().mockImplementation(({ cfg }: any) => resolveMockModelRef(cfg))
+  modelRuntimeMocks.updateSessionStore.mockReset().mockImplementation(async (_storePath: string, update: (store: any) => void | Promise<void>) => {
+    const store: Record<string, unknown> = {}
+    await update(store)
+  })
+  modelRuntimeMocks.applyModelOverrideToSessionEntry.mockReset().mockImplementation(({ entry, selection }: any) => {
+    entry.provider = selection.provider
+    entry.model = selection.model
+    entry.isDefault = selection.isDefault
+    return { updated: true }
+  })
 
   const sendMessage = vi.fn(async () => {
     if (setup.sendMessageDelayMs != null && setup.sendMessageDelayMs > 0) {
@@ -1057,10 +1130,15 @@ describe("inline/monitor", () => {
       expect(harness.calls.sendMessage).not.toHaveBeenCalled()
     })
 
+    const editPayload = harness.calls.invokeRaw.mock.calls.find(
+      (call) => call[0] === 8 && call[1]?.oneofKind === "editMessage" && call[1]?.editMessage?.messageId === 1005n,
+    )?.[1]
+    expect(editPayload?.editMessage?.actions).toEqual({ rows: [] })
+
     await handle.stop()
   })
 
-  it("edits model picker callback replies in place", async () => {
+  it("edits model list callback replies in place", async () => {
     const harness = await setupMonitorHarness({
       events: [
         {
@@ -1080,10 +1158,10 @@ describe("inline/monitor", () => {
         "7": [{ id: 1007n, date: 1_700_000_000n, fromId: 777n, message: "Pick a model" }],
       },
       dispatchReplyPayload: {
-        text: "pick model",
+        text: "Models (openai) — 12 available",
         channelData: {
           telegram: {
-            buttons: [[{ text: "openai/gpt-4.1", callback_data: "mdl_sel_openai/gpt-4.1" }]],
+            buttons: [[{ text: "gpt-4.1", callback_data: "mdl_sel_openai/gpt-4.1" }]],
           },
         },
       },
@@ -1110,7 +1188,7 @@ describe("inline/monitor", () => {
           oneofKind: "editMessage",
           editMessage: expect.objectContaining({
             messageId: 1007n,
-            text: "pick model",
+            text: "Models (openai) — 12 available",
             parseMarkdown: true,
             actions: expect.any(Object),
           }),
@@ -1125,7 +1203,66 @@ describe("inline/monitor", () => {
     )?.[1]
     const buttonData = editPayload?.editMessage?.actions?.rows?.[0]?.actions?.[0]?.action?.callback?.data
     expect(buttonData).toBeInstanceOf(Uint8Array)
-    expect(new TextDecoder().decode(buttonData)).toBe("/model openai/gpt-4.1")
+    expect(new TextDecoder().decode(buttonData)).toBe("mdl_sel_openai/gpt-4.1")
+
+    await handle.stop()
+  })
+
+  it("handles final model picker selection natively and clears buttons", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.action.invoke",
+          chatId: 7n,
+          interactionId: 24n,
+          messageId: 1007n,
+          actorUserId: 42n,
+          actionId: "pick",
+          data: new TextEncoder().encode("mdl_sel_openai/gpt-4.1"),
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice" },
+      },
+      historyByChat: {
+        "7": [{ id: 1007n, date: 1_700_000_000n, fromId: 777n, message: "Pick a model" }],
+      },
+    })
+
+    const cfg = {
+      agents: {
+        defaults: {
+          model: "openai/gpt-4.1",
+        },
+      },
+    } as any
+
+    const handle = await harness.monitorInlineProvider({
+      cfg,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).not.toHaveBeenCalled()
+      expect(harness.calls.finalizeInboundContext).not.toHaveBeenCalled()
+      expect(harness.calls.invokeRaw).toHaveBeenCalledWith(
+        8,
+        expect.objectContaining({
+          oneofKind: "editMessage",
+          editMessage: expect.objectContaining({
+            messageId: 1007n,
+            text: "✅ Model reset to default\n\nThis model will be used for your next message.",
+            parseMarkdown: true,
+            actions: { rows: [] },
+          }),
+        }),
+      )
+    })
+
+    expect(harness.calls.sendMessage).not.toHaveBeenCalled()
 
     await handle.stop()
   })
@@ -1341,7 +1478,7 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
-  it("rewrites telegram model callbacks to slash command payloads", async () => {
+  it("preserves native telegram model callbacks on rendered buttons", async () => {
     const harness = await setupMonitorHarness({
       events: [
         {
@@ -1397,9 +1534,9 @@ describe("inline/monitor", () => {
     const row1Btn2 = sent?.actions?.rows?.[0]?.actions?.[1]?.action?.callback?.data
     const row2Btn1 = sent?.actions?.rows?.[1]?.actions?.[0]?.action?.callback?.data
 
-    expect(new TextDecoder().decode(row1Btn1)).toBe("/models")
-    expect(new TextDecoder().decode(row1Btn2)).toBe("/models openai 2")
-    expect(new TextDecoder().decode(row2Btn1)).toBe("/model openai/gpt-4.1")
+    expect(new TextDecoder().decode(row1Btn1)).toBe("mdl_prov")
+    expect(new TextDecoder().decode(row1Btn2)).toBe("mdl_list_openai_2")
+    expect(new TextDecoder().decode(row2Btn1)).toBe("mdl_sel_openai/gpt-4.1")
 
     await handle.stop()
   })

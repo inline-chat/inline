@@ -1,7 +1,9 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
+import { listNativeCommandSpecsForConfig } from "openclaw/plugin-sdk/native-command-registry"
+import { getPluginCommandSpecs } from "openclaw/plugin-sdk/plugin-runtime"
+import { listSkillCommandsForAgents } from "openclaw/plugin-sdk/skill-commands-runtime"
 import { listInlineAccountIds, resolveInlineAccount, resolveInlineToken } from "./accounts.js"
 import { callInlineBotApi, type InlineBotCommand } from "./bot-commands-api.js"
-import { loadNativeCommandHelpersCompat, loadPluginCommandSpecsCompat } from "../sdk-runtime-compat.js"
 
 const INLINE_BASE_NATIVE_COMMANDS: InlineBotCommand[] = [
   { command: "help", description: "Show available commands." },
@@ -38,20 +40,6 @@ type InlineCommandsSyncLogger = {
 
 const INLINE_COMMAND_NAME_RE = /^[a-z0-9_]{1,32}$/
 const INLINE_COMMAND_LIMIT = 100
-
-type LoadedNativeCommandHelpers = Awaited<ReturnType<typeof loadNativeCommandHelpersCompat>>
-type LoadedPluginCommandSpecs = Awaited<ReturnType<typeof loadPluginCommandSpecsCompat>>
-
-const FALLBACK_NATIVE_COMMAND_HELPERS: LoadedNativeCommandHelpers = {
-  available: false,
-  listNativeCommandSpecsForConfig: () => [],
-  listSkillCommandsForAgents: () => [],
-}
-
-const FALLBACK_PLUGIN_COMMAND_SPECS: LoadedPluginCommandSpecs = {
-  available: false,
-  specs: [],
-}
 
 function normalizeDynamicCommandName(raw: string): string {
   const trimmed = raw.trim().toLowerCase()
@@ -91,8 +79,6 @@ function shouldSyncInlineNativeSkills(cfg: OpenClawConfig): boolean {
 
 async function buildInlineNativeCommandsForConfig(params: {
   cfg: OpenClawConfig
-  nativeHelpers: LoadedNativeCommandHelpers
-  pluginSpecs: LoadedPluginCommandSpecs
 }): Promise<InlineBotCommand[]> {
   const commands = [...INLINE_BASE_NATIVE_COMMANDS]
   if (params.cfg.commands?.config === true) {
@@ -102,13 +88,15 @@ async function buildInlineNativeCommandsForConfig(params: {
     commands.push({ command: "debug", description: "Set runtime debug overrides." })
   }
 
-  const { listNativeCommandSpecsForConfig, listSkillCommandsForAgents } = params.nativeHelpers
   const skillCommands =
     shouldSyncInlineNativeSkills(params.cfg)
       ? listSkillCommandsForAgents({ cfg: params.cfg })
       : []
-  const nativeSpecs = listNativeCommandSpecsForConfig(params.cfg, { skillCommands })
-  const { specs: pluginSpecs } = params.pluginSpecs
+  const nativeSpecs = listNativeCommandSpecsForConfig(params.cfg, {
+    skillCommands,
+    provider: "telegram",
+  })
+  const pluginSpecs = getPluginCommandSpecs("inline")
   const seen = new Set<string>()
 
   const resolved: InlineBotCommand[] = []
@@ -133,18 +121,9 @@ export async function syncInlineNativeCommands(params: {
 }): Promise<{ attempted: number; synced: number; failed: number }> {
   const accountIds = listInlineAccountIds(params.cfg)
   const nativeEnabled = shouldSyncInlineNativeCommands(params.cfg)
-  const nativeHelpers = nativeEnabled
-    ? await loadNativeCommandHelpersCompat()
-    : FALLBACK_NATIVE_COMMAND_HELPERS
-  const pluginSpecs = nativeEnabled
-    ? await loadPluginCommandSpecsCompat("inline")
-    : FALLBACK_PLUGIN_COMMAND_SPECS
-  const usingSdkSource = nativeHelpers.available || pluginSpecs.available
   const allCommands = nativeEnabled
     ? await buildInlineNativeCommandsForConfig({
         cfg: params.cfg,
-        nativeHelpers,
-        pluginSpecs,
       })
     : []
   const commands = allCommands.slice(0, INLINE_COMMAND_LIMIT)
@@ -153,9 +132,6 @@ export async function syncInlineNativeCommands(params: {
       `[inline] native command sync truncating ${allCommands.length} commands to ${INLINE_COMMAND_LIMIT}`,
     )
   }
-  params.logger?.info?.(
-    `[inline] native command source: ${usingSdkSource ? "plugin-sdk" : "fallback"}`,
-  )
 
   let synced = 0
   let failed = 0

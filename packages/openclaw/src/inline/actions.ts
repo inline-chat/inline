@@ -4,6 +4,7 @@ import type {
   ChannelMessageToolDiscovery,
   ChannelMessageToolSchemaContribution,
 } from "openclaw/plugin-sdk/channel-contract"
+import { createMessageToolButtonsSchema } from "openclaw/plugin-sdk/channel-actions"
 import {
   normalizeInteractiveReply,
   reduceInteractiveReply,
@@ -32,7 +33,6 @@ import {
   readNumberParam,
   readStringParam,
 } from "../openclaw-compat.js"
-import { createMessageToolButtonsSchemaCompat } from "../sdk-runtime-compat.js"
 
 type InlineActionGateKey =
   | "send"
@@ -953,7 +953,7 @@ function describeInlineMessageTool({
     ? [
         {
           properties: {
-            buttons: createMessageToolButtonsSchemaCompat() as unknown as ChannelMessageToolSchemaContribution["properties"][string],
+            buttons: createMessageToolButtonsSchema() as unknown as ChannelMessageToolSchemaContribution["properties"][string],
           },
         },
       ]

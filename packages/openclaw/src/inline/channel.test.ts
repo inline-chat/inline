@@ -378,6 +378,35 @@ describe("inline/channel", () => {
     expect(issues.some((issue) => issue.accountId === "ops" && issue.kind === "auth")).toBe(true)
   })
 
+  it("collects recent reconnect-loop diagnostics as runtime issues", async () => {
+    vi.resetModules()
+    const { collectInlineStatusIssues } = await import("./status-issues")
+
+    const issues = collectInlineStatusIssues([
+      {
+        accountId: "default",
+        enabled: true,
+        configured: true,
+        diagnostics: {
+          protocol: {
+            lastFailureAt: Date.now(),
+            lastFailureReason: "authentication timeout after 10000ms",
+            transport: {
+              reconnectCount: 5,
+              lastReconnectCause: "ping-timeout",
+            },
+            ping: {
+              lastTimeoutAt: Date.now(),
+            },
+          },
+        },
+      },
+    ])
+
+    expect(issues.some((issue) => issue.message.includes("flapping"))).toBe(true)
+    expect(issues.some((issue) => issue.message.includes("ping watchdog"))).toBe(true)
+  })
+
   it("status includes lastProbeAt in channel summary and account snapshots", async () => {
     vi.resetModules()
     const { inlineChannelPlugin } = await import("./channel")
@@ -424,6 +453,7 @@ describe("inline/channel", () => {
         lastInboundAt: null,
         lastOutboundAt: null,
         lastProbeAt: 444,
+        diagnostics: { protocol: { state: "open" } },
       } as any,
       probe: {
         ok: true,
@@ -434,6 +464,7 @@ describe("inline/channel", () => {
       expect.objectContaining({
         lastStartAt: 333,
         lastProbeAt: 444,
+        diagnostics: { protocol: { state: "open" } },
         probe: { ok: true },
       }),
     )

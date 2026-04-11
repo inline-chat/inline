@@ -9,6 +9,22 @@ type InlineProbeSummary = {
   error?: string
 }
 
+type InlineDiagnosticsSummary = {
+  protocol?: {
+    lastFailureAt?: number
+    lastFailureReason?: string | undefined
+    ping?: {
+      lastTimeoutAt?: number
+    }
+  }
+  transport?: {
+    reconnectCount?: number
+    lastReconnectCause?: string | undefined
+  }
+}
+
+const RECENT_RUNTIME_ISSUE_MS = 30 * 60 * 1000
+
 function readInlineProbeSummary(value: unknown): InlineProbeSummary {
   if (!isRecord(value)) {
     return {}
@@ -26,6 +42,57 @@ function readInlineProbeSummary(value: unknown): InlineProbeSummary {
 
 function looksLikeAuthError(text: string): boolean {
   return /(401|403|unauth|forbidden|invalid token|token invalid|unauthorized)/i.test(text)
+}
+
+function readInlineDiagnosticsSummary(value: unknown): InlineDiagnosticsSummary {
+  if (!isRecord(value)) {
+    return {}
+  }
+
+  const protocolValue = isRecord(value.protocol) ? value.protocol : undefined
+  const transportValue =
+    (protocolValue && isRecord(protocolValue.transport) ? protocolValue.transport : undefined) ??
+    (isRecord(value.transport) ? value.transport : undefined)
+  const pingValue = protocolValue && isRecord(protocolValue.ping) ? protocolValue.ping : undefined
+
+  return {
+    ...(protocolValue
+      ? {
+          protocol: {
+            ...(typeof protocolValue.lastFailureAt === "number"
+              ? { lastFailureAt: protocolValue.lastFailureAt }
+              : {}),
+            ...(asString(protocolValue.lastFailureReason)
+              ? { lastFailureReason: asString(protocolValue.lastFailureReason) }
+              : {}),
+            ...(pingValue && typeof pingValue.lastTimeoutAt === "number"
+              ? {
+                  ping: {
+                    lastTimeoutAt: pingValue.lastTimeoutAt,
+                  },
+                }
+              : {}),
+          },
+        }
+      : {}),
+    ...(transportValue
+      ? {
+          transport: {
+            ...(typeof transportValue.reconnectCount === "number"
+              ? { reconnectCount: transportValue.reconnectCount }
+              : {}),
+            ...(asString(transportValue.lastReconnectCause)
+              ? { lastReconnectCause: asString(transportValue.lastReconnectCause) }
+              : {}),
+          },
+        }
+      : {}),
+  }
+}
+
+function isRecentTimestamp(timestamp: number | undefined): boolean {
+  if (typeof timestamp !== "number" || !Number.isFinite(timestamp) || timestamp <= 0) return false
+  return Date.now() - timestamp <= RECENT_RUNTIME_ISSUE_MS
 }
 
 export function collectInlineStatusIssues(accounts: ChannelAccountSnapshot[]): ChannelStatusIssue[] {
@@ -84,6 +151,32 @@ export function collectInlineStatusIssues(accounts: ChannelAccountSnapshot[]): C
         kind: looksLikeAuthError(probe.error) ? "auth" : "runtime",
         message: `Inline probe failed: ${probe.error}`,
         fix: "Verify token/baseUrl connectivity, then re-run channel status.",
+      })
+    }
+
+    const diagnostics = readInlineDiagnosticsSummary((entry as Record<string, unknown>).diagnostics)
+    if (
+      isRecentTimestamp(diagnostics.protocol?.lastFailureAt) &&
+      (diagnostics.transport?.reconnectCount ?? 0) >= 3
+    ) {
+      issues.push({
+        channel: "inline",
+        accountId,
+        kind: "runtime",
+        message:
+          `Inline connection is flapping (${diagnostics.transport?.reconnectCount ?? 0} reconnects). ` +
+          `${diagnostics.protocol?.lastFailureReason ?? diagnostics.transport?.lastReconnectCause ?? "Recent reconnect failures detected."}`,
+        fix: "Inspect gateway logs for websocket close/error details and verify Inline API/network stability.",
+      })
+    }
+
+    if (isRecentTimestamp(diagnostics.protocol?.ping?.lastTimeoutAt)) {
+      issues.push({
+        channel: "inline",
+        accountId,
+        kind: "runtime",
+        message: "Inline ping watchdog triggered a reconnect recently.",
+        fix: "Check websocket latency/packet loss and compare last pong timing in the Inline diagnostics snapshot.",
       })
     }
   }
