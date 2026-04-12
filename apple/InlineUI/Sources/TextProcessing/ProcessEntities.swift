@@ -619,6 +619,9 @@ public class ProcessEntities {
       // NOTE: This must come SECOND to avoid interference with pre code blocks
       entities = extractInlineCodeFromMarkdown(text: &text, existingEntities: entities)
 
+      // Extract markdown links after code so code spans shield their contents from link parsing.
+      entities = extractLinksFromMarkdown(text: &text, existingEntities: entities)
+
       // Extract bold entities from **text** markdown syntax and update all entity offsets
       // NOTE: Only extract if not within code blocks
       entities = extractBoldFromMarkdown(text: &text, existingEntities: entities)
@@ -936,9 +939,24 @@ public class ProcessEntities {
 
     for i in 0 ..< entities.count {
       let entityOffset = Int(entities[i].offset)
-      let adjustment = totalRemovedCharacters(before: entityOffset, removals: removals)
-      entities[i].offset = Int64(max(0, entityOffset - adjustment))
+      let entityLength = Int(entities[i].length)
+      let entityRange = NSRange(location: entityOffset, length: entityLength)
+      let offsetAdjustment = totalRemovedCharacters(before: entityOffset, removals: removals)
+      let lengthAdjustment = totalRemovedCharacters(in: entityRange, removals: removals)
+      entities[i].offset = Int64(max(0, entityOffset - offsetAdjustment))
+      entities[i].length = Int64(max(0, entityLength - lengthAdjustment))
     }
+  }
+
+  private static func totalRemovedCharacters(in range: NSRange, removals: [OffsetRemoval]) -> Int {
+    guard range.length > 0 else { return 0 }
+
+    var total = 0
+    for removal in removals {
+      let removalRange = NSRange(location: removal.position, length: removal.length)
+      total += NSIntersectionRange(range, removalRange).length
+    }
+    return total
   }
 
   private static func totalOffsetAdjustment(before offset: Int, adjustments: [OffsetAdjustment]) -> Int {
@@ -1159,6 +1177,143 @@ public class ProcessEntities {
       // Handle regex error silently
     }
 
+    return allEntities
+  }
+
+  private struct MarkdownLinkMatch {
+    let fullRange: NSRange
+    let textRange: NSRange
+    let url: String
+  }
+
+  private static func findMarkdownLinkMatches(in text: String) -> [MarkdownLinkMatch] {
+    let nsText = text as NSString
+    var matches: [MarkdownLinkMatch] = []
+    var cursor = 0
+
+    while cursor < nsText.length {
+      guard nsText.character(at: cursor) == 91 else {
+        cursor += 1
+        continue
+      }
+
+      var textEnd = cursor + 1
+      while textEnd < nsText.length, nsText.character(at: textEnd) != 93 {
+        textEnd += 1
+      }
+
+      guard textEnd < nsText.length else {
+        cursor += 1
+        continue
+      }
+
+      let textRange = NSRange(location: cursor + 1, length: textEnd - cursor - 1)
+      guard textRange.length > 0 else {
+        cursor += 1
+        continue
+      }
+
+      guard textEnd + 1 < nsText.length, nsText.character(at: textEnd + 1) == 40 else {
+        cursor += 1
+        continue
+      }
+
+      let urlStart = textEnd + 2
+      var parenDepth = 1
+      var urlEndCursor = urlStart
+
+      while urlEndCursor < nsText.length, parenDepth > 0 {
+        let character = nsText.character(at: urlEndCursor)
+        if character == 40 {
+          parenDepth += 1
+        } else if character == 41 {
+          parenDepth -= 1
+        }
+        urlEndCursor += 1
+      }
+
+      guard parenDepth == 0 else {
+        cursor += 1
+        continue
+      }
+
+      let urlRange = NSRange(location: urlStart, length: urlEndCursor - urlStart - 1)
+      guard urlRange.length > 0 else {
+        cursor += 1
+        continue
+      }
+
+      let url = nsText.substring(with: urlRange)
+      guard !url.isEmpty else {
+        cursor += 1
+        continue
+      }
+
+      matches.append(
+        MarkdownLinkMatch(
+          fullRange: NSRange(location: cursor, length: urlEndCursor - cursor),
+          textRange: textRange,
+          url: url
+        )
+      )
+
+      cursor = urlEndCursor
+    }
+
+    return matches
+  }
+
+  private static func extractLinksFromMarkdown(
+    text: inout String,
+    existingEntities: [MessageEntity]
+  ) -> [MessageEntity] {
+    var allEntities = existingEntities
+    var textUrlEntities: [MessageEntity] = []
+    let matches = findMarkdownLinkMatches(in: text)
+
+    guard !matches.isEmpty else { return allEntities }
+
+    var removals: [OffsetRemoval] = []
+
+    for match in matches.reversed() {
+      if isPositionWithinCodeBlock(position: match.fullRange.location, entities: allEntities) {
+        continue
+      }
+
+      guard let swiftFullRange = Range(match.fullRange, in: text),
+            let swiftTextRange = Range(match.textRange, in: text)
+      else {
+        continue
+      }
+
+      let linkText = String(text[swiftTextRange])
+      text.replaceSubrange(swiftFullRange, with: linkText)
+
+      let prefixLength = match.textRange.location - match.fullRange.location
+      if prefixLength > 0 {
+        removals.append(OffsetRemoval(position: match.fullRange.location, length: prefixLength))
+      }
+
+      let suffixStart = match.textRange.location + match.textRange.length
+      let fullEnd = match.fullRange.location + match.fullRange.length
+      let suffixLength = fullEnd - suffixStart
+      if suffixLength > 0 {
+        removals.append(OffsetRemoval(position: suffixStart, length: suffixLength))
+      }
+
+      var entity = MessageEntity()
+      entity.type = .textURL
+      entity.offset = Int64(match.textRange.location)
+      entity.length = Int64(match.textRange.length)
+      entity.textURL = MessageEntity.MessageEntityTextUrl.with {
+        $0.url = match.url
+      }
+      textUrlEntities.append(entity)
+    }
+
+    applyOffsetRemovals(&allEntities, removals: removals)
+    applyOffsetRemovals(&textUrlEntities, removals: removals)
+    allEntities.append(contentsOf: textUrlEntities)
     return allEntities
   }
 
