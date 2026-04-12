@@ -711,6 +711,72 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
 }
 
 describe("inline/monitor", () => {
+  it("debounces rapid inbound text messages into one turn", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1001n,
+            date: 1_700_000_000n,
+            fromId: 42n,
+            message: "first line",
+          },
+        },
+        {
+          kind: "message.new",
+          chatId: 7n,
+          message: {
+            id: 1002n,
+            date: 1_700_000_001n,
+            fromId: 42n,
+            message: "second line",
+          },
+        },
+      ],
+      chats: {
+        "7": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyPayload: {
+        text: "batched reply",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {
+        messages: {
+          inbound: {
+            debounceMs: 20,
+            byChannel: {
+              inline: 20,
+            },
+          },
+        },
+      } as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
+      expect(harness.calls.resolveAgentRoute).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledTimes(1)
+      expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
+        expect.objectContaining({
+          RawBody: "first line\nsecond line",
+          MessageSid: "1002",
+          From: "inline:42",
+          To: "inline:7",
+        }),
+      )
+    })
+
+    await handle.stop()
+  }, 30_000)
+
   it("routes direct messages by sender id and preserves reply-to message id", async () => {
     const harness = await setupMonitorHarness({
       events: [
