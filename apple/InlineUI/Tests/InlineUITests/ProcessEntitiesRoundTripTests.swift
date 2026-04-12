@@ -109,6 +109,51 @@ struct ProcessEntitiesRoundTripTests {
     #expect(sortedEntities[2].offset == 18)
     #expect(sortedEntities[2].length == 6) // "italic"
   }
+
+  @Test("Markdown link parsing")
+  func testMarkdownLinkParsing() {
+    let input = "Open [docs](https://example.com)"
+    let (text, entities) = ProcessEntities.fromAttributedString(NSAttributedString(string: input))
+
+    #expect(text == "Open docs")
+    #expect(entities.entities.count == 1)
+
+    let entity = entities.entities[0]
+    #expect(entity.type == .textURL)
+    #expect(entity.offset == 5)
+    #expect(entity.length == 4)
+    #expect(entity.textURL.url == "https://example.com")
+  }
+
+  @Test("Markdown link preserves nested formatting in label")
+  func testMarkdownLinkWithFormattedLabel() throws {
+    let input = "Open [**docs**](https://example.com)"
+    let (text, entities) = ProcessEntities.fromAttributedString(NSAttributedString(string: input))
+
+    #expect(text == "Open docs")
+    #expect(entities.entities.count == 2)
+
+    let textLink = try #require(entities.entities.first { $0.type == .textURL })
+    #expect(textLink.offset == 5)
+    #expect(textLink.length == 4)
+    #expect(textLink.textURL.url == "https://example.com")
+
+    let bold = try #require(entities.entities.first { $0.type == .bold })
+    #expect(bold.offset == 5)
+    #expect(bold.length == 4)
+  }
+
+  @Test("Markdown link syntax inside inline code is not parsed as link")
+  func testMarkdownLinkInsideInlineCode() {
+    let input = "Use `[docs](https://example.com)`"
+    let (text, entities) = ProcessEntities.fromAttributedString(NSAttributedString(string: input))
+
+    #expect(text == "Use [docs](https://example.com)")
+    #expect(entities.entities.count == 1)
+    #expect(entities.entities[0].type == .code)
+    #expect(entities.entities[0].offset == 4)
+    #expect(entities.entities[0].length == 27)
+  }
   
   @Test("Pre code block with leading/trailing content")
   func testPreCodeBlockWithContent() {
