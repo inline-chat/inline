@@ -142,3 +142,5 @@ packages/openclaw-inline/*.tgz
 # Local agent docs
 .superpowers/
 docs/superpowers
+
+.build-macos
