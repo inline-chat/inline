@@ -61,7 +61,7 @@ export const encodePhotoInfo = (file: DbFile): PhotoInfo => {
     throw new InlineError(InlineError.ApiError.INTERNAL)
   }
 
-  const url = getSignedMediaPhotoUrl(file.fileUniqueId)
+  const url = getSignedMediaPhotoUrl(file)
 
   return Value.Encode(PhotoInfo, {
     fileUniqueId: file.fileUniqueId,
