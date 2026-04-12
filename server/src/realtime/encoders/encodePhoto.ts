@@ -11,7 +11,7 @@ const encodePhotoSize = (size: DbFullPhotoSize): PhotoSize | null => {
 
   if (!file) return null
 
-  const url = getSignedMediaPhotoUrl(file.fileUniqueId)
+  const url = getSignedMediaPhotoUrl(file)
 
   let proto: PhotoSize = {
     type: size.size ?? "f",
@@ -66,7 +66,7 @@ export const encodePhoto = ({ photo }: { photo: DbFullPhoto }) => {
 }
 
 export const encodePhotoLegacy = ({ file }: { file: DbFile }) => {
-  const url = getSignedMediaPhotoUrl(file.fileUniqueId)
+  const url = getSignedMediaPhotoUrl(file)
 
   let proto: Photo = {
     id: BigInt(file.id),

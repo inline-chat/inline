@@ -14,7 +14,7 @@ export const encodeUser = ({
 }): User => {
   let cdnUrl: string | undefined = undefined
   if (photoFile) {
-    cdnUrl = getSignedMediaPhotoUrl(photoFile.fileUniqueId) ?? undefined
+    cdnUrl = getSignedMediaPhotoUrl(photoFile) ?? undefined
   }
 
   return {

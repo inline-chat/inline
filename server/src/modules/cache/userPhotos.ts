@@ -26,7 +26,7 @@ export async function getCachedUserProfilePhotoUrl(userId: number): Promise<stri
 
     let cdnUrl: string | undefined
     if (photoFile) {
-      cdnUrl = getSignedMediaPhotoUrl(photoFile.fileUniqueId) ?? undefined
+      cdnUrl = getSignedMediaPhotoUrl(photoFile) ?? undefined
     }
 
     cachedUserPhotos.set(userId, {

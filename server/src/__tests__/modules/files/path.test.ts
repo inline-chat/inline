@@ -8,7 +8,7 @@ describe("media photo url signing", () => {
   const fileUniqueId = "INPabcdefghijklmnopqrstu"
 
   it("creates a signed photo url under /file and verifies it", () => {
-    const url = getSignedMediaPhotoUrl(fileUniqueId, 120, { baseUrl, signingKey, now })
+    const url = getSignedMediaPhotoUrl(fileUniqueId, 120, { baseUrl, signingKey, now, useProxy: true })
 
     expect(url).toBeDefined()
     const parsed = new URL(url!)
@@ -33,7 +33,7 @@ describe("media photo url signing", () => {
   })
 
   it("rejects tampered file id", () => {
-    const url = getSignedMediaPhotoUrl(fileUniqueId, 120, { baseUrl, signingKey, now })
+    const url = getSignedMediaPhotoUrl(fileUniqueId, 120, { baseUrl, signingKey, now, useProxy: true })
     const parsed = new URL(url!)
     const exp = Number(parsed.searchParams.get("exp"))
     const sig = parsed.searchParams.get("sig")!
@@ -50,7 +50,7 @@ describe("media photo url signing", () => {
   })
 
   it("rejects expired urls", () => {
-    const url = getSignedMediaPhotoUrl(fileUniqueId, 10, { baseUrl, signingKey, now })
+    const url = getSignedMediaPhotoUrl(fileUniqueId, 10, { baseUrl, signingKey, now, useProxy: true })
     const parsed = new URL(url!)
 
     expect(
@@ -66,7 +66,7 @@ describe("media photo url signing", () => {
 
   it("rejects invalid file unique id format", () => {
     const exp = now + 300
-    const sigUrl = getSignedMediaPhotoUrl(fileUniqueId, 300, { baseUrl, signingKey, now })!
+    const sigUrl = getSignedMediaPhotoUrl(fileUniqueId, 300, { baseUrl, signingKey, now, useProxy: true })!
     const sig = new URL(sigUrl).searchParams.get("sig")!
 
     expect(
