@@ -10,6 +10,7 @@ type Task = {
   title: string;
   enabled: boolean;
   skipReason?: string;
+  softFail?: boolean;
   dryRun?: (ctx: ReleaseContext, ui: Ui) => Promise<void> | void;
   run: (ctx: ReleaseContext, ui: Ui) => Promise<void> | void;
 };
@@ -23,6 +24,7 @@ type ReleaseOptions = {
   releaseTag: string;
   skipGithubRelease: boolean;
   skip: Set<string>;
+  fromTask: string;
   dryRun: boolean;
   pauseBeforeNotarize: boolean;
   rollback: boolean;
@@ -73,6 +75,7 @@ function usage(): string {
     "  --sparkle-dir <path>             Sparkle tools dir (default: <root>/.action/sparkle)",
     "  --release-tag <tag>              Attach DMG to GitHub release/tag (default: beta->tip, stable->empty)",
     "  --skip-github-release            Skip GitHub release/tag steps",
+    "  --from <id>                      Resume from a task id without rerunning earlier steps (preflight still runs)",
     "  --skip <ids>                     Skip steps (comma-separated or repeatable)",
     "                                  Known ids: build, upload-sentry-dsyms, post-check, upload-dmg, verify-dmg, gen-appcast, validate-appcast, upload-appcast, github",
     "                                  Aliases: upload (upload-dmg+upload-appcast), appcast (gen+validate+upload)",
@@ -105,6 +108,7 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   let releaseTag: string | undefined;
   let skipGithubRelease = false;
   const skip = new Set<string>();
+  let fromTask = "";
   let dryRun = false;
   let pauseBeforeNotarize = false;
   let rollback = false;
@@ -153,6 +157,12 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
     }
     if (arg === "--skip-github-release") {
       skipGithubRelease = true;
+      continue;
+    }
+    if (arg === "--from") {
+      fromTask = eat(i).trim();
+      if (!fromTask) die(`Missing value for ${arg}`);
+      i++;
       continue;
     }
     if (arg === "--rollback") {
@@ -238,6 +248,7 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
     releaseTag,
     skipGithubRelease,
     skip,
+    fromTask,
     dryRun,
     pauseBeforeNotarize,
     rollback,
@@ -360,8 +371,8 @@ class Ui {
     this.stopTicker();
   }
 
-  setSuccess(taskId: string) {
-    this.setStatus(taskId, "success");
+  setSuccess(taskId: string, note?: string) {
+    this.setStatus(taskId, "success", note);
     this.stopTicker();
   }
 
@@ -547,6 +558,42 @@ function validateSkipIds(skip: Set<string>) {
   }
 }
 
+function formatCmd(args: string[]): string {
+  return args
+    .map((arg) => (/^[A-Za-z0-9_./:=+-]+$/.test(arg) ? arg : JSON.stringify(arg)))
+    .join(" ");
+}
+
+function buildResumeCommand(ctx: ReleaseContext, fromTask: string): string {
+  const args = ["bun", "run", "scripts/macos/release-app.ts", "--channel", ctx.channel, "--from", fromTask];
+  const defaultDerivedData = resolve(ctx.rootDir, "build/InlineMacDirect");
+  const defaultAppPath = resolve(defaultDerivedData, "Build/Products/Release/Inline.app");
+  const defaultDmgPath = resolve(ctx.rootDir, "build/macos-direct/Inline.dmg");
+  const defaultSparkleDir = resolve(ctx.rootDir, ".action/sparkle");
+  const defaultReleaseTag = ctx.rollback ? "" : ctx.channel === "beta" ? "tip" : "";
+  const concreteSkipIds = [...ctx.skip]
+    .filter((id) => !["upload", "appcast", "github"].includes(id))
+    .sort();
+
+  if (ctx.rollback) {
+    args.push("--rollback");
+    if (ctx.rollbackToBuild) args.push("--rollback-to-build", ctx.rollbackToBuild);
+    else if (ctx.rollbackStepsBack !== 1) args.push("--rollback-steps-back", String(ctx.rollbackStepsBack));
+  } else if (ctx.releaseTag !== defaultReleaseTag) {
+    args.push("--release-tag", ctx.releaseTag);
+  }
+
+  if (ctx.skipGithubRelease) args.push("--skip-github-release");
+  if (concreteSkipIds.length) args.push("--skip", concreteSkipIds.join(","));
+  if (ctx.pauseBeforeNotarize) args.push("--pause-before-notarize");
+  if (ctx.derivedData !== defaultDerivedData) args.push("--derived-data", ctx.derivedData);
+  if (ctx.appPath !== defaultAppPath) args.push("--app-path", ctx.appPath);
+  if (ctx.dmgPath !== defaultDmgPath) args.push("--dmg-path", ctx.dmgPath);
+  if (ctx.sparkleDir !== defaultSparkleDir) args.push("--sparkle-dir", ctx.sparkleDir);
+
+  return formatCmd(args);
+}
+
 async function main() {
   const rootDir = resolve(import.meta.dir, "../..");
   const interactive = Boolean(process.stdout.isTTY && process.stderr.isTTY && !process.env.CI);
@@ -578,6 +625,7 @@ async function main() {
     releaseTag,
     skipGithubRelease: parsed0.skipGithubRelease || parsed0.skip.has("github"),
     skip: parsed0.skip,
+    fromTask: parsed0.fromTask,
     dryRun: parsed0.dryRun,
     pauseBeforeNotarize: parsed0.pauseBeforeNotarize,
     rollback: parsed0.rollback,
@@ -615,8 +663,8 @@ async function main() {
 
   ui.setHintLine(
     opts.rollback
-      ? `Rollback  Channel: ${opts.channel}${opts.rollbackToBuild ? `  Build: ${opts.rollbackToBuild}` : `  Steps back: ${opts.rollbackStepsBack}`}${opts.dryRun ? "  Dry run" : ""}`
-      : `Release  Channel: ${opts.channel}${opts.releaseTag ? `  Tag: ${opts.releaseTag}` : ""}${opts.pauseBeforeNotarize ? "  Pause before notarize" : ""}${opts.dryRun ? "  Dry run" : ""}`,
+      ? `Rollback  Channel: ${opts.channel}${opts.rollbackToBuild ? `  Build: ${opts.rollbackToBuild}` : `  Steps back: ${opts.rollbackStepsBack}`}${opts.fromTask ? `  From: ${opts.fromTask}` : ""}${opts.dryRun ? "  Dry run" : ""}`
+      : `Release  Channel: ${opts.channel}${opts.releaseTag ? `  Tag: ${opts.releaseTag}` : ""}${opts.fromTask ? `  From: ${opts.fromTask}` : ""}${opts.pauseBeforeNotarize ? "  Pause before notarize" : ""}${opts.dryRun ? "  Dry run" : ""}`,
   );
 
   const tasks: Task[] = [];
@@ -634,12 +682,11 @@ async function main() {
       }
     }
     if (!ctx.rollback && taskEnabled(opts, "upload-sentry-dsyms")) {
-      for (const c of ["ditto"]) {
-        if (!commandExists(c)) missing.push(c);
+      if (!commandExists("ditto")) {
+        ui.info("Warning: upload-sentry-dsyms is best-effort and will fail because `ditto` is missing.");
       }
       if (!process.env.SENTRY_AUTH_TOKEN && !commandExists("sentry")) {
-        if (ctx.dryRun) ui.info("Warning: upload-sentry-dsyms expects SENTRY_AUTH_TOKEN or an authenticated `sentry` CLI session.");
-        else throw new Error("upload-sentry-dsyms requires SENTRY_AUTH_TOKEN or an authenticated `sentry` CLI session.");
+        ui.info("Warning: upload-sentry-dsyms is best-effort and will be skipped after a failure unless SENTRY_AUTH_TOKEN or an authenticated `sentry` CLI session is available.");
       }
     }
     if (!ctx.rollback && taskEnabled(opts, "post-check")) {
@@ -858,6 +905,7 @@ async function main() {
       title: "Upload dSYMs to Sentry",
       enabled: taskEnabled(opts, "upload-sentry-dsyms"),
       skipReason: taskEnabled(opts, "upload-sentry-dsyms") ? undefined : "operator requested",
+      softFail: true,
       dryRun: (ctx, ui) => {
         ui.info("Would run:");
         ui.info(`  bun run scripts/macos/upload-dsyms.ts --search-root ${resolve(ctx.derivedData, "Build/Products/Release")}`);
@@ -865,6 +913,8 @@ async function main() {
         ui.info("  Uses SENTRY_AUTH_TOKEN if set, otherwise resolves the token from `sentry auth token`.");
         ui.info("Optional env:");
         ui.info("  SENTRY_ORG (default: usenoor), SENTRY_PROJECT (default: inline-ios-macos), SENTRY_API_URL (default: https://us.sentry.io)");
+        ui.info("Behavior:");
+        ui.info("  This step is best-effort; failures are logged and the release continues.");
       },
       run: async (ctx, ui) => {
         const searchRoot = resolve(ctx.derivedData, "Build/Products/Release");
@@ -1184,6 +1234,15 @@ async function main() {
   }
 
   // Initialize UI and run tasks.
+  if (opts.fromTask) {
+    const target = tasks.find((task) => task.id === opts.fromTask);
+    if (!target) {
+      die(`Unknown --from task id: ${opts.fromTask}\nAvailable ids: ${tasks.map((task) => task.id).join(", ")}`);
+    }
+    if (!target.enabled) {
+      die(`--from ${opts.fromTask} refers to a disabled step${target.skipReason ? ` (${target.skipReason})` : ""}.`);
+    }
+  }
   ui.init(tasks);
 
   const cleanup = () => {
@@ -1204,17 +1263,34 @@ async function main() {
     if (opts.dryRun) {
       ui.info("Dry run: not executing. Showing what would run.");
     }
+    let reachedFrom = !opts.fromTask;
     for (const task of tasks) {
       if (!task.enabled) {
         ui.setSkipped(task.id, task.skipReason);
         continue;
       }
+      if (opts.fromTask && task.id === opts.fromTask) {
+        reachedFrom = true;
+      }
+      if (opts.fromTask && task.id !== "preflight" && !reachedFrom) {
+        ui.setSkipped(task.id, `resume from ${opts.fromTask}`);
+        continue;
+      }
       ui.setRunning(task.id);
-      if (opts.dryRun) {
-        if (task.dryRun) await task.dryRun(ctx, ui);
-        else ui.info("(No dry-run details for this step.)");
-      } else {
-        await task.run(ctx, ui);
+      try {
+        if (opts.dryRun) {
+          if (task.dryRun) await task.dryRun(ctx, ui);
+          else ui.info("(No dry-run details for this step.)");
+        } else {
+          await task.run(ctx, ui);
+        }
+      } catch (err) {
+        if (!task.softFail) throw err;
+        const msg = err instanceof Error ? err.message : String(err);
+        ui.error(`Non-fatal: ${task.id} failed; continuing release.`);
+        ui.error(msg);
+        ui.setSuccess(task.id, "continued after failure");
+        continue;
       }
       ui.setSuccess(task.id);
     }
@@ -1228,8 +1304,18 @@ async function main() {
     }
     const msg = err instanceof Error ? err.message : String(err);
     const current = ui.getCurrentTaskId();
-    if (current) ui.setFailed(current, msg);
-    else ui.error(msg);
+    if (current) {
+      ui.setFailed(current, msg);
+      if (!interactive) ui.error(msg);
+    } else ui.error(msg);
+    if (current) {
+      ui.error(`Retry this step: ${buildResumeCommand(ctx, current)}`);
+      const currentIndex = tasks.findIndex((task) => task.id === current);
+      const nextTask = currentIndex === -1 ? undefined : tasks.slice(currentIndex + 1).find((task) => task.enabled);
+      if (nextTask) {
+        ui.error(`Continue past it: ${buildResumeCommand(ctx, nextTask.id)}`);
+      }
+    }
     ui.error(`Temp dir: ${ctx.tempDir}`);
     process.exit(1);
   }

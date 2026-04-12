@@ -209,6 +209,13 @@ cd scripts
 bun run macos:release-app -- --channel beta --skip build,github
 ```
 
+Resume from a later step without rerunning earlier work:
+
+```bash
+cd scripts
+bun run macos:release-app -- --channel beta --from post-check
+```
+
 Dry run:
 
 ```bash
@@ -256,5 +263,5 @@ bash scripts/macos/appcast-only.sh --channel beta
 
 - Sparkle private key is **never** embedded in the app bundle. It is only used
   for appcast signing in the release pipeline.
-- The local release script uploads dSYMs to Sentry before artifact upload so new crashes symbolicate sooner.
+- The local release script uploads dSYMs to Sentry before artifact upload so new crashes symbolicate sooner, but that step is best-effort and no longer blocks the rest of the release.
 - Appcasts are validated locally and in CI before upload to avoid broken feeds.
