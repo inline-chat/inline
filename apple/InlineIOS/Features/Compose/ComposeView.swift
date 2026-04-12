@@ -76,8 +76,12 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
 
   private var hasActiveAttachmentUploads: Bool {
     for attachmentId in attachmentItems.keys {
-      guard let progress = attachmentUploadProgress[attachmentId] else {
+      if attachmentUploadStartTasks[attachmentId] != nil || attachmentUploadBindingTasks[attachmentId] != nil {
         return true
+      }
+
+      guard let progress = attachmentUploadProgress[attachmentId] else {
+        continue
       }
 
       if progress.stage == .processing || progress.stage == .uploading {

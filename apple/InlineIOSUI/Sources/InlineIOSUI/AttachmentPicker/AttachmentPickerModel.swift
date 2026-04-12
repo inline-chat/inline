@@ -5,6 +5,9 @@ import Photos
 @MainActor
 @Observable
 public final class AttachmentPickerModel: NSObject, PHPhotoLibraryChangeObserver {
+  public static let defaultInitialRecentLimit = 25
+  public static let defaultRecentLimit = 75
+
   public enum RecentMediaType: String, Sendable {
     case image
     case video
@@ -14,13 +17,20 @@ public final class AttachmentPickerModel: NSObject, PHPhotoLibraryChangeObserver
     public let localIdentifier: String
     public let createdAt: Date?
     public let mediaType: RecentMediaType
+    public let duration: TimeInterval?
 
     public var id: String { localIdentifier }
 
-    public init(localIdentifier: String, createdAt: Date?, mediaType: RecentMediaType) {
+    public init(
+      localIdentifier: String,
+      createdAt: Date?,
+      mediaType: RecentMediaType,
+      duration: TimeInterval? = nil
+    ) {
       self.localIdentifier = localIdentifier
       self.createdAt = createdAt
       self.mediaType = mediaType
+      self.duration = duration
     }
   }
 
@@ -49,20 +59,25 @@ public final class AttachmentPickerModel: NSObject, PHPhotoLibraryChangeObserver
   }
 
   @ObservationIgnored private let authorizationStatusProvider: @Sendable () -> PHAuthorizationStatus
-  @ObservationIgnored private let recentItemsProvider: @Sendable () -> [RecentItem]
+  @ObservationIgnored private let recentItemsProvider: @Sendable (Int) -> [RecentItem]
+  @ObservationIgnored private let initialRecentLimit: Int
   @ObservationIgnored private let recentLimit: Int
+  @ObservationIgnored private var backgroundExpansionTask: Task<Void, Never>?
+  @ObservationIgnored private var reloadGeneration = 0
 
   public init(
-    recentLimit: Int = 20,
+    recentLimit: Int = 75,
+    initialRecentLimit: Int = 25,
     authorizationStatusProvider: @escaping @Sendable () -> PHAuthorizationStatus = {
       PHPhotoLibrary.authorizationStatus(for: .readWrite)
     },
-    recentItemsProvider: (@Sendable () -> [RecentItem])? = nil
+    recentItemsProvider: (@Sendable (Int) -> [RecentItem])? = nil
   ) {
-    self.recentLimit = recentLimit
+    self.recentLimit = max(1, recentLimit)
+    self.initialRecentLimit = min(max(1, initialRecentLimit), self.recentLimit)
     self.authorizationStatusProvider = authorizationStatusProvider
     self.recentItemsProvider = recentItemsProvider ?? {
-      Self.fetchRecentItems(limit: recentLimit)
+      Self.fetchRecentItems(limit: $0)
     }
     authorizationStatus = authorizationStatusProvider()
     super.init()
@@ -70,6 +85,7 @@ public final class AttachmentPickerModel: NSObject, PHPhotoLibraryChangeObserver
   }
 
   deinit {
+    backgroundExpansionTask?.cancel()
     PHPhotoLibrary.shared().unregisterChangeObserver(self)
   }
 
@@ -81,6 +97,9 @@ public final class AttachmentPickerModel: NSObject, PHPhotoLibraryChangeObserver
   }
 
   public func reload() async {
+    backgroundExpansionTask?.cancel()
+    reloadGeneration += 1
+    let generation = reloadGeneration
     isLoading = true
 
     let status = authorizationStatusProvider()
@@ -88,12 +107,16 @@ public final class AttachmentPickerModel: NSObject, PHPhotoLibraryChangeObserver
 
     if isAuthorizedForRecents {
       let fetchRecentItems = recentItemsProvider
+      let initialLimit = initialRecentLimit
       let fetchedItems = await Task.detached(priority: .userInitiated) {
-        fetchRecentItems()
+        fetchRecentItems(initialLimit)
       }.value
+      guard generation == reloadGeneration else { return }
+
       recentItems = Self.sortRecentItems(fetchedItems)
       let availableIds = Set(recentItems.map(\.localIdentifier))
       selectedRecentItemIds = selectedRecentItemIds.intersection(availableIds)
+      scheduleBackgroundExpansion(generation: generation, promotedLocalIdentifiers: [])
     } else {
       recentItems = []
       selectedRecentItemIds = []
@@ -103,30 +126,66 @@ public final class AttachmentPickerModel: NSObject, PHPhotoLibraryChangeObserver
   }
 
   public func reload(promotingLocalIdentifiers localIdentifiers: [String]) async {
+    backgroundExpansionTask?.cancel()
+    reloadGeneration += 1
+    let generation = reloadGeneration
     let uniqueIds = Self.uniqueOrderedIdentifiers(from: localIdentifiers)
-    await reload()
 
-    guard uniqueIds.isEmpty == false else { return }
+    isLoading = true
+
+    let status = authorizationStatusProvider()
+    authorizationStatus = status
+
+    guard isAuthorizedForRecents else {
+      recentItems = []
+      selectedRecentItemIds = []
+      isLoading = false
+      return
+    }
+
+    let fetchRecentItems = recentItemsProvider
+    let initialLimit = initialRecentLimit
+    let initialItems = await Task.detached(priority: .userInitiated) {
+      fetchRecentItems(initialLimit)
+    }.value
+    guard generation == reloadGeneration else { return }
+
+    recentItems = Self.sortRecentItems(initialItems)
+    let availableIds = Set(recentItems.map(\.localIdentifier))
+    selectedRecentItemIds = selectedRecentItemIds.intersection(availableIds)
+
+    guard uniqueIds.isEmpty == false else {
+      scheduleBackgroundExpansion(generation: generation, promotedLocalIdentifiers: [])
+      isLoading = false
+      return
+    }
 
     let fetchedPromotedItems = await Task.detached(priority: .userInitiated) {
       Self.fetchRecentItems(localIdentifiers: uniqueIds)
     }.value
-    guard fetchedPromotedItems.isEmpty == false else { return }
+    guard generation == reloadGeneration else { return }
+    guard fetchedPromotedItems.isEmpty == false else {
+      scheduleBackgroundExpansion(generation: generation, promotedLocalIdentifiers: [])
+      isLoading = false
+      return
+    }
 
     let promotedById = Dictionary(uniqueKeysWithValues: fetchedPromotedItems.map { ($0.localIdentifier, $0) })
     let promotedItems = uniqueIds.compactMap { promotedById[$0] }
-    guard promotedItems.isEmpty == false else { return }
-
-    let promotedIds = Set(promotedItems.map(\.localIdentifier))
-    var mergedItems = promotedItems
-    mergedItems.append(contentsOf: recentItems.filter { promotedIds.contains($0.localIdentifier) == false })
-    if mergedItems.count > recentLimit {
-      mergedItems = Array(mergedItems.prefix(recentLimit))
+    guard promotedItems.isEmpty == false else {
+      scheduleBackgroundExpansion(generation: generation, promotedLocalIdentifiers: [])
+      isLoading = false
+      return
     }
 
-    recentItems = mergedItems
-    let availableIds = Set(recentItems.map(\.localIdentifier))
-    selectedRecentItemIds = selectedRecentItemIds.intersection(availableIds)
+    recentItems = mergePromotedItems(promotedItems, into: recentItems, limit: initialRecentLimit)
+    let mergedAvailableIds = Set(recentItems.map(\.localIdentifier))
+    selectedRecentItemIds = selectedRecentItemIds.intersection(mergedAvailableIds)
+    scheduleBackgroundExpansion(
+      generation: generation,
+      promotedLocalIdentifiers: uniqueIds
+    )
+    isLoading = false
   }
 
   nonisolated static func sortRecentItems(_ items: [RecentItem]) -> [RecentItem] {
@@ -191,7 +250,8 @@ public final class AttachmentPickerModel: NSObject, PHPhotoLibraryChangeObserver
         RecentItem(
           localIdentifier: asset.localIdentifier,
           createdAt: asset.creationDate,
-          mediaType: mediaType
+          mediaType: mediaType,
+          duration: mediaType == .video ? asset.duration : nil
         )
       )
     }
@@ -215,7 +275,8 @@ public final class AttachmentPickerModel: NSObject, PHPhotoLibraryChangeObserver
       itemsById[asset.localIdentifier] = RecentItem(
         localIdentifier: asset.localIdentifier,
         createdAt: asset.creationDate,
-        mediaType: mediaType
+        mediaType: mediaType,
+        duration: mediaType == .video ? asset.duration : nil
       )
     }
 
@@ -246,5 +307,51 @@ public final class AttachmentPickerModel: NSObject, PHPhotoLibraryChangeObserver
 
   public func clearRecentSelection() {
     selectedRecentItemIds.removeAll()
+  }
+
+  private func scheduleBackgroundExpansion(
+    generation: Int,
+    promotedLocalIdentifiers: [String]
+  ) {
+    guard recentLimit > initialRecentLimit else { return }
+
+    let fetchRecentItems = recentItemsProvider
+    let expandedLimit = recentLimit
+    backgroundExpansionTask = Task(priority: .utility) { [weak self] in
+      let expandedItems = await Task.detached(priority: .utility) {
+        fetchRecentItems(expandedLimit)
+      }.value
+
+      await MainActor.run {
+        guard let self, generation == self.reloadGeneration else { return }
+
+        let sortedItems = Self.sortRecentItems(expandedItems)
+        let finalItems: [RecentItem]
+        if promotedLocalIdentifiers.isEmpty {
+          finalItems = Array(sortedItems.prefix(self.recentLimit))
+        } else {
+          let promotedById = Dictionary(uniqueKeysWithValues: sortedItems.map { ($0.localIdentifier, $0) })
+          let promotedItems = promotedLocalIdentifiers.compactMap { promotedById[$0] }
+          finalItems = self.mergePromotedItems(promotedItems, into: sortedItems, limit: self.recentLimit)
+        }
+
+        if finalItems != self.recentItems {
+          self.recentItems = finalItems
+          let availableIds = Set(finalItems.map(\.localIdentifier))
+          self.selectedRecentItemIds = self.selectedRecentItemIds.intersection(availableIds)
+        }
+      }
+    }
+  }
+
+  private func mergePromotedItems(
+    _ promotedItems: [RecentItem],
+    into baseItems: [RecentItem],
+    limit: Int
+  ) -> [RecentItem] {
+    let promotedIds = Set(promotedItems.map(\.localIdentifier))
+    var mergedItems = promotedItems
+    mergedItems.append(contentsOf: baseItems.filter { promotedIds.contains($0.localIdentifier) == false })
+    return Array(mergedItems.prefix(limit))
   }
 }

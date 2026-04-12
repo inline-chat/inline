@@ -44,7 +44,7 @@ public struct AttachmentPickerSheet: View {
   @MainActor
   public init(
     actions: AttachmentPickerActions,
-    recentLimit: Int = 25
+    recentLimit: Int = AttachmentPickerModel.defaultRecentLimit
   ) {
     _model = State(initialValue: AttachmentPickerModel(recentLimit: recentLimit))
     self.actions = actions
@@ -60,25 +60,33 @@ public struct AttachmentPickerSheet: View {
   }
 
   public var body: some View {
-    content
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-      .overlay(alignment: .bottom) {
+    ScrollView(.vertical, showsIndicators: false) {
+      content
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+    .safeAreaInset(edge: .bottom, spacing: 0) {
+      if model.selectedRecentItems.isEmpty == false {
         bottomSendButtonOverlay
+          .padding(.horizontal, AttachmentPickerTileMetrics.floatingButtonHorizontalPadding)
+          .padding(.top, 8)
+          .padding(.bottom, AttachmentPickerTileMetrics.floatingButtonBottomInset)
       }
-      .animation(.easeInOut(duration: 0.22), value: model.selectedRecentItems.isEmpty)
-      .task {
-        await model.reload()
-      }
-      .onReceive(NotificationCenter.default.publisher(for: .attachmentPickerRecentMediaDidChange)) { notification in
-        Task {
-          let localIdentifiers = notification.userInfo?[AttachmentPickerRecentMediaChangeUserInfo.localIdentifiersKey] as? [String]
-          if let localIdentifiers {
-            await model.reload(promotingLocalIdentifiers: localIdentifiers)
-          } else {
-            await model.reload()
-          }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    .animation(.snappy(duration: 0.28, extraBounce: 0), value: model.selectedRecentItems.isEmpty)
+    .task {
+      await model.reload()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .attachmentPickerRecentMediaDidChange)) { notification in
+      Task {
+        let localIdentifiers = notification.userInfo?[AttachmentPickerRecentMediaChangeUserInfo.localIdentifiersKey] as? [String]
+        if let localIdentifiers {
+          await model.reload(promotingLocalIdentifiers: localIdentifiers)
+        } else {
+          await model.reload()
         }
       }
+    }
   }
 
   private var content: some View {
@@ -100,7 +108,7 @@ public struct AttachmentPickerSheet: View {
       actionList
     }
     .padding(.top, 20)
-    .padding(.bottom, 24)
+    .padding(.bottom, AttachmentPickerTileMetrics.contentBottomPadding)
   }
 
   private var mediaHeader: some View {
@@ -119,23 +127,15 @@ public struct AttachmentPickerSheet: View {
   }
 
   private var recentStrip: some View {
-    ScrollView(.horizontal, showsIndicators: false) {
-      HStack(spacing: 12) {
-        AttachmentPickerCameraTile(action: actions.openCamera)
-        AttachmentPickerPhotosTile(action: libraryAction)
-
-        ForEach(model.recentItems) { item in
-          AttachmentPickerRecentTile(
-            item: item,
-            isSelected: model.selectedRecentItemIds.contains(item.localIdentifier),
-            onSelectToggle: {
-              model.toggleRecentSelection(localIdentifier: item.localIdentifier)
-            }
-          )
-        }
+    AttachmentPickerRecentStrip(
+      items: model.recentItems,
+      selectedItemIds: model.selectedRecentItemIds,
+      openCamera: actions.openCamera,
+      openLibrary: libraryAction,
+      toggleSelection: { localIdentifier in
+        model.toggleRecentSelection(localIdentifier: localIdentifier)
       }
-      .padding(.horizontal, 12)
-    }
+    )
   }
 
   private var actionList: some View {
@@ -158,25 +158,11 @@ public struct AttachmentPickerSheet: View {
   @ViewBuilder
   private var bottomSendButtonOverlay: some View {
     if model.selectedRecentItems.isEmpty == false {
-      Button(action: sendSelectedItems) {
-        HStack {
-          Spacer(minLength: 0)
-
-          Text(sendSelectedButtonTitle)
-            .font(.body.weight(.semibold))
-            .foregroundStyle(.white)
-
-          Spacer(minLength: 0)
-        }
-        .padding(.vertical, 14)
-        .background(.blue, in: Capsule())
-        .contentShape(.rect)
-      }
-      .buttonStyle(.plain)
-      .frame(maxWidth: .infinity)
-      .padding(.horizontal, 28)
-      .padding(.bottom, 8)
-      .transition(.move(edge: .bottom).combined(with: .opacity))
+      AttachmentPickerFloatingSendButton(
+        title: sendSelectedButtonTitle,
+        action: sendSelectedItems
+      )
+      .transition(.attachmentPickerFooter)
     }
   }
 
@@ -247,6 +233,40 @@ public struct AttachmentPickerSheet: View {
       @unknown default:
         return nil
     }
+  }
+}
+
+private struct AttachmentPickerFooterTransitionModifier: ViewModifier {
+  let opacity: Double
+  let blurRadius: CGFloat
+  let scale: CGFloat
+  let offsetY: CGFloat
+
+  func body(content: Content) -> some View {
+    content
+      .opacity(opacity)
+      .blur(radius: blurRadius)
+      .scaleEffect(scale, anchor: .bottom)
+      .offset(y: offsetY)
+  }
+}
+
+private extension AnyTransition {
+  static var attachmentPickerFooter: AnyTransition {
+    .modifier(
+      active: AttachmentPickerFooterTransitionModifier(
+        opacity: 0,
+        blurRadius: 4,
+        scale: 0.934,
+        offsetY: 36
+      ),
+      identity: AttachmentPickerFooterTransitionModifier(
+        opacity: 1,
+        blurRadius: 0,
+        scale: 1,
+        offsetY: 0
+      )
+    )
   }
 }
 #endif

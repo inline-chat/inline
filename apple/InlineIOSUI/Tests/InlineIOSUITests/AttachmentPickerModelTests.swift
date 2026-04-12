@@ -32,7 +32,7 @@ struct AttachmentPickerModelTests {
   func limitedAuthorizationShowsNotice() async {
     let model = AttachmentPickerModel(
       authorizationStatusProvider: { .limited },
-      recentItemsProvider: { [] }
+      recentItemsProvider: { _ in [] }
     )
 
     await model.reload()
@@ -47,7 +47,7 @@ struct AttachmentPickerModelTests {
   func deniedAuthorizationClearsRecents() async {
     let model = AttachmentPickerModel(
       authorizationStatusProvider: { .denied },
-      recentItemsProvider: {
+      recentItemsProvider: { _ in
         [
           AttachmentPickerModel.RecentItem(
             localIdentifier: "ignored",
@@ -73,7 +73,7 @@ struct AttachmentPickerModelTests {
 
     let model = AttachmentPickerModel(
       authorizationStatusProvider: { .authorized },
-      recentItemsProvider: {
+      recentItemsProvider: { _ in
         [
           AttachmentPickerModel.RecentItem(
             localIdentifier: "older",
@@ -110,10 +110,10 @@ struct AttachmentPickerModelTests {
 
     let model = AttachmentPickerModel(
       authorizationStatusProvider: { .authorized },
-      recentItemsProvider: {
+      recentItemsProvider: { _ in
         [
           .init(localIdentifier: "oldest", createdAt: oldest, mediaType: .image),
-          .init(localIdentifier: "middle", createdAt: middle, mediaType: .video),
+          .init(localIdentifier: "middle", createdAt: middle, mediaType: .video, duration: 91),
           .init(localIdentifier: "newest", createdAt: newest, mediaType: .image),
         ]
       }
@@ -137,7 +137,7 @@ struct AttachmentPickerModelTests {
 
     let model = AttachmentPickerModel(
       authorizationStatusProvider: { .authorized },
-      recentItemsProvider: { store.get() }
+      recentItemsProvider: { _ in store.get() }
     )
 
     await model.reload()
@@ -151,6 +151,38 @@ struct AttachmentPickerModelTests {
     await model.reload()
 
     #expect(model.selectedRecentItems.map(\.localIdentifier) == ["two"])
+  }
+
+  @MainActor
+  @Test("reload expands recent items in the background after the initial batch")
+  func reloadExpandsRecentItemsInBackground() async {
+    let items = (0..<AttachmentPickerModel.defaultRecentLimit).map { index in
+      AttachmentPickerModel.RecentItem(
+        localIdentifier: "item-\(index)",
+        createdAt: Date(timeIntervalSince1970: TimeInterval(AttachmentPickerModel.defaultRecentLimit - index)),
+        mediaType: index.isMultiple(of: 3) ? .video : .image,
+        duration: index.isMultiple(of: 3) ? TimeInterval(index + 30) : nil
+      )
+    }
+
+    let model = AttachmentPickerModel(
+      recentLimit: AttachmentPickerModel.defaultRecentLimit,
+      initialRecentLimit: AttachmentPickerModel.defaultInitialRecentLimit,
+      authorizationStatusProvider: { .authorized },
+      recentItemsProvider: { limit in
+        Array(items.prefix(limit))
+      }
+    )
+
+    await model.reload()
+
+    #expect(model.recentItems.count == AttachmentPickerModel.defaultInitialRecentLimit)
+
+    for _ in 0..<30 where model.recentItems.count < AttachmentPickerModel.defaultRecentLimit {
+      await Task.yield()
+    }
+
+    #expect(model.recentItems.count == AttachmentPickerModel.defaultRecentLimit)
   }
 
 }
