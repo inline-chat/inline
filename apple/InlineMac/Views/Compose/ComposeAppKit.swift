@@ -952,14 +952,22 @@ class ComposeAppKit: NSView {
           self.updateHeight(animate: true)
         }
       } catch {
-        await MainActor.run { [weak self] in
-          guard let self else { return }
-          guard self.pendingVideoSaveTasks[pendingId] != nil else { return } // removed/cancelled
+        let fellBackToFile = await MainActor.run { [weak self] in
+          guard let self else { return false }
+          guard self.pendingVideoSaveTasks[pendingId] != nil else { return false } // removed/cancelled
           self.pendingVideoSaveTasks.removeValue(forKey: pendingId)
           self.attachments.removeVideoView(id: pendingId)
           self.updateHeight(animate: true)
+
+          if self.addFile(url) {
+            self.log.warning("Failed to save video in attachments; sending as file instead")
+            return true
+          }
+
+          self.log.error("Failed to save video in attachments", error: error)
+          return false
         }
-        log.error("Failed to save video in attachments", error: error)
+        if fellBackToFile { return }
       }
     }
 
@@ -976,7 +984,8 @@ class ComposeAppKit: NSView {
     updateHeight(animate: true)
   }
 
-  func addFile(_ url: URL) {
+  @discardableResult
+  func addFile(_ url: URL) -> Bool {
     do {
       let documentInfo = try FileCache.saveDocument(url: url)
       let mediaItem = FileMediaItem.document(documentInfo)
@@ -988,8 +997,10 @@ class ComposeAppKit: NSView {
 
       // Update State
       attachmentItems[uniqueId] = mediaItem
+      return true
     } catch {
       log.error("Failed to save document", error: error)
+      return false
     }
   }
 
