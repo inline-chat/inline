@@ -31,7 +31,7 @@ When enabled:
 
 ## Install
 
-Requires OpenClaw `2026.3.28` or newer.
+Requires OpenClaw `2026.4.11` or newer.
 
 From npm (once published):
 
