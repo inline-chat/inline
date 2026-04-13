@@ -6,19 +6,29 @@ import Testing
 @MainActor
 @Suite("Peer Bot Commands ViewModel")
 struct PeerBotCommandsViewModelTests {
+  private nonisolated static func makeResolver() -> PeerBotCommandsViewModel.UserInfoResolver {
+    { _, user in
+      UserInfo(user: User(from: user))
+    }
+  }
+
   @Test("loads once per peer and reuses cached results")
   func cachesPerPeer() async {
     let counter = FetchCounter()
     let threadPeer = Peer.thread(id: 100)
     let otherPeer = Peer.thread(id: 200)
 
-    let viewModel = PeerBotCommandsViewModel(peer: threadPeer) { peer in
-      await counter.increment()
-      if peer == threadPeer {
-        return [Self.makeGroup(botId: 1, username: "alpha", commands: [("help", "Show help")])]
-      }
-      return [Self.makeGroup(botId: 2, username: "beta", commands: [("start", "Start bot")])]
-    }
+    let viewModel = PeerBotCommandsViewModel(
+      peer: threadPeer,
+      fetcher: { peer in
+        await counter.increment()
+        if peer == threadPeer {
+          return [Self.makeGroup(botId: 1, username: "alpha", commands: [("help", "Show help")])]
+        }
+        return [Self.makeGroup(botId: 2, username: "beta", commands: [("start", "Start bot")])]
+      },
+      userInfoResolver: Self.makeResolver()
+    )
 
     await viewModel.ensureLoaded()
     await viewModel.ensureLoaded()
@@ -39,12 +49,16 @@ struct PeerBotCommandsViewModelTests {
   @Test("marks duplicate commands case-insensitively and builds targeted insertion text")
   func marksAmbiguousSuggestions() async {
     let peer = Peer.thread(id: 100)
-    let viewModel = PeerBotCommandsViewModel(peer: peer) { _ in
-      [
-        Self.makeGroup(botId: 1, username: "alpha", commands: [("help", "Alpha help")]),
-        Self.makeGroup(botId: 2, username: "beta", commands: [("help", "Beta help")]),
-      ]
-    }
+    let viewModel = PeerBotCommandsViewModel(
+      peer: peer,
+      fetcher: { _ in
+        [
+          Self.makeGroup(botId: 1, username: "alpha", commands: [("help", "Alpha help")]),
+          Self.makeGroup(botId: 2, username: "beta", commands: [("help", "Beta help")]),
+        ]
+      },
+      userInfoResolver: Self.makeResolver()
+    )
 
     await viewModel.ensureLoaded()
     let suggestions = viewModel.suggestions(matching: "he")
@@ -57,20 +71,24 @@ struct PeerBotCommandsViewModelTests {
   @Test("filters by command, description, and bot username fragments")
   func filtersSuggestions() async {
     let peer = Peer.thread(id: 100)
-    let viewModel = PeerBotCommandsViewModel(peer: peer) { _ in
-      [
-        Self.makeGroup(
-          botId: 1,
-          username: "alpha",
-          commands: [("deploy", "Deploy the app"), ("logs", "View deploy logs")]
-        ),
-        Self.makeGroup(
-          botId: 2,
-          username: "buildbot",
-          commands: [("build", "Run a build")]
-        ),
-      ]
-    }
+    let viewModel = PeerBotCommandsViewModel(
+      peer: peer,
+      fetcher: { _ in
+        [
+          Self.makeGroup(
+            botId: 1,
+            username: "alpha",
+            commands: [("deploy", "Deploy the app"), ("logs", "View deploy logs")]
+          ),
+          Self.makeGroup(
+            botId: 2,
+            username: "buildbot",
+            commands: [("build", "Run a build")]
+          ),
+        ]
+      },
+      userInfoResolver: Self.makeResolver()
+    )
 
     await viewModel.ensureLoaded()
 
@@ -83,14 +101,18 @@ struct PeerBotCommandsViewModelTests {
   func retriesAfterFailure() async {
     let peer = Peer.thread(id: 100)
     let counter = FetchCounter()
-    let viewModel = PeerBotCommandsViewModel(peer: peer) { _ in
-      let attempt = await counter.next()
-      if attempt == 1 {
-        struct TestError: Error {}
-        throw TestError()
-      }
-      return [Self.makeGroup(botId: 1, username: "alpha", commands: [("help", "Show help")])]
-    }
+    let viewModel = PeerBotCommandsViewModel(
+      peer: peer,
+      fetcher: { _ in
+        let attempt = await counter.next()
+        if attempt == 1 {
+          struct TestError: Error {}
+          throw TestError()
+        }
+        return [Self.makeGroup(botId: 1, username: "alpha", commands: [("help", "Show help")])]
+      },
+      userInfoResolver: Self.makeResolver()
+    )
 
     await viewModel.ensureLoaded()
     #expect(viewModel.shouldAttemptLoad)

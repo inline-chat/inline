@@ -8,7 +8,7 @@ import Testing
 @Suite("Message Action Persistence")
 struct MessageActionPersistenceTests {
   private func makeInMemoryDB() throws -> DatabaseQueue {
-    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration())
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
     _ = try AppDatabase(queue)
     return queue
   }

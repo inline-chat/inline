@@ -29,7 +29,7 @@ struct PlatformPhotoViewTests {
     let photoInfo = PhotoInfo(
       photo: photo,
       sizes: [
-        PhotoSize(photoId: 42, type: "s", width: 40, height: 30, size: Int64(strippedBytes.count), bytes: strippedBytes),
+        PhotoSize(photoId: 42, type: "s", width: 40, height: 30, size: strippedBytes.count, bytes: strippedBytes),
       ]
     )
 

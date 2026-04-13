@@ -1,5 +1,4 @@
 import Foundation
-import KeychainSwift
 import Testing
 
 @testable import Auth
@@ -25,18 +24,16 @@ final class Auth2StoreTests {
 
   private struct Harness {
     let namespace: String
-    let keychain: KeychainSwift
     let userDefaultsKey: String
 
     init() {
       namespace = UUID().uuidString
-      keychain = AuthKeychainConfig.makePrimaryKeychain(mocked: true, namespace: namespace)
       userDefaultsKey = "\(AuthKeychainConfig.userDefaultsPrefix(mocked: true, namespace: namespace))userId"
     }
 
     func resetStorage() {
-      _ = keychain.delete("token")
-      _ = keychain.delete("credentials_v2")
+      AuthKeychainConfig.mockDelete("token", namespace: namespace)
+      AuthKeychainConfig.mockDelete("credentials_v2", namespace: namespace)
       DatabaseKeyStore.delete(mocked: true, namespace: namespace)
       UserDefaults.standard.removeObject(forKey: userDefaultsKey)
     }
@@ -57,7 +54,7 @@ final class Auth2StoreTests {
     let createdAt = Date(timeIntervalSince1970: 1_700_000_000)
     let expected = AuthCredentials(userId: 42, token: "42:tok", createdAt: createdAt)
     let data = try JSONEncoder().encode(expected)
-    #expect(h.keychain.set(data, forKey: "credentials_v2", withAccess: .accessibleAfterFirstUnlock))
+    AuthKeychainConfig.mockSet(data, forKey: "credentials_v2", namespace: h.namespace)
 
     let (cache, _) = h.makeStore()
     let snapshot = cache.snapshot()
@@ -76,7 +73,7 @@ final class Auth2StoreTests {
     defer { h.resetStorage() }
 
     let token = "42:legacyTok"
-    #expect(h.keychain.set(token, forKey: "token", withAccess: .accessibleAfterFirstUnlock))
+    AuthKeychainConfig.mockSet(token, forKey: "token", namespace: h.namespace)
     UserDefaults.standard.set(NSNumber(value: Int64(42)), forKey: h.userDefaultsKey)
 
     let (cache, _) = h.makeStore()
@@ -98,7 +95,7 @@ final class Auth2StoreTests {
     defer { h.resetStorage() }
 
     let token = "99:legacyTok"
-    #expect(h.keychain.set(token, forKey: "token", withAccess: .accessibleAfterFirstUnlock))
+    AuthKeychainConfig.mockSet(token, forKey: "token", namespace: h.namespace)
 
     let (cache, _) = h.makeStore()
     let snapshot = cache.snapshot()

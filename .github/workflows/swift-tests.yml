@@ -4,13 +4,19 @@ on:
   push:
     branches: [main]
     paths:
+      - ".github/workflows/swift-tests.yml"
       - "apple/InlineKit/**"
       - "apple/InlineUI/**"
+      - "apple/InlineIOSUI/**"
+      - "apple/InlineMacUI/**"
   pull_request:
     branches: [main]
     paths:
+      - ".github/workflows/swift-tests.yml"
       - "apple/InlineKit/**"
       - "apple/InlineUI/**"
+      - "apple/InlineIOSUI/**"
+      - "apple/InlineMacUI/**"
   workflow_dispatch:
 
 concurrency:
@@ -19,9 +25,25 @@ concurrency:
 
 jobs:
   test:
-    name: Swift Tests
+    name: Swift Tests (${{ matrix.package }})
     runs-on: macos-26
-    timeout-minutes: 10
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: InlineKit
+            path: apple/InlineKit
+            test_args: --no-parallel
+          - package: InlineUI
+            path: apple/InlineUI
+            test_args: ""
+          - package: InlineIOSUI
+            path: apple/InlineIOSUI
+            test_args: ""
+          - package: InlineMacUI
+            path: apple/InlineMacUI
+            test_args: ""
 
     steps:
       - name: Checkout
@@ -36,15 +58,18 @@ jobs:
           sw_vers
           echo "Available Xcodes:"
           ls -d /Applications/Xcode*.app 2>/dev/null || true
-          if [[ -n "${XCODE_PATH:-}" ]]; then
+          # Prefer the newest stable versioned Xcode install on CI so Swift package checks
+          # follow the latest released Xcode instead of the runner default or a stale override.
+          stable_xcode_path="$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -v '_beta\\.app$' | sort -V | tail -n 1 || true)"
+          beta_xcode_path="$(ls -d /Applications/Xcode_*_beta.app 2>/dev/null | sort -V | tail -n 1 || true)"
+          if [[ -n "${stable_xcode_path}" ]]; then
+            xcode_path="${stable_xcode_path}"
+          elif [[ -n "${XCODE_PATH:-}" && -d "${XCODE_PATH}" ]]; then
             xcode_path="${XCODE_PATH}"
+          elif [[ -d "/Applications/Xcode.app" ]]; then
+            xcode_path="/Applications/Xcode.app"
           else
-            # Pick the newest installed Xcode by default (future-proof across runner image updates).
-            # Prefer versioned installs (Xcode_*.app) when available; fall back to Xcode.app.
-            xcode_path="$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -n 1 || true)"
-            if [[ -z "${xcode_path}" && -d "/Applications/Xcode.app" ]]; then
-              xcode_path="/Applications/Xcode.app"
-            fi
+            xcode_path="${beta_xcode_path}"
           fi
           if [[ -z "${xcode_path}" ]]; then
             echo "No suitable Xcode found on runner." >&2
@@ -57,15 +82,15 @@ jobs:
         run: sudo xcode-select -s "${{ steps.preflight.outputs.xcode_path }}"
 
       - name: Swift Version
-        run: swift --version
+        run: xcrun swift --version
 
       - name: Xcode Version
         run: xcodebuild -version
 
-      - name: Test InlineKit
-        working-directory: apple/InlineKit
-        run: swift test
+      - name: Build ${{ matrix.package }}
+        working-directory: ${{ matrix.path }}
+        run: xcrun swift build
 
-      - name: Test InlineUI
-        working-directory: apple/InlineUI
-        run: swift test
+      - name: Test ${{ matrix.package }}
+        working-directory: ${{ matrix.path }}
+        run: xcrun swift test ${{ matrix.test_args }}
