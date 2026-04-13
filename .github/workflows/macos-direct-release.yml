@@ -333,7 +333,7 @@ jobs:
           gh release upload "${tag}" build/macos-direct/Inline.dmg --clobber
 
       - name: Upload DMG
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: inline-macos-dmg
           path: build/macos-direct/Inline.dmg
