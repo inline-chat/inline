@@ -235,6 +235,34 @@ describe("WebSocketTransport", () => {
     randomSpy.mockRestore()
   })
 
+  it("dedupes reconnect scheduling when the same socket emits error then close", async () => {
+    vi.useFakeTimers()
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0)
+
+    const { WebSocketTransport } = await import("./ws-transport")
+    const { WebSocket } = await import("ws")
+
+    const transport = new WebSocketTransport({ url: "ws://example.test" })
+    await transport.start()
+    const sock = (WebSocket as any).__getLast()
+    sock.__open()
+
+    sock.__error(new Error("boom"))
+    sock.__close(1006, "bye")
+    await Promise.resolve()
+
+    const diagnostics = transport.getDiagnostics()
+    expect(diagnostics.reconnectCount).toBe(1)
+    expect(diagnostics.lastReconnectCause).toMatch(/^socket-(error|close):/)
+
+    const before = (WebSocket as any).__count()
+    await vi.runOnlyPendingTimersAsync()
+    expect((WebSocket as any).__count()).toBe(before + 1)
+
+    vi.useRealTimers()
+    randomSpy.mockRestore()
+  })
+
   it("records close diagnostics for debugging", async () => {
     vi.useFakeTimers()
     const { WebSocketTransport } = await import("./ws-transport")
