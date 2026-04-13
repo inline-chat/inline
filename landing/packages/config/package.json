@@ -10,6 +10,11 @@
       "default": "./src/index.ts"
     }
   },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "bunx oxlint --ignore-path ../../../.oxlintignore src",
+    "test": "bunx vitest run --passWithNoTests"
+  },
   "devDependencies": {
     "typescript": "^5.7.2"
   }

@@ -71,7 +71,11 @@
 
 ## Common Commands
 
-- Root: `bun run dev`, `bun run dev:server`, `bun run dev:web`, `bun run typecheck`, `bun run test`, `bun run lint`.
+- Root: `bun run dev`, `bun run dev:server`, `bun run generate:proto`, `bun run db:migrate`, `bun run db:generate`.
+- Checks: run the workspace-local `typecheck` / `lint` / `test` scripts from that package instead of guessing commands or using `bun x`.
+- App workspaces: `cd server && bun run typecheck|lint|test`, `cd landing && bun run typecheck|lint|test`, `cd desktop && bun run typecheck|lint|test`, `cd web && bun run typecheck|lint|test`.
+- Package workspaces: `cd packages/openclaw && bun run typecheck|lint|test`, `cd packages/mcp && bun run typecheck|lint|test`, `cd packages/sdk && bun run typecheck|lint|test`, `cd packages/protocol && bun run typecheck|lint|test`, `cd packages/bot-api && bun run typecheck|lint|test`, `cd packages/bot-api-types && bun run typecheck|lint|test`, `cd packages/oauth-core && bun run typecheck|lint|test`.
+- Nested workspaces: `cd landing/packages/client && bun run typecheck|lint|test`, `cd landing/packages/log && bun run typecheck|lint|test`, `cd landing/packages/protocol && bun run typecheck|lint|test`, `cd landing/packages/auth && bun run typecheck|lint|test`, `cd landing/packages/config && bun run typecheck|lint|test`, `cd server/packages/email-preview && bun run typecheck|lint|test`, `cd server/packages/email-templates && bun run typecheck|lint|test`, `cd scripts && bun run typecheck|lint|test`, `cd cli && bun run typecheck|lint|test`.
 - Protos: `bun run generate:proto`; per-language from `scripts/`: `bun run generate`.
 - DB: `cd server && bun run db:migrate`; create migration `bun run db:generate <name>`; inspect `bun run db:studio`.
 - Backend tests: `cd server && bun test src/__tests__/modules/...` (`DEBUG=1` for verbose).
@@ -123,7 +127,7 @@
 ## Web & Docs
 
 - Web stack: TanStack Router + Vite + StyleX/Tailwind; keep SSR-safe patterns.
-- Web commands: `cd landing && bun run dev|build|typecheck`.
+- Web commands: `cd landing && bun run dev|build|typecheck|lint|test`; `cd web && bun run typecheck|lint|test` for the current stub workspace.
 - Prefer existing tokens/utilities over ad-hoc CSS; keep light/dark behavior consistent.
 - Docs: routes in `landing/src/routes/docs/`, content in `landing/src/docs/content/`, nav in `landing/src/docs/nav.ts`.
 - Docs additions: add markdown page + route + nav entry; keep writing concise and practical.
