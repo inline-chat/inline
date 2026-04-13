@@ -13,6 +13,8 @@ actor AuthStore: Sendable {
   private let fallbackKeychain: KeychainSwift?
   private let userDefaultsKey: String
   private let readSnapshot: (KeychainSwift, KeychainSwift?, String) -> AuthSnapshot
+  private let mocked: Bool
+  private let namespace: String?
 
   private let cache: AuthSnapshotCache
 
@@ -32,12 +34,22 @@ actor AuthStore: Sendable {
     readSnapshot: ((KeychainSwift, KeychainSwift?, String) -> AuthSnapshot)? = nil
   ) {
     self.cache = cache
+    self.mocked = mocked
+    self.namespace = namespace
     primaryKeychain = AuthKeychainConfig.makePrimaryKeychain(mocked: mocked, namespace: namespace)
     fallbackKeychain = AuthKeychainConfig.makeFallbackKeychainIfNeeded(mocked: mocked, namespace: namespace)
 
     let prefix = AuthKeychainConfig.userDefaultsPrefix(mocked: mocked, namespace: namespace)
     userDefaultsKey = "\(prefix)userId"
-    self.readSnapshot = readSnapshot ?? Self.readSnapshot
+    self.readSnapshot = readSnapshot ?? { primaryKeychain, fallbackKeychain, userDefaultsKey in
+      Self.readSnapshot(
+        primaryKeychain: primaryKeychain,
+        fallbackKeychain: fallbackKeychain,
+        userDefaultsKey: userDefaultsKey,
+        mocked: mocked,
+        namespace: namespace
+      )
+    }
 
     var snapshotsContinuation: AsyncStream<AuthSnapshot>.Continuation!
     snapshots = AsyncStream(bufferingPolicy: .bufferingNewest(1)) { snapshotsContinuation = $0 }
@@ -70,6 +82,19 @@ actor AuthStore: Sendable {
   // MARK: - Public API
 
   func saveCredentials(token: String, userId: Int64) async {
+    if mocked {
+      AuthKeychainConfig.mockSet(token, forKey: Self.legacyTokenKey, namespace: namespace)
+      let record = AuthCredentials(userId: userId, token: token)
+      if let data = try? JSONEncoder().encode(record) {
+        AuthKeychainConfig.mockSet(data, forKey: Self.credentialsV2Key, namespace: namespace)
+      }
+      UserDefaults.standard.set(NSNumber(value: userId), forKey: userDefaultsKey)
+
+      log.info("AUTH2_SAVE mocked userId=\(userId)")
+      await update(AuthSnapshot(status: .authenticated(record), didHydrate: true))
+      return
+    }
+
     // Persist legacy token for backward compatibility with older builds.
     let legacySavedPrimary = primaryKeychain.set(
       token,
@@ -144,6 +169,16 @@ actor AuthStore: Sendable {
   }
 
   func logOut() async {
+    if mocked {
+      AuthKeychainConfig.mockDelete(Self.legacyTokenKey, namespace: namespace)
+      AuthKeychainConfig.mockDelete(Self.credentialsV2Key, namespace: namespace)
+      UserDefaults.standard.removeObject(forKey: userDefaultsKey)
+
+      log.info("AUTH2_LOGOUT mocked")
+      await update(AuthSnapshot(status: .unauthenticated, didHydrate: true))
+      return
+    }
+
     _ = primaryKeychain.delete(Self.legacyTokenKey)
     _ = primaryKeychain.delete(Self.credentialsV2Key)
     if let fallbackKeychain {
@@ -170,7 +205,7 @@ actor AuthStore: Sendable {
     }
 
     // If we recovered via macOS fallback keychain, re-save into primary access group.
-    if case let .authenticated(creds) = snapshot.status {
+    if mocked == false, case let .authenticated(creds) = snapshot.status {
       let legacySavedPrimary = primaryKeychain.set(
         creds.token,
         forKey: Self.legacyTokenKey,
@@ -300,12 +335,24 @@ actor AuthStore: Sendable {
   private static func readSnapshot(
     primaryKeychain: KeychainSwift,
     fallbackKeychain: KeychainSwift?,
-    userDefaultsKey: String
+    userDefaultsKey: String,
+    mocked: Bool,
+    namespace: String?
   ) -> AuthSnapshot {
     let userIdHint = readUserId(key: userDefaultsKey)
 
     // 1) Try v2 record first.
-    switch AuthKeychainConfig.readData(credentialsV2Key, primary: primaryKeychain, fallback: fallbackKeychain) {
+    let credentialsOutcome: KeychainReadOutcome<Data> = if mocked {
+      if let data = AuthKeychainConfig.mockGetData(credentialsV2Key, namespace: namespace) {
+        .success(data, usedFallback: false)
+      } else {
+        .notFound(status: errSecItemNotFound)
+      }
+    } else {
+      AuthKeychainConfig.readData(credentialsV2Key, primary: primaryKeychain, fallback: fallbackKeychain)
+    }
+
+    switch credentialsOutcome {
     case .success(let data, _):
       if let creds = try? JSONDecoder().decode(AuthCredentials.self, from: data) {
         return AuthSnapshot(status: .authenticated(creds), didHydrate: true)
@@ -321,7 +368,15 @@ actor AuthStore: Sendable {
     }
 
     // 2) Legacy token + userId hint.
-    let tokenOutcome = AuthKeychainConfig.readString(legacyTokenKey, primary: primaryKeychain, fallback: fallbackKeychain)
+    let tokenOutcome: KeychainReadOutcome<String> = if mocked {
+      if let token = AuthKeychainConfig.mockGetString(legacyTokenKey, namespace: namespace) {
+        .success(token, usedFallback: false)
+      } else {
+        .notFound(status: errSecItemNotFound)
+      }
+    } else {
+      AuthKeychainConfig.readString(legacyTokenKey, primary: primaryKeychain, fallback: fallbackKeychain)
+    }
 
     let token: String? = switch tokenOutcome {
     case .success(let token, _): token

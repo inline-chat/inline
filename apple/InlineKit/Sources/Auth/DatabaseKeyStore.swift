@@ -14,6 +14,13 @@ public enum DatabaseKeyStore {
   public static let keychainKey = "dbKey_v1"
 
   public static func load(mocked: Bool = false, namespace: String? = nil) -> DatabaseKeyAvailability {
+    if mocked {
+      if let key = AuthKeychainConfig.mockGetString(keychainKey, namespace: namespace) {
+        return .available(key: key)
+      }
+      return .notFound
+    }
+
     let primary = AuthKeychainConfig.makePrimaryKeychain(mocked: mocked, namespace: namespace)
     let fallback = AuthKeychainConfig.makeFallbackKeychainIfNeeded(mocked: mocked, namespace: namespace)
 
@@ -60,6 +67,12 @@ public enum DatabaseKeyStore {
     }
 
     let key = Data(bytes).base64EncodedString()
+
+    if mocked {
+      AuthKeychainConfig.mockSet(key, forKey: keychainKey, namespace: namespace)
+      return .available(key: key)
+    }
+
     let ok = primary.set(key, forKey: keychainKey, withAccess: .accessibleAfterFirstUnlock)
     if ok {
       return .available(key: key)
@@ -89,6 +102,11 @@ public enum DatabaseKeyStore {
   }
 
   public static func delete(mocked: Bool = false, namespace: String? = nil) {
+    if mocked {
+      AuthKeychainConfig.mockDelete(keychainKey, namespace: namespace)
+      return
+    }
+
     let primary = AuthKeychainConfig.makePrimaryKeychain(mocked: mocked, namespace: namespace)
     _ = primary.delete(keychainKey)
     if let fallback = AuthKeychainConfig.makeFallbackKeychainIfNeeded(mocked: mocked, namespace: namespace) {

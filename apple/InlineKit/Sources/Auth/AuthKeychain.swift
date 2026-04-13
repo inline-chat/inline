@@ -20,6 +20,11 @@ enum KeychainReadOutcome<Value> {
 }
 
 enum AuthKeychainConfig {
+  private static func mockStorageKey(_ key: String, namespace: String?) -> String {
+    let namespace = namespace?.isEmpty == false ? namespace! : "default"
+    return "mock_secure_\(namespace)_\(key)"
+  }
+
   static func keychainBasePrefix(userProfile: String?) -> String {
     #if os(macOS)
     #if DEBUG
@@ -96,6 +101,27 @@ enum AuthKeychainConfig {
 
   static func osStatusMessage(_ status: OSStatus) -> String {
     (SecCopyErrorMessageString(status, nil) as String?) ?? "OSStatus(\(status))"
+  }
+
+  static func mockGetData(_ key: String, namespace: String?) -> Data? {
+    UserDefaults.standard.data(forKey: mockStorageKey(key, namespace: namespace))
+  }
+
+  static func mockGetString(_ key: String, namespace: String?) -> String? {
+    guard let data = mockGetData(key, namespace: namespace) else { return nil }
+    return String(data: data, encoding: .utf8)
+  }
+
+  static func mockSet(_ data: Data, forKey key: String, namespace: String?) {
+    UserDefaults.standard.set(data, forKey: mockStorageKey(key, namespace: namespace))
+  }
+
+  static func mockSet(_ string: String, forKey key: String, namespace: String?) {
+    mockSet(Data(string.utf8), forKey: key, namespace: namespace)
+  }
+
+  static func mockDelete(_ key: String, namespace: String?) {
+    UserDefaults.standard.removeObject(forKey: mockStorageKey(key, namespace: namespace))
   }
 
   static func readData(_ key: String, primary: KeychainSwift, fallback: KeychainSwift?) -> KeychainReadOutcome<Data> {

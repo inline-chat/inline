@@ -11,7 +11,7 @@ struct UnreadReplayGuardTests {
   private let senderId: Int64 = 99
 
   private func makeInMemoryDB() throws -> DatabaseQueue {
-    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration())
+    let queue = try DatabaseQueue(configuration: AppDatabase.makeConfiguration(passphrase: "123"))
     _ = try AppDatabase(queue)
     return queue
   }

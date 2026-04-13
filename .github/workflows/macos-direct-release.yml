@@ -94,15 +94,18 @@ jobs:
           sw_vers
           echo "Available Xcodes:"
           ls -d /Applications/Xcode*.app 2>/dev/null || true
-          if [[ -n "${XCODE_PATH:-}" ]]; then
+          # Prefer the newest stable versioned Xcode install on CI so release builds stay
+          # on the latest stable toolchain even when the runner default lags behind.
+          stable_xcode_path="$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -v '_beta\\.app$' | sort -V | tail -n 1 || true)"
+          beta_xcode_path="$(ls -d /Applications/Xcode_*_beta.app 2>/dev/null | sort -V | tail -n 1 || true)"
+          if [[ -n "${stable_xcode_path}" ]]; then
+            xcode_path="${stable_xcode_path}"
+          elif [[ -n "${XCODE_PATH:-}" && -d "${XCODE_PATH}" ]]; then
             xcode_path="${XCODE_PATH}"
+          elif [[ -d "/Applications/Xcode.app" ]]; then
+            xcode_path="/Applications/Xcode.app"
           else
-            # Pick the newest installed Xcode by default (future-proof across runner image updates).
-            # Prefer versioned installs (Xcode_*.app) when available; fall back to Xcode.app.
-            xcode_path="$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -n 1 || true)"
-            if [[ -z "${xcode_path}" && -d "/Applications/Xcode.app" ]]; then
-              xcode_path="/Applications/Xcode.app"
-            fi
+            xcode_path="${beta_xcode_path}"
           fi
           if [[ -z "${xcode_path}" ]]; then
             echo "No suitable Xcode found on runner." >&2

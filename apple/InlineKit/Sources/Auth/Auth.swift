@@ -1,6 +1,5 @@
 import Combine
 import Foundation
-import KeychainSwift
 import Logger
 
 public final class Auth: ObservableObject, @unchecked Sendable {
@@ -40,21 +39,20 @@ public final class Auth: ObservableObject, @unchecked Sendable {
     let namespace = UUID().uuidString
 
     // Seed mock storage synchronously before the store reads from it.
-    let keychain = AuthKeychainConfig.makePrimaryKeychain(mocked: true, namespace: namespace)
     let prefix = AuthKeychainConfig.userDefaultsPrefix(mocked: true, namespace: namespace)
     let userDefaultsKey = "\(prefix)userId"
 
     if mockAuthenticated {
       let token = "1:mockToken"
-      _ = keychain.set(token, forKey: "token", withAccess: .accessibleAfterFirstUnlock)
+      AuthKeychainConfig.mockSet(token, forKey: "token", namespace: namespace)
       let creds = AuthCredentials(userId: 1, token: token)
       if let data = try? JSONEncoder().encode(creds) {
-        _ = keychain.set(data, forKey: "credentials_v2", withAccess: .accessibleAfterFirstUnlock)
+        AuthKeychainConfig.mockSet(data, forKey: "credentials_v2", namespace: namespace)
       }
       UserDefaults.standard.set(NSNumber(value: 1), forKey: userDefaultsKey)
     } else {
-      _ = keychain.delete("token")
-      _ = keychain.delete("credentials_v2")
+      AuthKeychainConfig.mockDelete("token", namespace: namespace)
+      AuthKeychainConfig.mockDelete("credentials_v2", namespace: namespace)
       UserDefaults.standard.removeObject(forKey: userDefaultsKey)
     }
 
