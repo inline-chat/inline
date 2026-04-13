@@ -709,7 +709,13 @@ actor WebSocketTransport: NSObject, Sendable {
         details += " recoverySuggestion=\(recoverySuggestion)"
       }
       log.warning("Disconnected with error (\(details))")
-      if shouldCaptureIssue(error: error, closeCode: closeCode, origin: origin) {
+      if shouldCaptureIssue(
+        error: error,
+        closeCode: closeCode,
+        origin: origin,
+        priorState: priorState,
+        httpStatus: httpStatus
+      ) {
         await captureTransportIssue(
           message: "WebSocket disconnected with error",
           origin: origin,
@@ -721,7 +727,13 @@ actor WebSocketTransport: NSObject, Sendable {
           ]
         )
       }
-    } else if shouldCaptureIssue(error: nil, closeCode: closeCode, origin: origin) {
+    } else if shouldCaptureIssue(
+      error: nil,
+      closeCode: closeCode,
+      origin: origin,
+      priorState: priorState,
+      httpStatus: httpStatus
+    ) {
       await captureTransportIssue(
         message: "WebSocket closed unexpectedly",
         origin: origin,
@@ -1030,22 +1042,46 @@ private extension WebSocketTransport {
   func shouldCaptureIssue(
     error: Error?,
     closeCode: URLSessionWebSocketTask.CloseCode?,
-    origin: TransportOrigin
+    origin: TransportOrigin,
+    priorState: TransportConnectionState,
+    httpStatus: Int?
   ) -> Bool {
+    if priorState == .disconnected {
+      return false
+    }
+
     if let error {
+      if error is CancellationError {
+        return false
+      }
+
+      if case TransportError.notConnected = error {
+        return false
+      }
+
       if case TransportError.connectionTimeout = error {
         return true
       }
 
       let nsError = error as NSError
+      if origin == .receive, nsError.domain == NSPOSIXErrorDomain {
+        switch nsError.code {
+          case 57, 89:
+            return false
+          default:
+            break
+        }
+      }
+
       if nsError.domain == NSURLErrorDomain {
         switch nsError.code {
           case NSURLErrorCancelled,
             NSURLErrorTimedOut,
             NSURLErrorNotConnectedToInternet,
-            NSURLErrorSecureConnectionFailed,
-            NSURLErrorNetworkConnectionLost:
+            NSURLErrorSecureConnectionFailed:
             return false
+          case NSURLErrorNetworkConnectionLost:
+            return origin == .didComplete && httpStatus == 101
           default:
             return true
         }
@@ -1065,6 +1101,7 @@ private extension WebSocketTransport {
   ) -> [String: String] {
     var tags: [String: String] = [
       "scope": "Realtime_TransportWS",
+      "transport_event": transportEvent(origin: origin, error: error, closeCode: closeCode),
       "ws_origin": origin.rawValue,
       "transport_state": connectionState.sentryValue,
       "network_available": networkAvailable ? "true" : "false",
@@ -1125,6 +1162,7 @@ private extension WebSocketTransport {
     data extra: [String: Any] = [:]
   ) -> [String: Any] {
     var data: [String: Any] = [
+      "transport_event": transportEvent(origin: origin, error: error, closeCode: closeCode),
       "ws_origin": origin.rawValue,
       "transport_state": connectionState.sentryValue,
       "running": running,
@@ -1211,5 +1249,25 @@ private extension WebSocketTransport {
 
     let nsError = error as NSError
     return ("nserror", nsError.domain, String(nsError.code))
+  }
+
+  func transportEvent(
+    origin: TransportOrigin,
+    error: Error?,
+    closeCode: URLSessionWebSocketTask.CloseCode?
+  ) -> String {
+    if let error, case TransportError.connectionTimeout = error {
+      return "connect_timeout"
+    }
+
+    if error != nil {
+      return "disconnect_error"
+    }
+
+    if origin == .didClose, let closeCode, closeCode != .normalClosure, closeCode != .goingAway {
+      return "unexpected_close"
+    }
+
+    return "transport_issue"
   }
 }
