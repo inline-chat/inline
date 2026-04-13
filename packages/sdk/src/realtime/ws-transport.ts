@@ -67,6 +67,13 @@ export class WebSocketTransport implements Transport {
   async reconnect(options?: TransportReconnectOptions) {
     const skipDelay = options?.skipDelay ?? false
 
+    // A single socket failure often emits both `error` and `close`. Once a
+    // reconnect timer exists, keep the first scheduled retry and ignore
+    // duplicate reschedules from the same disconnect cycle.
+    if (this.state === "connecting" && this.reconnectionTimer) {
+      return
+    }
+
     await this.setConnecting()
     this.cleanUpPreviousConnection()
 
