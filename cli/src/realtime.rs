@@ -1,5 +1,6 @@
 use futures_util::{SinkExt, StreamExt};
 use prost::Message;
+use std::process::Command;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use url::Url;
@@ -100,6 +101,7 @@ impl RealtimeClient {
             build_number: None,
             layer: None,
             client_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+            os_version: current_os_version(),
         };
 
         let message = proto::ClientMessage {
@@ -217,4 +219,37 @@ fn current_epoch_seconds() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+fn current_os_version() -> Option<String> {
+    let mut cmd = match std::env::consts::OS {
+        "macos" => {
+            let mut cmd = Command::new("sw_vers");
+            cmd.arg("-productVersion");
+            cmd
+        }
+        "linux" => {
+            let mut cmd = Command::new("uname");
+            cmd.arg("-r");
+            cmd
+        }
+        "windows" => {
+            let mut cmd = Command::new("cmd");
+            cmd.args(["/C", "ver"]);
+            cmd
+        }
+        _ => return Some(std::env::consts::OS.to_string()),
+    };
+
+    let output = cmd.output().ok()?;
+    if !output.status.success() {
+        return Some(std::env::consts::OS.to_string());
+    }
+
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if value.is_empty() {
+        return Some(std::env::consts::OS.to_string());
+    }
+
+    Some(value)
 }
