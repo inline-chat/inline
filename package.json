@@ -25,7 +25,8 @@
   },
   "devDependencies": {
     "@types/bun": "^1.3.5",
-    "oxlint": "^1.39.0"
+    "oxlint": "^1.39.0",
+    "typescript": "^5.8.3"
   },
   "dependencies": {
     "zustand": "^5.0.9"

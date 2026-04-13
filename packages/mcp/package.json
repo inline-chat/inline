@@ -18,6 +18,7 @@
     "dev": "bun --watch src/main.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "bunx oxlint --ignore-path ../../.oxlintignore src vitest.config.ts",
     "test": "vitest run --coverage"
   },
   "dependencies": {

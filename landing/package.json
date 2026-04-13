@@ -6,7 +6,8 @@
     "dev": "vite dev",
     "build": "vite build",
     "start": "bun run .output/server/index.mjs",
-    "typecheck": "tsc",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "bunx oxlint --ignore-path ../.oxlintignore src packages vite.config.ts vitest.config.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

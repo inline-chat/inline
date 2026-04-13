@@ -17,6 +17,7 @@
   "scripts": {
     "build": "bun run --cwd ../bot-api-types build && tsc -p tsconfig.json",
     "typecheck": "bun run --cwd ../bot-api-types build && tsc -p tsconfig.json --noEmit",
+    "lint": "bunx oxlint --ignore-path ../../.oxlintignore src vitest.config.ts",
     "test": "vitest run --coverage"
   },
   "dependencies": {

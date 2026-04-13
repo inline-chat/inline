@@ -2,6 +2,9 @@
   "name": "@inline-chat/cli",
   "private": true,
   "scripts": {
+    "typecheck": "cargo check",
+    "lint": "cargo clippy --all-targets -- -D warnings",
+    "test": "cargo test",
     "release:cli": "cd ../scripts && bun run release:cli"
   }
 }

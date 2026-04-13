@@ -17,6 +17,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "bunx oxlint --ignore-path ../../.oxlintignore src",
     "test": "bun test"
   },
   "devDependencies": {

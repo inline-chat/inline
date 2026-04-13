@@ -11,9 +11,10 @@
     }
   },
   "scripts": {
+    "lint": "bunx oxlint --ignore-path ../../../.oxlintignore src vitest.config.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@inline/auth": "workspace:*",

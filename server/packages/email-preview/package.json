@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "bun --watch src/index.tsx",
-    "start": "bun src/index.tsx"
+    "start": "bun src/index.tsx",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "bunx oxlint --ignore-path ../../../.oxlintignore src",
+    "test": "echo \"No tests yet for @inline-chat/email-preview\""
   },
   "dependencies": {
     "@inline-chat/email-templates": "workspace:*",
@@ -13,5 +16,11 @@
     "@react-email/render": "^2.0.4",
     "react": "^19.2.3",
     "react-dom": "^19.2.3"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.5",
+    "@types/react": "^19.2.9",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "^5.8.3"
   }
 }

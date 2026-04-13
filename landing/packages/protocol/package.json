@@ -18,6 +18,11 @@
       "default": "./src/client.ts"
     }
   },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "bunx oxlint --ignore-path ../../../.oxlintignore src",
+    "test": "bunx vitest run --passWithNoTests"
+  },
   "dependencies": {
     "@protobuf-ts/runtime": "^2.11.1"
   },
