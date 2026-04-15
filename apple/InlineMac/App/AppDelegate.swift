@@ -40,9 +40,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Disable native tabbing
     NSWindow.allowsAutomaticWindowTabbing = false
 
-    // Disable the bug with TableView
-    // https://christiantietze.de/posts/2022/11/nstableview-variable-row-heights-broken-macos-ventura-13-0/
-    UserDefaults.standard.set(false, forKey: "NSTableViewCanEstimateRowHeights")
+    registerMacGlobalSettings()
 
     // Setup Notifications Delegate
     setupNotifications()
@@ -133,6 +131,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 //      }
 //    }
     restoreMainWindowAfterActivationIfNeeded()
+  }
+
+  private func registerMacGlobalSettings() {
+    UserDefaults.standard.register(defaults: [
+      // NSTableView row-height estimation is broken for variable-height rows on AppKit.
+      // Keep this off so message list layout stays stable.
+      "NSTableViewCanEstimateRowHeights": false,
+
+      // Disable macOS SMS one-time-code autofill heuristics inside Inline inputs.
+      "NSAutoFillHeuristicControllerEnabled": false,
+    ])
   }
 
   @MainActor private func setupMainWindow() {
