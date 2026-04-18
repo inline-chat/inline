@@ -77,6 +77,10 @@ public enum ComposeSendEligibility {
     hasPendingVideos: Bool,
     hasActiveAttachmentUploads: Bool
   ) -> Bool {
+    if hasActiveAttachmentUploads, hasAttachments || hasForward {
+      return false
+    }
+
     if hasText {
       return true
     }
@@ -90,6 +94,12 @@ public enum ComposeSendEligibility {
     hasPendingVideos: Bool,
     hasActiveAttachmentUploads: Bool
   ) -> Bool {
+    false
+  }
+}
+
+public enum ComposeAttachmentUploadBehavior {
+  public static func shouldStartUploadsInCompose() -> Bool {
     false
   }
 }

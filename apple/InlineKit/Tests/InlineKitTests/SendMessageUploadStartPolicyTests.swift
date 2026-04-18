@@ -68,4 +68,35 @@ struct SendMessageUploadStartPolicyTests {
 
     #expect(resolvedLocalId == expectedLocalId)
   }
+
+  @Test("createLocalVideo returns a persisted local id that survives server id rewrites")
+  func createLocalVideoReturnsPersistedLocalId() async throws {
+    let video = try MediaHelpers.shared.createLocalVideo(
+      width: 16,
+      height: 16,
+      duration: 1,
+      size: 128,
+      localPath: "test-\(UUID().uuidString).mp4"
+    )
+
+    let localId = try #require(video.id)
+
+    try await AppDatabase.shared.dbWriter.write { db in
+      try AppDatabase.updateVideoWithServerId(db, localVideo: video, serverId: Int64.random(in: 1 ... Int64.max))
+    }
+
+    let resolvedLocalId = try await FileUploader.shared.resolveLocalVideoId(for: video)
+    #expect(resolvedLocalId == localId)
+  }
+
+  @Test("createLocalDocument returns a persisted local id")
+  func createLocalDocumentReturnsPersistedLocalId() throws {
+    let document = try MediaHelpers.shared.createLocalDocument(
+      fileName: "test.txt",
+      mimeType: "text/plain",
+      size: 16
+    )
+
+    #expect(document.id != nil)
+  }
 }
