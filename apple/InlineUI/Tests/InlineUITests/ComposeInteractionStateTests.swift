@@ -118,8 +118,8 @@ struct ComposeInteractionStateTests {
     #expect(shouldShowImmediately == false)
   }
 
-  @Test("text can send while attachments are still uploading")
-  func sendEligibilityAllowsTextDuringUpload() async throws {
+  @Test("attachment sends are blocked while uploads are already in flight")
+  func sendEligibilityBlocksAttachmentSendDuringUpload() async throws {
     let canSend = ComposeSendEligibility.canSend(
       hasText: true,
       hasAttachments: true,
@@ -128,7 +128,7 @@ struct ComposeInteractionStateTests {
       hasActiveAttachmentUploads: true
     )
 
-    #expect(canSend == true)
+    #expect(canSend == false)
   }
 
   @Test("attachment-only send is allowed while pending video preprocessing is in progress")
@@ -144,8 +144,8 @@ struct ComposeInteractionStateTests {
     #expect(canSend == true)
   }
 
-  @Test("attachment-only send is allowed while uploads are already in flight")
-  func sendEligibilityAllowsAttachmentOnlyDuringUpload() async throws {
+  @Test("attachment-only send is blocked while uploads are already in flight")
+  func sendEligibilityBlocksAttachmentOnlyDuringUpload() async throws {
     let canSend = ComposeSendEligibility.canSend(
       hasText: false,
       hasAttachments: true,
@@ -154,7 +154,14 @@ struct ComposeInteractionStateTests {
       hasActiveAttachmentUploads: true
     )
 
-    #expect(canSend == true)
+    #expect(canSend == false)
+  }
+
+  @Test("compose does not prestart attachment uploads")
+  func attachmentUploadsDoNotStartInCompose() async throws {
+    let shouldStartUploads = ComposeAttachmentUploadBehavior.shouldStartUploadsInCompose()
+
+    #expect(shouldStartUploads == false)
   }
 
   @Test("pending video only can be sent")

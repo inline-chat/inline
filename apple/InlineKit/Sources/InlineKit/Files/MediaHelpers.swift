@@ -166,7 +166,7 @@ final class MediaHelpers: Sendable {
       let tempId = Int64(bitPattern: UInt64(arc4random()) | (UInt64(arc4random()) << 32)) * -1
 
       // Create and save the video
-      var video = Video(
+      let video = Video(
         videoId: tempId,
         date: Date(),
         width: width,
@@ -177,9 +177,7 @@ final class MediaHelpers: Sendable {
         cdnUrl: nil,
         localPath: localPath
       )
-      try video.insert(db)
-
-      return video
+      return try video.insertAndFetch(db)
     }
   }
 
@@ -293,7 +291,7 @@ final class MediaHelpers: Sendable {
       let tempId = Int64(bitPattern: UInt64(arc4random()) | (UInt64(arc4random()) << 32)) * -1
 
       // Create and save the document
-      var document = Document(
+      let document = Document(
         documentId: tempId,
         date: Date(),
         fileName: fileName,
@@ -303,9 +301,7 @@ final class MediaHelpers: Sendable {
         localPath: nil,
         thumbnailPhotoId: thumbnail?.id
       )
-      try document.insert(db)
-
-      return document
+      return try document.insertAndFetch(db)
     }
   }
 

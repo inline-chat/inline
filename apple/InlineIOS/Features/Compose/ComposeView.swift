@@ -75,6 +75,8 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   private var documentInteractionController: UIDocumentInteractionController?
 
   private var hasActiveAttachmentUploads: Bool {
+    guard ComposeAttachmentUploadBehavior.shouldStartUploadsInCompose() else { return false }
+
     for attachmentId in attachmentItems.keys {
       if attachmentUploadStartTasks[attachmentId] != nil || attachmentUploadBindingTasks[attachmentId] != nil {
         return true
@@ -1171,6 +1173,11 @@ class ComposeView: UIView, NSTextLayoutManagerDelegate {
   }
 
   private func syncAttachmentUploadTracking(cancelRemovedUploads: Bool = true) {
+    guard ComposeAttachmentUploadBehavior.shouldStartUploadsInCompose() else {
+      clearAttachmentUploadTracking(cancelUploads: cancelRemovedUploads)
+      return
+    }
+
     let currentAttachmentIds = Set(attachmentItems.keys)
 
     for trackedId in Set(attachmentUploadProgress.keys) where !currentAttachmentIds.contains(trackedId) {
