@@ -176,9 +176,9 @@ public actor RealtimeV2 {
           self.log.error("Realtime handshake failed due to missing auth token")
           await self.handleMissingAuthTokenHandshakeFailure()
 
-        case .connectionError:
-          self.log.error("Received server connection error during handshake")
-          await self.handleConnectionErrorDuringHandshake()
+        case let .connectionError(reason):
+          self.log.error("Received server connection error during handshake reason=\(reason)")
+          await self.handleConnectionErrorDuringHandshake(reason: reason)
 
         default:
           break
@@ -432,6 +432,21 @@ public actor RealtimeV2 {
     }
   }
 
+  public func revokeSession(_ sessionID: Int64) async throws -> InlineProtocol.RevokeSessionResult {
+    let result = try await callRpcDirect(
+      method: .revokeSession,
+      input: .revokeSession(.with {
+        $0.sessionID = sessionID
+      })
+    )
+
+    guard case let .revokeSession(revokeResult)? = result else {
+      throw RealtimeDirectRpcError.rpcError(message: "Unexpected revokeSession response", code: 500)
+    }
+
+    return revokeResult
+  }
+
   public func cancelTransaction(where predicate: @escaping @Sendable (TransactionWrapper) -> Bool) {
     Task { [predicate] in
       await transactions.cancel(where: predicate)
@@ -525,9 +540,14 @@ public actor RealtimeV2 {
     NotificationCenter.default.post(name: .realtimeV2ConnectionInitFailed, object: nil)
   }
 
-  /// Server-side `connectionError` is generic; only treat it as a restart-worthy failure
-  /// when local auth refresh confirms the token is actually missing.
-  private func handleConnectionErrorDuringHandshake() async {
+  private func handleConnectionErrorDuringHandshake(reason: InlineProtocol.ConnectionError.Reason) async {
+    if reason == .sessionRevoked || reason == .invalidAuth {
+      log.error("Realtime handshake failed because auth was invalidated")
+      await connectionManager.setAuthAvailable(false)
+      NotificationCenter.default.post(name: .realtimeV2AuthInvalidated, object: nil)
+      return
+    }
+
     await auth.refreshFromStorage()
 
     guard isMissingAuthToken() else { return }

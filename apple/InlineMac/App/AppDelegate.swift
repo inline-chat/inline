@@ -45,7 +45,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Setup Notifications Delegate
     setupNotifications()
 
-    dependencies.logOut = logOut
+    dependencies.logOut = { [weak self] in
+      await self?.logOut()
+    }
   }
 
   func applicationDidFinishLaunching(_: Notification) {
@@ -54,6 +56,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     setupMainWindow()
     setupMainMenu()
     setupRealtimeConnectionFailureObserver()
+    setupRealtimeAuthInvalidatedObserver()
     setupGlobalFocusHotkey()
     setupNotificationsSoundSetting()
     launchAtLoginController.start()
@@ -301,6 +304,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     )
   }
 
+  private func setupRealtimeAuthInvalidatedObserver() {
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleRealtimeAuthInvalidatedNotification),
+      name: .realtimeV2AuthInvalidated,
+      object: nil
+    )
+  }
+
+  @objc private func handleRealtimeAuthInvalidatedNotification() {
+    Task { [weak self] in
+      await self?.logOut(notifyServer: false)
+    }
+  }
+
   @objc private func handleRealtimeConnectionFailureNotification() {
     Task { @MainActor [weak self] in
       self?.presentRealtimeConnectionFailureAlertIfNeeded()
@@ -519,7 +537,7 @@ extension AppDelegate {
     AppMenu.shared.setupMainMenu(dependencies: dependencies)
   }
 
-  private func logOut() async {
+  private func logOut(notifyServer: Bool = true) async {
     // Navigate outside of the app
     DispatchQueue.main.async {
       self.dependencies.viewModel.navigate(.onboarding)
@@ -530,7 +548,9 @@ extension AppDelegate {
     }
 
     Task {
-      _ = try? await ApiClient.shared.logout()
+      if notifyServer {
+        _ = try? await ApiClient.shared.logout()
+      }
 
       Analytics.logout()
 

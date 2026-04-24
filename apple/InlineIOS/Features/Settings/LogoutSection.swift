@@ -1,7 +1,4 @@
-import Auth
 import InlineKit
-import Logger
-import Sentry
 import SwiftUI
 
 struct LogoutSection: View {
@@ -54,68 +51,12 @@ struct LogoutSection: View {
 //  }
 
   private func performLogout() async {
-    do {
-      // 1. Close active connections first
-      await Realtime.shared.loggedOut()
-
-      do {
-        try await withThrowingTaskGroup(of: Void.self) { group in
-          // Tell server about logout
-          group.addTask {
-            _ = try await ApiClient.shared.logout()
-          }
-
-          // Timeout
-          group.addTask {
-            try await Task.sleep(nanoseconds: 2 * 1_000_000_000) // 2 seconds
-            throw TimeoutError()
-          }
-
-          // Return first completed result or throw error
-          let result = try await group.next()!
-          group.cancelAll() // Cancel other tasks
-          return result
-        }
-      } catch {
-        // Handle logout error
-        Log.shared.error("Logout API call failed: \(error.localizedDescription)")
-      }
-
-      // 2. Clear analytics user
-      Analytics.logout()
-
-      // 3. Clear local authentication state
-      await Auth.shared.logOut()
-
-      // 4. Clear database (loggedOut() already calls clearDB() internally)
-      try AppDatabase.loggedOut()
-
-      // 5. Clear pending transactions
-      Transactions.shared.clearAll()
-
-      // 6. Clear app state that's persisted in UserDefaults
-      await MainActor.run {
-        TabsManager.shared.reset()
-        TabsManager.shared.clearActiveSpaceId()
-        ChatState.shared.reset()
-        navigation.reset()
-      }
-
-      // 7. Update UI on main thread
-      await MainActor.run {
-        mainRouter.setRoute(route: .onboarding)
-        onboardingNavigation.reset()
-        router.reset()
-      }
-    } catch {
-      // Show error to user
-      Log.shared.error("Logout failed: \(error.localizedDescription)")
-    }
-  }
-}
-
-struct TimeoutError: Error {
-  var localizedDescription: String {
-    "Logout timed out."
+    await LogoutPerformer.perform(
+      notifyServer: true,
+      mainRouter: mainRouter,
+      navigation: navigation,
+      onboardingNavigation: onboardingNavigation,
+      router: router
+    )
   }
 }
