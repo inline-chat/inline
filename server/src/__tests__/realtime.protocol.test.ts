@@ -7,7 +7,7 @@ import {
   wsSendClientProtocolMessage,
   wsServerProtocolMessage,
 } from "@in/server/realtime/test/utils"
-import { Method, PushNotificationProvider, RpcError_Code } from "@inline-chat/protocol/core"
+import { ConnectionError_Reason, Method, PushNotificationProvider, RpcError_Code } from "@inline-chat/protocol/core"
 import { db } from "@in/server/db"
 import { sessions } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
@@ -66,7 +66,7 @@ describe("realtime protocol safety", () => {
 
     const openMessage = await wsServerProtocolMessage(ws)
     expect(openMessage.body.oneofKind).toBe("connectionOpen")
-    return { ws, sessionId: session.id }
+    return { ws, userId: user.id, sessionId: session.id }
   }
 
   it("closes socket for text payloads", async () => {
@@ -99,6 +99,35 @@ describe("realtime protocol safety", () => {
 
     const message = await wsServerProtocolMessage(ws)
     expect(message.body.oneofKind).toBe("connectionError")
+    if (message.body.oneofKind === "connectionError") {
+      expect(message.body.connectionError.reason).toBe(ConnectionError_Reason.INVALID_AUTH)
+    }
+    await wsClosed(ws)
+  })
+
+  it("returns sessionRevoked connectionError when connectionInit token is revoked", async () => {
+    const ws = await openRealtimeSocket()
+    const user = await testUtils.createUser("realtime-revoked-auth@test.com")
+    const { token, session } = await testUtils.createSessionForUser(user.id, { clientType: "ios" })
+
+    await db.update(sessions).set({ revoked: new Date() }).where(eq(sessions.id, session.id))
+
+    wsSendClientProtocolMessage(ws, {
+      id: 11n,
+      seq: 1,
+      body: {
+        oneofKind: "connectionInit",
+        connectionInit: {
+          token,
+        },
+      },
+    })
+
+    const message = await wsServerProtocolMessage(ws)
+    expect(message.body.oneofKind).toBe("connectionError")
+    if (message.body.oneofKind === "connectionError") {
+      expect(message.body.connectionError.reason).toBe(ConnectionError_Reason.SESSION_REVOKED)
+    }
     await wsClosed(ws)
   })
 
@@ -263,6 +292,50 @@ describe("realtime protocol safety", () => {
     expect(session?.pushContentKeyId).toBe("key-v1")
     expect(session?.pushContentKeyAlgorithm).toBe("X25519_HKDF_SHA256_AES256_GCM")
     expect(session?.pushContentVersion).toBe(1)
+
+    await wsClosed(ws)
+  })
+
+  it("revokes another session via RPC", async () => {
+    const { ws, userId } = await authenticateSocket()
+    const otherSession = await testUtils.createSessionForUser(userId, { clientType: "macos" })
+
+    wsSendClientProtocolMessage(ws, {
+      id: 600n,
+      seq: 2,
+      body: {
+        oneofKind: "rpcCall",
+        rpcCall: {
+          method: Method.REVOKE_SESSION,
+          input: {
+            oneofKind: "revokeSession",
+            revokeSession: {
+              sessionId: BigInt(otherSession.session.id),
+            },
+          },
+        },
+      },
+    })
+
+    const response = await wsServerProtocolMessage(ws)
+    expect(response.body.oneofKind).toBe("rpcResult")
+    if (response.body.oneofKind === "rpcResult") {
+      expect(response.body.rpcResult.reqMsgId).toBe(600n)
+      expect(response.body.rpcResult.result.oneofKind).toBe("revokeSession")
+      if (response.body.rpcResult.result.oneofKind === "revokeSession") {
+        expect(response.body.rpcResult.result.revokeSession.revoked).toBe(true)
+        expect(response.body.rpcResult.result.revokeSession.alreadyRevoked).toBe(false)
+      }
+    }
+
+    const revoked = await db
+      .select({ revoked: sessions.revoked, active: sessions.active })
+      .from(sessions)
+      .where(eq(sessions.id, otherSession.session.id))
+      .limit(1)
+      .then((rows) => rows[0])
+    expect(revoked?.revoked).not.toBeNull()
+    expect(revoked?.active).toBe(false)
 
     await wsClosed(ws)
   })

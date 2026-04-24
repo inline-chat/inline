@@ -107,6 +107,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case reserveChatIds // = 47
   case invokeMessageAction // = 48
   case answerMessageAction // = 49
+  case revokeSession // = 50
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -165,6 +166,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 47: self = .reserveChatIds
     case 48: self = .invokeMessageAction
     case 49: self = .answerMessageAction
+    case 50: self = .revokeSession
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -221,6 +223,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .reserveChatIds: return 47
     case .invokeMessageAction: return 48
     case .answerMessageAction: return 49
+    case .revokeSession: return 50
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -277,6 +280,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .reserveChatIds,
     .invokeMessageAction,
     .answerMessageAction,
+    .revokeSession,
   ]
 
 }
@@ -673,7 +677,51 @@ public struct ConnectionError: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
+  public var reason: ConnectionError.Reason = .unspecified
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public enum Reason: SwiftProtobuf.Enum, Swift.CaseIterable {
+    public typealias RawValue = Int
+    case unspecified // = 0
+    case unauthorized // = 1
+    case invalidAuth // = 2
+    case sessionRevoked // = 3
+    case UNRECOGNIZED(Int)
+
+    public init() {
+      self = .unspecified
+    }
+
+    public init?(rawValue: Int) {
+      switch rawValue {
+      case 0: self = .unspecified
+      case 1: self = .unauthorized
+      case 2: self = .invalidAuth
+      case 3: self = .sessionRevoked
+      default: self = .UNRECOGNIZED(rawValue)
+      }
+    }
+
+    public var rawValue: Int {
+      switch self {
+      case .unspecified: return 0
+      case .unauthorized: return 1
+      case .invalidAuth: return 2
+      case .sessionRevoked: return 3
+      case .UNRECOGNIZED(let i): return i
+      }
+    }
+
+    // The compiler won't synthesize support with the UNRECOGNIZED case.
+    public static let allCases: [ConnectionError.Reason] = [
+      .unspecified,
+      .unauthorized,
+      .invalidAuth,
+      .sessionRevoked,
+    ]
+
+  }
 
   public init() {}
 }
@@ -3169,6 +3217,14 @@ public struct RpcCall: Sendable {
     set {input = .answerMessageAction(newValue)}
   }
 
+  public var revokeSession: RevokeSessionInput {
+    get {
+      if case .revokeSession(let v)? = input {return v}
+      return RevokeSessionInput()
+    }
+    set {input = .revokeSession(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Input: Equatable, Sendable {
@@ -3221,6 +3277,7 @@ public struct RpcCall: Sendable {
     case reserveChatIds(ReserveChatIdsInput)
     case invokeMessageAction(InvokeMessageActionInput)
     case answerMessageAction(AnswerMessageActionInput)
+    case revokeSession(RevokeSessionInput)
 
   }
 
@@ -3634,6 +3691,14 @@ public struct RpcResult: @unchecked Sendable {
     set {_uniqueStorage()._result = .answerMessageAction(newValue)}
   }
 
+  public var revokeSession: RevokeSessionResult {
+    get {
+      if case .revokeSession(let v)? = _storage._result {return v}
+      return RevokeSessionResult()
+    }
+    set {_uniqueStorage()._result = .revokeSession(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Result: Equatable, Sendable {
@@ -3686,6 +3751,7 @@ public struct RpcResult: @unchecked Sendable {
     case reserveChatIds(ReserveChatIdsResult)
     case invokeMessageAction(InvokeMessageActionResult)
     case answerMessageAction(AnswerMessageActionResult)
+    case revokeSession(RevokeSessionResult)
 
   }
 
@@ -4253,6 +4319,32 @@ public struct ListBotsResult: Sendable {
   // methods supported on all messages.
 
   public var bots: [User] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct RevokeSessionInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var sessionID: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct RevokeSessionResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var revoked: Bool = false
+
+  public var alreadyRevoked: Bool = false
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -8181,6 +8273,7 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     47: .same(proto: "RESERVE_CHAT_IDS"),
     48: .same(proto: "INVOKE_MESSAGE_ACTION"),
     49: .same(proto: "ANSWER_MESSAGE_ACTION"),
+    50: .same(proto: "REVOKE_SESSION"),
   ]
 }
 
@@ -8690,21 +8783,43 @@ extension ConnectionOpen: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
 
 extension ConnectionError: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = "ConnectionError"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "reason"),
+  ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    // Load everything into unknown fields
-    while try decoder.nextFieldNumber() != nil {}
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularEnumField(value: &self.reason) }()
+      default: break
+      }
+    }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.reason != .unspecified {
+      try visitor.visitSingularEnumField(value: self.reason, fieldNumber: 1)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: ConnectionError, rhs: ConnectionError) -> Bool {
+    if lhs.reason != rhs.reason {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
+}
+
+extension ConnectionError.Reason: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    0: .same(proto: "REASON_UNSPECIFIED"),
+    1: .same(proto: "UNAUTHORIZED"),
+    2: .same(proto: "INVALID_AUTH"),
+    3: .same(proto: "SESSION_REVOKED"),
+  ]
 }
 
 extension Ping: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
@@ -11715,6 +11830,7 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     48: .same(proto: "reserveChatIds"),
     49: .same(proto: "invokeMessageAction"),
     50: .same(proto: "answerMessageAction"),
+    51: .same(proto: "revokeSession"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -12361,6 +12477,19 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
           self.input = .answerMessageAction(v)
         }
       }()
+      case 51: try {
+        var v: RevokeSessionInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .revokeSession(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .revokeSession(v)
+        }
+      }()
       default: break
       }
     }
@@ -12571,6 +12700,10 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       guard case .answerMessageAction(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 50)
     }()
+    case .revokeSession?: try {
+      guard case .revokeSession(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 51)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -12637,6 +12770,7 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     48: .same(proto: "reserveChatIds"),
     49: .same(proto: "invokeMessageAction"),
     50: .same(proto: "answerMessageAction"),
+    51: .same(proto: "revokeSession"),
   ]
 
   fileprivate class _StorageClass {
@@ -13314,6 +13448,19 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
             _storage._result = .answerMessageAction(v)
           }
         }()
+        case 51: try {
+          var v: RevokeSessionResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .revokeSession(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .revokeSession(v)
+          }
+        }()
         default: break
         }
       }
@@ -13525,6 +13672,10 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
       case .answerMessageAction?: try {
         guard case .answerMessageAction(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 50)
+      }()
+      case .revokeSession?: try {
+        guard case .revokeSession(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 51)
       }()
       case nil: break
       }
@@ -14636,6 +14787,76 @@ extension ListBotsResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplement
 
   public static func ==(lhs: ListBotsResult, rhs: ListBotsResult) -> Bool {
     if lhs.bots != rhs.bots {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension RevokeSessionInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "RevokeSessionInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "session_id"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.sessionID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.sessionID != 0 {
+      try visitor.visitSingularInt64Field(value: self.sessionID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: RevokeSessionInput, rhs: RevokeSessionInput) -> Bool {
+    if lhs.sessionID != rhs.sessionID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension RevokeSessionResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "RevokeSessionResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "revoked"),
+    2: .standard(proto: "already_revoked"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularBoolField(value: &self.revoked) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self.alreadyRevoked) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.revoked != false {
+      try visitor.visitSingularBoolField(value: self.revoked, fieldNumber: 1)
+    }
+    if self.alreadyRevoked != false {
+      try visitor.visitSingularBoolField(value: self.alreadyRevoked, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: RevokeSessionResult, rhs: RevokeSessionResult) -> Bool {
+    if lhs.revoked != rhs.revoked {return false}
+    if lhs.alreadyRevoked != rhs.alreadyRevoked {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

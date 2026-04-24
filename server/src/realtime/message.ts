@@ -1,9 +1,7 @@
 import { connectionManager } from "@in/server/ws/connections"
 import {
   ClientMessage,
-  ConnectionInit,
   Method,
-  RpcError,
   RpcError_Code,
   RpcResult,
   ServerMessage,
@@ -12,9 +10,10 @@ import {
 } from "@inline-chat/protocol/core"
 import type { HandlerContext, RootContext, Ws } from "./types"
 import { handleConnectionInit } from "@in/server/realtime/handlers/_connectionInit"
-import { Log, LogLevel } from "@in/server/utils/log"
+import { Log } from "@in/server/utils/log"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { InlineError } from "@in/server/types/errors"
+import { getConnectionReasonFromAuthError } from "@in/server/controllers/plugins"
 
 const log = new Log("realtime")
 
@@ -129,9 +128,10 @@ export const handleMessage = async (message: ClientMessage, rootContext: RootCon
           }
         } catch (e) {
           log.error("error handling message in connectionInit", e)
+          const reason = getConnectionReasonFromAuthError(e)
           sendRaw({
             id: message.id,
-            body: { oneofKind: "connectionError", connectionError: {} },
+            body: { oneofKind: "connectionError", connectionError: { reason } },
           })
         }
         break

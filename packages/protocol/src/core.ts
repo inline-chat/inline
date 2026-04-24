@@ -189,6 +189,31 @@ export interface ConnectionOpen {
  * @generated from protobuf message ConnectionError
  */
 export interface ConnectionError {
+    /**
+     * @generated from protobuf field: ConnectionError.Reason reason = 1;
+     */
+    reason: ConnectionError_Reason;
+}
+/**
+ * @generated from protobuf enum ConnectionError.Reason
+ */
+export enum ConnectionError_Reason {
+    /**
+     * @generated from protobuf enum value: REASON_UNSPECIFIED = 0;
+     */
+    REASON_UNSPECIFIED = 0,
+    /**
+     * @generated from protobuf enum value: UNAUTHORIZED = 1;
+     */
+    UNAUTHORIZED = 1,
+    /**
+     * @generated from protobuf enum value: INVALID_AUTH = 2;
+     */
+    INVALID_AUTH = 2,
+    /**
+     * @generated from protobuf enum value: SESSION_REVOKED = 3;
+     */
+    SESSION_REVOKED = 3
 }
 /**
  * @generated from protobuf message Ping
@@ -2017,6 +2042,12 @@ export interface RpcCall {
          */
         answerMessageAction: AnswerMessageActionInput;
     } | {
+        oneofKind: "revokeSession";
+        /**
+         * @generated from protobuf field: RevokeSessionInput revokeSession = 51;
+         */
+        revokeSession: RevokeSessionInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -2325,6 +2356,12 @@ export interface RpcResult {
          * @generated from protobuf field: AnswerMessageActionResult answerMessageAction = 50;
          */
         answerMessageAction: AnswerMessageActionResult;
+    } | {
+        oneofKind: "revokeSession";
+        /**
+         * @generated from protobuf field: RevokeSessionResult revokeSession = 51;
+         */
+        revokeSession: RevokeSessionResult;
     } | {
         oneofKind: undefined;
     };
@@ -2709,6 +2746,28 @@ export interface ListBotsResult {
      * @generated from protobuf field: repeated User bots = 1;
      */
     bots: User[];
+}
+/**
+ * @generated from protobuf message RevokeSessionInput
+ */
+export interface RevokeSessionInput {
+    /**
+     * @generated from protobuf field: int64 session_id = 1;
+     */
+    sessionId: bigint;
+}
+/**
+ * @generated from protobuf message RevokeSessionResult
+ */
+export interface RevokeSessionResult {
+    /**
+     * @generated from protobuf field: bool revoked = 1;
+     */
+    revoked: boolean;
+    /**
+     * @generated from protobuf field: bool already_revoked = 2;
+     */
+    alreadyRevoked: boolean;
 }
 /**
  * @generated from protobuf message BotCommand
@@ -5388,7 +5447,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: ANSWER_MESSAGE_ACTION = 49;
      */
-    ANSWER_MESSAGE_ACTION = 49
+    ANSWER_MESSAGE_ACTION = 49,
+    /**
+     * @generated from protobuf enum value: REVOKE_SESSION = 50;
+     */
+    REVOKE_SESSION = 50
 }
 /**
  * @generated from protobuf enum PushNotificationProvider
@@ -5922,18 +5985,40 @@ export const ConnectionOpen = new ConnectionOpen$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class ConnectionError$Type extends MessageType<ConnectionError> {
     constructor() {
-        super("ConnectionError", []);
+        super("ConnectionError", [
+            { no: 1, name: "reason", kind: "enum", T: () => ["ConnectionError.Reason", ConnectionError_Reason] }
+        ]);
     }
     create(value?: PartialMessage<ConnectionError>): ConnectionError {
         const message = globalThis.Object.create((this.messagePrototype!));
+        message.reason = 0;
         if (value !== undefined)
             reflectionMergePartial<ConnectionError>(this, message, value);
         return message;
     }
     internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ConnectionError): ConnectionError {
-        return target ?? this.create();
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* ConnectionError.Reason reason */ 1:
+                    message.reason = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
     }
     internalBinaryWrite(message: ConnectionError, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* ConnectionError.Reason reason = 1; */
+        if (message.reason !== 0)
+            writer.tag(1, WireType.Varint).int32(message.reason);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9478,7 +9563,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 47, name: "showChatInSidebar", kind: "message", oneof: "input", T: () => ShowChatInSidebarInput },
             { no: 48, name: "reserveChatIds", kind: "message", oneof: "input", T: () => ReserveChatIdsInput },
             { no: 49, name: "invokeMessageAction", kind: "message", oneof: "input", T: () => InvokeMessageActionInput },
-            { no: 50, name: "answerMessageAction", kind: "message", oneof: "input", T: () => AnswerMessageActionInput }
+            { no: 50, name: "answerMessageAction", kind: "message", oneof: "input", T: () => AnswerMessageActionInput },
+            { no: 51, name: "revokeSession", kind: "message", oneof: "input", T: () => RevokeSessionInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -9791,6 +9877,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         answerMessageAction: AnswerMessageActionInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).answerMessageAction)
                     };
                     break;
+                case /* RevokeSessionInput revokeSession */ 51:
+                    message.input = {
+                        oneofKind: "revokeSession",
+                        revokeSession: RevokeSessionInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).revokeSession)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -9953,6 +10045,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* AnswerMessageActionInput answerMessageAction = 50; */
         if (message.input.oneofKind === "answerMessageAction")
             AnswerMessageActionInput.internalBinaryWrite(message.input.answerMessageAction, writer.tag(50, WireType.LengthDelimited).fork(), options).join();
+        /* RevokeSessionInput revokeSession = 51; */
+        if (message.input.oneofKind === "revokeSession")
+            RevokeSessionInput.internalBinaryWrite(message.input.revokeSession, writer.tag(51, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -10016,7 +10111,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 47, name: "showChatInSidebar", kind: "message", oneof: "result", T: () => ShowChatInSidebarResult },
             { no: 48, name: "reserveChatIds", kind: "message", oneof: "result", T: () => ReserveChatIdsResult },
             { no: 49, name: "invokeMessageAction", kind: "message", oneof: "result", T: () => InvokeMessageActionResult },
-            { no: 50, name: "answerMessageAction", kind: "message", oneof: "result", T: () => AnswerMessageActionResult }
+            { no: 50, name: "answerMessageAction", kind: "message", oneof: "result", T: () => AnswerMessageActionResult },
+            { no: 51, name: "revokeSession", kind: "message", oneof: "result", T: () => RevokeSessionResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -10329,6 +10425,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         answerMessageAction: AnswerMessageActionResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).answerMessageAction)
                     };
                     break;
+                case /* RevokeSessionResult revokeSession */ 51:
+                    message.result = {
+                        oneofKind: "revokeSession",
+                        revokeSession: RevokeSessionResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).revokeSession)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -10491,6 +10593,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* AnswerMessageActionResult answerMessageAction = 50; */
         if (message.result.oneofKind === "answerMessageAction")
             AnswerMessageActionResult.internalBinaryWrite(message.result.answerMessageAction, writer.tag(50, WireType.LengthDelimited).fork(), options).join();
+        /* RevokeSessionResult revokeSession = 51; */
+        if (message.result.oneofKind === "revokeSession")
+            RevokeSessionResult.internalBinaryWrite(message.result.revokeSession, writer.tag(51, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -11744,6 +11849,108 @@ class ListBotsResult$Type extends MessageType<ListBotsResult> {
  * @generated MessageType for protobuf message ListBotsResult
  */
 export const ListBotsResult = new ListBotsResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RevokeSessionInput$Type extends MessageType<RevokeSessionInput> {
+    constructor() {
+        super("RevokeSessionInput", [
+            { no: 1, name: "session_id", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RevokeSessionInput>): RevokeSessionInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.sessionId = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<RevokeSessionInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RevokeSessionInput): RevokeSessionInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 session_id */ 1:
+                    message.sessionId = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RevokeSessionInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 session_id = 1; */
+        if (message.sessionId !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.sessionId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RevokeSessionInput
+ */
+export const RevokeSessionInput = new RevokeSessionInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RevokeSessionResult$Type extends MessageType<RevokeSessionResult> {
+    constructor() {
+        super("RevokeSessionResult", [
+            { no: 1, name: "revoked", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 2, name: "already_revoked", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RevokeSessionResult>): RevokeSessionResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.revoked = false;
+        message.alreadyRevoked = false;
+        if (value !== undefined)
+            reflectionMergePartial<RevokeSessionResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RevokeSessionResult): RevokeSessionResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bool revoked */ 1:
+                    message.revoked = reader.bool();
+                    break;
+                case /* bool already_revoked */ 2:
+                    message.alreadyRevoked = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RevokeSessionResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool revoked = 1; */
+        if (message.revoked !== false)
+            writer.tag(1, WireType.Varint).bool(message.revoked);
+        /* bool already_revoked = 2; */
+        if (message.alreadyRevoked !== false)
+            writer.tag(2, WireType.Varint).bool(message.alreadyRevoked);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message RevokeSessionResult
+ */
+export const RevokeSessionResult = new RevokeSessionResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class BotCommand$Type extends MessageType<BotCommand> {
     constructor() {

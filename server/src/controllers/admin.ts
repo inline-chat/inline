@@ -35,6 +35,7 @@ import { getR2 } from "@in/server/libs/r2"
 import { UsersModel } from "@in/server/db/models/users"
 import { issueEmailLoginChallenge, verifyEmailLoginChallenge } from "@in/server/modules/auth/emailLoginChallenges"
 import { getDesktopPushSuppressionMetrics } from "@in/server/modules/notifications/desktopPushSuppression"
+import { revokeSession } from "@in/server/modules/sessions/revokeSession"
 
 const ADMIN_COOKIE_NAME = "inline_admin_session" as const
 const ADMIN_IDLE_MS = 1000 * 60 * 60 * 24
@@ -1109,6 +1110,60 @@ export const admin = new Elysia({ name: "admin", prefix: "/admin" })
     {
       params: t.Object({
         id: t.String(),
+      }),
+      cookie: adminCookieSchema,
+    },
+  )
+  .post(
+    "/users/:id/sessions/:sessionId/revoke",
+    async ({ params, cookie, request, server, set }) => {
+      const session = await requireAdminSession(cookie as AdminCookieStore, request, server, set)
+      if (!session) {
+        return { ok: false, error: "unauthorized" }
+      }
+
+      if (!requireSetupComplete(session, set)) {
+        return { ok: false, error: "setup_required" }
+      }
+
+      if (!requireStepUp(session, set)) {
+        return { ok: false, error: "step_up_required" }
+      }
+
+      const userId = Number(params.id)
+      const sessionId = Number(params.sessionId)
+      if (!Number.isSafeInteger(userId) || userId <= 0 || !Number.isSafeInteger(sessionId) || sessionId <= 0) {
+        set.status = 400
+        return { ok: false, error: "invalid_session" }
+      }
+
+      const result = await revokeSession({
+        actor: "admin",
+        actorUserId: session.userId,
+        targetUserId: userId,
+        sessionId,
+      })
+
+      if (!result.session) {
+        set.status = 404
+        return { ok: false, error: "not_found" }
+      }
+
+      if (result.revoked) {
+        await notifyAdminAction({
+          actionTaken: `Revoked session ${sessionId} for user ${userId}`,
+          actorEmail: session.email,
+          ip: getRequestIp(request, server),
+          userAgent: request.headers.get("user-agent") ?? "",
+        })
+      }
+
+      return { ok: true, revoked: result.revoked, alreadyRevoked: result.alreadyRevoked }
+    },
+    {
+      params: t.Object({
+        id: t.String(),
+        sessionId: t.String(),
       }),
       cookie: adminCookieSchema,
     },
