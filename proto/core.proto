@@ -60,7 +60,16 @@ message Ack { uint64 msg_id = 1; }
 
 message ConnectionOpen {}
 
-message ConnectionError {}
+message ConnectionError {
+  enum Reason {
+    REASON_UNSPECIFIED = 0;
+    UNAUTHORIZED = 1;
+    INVALID_AUTH = 2;
+    SESSION_REVOKED = 3;
+  }
+
+  Reason reason = 1;
+}
 
 message Ping { uint64 nonce = 1; }
 
@@ -732,6 +741,7 @@ enum Method {
   RESERVE_CHAT_IDS = 47;
   INVOKE_MESSAGE_ACTION = 48;
   ANSWER_MESSAGE_ACTION = 49;
+  REVOKE_SESSION = 50;
 }
 
 message RpcCall {
@@ -786,6 +796,7 @@ message RpcCall {
     ReserveChatIdsInput reserveChatIds = 48;
     InvokeMessageActionInput invokeMessageAction = 49;
     AnswerMessageActionInput answerMessageAction = 50;
+    RevokeSessionInput revokeSession = 51;
   }
 }
 
@@ -842,6 +853,7 @@ message RpcResult {
     ReserveChatIdsResult reserveChatIds = 48;
     InvokeMessageActionResult invokeMessageAction = 49;
     AnswerMessageActionResult answerMessageAction = 50;
+    RevokeSessionResult revokeSession = 51;
   }
 }
 
@@ -1000,6 +1012,13 @@ message CreateBotResult {
 message ListBotsInput {}
 
 message ListBotsResult { repeated User bots = 1; }
+
+message RevokeSessionInput { int64 session_id = 1; }
+
+message RevokeSessionResult {
+  bool revoked = 1;
+  bool already_revoked = 2;
+}
 
 message BotCommand {
   string command = 1;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import { app } from "../../index"
 import { db } from "@in/server/db"
-import { loginCodes, superadminSessions, superadminUsers, users } from "@in/server/db/schema"
+import { loginCodes, sessions, superadminSessions, superadminUsers, users } from "@in/server/db/schema"
 import { eq } from "drizzle-orm"
 import { setupTestLifecycle, testUtils } from "../setup"
 import { generateTotpCode } from "@in/server/utils/totp"
@@ -382,5 +382,70 @@ describe("Admin auth", () => {
 
     const updatedUser = (await db.select().from(users).where(eq(users.id, targetUser!.id)))[0]
     expect(updatedUser?.firstName).toBe("UpdatedByAdmin")
+  })
+
+  it("requires step-up and revokes user sessions", async () => {
+    const email = "revoke-session-admin@example.com"
+    const password = "supersecurepassword"
+    await createSuperadmin(email, password)
+
+    const targetUser = await testUtils.createUser("revoke-target@example.com")
+    const targetSession = await testUtils.createSessionForUser(targetUser!.id, { clientType: "ios" })
+
+    const loginResponse = await app.handle(
+      buildRequest("/admin/auth/login", {
+        method: "POST",
+        body: { email, password },
+      }),
+    )
+    const cookie = extractAdminCookie(loginResponse)
+    expect(cookie).not.toBeNull()
+
+    const setupResponse = await app.handle(
+      buildRequest("/admin/auth/totp/setup", {
+        method: "GET",
+        cookie: cookie ?? undefined,
+      }),
+    )
+    const setupJson = await setupResponse.json()
+    const verifyResponse = await app.handle(
+      buildRequest("/admin/auth/totp/verify", {
+        method: "POST",
+        cookie: cookie ?? undefined,
+        body: { code: generateTotpCode(setupJson.secret) },
+      }),
+    )
+    expect(verifyResponse.status).toBe(200)
+
+    const beforeStepUp = await app.handle(
+      buildRequest(`/admin/users/${targetUser!.id}/sessions/${targetSession.session.id}/revoke`, {
+        method: "POST",
+        cookie: cookie ?? undefined,
+      }),
+    )
+    expect(beforeStepUp.status).toBe(403)
+    expect(await beforeStepUp.json()).toMatchObject({ ok: false, error: "step_up_required" })
+
+    const stepUpResponse = await app.handle(
+      buildRequest("/admin/auth/step-up", {
+        method: "POST",
+        cookie: cookie ?? undefined,
+        body: { password, totpCode: generateTotpCode(setupJson.secret) },
+      }),
+    )
+    expect(stepUpResponse.status).toBe(200)
+
+    const revokeResponse = await app.handle(
+      buildRequest(`/admin/users/${targetUser!.id}/sessions/${targetSession.session.id}/revoke`, {
+        method: "POST",
+        cookie: cookie ?? undefined,
+      }),
+    )
+    expect(revokeResponse.status).toBe(200)
+    expect(await revokeResponse.json()).toMatchObject({ ok: true, revoked: true, alreadyRevoked: false })
+
+    const revoked = (await db.select().from(sessions).where(eq(sessions.id, targetSession.session.id)))[0]
+    expect(revoked?.revoked).not.toBeNull()
+    expect(revoked?.active).toBe(false)
   })
 })

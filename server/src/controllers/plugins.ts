@@ -1,9 +1,27 @@
 import { Elysia, t } from "elysia"
 import { InlineError } from "@in/server/types/errors"
 import { db } from "@in/server/db"
-import { and, eq, isNull } from "drizzle-orm"
+import { eq } from "drizzle-orm"
 import { sessions } from "@in/server/db/schema"
 import { hashToken, normalizeToken } from "@in/server/utils/auth"
+import { ConnectionError_Reason } from "@inline-chat/protocol/core"
+
+export class AuthTokenError extends InlineError {
+  constructor(
+    error: (typeof InlineError.ApiError)[keyof typeof InlineError.ApiError],
+    public readonly connectionReason: ConnectionError_Reason,
+  ) {
+    super(error)
+  }
+}
+
+export const getConnectionReasonFromAuthError = (error: unknown): ConnectionError_Reason => {
+  if (error instanceof AuthTokenError) {
+    return error.connectionReason
+  }
+
+  return ConnectionError_Reason.UNAUTHORIZED
+}
 
 export const authenticate = new Elysia({ name: "authenticate-post" })
   .state("currentUserId", 0)
@@ -20,7 +38,7 @@ export const authenticate = new Elysia({ name: "authenticate-post" })
       let auth = headers["authorization"]
       let token = normalizeToken(auth)
       if (!token) {
-        throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
+        throw new AuthTokenError(InlineError.ApiError.UNAUTHORIZED, ConnectionError_Reason.INVALID_AUTH)
       }
 
       const { userId, sessionId } = await getUserIdFromToken(token)
@@ -43,7 +61,7 @@ export const authenticateGet = new Elysia({ name: "authenticate-get" })
       let auth = params.token ?? headers["authorization"]
       let token = normalizeToken(auth)
       if (!token) {
-        throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
+        throw new AuthTokenError(InlineError.ApiError.UNAUTHORIZED, ConnectionError_Reason.INVALID_AUTH)
       }
 
       const { userId, sessionId } = await getUserIdFromToken(token)
@@ -56,18 +74,22 @@ export const getUserIdFromToken = async (token: string): Promise<{ userId: numbe
   let supposedUserId = token.split(":")[0]
   let tokenHash = hashToken(token)
   let session = await db._query.sessions.findFirst({
-    where: and(eq(sessions.tokenHash, tokenHash), isNull(sessions.revoked)),
+    where: eq(sessions.tokenHash, tokenHash),
   })
 
   if (!session || !supposedUserId) {
-    throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
+    throw new AuthTokenError(InlineError.ApiError.UNAUTHORIZED, ConnectionError_Reason.INVALID_AUTH)
+  }
+
+  if (session.revoked) {
+    throw new AuthTokenError(InlineError.ApiError.SESSION_REVOKED, ConnectionError_Reason.SESSION_REVOKED)
   }
 
   // TODO: update last active
 
   if (session.userId !== parseInt(supposedUserId, 10)) {
     console.error("userId mismatch", session.userId, supposedUserId)
-    throw new InlineError(InlineError.ApiError.UNAUTHORIZED)
+    throw new AuthTokenError(InlineError.ApiError.UNAUTHORIZED, ConnectionError_Reason.UNAUTHORIZED)
   }
 
   const now = new Date()

@@ -1,7 +1,5 @@
-import { Method, type ConnectionInit, type ConnectionOpen, type RpcCall, type RpcResult } from "@inline-chat/protocol/core"
+import { Method, type RpcCall, type RpcResult } from "@inline-chat/protocol/core"
 import type { HandlerContext } from "@in/server/realtime/types"
-import { getUserIdFromToken } from "@in/server/controllers/plugins"
-import { connectionManager } from "@in/server/ws/connections"
 import { getMe } from "@in/server/realtime/handlers/getMe"
 import { Log } from "@in/server/utils/log"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -51,6 +49,7 @@ import { reserveChatIds } from "@in/server/realtime/handlers/messages.reserveCha
 import { invokeMessageAction } from "@in/server/realtime/handlers/messages.invokeMessageAction"
 import { answerMessageAction } from "@in/server/realtime/handlers/messages.answerMessageAction"
 import { createSubthread } from "@in/server/realtime/handlers/messages.createSubthread"
+import { revokeSessionHandler } from "@in/server/realtime/handlers/user.revokeSession"
 
 const log = new Log("rpc")
 
@@ -436,6 +435,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       const result = await answerMessageAction(call.input.answerMessageAction, handlerContext)
       return { oneofKind: "answerMessageAction", answerMessageAction: result }
+    }
+
+    case Method.REVOKE_SESSION: {
+      if (call.input.oneofKind !== "revokeSession") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await revokeSessionHandler(call.input.revokeSession, handlerContext)
+      return { oneofKind: "revokeSession", revokeSession: result }
     }
 
     default:
