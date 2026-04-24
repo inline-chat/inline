@@ -324,7 +324,7 @@ final class RealtimeSendTests {
 
     Task {
       for await event in session.events {
-        if case .connectionError = event {
+        if case .connectionError(reason: .unspecified) = event {
           await sawConnectionError.set()
           return
         }
@@ -1041,10 +1041,12 @@ private actor SendTestSyncStorage: SyncStorage {
   }
 }
 
-private func connectionErrorMessage() -> ServerProtocolMessage {
+private func connectionErrorMessage(reason: ConnectionError.Reason = .unspecified) -> ServerProtocolMessage {
   var message = ServerProtocolMessage()
   message.id = 1
-  message.body = .connectionError(.init())
+  message.body = .connectionError(.with {
+    $0.reason = reason
+  })
   return message
 }
 

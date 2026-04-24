@@ -115,9 +115,9 @@ actor ProtocolSession: ProtocolSessionType {
       log.trace("Received pong: \(pong.nonce)")
       await events.send(.pong(nonce: pong.nonce))
 
-    case .connectionError:
-      log.error("Protocol session: server rejected connection init")
-      await events.send(.connectionError)
+    case let .connectionError(error):
+      log.error("Protocol session: server rejected connection init reason=\(error.reason)")
+      await events.send(.connectionError(reason: error.reason))
 
     default:
       log.trace("Protocol session: unhandled message type: \(String(describing: message.body))")

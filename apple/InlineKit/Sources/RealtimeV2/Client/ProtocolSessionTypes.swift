@@ -8,7 +8,7 @@ enum ProtocolSessionEvent: Sendable {
 
   case protocolOpen
   case authFailed
-  case connectionError
+  case connectionError(reason: InlineProtocol.ConnectionError.Reason)
 
   case ack(msgId: UInt64)
   case rpcResult(msgId: UInt64, rpcResult: InlineProtocol.RpcResult.OneOf_Result?)

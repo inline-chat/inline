@@ -40,6 +40,7 @@ struct ExperimentalRootView: View {
   @StateObject private var tabsManager = TabsManager()
 
   @Environment(Router.self) private var router
+  @EnvironmentObject private var navigation: Navigation
 
   var body: some View {
     Group {
@@ -61,6 +62,17 @@ struct ExperimentalRootView: View {
     .environmentObject(mainViewRouter)
     .environmentObject(fileUploadViewModel)
     .environmentObject(tabsManager)
+    .onReceive(NotificationCenter.default.publisher(for: .realtimeV2AuthInvalidated)) { _ in
+      Task {
+        await LogoutPerformer.perform(
+          notifyServer: false,
+          mainRouter: mainViewRouter,
+          navigation: navigation,
+          onboardingNavigation: onboardingNavigation,
+          router: router
+        )
+      }
+    }
     // Experimental UI keeps navigation inside per-tab stacks; each stack owns tab bar visibility.
     .environment(\.inlineHideTabBar, false)
     .toastView()

@@ -17,6 +17,7 @@ struct ContentView2: View {
   @StateObject private var tabsManager = TabsManager()
 
   @Environment(Router.self) private var router
+  @EnvironmentObject private var navigation: Navigation
 
   var body: some View {
     Group {
@@ -30,6 +31,17 @@ struct ContentView2: View {
     .environmentObject(mainViewRouter)
     .environmentObject(fileUploadViewModel)
     .environmentObject(tabsManager)
+    .onReceive(NotificationCenter.default.publisher(for: .realtimeV2AuthInvalidated)) { _ in
+      Task {
+        await LogoutPerformer.perform(
+          notifyServer: false,
+          mainRouter: mainViewRouter,
+          navigation: navigation,
+          onboardingNavigation: onboardingNav,
+          router: router
+        )
+      }
+    }
     .toastView()
   }
 
