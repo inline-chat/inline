@@ -3,6 +3,8 @@ import InlineKit
 import Logger
 
 enum LogoutPerformer {
+  @MainActor private static var isRunning = false
+
   static func perform(
     notifyServer: Bool,
     mainRouter: MainViewRouter,
@@ -10,29 +12,44 @@ enum LogoutPerformer {
     onboardingNavigation: OnboardingNavigation,
     router: Router
   ) async {
+    let shouldRun = await MainActor.run {
+      guard !isRunning else { return false }
+      isRunning = true
+      return true
+    }
+    guard shouldRun else { return }
+
+    defer {
+      Task { @MainActor in
+        isRunning = false
+      }
+    }
+
+    await Realtime.shared.loggedOut()
+
+    if notifyServer {
+      await notifyServerLogout()
+    }
+
+    Analytics.logout()
+    await Auth.shared.logOut()
+
     do {
-      await Realtime.shared.loggedOut()
-
-      if notifyServer {
-        await notifyServerLogout()
-      }
-
-      Analytics.logout()
-      await Auth.shared.logOut()
       try AppDatabase.loggedOut()
-      Transactions.shared.clearAll()
-
-      await MainActor.run {
-        TabsManager.shared.reset()
-        TabsManager.shared.clearActiveSpaceId()
-        ChatState.shared.reset()
-        navigation.reset()
-        mainRouter.setRoute(route: .onboarding)
-        onboardingNavigation.reset()
-        router.reset()
-      }
     } catch {
-      Log.shared.error("Logout failed: \(error.localizedDescription)")
+      Log.shared.error("Local database logout cleanup failed: \(error.localizedDescription)")
+    }
+
+    Transactions.shared.clearAll()
+
+    await MainActor.run {
+      TabsManager.shared.reset()
+      TabsManager.shared.clearActiveSpaceId()
+      ChatState.shared.reset()
+      navigation.reset()
+      mainRouter.setRoute(route: .onboarding)
+      onboardingNavigation.reset()
+      router.reset()
     }
   }
 
