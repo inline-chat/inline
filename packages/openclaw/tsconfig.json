@@ -17,7 +17,7 @@
     "sourceMap": true,
     "types": ["node"],
     "verbatimModuleSyntax": true,
-    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
+    "tsBuildInfoFile": ".tsbuildinfo/tsconfig.tsbuildinfo"
   },
   "include": ["src/**/*.ts"],
   "exclude": ["src/**/*.test.ts"]

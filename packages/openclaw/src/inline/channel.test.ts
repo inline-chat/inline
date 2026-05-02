@@ -407,6 +407,32 @@ describe("inline/channel", () => {
     expect(issues.some((issue) => issue.message.includes("ping watchdog"))).toBe(true)
   })
 
+  it("does not collect one-off reconnect notices as runtime issues", async () => {
+    vi.resetModules()
+    const { collectInlineStatusIssues } = await import("./status-issues")
+
+    const issues = collectInlineStatusIssues([
+      {
+        accountId: "default",
+        enabled: true,
+        configured: true,
+        baseUrl: "[set]",
+        lastError: "WebSocket reconnect scheduled (attempt=1, delayMs=600, cause=socket-close:1006)",
+        diagnostics: {
+          protocol: {
+            lastFailureAt: Date.now(),
+            transport: {
+              reconnectCount: 1,
+              lastReconnectCause: "socket-close:1006",
+            },
+          },
+        },
+      },
+    ])
+
+    expect(issues).toEqual([])
+  })
+
   it("status includes lastProbeAt in channel summary and account snapshots", async () => {
     vi.resetModules()
     const { inlineChannelPlugin } = await import("./channel")

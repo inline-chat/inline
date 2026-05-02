@@ -7,15 +7,15 @@ import { describe, expect, it } from "vitest"
 
 const execFile = promisify(execFileCallback)
 
-async function listJsFiles(dir: string): Promise<string[]> {
+async function listFiles(dir: string): Promise<string[]> {
   const entries = await readdir(dir, { withFileTypes: true })
   const files = await Promise.all(
     entries.map(async (entry) => {
       const entryPath = path.join(dir, entry.name)
       if (entry.isDirectory()) {
-        return listJsFiles(entryPath)
+        return listFiles(entryPath)
       }
-      if (entry.isFile() && entry.name.endsWith(".js")) {
+      if (entry.isFile()) {
         return [entryPath]
       }
       return []
@@ -42,8 +42,11 @@ describe("packed artifact", () => {
     await execFile("tar", ["-xzf", tarballPath, "-C", extractDir])
 
     const distDir = path.join(extractDir, "package", "dist")
-    const jsFiles = await listJsFiles(distDir)
+    const files = await listFiles(distDir)
+    const jsFiles = files.filter((file) => file.endsWith(".js"))
     expect(jsFiles.length).toBeGreaterThan(0)
+    expect(files.some((file) => file.endsWith("index.d.ts"))).toBe(true)
+    expect(files.some((file) => file.endsWith(".tsbuildinfo"))).toBe(false)
 
     const unresolvedBareImports = new Set<string>()
     const importPattern = /from\s+"([^"]+)"/g

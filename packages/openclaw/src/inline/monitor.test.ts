@@ -59,6 +59,13 @@ type MonitorHarness = {
   }
 }
 
+type CapturedSdkClientOptions = {
+  logger?: {
+    warn?: (msg: string, meta?: unknown) => void
+    error?: (msg: string, meta?: unknown) => void
+  }
+}
+
 type MonitorSetup = {
   me?: {
     userId?: bigint
@@ -161,6 +168,7 @@ type MonitorSetup = {
   skipInfos?: Array<{ reason?: string }>
   dispatchErrorInfos?: Array<{ kind?: string }>
   sendMessageDelayMs?: number
+  onSdkClientOptions?: (options: CapturedSdkClientOptions) => void
 }
 
 function buildAccount(overrides?: {
@@ -522,7 +530,9 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         ANSWER_MESSAGE_ACTION: 49,
       },
       InlineSdkClient: class {
-        constructor(_opts: unknown) {}
+        constructor(opts: CapturedSdkClientOptions) {
+          setup.onSdkClientOptions?.(opts)
+        }
         connect = vi.fn(async () => {})
         getMe = vi.fn(async () => ({ userId: setup.me?.userId ?? 777n }))
         getChat = vi.fn(async ({ chatId }: { chatId: bigint }) => {
@@ -549,6 +559,7 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
         answerMessageAction = answerMessageAction
         invokeRaw = invokeRaw
         invokeUncheckedRaw = this.invokeRaw
+        getDiagnostics = vi.fn(() => ({ protocol: { state: "open" } }))
         close = vi.fn(async () => {})
         events = vi.fn(() => eventsGenerator())
       },
@@ -713,6 +724,57 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
 }
 
 describe("inline/monitor", () => {
+  it("does not expose transient SDK reconnect logs as runtime errors", async () => {
+    let logger: CapturedSdkClientOptions["logger"]
+    const patches: Array<Record<string, unknown>> = []
+    const log = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    }
+    const harness = await setupMonitorHarness({
+      events: [],
+      chats: {},
+      onSdkClientOptions: (options) => {
+        logger = options.logger
+      },
+    })
+
+    const controller = new AbortController()
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: controller.signal,
+      log,
+      statusSink: (patch) => {
+        patches.push(patch as Record<string, unknown>)
+      },
+    })
+
+    logger?.warn?.("WebSocket reconnect scheduled (attempt=1, delayMs=600, cause=socket-close:1006)")
+    logger?.error?.("WebSocket error: Error: socket hang up")
+    logger?.error?.("Failed to decode message", new Error("bad payload"))
+    await handle.stop()
+
+    expect(log.warn).toHaveBeenCalledWith(
+      "WebSocket reconnect scheduled (attempt=1, delayMs=600, cause=socket-close:1006)",
+    )
+    expect(log.error).toHaveBeenCalledWith("WebSocket error: Error: socket hang up")
+    expect(
+      patches.some((patch) =>
+        String(patch.lastError ?? "").includes("WebSocket reconnect scheduled"),
+      ),
+    ).toBe(false)
+    expect(
+      patches.some((patch) => String(patch.lastError ?? "").includes("WebSocket error")),
+    ).toBe(false)
+    expect(
+      patches.some((patch) => String(patch.lastError ?? "").includes("Failed to decode message")),
+    ).toBe(true)
+  })
+
   it("debounces rapid inbound text messages into one turn", async () => {
     const harness = await setupMonitorHarness({
       events: [

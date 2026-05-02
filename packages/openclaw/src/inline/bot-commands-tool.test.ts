@@ -18,7 +18,7 @@ describe("inline/bot-commands-tool", () => {
   })
 
   it("supports set/get/delete command management via Inline Bot API", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = String(input)
       if (url.endsWith("/bot/setMyCommands")) {
         return new Response(JSON.stringify({ ok: true, result: {} }), {

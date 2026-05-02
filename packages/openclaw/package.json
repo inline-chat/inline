@@ -1,6 +1,6 @@
 {
   "name": "@inline-openclaw/inline",
-  "version": "0.0.30",
+  "version": "0.0.31",
   "type": "module",
   "files": [
     "dist",
@@ -15,7 +15,7 @@
     }
   },
   "scripts": {
-    "build": "rm -rf dist src/index.js src/index.js.map && bun build ./src/index.ts --outdir dist --entry-naming '[name].js' --target=node --format=esm --packages=bundle --external openclaw/plugin-sdk --sourcemap=linked && tsc -p tsconfig.json --emitDeclarationOnly",
+    "build": "rm -rf dist .tsbuildinfo src/index.js src/index.js.map && bun build ./src/index.ts --outdir dist --entry-naming '[name].js' --target=node --format=esm --packages=bundle --external openclaw/plugin-sdk --sourcemap=linked && tsc -p tsconfig.json --emitDeclarationOnly",
     "lint": "bunx oxlint --ignore-path ../../.oxlintignore src vitest.config.ts",
     "prepack": "bun run build",
     "pretest": "rm -rf coverage",
