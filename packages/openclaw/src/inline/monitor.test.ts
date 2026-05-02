@@ -2085,6 +2085,58 @@ describe("inline/monitor", () => {
     await handle.stop()
   })
 
+  it("does not render reasoning streams as chat messages", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 677n,
+          message: {
+            id: 5770n,
+            date: 1_700_000_007n,
+            fromId: 42n,
+            message: "dm",
+          },
+        },
+      ],
+      chats: {
+        "677": { kind: "direct", title: "Alice" },
+      },
+      reasoningReplies: [{ text: "thinking through the answer\n\n" }],
+      dispatchReplyPayload: {
+        text: "final answer",
+      },
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open", streamViaEditMessage: true }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      const args = harness.calls.dispatchReply.mock.calls[0]?.[0]
+      expect(args?.replyOptions?.onReasoningStream).toBeUndefined()
+      expect(args?.replyOptions?.onReasoningEnd).toBeUndefined()
+      expect(harness.calls.sendMessage).toHaveBeenCalledTimes(1)
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 677n,
+          text: "final answer",
+          parseMarkdown: true,
+        }),
+      )
+      expect(harness.calls.invokeRaw).not.toHaveBeenCalledWith(
+        8,
+        expect.objectContaining({ oneofKind: "editMessage" }),
+      )
+    })
+
+    await handle.stop()
+  })
+
   it("rotates streamed edit messages on assistant message boundaries", async () => {
     const harness = await setupMonitorHarness({
       events: [

@@ -2127,20 +2127,6 @@ export async function monitorInlineProvider(params: {
         : {}),
       ...(streamViaEditMessage
         ? {
-            onReasoningStream: async (payload: { text?: string; mediaUrls?: string[] }) => {
-              await handlePartialStreamPayload(payload)
-            },
-          }
-        : {}),
-      ...(streamViaEditMessage
-        ? {
-            onReasoningEnd: async () => {
-              await editStreamState.opChain
-            },
-          }
-        : {}),
-      ...(streamViaEditMessage
-        ? {
             onToolStart: async () => {
               await resetEditStreamOnBoundary()
             },
