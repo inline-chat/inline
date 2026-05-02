@@ -148,6 +148,18 @@ function formatSdkLogLine(message: string, meta?: unknown): string {
   return `${message} ${detail}`
 }
 
+function isTransientSdkConnectionLog(line: string): boolean {
+  return (
+    line.startsWith("WebSocket reconnect scheduled ") ||
+    line.startsWith("WebSocket closed ") ||
+    line.startsWith("WebSocket error: ") ||
+    line.startsWith("Protocol reconnect scheduled ") ||
+    line.startsWith("Ping timeout, reconnecting ") ||
+    line.startsWith("Failed to send ping") ||
+    line.startsWith("Failed to send RPC request; waiting for reconnect")
+  )
+}
+
 type InlineHistoryEntryPayload = {
   line: string | null
   attachmentLine: string | null
@@ -289,10 +301,6 @@ const INLINE_ACTION_MAX_PER_ROW = 8
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
-}
-
-function normalizeReplyMarkupButtons(raw: unknown): InlineReplyMarkupButton[][] {
-  return normalizeReplyMarkupButtonsWith(raw)
 }
 
 function resolveInlineNativeCommandMenu(params: {
@@ -491,9 +499,7 @@ function resolveInlineReplyActions(payload: Record<string, unknown>): MessageAct
 
   if (!hasExplicitButtons) return undefined
 
-  const rows = normalizeReplyMarkupButtonsWith(rawButtons, {
-    ...(mapCallbackData ? { mapCallbackData } : {}),
-  })
+  const rows = normalizeReplyMarkupButtonsWith(rawButtons, mapCallbackData ? { mapCallbackData } : undefined)
   return {
     rows: rows.map((row, rowIndex) => ({
       actions: row.map((button, buttonIndex) => ({
@@ -1247,7 +1253,7 @@ export async function monitorInlineProvider(params: {
   let client: InlineSdkClient | null = null
   const pushDiagnostics = (patch?: { lastError?: string; lastInboundAt?: number; lastOutboundAt?: number }) => {
     statusSink?.({
-      ...(patch ?? {}),
+      ...patch,
       ...(client ? { diagnostics: client.getDiagnostics() } : {}),
     })
   }
@@ -1257,12 +1263,12 @@ export async function monitorInlineProvider(params: {
     warn: (msg: string, meta?: unknown) => {
       const line = formatSdkLogLine(msg, meta)
       log?.warn(line)
-      pushDiagnostics({ lastError: line })
+      pushDiagnostics()
     },
     error: (msg: string, meta?: unknown) => {
       const line = formatSdkLogLine(msg, meta)
       log?.error(line)
-      pushDiagnostics({ lastError: line })
+      pushDiagnostics(isTransientSdkConnectionLog(line) ? undefined : { lastError: line })
     },
   }
 

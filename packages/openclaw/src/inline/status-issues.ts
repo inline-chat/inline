@@ -44,6 +44,18 @@ function looksLikeAuthError(text: string): boolean {
   return /(401|403|unauth|forbidden|invalid token|token invalid|unauthorized)/i.test(text)
 }
 
+function looksLikeTransientConnectionNotice(text: string): boolean {
+  return (
+    text.startsWith("WebSocket reconnect scheduled ") ||
+    text.startsWith("WebSocket closed ") ||
+    text.startsWith("WebSocket error: ") ||
+    text.startsWith("Protocol reconnect scheduled ") ||
+    text.startsWith("Ping timeout, reconnecting ") ||
+    text.startsWith("Failed to send ping") ||
+    text.startsWith("Failed to send RPC request; waiting for reconnect")
+  )
+}
+
 function readInlineDiagnosticsSummary(value: unknown): InlineDiagnosticsSummary {
   if (!isRecord(value)) {
     return {}
@@ -133,7 +145,7 @@ export function collectInlineStatusIssues(accounts: ChannelAccountSnapshot[]): C
     }
 
     const lastError = asString(entry.lastError)
-    if (lastError) {
+    if (lastError && !looksLikeTransientConnectionNotice(lastError)) {
       issues.push({
         channel: "inline",
         accountId,
