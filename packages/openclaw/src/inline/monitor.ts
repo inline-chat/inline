@@ -2167,10 +2167,15 @@ export async function monitorInlineProvider(params: {
                 mediaUrl?: string
                 mediaUrls?: string[]
                 replyToId?: string
+                isReasoning?: boolean
                 channelData?: Record<string, unknown>
               },
               info?: InlineDispatchReplyInfo,
             ) => {
+              if (payload.isReasoning === true) {
+                return
+              }
+
               const rawText = payload.text ?? ""
               const mediaList = payload.mediaUrls?.length
                 ? payload.mediaUrls

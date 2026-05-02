@@ -138,6 +138,7 @@ type MonitorSetup = {
     mediaUrl?: string
     mediaUrls?: string[]
     buttons?: Array<Array<{ text?: string; callback_data?: string }>>
+    isReasoning?: boolean
     channelData?: Record<string, unknown>
   }
   dispatchReplyPayloads?: Array<{
@@ -146,6 +147,7 @@ type MonitorSetup = {
     mediaUrl?: string
     mediaUrls?: string[]
     buttons?: Array<Array<{ text?: string; callback_data?: string }>>
+    isReasoning?: boolean
     channelData?: Record<string, unknown>
   }>
   partialReplies?: Array<{ text?: string; mediaUrls?: string[] }>
@@ -2131,6 +2133,56 @@ describe("inline/monitor", () => {
       expect(harness.calls.invokeRaw).not.toHaveBeenCalledWith(
         8,
         expect.objectContaining({ oneofKind: "editMessage" }),
+      )
+    })
+
+    await handle.stop()
+  })
+
+  it("does not deliver reasoning final payloads as chat messages", async () => {
+    const harness = await setupMonitorHarness({
+      events: [
+        {
+          kind: "message.new",
+          chatId: 678n,
+          message: {
+            id: 5780n,
+            date: 1_700_000_007n,
+            fromId: 42n,
+            message: "dm",
+          },
+        },
+      ],
+      chats: {
+        "678": { kind: "direct", title: "Alice" },
+      },
+      dispatchReplyPayloads: [
+        {
+          text: "Reasoning:\n_internal step_",
+          isReasoning: true,
+        },
+        {
+          text: "final answer",
+        },
+      ],
+    })
+
+    const handle = await harness.monitorInlineProvider({
+      cfg: {} as any,
+      account: buildAccount({ dmPolicy: "open" }),
+      runtime: { log: vi.fn(), error: vi.fn() } as any,
+      abortSignal: new AbortController().signal,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    })
+
+    await waitFor(() => {
+      expect(harness.calls.sendMessage).toHaveBeenCalledTimes(1)
+      expect(harness.calls.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 678n,
+          text: "final answer",
+          parseMarkdown: true,
+        }),
       )
     })
 
