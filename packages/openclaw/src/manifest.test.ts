@@ -11,4 +11,16 @@ describe("plugin manifest", () => {
     expect(json.id).toBe("inline")
     expect(json.channels).toEqual(["inline"])
   })
+
+  it("declares the minimum OpenClaw host that has the sender metadata prompt path", async () => {
+    const packagePath = path.resolve(__dirname, "..", "package.json")
+    const raw = await readFile(packagePath, "utf8")
+    const json = JSON.parse(raw) as {
+      openclaw?: { install?: { minHostVersion?: unknown } }
+      peerDependencies?: { openclaw?: unknown }
+    }
+
+    expect(json.openclaw?.install?.minHostVersion).toBe(">=2026.4.26")
+    expect(json.peerDependencies?.openclaw).toBe(">=2026.4.26")
+  })
 })

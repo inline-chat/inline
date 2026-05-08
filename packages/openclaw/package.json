@@ -1,6 +1,6 @@
 {
   "name": "@inline-openclaw/inline",
-  "version": "0.0.33",
+  "version": "0.0.34",
   "type": "module",
   "files": [
     "dist",
@@ -57,7 +57,8 @@
     "install": {
       "npmSpec": "@inline-openclaw/inline",
       "localPath": "packages/openclaw",
-      "defaultChoice": "npm"
+      "defaultChoice": "npm",
+      "minHostVersion": ">=2026.4.26"
     }
   },
   "moltbot": {
