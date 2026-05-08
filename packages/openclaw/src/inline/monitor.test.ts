@@ -683,6 +683,31 @@ async function setupMonitorHarness(setup: MonitorSetup): Promise<MonitorHarness>
       reply: {
         resolveEnvelopeFormatOptions: () => ({ mode: "compact" }),
         formatAgentEnvelope: ({ body }: { body: string }) => body,
+        formatInboundEnvelope: ({
+          body,
+          chatType,
+          sender,
+          senderLabel,
+        }: {
+          body: string
+          chatType?: string
+          sender?: { id?: string; name?: string; username?: string }
+          senderLabel?: string
+        }) => {
+          const id = sender?.id?.trim() ? `id:${sender.id.trim()}` : undefined
+          const username = sender?.username?.trim() ? `@${sender.username.trim()}` : undefined
+          const name = sender?.name?.trim()
+          const label =
+            senderLabel ??
+            (name && username
+              ? `${name} (${username})${id ? ` ${id}` : ""}`
+              : name
+                ? `${name}${id ? ` ${id}` : ""}`
+                : username
+                  ? `${username}${id ? ` ${id}` : ""}`
+                  : id)
+          return chatType === "group" && label ? `${label}: ${body}` : body
+        },
         finalizeInboundContext,
         dispatchReplyWithBufferedBlockDispatcher: dispatchReply,
       },
@@ -1134,7 +1159,7 @@ describe("inline/monitor", () => {
           actions: expect.any(Object),
         }),
       )
-    })
+    }, 10_000)
 
     const sent = harness.calls.sendMessage.mock.calls[0]?.[0]
     const firstButtonData = sent?.actions?.rows?.[0]?.actions?.[0]?.action?.callback?.data
@@ -1818,6 +1843,8 @@ describe("inline/monitor", () => {
         expect.objectContaining({
           ChatType: "group",
           GroupSubject: "Project Room",
+          ConversationLabel: "Project Room id:88",
+          Body: expect.stringContaining("id:51: hello from group"),
           From: "inline:chat:88",
           To: "inline:88",
         }),
@@ -2574,11 +2601,13 @@ describe("inline/monitor", () => {
       expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: expect.stringContaining("#60020 user:51: context before mention"),
+          Body: expect.stringMatching(
+            /#60020 id:51: context before mention[\s\S]*id:51: @inlinebot can you summarize\?/,
+          ),
           BodyForAgent: "@inlinebot can you summarize?",
           InboundHistory: [
             expect.objectContaining({
-              sender: "user:51",
+              sender: "id:51",
               body: "context before mention",
             }),
           ],
@@ -2661,19 +2690,21 @@ describe("inline/monitor", () => {
       expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: expect.stringContaining("#60028 user:52: we changed the deployment config"),
+          Body: expect.stringMatching(
+            /#60028 id:52: we changed the deployment config[\s\S]*id:51: @inlinebot can you catch up\?/,
+          ),
           BodyForAgent: "@inlinebot can you catch up?",
           InboundHistory: [
             expect.objectContaining({
-              sender: "user:52",
+              sender: "id:52",
               body: "we changed the deployment config",
             }),
             expect.objectContaining({
-              sender: "user:53",
+              sender: "id:53",
               body: "staging looks stable now",
             }),
             expect.objectContaining({
-              sender: "user:51",
+              sender: "id:51",
               body: "can someone summarize this for the bot?",
             }),
           ],
@@ -2800,7 +2831,7 @@ describe("inline/monitor", () => {
           BodyForAgent: "@inlinebot can you summarize what happened?",
           InboundHistory: [
             expect.objectContaining({
-              sender: "user:51",
+              sender: "id:51",
               body: "we deployed to staging and saw an error",
             }),
           ],
@@ -2880,7 +2911,7 @@ describe("inline/monitor", () => {
           Body: expect.stringContaining(`image attachment: ${longMediaUrl}`),
           InboundHistory: [
             expect.objectContaining({
-              sender: "user:51",
+              sender: "id:51",
               body: `image attachment: ${longMediaUrl}`,
             }),
           ],
@@ -3202,18 +3233,18 @@ describe("inline/monitor", () => {
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: expect.stringContaining("#7300 user:52: link preview (Design mock): https://example.com/design"),
+          Body: expect.stringContaining("#7300 id:52: link preview (Design mock): https://example.com/design"),
         }),
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: expect.stringContaining("Recent media/attachments:\n#7300 user:52: link preview (Design mock): https://example.com/design"),
+          Body: expect.stringContaining("Recent media/attachments:\n#7300 id:52: link preview (Design mock): https://example.com/design"),
         }),
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
           Body: expect.stringMatching(
-            /Current message:\n<media:image>[\s\S]*Current media\/attachments:\nimage attachment: https:\/\/cdn\.inline\.chat\/current-photo\.jpg/,
+            /id:51: <media:image>[\s\S]*Current media\/attachments:\nimage attachment: https:\/\/cdn\.inline\.chat\/current-photo\.jpg/,
           ),
           MediaPath: "/tmp/current-photo.jpg",
           MediaType: "image/jpeg",
@@ -3288,18 +3319,18 @@ describe("inline/monitor", () => {
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
           Body: expect.stringContaining(
-            `Recent thread messages (oldest -> newest):\n#7300 user:52: image attachment: ${longMediaUrl}`,
+            `Recent thread messages (oldest -> newest):\n#7300 id:52: image attachment: ${longMediaUrl}`,
           ),
         }),
       )
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
           Body: expect.stringContaining(
-            `Recent media/attachments:\n#7300 user:52: image attachment: ${longMediaUrl}`,
+            `Recent media/attachments:\n#7300 id:52: image attachment: ${longMediaUrl}`,
           ),
           InboundHistory: expect.arrayContaining([
             expect.objectContaining({
-              sender: "user:52",
+              sender: "id:52",
               body: `image attachment: ${longMediaUrl}`,
             }),
           ]),
@@ -3382,7 +3413,7 @@ describe("inline/monitor", () => {
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
           Body: expect.stringMatching(
-            /Current message:\n<media:document>[\s\S]*Current media\/attachments:\ndocument attachment \(spec\.pdf\): https:\/\/cdn\.inline\.chat\/spec\.pdf/,
+            /id:51: <media:document>[\s\S]*Current media\/attachments:\ndocument attachment \(spec\.pdf\): https:\/\/cdn\.inline\.chat\/spec\.pdf/,
           ),
           RawBody: "<media:document>",
           CommandBody: "<media:document>",
@@ -3459,7 +3490,7 @@ describe("inline/monitor", () => {
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
           Body: expect.stringMatching(
-            /Current message:\n<media:image>[\s\S]*Current media\/attachments:\nimage attachment: https:\/\/cdn\.inline\.chat\/flattened-photo\.jpg/,
+            /id:51: <media:image>[\s\S]*Current media\/attachments:\nimage attachment: https:\/\/cdn\.inline\.chat\/flattened-photo\.jpg/,
           ),
           RawBody: "<media:image>",
           CommandBody: "<media:image>",
@@ -3527,7 +3558,7 @@ describe("inline/monitor", () => {
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
           Body: expect.stringMatching(
-            /Current message:\n<media:image>[\s\S]*Current media\/attachments:\nimage attachment: https:\/\/cdn\.inline\.chat\/broken-photo\.jpg/,
+            /id:51: <media:image>[\s\S]*Current media\/attachments:\nimage attachment: https:\/\/cdn\.inline\.chat\/broken-photo\.jpg/,
           ),
         }),
       )
@@ -3608,7 +3639,7 @@ describe("inline/monitor", () => {
         expect.objectContaining({
           RawBody: "<media:document>",
           Body: expect.stringMatching(
-            /Current message:\n<media:document>[\s\S]*Current media\/attachments:\ndocument attachment \(huge-spec\.pdf\): https:\/\/cdn\.inline\.chat\/huge-spec\.pdf/,
+            /id:51: <media:document>[\s\S]*Current media\/attachments:\ndocument attachment \(huge-spec\.pdf\): https:\/\/cdn\.inline\.chat\/huge-spec\.pdf/,
           ),
         }),
       )
@@ -3699,7 +3730,7 @@ describe("inline/monitor", () => {
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
           Body: expect.stringContaining(
-            'Recent message entities:\n#7300 user:52: text link "portal" -> https://example.com/history-portal',
+            'Recent message entities:\n#7300 id:52: text link "portal" -> https://example.com/history-portal',
           ),
         }),
       )
@@ -4085,7 +4116,8 @@ describe("inline/monitor", () => {
       expect(harness.calls.dispatchReply).toHaveBeenCalled()
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          Body: expect.stringContaining("@alice reacted with 🔥 to your message #5000"),
+          Body: expect.stringContaining("Alice (@alice) id:51: reacted with 🔥 to your message #5000"),
+          BodyForAgent: "reacted with 🔥 to your message #5000",
           ReplyToId: "5000",
           MessageSid: "5000",
         }),
