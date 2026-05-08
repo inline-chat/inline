@@ -2604,7 +2604,9 @@ describe("inline/monitor", () => {
           Body: expect.stringMatching(
             /#60020 id:51: context before mention[\s\S]*id:51: @inlinebot can you summarize\?/,
           ),
-          BodyForAgent: "@inlinebot can you summarize?",
+          BodyForAgent: expect.stringMatching(
+            /"sender_id": "51"[\s\S]*id:51: @inlinebot can you summarize\?/,
+          ),
           InboundHistory: [
             expect.objectContaining({
               sender: "id:51",
@@ -2693,7 +2695,9 @@ describe("inline/monitor", () => {
           Body: expect.stringMatching(
             /#60028 id:52: we changed the deployment config[\s\S]*id:51: @inlinebot can you catch up\?/,
           ),
-          BodyForAgent: "@inlinebot can you catch up?",
+          BodyForAgent: expect.stringMatching(
+            /"sender_id": "51"[\s\S]*id:51: @inlinebot can you catch up\?/,
+          ),
           InboundHistory: [
             expect.objectContaining({
               sender: "id:52",
@@ -2762,7 +2766,9 @@ describe("inline/monitor", () => {
       expect(harness.calls.dispatchReply).toHaveBeenCalledTimes(1)
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          BodyForAgent: "@inlinebot are you here?",
+          BodyForAgent: expect.stringMatching(
+            /"sender_id": "51"[\s\S]*id:51: @inlinebot are you here\?/,
+          ),
           InboundHistory: [],
         }),
       )
@@ -2828,7 +2834,9 @@ describe("inline/monitor", () => {
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
           Body: expect.stringContaining("we deployed to staging and saw an error"),
-          BodyForAgent: "@inlinebot can you summarize what happened?",
+          BodyForAgent: expect.stringMatching(
+            /"sender_id": "51"[\s\S]*id:51: @inlinebot can you summarize what happened\?/,
+          ),
           InboundHistory: [
             expect.objectContaining({
               sender: "id:51",
@@ -3060,6 +3068,7 @@ describe("inline/monitor", () => {
         expect.objectContaining({
           RawBody: "/status@inlinebot now",
           CommandBody: "/status now",
+          BodyForCommands: "/status now",
           WasMentioned: true,
         }),
       )
@@ -4117,7 +4126,9 @@ describe("inline/monitor", () => {
       expect(harness.calls.finalizeInboundContext).toHaveBeenCalledWith(
         expect.objectContaining({
           Body: expect.stringContaining("Alice (@alice) id:51: reacted with 🔥 to your message #5000"),
-          BodyForAgent: "reacted with 🔥 to your message #5000",
+          BodyForAgent: expect.stringMatching(
+            /"sender_id": "51"[\s\S]*Alice \(@alice\) id:51: reacted with 🔥 to your message #5000/,
+          ),
           ReplyToId: "5000",
           MessageSid: "5000",
         }),
