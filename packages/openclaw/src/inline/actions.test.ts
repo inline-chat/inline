@@ -135,7 +135,7 @@ describe("inline/actions", () => {
     const schema = Array.isArray(discovery?.schema) ? discovery.schema[0] : discovery?.schema
     const buttonsSchema = schema?.properties?.buttons as Record<string | symbol, unknown> | undefined
 
-    expect(discovery?.capabilities).toEqual(["interactive", "buttons"])
+    expect(discovery?.capabilities).toEqual(["presentation"])
     expect(buttonsSchema).toBeDefined()
     expect(buttonsSchema?.type).toBe("array")
     expect(buttonsSchema?.description).toBe("Button rows for channels that support button-style actions.")
