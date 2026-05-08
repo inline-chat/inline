@@ -45,6 +45,9 @@ describe("packed artifact", () => {
     const jsFiles = await listJsFiles(distDir)
     expect(jsFiles.length).toBeGreaterThan(0)
 
+    const distFiles = await readdir(distDir)
+    expect(distFiles).not.toContain("tsconfig.tsbuildinfo")
+
     const unresolvedBareImports = new Set<string>()
     const importPattern = /from\s+"([^"]+)"/g
 

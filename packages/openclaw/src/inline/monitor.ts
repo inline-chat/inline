@@ -291,10 +291,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
 
-function normalizeReplyMarkupButtons(raw: unknown): InlineReplyMarkupButton[][] {
-  return normalizeReplyMarkupButtonsWith(raw)
-}
-
 function resolveInlineNativeCommandMenu(params: {
   commandBody: string
   cfg: OpenClawConfig
@@ -491,9 +487,10 @@ function resolveInlineReplyActions(payload: Record<string, unknown>): MessageAct
 
   if (!hasExplicitButtons) return undefined
 
-  const rows = normalizeReplyMarkupButtonsWith(rawButtons, {
-    ...(mapCallbackData ? { mapCallbackData } : {}),
-  })
+  const rows = normalizeReplyMarkupButtonsWith(
+    rawButtons,
+    mapCallbackData ? { mapCallbackData } : undefined,
+  )
   return {
     rows: rows.map((row, rowIndex) => ({
       actions: row.map((button, buttonIndex) => ({
@@ -762,9 +759,45 @@ function resolveHistorySenderLabel(params: {
   if (params.senderId === params.meId) return "assistant"
   const senderId = String(params.senderId)
   const profile = params.senderProfilesById.get(senderId)
-  if (profile?.username) return `@${profile.username}`
-  if (profile?.name) return profile.name
-  return `user:${senderId}`
+  return resolveInlineSenderLabel({
+    senderId,
+    senderName: profile?.name,
+    senderUsername: profile?.username,
+  })
+}
+
+function resolveInlineSenderLabel(params: {
+  senderId: string
+  senderName?: string | null | undefined
+  senderUsername?: string | null | undefined
+}): string {
+  const senderId = params.senderId.trim()
+  const name = params.senderName?.trim()
+  const usernameRaw = params.senderUsername?.trim().replace(/^@+/, "")
+  const username = usernameRaw ? `@${usernameRaw}` : undefined
+
+  let label = name
+  if (name && username) {
+    label = `${name} (${username})`
+  } else if (!name && username) {
+    label = username
+  }
+
+  const id = senderId ? `id:${senderId}` : undefined
+  if (label && id) return `${label} ${id}`
+  if (label) return label
+  return id ?? "id:unknown"
+}
+
+function resolveInlineConversationLabel(params: {
+  isGroup: boolean
+  groupTitle?: string | null
+  groupId: string
+  senderLabel: string
+}): string {
+  if (!params.isGroup) return params.senderLabel
+  const title = params.groupTitle?.trim()
+  return title ? `${title} id:${params.groupId}` : `group:${params.groupId}`
 }
 
 function resolveHistoryLimit(params: {
@@ -1247,7 +1280,7 @@ export async function monitorInlineProvider(params: {
   let client: InlineSdkClient | null = null
   const pushDiagnostics = (patch?: { lastError?: string; lastInboundAt?: number; lastOutboundAt?: number }) => {
     statusSink?.({
-      ...(patch ?? {}),
+      ...patch,
       ...(client ? { diagnostics: client.getDiagnostics() } : {}),
     })
   }
@@ -1391,22 +1424,14 @@ export async function monitorInlineProvider(params: {
     const senderUsername = senderProfile?.username
     const senderName = senderProfile?.name ?? (!isGroup ? chatInfo.title ?? undefined : undefined)
     if (reactionEvent) {
-      const actor =
-        senderUsername != null && senderUsername.length > 0
-          ? `@${senderUsername}`
-          : senderName ?? `user:${senderId}`
       const emoji = reactionEvent.emoji.trim() || "a reaction"
       const messageId = String(reactionEvent.targetMessageId)
       if (reactionEvent.action === "added") {
-        rawBody = `${actor} reacted with ${emoji} to your message #${messageId}`
+        rawBody = `reacted with ${emoji} to your message #${messageId}`
       } else {
-        rawBody = `${actor} removed ${emoji} from your message #${messageId}`
+        rawBody = `removed ${emoji} from your message #${messageId}`
       }
     } else if (callbackActionEvent) {
-      const actor =
-        senderUsername != null && senderUsername.length > 0
-          ? `@${senderUsername}`
-          : senderName ?? `user:${senderId}`
       const payload = {
         type: "inline_message_action_callback",
         interaction_id: String(callbackActionEvent.interactionId),
@@ -1417,7 +1442,7 @@ export async function monitorInlineProvider(params: {
         data_base64: callbackDataToBase64(callbackActionEvent.data),
         data_utf8: callbackDataToUtf8(callbackActionEvent.data) ?? null,
       }
-      rawBody = `${actor} pressed a button on message #${String(callbackActionEvent.targetMessageId)}\n${JSON.stringify(payload)}`
+      rawBody = `pressed a button on message #${String(callbackActionEvent.targetMessageId)}\n${JSON.stringify(payload)}`
     }
 
     const dmPolicy = account.config.dmPolicy ?? "pairing"
@@ -1580,7 +1605,12 @@ export async function monitorInlineProvider(params: {
         ? `${route.sessionKey}:thread:${String(replyThreadContext.childChatId)}`
         : route.sessionKey
       : null
-    const pendingHistorySender = senderUsername ? `@${senderUsername}` : senderName ?? `user:${senderId}`
+    const senderLabel = resolveInlineSenderLabel({
+      senderId,
+      senderName,
+      senderUsername,
+    })
+    const pendingHistorySender = senderLabel
     const historyLimit = resolveHistoryLimit({
       cfg,
       isGroup,
@@ -1846,32 +1876,44 @@ export async function monitorInlineProvider(params: {
         })
 
     const timestamp = messageTimestamp
-    const fromLabel = isGroup ? `chat:${effectiveGroupTitle ?? String(effectiveChatId)}` : `user:${senderId}`
+    const fromLabel = resolveInlineConversationLabel({
+      isGroup,
+      groupTitle: effectiveGroupTitle,
+      groupId: String(effectiveChatId),
+      senderLabel,
+    })
 
     const storePath = core.channel.session.resolveStorePath(cfg.session?.store, { agentId: route.agentId })
     const envelopeOptions = core.channel.reply.resolveEnvelopeFormatOptions(cfg)
     const previousTimestamp = core.channel.session.readSessionUpdatedAt({ storePath, sessionKey: route.sessionKey })
-    const combinedBody = [
+    const currentBody = buildInlineBodyForAgent({
+      rawBody,
+      currentAttachmentText,
+      currentEntityText,
+    })
+    const contextBody = [
       effectiveHistoryContext.historyText,
       effectiveHistoryContext.attachmentText,
       effectiveHistoryContext.entityText,
       INLINE_FORMATTING_NOTE,
-      `Current message:\n${rawBody}`,
-      currentAttachmentText && currentAttachmentText !== rawBody
-        ? `Current media/attachments:\n${currentAttachmentText}`
-        : null,
-      currentEntityText ? `Current message entities:\n${currentEntityText}` : null,
     ]
       .filter(Boolean)
       .join("\n\n")
-    let body = core.channel.reply.formatAgentEnvelope({
+    const currentEnvelope = core.channel.reply.formatInboundEnvelope({
       channel: "Inline",
       from: fromLabel,
       timestamp,
+      chatType: isGroup ? "group" : "direct",
+      sender: {
+        id: senderId,
+        ...(senderName ? { name: senderName } : {}),
+        ...(senderUsername ? { username: senderUsername } : {}),
+      },
       ...(previousTimestamp != null ? { previousTimestamp } : {}),
       envelope: envelopeOptions,
-      body: combinedBody || rawBody,
+      body: currentBody || rawBody,
     })
+    let body = [contextBody, currentEnvelope].filter(Boolean).join("\n\n")
     if (isGroup && groupHistoryKey) {
       body = buildPendingHistoryContextFromMap({
         historyMap: groupPendingHistories,
@@ -1879,9 +1921,11 @@ export async function monitorInlineProvider(params: {
         limit: historyLimit,
         currentMessage: body,
         formatEntry: (entry) =>
-          core.channel.reply.formatAgentEnvelope({
+          core.channel.reply.formatInboundEnvelope({
             channel: "Inline",
             from: fromLabel,
+            chatType: "group",
+            senderLabel: entry.sender,
             ...(entry.timestamp != null ? { timestamp: entry.timestamp } : {}),
             envelope: envelopeOptions,
             body: `${entry.body}${entry.messageId ? ` [id:${entry.messageId} chat:${String(chatId)}]` : ""}`,
@@ -1896,11 +1940,7 @@ export async function monitorInlineProvider(params: {
             limit: historyLimit,
           })
         : []
-    const bodyForAgent = buildInlineBodyForAgent({
-      rawBody,
-      currentAttachmentText,
-      currentEntityText,
-    })
+    const bodyForAgent = currentBody
     const effectiveSurface = shouldUseTelegramSurfaceForModelCommands(normalizedCommandBody)
       ? "telegram"
       : CHANNEL_ID

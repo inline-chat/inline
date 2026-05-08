@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { InlineAccountSchema, InlineConfigSchema, InlineRuntimeConfigSchema } from "./config-schema"
 
@@ -101,5 +102,18 @@ describe("inline/config-schema", () => {
         },
       }).success,
     ).toBe(true)
+  })
+
+  it("keeps the manifest channel config schema in sync", () => {
+    const manifest = JSON.parse(
+      readFileSync(new URL("../../openclaw.plugin.json", import.meta.url), "utf8"),
+    ) as { channelConfigs?: { inline?: { schema?: unknown } } }
+
+    expect(manifest.channelConfigs?.inline?.schema).toEqual(
+      InlineConfigSchema.toJSONSchema({
+        target: "draft-07",
+        unrepresentable: "any",
+      }),
+    )
   })
 })

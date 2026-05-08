@@ -7,7 +7,7 @@ describe("inline/message-tools", () => {
 
     const connect = vi.fn(async () => {})
     const close = vi.fn(async () => {})
-    const invokeRaw = vi.fn(async (method: number, input: unknown) => {
+    const invokeRaw = vi.fn(async (method: number, _input: unknown) => {
       if (method !== 2) {
         throw new Error(`unexpected method ${String(method)}`)
       }
@@ -106,7 +106,7 @@ describe("inline/message-tools", () => {
 
     const connect = vi.fn(async () => {})
     const close = vi.fn(async () => {})
-    const invokeRaw = vi.fn(async (method: number, input: unknown) => {
+    const invokeRaw = vi.fn(async (method: number, _input: unknown) => {
       if (method !== 29) {
         throw new Error(`unexpected method ${String(method)}`)
       }

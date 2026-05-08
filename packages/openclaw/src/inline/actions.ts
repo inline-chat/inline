@@ -147,7 +147,7 @@ function chunkInteractiveButtons(
       .slice(i, i + INLINE_ACTION_MAX_PER_ROW)
       .map((button) => {
         const text = button.label.trim()
-        const callbackData = button.value.trim()
+        const callbackData = button.value?.trim() ?? ""
         if (!text || !callbackData) {
           return null
         }
@@ -948,7 +948,9 @@ function describeInlineMessageTool({
   }
 
   const buttonsEnabled = supportsInlineMessageButtons(actions)
-  const capabilities: Array<"interactive" | "buttons"> = buttonsEnabled ? ["interactive", "buttons"] : []
+  const capabilities: NonNullable<ChannelMessageToolDiscovery["capabilities"]> = buttonsEnabled
+    ? ["presentation"]
+    : []
   const schema: ChannelMessageToolSchemaContribution[] = buttonsEnabled
     ? [
         {
