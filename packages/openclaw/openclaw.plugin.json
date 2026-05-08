@@ -520,13 +520,11 @@
                   "additionalProperties": false
                 }
               },
-              "required": ["dmPolicy", "groupPolicy"],
-              "additionalProperties": false
+              "additionalProperties": {}
             }
           }
         },
-        "required": ["dmPolicy", "groupPolicy"],
-        "additionalProperties": false
+        "additionalProperties": {}
       },
       "label": "Inline",
       "description": "OpenClaw channel provider for Inline DMs and chats.",

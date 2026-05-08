@@ -49,9 +49,19 @@ describe("inline/config-schema", () => {
     ).toBe(false)
   })
 
-  it("runtime schema remains lenient so token-only setup does not get dropped", () => {
+  it("runtime schema remains lenient so token-only setup and existing user keys do not get dropped", () => {
     expect(
-      InlineRuntimeConfigSchema.safeParse({ token: "t", dmPolicy: "open" }).success,
+      InlineRuntimeConfigSchema.safeParse({
+        token: "t",
+        dmPolicy: "open",
+        legacyUserKey: true,
+        accounts: {
+          work: {
+            token: "t",
+            legacyAccountKey: true,
+          },
+        },
+      }).success,
     ).toBe(true)
   })
 
@@ -110,10 +120,27 @@ describe("inline/config-schema", () => {
     ) as { channelConfigs?: { inline?: { schema?: unknown } } }
 
     expect(manifest.channelConfigs?.inline?.schema).toEqual(
-      InlineConfigSchema.toJSONSchema({
+      InlineRuntimeConfigSchema.toJSONSchema({
         target: "draft-07",
         unrepresentable: "any",
       }),
     )
+  })
+
+  it("does not require defaulted policy fields in the published channel schema", () => {
+    const schema = InlineRuntimeConfigSchema.toJSONSchema({
+      target: "draft-07",
+      unrepresentable: "any",
+    }) as {
+      required?: unknown
+      properties?: {
+        accounts?: {
+          additionalProperties?: { required?: unknown }
+        }
+      }
+    }
+
+    expect(schema.required).toBeUndefined()
+    expect(schema.properties?.accounts?.additionalProperties?.required).toBeUndefined()
   })
 })
