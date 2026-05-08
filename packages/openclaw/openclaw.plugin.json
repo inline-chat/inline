@@ -3,6 +3,15 @@
   "name": "Inline",
   "description": "Inline channel plugin (realtime RPC bot token; DMs + chats).",
   "channels": ["inline"],
+  "contracts": {
+    "tools": [
+      "inline_members",
+      "inline_update_profile",
+      "inline_bot_commands",
+      "inline_nudge",
+      "inline_forward"
+    ]
+  },
   "channelEnvVars": {
     "inline": ["INLINE_TOKEN"]
   },

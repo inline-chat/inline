@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import type { OpenClawPluginApi, PluginRuntime } from "openclaw/plugin-sdk"
+import { readFile } from "node:fs/promises"
+import path from "node:path"
 
 describe("plugin entry", () => {
   it("registers the channel, Inline message hook, and wires runtime", async () => {
@@ -43,13 +45,18 @@ describe("plugin entry", () => {
     pluginMod.default.register(api)
 
     expect(registered).toBe(true)
-    expect(registeredToolNames).toEqual([
+    const expectedToolNames = [
       "inline_members",
       "inline_update_profile",
       "inline_bot_commands",
       "inline_nudge",
       "inline_forward",
-    ])
+    ]
+    expect(registeredToolNames).toEqual(expectedToolNames)
+    const manifestPath = path.resolve(__dirname, "..", "openclaw.plugin.json")
+    const rawManifest = await readFile(manifestPath, "utf8")
+    const manifest = JSON.parse(rawManifest) as { contracts?: { tools?: unknown } }
+    expect(manifest.contracts?.tools).toEqual(expectedToolNames)
     expect(hooks.has("message_sending")).toBe(true)
     expect(hooks.has("gateway_start")).toBe(true)
 
