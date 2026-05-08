@@ -114,8 +114,8 @@ export const ToolPolicySchema = ToolPolicyBaseSchema.superRefine((value, ctx) =>
 }).optional()
 
 export function requireOpenAllowFrom(params: {
-  policy?: string
-  allowFrom?: Array<string | number>
+  policy?: string | undefined
+  allowFrom?: Array<string | number> | undefined
   ctx: z.RefinementCtx
   path: Array<string | number>
   message: string

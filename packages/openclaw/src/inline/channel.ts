@@ -6,7 +6,7 @@ import {
 import { buildDmGroupAccountAllowlistAdapter } from "openclaw/plugin-sdk/allowlist-config-edit"
 import { buildTokenChannelStatusSummary } from "openclaw/plugin-sdk/status-helpers"
 import { InlineSdkClient, Method, type Chat, type Dialog, type User } from "@inline-chat/realtime-sdk"
-import { InlineConfigSchema } from "./config-schema.js"
+import { InlineRuntimeConfigSchema } from "./config-schema.js"
 import {
   listInlineAccountIds,
   resolveDefaultInlineAccountId,
@@ -776,7 +776,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
     blockStreamingCoalesceDefaults: { minChars: 1500, idleMs: 1000 },
   },
   reload: { configPrefixes: ["channels.inline"] },
-  configSchema: buildChannelConfigSchema(InlineConfigSchema),
+  configSchema: buildChannelConfigSchema(InlineRuntimeConfigSchema),
   setup: inlineSetupAdapter,
   setupWizard: inlineSetupWizard,
 
