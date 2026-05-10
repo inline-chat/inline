@@ -21,7 +21,7 @@ public struct SyncConfig: Sendable {
     self.maxConcurrentBucketFetches = max(1, maxConcurrentBucketFetches)
   }
 
-  public static let `default` = SyncConfig(enableMessageUpdates: false, lastSyncSafetyGapSeconds: 15)
+  public static let `default` = SyncConfig(enableMessageUpdates: true, lastSyncSafetyGapSeconds: 15)
 }
 
 public struct SyncBucketSnapshot: Sendable {
@@ -107,6 +107,9 @@ public struct SyncStats: Sendable {
 }
 
 actor Sync {
+  private static let getUpdatesStateTimeout: Duration = .seconds(15)
+  private static let getUpdatesStateRetryDelays: [Duration] = [.seconds(1), .seconds(2), .seconds(5)]
+
   private var log = Log.scoped("RealtimeV2.Sync")
 
   private var applyUpdates: ApplyUpdates
@@ -167,12 +170,18 @@ actor Sync {
 
     // Apply the direct updates
     if !applyingUpdates.isEmpty {
-      await applyUpdates.apply(updates: applyingUpdates, source: .realtime)
-      recordDirectApply(count: applyingUpdates.count)
-      let maxAppliedDate = maxUpdateDate(in: applyingUpdates)
-      await updateLastSyncDate(maxAppliedDate: maxAppliedDate, source: "direct")
-      // Update bucket states based on applied updates
-      await updateBucketStates(for: applyingUpdates)
+      let result = await applyUpdates.apply(updates: applyingUpdates, source: .realtime)
+      recordDirectApply(count: result.appliedCount)
+      if result.succeeded {
+        let maxAppliedDate = maxUpdateDate(in: applyingUpdates)
+        await updateLastSyncDate(maxAppliedDate: maxAppliedDate, source: "direct")
+        // Update bucket states based on applied updates
+        await updateBucketStates(for: applyingUpdates)
+      } else {
+        log.error(
+          "failed to apply \(result.failedCount) direct updates; skipping direct sync cursor advancement"
+        )
+      }
     }
 
     // Apply bucketed updates (sequenced) via BucketActor ordering/buffering.
@@ -214,12 +223,12 @@ actor Sync {
   }
 
   /// Apply updates from bucket actor
-  func applyUpdatesFromBucket(_ updates: [InlineProtocol.Update]) async {
+  func applyUpdatesFromBucket(_ updates: [InlineProtocol.Update]) async -> UpdateApplyResult {
     await applyUpdates.apply(updates: updates, source: .syncCatchup)
   }
 
   /// Apply sequenced realtime updates through the same engine, but with realtime side effects.
-  func applyUpdatesFromRealtime(_ updates: [InlineProtocol.Update]) async {
+  func applyUpdatesFromRealtime(_ updates: [InlineProtocol.Update]) async -> UpdateApplyResult {
     await applyUpdates.apply(updates: updates, source: .realtime)
   }
 
@@ -298,51 +307,71 @@ actor Sync {
 
   /// Get the state from the server
   private func getStateFromServer() {
-    Task {
-      guard let client else {
-        log.error("client is nil")
-        return
-      }
-      var state = await syncStorage.getState()
+    Task { await fetchStateFromServerWithRetry() }
+  }
 
-      // Handle uninitialized or too old state
-      let now = Int64(Date().timeIntervalSince1970)
-      // 14 days in seconds
-      let maxSyncAge: Int64 = 14 * 24 * 60 * 60
+  private func fetchStateFromServerWithRetry() async {
+    guard let client else {
+      log.error("client is nil")
+      return
+    }
 
-      if state.lastSyncDate == 0 {
-        // Temporary rollout safety: when sync state is missing, ask the server for the past 5 days so
-        // we re-trigger buckets that may have changed while clients upgrade. Once all clients run the
-        // new sync engine we can narrow or remove this lookback window.
-        let fiveDays: Int64 = 5 * 24 * 60 * 60
-        let seedDate = max(0, now - fiveDays)
-        log.info("Sync state uninitialized (date=0). Seeding lookback to \(seedDate) (5 days ago)")
-        state = SyncState(lastSyncDate: seedDate)
-        await syncStorage.setState(state)
-      } else if now - state.lastSyncDate > maxSyncAge {
-        log.warning("Sync state too old (> 14 days). Resetting to now: \(now)")
-        // TODO: We should clear the client cache and refetch everything here because
-        // we might have missed too many updates and the gap is too large to sync reliably
-        // or efficiently. For now, we just reset the cursor to avoid a massive fetch storm.
-        state = SyncState(lastSyncDate: now)
-        await syncStorage.setState(state)
-      }
+    let state = await preparedSyncState()
+    let maxAttempts = Self.getUpdatesStateRetryDelays.count + 1
 
+    for attempt in 1 ... maxAttempts {
       do {
         // Note: We use callRpc to ensure we wait for the server's acknowledgement,
         // but the primary mechanism for sync is the server pushing 'hasNewUpdates'
         // events in response to this call (or as part of the result).
         let result = try await client.callRpc(method: .getUpdatesState, input: .getUpdatesState(.with {
           $0.date = state.lastSyncDate
-        }), timeout: nil)
+        }), timeout: Self.getUpdatesStateTimeout)
         log.trace("sent get updates state request with date: \(state.lastSyncDate)")
         if case let .getUpdatesState(payload) = result {
           await updateLastSyncDate(maxAppliedDate: payload.date, source: "getUpdatesState")
         }
+        return
       } catch {
-        log.error("failed to get updates state: \(error)")
+        log.error("failed to get updates state (attempt \(attempt)/\(maxAttempts)): \(error)")
+        guard attempt < maxAttempts else { return }
+        let delay = Self.getUpdatesStateRetryDelays[attempt - 1]
+        do {
+          try await Task.sleep(for: delay)
+        } catch {
+          return
+        }
       }
     }
+  }
+
+  private func preparedSyncState() async -> SyncState {
+    var state = await syncStorage.getState()
+
+    // Handle uninitialized or too old state
+    let now = Int64(Date().timeIntervalSince1970)
+    // 14 days in seconds
+    let maxSyncAge: Int64 = 14 * 24 * 60 * 60
+
+    if state.lastSyncDate == 0 {
+      // Temporary rollout safety: when sync state is missing, ask the server for the past 5 days so
+      // we re-trigger buckets that may have changed while clients upgrade. Once all clients run the
+      // new sync engine we can narrow or remove this lookback window.
+      let fiveDays: Int64 = 5 * 24 * 60 * 60
+      let seedDate = max(0, now - fiveDays)
+      log.info("Sync state uninitialized (date=0). Seeding lookback to \(seedDate) (5 days ago)")
+      state = SyncState(lastSyncDate: seedDate)
+      await syncStorage.setState(state)
+    } else if now - state.lastSyncDate > maxSyncAge {
+      log.warning("Sync state too old (> 14 days). Resetting to now: \(now)")
+      // TODO: We should clear the client cache and refetch everything here because
+      // we might have missed too many updates and the gap is too large to sync reliably
+      // or efficiently. For now, we just reset the cursor to avoid a massive fetch storm.
+      state = SyncState(lastSyncDate: now)
+      await syncStorage.setState(state)
+    }
+
+    return state
   }
 
   private func updateBucketStates(for updates: [InlineProtocol.Update]) async {
@@ -506,6 +535,8 @@ actor Sync {
         .chat(peer: payload.peerID)
       case .updateReadMaxID:
         .user
+      case .chatOpen:
+        .user
       default:
         nil
     }
@@ -573,6 +604,7 @@ actor BucketActor {
   private var log = Log.scoped("RealtimeV2.Sync.BucketActor")
 
   private static let maxTotalUpdates: Int64 = 1000
+  private static let getUpdatesTimeout: Duration = .seconds(30)
 
   // Strong ref for the same reason as Sync.client.
   private var client: ProtocolClientType?
@@ -653,6 +685,8 @@ actor BucketActor {
       case .chatMoved:
         true
       case .joinSpace:
+        true
+      case .chatOpen:
         true
       case .newMessage, .editMessage, .messageAttachment:
         enableMessageUpdates
@@ -739,19 +773,34 @@ actor BucketActor {
     }
 
     var contiguous: [InlineProtocol.Update] = []
+    var nextSeq = seq
+    var nextDate = date
 
     // Drain a contiguous run starting at the next expected seq.
-    while let next = bufferedRealtimeUpdates[seq + 1] {
-      bufferedRealtimeUpdates.removeValue(forKey: seq + 1)
+    while let next = bufferedRealtimeUpdates[nextSeq + 1] {
       contiguous.append(next)
-      seq = Int64(next.seq)
-      date = next.date
+      nextSeq = Int64(next.seq)
+      nextDate = next.date
     }
 
     guard !contiguous.isEmpty else { return }
 
-    log.debug("applying \(contiguous.count) realtime updates for bucket \(key) (new seq=\(seq))")
-    await sync.applyUpdatesFromRealtime(contiguous)
+    log.debug("applying \(contiguous.count) realtime updates for bucket \(key) (new seq=\(nextSeq))")
+    let result = await sync.applyUpdatesFromRealtime(contiguous)
+    guard result.succeeded else {
+      log.error(
+        "failed to apply \(result.failedCount) realtime updates for bucket \(key); keeping seq=\(seq) and scheduling catch-up"
+      )
+      needsFetch = true
+      Task { await self.fetchNewUpdates() }
+      return
+    }
+
+    for update in contiguous where update.hasSeq {
+      bufferedRealtimeUpdates.removeValue(forKey: Int64(update.seq))
+    }
+    seq = nextSeq
+    date = nextDate
     let maxAppliedDate = maxUpdateDate(in: contiguous)
     await sync.updateLastSyncDate(maxAppliedDate: maxAppliedDate, source: "realtime:\(key)")
     await sync.saveBucketState(for: key, seq: seq, date: date)
@@ -871,7 +920,7 @@ actor BucketActor {
           if let requestSeqEnd {
             $0.seqEnd = requestSeqEnd
           }
-          }), timeout: nil)
+          }), timeout: Self.getUpdatesTimeout)
         } catch {
           await fetchLimiter.release()
           throw error
@@ -1000,7 +1049,18 @@ actor BucketActor {
         // monotonic per-bucket ordering.
         let orderedUpdates = orderUpdatesBySeq(pendingUpdates)
         log.debug("applying \(orderedUpdates.count) updates for bucket \(key)")
-        await sync.applyUpdatesFromBucket(orderedUpdates)
+        let result = await sync.applyUpdatesFromBucket(orderedUpdates)
+        guard result.succeeded else {
+          log.error(
+            "failed to apply \(result.failedCount) catch-up updates for bucket \(key); keeping seq=\(seq)"
+          )
+          await sync.recordBucketUpdatesApplied(
+            applied: result.appliedCount,
+            skipped: totalSkipped,
+            duplicates: totalDuplicateSkipped
+          )
+          return false
+        }
         let maxAppliedDate = maxUpdateDate(in: orderedUpdates)
         await sync.updateLastSyncDate(maxAppliedDate: maxAppliedDate, source: "bucket:\(key)")
       }
@@ -1037,6 +1097,10 @@ actor BucketActor {
       )
 
     } catch {
+      if isNonRetryableBucketError(error) {
+        log.warning("non-retryable getUpdates error for bucket \(key): \(error)")
+        return true
+      }
       log.error("failed to fetch updates for bucket \(key): \(error)")
       await sync.recordBucketFetchFailure()
       // We exit; next sync attempt will retry from the last saved seq
@@ -1044,6 +1108,20 @@ actor BucketActor {
     }
 
     return true
+  }
+
+  private func isNonRetryableBucketError(_ error: Error) -> Bool {
+    guard case let ProtocolSessionError.rpcError(errorCode, _, _) = error else {
+      return false
+    }
+
+    let normalized = errorCode
+      .replacingOccurrences(of: "_", with: "")
+      .lowercased()
+
+    return normalized == "peeridinvalid"
+      || normalized == "chatidinvalid"
+      || normalized == "spaceidinvalid"
   }
 
   private func resetRetryState() {

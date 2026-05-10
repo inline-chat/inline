@@ -1,12 +1,9 @@
 import InlineKit
-import RealtimeV2
 import SwiftUI
 
 struct ExperimentalView: View {
   @AppStorage("enableExperimentalView") private var enableExperimentalView = false
   @AppStorage(ExperimentalFeatureFlags.voiceMessagesKey) private var enableVoiceMessages = false
-  @Environment(\.realtimeV2) private var realtimeV2
-  @State private var enableSyncMessageUpdates = Api.realtime.getEnableSyncMessageUpdates()
 
   var body: some View {
     List {
@@ -22,16 +19,6 @@ struct ExperimentalView: View {
         }
 
         SettingsItem(
-          icon: "arrow.triangle.2.circlepath",
-          iconColor: .orange,
-          title: "Enable sync message updates"
-        ) {
-          Toggle("", isOn: $enableSyncMessageUpdates)
-            .labelsHidden()
-            .accessibilityLabel("Enable sync message updates")
-        }
-
-        SettingsItem(
           icon: "waveform",
           iconColor: .red,
           title: "Enable voice messages"
@@ -41,7 +28,7 @@ struct ExperimentalView: View {
             .accessibilityLabel("Enable voice messages")
         }
 
-        Text("Experimental voice features and UI changes may require an app restart. Sync changes apply immediately.")
+        Text("Experimental voice features and UI changes may require an app restart.")
           .font(.caption)
           .foregroundStyle(.secondary)
       }
@@ -49,12 +36,6 @@ struct ExperimentalView: View {
     .listStyle(.insetGrouped)
     .navigationTitle("Experimental")
     .navigationBarTitleDisplayMode(.inline)
-    .onAppear {
-      enableSyncMessageUpdates = Api.realtime.getEnableSyncMessageUpdates()
-    }
-    .onChange(of: enableSyncMessageUpdates) { _, _ in
-      Task { await realtimeV2.setEnableSyncMessageUpdates(enableSyncMessageUpdates) }
-    }
   }
 }
 

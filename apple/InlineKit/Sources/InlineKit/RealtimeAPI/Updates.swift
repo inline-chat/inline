@@ -16,7 +16,7 @@ public actor UpdatesEngine: Sendable {
     db: Database,
     source: UpdateApplySource,
     reloadPeers: inout Set<Peer>
-  ) {
+  ) -> Bool {
     log.trace("apply realtime update")
     // log.debug("Received update type: \(update.update)")
 
@@ -50,7 +50,10 @@ public actor UpdatesEngine: Sendable {
           }
 
         case let .messageAttachment(updateMessageAttachment):
-          try updateMessageAttachment.apply(db)
+          let peer = try updateMessageAttachment.apply(db, publishChanges: source != .syncCatchup)
+          if source == .syncCatchup, let peer {
+            reloadPeers.insert(peer)
+          }
 
         case let .updateReaction(updateReaction):
           try updateReaction.apply(db)
@@ -132,21 +135,27 @@ public actor UpdatesEngine: Sendable {
         default:
           break
       }
+      return true
     } catch {
       log.error("Failed to apply update", error: error)
+      return false
     }
   }
 
-  public func applyBatch(updates: [InlineProtocol.Update]) async {
+  @discardableResult
+  public func applyBatch(updates: [InlineProtocol.Update]) async -> UpdateApplyResult {
     await applyBatch(updates: updates, source: .realtime)
   }
 
-  public func applyBatch(updates: [InlineProtocol.Update], source: UpdateApplySource) async {
+  @discardableResult
+  public func applyBatch(updates: [InlineProtocol.Update], source: UpdateApplySource) async -> UpdateApplyResult {
     log.debug("applying \(updates.count) updates (source=\(source))")
     // Keep catch-up writes bounded so a very large reconnect batch does not monopolize
     // the writer lock long enough to visibly stall chat UI reads.
     let chunkSize = source == .syncCatchup ? 200 : max(updates.count, 1)
     var reloadPeers = Set<Peer>()
+    var appliedCount = 0
+    var failedCount = 0
 
     var start = updates.startIndex
     while start < updates.endIndex {
@@ -154,16 +163,25 @@ public actor UpdatesEngine: Sendable {
       let chunk = updates[start ..< end]
 
       do {
-        let chunkReloadPeers = try await database.dbWriter.write { db in
+        let chunkResult = try await database.dbWriter.write { db in
           var chunkReloadPeers = Set<Peer>()
+          var chunkApplied = 0
+          var chunkFailed = 0
           for update in chunk {
-            self.apply(update: update, db: db, source: source, reloadPeers: &chunkReloadPeers)
+            if self.apply(update: update, db: db, source: source, reloadPeers: &chunkReloadPeers) {
+              chunkApplied += 1
+            } else {
+              chunkFailed += 1
+            }
           }
-          return chunkReloadPeers
+          return (chunkReloadPeers, chunkApplied, chunkFailed)
         }
-        reloadPeers.formUnion(chunkReloadPeers)
+        reloadPeers.formUnion(chunkResult.0)
+        appliedCount += chunkResult.1
+        failedCount += chunkResult.2
       } catch {
         log.error("Failed to apply updates chunk", error: error)
+        failedCount += chunk.count
       }
 
       if source == .syncCatchup, end < updates.endIndex {
@@ -179,10 +197,18 @@ public actor UpdatesEngine: Sendable {
         }
       }
     }
+
+    return UpdateApplyResult(appliedCount: appliedCount, failedCount: failedCount)
   }
 }
 
 // MARK: Extensions
+
+private func deleteChatSyncBucket(_ db: Database, chatId: Int64) throws {
+  try DbBucketState
+    .filter(DbBucketState.Columns.bucketType == 1 && DbBucketState.Columns.entityId == -chatId)
+    .deleteAll(db)
+}
 
 extension InlineProtocol.UpdateDeleteChat {
   func apply(_ db: Database) throws {
@@ -207,6 +233,12 @@ extension InlineProtocol.UpdateDeleteChat {
       try Chat.filter(Column("id") == chatId).deleteAll(db)
     } catch {
       Log.shared.error("Failed to delete chat", error: error)
+    }
+
+    do {
+      try deleteChatSyncBucket(db, chatId: chatId)
+    } catch {
+      Log.shared.error("Failed to delete chat sync bucket", error: error)
     }
 
     // Post notification to pop chat route
@@ -422,7 +454,8 @@ extension InlineProtocol.UpdateDeleteMessages {
 }
 
 extension InlineProtocol.UpdateMessageAttachment {
-  func apply(_ db: Database) throws {
+  @discardableResult
+  func apply(_ db: Database, publishChanges: Bool = true) throws -> Peer? {
     if attachment.attachment == nil {
       let attachmentId = attachment.id
 
@@ -462,7 +495,7 @@ extension InlineProtocol.UpdateMessageAttachment {
     } else {
       guard attachment.attachment != nil else {
         Log.shared.error("Message attachment is nil")
-        return
+        return nil
       }
 
       let message = try Message.filter(Column("messageId") == messageID).filter(Column("chatId") == chatID)
@@ -480,12 +513,17 @@ extension InlineProtocol.UpdateMessageAttachment {
       .fetchOne(db)
 
     if let message {
-      db.afterNextTransaction { _ in
-        Task(priority: .userInitiated) { @MainActor in
-          MessagesPublisher.shared.messageUpdatedSync(message: message, peer: message.peerId, animated: true)
+      if publishChanges {
+        db.afterNextTransaction { _ in
+          Task(priority: .userInitiated) { @MainActor in
+            MessagesPublisher.shared.messageUpdatedSync(message: message, peer: message.peerId, animated: true)
+          }
         }
       }
+      return message.peerId
     }
+
+    return nil
   }
 }
 
@@ -812,6 +850,12 @@ extension InlineProtocol.UpdateChatParticipantDelete {
         try Chat.filter(Column("id") == chatID).deleteAll(db)
       } catch {
         Log.shared.error("Failed to delete chat", error: error)
+      }
+
+      do {
+        try deleteChatSyncBucket(db, chatId: chatID)
+      } catch {
+        Log.shared.error("Failed to delete chat sync bucket", error: error)
       }
 
       // Post notification to pop chat route

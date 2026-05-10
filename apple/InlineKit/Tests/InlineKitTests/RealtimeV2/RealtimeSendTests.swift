@@ -815,6 +815,33 @@ private actor DependencyFailureTransport: Transport {
           response.id = message.id
           response.body = .rpcResult(rpcResult)
           await channel.send(.message(response))
+        } else if rpcCall.method == .getUpdatesState {
+          var result = InlineProtocol.GetUpdatesStateResult()
+          result.date = Int64(Date().timeIntervalSince1970)
+
+          var rpcResult = InlineProtocol.RpcResult()
+          rpcResult.reqMsgID = message.id
+          rpcResult.result = .getUpdatesState(result)
+
+          var response = ServerProtocolMessage()
+          response.id = message.id
+          response.body = .rpcResult(rpcResult)
+          await channel.send(.message(response))
+        } else if rpcCall.method == .getUpdates {
+          var result = InlineProtocol.GetUpdatesResult()
+          result.seq = 0
+          result.date = Int64(Date().timeIntervalSince1970)
+          result.final = true
+          result.resultType = .empty
+
+          var rpcResult = InlineProtocol.RpcResult()
+          rpcResult.reqMsgID = message.id
+          rpcResult.result = .getUpdates(result)
+
+          var response = ServerProtocolMessage()
+          response.id = message.id
+          response.body = .rpcResult(rpcResult)
+          await channel.send(.message(response))
         }
 
       default:
@@ -1006,7 +1033,9 @@ private enum SendTestTimeoutError: Error {
 }
 
 private actor SendTestApplyUpdates: ApplyUpdates {
-  func apply(updates: [InlineProtocol.Update], source: UpdateApplySource) async {}
+  func apply(updates: [InlineProtocol.Update], source: UpdateApplySource) async -> UpdateApplyResult {
+    .success(count: updates.count)
+  }
 }
 
 private actor SendTestSyncStorage: SyncStorage {

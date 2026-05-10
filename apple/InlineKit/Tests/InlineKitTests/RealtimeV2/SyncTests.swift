@@ -7,6 +7,18 @@ import Testing
 
 @Suite("SyncTests")
 final class SyncTests {
+  @Test("sync message updates are enabled by default")
+  func testSyncMessageUpdatesDefaultEnabled() {
+    #expect(SyncConfig.default.enableMessageUpdates)
+  }
+
+  @Test("stable sync ignores legacy experimental opt-out")
+  func testStableSyncIgnoresLegacyExperimentalOptOut() {
+    RealtimeConfigStore.setEnableSyncMessageUpdates(false)
+    #expect(RealtimeConfigStore.getEnableSyncMessageUpdates())
+    #expect(RealtimeConfigStore.initialSyncConfig().enableMessageUpdates)
+  }
+
   @Test("updates lastSyncDate with safety gap")
   func testLastSyncDateSafetyGap() async throws {
     let storage = InMemorySyncStorage()
@@ -80,7 +92,13 @@ final class SyncTests {
       final: true,
       resultType: .empty
     )
-    let client = FakeProtocolClient(responses: [response])
+    let client = FakeProtocolClient(
+      responses: [],
+      methodResponses: [
+        .getUpdatesState: [makeGetUpdatesStateResult(date: 100)],
+        .getUpdates: [response],
+      ]
+    )
     let config = SyncConfig(enableMessageUpdates: false, lastSyncSafetyGapSeconds: 15)
     let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
 
@@ -142,7 +160,13 @@ final class SyncTests {
       resultType: .slice
     )
 
-    let client = FakeProtocolClient(responses: [response])
+    let client = FakeProtocolClient(
+      responses: [],
+      methodResponses: [
+        .getUpdatesState: [makeGetUpdatesStateResult(date: 100)],
+        .getUpdates: [response],
+      ]
+    )
     let config = SyncConfig(enableMessageUpdates: false, lastSyncSafetyGapSeconds: 15)
     let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
 
@@ -178,7 +202,13 @@ final class SyncTests {
       resultType: .slice
     )
 
-    let client = FakeProtocolClient(responses: [response])
+    let client = FakeProtocolClient(
+      responses: [],
+      methodResponses: [
+        .getUpdatesState: [makeGetUpdatesStateResult(date: 100)],
+        .getUpdates: [response],
+      ]
+    )
     let config = SyncConfig(enableMessageUpdates: true, lastSyncSafetyGapSeconds: 15)
     let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
 
@@ -735,6 +765,112 @@ final class SyncTests {
     } else {
       #expect(Bool(false), "Expected chatMoved")
     }
+  }
+
+  @Test("user bucket catch-up applies chatOpen")
+  func testUserBucketAppliesChatOpen() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+
+    let chatOpen = makeChatOpenUpdate(seq: 1, date: 100, chatId: 1)
+    let response = makeGetUpdatesResult(
+      seq: 1,
+      date: 100,
+      updates: [chatOpen],
+      final: true,
+      resultType: .slice
+    )
+
+    let client = FakeProtocolClient(
+      responses: [],
+      methodResponses: [
+        .getUpdatesState: [makeGetUpdatesStateResult(date: 100)],
+        .getUpdates: [response],
+      ]
+    )
+    let config = SyncConfig(enableMessageUpdates: false, lastSyncSafetyGapSeconds: 15)
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+
+    await sync.connectionStateChanged(state: .connected)
+    let didApply = await waitForCondition(timeout: .seconds(1)) {
+      await apply.appliedUpdates.count == 1
+    }
+    #expect(didApply)
+
+    let applied = await apply.appliedUpdates
+    #expect(applied.count == 1)
+    guard let first = applied.first else { return }
+    if case .chatOpen = first.update {
+      // ok
+    } else {
+      #expect(Bool(false), "Expected chatOpen")
+    }
+
+    let bucketState = await storage.getBucketState(for: .user)
+    #expect(bucketState.seq == 1)
+    #expect(bucketState.date == 100)
+  }
+
+  @Test("catch-up apply failure does not advance bucket state")
+  func testCatchUpApplyFailureDoesNotAdvanceBucketState() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    await apply.setResult(UpdateApplyResult(appliedCount: 0, failedCount: 1))
+
+    let peer = makeChatPeer(chatId: 1)
+    await storage.setBucketState(for: .chat(peer: peer), state: BucketState(date: 100, seq: 5))
+
+    let update = makeChatInfoUpdate(seq: 6, date: 120)
+    let response = makeGetUpdatesResult(
+      seq: 6,
+      date: 120,
+      updates: [update],
+      final: true,
+      resultType: .slice
+    )
+
+    let client = FakeProtocolClient(responses: [response])
+    let config = SyncConfig(enableMessageUpdates: false, lastSyncSafetyGapSeconds: 15)
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+
+    let signal = makeChatHasNewUpdatesSignal(chatId: 1, updateSeq: 6)
+    await sync.process(updates: [signal])
+
+    let didApply = await waitForCondition(timeout: .milliseconds(500)) {
+      await apply.appliedUpdates.count == 1
+    }
+    #expect(didApply)
+
+    let applied = await apply.appliedUpdates
+    #expect(applied.count == 1)
+
+    let bucketState = await storage.getBucketState(for: .chat(peer: peer))
+    #expect(bucketState.seq == 5)
+    #expect(bucketState.date == 100)
+  }
+
+  @Test("realtime apply failure does not advance bucket state")
+  func testRealtimeApplyFailureDoesNotAdvanceBucketState() async throws {
+    let storage = InMemorySyncStorage()
+    let apply = RecordingApplyUpdates()
+    await apply.setResult(UpdateApplyResult(appliedCount: 0, failedCount: 1))
+
+    let peer = makeChatPeer(chatId: 1)
+    await storage.setBucketState(for: .chat(peer: peer), state: BucketState(date: 100, seq: 5))
+
+    let client = FakeProtocolClient(responses: [])
+    let config = SyncConfig(enableMessageUpdates: false, lastSyncSafetyGapSeconds: 15)
+    let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
+
+    let update = makeChatInfoUpdate(seq: 6, date: 120)
+    await sync.process(updates: [update])
+
+    let applied = await apply.appliedUpdates
+    #expect(applied.count == 1)
+
+    let bucketState = await storage.getBucketState(for: .chat(peer: peer))
+    #expect(bucketState.seq == 5)
+    #expect(bucketState.date == 100)
   }
 
   @Test("sequenced updateReadMaxId realtime update advances user bucket state")
@@ -1342,9 +1478,18 @@ final actor FakeProtocolClient: ProtocolClientType {
 
 actor RecordingApplyUpdates: ApplyUpdates {
   private(set) var appliedUpdates: [InlineProtocol.Update] = []
+  var result = UpdateApplyResult.success(count: 0)
 
-  func apply(updates: [InlineProtocol.Update], source: UpdateApplySource) async {
+  func setResult(_ result: UpdateApplyResult) {
+    self.result = result
+  }
+
+  func apply(updates: [InlineProtocol.Update], source: UpdateApplySource) async -> UpdateApplyResult {
     appliedUpdates.append(contentsOf: updates)
+    guard result.failedCount > 0 else {
+      return .success(count: updates.count)
+    }
+    return result
   }
 }
 
@@ -1499,5 +1644,24 @@ private func makeChatMovedUpdate(
   update.seq = Int32(seq)
   update.date = date
   update.update = .chatMoved(payload)
+  return update
+}
+
+private func makeChatOpenUpdate(seq: Int64, date: Int64, chatId: Int64) -> InlineProtocol.Update {
+  var chat = InlineProtocol.Chat()
+  chat.id = chatId
+  chat.peerID = makeChatPeer(chatId: chatId)
+
+  var dialog = InlineProtocol.Dialog()
+  dialog.chatID = chatId
+
+  var payload = InlineProtocol.UpdateChatOpen()
+  payload.chat = chat
+  payload.dialog = dialog
+
+  var update = InlineProtocol.Update()
+  update.seq = Int32(seq)
+  update.date = date
+  update.update = .chatOpen(payload)
   return update
 }
