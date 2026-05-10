@@ -461,9 +461,9 @@ public actor RealtimeV2 {
     RealtimeConfigStore.getEnableSyncMessageUpdates()
   }
 
-  public func setEnableSyncMessageUpdates(_ enabled: Bool) {
-    RealtimeConfigStore.setEnableSyncMessageUpdates(enabled)
-    Task { await sync.updateConfig(syncConfig(for: enabled)) }
+  public func setEnableSyncMessageUpdates(_: Bool) {
+    RealtimeConfigStore.setEnableSyncMessageUpdates(true)
+    Task { await sync.updateConfig(SyncConfig.default) }
   }
 
   public func getSyncStats() async -> SyncStats {
@@ -572,10 +572,4 @@ public actor RealtimeV2 {
     }
   }
 
-  private func syncConfig(for enableMessageUpdates: Bool) -> SyncConfig {
-    SyncConfig(
-      enableMessageUpdates: enableMessageUpdates,
-      lastSyncSafetyGapSeconds: SyncConfig.default.lastSyncSafetyGapSeconds
-    )
-  }
 }
