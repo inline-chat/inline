@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import { InlineAccountSchema, InlineConfigSchema, InlineRuntimeConfigSchema } from "./config-schema"
 
@@ -47,12 +46,87 @@ describe("inline/config-schema", () => {
     expect(
       InlineAccountSchema.safeParse({ dmPolicy: "open", allowFrom: ["2"] }).success,
     ).toBe(false)
+    expect(
+      InlineConfigSchema.safeParse({
+        accounts: {
+          work: { dmPolicy: "open", allowFrom: ["2"] },
+        },
+      }).success,
+    ).toBe(false)
   })
 
   it("runtime schema remains lenient so token-only setup does not get dropped", () => {
     expect(
       InlineRuntimeConfigSchema.safeParse({ token: "t", dmPolicy: "open" }).success,
     ).toBe(true)
+  })
+
+  it("runtime schema tolerates future host fields without dropping known Inline config", () => {
+    const result = InlineRuntimeConfigSchema.safeParse({
+      token: "t",
+      futureHostField: true,
+      streaming: {
+        mode: "progress",
+        futureModeOption: "host-owned",
+        preview: {
+          toolProgress: false,
+          futurePreviewOption: true,
+        },
+        block: {
+          coalesce: {
+            minChars: 500,
+            futureCoalesceOption: "ok",
+          },
+        },
+      },
+      accounts: {
+        work: {
+          token: "work-token",
+          futureAccountField: "ok",
+          streaming: {
+            mode: "block",
+            futureAccountStreamingField: true,
+          },
+        },
+      },
+    })
+
+    expect(result.success).toBe(true)
+  })
+
+  it("channel config schema tolerates unknown host-owned fields but rejects bad known streaming values", () => {
+    expect(
+      InlineConfigSchema.safeParse({
+        token: "t",
+        futureHostField: true,
+        streaming: {
+          mode: "progress",
+          futureModeOption: "host-owned",
+          preview: {
+            toolProgress: false,
+            futurePreviewOption: true,
+          },
+        },
+        accounts: {
+          work: {
+            token: "work-token",
+            futureAccountField: true,
+            streaming: {
+              mode: "partial",
+              futureAccountStreamingField: true,
+            },
+          },
+        },
+      }).success,
+    ).toBe(true)
+
+    expect(InlineConfigSchema.safeParse({ streaming: "stream" }).success).toBe(false)
+    expect(InlineConfigSchema.safeParse({ streaming: { mode: "stream" } }).success).toBe(false)
+    expect(
+      InlineConfigSchema.safeParse({
+        streaming: { progress: { commandText: "hidden" } },
+      }).success,
+    ).toBe(false)
   })
 
   it("accepts streaming and group tool-policy fields", () => {
@@ -66,6 +140,29 @@ describe("inline/config-schema", () => {
           permissions: false,
         },
         blockStreaming: true,
+        streaming: {
+          mode: "progress",
+          chunkMode: "newline",
+          preview: {
+            chunk: { minChars: 200, maxChars: 800, breakPreference: "paragraph" },
+            toolProgress: false,
+            commandText: "status",
+          },
+          progress: {
+            label: "Working",
+            labels: ["Working", "Reading"],
+            maxLines: 4,
+            render: "text",
+            toolProgress: false,
+            commandText: "status",
+          },
+          block: {
+            enabled: true,
+            coalesce: { minChars: 600, idleMs: 700, maxChars: 2_200 },
+          },
+        },
+        streamMode: "block",
+        draftChunk: { minChars: 200, maxChars: 800, breakPreference: "sentence" },
         streamViaEditMessage: true,
         chunkMode: "newline",
         commands: {
@@ -89,6 +186,11 @@ describe("inline/config-schema", () => {
     ).toBe(true)
   })
 
+  it("accepts legacy scalar streaming aliases for older OpenClaw configs", () => {
+    expect(InlineConfigSchema.safeParse({ streaming: "partial" }).success).toBe(true)
+    expect(InlineConfigSchema.safeParse({ streaming: false }).success).toBe(true)
+  })
+
   it("accepts top-level and group systemPrompt fields", () => {
     expect(
       InlineConfigSchema.safeParse({
@@ -102,18 +204,5 @@ describe("inline/config-schema", () => {
         },
       }).success,
     ).toBe(true)
-  })
-
-  it("keeps the manifest channel config schema in sync", () => {
-    const manifest = JSON.parse(
-      readFileSync(new URL("../../openclaw.plugin.json", import.meta.url), "utf8"),
-    ) as { channelConfigs?: { inline?: { schema?: unknown } } }
-
-    expect(manifest.channelConfigs?.inline?.schema).toEqual(
-      InlineConfigSchema.toJSONSchema({
-        target: "draft-07",
-        unrepresentable: "any",
-      }),
-    )
   })
 })

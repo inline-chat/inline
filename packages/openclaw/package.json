@@ -1,6 +1,6 @@
 {
   "name": "@inline-openclaw/inline",
-  "version": "0.0.32",
+  "version": "0.0.35",
   "type": "module",
   "files": [
     "dist",
@@ -34,7 +34,7 @@
   "devDependencies": {
     "@types/node": "^20.11.30",
     "@vitest/coverage-v8": "4.0.16",
-    "openclaw": "2026.4.26",
+    "openclaw": "2026.5.7",
     "typescript": "^5.8.3",
     "vitest": "^4.0.16"
   },
@@ -57,7 +57,8 @@
     "install": {
       "npmSpec": "@inline-openclaw/inline",
       "localPath": "packages/openclaw",
-      "defaultChoice": "npm"
+      "defaultChoice": "npm",
+      "minHostVersion": ">=2026.4.26"
     }
   },
   "moltbot": {

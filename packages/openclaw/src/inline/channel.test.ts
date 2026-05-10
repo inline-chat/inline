@@ -76,6 +76,15 @@ describe("inline/channel", () => {
     expect(inlineChannelPlugin.gateway?.logoutAccount).toBeDefined()
     expect(inlineChannelPlugin.allowlist).toBeDefined()
     expect(inlineChannelPlugin.bindings).toBeDefined()
+    expect(inlineChannelPlugin.outbound.presentationCapabilities).toEqual({
+      supported: true,
+      buttons: true,
+      selects: true,
+      context: true,
+      divider: false,
+    })
+    expect(inlineChannelPlugin.outbound.extractMarkdownImages).toBe(true)
+    expect(inlineChannelPlugin.outbound.preferFinalAssistantVisibleText).toBe(true)
     expect(inlineChannelPlugin.streaming?.blockStreamingCoalesceDefaults).toEqual({
       minChars: 1500,
       idleMs: 1000,
@@ -594,6 +603,53 @@ describe("inline/channel", () => {
     expect(close).toHaveBeenCalled()
   })
 
+  it("outbound sendText suppresses copied OpenClaw runtime context", async () => {
+    vi.resetModules()
+
+    const connect = vi.fn(async () => {})
+    const sendMessage = vi.fn(async () => ({ messageId: null }))
+    const close = vi.fn(async () => {})
+
+    mockRealtimeSdk({
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = connect
+        sendMessage = sendMessage
+        close = close
+      },
+    })
+
+    await setInlineTestRuntime()
+
+    const { inlineChannelPlugin } = await import("./channel")
+
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+        },
+      },
+    } satisfies OpenClawConfig
+
+    const result = await inlineChannelPlugin.outbound.sendText?.({
+      cfg,
+      to: "chat:7",
+      text: [
+        "OpenClaw runtime context for the immediately preceding user message.",
+        "This context is runtime-generated, not user-authored. Keep internal details private.",
+        "",
+        "Read HEARTBEAT.md if it exists. If nothing needs attention, reply HEARTBEAT_OK.",
+      ].join("\n"),
+      accountId: "default",
+    } as any)
+
+    expect(result).toMatchObject({ channel: "inline", messageId: "", chatId: "7" })
+    expect(connect).not.toHaveBeenCalled()
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(close).not.toHaveBeenCalled()
+  })
+
   it("outbound sendText supports explicit user targets", async () => {
     vi.resetModules()
 
@@ -1068,6 +1124,77 @@ describe("inline/channel", () => {
     expect(close).toHaveBeenCalled()
   })
 
+  it("outbound sendMedia strips copied OpenClaw runtime captions", async () => {
+    vi.resetModules()
+
+    const connect = vi.fn(async () => {})
+    const uploadFile = vi.fn(async () => ({ fileUniqueId: "INP_1", photoId: 101n }))
+    const sendMessage = vi.fn(async () => ({ messageId: 55n }))
+    const close = vi.fn(async () => {})
+    const loadWebMedia = vi.fn(async () => ({
+      buffer: Buffer.from([1, 2, 3]),
+      contentType: "image/png",
+      kind: "image",
+      fileName: "image.png",
+    }))
+
+    mockRealtimeSdk({
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = connect
+        uploadFile = uploadFile
+        sendMessage = sendMessage
+        close = close
+      },
+    })
+
+    mockOpenClawMediaSdk({
+      loadWebMedia,
+      detectMime: vi.fn(async () => "image/png"),
+    })
+
+    await setInlineTestRuntime({
+      loadWebMedia,
+      detectMime: vi.fn(async () => "image/png"),
+    })
+
+    const { inlineChannelPlugin } = await import("./channel")
+
+    const cfg = {
+      channels: {
+        inline: {
+          token: "token",
+          baseUrl: "https://api.inline.chat",
+          parseMarkdown: true,
+        },
+      },
+    } satisfies OpenClawConfig
+
+    await inlineChannelPlugin.outbound.sendMedia?.({
+      cfg,
+      to: "chat:7",
+      text: [
+        "OpenClaw runtime event.",
+        "This context is runtime-generated, not user-authored. Keep internal details private.",
+        "",
+        "Read HEARTBEAT.md if it exists. If nothing needs attention, reply HEARTBEAT_OK.",
+      ].join("\n"),
+      mediaUrl: "https://example.com/image.png",
+      accountId: "default",
+    } as any)
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: 7n,
+        media: {
+          kind: "photo",
+          photoId: 101n,
+        },
+      }),
+    )
+    expect(sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ text: expect.any(String) }))
+  })
+
   it("outbound sendMedia routes into the child reply-thread chat when replyThreads is enabled", async () => {
     vi.resetModules()
 
@@ -1440,6 +1567,65 @@ describe("inline/channel", () => {
     const secondCall = sendMessage.mock.calls[1]?.[0]
     expect(secondCall?.replyToMsgId).toBeUndefined()
     expect(secondCall?.parseMarkdown).toBeUndefined()
+  })
+
+  it("outbound sendPayload maps presentation buttons to Inline actions", async () => {
+    vi.resetModules()
+
+    const connect = vi.fn(async () => {})
+    const sendMessage = vi.fn(async () => ({ messageId: 56n }))
+    const close = vi.fn(async () => {})
+
+    mockRealtimeSdk({
+      InlineSdkClient: class {
+        constructor(_opts: unknown) {}
+        connect = connect
+        sendMessage = sendMessage
+        close = close
+      },
+    })
+
+    await setInlineTestRuntime()
+
+    const { inlineChannelPlugin } = await import("./channel")
+
+    const rendered = await inlineChannelPlugin.outbound.renderPresentation?.({
+      payload: {},
+      presentation: {
+        blocks: [
+          { type: "text", text: "Approve deploy?" },
+          { type: "buttons", buttons: [{ label: "Approve", value: "approve" }] },
+        ],
+      },
+      ctx: {} as any,
+    } as any)
+
+    await inlineChannelPlugin.outbound.sendPayload?.({
+      cfg: {
+        channels: {
+          inline: {
+            token: "token",
+            baseUrl: "https://api.inline.chat",
+            parseMarkdown: true,
+          },
+        },
+      } satisfies OpenClawConfig,
+      to: "chat:7",
+      payload: rendered,
+      accountId: "default",
+    } as any)
+
+    const firstArg = sendMessage.mock.calls[0]?.[0]
+    expect(firstArg).toEqual(
+      expect.objectContaining({
+        chatId: 7n,
+        text: expect.stringContaining("Approve deploy?"),
+        parseMarkdown: true,
+      }),
+    )
+    expect(firstArg?.actions?.rows?.[0]?.actions?.[0]?.text).toBe("Approve")
+    const callbackData = firstArg?.actions?.rows?.[0]?.actions?.[0]?.action.callback.data
+    expect(Buffer.from(callbackData).toString()).toBe("approve")
   })
 
   it("directory and resolver use inline getChats/getChatParticipants", async () => {

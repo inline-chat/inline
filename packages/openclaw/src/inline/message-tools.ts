@@ -2,6 +2,7 @@ import type { AnyAgentTool, OpenClawConfig } from "openclaw/plugin-sdk/core"
 import { InlineSdkClient, Method } from "@inline-chat/realtime-sdk"
 import { resolveInlineAccount, resolveInlineToken } from "./accounts.js"
 import { normalizeInlineTarget } from "./normalize.js"
+import { sanitizeInlineVisibleText } from "./outbound-sanitize.js"
 import { jsonResult } from "../openclaw-compat.js"
 
 type InlineMessageToolContext = {
@@ -364,6 +365,7 @@ function createInlineNudgeTool(ctx: InlineMessageToolContext): AnyAgentTool {
         fallback: fallbackTarget,
       })
       const message = readStringCandidate(args.message, args.text)
+      const visibleMessage = sanitizeInlineVisibleText(message)
 
       return await withInlineClient({
         cfg: ctx.config,
@@ -373,7 +375,7 @@ function createInlineNudgeTool(ctx: InlineMessageToolContext): AnyAgentTool {
             oneofKind: "sendMessage",
             sendMessage: {
               peerId: target.peerId,
-              ...(message ? { message } : {}),
+              ...(!visibleMessage.shouldSkip && visibleMessage.text ? { message: visibleMessage.text } : {}),
               media: {
                 media: {
                   oneofKind: "nudge",
@@ -391,7 +393,7 @@ function createInlineNudgeTool(ctx: InlineMessageToolContext): AnyAgentTool {
             nudged: true,
             target: target.normalized,
             usedCurrentChatDefault: usedFallback,
-            message: message ?? null,
+            message: visibleMessage.shouldSkip || !visibleMessage.text ? null : visibleMessage.text,
             messageId,
           })
         },

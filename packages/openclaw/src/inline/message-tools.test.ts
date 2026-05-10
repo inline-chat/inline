@@ -101,6 +101,79 @@ describe("inline/message-tools", () => {
     expect(close).toHaveBeenCalled()
   })
 
+  it("suppresses copied OpenClaw runtime text on nudges", async () => {
+    vi.resetModules()
+
+    const connect = vi.fn(async () => {})
+    const close = vi.fn(async () => {})
+    const invokeRaw = vi.fn(async () => ({
+      oneofKind: "sendMessage",
+      sendMessage: {
+        updates: [
+          {
+            update: {
+              oneofKind: "newMessage",
+              newMessage: {
+                message: { id: 901n },
+              },
+            },
+          },
+        ],
+      },
+    }))
+
+    vi.doMock("@inline-chat/realtime-sdk", async () => {
+      const actual = await vi.importActual<Record<string, unknown>>("@inline-chat/realtime-sdk")
+      return {
+        ...actual,
+        Method: {
+          SEND_MESSAGE: 2,
+        },
+        InlineSdkClient: class {
+          constructor(_opts: unknown) {}
+          connect = connect
+          close = close
+          invokeRaw = invokeRaw
+        },
+      }
+    })
+
+    const { createInlineMessageTools } = await import("./message-tools")
+
+    const tools = createInlineMessageTools({
+      config: {
+        channels: {
+          inline: {
+            token: "token",
+            baseUrl: "https://api.inline.chat",
+          },
+        },
+      } satisfies OpenClawConfig,
+      agentAccountId: "default",
+      messageChannel: "inline",
+      sessionKey: "agent:main:inline:chat:77",
+    })
+
+    const tool = tools.find((item) => item.name === "inline_nudge")
+    await tool?.execute("tool-1", {
+      message: [
+        "OpenClaw runtime context for the immediately preceding user message.",
+        "This context is runtime-generated, not user-authored. Keep internal details private.",
+        "",
+        "Read HEARTBEAT.md if it exists. If nothing needs attention, reply HEARTBEAT_OK.",
+      ].join("\n"),
+    })
+
+    expect(invokeRaw).toHaveBeenCalledWith(
+      2,
+      expect.objectContaining({
+        sendMessage: expect.not.objectContaining({
+          message: expect.any(String),
+        }),
+      }),
+    )
+  })
+
   it("forwards messages from an explicit source and defaults destination/account aliases correctly", async () => {
     vi.resetModules()
 
