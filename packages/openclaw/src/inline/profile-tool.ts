@@ -1,6 +1,7 @@
 import type { AnyAgentTool, OpenClawConfig } from "openclaw/plugin-sdk/core"
 import { InlineSdkClient, Method } from "@inline-chat/realtime-sdk"
 import { resolveInlineAccount, resolveInlineToken } from "./accounts.js"
+import { sanitizeInlineVisibleText } from "./outbound-sanitize.js"
 import { getInlineRuntime } from "../runtime.js"
 
 type InlineProfileToolArgs = {
@@ -151,7 +152,12 @@ export function createInlineProfileTool(ctx: {
     parameters: InlineProfileToolParameters,
     execute: async (_toolCallId, rawArgs) => {
       const args = rawArgs as InlineProfileToolArgs
-      const name = readTrimmedString(args.name)
+      const rawName = readTrimmedString(args.name)
+      const visibleName = sanitizeInlineVisibleText(rawName)
+      if (visibleName.shouldSkip) {
+        throw new Error("inline_update_profile: name contains internal runtime text")
+      }
+      const name = readTrimmedString(visibleName.text)
       const existingPhotoFileUniqueId = readTrimmedString(args.photoFileUniqueId)
       const photoSource = resolvePhotoSource(args)
 

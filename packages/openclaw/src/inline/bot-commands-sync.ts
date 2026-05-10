@@ -25,7 +25,7 @@ const INLINE_BASE_NATIVE_COMMANDS: InlineBotCommand[] = [
   { command: "compact", description: "Compact the session context." },
   { command: "think", description: "Set thinking level." },
   { command: "verbose", description: "Toggle verbose mode." },
-  { command: "reasoning", description: "Toggle reasoning visibility." },
+  { command: "reasoning", description: "Set reasoning visibility: off, on, or stream." },
   { command: "elevated", description: "Toggle elevated mode." },
   { command: "exec", description: "Set exec defaults for this session." },
   { command: "model", description: "Show or set the model." },

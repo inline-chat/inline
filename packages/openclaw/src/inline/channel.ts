@@ -1,11 +1,22 @@
 import type { ChannelPlugin, OpenClawConfig } from "openclaw/plugin-sdk/core"
 import {
+  presentationToInteractiveReply,
+  renderMessagePresentationFallbackText,
+} from "openclaw/plugin-sdk/interactive-runtime"
+import {
   deleteAccountFromConfigSection,
   setAccountEnabledInConfigSection,
 } from "openclaw/plugin-sdk/core"
 import { buildDmGroupAccountAllowlistAdapter } from "openclaw/plugin-sdk/allowlist-config-edit"
 import { buildTokenChannelStatusSummary } from "openclaw/plugin-sdk/status-helpers"
-import { InlineSdkClient, Method, type Chat, type Dialog, type User } from "@inline-chat/realtime-sdk"
+import {
+  InlineSdkClient,
+  Method,
+  type Chat,
+  type Dialog,
+  type MessageActions,
+  type User,
+} from "@inline-chat/realtime-sdk"
 import { InlineConfigSchema } from "./config-schema.js"
 import {
   listInlineAccountIds,
@@ -17,8 +28,10 @@ import {
 import { isInlineReplyThreadsEnabled, resolveInlineReplyThreadChatId } from "./reply-threads.js"
 import { looksLikeInlineTargetId, normalizeInlineTarget } from "./normalize.js"
 import { monitorInlineProvider } from "./monitor.js"
+import { sanitizeInlineVisibleText } from "./outbound-sanitize.js"
+import { sanitizeInlineOutgoingText } from "./message-formatting.js"
 import { resolveInlineGroupRequireMention, resolveInlineGroupToolPolicy } from "./policy.js"
-import { inlineMessageActions } from "./actions.js"
+import { inlineMessageActions, resolveInlineMessageActionsParam } from "./actions.js"
 import { getInlineRuntime } from "../runtime.js"
 import {
   buildChannelConfigSchema,
@@ -349,6 +362,20 @@ function buildInlineSendTarget(target: InlineParsedOutboundTarget): { chatId: bi
   return { chatId: target.targetId }
 }
 
+function resolveInlinePayloadActions(payload: Record<string, unknown>): MessageActions | undefined {
+  const channelData = asRecord(payload.channelData)
+  const inlineData = asRecord(channelData?.inline)
+  const telegramData = asRecord(channelData?.telegram)
+
+  if (Object.hasOwn(inlineData ?? {}, "buttons")) {
+    return resolveInlineMessageActionsParam({ buttons: inlineData?.buttons })
+  }
+  if (Object.hasOwn(telegramData ?? {}, "buttons")) {
+    return resolveInlineMessageActionsParam({ buttons: telegramData?.buttons })
+  }
+  return resolveInlineMessageActionsParam(payload)
+}
+
 function formatInlineResultChatId(target: InlineParsedOutboundTarget): string {
   if (target.kind === "user") {
     return `user:${target.normalizedNumeric}`
@@ -525,6 +552,7 @@ async function sendMessageInline(params: {
   cfg: OpenClawConfig
   to: string
   text: string
+  actions?: MessageActions | undefined
   accountId?: string | null
   replyToId?: string | null
   threadId?: string | number | null
@@ -539,6 +567,14 @@ async function sendMessageInline(params: {
     raw: params.to,
     context: "sendText",
   })
+  const visibleText = sanitizeInlineVisibleText(params.text)
+  if (visibleText.shouldSkip) {
+    return {
+      messageId: "",
+      chatId: target.kind === "user" ? `user:${target.normalizedNumeric}` : target.normalizedNumeric,
+    }
+  }
+  const text = sanitizeInlineOutgoingText(visibleText.text)
 
   const client = new InlineSdkClient({
     baseUrl: account.baseUrl,
@@ -567,7 +603,8 @@ async function sendMessageInline(params: {
     const result = await client
       .sendMessage({
         ...(effectiveChatId != null ? { chatId: effectiveChatId } : buildInlineSendTarget(resolvedTarget)),
-        text: params.text,
+        text,
+        ...(params.actions !== undefined ? { actions: params.actions } : {}),
         ...(replyToMsgId != null ? { replyToMsgId } : {}),
         parseMarkdown: account.config.parseMarkdown ?? true,
       })
@@ -596,6 +633,7 @@ async function sendMediaInline(params: {
   to: string
   text: string
   mediaUrl: string
+  actions?: MessageActions | undefined
   accountId?: string | null
   replyToId?: string | null
   threadId?: string | number | null
@@ -611,7 +649,8 @@ async function sendMediaInline(params: {
     context: "sendMedia",
   })
   const replyToMsgId = parseInlineId(params.replyToId)
-  const caption = params.text.trim()
+  const visibleText = sanitizeInlineVisibleText(params.text)
+  const caption = visibleText.shouldSkip ? "" : sanitizeInlineOutgoingText(visibleText.text).trim()
 
   const client = new InlineSdkClient({
     baseUrl: account.baseUrl,
@@ -645,6 +684,7 @@ async function sendMediaInline(params: {
         ...(effectiveChatId != null ? { chatId: effectiveChatId } : buildInlineSendTarget(resolvedTarget)),
         ...(caption ? { text: caption } : {}),
         media,
+        ...(params.actions !== undefined ? { actions: params.actions } : {}),
         ...(replyToMsgId != null ? { replyToMsgId } : {}),
         ...(caption ? { parseMarkdown: account.config.parseMarkdown ?? true } : {}),
       })
@@ -1149,11 +1189,36 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
     deliveryMode: "direct",
     chunker: (text, limit) => getInlineRuntime().channel.text.chunkMarkdownText(text, limit),
     chunkerMode: "markdown",
+    extractMarkdownImages: true,
     textChunkLimit: 4000,
+    sanitizeText: ({ text }) => sanitizeInlineOutgoingText(text),
+    shouldSkipPlainTextSanitization: ({ payload }) => Boolean(payload.channelData),
+    shouldTreatDeliveredTextAsVisible: ({ kind }) => kind !== "final",
+    preferFinalAssistantVisibleText: true,
+    presentationCapabilities: {
+      supported: true,
+      buttons: true,
+      selects: true,
+      context: true,
+      divider: false,
+    },
+    renderPresentation: ({ payload, presentation }) => {
+      const text = renderMessagePresentationFallbackText({
+        ...(payload.text !== undefined ? { text: payload.text } : {}),
+        presentation,
+      })
+      const interactive = presentationToInteractiveReply(presentation)
+      return {
+        ...payload,
+        text,
+        ...(interactive ? { interactive } : {}),
+      }
+    },
     sendPayload: async ({ cfg, to, payload, accountId, replyToId }) => {
       const text = payload.text ?? ""
       const payloadReplyToId = typeof payload.replyToId === "string" ? payload.replyToId.trim() : null
       const effectiveReplyToId = payloadReplyToId || replyToId || null
+      const actions = resolveInlinePayloadActions(payload as Record<string, unknown>)
       const mediaUrls = payload.mediaUrls?.length
         ? payload.mediaUrls
         : payload.mediaUrl
@@ -1165,6 +1230,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
           cfg,
           to,
           text,
+          actions,
           accountId: accountId ?? null,
           replyToId: effectiveReplyToId,
           threadId: null,
@@ -1182,6 +1248,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
           to,
           text: isFirst ? text : "",
           mediaUrl,
+          actions: isFirst ? actions : undefined,
           accountId: accountId ?? null,
           replyToId: isFirst ? effectiveReplyToId : null,
           threadId: null,
@@ -1193,6 +1260,7 @@ export const inlineChannelPlugin: ChannelPlugin<ResolvedInlineAccount> = {
           cfg,
           to,
           text,
+          actions,
           accountId: accountId ?? null,
           replyToId: effectiveReplyToId,
           threadId: null,

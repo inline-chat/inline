@@ -25,6 +25,7 @@ import { isInlineReplyThreadsEnabled } from "./reply-threads.js"
 import { uploadInlineMediaFromUrl } from "./media.js"
 import { summarizeInlineMessageContent } from "./message-content.js"
 import { normalizeInlineTarget } from "./normalize.js"
+import { sanitizeInlineVisibleLabel, sanitizeInlineVisibleText } from "./outbound-sanitize.js"
 import { buildInlineUserDisplayName, getSpaceMembersWithUsers } from "./space-members.js"
 import {
   createActionGate,
@@ -112,6 +113,35 @@ type InlineReplyMarkupButton = {
   callback_data: string
 }
 
+function suppressedInternalTextResult() {
+  return jsonResult({
+    ok: false,
+    reason: "suppressed_internal_context",
+    hint: "Inline suppressed OpenClaw internal runtime or heartbeat text before delivery. Do not retry this text.",
+  })
+}
+
+function requireVisibleActionText(raw: string | undefined, label: string): string {
+  const visible = sanitizeInlineVisibleText(raw)
+  if (visible.shouldSkip) {
+    throw new Error(`inline action: ${label} contains internal runtime text`)
+  }
+  const text = visible.text.trim()
+  if (!text) {
+    throw new Error(`inline action: ${label} is required`)
+  }
+  return text
+}
+
+function optionalVisibleActionText(raw: string | undefined, label: string): string | undefined {
+  if (raw === undefined) return undefined
+  const visible = sanitizeInlineVisibleText(raw)
+  if (visible.shouldSkip) {
+    throw new Error(`inline action: ${label} contains internal runtime text`)
+  }
+  return visible.text.trim() || undefined
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
@@ -124,7 +154,9 @@ function normalizeReplyMarkupButtons(raw: unknown): InlineReplyMarkupButton[][] 
     const row: InlineReplyMarkupButton[] = []
     for (const candidateButton of candidateRow) {
       if (!isRecord(candidateButton)) continue
-      const text = typeof candidateButton.text === "string" ? candidateButton.text.trim() : ""
+      const text = sanitizeInlineVisibleLabel(
+        typeof candidateButton.text === "string" ? candidateButton.text : "",
+      )
       const callbackData =
         typeof candidateButton.callback_data === "string" ? candidateButton.callback_data.trim() : ""
       if (!text || !callbackData) continue
@@ -146,7 +178,7 @@ function chunkInteractiveButtons(
     const row = buttons
       .slice(i, i + INLINE_ACTION_MAX_PER_ROW)
       .map((button) => {
-        const text = button.label.trim()
+        const text = sanitizeInlineVisibleLabel(button.label)
         const callbackData = button.value?.trim() ?? ""
         if (!text || !callbackData) {
           return null
@@ -222,7 +254,7 @@ function toInlineMessageActions(rows: InlineReplyMarkupButton[][]): MessageActio
   }
 }
 
-function resolveInlineMessageActionsParam(params: Record<string, unknown>): MessageActions | undefined {
+export function resolveInlineMessageActionsParam(params: Record<string, unknown>): MessageActions | undefined {
   if (!Object.prototype.hasOwnProperty.call(params, "buttons")) {
     const interactiveRows = resolveInlineInteractiveButtonsParam(params)
     return interactiveRows ? toInlineMessageActions(interactiveRows) : undefined
@@ -948,9 +980,7 @@ function describeInlineMessageTool({
   }
 
   const buttonsEnabled = supportsInlineMessageButtons(actions)
-  const capabilities: NonNullable<ChannelMessageToolDiscovery["capabilities"]> = buttonsEnabled
-    ? ["presentation"]
-    : []
+  const capabilities: ChannelMessageToolDiscovery["capabilities"] = buttonsEnabled ? ["presentation"] : []
   const schema: ChannelMessageToolSchemaContribution[] = buttonsEnabled
     ? [
         {
@@ -1044,6 +1074,7 @@ export const inlineMessageActions = {
             readStringParam(params, "text") ??
             readStringParam(params, "caption") ??
             ""
+          const caption = sanitizeInlineVisibleText(text)
           const replyToMsgId = parseOptionalInlineId(
             readFlexibleId(params, "messageId") ??
               readFlexibleId(params, "replyTo") ??
@@ -1062,9 +1093,13 @@ export const inlineMessageActions = {
             const message =
               readStringParam(params, "message") ??
               readStringParam(params, "text", { required: true, allowEmpty: true })
+            const visibleMessage = sanitizeInlineVisibleText(message)
+            if (visibleMessage.shouldSkip) {
+              return suppressedInternalTextResult()
+            }
             const sent = await client.sendMessage({
               ...sendTarget,
-              text: message,
+              text: visibleMessage.text,
               ...(actions !== undefined ? { actions } : {}),
               ...(replyToMsgId != null ? { replyToMsgId } : {}),
               parseMarkdown,
@@ -1089,11 +1124,11 @@ export const inlineMessageActions = {
             })
             lastSent = await client.sendMessage({
               ...sendTarget,
-              ...(index === 0 && text ? { text } : {}),
+              ...(index === 0 && !caption.shouldSkip && caption.text ? { text: caption.text } : {}),
               media,
               ...(index === 0 && actions !== undefined ? { actions } : {}),
               ...(index === 0 && replyToMsgId != null ? { replyToMsgId } : {}),
-              ...(index === 0 && text ? { parseMarkdown } : {}),
+              ...(index === 0 && !caption.shouldSkip && caption.text ? { parseMarkdown } : {}),
             })
           }
           return jsonResult({
@@ -1140,9 +1175,13 @@ export const inlineMessageActions = {
             const text =
               readStringParam(params, "message") ??
               readStringParam(params, "text", { required: true, allowEmpty: true })
+            const visibleText = sanitizeInlineVisibleText(text)
+            if (visibleText.shouldSkip) {
+              return suppressedInternalTextResult()
+            }
             const sent = await client.sendMessage({
               chatId,
-              text,
+              text: visibleText.text,
               ...(actions !== undefined ? { actions } : {}),
               ...(replyToMsgId != null ? { replyToMsgId } : {}),
               parseMarkdown,
@@ -1176,9 +1215,13 @@ export const inlineMessageActions = {
           const text =
             readStringParam(replyParams, "message") ??
             readStringParam(replyParams, "text", { required: true, allowEmpty: true })
+          const visibleText = sanitizeInlineVisibleText(text)
+          if (visibleText.shouldSkip) {
+            return suppressedInternalTextResult()
+          }
           const sent = await client.sendMessage({
             chatId,
-            text,
+            text: visibleText.text,
             ...(actions !== undefined ? { actions } : {}),
             replyToMsgId,
             parseMarkdown,
@@ -1430,12 +1473,16 @@ export const inlineMessageActions = {
             "messageId",
           )
           const text = readStringParam(params, "message", { required: true, allowEmpty: true })
+          const visibleText = sanitizeInlineVisibleText(text)
+          if (visibleText.shouldSkip) {
+            return suppressedInternalTextResult()
+          }
           const result = await client.invokeRaw(Method.EDIT_MESSAGE, {
             oneofKind: "editMessage",
             editMessage: {
               messageId,
               peerId: buildChatPeer(chatId),
-              text,
+              text: visibleText.text,
               ...(actions !== undefined ? { actions } : {}),
               parseMarkdown,
             },
@@ -1444,7 +1491,13 @@ export const inlineMessageActions = {
             throw new Error(`inline action: expected editMessage result, got ${String(result.oneofKind)}`)
           }
           return jsonResult(
-            toJsonSafe({ ok: true, chatId: String(chatId), messageId: String(messageId), text, parseMarkdown }),
+            toJsonSafe({
+              ok: true,
+              chatId: String(chatId),
+              messageId: String(messageId),
+              text: visibleText.text,
+              parseMarkdown,
+            }),
           )
         },
       })
@@ -1482,11 +1535,13 @@ export const inlineMessageActions = {
         accountId,
         fn: async (client) => {
           const chatId = resolveChatIdFromParams(params)
-          const title =
+          const title = requireVisibleActionText(
             readStringParam(params, "title") ??
-            readStringParam(params, "name") ??
-            readStringParam(params, "threadName") ??
-            readStringParam(params, "message", { required: true })
+              readStringParam(params, "name") ??
+              readStringParam(params, "threadName") ??
+              readStringParam(params, "message", { required: true }),
+            "title",
+          )
           const result = await client.invokeRaw(Method.UPDATE_CHAT_INFO, {
             oneofKind: "updateChatInfo",
             updateChatInfo: {
@@ -1585,12 +1640,14 @@ export const inlineMessageActions = {
         cfg,
         accountId,
         fn: async (client) => {
-          const title =
+          const title = requireVisibleActionText(
             readStringParam(params, "title") ??
-            readStringParam(params, "name") ??
-            readStringParam(params, "threadName") ??
-            readStringParam(params, "message", { required: true })
-          const description = readStringParam(params, "description")
+              readStringParam(params, "name") ??
+              readStringParam(params, "threadName") ??
+              readStringParam(params, "message", { required: true }),
+            "title",
+          )
+          const description = optionalVisibleActionText(readStringParam(params, "description"), "description")
           const emoji = readStringParam(params, "emoji")
           const spaceId = parseOptionalInlineId(
             readFlexibleId(params, "spaceId") ?? readFlexibleId(params, "space"),

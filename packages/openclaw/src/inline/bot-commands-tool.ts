@@ -5,6 +5,7 @@ import {
   normalizeInlineBotCommandName,
   type InlineBotCommand,
 } from "./bot-commands-api.js"
+import { sanitizeInlineVisibleText } from "./outbound-sanitize.js"
 import { jsonResult } from "../openclaw-compat.js"
 
 type InlineBotCommandsToolArgs = {
@@ -89,7 +90,13 @@ function normalizeCommands(raw: unknown): InlineBotCommand[] {
     }
 
     const command = normalizeInlineBotCommandName(rawCommand)
-    const description = rawDescription.trim()
+    const visibleDescription = sanitizeInlineVisibleText(rawDescription)
+    if (visibleDescription.shouldSkip) {
+      throw new Error(
+        `inline_bot_commands: commands[${index}].description contains internal runtime text`,
+      )
+    }
+    const description = visibleDescription.text.trim()
 
     if (command.length < 1 || command.length > 32 || !BOT_COMMAND_RE.test(command)) {
       throw new Error(

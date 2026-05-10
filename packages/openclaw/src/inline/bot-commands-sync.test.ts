@@ -64,7 +64,11 @@ describe("inline/bot-commands-sync", () => {
     expect(names).toContain("status")
     expect(names).toContain("model")
     expect(names).toContain("exec")
-  })
+    expect(setBody.commands).toContainEqual({
+      command: "reasoning",
+      description: "Set reasoning visibility: off, on, or stream.",
+    })
+  }, 30_000)
 
   it("clears native commands when commands.native is disabled", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {

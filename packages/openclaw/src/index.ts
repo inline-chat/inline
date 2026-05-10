@@ -3,6 +3,7 @@ import { inlineChannelPlugin } from "./inline/channel.js"
 import { createInlineMessageTools } from "./inline/message-tools.js"
 import { createInlineMembersTool } from "./inline/members-tool.js"
 import { sanitizeInlineOutgoingText } from "./inline/message-formatting.js"
+import { sanitizeInlineVisibleText } from "./inline/outbound-sanitize.js"
 import { createInlineProfileTool } from "./inline/profile-tool.js"
 import { createInlineBotCommandsTool } from "./inline/bot-commands-tool.js"
 import { syncInlineNativeCommands } from "./inline/bot-commands-sync.js"
@@ -39,7 +40,15 @@ const plugin: {
     })
     api.on("message_sending", (event, ctx) => {
       if (ctx.channelId !== "inline") return
-      const content = sanitizeInlineOutgoingText(event.content)
+      const visible = sanitizeInlineVisibleText(event.content)
+      if (visible.shouldSkip) {
+        return {
+          content: "",
+          cancel: true,
+          cancelReason: "suppressed_internal_context",
+        }
+      }
+      const content = sanitizeInlineOutgoingText(visible.text)
       if (content === event.content) return
       return { content }
     })

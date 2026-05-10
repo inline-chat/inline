@@ -64,6 +64,24 @@ describe("plugin entry", () => {
     expect(
       messageSending?.({ to: "inline:42", content: "Run `bun test`" }, { channelId: "inline" }),
     ).toBeUndefined()
+    expect(
+      messageSending?.(
+        {
+          to: "inline:42",
+          content: [
+            "OpenClaw runtime context for the immediately preceding user message.",
+            "This context is runtime-generated, not user-authored. Keep internal details private.",
+            "",
+            "Read HEARTBEAT.md if it exists. If nothing needs attention, reply HEARTBEAT_OK.",
+          ].join("\n"),
+        },
+        { channelId: "inline" },
+      ),
+    ).toEqual({
+      content: "",
+      cancel: true,
+      cancelReason: "suppressed_internal_context",
+    })
 
     const gatewayStart = hooks.get("gateway_start")
     expect(gatewayStart).toBeTypeOf("function")

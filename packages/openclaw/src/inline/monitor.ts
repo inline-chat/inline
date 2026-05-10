@@ -3,16 +3,36 @@ import path from "node:path"
 import {
   buildCommandTextFromArgs,
   findCommandByNativeName,
+  formatCommandArgMenuTitle,
   parseCommandArgs,
   resolveCommandArgMenu,
 } from "openclaw/plugin-sdk/native-command-registry"
+import { resolveStoredModelOverride } from "openclaw/plugin-sdk/command-auth-native"
 import {
   createChannelInboundDebouncer,
   shouldDebounceTextInbound,
 } from "openclaw/plugin-sdk/channel-inbound"
-import { resolveDefaultModelForAgent } from "openclaw/plugin-sdk/agent-runtime"
-import { applyModelOverrideToSessionEntry, updateSessionStore } from "openclaw/plugin-sdk/config-runtime"
+import {
+  buildConfiguredModelCatalog,
+  resolveAgentConfig,
+  resolveDefaultModelForAgent,
+  resolveThinkingDefault,
+} from "openclaw/plugin-sdk/agent-runtime"
+import {
+  applyModelOverrideToSessionEntry,
+  loadSessionStore,
+  resolveSessionStoreEntry,
+  resolveStorePath,
+  updateSessionStore,
+} from "openclaw/plugin-sdk/config-runtime"
 import { buildModelsProviderData } from "openclaw/plugin-sdk/models-provider-runtime"
+import { isReasoningReplyPayload } from "openclaw/plugin-sdk/reply-payload"
+import {
+  findCodeRegions,
+  isInsideCode,
+  normalizeLowercaseStringOrEmpty,
+  stripReasoningTagsFromText,
+} from "openclaw/plugin-sdk/text-runtime"
 import {
   DEFAULT_GROUP_HISTORY_LIMIT,
   buildPendingHistoryContextFromMap,
@@ -24,11 +44,13 @@ import type { OpenClawConfig } from "openclaw/plugin-sdk/core"
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env"
 import { InlineSdkClient, JsonFileStateStore, Method, type Message, type MessageActions } from "@inline-chat/realtime-sdk"
 import { resolveInlineToken, type ResolvedInlineAccount } from "./accounts.js"
+import { resolveInlineMessageActionsParam } from "./actions.js"
 import { INLINE_FORMATTING_NOTE, buildInlineSystemPrompt } from "./message-formatting.js"
 import { resolveInlineGroupRequireMention } from "./policy.js"
 import { getInlineRuntime } from "../runtime.js"
 import { uploadInlineMediaFromUrl } from "./media.js"
 import { summarizeInlineMessageContent } from "./message-content.js"
+import { sanitizeInlineVisibleLabel, sanitizeInlineVisibleText } from "./outbound-sanitize.js"
 import {
   isInlineReplyThreadsEnabled,
   loadInlineReplyThreadAnchorMessage,
@@ -108,6 +130,15 @@ type InlineDispatchReplyInfo = {
   reason?: string
 }
 
+type InlineReplyPayload = {
+  text?: string
+  mediaUrl?: string
+  mediaUrls?: string[]
+  replyToId?: string
+  channelData?: Record<string, unknown>
+  isReasoning?: boolean
+}
+
 type InlineDebounceEntry = {
   chatId: bigint
   msg: Message
@@ -170,9 +201,142 @@ const GET_MESSAGES_METHOD =
   ((Method as Record<string, unknown>).GET_MESSAGES as number) > 0
     ? ((Method as Record<string, unknown>).GET_MESSAGES as Method)
     : null
+const REASONING_MESSAGE_PREFIX = "Reasoning:\n"
+const REASONING_TAG_PREFIXES = [
+  "<think",
+  "<thinking",
+  "<thought",
+  "<antthinking",
+  "</think",
+  "</thinking",
+  "</thought",
+  "</antthinking",
+]
+const THINKING_TAG_RE = /<\s*(\/?)\s*(?:think(?:ing)?|thought|antthinking)\b[^<>]*>/gi
 
 function normalizeAllowEntry(raw: string): string {
   return raw.trim().replace(/^inline:/i, "").replace(/^user:/i, "")
+}
+
+function resolveInlinePayloadMediaUrls(payload: InlineReplyPayload): string[] {
+  if (payload.mediaUrls?.length) return payload.mediaUrls
+  if (payload.mediaUrl) return [payload.mediaUrl]
+  return []
+}
+
+function isPartialReasoningTagPrefix(text: string): boolean {
+  const trimmed = normalizeLowercaseStringOrEmpty(text.trimStart())
+  if (!trimmed.startsWith("<")) return false
+  if (trimmed.includes(">")) return false
+  return REASONING_TAG_PREFIXES.some((prefix) => prefix.startsWith(trimmed))
+}
+
+type InlineReasoningSplit = {
+  reasoningText?: string
+  answerText?: string
+}
+
+function formatInlineReasoningMessageLikeTelegram(text: string): string {
+  const trimmed = text.trim()
+  if (!trimmed) return ""
+  const italicLines = trimmed
+    .split("\n")
+    .map((line) => (line ? `_${line}_` : line))
+    .join("\n")
+  return `${REASONING_MESSAGE_PREFIX}${italicLines}`
+}
+
+function extractInlineThinkingFromTaggedStreamOutsideCode(text: string): string {
+  if (!text) return ""
+  const codeRegions = findCodeRegions(text)
+  let result = ""
+  let lastIndex = 0
+  let inThinking = false
+  THINKING_TAG_RE.lastIndex = 0
+  for (const match of text.matchAll(THINKING_TAG_RE)) {
+    const idx = match.index ?? 0
+    if (isInsideCode(idx, codeRegions)) continue
+    if (inThinking) {
+      result += text.slice(lastIndex, idx)
+    }
+    const isClose = match[1] === "/"
+    inThinking = !isClose
+    lastIndex = idx + match[0].length
+  }
+  if (inThinking) {
+    result += text.slice(lastIndex)
+  }
+  return result.trim()
+}
+
+function splitInlineReasoningTextLikeTelegram(text?: string, isReasoning?: boolean): InlineReasoningSplit {
+  if (typeof text !== "string") return {}
+
+  const trimmed = text.trim()
+  if (isPartialReasoningTagPrefix(trimmed)) {
+    return {}
+  }
+  if (
+    trimmed.startsWith(REASONING_MESSAGE_PREFIX) &&
+    trimmed.length > REASONING_MESSAGE_PREFIX.length
+  ) {
+    return { reasoningText: trimmed }
+  }
+
+  const taggedReasoning = extractInlineThinkingFromTaggedStreamOutsideCode(text)
+  const strippedAnswer = stripReasoningTagsFromText(text, { mode: "strict", trim: "both" })
+
+  if (isReasoning === true) {
+    return {
+      reasoningText: formatInlineReasoningMessageLikeTelegram(
+        taggedReasoning || strippedAnswer || text,
+      ),
+    }
+  }
+  if (!taggedReasoning && strippedAnswer === text) {
+    return { answerText: text }
+  }
+  const reasoningText = taggedReasoning
+    ? formatInlineReasoningMessageLikeTelegram(taggedReasoning)
+    : undefined
+  return {
+    ...(reasoningText ? { reasoningText } : {}),
+    ...(strippedAnswer ? { answerText: strippedAnswer } : {}),
+  }
+}
+
+function resolveInlineChatVisibleReplyPayload<T extends InlineReplyPayload>(payload: T): T | null {
+  const mediaUrls = resolveInlinePayloadMediaUrls(payload)
+  if (isReasoningReplyPayload(payload)) {
+    return mediaUrls.length > 0 ? { ...payload, text: undefined } : null
+  }
+
+  if (typeof payload.text !== "string") {
+    return payload
+  }
+
+  const internal = sanitizeInlineVisibleText(payload.text)
+  if (internal.shouldSkip) {
+    return mediaUrls.length > 0 ? { ...payload, text: undefined } : null
+  }
+  if (isPartialReasoningTagPrefix(internal.text.trim())) {
+    return mediaUrls.length > 0 ? { ...payload, text: undefined } : null
+  }
+
+  const split = splitInlineReasoningTextLikeTelegram(internal.text, payload.isReasoning)
+  if (split.answerText !== undefined) {
+    if (split.answerText === payload.text) {
+      return payload
+    }
+    return {
+      ...payload,
+      text: split.answerText || undefined,
+    }
+  }
+  if (!split.reasoningText) {
+    return payload
+  }
+  return mediaUrls.length > 0 ? { ...payload, text: undefined } : null
 }
 
 function normalizeAllowlist(entries: Array<string | number> | undefined): string[] {
@@ -288,12 +452,158 @@ const INLINE_ACTION_MAX_ROWS = 8
 const INLINE_ACTION_MAX_PER_ROW = 8
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function normalizeOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined
+}
+
+type InlineStreamingMode = "off" | "partial" | "block" | "progress"
+
+function normalizeInlineStreamingMode(value: unknown): InlineStreamingMode | null {
+  if (typeof value !== "string") return null
+  const normalized = normalizeLowercaseStringOrEmpty(value)
+  switch (normalized) {
+    case "off":
+    case "partial":
+    case "block":
+    case "progress":
+      return normalized
+    default:
+      return null
+  }
+}
+
+function resolveInlineStreamingMode(config: {
+  streaming?: unknown
+  streamMode?: unknown
+  streamViaEditMessage?: boolean | undefined
+}): InlineStreamingMode {
+  const streaming = isRecord(config.streaming) ? config.streaming : null
+  const mode =
+    normalizeInlineStreamingMode(streaming?.mode) ??
+    normalizeInlineStreamingMode(config.streaming) ??
+    normalizeInlineStreamingMode(config.streamMode)
+  if (mode) return mode
+  if (typeof config.streaming === "boolean") {
+    return config.streaming ? "partial" : "off"
+  }
+  return config.streamViaEditMessage === true ? "partial" : "off"
+}
+
+function resolveInlineBlockStreamingEnabled(config: {
+  streaming?: unknown
+  streamMode?: unknown
+  blockStreaming?: boolean | undefined
+  streamViaEditMessage?: boolean | undefined
+}): boolean | undefined {
+  const mode = resolveInlineStreamingMode(config)
+  const streaming = isRecord(config.streaming) ? config.streaming : null
+  const block = streaming && isRecord(streaming.block) ? streaming.block : null
+  if (typeof block?.enabled === "boolean") return block.enabled
+  if (typeof config.blockStreaming === "boolean") return config.blockStreaming
+  if (mode === "block") return true
+  if (mode === "off") return false
+  return undefined
+}
+
+function resolveInlineCommandMenuModelContext(params: {
+  cfg: OpenClawConfig
+  agentId: string
+  sessionKey: string
+}): { provider?: string; model?: string; thinkingLevel?: string } {
+  if (!params.sessionKey.trim()) {
+    return {}
+  }
+  try {
+    const storePath = resolveStorePath(params.cfg.session?.store, { agentId: params.agentId })
+    const defaultModel = resolveDefaultModelForAgent({
+      cfg: params.cfg,
+      agentId: params.agentId,
+    })
+    const store = loadSessionStore(storePath)
+    const entry = resolveSessionStoreEntry({ store, sessionKey: params.sessionKey }).existing
+    const thinkingLevel = normalizeOptionalString(entry?.thinkingLevel)
+    if (entry?.modelOverrideSource === "auto" && normalizeOptionalString(entry.modelOverride)) {
+      return {
+        provider: defaultModel.provider,
+        model: defaultModel.model,
+        ...(thinkingLevel ? { thinkingLevel } : {}),
+      }
+    }
+    const override = resolveStoredModelOverride({
+      ...(entry ? { sessionEntry: entry } : {}),
+      sessionStore: store,
+      sessionKey: params.sessionKey,
+      defaultProvider: defaultModel.provider,
+    })
+    if (override?.model) {
+      return {
+        provider: override.provider || defaultModel.provider,
+        model: override.model,
+        ...(thinkingLevel ? { thinkingLevel } : {}),
+      }
+    }
+    const provider =
+      normalizeOptionalString(entry?.providerOverride) ??
+      normalizeOptionalString(entry?.modelProvider)
+    const model =
+      normalizeOptionalString(entry?.modelOverride) ?? normalizeOptionalString(entry?.model)
+    return {
+      ...(provider ? { provider } : {}),
+      ...(model ? { model } : {}),
+      ...(thinkingLevel ? { thinkingLevel } : {}),
+    }
+  } catch {
+    return {}
+  }
+}
+
+function resolveInlineThinkMenuCurrentLevel(params: {
+  cfg: OpenClawConfig
+  agentId: string
+  provider?: string
+  model?: string
+  thinkingLevel?: string
+}): string {
+  const explicit = normalizeOptionalString(params.thinkingLevel)
+  if (explicit) return explicit
+
+  const agentThinkingDefault = normalizeOptionalString(
+    resolveAgentConfig(params.cfg, params.agentId)?.thinkingDefault,
+  )
+  if (agentThinkingDefault) return agentThinkingDefault
+
+  const defaultModel = resolveDefaultModelForAgent({
+    cfg: params.cfg,
+    agentId: params.agentId,
+  })
+  return resolveThinkingDefault({
+    cfg: params.cfg,
+    provider: params.provider ?? defaultModel.provider,
+    model: params.model ?? defaultModel.model,
+    catalog: buildConfiguredModelCatalog({ cfg: params.cfg }),
+  })
+}
+
+function formatInlineCommandArgMenuTitle(params: {
+  command: NonNullable<ReturnType<typeof findCommandByNativeName>>
+  menu: NonNullable<ReturnType<typeof resolveCommandArgMenu>>
+  currentThinkingLevel?: string
+}): string {
+  const title = formatCommandArgMenuTitle({ command: params.command, menu: params.menu })
+  if (params.command.key !== "think" || !params.currentThinkingLevel) {
+    return title
+  }
+  return `Current thinking level: ${params.currentThinkingLevel}.\n${title}`
 }
 
 function resolveInlineNativeCommandMenu(params: {
   commandBody: string
   cfg: OpenClawConfig
+  agentId: string
+  sessionKey: string
 }): {
   title: string
   buttons: InlineReplyMarkupButton[][]
@@ -306,14 +616,40 @@ function resolveInlineNativeCommandMenu(params: {
   if (!command) return null
 
   const args = parseCommandArgs(command, match[2])
+  const menuNeedsModelContext =
+    command.argsMenu &&
+    !(args?.raw && !args.values) &&
+    command.args?.some(
+      (arg) => typeof arg.choices === "function" && args?.values?.[arg.name] == null,
+    )
+  const menuModelContext = menuNeedsModelContext
+    ? resolveInlineCommandMenuModelContext({
+        cfg: params.cfg,
+        agentId: params.agentId,
+        sessionKey: params.sessionKey,
+      })
+    : {}
   const menu = resolveCommandArgMenu({
     command,
     ...(args ? { args } : {}),
     cfg: params.cfg,
+    ...menuModelContext,
   })
   if (!menu) return null
 
-  const title = menu.title ?? `Choose ${menu.arg.description || menu.arg.name} for /${command.nativeName}.`
+  const currentThinkingLevel =
+    command.key === "think"
+      ? resolveInlineThinkMenuCurrentLevel({
+          cfg: params.cfg,
+          agentId: params.agentId,
+          ...menuModelContext,
+        })
+      : undefined
+  const title = formatInlineCommandArgMenuTitle({
+    command,
+    menu,
+    ...(currentThinkingLevel ? { currentThinkingLevel } : {}),
+  })
   const rows: InlineReplyMarkupButton[][] = []
   for (let index = 0; index < menu.choices.length; index += 2) {
     const slice = menu.choices.slice(index, index + 2)
@@ -448,7 +784,9 @@ function normalizeReplyMarkupButtonsWith(
     const row: InlineReplyMarkupButton[] = []
     for (const candidateButton of candidateRow) {
       if (!isRecord(candidateButton)) continue
-      const text = typeof candidateButton.text === "string" ? candidateButton.text.trim() : ""
+      const text = sanitizeInlineVisibleLabel(
+        typeof candidateButton.text === "string" ? candidateButton.text : "",
+      )
       const callbackDataRaw =
         typeof candidateButton.callback_data === "string" ? candidateButton.callback_data.trim() : ""
       const callbackData = options?.mapCallbackData ? options.mapCallbackData(callbackDataRaw) : callbackDataRaw
@@ -485,7 +823,9 @@ function resolveInlineReplyActions(payload: Record<string, unknown>): MessageAct
     hasExplicitButtons = true
   }
 
-  if (!hasExplicitButtons) return undefined
+  if (!hasExplicitButtons) {
+    return resolveInlineMessageActionsParam(payload)
+  }
 
   const rows = normalizeReplyMarkupButtonsWith(
     rawButtons,
@@ -784,9 +1124,10 @@ function resolveInlineSenderLabel(params: {
   }
 
   const id = senderId ? `id:${senderId}` : undefined
+  const fallback = senderId ? `user:${senderId}` : undefined
   if (label && id) return `${label} ${id}`
   if (label) return label
-  return id ?? "id:unknown"
+  return fallback ?? "id:unknown"
 }
 
 function resolveInlineConversationLabel(params: {
@@ -965,6 +1306,80 @@ function buildInlineBodyForAgent(params: {
       .filter(Boolean)
       .join("\n\n") || params.rawBody
   )
+}
+
+function normalizeInlineAgentMetadataValue(value: string | boolean | null | undefined): string | boolean | undefined {
+  if (typeof value === "boolean") return value
+  const normalized = value
+    ?.replace(/\r\n|\r|\n/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+  return normalized || undefined
+}
+
+function buildInlineBodyForAgentPrompt(params: {
+  body: string
+  channel: string
+  surface: string
+  chatType: "direct" | "group"
+  chatId: string
+  chatRef: string
+  conversationLabel: string
+  messageId: string
+  eventType: string
+  senderId: string
+  senderLabel: string
+  senderName?: string | null
+  senderUsername?: string | null
+  wasMentioned: boolean
+  replyToId?: string | null
+  replyToSenderId?: string | null
+  replyToWasBot?: boolean
+  threadId?: string | null
+  threadLabel?: string | null
+  messageActionInteractionId?: string | null
+  messageActionId?: string | null
+}): string {
+  const metadata = {
+    schema: "inline.current_message.v1",
+    channel: normalizeInlineAgentMetadataValue(params.channel),
+    surface: normalizeInlineAgentMetadataValue(params.surface),
+    chat_type: normalizeInlineAgentMetadataValue(params.chatType),
+    chat_id: normalizeInlineAgentMetadataValue(params.chatId),
+    chat_ref: normalizeInlineAgentMetadataValue(params.chatRef),
+    conversation_label: normalizeInlineAgentMetadataValue(params.conversationLabel),
+    message_id: normalizeInlineAgentMetadataValue(params.messageId),
+    event_type: normalizeInlineAgentMetadataValue(params.eventType),
+    sender_id: normalizeInlineAgentMetadataValue(params.senderId),
+    sender_label: normalizeInlineAgentMetadataValue(params.senderLabel),
+    sender_name: normalizeInlineAgentMetadataValue(params.senderName ?? undefined),
+    sender_username: normalizeInlineAgentMetadataValue(params.senderUsername ?? undefined),
+    was_mentioned: params.wasMentioned,
+    reply_to_id: normalizeInlineAgentMetadataValue(params.replyToId ?? undefined),
+    reply_to_sender_id: normalizeInlineAgentMetadataValue(params.replyToSenderId ?? undefined),
+    reply_to_was_bot:
+      params.replyToWasBot === undefined
+        ? undefined
+        : normalizeInlineAgentMetadataValue(params.replyToWasBot),
+    thread_id: normalizeInlineAgentMetadataValue(params.threadId ?? undefined),
+    thread_label: normalizeInlineAgentMetadataValue(params.threadLabel ?? undefined),
+    message_action_interaction_id: normalizeInlineAgentMetadataValue(
+      params.messageActionInteractionId ?? undefined,
+    ),
+    message_action_id: normalizeInlineAgentMetadataValue(params.messageActionId ?? undefined),
+  }
+  const payload = Object.fromEntries(
+    Object.entries(metadata).filter(([, value]) => value !== undefined),
+  )
+  return [
+    "Inline current message metadata (generated by the Inline channel adapter):",
+    "```json",
+    JSON.stringify(payload, null, 2),
+    "```",
+    params.body,
+  ]
+    .filter(Boolean)
+    .join("\n\n")
 }
 
 function resolveInlineMediaMaxBytes(params: {
@@ -1424,14 +1839,22 @@ export async function monitorInlineProvider(params: {
     const senderUsername = senderProfile?.username
     const senderName = senderProfile?.name ?? (!isGroup ? chatInfo.title ?? undefined : undefined)
     if (reactionEvent) {
+      const actor =
+        senderUsername != null && senderUsername.length > 0
+          ? `@${senderUsername}`
+          : senderName ?? `user:${senderId}`
       const emoji = reactionEvent.emoji.trim() || "a reaction"
       const messageId = String(reactionEvent.targetMessageId)
       if (reactionEvent.action === "added") {
-        rawBody = `reacted with ${emoji} to your message #${messageId}`
+        rawBody = `${actor} reacted with ${emoji} to your message #${messageId}`
       } else {
-        rawBody = `removed ${emoji} from your message #${messageId}`
+        rawBody = `${actor} removed ${emoji} from your message #${messageId}`
       }
     } else if (callbackActionEvent) {
+      const actor =
+        senderUsername != null && senderUsername.length > 0
+          ? `@${senderUsername}`
+          : senderName ?? `user:${senderId}`
       const payload = {
         type: "inline_message_action_callback",
         interaction_id: String(callbackActionEvent.interactionId),
@@ -1442,7 +1865,7 @@ export async function monitorInlineProvider(params: {
         data_base64: callbackDataToBase64(callbackActionEvent.data),
         data_utf8: callbackDataToUtf8(callbackActionEvent.data) ?? null,
       }
-      rawBody = `pressed a button on message #${String(callbackActionEvent.targetMessageId)}\n${JSON.stringify(payload)}`
+      rawBody = `${actor} pressed a button on message #${String(callbackActionEvent.targetMessageId)}\n${JSON.stringify(payload)}`
     }
 
     const dmPolicy = account.config.dmPolicy ?? "pairing"
@@ -1701,6 +2124,8 @@ export async function monitorInlineProvider(params: {
     const nativeCommandMenu = resolveInlineNativeCommandMenu({
       commandBody: normalizedCommandBody,
       cfg,
+      agentId: route.agentId,
+      sessionKey: route.sessionKey,
     })
     if (nativeCommandMenu) {
       const menuActions = resolveInlineReplyActions({
@@ -1940,7 +2365,6 @@ export async function monitorInlineProvider(params: {
             limit: historyLimit,
           })
         : []
-    const bodyForAgent = currentBody
     const effectiveSurface = shouldUseTelegramSurfaceForModelCommands(normalizedCommandBody)
       ? "telegram"
       : CHANNEL_ID
@@ -1948,10 +2372,49 @@ export async function monitorInlineProvider(params: {
       account,
       ...(isGroup ? { groupId: String(effectiveChatId) } : {}),
     })
+    const messageSid = buildInlineInboundMessageSid({
+      msgId: msg.id,
+      ...(callbackActionEvent ? { callbackActionEvent } : {}),
+    })
+    const eventType = callbackActionEvent
+      ? "message_action"
+      : reactionEvent
+        ? `reaction_${reactionEvent.action}`
+        : "message"
+    const bodyForAgent = buildInlineBodyForAgentPrompt({
+      body,
+      channel: CHANNEL_ID,
+      surface: effectiveSurface,
+      chatType: isGroup ? "group" : "direct",
+      chatId: String(effectiveChatId),
+      chatRef: `inline:${String(effectiveChatId)}`,
+      conversationLabel: fromLabel,
+      messageId: messageSid,
+      eventType,
+      senderId,
+      senderLabel,
+      wasMentioned: mentionGate.effectiveWasMentioned,
+      ...(senderName ? { senderName } : {}),
+      ...(senderUsername ? { senderUsername } : {}),
+      ...(msg.replyToMsgId != null ? { replyToId: String(msg.replyToMsgId) } : {}),
+      ...(effectiveHistoryContext.replyToSenderId != null
+        ? { replyToSenderId: effectiveHistoryContext.replyToSenderId }
+        : {}),
+      ...(msg.replyToMsgId != null ? { replyToWasBot: effectiveHistoryContext.repliedToBot } : {}),
+      ...(replyThreadContext ? { threadId: String(replyThreadContext.childChatId) } : {}),
+      ...(replyThreadContext?.threadLabel ? { threadLabel: replyThreadContext.threadLabel } : {}),
+      ...(callbackActionEvent
+        ? {
+            messageActionInteractionId: String(callbackActionEvent.interactionId),
+            messageActionId: callbackActionEvent.actionId,
+          }
+        : {}),
+    })
 
     const ctxPayload = core.channel.reply.finalizeInboundContext({
       Body: body,
       BodyForAgent: bodyForAgent,
+      BodyForCommands: normalizedCommandBody,
       ...(isGroup ? { InboundHistory: inboundHistory } : {}),
       RawBody: rawBody,
       CommandBody: normalizedCommandBody,
@@ -1968,10 +2431,7 @@ export async function monitorInlineProvider(params: {
       ...(senderUsername ? { SenderUsername: senderUsername } : {}),
       Provider: CHANNEL_ID,
       Surface: effectiveSurface,
-      MessageSid: buildInlineInboundMessageSid({
-        msgId: msg.id,
-        ...(callbackActionEvent ? { callbackActionEvent } : {}),
-      }),
+      MessageSid: messageSid,
       ...(replyThreadContext ? { MessageThreadId: String(replyThreadContext.childChatId) } : {}),
       ...(replyThreadContext?.threadLabel ? { ThreadLabel: replyThreadContext.threadLabel } : {}),
       ...(msg.replyToMsgId != null ? { ReplyToId: String(msg.replyToMsgId) } : {}),
@@ -2054,13 +2514,17 @@ export async function monitorInlineProvider(params: {
           }).catch(() => null)
         : null
 
-    const streamViaEditMessage = account.config.streamViaEditMessage === true && !shouldEditCallbackTargetInPlace
+    const inlineStreamingMode = resolveInlineStreamingMode(account.config)
+    const streamViaEditMessage =
+      (inlineStreamingMode === "partial" || inlineStreamingMode === "progress") &&
+      !shouldEditCallbackTargetInPlace
     const defaultReplyToMsgId = isGroup && msg.replyToMsgId != null ? msg.id : undefined
+    const inlineBlockStreamingEnabled = resolveInlineBlockStreamingEnabled(account.config)
     const disableBlockStreaming =
       streamViaEditMessage
         ? true
-        : typeof account.config.blockStreaming === "boolean"
-        ? !account.config.blockStreaming
+        : typeof inlineBlockStreamingEnabled === "boolean"
+        ? !inlineBlockStreamingEnabled
         : undefined
     const editStreamState: InlineEditStreamState = {
       messageId: shouldEditCallbackTargetInPlace ? callbackActionEvent?.targetMessageId ?? null : null,
@@ -2090,13 +2554,12 @@ export async function monitorInlineProvider(params: {
       if (!streamViaEditMessage) return
       await resetEditStreamForAssistantMessage()
     }
-    const handlePartialStreamPayload = async (payload: {
-      text?: string
-      mediaUrls?: string[]
-    }): Promise<void> => {
+    const handlePartialStreamPayload = async (payload: InlineReplyPayload): Promise<void> => {
+      const visiblePayload = resolveInlineChatVisibleReplyPayload(payload)
+      if (!visiblePayload) return
       if (editStreamState.failed) return
-      if ((payload.mediaUrls?.length ?? 0) > 0) return
-      const partialText = typeof payload.text === "string" ? payload.text : ""
+      if (resolveInlinePayloadMediaUrls(visiblePayload).length > 0) return
+      const partialText = typeof visiblePayload.text === "string" ? visiblePayload.text : ""
       if (!partialText || partialText === editStreamState.lastPartialText) return
       editStreamState.lastPartialText = partialText
 
@@ -2167,20 +2630,6 @@ export async function monitorInlineProvider(params: {
         : {}),
       ...(streamViaEditMessage
         ? {
-            onReasoningStream: async (payload: { text?: string; mediaUrls?: string[] }) => {
-              await handlePartialStreamPayload(payload)
-            },
-          }
-        : {}),
-      ...(streamViaEditMessage
-        ? {
-            onReasoningEnd: async () => {
-              await editStreamState.opChain
-            },
-          }
-        : {}),
-      ...(streamViaEditMessage
-        ? {
             onToolStart: async () => {
               await resetEditStreamOnBoundary()
             },
@@ -2216,29 +2665,22 @@ export async function monitorInlineProvider(params: {
             ...prefixOptions,
             ...(typingCallbacks ? { typingCallbacks } : {}),
             deliver: async (
-              payload: {
-                text?: string
-                mediaUrl?: string
-                mediaUrls?: string[]
-                replyToId?: string
-                channelData?: Record<string, unknown>
-              },
+              payload: InlineReplyPayload,
               info?: InlineDispatchReplyInfo,
             ) => {
-              const rawText = payload.text ?? ""
-              const mediaList = payload.mediaUrls?.length
-                ? payload.mediaUrls
-                : payload.mediaUrl
-                  ? [payload.mediaUrl]
-                  : []
+              const visiblePayload = resolveInlineChatVisibleReplyPayload(payload)
+              if (!visiblePayload) return
+
+              const rawText = visiblePayload.text ?? ""
+              const mediaList = resolveInlinePayloadMediaUrls(visiblePayload)
               const outboundText = rewriteNumericMentionsToUsernames(rawText, senderProfilesById)
-              const outboundActions = resolveInlineReplyActions(payload as Record<string, unknown>)
+              const outboundActions = resolveInlineReplyActions(visiblePayload as Record<string, unknown>)
               const infoKind = typeof info?.kind === "string" ? info.kind : undefined
 
               let replyToMsgId: bigint | undefined
-              if (payload.replyToId != null) {
+              if (visiblePayload.replyToId != null) {
                 try {
-                  replyToMsgId = BigInt(payload.replyToId)
+                  replyToMsgId = BigInt(visiblePayload.replyToId)
                 } catch {
                   // ignore
                 }
