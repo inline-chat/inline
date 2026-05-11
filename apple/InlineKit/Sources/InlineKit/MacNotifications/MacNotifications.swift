@@ -4,7 +4,6 @@ import CoreGraphics
 import Foundation
 import ImageIO
 import InlineProtocol
-import Kingfisher
 import Logger
 import UniformTypeIdentifiers
 import UserNotifications
@@ -170,14 +169,10 @@ private actor AvatarAttachmentBuilder {
   private let cacheLimit: Int = 64
   private var cachedAttachments: [String: URL] = [:]
   private var cacheOrder: [String] = []
-  private let downloader: ImageDownloader
 
   init(avatarDiameter: CGFloat) {
     self.avatarDiameter = avatarDiameter
     thumbnailMaxPixel = max(Int(avatarDiameter * 3), 132)
-    let downloader = ImageDownloader(name: "notification-avatar")
-    downloader.downloadTimeout = timeoutSeconds
-    self.downloader = downloader
   }
 
   func attachmentURL(for userInfo: UserInfo?) async -> URL? {
@@ -208,20 +203,20 @@ private actor AvatarAttachmentBuilder {
 
     if let localURL = userInfo.profilePhoto?.first?.getLocalURL(),
        FileManager.default.fileExists(atPath: localURL.path),
-       let image = await retrieveImage(from: .provider(LocalFileImageDataProvider(fileURL: localURL)))
+       let image = await retrieveImage(from: .local(localURL))
     {
       return AvatarSource(cacheKey: cacheKey(for: localURL), image: image)
     }
 
     if let localURL = userInfo.user.getLocalURL(),
        FileManager.default.fileExists(atPath: localURL.path),
-       let image = await retrieveImage(from: .provider(LocalFileImageDataProvider(fileURL: localURL)))
+       let image = await retrieveImage(from: .local(localURL))
     {
       return AvatarSource(cacheKey: cacheKey(for: localURL), image: image)
     }
 
     if let remoteURL = userInfo.profilePhoto?.first?.getRemoteURL() ?? userInfo.user.getRemoteURL() {
-      if let image = await retrieveImage(from: .network(remoteURL)) {
+      if let image = await retrieveImage(from: .remote(remoteURL)) {
         return AvatarSource(cacheKey: remoteURL.absoluteString, image: image)
       }
     }
@@ -239,36 +234,75 @@ private actor AvatarAttachmentBuilder {
     return localURL.path
   }
 
-  private func retrieveImage(from source: Source) async -> CGImage? {
-    let options: KingfisherOptionsInfo = [
-      .callbackQueue(.mainCurrentOrAsync),
-      .processor(DownsamplingImageProcessor(size: CGSize(
-        width: CGFloat(thumbnailMaxPixel),
-        height: CGFloat(thumbnailMaxPixel)
-      ))),
-      .downloader(downloader),
-      .cacheMemoryOnly,
-      .scaleFactor(1),
-    ]
+  private func retrieveImage(from source: AvatarImageSource) async -> CGImage? {
+    switch source {
+    case .local(let url):
+      return downsampleImage(from: url)
 
-    let logger = log
+    case .remote(let url):
+      do {
+        let request = URLRequest(
+          url: url,
+          cachePolicy: .reloadIgnoringLocalCacheData,
+          timeoutInterval: timeoutSeconds
+        )
+        let (data, response) = try await URLSession.shared.data(for: request)
 
-    return await withCheckedContinuation { continuation in
-      _ = KingfisherManager.shared.retrieveImage(
-        with: source,
-        options: options
-      ) { result in
-        switch result {
-          case let .success(value):
-            var rect = CGRect(origin: .zero, size: value.image.size)
-            let cgImage = value.image.cgImage(forProposedRect: &rect, context: nil, hints: nil)
-            continuation.resume(returning: cgImage)
-          case let .failure(error):
-            logger.error("Failed to download avatar image", error: error)
-            continuation.resume(returning: nil)
+        if let httpResponse = response as? HTTPURLResponse,
+           !(200 ..< 400).contains(httpResponse.statusCode)
+        {
+          log.warning("Failed to download avatar image status=\(httpResponse.statusCode)")
+          return nil
         }
+
+        return downsampleImage(from: data)
+      } catch {
+        log.error("Failed to download avatar image", error: error)
+        return nil
       }
     }
+  }
+
+  private func downsampleImage(from url: URL) -> CGImage? {
+    let sourceOptions = [
+      kCGImageSourceShouldCache: false,
+    ] as CFDictionary
+
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, sourceOptions) else {
+      log.error("Failed to read avatar image")
+      return nil
+    }
+
+    return downsampleImage(from: source)
+  }
+
+  private func downsampleImage(from data: Data) -> CGImage? {
+    let sourceOptions = [
+      kCGImageSourceShouldCache: false,
+    ] as CFDictionary
+
+    guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions) else {
+      log.error("Failed to decode avatar image")
+      return nil
+    }
+
+    return downsampleImage(from: source)
+  }
+
+  private func downsampleImage(from source: CGImageSource) -> CGImage? {
+    let options: [CFString: Any] = [
+      kCGImageSourceCreateThumbnailFromImageAlways: true,
+      kCGImageSourceCreateThumbnailWithTransform: true,
+      kCGImageSourceShouldCacheImmediately: true,
+      kCGImageSourceThumbnailMaxPixelSize: thumbnailMaxPixel,
+    ]
+
+    guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+      log.error("Failed to create avatar thumbnail")
+      return nil
+    }
+
+    return image
   }
 
   private func makeCircularAvatarImage(from image: CGImage) -> URL? {
@@ -372,5 +406,10 @@ private actor AvatarAttachmentBuilder {
 private struct AvatarSource {
   let cacheKey: String
   let image: CGImage
+}
+
+private enum AvatarImageSource {
+  case local(URL)
+  case remote(URL)
 }
 #endif
