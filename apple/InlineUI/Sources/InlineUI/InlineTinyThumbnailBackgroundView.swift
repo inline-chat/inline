@@ -2,6 +2,7 @@ import CoreImage
 import Foundation
 import ImageIO
 import InlineKit
+import os.signpost
 
 #if os(iOS)
 import UIKit
@@ -68,6 +69,7 @@ public final class InlineTinyThumbnailBackgroundView: PlatformView {
     return cache
   }()
   private static let ciContext = CIContext()
+  private static let signpostLog = OSLog(subsystem: "InlineUI", category: "PointsOfInterest")
 
   private let imageView = TinyThumbnailImageView(frame: .zero)
   private var currentBytes: Data?
@@ -138,6 +140,27 @@ public final class InlineTinyThumbnailBackgroundView: PlatformView {
       return cached
     }
 
+    let signpostID = OSSignpostID(log: signpostLog)
+    var rendered = false
+    os_signpost(
+      .begin,
+      log: signpostLog,
+      name: "TinyThumbnailRender",
+      signpostID: signpostID,
+      "%{public}s",
+      "bytes=\(strippedBytes.count)"
+    )
+    defer {
+      os_signpost(
+        .end,
+        log: signpostLog,
+        name: "TinyThumbnailRender",
+        signpostID: signpostID,
+        "%{public}s",
+        "rendered=\(rendered)"
+      )
+    }
+
     guard let decodedJPEG = InlineTinyThumbnailDecoder.decodeJPEGData(from: strippedBytes),
           let imageSource = CGImageSourceCreateWithData(decodedJPEG as CFData, nil),
           let decodedImage = CGImageSourceCreateImageAtIndex(imageSource, 0, nil),
@@ -148,6 +171,7 @@ public final class InlineTinyThumbnailBackgroundView: PlatformView {
 
     let image = platformImage(from: backgroundCGImage)
     imageCache.setObject(image, forKey: cacheKey)
+    rendered = true
     return image
   }
 

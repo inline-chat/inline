@@ -2,4 +2,4 @@
 #include "Local.default.xcconfig"
 #include? "Local.xcconfig"
 
-DISPLAY_NAME = Inline Dev
+DISPLAY_NAME = Inline Debug

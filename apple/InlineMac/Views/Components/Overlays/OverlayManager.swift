@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @MainActor
@@ -24,13 +25,16 @@ final class OverlayManager: ObservableObject, ToastPresenting {
   private weak var toastContainerView: NSView?
   private var toastHostingView: NSHostingView<ToastBannerView>?
   private var toastTopConstraint: NSLayoutConstraint?
-  private var toastModel: ToastModel?
+  @Published private(set) var toastModel: ToastModel?
   private var dismissTask: Task<Void, Never>?
   private let toastYOffset: CGFloat = 80
   private let toastVisibleTopOffset: CGFloat = 18
   private let toastHiddenTopOffset: CGFloat = 8
 
   func attachToast(to containerView: NSView) {
+    if toastContainerView !== containerView, toastHostingView != nil {
+      dismissToast()
+    }
     toastContainerView = containerView
     ToastCenter.shared.presenter = self
   }
@@ -92,10 +96,12 @@ final class OverlayManager: ObservableObject, ToastPresenting {
       host.animator().alphaValue = 0
       topConstraint?.animator().constant = toastHiddenTopOffset + toastYOffset
       containerView?.animator().layoutSubtreeIfNeeded()
-    } completionHandler: { [weak self] in
-      host.removeFromSuperview()
-      self?.toastHostingView = nil
-      self?.toastTopConstraint = nil
+    } completionHandler: { [weak self, weak host] in
+      Task { @MainActor in
+        host?.removeFromSuperview()
+        self?.toastHostingView = nil
+        self?.toastTopConstraint = nil
+      }
     }
   }
 
@@ -118,6 +124,18 @@ final class OverlayManager: ObservableObject, ToastPresenting {
       action: action
     )
     toastModel = model
+
+    if let seconds {
+      dismissTask = Task { [weak self] in
+        try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+        await MainActor.run {
+          guard let self else { return }
+          if self.toastModel?.id == model.id {
+            self.dismissToast()
+          }
+        }
+      }
+    }
 
     guard let containerView = toastContainerView else { return }
 
@@ -155,18 +173,6 @@ final class OverlayManager: ObservableObject, ToastPresenting {
       toastTopConstraint?.animator().constant = toastVisibleTopOffset + toastYOffset
       containerView.animator().layoutSubtreeIfNeeded()
     }
-
-    if let seconds {
-      dismissTask = Task { [weak self] in
-        try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-        await MainActor.run {
-          guard let self else { return }
-          if self.toastModel?.id == model.id {
-            self.dismissToast()
-          }
-        }
-      }
-    }
   }
 
   func showError(title: String? = nil, message: String, error: Error? = nil) {
@@ -179,6 +185,40 @@ final class OverlayManager: ObservableObject, ToastPresenting {
     alert.addButton(withTitle: "OK")
 
     alert.runModal() // shows alert modally
+  }
+}
+
+extension View {
+  @ViewBuilder
+  func toastOverlayHost(_ overlay: OverlayManager?) -> some View {
+    if let overlay {
+      modifier(ToastOverlayModifier(overlay: overlay))
+    } else {
+      self
+    }
+  }
+}
+
+private struct ToastOverlayModifier: ViewModifier {
+  @ObservedObject var overlay: OverlayManager
+
+  func body(content: Content) -> some View {
+    content
+      .overlay(alignment: .top) {
+        if let toast = overlay.toastModel {
+          ToastBannerView(
+            model: toast,
+            dismiss: {
+              overlay.dismissToast()
+            }
+          )
+          .padding(.top, 98)
+          .padding(.horizontal, 18)
+          .transition(.opacity)
+          .zIndex(10)
+        }
+      }
+      .animation(.easeOut(duration: 0.2), value: overlay.toastModel?.id)
   }
 }
 

@@ -15,11 +15,12 @@ extension Notification.Name {
   static let nextChat = Notification.Name("nextChat")
 }
 
+@MainActor
 final class AppMenu: NSObject {
   static let shared = AppMenu()
   private let mainMenu = NSMenu()
   private var dependencies: AppDependencies?
-  private weak var tabStripMenuItem: NSMenuItem?
+  private weak var tabBarMenuItem: NSMenuItem?
 #if SPARKLE
   private weak var updateMenuItem: NSMenuItem?
   private var updateMenuItemEnabled = true
@@ -169,6 +170,27 @@ final class AppMenu: NSObject {
     let fileMenuItem = NSMenuItem(title: "File", action: nil, keyEquivalent: "")
     fileMenuItem.submenu = fileMenu
     mainMenu.addItem(fileMenuItem)
+
+    let newWindowItem = NSMenuItem(
+      title: "New Window",
+      action: #selector(newWindow(_:)),
+      keyEquivalent: "n"
+    )
+    newWindowItem.target = self
+    newWindowItem.image = NSImage(systemSymbolName: "macwindow", accessibilityDescription: nil)
+    fileMenu.addItem(newWindowItem)
+
+    let newTabItem = NSMenuItem(
+      title: "New Tab",
+      action: #selector(newTab(_:)),
+      keyEquivalent: "t"
+    )
+    newTabItem.target = self
+    newTabItem.image = NSImage(systemSymbolName: "plus.square.on.square", accessibilityDescription: nil)
+    fileMenu.addItem(newTabItem)
+
+    fileMenu.addItem(NSMenuItem.separator())
+
     fileMenu.addItem(
       withTitle: "Close Window",
       action: #selector(NSWindow.performClose(_:)),
@@ -401,19 +423,29 @@ final class AppMenu: NSObject {
     viewMenu.addItem(toggleSidebarItem)
 
     let tabStripItem = NSMenuItem(
-      title: "Show Tab Strip",
-      action: #selector(toggleMainTabStrip(_:)),
+      title: "Show Tab Bar",
+      action: #selector(toggleNativeTabBar(_:)),
       keyEquivalent: "s"
     )
     tabStripItem.keyEquivalentModifierMask = [.command, .shift]
     tabStripItem.target = self
-    tabStripItem.state = AppSettings.shared.showMainTabStrip ? .on : .off
+    tabStripItem.state = activeWindow()?.tabGroup?.isTabBarVisible == true ? .on : .off
     tabStripItem.image = NSImage(
       systemSymbolName: "rectangle.topthird.inset.filled",
       accessibilityDescription: nil
     )
     viewMenu.addItem(tabStripItem)
-    tabStripMenuItem = tabStripItem
+    tabBarMenuItem = tabStripItem
+
+    let showAllTabsItem = NSMenuItem(
+      title: "Show All Tabs",
+      action: #selector(showAllTabs(_:)),
+      keyEquivalent: "\\"
+    )
+    showAllTabsItem.keyEquivalentModifierMask = [.command, .shift]
+    showAllTabsItem.target = self
+    showAllTabsItem.image = NSImage(systemSymbolName: "square.grid.2x2", accessibilityDescription: nil)
+    viewMenu.addItem(showAllTabsItem)
 
     viewMenu.addItem(NSMenuItem.separator())
 
@@ -464,8 +496,6 @@ final class AppMenu: NSObject {
       keyEquivalent: ""
     )
 
-    windowMenu.addItem(NSMenuItem.separator())
-
     let alwaysOnTopItem = NSMenuItem(
       title: "Always on Top",
       action: #selector(toggleAlwaysOnTop(_:)),
@@ -493,6 +523,26 @@ final class AppMenu: NSObject {
     helpMenuItem.submenu = helpMenu
     mainMenu.addItem(helpMenuItem)
 
+    let docsItem = NSMenuItem(
+      title: "Documentation",
+      action: #selector(openDocs(_:)),
+      keyEquivalent: ""
+    )
+    docsItem.target = self
+    docsItem.image = NSImage(systemSymbolName: "book.closed", accessibilityDescription: nil)
+    helpMenu.addItem(docsItem)
+
+    let feedbackItem = NSMenuItem(
+      title: "Send Feedback",
+      action: #selector(sendFeedback(_:)),
+      keyEquivalent: ""
+    )
+    feedbackItem.target = self
+    feedbackItem.image = NSImage(systemSymbolName: "bubble.left.and.text.bubble.right", accessibilityDescription: nil)
+    helpMenu.addItem(feedbackItem)
+
+    helpMenu.addItem(NSMenuItem.separator())
+
     let websiteItem = NSMenuItem(
       title: "Website",
       action: #selector(openWebsite(_:)),
@@ -501,6 +551,26 @@ final class AppMenu: NSObject {
     websiteItem.target = self
     websiteItem.image = NSImage(systemSymbolName: "safari", accessibilityDescription: nil)
     helpMenu.addItem(websiteItem)
+
+    let githubItem = NSMenuItem(
+      title: "GitHub",
+      action: #selector(openGitHub(_:)),
+      keyEquivalent: ""
+    )
+    githubItem.target = self
+    githubItem.image = NSImage(systemSymbolName: "chevron.left.forwardslash.chevron.right", accessibilityDescription: nil)
+    helpMenu.addItem(githubItem)
+
+    let xItem = NSMenuItem(
+      title: "Updates on X",
+      action: #selector(openX(_:)),
+      keyEquivalent: ""
+    )
+    xItem.target = self
+    xItem.image = NSImage(systemSymbolName: "link", accessibilityDescription: nil)
+    helpMenu.addItem(xItem)
+
+    helpMenu.addItem(NSMenuItem.separator())
 
     let statusPageItem = NSMenuItem(
       title: "Status Page",
@@ -515,6 +585,14 @@ final class AppMenu: NSObject {
   @objc private func showPreferences(_ sender: Any?) {
     guard let dependencies else { return }
     SettingsWindowController.show(using: dependencies, sender: sender)
+  }
+
+  @MainActor @objc private func newWindow(_ sender: Any?) {
+    (NSApp.delegate as? AppDelegate)?.openNewMainWindow(sender)
+  }
+
+  @MainActor @objc private func newTab(_ sender: Any?) {
+    MainWindowOpenCoordinator.shared.openTab()
   }
 
   @objc private func logOut(_ sender: Any?) {
@@ -534,11 +612,24 @@ final class AppMenu: NSObject {
   }
 
   @objc private func clearCache(_ sender: Any?) {
-    Task { await Api.realtime.clearSyncState() }
-    Transactions.shared.clearAll()
-    try? AppDatabase.clearDB()
+    guard confirm(
+      title: "Clear Cache",
+      message: "This clears local cached app data and sync state. Inline will reload your account from the server."
+    ) else { return }
 
-    // TODO: re-open windows?
+    Task { @MainActor in
+      guard let appDelegate = NSApp.delegate as? AppDelegate else {
+        ToastCenter.shared.showError("Failed to clear cache")
+        return
+      }
+
+      do {
+        try await appDelegate.clearCacheAndResetApp()
+        ToastCenter.shared.showSuccess("Cache cleared")
+      } catch {
+        ToastCenter.shared.showError("Failed to clear cache")
+      }
+    }
   }
 
   @objc private func clearMediaCache(_ sender: Any?) {
@@ -548,19 +639,47 @@ final class AppMenu: NSObject {
   }
 
   @objc private func resetDismissedPopovers(_ sender: Any?) {
-    Task {
-      await TranslationAlertDismiss.shared.resetAllDismissStates()
-    }
+    TranslationAlertDismiss.shared.resetAllDismissStates()
+  }
+
+  @objc private func openDocs(_ sender: Any?) {
+    openURL("https://inline.chat/docs")
+  }
+
+  @objc private func sendFeedback(_ sender: Any?) {
+    openURL("https://inline.chat/feedback")
   }
 
   @objc private func openWebsite(_ sender: Any?) {
-    guard let url = URL(string: "https://inline.chat") else { return }
-    NSWorkspace.shared.open(url)
+    openURL("https://inline.chat")
+  }
+
+  @objc private func openGitHub(_ sender: Any?) {
+    openURL("https://github.com/inline-chat")
+  }
+
+  @objc private func openX(_ sender: Any?) {
+    openURL("https://x.com/InlineChat")
   }
 
   @objc private func openStatusPage(_ sender: Any?) {
-    guard let url = URL(string: "https://status.inline.chat/") else { return }
+    openURL("https://status.inline.chat/")
+  }
+
+  private func openURL(_ string: String) {
+    guard let url = URL(string: string) else { return }
     NSWorkspace.shared.open(url)
+  }
+
+  private func confirm(title: String, message: String) -> Bool {
+    let alert = NSAlert()
+    alert.messageText = title
+    alert.informativeText = message
+    alert.addButton(withTitle: "Cancel")
+    alert.alertStyle = .warning
+    let button = alert.addButton(withTitle: title)
+    button.hasDestructiveAction = true
+    return alert.runModal() == .alertSecondButtonReturn
   }
 
   @objc private func toggleAlwaysOnTop(_ sender: NSMenuItem) {
@@ -575,27 +694,51 @@ final class AppMenu: NSObject {
     }
   }
 
-  @objc private func toggleSidebar(_ sender: NSMenuItem) {
-    NotificationCenter.default.post(name: .toggleSidebar, object: nil)
+  @objc private func showAllTabs(_ sender: Any?) {
+    guard let window = tabOverviewWindow() else { return }
+    window.toggleTabOverview(sender)
   }
 
-  @objc private func toggleMainTabStrip(_ sender: NSMenuItem) {
-    AppSettings.shared.showMainTabStrip.toggle()
-    sender.state = AppSettings.shared.showMainTabStrip ? .on : .off
+  private func activeWindow() -> NSWindow? {
+    NSApp.keyWindow ?? NSApp.mainWindow
+  }
+
+  private func tabOverviewWindow() -> NSWindow? {
+    let candidates = [activeWindow()] + NSApp.windows
+    return candidates.compactMap { $0 }.first { ($0.tabGroup?.windows.count ?? 0) > 1 }
+      ?? activeWindow()
+  }
+
+  @objc private func toggleSidebar(_ sender: NSMenuItem) {
+    if MainWindowOpenCoordinator.shared.toggleSidebar() == false {
+      NotificationCenter.default.post(name: .toggleSidebar, object: nil)
+    }
+  }
+
+  @objc private func toggleNativeTabBar(_ sender: NSMenuItem) {
+    guard let window = activeWindow() else { return }
+    window.toggleTabBar(sender)
+    sender.state = window.tabGroup?.isTabBarVisible == true ? .on : .off
   }
 
   @objc private func focusSearch(_ sender: NSMenuItem) {
-    NotificationCenter.default.post(name: .focusSearch, object: nil)
+    if MainWindowOpenCoordinator.shared.openCommandBar() == false {
+      NotificationCenter.default.post(name: .focusSearch, object: nil)
+    }
   }
 
   // MARK: - Chat Navigation Actions
 
   @objc private func prevChat(_ sender: Any?) {
-    NotificationCenter.default.post(name: .prevChat, object: nil)
+    if MainWindowOpenCoordinator.shared.navigateChat(offset: -1) == false {
+      NotificationCenter.default.post(name: .prevChat, object: nil)
+    }
   }
 
   @objc private func nextChat(_ sender: Any?) {
-    NotificationCenter.default.post(name: .nextChat, object: nil)
+    if MainWindowOpenCoordinator.shared.navigateChat(offset: 1) == false {
+      NotificationCenter.default.post(name: .nextChat, object: nil)
+    }
   }
 
 #if SPARKLE
@@ -660,6 +803,9 @@ extension AppMenu: NSMenuItemValidation {
 #endif
 
     if menuItem.action == #selector(prevChat(_:)) || menuItem.action == #selector(nextChat(_:)) {
+      if MainWindowOpenCoordinator.shared.canNavigateChat {
+        return true
+      }
       if dependencies.nav2 != nil {
         return true
       }
@@ -667,9 +813,15 @@ extension AppMenu: NSMenuItemValidation {
       return nav.selectedTab == .inbox || nav.selectedTab == .archive
     }
 
-    if menuItem.action == #selector(toggleMainTabStrip(_:)) || menuItem == tabStripMenuItem {
-      menuItem.state = AppSettings.shared.showMainTabStrip ? .on : .off
+    if menuItem.action == #selector(toggleNativeTabBar(_:)) || menuItem == tabBarMenuItem {
+      guard let window = activeWindow() else { return false }
+      menuItem.state = window.tabGroup?.isTabBarVisible == true ? .on : .off
       return true
+    }
+
+    if menuItem.action == #selector(showAllTabs(_:)) {
+      guard let window = tabOverviewWindow() else { return false }
+      return (window.tabGroup?.windows.count ?? 0) > 1
     }
 
     return true

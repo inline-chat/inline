@@ -100,13 +100,11 @@ final class LinearIssueCoordinator: ObservableObject {
 
   private init() {}
 
-  func handleCreateLinearIssue(message: Message, window: NSWindow) async {
+  func handleCreateLinearIssue(message: Message, spaceId: Int64?, window: NSWindow) async {
     guard !isCreatingIssue else { return }
     guard let text = message.text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return }
 
-    if message.peerId.isThread,
-       let spaceId = (try? Chat.getByPeerId(peerId: message.peerId)?.spaceId)
-    {
+    if message.peerId.isThread, let spaceId {
       await createIssue(text: text, message: message, spaceId: spaceId)
       return
     }

@@ -37,6 +37,7 @@ struct SettingsRootView: View {
     }
     .navigationTitle("Settings")
     .navigationSplitViewStyle(.balanced)
+    .frame(minWidth: Metrics.windowMinWidth, minHeight: Metrics.windowMinHeight)
     .toolbar {
       ToolbarItemGroup(placement: .navigation) {
         Button {
@@ -115,6 +116,8 @@ struct SettingsRootView: View {
 
 private enum Metrics {
   static let sidebarWidth: CGFloat = 200
+  static let windowMinWidth: CGFloat = 660
+  static let windowMinHeight: CGFloat = 540
 }
 
 private struct SettingsNavigationState: Equatable {

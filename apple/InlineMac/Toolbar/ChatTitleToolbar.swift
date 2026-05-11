@@ -156,11 +156,7 @@ class ChatTitleToolbar: NSToolbarItem {
   }
 
   private func openChatInfo() {
-    if let nav2 = dependencies.nav2 {
-      nav2.navigate(to: .chatInfo(peer: peer))
-    } else {
-      dependencies.nav.open(.chatInfo(peer: peer))
-    }
+    dependencies.openChatInfo(peer: peer)
   }
 
   @objc private func handleRenameMenu() {
@@ -215,25 +211,12 @@ class ChatTitleToolbar: NSToolbarItem {
   }
 
   private func isRenameAllowed() -> Bool {
-    guard case let .thread(chatId) = peer else { return false }
+    guard case .thread = peer else { return false }
     guard let currentUserId = Auth.shared.getCurrentUserId() else { return false }
 
     do {
       return try dependencies.database.reader.read { db in
-        if let chat = try Chat.fetchOne(db, id: chatId),
-           chat.isPublic == true,
-           let spaceId = chat.spaceId
-        {
-          return try Member
-            .filter(Member.Columns.userId == currentUserId)
-            .filter(Member.Columns.spaceId == spaceId)
-            .fetchOne(db) != nil
-        }
-
-        return try ChatParticipant
-          .filter(Column("chatId") == chatId)
-          .filter(Column("userId") == currentUserId)
-          .fetchOne(db) != nil
+        try ChatRenamePermission.canRename(peer: peer, currentUserId: currentUserId, db: db)
       }
     } catch {
       Log.shared.error("Failed to check chat rename eligibility", error: error)

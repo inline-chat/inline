@@ -20,7 +20,7 @@ class NewChatViewController: NSViewController {
 
   private lazy var swiftUIView: some View =
     CreateChatView(spaceId: self.spaceId) { chatId in
-      self.dependencies.nav.open(.chat(peer: Peer.thread(id: chatId)))
+      self.dependencies.requestOpenChat(peer: Peer.thread(id: chatId))
     }
     .environment(dependencies: dependencies)
 

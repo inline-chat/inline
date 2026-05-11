@@ -25,6 +25,8 @@ class InviteToSpaceViewController: NSViewController {
       onManageMembers: { [dependencies, spaceId] in
         if let nav2 = dependencies.nav2 {
           nav2.navigate(to: .members(spaceId: spaceId))
+        } else if let nav3 = dependencies.nav3 {
+          nav3.open(.members(spaceId: spaceId))
         } else {
           dependencies.nav.open(.members(spaceId: spaceId))
         }

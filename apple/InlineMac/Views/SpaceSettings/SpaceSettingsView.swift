@@ -5,6 +5,9 @@ import SwiftUI
 
 struct SpaceSettingsView: View {
   let spaceId: Int64
+  private let onOpenIntegrations: (() -> Void)?
+  private let onOpenMembers: (() -> Void)?
+  private let onExit: (() -> Void)?
 
   @EnvironmentObject private var nav: Nav
   @EnvironmentObject private var data: DataManager
@@ -14,8 +17,16 @@ struct SpaceSettingsView: View {
   @State private var showConfirm = false
   @State private var actionError: String?
 
-  init(spaceId: Int64) {
+  init(
+    spaceId: Int64,
+    onOpenIntegrations: (() -> Void)? = nil,
+    onOpenMembers: (() -> Void)? = nil,
+    onExit: (() -> Void)? = nil
+  ) {
     self.spaceId = spaceId
+    self.onOpenIntegrations = onOpenIntegrations
+    self.onOpenMembers = onOpenMembers
+    self.onExit = onExit
     _viewModel = StateObject(wrappedValue: FullSpaceViewModel(db: AppDatabase.shared, spaceId: spaceId))
     _membershipStatus = StateObject(wrappedValue: SpaceMembershipStatusViewModel(db: AppDatabase.shared, spaceId: spaceId))
   }
@@ -36,13 +47,13 @@ struct SpaceSettingsView: View {
         Form {
           Section("Space") {
             Button {
-              nav.open(.spaceIntegrations(spaceId: spaceId))
+              openIntegrations()
             } label: {
               Label("Integrations", systemImage: "app.connected.to.app.below.fill")
             }
 
             Button {
-              nav.open(.members(spaceId: spaceId))
+              openMembers()
             } label: {
               Label("Manage Members", systemImage: "person.2")
             }
@@ -118,6 +129,24 @@ struct SpaceSettingsView: View {
     }
   }
 
+  private func openIntegrations() {
+    if let onOpenIntegrations {
+      onOpenIntegrations()
+      return
+    }
+
+    nav.open(.spaceIntegrations(spaceId: spaceId))
+  }
+
+  private func openMembers() {
+    if let onOpenMembers {
+      onOpenMembers()
+      return
+    }
+
+    nav.open(.members(spaceId: spaceId))
+  }
+
   private func performAction() {
     Task {
       do {
@@ -127,7 +156,11 @@ struct SpaceSettingsView: View {
           try await data.leaveSpace(spaceId: spaceId)
         }
         await MainActor.run {
-          nav.openHome(replace: true)
+          if let onExit {
+            onExit()
+          } else {
+            nav.openHome(replace: true)
+          }
         }
       } catch {
         await MainActor.run {

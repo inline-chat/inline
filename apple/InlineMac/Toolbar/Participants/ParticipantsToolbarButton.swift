@@ -1,9 +1,9 @@
+import Combine
 import GRDB
 import InlineKit
 import InlineUI
 import Logger
 import SwiftUI
-import Combine
 
 public struct ParticipantsToolbarButton: View {
   let peer: Peer
@@ -12,13 +12,13 @@ public struct ParticipantsToolbarButton: View {
   @State private var showAddParticipants = false
   @State private var chat: Chat?
   @StateObject private var participantsViewModel: ChatParticipantsWithMembersViewModel
-  
+
   public init(peer: Peer, dependencies: AppDependencies) {
     self.peer = peer
     self.dependencies = dependencies
-    
+
     switch peer {
-    case .thread(let chatId):
+    case let .thread(chatId):
       _participantsViewModel = StateObject(
         wrappedValue: ChatParticipantsWithMembersViewModel(db: dependencies.database, chatId: chatId)
       )
@@ -29,31 +29,19 @@ public struct ParticipantsToolbarButton: View {
       )
     }
   }
-  
+
   private var displayParticipants: [UserInfo] {
     // Show all participants including current user
     return participantsViewModel.participants
   }
-  
+
   public var body: some View {
-    Button(action: {
+    ParticipantsButton(participants: displayParticipants) {
       isPopoverPresented.toggle()
-    }) {
-      ParticipantAvatarStack(participants: Array(displayParticipants.prefix(3)))
     }
-    .buttonStyle(.plain)
+    .accessibilityLabel("Participants")
     .popover(isPresented: $isPopoverPresented, arrowEdge: .bottom) {
-      ParticipantsPopoverView(
-        participants: participantsViewModel.participants,
-        currentUserId: dependencies.auth.currentUserId,
-        peer: peer,
-        dependencies: dependencies,
-        isPresented: $isPopoverPresented,
-        onAddParticipants: {
-          showAddParticipants = true
-        }
-      )
-      .frame(width: 180, height: 240)
+      participantsPresentationContent
     }
     .sheet(isPresented: $showAddParticipants) {
       if let chat {
@@ -85,6 +73,21 @@ public struct ParticipantsToolbarButton: View {
     }
   }
 
+  @ViewBuilder
+  private var participantsPresentationContent: some View {
+    ParticipantsPopoverView(
+      participants: participantsViewModel.participants,
+      currentUserId: dependencies.auth.currentUserId,
+      peer: peer,
+      dependencies: dependencies,
+      isPresented: $isPopoverPresented,
+      onAddParticipants: {
+        showAddParticipants = true
+      }
+    )
+    .frame(width: 180, height: 240)
+  }
+
   private func loadChat() async {
     guard case let .thread(chatId) = peer else { return }
 
@@ -94,6 +97,38 @@ public struct ParticipantsToolbarButton: View {
       }
     } catch {
       Log.shared.error("Failed to load chat for add participants", error: error)
+    }
+  }
+}
+
+/// Button-only participants toolbar item. Presentation is owned by the caller.
+public struct ParticipantsButton: View {
+  private let participants: [UserInfo]
+  private let action: () -> Void
+
+  public init(participants: [UserInfo], action: @escaping () -> Void) {
+    self.participants = participants
+    self.action = action
+  }
+
+  private var visibleParticipants: [UserInfo] {
+    Array(participants.prefix(3))
+  }
+
+  private var buttonWidth: CGFloat {
+    let count = visibleParticipants.count
+    let width = CGFloat(count) * 24 - CGFloat(max(0, count - 1)) * 6 + 8
+    return max(32, width)
+  }
+
+  public var body: some View {
+    Button(action: action) {
+      Label("Participants", systemImage: "person.2")
+        .frame(width: buttonWidth)
+        .opacity(0)
+        .overlay {
+          ParticipantAvatarStack(participants: visibleParticipants)
+        }
     }
   }
 }

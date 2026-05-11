@@ -162,7 +162,6 @@ struct Nav2Entry: Codable {
     clearPendingChatOpenState()
     log.trace("Navigating to \(route)")
     if case let .chat(peer) = route {
-      // PERF MARK: begin chat navigation signpost (remove when done).
       beginChatNavigationSignpost(peer: peer)
     }
     lastRoutes[activeTab] = route
@@ -224,6 +223,12 @@ struct Nav2Entry: Codable {
         }
       }
     }
+  }
+
+  @MainActor
+  func requestOpenChatInHome(peer: Peer, database: AppDatabase = .shared) {
+    openHomeTabIfNeeded()
+    requestOpenChat(peer: peer, database: database)
   }
 
   func goBack() {
@@ -331,7 +336,6 @@ struct Nav2Entry: Codable {
 
   private func beginChatNavigationSignpost(peer: Peer) {
     if let activeChatNavigation {
-      // PERF MARK: end superseded chat navigation signpost (remove when done).
       os_signpost(
         .end,
         log: navigationSignpostLog,
@@ -344,7 +348,6 @@ struct Nav2Entry: Codable {
 
     let signpostID = OSSignpostID(log: navigationSignpostLog)
     activeChatNavigation = (peer, signpostID)
-    // PERF MARK: begin chat navigation signpost (remove when done).
     os_signpost(
       .begin,
       log: navigationSignpostLog,
@@ -357,7 +360,6 @@ struct Nav2Entry: Codable {
 
   func endChatNavigationSignpost(peer: Peer, reason: String) {
     guard let activeChatNavigation, activeChatNavigation.peer == peer else { return }
-    // PERF MARK: end chat navigation signpost (remove when done).
     os_signpost(
       .end,
       log: navigationSignpostLog,

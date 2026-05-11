@@ -3,13 +3,17 @@ import Foundation
 import Logger
 import OrderedCollections
 
-/// Add keyboard handling to the application views for global events that could interfere
-/// This should be initialized per window
+/// Add keyboard handling to the application views for global events that could interfere.
+/// This should be attached per window.
 @MainActor
 public class KeyMonitor: Sendable {
   private let ESCAPE_KEY_CODE: UInt16 = 53
   private let V_KEY_CODE: UInt16 = 9
-  private let log = Log.scoped("KeyMonitor", enableTracing: false)
+  private static let traceDefaultsKey = "keyMonitorTraceEnabled"
+  private let log = Log.scoped(
+    "KeyMonitor",
+    enableTracing: UserDefaults.standard.bool(forKey: traceDefaultsKey)
+  )
   private var escapeHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
   private var textInputCatchAllHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
   private var pasteHandlers: OrderedDictionary<String, (NSEvent) -> Void> = [:]
@@ -21,11 +25,12 @@ public class KeyMonitor: Sendable {
   private var commandNumberHandlers: OrderedDictionary<String, (NSEvent) -> Bool> = [:]
 
   private var localEventMonitor: Any?
-  private var window: NSWindow
+  private weak var window: NSWindow?
+
+  init() {}
 
   init(window: NSWindow) {
-    self.window = window
-    setupKeyboardMonitoring()
+    attach(window: window)
   }
 
   // MARK: - Public API
@@ -40,6 +45,18 @@ public class KeyMonitor: Sendable {
     case vimNavigation
   }
 
+  func attach(window: NSWindow?) {
+    guard self.window !== window else { return }
+
+    log.trace("Attaching to window \(describe(window)); previous=\(describe(self.window))")
+    self.window = window
+    if window == nil {
+      removeKeyboardMonitoring()
+    } else {
+      setupKeyboardMonitoringIfNeeded()
+    }
+  }
+
   /// Add a handler for a specific event type
   /// It returns a function to call to unsubscribe
   func addHandler(for type: HandlerType, key: String, handler: @escaping (NSEvent) -> Void) -> (() -> Void) {
@@ -47,6 +64,7 @@ public class KeyMonitor: Sendable {
     switch type {
       case .escape:
         escapeHandlers[key] = handler
+        log.trace("Escape handlers after add: \(handlerKeys(escapeHandlers))")
       case .textInputCatchAll:
         textInputCatchAllHandlers[key] = handler
       case .paste:
@@ -66,6 +84,7 @@ public class KeyMonitor: Sendable {
       switch type {
         case .escape:
           self?.escapeHandlers.removeValue(forKey: key)
+          self?.log.trace("Escape handlers after remove: \(self?.handlerKeys(self?.escapeHandlers ?? [:]) ?? "")")
         case .textInputCatchAll:
           self?.textInputCatchAllHandlers.removeValue(forKey: key)
         case .paste:
@@ -87,6 +106,7 @@ public class KeyMonitor: Sendable {
     switch type {
       case .escape:
         escapeHandlers.removeValue(forKey: key)
+        log.trace("Escape handlers after explicit remove: \(handlerKeys(escapeHandlers))")
       case .textInputCatchAll:
         textInputCatchAllHandlers.removeValue(forKey: key)
       case .paste:
@@ -119,13 +139,21 @@ public class KeyMonitor: Sendable {
 
   // MARK: - Monitor
 
-  private func setupKeyboardMonitoring() {
+  private func setupKeyboardMonitoringIfNeeded() {
+    guard localEventMonitor == nil else {
+      log.trace("Keyboard monitoring already installed for window \(describe(window))")
+      return
+    }
+
+    log.trace("Installing local key monitor for window \(describe(window))")
     localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
       guard let self else {
         return event
       }
-      // Is this really needed?
-      guard event.window == window else {
+      guard let window, event.window == window else {
+        log.trace(
+          "Ignoring key event for different window; keyCode=\(event.keyCode) eventWindow=\(describe(event.window)) monitorWindow=\(describe(window))"
+        )
         return event
       }
 
@@ -140,7 +168,9 @@ public class KeyMonitor: Sendable {
       }
 
       if event.keyCode == ESCAPE_KEY_CODE {
+        log.trace("Escape keydown; handlers=\(handlerKeys(escapeHandlers))")
         let handled = callHandler(for: .escape, event: event)
+        log.trace("Escape keydown handled=\(handled)")
         if handled { return nil }
       }
 
@@ -193,6 +223,13 @@ public class KeyMonitor: Sendable {
     }
   }
 
+  private func removeKeyboardMonitoring() {
+    guard let monitor = localEventMonitor else { return }
+    log.trace("Removing local key monitor for window \(describe(window))")
+    NSEvent.removeMonitor(monitor)
+    localEventMonitor = nil
+  }
+
   private func shouldInterceptKeyEvent(_ event: NSEvent) -> Bool {
     // First, check if the current first responder is a text input control
     if isTextInputCurrentlyFocused() {
@@ -218,7 +255,7 @@ public class KeyMonitor: Sendable {
   }
 
   private func isTextInputCurrentlyFocused() -> Bool {
-    guard let firstResponder = window.firstResponder
+    guard let firstResponder = window?.firstResponder
     else {
       return false
     }
@@ -235,11 +272,13 @@ public class KeyMonitor: Sendable {
   private func callHandler(for type: HandlerType, event: NSEvent) -> Bool {
     switch type {
       case .escape:
-        // last one is most specific, but we'll have to remove it somehow
-        if let last = escapeHandlers.values.last {
+        // Last one is most specific.
+        if let key = escapeHandlers.keys.last, let last = escapeHandlers[key] {
+          log.trace("Calling escape handler key=\(key)")
           last(event)
           return true
         } else {
+          log.trace("No escape handler registered")
           return false
         }
       case .textInputCatchAll:
@@ -305,5 +344,15 @@ public class KeyMonitor: Sendable {
     if let monitor = localEventMonitor {
       NSEvent.removeMonitor(monitor)
     }
+  }
+
+  private func handlerKeys<Value>(_ handlers: OrderedDictionary<String, Value>) -> String {
+    let keys = handlers.keys.joined(separator: ",")
+    return keys.isEmpty ? "<none>" : keys
+  }
+
+  private func describe(_ window: NSWindow?) -> String {
+    guard let window else { return "nil" }
+    return "\(window.windowNumber):\(window.title)"
   }
 }

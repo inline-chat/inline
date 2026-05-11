@@ -3,26 +3,56 @@ import AppKit
 import InlineKit
 import InlineUI
 import Logger
+import Nuke
+import Quartz
 import SwiftUI
 import Translation
 
+enum ChatInfoDefaultTab: Hashable {
+  case files
+  case media
+  case links
+  case participants
+}
+
+private enum ChatVisibilitySelection: String, CaseIterable, Hashable {
+  case publicChat
+  case privateChat
+
+  var title: String {
+    switch self {
+      case .publicChat:
+        "Public"
+      case .privateChat:
+        "Private"
+    }
+  }
+}
+
 struct ChatInfo: View {
   @Environment(\.dependencies) private var dependencies
+  @Environment(\.nav) private var nav
   @Environment(\.realtimeV2) private var realtimeV2
   @EnvironmentStateObject var fullChat: FullChatViewModel
   @EnvironmentStateObject private var documentsState: ChatInfoDocumentsState
   @EnvironmentStateObject private var linksState: ChatInfoLinksState
   @EnvironmentStateObject private var participantsState: ChatInfoParticipantsState
   @StateObject private var appSettings = AppSettings.shared
+  @StateObject private var avatarPreview = ChatInfoAvatarQuickLookPresenter()
 
   let peerId: Peer
+  private let defaultTab: ChatInfoDefaultTab?
   @State private var selectedTab: ChatInfoTab = .files
+  @State private var didApplyDefaultTab = false
   @State private var isOwnerOrAdmin = false
   @State private var isCreator = false
   @State private var showVisibilityPicker = false
   @State private var showTranslationOptions = false
+  @State private var showAddParticipants = false
+  @State private var showRemoveParticipantConfirmation = false
   @State private var isTranslationEnabled: Bool
   @State private var selectedParticipantIds: Set<Int64> = []
+  @State private var participantPendingRemoval: UserInfo?
 
   private var chatTitle: String {
     if let userInfo = fullChat.chatItem?.userInfo {
@@ -38,36 +68,16 @@ struct ChatInfo: View {
     fullChat.chat?.id ?? fullChat.chatItem?.dialog.chatId
   }
 
-  private var chatTypeLabel: String {
-    if peerId.isThread {
-      return "Thread"
-    }
-    if let chatType = fullChat.chat?.type {
-      switch chatType {
-        case .thread:
-          return "Thread"
-        case .privateChat:
-          return "Private"
-      }
-    }
-    if fullChat.peerUser != nil {
-      return "Private"
-    }
-    return "Chat"
-  }
-
   private var notificationSelection: DialogNotificationSettingSelection {
     fullChat.chatItem?.dialog.notificationSelection ?? .global
   }
 
-  private var visibilityLabel: String {
-    if fullChat.chat?.isPublic == true {
-      return "Public"
-    }
-    if fullChat.chat?.isPublic == false {
-      return "Private"
-    }
-    return "Unknown"
+  private var notificationTitle: String {
+    notificationSelection == .global ? "Default" : notificationSelection.title
+  }
+
+  private var visibilitySelection: ChatVisibilitySelection {
+    fullChat.chat?.isPublic == true ? .publicChat : .privateChat
   }
 
   private var shouldShowVisibilityRow: Bool {
@@ -85,15 +95,6 @@ struct ChatInfo: View {
     return true
   }
 
-  private var visibilityBinding: Binding<Bool> {
-    Binding(
-      get: { fullChat.chat?.isPublic ?? false },
-      set: { newValue in
-        handleVisibilityToggle(newValue)
-      }
-    )
-  }
-
   private var translationBinding: Binding<Bool> {
     Binding(
       get: { isTranslationEnabled },
@@ -106,14 +107,25 @@ struct ChatInfo: View {
   }
 
   private var shouldShowParticipantsTab: Bool {
-    chatId != nil
+    peerId.isThread && chatId != nil && fullChat.chat?.type != .privateChat
+  }
+
+  private var canManageParticipants: Bool {
+    guard peerId.isThread,
+          let chat = fullChat.chat,
+          chat.isPublic == false
+    else {
+      return false
+    }
+    return isOwnerOrAdmin || isCreator
   }
 
   private var availableTabs: [ChatInfoTab] {
-    var tabs: [ChatInfoTab] = [.files, .media, .links]
+    var tabs: [ChatInfoTab] = []
     if shouldShowParticipantsTab {
       tabs.append(.participants)
     }
+    tabs.append(contentsOf: [.files, .links])
     return tabs
   }
 
@@ -122,11 +134,13 @@ struct ChatInfo: View {
   }
 
   private var permissionsTaskKey: String {
-    "\(peerId.toString())-\(fullChat.chat?.spaceId ?? 0)-\(dependencies?.auth.currentUserId ?? 0)"
+    "\(peerId.toString())-\(fullChat.chat?.id ?? 0)-\(fullChat.chat?.spaceId ?? 0)-\(fullChat.chat?.createdBy ?? 0)-\(dependencies?.auth.currentUserId ?? 0)"
   }
 
-  public init(peerId: Peer) {
+  public init(peerId: Peer, defaultTab: ChatInfoDefaultTab? = nil) {
     self.peerId = peerId
+    self.defaultTab = defaultTab
+    _selectedTab = State(initialValue: ChatInfoTab(defaultTab))
     _isTranslationEnabled = State(initialValue: TranslationState.shared.isTranslationEnabled(for: peerId))
     _fullChat = EnvironmentStateObject { env in
       FullChatViewModel(db: env.appDatabase, peer: peerId)
@@ -160,11 +174,12 @@ struct ChatInfo: View {
         tabContent
       }
       .frame(maxWidth: .infinity, alignment: .topLeading)
-      .padding(.top, 16)
+      .padding(.top, 24)
       .padding(.bottom, 24)
       .padding(.horizontal, 16)
     }
     .frame(maxWidth: .infinity, alignment: .top)
+    .navigationTitle(chatTitle)
     .onAppear {
       updateViewModels()
       ensureSelectedTab()
@@ -177,6 +192,7 @@ struct ChatInfo: View {
       updateViewModels()
     }
     .onChange(of: availableTabsKey) { _, _ in
+      updateViewModels()
       ensureSelectedTab()
     }
     .onReceive(TranslationState.shared.subject) { event in
@@ -189,7 +205,14 @@ struct ChatInfo: View {
   @ViewBuilder
   var icon: some View {
     if let userInfo = fullChat.chatItem?.userInfo {
-      ChatIcon(peer: .user(userInfo), size: 100)
+      Button {
+        avatarPreview.show(userInfo: userInfo)
+      } label: {
+        ChatIcon(peer: .user(userInfo), size: 100)
+      }
+      .buttonStyle(.plain)
+      .contentShape(Circle())
+      .help("Open avatar")
     } else if let chat = fullChat.chatItem?.chat {
       ChatIcon(peer: .chat(chat), size: 100)
     } else {
@@ -201,120 +224,95 @@ struct ChatInfo: View {
   private var header: some View {
     VStack(spacing: 8) {
       icon
-        .padding(.top, 8)
+        .padding(.top, 4)
 
       Text(chatTitle)
         .font(.title3)
         .fontWeight(.semibold)
-
-      Text(chatTypeLabel)
-        .font(.subheadline)
-        .foregroundStyle(.secondary)
     }
     .frame(maxWidth: .infinity)
   }
 
   private var infoCard: some View {
-    GroupBox {
-      VStack(alignment: .leading, spacing: 0) {
-        infoRow("Chat ID") {
-          if let chatId {
-            Button {
-              copyThreadIdToClipboard(chatId)
-            } label: {
-              Label {
+    VStack(alignment: .leading, spacing: 8) {
+      GroupBox {
+        VStack(alignment: .leading, spacing: 0) {
+          if let username = fullChat.chatItem?.userInfo?.user.username, !username.isEmpty {
+            infoRow("Username") {
+              Text("@\(username)")
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            }
+
+            Divider()
+          }
+
+          infoRow("Notifications") {
+            notificationPicker
+          }
+
+          if appSettings.translationUIEnabled {
+            Divider()
+
+            infoRow("Translation") {
+              HStack(spacing: 10) {
+                Toggle("Translate messages", isOn: translationBinding)
+                  .labelsHidden()
+                  .toggleStyle(.switch)
+                  .accessibilityLabel("Translate messages")
+
+                Button {
+                  showTranslationOptions = true
+                } label: {
+                  Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 15, weight: .regular))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Translation options")
+                .help("Translation options")
+              }
+            }
+          }
+
+          if shouldShowVisibilityRow {
+            Divider()
+
+            infoRow("Visibility") {
+              visibilityPicker
+            }
+          }
+
+          Divider()
+
+          infoRow("Chat ID") {
+            if let chatId {
+              Button {
+                copyThreadIdToClipboard(chatId)
+              } label: {
                 Text(String(chatId))
                   .font(.system(.body, design: .monospaced))
-              } icon: {
-                Image(systemName: "doc.on.doc")
                   .foregroundStyle(.secondary)
+                  .textSelection(.enabled)
               }
-            }
-            .buttonStyle(.plain)
-          } else {
-            Text("—")
-              .foregroundStyle(.secondary)
-          }
-        }
-
-        Divider()
-
-        infoRow("Chat Type") {
-          Text(chatTypeLabel)
-            .foregroundStyle(.secondary)
-        }
-
-        Divider()
-
-        infoRow("Notifications") {
-          Picker(
-            "Notifications",
-            selection: Binding(
-              get: { notificationSelection },
-              set: { newSelection in
-                updateNotificationSettings(newSelection)
-              }
-            )
-          ) {
-            Text(DialogNotificationSettingSelection.global.title).tag(DialogNotificationSettingSelection.global)
-            Text(DialogNotificationSettingSelection.all.title).tag(DialogNotificationSettingSelection.all)
-            Text(DialogNotificationSettingSelection.mentions.title).tag(DialogNotificationSettingSelection.mentions)
-            Text(DialogNotificationSettingSelection.none.title).tag(DialogNotificationSettingSelection.none)
-          }
-          .labelsHidden()
-          .pickerStyle(.menu)
-          .frame(maxWidth: 220, alignment: .trailing)
-        }
-
-        if appSettings.translationUIEnabled {
-          Divider()
-
-          infoRow("Translation") {
-            HStack(spacing: 10) {
-              Toggle("Translate messages", isOn: translationBinding)
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .accessibilityLabel("Translate messages")
-
-              Button("Options…") {
-                showTranslationOptions = true
-              }
-              .buttonStyle(.link)
+              .buttonStyle(.plain)
+              .accessibilityLabel("Copy chat ID")
+            } else {
+              Text("—")
+                .foregroundStyle(.secondary)
             }
           }
         }
-
-        if shouldShowVisibilityRow {
-          Divider()
-
-          infoRow("Visibility") {
-            HStack(spacing: 8) {
-              Text(visibilityLabel)
-                .foregroundStyle(canToggleVisibility ? .primary : .secondary)
-
-              Toggle("Visibility", isOn: visibilityBinding)
-                .labelsHidden()
-                .accessibilityLabel("Visibility")
-                .toggleStyle(.switch)
-                .disabled(!canToggleVisibility)
-            }
-          }
-
-          if !canToggleVisibility {
-            Text("Only the chat creator, owner, or admin can change visibility.")
-              .font(.footnote)
-              .foregroundStyle(.secondary)
-              .frame(maxWidth: .infinity, alignment: .leading)
-              .padding(.leading, 154)
-              .padding(.bottom, 8)
-          }
-        }
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
       }
-      .padding(14)
-      .frame(maxWidth: .infinity, alignment: .leading)
-    } label: {
-      Label("Info", systemImage: "info.circle")
-        .font(.headline)
+
+      if shouldShowVisibilityRow, !canToggleVisibility {
+        Text("Only the chat creator, owner, or admin can change visibility.")
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(.horizontal, 4)
+      }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .sheet(isPresented: $showVisibilityPicker) {
@@ -336,6 +334,86 @@ struct ChatInfo: View {
     .sheet(isPresented: $showTranslationOptions) {
       TranslationOptions(peer: peerId)
     }
+    .sheet(isPresented: $showAddParticipants) {
+      if let chat = fullChat.chat, let dependencies {
+        if let spaceId = chat.spaceId {
+          AddParticipantsSheet(
+            chatId: chat.id,
+            spaceId: spaceId,
+            currentParticipants: participantsState.participantsViewModel?.participants ?? [],
+            db: dependencies.database,
+            isPresented: $showAddParticipants
+          )
+        } else {
+          AddHomeParticipantsSheet(
+            chatId: chat.id,
+            currentUserId: dependencies.auth.currentUserId,
+            currentParticipants: participantsState.participantsViewModel?.participants ?? [],
+            db: dependencies.database,
+            isPresented: $showAddParticipants
+          )
+        }
+      }
+    }
+    .confirmationDialog(
+      "Remove participant?",
+      isPresented: $showRemoveParticipantConfirmation,
+      presenting: participantPendingRemoval,
+      actions: { participant in
+        Button("Cancel", role: .cancel) {}
+        Button("Remove", role: .destructive) {
+          removeParticipant(userId: participant.user.id)
+        }
+      },
+      message: { participant in
+        Text("Remove \(participant.user.shortDisplayName) from this chat?")
+      }
+    )
+  }
+
+  private var notificationPicker: some View {
+    Menu {
+      ForEach(DialogNotificationSettingSelection.allCases, id: \.self) { selection in
+        Button {
+          updateNotificationSettings(selection)
+        } label: {
+          Label(notificationTitle(for: selection), systemImage: selection.iconName)
+        }
+      }
+    } label: {
+      InlineMenuPickerLabel(
+        title: notificationTitle,
+        systemImage: notificationSelection.iconName,
+        disabled: false
+      )
+    }
+    .menuStyle(.borderlessButton)
+    .buttonStyle(.plain)
+    .accessibilityLabel("Notifications")
+  }
+
+  private func notificationTitle(for selection: DialogNotificationSettingSelection) -> String {
+    selection == .global ? "Default" : selection.title
+  }
+
+  private var visibilityPicker: some View {
+    Menu {
+      ForEach(ChatVisibilitySelection.allCases, id: \.self) { selection in
+        Button(selection.title) {
+          handleVisibilitySelection(selection)
+        }
+      }
+    } label: {
+      InlineMenuPickerLabel(
+        title: visibilitySelection.title,
+        systemImage: "eye",
+        disabled: !canToggleVisibility
+      )
+    }
+    .menuStyle(.borderlessButton)
+    .buttonStyle(.plain)
+    .disabled(!canToggleVisibility)
+    .accessibilityLabel("Visibility")
   }
 
   @ViewBuilder
@@ -350,8 +428,8 @@ struct ChatInfo: View {
       content()
     }
     .frame(maxWidth: .infinity, alignment: .leading)
-    .padding(.vertical, 10)
-    .padding(.horizontal, 2)
+    .padding(.vertical, 8)
+    .padding(.horizontal, 10)
   }
 
   @ViewBuilder
@@ -360,7 +438,7 @@ struct ChatInfo: View {
       case .files:
         filesTab
       case .media:
-        comingSoonView(title: "Media", message: "Media browsing is coming soon.")
+        filesTab
       case .links:
         linksTab
       case .participants:
@@ -403,7 +481,18 @@ struct ChatInfo: View {
     if let participantsViewModel = participantsState.participantsViewModel {
       ChatInfoParticipantsList(
         participantsViewModel: participantsViewModel,
-        currentUserId: dependencies?.auth.currentUserId
+        currentUserId: dependencies?.auth.currentUserId,
+        canManageParticipants: canManageParticipants,
+        onAddParticipants: {
+          showAddParticipants = true
+        },
+        onOpenChatInfo: { userInfo in
+          openUserChatInfo(userInfo)
+        },
+        onRequestRemove: { userInfo in
+          participantPendingRemoval = userInfo
+          showRemoveParticipantConfirmation = true
+        }
       )
     } else {
       HStack {
@@ -429,6 +518,15 @@ struct ChatInfo: View {
   }
 
   private func ensureSelectedTab() {
+    if !didApplyDefaultTab {
+      let preferredTab = ChatInfoTab(defaultTab)
+      if availableTabs.contains(preferredTab) {
+        selectedTab = preferredTab
+        didApplyDefaultTab = true
+        return
+      }
+    }
+
     guard availableTabs.contains(selectedTab) else {
       selectedTab = availableTabs.first ?? .files
       return
@@ -439,7 +537,9 @@ struct ChatInfo: View {
     guard let chatId, chatId > 0 else { return }
     documentsState.updateChatId(chatId)
     linksState.updateChatId(chatId)
-    participantsState.updateChatId(chatId)
+    if shouldShowParticipantsTab {
+      participantsState.updateChatId(chatId)
+    }
   }
 
   private func syncTranslationState() {
@@ -460,11 +560,16 @@ struct ChatInfo: View {
     }
     guard let dependencies,
           let chat = fullChat.chat,
-          let spaceId = chat.spaceId,
           let currentUserId = dependencies.auth.currentUserId
     else {
       isOwnerOrAdmin = false
       isCreator = false
+      return
+    }
+
+    isCreator = chat.createdBy == currentUserId
+    guard let spaceId = chat.spaceId else {
+      isOwnerOrAdmin = false
       return
     }
 
@@ -476,20 +581,19 @@ struct ChatInfo: View {
           .fetchOne(db)
       }
       isOwnerOrAdmin = member?.role == .owner || member?.role == .admin
-      isCreator = chat.createdBy == currentUserId
     } catch {
       isOwnerOrAdmin = false
-      isCreator = false
       Log.shared.error("Failed to load chat permissions", error: error)
     }
   }
 
-  private func handleVisibilityToggle(_ isPublic: Bool) {
+  private func handleVisibilitySelection(_ selection: ChatVisibilitySelection) {
     guard canToggleVisibility,
           let chat = fullChat.chat
     else { return }
 
     let currentlyPublic = chat.isPublic == true
+    let isPublic = selection == .publicChat
     guard isPublic != currentlyPublic else { return }
 
     if isPublic {
@@ -522,6 +626,33 @@ struct ChatInfo: View {
     }
   }
 
+  private func removeParticipant(userId: Int64) {
+    guard case let .thread(chatId) = peerId else { return }
+    if let currentUserId = dependencies?.auth.currentUserId, currentUserId == userId { return }
+
+    Task {
+      do {
+        _ = try await Api.realtime.send(.removeChatParticipant(chatID: chatId, userID: userId))
+        do {
+          try await Api.realtime.send(.getChatParticipants(chatID: chatId))
+        } catch {
+          Log.shared.error("Failed to refetch chat participants after removal", error: error)
+        }
+      } catch {
+        Log.shared.error("Failed to remove participant", error: error)
+      }
+    }
+  }
+
+  private func openUserChatInfo(_ userInfo: UserInfo) {
+    let peer = Peer.user(id: userInfo.user.id)
+    if let dependencies {
+      dependencies.openChatInfo(peer: peer)
+    } else {
+      nav.open(.chatInfo(peer: peer))
+    }
+  }
+
   private func updateNotificationSettings(_ selection: DialogNotificationSettingSelection) {
     guard selection != notificationSelection else { return }
 
@@ -541,9 +672,186 @@ private enum ChatInfoTab: String, CaseIterable, Hashable {
   case links
   case participants
 
+  init(_ tab: ChatInfoDefaultTab?) {
+    switch tab {
+    case .none:
+      self = .participants
+    case .participants:
+      self = .participants
+    case .files:
+      self = .files
+    case .media:
+      self = .files
+    case .links:
+      self = .links
+    }
+  }
+
   var title: String {
     rawValue.capitalized
   }
+}
+
+private struct InlineMenuPickerLabel: View {
+  let title: String
+  let systemImage: String
+  let disabled: Bool
+
+  var body: some View {
+    HStack(spacing: 7) {
+      Image(systemName: systemImage)
+        .font(.system(size: 12, weight: .regular))
+        .frame(width: 14)
+
+      Text(title)
+        .lineLimit(1)
+
+      Image(systemName: "chevron.up.chevron.down")
+        .font(.system(size: 9, weight: .semibold))
+        .foregroundStyle(.tertiary)
+    }
+    .foregroundStyle(disabled ? .secondary : .primary)
+    .padding(.horizontal, 8)
+    .padding(.vertical, 4)
+    .contentShape(Rectangle())
+  }
+}
+
+private final class ChatInfoAvatarQuickLookPresenter: NSObject, ObservableObject {
+  private var item: ChatInfoAvatarPreviewItem?
+  private var tempURL: URL?
+  private var isLoading = false
+
+  func show(userInfo: UserInfo) {
+    Task { @MainActor in
+      await open(userInfo: userInfo)
+    }
+  }
+
+  @MainActor
+  private func open(userInfo: UserInfo) async {
+    guard !isLoading else { return }
+
+    let user = userInfo.user
+    let title = user.displayName.isEmpty ? "Avatar" : user.displayName
+
+    if let localURL = user.getLocalURL(), FileManager.default.fileExists(atPath: localURL.path) {
+      present(url: localURL, title: title, ownsTempURL: false)
+      return
+    }
+
+    guard let remoteURL = user.getRemoteURL() else {
+      ToastCenter.shared.showError("Avatar isn't available")
+      return
+    }
+
+    isLoading = true
+    defer { isLoading = false }
+
+    do {
+      let image = try await ImagePipeline.shared.image(for: ImageRequest(url: remoteURL))
+      let previewURL = try makeTempURL(for: image)
+      present(url: previewURL, title: title, ownsTempURL: true)
+    } catch {
+      ToastCenter.shared.showError("Failed to open avatar")
+    }
+  }
+
+  @MainActor
+  private func present(url: URL, title: String, ownsTempURL: Bool) {
+    if !ownsTempURL {
+      cleanupTempURL()
+    }
+
+    item = ChatInfoAvatarPreviewItem(url: url, title: title)
+
+    guard let panel = QLPreviewPanel.shared() else {
+      return
+    }
+
+    panel.dataSource = self
+    panel.delegate = self
+    panel.reloadData()
+    setLargeFrame(for: panel)
+    panel.makeKeyAndOrderFront(nil)
+  }
+
+  private func makeTempURL(for image: NSImage) throws -> URL {
+    cleanupTempURL()
+
+    guard let data = image.tiffRepresentation else {
+      throw ChatInfoAvatarPreviewError.imageEncodingFailed
+    }
+
+    let dir = try FileManager.default.url(
+      for: .itemReplacementDirectory,
+      in: .userDomainMask,
+      appropriateFor: FileManager.default.temporaryDirectory,
+      create: true
+    )
+    let url = dir.appending(path: "avatar-\(UUID().uuidString).tiff")
+    try data.write(to: url, options: .atomic)
+    tempURL = url
+    return url
+  }
+
+  private func setLargeFrame(for panel: QLPreviewPanel) {
+    guard let visibleFrame = NSScreen.main?.visibleFrame else {
+      return
+    }
+
+    let width = min(max(720, visibleFrame.width * 0.52), visibleFrame.width - 80)
+    let height = min(max(720, visibleFrame.height * 0.72), visibleFrame.height - 80)
+    let frame = NSRect(
+      x: visibleFrame.midX - width / 2,
+      y: visibleFrame.midY - height / 2,
+      width: width,
+      height: height
+    )
+    panel.setFrame(frame, display: true, animate: true)
+  }
+
+  private func cleanupTempURL() {
+    guard let tempURL else { return }
+    try? FileManager.default.removeItem(at: tempURL.deletingLastPathComponent())
+    self.tempURL = nil
+  }
+
+  deinit {
+    cleanupTempURL()
+  }
+}
+
+extension ChatInfoAvatarQuickLookPresenter: QLPreviewPanelDataSource, QLPreviewPanelDelegate {
+  func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int {
+    item == nil ? 0 : 1
+  }
+
+  func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> QLPreviewItem! {
+    item
+  }
+}
+
+private final class ChatInfoAvatarPreviewItem: NSObject, QLPreviewItem {
+  let url: URL
+  let title: String
+
+  init(url: URL, title: String) {
+    self.url = url
+    self.title = title
+  }
+
+  @objc var previewItemURL: URL? {
+    url
+  }
+
+  var previewItemTitle: String? {
+    title
+  }
+}
+
+private enum ChatInfoAvatarPreviewError: Error {
+  case imageEncodingFailed
 }
 
 @MainActor
@@ -813,6 +1121,10 @@ private struct ChatInfoLinkRow: View {
 private struct ChatInfoParticipantsList: View {
   @ObservedObject var participantsViewModel: ChatParticipantsWithMembersViewModel
   let currentUserId: Int64?
+  let canManageParticipants: Bool
+  let onAddParticipants: () -> Void
+  let onOpenChatInfo: (UserInfo) -> Void
+  let onRequestRemove: (UserInfo) -> Void
 
   private var sortedParticipants: [UserInfo] {
     participantsViewModel.participants.sorted { lhs, rhs in
@@ -833,53 +1145,124 @@ private struct ChatInfoParticipantsList: View {
           .frame(maxWidth: .infinity, alignment: .center)
           .padding(.vertical, 32)
       } else {
-        VStack(alignment: .leading, spacing: 10) {
-          Text("\(sortedParticipants.count) participant\(sortedParticipants.count == 1 ? "" : "s")")
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 0) {
+          HStack {
+            Text("\(sortedParticipants.count) participant\(sortedParticipants.count == 1 ? "" : "s")")
+              .font(.subheadline.weight(.semibold))
+              .foregroundStyle(.secondary)
 
-          LazyVStack(alignment: .leading, spacing: 8) {
-            ForEach(sortedParticipants, id: \.id) { participant in
-              HStack(spacing: 10) {
-                UserAvatar(user: participant.user, size: 26)
+            Spacer()
 
-                VStack(alignment: .leading, spacing: 1) {
-                  HStack(spacing: 6) {
-                    Text(participant.user.displayName)
-                      .font(.body)
-                      .lineLimit(1)
-
-                    if participant.user.id == currentUserId {
-                      Text("You")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    }
-                  }
-
-                  if let username = participant.user.username, !username.isEmpty {
-                    Text("@\(username)")
-                      .font(.caption)
-                      .foregroundStyle(.secondary)
-                      .lineLimit(1)
-                  }
-                }
-
-                Spacer(minLength: 8)
+            if canManageParticipants {
+              Button {
+                onAddParticipants()
+              } label: {
+                Label("Add", systemImage: "person.badge.plus")
               }
-              .padding(.horizontal, 10)
-              .padding(.vertical, 7)
-              .background(
-                RoundedRectangle(cornerRadius: 10)
-                  .fill(Color(nsColor: .windowBackgroundColor))
-              )
+              .buttonStyle(.borderless)
+              .controlSize(.small)
             }
           }
+          .padding(.horizontal, 16)
+          .padding(.bottom, 8)
+
+          VStack(alignment: .leading, spacing: 0) {
+            ForEach(sortedParticipants, id: \.id) { participant in
+              ChatInfoParticipantRow(
+                participant: participant,
+                isCurrentUser: participant.user.id == currentUserId,
+                canRemove: canManageParticipants && participant.user.id != currentUserId,
+                onOpenChatInfo: {
+                  onOpenChatInfo(participant)
+                },
+                onRequestRemove: {
+                  onRequestRemove(participant)
+                }
+              )
+
+              if participant.id != sortedParticipants.last?.id {
+                Divider()
+                  .padding(.leading, 54)
+              }
+            }
+          }
+          .background(Color(nsColor: .controlBackgroundColor))
+          .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+          .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+              .stroke(Color(nsColor: .separatorColor).opacity(0.7), lineWidth: 0.5)
+          }
+          .padding(.horizontal, 16)
         }
-        .padding(.horizontal, 16)
       }
     }
     .task {
       await participantsViewModel.refetchParticipants()
+    }
+  }
+}
+
+private struct ChatInfoParticipantRow: View {
+  let participant: UserInfo
+  let isCurrentUser: Bool
+  let canRemove: Bool
+  let onOpenChatInfo: () -> Void
+  let onRequestRemove: () -> Void
+
+  var body: some View {
+    HStack(spacing: 10) {
+      HStack(spacing: 10) {
+        Button(action: onOpenChatInfo) {
+          UserAvatar(user: participant.user, size: 28)
+        }
+        .buttonStyle(.plain)
+        .contentShape(Circle())
+        .help("Open User Info")
+
+        VStack(alignment: .leading, spacing: 1) {
+          HStack(spacing: 6) {
+            Text(participant.user.displayName)
+              .font(.body)
+              .foregroundStyle(.primary)
+              .lineLimit(1)
+
+            if isCurrentUser {
+              Text("You")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            }
+          }
+
+          if let username = participant.user.username, !username.isEmpty {
+            Text("@\(username)")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
+          }
+        }
+
+        Spacer(minLength: 8)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+
+      if canRemove {
+        Button(role: .destructive, action: onRequestRemove) {
+          Image(systemName: "minus.circle")
+            .font(.system(size: 14, weight: .medium))
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("Remove participant")
+      }
+    }
+    .padding(.horizontal, 10)
+    .padding(.vertical, 7)
+    .contentShape(Rectangle())
+    .contextMenu {
+      if canRemove {
+        Button(role: .destructive, action: onRequestRemove) {
+          Label("Remove Participant", systemImage: "minus.circle")
+        }
+      }
     }
   }
 }

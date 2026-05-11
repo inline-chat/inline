@@ -106,36 +106,22 @@ public struct NudgeButton: View {
     Button {
       handleTap()
     } label: {
-      ZStack {
-        if holdProgress > 0 && !showUrgent {
-          Circle()
-            .trim(from: 0, to: holdProgress)
-#if os(iOS)
-            .stroke(Color.red, style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
-            .frame(width: 32, height: 32)
+#if os(macOS)
+      nudgeButtonGlyph
+        .font(.system(size: 15, weight: .regular))
+        .imageScale(.medium)
+        .frame(width: 24, height: 24)
+        .overlay {
+          holdProgressRing(size: 26, lineWidth: 2)
+        }
+        .animation(.easeOut(duration: 0.15), value: isHolding)
 #else
-            .stroke(Color.red, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-            .frame(width: 28, height: 28)
-#endif
-            .rotationEffect(.degrees(-90))
-            .animation(.linear(duration: holdProgressUpdateInterval), value: holdProgress)
-        }
-        if showUrgent {
-          Text(NudgeButtonState.urgentNudgeText)
-#if os(iOS)
-            .font(.title3.weight(.bold))
-#endif
-            .scaleEffect(isHolding ? 0.92 : 1)
-        } else {
-          Image(systemName: NudgeButtonState.nudgeIconName)
-#if os(iOS)
-            .font(.body.weight(.regular))
-#endif
-            .imageScale(.medium)
-            .scaleEffect(isHolding ? 0.92 : 1)
-        }
+      ZStack {
+        holdProgressRing(size: 32, lineWidth: 3.5)
+        nudgeButtonGlyph
       }
       .animation(.easeOut(duration: 0.15), value: isHolding)
+#endif
     }
 #if os(iOS)
     .onLongPressGesture(minimumDuration: 0, pressing: { pressing in
@@ -157,6 +143,8 @@ public struct NudgeButton: View {
 #if os(iOS)
     .frame(minWidth: 44, minHeight: 44)
     .contentShape(Rectangle())
+#else
+    .controlSize(.regular)
 #endif
     .accessibilityLabel("Send nudge")
     .disabled(isSending)
@@ -167,6 +155,36 @@ public struct NudgeButton: View {
         cancelHoldProgress()
         cancelHoldHaptics()
       }
+    }
+  }
+
+  @ViewBuilder
+  private var nudgeButtonGlyph: some View {
+    if showUrgent {
+      Text(NudgeButtonState.urgentNudgeText)
+#if os(iOS)
+        .font(.title3.weight(.bold))
+#endif
+        .scaleEffect(isHolding ? 0.92 : 1)
+    } else {
+      Image(systemName: NudgeButtonState.nudgeIconName)
+#if os(iOS)
+        .font(.body.weight(.regular))
+#endif
+        .imageScale(.medium)
+        .scaleEffect(isHolding ? 0.92 : 1)
+    }
+  }
+
+  @ViewBuilder
+  private func holdProgressRing(size: CGFloat, lineWidth: CGFloat) -> some View {
+    if holdProgress > 0 && !showUrgent {
+      Circle()
+        .trim(from: 0, to: holdProgress)
+        .stroke(Color.red, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+        .frame(width: size, height: size)
+        .rotationEffect(.degrees(-90))
+        .animation(.linear(duration: holdProgressUpdateInterval), value: holdProgress)
     }
   }
 

@@ -655,10 +655,6 @@ private final class ChatToolbarMenuModel: ObservableObject {
   }
 
   private func bindRenameEligibility() {
-    guard case let .thread(chatId) = peer else {
-      canRename = false
-      return
-    }
     guard let currentUserId = Auth.shared.getCurrentUserId() else {
       canRename = false
       return
@@ -667,21 +663,7 @@ private final class ChatToolbarMenuModel: ObservableObject {
     db.warnIfInMemoryDatabaseForObservation("ChatToolbarMenuModel.renameEligibility")
     renameCancellable = ValueObservation
       .tracking { db in
-        if let chat = try Chat.fetchOne(db, id: chatId),
-           chat.isPublic == true,
-           let spaceId = chat.spaceId
-        {
-          return try Member
-            .filter(Member.Columns.userId == currentUserId)
-            .filter(Member.Columns.spaceId == spaceId)
-            .filter(Member.Columns.canAccessPublicChats == true)
-            .fetchOne(db) != nil
-        }
-
-        return try ChatParticipant
-          .filter(Column("chatId") == chatId)
-          .filter(Column("userId") == currentUserId)
-          .fetchOne(db) != nil
+        try ChatRenamePermission.canRename(peer: self.peer, currentUserId: currentUserId, db: db)
       }
       .publisher(in: db.dbWriter, scheduling: .immediate)
       .receive(on: DispatchQueue.main)
@@ -813,7 +795,7 @@ private struct ChatToolbarMenu: View {
     }
     .sheet(isPresented: $showMoveToSpaceSheet) {
       if let chatId = peer.asThreadId() {
-        MoveThreadToSpaceSheet(chatId: chatId, nav2: dependencies.nav2)
+        MoveThreadToSpaceSheet(chatId: chatId, nav2: dependencies.nav2, nav3: dependencies.nav3)
       }
     }
     .confirmationDialog(

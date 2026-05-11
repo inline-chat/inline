@@ -31,19 +31,7 @@ public struct TranslationButton: View {
   /// Button shown in nav bar/toolbar
   @ViewBuilder
   public var button: some View {
-    Button {
-      pressed()
-    } label: {
-      // TODO: change the icon from this Apple-copyrighted icon
-      Image(systemName: "translate")
-    }
-    #if os(macOS)
-    // .font(.system(size: 18))
-    .foregroundStyle(isTranslationEnabled ? Color.macOSAccent : .secondary)
-    // .buttonStyle(.automatic)
-    #else
-    .foregroundStyle(isTranslationEnabled ? Color.accentColor : .secondary)
-    #endif
+    TranslationToolbarButton(peer: peer, action: pressed)
   }
 
   /// Popover when button is pressed
@@ -119,5 +107,35 @@ public struct TranslationButton: View {
 
     // Hide automatic prompt
     showPrompt = false
+  }
+}
+
+/// Button-only translation toolbar item. Presentation is owned by the caller.
+public struct TranslationToolbarButton: View {
+  private let peer: Peer
+  private let action: () -> Void
+
+  @State private var isTranslationEnabled: Bool
+
+  public init(peer: Peer, action: @escaping () -> Void) {
+    self.peer = peer
+    self.action = action
+    _isTranslationEnabled = State(initialValue: TranslationState.shared.isTranslationEnabled(for: peer))
+  }
+
+  public var body: some View {
+    Button(action: action) {
+      Label("Translate", systemImage: "translate")
+    }
+    #if os(macOS)
+    .foregroundStyle(isTranslationEnabled ? Color.macOSAccent : .secondary)
+    #else
+    .foregroundStyle(isTranslationEnabled ? Color.accentColor : .secondary)
+    #endif
+    .onReceive(TranslationState.shared.subject) { event in
+      let (eventPeer, enabled) = event
+      guard eventPeer == peer else { return }
+      isTranslationEnabled = enabled
+    }
   }
 }
