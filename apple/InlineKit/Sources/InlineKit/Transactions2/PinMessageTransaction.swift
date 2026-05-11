@@ -42,20 +42,11 @@ public struct PinMessageTransaction: Transaction2 {
         }
 
         if context.unpin {
-          _ = try PinnedMessage
-            .filter(Column("chatId") == chat.id)
-            .filter(Column("messageId") == context.messageId)
-            .deleteAll(db)
+          try PinnedMessage.unpin(db, chatId: chat.id, messageId: context.messageId)
           return
         }
 
-        try db.execute(
-          sql: "UPDATE pinnedMessage SET position = position + 1 WHERE chatId = ?",
-          arguments: [chat.id]
-        )
-
-        let pinned = PinnedMessage(chatId: chat.id, messageId: context.messageId, position: 0)
-        try pinned.save(db)
+        try PinnedMessage.pin(db, chatId: chat.id, messageId: context.messageId)
       }
     } catch {
       log.error("Failed to optimistically update pin state", error: error)

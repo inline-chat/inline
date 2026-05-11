@@ -932,20 +932,10 @@ extension InlineProtocol.UpdatePinnedMessages {
     guard let chat = try Chat.getByPeerId(db: db, peerId: peer) else { return }
 
     do {
-      try PinnedMessage.filter(Column("chatId") == chat.id).deleteAll(db)
-    } catch {
-      Log.shared.error("Failed to clear pinned messages", error: error)
-    }
-
-    guard !messageIds.isEmpty else { return }
-
-    do {
-      for (index, messageId) in messageIds.enumerated() {
-        let pinned = PinnedMessage(chatId: chat.id, messageId: messageId, position: Int64(index))
-        try pinned.save(db)
-      }
+      try PinnedMessage.replaceAll(db, chatId: chat.id, messageIds: messageIds)
     } catch {
       Log.shared.error("Failed to save pinned messages", error: error)
+      throw error
     }
   }
 }
