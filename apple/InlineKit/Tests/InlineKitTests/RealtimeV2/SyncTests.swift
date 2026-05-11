@@ -49,15 +49,22 @@ final class SyncTests {
     let storage = InMemorySyncStorage()
     let apply = RecordingApplyUpdates()
 
-    let response = makeGetUpdatesResult(
+    let firstResponse = makeGetUpdatesResult(
       seq: 1,
       date: 100,
       updates: [],
       final: true,
       resultType: .empty
     )
+    let secondResponse = makeGetUpdatesResult(
+      seq: 2,
+      date: 101,
+      updates: [],
+      final: true,
+      resultType: .empty
+    )
 
-    let client = FakeProtocolClient(responses: [response, response], gateFirstCall: true)
+    let client = FakeProtocolClient(responses: [firstResponse, secondResponse], gateFirstCall: true)
     let config = SyncConfig(enableMessageUpdates: false, lastSyncSafetyGapSeconds: 15)
     let sync = Sync(applyUpdates: apply, syncStorage: storage, client: client, config: config)
 
@@ -66,8 +73,12 @@ final class SyncTests {
     async let firstProcess: Void = sync.process(updates: [firstSignal])
     await client.waitForFirstCallStarted()
 
-    let secondSignal = makeChatHasNewUpdatesSignal(chatId: chatId, updateSeq: 1)
+    let secondSignal = makeChatHasNewUpdatesSignal(chatId: chatId, updateSeq: 2)
     await sync.process(updates: [secondSignal])
+    _ = await waitForCondition {
+      let stats = await sync.getStats()
+      return stats.bucketFetchFollowups == 1
+    }
 
     await client.releaseFirstCall()
     await firstProcess
