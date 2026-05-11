@@ -1,6 +1,5 @@
 import Foundation
 import InlineConfig
-import KeychainSwift
 import Security
 
 enum KeychainReadOutcome<Value> {
@@ -81,19 +80,19 @@ enum AuthKeychainConfig {
     #endif
   }
 
-  static func makePrimaryKeychain(mocked: Bool, namespace: String? = nil) -> KeychainSwift {
-    let keychain = KeychainSwift(keyPrefix: keychainPrefix(mocked: mocked, namespace: namespace))
+  static func makePrimaryKeychain(mocked: Bool, namespace: String? = nil) -> KeychainStore {
+    let keychain = KeychainStore(keyPrefix: keychainPrefix(mocked: mocked, namespace: namespace))
     if let accessGroup = primaryAccessGroup(mocked: mocked) {
       keychain.accessGroup = accessGroup
     }
     return keychain
   }
 
-  static func makeFallbackKeychainIfNeeded(mocked: Bool, namespace: String? = nil) -> KeychainSwift? {
+  static func makeFallbackKeychainIfNeeded(mocked: Bool, namespace: String? = nil) -> KeychainStore? {
     guard mocked == false else { return nil }
     #if os(macOS)
     // Legacy macOS builds stored items without setting a keychain access group.
-    return KeychainSwift(keyPrefix: keychainPrefix(mocked: mocked, namespace: namespace))
+    return KeychainStore(keyPrefix: keychainPrefix(mocked: mocked, namespace: namespace))
     #else
     return nil
     #endif
@@ -124,7 +123,11 @@ enum AuthKeychainConfig {
     UserDefaults.standard.removeObject(forKey: mockStorageKey(key, namespace: namespace))
   }
 
-  static func readData(_ key: String, primary: KeychainSwift, fallback: KeychainSwift?) -> KeychainReadOutcome<Data> {
+  static func readData(
+    _ key: String,
+    primary: any KeychainClient,
+    fallback: (any KeychainClient)?
+  ) -> KeychainReadOutcome<Data> {
     if let data = primary.getData(key) {
       return .success(data, usedFallback: false)
     }
@@ -172,7 +175,11 @@ enum AuthKeychainConfig {
     return .error(status: primaryStatus)
   }
 
-  static func readString(_ key: String, primary: KeychainSwift, fallback: KeychainSwift?) -> KeychainReadOutcome<String> {
+  static func readString(
+    _ key: String,
+    primary: any KeychainClient,
+    fallback: (any KeychainClient)?
+  ) -> KeychainReadOutcome<String> {
     switch readData(key, primary: primary, fallback: fallback) {
     case .success(let data, let usedFallback):
       if let string = String(data: data, encoding: .utf8) {
