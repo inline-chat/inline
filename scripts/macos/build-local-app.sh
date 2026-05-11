@@ -12,7 +12,7 @@ APPCAST_URL=${APPCAST_URL:-"https://public-assets.inline.chat/mac/${CHANNEL}/app
 SPARKLE_SCHEDULED_CHECK_INTERVAL=${SPARKLE_SCHEDULED_CHECK_INTERVAL:-3600}
 SPARKLE_DIR=${SPARKLE_DIR:-"${ROOT_DIR}/.action/sparkle"}
 DERIVED_DATA=${DERIVED_DATA:-"${ROOT_DIR}/build/InlineMacDirectLocal"}
-APP_PATH=${APP_PATH:-"${DERIVED_DATA}/Build/Products/${CONFIGURATION}/Inline (Dev Build).app"}
+APP_PATH=${APP_PATH:-"${DERIVED_DATA}/Build/Products/${CONFIGURATION}/Inline-Dev.app"}
 OUTPUT_DIR=${OUTPUT_DIR:-"${ROOT_DIR}/build/macos-local-app"}
 BUILD_LOG_PATH="${OUTPUT_DIR}/xcodebuild.log"
 
@@ -29,7 +29,7 @@ creation, notarization, or upload steps.
 
 Options:
   --channel <stable|beta>         Update channel to embed in Info.plist
-  --configuration <name>          Xcode build configuration (default: DevBuild)
+  --configuration DevBuild        Xcode build configuration (fixed to DevBuild)
   --derived-data <path>           Xcode derived data path
   --app-path <path>               App bundle output path
   --sign                          Require post-build local signing
@@ -72,12 +72,12 @@ while [[ $# -gt 0 ]]; do
       ;;
     --configuration)
       CONFIGURATION="${2:-}"
-      APP_PATH="${DERIVED_DATA}/Build/Products/${CONFIGURATION}/Inline (Dev Build).app"
+      APP_PATH="${DERIVED_DATA}/Build/Products/${CONFIGURATION}/Inline-Dev.app"
       shift 2
       ;;
     --derived-data)
       DERIVED_DATA="$(resolve_path "${2:-}")"
-      APP_PATH="${DERIVED_DATA}/Build/Products/${CONFIGURATION}/Inline (Dev Build).app"
+      APP_PATH="${DERIVED_DATA}/Build/Products/${CONFIGURATION}/Inline-Dev.app"
       shift 2
       ;;
     --app-path)
@@ -119,6 +119,12 @@ case "${SIGN_BUILD}" in
     exit 1
     ;;
 esac
+
+if [[ "${CONFIGURATION}" != "DevBuild" ]]; then
+  echo "build-local-app.sh only supports the isolated DevBuild configuration." >&2
+  echo "Use Xcode Debug/Debug #2 for regular debug runs." >&2
+  exit 1
+fi
 
 for cmd in xcodebuild curl unzip rsync git; do
   if ! command -v "${cmd}" >/dev/null 2>&1; then
@@ -218,8 +224,8 @@ plist_set_integer() {
 
 plist_set_string "CFBundleVersion" "${BUILD_NUMBER}"
 plist_set_string "InlineCommit" "${INLINE_COMMIT}"
-plist_set_string "CFBundleDisplayName" "Inline (Dev Build)"
-plist_set_string "CFBundleName" "Inline (Dev Build)"
+plist_set_string "CFBundleDisplayName" "Inline-Dev"
+plist_set_string "CFBundleName" "Inline-Dev"
 if [[ -n "${SPARKLE_PUBLIC_KEY:-}" ]]; then
   plist_set_string "SUPublicEDKey" "${SPARKLE_PUBLIC_KEY}"
 else
@@ -245,7 +251,8 @@ sign_local_app() {
     bash "${ROOT_DIR}/scripts/macos/sign-direct.sh" \
       --app-path "${APP_PATH}" \
       --entitlements-path "${ROOT_DIR}/apple/InlineMac/InlineMacDirect.entitlements" \
-      --output-dir "${OUTPUT_DIR}"
+      --output-dir "${OUTPUT_DIR}" \
+      --skip-timestamp
 }
 
 signed_build="no"

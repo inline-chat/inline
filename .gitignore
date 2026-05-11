@@ -144,3 +144,5 @@ packages/openclaw-inline/*.tgz
 docs/superpowers
 
 .build-macos
+
+.context/traces

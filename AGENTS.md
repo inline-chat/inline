@@ -43,6 +43,7 @@
 - If undoing your own changes in a file with other uncommitted edits, ask first.
 - Regenerate protobufs when contracts change (`bun run generate:proto`); run focused `swift build` for touched Swift packages.
 - Run focused tests/typechecks for affected areas; add/update tests for new features and regressions.
+- When data has duplicated or denormalized representations, treat consistency as an invariant: identify the source of truth, update every write path through shared logic, and add regression tests for the invariant instead of fixing only one reader/UI.
 - Web is WIP. Do not extend requested changes or investigations to `landing/` unless explicitly asked.
 - New UI work must stay in new UI components; do not modify legacy sidebar/old UI.
 - When asked to write a plan or save your investigation, make a file in `.context/` named `YYYY-MM-DD-title-kebab-case.md`.
@@ -50,7 +51,9 @@
 - Do just the right amount of engineering, not over engineer, and not under engineer. Simple and elegant solutions are often better than prematuraly complex solutions that go beyond the scope and spec.
 - When adding colors, ensure the color supports light/dark theming and if it's not a one-off color, add it to the platforms theme class/module.
 - Don't put implicit DB read/write calls in computed variables, keep them pure.
+- Prefer simple neutral names for variables and types; avoid encoding setup/state history into names like `configuredDB` when `db` or `database` is enough.
 - When commiting file(s) with multiple changes/fixes, add a concise bullet list of specific items in the commit description; if fixing regressions or tricky bugs in non-conventional ways, add a very short explaination in commit description. Keep it under ~300 characters.
+- Do not remove comments explaining code or left by authors of code.
 
 ## Style Guide
 - Use shorter function/variables names as much as possible, avoid long phrasal function names when we can keep it simply unless required. Don't use weird abbreviations like `idxes`; `msg`, `id`, `ctx` and alike are fine.
@@ -60,7 +63,6 @@
   - Avoid duplication of logic that makes modules harder to maintain.
   - Avoid making huge functions, split if it makes sense. Unless it hurts it more.
   - Simplify logic if possible by using more suitable standard library methods, reusing logic, using better native APIs, extracting common helpers per best practices.
-  - Don't write unneccessary comments unless the module is complicated or purpose is not immediately clear.
 
 ## Security
 - Always pin dependencies; Keep dependencies to minimum; Do not install new dependencies for simple tasks that we can create our own version in house.
@@ -98,7 +100,7 @@
 - Prefer new feature work in `apple/InlineIOSUI` and `apple/InlineMacUI`; use legacy targets only when tightly coupled.
 - Minimum versions: iOS 18, macOS 15.
 - Prefer Swift Testing (`import Testing`, `@Test`, `@Suite`) and Observation (`@Observable`, `@Bindable`).
-- Prefer focused package builds/tests (for example `swift test`, `swift build`, swift syntax typecheck) over full `xcodebuild`. don't run `xcodebuild` yourself.
+- Prefer focused package builds/tests (for example `swift test`, `swift build`, swift syntax typecheck) over full `xcodebuild`.
 - `AppDatabase` migrations are in `InlineKit/Sources/InlineKit/Database.swift`; append new migrations at the bottom.
 - For protobuf blobs in DB, follow the `DraftMessage` typed-model + `ProtocolHelpers` + `DatabaseValueConvertible` pattern.
 - Use `Log.scoped`; avoid main-thread heavy work; prefer Swift concurrency and composable views.
@@ -106,11 +108,14 @@
 - For Apple docs, use `https://sosumi.ai/...` mirror of Developer docs via `curl` instead of web search.
 - Liquid Glass: gate with `#available` (iOS/macOS 26+), apply after layout/appearance, wrap related views in `GlassEffectContainer`, use `.interactive()` only for tappable elements.
 - macOS releases: `bun run release:macos -- --channel <stable|beta>` or `cd scripts && bun run macos:release-app -- --channel <stable|beta>`.
-- Local macOS direct app test build: `cd scripts && bun run macos:build-local-app -- --channel <stable|beta>`; output app: `build/InlineMacDirectLocal/Build/Products/DevBuild/Inline (Dev Build).app`.
-- `DevBuild` is an opinionated macOS config for `Inline (Dev Build)`; keep it aligned with `Release` and only diverge for its intentional identity values like bundle ID, app name, icon, and `INLINE_USER_PROFILE = devbuild`.
+- Local macOS direct app test build: `cd scripts && bun run macos:build-local-app -- --channel <stable|beta>`; output app: `build/InlineMacDirectLocal/Build/Products/DevBuild/Inline-Dev.app`.
+- `DevBuild` is an opinionated macOS config for `Inline-Dev`; keep it aligned with `Release` and only diverge for its intentional identity values like bundle ID, app name, icon, and `INLINE_USER_PROFILE = devbuild`.
 - TestFlight is deprecated for macOS distribution; Sparkle/DMG direct build is primary.
 - send-message and open-chat paths are latency-critical; progressive/message-list changes must avoid regressions and include focused perf validation.
 - Xcode project uses filesystem-synced groups.
+- Don't use .receive(on: DispatchQueue.main) for GRDB observations unless we don't need results for render
+- Do not use EnvironmentObject/ObservableObject as much as possible
+- Message views must be very lightweight render only structures and not include heavy sync works, immediate db calls, heavy setups, etc. Anything not related to painting first frame must be deferred to a later time eg. fetching additional data for a menu.
 
 ## Backend
 

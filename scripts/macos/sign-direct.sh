@@ -18,6 +18,7 @@ MACOS_PROVISIONING_PROFILE_BASE64=${MACOS_PROVISIONING_PROFILE_BASE64:-""}
 MACOS_PROVISIONING_PROFILE_PATH=${MACOS_PROVISIONING_PROFILE_PATH:-""}
 SIGN_RETRY_COUNT=${SIGN_RETRY_COUNT:-3}
 SIGN_RETRY_DELAY_SECONDS=${SIGN_RETRY_DELAY_SECONDS:-2}
+SIGN_TIMESTAMP=${SIGN_TIMESTAMP:-always}
 EFFECTIVE_ENTITLEMENTS_PATH="${ENTITLEMENTS_PATH}"
 
 usage() {
@@ -33,6 +34,7 @@ Options:
   --output-dir <path>                    Output/temp dir for generated entitlements/profile
   --retry-count <n>                      Timestamp signing retry count (default: 3)
   --retry-delay-seconds <n>              Retry delay in seconds (default: 2)
+  --skip-timestamp                       Sign without requiring a secure timestamp
   --provisioning-profile-path <path>     Provisioning profile file path (optional)
   -h, --help                             Show help
 
@@ -42,6 +44,7 @@ Required env:
 Optional env:
   MACOS_PROVISIONING_PROFILE_BASE64
   MACOS_PROVISIONING_PROFILE_PATH
+  SIGN_TIMESTAMP=always|never            Whether codesign should require secure timestamps
 EOF
 }
 
@@ -71,6 +74,10 @@ while [[ $# -gt 0 ]]; do
       SIGN_RETRY_DELAY_SECONDS="${2:-}"
       shift 2
       ;;
+    --skip-timestamp)
+      SIGN_TIMESTAMP=never
+      shift
+      ;;
     --provisioning-profile-path)
       MACOS_PROVISIONING_PROFILE_PATH="${2:-}"
       shift 2
@@ -86,6 +93,14 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+case "${SIGN_TIMESTAMP}" in
+  always|never) ;;
+  *)
+    echo "Invalid SIGN_TIMESTAMP: ${SIGN_TIMESTAMP}" >&2
+    exit 1
+    ;;
+esac
 
 if [[ -z "${MACOS_CERTIFICATE_NAME:-}" ]]; then
   echo "MACOS_CERTIFICATE_NAME is required" >&2
@@ -127,6 +142,10 @@ signature_has_timestamp() {
   local signature_details
   signature_details=$(/usr/bin/codesign -dv --verbose=4 "${path}" 2>&1 || true)
   [[ "${signature_details}" == *"Timestamp="* ]]
+}
+
+requires_timestamp() {
+  [[ "${SIGN_TIMESTAMP}" == "always" ]]
 }
 
 prepare_effective_entitlements() {
@@ -183,7 +202,11 @@ codesign_path() {
   local attempts=0
   local sign_output
   local sign_ec
-  local -a sign_cmd=(/usr/bin/codesign --verbose -f -s "${MACOS_CERTIFICATE_NAME}" -o runtime --timestamp)
+  local -a sign_cmd=(/usr/bin/codesign --verbose -f -s "${MACOS_CERTIFICATE_NAME}" -o runtime)
+
+  if requires_timestamp; then
+    sign_cmd+=(--timestamp)
+  fi
 
   if [[ "$#" -gt 0 ]]; then
     sign_cmd+=("$@")
@@ -209,7 +232,7 @@ codesign_path() {
       exit 1
     fi
 
-    if signature_has_timestamp "${path}"; then
+    if ! requires_timestamp || signature_has_timestamp "${path}"; then
       return 0
     fi
     attempts=$((attempts + 1))
@@ -227,6 +250,9 @@ codesign_path() {
 verify_codesign_timestamp() {
   local path="$1"
   /usr/bin/codesign --verify --deep --strict --verbose=2 "${path}"
+  if ! requires_timestamp; then
+    return 0
+  fi
   if ! signature_has_timestamp "${path}"; then
     echo "Code signature missing timestamp: ${path}" >&2
     exit 1

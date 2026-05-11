@@ -34,7 +34,7 @@ with Sparkle (non-TestFlight) and preparing DMG artifacts.
 - `release-direct.ts`: uploads DMG and/or appcast to R2 with cache headers.
 - `upload-dsyms.ts`: uploads zipped `.dSYM` bundles to Sentry using Sentry's API.
 - `release-app.ts`: runs the local release pipeline (build → upload dSYMs → upload DMG → update appcast → upload appcast), with an interactive TUI (shows progress, skipped steps, and failures clearly).
-- `build-local-app.sh`: builds a local Sparkle-enabled `Inline (Dev Build).app` bundle for testing without DMG creation, notarization, or upload steps.
+- `build-local-app.sh`: builds a local Sparkle-enabled `Inline-Dev.app` bundle for testing without DMG creation, notarization, or upload steps.
   It always uses `DEBUG_BUILD`, defaults to the `DevBuild` config, disables login-item registration in app code, and can post-sign the app locally by reusing `sign-direct.sh`.
 - `update-version.ts`: bumps the InlineMac marketing version, creates a `macos-vX.Y.Z` tag, and pushes to trigger CI.
 - `appcast-only.sh`: updates the appcast only (no rebuild), with validation.
@@ -101,7 +101,7 @@ Choose one of the two auth methods below.
 - `DMG_PATH` — output DMG path (default: `build/macos-direct/Inline.dmg`)
 - `SKIP_NOTARIZE=1` — skip notarization (dev only)
 - `PAUSE_BEFORE_NOTARIZE=1` — pause after build/sign/DMG so you can test locally before notarization continues
-- `DEBUG_BUILD=1` — enable debug-build behavior gate (adds `DEBUG_BUILD` swift compile condition)
+- `DEBUG_BUILD=1` — build the isolated `DevBuild` flavor and add the `DEBUG_BUILD` swift compile condition
 - `UPLOAD_MODE` — for `release-direct.ts`: `all` (default), `dmg`, or `appcast`
 
 ### CI Secrets Mapping (GitHub Actions)
@@ -183,8 +183,8 @@ To build just a local `.app` bundle for testing, without the release/notarizatio
 bun run build:macos:local-app
 ```
 
-The app bundle is written to `build/InlineMacDirectLocal/Build/Products/DevBuild/Inline (Dev Build).app`.
-This local build always uses `DEBUG_BUILD`, appears as `Inline (Dev Build)`, and will post-sign automatically when `MACOS_CERTIFICATE_NAME` is set. Use `--sign` to require signing or `--skip-sign` to force an unsigned build.
+The app bundle is written to `build/InlineMacDirectLocal/Build/Products/DevBuild/Inline-Dev.app`.
+This local build is fixed to the isolated `DevBuild` configuration, always uses `DEBUG_BUILD`, appears as `Inline-Dev`, and will post-sign automatically when `MACOS_CERTIFICATE_NAME` is set. Use `--sign` to require signing or `--skip-sign` to force an unsigned build.
 
 ## Local Release (Stable/Beta)
 
