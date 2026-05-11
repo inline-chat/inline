@@ -24,7 +24,7 @@ struct NotificationSettingsButton: View {
       case .standard:
         Theme.sidebarTitleIconSize
       case .sidebarFooter:
-        MainSidebarFooterMetrics.buttonSize
+        SidebarFooterMetrics.buttonSize
     }
   }
 
@@ -73,7 +73,7 @@ struct NotificationSettingsButton: View {
           .foregroundStyle(.tertiary)
       case .sidebarFooter:
         image
-          .font(MainSidebarFooterMetrics.iconFont)
+          .font(SidebarFooterMetrics.iconFont)
           .foregroundStyle(Color(NSColor.tertiaryLabelColor))
     }
   }

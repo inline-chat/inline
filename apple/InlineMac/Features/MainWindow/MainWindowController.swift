@@ -1,353 +1,179 @@
 import AppKit
-import Auth
-import Combine
 import InlineKit
-import InlineMacWindow
 import Logger
 import SwiftUI
 
-class MainWindowController: NSWindowController, NSWindowDelegate {
-  private var dependencies: AppDependencies
-  private var keyMonitor: KeyMonitor
-  private var log = Log.scoped("MainWindowController")
+@MainActor
+final class MainWindowController: NSWindowController, NSWindowDelegate {
+  private static let defaultContentSize = MainWindowSceneOptions.defaultContentSize
+  private static var controllers: [MainWindowController] = []
 
-  private var nav2: Nav2 = .init()
-
-  private var defaultSize = NSSize(width: 860, height: 640)
-  private var minimumWindowHeight: CGFloat = Theme.windowMinimumSize.height
-  private var minSize: NSSize {
-    NSSize(width: 0, height: minimumWindowHeight)
+  static var all: [MainWindowController] {
+    pruneControllers()
+    return controllers
   }
 
-  private var topLevelRoute: TopLevelRoute {
-    dependencies.viewModel.topLevelRoute
-  }
+  let sceneId: String
 
-  private var nav: Nav {
-    dependencies.nav
-  }
+  private let dependencies: AppDependencies
+  private let nav3: Nav3
+  private let keyMonitor: KeyMonitor
+  private let appliesDefaultFrame: Bool
+  private let windowID = UUID()
+  private let log = Log.scoped("MainWindowController")
+  private var rootEscapeUnsubscribe: (() -> Void)?
 
-  private var currentTopLevelRoute: TopLevelRoute?
-  private var windowView: MainWindowView = .init()
-  private var mainSplitView: MainSplitView?
+  @discardableResult
+  static func showDefault(dependencies: AppDependencies) -> MainWindowController {
+    if let controller = firstVisible {
+      controller.showWindow(nil)
+      return controller
+    }
 
-  private var navBackButton: NSButton?
-  private var navForwardButton: NSButton?
-  private var sidebarToggleObserver: NSObjectProtocol?
-  private var autoCollapsedSidebar = false
-  private let sidebarAutoCollapseHysteresis: CGFloat = 16
-
-  private func collapseSidebarThreshold() -> CGFloat {
-    700
-  }
-
-  init(dependencies: AppDependencies) {
-    self.dependencies = dependencies
-
-    let window = TrafficLightInsetWindow(
-      contentRect: NSRect(origin: .zero, size: defaultSize),
-      styleMask: [
-        .titled,
-        .closable,
-        .miniaturizable,
-        .resizable,
-        .fullSizeContentView,
-      ],
-      backing: .buffered,
-      defer: false
+    return newWindow(
+      dependencies: dependencies,
+      sceneId: MainWindowSceneStateStore.defaultSceneId
     )
-    let trafficLightController = TrafficLightController(
-      window: window,
-      insetPreset: .sidebarVisible
+  }
+
+  @discardableResult
+  static func newWindow(
+    dependencies: AppDependencies,
+    sceneId: String = MainWindowSceneStateStore.makeSceneId(),
+    destination: MainWindowDestination? = nil,
+    sender: Any? = nil
+  ) -> MainWindowController {
+    let controller = make(
+      dependencies: dependencies,
+      sceneId: sceneId,
+      destination: destination
     )
-    self.dependencies.trafficLightController = trafficLightController
-
-    keyMonitor = KeyMonitor(window: window)
-    self.dependencies.keyMonitor = keyMonitor
-    self.dependencies.nav2 = nav2
-    super.init(window: window)
-
-    injectDependencies()
-    configureWindow()
-    subscribe()
+    controller.showAsStandaloneWindow(sender)
+    return controller
   }
 
-  private func configureWindow() {
-    guard let window else { return }
-    window.title = "Inline"
-    window.titleVisibility = .hidden
-    window.titlebarAppearsTransparent = true
-    window.backgroundColor = NSColor.clear
-    window.isOpaque = false
-    window.setFrameAutosaveName("MainWindow")
-    window.contentViewController = windowView
-    dependencies.overlay.attachToast(to: windowView.view)
-    window.delegate = self
-    window.setContentSize(defaultSize)
-
-    switchTopLevel(topLevelRoute)
-    setupSidebarToggleObserver()
-  }
-
-  /// Animate or switch to next VC
-  private func switchViewController(to viewController: NSViewController) {
-    windowView.switchTo(viewController: viewController)
-  }
-
-  private func setupOnboarding() {
-    autoCollapsedSidebar = false
-    mainSplitView = nil
-    switchViewController(to: OnboardingViewController(dependencies: dependencies))
-
-    // configure window
-    window?.isMovableByWindowBackground = true
-    window?.backgroundColor = .clear
-    window?.setContentSize(defaultSize)
-    window?.minSize = minSize
-  }
-
-  private func setupLoading() {
-    autoCollapsedSidebar = false
-    mainSplitView = nil
-    switchViewController(to: LoadingViewController())
-
-    window?.isMovableByWindowBackground = true
-    window?.backgroundColor = .clear
-    window?.setContentSize(defaultSize)
-    window?.minSize = minSize
-  }
-
-  private func setupMainSplitView() {
-    log.info("Setting up main split view")
-
-    autoCollapsedSidebar = false
-    window?.isMovableByWindowBackground = false
-
-    // re-add rootData so it has fresh user ID
-    dependencies.rootData = RootData(db: dependencies.database, auth: dependencies.auth)
-
-    // set main view
-    let splitView = MainSplitView(dependencies: dependencies)
-    mainSplitView = splitView
-    switchViewController(to: splitView)
-
-    setupWindowFor(route: nav.currentRoute)
-  }
-
-  @MainActor
-  func openChatFromNotification(peer: Peer) async {
-    await nav2.openChat(peer: peer)
-  }
-
-  private func switchTopLevel(_ route: TopLevelRoute) {
-    currentTopLevelRoute = route
-    switch route {
-      case .loading:
-        setupLoading()
-      case .onboarding:
-        setupOnboarding()
-      case .main:
-        setupMainSplitView()
+  @discardableResult
+  static func newTab(
+    dependencies: AppDependencies,
+    destination: MainWindowDestination? = nil,
+    sender: Any? = nil
+  ) -> MainWindowController {
+    guard let parent = preferredParentWindow else {
+      return newWindow(dependencies: dependencies, destination: destination, sender: sender)
     }
 
-    window?.setContentSize(defaultSize)
-    window?.setFrameUsingName("MainWindow")
-    if route == .main {
-      updateWindowMinimumSize()
-      synchronizeSidebarWithWindowSize(animated: false)
-    } else {
-      window?.minSize = minSize
+    let controller = make(dependencies: dependencies, destination: destination)
+    guard let window = controller.window else { return controller }
+
+    if parent.isMiniaturized {
+      parent.deminiaturize(sender)
     }
+
+    if let tabGroup = parent.tabGroup,
+       tabGroup.windows.contains(window)
+    {
+      tabGroup.removeWindow(window)
+    }
+
+    window.tabbingMode = .preferred
+    parent.addTabbedWindow(window, ordered: .above)
+
+    DispatchQueue.main.async { [weak controller, weak window] in
+      controller?.showWindow(sender)
+      window?.makeKeyAndOrderFront(sender)
+      NSApp.activate(ignoringOtherApps: true)
+    }
+
+    return controller
   }
 
-  private var cancellables: Set<AnyCancellable> = []
-  private func subscribe() {
-    dependencies.viewModel.$topLevelRoute.receive(on: DispatchQueue.main).sink { route in
-      self.log.trace("Top level route changed: \(route)")
+  @discardableResult
+  static func restore(
+    dependencies: AppDependencies,
+    state: MainWindowRestorationState
+  ) -> MainWindowController {
+    make(
+      dependencies: dependencies,
+      sceneId: state.sceneId,
+      routeState: state.routeState,
+      appliesDefaultFrame: false
+    )
+  }
 
-      // Prevent re-open
-      if route == self.currentTopLevelRoute {
-        self.log.trace("Skipped top level change")
-        return
+  static func resetAllNavigation() {
+    all.forEach { $0.resetNavigation() }
+  }
+
+  static func closeAll() {
+    let controllers = all
+    controllers.forEach { $0.close() }
+    self.controllers.removeAll()
+  }
+
+  private static var firstVisible: MainWindowController? {
+    all.first { controller in
+      controller.window?.isVisible == true && controller.window?.isMiniaturized == false
+    } ?? all.first
+  }
+
+  private static var preferredParentWindow: NSWindow? {
+    if let keyWindow = NSApp.keyWindow,
+       keyWindow.windowController is MainWindowController
+    {
+      return keyWindow
+    }
+
+    if let main = all.first(where: { $0.window?.isMainWindow == true })?.window {
+      return main
+    }
+
+    return all.last?.window
+  }
+
+  private static func make(
+    dependencies: AppDependencies,
+    sceneId: String = MainWindowSceneStateStore.makeSceneId(),
+    destination: MainWindowDestination? = nil,
+    routeState: String = "",
+    appliesDefaultFrame: Bool = true
+  ) -> MainWindowController {
+    pruneControllers()
+
+    if let controller = controllers.first(where: { $0.sceneId == sceneId }) {
+      if let destination {
+        controller.route(destination)
       }
-      DispatchQueue.main.async {
-        self.switchTopLevel(route)
-      }
-    }.store(in: &cancellables)
-
-    dependencies.nav.currentRoutePublisher
-      .receive(on: DispatchQueue.main)
-      .sink { [weak self] route in
-        guard let self else { return }
-        guard topLevelRoute == .main else { return }
-
-        // Make sure this is called with the right route. Probably in sink we don't have latest value yet
-        setupWindowFor(route: route)
-        // reloadToolbar()
-      }.store(in: &cancellables)
-
-    dependencies.nav.canGoBackPublisher
-      .receive(on: DispatchQueue.main).sink { [weak self] value in
-        self?.navBackButton?.isEnabled = value
-      }.store(in: &cancellables)
-
-    dependencies.nav.canGoForwardPublisher
-      .receive(on: DispatchQueue.main).sink { [weak self] value in
-        self?.navForwardButton?.isEnabled = value
-      }.store(in: &cancellables)
-  }
-
-  @available(*, unavailable)
-  required init?(coder _: NSCoder) {
-    fatalError("init(coder:) has not been implemented")
-  }
-
-  private func injectDependencies() {
-    // RootData depends on `Auth` + persistent DB. It is created when switching to `.main`,
-    // after protected-data/keychain timing has settled.
-  }
-
-  private func setupWindowFor(route _: NavEntry.Route) {
-//    switch route {
-//    case .chat:
-//      window?.backgroundColor = .controlBackgroundColor
-//
-//    default:
-//      window?.backgroundColor = .controlBackgroundColor
-//      window?.titlebarAppearsTransparent = titlebarAppearsTransparent
-//      window?.isMovableByWindowBackground = false
-//    }
-  }
-
-  private func setupSidebarToggleObserver() {
-    guard sidebarToggleObserver == nil else { return }
-    sidebarToggleObserver = NotificationCenter.default.addObserver(
-      forName: .toggleSidebar,
-      object: nil,
-      queue: .main
-    ) { [weak self] _ in
-      self?.toggleSidebar()
-    }
-  }
-
-  private func toggleSidebar() {
-    guard let splitView = mainSplitView else { return }
-    let willExpand = splitView.isSidebarCollapsed
-    autoCollapsedSidebar = false
-    splitView.setSidebarCollapsed(!splitView.isSidebarCollapsed, animated: true)
-    if willExpand {
-      DispatchQueue.main.async { [weak self] in
-        self?.ensureWindowWidthForExpandedSidebar(animated: true)
-      }
-    }
-  }
-
-  private func synchronizeSidebarWithWindowSize(animated: Bool) {
-    guard let window, let splitView = mainSplitView else { return }
-    updateWindowMinimumSize()
-
-    let width = window.frame.width
-    let threshold = collapseSidebarThreshold()
-    let expandThreshold = threshold + sidebarAutoCollapseHysteresis
-    if splitView.isSidebarCollapsed {
-      guard autoCollapsedSidebar else { return }
-      guard width > expandThreshold else { return }
-      autoCollapsedSidebar = false
-      splitView.setSidebarCollapsed(false, animated: animated)
-      ensureWindowWidthForExpandedSidebar(animated: animated)
-      return
+      return controller
     }
 
-    guard width <= threshold else { return }
-
-    let shouldAnimate = animated && !window.inLiveResize
-    autoCollapsedSidebar = true
-    splitView.setSidebarCollapsed(true, animated: shouldAnimate)
+    let controller = MainWindowController(
+      dependencies: dependencies,
+      sceneId: sceneId,
+      destination: destination,
+      routeState: routeState,
+      appliesDefaultFrame: appliesDefaultFrame
+    )
+    controllers.append(controller)
+    return controller
   }
 
-  private func updateWindowMinimumSize() {
-    guard let window else { return }
-    let minSize = NSSize(width: 0, height: minimumWindowHeight)
-    guard window.minSize != minSize else { return }
-    window.minSize = minSize
+  private static func pruneControllers() {
+    controllers.removeAll { $0.window == nil }
   }
 
-  private func ensureWindowWidthForExpandedSidebar(animated: Bool) {
-    guard let window else { return }
-    let minimumFrameWidth = collapseSidebarThreshold() + sidebarAutoCollapseHysteresis
-    guard window.frame.width < minimumFrameWidth else { return }
-
-    var frame = window.frame
-    frame.size.width = minimumFrameWidth
-    if let screen = window.screen {
-      frame = window.constrainFrameRect(frame, to: screen)
-    }
-    let shouldAnimate = animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-    window.setFrame(frame, display: true, animate: shouldAnimate)
-  }
-
-  // MARK: - NSWindowDelegate
-
-  func window(
-    _: NSWindow,
-    willUseFullScreenPresentationOptions _: NSApplication.PresentationOptions = []
-  ) -> NSApplication
-    .PresentationOptions
-  {
-    [.autoHideToolbar, .autoHideMenuBar, .fullScreen]
-  }
-
-  func windowWillResize(_ _: NSWindow, to frameSize: NSSize) -> NSSize {
-    guard topLevelRoute == .main else { return frameSize }
-    guard let splitView = mainSplitView else { return frameSize }
-    guard !splitView.isSidebarCollapsed else { return frameSize }
-
-    if frameSize.width <= collapseSidebarThreshold() {
-      autoCollapsedSidebar = true
-      splitView.setSidebarCollapsed(true, animated: false)
-      updateWindowMinimumSize()
-    }
-    return frameSize
-  }
-
-  func windowDidResize(_ notification: Notification) {
-    guard topLevelRoute == .main else { return }
-    synchronizeSidebarWithWindowSize(animated: false)
-  }
-
-  // MARK: - Deinit
-
-  deinit {
-    cancellables.removeAll()
-    navBackButton = nil
-    navForwardButton = nil
-    if let sidebarToggleObserver {
-      NotificationCenter.default.removeObserver(sidebarToggleObserver)
-    }
-  }
-}
-
-class LegacyMainWindowController: NSWindowController {
-  private var dependencies: AppDependencies
-  private var keyMonitor: KeyMonitor
-  private var log = Log.scoped("LegacyMainWindowController")
-
-  private var topLevelRoute: TopLevelRoute {
-    dependencies.viewModel.topLevelRoute
-  }
-
-  private var currentTopLevelRoute: TopLevelRoute?
-
-  private var navBackButton: NSButton?
-  private var navForwardButton: NSButton?
-
-  private var defaultWindowSize: CGSize = .init(width: 860, height: 640)
-
-  init(dependencies: AppDependencies) {
+  init(
+    dependencies: AppDependencies,
+    sceneId: String,
+    destination: MainWindowDestination? = nil,
+    routeState: String = "",
+    appliesDefaultFrame: Bool = true
+  ) {
     self.dependencies = dependencies
+    self.sceneId = sceneId
+    self.appliesDefaultFrame = appliesDefaultFrame
 
     let window = NSWindow(
-      contentRect: NSRect(origin: .zero, size: defaultWindowSize),
+      contentRect: NSRect(origin: .zero, size: Self.defaultContentSize),
       styleMask: [
         .titled,
         .closable,
@@ -360,179 +186,18 @@ class LegacyMainWindowController: NSWindowController {
     )
 
     keyMonitor = KeyMonitor(window: window)
-    self.dependencies.keyMonitor = keyMonitor
+    nav3 = Nav3(routeState: routeState, pendingRoute: destination?.route)
+
     super.init(window: window)
 
-    injectDependencies()
-    configureWindow()
-    subscribe()
-  }
-
-  private lazy var toolbar: NSToolbar = {
-    let toolbar = NSToolbar(identifier: "MainToolbar")
-    toolbar.delegate = self
-    toolbar.allowsUserCustomization = false
-    toolbar.autosavesConfiguration = true
-    toolbar.displayMode = .iconOnly
-    return toolbar
-  }()
-
-  private func configureWindow() {
-    window?.title = "Inline"
-    window?.toolbar = toolbar
-    window?.titleVisibility = .hidden
-    window?.toolbarStyle = .unified
-    window?.setFrameAutosaveName("MainWindow")
-    window?.delegate = self
-
-    switchTopLevel(topLevelRoute)
-  }
-
-  /// Animate or switch to next VC
-  private func switchViewController(to viewController: NSViewController) {
-    window?.contentViewController = viewController
-  }
-
-  private func setupOnboarding() {
-    switchViewController(to: OnboardingViewController(dependencies: dependencies))
-
-    // configure window
-    window?.titlebarAppearsTransparent = true
-    window?.isMovableByWindowBackground = true
-    window?.titleVisibility = .hidden
-    window?.backgroundColor = .clear
-    window?.setContentSize(NSSize(width: 780, height: 500))
-
-    reloadToolbar()
-  }
-
-  private func setupLoading() {
-    switchViewController(to: LoadingViewController())
-
-    window?.titlebarAppearsTransparent = true
-    window?.isMovableByWindowBackground = true
-    window?.titleVisibility = .hidden
-    window?.backgroundColor = .clear
-    window?.setContentSize(NSSize(width: 780, height: 500))
-
-    reloadToolbar()
-  }
-
-  private var titlebarAppearsTransparent: Bool {
-    if #available(macOS 26.0, *) {
-      false
-    } else {
-      // Fallback on earlier versions
-      true
+    installRootEscapeHandler()
+    nav3.onRouteChange = { [weak self, weak window] in
+      self?.applyWindowAppearance()
+      window?.invalidateRestorableState()
     }
-  }
-
-  private func setupMainSplitView() {
-    log.info("Setting up main split view")
-
-    // re-add rootData so it has fresh user ID
-    dependencies.rootData = RootData(db: dependencies.database, auth: dependencies.auth)
-
-    // set main view
-    switchViewController(
-      to: LegacyMainSplitViewController(dependencies: dependencies)
-    )
-
-    ensureToolbarIsSet()
-
-    window?.titleVisibility = .hidden
-    window?.isMovableByWindowBackground = false
-    window?.titlebarAppearsTransparent = titlebarAppearsTransparent
-    // window background is set based on current route
-
-    setupWindowFor(route: nav.currentRoute)
-
-    reloadToolbar()
-  }
-
-  private func ensureToolbarIsSet() {
-    window?.toolbar = toolbar
-    toolbar.isVisible = true
-  }
-
-  private func reloadToolbar() {
-    NSAnimationContext.runAnimationGroup { context in
-      context.duration = 0.0
-      context.allowsImplicitAnimation = false
-
-      while toolbar.items.count > 0 {
-        toolbar.removeItem(at: 0)
-      }
-
-      for item in currentToolbarIdentifiers {
-        toolbar.insertItem(withItemIdentifier: item, at: toolbar.items.count)
-      }
-
-      toolbar.validateVisibleItems()
-    }
-  }
-
-  private func switchTopLevel(_ route: TopLevelRoute) {
-    currentTopLevelRoute = route
-    switch route {
-      case .loading:
-        setupLoading()
-      case .onboarding:
-        setupOnboarding()
-      case .main:
-        setupMainSplitView()
-    }
-
-    // TODO: fix sizing
-    window?.setContentSize(defaultWindowSize)
-    window?.setFrameUsingName("MainWindow")
-    window?.minSize = NSSize(width: 330, height: 220)
-  }
-
-  private var cancellables: Set<AnyCancellable> = []
-  private func subscribe() {
-    dependencies.viewModel.$topLevelRoute.receive(on: DispatchQueue.main).sink { route in
-      self.log.trace("Top level route changed: \(route)")
-
-      // Prevent re-open
-      if route == self.currentTopLevelRoute {
-        self.log.trace("Skipped top level change")
-        return
-      }
-      DispatchQueue.main.async {
-        self.switchTopLevel(route)
-      }
-    }.store(in: &cancellables)
-
-    dependencies.nav.currentRoutePublisher
-      .receive(on: DispatchQueue.main)
-      .sink { [weak self] route in
-        guard let self else { return }
-        guard topLevelRoute == .main else { return }
-
-        // Make sure this is called with the right route. Probably in sink we don't have latest value yet
-        setupWindowFor(route: route)
-        reloadToolbar()
-      }.store(in: &cancellables)
-
-    AppSettings.shared.$translationUIEnabled
-      .receive(on: DispatchQueue.main)
-      .sink { [weak self] _ in
-        guard let self else { return }
-        guard topLevelRoute == .main else { return }
-        self.reloadToolbar()
-      }
-      .store(in: &cancellables)
-
-    dependencies.nav.canGoBackPublisher
-      .receive(on: DispatchQueue.main).sink { [weak self] value in
-        self?.navBackButton?.isEnabled = value
-      }.store(in: &cancellables)
-
-    dependencies.nav.canGoForwardPublisher
-      .receive(on: DispatchQueue.main).sink { [weak self] value in
-        self?.navForwardButton?.isEnabled = value
-      }.store(in: &cancellables)
+    configureWindow(window)
+    installContent()
+    applyWindowAppearance()
   }
 
   @available(*, unavailable)
@@ -540,475 +205,115 @@ class LegacyMainWindowController: NSWindowController {
     fatalError("init(coder:) has not been implemented")
   }
 
-  private func injectDependencies() {
-    // RootData depends on `Auth` + persistent DB. It is created when switching to `.main`,
-    // after protected-data/keychain timing has settled.
+  override func showWindow(_ sender: Any?) {
+    super.showWindow(sender)
+    window?.makeKeyAndOrderFront(sender)
+    NSApp.activate(ignoringOtherApps: true)
   }
 
-  private func setupWindowFor(route: NavEntry.Route) {
-    switch route {
-      case .chat:
-        window?.backgroundColor = .controlBackgroundColor
+  override func newWindowForTab(_ sender: Any?) {
+    let destination = MainWindowOpenCoordinator.shared.consumePendingDestination()
+    Self.newTab(dependencies: dependencies, destination: destination, sender: sender)
+  }
 
-      default:
-        window?.backgroundColor = .controlBackgroundColor
-        window?.titlebarAppearsTransparent = titlebarAppearsTransparent
-        window?.isMovableByWindowBackground = false
+  func route(_ destination: MainWindowDestination) {
+    nav3.open(destination.route)
+    showWindow(nil)
+  }
+
+  func resetNavigation() {
+    nav3.reset()
+    window?.invalidateRestorableState()
+  }
+
+  func windowWillClose(_ notification: Notification) {
+    removeRootEscapeHandler()
+    keyMonitor.attach(window: nil)
+    Self.controllers.removeAll { $0 === self }
+  }
+
+  func window(_ window: NSWindow, willEncodeRestorableState state: NSCoder) {
+    MainWindowRestorationState(sceneId: sceneId, routeState: nav3.encodedRouteState() ?? "")
+      .encode(with: state)
+  }
+
+  private func configureWindow(_ window: NSWindow) {
+    window.title = "Inline"
+    window.titleVisibility = .hidden
+    window.toolbarStyle = .unified
+    window.tabbingMode = .preferred
+    DispatchQueue.main.async { [weak window] in
+      guard window?.tabbingMode == .preferred else { return }
+      window?.tabbingMode = .automatic
+    }
+    window.isRestorable = true
+    window.restorationClass = MainWindowRestoration.self
+    window.identifier = NSUserInterfaceItemIdentifier(MainWindowRestoration.identifier)
+    window.delegate = self
+  }
+
+  private func showAsStandaloneWindow(_ sender: Any?) {
+    let previousTabbingMode = window?.tabbingMode ?? .preferred
+    window?.tabbingMode = .disallowed
+    showWindow(sender)
+    DispatchQueue.main.async { [weak window] in
+      guard window?.tabbingMode == .disallowed else { return }
+      window?.tabbingMode = previousTabbingMode == .disallowed ? .automatic : previousTabbingMode
     }
   }
 
-  deinit {
-    cancellables.removeAll()
-    navBackButton = nil
-    navForwardButton = nil
-  }
-}
+  private func applyWindowAppearance() {
+    guard let window else { return }
 
-// MARK: - NSToolbarDelegate
-
-extension LegacyMainWindowController: NSToolbarDelegate {
-  func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-    // Return current items or empty array for initial state
-    currentToolbarIdentifiers
-  }
-
-  func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-    // Return all possible items that could be shown
-    [
-      .toggleSidebar,
-      .homePlus,
-      .sidebarTrackingSeparator,
-      .flexibleSpace,
-      .navGroup,
-      .navBack,
-      .navForward,
-      .chatTitle,
-      .participants,
-      .space,
-      .nudge,
-      .translate,
-    ]
-  }
-
-  func toolbar(
-    _ toolbar: NSToolbar,
-    itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
-    willBeInsertedIntoToolbar flag: Bool
-  ) -> NSToolbarItem? {
-    switch itemIdentifier {
-      case .toggleSidebar:
-        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-        item.isBordered = true
-        item.label = "Toggle Sidebar"
-        item.image = NSImage(
-          systemSymbolName: "sidebar.left",
-          accessibilityDescription: nil
-        )
-        item.action = #selector(NSSplitViewController.toggleSidebar(_:))
-        item.target = window?.contentViewController as? NSSplitViewController
-        return item
-
-      case .homePlus:
-        let item = NSMenuToolbarItem(itemIdentifier: itemIdentifier)
-        item.image = NSImage(
-          systemSymbolName: "plus",
-          accessibilityDescription: "Add"
-        )
-        item.menu = createAddMenu()
-        return item
-
-      case .sidebarTrackingSeparator:
-        return NSTrackingSeparatorToolbarItem(
-          identifier: itemIdentifier,
-          splitView: (window?.contentViewController as? NSSplitViewController)?.splitView ?? NSSplitView(),
-          dividerIndex: 0
-        )
-
-//      case .backToHome:
-//        return makeBackToHome()
-
-      case .flexibleSpace:
-        return NSToolbarItem(itemIdentifier: .flexibleSpace)
-
-      case .navGroup:
-        return makeNavigationButtons()
-
-      case .chatTitle:
-        guard case let .chat(peer) = nav.currentRoute else { return nil }
-        return ChatTitleToolbar(
-          peer: peer,
-          dependencies: dependencies
-        )
-
-      case .participants:
-        guard case let .chat(peer) = nav.currentRoute else { return nil }
-        return ParticipantsToolbar(peer: peer, dependencies: dependencies)
-
-      case .space:
-        return NSToolbarItem(itemIdentifier: .space)
-
-      case .translate:
-        guard AppSettings.shared.translationUIEnabled else { return nil }
-        guard case let .chat(peer) = nav.currentRoute else { return nil }
-        return createTranslateButton(peer: peer)
-
-      case .nudge:
-        guard case let .chat(peer) = nav.currentRoute, case .user = peer else { return nil }
-        return createNudgeButton(peer: peer)
-
-      default:
-        return nil
-    }
-  }
-
-  var nav: Nav {
-    dependencies.nav
-  }
-
-  private func createAddMenu() -> NSMenu {
-    let menu = NSMenu()
-    let newSpaceItem = NSMenuItem(
-      title: "New Space",
-      action: #selector(createNewSpace),
-      keyEquivalent: ""
-    )
-    menu.addItem(newSpaceItem)
-    return menu
-  }
-
-  private func createTranslateButton(peer: Peer) -> NSToolbarItem {
-    let item = TranslateToolbar(peer: peer, dependencies: dependencies)
-    item.visibilityPriority = .high
-    return item
-  }
-
-  private func createNudgeButton(peer: Peer) -> NSToolbarItem {
-    let item = NudgeToolbar(peer: peer, dependencies: dependencies)
-    item.visibilityPriority = .high
-    return item
-  }
-
-  @objc private func createNewSpace() {
-    dependencies.nav.open(.createSpace)
-  }
-
-  @objc private func goBack() {
-    dependencies.nav.goBack()
-  }
-
-  @objc private func goForward() {
-    dependencies.nav.goForward()
-  }
-
-  @objc private func goBackToHome() {
-    dependencies.nav.openHome()
-  }
-}
-
-// MARK: - Toolbar Builders
-
-extension LegacyMainWindowController {
-  private var currentToolbarIdentifiers: [NSToolbarItem.Identifier] {
-    let nav = dependencies.nav
-    var items: [NSToolbarItem.Identifier] = []
-
-    if topLevelRoute == .onboarding || topLevelRoute == .loading {
-      return items
+    if nav3.currentRoute == .empty {
+      window.titlebarAppearsTransparent = true
+      window.backgroundColor = .clear
+      window.isOpaque = false
+      return
     }
 
-    // Base
-    // items.append(.toggleSidebar)
-
-    // Sidebar items
-    if nav.history.last?.spaceId != nil {
-      items.append(.flexibleSpace)
-      // items.append(.spacePlus)
-    } else {
-      items.append(.flexibleSpace)
-      // items.append(.homePlus)
-    }
-
-    // Close sidebar
-    items.append(.sidebarTrackingSeparator)
-
-    // Nav
-    items.append(.navGroup)
-
-    // Route dependant items
-    switch nav.currentRoute {
-      case let .chat(peer):
-        items.append(.chatTitle)
-        items.append(.flexibleSpace)
-
-        // Show participants for thread chats (not DMs)
-        if case .thread = peer {
-          items.append(.participants)
-        }
-
-        // Add space between participants and actions
-        items.append(.space)
-
-        if case .user = peer {
-          items.append(.nudge)
-          items.append(.space)
-        }
-
-        // Translation UI is controlled by a global settings toggle.
-        if AppSettings.shared.translationUIEnabled {
-          items.append(.translate)
-        }
-
-      default:
-        break
-    }
-
-    return items
+    window.titlebarAppearsTransparent = false
+    window.backgroundColor = Theme.windowContentBackgroundColor
+    window.isOpaque = true
   }
 
-  private func makeNavigationButtons() -> NSToolbarItem {
-    let item = NSToolbarItemGroup(itemIdentifier: .navGroup)
-    item.isNavigational = true
-    item.visibilityPriority = .low
-    item.label = "Navigation"
+  private func installRootEscapeHandler() {
+    guard rootEscapeUnsubscribe == nil else { return }
 
-    // Create a container view for the buttons
-    let containerView = NSView()
-
-    // Create buttons
-    let backButton = NSButton()
-    backButton.bezelStyle = .texturedRounded
-    backButton.isBordered = true
-    backButton.controlSize = .large
-    backButton.image = NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "Back")
-    backButton.target = self
-    backButton.action = #selector(goBack)
-    backButton.isEnabled = dependencies.nav.canGoBack
-
-    let forwardButton = NSButton()
-    forwardButton.bezelStyle = .texturedRounded
-    forwardButton.controlSize = .large
-    forwardButton.isBordered = true
-    forwardButton.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: "Forward")
-    forwardButton.target = self
-    forwardButton.action = #selector(goForward)
-    forwardButton.isEnabled = dependencies.nav.canGoForward
-
-    // Add buttons to container
-    containerView.addSubview(backButton)
-    containerView.addSubview(forwardButton)
-
-    // Layout constraints
-    backButton.translatesAutoresizingMaskIntoConstraints = false
-    forwardButton.translatesAutoresizingMaskIntoConstraints = false
-
-    NSLayoutConstraint.activate([
-      backButton.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
-      backButton.centerYAnchor.constraint(equalTo: containerView.centerYAnchor),
-
-      forwardButton.leadingAnchor.constraint(equalTo: backButton.trailingAnchor, constant: 0), // No gap
-      forwardButton.centerYAnchor.constraint(equalTo: containerView.centerYAnchor),
-      forwardButton.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
-
-      // Make sure the container sizes itself to fit the buttons
-      containerView.heightAnchor.constraint(equalTo: backButton.heightAnchor),
-    ])
-
-    item.view = containerView
-
-    // Store references for state updates
-    navBackButton = backButton
-    navForwardButton = forwardButton
-
-    return item
-  }
-
-  // Then in your action:
-  @objc private func segmentedNavAction(_ sender: NSSegmentedControl) {
-    switch sender.selectedSegment {
-      case 0:
-        goBack()
-      case 1:
-        goForward()
-      default:
-        break
-    }
-  }
-}
-
-extension LegacyMainWindowController: NSWindowDelegate {
-  func windowDidEndLiveResize(_ notification: Notification) {
-    window?.saveFrame(usingName: "MainWindow")
-  }
-
-  func windowShouldClose(_ sender: NSWindow) -> Bool {
-    sender.saveFrame(usingName: "MainWindow")
-    return true
-  }
-}
-
-extension NSToolbarItem.Identifier {
-  static let toggleSidebar = Self("ToggleSidebar")
-  static let homePlus = Self("HomePlus")
-  static let spacePlus = Self("SpacePlus")
-  static let backToHome = Self("BackToHome")
-  static let navGroup = Self("NavGroup")
-  static let navBack = Self("NavBack")
-  static let navForward = Self("NavForward")
-  static let chatTitle = Self("ChatTitle")
-  static let participants = Self("Participants")
-  static let nudge = Self("Nudge")
-  static let translate = Self("Translate")
-  static let transparentItem = Self("TransparentItem")
-  static let textItem = Self("TextItem")
-}
-
-// MARK: - Top level router
-
-enum TopLevelRoute {
-  case loading
-  case onboarding
-  case main
-
-  static func initial(for status: AuthStatus) -> TopLevelRoute {
-    switch status {
-    case .authenticated:
-      return .main
-    case .unauthenticated, .reauthRequired:
-      return .onboarding
-    case .hydrating, .locked:
-      return .loading
-    }
-  }
-}
-
-class MainWindowViewModel: ObservableObject {
-  @Published var topLevelRoute: TopLevelRoute
-
-  private var cancellables: Set<AnyCancellable> = []
-  private var transitionTask: Task<Void, Never>?
-
-  init() {
-    topLevelRoute = TopLevelRoute.initial(for: Auth.shared.getStatus())
-
-    // `Auth.status` is main actor-isolated; set up the subscription on the main actor.
-    Task { @MainActor [weak self] in
+    rootEscapeUnsubscribe = keyMonitor.addHandler(for: .escape, key: "swiftui_root_escape_\(windowID)") { [weak self] _ in
       guard let self else { return }
-      Auth.shared.$status
-        .receive(on: DispatchQueue.main)
-        .sink { [weak self] status in
-          self?.handle(status: status)
-        }
-        .store(in: &cancellables)
+      guard dependencies.viewModel.topLevelRoute == .main else { return }
+      guard nav3.currentRoute != .empty else { return }
+      nav3.open(.empty)
     }
   }
 
-  func navigate(_ route: TopLevelRoute) {
-    transitionTask?.cancel()
-    transitionTask = nil
-    topLevelRoute = route
+  private func removeRootEscapeHandler() {
+    rootEscapeUnsubscribe?()
+    rootEscapeUnsubscribe = nil
   }
 
-  private func handle(status: AuthStatus) {
-    switch topLevelRoute {
-    case .loading:
-      switch status {
-      case .hydrating, .locked:
-        break
+  private func installContent() {
+    let root = MainWindowRootView(
+      nav3: nav3,
+      initialTopLevelRoute: dependencies.viewModel.topLevelRoute,
+      keyMonitor: keyMonitor,
+      windowID: windowID
+    )
+    .environment(dependencies: dependencies)
+    .attachWindowKeyMonitor(keyMonitor)
 
-      case .authenticated:
-        transitionTask?.cancel()
-        transitionTask = Task { @MainActor [weak self] in
-          _ = await AppDatabase.promoteSharedToPersistentIfPossible()
-          guard !Task.isCancelled else { return }
-          self?.topLevelRoute = .main
-        }
-
-      case .unauthenticated, .reauthRequired:
-        transitionTask?.cancel()
-        transitionTask = Task { @MainActor [weak self] in
-          _ = await AppDatabase.promoteSharedToPersistentIfPossible()
-          guard !Task.isCancelled else { return }
-          self?.topLevelRoute = .onboarding
-        }
-      }
-
-    case .main:
-      // Don't downgrade to onboarding on transient locked states; only on explicit logout.
-      switch status {
-      case .unauthenticated, .reauthRequired:
-        transitionTask?.cancel()
-        transitionTask = nil
-        topLevelRoute = .onboarding
-      case .authenticated, .hydrating, .locked:
-        break
-      }
-
-    case .onboarding:
-      // Onboarding drives navigation to `.main` after login/profile completion.
-      transitionTask?.cancel()
-      transitionTask = nil
-      break
+    let hostingController = NSHostingController(rootView: root)
+    hostingController.sizingOptions = []
+    window?.contentViewController = hostingController
+    if appliesDefaultFrame {
+      window?.setContentSize(Self.defaultContentSize)
+      window?.center()
     }
+    log.debug("Configured SwiftUI main window sceneId=\(sceneId)")
   }
 }
 
-//    // Create buttons
-//    let backButton = NSButton()
-//    backButton.bezelStyle = .texturedRounded
-//    backButton.isBordered = true
-//    backButton.controlSize = .large
-//    backButton.image = NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "Back")
-//    backButton.target = self
-//    backButton.action = #selector(goBack)
-//    backButton.isEnabled = dependencies.nav.canGoBack
-//
-//    let forwardButton = NSButton()
-//    forwardButton.bezelStyle = .texturedRounded
-//    forwardButton.controlSize = .large
-//    forwardButton.isBordered = true
-//    forwardButton.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: "Forward")
-//    forwardButton.target = self
-//    forwardButton.action = #selector(goForward)
-//    forwardButton.isEnabled = dependencies.nav.canGoForward
-//
-//    // Add buttons to container
-//    containerView.addSubview(backButton)
-//    containerView.addSubview(forwardButton)
-//
-//    // Layout constraints
-//    backButton.translatesAutoresizingMaskIntoConstraints = false
-//    forwardButton.translatesAutoresizingMaskIntoConstraints = false
-//
-//    NSLayoutConstraint.activate([
-//      backButton.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
-//      backButton.centerYAnchor.constraint(equalTo: containerView.centerYAnchor),
-//
-//      forwardButton.leadingAnchor.constraint(equalTo: backButton.trailingAnchor, constant: 0), // No gap
-//      forwardButton.centerYAnchor.constraint(equalTo: containerView.centerYAnchor),
-//      forwardButton.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
-//
-//      // Make sure the container sizes itself to fit the buttons
-//      containerView.heightAnchor.constraint(equalTo: backButton.heightAnchor),
-//    ])
-//
-//    item.view = containerView
-//
-//    // Store references for state updates
-//    navBackButton = backButton
-//    navForwardButton = forwardButton
-//
-//    return item
-//  }
-//
-//  // Then in your action:
-//  @objc private func segmentedNavAction(_ sender: NSSegmentedControl) {
-//    switch sender.selectedSegment {
-//    case 0:
-//      goBack()
-//    case 1:
-//      goForward()
-//    default:
-//      break
-//    }
-//  }
-// }
+private enum MainWindowSceneOptions {
+  static let defaultContentSize = NSSize(width: 860, height: 640)
+}
