@@ -29,7 +29,6 @@ public struct AppDependencies {
   var nav3ChatOpenPreloader: Nav3ChatOpenPreloadBridge? = nil
   var forwardMessages: ForwardMessagesPresenter? = nil
   var keyMonitor: KeyMonitor?
-  var trafficLightController: TrafficLightController?
 
   // Optional
   var rootData: RootData?

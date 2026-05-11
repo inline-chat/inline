@@ -97,7 +97,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   @MainActor
   @objc func openNewMainWindow(_ sender: Any?) {
-    MainWindowSwiftUIWindowController.newWindow(dependencies: dependencies, sender: sender)
+    MainWindowController.newWindow(dependencies: dependencies, sender: sender)
   }
 
 #if SPARKLE
@@ -146,7 +146,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 //    }
     if !didHandleInitialActivation {
       didHandleInitialActivation = true
-      if MainWindowSwiftUIWindowController.all.isEmpty {
+      if MainWindowController.all.isEmpty {
         setupMainWindow()
       }
       refetchSessionAfterActivationIfNeeded()
@@ -171,7 +171,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   @MainActor private func setupMainWindow() {
-    MainWindowSwiftUIWindowController.showDefault(dependencies: dependencies)
+    MainWindowController.showDefault(dependencies: dependencies)
   }
 
   /// CMD+Tab can activate the app without triggering `applicationShouldHandleReopen`.
@@ -326,7 +326,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   @MainActor private func openMainWindowFromCoordinator() {
     let destination = MainWindowOpenCoordinator.shared.consumePendingDestination()
     if let destination {
-      MainWindowSwiftUIWindowController.newWindow(dependencies: dependencies, destination: destination)
+      MainWindowController.newWindow(dependencies: dependencies, destination: destination)
       return
     }
 
@@ -344,7 +344,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     dependencies.session.reset()
     dependencies.viewModel.navigate(.loading)
-    MainWindowSwiftUIWindowController.resetAllNavigation()
+    MainWindowController.resetAllNavigation()
 
     await Task.yield()
 
@@ -362,7 +362,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     dependencies.navigation.reset()
     dependencies.nav.reset()
 
-    MainWindowSwiftUIWindowController.closeAll()
+    MainWindowController.closeAll()
     MainWindowOpenCoordinator.shared.resetWindows()
 
     dependencies.viewModel.navigate(restoreRoute)

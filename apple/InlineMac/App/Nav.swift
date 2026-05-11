@@ -45,6 +45,12 @@ struct NavEntry: Hashable, Codable, Equatable {
   }
 }
 
+enum SidebarTab: String, Hashable {
+  case inbox
+  case archive
+  case spaces
+}
+
 /// Manages navigation per window
 @MainActor
 class Nav: ObservableObject {
@@ -85,7 +91,7 @@ class Nav: ObservableObject {
   }
 
   /// Selected tab in home sidebar
-  @Published var selectedTab: HomeSidebar.Tab = .inbox
+  @Published var selectedTab: SidebarTab = .inbox
 
   /// Selected space id in spaces tab
   @Published var selectedSpaceId: Int64? = nil
