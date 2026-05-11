@@ -1,6 +1,5 @@
 import Foundation
 import InlineConfig
-import KeychainSwift
 import Logger
 
 actor AuthStore: Sendable {
@@ -9,10 +8,10 @@ actor AuthStore: Sendable {
   private static let legacyTokenKey = "token"
   private static let credentialsV2Key = "credentials_v2"
 
-  private let primaryKeychain: KeychainSwift
-  private let fallbackKeychain: KeychainSwift?
+  private let primaryKeychain: KeychainStore
+  private let fallbackKeychain: KeychainStore?
   private let userDefaultsKey: String
-  private let readSnapshot: (KeychainSwift, KeychainSwift?, String) -> AuthSnapshot
+  private let readSnapshot: (KeychainStore, KeychainStore?, String) -> AuthSnapshot
   private let mocked: Bool
   private let namespace: String?
 
@@ -31,7 +30,7 @@ actor AuthStore: Sendable {
     cache: AuthSnapshotCache,
     mocked: Bool,
     namespace: String? = nil,
-    readSnapshot: ((KeychainSwift, KeychainSwift?, String) -> AuthSnapshot)? = nil
+    readSnapshot: ((KeychainStore, KeychainStore?, String) -> AuthSnapshot)? = nil
   ) {
     self.cache = cache
     self.mocked = mocked
@@ -315,7 +314,7 @@ actor AuthStore: Sendable {
     log.warning("AUTH2 keychain remained locked after retry loop; waiting for external refresh trigger")
   }
 
-  private static func migrateKeyIfFoundInFallback(_ key: String, primary: KeychainSwift, fallback: KeychainSwift) {
+  private static func migrateKeyIfFoundInFallback(_ key: String, primary: KeychainStore, fallback: KeychainStore) {
     // Already present in primary.
     if primary.getData(key) != nil {
       return
@@ -332,9 +331,9 @@ actor AuthStore: Sendable {
     }
   }
 
-  private static func readSnapshot(
-    primaryKeychain: KeychainSwift,
-    fallbackKeychain: KeychainSwift?,
+  static func readSnapshot(
+    primaryKeychain: any KeychainClient,
+    fallbackKeychain: (any KeychainClient)?,
     userDefaultsKey: String,
     mocked: Bool,
     namespace: String?

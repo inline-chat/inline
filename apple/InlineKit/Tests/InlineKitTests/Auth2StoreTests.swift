@@ -1,10 +1,70 @@
 import Foundation
+import Security
 import Testing
 
 @testable import Auth
 
 @Suite("Auth2 Store")
 final class Auth2StoreTests {
+  private final class FakeKeychain: KeychainClient, @unchecked Sendable {
+    private let lock = NSLock()
+    private var dataByKey: [String: Data]
+    private var statusByKey: [String: OSStatus]
+    private let defaultMissingStatus: OSStatus
+
+    private(set) var lastResultCode: OSStatus = noErr
+
+    init(
+      dataByKey: [String: Data] = [:],
+      statusByKey: [String: OSStatus] = [:],
+      defaultMissingStatus: OSStatus = errSecItemNotFound
+    ) {
+      self.dataByKey = dataByKey
+      self.statusByKey = statusByKey
+      self.defaultMissingStatus = defaultMissingStatus
+    }
+
+    @discardableResult
+    func set(_ value: String, forKey key: String, withAccess access: KeychainAccess? = nil) -> Bool {
+      set(Data(value.utf8), forKey: key, withAccess: access)
+    }
+
+    @discardableResult
+    func set(_ value: Data, forKey key: String, withAccess access: KeychainAccess? = nil) -> Bool {
+      lock.withLock {
+        if let status = statusByKey[key], status != errSecSuccess {
+          lastResultCode = status
+          return false
+        }
+
+        dataByKey[key] = value
+        lastResultCode = errSecSuccess
+        return true
+      }
+    }
+
+    func getData(_ key: String) -> Data? {
+      lock.withLock {
+        if let data = dataByKey[key] {
+          lastResultCode = errSecSuccess
+          return data
+        }
+
+        lastResultCode = statusByKey[key] ?? defaultMissingStatus
+        return nil
+      }
+    }
+
+    @discardableResult
+    func delete(_ key: String) -> Bool {
+      lock.withLock {
+        dataByKey[key] = nil
+        lastResultCode = errSecSuccess
+        return true
+      }
+    }
+  }
+
   private final class SnapshotDriver: @unchecked Sendable {
     private let lock = NSLock()
     private var _snapshot: AuthSnapshot
@@ -230,5 +290,79 @@ final class Auth2StoreTests {
     await store.refreshFromStorage()
 
     #expect(cache.snapshot().status == .locked(userIdHint: nil))
+  }
+
+  @Test("readData uses fallback keychain when primary cannot read")
+  func readDataUsesFallbackWhenPrimaryCannotRead() {
+    let primary = FakeKeychain(statusByKey: ["token": errSecMissingEntitlement])
+    let fallback = FakeKeychain(dataByKey: ["token": Data("42:fallback".utf8)])
+
+    let outcome = AuthKeychainConfig.readString("token", primary: primary, fallback: fallback)
+
+    guard case let .success(token, usedFallback) = outcome else {
+      #expect(Bool(false), "Expected fallback token")
+      return
+    }
+
+    #expect(token == "42:fallback")
+    #expect(usedFallback)
+  }
+
+  @Test("readData reports locked when primary is unavailable and fallback is missing")
+  func readDataReportsLockedWhenPrimaryUnavailableAndFallbackMissing() {
+    let primary = FakeKeychain(statusByKey: ["token": errSecInteractionNotAllowed])
+    let fallback = FakeKeychain()
+
+    let outcome = AuthKeychainConfig.readString("token", primary: primary, fallback: fallback)
+
+    guard case let .interactionNotAllowed(status) = outcome else {
+      #expect(Bool(false), "Expected locked status")
+      return
+    }
+
+    #expect(status == errSecInteractionNotAllowed)
+  }
+
+  @Test("snapshot authenticates from fallback credentials when primary errors")
+  func snapshotAuthenticatesFromFallbackCredentialsWhenPrimaryErrors() throws {
+    let userDefaultsKey = "test_\(UUID().uuidString)_userId"
+    defer { UserDefaults.standard.removeObject(forKey: userDefaultsKey) }
+
+    let creds = AuthCredentials(userId: 42, token: "42:fallback")
+    let data = try JSONEncoder().encode(creds)
+    let primary = FakeKeychain(statusByKey: ["credentials_v2": errSecMissingEntitlement])
+    let fallback = FakeKeychain(dataByKey: ["credentials_v2": data])
+
+    let snapshot = AuthStore.readSnapshot(
+      primaryKeychain: primary,
+      fallbackKeychain: fallback,
+      userDefaultsKey: userDefaultsKey,
+      mocked: false,
+      namespace: nil
+    )
+
+    #expect(snapshot.status == .authenticated(creds))
+  }
+
+  @Test("snapshot preserves reauthRequired when v2 errors but legacy token is missing")
+  func snapshotPreservesReauthRequiredWhenV2ErrorsButLegacyTokenMissing() {
+    let userDefaultsKey = "test_\(UUID().uuidString)_userId"
+    UserDefaults.standard.set(NSNumber(value: Int64(42)), forKey: userDefaultsKey)
+    defer { UserDefaults.standard.removeObject(forKey: userDefaultsKey) }
+
+    let primary = FakeKeychain(statusByKey: [
+      "credentials_v2": errSecDecode,
+      "token": errSecItemNotFound,
+    ])
+
+    let snapshot = AuthStore.readSnapshot(
+      primaryKeychain: primary,
+      fallbackKeychain: nil,
+      userDefaultsKey: userDefaultsKey,
+      mocked: false,
+      namespace: nil
+    )
+
+    #expect(snapshot.status == .reauthRequired(userIdHint: 42))
   }
 }

@@ -1,5 +1,4 @@
 import Foundation
-import KeychainSwift
 import Security
 
 public enum DatabaseKeyAvailability: Sendable, Equatable {
@@ -82,7 +81,7 @@ public enum DatabaseKeyStore {
       return .available(key: key)
     }
 
-    // KeychainSwift sets lastResultCode.
+    // KeychainStore sets lastResultCode.
     let writeStatus = primary.lastResultCode
     if writeStatus == errSecInteractionNotAllowed || writeStatus == errSecNotAvailable {
       return .locked
