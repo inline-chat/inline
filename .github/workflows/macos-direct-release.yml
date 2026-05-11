@@ -34,6 +34,8 @@ jobs:
   build:
     runs-on: macos-26
     timeout-minutes: 90
+    env:
+      HAS_SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN != '' }}
 
     steps:
       - name: Checkout
@@ -190,7 +192,7 @@ jobs:
         run: bash scripts/macos/build-direct.sh
 
       - name: Upload dSYMs to Sentry
-        if: ${{ secrets.SENTRY_AUTH_TOKEN != '' }}
+        if: env.HAS_SENTRY_AUTH_TOKEN == 'true'
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: usenoor
