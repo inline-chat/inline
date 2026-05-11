@@ -11,6 +11,12 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
     case mentionCandidates
   }
 
+  private enum RefreshRequest {
+    case none
+    case participants
+    case spaceMembers(Int64)
+  }
+
   @Published public private(set) var participants: [UserInfo] = []
 
   private var participantsCancellable: AnyCancellable?
@@ -151,8 +157,41 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
   }
 
   public func refetchParticipants() async {
+    await Self.refetchParticipants(db: db, chatId: chatId, purpose: purpose)
+  }
+
+  public static func ensureParticipantsLoaded(
+    db: AppDatabase,
+    chatId: Int64,
+    purpose: Purpose = .participantsList
+  ) async {
+    let log = Log.scoped("EnhancedChatParticipantsViewModel")
+
+    do {
+      let request = try await db.reader.read { db in
+        try refreshRequest(db, chatId: chatId, purpose: purpose)
+      }
+
+      switch request {
+      case .none:
+        return
+      case .participants:
+        try await Api.realtime.send(.getChatParticipants(chatID: chatId))
+      case let .spaceMembers(spaceId):
+        try await Api.realtime.send(.getSpaceMembers(spaceId: spaceId))
+      }
+    } catch {
+      log.error("Failed to ensure enhanced chat participants are loaded", error: error)
+    }
+  }
+
+  public static func refetchParticipants(
+    db: AppDatabase,
+    chatId: Int64,
+    purpose: Purpose = .participantsList
+  ) async {
+    let log = Log.scoped("EnhancedChatParticipantsViewModel")
     log.trace("Refetching participants...")
-    let chatId = chatId
 
     do {
       // First try to get chat participants
@@ -175,5 +214,31 @@ public final class ChatParticipantsWithMembersViewModel: ObservableObject {
     } catch {
       log.error("Failed to refetch enhanced chat participants", error: error)
     }
+  }
+
+  private static func refreshRequest(
+    _ db: Database,
+    chatId: Int64,
+    purpose: Purpose
+  ) throws -> RefreshRequest {
+    guard let chat = try Chat.fetchOne(db, id: chatId) else {
+      return .participants
+    }
+
+    if let spaceId = chat.spaceId, purpose == .mentionCandidates || chat.isPublic == true {
+      let hasMembers = try Member
+        .filter(Member.Columns.spaceId == spaceId)
+        .limit(1)
+        .fetchCount(db) > 0
+
+      return hasMembers ? .none : .spaceMembers(spaceId)
+    }
+
+    let hasParticipants = try ChatParticipant
+      .filter(ChatParticipant.Columns.chatId == chatId)
+      .limit(1)
+      .fetchCount(db) > 0
+
+    return hasParticipants ? .none : .participants
   }
 }

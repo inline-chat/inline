@@ -310,6 +310,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
   }
 
   private var chatCancellable: AnyCancellable?
+  private var refetchTask: Task<Void, Never>?
   private var historyRefetchTask: Task<Void, Never>?
   private var lastHistoryRefetchTime: CFTimeInterval = 0
   private let historyRefetchCooldown: CFTimeInterval = 1.0
@@ -346,21 +347,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
     chatCancellable =
       ValueObservation
         .tracking { db in
-          switch peerId {
-            case .user:
-              // Fetch private chat
-              try Dialog
-                .spaceChatItemQueryForUser()
-                .filter(id: Dialog.getDialogId(peerId: peerId))
-                .fetchOne(db)
-
-            case .thread:
-              // Fetch thread chat
-              try Dialog
-                .spaceChatItemQueryForChat()
-                .filter(id: Dialog.getDialogId(peerId: peerId))
-                .fetchOne(db)
-          }
+          try Self.fetchChatItem(peer: peerId, db: db)
         }
         .publisher(in: db.dbWriter, scheduling: .immediate)
         .sink(
@@ -386,18 +373,22 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
     let peer_ = peer
 
     let chatExists = await (try? queryChatFromDatabase()) != nil
+    guard !Task.isCancelled else { return }
 
     if chatExists {
       await withTaskGroup(of: Void.self) { group in
         group.addTask {
+          guard !Task.isCancelled else { return }
           _ = try? await Api.realtime.send(.getChat(peer: peer_))
         }
 
         group.addTask {
+          guard !Task.isCancelled else { return }
           _ = try? await Api.realtime.send(.getChatHistory(peer: peer_))
         }
 
         group.addTask {
+          guard !Task.isCancelled else { return }
           if self.peerUser == nil {
             do {
               if let userId = peer_.asUserId() {
@@ -420,16 +411,19 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
         }
       }
 
+      guard !Task.isCancelled else { return }
       _ = try? await Api.realtime.send(.getChat(peer: peer_))
 
+      guard !Task.isCancelled else { return }
       _ = try? await Api.realtime.send(.getChatHistory(peer: peer_))
     }
   }
 
   public func refetchChatView() {
     log.trace("Refetching chat view for peer \(peer)")
-    Task {
-      await refetchChatViewAsync()
+    refetchTask?.cancel()
+    refetchTask = Task { [weak self] in
+      await self?.refetchChatViewAsync()
     }
   }
 
@@ -455,10 +449,12 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
 
     await withTaskGroup(of: Void.self) { group in
       group.addTask {
+        guard !Task.isCancelled else { return }
         _ = try? await Api.realtime.send(.getChatHistory(peer: peer_))
       }
 
       group.addTask {
+        guard !Task.isCancelled else { return }
         if self.peerUser == nil, let userId = peer_.asUserId() {
           do {
             try await DataManager.shared.getUser(id: userId)
@@ -474,19 +470,40 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
   private func queryChatItemFromDatabase() async throws -> SpaceChatItem? {
     let peer_ = peer
     return try await db.reader.read { db in
-      switch peer_ {
-        case .user:
-          try Dialog
-            .spaceChatItemQueryForUser()
-            .filter(id: Dialog.getDialogId(peerId: peer_))
-            .fetchOne(db)
-        case .thread:
-          try Dialog
-            .spaceChatItemQueryForChat()
-            .filter(id: Dialog.getDialogId(peerId: peer_))
-            .fetchOne(db)
-      }
+      try Self.fetchChatItem(peer: peer_, db: db)
     }
+  }
+
+  private static func fetchChatItem(peer: Peer, db: Database) throws -> SpaceChatItem? {
+    let item: SpaceChatItem?
+    switch peer {
+      case .user:
+        item = try Dialog
+          .spaceChatItemQueryForUser()
+          .filter(id: Dialog.getDialogId(peerId: peer))
+          .fetchOne(db)
+
+      case .thread:
+        item = try Dialog
+          .spaceChatItemQueryForChat()
+          .filter(id: Dialog.getDialogId(peerId: peer))
+          .fetchOne(db)
+    }
+
+    return try item.map { try fillMissingChat(in: $0, peer: peer, db: db) }
+  }
+
+  private static func fillMissingChat(in item: SpaceChatItem, peer: Peer, db: Database) throws -> SpaceChatItem {
+    guard item.chat == nil else { return item }
+
+    var item = item
+    if let chatId = item.dialog.chatId {
+      item.chat = try Chat.fetchOne(db, id: chatId)
+    }
+    if item.chat == nil {
+      item.chat = try Chat.getByPeerId(db: db, peerId: peer)
+    }
+    return item
   }
 
   /// Query chat from database directly.
@@ -502,6 +519,7 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
 
     let peer_ = peer
     let cachedChatItem = try await queryChatItemFromDatabase()
+    try Task.checkCancellation()
 
     if let cachedChatItem {
       await MainActor.run {
@@ -510,13 +528,16 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
     }
 
     do {
+      try Task.checkCancellation()
       // Wait for getChat transaction to complete and save to database
       _ = try await Api.realtime.send(.getChat(peer: peer_))
+      try Task.checkCancellation()
 
       // Also fetch user info if it's a DM
       if let userId = peer_.asUserId() {
         try? await DataManager.shared.getUser(id: userId)
       }
+      try Task.checkCancellation()
 
       if let loadedChatItem = try await queryChatItemFromDatabase() {
         await MainActor.run {
@@ -526,14 +547,29 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
       }
 
       return cachedChatItem?.chat
+    } catch is CancellationError {
+      throw CancellationError()
     } catch {
-      if let cachedChatItem {
+      if let cachedChatItem, let chat = cachedChatItem.chat {
         Log.shared.warning("Failed to refresh chat from server, using cached chat for \(peer_)")
-        return cachedChatItem.chat
+        return chat
       }
       log.error("Failed to ensure chat", error: error)
       throw error
     }
+  }
+
+  public func dispose() {
+    chatCancellable?.cancel()
+    chatCancellable = nil
+    refetchTask?.cancel()
+    refetchTask = nil
+    historyRefetchTask?.cancel()
+    historyRefetchTask = nil
+  }
+
+  deinit {
+    dispose()
   }
 }
 

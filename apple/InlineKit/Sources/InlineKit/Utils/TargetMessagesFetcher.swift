@@ -17,6 +17,7 @@ public actor TargetMessagesFetcher {
   private struct TargetState {
     var queuedIds: Set<Int64> = []
     var inFlightIds: Set<Int64> = []
+    var resolvingIds: Set<Int64> = []
     var runnerTask: Task<Void, Never>?
   }
 
@@ -44,16 +45,25 @@ public actor TargetMessagesFetcher {
     let requestedIds = Set(messageIds.filter { $0 > 0 })
     guard !requestedIds.isEmpty else { return }
 
+    let target = FetchTarget(peer: peer, chatId: chatId)
+    let idsToResolve = beginResolving(target: target, messageIds: requestedIds)
+    guard !idsToResolve.isEmpty else { return }
+
     let missingIds: Set<Int64>
     do {
-      missingIds = try await resolveMissingIds(chatId, requestedIds)
+      missingIds = try await resolveMissingIds(chatId, idsToResolve)
+    } catch is CancellationError {
+      finishResolving(target: target, messageIds: idsToResolve)
+      return
     } catch {
       log.error("Failed to check cached target messages", error: error)
-      missingIds = requestedIds
+      missingIds = idsToResolve
     }
+
+    finishResolving(target: target, messageIds: idsToResolve)
     guard !missingIds.isEmpty else { return }
 
-    enqueue(target: FetchTarget(peer: peer, chatId: chatId), messageIds: missingIds)
+    enqueue(target: target, messageIds: missingIds)
   }
 
   private static func defaultResolveMissingIds(chatId: Int64, messageIds: Set<Int64>) async throws -> Set<Int64> {
@@ -77,7 +87,10 @@ public actor TargetMessagesFetcher {
 
   private func enqueue(target: FetchTarget, messageIds: Set<Int64>) {
     var state = targets[target] ?? TargetState()
-    let deduped = messageIds.subtracting(state.inFlightIds).subtracting(state.queuedIds)
+    let deduped = messageIds
+      .subtracting(state.resolvingIds)
+      .subtracting(state.inFlightIds)
+      .subtracting(state.queuedIds)
     guard !deduped.isEmpty else { return }
 
     state.queuedIds.formUnion(deduped)
@@ -92,6 +105,35 @@ public actor TargetMessagesFetcher {
     targets[target] = state
   }
 
+  private func beginResolving(target: FetchTarget, messageIds: Set<Int64>) -> Set<Int64> {
+    var state = targets[target] ?? TargetState()
+    let deduped = messageIds
+      .subtracting(state.resolvingIds)
+      .subtracting(state.inFlightIds)
+      .subtracting(state.queuedIds)
+    guard !deduped.isEmpty else { return [] }
+
+    state.resolvingIds.formUnion(deduped)
+    targets[target] = state
+    return deduped
+  }
+
+  private func finishResolving(target: FetchTarget, messageIds: Set<Int64>) {
+    guard var state = targets[target] else { return }
+
+    state.resolvingIds.subtract(messageIds)
+    save(target: target, state: state)
+  }
+
+  private func save(target: FetchTarget, state: TargetState) {
+    if state.queuedIds.isEmpty, state.inFlightIds.isEmpty, state.resolvingIds.isEmpty, state.runnerTask == nil {
+      targets.removeValue(forKey: target)
+      return
+    }
+
+    targets[target] = state
+  }
+
   private func runQueue(for target: FetchTarget) async {
     while true {
       guard var state = targets[target] else { return }
@@ -99,11 +141,7 @@ public actor TargetMessagesFetcher {
       let batchIds = Array(state.queuedIds.prefix(maxBatchSize))
       if batchIds.isEmpty {
         state.runnerTask = nil
-        if state.inFlightIds.isEmpty {
-          targets.removeValue(forKey: target)
-        } else {
-          targets[target] = state
-        }
+        save(target: target, state: state)
         return
       }
 

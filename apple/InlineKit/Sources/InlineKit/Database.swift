@@ -855,17 +855,39 @@ public extension AppDatabase {
 }
 
 public extension AppDatabase {
-  static func deleteDatabaseFile() throws {
-    let fileManager = FileManager.default
+  private static func databaseFilesOnDisk() -> [URL] {
     let databaseUrl = getDatabaseUrl()
-    let databasePath = databaseUrl.path
+    return [
+      databaseUrl,
+      URL(fileURLWithPath: "\(databaseUrl.path)-wal"),
+      URL(fileURLWithPath: "\(databaseUrl.path)-shm"),
+      URL(fileURLWithPath: "\(databaseUrl.path)-journal"),
+    ]
+  }
 
-    if fileManager.fileExists(atPath: databasePath) {
-      try fileManager.removeItem(at: databaseUrl)
-      log.info("Database file successfully deleted.")
-    } else {
-      log.warning("Database file not found.")
+  @discardableResult
+  static func deleteDatabaseFilesOnDisk() throws -> [URL] {
+    let fileManager = FileManager.default
+    var deleted: [URL] = []
+
+    for url in databaseFilesOnDisk() {
+      guard fileManager.fileExists(atPath: url.path) else { continue }
+      try fileManager.removeItem(at: url)
+      deleted.append(url)
     }
+
+    if deleted.isEmpty {
+      log.warning("Database files not found.")
+    } else {
+      let names = deleted.map(\.lastPathComponent).joined(separator: ", ")
+      log.info("Database files successfully deleted: \(names)")
+    }
+
+    return deleted
+  }
+
+  static func deleteDatabaseFile() throws {
+    try deleteDatabaseFilesOnDisk()
   }
 }
 
@@ -883,6 +905,29 @@ public extension AppDatabase {
 public extension AppDatabase {
   /// The database for the application
   static let shared = makeShared()
+
+  private static var buildFlavor: String {
+    #if DEBUG
+    "debug"
+    #elseif DEBUG_BUILD
+    "debugBuild"
+    #else
+    "release"
+    #endif
+  }
+
+  private static func keyStatus(_ availability: DatabaseKeyAvailability) -> String {
+    switch availability {
+    case .available:
+      return "available"
+    case .locked:
+      return "locked"
+    case .notFound:
+      return "notFound"
+    case .error(let status):
+      return "error(\(status))"
+    }
+  }
 
   private static func getDatabaseUrl() -> URL {
     do {
@@ -925,6 +970,19 @@ public extension AppDatabase {
     var pathForLog = databasePath
     pathForLog.replace(" ", with: "\\ ")
     log.debug("Database path: \(pathForLog)")
+    let keyAvailability = DatabaseKeyStore.load()
+    log.info(
+      "Database config: build=\(buildFlavor)" +
+        " profile=\(ProjectConfig.userProfile ?? "default")" +
+        " keyAccount=\(DatabaseKeyStore.expectedKeychainAccount())" +
+        " keyStatus=\(keyStatus(keyAvailability))" +
+        " fileExists=\(fileExists ? 1 : 0)"
+    )
+    #if !DEBUG_BUILD
+    if ProjectConfig.userProfile == "devbuild" {
+      log.error("DevBuild profile is active without DEBUG_BUILD; build devbuilds through scripts/macos/build-local-app.sh")
+    }
+    #endif
 
     func openPersistent(passphrase: String) throws -> (db: AppDatabase, pool: DatabasePool) {
       let config = AppDatabase.makeConfiguration(passphrase: passphrase)

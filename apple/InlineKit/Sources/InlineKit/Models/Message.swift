@@ -898,6 +898,7 @@ public extension Message {
     let existing = try? Message.fetchOne(db, key: ["messageId": id, "chatId": chatId])
     let isUpdate = existing != nil
     var message = Message(from: protocolMessage)
+    message.pinned = try PinnedMessage.isPinned(db, chatId: chatId, messageId: id)
 
     if let existing {
       message.globalId = existing.globalId

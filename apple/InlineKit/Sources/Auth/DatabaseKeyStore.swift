@@ -13,6 +13,10 @@ public enum DatabaseKeyStore {
   // Public so InlineKit can use the same key name if needed for diagnostics.
   public static let keychainKey = "dbKey_v1"
 
+  public static func expectedKeychainAccount(mocked: Bool = false, namespace: String? = nil) -> String {
+    "\(AuthKeychainConfig.keychainPrefix(mocked: mocked, namespace: namespace))\(keychainKey)"
+  }
+
   public static func load(mocked: Bool = false, namespace: String? = nil) -> DatabaseKeyAvailability {
     if mocked {
       if let key = AuthKeychainConfig.mockGetString(keychainKey, namespace: namespace) {

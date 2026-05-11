@@ -73,14 +73,7 @@ public struct GetChatTransaction: Transaction2 {
 
         do {
           let chatId = response.chat.id
-          try PinnedMessage.filter(Column("chatId") == chatId).deleteAll(db)
-
-          if !response.pinnedMessageIds.isEmpty {
-            for (index, messageId) in response.pinnedMessageIds.enumerated() {
-              let pinned = PinnedMessage(chatId: chatId, messageId: messageId, position: Int64(index))
-              try pinned.save(db)
-            }
-          }
+          try PinnedMessage.replaceAll(db, chatId: chatId, messageIds: response.pinnedMessageIds)
         } catch {
           log.error("Failed to save pinned messages", error: error)
           throw error

@@ -52,8 +52,11 @@ struct TargetMessagesFetcherTests {
   func dedupesOverlappingInFlightIDs() async {
     let recorder = FetchRecorder()
     let gate = FirstFetchGate()
+    let resolveGate = ResolveGate()
     let fetcher = TargetMessagesFetcher(
-      resolveMissingIds: { _, messageIds in messageIds },
+      resolveMissingIds: { _, messageIds in
+        await resolveGate.resolve(messageIds)
+      },
       fetchMessages: { _, messageIds in
         await recorder.record(messageIds)
         await gate.blockFirstFetchIfNeeded()
@@ -70,10 +73,12 @@ struct TargetMessagesFetcherTests {
       await fetcher.ensureCached(peer: .thread(id: 12), chatId: 12, messageIds: [2, 3])
     }
 
+    await resolveGate.waitForSecondCall()
+    await resolveGate.releaseSecondCall()
+    await second.value
     await gate.releaseFirstFetch()
 
     await first.value
-    await second.value
 
     let fetchedTwice = await waitForCondition(timeout: .seconds(2)) {
       await recorder.count() == 2
@@ -84,6 +89,9 @@ struct TargetMessagesFetcherTests {
     #expect(batches.count == 2)
     #expect(batches[0] == Set([1, 2]))
     #expect(batches[1] == Set([3]))
+
+    let resolved = await resolveGate.batches()
+    #expect(resolved == [Set([1, 2]), Set([3])])
   }
 
   @Test("getMessages transaction encodes peer and message ids")
@@ -177,6 +185,53 @@ private actor FirstFetchGate {
   func releaseFirstFetch() {
     releaseContinuation?.resume()
     releaseContinuation = nil
+  }
+}
+
+private actor ResolveGate {
+  private var items: [Set<Int64>] = []
+  private var secondCallStarted = false
+  private var secondCallWaiters: [CheckedContinuation<Void, Never>] = []
+  private var releaseSecondContinuation: CheckedContinuation<Void, Never>?
+
+  func resolve(_ messageIds: Set<Int64>) async -> Set<Int64> {
+    items.append(messageIds)
+
+    guard items.count == 2 else {
+      return messageIds
+    }
+
+    secondCallStarted = true
+    let waiters = secondCallWaiters
+    secondCallWaiters.removeAll()
+    for waiter in waiters {
+      waiter.resume()
+    }
+
+    await withCheckedContinuation { continuation in
+      releaseSecondContinuation = continuation
+    }
+
+    return messageIds
+  }
+
+  func waitForSecondCall() async {
+    if secondCallStarted {
+      return
+    }
+
+    await withCheckedContinuation { continuation in
+      secondCallWaiters.append(continuation)
+    }
+  }
+
+  func releaseSecondCall() {
+    releaseSecondContinuation?.resume()
+    releaseSecondContinuation = nil
+  }
+
+  func batches() -> [Set<Int64>] {
+    items
   }
 }
 

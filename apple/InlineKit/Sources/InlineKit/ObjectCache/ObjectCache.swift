@@ -74,6 +74,24 @@ public class ObjectCache {
 
     return spaces[id]
   }
+
+  public func clear() {
+    dbCancellables.forEach { $0.cancel() }
+    dbCancellables.removeAll()
+
+    observingUsers.removeAll()
+    observingChats.removeAll()
+    observingSpaces.removeAll()
+
+    users.removeAll()
+    chats.removeAll()
+    spaces.removeAll()
+
+    userPublishers.values.forEach { $0.send(nil) }
+    chatPublishers.values.forEach { $0.send(nil) }
+    userPublishers.removeAll()
+    chatPublishers.removeAll()
+  }
 }
 
 // User
