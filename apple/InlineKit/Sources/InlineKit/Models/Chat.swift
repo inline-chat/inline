@@ -117,7 +117,7 @@ public struct Chat: FetchableRecord, Identifiable, Codable, Hashable, Persistabl
 }
 
 public extension Chat {
-  public var humanReadableTitle: String? {
+  var humanReadableTitle: String? {
     if let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines),
        trimmed.isEmpty == false
     {
@@ -142,7 +142,7 @@ public extension Chat {
     }
   }
 
-  public var isReplyThread: Bool {
+  var isReplyThread: Bool {
     parentMessageId != nil
   }
 }
