@@ -1140,21 +1140,21 @@ public extension Message {
     setVoiceContent(voiceContent)
   }
 
-  public var replyThreadSummary: MessageReplies? {
+  var replyThreadSummary: MessageReplies? {
     guard let contentPayload, contentPayload.hasReplies else { return nil }
     return contentPayload.replies
   }
 
-  public var replyThreadPeer: Peer? {
+  var replyThreadPeer: Peer? {
     guard let replyThreadSummary, replyThreadSummary.chatID > 0 else { return nil }
     return .thread(id: replyThreadSummary.chatID)
   }
 
-  public var replyThreadRecentReplierUserIds: [Int64] {
+  var replyThreadRecentReplierUserIds: [Int64] {
     replyThreadSummary?.recentReplierUserIds ?? []
   }
 
-  public var hasReplyThreadSummary: Bool {
+  var hasReplyThreadSummary: Bool {
     guard let replyThreadSummary else { return false }
     return replyThreadSummary.replyCount > 0
   }

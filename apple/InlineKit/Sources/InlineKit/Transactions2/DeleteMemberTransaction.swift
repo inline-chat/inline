@@ -36,7 +36,7 @@ public struct DeleteMemberTransaction: Transaction2 {
   public func optimistic() async throws(TransactionExecutionError) {
     do {
       try await AppDatabase.shared.dbWriter.write { db in
-        try Member
+        _ = try Member
           .filter(Column("spaceId") == context.spaceId)
           .filter(Column("userId") == context.userId)
           .deleteAll(db)
