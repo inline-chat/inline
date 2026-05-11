@@ -87,14 +87,18 @@ BUILD_LOG_PATH="${OUTPUT_DIR}/xcodebuild.log"
 
 set +e
 swift_conditions='$(inherited) SPARKLE'
+configuration="Release"
+app_name="Inline.app"
 if [[ "${DEBUG_BUILD}" == "1" ]]; then
   swift_conditions='$(inherited) SPARKLE DEBUG_BUILD'
+  configuration="DevBuild"
+  app_name="Inline-Dev.app"
 fi
 
 xcodebuild_args=(
   -project "${ROOT_DIR}/apple/Inline.xcodeproj"
   -scheme "${SCHEME}"
-  -configuration Release
+  -configuration "${configuration}"
   -derivedDataPath "${DERIVED_DATA}"
   "SWIFT_ACTIVE_COMPILATION_CONDITIONS=${swift_conditions}"
   "FRAMEWORK_SEARCH_PATHS=${SPARKLE_FRAMEWORK_PATH}"
@@ -123,7 +127,7 @@ if [[ "${xcodebuild_ec}" -ne 0 ]]; then
   exit "${xcodebuild_ec}"
 fi
 
-APP_PATH="${DERIVED_DATA}/Build/Products/Release/Inline.app"
+APP_PATH="${DERIVED_DATA}/Build/Products/${configuration}/${app_name}"
 PLIST_PATH="${APP_PATH}/Contents/Info.plist"
 BUILD_NUMBER=$(git -C "${ROOT_DIR}" rev-list --count HEAD)
 INLINE_COMMIT=$(git -C "${ROOT_DIR}" rev-parse --short HEAD)
@@ -169,8 +173,8 @@ plist_set_integer() {
 plist_set_string "CFBundleVersion" "${BUILD_NUMBER}"
 plist_set_string "InlineCommit" "${INLINE_COMMIT}"
 if [[ "${DEBUG_BUILD}" == "1" ]]; then
-  plist_set_string "CFBundleDisplayName" "Inline (Dev Build)"
-  plist_set_string "CFBundleName" "Inline (Dev Build)"
+  plist_set_string "CFBundleDisplayName" "Inline-Dev"
+  plist_set_string "CFBundleName" "Inline-Dev"
 fi
 plist_set_string "SUPublicEDKey" "${SPARKLE_PUBLIC_KEY}"
 plist_set_string "SUFeedURL" "${APPCAST_URL}"
