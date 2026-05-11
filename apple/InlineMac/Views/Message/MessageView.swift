@@ -40,7 +40,8 @@ class MessageViewAppKit: NSView {
   private var translationStateCancellable: AnyCancellable?
   private var messageActionLoadingCancellable: AnyCancellable?
   private var messageActionAnsweredCancellable: AnyCancellable?
-  private var notionAccessCancellable: AnyCancellable?
+  private var didResolveMessageSpaceId = false
+  private var resolvedMessageSpaceId: Int64?
   private var from: User {
     fullMessage.from ?? User.deletedInstance
   }
@@ -67,7 +68,8 @@ class MessageViewAppKit: NSView {
 
   private func isMessagePinned() -> Bool {
     do {
-      return try AppDatabase.shared.reader.read { db in
+      let database = dependencies?.database ?? AppDatabase.shared
+      return try database.reader.read { db in
         try PinnedMessage
           .filter(Column("chatId") == message.chatId)
           .filter(Column("messageId") == message.messageId)
@@ -431,9 +433,15 @@ class MessageViewAppKit: NSView {
     guard props.layout.hasActionsRows, !renderableMessageActionRows.isEmpty else {
       messageActionRowsView?.removeFromSuperview()
       messageActionRowsView = nil
+      messageActionLoadingCancellable?.cancel()
+      messageActionLoadingCancellable = nil
+      messageActionAnsweredCancellable?.cancel()
+      messageActionAnsweredCancellable = nil
       clearMessageActionRowsConstraints()
       return
     }
+
+    ensureMessageActionStateObservation()
 
     let view = messageActionRowsView ?? MessageActionRowsView()
     if view.superview == nil {
@@ -455,7 +463,12 @@ class MessageViewAppKit: NSView {
     messageActionRowsView = view
   }
 
-  private func setupMessageActionStateObservation() {
+  private func ensureMessageActionStateObservation() {
+    guard messageActionLoadingCancellable == nil || messageActionAnsweredCancellable == nil else { return }
+
+    messageActionLoadingCancellable?.cancel()
+    messageActionAnsweredCancellable?.cancel()
+
     messageActionLoadingCancellable = MessageActionInteractionState.shared.loadingPublisher
       .receive(on: DispatchQueue.main)
       .sink { [weak self] _ in
@@ -838,7 +851,6 @@ class MessageViewAppKit: NSView {
     scrollState = isScrolling ? .scrolling : .idle
     super.init(frame: .zero)
     setupView()
-    setupNotionAccessObserver()
 
     DispatchQueue.main.async(qos: .userInitiated) { [weak self] in
       self?.setupScrollStateObserver()
@@ -940,7 +952,6 @@ class MessageViewAppKit: NSView {
 
     // Setup translation state observation
     setupTranslationStateObservation()
-    setupMessageActionStateObservation()
   }
 
   private func setupTranslationStateObservation() {
@@ -1401,14 +1412,20 @@ class MessageViewAppKit: NSView {
       return
     }
 
-    guard let chat = try? Chat.getByPeerId(peerId: targetPeer) else {
-      ToastCenter.shared.showError("You don't have access to that chat")
-      return
-    }
-
+    let database = dependencies?.database ?? AppDatabase.shared
     openChat(peer: targetPeer)
-    let chatState = ChatsManager.shared.get(for: targetPeer, chatId: chat.id)
-    chatState.scrollTo(msgId: forwardedMessageId, reason: .forwarded)
+
+    Task { @MainActor in
+      guard let chat = try? await database.reader.read({ db in
+        try Chat.getByPeerId(db: db, peerId: targetPeer)
+      }) else {
+        ToastCenter.shared.showError("You don't have access to that chat")
+        return
+      }
+
+      let chatState = ChatsManager.shared.get(for: targetPeer, chatId: chat.id)
+      chatState.scrollTo(msgId: forwardedMessageId, reason: .forwarded)
+    }
   }
 
   private func setupConstraints() {
@@ -1850,7 +1867,6 @@ class MessageViewAppKit: NSView {
 
   override func updateConstraints() {
     var skipUpdates = false
-    var didRebuildMessageActionRowConstraints = false
     if isInitialUpdateConstraint {
       setupConstraints()
       isInitialUpdateConstraint = false
@@ -1895,7 +1911,6 @@ class MessageViewAppKit: NSView {
         || hasUnexpectedSideConstraint
       {
         clearMessageActionRowsConstraints()
-        didRebuildMessageActionRowConstraints = true
 
         messageActionRowsWidthConstraint = messageActionRowsView.widthAnchor.constraint(
           equalToConstant: actionsRows.size.width
@@ -1927,9 +1942,8 @@ class MessageViewAppKit: NSView {
         || messageActionRowsTopConstraint != nil
         || messageActionRowsSideConstraint != nil
       {
-        didRebuildMessageActionRowConstraints = true
+        clearMessageActionRowsConstraints()
       }
-      clearMessageActionRowsConstraints()
     }
 
     // From this point on, only updates happen (no setup)
@@ -2450,17 +2464,9 @@ class MessageViewAppKit: NSView {
   // MARK: - Context Menu
 
   private func setupContextMenu() {
-    let newMenu = createMenu(context: .message)
+    let newMenu = NSMenu()
     newMenu.delegate = self
     menu = newMenu
-  }
-
-  private func setupNotionAccessObserver() {
-    notionAccessCancellable = NotionTaskService.shared.$hasAccess
-      .receive(on: DispatchQueue.main)
-      .sink { [weak self] _ in
-        self?.setupContextMenu()
-      }
   }
 
   @objc private func addReaction() {
@@ -2551,13 +2557,6 @@ class MessageViewAppKit: NSView {
   }
 
   private func chatPeerId() -> Peer {
-    do {
-      if let chat = try AppDatabase.shared.reader.read({ db in try Chat.fetchOne(db, id: message.chatId) }) {
-        return chat.peerId.toPeer()
-      }
-    } catch {
-      log.error("Failed to resolve chat peer for pin", error: error)
-    }
     return message.peerId
   }
 
@@ -2635,14 +2634,15 @@ class MessageViewAppKit: NSView {
   }
 
   private func openReplyThread(peer: Peer, dependencies: AppDependencies) {
-    if let nav2 = dependencies.nav2 {
-      nav2.navigate(to: .chat(peer: peer))
-    } else {
-      Nav.main.open(.chat(peer: peer))
-    }
+    dependencies.openChatRoute(peer: peer)
   }
 
   @objc private func forwardMessage() {
+    if let forwardMessages = dependencies?.forwardMessages {
+      forwardMessages.present(messages: [fullMessage])
+      return
+    }
+
     guard let window, let presentingController = window.contentViewController else { return }
 
     var dismissForwardSheet: (() -> Void)?
@@ -2744,11 +2744,52 @@ class MessageViewAppKit: NSView {
   }
 
   private func openChat(peer: Peer) {
-    if let nav2 = dependencies?.nav2 {
-      nav2.requestOpenChat(peer: peer, database: dependencies?.database ?? .shared)
-    } else {
+    guard let dependencies else {
       Nav.main.open(.chat(peer: peer))
+      return
     }
+
+    dependencies.requestOpenChat(peer: peer)
+  }
+
+  private func messageSpaceId() -> Int64? {
+    guard message.peerId.isThread else { return nil }
+    if didResolveMessageSpaceId {
+      return resolvedMessageSpaceId
+    }
+    do {
+      let database = dependencies?.database ?? AppDatabase.shared
+      guard let chat = try database.reader.read({ db in
+        try Chat.fetchOne(db, id: message.chatId)
+      }) else {
+        return nil
+      }
+      resolvedMessageSpaceId = chat.spaceId
+      didResolveMessageSpaceId = true
+      return resolvedMessageSpaceId
+    } catch {
+      log.error("Failed to resolve message chat space", error: error)
+      return nil
+    }
+  }
+
+  private func messageHasLinearAccess() -> Bool {
+    let service = LinearIntegrationService.shared
+
+    if message.peerId.isThread {
+      guard let spaceId = messageSpaceId() else { return false }
+      let connected = service.isConnected(spaceId: spaceId)
+      if connected == nil {
+        service.refresh(spaceId: spaceId)
+      }
+      return connected == true
+    }
+
+    let connected = service.isConnectedAnySpace()
+    if connected == nil {
+      service.refreshAnySpace()
+    }
+    return connected == true
   }
 
   @MainActor
@@ -2799,7 +2840,7 @@ class MessageViewAppKit: NSView {
 
     Task { @MainActor in
       let spaceId: Int64? = if message.peerId.isThread {
-        try? Chat.getByPeerId(peerId: message.peerId)?.spaceId
+        messageSpaceId()
       } else {
         nil
       }
@@ -2817,7 +2858,16 @@ class MessageViewAppKit: NSView {
     guard let window else { return }
 
     Task { @MainActor in
-      await LinearIssueCoordinator.shared.handleCreateLinearIssue(message: message, window: window)
+      let spaceId: Int64? = if message.peerId.isThread {
+        messageSpaceId()
+      } else {
+        nil
+      }
+      await LinearIssueCoordinator.shared.handleCreateLinearIssue(
+        message: message,
+        spaceId: spaceId,
+        window: window
+      )
     }
   }
 
@@ -2945,6 +2995,10 @@ class MessageViewAppKit: NSView {
 
     // update internal props
     self.fullMessage = fullMessage
+    if prev.message.chatId != fullMessage.message.chatId {
+      didResolveMessageSpaceId = false
+      resolvedMessageSpaceId = nil
+    }
     syncForwardHeaderView(for: props)
     syncMessageActionRowsView(message: fullMessage, props: props)
 
@@ -3030,11 +3084,6 @@ class MessageViewAppKit: NSView {
     // Experimental: I wanted to add this for external task attachments when created, but I'm just adding it here.
     // Force update constraints
     needsUpdateConstraints = true
-
-    DispatchQueue.main.async(qos: .utility) { [weak self] in
-      // As the message changes here, we need to update everything related to that. Otherwise we get wrong context menu.
-      self?.setupContextMenu()
-    }
   }
 
   func updateSize(props: MessageViewProps) {
@@ -3536,44 +3585,17 @@ extension MessageViewAppKit: NSMenuDelegate {
     }
 
     if regularMessage, !isAnchorMessage, hasText {
-      if message.peerId.isThread {
-        if let spaceId = (try? Chat.getByPeerId(peerId: message.peerId)?.spaceId) {
-          if LinearIntegrationService.shared.isConnected(spaceId: spaceId) == nil {
-            // Warm the cache for future menus. We'll only show the action once we know Linear is connected.
-            LinearIntegrationService.shared.refresh(spaceId: spaceId)
-          }
-
-          if LinearIntegrationService.shared.isConnected(spaceId: spaceId) == true {
-            let createLinearIssueItem = NSMenuItem(
-              title: "Create Linear Issue",
-              action: #selector(handleCreateLinearIssue),
-              keyEquivalent: ""
-            )
-            createLinearIssueItem.image = NSImage(
-              systemSymbolName: "circle.badge.plus",
-              accessibilityDescription: "Create Linear Issue"
-            )
-            integrationItems.append(createLinearIssueItem)
-          }
-        }
-      } else {
-        if LinearIntegrationService.shared.isConnectedAnySpace() == nil {
-          // Warm the cache for future menus. We'll only show the action once we know Linear is connected.
-          LinearIntegrationService.shared.refreshAnySpace()
-        }
-
-        if LinearIntegrationService.shared.isConnectedAnySpace() == true {
-          let createLinearIssueItem = NSMenuItem(
-            title: "Create Linear Issue",
-            action: #selector(handleCreateLinearIssue),
-            keyEquivalent: ""
-          )
-          createLinearIssueItem.image = NSImage(
-            systemSymbolName: "circle.badge.plus",
-            accessibilityDescription: "Create Linear Issue"
-          )
-          integrationItems.append(createLinearIssueItem)
-        }
+      if messageHasLinearAccess() {
+        let createLinearIssueItem = NSMenuItem(
+          title: "Create Linear Issue",
+          action: #selector(handleCreateLinearIssue),
+          keyEquivalent: ""
+        )
+        createLinearIssueItem.image = NSImage(
+          systemSymbolName: "circle.badge.plus",
+          accessibilityDescription: "Create Linear Issue"
+        )
+        integrationItems.append(createLinearIssueItem)
       }
     }
 

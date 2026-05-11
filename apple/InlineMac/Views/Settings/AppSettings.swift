@@ -154,12 +154,6 @@ final class AppSettings: ObservableObject {
 
   // MARK: - Experimental Settings
 
-  @Published var enableNewMacUI: Bool {
-    didSet {
-      UserDefaults.standard.set(enableNewMacUI, forKey: "enableNewMacUI")
-    }
-  }
-
   @Published var showMainTabStrip: Bool {
     didSet {
       UserDefaults.standard.set(showMainTabStrip, forKey: "showMainTabStrip")
@@ -222,7 +216,6 @@ final class AppSettings: ObservableObject {
     }
     disableNotificationSound = UserDefaults.standard.bool(forKey: "disableNotificationSound")
     showDockBadgeUnreadDMs = UserDefaults.standard.object(forKey: "showDockBadgeUnreadDMs") as? Bool ?? true
-    enableNewMacUI = UserDefaults.standard.bool(forKey: "enableNewMacUI")
     showMainTabStrip = UserDefaults.standard.object(forKey: "showMainTabStrip") as? Bool ?? false
     enableVoiceMessages = UserDefaults.standard.bool(forKey: ExperimentalFeatureFlags.voiceMessagesKey)
     enableReplyThreadMenuItems = UserDefaults.standard.bool(forKey: ExperimentalFeatureFlags.replyThreadMenuItemsKey)

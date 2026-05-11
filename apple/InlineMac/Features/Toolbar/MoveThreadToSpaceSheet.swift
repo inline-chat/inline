@@ -7,6 +7,7 @@ import SwiftUI
 struct MoveThreadToSpaceSheet: View {
   let chatId: Int64
   let nav2: Nav2?
+  let nav3: Nav3?
 
   @Environment(\.dismiss) private var dismiss
   @Environment(\.realtimeV2) private var realtimeV2
@@ -117,6 +118,12 @@ struct MoveThreadToSpaceSheet: View {
             await Task.yield()
             nav2.openSpace(space)
             nav2.requestOpenChat(peer: .thread(id: chatId), database: AppDatabase.shared)
+          }
+        } else if let nav3 {
+          Task { @MainActor in
+            await Task.yield()
+            nav3.selectSpace(space.id)
+            nav3.open(.chat(peer: .thread(id: chatId)))
           }
         }
       } catch {

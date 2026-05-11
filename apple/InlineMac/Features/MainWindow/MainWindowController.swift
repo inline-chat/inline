@@ -868,6 +868,17 @@ enum TopLevelRoute {
   case loading
   case onboarding
   case main
+
+  static func initial(for status: AuthStatus) -> TopLevelRoute {
+    switch status {
+    case .authenticated:
+      return .main
+    case .unauthenticated, .reauthRequired:
+      return .onboarding
+    case .hydrating, .locked:
+      return .loading
+    }
+  }
 }
 
 class MainWindowViewModel: ObservableObject {
@@ -877,7 +888,7 @@ class MainWindowViewModel: ObservableObject {
   private var transitionTask: Task<Void, Never>?
 
   init() {
-    topLevelRoute = Self.initialRoute(for: Auth.shared.getStatus())
+    topLevelRoute = TopLevelRoute.initial(for: Auth.shared.getStatus())
 
     // `Auth.status` is main actor-isolated; set up the subscription on the main actor.
     Task { @MainActor [weak self] in
@@ -895,17 +906,6 @@ class MainWindowViewModel: ObservableObject {
     transitionTask?.cancel()
     transitionTask = nil
     topLevelRoute = route
-  }
-
-  private static func initialRoute(for status: AuthStatus) -> TopLevelRoute {
-    switch status {
-    case .authenticated:
-      return .main
-    case .unauthenticated, .reauthRequired:
-      return .onboarding
-    case .hydrating, .locked:
-      return .loading
-    }
   }
 
   private func handle(status: AuthStatus) {

@@ -36,7 +36,6 @@ struct InlineButton<Label>: View
 
   @FocusState private var isFocused: Bool
   @State private var hovered: Bool = false
-  @State private var shineOffset: CGFloat = -200
 
   var body: some View {
     if #available(macOS 14.0, *) {
@@ -47,23 +46,17 @@ struct InlineButton<Label>: View
         .onHover {
           hovered = $0
         }
-        .overlay(shineOverlay)
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-        .onAppear {
-          if shiny {
-            startShineAnimation()
-          }
+        .overlay {
+          ButtonShineOverlay(active: shiny)
         }
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
     } else {
       Button(action: action, label: { label })
         .buttonStyle(GrayButtonStyle(size: size))
-        .overlay(shineOverlay)
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-        .onAppear {
-          if shiny {
-            startShineAnimation()
-          }
+        .overlay {
+          ButtonShineOverlay(active: shiny)
         }
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
     }
   }
 
@@ -75,32 +68,6 @@ struct InlineButton<Label>: View
         8
       case .large:
         10
-    }
-  }
-
-  @ViewBuilder
-  var shineOverlay: some View {
-    if shiny {
-      GeometryReader { geometry in
-        Image("shine")
-          .resizable()
-          .scaledToFit()
-          .frame(width: 150, height: geometry.size.height + 100)
-          .rotationEffect(.degrees(15))
-          .opacity(0.3)
-          .blendMode(.overlay)
-          .offset(x: shineOffset, y: -50)
-          .allowsHitTesting(false)
-      }
-    }
-  }
-
-  private func startShineAnimation() {
-    let animation = Animation.easeInOut(duration: 3.5)
-      .repeatForever(autoreverses: false)
-      .delay(0.4)
-    withAnimation(animation) {
-      shineOffset = 200
     }
   }
 
@@ -227,6 +194,40 @@ struct InlineButton<Label>: View
         })
         .scaleEffect(x: scale, y: scale)
         .animation(.mediumFeedback, value: animation)
+    }
+  }
+}
+
+struct ButtonShineOverlay: View {
+  let active: Bool
+
+  @State private var shineOffset: CGFloat = -200
+
+  var body: some View {
+    if active {
+      GeometryReader { geometry in
+        Image("shine")
+          .resizable()
+          .scaledToFit()
+          .frame(width: 150, height: geometry.size.height + 100)
+          .rotationEffect(.degrees(15))
+          .opacity(0.3)
+          .blendMode(.overlay)
+          .offset(x: shineOffset, y: -50)
+          .allowsHitTesting(false)
+      }
+      .onAppear {
+        startShineAnimation()
+      }
+    }
+  }
+
+  private func startShineAnimation() {
+    let animation = Animation.easeInOut(duration: 3.5)
+      .repeatForever(autoreverses: false)
+      .delay(0.4)
+    withAnimation(animation) {
+      shineOffset = 200
     }
   }
 }

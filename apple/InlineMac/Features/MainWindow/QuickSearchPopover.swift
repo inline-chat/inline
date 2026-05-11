@@ -32,6 +32,19 @@ private enum QuickSearchLayout {
   static let itemTextSpacing: CGFloat = 6
 }
 
+private enum QuickSearchSavedMessages {
+  static let title = "Saved Messages"
+
+  static func matches(query: String) -> Bool {
+    let title = Self.title.lowercased()
+    let tokens = query
+      .lowercased()
+      .split(whereSeparator: { $0.isWhitespace })
+    guard !tokens.isEmpty else { return false }
+    return tokens.allSatisfy { title.contains(String($0)) }
+  }
+}
+
 fileprivate enum QuickSearchLocalItem: Identifiable, Hashable {
   case thread(ThreadInfo)
   case user(User)
@@ -55,31 +68,30 @@ fileprivate enum QuickSearchLocalItem: Identifiable, Hashable {
   }
 }
 
+fileprivate extension Array where Element == QuickSearchLocalItem {
+  func containsUser(id: Int64) -> Bool {
+    contains { item in
+      if case let .user(user) = item {
+        return user.id == id
+      }
+      return false
+    }
+  }
+}
+
 fileprivate struct QuickSearchCommandContext: Equatable {
-  var route: Nav2Route?
-  var activeTab: TabId?
+  var activePeer: Peer?
+  var selectedSpaceId: Int64?
   var hasSelectedMessage: Bool
 
-  init(route: Nav2Route? = nil, activeTab: TabId? = nil, hasSelectedMessage: Bool = false) {
-    self.route = route
-    self.activeTab = activeTab
+  init(activePeer: Peer? = nil, selectedSpaceId: Int64? = nil, hasSelectedMessage: Bool = false) {
+    self.activePeer = activePeer
+    self.selectedSpaceId = selectedSpaceId
     self.hasSelectedMessage = hasSelectedMessage
   }
 
-  var activePeer: Peer? {
-    guard let route else { return nil }
-    if case let .chat(peer) = route {
-      return peer
-    }
-    return nil
-  }
-
   var hasOpenChat: Bool {
-    guard let route else { return false }
-    if case .chat = route {
-      return true
-    }
-    return false
+    activePeer != nil
   }
 
   var hasOpenThread: Bool {
@@ -87,11 +99,7 @@ fileprivate struct QuickSearchCommandContext: Equatable {
   }
 
   var hasSelectedSpace: Bool {
-    guard let activeTab else { return false }
-    if case .space = activeTab {
-      return true
-    }
-    return false
+    selectedSpaceId != nil
   }
 }
 
@@ -123,6 +131,7 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
 #if SPARKLE
   case checkForUpdates
 #endif
+  case backHome
   case newThread
   case renameThread
   case newSpace
@@ -139,6 +148,8 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
       case .checkForUpdates:
         "Check for Updates…"
 #endif
+      case .backHome:
+        "Back to Home"
       case .newThread:
         "New thread"
       case .renameThread:
@@ -160,6 +171,8 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
       case .checkForUpdates:
         "arrow.triangle.2.circlepath"
 #endif
+      case .backHome:
+        "house"
       case .newThread:
         "bubble.left.and.bubble.right.fill"
       case .renameThread:
@@ -177,6 +190,8 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
       case .checkForUpdates:
         ["check", "update", "updates", "upgrade", "version", "sparkle"]
 #endif
+      case .backHome:
+        ["home", "back", "workspace", "space", "main"]
       case .newThread:
         ["new", "thread", "chat", "message", "conversation"]
       case .renameThread:
@@ -194,6 +209,8 @@ fileprivate enum QuickSearchCommand: String, CaseIterable, Identifiable, Hashabl
       case .checkForUpdates:
         .always
 #endif
+      case .backHome:
+        .spaceSelected
       case .renameThread:
         .threadOpen
     }
@@ -217,10 +234,15 @@ final class QuickSearchViewModel: ObservableObject {
   let globalSearch: GlobalSearch
 
   private let dependencies: AppDependencies
+  private weak var nav3: Nav3?
+  private var openSettings: (() -> Void)?
   @Published private var spaceResults: [Space] = []
   @Published private var isSpaceSearching: Bool = false
   @Published private var commandContext = QuickSearchCommandContext()
+  @Published private var savedMessagesUser: User?
+  @Published private var isSavedMessagesSearching = false
   private var spaceSearchToken = UUID()
+  private var savedMessagesSearchToken = UUID()
   private var cancellables = Set<AnyCancellable>()
 
   init(dependencies: AppDependencies) {
@@ -231,8 +253,16 @@ final class QuickSearchViewModel: ObservableObject {
     bindCommandContext()
   }
 
+  func attach(nav3: Nav3, openSettings: @escaping () -> Void) {
+    if self.nav3 !== nav3 {
+      self.nav3 = nav3
+      bindCommandContext()
+    }
+    self.openSettings = openSettings
+  }
+
   fileprivate var localResults: [QuickSearchLocalItem] {
-    let locals = localSearch.results.map { result in
+    var locals = localSearch.results.map { result in
       switch result {
         case let .thread(threadInfo):
           return QuickSearchLocalItem.thread(threadInfo)
@@ -240,7 +270,12 @@ final class QuickSearchViewModel: ObservableObject {
           return QuickSearchLocalItem.user(user)
       }
     }
-    let spaces = spaceResults.map { QuickSearchLocalItem.space($0) }
+
+    if let savedMessagesUser, !locals.containsUser(id: savedMessagesUser.id) {
+      locals.insert(.user(savedMessagesUser), at: 0)
+    }
+
+    let spaces = supportsSpaceSelection ? spaceResults.map { QuickSearchLocalItem.space($0) } : []
     let commands = commandResults.map { QuickSearchLocalItem.command($0) }
     var items = locals
     items.append(contentsOf: spaces)
@@ -284,12 +319,16 @@ final class QuickSearchViewModel: ObservableObject {
   }
 
   var renderedGlobalResults: [GlobalSearchResult] {
-    let localUserIds = Set(localSearch.results.compactMap { result in
+    var localUserIds = Set(localSearch.results.compactMap { result in
       if case let .user(user) = result {
         return user.id
       }
       return nil
     })
+    if let savedMessagesUser {
+      localUserIds.insert(savedMessagesUser.id)
+    }
+
     let filtered = globalResults.filter { result in
       switch result {
         case let .users(user):
@@ -337,6 +376,7 @@ final class QuickSearchViewModel: ObservableObject {
 
   func performSearch() {
     localSearch.search(query: query)
+    searchSavedMessages(query: query)
     searchSpaces(query: query)
     globalSearch.updateQuery(query)
     selectedIndex = 0
@@ -349,6 +389,8 @@ final class QuickSearchViewModel: ObservableObject {
   func reset() {
     query = ""
     localSearch.search(query: "")
+    savedMessagesUser = nil
+    isSavedMessagesSearching = false
     spaceResults = []
     globalSearch.clear()
     selectedIndex = 0
@@ -387,19 +429,31 @@ final class QuickSearchViewModel: ObservableObject {
     switch result {
       case let .thread(threadInfo):
         Task { @MainActor in
-          await dependencies.nav2?.openChat(
-            peer: .thread(id: threadInfo.chat.id),
-            space: threadInfo.space
-          )
+          if let nav2 = dependencies.nav2 {
+            await nav2.openChat(
+              peer: .thread(id: threadInfo.chat.id),
+              space: threadInfo.space
+            )
+          } else {
+            dependencies.requestOpenChat(peer: .thread(id: threadInfo.chat.id))
+          }
           unarchiveIfNeeded(peer: .thread(id: threadInfo.chat.id))
         }
       case let .user(user):
         Task { @MainActor in
-          await dependencies.nav2?.openChat(peer: .user(id: user.id))
+          if let nav2 = dependencies.nav2 {
+            await nav2.openChat(peer: .user(id: user.id))
+          } else {
+            dependencies.requestOpenChat(peer: .user(id: user.id))
+          }
           unarchiveIfNeeded(peer: .user(id: user.id))
         }
       case let .space(space):
-        dependencies.nav2?.openSpace(space)
+        if let nav2 = dependencies.nav2 {
+          nav2.openSpace(space)
+        } else {
+          nav3?.selectSpace(space.id)
+        }
       case let .command(command):
         runCommand(command)
       case let .createThread(title, spaceId, _):
@@ -414,7 +468,11 @@ final class QuickSearchViewModel: ObservableObject {
         if hasDialog == false {
           try await dependencies.data.createPrivateChatWithOptimistic(user: user)
         }
-        await dependencies.nav2?.openChat(peer: .user(id: user.id))
+        if let nav2 = dependencies.nav2 {
+          await nav2.openChat(peer: .user(id: user.id))
+        } else {
+          dependencies.requestOpenChat(peer: .user(id: user.id))
+        }
         unarchiveIfNeeded(peer: .user(id: user.id))
       } catch {
         Log.shared.error("Failed to open a private chat with \(user.anyName)", error: error)
@@ -499,6 +557,7 @@ final class QuickSearchViewModel: ObservableObject {
 
   private var hasAnySearchResults: Bool {
     if localSearch.results.isEmpty == false { return true }
+    if savedMessagesUser != nil { return true }
     if spaceResults.isEmpty == false { return true }
     if renderedGlobalResults.isEmpty == false { return true }
     if commandResults.isEmpty == false { return true }
@@ -507,15 +566,50 @@ final class QuickSearchViewModel: ObservableObject {
 
   private var isSearchComplete: Bool {
     localSearch.isSearching == false &&
+      isSavedMessagesSearching == false &&
       isSpaceSearching == false &&
       globalSearch.isLoading == false &&
       error == nil
   }
 
   private var activeSpaceContext: (id: Int64, name: String?)? {
-    guard let activeTab = commandContext.activeTab else { return nil }
-    guard case let .space(id, name) = activeTab else { return nil }
-    return (id: id, name: name)
+    guard let spaceId = commandContext.selectedSpaceId else { return nil }
+    return (id: spaceId, name: nil)
+  }
+
+  private func searchSavedMessages(query: String) {
+    savedMessagesSearchToken = UUID()
+    let token = savedMessagesSearchToken
+    savedMessagesUser = nil
+
+    guard QuickSearchSavedMessages.matches(query: query) else {
+      isSavedMessagesSearching = false
+      return
+    }
+
+    if let currentUser = dependencies.rootData?.currentUser {
+      savedMessagesUser = currentUser
+      isSavedMessagesSearching = false
+      return
+    }
+
+    isSavedMessagesSearching = true
+
+    Task { @MainActor in
+      do {
+        let user = try await dependencies.database.reader.read { db in
+          try CurrentUser().fetch(db)?.user
+        }
+        guard savedMessagesSearchToken == token else { return }
+        savedMessagesUser = user
+        isSavedMessagesSearching = false
+      } catch {
+        Log.shared.error("Failed to search saved messages", error: error)
+        guard savedMessagesSearchToken == token else { return }
+        savedMessagesUser = nil
+        isSavedMessagesSearching = false
+      }
+    }
   }
 
   private func searchSpaces(query: String) {
@@ -554,29 +648,66 @@ final class QuickSearchViewModel: ObservableObject {
   private func runCommand(_ command: QuickSearchCommand) {
     switch command {
       case .settings:
-        SettingsWindowController.show(using: dependencies)
+        if let openSettings {
+          openSettings()
+        } else {
+          SettingsWindowController.show(using: dependencies)
+        }
 #if SPARKLE
       case .checkForUpdates:
         (NSApp.delegate as? AppDelegate)?.checkForUpdates(nil)
 #endif
+      case .backHome:
+        if let nav2 = dependencies.nav2,
+           let homeIndex = nav2.tabs.firstIndex(of: .home) {
+          nav2.setActiveTab(index: homeIndex)
+        } else {
+          nav3?.selectHome()
+        }
       case .newThread:
-        NewThreadAction.start(dependencies: dependencies, spaceId: dependencies.nav2?.activeSpaceId)
+        if let nav2 = dependencies.nav2 {
+          NewThreadAction.start(dependencies: dependencies, spaceId: nav2.activeSpaceId)
+        } else {
+          nav3?.open(.newChat(spaceId: commandContext.selectedSpaceId))
+        }
       case .renameThread:
-        NotificationCenter.default.post(name: .renameThread, object: nil)
+        if MainWindowOpenCoordinator.shared.renameThread() == false {
+          NotificationCenter.default.post(name: .renameThread, object: nil)
+        }
       case .newSpace:
-        dependencies.nav2?.navigate(to: .createSpace)
+        if let nav2 = dependencies.nav2 {
+          nav2.navigate(to: .createSpace)
+        } else {
+          nav3?.open(.createSpace)
+        }
     }
   }
 
   private func bindCommandContext() {
-    guard let nav2 = dependencies.nav2 else { return }
     withObservationTracking { [weak self] in
       guard let self else { return }
-      let context = QuickSearchCommandContext(
-        route: nav2.currentRoute,
-        activeTab: nav2.activeTab,
-        hasSelectedMessage: false
-      )
+      let context: QuickSearchCommandContext
+      if let nav2 = dependencies.nav2 {
+        let activePeer: Peer?
+        switch nav2.currentRoute {
+        case let .chat(peer), let .chatInfo(peer):
+          activePeer = peer
+        default:
+          activePeer = nil
+        }
+
+        context = QuickSearchCommandContext(
+          activePeer: activePeer,
+          selectedSpaceId: nav2.activeSpaceId,
+          hasSelectedMessage: false
+        )
+      } else {
+        context = QuickSearchCommandContext(
+          activePeer: nav3?.currentRoute.selectedPeer,
+          selectedSpaceId: nav3?.selectedSpaceId,
+          hasSelectedMessage: false
+        )
+      }
       if commandContext != context {
         commandContext = context
       }
@@ -589,6 +720,10 @@ final class QuickSearchViewModel: ObservableObject {
 
   private var trimmedQuery: String {
     query.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private var supportsSpaceSelection: Bool {
+    dependencies.nav2 != nil || nav3 != nil
   }
 
   private func localScore(
@@ -624,12 +759,16 @@ final class QuickSearchViewModel: ObservableObject {
           .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
           .filter { $0.isEmpty == false }
           .joined(separator: " ")
-        return [
+        var fields = [
           QuickSearchSearchField(value: user.displayName, boost: 700),
           QuickSearchSearchField(value: fullName, boost: 600),
           QuickSearchSearchField(value: user.username ?? "", boost: 520),
           QuickSearchSearchField(value: user.email ?? "", boost: 480)
         ]
+        if user.isCurrentUser() {
+          fields.insert(QuickSearchSearchField(value: QuickSearchSavedMessages.title, boost: 760), at: 0)
+        }
+        return fields
       case let .space(space):
         return [
           QuickSearchSearchField(value: space.displayName, boost: 700),
@@ -672,7 +811,7 @@ final class QuickSearchViewModel: ObservableObject {
       case let .thread(threadInfo):
         threadInfo.chat.humanReadableTitle ?? ""
       case let .user(user):
-        user.displayName
+        user.isCurrentUser() ? QuickSearchSavedMessages.title : user.displayName
       case let .space(space):
         space.displayName
       case let .command(command):
@@ -784,10 +923,15 @@ struct QuickSearchOverlayView: View {
       }
     }
     .overlay(shape.strokeBorder(Color.primary.opacity(0.08)))
-    .shadow(color: Color.black.opacity(0.18), radius: 24, x: 0, y: 10)
+    .shadow(color: Color.black.opacity(0.12), radius: 24, x: 0, y: 10)
     .onAppear {
       isFocused = true
       notifySizeChange()
+    }
+    .onChange(of: isFocused) { focused in
+      if !focused {
+        onDismiss()
+      }
     }
     .onChange(of: viewModel.focusToken) { _ in
       isFocused = true
@@ -1081,22 +1225,26 @@ private struct QuickSearchRow: View {
               }
 
             case let .user(user):
-              SidebarChatIcon(peer: .user(UserInfo(user: user)), size: QuickSearchLayout.iconSize)
+              let isSavedMessages = user.isCurrentUser()
+              SidebarChatIcon(
+                peer: isSavedMessages ? .savedMessage(user) : .user(UserInfo(user: user)),
+                size: QuickSearchLayout.iconSize
+              )
                 .frame(
                   width: QuickSearchLayout.iconContainerSize,
                   height: QuickSearchLayout.iconContainerSize,
                   alignment: .center
                 )
               HStack(spacing: QuickSearchLayout.itemTextSpacing) {
-                Text(user.displayName)
+                Text(isSavedMessages ? QuickSearchSavedMessages.title : user.displayName)
                   .lineLimit(1)
-                if let username = user.username {
+                if !isSavedMessages, let username = user.username {
                   Text("@\(username)")
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 }
                 Spacer(minLength: 0)
-                Text("User")
+                Text(isSavedMessages ? "Chat" : "User")
                   .foregroundStyle(.secondary)
                   .lineLimit(1)
               }

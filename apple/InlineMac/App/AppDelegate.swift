@@ -10,14 +10,24 @@ import Sentry
 import SwiftUI
 import UserNotifications
 
+#if DEVBUILD_REQUIRES_SCRIPT && !DEBUG_BUILD
+  #error("DevBuild must be built through scripts/macos/build-local-app.sh or macOS release scripts.")
+#endif
+
 class AppDelegate: NSObject, NSApplicationDelegate {
-  // Main Window
-  private var mainWindowController: NSWindowController?
+  private var didHandleInitialActivation = false
 
   @MainActor private let dockBadgeService = DockBadgeService()
 
   // Common Dependencies
-  @MainActor private var dependencies = AppDependencies()
+  @MainActor private(set) lazy var dependencies: AppDependencies = {
+    var deps = AppDependencies()
+    deps.logOut = { [weak self] in
+      guard let self else { return }
+      await self.performLogOut()
+    }
+    return deps
+  }()
 
   @MainActor private var globalFocusHotkeyController: GlobalFocusHotkeyController?
 
@@ -29,7 +39,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   // --
   let notifications = NotificationsManager()
-  let navigation: NavigationModel = .shared
   let log = Log.scoped("AppDelegate")
 
   private var cancellables = Set<AnyCancellable>()
@@ -37,24 +46,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   private var didShowRealtimeConnectionFailureAlert = false
 
   func applicationWillFinishLaunching(_: Notification) {
-    // Disable native tabbing
-    NSWindow.allowsAutomaticWindowTabbing = false
+    NSWindow.allowsAutomaticWindowTabbing = true
 
     registerMacGlobalSettings()
 
     // Setup Notifications Delegate
     setupNotifications()
 
-    dependencies.logOut = { [weak self] in
-      await self?.logOut()
-    }
+    _ = dependencies
   }
 
   func applicationDidFinishLaunching(_: Notification) {
     initializeServices()
     setupAppearanceSetting()
-    setupMainWindow()
     setupMainMenu()
+    registerMainWindowCoordinator()
     setupRealtimeConnectionFailureObserver()
     setupRealtimeAuthInvalidatedObserver()
     setupGlobalFocusHotkey()
@@ -87,6 +93,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         try? await DataManager.shared.updateTimezone()
       }
     }
+  }
+
+  @MainActor
+  @objc func openNewMainWindow(_ sender: Any?) {
+    MainWindowSwiftUIWindowController.newWindow(dependencies: dependencies, sender: sender)
   }
 
 #if SPARKLE
@@ -133,7 +144,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 //        try? await DataManager.shared.updateStatus(online: true)
 //      }
 //    }
+    if !didHandleInitialActivation {
+      didHandleInitialActivation = true
+      if MainWindowSwiftUIWindowController.all.isEmpty {
+        setupMainWindow()
+      }
+      refetchSessionAfterActivationIfNeeded()
+      return
+    }
+
     restoreMainWindowAfterActivationIfNeeded()
+    refetchSessionAfterActivationIfNeeded()
   }
 
   private func registerMacGlobalSettings() {
@@ -144,26 +165,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
       // Disable macOS SMS one-time-code autofill heuristics inside Inline inputs.
       "NSAutoFillHeuristicControllerEnabled": false,
+
+      "showSidebarMessagePreview": true,
     ])
   }
 
   @MainActor private func setupMainWindow() {
-    // If window controller exists but window is closed
-    if let windowController = mainWindowController {
-      windowController.showWindow(nil)
-      windowController.window?.makeKeyAndOrderFront(nil)
-      return
-    }
-
-    // Create new window controller if it doesn't exist
-    let controller: NSWindowController
-    if AppSettings.shared.enableNewMacUI {
-      controller = MainWindowController(dependencies: dependencies)
-    } else {
-      controller = LegacyMainWindowController(dependencies: dependencies)
-    }
-    controller.showWindow(nil)
-    mainWindowController = controller
+    MainWindowSwiftUIWindowController.showDefault(dependencies: dependencies)
   }
 
   /// CMD+Tab can activate the app without triggering `applicationShouldHandleReopen`.
@@ -175,7 +183,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     guard !hasVisibleWindows else { return }
 
     setupMainWindow()
-    mainWindowController?.window?.makeKeyAndOrderFront(nil)
+  }
+
+  @MainActor private func refetchSessionAfterActivationIfNeeded() {
+    guard dependencies.viewModel.topLevelRoute == .main else { return }
+    dependencies.session.refetchChats(dependencies: dependencies)
   }
 
   /// Bring Inline to the front and ensure the main window exists.
@@ -184,7 +196,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     if app.isHidden {
       _ = app.unhide()
     }
-    _ = app.activate(options: [.activateIgnoringOtherApps, .activateAllWindows])
+    NSApp.activate(ignoringOtherApps: true)
+    NSApp.arrangeInFront(nil)
     setupMainWindow()
   }
 
@@ -225,8 +238,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   func applicationShouldHandleReopen(_: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
     if !flag {
-      setupMainWindow()
+      showAndFocusMainWindow()
+      return false
     }
+
     return true
   }
 
@@ -258,6 +273,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       case "user":
         handleUserURL(pathComponents: pathComponents)
       case "integrations":
+        showAndFocusMainWindow()
         NotificationCenter.default.post(name: .integrationCallback, object: url)
       default:
         log.warning("Unhandled URL host: \(url.host ?? "nil")")
@@ -280,11 +296,77 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Navigate to the user chat
     let peer: Peer = .user(id: userId)
-    if let nav2 = dependencies.nav2 {
-      nav2.requestOpenChat(peer: peer, database: dependencies.database)
-    } else {
-      dependencies.nav.open(.chat(peer: peer))
+    openChat(peer: peer)
+  }
+
+  @MainActor private func openChat(peer: Peer) {
+    guard Auth.shared.getIsLoggedIn(), dependencies.viewModel.topLevelRoute == .main else {
+      MainWindowOpenCoordinator.shared.openOnboarding()
+      return
     }
+
+    MainWindowOpenCoordinator.shared.openWindow(.chat(peer: peer))
+  }
+
+  @MainActor private func registerMainWindowCoordinator() {
+    MainWindowOpenCoordinator.shared.register(
+      openMainWindow: { [weak self] in
+        Task { @MainActor in
+          self?.openMainWindowFromCoordinator()
+        }
+      },
+      openOnboardingWindow: { [weak self] in
+        Task { @MainActor in
+          self?.showOnboardingWindow()
+        }
+      }
+    )
+  }
+
+  @MainActor private func openMainWindowFromCoordinator() {
+    let destination = MainWindowOpenCoordinator.shared.consumePendingDestination()
+    if let destination {
+      MainWindowSwiftUIWindowController.newWindow(dependencies: dependencies, destination: destination)
+      return
+    }
+
+    setupMainWindow()
+  }
+
+  @MainActor private func showOnboardingWindow() {
+    dependencies.viewModel.navigate(.onboarding)
+    showAndFocusMainWindow()
+  }
+
+  @MainActor
+  func clearCacheAndResetApp() async throws {
+    let restoreRoute = TopLevelRoute.initial(for: Auth.shared.getStatus())
+
+    dependencies.session.reset()
+    dependencies.viewModel.navigate(.loading)
+    MainWindowSwiftUIWindowController.resetAllNavigation()
+
+    await Task.yield()
+
+    do {
+      await Api.realtime.clearSyncState()
+      Transactions.shared.clearAll()
+      ObjectCache.shared.clear()
+      try await FileCache.shared.clearCache()
+      try AppDatabase.clearDB()
+    } catch {
+      dependencies.viewModel.navigate(restoreRoute)
+      throw error
+    }
+
+    dependencies.navigation.reset()
+    dependencies.nav.reset()
+
+    MainWindowSwiftUIWindowController.closeAll()
+    MainWindowOpenCoordinator.shared.resetWindows()
+
+    dependencies.viewModel.navigate(restoreRoute)
+    setupMainWindow()
   }
 
   private func initializeServices() {
@@ -315,7 +397,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
   @objc private func handleRealtimeAuthInvalidatedNotification() {
     Task { [weak self] in
-      await self?.logOut(notifyServer: false)
+      await self?.performLogOut(notifyServer: false)
     }
   }
 
@@ -386,7 +468,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Observe setting changes
     AppSettings.shared.$disableNotificationSound
-      .sink { [weak self] disableSound in
+      .sink { disableSound in
         Task {
           await MacNotifications.shared.setSoundEnabled(!disableSound)
         }
@@ -463,11 +545,7 @@ extension AppDelegate {
       Task(priority: .userInitiated) { @MainActor in
         NSApp.activate(ignoringOtherApps: true)
         setupMainWindow()
-        if let controller = self.mainWindowController as? MainWindowController {
-          await controller.openChatFromNotification(peer: peerId)
-        } else {
-          self.dependencies.nav.open(.chat(peer: peerId))
-        }
+        self.openChat(peer: peerId)
         await self.unarchiveIfNeeded(peer: peerId)
       }
     } else {
@@ -537,35 +615,36 @@ extension AppDelegate {
     AppMenu.shared.setupMainMenu(dependencies: dependencies)
   }
 
-  private func logOut(notifyServer: Bool = true) async {
+  @MainActor
+  func performLogOut(notifyServer: Bool = true) async {
     // Navigate outside of the app
-    DispatchQueue.main.async {
-      self.dependencies.viewModel.navigate(.onboarding)
+    dependencies.viewModel.navigate(.onboarding)
 
-      // Reset internal navigation
-      self.dependencies.navigation.reset()
-      self.dependencies.nav.reset()
+    // Reset internal navigation
+    dependencies.navigation.reset()
+    dependencies.nav.reset()
+
+    MainWindowOpenCoordinator.shared.openOnboarding()
+
+    if notifyServer {
+      _ = try? await ApiClient.shared.logout()
     }
 
-    Task {
-      if notifyServer {
-        _ = try? await ApiClient.shared.logout()
-      }
+    Analytics.logout()
 
-      Analytics.logout()
+    // Clear database
+    try? AppDatabase.loggedOut()
 
-      // Clear database
-      try? AppDatabase.loggedOut()
+    // Clear creds
+    await Auth.shared.logOut()
 
-      // Clear creds
-      await Auth.shared.logOut()
+    // Clear transactions
+    Transactions.shared.clearAll()
+    ObjectCache.shared.clear()
+    dependencies.session.reset()
 
-      // Clear transactions
-      Transactions.shared.clearAll()
-
-      // Stop WebSocket
-      await dependencies.realtime.loggedOut()
-    }
+    // Stop WebSocket
+    await dependencies.realtime.loggedOut()
   }
 }
 

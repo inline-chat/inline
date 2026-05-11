@@ -5,6 +5,7 @@ import Logger
 import SwiftUI
 import Throttler
 import Translation
+import os.signpost
 
 class MessageListAppKit: NSViewController {
   // Data
@@ -14,6 +15,7 @@ class MessageListAppKit: NSViewController {
   private var chatId: Int64 { chat?.id ?? 0 }
   private let chatRows: ChatRowListViewModel
   private let showUnreadAfter: Int64?
+  private let initialPinnedMessage: PreparedPinnedMessage?
   var viewModel: MessagesProgressiveViewModel { chatRows.progressiveViewModel }
   private var messages: [FullMessage] { chatRows.messages }
   private var state: ChatState
@@ -42,10 +44,20 @@ class MessageListAppKit: NSViewController {
 
   // Debugging
   private var debug_slowAnimation = false
+  private static let signpostLog = OSLog(subsystem: "InlineMac", category: "PointsOfInterest")
+  private var viewDidLayoutCount = 0
+  private var heightRecalcCount = 0
+  private var madeMessageCellCount = 0
+  private var rowHeightQueryCount = 0
 
   private var suppressResizeScrollMaintenance = false
 
   private var eventMonitorTask: Task<Void, Never>?
+  private var integrationCheckTask: Task<Void, Never>?
+  private var remoteOlderTask: Task<Void, Never>?
+  private var loadBatchTask: Task<Void, Never>?
+  private var heightPrecalcTask: Task<Void, Never>?
+  private var readAllTask: Task<Void, Never>?
   private var cancellables: Set<AnyCancellable> = []
 
   // Translation system
@@ -62,12 +74,14 @@ class MessageListAppKit: NSViewController {
     peerId: Peer,
     chat: Chat,
     showUnreadAfter: Int64? = nil,
-    initialState: MessagesProgressiveViewModel.InitialState? = nil
+    initialState: MessagesProgressiveViewModel.InitialState? = nil,
+    initialPinnedMessage: PreparedPinnedMessage? = nil
   ) {
     self.dependencies = dependencies
     self.peerId = peerId
     self.chat = chat
     self.showUnreadAfter = showUnreadAfter
+    self.initialPinnedMessage = initialPinnedMessage
     chatRows = ChatRowListViewModel(peer: peerId, initialState: initialState)
     messageRenderStyle = AppSettings.shared.messageRenderStyle
     state = ChatsManager
@@ -78,6 +92,8 @@ class MessageListAppKit: NSViewController {
     translationViewModel = TranslationViewModel(peerId: peerId)
 
     super.init(nibName: nil, bundle: nil)
+
+    pinnedHeaderHeight = initialPinnedMessage == nil ? 0 : PinnedMessageHeaderView.preferredHeight
 
     appActivityObserverId = AppActivityMonitor.shared.addObserver { [weak self] state in
       guard let self else { return }
@@ -162,7 +178,12 @@ class MessageListAppKit: NSViewController {
   private var pinnedHeaderTopConstraint: NSLayoutConstraint?
   private var pinnedHeaderHeightConstraint: NSLayoutConstraint?
   private lazy var pinnedHeaderView: PinnedMessageHeaderView = {
-    let view = PinnedMessageHeaderView(dependencies: dependencies, peerId: peerId, chatId: chatId)
+    let view = PinnedMessageHeaderView(
+      dependencies: dependencies,
+      peerId: peerId,
+      chatId: chatId,
+      initialPinnedMessage: initialPinnedMessage
+    )
     view.onHeightChange = { [weak self] height in
       guard let self else { return }
       pinnedHeaderHeight = height
@@ -264,7 +285,6 @@ class MessageListAppKit: NSViewController {
     scroll.backgroundColor = .clear
     scroll.translatesAutoresizingMaskIntoConstraints = false
     scroll.documentView = tableView
-    scroll.hasVerticalScroller = true
     scroll.scrollerStyle = .overlay
     scroll.autoresizesSubviews = true // NEW
 
@@ -315,8 +335,11 @@ class MessageListAppKit: NSViewController {
 
     log.trace("viewDidLoad for chat \(chatId)")
 
-    Task { [weak self] in
+    integrationCheckTask?.cancel()
+    integrationCheckTask = Task { [weak self] in
       guard let self, let chat else { return }
+      await Task.yield()
+      guard !Task.isCancelled else { return }
       await NotionTaskService.shared.checkIntegrationAccess(peerId: peerId, spaceId: chat.spaceId)
     }
   }
@@ -347,7 +370,7 @@ class MessageListAppKit: NSViewController {
     // TODO: extract insets logic from bottom here.
   }
 
-  private var toolbarHeight: CGFloat = AppSettings.shared.enableNewMacUI ? Theme.toolbarHeight : 52
+  private var toolbarHeight: CGFloat = Theme.toolbarHeight
 
   // This fixes the issue with the toolbar messing up initial content insets on window open. Now we call it on did
   // layout and it fixes the issue.
@@ -856,9 +879,7 @@ class MessageListAppKit: NSViewController {
   private var needsInitialScroll = true
 
   private func hideScrollbars() {
-    scrollView.hasVerticalScroller = false
-    scrollView.verticalScroller?.isHidden = true
-    scrollView.verticalScroller?.alphaValue = 0.0
+    // Keep native overlay scrollers available during initial scroll positioning.
   }
 
   private func enableScrollbars() {
@@ -868,6 +889,25 @@ class MessageListAppKit: NSViewController {
   }
 
   override func viewDidLayout() {
+    viewDidLayoutCount += 1
+    let shouldSignpost = viewDidLayoutCount <= 40
+    let signpostID = OSSignpostID(log: Self.signpostLog)
+    if shouldSignpost {
+      os_signpost(
+        .begin,
+        log: Self.signpostLog,
+        name: "MessageListViewDidLayout",
+        signpostID: signpostID,
+        "%{public}s",
+        "count=\(viewDidLayoutCount) width=\(tableWidth()) rows=\(tableView.numberOfRows) messages=\(messages.count) initial=\(needsInitialScroll)"
+      )
+    }
+    defer {
+      if shouldSignpost {
+        os_signpost(.end, log: Self.signpostLog, name: "MessageListViewDidLayout", signpostID: signpostID)
+      }
+    }
+
     super.viewDidLayout()
     #if DEBUG
     log.trace("viewDidLayout() called, width=\(tableWidth())")
@@ -1035,14 +1075,17 @@ class MessageListAppKit: NSViewController {
     loadingRemoteOlderBatch = true
     lastRemoteOlderCursor = beforeMessageId
 
-    Task { [weak self] in
+    remoteOlderTask?.cancel()
+    remoteOlderTask = Task { [weak self] in
       guard let self else { return }
       defer { loadingRemoteOlderBatch = false }
 
       do {
+        guard !Task.isCancelled else { return }
         let rpcResult = try await Api.realtime.send(
           .getChatHistory(peer: peerId, offsetID: beforeMessageId, limit: remoteOlderLimit())
         )
+        guard !Task.isCancelled else { return }
 
         guard let rpcResult, case let .getChatHistory(result) = rpcResult else {
           return
@@ -1058,8 +1101,11 @@ class MessageListAppKit: NSViewController {
         }
 
         await MainActor.run { [weak self] in
+          guard Task.isCancelled == false else { return }
           self?.loadBatch(at: .older)
         }
+      } catch is CancellationError {
+        return
       } catch {
         log.error("Failed to load older messages from remote", error: error)
       }
@@ -1072,13 +1118,20 @@ class MessageListAppKit: NSViewController {
     if loadingBatch { return }
     loadingBatch = true
 
-    Task { [weak self] in
+    loadBatchTask?.cancel()
+    loadBatchTask = Task { [weak self] in
       guard let self else { return }
+      defer { loadBatchTask = nil }
+      guard !Task.isCancelled else {
+        loadingBatch = false
+        return
+      }
       let oldestMessageIdBeforeLoad = messages.first?.message.messageId
       var didInsertRows = false
       // Preserve scroll position from bottom if we're loading at top
       maintainingBottomScroll { [weak self] in
         guard let self else { return false }
+        guard !Task.isCancelled else { return false }
 
         log.trace("Loading batch at top")
         chatRows.loadBatch(at: direction, publish: false)
@@ -1110,6 +1163,7 @@ class MessageListAppKit: NSViewController {
 
       loadingBatch = false
 
+      guard !Task.isCancelled else { return }
       guard !didInsertRows else { return }
       guard direction == .older else { return }
       guard let oldestMessageIdBeforeLoad else { return }
@@ -1378,6 +1432,8 @@ class MessageListAppKit: NSViewController {
     duringLiveResize: Bool = false,
     maintainScroll: Bool = true
   ) {
+    heightRecalcCount += 1
+
     #if DEBUG
     log.trace("Recalculating heights on width change")
     #endif
@@ -1406,6 +1462,23 @@ class MessageListAppKit: NSViewController {
 
     // First, immediately update visible rows
     let rowsToUpdate = IndexSet(integersIn: visibleStartIndex ..< visibleEndIndex)
+    let shouldSignpost = heightRecalcCount <= 80
+    let signpostID = OSSignpostID(log: Self.signpostLog)
+    if shouldSignpost {
+      os_signpost(
+        .begin,
+        log: Self.signpostLog,
+        name: "MessageListHeightRecalc",
+        signpostID: signpostID,
+        "%{public}s",
+        "count=\(heightRecalcCount) rows=\(rowsToUpdate.count) width=\(tableWidth()) initial=\(needsInitialScroll) live=\(duringLiveResize) maintain=\(maintainScroll)"
+      )
+    }
+    defer {
+      if shouldSignpost {
+        os_signpost(.end, log: Self.signpostLog, name: "MessageListHeightRecalc", signpostID: signpostID)
+      }
+    }
 
     #if DEBUG
     log.trace("Rows to update: \(rowsToUpdate)")
@@ -1477,9 +1550,11 @@ class MessageListAppKit: NSViewController {
         rowsToUpdate = IndexSet(integersIn: visibleRange.location ..< visibleRange.location + visibleRange.length)
     }
 
-    Task(priority: .userInitiated) { [weak self] in
+    heightPrecalcTask?.cancel()
+    heightPrecalcTask = Task(priority: .userInitiated) { [weak self] in
       guard let self else { return }
       for row in rowsToUpdate {
+        guard !Task.isCancelled else { return }
         guard let message = message(forRow: row) else { continue }
         let props = messageProps(for: row)
         let _ = calculateSize(for: message, with: props, tableWidth: width_)
@@ -1637,7 +1712,13 @@ class MessageListAppKit: NSViewController {
   // MARK: - Unread
 
   func readAll() {
-    Task {
+    let peerId = peerId
+    let chatId = chatId
+
+    readAllTask?.cancel()
+    readAllTask = Task {
+      await Task.yield()
+      guard !Task.isCancelled else { return }
       UnreadManager.shared.readAll(peerId, chatId: chatId)
     }
   }
@@ -1809,12 +1890,31 @@ extension MessageListAppKit: NSTableViewDelegate {
     stableId: Int64,
     row: Int
   ) -> NSView? {
+    madeMessageCellCount += 1
+    let shouldSignpost = madeMessageCellCount <= 160
+    let signpostID = OSSignpostID(log: Self.signpostLog)
+    if shouldSignpost {
+      os_signpost(
+        .begin,
+        log: Self.signpostLog,
+        name: "MessageCellMake",
+        signpostID: signpostID,
+        "%{public}s",
+        "count=\(madeMessageCellCount) row=\(row)"
+      )
+    }
+    defer {
+      if shouldSignpost {
+        os_signpost(.end, log: Self.signpostLog, name: "MessageCellMake", signpostID: signpostID)
+      }
+    }
+
     guard let messageAndIndex = messageAndIndex(forStableId: stableId) else { return nil }
     let message = messageAndIndex.message
 
     let identifier = NSUserInterfaceItemIdentifier("MessageCell")
-    let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? MessageTableCell
-      ?? MessageTableCell()
+    let reusedView = tableView.makeView(withIdentifier: identifier, owner: nil)
+    let cell = reusedView as? MessageTableCell ?? MessageTableCell()
     cell.identifier = identifier
     cell.setDependencies(dependencies)
 
@@ -1891,6 +1991,25 @@ extension MessageListAppKit: NSTableViewDelegate {
     guard let item = rowItem(at: row) else {
       return defaultRowHeight
     }
+    rowHeightQueryCount += 1
+    let shouldSignpost = rowHeightQueryCount <= 200
+    let signpostID = OSSignpostID(log: Self.signpostLog)
+    if shouldSignpost {
+      os_signpost(
+        .begin,
+        log: Self.signpostLog,
+        name: "MessageRowHeight",
+        signpostID: signpostID,
+        "%{public}s",
+        "count=\(rowHeightQueryCount) row=\(row)"
+      )
+    }
+    defer {
+      if shouldSignpost {
+        os_signpost(.end, log: Self.signpostLog, name: "MessageRowHeight", signpostID: signpostID)
+      }
+    }
+
     #if DEBUG
     log.trace("Noting height change for row \(row)")
     #endif
@@ -2208,6 +2327,16 @@ extension MessageListAppKit {
     // Cancel any tasks
     eventMonitorTask?.cancel()
     eventMonitorTask = nil
+    integrationCheckTask?.cancel()
+    integrationCheckTask = nil
+    remoteOlderTask?.cancel()
+    remoteOlderTask = nil
+    loadBatchTask?.cancel()
+    loadBatchTask = nil
+    heightPrecalcTask?.cancel()
+    heightPrecalcTask = nil
+    readAllTask?.cancel()
+    readAllTask = nil
     deferredTranslationTask?.cancel()
     deferredTranslationTask = nil
 

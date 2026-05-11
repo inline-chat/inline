@@ -4,6 +4,8 @@ struct Onboarding: View {
   @EnvironmentObject var windowViewModel: MainWindowViewModel
   @StateObject var viewModel = OnboardingViewModel()
 
+  var usesWindowContainerBackground = false
+
   var routeTransition1: AnyTransition = .asymmetric(
     insertion: .push(from: .trailing),
     removal: .push(from: .trailing)
@@ -24,19 +26,7 @@ struct Onboarding: View {
 
   var body: some View {
     ZStack {
-      VisualEffectView(material: .popover, blendingMode: .behindWindow)
-        .overlay {
-          LinearGradient(
-            colors: [
-              .white.opacity(0.0),
-              .white.opacity(0.05),
-              .white.opacity(0.0),
-            ],
-            startPoint: .topTrailing,
-            endPoint: .bottomLeading,
-          )
-        }
-        .ignoresSafeArea(edges: .all)
+      background
 
       switch viewModel.path.last {
         case .welcome:
@@ -79,6 +69,32 @@ struct Onboarding: View {
     .task {
       viewModel.setMainWindowViewModel(windowViewModel)
     }
+  }
+
+  @ViewBuilder
+  private var background: some View {
+    Group {
+      if usesWindowContainerBackground {
+        Color.clear
+          .contentShape(Rectangle())
+          .gesture(WindowDragGesture())
+          .allowsWindowActivationEvents(true)
+      } else {
+        VisualEffectView(material: .popover, blendingMode: .behindWindow)
+      }
+    }
+    .overlay {
+      LinearGradient(
+        colors: [
+          .white.opacity(0.0),
+          .white.opacity(0.05),
+          .white.opacity(0.0),
+        ],
+        startPoint: .topTrailing,
+        endPoint: .bottomLeading,
+      )
+    }
+    .ignoresSafeArea(edges: .all)
   }
 }
 

@@ -4,13 +4,14 @@ import GRDB
 import InlineKit
 import Logger
 import SwiftUI
+import os.signpost
 
 private let pinnedHeaderCornerRadius: CGFloat = 14
 
 final class PinnedMessageHeaderView: NSView {
   private enum Constants {
     static let horizontalPadding: CGFloat = 8
-    static let verticalPadding: CGFloat = 16
+    static let verticalPadding: CGFloat = 2
     static let contentSpacing: CGFloat = 8
     static let closeButtonSize: CGFloat = EmbedMessageView.height
     static let fadeDuration: TimeInterval = 0.2
@@ -22,6 +23,7 @@ final class PinnedMessageHeaderView: NSView {
   private let chatId: Int64
   private let dependencies: AppDependencies
   private let log = Log.scoped("PinnedMessageHeaderView")
+  private static let signpostLog = OSLog(subsystem: "InlineMac", category: "PointsOfInterest")
 
   var onHeightChange: ((CGFloat) -> Void)?
 
@@ -62,7 +64,12 @@ final class PinnedMessageHeaderView: NSView {
   private var closeButtonHeightConstraint: NSLayoutConstraint?
   private var isVisible = false
 
-  init(dependencies: AppDependencies, peerId: Peer, chatId: Int64) {
+  init(
+    dependencies: AppDependencies,
+    peerId: Peer,
+    chatId: Int64,
+    initialPinnedMessage: PreparedPinnedMessage? = nil
+  ) {
     self.dependencies = dependencies
     self.peerId = peerId
     self.chatId = chatId
@@ -87,7 +94,11 @@ final class PinnedMessageHeaderView: NSView {
     super.init(frame: .zero)
     setupView()
     setupConstraints()
-    applyHiddenState()
+    if let initialPinnedMessage {
+      applyInitialPinnedMessage(initialPinnedMessage)
+    } else {
+      applyHiddenState()
+    }
   }
 
   @available(*, unavailable)
@@ -135,26 +146,32 @@ final class PinnedMessageHeaderView: NSView {
 
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
-    startObservingIfNeeded()
+    guard window != nil else { return }
+    DispatchQueue.main.async { [weak self] in
+      self?.startObservingIfNeeded()
+    }
   }
 
   private func startObservingIfNeeded() {
     guard !didStartObservation else { return }
     didStartObservation = true
-
-    do {
-      let pinned = try AppDatabase.shared.dbWriter.read { db in
-        try PinnedMessage
-          .filter(Column("chatId") == chatId)
-          .order(PinnedMessage.Columns.position.asc)
-          .fetchOne(db)
-      }
-      updatePinnedMessageId(pinned?.messageId)
-    } catch {
-      log.error("Failed to read pinned message state", error: error)
+    let signpostID = OSSignpostID(log: Self.signpostLog)
+    os_signpost(
+      .begin,
+      log: Self.signpostLog,
+      name: "PinnedHeaderStartObserving",
+      signpostID: signpostID,
+      "%{public}s",
+      "chatId=\(chatId)"
+    )
+    defer {
+      os_signpost(.end, log: Self.signpostLog, name: "PinnedHeaderStartObserving", signpostID: signpostID)
     }
 
     observePinnedMessages()
+    if let currentMessageId, messageObservation == nil {
+      observePinnedMessageContent(messageId: currentMessageId)
+    }
   }
 
   private func observePinnedMessages() {
@@ -188,24 +205,9 @@ final class PinnedMessageHeaderView: NSView {
     if let messageId {
       setVisible(true)
       if let message = loadPinnedMessage(messageId: messageId) {
-        embedView.configure(
-          fullMessage: message,
-          kind: .pinnedInHeader,
-          outgoing: false,
-          isOnlyEmoji: false,
-          style: .replyBubble
-        )
+        configurePinnedMessage(message)
       } else {
-        embedView.showNotLoaded(
-          kind: .pinnedInHeader,
-          outgoing: false,
-          isOnlyEmoji: false,
-          style: .replyBubble,
-          messageText: "Pinned message unavailable"
-        )
-        Task {
-          await TargetMessagesFetcher.shared.ensureCached(peer: peerId, chatId: chatId, messageIds: [messageId])
-        }
+        showPinnedMessageUnavailable(messageId: messageId, shouldFetch: true)
       }
       observePinnedMessageContent(messageId: messageId)
     } else {
@@ -213,15 +215,74 @@ final class PinnedMessageHeaderView: NSView {
     }
   }
 
+  private func applyInitialPinnedMessage(_ pinned: PreparedPinnedMessage) {
+    currentMessageId = pinned.messageId
+    setVisible(true, animate: false)
+
+    if let message = pinned.message {
+      configurePinnedMessage(message)
+    } else {
+      showPinnedMessageUnavailable(messageId: pinned.messageId, shouldFetch: true)
+    }
+  }
+
+  private func configurePinnedMessage(_ message: FullMessage) {
+    embedView.configure(
+      fullMessage: message,
+      kind: .pinnedInHeader,
+      outgoing: false,
+      isOnlyEmoji: false,
+      style: .replyBubble
+    )
+  }
+
+  private func showPinnedMessageUnavailable(messageId: Int64? = nil, shouldFetch: Bool = false) {
+    embedView.showNotLoaded(
+      kind: .pinnedInHeader,
+      outgoing: false,
+      isOnlyEmoji: false,
+      style: .replyBubble,
+      messageText: "Pinned message unavailable"
+    )
+
+    guard shouldFetch, let messageId else { return }
+    Task {
+      await TargetMessagesFetcher.shared.ensureCached(peer: peerId, chatId: chatId, messageIds: [messageId])
+    }
+  }
+
   private func loadPinnedMessage(messageId: Int64) -> FullMessage? {
+    let signpostID = OSSignpostID(log: Self.signpostLog)
+    var found = false
+    os_signpost(
+      .begin,
+      log: Self.signpostLog,
+      name: "PinnedHeaderLoadMessage",
+      signpostID: signpostID,
+      "%{public}s",
+      "chatId=\(chatId)"
+    )
+    defer {
+      os_signpost(
+        .end,
+        log: Self.signpostLog,
+        name: "PinnedHeaderLoadMessage",
+        signpostID: signpostID,
+        "%{public}s",
+        "found=\(found)"
+      )
+    }
+
     do {
-      return try AppDatabase.shared.dbWriter.read { db in
+      let message = try AppDatabase.shared.dbWriter.read { db in
         try FullMessage.queryRequest()
           .filter(
             Column("messageId") == messageId && Column("chatId") == chatId
           )
           .fetchOne(db)
       }
+      found = message != nil
+      return message
     } catch {
       log.error("Failed to read pinned message state", error: error)
       return nil
@@ -247,21 +308,9 @@ final class PinnedMessageHeaderView: NSView {
         receiveValue: { [weak self] message in
           guard let self else { return }
           if let message {
-            embedView.configure(
-              fullMessage: message,
-              kind: .pinnedInHeader,
-              outgoing: false,
-              isOnlyEmoji: false,
-              style: .replyBubble
-            )
+            configurePinnedMessage(message)
           } else {
-            embedView.showNotLoaded(
-              kind: .pinnedInHeader,
-              outgoing: false,
-              isOnlyEmoji: false,
-              style: .replyBubble,
-              messageText: "Pinned message unavailable"
-            )
+            showPinnedMessageUnavailable()
           }
         }
       )
@@ -269,6 +318,19 @@ final class PinnedMessageHeaderView: NSView {
 
   private func setVisible(_ visible: Bool, animate: Bool = true) {
     guard visible != isVisible else { return }
+    let signpostID = OSSignpostID(log: Self.signpostLog)
+    os_signpost(
+      .begin,
+      log: Self.signpostLog,
+      name: "PinnedHeaderSetVisible",
+      signpostID: signpostID,
+      "%{public}s",
+      "visible=\(visible) animate=\(animate) hasWindow=\(window != nil)"
+    )
+    defer {
+      os_signpost(.end, log: Self.signpostLog, name: "PinnedHeaderSetVisible", signpostID: signpostID)
+    }
+
     isVisible = visible
 
     let canAnimate = animate && window != nil && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion

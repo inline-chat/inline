@@ -97,7 +97,7 @@
 		C3AA8E4E2CB942BF00800A03 /* InlineKit */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineKit; sourceTree = "<group>"; };
 		C3CC99172CCE9A7E007F7F77 /* InlineUI */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineUI; sourceTree = "<group>"; };
 		CD092C4B2EDC6D8200E867E5 /* InlineMacUI */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = InlineMacUI; sourceTree = "<group>"; };
-		CD2661652CA01E3E00EB186F /* Inline Dev.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Inline Dev.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		CD2661652CA01E3E00EB186F /* Inline Debug.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Inline Debug.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD3AF2F92EE731EB001DA73E /* InlineNotificationExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = InlineNotificationExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		CD5326842CE113CD00EC348D /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		CD5326862CE1149700EC348D /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
@@ -321,7 +321,7 @@
 		CD2661052CA01CAE00EB186F /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				CD2661652CA01E3E00EB186F /* Inline Dev.app */,
+				CD2661652CA01E3E00EB186F /* Inline Debug.app */,
 				C38A28372CA5AB8F00D3DFB8 /* InlineIOS.app */,
 				B7C0674E2DB7F2BA00EAADA4 /* iMessageUI.framework */,
 				B7020C422DCE1534007099D9 /* InlineShareExtension.appex */,
@@ -477,7 +477,7 @@
 				CD092C4E2EDC6F4A00E867E5 /* MacTheme */,
 			);
 			productName = InlineMac;
-			productReference = CD2661652CA01E3E00EB186F /* Inline Dev.app */;
+			productReference = CD2661652CA01E3E00EB186F /* Inline Debug.app */;
 			productType = "com.apple.product-type.application";
 		};
 		CD3AF2F82EE731EB001DA73E /* InlineNotificationExtension */ = {
@@ -1096,12 +1096,13 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = InlineMac/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Inline Dev";
+				INFOPLIST_KEY_CFBundleDisplayName = "Inline Debug";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Inline uses camera when you choose to capture and send in a chat.";
 				INFOPLIST_KEY_NSContactsUsageDescription = "Inline needs acccess to your contacts to let you invite or find your friends";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INLINE_USER_PROFILE = debug;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -1109,7 +1110,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 15.2;
 				MARKETING_VERSION = 0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineMac.debug;
-				PRODUCT_NAME = "Inline Dev";
+				PRODUCT_NAME = "Inline Debug";
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -1357,12 +1358,13 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = InlineMac/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Inline Dev";
+				INFOPLIST_KEY_CFBundleDisplayName = "Inline Debug";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Inline uses camera when you choose to capture and send in a chat.";
 				INFOPLIST_KEY_NSContactsUsageDescription = "Inline needs acccess to your contacts to let you invite or find your friends";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INLINE_USER_PROFILE = debug2;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -1370,7 +1372,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 15.2;
 				MARKETING_VERSION = 0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineMac.debug2;
-				PRODUCT_NAME = "Inline Dev";
+				PRODUCT_NAME = "Inline Debug";
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -1494,7 +1496,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = InlineMac/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Inline (Dev Build)";
+				INFOPLIST_KEY_CFBundleDisplayName = "Inline-Dev";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.business";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Inline uses camera when you choose to capture and send in a chat.";
@@ -1508,8 +1510,9 @@
 				MACOSX_DEPLOYMENT_TARGET = 15.2;
 				MARKETING_VERSION = 0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = chat.inline.InlineMac.devbuild;
-				PRODUCT_NAME = "Inline (Dev Build)";
+				PRODUCT_NAME = "Inline-Dev";
 				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEVBUILD_REQUIRES_SCRIPT";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 			};

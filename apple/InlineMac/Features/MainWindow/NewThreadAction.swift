@@ -29,10 +29,7 @@ enum NewThreadAction {
 
         await MainActor.run {
           ToastCenter.shared.dismiss()
-          dependencies.nav2?.requestOpenChat(
-            peer: .thread(id: chatId),
-            database: dependencies.database
-          )
+          dependencies.requestOpenChat(peer: .thread(id: chatId))
         }
       } catch {
         await MainActor.run {

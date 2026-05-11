@@ -1,9 +1,11 @@
 import AppKit
+import Combine
 import Cocoa
 import InlineKit
 import InlineUI
 import Logger
 import Nuke
+import RealtimeV2
 import SwiftUI
 import os.signpost
 
@@ -40,10 +42,14 @@ class ChatViewAppKit: NSViewController {
   private var pendingDropObserver: NSObjectProtocol?
   private var appDidBecomeActiveObserver: NSObjectProtocol?
   private var mediaSendFailedObserver: NSObjectProtocol?
-  private var deferredObservationTask: Task<Void, Never>?
+  private var chatItemCancellable: AnyCancellable?
+  private var fetchChatTask: Task<Void, Never>?
+  private var isDisposed = false
+  private var didStartDeferredObservation = false
 
   private var didInitialRefetch = false
-  private let messageListSignpostLog = OSLog(subsystem: "InlineMac", category: "MessageList")
+  private let signpostLog = OSLog(subsystem: "InlineMac", category: "PointsOfInterest")
+  private var viewDidLayoutCount = 0
 
   init(
     peerId: Peer,
@@ -63,16 +69,11 @@ class ChatViewAppKit: NSViewController {
     state = .initial(viewModel.chat)
     super.init(nibName: nil, bundle: nil)
 
+    observeChatItem()
+
     if preparedPayload == nil {
       // Refetch immediately when no prepared payload exists.
       viewModel.refetchChatView()
-    } else {
-      // Defer observation/refetch so route commit stays responsive.
-      deferredObservationTask = Task { @MainActor [weak self] in
-        try? await Task.sleep(nanoseconds: 100_000_000)
-        self?.viewModel.startChatObservationIfNeeded()
-        self?.viewModel.refetchChatView()
-      }
     }
 
     appDidBecomeActiveObserver = NotificationCenter.default.addObserver(
@@ -80,7 +81,8 @@ class ChatViewAppKit: NSViewController {
       object: nil,
       queue: .main
     ) { [weak self] _ in
-      self?.viewModel.refetchChatView()
+      guard let self, !isDisposed else { return }
+      viewModel.refetchChatView()
     }
 
     mediaSendFailedObserver = NotificationCenter.default.addObserver(
@@ -89,12 +91,15 @@ class ChatViewAppKit: NSViewController {
       queue: .main
     ) { [weak self] notification in
       guard let self,
+            !isDisposed,
             let chatId = notification.userInfo?["chatId"] as? Int64,
             chatId == self.viewModel.chat?.id
       else { return }
 
       let message = notification.userInfo?["message"] as? String ?? "Couldn't send attachment."
-      ToastCenter.shared.showError(message)
+      Task { @MainActor in
+        ToastCenter.shared.showError(message)
+      }
     }
   }
 
@@ -104,6 +109,19 @@ class ChatViewAppKit: NSViewController {
   }
 
   override func loadView() {
+    let signpostID = OSSignpostID(log: signpostLog)
+    os_signpost(
+      .begin,
+      log: signpostLog,
+      name: "ChatViewLoadView",
+      signpostID: signpostID,
+      "%{public}s",
+      String(describing: peerId)
+    )
+    defer {
+      os_signpost(.end, log: signpostLog, name: "ChatViewLoadView", signpostID: signpostID)
+    }
+
     view = ChatDropView()
     view.translatesAutoresizingMaskIntoConstraints = false
     view.wantsLayer = true
@@ -117,15 +135,44 @@ class ChatViewAppKit: NSViewController {
     setupPendingDropObserver()
   }
 
+  override func viewDidAppear() {
+    super.viewDidAppear()
+    startDeferredObservationIfNeeded()
+  }
+
   override func viewDidLayout() {
+    viewDidLayoutCount += 1
+    let shouldSignpost = viewDidLayoutCount <= 20
+
+    guard shouldSignpost else {
+      super.viewDidLayout()
+      compose?.didLayout()
+      return
+    }
+
+    let signpostID = OSSignpostID(log: signpostLog)
+    let count = viewDidLayoutCount
+    os_signpost(
+      .begin,
+      log: signpostLog,
+      name: "ChatViewDidLayout",
+      signpostID: signpostID,
+      "%{public}s",
+      "count=\(count)"
+    )
+    defer {
+      os_signpost(.end, log: signpostLog, name: "ChatViewDidLayout", signpostID: signpostID)
+    }
+
     super.viewDidLayout()
     compose?.didLayout()
   }
 
   private func transitionFromInitialState() {
+    guard !isDisposed else { return }
     switch state {
       case let .initial(chat):
-        if let chat {
+        if let chat = chat ?? viewModel.chat {
           state = .loaded(chat)
         } else {
           state = .loading
@@ -135,7 +182,15 @@ class ChatViewAppKit: NSViewController {
     }
   }
 
+  private func startDeferredObservationIfNeeded() {
+    guard preparedPayload != nil, !didStartDeferredObservation, !isDisposed else { return }
+    didStartDeferredObservation = true
+    viewModel.startChatObservationIfNeeded()
+    viewModel.refetchChatView()
+  }
+
   private func updateState() {
+    guard !isDisposed else { return }
     clearCurrentViews()
 
     switch state {
@@ -145,12 +200,12 @@ class ChatViewAppKit: NSViewController {
         showSpinner()
       case let .loaded(chat):
         setupChatComponents(chat: chat)
-        // PERF MARK: end chat navigation signpost (remove when done).
         dependencies.nav2?.endChatNavigationSignpost(peer: peerId, reason: "loaded")
+        dependencies.nav3?.endChatNavigationSignpost(peer: peerId, reason: "loaded")
       case let .error(error):
         showError(error: error)
-        // PERF MARK: end chat navigation signpost (remove when done).
         dependencies.nav2?.endChatNavigationSignpost(peer: peerId, reason: "error")
+        dependencies.nav3?.endChatNavigationSignpost(peer: peerId, reason: "error")
     }
   }
 
@@ -196,52 +251,110 @@ class ChatViewAppKit: NSViewController {
     errorVC = hostingController
   }
 
+  private func observeChatItem() {
+    chatItemCancellable = viewModel.$chatItem
+      .dropFirst()
+      .compactMap { $0?.chat }
+      .sink { [weak self] chat in
+        Task { @MainActor [weak self] in
+          self?.showLoadedChat(chat)
+        }
+      }
+  }
+
+  private func showLoadedChat(_ chat: Chat) {
+    guard !isDisposed else { return }
+    guard isViewLoaded else { return }
+    if case let .loaded(current) = state, current.id == chat.id {
+      return
+    }
+    state = .loaded(chat)
+  }
+
   private func setupChatComponents(chat: Chat) {
-    let signpostID = OSSignpostID(log: messageListSignpostLog)
-    // PERF MARK: begin message list setup (remove when done).
-    os_signpost(.begin, log: messageListSignpostLog, name: "MessageListSetup", signpostID: signpostID)
-    // Message List
-    let messageListVC_ = MessageListAppKit(
-      dependencies: dependencies,
-      peerId: peerId,
-      chat: chat,
-      showUnreadAfter: unreadBoundaryAtOpen(),
-      initialState: preparedPayload?.messagesInitialState
+    let componentsSignpostID = OSSignpostID(log: signpostLog)
+    os_signpost(
+      .begin,
+      log: signpostLog,
+      name: "ChatComponentsSetup",
+      signpostID: componentsSignpostID,
+      "%{public}s",
+      String(describing: peerId)
     )
+    defer {
+      os_signpost(.end, log: signpostLog, name: "ChatComponentsSetup", signpostID: componentsSignpostID)
+    }
+
+    // Message List
+    let messageListVC_: MessageListAppKit
+    do {
+      let signpostID = OSSignpostID(log: signpostLog)
+      os_signpost(
+        .begin,
+        log: signpostLog,
+        name: "MessageListSetup",
+        signpostID: signpostID,
+        "%{public}s",
+        preparedPayload == nil ? "cold" : "prepared"
+      )
+      defer {
+        os_signpost(.end, log: signpostLog, name: "MessageListSetup", signpostID: signpostID)
+      }
+
+      messageListVC_ = MessageListAppKit(
+        dependencies: dependencies,
+        peerId: peerId,
+        chat: chat,
+        showUnreadAfter: unreadBoundaryAtOpen(),
+        initialState: preparedPayload?.messagesInitialState,
+        initialPinnedMessage: preparedPayload?.pinnedMessage
+      )
+    }
     addChild(messageListVC_)
     view.addSubview(messageListVC_.view)
     messageListVC_.view.translatesAutoresizingMaskIntoConstraints = false
 
     messageListVC = messageListVC_
-    // PERF MARK: end message list setup (remove when done).
-    os_signpost(.end, log: messageListSignpostLog, name: "MessageListSetup", signpostID: signpostID)
 
     // Compose
-    let compose = ComposeAppKit(
-      peerId: peerId,
-      messageList: messageListVC!,
-      chat: chat,
-      dependencies: dependencies,
-      parentChatView: self,
-      dialog: dialog
-    )
+    let compose: ComposeAppKit
+    do {
+      let signpostID = OSSignpostID(log: signpostLog)
+      os_signpost(.begin, log: signpostLog, name: "ComposeSetup", signpostID: signpostID)
+      defer { os_signpost(.end, log: signpostLog, name: "ComposeSetup", signpostID: signpostID) }
+
+      compose = ComposeAppKit(
+        peerId: peerId,
+        messageList: messageListVC!,
+        chat: chat,
+        dependencies: dependencies,
+        parentChatView: self,
+        dialog: dialog
+      )
+    }
     view.addSubview(compose)
     compose.translatesAutoresizingMaskIntoConstraints = false
     self.compose = compose
 
     // Layout
-    NSLayoutConstraint.activate([
-      // messageList
-      messageListVC!.view.topAnchor.constraint(equalTo: view.topAnchor),
-      messageListVC!.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-      messageListVC!.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-      messageListVC!.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+    do {
+      let signpostID = OSSignpostID(log: signpostLog)
+      os_signpost(.begin, log: signpostLog, name: "ChatConstraintsSetup", signpostID: signpostID)
+      defer { os_signpost(.end, log: signpostLog, name: "ChatConstraintsSetup", signpostID: signpostID) }
 
-      // compose
-      compose.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-      compose.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-      compose.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-    ])
+      NSLayoutConstraint.activate([
+        // messageList
+        messageListVC!.view.topAnchor.constraint(equalTo: view.topAnchor),
+        messageListVC!.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+        messageListVC!.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+        messageListVC!.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+        // compose
+        compose.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        compose.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+        compose.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+      ])
+    }
 
     consumePendingDropAttachmentsIfPossible()
   }
@@ -257,22 +370,58 @@ class ChatViewAppKit: NSViewController {
   }
 
   private func fetchChat() {
-    Task {
+    fetchChatTask?.cancel()
+    fetchChatTask = Task { [weak self] in
+      guard let self, !isDisposed else { return }
       do {
         if let chat = try await viewModel.ensureChat() {
           await MainActor.run {
-            state = .loaded(chat)
+            guard !Task.isCancelled, !self.isDisposed else { return }
+            self.showLoadedChat(chat)
           }
         } else {
           await MainActor.run {
-            state = .error(ChatViewError.failedToLoad)
+            guard !Task.isCancelled, !self.isDisposed else { return }
+            self.showChatLoadErrorIfDefinitive(ChatViewError.failedToLoad)
           }
         }
       } catch {
         await MainActor.run {
-          state = .error(error)
+          guard !Task.isCancelled, !self.isDisposed else { return }
+          self.showChatLoadErrorIfDefinitive(error)
         }
       }
+    }
+  }
+
+  private func showChatLoadErrorIfDefinitive(_ error: Error) {
+    guard isDefinitiveChatLoadError(error) else {
+      Log.shared.warning("Chat cache miss is still loading for \(peerId)")
+      return
+    }
+    if case .loaded = state {
+      return
+    }
+    state = .error(error)
+  }
+
+  private func isDefinitiveChatLoadError(_ error: Error) -> Bool {
+    guard let error = error as? TransactionError else {
+      return true
+    }
+
+    switch error {
+      case let .rpcError(rpcError):
+        switch rpcError.errorCode {
+          case .peerIDInvalid, .chatIDInvalid, .userIDInvalid:
+            return true
+          default:
+            return false
+        }
+      case .invalid:
+        return true
+      case .timeout, .ackedButNoResultAfterReconnect, .dependencyFailed:
+        return false
     }
   }
 
@@ -305,28 +454,34 @@ class ChatViewAppKit: NSViewController {
   }
 
   func dispose() {
-    deferredObservationTask?.cancel()
-    deferredObservationTask = nil
+    guard !isDisposed else { return }
+    isDisposed = true
+    fetchChatTask?.cancel()
+    fetchChatTask = nil
+    chatItemCancellable?.cancel()
+    chatItemCancellable = nil
+    viewModel.dispose()
+    removeObservers()
     clearCurrentViews()
   }
 
   deinit {
-    deferredObservationTask?.cancel()
-    clearCurrentViews()
+    dispose()
+  }
 
-    // Remove observers
+  private func removeObservers() {
     if let appDidBecomeActiveObserver {
       NotificationCenter.default.removeObserver(appDidBecomeActiveObserver)
+      self.appDidBecomeActiveObserver = nil
     }
     if let pendingDropObserver {
       NotificationCenter.default.removeObserver(pendingDropObserver)
+      self.pendingDropObserver = nil
     }
     if let mediaSendFailedObserver {
       NotificationCenter.default.removeObserver(mediaSendFailedObserver)
+      self.mediaSendFailedObserver = nil
     }
-
-    // Remove window check since cleanup should have happened in viewWillDisappear
-    Log.shared.debug("🗑️ Deinit: \(type(of: self)) - \(self)")
   }
 
   // MARK: - Drag and Drop

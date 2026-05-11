@@ -58,6 +58,8 @@ class ComposeAppKit: NSView {
   private var mentionKeyMonitorEscUnsubscribe: (() -> Void)?
   private var mentionMenuConstraints: [NSLayoutConstraint] = []
   private var pendingAutoAddParticipants: Set<Int64> = []
+  private var didRequestMentionParticipants = false
+  private var mentionParticipantsTask: Task<Void, Never>?
 
   // Slash command completion
   private var commandCompletionMenu: CommandCompletionMenu?
@@ -195,12 +197,19 @@ class ComposeAppKit: NSView {
   override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
 
-    // Focus the text editor
-    focus()
+    guard window != nil else { return }
 
-    // Set up mention menu positioning now that we have a window
-    addMentionMenuToSuperview()
-    addCommandMenuToSuperview()
+    DispatchQueue.main.async { [weak self] in
+      self?.focus()
+    }
+
+    if mentionCompletionMenu != nil {
+      addMentionMenuToSuperview()
+    }
+
+    if commandCompletionMenu != nil {
+      addCommandMenuToSuperview()
+    }
   }
 
   override func viewWillMove(toSuperview newSuperview: NSView?) {
@@ -267,10 +276,8 @@ class ComposeAppKit: NSView {
 
     setupReplyingView()
     setUpConstraints()
-    updateSilentModeUI()
+    updateSilentModeUI(animated: false, forceLayout: false)
     setupTextEditor()
-    setupMentionCompletion()
-    setupSlashCommandCompletion()
   }
 
   /// This method is called from ChatViewAppKit's viewDidLayout
@@ -407,12 +414,19 @@ class ComposeAppKit: NSView {
       }.store(in: &cancellables)
   }
 
-  private func updateSilentModeUI() {
+  private func updateSilentModeUI(animated: Bool = true, forceLayout: Bool = true) {
     let isEnabled = state.sendSilently
     sendButton.updateSendSilently(isEnabled)
     silentModeButton.isHidden = !isEnabled
     silentModeButtonWidthConstraint?.constant = isEnabled ? ComposeSilentModeButton.controlSize : 0
     silentModeToEmojiConstraint?.constant = isEnabled ? -rightButtonSpacing : 0
+
+    guard animated else {
+      if forceLayout {
+        layoutSubtreeIfNeeded()
+      }
+      return
+    }
 
     NSAnimationContext.runAnimationGroup { context in
       context.duration = 0.16
@@ -443,8 +457,8 @@ class ComposeAppKit: NSView {
 
   // MARK: - Mention Completion
 
-  private func setupMentionCompletion() {
-    guard let chatId else { return }
+  private func ensureMentionCompletion() {
+    guard mentionCompletionMenu == nil, let chatId else { return }
 
     // Initialize chat participants view model
     chatParticipantsViewModel = InlineKit.ChatParticipantsWithMembersViewModel(
@@ -465,10 +479,17 @@ class ComposeAppKit: NSView {
         self?.mentionCompletionMenu?.updateParticipants(participants)
       }
       .store(in: &cancellables)
+  }
 
-    // Fetch participants from server
-    Task {
-      log.trace("Fetching chat participants from server")
+  private func refetchMentionParticipantsIfNeeded() {
+    guard !didRequestMentionParticipants, let chatParticipantsViewModel else { return }
+    didRequestMentionParticipants = true
+
+    mentionParticipantsTask?.cancel()
+    mentionParticipantsTask = Task { @MainActor [weak self, weak chatParticipantsViewModel] in
+      await Task.yield()
+      guard !Task.isCancelled else { return }
+      self?.log.trace("Fetching chat participants from server")
       await chatParticipantsViewModel?.refetchParticipants()
     }
   }
@@ -502,7 +523,8 @@ class ComposeAppKit: NSView {
     log.trace("addMentionMenuToSuperview: menu positioned above compose view")
   }
 
-  private func setupSlashCommandCompletion() {
+  private func ensureSlashCommandCompletion() {
+    guard peerBotCommandsViewModel == nil else { return }
     peerBotCommandsViewModel = PeerBotCommandsViewModel(peer: peerId)
     commandCompletionMenu = CommandCompletionMenu()
     commandCompletionMenu?.delegate = self
@@ -532,13 +554,16 @@ class ComposeAppKit: NSView {
 
   private func showMentionCompletion(for query: String) {
     log.trace("showMentionCompletion: query='\(query)'")
+    ensureMentionCompletion()
+    guard let mentionCompletionMenu else { return }
 
     // Ensure menu is added to view hierarchy
     addMentionMenuToSuperview()
     hideCommandCompletion()
 
-    mentionCompletionMenu?.filterParticipants(with: query)
-    mentionCompletionMenu?.show()
+    mentionCompletionMenu.filterParticipants(with: query)
+    mentionCompletionMenu.show()
+    refetchMentionParticipantsIfNeeded()
 
     // Add escape handler for mention menu
     mentionKeyMonitorEscUnsubscribe = dependencies.keyMonitor?.addHandler(
@@ -561,17 +586,18 @@ class ComposeAppKit: NSView {
 
   private func showCommandCompletion(for query: String) {
     currentSlashQuery = query
+    ensureSlashCommandCompletion()
     addCommandMenuToSuperview()
     hideMentionCompletion()
 
-    guard let peerBotCommandsViewModel else { return }
+    guard let peerBotCommandsViewModel, let commandCompletionMenu else { return }
     let suggestions = peerBotCommandsViewModel.suggestions(matching: query)
-    commandCompletionMenu?.updateSuggestions(suggestions)
+    commandCompletionMenu.updateSuggestions(suggestions)
 
     if suggestions.isEmpty {
-      commandCompletionMenu?.hide()
+      commandCompletionMenu.hide()
     } else {
-      commandCompletionMenu?.show()
+      commandCompletionMenu.show()
       commandKeyMonitorEscUnsubscribe?()
       commandKeyMonitorEscUnsubscribe = dependencies.keyMonitor?.addHandler(
         for: .escape,
@@ -1369,6 +1395,8 @@ class ComposeAppKit: NSView {
     NSLayoutConstraint.deactivate(mentionMenuConstraints)
     mentionMenuConstraints.removeAll()
     mentionCompletionMenu?.removeFromSuperview()
+    mentionParticipantsTask?.cancel()
+    mentionParticipantsTask = nil
 
     for (_, task) in pendingImageSaveTasks {
       task.cancel()

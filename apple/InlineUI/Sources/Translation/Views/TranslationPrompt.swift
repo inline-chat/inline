@@ -8,6 +8,11 @@ public struct TranslationPrompt: View {
 
   @Environment(\.dismiss) private var dismiss
 
+  public init(peer: Peer, action: (() -> Void)? = nil) {
+    self.peer = peer
+    self.action = action
+  }
+
   public var body: some View {
     HStack {
       // TODO: Translate this prompt in common user languages

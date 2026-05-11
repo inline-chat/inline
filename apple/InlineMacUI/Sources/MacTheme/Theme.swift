@@ -70,7 +70,7 @@ public enum Theme {
   // MARK: - Sidebar
 
   /// 190 is minimum that fits both sidebar collapse button and plus button
-  public static let minimumSidebarWidth: CGFloat = 200
+  public static let minimumSidebarWidth: CGFloat = 180
   public static let idealSidebarWidth: CGFloat = 240
   public static let sidebarItemRadius: CGFloat = 10
   public static let sidebarItemPadding: CGFloat = 7.0

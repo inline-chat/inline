@@ -39,7 +39,7 @@ struct NotificationSettingsButton: View {
 
   @ViewBuilder
   private var button: some View {
-    Button {
+    let button = Button {
       presented.toggle()
     } label: {
       iconImage
@@ -54,7 +54,13 @@ struct NotificationSettingsButton: View {
         ))
         .animation(.easeOut(duration: 0.2), value: notificationIcon)
     }
-    .buttonStyle(.plain)
+
+    switch style {
+      case .standard:
+        button.buttonStyle(.plain)
+      case .sidebarFooter:
+        button
+    }
   }
 
   @ViewBuilder

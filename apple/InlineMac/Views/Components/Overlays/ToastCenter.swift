@@ -24,23 +24,27 @@ final class ToastCenter {
 
   weak var presenter: (any ToastPresenting)?
 
+  private var targetPresenter: (any ToastPresenting)? {
+    MainWindowOpenCoordinator.shared.activeToastPresenter ?? presenter
+  }
+
   func showLoading(_ message: String, actionTitle: String? = nil, action: (@MainActor () -> Void)? = nil) {
-    presenter?.showLoading(message, actionTitle: actionTitle, action: action)
+    targetPresenter?.showLoading(message, actionTitle: actionTitle, action: action)
   }
 
   func showInfo(_ message: String) {
-    presenter?.showInfo(message)
+    targetPresenter?.showInfo(message)
   }
 
   func showSuccess(_ message: String, actionTitle: String? = nil, action: (@MainActor () -> Void)? = nil) {
-    presenter?.showSuccess(message, actionTitle: actionTitle, action: action)
+    targetPresenter?.showSuccess(message, actionTitle: actionTitle, action: action)
   }
 
   func showError(_ message: String) {
-    presenter?.showError(message)
+    targetPresenter?.showError(message)
   }
 
   func dismiss() {
-    presenter?.dismissToast()
+    targetPresenter?.dismissToast()
   }
 }
