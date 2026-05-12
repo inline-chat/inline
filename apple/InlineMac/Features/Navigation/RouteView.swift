@@ -9,12 +9,6 @@ struct RouteView: View {
     case .empty:
       EmptyRouteView()
 
-    case .spaces:
-      RoutePlaceholderView(
-        title: "Spaces",
-        systemImage: "person.3"
-      )
-
     case let .chat(peer):
       ChatRouteView(peer: peer)
         .id(peer.toString())

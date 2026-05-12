@@ -7,7 +7,6 @@ import Combine
 
 extension Notification.Name {
   static let toggleSidebar = Notification.Name("toggleSidebar")
-  static let focusSearch = Notification.Name("focusSearch")
   static let quickSearchVisibilityChanged = Notification.Name("quickSearchVisibilityChanged")
   static let renameThread = Notification.Name("renameThread")
   static let switchToInbox = Notification.Name("switchToInbox")
@@ -722,9 +721,7 @@ final class AppMenu: NSObject {
   }
 
   @objc private func focusSearch(_ sender: NSMenuItem) {
-    if MainWindowOpenCoordinator.shared.openCommandBar() == false {
-      NotificationCenter.default.post(name: .focusSearch, object: nil)
-    }
+    MainWindowOpenCoordinator.shared.openCommandBar()
   }
 
   // MARK: - Chat Navigation Actions

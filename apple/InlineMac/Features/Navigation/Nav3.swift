@@ -12,7 +12,6 @@ enum Nav3Route: Hashable, Codable {
   }
 
   case empty
-  case spaces
   case chat(peer: Peer)
   case chatInfo(peer: Peer, query: ChatInfoQuery? = nil)
   case profile(userId: Int64)

@@ -36,7 +36,7 @@ struct SidebarFooterView: View {
   let onToggleArchive: () -> Void
   let onSearch: () -> Void
   let onCreateSpace: () -> Void
-  let onCreateChat: () -> Void
+  let onNewThread: () -> Void
   let onInvite: () -> Void
 
   @State private var isNotificationHovering = false
@@ -97,8 +97,8 @@ struct SidebarFooterView: View {
             Label("Create Space", systemImage: "square.grid.2x2")
           }
 
-          Button(action: onCreateChat) {
-            Label("Create Chat", systemImage: "bubble.left.and.bubble.right")
+          Button(action: onNewThread) {
+            Label("New Thread", systemImage: "square.and.pencil")
           }
 
           Button(action: onInvite) {

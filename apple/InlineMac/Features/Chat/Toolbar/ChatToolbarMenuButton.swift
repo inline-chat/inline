@@ -14,6 +14,7 @@ struct ChatToolbarMenuButton: View {
   @State private var showRenameSheet = false
   @State private var showMoveToSpaceSheet = false
   @State private var showMoveOutConfirm = false
+  @State private var pendingDestructiveAction: ChatDestructiveAction?
   @State private var loadHistoryTask: Task<Void, Never>?
 
   init(peer: Peer, dependencies: AppDependencies) {
@@ -80,6 +81,14 @@ struct ChatToolbarMenuButton: View {
           )
         }
       }
+
+      if let destructiveAction = model.state.destructiveAction {
+        Divider()
+
+        Button(destructiveAction.title, systemImage: destructiveAction.systemImage, role: .destructive) {
+          pendingDestructiveAction = destructiveAction
+        }
+      }
     } label: {
       Image(systemName: "info.circle")
     } primaryAction: {
@@ -106,8 +115,33 @@ struct ChatToolbarMenuButton: View {
       }
       Button("Cancel", role: .cancel) {}
     }
+    .alert(
+      pendingDestructiveAction?.title ?? "Confirm",
+      isPresented: destructiveConfirmationPresented,
+      presenting: pendingDestructiveAction
+    ) { action in
+      Button("Cancel", role: .cancel) {
+        pendingDestructiveAction = nil
+      }
+
+      Button(action.shortTitle, role: .destructive) {
+        performDestructiveAction(action)
+      }
+    } message: { action in
+      Text(action.confirmationMessage(chatTitle: model.state.title))
+    }
     .onDisappear {
       cancelHistoryLoad()
+    }
+  }
+
+  private var destructiveConfirmationPresented: Binding<Bool> {
+    Binding {
+      pendingDestructiveAction != nil
+    } set: { isPresented in
+      if isPresented == false {
+        pendingDestructiveAction = nil
+      }
     }
   }
 
@@ -253,6 +287,16 @@ struct ChatToolbarMenuButton: View {
       }
     }
   }
+
+  @MainActor
+  private func performDestructiveAction(_ action: ChatDestructiveAction) {
+    pendingDestructiveAction = nil
+    ChatDestructiveActionRunner.perform(action, peer: peer, dependencies: dependencies) {
+      dependencies.nav2?.navigate(to: .empty)
+      dependencies.nav3?.open(.empty)
+      dependencies.nav.open(.empty)
+    }
+  }
 }
 
 @MainActor
@@ -309,6 +353,8 @@ private struct ChatToolbarMenuState: Equatable {
   var isSidebarVisible = true
   var canRename = false
   var chatSpaceId: Int64?
+  var title = "Chat"
+  var destructiveAction: ChatDestructiveAction?
 
   init() {}
 
@@ -323,6 +369,12 @@ private struct ChatToolbarMenuState: Equatable {
     isArchived = dialog?.archived ?? false
     isSidebarVisible = dialog?.sidebarVisible != false
     chatSpaceId = chat?.spaceId
+    title = chat?.humanReadableTitle ?? "Chat"
+    destructiveAction = ChatDestructiveActionResolver.action(
+      peer: peer,
+      chat: chat,
+      currentUserId: currentUserId
+    )
     canRename = try Self.resolveCanRename(
       chat: chat,
       peer: peer,
