@@ -203,8 +203,12 @@ struct SidebarChatItemView: Equatable, View {
 
   @ViewBuilder
   private var avatar: some View {
-    if case let .chat(chat) = item.peer, size == .compact {
-      SidebarThreadIcon(chat: chat, size: Self.compactIconSize)
+    if case let .chat(chat) = item.peer {
+      SidebarThreadIcon(
+        chat: chat,
+        size: iconSize,
+        shape: size == .compact ? .roundedSquare : .circle
+      )
     } else if let peer = item.peer {
       ChatIcon(peer: peer, size: iconSize)
     } else {
