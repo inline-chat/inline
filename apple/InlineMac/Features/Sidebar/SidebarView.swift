@@ -20,6 +20,7 @@ struct SidebarView: View {
   @State private var legacyApiState: RealtimeAPIState = Realtime.shared.apiState
   @State private var showConnectedState = false
   @State private var hideConnectedTask: Task<Void, Never>?
+  @State private var pendingSpaceAction: SidebarSpacePendingAction?
   @Environment(SidebarViewModel.self) private var viewModel
   private let isCollapsed: Bool
 
@@ -28,6 +29,26 @@ struct SidebarView: View {
   }
 
   var body: some View {
+    sidebarContent
+      .alert(
+        pendingSpaceAction?.action.title ?? "Confirm",
+        isPresented: spaceConfirmationPresented,
+        presenting: pendingSpaceAction
+      ) { pending in
+        Button("Cancel", role: .cancel) {
+          pendingSpaceAction = nil
+        }
+
+        Button(pending.action.shortTitle, role: .destructive) {
+          performSpaceAction(pending)
+        }
+      } message: { pending in
+        Text(pending.action.confirmationMessage(spaceName: pending.space.displayName))
+      }
+  }
+
+  @ViewBuilder
+  private var sidebarContent: some View {
     if #available(macOS 26.0, *) {
       // Safe area bar gives us the natural progressive blur background on macOS 26.0
       list
@@ -45,6 +66,16 @@ struct SidebarView: View {
         .safeAreaInset(edge: .bottom) {
           bottomBar
         }
+    }
+  }
+
+  private var spaceConfirmationPresented: Binding<Bool> {
+    Binding {
+      pendingSpaceAction != nil
+    } set: { isPresented in
+      if isPresented == false {
+        pendingSpaceAction = nil
+      }
     }
   }
 
@@ -97,6 +128,7 @@ struct SidebarView: View {
     }
   }
 
+  @ViewBuilder
   private var chatRows: some View {
     ForEach(visibleItems) { item in
       let isSelected = selectedPeer == item.peerId
@@ -104,7 +136,7 @@ struct SidebarView: View {
       SidebarChatItemView(
         item: item,
         selected: isSelected,
-        titleDimmed: chatTitlesDimmed,
+        titleDimmed: sidebarTitlesDimmed,
         size: settings.showSidebarMessagePreview ? .large : .compact,
         onOpen: {
           openChat(item)
@@ -115,6 +147,34 @@ struct SidebarView: View {
       .listRowSeparator(.hidden)
       .listRowBackground(Color.clear)
     }
+
+    if visibleItems.isEmpty {
+      emptyStateRow
+    }
+
+    if !isArchiveVisible {
+      newThreadRow
+    }
+  }
+
+  private var emptyStateRow: some View {
+    SidebarEmptyStateRow(
+      title: isArchiveVisible ? "No archived chats" : "No chats",
+      systemImage: isArchiveVisible ? "archivebox" : "bubble.left"
+    )
+    .listRowInsets(.zero)
+    .listRowSeparator(.hidden)
+    .listRowBackground(Color.clear)
+  }
+
+  private var newThreadRow: some View {
+    SidebarNewThreadRow(
+      size: settings.showSidebarMessagePreview ? .large : .compact,
+      action: createNewThread
+    )
+    .listRowInsets(.zero)
+    .listRowSeparator(.hidden)
+    .listRowBackground(Color.clear)
   }
 
   @ViewBuilder
@@ -165,6 +225,7 @@ struct SidebarView: View {
         topBarIcon
 
         Text(topBarTitle)
+          .foregroundStyle(sidebarTitleColor)
           .lineLimit(1)
           .truncationMode(.tail)
           .layoutPriority(1)
@@ -190,6 +251,10 @@ struct SidebarView: View {
       if let selectedSpace {
         Section("Manage \(selectedSpace.displayName)") {
           selectedSpaceActions(selectedSpace)
+
+          Divider()
+
+          selectedSpaceDestructiveAction(selectedSpace)
         }
       }
     }
@@ -240,11 +305,15 @@ struct SidebarView: View {
     } label: {
       Label("Members", systemImage: "person.2")
     }
+  }
 
-    Button {
-      nav.open(.inviteToSpace(spaceId: space.id))
+  private func selectedSpaceDestructiveAction(_ space: Space) -> some View {
+    let action = SidebarSpaceDestructiveAction.action(for: space)
+
+    return Button(role: .destructive) {
+      pendingSpaceAction = SidebarSpacePendingAction(space: space, action: action)
     } label: {
-      Label("Add Member", systemImage: "person.badge.plus")
+      Label(action.title, systemImage: action.systemImage)
     }
   }
 
@@ -282,8 +351,8 @@ struct SidebarView: View {
       onCreateSpace: {
         nav.open(.createSpace)
       },
-      onCreateChat: {
-        nav.open(.newChat(spaceId: activeSpaceId))
+      onNewThread: {
+        createNewThread()
       },
       onInvite: {
         nav.open(.inviteToSpace(spaceId: activeSpaceId))
@@ -349,8 +418,12 @@ struct SidebarView: View {
     visibleItems.map { "\($0.id.kind.rawValue)-\($0.id.rawValue)" }
   }
 
-  private var chatTitlesDimmed: Bool {
+  private var sidebarTitlesDimmed: Bool {
     !appearsActive
+  }
+
+  private var sidebarTitleColor: Color {
+    sidebarTitlesDimmed ? Color.secondary : Color.primary
   }
 
   private var sidebarNavigationSignature: String {
@@ -399,6 +472,62 @@ struct SidebarView: View {
 
   private func selectSpace(_ spaceId: Int64) {
     nav.selectSpace(spaceId)
+  }
+
+  private func createNewThread() {
+    guard let dependencies else {
+      nav.open(.newChat(spaceId: activeSpaceId))
+      return
+    }
+
+    NewThreadAction.start(dependencies: dependencies, spaceId: activeSpaceId)
+  }
+
+  private func performSpaceAction(_ pending: SidebarSpacePendingAction) {
+    pendingSpaceAction = nil
+    let shouldNavigateOut = isActiveSpace(pending.space.id)
+    ToastCenter.shared.showLoading(pending.action.loadingTitle)
+
+    Task(priority: .userInitiated) {
+      do {
+        let data = dependencies?.data ?? DataManager.shared
+
+        switch pending.action {
+        case .delete:
+          try await data.deleteSpace(spaceId: pending.space.id)
+        case .leave:
+          try await data.leaveSpace(spaceId: pending.space.id)
+        }
+
+        await MainActor.run {
+          ToastCenter.shared.dismiss()
+          if shouldNavigateOut {
+            navigateOutOfSpace()
+          }
+          ToastCenter.shared.showSuccess(pending.action.successTitle)
+        }
+      } catch {
+        Log.shared.error(pending.action.failureTitle, error: error)
+
+        await MainActor.run {
+          ToastCenter.shared.dismiss()
+          ToastCenter.shared.showError(pending.action.failureTitle)
+        }
+      }
+    }
+  }
+
+  private func isActiveSpace(_ spaceId: Int64) -> Bool {
+    nav.selectedSpaceId == spaceId || dependencies?.activeSpaceId == spaceId
+  }
+
+  private func navigateOutOfSpace() {
+    nav.selectHome()
+    nav.open(.empty)
+    dependencies?.nav2?.setActiveTab(index: 0)
+    dependencies?.nav2?.navigate(to: .empty)
+    dependencies?.nav3?.selectHome()
+    dependencies?.nav3?.open(.empty)
   }
 
   private func refreshSpaceIfNeeded(_ spaceId: Int64?) {
@@ -541,6 +670,156 @@ private enum SidebarTopBarMetrics {
   static let buttonHeight: CGFloat = 30
   static let leadingPadding = Theme.sidebarItemOuterSpacing + 3
   static let trailingAccessoryWidth: CGFloat = 14
+}
+
+private struct SidebarSpacePendingAction: Identifiable {
+  let space: Space
+  let action: SidebarSpaceDestructiveAction
+
+  var id: String {
+    "\(space.id)-\(action.title)"
+  }
+}
+
+private enum SidebarSpaceDestructiveAction {
+  case delete
+  case leave
+
+  static func action(for space: Space) -> SidebarSpaceDestructiveAction {
+    space.creator == true ? .delete : .leave
+  }
+
+  var title: String {
+    switch self {
+    case .delete:
+      "Delete Space"
+    case .leave:
+      "Leave Space"
+    }
+  }
+
+  var shortTitle: String {
+    switch self {
+    case .delete:
+      "Delete"
+    case .leave:
+      "Leave"
+    }
+  }
+
+  var systemImage: String {
+    switch self {
+    case .delete:
+      "trash"
+    case .leave:
+      "rectangle.portrait.and.arrow.right"
+    }
+  }
+
+  var loadingTitle: String {
+    switch self {
+    case .delete:
+      "Deleting space..."
+    case .leave:
+      "Leaving space..."
+    }
+  }
+
+  var successTitle: String {
+    switch self {
+    case .delete:
+      "Space deleted"
+    case .leave:
+      "Left space"
+    }
+  }
+
+  var failureTitle: String {
+    switch self {
+    case .delete:
+      "Failed to delete space"
+    case .leave:
+      "Failed to leave space"
+    }
+  }
+
+  func confirmationMessage(spaceName: String) -> String {
+    switch self {
+    case .delete:
+      "Delete \"\(spaceName)\"? This removes the space and its chats from your sidebar."
+    case .leave:
+      "Leave \"\(spaceName)\"? This removes the space and its chats from your sidebar."
+    }
+  }
+}
+
+private struct SidebarEmptyStateRow: View {
+  let title: String
+  let systemImage: String
+
+  var body: some View {
+    HStack(spacing: 6) {
+      Image(systemName: systemImage)
+      Text(title)
+    }
+    .font(.system(size: 12, weight: .regular))
+    .foregroundStyle(.tertiary)
+    .frame(maxWidth: .infinity, alignment: .center)
+    .padding(.vertical, 12)
+  }
+}
+
+private struct SidebarNewThreadRow: View {
+  let size: SidebarItemSize
+  let action: () -> Void
+
+  @Environment(\.colorScheme) private var colorScheme
+  @State private var isHovered = false
+
+  private var rowHeight: CGFloat {
+    switch size {
+    case .compact:
+      30
+    case .large:
+      44
+    }
+  }
+
+  var body: some View {
+    Button(action: action) {
+      HStack(spacing: 8) {
+        Image(systemName: "square.and.pencil")
+          .font(.system(size: 13, weight: .regular))
+          .frame(width: 22, height: 22)
+
+        Text("New thread")
+          .font(.system(size: 13, weight: .regular))
+          .lineLimit(1)
+
+        Spacer(minLength: 0)
+      }
+      .foregroundStyle(.secondary)
+      .frame(height: rowHeight)
+      .padding(.horizontal, 6)
+      .contentShape(.interaction, .rect(cornerRadius: Theme.sidebarItemRadius))
+      .background(background)
+      .padding(.horizontal, -Theme.sidebarNativeDefaultEdgeInsets + 8)
+    }
+    .buttonStyle(.plain)
+    .help("New Thread")
+    .accessibilityLabel("New Thread")
+    .onHover { isHovered = $0 }
+    .animation(.smoothSnappy, value: size)
+  }
+
+  private var background: some View {
+    RoundedRectangle(cornerRadius: Theme.sidebarItemRadius, style: .continuous)
+      .fill(isHovered ? hoverColor : .clear)
+  }
+
+  private var hoverColor: Color {
+    colorScheme == .dark ? .white.opacity(0.07) : .black.opacity(0.05)
+  }
 }
 
 private enum SidebarConnectionDisplayState: Equatable {
