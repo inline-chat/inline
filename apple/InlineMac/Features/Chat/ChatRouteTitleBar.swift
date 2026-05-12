@@ -56,7 +56,12 @@ struct ChatRouteTitleBar: View {
             )
         }
       }
-      .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+      .frame(minWidth: 0, alignment: .leading)
+      .layoutPriority(1)
+
+      Color.clear
+        .frame(minWidth: 0, maxWidth: .infinity)
+        .toolbarWindowDoubleClickZoom()
     }
     .frame(minWidth: 0, maxWidth: 280, alignment: .leading)
     .toolbarWindowDragClickGate(suppressClick: $suppressClick)
@@ -133,7 +138,7 @@ struct ChatRouteTitleBar: View {
       .font(.system(size: 13, weight: .semibold))
       .lineLimit(1)
       .truncationMode(.tail)
-      .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+      .frame(minWidth: 0, alignment: .leading)
   }
 
   private var renamePopover: some View {
@@ -213,6 +218,10 @@ private extension View {
   func toolbarWindowDragClickGate(suppressClick: Binding<Bool>) -> some View {
     modifier(ToolbarWindowDragClickGate(suppressClick: suppressClick))
   }
+
+  func toolbarWindowDoubleClickZoom() -> some View {
+    modifier(ToolbarWindowDoubleClickZoom())
+  }
 }
 
 private struct ToolbarWindowDragClickGate: ViewModifier {
@@ -240,6 +249,22 @@ private struct ToolbarWindowDragClickGate: ViewModifier {
         DispatchQueue.main.async {
           suppressClick = false
         }
+      }
+  }
+}
+
+private struct ToolbarWindowDoubleClickZoom: ViewModifier {
+  @State private var window: NSWindow?
+
+  func body(content: Content) -> some View {
+    content
+      .contentShape(Rectangle())
+      .onTapGesture(count: 2) {
+        window?.performZoom(nil)
+      }
+      .allowsWindowActivationEvents(true)
+      .onHostingWindowChange { newWindow in
+        window = newWindow
       }
   }
 }
