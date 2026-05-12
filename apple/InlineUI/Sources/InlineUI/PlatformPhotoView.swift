@@ -12,6 +12,8 @@ public typealias PlatformView = NSView
 typealias PlatformImage = NSImage
 #endif
 
+private let platformPhotoFadeDuration: TimeInterval = 0.22
+
 public enum PlatformPhotoContentMode {
   case aspectFill
   case aspectFit
@@ -173,7 +175,7 @@ public final class PlatformPhotoView: PlatformView {
       guard let self else { return }
       switch result {
       case let .success(value):
-        self.setImage(value.image)
+        self.setImage(value.image, loadedFromMemory: value.cacheType == .memory)
         self.hidePlaceholder()
       case .failure:
         self.clearImage()
@@ -182,8 +184,13 @@ public final class PlatformPhotoView: PlatformView {
     }
   }
 
-  private func setImage(_ image: PlatformImage?) {
-    imageView.setImage(image)
+  private func setImage(_ image: PlatformImage?, loadedFromMemory: Bool = false) {
+    let shouldFade = image != nil
+      && !tinyThumbnailBackgroundView.isHidden
+      && !loadedFromMemory
+      && !imageView.hasImage
+
+    imageView.setImage(image, animated: shouldFade)
   }
 
   private func clearImage() {
@@ -275,8 +282,24 @@ private final class ImageContainerView: UIImageView {
     contentMode = mode == .aspectFill ? .scaleAspectFill : .scaleAspectFit
   }
 
-  func setImage(_ image: UIImage?) {
+  var hasImage: Bool {
+    image != nil
+  }
+
+  func setImage(_ image: UIImage?, animated: Bool = false) {
+    let shouldAnimate = animated && image != nil && self.image == nil
+    alpha = shouldAnimate ? 0 : 1
     self.image = image
+
+    guard shouldAnimate else { return }
+
+    UIView.animate(
+      withDuration: platformPhotoFadeDuration,
+      delay: 0,
+      options: [.allowUserInteraction, .beginFromCurrentState]
+    ) {
+      self.alpha = 1
+    }
   }
 }
 #else
@@ -314,8 +337,28 @@ private final class ImageContainerView: NSView {
     imageLayer.contentsGravity = mode == .aspectFill ? .resizeAspectFill : .resizeAspect
   }
 
-  func setImage(_ image: NSImage?) {
+  var hasImage: Bool {
+    imageLayer.contents != nil
+  }
+
+  func setImage(_ image: NSImage?, animated: Bool = false) {
+    imageLayer.removeAnimation(forKey: "photoFadeIn")
+
+    let shouldAnimate = animated && image != nil && imageLayer.contents == nil
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
     imageLayer.contents = image
+    imageLayer.opacity = 1
+    CATransaction.commit()
+
+    guard shouldAnimate else { return }
+
+    let animation = CABasicAnimation(keyPath: "opacity")
+    animation.fromValue = 0
+    animation.toValue = 1
+    animation.duration = platformPhotoFadeDuration
+    animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+    imageLayer.add(animation, forKey: "photoFadeIn")
   }
 }
 #endif

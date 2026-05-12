@@ -7,6 +7,8 @@ import NukeUI
 import Quartz
 
 final class NewPhotoView: NSView {
+  private static let imageFadeDuration: TimeInterval = 0.22
+
   private let imageView: NSView = {
     let view = NSView()
     view.wantsLayer = true
@@ -149,6 +151,7 @@ final class NewPhotoView: NSView {
 
   private func updateTinyThumbnailBackground() {
     tinyThumbnailBackgroundView.setPhoto(fullMessage.message.isSticker == true ? nil : fullMessage.photoInfo)
+
     if currentImage == nil {
       backgroundView.isHidden = !shouldShowFlatPlaceholder()
     }
@@ -186,6 +189,7 @@ final class NewPhotoView: NSView {
   private func updateImage() {
     if let url = imageLocalUrl() {
       let loadSync = shouldLoadSync()
+      let isMemoryCached = ImageCacheManager.shared.cachedImage(cacheKey: url.absoluteString) != nil
 
       ImageCacheManager.shared.image(for: url, loadSync: loadSync) { [weak self] image in
         guard let self, let image else {
@@ -195,11 +199,11 @@ final class NewPhotoView: NSView {
 
         addImageView()
 
-        if loadSync {
+        if !loadSync, !isMemoryCached, shouldFadeImageIn {
+          animateImageTransition(to: image)
+        } else {
           setImage(image)
           hideLoadingView()
-        } else {
-          animateImageTransition(to: image)
         }
       }
 
@@ -215,6 +219,10 @@ final class NewPhotoView: NSView {
       showLoadingView()
       return
     }
+  }
+
+  private var shouldFadeImageIn: Bool {
+    currentImage == nil && !tinyThumbnailBackgroundView.isHidden
   }
 
   private func setImage(_ image: NSImage) {
@@ -234,7 +242,7 @@ final class NewPhotoView: NSView {
 
     DispatchQueue.main.async {
       NSAnimationContext.runAnimationGroup { context in
-        context.duration = 0.25
+        context.duration = Self.imageFadeDuration
         context.allowsImplicitAnimation = true
         context.timingFunction = CAMediaTimingFunction(name: .easeOut)
         self.imageView.animator().alphaValue = 1.0

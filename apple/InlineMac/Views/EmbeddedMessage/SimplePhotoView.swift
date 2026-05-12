@@ -6,6 +6,8 @@ import Nuke
 import NukeUI
 
 final class SimplePhotoView: NSView {
+  private static let imageFadeDuration: TimeInterval = 0.22
+
   private let imageView: NSView = {
     let view = NSView()
     view.wantsLayer = true
@@ -129,19 +131,25 @@ final class SimplePhotoView: NSView {
       return
     }
 
+    let isMemoryCached = ImageCacheManager.shared.cachedImage(cacheKey: url.absoluteString) != nil
     ImageCacheManager.shared.image(for: url, loadSync: true) { [weak self] image in
       guard let self, let image else {
         self?.hideLoadingView()
         return
       }
 
-      setImage(image)
-      hideLoadingView()
+      if !isMemoryCached, shouldFadeImageIn {
+        animateImageTransition(to: image)
+      } else {
+        setImage(image)
+        hideLoadingView()
+      }
     }
   }
 
   private func updateTinyThumbnailBackground() {
     tinyThumbnailBackgroundView.setPhoto(photoInfo)
+
     if imageLayer.contents == nil {
       backgroundView.isHidden = !shouldShowFlatPlaceholder()
     }
@@ -150,6 +158,28 @@ final class SimplePhotoView: NSView {
   private func setImage(_ image: NSImage) {
     imageLayer.contents = image
     updateImageLayerFrame()
+  }
+
+  private var shouldFadeImageIn: Bool {
+    imageLayer.contents == nil && !tinyThumbnailBackgroundView.isHidden
+  }
+
+  private func animateImageTransition(to image: NSImage) {
+    imageView.alphaValue = 0
+    setImage(image)
+    needsLayout = true
+    layoutSubtreeIfNeeded()
+
+    DispatchQueue.main.async {
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = Self.imageFadeDuration
+        context.allowsImplicitAnimation = true
+        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        self.imageView.animator().alphaValue = 1
+      } completionHandler: {
+        self.hideLoadingView()
+      }
+    }
   }
 
   private func updateImageLayerFrame() {
