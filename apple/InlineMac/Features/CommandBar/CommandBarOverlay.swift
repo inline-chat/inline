@@ -57,6 +57,9 @@ private struct CommandBarOverlay: View {
       },
       onSizeChange: { _ in }
     )
+    .onClickOutside {
+      close()
+    }
     .onAppear {
       viewModel.requestFocus()
       installKeyHandling()
