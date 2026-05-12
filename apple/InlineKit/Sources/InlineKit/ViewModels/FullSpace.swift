@@ -20,6 +20,7 @@ public struct SpaceChatItem: Codable, FetchableRecord, PersistableRecord, Sendab
   public var from: UserInfo?
   public var translations: [Translation] = []
   public var photoInfo: PhotoInfo?
+  public var document: Document?
   // ------ GETTERS ----------
   // Peer user
   public var peerId: Peer {
@@ -45,7 +46,8 @@ public struct SpaceChatItem: Codable, FetchableRecord, PersistableRecord, Sendab
     message: Message? = nil,
     from: UserInfo? = nil,
     translations: [Translation] = [],
-    photoInfo: PhotoInfo? = nil
+    photoInfo: PhotoInfo? = nil,
+    document: Document? = nil
   ) {
     self.dialog = dialog
     self.chat = chat
@@ -54,6 +56,7 @@ public struct SpaceChatItem: Codable, FetchableRecord, PersistableRecord, Sendab
     self.from = from
     self.translations = translations
     self.photoInfo = photoInfo
+    self.document = document
   }
 }
 

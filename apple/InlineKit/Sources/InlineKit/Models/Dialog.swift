@@ -343,6 +343,7 @@ public extension Dialog {
               .forKey("photoInfo")
               .including(all: Photo.sizes.forKey(PhotoInfo.CodingKeys.sizes))
           )
+          .including(optional: Message.document.forKey("document"))
         )
     )
 
@@ -379,6 +380,7 @@ public extension Dialog {
               .forKey("photoInfo")
               .including(all: Photo.sizes.forKey(PhotoInfo.CodingKeys.sizes))
           )
+          .including(optional: Message.document.forKey("document"))
         )
     )
     .asRequest(of: SpaceChatItem.self)
@@ -402,6 +404,7 @@ public extension Dialog {
               .forKey("photoInfo")
               .including(all: Photo.sizes.forKey(PhotoInfo.CodingKeys.sizes))
           )
+          .including(optional: Message.document.forKey("document"))
         )
     )
 

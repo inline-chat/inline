@@ -133,6 +133,7 @@ public extension Member {
               .forKey("photoInfo")
               .including(all: Photo.sizes.forKey(PhotoInfo.CodingKeys.sizes))
           )
+          .including(optional: Message.document.forKey("document"))
       ))
     
     .including(optional: Member.dialog)
