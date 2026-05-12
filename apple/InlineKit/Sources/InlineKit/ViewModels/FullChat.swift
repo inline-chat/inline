@@ -372,51 +372,29 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
   public func refetchChatViewAsync() async {
     let peer_ = peer
 
-    let chatExists = await (try? queryChatFromDatabase()) != nil
+    let cachedChatItem = await (try? queryChatItemFromDatabase())
     guard !Task.isCancelled else { return }
 
-    if chatExists {
-      await withTaskGroup(of: Void.self) { group in
-        group.addTask {
-          guard !Task.isCancelled else { return }
-          _ = try? await Api.realtime.send(.getChat(peer: peer_))
-        }
-
-        group.addTask {
-          guard !Task.isCancelled else { return }
-          _ = try? await Api.realtime.send(.getChatHistory(peer: peer_))
-        }
-
-        group.addTask {
-          guard !Task.isCancelled else { return }
-          if self.peerUser == nil {
-            do {
-              if let userId = peer_.asUserId() {
-                try await DataManager.shared.getUser(id: userId)
-              }
-            } catch {
-              self.log.error("Failed to refetch user info \(error)")
-            }
-          }
-        }
-      }
-    } else {
-      if self.peerUser == nil {
-        do {
-          if let userId = peer_.asUserId() {
-            try await DataManager.shared.getUser(id: userId)
-          }
-        } catch {
-          log.error("Failed to refetch user info \(error)")
-        }
-      }
-
-      guard !Task.isCancelled else { return }
-      _ = try? await Api.realtime.send(.getChat(peer: peer_))
-
-      guard !Task.isCancelled else { return }
-      _ = try? await Api.realtime.send(.getChatHistory(peer: peer_))
+    if cachedChatItem?.chat != nil {
+      await refetchHistoryAndUser(peer: peer_)
+      return
     }
+
+    if self.peerUser == nil {
+      do {
+        if let userId = peer_.asUserId() {
+          try await DataManager.shared.getUser(id: userId)
+        }
+      } catch {
+        log.error("Failed to refetch user info \(error)")
+      }
+    }
+
+    guard !Task.isCancelled else { return }
+    _ = try? await Api.realtime.send(.getChat(peer: peer_))
+
+    guard !Task.isCancelled else { return }
+    _ = try? await Api.realtime.send(.getChatHistory(peer: peer_))
   }
 
   public func refetchChatView() {
@@ -446,16 +424,19 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
 
   private func refetchHistoryOnlyAsync() async {
     let peer_ = peer
+    await refetchHistoryAndUser(peer: peer_)
+  }
 
+  private func refetchHistoryAndUser(peer: Peer) async {
     await withTaskGroup(of: Void.self) { group in
       group.addTask {
         guard !Task.isCancelled else { return }
-        _ = try? await Api.realtime.send(.getChatHistory(peer: peer_))
+        _ = try? await Api.realtime.send(.getChatHistory(peer: peer))
       }
 
       group.addTask {
         guard !Task.isCancelled else { return }
-        if self.peerUser == nil, let userId = peer_.asUserId() {
+        if self.peerUser == nil, let userId = peer.asUserId() {
           do {
             try await DataManager.shared.getUser(id: userId)
           } catch {
@@ -506,11 +487,6 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
     return item
   }
 
-  /// Query chat from database directly.
-  private func queryChatFromDatabase() async throws -> Chat? {
-    try await queryChatItemFromDatabase()?.chat
-  }
-
   /// Ensure chat is loaded, if not fetch it
   public func ensureChat() async throws -> Chat? {
     if let chatItem, let chat = chatItem.chat {
@@ -524,6 +500,10 @@ public final class FullChatViewModel: ObservableObject, @unchecked Sendable {
     if let cachedChatItem {
       await MainActor.run {
         self.chatItem = cachedChatItem
+      }
+
+      if let chat = cachedChatItem.chat {
+        return chat
       }
     }
 
