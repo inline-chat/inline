@@ -100,7 +100,8 @@ struct ChatListItem: Hashable, Identifiable {
         senderInfo: spaceContactItem.from,
         translations: spaceContactItem.translations,
         photoInfo: spaceContactItem.photoInfo,
-        videoInfo: nil
+        videoInfo: nil,
+        document: spaceContactItem.document
       )
     } else {
       lastMessage = nil
@@ -121,7 +122,8 @@ struct ChatListItem: Hashable, Identifiable {
         senderInfo: spaceChatItem.from,
         translations: spaceChatItem.translations,
         photoInfo: spaceChatItem.photoInfo,
-        videoInfo: nil
+        videoInfo: nil,
+        document: spaceChatItem.document
       )
     } else {
       lastMessage = nil
@@ -145,6 +147,7 @@ extension ChatListItem {
   var sidebarLastMessagePreviewText: String {
     guard let lastMessage else { return "" }
     let messageText = lastMessage.displayTextForLastMessage
+      ?? lastMessage.documentPreviewText
       ?? lastMessage.message.stringRepresentationPlain
     guard kind == .thread, chat?.type == .thread else { return messageText }
     guard let sender = lastMessage.senderInfo?.user.shortDisplayName, sender.isEmpty == false else {
@@ -155,5 +158,17 @@ extension ChatListItem {
 
   var sidebarBasePreviewText: String {
     draftPreviewText ?? sidebarLastMessagePreviewText
+  }
+}
+
+private extension EmbeddedMessage {
+  var documentPreviewText: String? {
+    guard message.documentId != nil else { return nil }
+    guard let fileName = document?.fileName?.trimmingCharacters(in: .whitespacesAndNewlines),
+          fileName.isEmpty == false
+    else {
+      return nil
+    }
+    return fileName.replacingOccurrences(of: "\n", with: " ")
   }
 }
