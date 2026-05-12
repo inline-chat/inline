@@ -11,6 +11,8 @@ import UIKit
 final class NewPhotoView: UIView {
   // MARK: - Properties
 
+  private static let imageFadeDuration: TimeInterval = 0.22
+
   private var fullMessage: FullMessage
 
   private let maxWidth: CGFloat = 280
@@ -329,15 +331,12 @@ final class NewPhotoView: UIView {
 
   private func updateTinyThumbnailBackground() {
     tinyThumbnailBackgroundView.setPhoto(isSticker ? nil : fullMessage.photoInfo)
+    updateImageTransition()
   }
 
   private func updateImage() {
     if let url = imageLocalUrl() {
-      imageView.request = ImageRequest(
-        url: url,
-        processors: [.resize(width: 300)],
-        priority: .high
-      )
+      setImageRequest(for: url)
     } else {
       if let photoInfo = fullMessage.photoInfo {
         Task.detached(priority: .userInitiated) { [weak self] in
@@ -347,18 +346,30 @@ final class NewPhotoView: UIView {
 
           Task { @MainActor in
             if let newUrl = self.imageLocalUrl() {
-              self.imageView.request = ImageRequest(
-                url: newUrl,
-                processors: [.resize(width: 300)],
-                priority: .high
-              )
+              self.setImageRequest(for: newUrl)
             }
           }
         }
       }
 
+      updateImageTransition()
       imageView.url = nil
     }
+  }
+
+  private func setImageRequest(for url: URL) {
+    let request = ImageRequest(
+      url: url,
+      processors: [.resize(width: 300)],
+      priority: .high
+    )
+
+    updateImageTransition()
+    imageView.request = request
+  }
+
+  private func updateImageTransition() {
+    imageView.transition = tinyThumbnailBackgroundView.isHidden ? nil : .fadeIn(duration: Self.imageFadeDuration)
   }
 
   private func imageLocalUrl() -> URL? {
