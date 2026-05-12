@@ -2,19 +2,27 @@ import InlineKit
 import SwiftUI
 
 struct SidebarThreadIcon: View, Equatable {
+  enum IconShape: Equatable {
+    case roundedSquare
+    case circle
+  }
+
   let emoji: String?
   var size: CGFloat = 20
+  var shape: IconShape = .roundedSquare
 
   let noBg: Bool = false
 
-  init(chat: Chat, size: CGFloat = 20) {
+  init(chat: Chat, size: CGFloat = 20, shape: IconShape = .roundedSquare) {
     emoji = Self.normalizedEmoji(chat.emoji)
     self.size = size
+    self.shape = shape
   }
 
-  init(emoji: String?, size: CGFloat = 20) {
+  init(emoji: String?, size: CGFloat = 20, shape: IconShape = .roundedSquare) {
     self.emoji = Self.normalizedEmoji(emoji)
     self.size = size
+    self.shape = shape
   }
 
   var body: some View {
@@ -40,8 +48,14 @@ struct SidebarThreadIcon: View, Equatable {
     if noBg {
       Color.clear
     } else {
-      RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        .fill(.quinary)
+      switch shape {
+        case .roundedSquare:
+          RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(.quinary)
+        case .circle:
+          Circle()
+            .fill(.quinary)
+      }
     }
   }
 
@@ -69,6 +83,8 @@ struct SidebarThreadIcon: View, Equatable {
     SidebarThreadIcon(emoji: "💬")
     SidebarThreadIcon(emoji: nil)
     SidebarThreadIcon(emoji: "🧠", size: 24)
+    SidebarThreadIcon(emoji: "💬", size: 32, shape: .circle)
+    SidebarThreadIcon(emoji: nil, size: 32, shape: .circle)
   }
   .padding()
 }
