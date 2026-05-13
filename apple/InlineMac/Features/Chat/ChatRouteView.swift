@@ -131,12 +131,20 @@ struct ChatRouteView: View {
             )
             .id(peer.toString())
           }
+
+          if #available(macOS 26.0, *) {
+            ToolbarSpacer(.fixed)
+          }
         }
 
         if case .user = peer {
           ToolbarItem {
             NudgeButton(peer: peer)
               .id(peer.id)
+          }
+
+          if #available(macOS 26.0, *) {
+            ToolbarSpacer(.fixed)
           }
         }
 

@@ -108,7 +108,7 @@ public struct NudgeButton: View {
     } label: {
 #if os(macOS)
       nudgeButtonGlyph
-        .font(.system(size: 15, weight: .regular))
+        .font(.system(size: 16, weight: .regular))
         .imageScale(.medium)
         .frame(width: 24, height: 24)
         .overlay {
