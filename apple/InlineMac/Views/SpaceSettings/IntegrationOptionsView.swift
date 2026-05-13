@@ -114,8 +114,8 @@ struct IntegrationOptionsView: View {
     .scrollContentBackground(.hidden)
     .navigationTitle(provider == "linear" ? "Linear Options" : "Notion Options")
     .frame(minWidth: 380, minHeight: 240)
-    .toolbar {
-      ToolbarItem(placement: .confirmationAction) {
+    .toolbar(id: "integration-options-toolbar") {
+      ToolbarItem(id: "integration-options-done", placement: .confirmationAction) {
         Button("Done") {
           dismiss()
         }

@@ -38,21 +38,23 @@ struct SettingsRootView: View {
     .navigationTitle("Settings")
     .navigationSplitViewStyle(.balanced)
     .frame(minWidth: Metrics.windowMinWidth, minHeight: Metrics.windowMinHeight)
-    .toolbar {
-      ToolbarItemGroup(placement: .navigation) {
-        Button {
-          goBack()
-        } label: {
-          Image(systemName: "chevron.left")
-        }
-        .disabled(!canGoBack)
+    .toolbar(id: "settings-toolbar") {
+      ToolbarItem(id: "settings-navigation-history", placement: .navigation) {
+        HStack(spacing: 0) {
+          Button {
+            goBack()
+          } label: {
+            Image(systemName: "chevron.left")
+          }
+          .disabled(!canGoBack)
 
-        Button {
-          goForward()
-        } label: {
-          Image(systemName: "chevron.right")
+          Button {
+            goForward()
+          } label: {
+            Image(systemName: "chevron.right")
+          }
+          .disabled(!canGoForward)
         }
-        .disabled(!canGoForward)
       }
     }
     .onChange(of: selectedCategory) { _, _ in

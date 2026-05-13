@@ -1,10 +1,10 @@
 import SwiftUI
 
-struct MainWindowToolbar: ToolbarContent {
+struct MainWindowToolbar: CustomizableToolbarContent {
   let nav: Nav3
 
-  var body: some ToolbarContent {
-    ToolbarItem(placement: .navigation) {
+  var body: some CustomizableToolbarContent {
+    ToolbarItem(id: "navigation-history", placement: .navigation) {
       HStack(spacing: 0) {
         Button(action: nav.goBack) {
           Image(systemName: "chevron.left")
