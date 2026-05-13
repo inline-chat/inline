@@ -4,7 +4,7 @@ struct Onboarding: View {
   @EnvironmentObject var windowViewModel: MainWindowViewModel
   @StateObject var viewModel = OnboardingViewModel()
 
-  var usesWindowContainerBackground = false
+  var allowsBackgroundWindowDrag = false
 
   var routeTransition1: AnyTransition = .asymmetric(
     insertion: .push(from: .trailing),
@@ -73,28 +73,30 @@ struct Onboarding: View {
 
   @ViewBuilder
   private var background: some View {
-    Group {
-      if usesWindowContainerBackground {
-        Color.clear
-          .contentShape(Rectangle())
-          .gesture(WindowDragGesture())
-          .allowsWindowActivationEvents(true)
-      } else {
-        VisualEffectView(material: .popover, blendingMode: .behindWindow)
+    if allowsBackgroundWindowDrag {
+      backgroundSurface
+        .contentShape(Rectangle())
+        .gesture(WindowDragGesture())
+        .allowsWindowActivationEvents(true)
+    } else {
+      backgroundSurface
+    }
+  }
+
+  private var backgroundSurface: some View {
+    VisualEffectView(material: .popover, blendingMode: .behindWindow)
+      .overlay {
+        LinearGradient(
+          colors: [
+            .white.opacity(0.0),
+            .white.opacity(0.05),
+            .white.opacity(0.0),
+          ],
+          startPoint: .topTrailing,
+          endPoint: .bottomLeading,
+        )
       }
-    }
-    .overlay {
-      LinearGradient(
-        colors: [
-          .white.opacity(0.0),
-          .white.opacity(0.05),
-          .white.opacity(0.0),
-        ],
-        startPoint: .topTrailing,
-        endPoint: .bottomLeading,
-      )
-    }
-    .ignoresSafeArea(edges: .all)
+      .ignoresSafeArea(edges: .all)
   }
 }
 
