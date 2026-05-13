@@ -14,3 +14,5 @@ If you previously installed Inline via TestFlight and now want to use the `.dmg`
 3. Install Inline from the `.dmg`.
 
 If Finder shows a replace prompt while copying from the `.dmg`, click **Replace**.
+
+Need an older macOS build? See [previous versions](/docs/downloads/previous).
