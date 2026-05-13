@@ -119,20 +119,13 @@ struct ChatRouteView: View {
         }
 
         if peer.isThread {
-          let participantsItem =
-            ToolbarItem {
-              ChatToolbarParticipantsButton(
-                peer: peer,
-                dependencies: dependencies,
-                toolbarState: chatToolbarState
-              )
-              .id(peer.toString())
-            }
-
-          if #available(macOS 26.0, *) {
-            participantsItem.sharedBackgroundVisibility(.hidden)
-          } else {
-            participantsItem
+          ToolbarItem {
+            ChatToolbarParticipantsButton(
+              peer: peer,
+              dependencies: dependencies,
+              toolbarState: chatToolbarState
+            )
+            .id(peer.toString())
           }
         }
 
