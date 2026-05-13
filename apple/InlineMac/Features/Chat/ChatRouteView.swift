@@ -118,6 +118,10 @@ struct ChatRouteView: View {
           .id(peer.id)
         }
 
+        if #available(macOS 26.0, *) {
+          ToolbarSpacer(.fixed)
+        }
+
         if peer.isThread {
           ToolbarItem {
             ChatToolbarParticipantsButton(
@@ -130,16 +134,9 @@ struct ChatRouteView: View {
         }
 
         if case .user = peer {
-          let nudgeItem =
-            ToolbarItem {
-              NudgeButton(peer: peer)
-                .id(peer.id)
-            }
-
-          if #available(macOS 26.0, *) {
-            nudgeItem.sharedBackgroundVisibility(.hidden)
-          } else {
-            nudgeItem
+          ToolbarItem {
+            NudgeButton(peer: peer)
+              .id(peer.id)
           }
         }
 
