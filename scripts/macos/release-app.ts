@@ -69,7 +69,7 @@ function usage(): string {
     "",
     "Options:",
     "  --channel stable|beta            Update channel (default: beta; prompts if omitted in an interactive terminal)",
-    "  --derived-data <path>            Xcode derived data (default: <root>/build/InlineMacDirect)",
+    "  --derived-data <path>            Xcode derived data (default: unique <root>/build/InlineMacDirect/release-*)",
     "  --app-path <path>                App path (default: <derived-data>/Build/Products/Release/Inline.app)",
     "  --dmg-path <path>                DMG path (default: <root>/build/macos-direct/Inline.dmg)",
     "  --sparkle-dir <path>             Sparkle tools dir (default: <root>/.action/sparkle)",
@@ -83,6 +83,7 @@ function usage(): string {
     "  --rollback-to-build <build>      Target build to restore (default: previous appcast item)",
     "  --rollback-steps-back <n>        Pick the Nth previous appcast item (default: 1)",
     "  --pause-before-notarize          Pause after app/DMG build so you can test locally, then continue notarization",
+    "  --upload-sentry-dsyms            Upload dSYMs to Sentry (disabled by default while the upload flow is broken)",
     "  --dry-run                         Print what would run, without executing the pipeline",
     "  --skip-build                      Alias for --skip build",
     "  -h, --help                       Show help",
@@ -101,7 +102,7 @@ function die(message: string): never {
 
 function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   let channel: "stable" | "beta" | undefined;
-  let derivedData = resolve(rootDir, "build/InlineMacDirect");
+  let derivedData = resolve(rootDir, "build/InlineMacDirect", `release-${nowIsoCompact()}-${Math.random().toString(16).slice(2, 8)}`);
   let appPath = "";
   let dmgPath = resolve(rootDir, "build/macos-direct/Inline.dmg");
   let sparkleDir = resolve(rootDir, ".action/sparkle");
@@ -114,6 +115,7 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   let rollback = false;
   let rollbackToBuild = "";
   let rollbackStepsBack = 1;
+  let uploadSentryDsyms = false;
 
   const resolveFromRoot = (p: string): string => {
     if (!p) return p;
@@ -193,6 +195,10 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
       pauseBeforeNotarize = true;
       continue;
     }
+    if (arg === "--upload-sentry-dsyms") {
+      uploadSentryDsyms = true;
+      continue;
+    }
     if (arg === "--skip-build") {
       skip.add("build");
       continue;
@@ -215,6 +221,17 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
 
   if (!appPath) {
     appPath = resolve(derivedData, "Build/Products/Release/Inline.app");
+  }
+  if (rollback && uploadSentryDsyms) {
+    die("--upload-sentry-dsyms is not supported with --rollback.");
+  }
+  if (!rollback) {
+    if (uploadSentryDsyms && skip.has("upload-sentry-dsyms")) {
+      die("Use either --upload-sentry-dsyms or --skip upload-sentry-dsyms, not both.");
+    }
+    if (!uploadSentryDsyms) {
+      skip.add("upload-sentry-dsyms");
+    }
   }
 
   if (rollbackToBuild && !rollback) {
@@ -586,6 +603,7 @@ function buildResumeCommand(ctx: ReleaseContext, fromTask: string): string {
   if (ctx.skipGithubRelease) args.push("--skip-github-release");
   if (concreteSkipIds.length) args.push("--skip", concreteSkipIds.join(","));
   if (ctx.pauseBeforeNotarize) args.push("--pause-before-notarize");
+  if (!ctx.rollback && !ctx.skip.has("upload-sentry-dsyms")) args.push("--upload-sentry-dsyms");
   if (ctx.derivedData !== defaultDerivedData) args.push("--derived-data", ctx.derivedData);
   if (ctx.appPath !== defaultAppPath) args.push("--app-path", ctx.appPath);
   if (ctx.dmgPath !== defaultDmgPath) args.push("--dmg-path", ctx.dmgPath);
