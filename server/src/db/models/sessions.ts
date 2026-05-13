@@ -56,6 +56,11 @@ export interface SessionWithDecryptedData
   applePushToken: string | null
 }
 
+export interface IOSPushSession extends SessionWithDecryptedData {
+  clientType: "ios"
+  applePushToken: string
+}
+
 const log = new Log("SessionsModel")
 
 export class SessionsModel {
@@ -223,7 +228,7 @@ export class SessionsModel {
     await db
       .update(sessions)
       .set(updateData)
-      .where(eq(sessions.id, id))
+      .where(and(eq(sessions.id, id), isNull(sessions.revoked)))
   }
 
   static async clearApplePushToken(id: number): Promise<void> {
@@ -238,6 +243,10 @@ export class SessionsModel {
         applePushTokenEncrypted: null,
         applePushTokenIv: null,
         applePushTokenTag: null,
+        pushContentKeyPublic: null,
+        pushContentKeyId: null,
+        pushContentKeyAlgorithm: null,
+        pushContentVersion: null,
       })
       .where(eq(sessions.id, id))
   }
@@ -251,7 +260,18 @@ export class SessionsModel {
     try {
       const result = await db
         .update(sessions)
-        .set({ revoked: new Date() })
+        .set({
+          revoked: new Date(),
+          active: false,
+          applePushToken: null,
+          applePushTokenEncrypted: null,
+          applePushTokenIv: null,
+          applePushTokenTag: null,
+          pushContentKeyPublic: null,
+          pushContentKeyId: null,
+          pushContentKeyAlgorithm: null,
+          pushContentVersion: null,
+        })
         .where(eq(sessions.id, id))
         .returning({ id: sessions.id })
 
@@ -341,6 +361,25 @@ export class SessionsModel {
     }
   }
 
+  static async getValidIOSPushSessionsByUserId(userId: number): Promise<IOSPushSession[]> {
+    if (!userId || userId <= 0) {
+      throw new Error("Invalid user ID")
+    }
+
+    try {
+      const rows = await db
+        .select()
+        .from(sessions)
+        .where(and(eq(sessions.userId, userId), isNull(sessions.revoked), eq(sessions.clientType, "ios")))
+
+      return rows.map((session) => this.decryptSessionData(session)).filter(this.isIOSPushSession)
+    } catch (error) {
+      throw new Error(
+        `Failed to get active iOS push sessions: ${error instanceof Error ? error.message : "Unknown error"}`,
+      )
+    }
+  }
+
   // Get all currently active sessions for a user
   static async getActiveSessionsByUserId(userId: number): Promise<SessionWithDecryptedData[]> {
     if (!userId || userId <= 0) {
@@ -360,5 +399,9 @@ export class SessionsModel {
     } catch (error) {
       throw new Error(`Failed to get active sessions: ${error instanceof Error ? error.message : "Unknown error"}`)
     }
+  }
+
+  private static isIOSPushSession(session: SessionWithDecryptedData): session is IOSPushSession {
+    return session.revoked === null && session.clientType === "ios" && !!session.applePushToken
   }
 }

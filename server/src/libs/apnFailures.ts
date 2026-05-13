@@ -84,9 +84,3 @@ export const isSuppressedApnFailure = (summary: ApnFailureSummary): boolean => {
   if (summary.reason && suppressedReasons.has(summary.reason)) return true
   return false
 }
-
-export const shouldInvalidateTokenForApnFailure = (summary: ApnFailureSummary): boolean => {
-  if (summary.status === 410) return true
-  if (!summary.reason) return false
-  return suppressedReasons.has(summary.reason)
-}
