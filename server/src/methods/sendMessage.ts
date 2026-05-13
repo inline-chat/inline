@@ -28,6 +28,7 @@ import { getUpdateGroup } from "@in/server/modules/updates"
 import * as APN from "apn"
 import type { HandlerContext } from "../controllers/helpers"
 import { getApnProvider } from "../libs/apn"
+import { summarizeApnFailure } from "../libs/apnFailures"
 import { SessionsModel } from "@in/server/db/models/sessions"
 import { encryptMessage } from "@in/server/modules/encryption/encryptMessage"
 import { encryptBinary } from "@in/server/modules/encryption/encryption"
@@ -434,8 +435,9 @@ const sendPushNotificationToUser = async ({
         try {
           const result = await apnProvider.send(notification, session.applePushToken)
           if (result.failed.length > 0) {
+            const summaries = result.failed.map((failure) => summarizeApnFailure(failure))
             Log.shared.debug("Failed to send push notification", {
-              errors: result.failed.map((f) => f.response),
+              errors: summaries,
               userId,
             })
           } else {

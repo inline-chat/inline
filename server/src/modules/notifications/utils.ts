@@ -7,7 +7,7 @@ export const iOSTopic = isProd ? "chat.inline.InlineIOS" : "chat.inline.InlineIO
 export const isIOSPushSession = (session: SessionWithDecryptedData): session is SessionWithDecryptedData & {
   applePushToken: string
 } => {
-  return session.clientType === "ios" && !!session.applePushToken
+  return session.revoked === null && session.clientType === "ios" && !!session.applePushToken
 }
 
 export const setPushType = (notification: Notification, pushType: "alert" | "background") => {

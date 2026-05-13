@@ -1,9 +1,9 @@
 import { SessionsModel } from "@in/server/db/models/sessions"
 import { getApnProvider } from "@in/server/libs/apn"
-import { isSuppressedApnFailure, shouldInvalidateTokenForApnFailure, summarizeApnFailure } from "@in/server/libs/apnFailures"
+import { isSuppressedApnFailure, summarizeApnFailure } from "@in/server/libs/apnFailures"
 import { Log } from "@in/server/utils/log"
 import { Notification } from "apn"
-import { configureAlertNotification, configureBackgroundNotification, iOSTopic, isIOSPushSession } from "./utils"
+import { configureAlertNotification, configureBackgroundNotification, iOSTopic } from "./utils"
 import {
   encryptSendMessagePushContent,
   PUSH_CONTENT_ALGORITHM,
@@ -110,7 +110,7 @@ const configurePlaintextSendMessageNotification = ({
 const genericEncryptedAlertTitle = "New message"
 const genericEncryptedAlertBody = "Open Inline to read it."
 
-type UserSession = Awaited<ReturnType<typeof SessionsModel.getValidSessionsByUserId>>[number]
+type UserSession = Awaited<ReturnType<typeof SessionsModel.getValidIOSPushSessionsByUserId>>[number]
 
 const sessionSupportsEncryptedPushContent = (
   session: UserSession,
@@ -127,7 +127,7 @@ const sessionSupportsEncryptedPushContent = (
 export const sendPushNotificationToUser = async ({ userId, payload }: SendPushToUserInput) => {
   try {
     // Get all sessions for the user
-    const userSessions = await SessionsModel.getValidSessionsByUserId(userId)
+    const userSessions = await SessionsModel.getValidIOSPushSessionsByUserId(userId)
 
     if (!userSessions.length) {
       return
@@ -139,7 +139,7 @@ export const sendPushNotificationToUser = async ({ userId, payload }: SendPushTo
       return
     }
 
-    for (const session of userSessions.filter(isIOSPushSession)) {
+    for (const session of userSessions) {
       const topic = iOSTopic
       if (!topic) continue
 
@@ -278,13 +278,6 @@ export const sendPushNotificationToUser = async ({ userId, payload }: SendPushTo
               })
             }
 
-            if (summaries.some((s) => shouldInvalidateTokenForApnFailure(s))) {
-              try {
-                await SessionsModel.clearApplePushToken(session.id)
-              } catch (error) {
-                log.debug("Failed to clear invalid push token", { error, userId, sessionId: session.id })
-              }
-            }
           } else {
             log.debug("Push notification sent successfully", {
               userId,
