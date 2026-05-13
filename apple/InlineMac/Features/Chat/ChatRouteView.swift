@@ -70,7 +70,7 @@ struct ChatRouteView: View {
       .task(id: peer.toString(), priority: .utility) {
         await ensureToolbarParticipantsLoaded(dependencies: dependencies)
       }
-      .toolbar {
+      .toolbar(id: "chat-toolbar") {
         let mainItem =
           ToolbarItem(id: "chat-title", placement: .navigation) {
             ChatRouteTitleBar(peer: peer, db: db, contextSpaceId: nav.selectedSpaceId) { title in
@@ -109,33 +109,6 @@ struct ChatRouteView: View {
           ToolbarSpacer(.flexible)
         }
 
-        if peer.isThread {
-          ToolbarItem(id: "chat-participants") {
-            ChatToolbarParticipantsButton(
-              peer: peer,
-              dependencies: dependencies,
-              toolbarState: chatToolbarState
-            )
-            .id(peer.toString())
-          }
-
-          if #available(macOS 26.0, *) {
-            ToolbarSpacer(.fixed)
-          }
-        }
-
-        if case .user = peer {
-          ToolbarItem(id: "chat-nudge") {
-            NudgeButton(peer: peer)
-              .toolbarItemLabel("Nudge")
-              .id(peer.id)
-          }
-
-          if #available(macOS 26.0, *) {
-            ToolbarSpacer(.fixed)
-          }
-        }
-
         ToolbarItem(id: "chat-notifications") {
           ChatToolbarNotificationButton(
             peer: peer,
@@ -143,6 +116,39 @@ struct ChatRouteView: View {
             toolbarState: chatToolbarState
           )
           .id(peer.id)
+        }
+
+        if peer.isThread {
+          let participantsItem =
+            ToolbarItem(id: "chat-participants") {
+              ChatToolbarParticipantsButton(
+                peer: peer,
+                dependencies: dependencies,
+                toolbarState: chatToolbarState
+              )
+              .id(peer.toString())
+            }
+
+          if #available(macOS 26.0, *) {
+            participantsItem.sharedBackgroundVisibility(.hidden)
+          } else {
+            participantsItem
+          }
+        }
+
+        if case .user = peer {
+          let nudgeItem =
+            ToolbarItem(id: "chat-nudge") {
+              NudgeButton(peer: peer)
+                .toolbarItemLabel("Nudge")
+                .id(peer.id)
+            }
+
+          if #available(macOS 26.0, *) {
+            nudgeItem.sharedBackgroundVisibility(.hidden)
+          } else {
+            nudgeItem
+          }
         }
 
         if AppSettings.shared.translationUIEnabled {
