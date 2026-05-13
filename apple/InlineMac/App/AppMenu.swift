@@ -531,6 +531,15 @@ final class AppMenu: NSObject {
     docsItem.image = NSImage(systemSymbolName: "book.closed", accessibilityDescription: nil)
     helpMenu.addItem(docsItem)
 
+    let previousVersionsItem = NSMenuItem(
+      title: "Previous Versions",
+      action: #selector(openPreviousVersions(_:)),
+      keyEquivalent: ""
+    )
+    previousVersionsItem.target = self
+    previousVersionsItem.image = NSImage(systemSymbolName: "arrow.down.circle", accessibilityDescription: nil)
+    helpMenu.addItem(previousVersionsItem)
+
     let feedbackItem = NSMenuItem(
       title: "Send Feedback",
       action: #selector(sendFeedback(_:)),
@@ -643,6 +652,10 @@ final class AppMenu: NSObject {
 
   @objc private func openDocs(_ sender: Any?) {
     openURL("https://inline.chat/docs")
+  }
+
+  @objc private func openPreviousVersions(_ sender: Any?) {
+    openURL("https://inline.chat/docs/downloads/previous")
   }
 
   @objc private func sendFeedback(_ sender: Any?) {

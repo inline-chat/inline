@@ -1,45 +1,8 @@
 import { createFileRoute, redirect } from "@tanstack/react-router"
 
+import { latestMacDmgUrl } from "~/lib/macReleases"
+
 const APPCAST_URL = "https://public-assets.inline.chat/mac/beta/appcast.xml"
-
-function parseLatestDmgUrl(xml: string): string | null {
-  const itemRegex = /<item>([\s\S]*?)<\/item>/g
-  let bestUrl: string | null = null
-  let bestVersion: bigint | null = null
-  let lastUrl: string | null = null
-
-  for (const match of xml.matchAll(itemRegex)) {
-    const item = match[1]
-    const urlMatch = item.match(/<enclosure[^>]*\surl="([^"]+)"/)
-    if (!urlMatch) {
-      continue
-    }
-
-    const url = urlMatch[1]
-    lastUrl = url
-
-    const versionMatch = item.match(/<sparkle:version>([^<]+)<\/sparkle:version>/)
-    if (!versionMatch) {
-      if (!bestUrl) {
-        bestUrl = url
-      }
-      continue
-    }
-
-    const versionText = versionMatch[1].trim()
-    if (/^\d+$/.test(versionText)) {
-      const version = BigInt(versionText)
-      if (bestVersion === null || version > bestVersion) {
-        bestVersion = version
-        bestUrl = url
-      }
-    } else if (!bestUrl) {
-      bestUrl = url
-    }
-  }
-
-  return bestUrl ?? lastUrl
-}
 
 export const Route = createFileRoute("/download/mac/beta")({
   loader: async () => {
@@ -54,7 +17,7 @@ export const Route = createFileRoute("/download/mac/beta")({
     }
 
     const xml = await response.text()
-    const dmgUrl = parseLatestDmgUrl(xml)
+    const dmgUrl = latestMacDmgUrl(xml)
     throw redirect({ href: dmgUrl ?? APPCAST_URL })
   },
 })
