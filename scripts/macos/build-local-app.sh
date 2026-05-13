@@ -7,7 +7,7 @@ SPARKLE_VERSION=${SPARKLE_VERSION:-2.7.3}
 SCHEME=${SCHEME:-"Inline (macOS)"}
 CONFIGURATION=${CONFIGURATION:-DevBuild}
 CHANNEL=${CHANNEL:-stable}
-SIGN_BUILD=${SIGN_BUILD:-auto}
+SIGN_BUILD=${SIGN_BUILD:-always}
 APPCAST_URL=${APPCAST_URL:-"https://public-assets.inline.chat/mac/${CHANNEL}/appcast.xml"}
 SPARKLE_SCHEDULED_CHECK_INTERVAL=${SPARKLE_SCHEDULED_CHECK_INTERVAL:-3600}
 SPARKLE_DIR=${SPARKLE_DIR:-"${ROOT_DIR}/.action/sparkle"}
@@ -24,22 +24,22 @@ usage() {
   cat <<'EOF'
 Usage: build-local-app.sh [options]
 
-Builds a local Sparkle-enabled Inline.app for testing without signing, DMG
-creation, notarization, or upload steps.
+Builds a local Sparkle-enabled Inline.app for testing without DMG creation,
+notarization, or upload steps. Local post-build signing is enabled by default.
 
 Options:
   --channel <stable|beta>         Update channel to embed in Info.plist
   --configuration DevBuild        Xcode build configuration (fixed to DevBuild)
   --derived-data <path>           Xcode derived data path
   --app-path <path>               App bundle output path
-  --sign                          Require post-build local signing
+  --sign                          Require post-build local signing (default)
   --skip-sign                     Skip post-build local signing
   --sparkle-dir <path>            Sparkle download/cache directory
   --scheme <name>                 Xcode scheme (default: Inline (macOS))
   -h, --help                      Show help
 
 Optional env:
-  SIGN_BUILD                      auto|always|never (default: auto)
+  SIGN_BUILD                      auto|always|never (default: always)
   SPARKLE_PUBLIC_KEY              Embedded into SUPublicEDKey when set
   MACOS_SPARKLE_PUBLIC_KEY        Alias for SPARKLE_PUBLIC_KEY
   MACOS_CERTIFICATE_NAME          Signing identity used by sign-direct.sh
