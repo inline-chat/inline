@@ -156,10 +156,24 @@ extension AppDependencies {
 }
 
 @MainActor
+@Observable
 final class MainWindowSessionRefresher {
-  private var didFetchInitialData = false
-  private var initialTask: Task<Void, Never>?
-  private var chatsTask: Task<Void, Never>?
+  private(set) var isFetchingSidebarChats = false
+
+  @ObservationIgnored private var sidebarFetchCount = 0
+  @ObservationIgnored private var didFetchInitialData = false
+  @ObservationIgnored private var initialTask: Task<Void, Never>?
+  @ObservationIgnored private var chatsTask: Task<Void, Never>?
+
+  private func beginSidebarFetch() {
+    sidebarFetchCount += 1
+    isFetchingSidebarChats = true
+  }
+
+  private func endSidebarFetch() {
+    sidebarFetchCount = max(0, sidebarFetchCount - 1)
+    isFetchingSidebarChats = sidebarFetchCount > 0
+  }
 
   func fetchInitialDataIfNeeded(dependencies: AppDependencies) {
     guard didFetchInitialData == false else { return }
@@ -171,8 +185,10 @@ final class MainWindowSessionRefresher {
     let realtime = dependencies.realtimeV2
     let data = dependencies.data
 
+    beginSidebarFetch()
     initialTask = Task { @MainActor [weak self] in
       defer {
+        self?.endSidebarFetch()
         self?.initialTask = nil
       }
 
@@ -202,8 +218,10 @@ final class MainWindowSessionRefresher {
     guard chatsTask == nil else { return }
 
     let realtime = dependencies.realtimeV2
+    beginSidebarFetch()
     chatsTask = Task { @MainActor [weak self] in
       defer {
+        self?.endSidebarFetch()
         self?.chatsTask = nil
       }
 
@@ -223,6 +241,8 @@ final class MainWindowSessionRefresher {
     chatsTask?.cancel()
     initialTask = nil
     chatsTask = nil
+    sidebarFetchCount = 0
+    isFetchingSidebarChats = false
   }
 }
 

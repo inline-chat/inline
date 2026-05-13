@@ -21,6 +21,7 @@ struct SidebarView: View {
   @State private var showConnectedState = false
   @State private var hideConnectedTask: Task<Void, Never>?
   @State private var pendingSpaceAction: SidebarSpacePendingAction?
+  @State private var fetchingDialogSpaceIds = Set<Int64>()
   @Environment(SidebarViewModel.self) private var viewModel
   private let isCollapsed: Bool
 
@@ -148,11 +149,9 @@ struct SidebarView: View {
       .listRowBackground(Color.clear)
     }
 
-    if visibleItems.isEmpty {
+    if shouldShowEmptyState {
       emptyStateRow
-    }
-
-    if !isArchiveVisible {
+    } else if !isArchiveVisible, visibleItems.isEmpty == false {
       newThreadRow
     }
   }
@@ -160,7 +159,9 @@ struct SidebarView: View {
   private var emptyStateRow: some View {
     SidebarEmptyStateRow(
       title: isArchiveVisible ? "No archived chats" : "No chats",
-      systemImage: isArchiveVisible ? "archivebox" : "bubble.left"
+      systemImage: isArchiveVisible ? "archivebox" : "bubble.left",
+      actionTitle: isArchiveVisible ? nil : "New thread",
+      action: isArchiveVisible ? nil : createNewThread
     )
     .listRowInsets(.zero)
     .listRowSeparator(.hidden)
@@ -438,6 +439,20 @@ struct SidebarView: View {
     isHomeHovering || isLocationHovering
   }
 
+  private var shouldShowEmptyState: Bool {
+    visibleItems.isEmpty && isFetchingVisibleItems == false
+  }
+
+  private var isFetchingVisibleItems: Bool {
+    guard !isArchiveVisible else { return false }
+
+    if let activeSpaceId {
+      return fetchingDialogSpaceIds.contains(activeSpaceId)
+    }
+
+    return dependencies?.session.isFetchingSidebarChats == true
+  }
+
   private var sidebarConnectionState: SidebarConnectionDisplayState? {
     guard !isCollapsed else { return nil }
 
@@ -534,7 +549,12 @@ struct SidebarView: View {
     guard let spaceId else { return }
     guard let dependencies else { return }
 
+    fetchingDialogSpaceIds.insert(spaceId)
     Task {
+      defer {
+        fetchingDialogSpaceIds.remove(spaceId)
+      }
+
       do {
         try await dependencies.data.getSpace(spaceId: spaceId)
       } catch {
@@ -756,16 +776,63 @@ private enum SidebarSpaceDestructiveAction {
 private struct SidebarEmptyStateRow: View {
   let title: String
   let systemImage: String
+  let actionTitle: String?
+  let action: (() -> Void)?
 
   var body: some View {
-    HStack(spacing: 6) {
+    VStack(spacing: 7) {
       Image(systemName: systemImage)
+        .font(.system(size: 16, weight: .regular))
+
       Text(title)
+        .font(.system(size: 12, weight: .regular))
+
+      if let actionTitle, let action {
+        SidebarEmptyStateButton(title: actionTitle, action: action)
+          .padding(.top, 1)
+      }
     }
-    .font(.system(size: 12, weight: .regular))
     .foregroundStyle(.tertiary)
     .frame(maxWidth: .infinity, alignment: .center)
-    .padding(.vertical, 12)
+    .padding(.vertical, 16)
+  }
+}
+
+private struct SidebarEmptyStateButton: View {
+  let title: String
+  let action: () -> Void
+
+  @Environment(\.colorScheme) private var colorScheme
+  @State private var isHovered = false
+
+  var body: some View {
+    Button(action: action) {
+      Text(title)
+        .font(.system(size: 12, weight: .regular))
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .padding(.horizontal, 10)
+        .frame(height: 24)
+        .background(background)
+        .contentShape(.rect(cornerRadius: 7))
+    }
+    .buttonStyle(.plain)
+    .help(title)
+    .accessibilityLabel(title)
+    .onHover { isHovered = $0 }
+  }
+
+  private var background: some View {
+    RoundedRectangle(cornerRadius: 7, style: .continuous)
+      .fill(isHovered ? hoverColor : idleColor)
+  }
+
+  private var idleColor: Color {
+    colorScheme == .dark ? .white.opacity(0.06) : .black.opacity(0.04)
+  }
+
+  private var hoverColor: Color {
+    colorScheme == .dark ? .white.opacity(0.12) : .black.opacity(0.08)
   }
 }
 
@@ -776,6 +843,11 @@ private struct SidebarNewThreadRow: View {
   @Environment(\.colorScheme) private var colorScheme
   @State private var isHovered = false
 
+  private static let titleFont: Font = .system(size: 13, weight: .regular)
+  private static let innerPaddingHorizontal = 6.0
+  private static let compactIconSize = 22.0
+  private static let largeIconSize = 32.0
+
   private var rowHeight: CGFloat {
     switch size {
     case .compact:
@@ -785,22 +857,30 @@ private struct SidebarNewThreadRow: View {
     }
   }
 
+  private var iconSize: CGFloat {
+    switch size {
+    case .compact:
+      Self.compactIconSize
+    case .large:
+      Self.largeIconSize
+    }
+  }
+
   var body: some View {
     Button(action: action) {
-      HStack(spacing: 8) {
-        Image(systemName: "square.and.pencil")
-          .font(.system(size: 13, weight: .regular))
-          .frame(width: 22, height: 22)
+      HStack(spacing: 0) {
+        icon
+          .frame(width: iconSize, height: iconSize)
+          .padding(.trailing, 8)
 
         Text("New thread")
-          .font(.system(size: 13, weight: .regular))
+          .font(Self.titleFont)
           .lineLimit(1)
-
-        Spacer(minLength: 0)
+          .frame(maxWidth: .infinity, alignment: .leading)
       }
       .foregroundStyle(.secondary)
       .frame(height: rowHeight)
-      .padding(.horizontal, 6)
+      .padding(.horizontal, Self.innerPaddingHorizontal)
       .contentShape(.interaction, .rect(cornerRadius: Theme.sidebarItemRadius))
       .background(background)
       .padding(.horizontal, -Theme.sidebarNativeDefaultEdgeInsets + 8)
@@ -810,6 +890,22 @@ private struct SidebarNewThreadRow: View {
     .accessibilityLabel("New Thread")
     .onHover { isHovered = $0 }
     .animation(.smoothSnappy, value: size)
+  }
+
+  @ViewBuilder
+  private var icon: some View {
+    if size == .large {
+      Circle()
+        .fill(.quinary)
+        .overlay {
+          Image(systemName: "square.and.pencil")
+            .font(.system(size: iconSize * 0.42, weight: .regular))
+            .foregroundStyle(.secondary)
+        }
+    } else {
+      Image(systemName: "square.and.pencil")
+        .font(.system(size: 13, weight: .regular))
+    }
   }
 
   private var background: some View {
