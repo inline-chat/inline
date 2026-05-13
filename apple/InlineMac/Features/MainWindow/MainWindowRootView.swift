@@ -109,7 +109,7 @@ struct MainWindowRootView: View {
       MainWindowLoadingView()
 
     case .onboarding:
-      Onboarding(usesWindowContainerBackground: true)
+      Onboarding(allowsBackgroundWindowDrag: true)
 
     case .main:
       MainWindowRoot(
