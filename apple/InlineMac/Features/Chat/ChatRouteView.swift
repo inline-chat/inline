@@ -118,36 +118,34 @@ struct ChatRouteView: View {
           .id(peer.id)
         }
 
+        if #available(macOS 26.0, *) {
+          ToolbarSpacer(.fixed)
+        }
+
         if peer.isThread {
-          let participantsItem =
-            ToolbarItem(id: "chat-participants") {
-              ChatToolbarParticipantsButton(
-                peer: peer,
-                dependencies: dependencies,
-                toolbarState: chatToolbarState
-              )
-              .id(peer.toString())
-            }
+          ToolbarItem(id: "chat-participants") {
+            ChatToolbarParticipantsButton(
+              peer: peer,
+              dependencies: dependencies,
+              toolbarState: chatToolbarState
+            )
+            .id(peer.toString())
+          }
 
           if #available(macOS 26.0, *) {
-            participantsItem.sharedBackgroundVisibility(.hidden)
-          } else {
-            participantsItem
+            ToolbarSpacer(.fixed)
           }
         }
 
         if case .user = peer {
-          let nudgeItem =
-            ToolbarItem(id: "chat-nudge") {
-              NudgeButton(peer: peer)
-                .toolbarItemLabel("Nudge")
-                .id(peer.id)
-            }
+          ToolbarItem(id: "chat-nudge") {
+            NudgeButton(peer: peer)
+              .toolbarItemLabel("Nudge")
+              .id(peer.id)
+          }
 
           if #available(macOS 26.0, *) {
-            nudgeItem.sharedBackgroundVisibility(.hidden)
-          } else {
-            nudgeItem
+            ToolbarSpacer(.fixed)
           }
         }
 
@@ -159,7 +157,7 @@ struct ChatRouteView: View {
 
         ToolbarItem(id: "chat-menu") {
           ChatToolbarMenuButton(peer: peer, dependencies: dependencies)
-            .toolbarItemLabel("More")
+            .toolbarItemLabel("Chat Info")
             .id(peer.id)
         }
       }
