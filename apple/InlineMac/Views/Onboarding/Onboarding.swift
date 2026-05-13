@@ -47,9 +47,9 @@ struct Onboarding: View {
     }
 //    .animation(.snappy.speed(1.5), value: self.viewModel.path)
     .animation(.smoothSnappy, value: viewModel.path)
-    .toolbar(id: "onboarding-toolbar") {
+    .toolbar(content: {
       if viewModel.canGoBack {
-        ToolbarItem(id: "onboarding-back", placement: .navigation) {
+        ToolbarItem(placement: .navigation) {
           Button {
             viewModel.goBack()
           } label: {
@@ -60,11 +60,11 @@ struct Onboarding: View {
         // Hack to show toolbar in first screen to avoid a jump
         // When going back from an inner screen
 
-        ToolbarItem(id: "onboarding-back", placement: .navigation) {
+        ToolbarItem(placement: .navigation) {
           Text("")
         }
       }
-    }
+    })
     .environmentObject(viewModel)
     .task {
       viewModel.setMainWindowViewModel(windowViewModel)

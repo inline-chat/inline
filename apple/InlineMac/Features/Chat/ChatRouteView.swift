@@ -70,9 +70,9 @@ struct ChatRouteView: View {
       .task(id: peer.toString(), priority: .utility) {
         await ensureToolbarParticipantsLoaded(dependencies: dependencies)
       }
-      .toolbar(id: "chat-toolbar") {
+      .toolbar {
         let mainItem =
-          ToolbarItem(id: "chat-title", placement: .navigation) {
+          ToolbarItem(placement: .navigation) {
             ChatRouteTitleBar(peer: peer, db: db, contextSpaceId: nav.selectedSpaceId) { title in
               navigationTitle = title
             }
@@ -109,7 +109,7 @@ struct ChatRouteView: View {
           ToolbarSpacer(.flexible)
         }
 
-        ToolbarItem(id: "chat-notifications") {
+        ToolbarItem {
           ChatToolbarNotificationButton(
             peer: peer,
             db: dependencies.database,
@@ -123,7 +123,7 @@ struct ChatRouteView: View {
         }
 
         if peer.isThread {
-          ToolbarItem(id: "chat-participants") {
+          ToolbarItem {
             ChatToolbarParticipantsButton(
               peer: peer,
               dependencies: dependencies,
@@ -138,9 +138,8 @@ struct ChatRouteView: View {
         }
 
         if case .user = peer {
-          ToolbarItem(id: "chat-nudge") {
+          ToolbarItem {
             NudgeButton(peer: peer)
-              .toolbarItemLabel("Nudge")
               .id(peer.id)
           }
 
@@ -150,14 +149,13 @@ struct ChatRouteView: View {
         }
 
         if AppSettings.shared.translationUIEnabled {
-          ToolbarItem(id: "chat-translation") {
+          ToolbarItem {
             ChatToolbarTranslationButton(peer: peer, toolbarState: chatToolbarState)
           }
         }
 
-        ToolbarItem(id: "chat-menu") {
+        ToolbarItem {
           ChatToolbarMenuButton(peer: peer, dependencies: dependencies)
-            .toolbarItemLabel("Chat Info")
             .id(peer.id)
         }
       }

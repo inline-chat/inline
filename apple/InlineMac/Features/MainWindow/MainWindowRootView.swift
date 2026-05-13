@@ -256,7 +256,7 @@ private struct MainWindowRoot: View {
       } detail: {
         MainContentView()
       }
-      .toolbar(id: "main-window-toolbar") {
+      .toolbar {
         MainWindowToolbar(nav: nav3)
       }
 

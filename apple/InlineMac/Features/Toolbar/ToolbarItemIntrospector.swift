@@ -26,19 +26,7 @@ extension View {
 
         if let label {
           item.label = label
-          item.paletteLabel = label
         }
-      }
-      .frame(width: 0, height: 0)
-    }
-  }
-
-  /// Sets the backing `NSToolbarItem` label for customization and icon+text display modes.
-  func toolbarItemLabel(_ label: String) -> some View {
-    background {
-      ToolbarItemIntrospector { item in
-        item.label = label
-        item.paletteLabel = label
       }
       .frame(width: 0, height: 0)
     }
