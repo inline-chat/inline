@@ -170,7 +170,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     ])
   }
 
-  @MainActor private func setupMainWindow() {
+  @discardableResult
+  @MainActor private func setupMainWindow() -> MainWindowController {
     MainWindowController.showDefault(dependencies: dependencies)
   }
 
@@ -305,7 +306,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       return
     }
 
-    MainWindowOpenCoordinator.shared.openWindow(.chat(peer: peer))
+    setupMainWindow().route(.chat(peer: peer))
   }
 
   @MainActor private func registerMainWindowCoordinator() {
@@ -543,8 +544,6 @@ extension AppDelegate {
 
     if let peerId = resolvePeerFromNotification(userInfo, threadIdentifier: threadIdentifier) {
       Task(priority: .userInitiated) { @MainActor in
-        NSApp.activate(ignoringOtherApps: true)
-        setupMainWindow()
         self.openChat(peer: peerId)
         await self.unarchiveIfNeeded(peer: peerId)
       }
