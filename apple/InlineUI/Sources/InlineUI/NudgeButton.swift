@@ -74,7 +74,7 @@ public struct NudgeButton: View {
               activePopover = nil
             }
           case .confirm:
-            Button("Send \(NudgeButtonState.urgentNudgeText)", role: .destructive) {
+            Button("Send \(NudgeButtonState.urgentNudgeText)") {
               activePopover = nil
               triggerUrgentHaptic()
               sendNudge(nudgeText: NudgeButtonState.urgentNudgeText)
@@ -562,7 +562,6 @@ private struct NudgeConfirmView: View {
             onSend()
           }
           .buttonStyle(.glassProminent)
-          .tint(.red)
           .disabled(isSending)
         } else {
           Button("Send") {
@@ -571,7 +570,6 @@ private struct NudgeConfirmView: View {
           .buttonStyle(.borderedProminent)
           .controlSize(.regular)
           .buttonBorderShape(.capsule)
-          .tint(.red)
           .disabled(isSending)
         }
       }
