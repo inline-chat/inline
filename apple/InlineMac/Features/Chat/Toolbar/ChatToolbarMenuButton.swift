@@ -25,12 +25,6 @@ struct ChatToolbarMenuButton: View {
 
   var body: some View {
     Menu {
-      Button("Chat Info", systemImage: "info.circle") {
-        openChatInfo()
-      }
-
-      Divider()
-
       if peer.isThread, model.state.canRename {
         Button("Rename Chat...", systemImage: "pencil") {
           showRenameSheet = true
@@ -96,11 +90,13 @@ struct ChatToolbarMenuButton: View {
         }
       }
     } label: {
-      Image(systemName: "ellipsis")
+      Image(systemName: "info.circle")
+    } primaryAction: {
+      openChatInfo()
     }
     .menuIndicator(.hidden)
-    .accessibilityLabel("More")
-    .help("More")
+    .accessibilityLabel("Chat Info")
+    .help("Chat Info")
     .sheet(isPresented: $showRenameSheet) {
       RenameChatSheet(peer: peer)
     }
