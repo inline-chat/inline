@@ -293,8 +293,8 @@ struct UserProfile: View {
     }
     .frame(minWidth: 320)
     .formStyle(.grouped)
-    .toolbar(id: "user-profile-toolbar") {
-      ToolbarItem(id: "user-profile-title", placement: .principal) {
+    .toolbar {
+      ToolbarItem(placement: .principal) {
         Text("Profile")
       }
     }
