@@ -96,7 +96,9 @@ Choose one of the two auth methods below.
 - `APPCAST_URL` — override appcast URL (defaults to `https://public-assets.inline.chat/mac/<channel>/appcast.xml`)
 - `SPARKLE_SCHEDULED_CHECK_INTERVAL` — Sparkle update poll interval in seconds (default: `3600`, i.e. 1 hour)
 - `SPARKLE_DIR` — Sparkle download cache (default: `.action/sparkle`)
-- `DERIVED_DATA` — Xcode derived data path (default: `build/InlineMacDirect`)
+- `DERIVED_DATA` — Xcode derived data path (`build-direct.sh` default:
+  `build/InlineMacDirect`; `release-app.ts` default: unique
+  `build/InlineMacDirect/release-*`)
 - `OUTPUT_DIR` — DMG output directory (default: `build/macos-direct`)
 - `DMG_PATH` — output DMG path (default: `build/macos-direct/Inline.dmg`)
 - `SKIP_NOTARIZE=1` — skip notarization (dev only)
@@ -201,6 +203,8 @@ bun run macos:release-app -- --channel beta --pause-before-notarize
 ```
 
 If you omit `--channel` in an interactive terminal, it will prompt you to choose (default: `beta`).
+Release builds use a per-run derived data directory under `build/InlineMacDirect/`
+by default so concurrent/stale Xcode build databases do not block a release.
 
 Skip steps (they remain visible as disabled in the UI):
 
@@ -263,5 +267,6 @@ bash scripts/macos/appcast-only.sh --channel beta
 
 - Sparkle private key is **never** embedded in the app bundle. It is only used
   for appcast signing in the release pipeline.
-- The local release script uploads dSYMs to Sentry before artifact upload so new crashes symbolicate sooner, but that step is best-effort and no longer blocks the rest of the release.
+- The local release script skips Sentry dSYM upload by default while the upload
+  flow is broken. Pass `--upload-sentry-dsyms` to opt in.
 - Appcasts are validated locally and in CI before upload to avoid broken feeds.
