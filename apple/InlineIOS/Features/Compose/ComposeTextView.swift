@@ -107,6 +107,8 @@ class ComposeTextView: UITextView {
   override func paste(_ sender: Any?) {
     if UIPasteboard.general.image != nil {
       composeView?.handlePastedImage()
+    } else if selectedRange.length > 0, let urlString = pastedLinkURLString(from: .general) {
+      applyLink(urlString, to: selectedRange)
     } else if let string = UIPasteboard.general.string {
       // Insert plain text only
       let pasteResult = ComposePlainTextPaste.apply(
@@ -130,6 +132,48 @@ class ComposeTextView: UITextView {
         composeView?.buttonAppear()
       }
     }
+  }
+
+  private func pastedLinkURLString(from pasteboard: UIPasteboard) -> String? {
+    if let string = pasteboard.string {
+      return ComposeLinkPaste.normalizedURLString(from: string)
+    }
+
+    guard let url = pasteboard.url else { return nil }
+    return ComposeLinkPaste.normalizedURLString(from: url)
+  }
+
+  private func applyLink(_ urlString: String, to range: NSRange) {
+    let safeRange = clampedRange(range)
+    guard safeRange.length > 0 else { return }
+
+    let selectedText = (attributedText.string as NSString).substring(with: safeRange)
+    guard !selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+    textStorage.beginEditing()
+    textStorage.removeAttribute(.emailAddress, range: safeRange)
+    textStorage.removeAttribute(.phoneNumber, range: safeRange)
+    textStorage.addAttributes(linkAttributes(urlString: urlString), range: safeRange)
+    textStorage.endEditing()
+
+    selectedRange = safeRange
+    textDidChange()
+    delegate?.textViewDidChange?(self)
+  }
+
+  private func linkAttributes(urlString: String) -> [NSAttributedString.Key: Any] {
+    [
+      .foregroundColor: composeView?.linkColor ?? tintColor ?? ThemeManager.shared.selected.accent,
+      .link: urlString,
+      .underlineStyle: 0,
+    ]
+  }
+
+  private func clampedRange(_ range: NSRange) -> NSRange {
+    let length = attributedText.length
+    let location = min(max(0, range.location), length)
+    let safeLength = min(max(0, range.length), length - location)
+    return NSRange(location: location, length: safeLength)
   }
 
   private func fixFontSizeAfterStickerInsertion() {

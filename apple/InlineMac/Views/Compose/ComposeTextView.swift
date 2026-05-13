@@ -27,6 +27,7 @@ protocol ComposeTextViewDelegate: NSTextViewDelegate {
 class ComposeNSTextView: NSTextView {
   private var isStrippingEmailLinks = false
   private let boldUndoActionName = "Bold"
+  private let linkUndoActionName = "Make Link"
 
   override func keyDown(with event: NSEvent) {
     let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
@@ -200,6 +201,11 @@ class ComposeNSTextView: NSTextView {
       return
     }
 
+    if let range = selectedLinkTextRange(), let urlString = Self.linkURLString(from: .general) {
+      applyLink(urlString, to: range)
+      return
+    }
+
     // Note(@Mo) Important: Temporarily disable rich-text paste entirely. We still rely on AppKit's native
     // plain-text paste pipeline for correct undo/redo, IME behavior, and selection handling, but we do not
     // allow any clipboard-provided styling to enter the compose view while we stabilize edge cases.
@@ -209,6 +215,142 @@ class ComposeNSTextView: NSTextView {
     DispatchQueue.main.async { [weak self] in
       self?.resetTypingAttributesToDefault()
     }
+  }
+
+  override func menu(for event: NSEvent) -> NSMenu? {
+    let menu = (super.menu(for: event)?.copy() as? NSMenu) ?? NSMenu()
+    guard selectedLinkTextRange() != nil else { return menu }
+
+    menu.addItem(.separator())
+
+    let item = NSMenuItem(title: "Make Link...", action: #selector(makeLink(_:)), keyEquivalent: "")
+    item.target = self
+    item.image = NSImage(systemSymbolName: "link", accessibilityDescription: nil)
+    menu.addItem(item)
+
+    return menu
+  }
+
+  @objc func makeLink(_ sender: Any?) {
+    guard let range = selectedLinkTextRange() else { return }
+
+    let prefill = existingLinkURLString(in: range) ?? Self.linkURLString(from: .general) ?? ""
+    guard let urlString = promptForLinkURL(prefill: prefill) else { return }
+
+    applyLink(urlString, to: range)
+  }
+
+  private func promptForLinkURL(prefill: String) -> String? {
+    let input = NSTextField(string: prefill)
+    input.placeholderString = "https://example.com"
+    input.frame = NSRect(x: 0, y: 0, width: 320, height: 24)
+
+    let alert = NSAlert()
+    alert.messageText = "Make Link"
+    alert.informativeText = "Enter a URL for the selected text."
+    alert.addButton(withTitle: "Add Link")
+    alert.addButton(withTitle: "Cancel")
+    alert.accessoryView = input
+    alert.window.initialFirstResponder = input
+
+    guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+    guard let urlString = ComposeLinkPaste.normalizedURLString(from: input.stringValue) else {
+      NSSound.beep()
+      return nil
+    }
+
+    return urlString
+  }
+
+  private func selectedLinkTextRange() -> NSRange? {
+    let range = selectedRange()
+    guard range.location != NSNotFound else { return nil }
+
+    let safeRange = clampedRange(range)
+    guard safeRange.length > 0 else { return nil }
+
+    let selectedText = (string as NSString).substring(with: safeRange)
+    guard !selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+
+    return safeRange
+  }
+
+  private func applyLink(_ urlString: String, to range: NSRange) {
+    guard let textStorage else { return }
+
+    let safeRange = clampedRange(range)
+    guard safeRange.length > 0 else { return }
+
+    let snapshot = FormattingSnapshot(
+      attributedString: NSAttributedString(attributedString: attributedString()),
+      selectedRange: selectedRange(),
+      typingAttributes: typingAttributes,
+      actionName: linkUndoActionName
+    )
+    registerUndo(snapshot)
+
+    textStorage.beginEditing()
+    textStorage.removeAttribute(.emailAddress, range: safeRange)
+    textStorage.removeAttribute(.phoneNumber, range: safeRange)
+    textStorage.addAttributes(linkAttributes(urlString: urlString), range: safeRange)
+    textStorage.endEditing()
+
+    setSelectedRange(safeRange)
+    resetTypingAttributesToDefault()
+    notifyDelegateAboutFormattingChange()
+  }
+
+  private func existingLinkURLString(in range: NSRange) -> String? {
+    guard let textStorage, range.location < textStorage.length else { return nil }
+
+    let value = textStorage.attribute(.link, at: range.location, effectiveRange: nil)
+    if let url = value as? URL {
+      return ComposeLinkPaste.normalizedURLString(from: url)
+    }
+
+    if let string = value as? String {
+      return ComposeLinkPaste.normalizedURLString(from: string)
+    }
+
+    return nil
+  }
+
+  private func linkAttributes(urlString: String) -> [NSAttributedString.Key: Any] {
+    [
+      .foregroundColor: ComposeTextEditor.linkColor,
+      .link: urlString,
+      .underlineStyle: 0,
+      .cursor: NSCursor.pointingHand,
+    ]
+  }
+
+  private func clampedRange(_ range: NSRange) -> NSRange {
+    let length = (string as NSString).length
+    let location = min(max(0, range.location), length)
+    let safeLength = min(max(0, range.length), length - location)
+    return NSRange(location: location, length: safeLength)
+  }
+
+  private static func linkURLString(from pasteboard: NSPasteboard) -> String? {
+    if let string = pasteboard.string(forType: .string) {
+      return ComposeLinkPaste.normalizedURLString(from: string)
+    }
+
+    let options: [NSPasteboard.ReadingOptionKey: Any] = [
+      .urlReadingFileURLsOnly: false,
+    ]
+    let objects = pasteboard.readObjects(forClasses: [NSURL.self], options: options) ?? []
+    for object in objects {
+      if let url = object as? URL, let urlString = ComposeLinkPaste.normalizedURLString(from: url) {
+        return urlString
+      }
+
+      if let url = object as? NSURL, let urlString = ComposeLinkPaste.normalizedURLString(from: url as URL) {
+        return urlString
+      }
+    }
+
+    return nil
   }
 
   private func insertPlainText(_ inputText: String, replacementRange: NSRange? = nil) {
@@ -679,7 +821,8 @@ class ComposeNSTextView: NSTextView {
     let snapshot = FormattingSnapshot(
       attributedString: NSAttributedString(attributedString: attributedString()),
       selectedRange: selectedRange(),
-      typingAttributes: typingAttributes
+      typingAttributes: typingAttributes,
+      actionName: boldUndoActionName
     )
     registerUndo(snapshot)
 
@@ -700,7 +843,8 @@ class ComposeNSTextView: NSTextView {
     let snapshot = FormattingSnapshot(
       attributedString: NSAttributedString(attributedString: attributedString()),
       selectedRange: selectedRange(),
-      typingAttributes: typingAttributes
+      typingAttributes: typingAttributes,
+      actionName: boldUndoActionName
     )
     registerUndo(snapshot)
 
@@ -747,7 +891,7 @@ class ComposeNSTextView: NSTextView {
     undoManager?.registerUndo(withTarget: self) { target in
       target.restoreFormattingSnapshot(snapshot)
     }
-    undoManager?.setActionName(boldUndoActionName)
+    undoManager?.setActionName(snapshot.actionName)
   }
 
   private func restoreFormattingSnapshot(_ snapshot: FormattingSnapshot) {
@@ -755,7 +899,8 @@ class ComposeNSTextView: NSTextView {
       FormattingSnapshot(
         attributedString: NSAttributedString(attributedString: attributedString()),
         selectedRange: selectedRange(),
-        typingAttributes: typingAttributes
+        typingAttributes: typingAttributes,
+        actionName: snapshot.actionName
       )
     )
 
@@ -778,4 +923,5 @@ private struct FormattingSnapshot {
   let attributedString: NSAttributedString
   let selectedRange: NSRange
   let typingAttributes: [NSAttributedString.Key: Any]
+  let actionName: String
 }

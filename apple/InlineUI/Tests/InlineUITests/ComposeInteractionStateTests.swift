@@ -1,4 +1,5 @@
 import Foundation
+import TextProcessing
 import Testing
 
 @testable import InlineUI
@@ -40,6 +41,34 @@ struct ComposeInteractionStateTests {
 
     #expect(result.text == "Hi 🙂")
     #expect(result.selectedRange == NSRange(location: 5, length: 0))
+  }
+
+  @Test("link paste accepts a full URL")
+  func linkPasteAcceptsFullURL() async throws {
+    let urlString = ComposeLinkPaste.normalizedURLString(from: " https://inline.chat/docs?tab=api ")
+
+    #expect(urlString == "https://inline.chat/docs?tab=api")
+  }
+
+  @Test("link paste normalizes a bare domain")
+  func linkPasteNormalizesBareDomain() async throws {
+    let urlString = ComposeLinkPaste.normalizedURLString(from: "inline.chat/docs")
+
+    #expect(urlString == "https://inline.chat/docs")
+  }
+
+  @Test("link paste rejects surrounding prose")
+  func linkPasteRejectsSurroundingProse() async throws {
+    let urlString = ComposeLinkPaste.normalizedURLString(from: "go to https://inline.chat")
+
+    #expect(urlString == nil)
+  }
+
+  @Test("link paste rejects non-web URLs")
+  func linkPasteRejectsNonWebURLs() async throws {
+    let urlString = ComposeLinkPaste.normalizedURLString(from: "file:///tmp/test.png")
+
+    #expect(urlString == nil)
   }
 
   @Test("visible but disabled send button is not treated as fully visible")
