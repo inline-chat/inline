@@ -17,6 +17,6 @@ Inline is a fast, lightweight work chat for high-performance teams.
 - [Developers](/docs/developers)
 - [Realtime API](/docs/realtime-api)
 - [Bot API](/docs/bot-api)
-- [Terms](/docs/terms)
+- [Legal](/legal)
 - [Security](/docs/security)
 - [GitHub Repository](https://github.com/inline-chat/inline)

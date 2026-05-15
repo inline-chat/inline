@@ -36,9 +36,8 @@ export const DOCS_NAV: DocsNavGroup[] = [
   {
     title: "Policies",
     items: [
-      { title: "Terms", to: "/docs/terms" },
       { title: "Security", to: "/docs/security" },
-      { title: "Privacy", to: "/privacy" },
+      { title: "Legal", to: "/legal" },
     ],
   },
 ]

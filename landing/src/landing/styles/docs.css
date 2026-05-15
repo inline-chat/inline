@@ -199,6 +199,18 @@
   width: 100%;
 }
 
+.legal-layout {
+  gap: 38px;
+}
+
+.legal-sidebar {
+  width: 200px;
+}
+
+.legal-main {
+  max-width: 820px;
+}
+
 .docs-footer {
   padding: 14px 0 18px 0;
 }
@@ -292,6 +304,11 @@
 .docs-content.page-content {
   font-size: 17px;
   line-height: 1.55;
+}
+
+.legal-content.page-content {
+  font-size: 16px;
+  line-height: 1.6;
 }
 
 .docs-content.page-content h1 {
