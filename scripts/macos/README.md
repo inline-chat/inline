@@ -1,272 +1,165 @@
-# macOS Direct Release (Sparkle)
+# macOS Direct Release
 
-This folder contains scripts for building the direct-distribution macOS app
-with Sparkle (non-TestFlight) and preparing DMG artifacts.
+This folder is the local release path for the direct-distribution macOS app.
+Use it for both beta and stable Sparkle releases. Do not use CI for the normal
+release path.
 
-## Overview
+Direct builds are unsandboxed and include Sparkle. TestFlight/App Store builds
+are sandboxed and exclude Sparkle. Both use the same bundle identifier,
+`chat.inline.InlineMac`, so they cannot be installed side by side.
 
-- Direct builds are **unsandboxed** and include Sparkle.
-- TestFlight/App Store builds are **sandboxed** and exclude Sparkle.
-- We reuse the **same bundle identifier** (`chat.inline.InlineMac`), which means
-  direct and TestFlight builds cannot be installed side-by-side.
+## Release Commands
 
-## Generating Sparkle Keys
-
-1. Download Sparkle tools and run `generate_keys` once.
-2. Store the **private key** in CI secrets (`MACOS_SPARKLE_PRIVATE_KEY`).
-3. Use the **public key** for `SPARKLE_PUBLIC_KEY` (in CI: `MACOS_SPARKLE_PUBLIC_KEY`).
-
-## Required Tools
-
-- Xcode (via `xcode-select`)
-- `create-dmg` (`npm install --global create-dmg`)
-- `curl`, `unzip`, `rsync`
-- `xcodeproj` gem (`gem install xcodeproj`) for `update-version.ts`
-
-## Scripts
-
-- `build-direct.sh`: builds a Sparkle-enabled app, injects Info.plist keys,
-  signs Sparkle helpers + app, creates a DMG, and optionally notarizes.
-  Xcode signing is disabled during the build to avoid provisioning profile
-  requirements; the app is signed manually afterward.
-- `update_appcast.py`: generates/updates an appcast from `sign_update` output.
-- `validate_appcast.py`: validates Sparkle appcasts before upload.
-- `release-direct.ts`: uploads DMG and/or appcast to R2 with cache headers.
-- `upload-dsyms.ts`: uploads zipped `.dSYM` bundles to Sentry using Sentry's API.
-- `release-app.ts`: runs the local release pipeline (build → upload dSYMs → upload DMG → update appcast → upload appcast), with an interactive TUI (shows progress, skipped steps, and failures clearly).
-- `build-local-app.sh`: builds a local Sparkle-enabled `Inline-Dev.app` bundle for testing without DMG creation, notarization, or upload steps.
-  It always uses `DEBUG_BUILD`, defaults to the `DevBuild` config, disables login-item registration in app code, and post-signs the app locally by reusing `sign-direct.sh` unless `--skip-sign` is passed.
-- `update-version.ts`: bumps the InlineMac marketing version, creates a `macos-vX.Y.Z` tag, and pushes to trigger CI.
-- `appcast-only.sh`: updates the appcast only (no rebuild), with validation.
-
-## Environment Variables
-
-### Required for `build-direct.sh`
-
-- `SPARKLE_PUBLIC_KEY` — Sparkle EdDSA public key (embedded into Info.plist).
-- `MACOS_SPARKLE_PUBLIC_KEY` — accepted as an alias for `SPARKLE_PUBLIC_KEY`.
-- `MACOS_CERTIFICATE_NAME` — signing identity (Keychain name).
-- `MACOS_PROVISIONING_PROFILE_BASE64` or `MACOS_PROVISIONING_PROFILE_PATH` —
-  required when using APS/keychain entitlements for direct distribution.
-
-### Required for notarization (unless `SKIP_NOTARIZE=1`)
-
-Choose one of the two auth methods below.
-
-#### Option A: App Store Connect API key (recommended)
-
-- `APPLE_NOTARIZATION_KEY`
-- `APPLE_NOTARIZATION_KEY_ID`
-- `APPLE_NOTARIZATION_ISSUER`
-
-#### Option B: Apple ID + app-specific password
-
-- `APPLE_ID`
-- `APPLE_PASSWORD`
-- `APPLE_TEAM_ID`
-
-### Required for appcast signing
-
-- `SPARKLE_PRIVATE_KEY` — Sparkle EdDSA private key (used by `sign_update`).
-- `MACOS_SPARKLE_PRIVATE_KEY` — accepted as an alias for `SPARKLE_PRIVATE_KEY`.
-
-### Required for R2 uploads
-
-- `PUBLIC_RELEASES_R2_ACCESS_KEY_ID`
-- `PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY`
-- `PUBLIC_RELEASES_R2_BUCKET`
-- `PUBLIC_RELEASES_R2_ENDPOINT`
-- `PUBLIC_RELEASES_R2_PUBLIC_BASE_URL` (expected: `https://public-assets.inline.chat`)
-
-### Required for Sentry dSYM upload
-
-- `SENTRY_AUTH_TOKEN` or an authenticated modern `sentry` CLI session where `sentry auth token` works
-
-### Optional for Sentry dSYM upload
-
-- `SENTRY_ORG` (default: `usenoor`)
-- `SENTRY_PROJECT` (default: `inline-ios-macos`)
-- `SENTRY_API_URL` (default: `https://us.sentry.io`)
-
-### Optional
-
-- `SPARKLE_VERSION` — Sparkle release version (default: 2.7.3)
-- `SCHEME` — Xcode scheme for the macOS app (default: `Inline (macOS)`)
-- `CHANNEL` — update channel (`stable` or `beta`, default: `stable`)
-- `APPCAST_URL` — override appcast URL (defaults to `https://public-assets.inline.chat/mac/<channel>/appcast.xml`)
-- `SPARKLE_SCHEDULED_CHECK_INTERVAL` — Sparkle update poll interval in seconds (default: `3600`, i.e. 1 hour)
-- `SPARKLE_DIR` — Sparkle download cache (default: `.action/sparkle`)
-- `DERIVED_DATA` — Xcode derived data path (`build-direct.sh` default:
-  `build/InlineMacDirect`; `release-app.ts` default: unique
-  `build/InlineMacDirect/release-*`)
-- `OUTPUT_DIR` — DMG output directory (default: `build/macos-direct`)
-- `DMG_PATH` — output DMG path (default: `build/macos-direct/Inline.dmg`)
-- `SKIP_NOTARIZE=1` — skip notarization (dev only)
-- `PAUSE_BEFORE_NOTARIZE=1` — pause after build/sign/DMG so you can test locally before notarization continues
-- `DEBUG_BUILD=1` — build the isolated `DevBuild` flavor and add the `DEBUG_BUILD` swift compile condition
-- `UPLOAD_MODE` — for `release-direct.ts`: `all` (default), `dmg`, or `appcast`
-
-### CI Secrets Mapping (GitHub Actions)
-
-- `MACOS_CERTIFICATE`
-- `MACOS_CERTIFICATE_PWD`
-- `MACOS_CERTIFICATE_NAME`
-- `MACOS_CI_KEYCHAIN_PWD`
-- `MACOS_SPARKLE_PUBLIC_KEY`
-- `MACOS_SPARKLE_PRIVATE_KEY`
-- `MACOS_PROVISIONING_PROFILE_BASE64`
-- `APPLE_NOTARIZATION_KEY`
-- `APPLE_NOTARIZATION_KEY_ID`
-- `APPLE_NOTARIZATION_ISSUER`
-- `APPLE_ID`
-- `APPLE_PASSWORD`
-- `APPLE_TEAM_ID`
-- `PUBLIC_RELEASES_R2_ACCESS_KEY_ID`
-- `PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY`
-- `PUBLIC_RELEASES_R2_BUCKET`
-- `PUBLIC_RELEASES_R2_ENDPOINT`
-- `PUBLIC_RELEASES_R2_PUBLIC_BASE_URL`
-
-## GitHub Release Attachment
-
-The workflow `macos-direct-release.yml` accepts an optional `tag` input. If set,
-the DMG will be attached to that GitHub tag/release for traceability.
-
-## Beta (Tip-Style) Releases
-
-- Run the `macos-direct-release.yml` workflow manually with `channel = beta`.
-- Leave `tag` empty so the workflow attaches the DMG to the `tip` release.
-- The appcast is updated **after** the DMG is uploaded to avoid incomplete releases.
-
-## Stable Release Guide
-
-1. Ensure all CI secrets are set (including `MACOS_PROVISIONING_PROFILE_BASE64`).
-2. Bump and tag the release:
+Run from `scripts/`.
 
 ```bash
-bun run scripts/macos/update-version.ts --version X.Y.Z
-```
+# Check tools and show the pipeline without building or uploading.
+bun run macos:release-app -- --channel stable --dry-run
 
-Skip the confirmation prompt:
-
-```bash
-bun run scripts/macos/update-version.ts --version X.Y.Z -y
-```
-
-To undo the last macOS version bump (requires a clean git state):
-
-```bash
-bun run scripts/macos/update-version.ts --undo
-```
-
-3. CI will run `macos-direct-release.yml` on the `macos-vX.Y.Z` tag.
-4. (Optional) Run `macos-direct-release.yml` manually with `channel = stable` if you need to rebuild.
-5. Verify:
-   - DMG is uploaded to R2 at `/mac/stable/<build>/Inline.dmg`.
-   - Appcast at `/mac/stable/appcast.xml` points to the new build.
-   - Notarization/stapling succeeded.
-
-## Local Dev Usage (Direct Build)
-
-```
-export SPARKLE_PUBLIC_KEY="..."
-export MACOS_CERTIFICATE_NAME="Developer ID Application: ..."
-export SKIP_NOTARIZE=1
-# Optional local debug flavor for behavior gating:
-# export DEBUG_BUILD=1
-bash scripts/macos/build-direct.sh
-```
-
-The resulting DMG is written to `build/macos-direct/Inline.dmg`.
-
-To build just a local `.app` bundle for testing, without the release/notarization flow:
-
-```bash
-bun run build:macos:local-app
-```
-
-The app bundle is written to `build/InlineMacDirectLocal/Build/Products/DevBuild/Inline-Dev.app`.
-This local build is fixed to the isolated `DevBuild` configuration, always uses `DEBUG_BUILD`, appears as `Inline-Dev`, and post-signs by default. Use `--skip-sign` to force an unsigned build.
-
-## Local Release (Stable/Beta)
-
-The local release command uses the **same env var list as CI** (plus optional
-`MACOS_PROVISIONING_PROFILE_PATH` for convenience).
-
-```bash
-cd scripts
-bun run macos:release-app -- --channel beta
-# or
+# Publish stable.
 bun run macos:release-app -- --channel stable
-# with a manual local-check checkpoint before notarization:
-bun run macos:release-app -- --channel beta --pause-before-notarize
+
+# Publish beta.
+bun run macos:release-app -- --channel beta
 ```
 
-If you omit `--channel` in an interactive terminal, it will prompt you to choose (default: `beta`).
-Release builds use a per-run derived data directory under `build/InlineMacDirect/`
-by default so concurrent/stale Xcode build databases do not block a release.
+The command runs:
 
-Skip steps (they remain visible as disabled in the UI):
+1. Preflight tool checks.
+2. Build, sign, create DMG, notarize, and staple.
+3. Post-check the DMG, code signature, Gatekeeper, Sparkle keys, and archs.
+4. Upload the DMG to R2.
+5. Verify the public DMG URL.
+6. Sign and generate the Sparkle appcast.
+7. Validate and upload the appcast.
+
+Stable publishes to:
+
+- `https://public-assets.inline.chat/mac/stable/<build>/Inline.dmg`
+- `https://public-assets.inline.chat/mac/stable/appcast.xml`
+
+Beta publishes to:
+
+- `https://public-assets.inline.chat/mac/beta/<build>/Inline.dmg`
+- `https://public-assets.inline.chat/mac/beta/appcast.xml`
+
+Beta also updates the GitHub `tip` release by default. Add
+`--skip-github-release` if you only want the Sparkle/R2 release. Stable does not
+use a GitHub release tag unless you pass `--release-tag`.
+
+## Local Test Build
+
+To build an installable local app without DMG creation, notarization, or upload:
 
 ```bash
 cd scripts
-bun run macos:release-app -- --channel beta --skip build,github
+bun run macos:build-local-app -- --channel stable
 ```
 
-Resume from a later step without rerunning earlier work:
+Output:
+
+```text
+build/InlineMacDirectLocal/Build/Products/DevBuild/Inline-Dev.app
+```
+
+This uses the isolated `DevBuild` flavor, enables `DEBUG_BUILD`, embeds the
+selected Sparkle channel, and signs locally by default.
+
+## Required Local Setup
+
+Tools:
+
+- Xcode selected with `xcode-select`.
+- `create-dmg`.
+- `curl`, `unzip`, `rsync`, `python3`, `xcrun`, `codesign`, `security`,
+  `hdiutil`, `spctl`, `lipo`.
+
+Signing and Sparkle env vars:
+
+- `SPARKLE_PUBLIC_KEY` or `MACOS_SPARKLE_PUBLIC_KEY`.
+- `SPARKLE_PRIVATE_KEY` or `MACOS_SPARKLE_PRIVATE_KEY`.
+- `MACOS_CERTIFICATE_NAME`.
+- `MACOS_PROVISIONING_PROFILE_BASE64` or `MACOS_PROVISIONING_PROFILE_PATH`
+  when the direct entitlements include APS/keychain groups.
+
+Notarization env vars, using one auth method:
+
+- API key: `APPLE_NOTARIZATION_KEY`, `APPLE_NOTARIZATION_KEY_ID`,
+  `APPLE_NOTARIZATION_ISSUER`.
+- Apple ID: `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`.
+
+R2 upload env vars:
+
+- `PUBLIC_RELEASES_R2_ACCESS_KEY_ID`.
+- `PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY`.
+- `PUBLIC_RELEASES_R2_BUCKET`.
+- `PUBLIC_RELEASES_R2_ENDPOINT`.
+- `PUBLIC_RELEASES_R2_PUBLIC_BASE_URL`.
+
+Sentry dSYM upload is skipped by default. Add `--upload-sentry-dsyms` when the
+Sentry credential flow is available.
+
+## Useful Options
+
+```bash
+# Pause after app/DMG creation so you can inspect locally before notarization.
+bun run macos:release-app -- --channel stable --pause-before-notarize
+
+# Resume from a step after fixing a transient failure.
+bun run macos:release-app -- --channel stable --from post-check
+
+# Skip a step explicitly.
+bun run macos:release-app -- --channel beta --skip github
+```
+
+Known step ids:
+
+```text
+build, upload-sentry-dsyms, post-check, upload-dmg, verify-dmg,
+gen-appcast, validate-appcast, upload-appcast, github
+```
+
+Aliases:
+
+- `upload`: `upload-dmg` and `upload-appcast`.
+- `appcast`: `gen-appcast`, `validate-appcast`, and `upload-appcast`.
+
+## Versioning
+
+The release build number is `git rev-list --count HEAD`. The app also records
+the current short commit in `InlineCommit`.
+
+If the marketing version needs to change, make that change and commit it before
+running the local release. `macos:update-version` is a legacy helper that commits,
+tags, and pushes for the old CI-triggered flow, so do not use it as the default
+local release path.
+
+## Rollback
+
+Rollback republishes only `appcast.xml`; it does not delete uploaded DMGs and it
+does not downgrade users who already installed the bad build.
 
 ```bash
 cd scripts
-bun run macos:release-app -- --channel beta --from post-check
+
+# Roll stable back to the previous appcast item.
+bun run macos:release-app -- --channel stable --rollback
+
+# Roll back to a specific uploaded build.
+bun run macos:release-app -- --channel stable --rollback --rollback-to-build 12345
+
+# Preview rollback work.
+bun run macos:release-app -- --channel stable --rollback --dry-run
 ```
 
-Dry run:
+## Lower-Level Scripts
 
-```bash
-cd scripts
-bun run macos:release-app -- --dry-run
-```
-
-Local release artifacts (signing key, sign_update output, appcast files) are
-written under `build/macos-release-tmp/` and cleaned up each run.
-
-## Roll Back a Bad Release
-
-If a bad direct-distribution build is already uploaded, you can roll the live
-Sparkle feed back to an older build that is still present in the channel appcast.
-This republishes only `appcast.xml`; it does not rebuild or delete any DMGs.
-
-```bash
-bun run release:macos -- --channel beta --rollback
-```
-
-To pick a specific build instead of the previous appcast item:
-
-```bash
-bun run release:macos -- --channel beta --rollback --rollback-to-build 12345
-```
-
-Dry run:
-
-```bash
-bun run release:macos -- --channel beta --rollback --dry-run
-```
-
-Important limitation: Sparkle will not silently downgrade users who already
-installed the bad build. Rolling back the appcast mainly protects users who
-have not updated yet by making the older build the latest one still advertised
-in the feed.
-
-## Appcast Only (No Rebuild)
-
-```bash
-bash scripts/macos/appcast-only.sh --channel beta
-```
-
-## Notes
-
-- Sparkle private key is **never** embedded in the app bundle. It is only used
-  for appcast signing in the release pipeline.
-- The local release script skips Sentry dSYM upload by default while the upload
-  flow is broken. Pass `--upload-sentry-dsyms` to opt in.
-- Appcasts are validated locally and in CI before upload to avoid broken feeds.
+- `build-direct.sh`: build, sign, DMG, notarize, and staple.
+- `sign-direct.sh`: sign an existing app bundle and nested Sparkle code.
+- `post-check.sh`: validate DMG, stapling, Gatekeeper, signatures, Sparkle keys,
+  and architecture.
+- `release-direct.ts`: upload DMG and/or appcast to R2.
+- `update_appcast.py`: generate the Sparkle appcast from `sign_update` output.
+- `validate_appcast.py`: validate appcasts before upload.
+- `rollback_appcast.py`: remove newer entries from an appcast for rollback.
+- `build-local-app.sh`: create a local `Inline-Dev.app` for testing.
