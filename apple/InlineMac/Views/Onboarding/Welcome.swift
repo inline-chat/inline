@@ -64,7 +64,7 @@ struct OnboardingWelcome: View {
         Spacer()
 
         Text(
-          "By continuing, you acknowledge that you understand and agree to the [Terms & Conditions](https://inline.chat/legal) and [Privacy Policy](https://inline.chat/legal)."
+          "By continuing, you acknowledge that you understand and agree to the [Terms of Service](https://inline.chat/legal/terms) and [Privacy Policy](https://inline.chat/legal/privacy)."
         )
         .font(.footnote)
         .tint(Color.secondary)

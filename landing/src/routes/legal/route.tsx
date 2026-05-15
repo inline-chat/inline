@@ -1,17 +1,23 @@
 import { createFileRoute, Link, Outlet, useRouterState } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 
-import { DOCS_NAV } from "~/docs/nav"
 import { MoonIcon, SunIcon } from "~/docs/lucide"
+import { LEGAL_NAV } from "~/legal/nav"
 
 import styleCssUrl from "../../landing/styles/style.css?url"
 import docsCssUrl from "../../landing/styles/docs.css?url"
 import "../../landing/styles/page-content.css"
 
-export const Route = createFileRoute("/docs")({
-  component: DocsLayout,
+export const Route = createFileRoute("/legal")({
+  component: LegalLayout,
   head: () => ({
-    meta: [{ title: "Docs - Inline" }],
+    meta: [
+      { title: "Legal - Inline" },
+      {
+        name: "description",
+        content: "Legal policies and agreements for Inline.",
+      },
+    ],
     links: [
       { rel: "stylesheet", href: styleCssUrl },
       { rel: "stylesheet", href: docsCssUrl },
@@ -19,7 +25,7 @@ export const Route = createFileRoute("/docs")({
   }),
 })
 
-function DocsLayout() {
+function LegalLayout() {
   const { pathname, hash } = useRouterState({
     select: (s) => ({ pathname: s.location.pathname, hash: s.location.hash }),
   })
@@ -54,15 +60,14 @@ function DocsLayout() {
     const el = document.getElementById(id)
     if (!el) return
 
-    // Wait a frame for nested routes/markdown to paint before scrolling.
     requestAnimationFrame(() => {
       el.scrollIntoView({ block: "start" })
     })
   }, [hash, pathname])
 
   return (
-    <div className="docs-page">
-      <header className="docs-topbar" aria-label="Docs top bar">
+    <div className="docs-page legal-page">
+      <header className="docs-topbar" aria-label="Legal top bar">
         <div className="docs-container">
           <div className="docs-topbar-inner">
             <a href="/" className="docs-topbar-home" aria-label="Inline home">
@@ -94,9 +99,9 @@ function DocsLayout() {
 
       <div className="docs-body">
         <div className="docs-container">
-          <div className="docs-layout">
-            <aside className="docs-sidebar" aria-label="Docs navigation">
-              {DOCS_NAV.map((group) => (
+          <div className="docs-layout legal-layout">
+            <aside className="docs-sidebar legal-sidebar" aria-label="Legal navigation">
+              {LEGAL_NAV.map((group) => (
                 <div className="docs-sidebar-group" key={group.title}>
                   <div className="docs-sidebar-title">{group.title}</div>
                   {group.items.map((item) => {
@@ -112,14 +117,14 @@ function DocsLayout() {
               ))}
             </aside>
 
-            <main className="docs-main">
+            <main className="docs-main legal-main">
               <Outlet />
             </main>
           </div>
         </div>
       </div>
 
-      <footer className="docs-footer" aria-label="Docs footer">
+      <footer className="docs-footer" aria-label="Legal footer">
         <div className="docs-container">
           <div className="docs-footer-inner">
             <div className="docs-footer-brand">
@@ -127,12 +132,11 @@ function DocsLayout() {
               <span className="docs-footer-muted">Work chat for high-performance teams.</span>
             </div>
             <div className="docs-footer-links">
-              <a href="https://github.com/inline-chat/inline">GitHub</a>
-              <a href="https://x.com/inline_chat">X</a>
-              <a href="https://status.inline.chat">Status</a>
+              <a href="/docs">Docs</a>
               <a href="/docs/security">Security</a>
               <a href="/legal/terms">Terms</a>
               <a href="/legal/privacy">Privacy</a>
+              <a href="/legal/subprocessors">Subprocessors</a>
               <button
                 type="button"
                 className="docs-footer-copy"

@@ -34,6 +34,9 @@ export const PageFooter = () => {
             <a href="/docs" {...stylex.props(styles.link)}>
               Docs
             </a>
+            <a href="/legal" {...stylex.props(styles.link)}>
+              Legal
+            </a>
             <a href="https://github.com/inline-chat" {...stylex.props(styles.link)}>
               GitHub
             </a>
@@ -43,7 +46,7 @@ export const PageFooter = () => {
             <a href="https://status.inline.chat" {...stylex.props(styles.link)}>
               Status
             </a>
-            <a href="/privacy" {...stylex.props(styles.link)}>
+            <a href="/legal/privacy" {...stylex.props(styles.link)}>
               Privacy
             </a>
           </div>

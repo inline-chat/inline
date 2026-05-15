@@ -73,6 +73,7 @@ const COPY = {
       github: "GitHub",
       status: "Status",
       docs: "Docs",
+      legal: "Legal",
       privacy: "Privacy",
       email: "hey@inline.chat",
     },
@@ -520,7 +521,12 @@ export function Landing() {
             </a>
           </div>
           <div>
-            <a href="/privacy" {...stylex.props(styles.footerLink)}>
+            <a href="/legal" {...stylex.props(styles.footerLink)}>
+              {COPY.footer.links.legal}
+            </a>
+          </div>
+          <div>
+            <a href="/legal/privacy" {...stylex.props(styles.footerLink)}>
               {COPY.footer.links.privacy}
             </a>
           </div>
