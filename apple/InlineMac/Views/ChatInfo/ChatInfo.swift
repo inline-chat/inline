@@ -46,6 +46,9 @@ struct ChatInfo: View {
   @State private var didApplyDefaultTab = false
   @State private var isOwnerOrAdmin = false
   @State private var isCreator = false
+  @State private var canEditChatInfo = false
+  @State private var isSavingIcon = false
+  @State private var iconDraft = ""
   @State private var showVisibilityPicker = false
   @State private var showTranslationOptions = false
   @State private var showAddParticipants = false
@@ -82,6 +85,17 @@ struct ChatInfo: View {
 
   private var shouldShowVisibilityRow: Bool {
     peerId.isThread
+  }
+
+  private var chatIconBinding: Binding<String> {
+    Binding(
+      get: { iconDraft },
+      set: { newValue in
+        let normalized = Self.normalizedEmoji(newValue) ?? ""
+        iconDraft = normalized
+        updateChatIcon(normalized)
+      }
+    )
   }
 
   private var canToggleVisibility: Bool {
@@ -184,12 +198,17 @@ struct ChatInfo: View {
       updateViewModels()
       ensureSelectedTab()
       syncTranslationState()
+      syncIconDraft()
     }
     .task(id: permissionsTaskKey) {
       await loadVisibilityPermissions()
     }
     .onChange(of: chatId) { _, _ in
       updateViewModels()
+      syncIconDraft()
+    }
+    .onChange(of: fullChat.chat?.emoji) { _, _ in
+      syncIconDraft()
     }
     .onChange(of: availableTabsKey) { _, _ in
       updateViewModels()
@@ -242,6 +261,20 @@ struct ChatInfo: View {
               Text("@\(username)")
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
+            }
+
+            Divider()
+          }
+
+          if peerId.isThread {
+            infoRow("Icon") {
+              EmojiTextFieldPicker(
+                emoji: chatIconBinding,
+                size: 30,
+                placeholderSystemImage: "number",
+                isDisabled: !canEditChatInfo || isSavingIcon,
+                accessibilityLabel: "Chat icon"
+              )
             }
 
             Divider()
@@ -546,6 +579,42 @@ struct ChatInfo: View {
     isTranslationEnabled = TranslationState.shared.isTranslationEnabled(for: peerId)
   }
 
+  private func syncIconDraft() {
+    iconDraft = Self.normalizedEmoji(fullChat.chat?.emoji ?? fullChat.chatItem?.chat?.emoji) ?? ""
+  }
+
+  private func updateChatIcon(_ emoji: String) {
+    guard canEditChatInfo, !isSavingIcon else {
+      syncIconDraft()
+      return
+    }
+    guard case let .thread(chatId) = peerId else { return }
+
+    let currentEmoji = Self.normalizedEmoji(fullChat.chat?.emoji ?? fullChat.chatItem?.chat?.emoji)
+    let nextEmoji = Self.normalizedEmoji(emoji)
+    guard currentEmoji != nextEmoji else { return }
+
+    isSavingIcon = true
+    Task {
+      do {
+        _ = try await realtimeV2.send(.updateChatInfo(
+          chatID: chatId,
+          title: nil,
+          emoji: nextEmoji ?? ""
+        ))
+        await MainActor.run {
+          isSavingIcon = false
+        }
+      } catch {
+        Log.shared.error("Failed to update chat icon", error: error)
+        await MainActor.run {
+          isSavingIcon = false
+          syncIconDraft()
+        }
+      }
+    }
+  }
+
   private func copyThreadIdToClipboard(_ threadId: Int64) {
     let pasteboard = NSPasteboard.general
     pasteboard.clearContents()
@@ -556,6 +625,8 @@ struct ChatInfo: View {
   private func loadVisibilityPermissions() async {
     guard peerId.isThread else {
       isOwnerOrAdmin = false
+      isCreator = false
+      canEditChatInfo = false
       return
     }
     guard let dependencies,
@@ -564,7 +635,17 @@ struct ChatInfo: View {
     else {
       isOwnerOrAdmin = false
       isCreator = false
+      canEditChatInfo = false
       return
+    }
+
+    do {
+      canEditChatInfo = try await dependencies.database.dbWriter.read { db in
+        try ChatRenamePermission.canRename(peer: peerId, currentUserId: currentUserId, db: db)
+      }
+    } catch {
+      canEditChatInfo = false
+      Log.shared.error("Failed to load chat edit permissions", error: error)
     }
 
     isCreator = chat.createdBy == currentUserId
@@ -663,6 +744,13 @@ struct ChatInfo: View {
         Log.shared.error("Failed to update dialog notification settings", error: error)
       }
     }
+  }
+
+  private static func normalizedEmoji(_ emoji: String?) -> String? {
+    guard let emoji else { return nil }
+    let trimmed = emoji.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let first = trimmed.first else { return nil }
+    return String(first)
   }
 }
 

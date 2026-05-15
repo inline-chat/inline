@@ -42,6 +42,7 @@ final class ChatRouteToolbarTitleModel {
   var isEditingTitle = false
   var isSavingTitle = false
   var titleDraft = ""
+  var emojiDraft = ""
 
   @ObservationIgnored private let db: AppDatabase
   @ObservationIgnored private let log = Log.scoped("ChatRouteToolbarTitle")
@@ -91,11 +92,13 @@ final class ChatRouteToolbarTitleModel {
     guard peer.isThread else { return }
     guard !isSavingTitle else { return }
     titleDraft = title
+    emojiDraft = resolvedEmoji() ?? ""
     isEditingTitle = true
   }
 
   func cancelEditingTitle() {
     titleDraft = title
+    emojiDraft = resolvedEmoji() ?? ""
     isEditingTitle = false
   }
 
@@ -114,14 +117,26 @@ final class ChatRouteToolbarTitleModel {
       return
     }
 
-    if trimmedTitle == title {
+    let nextEmoji = Self.normalizedEmoji(emojiDraft)
+    let shouldUpdateTitle = trimmedTitle != title
+    let shouldUpdateEmoji = nextEmoji != resolvedEmoji()
+
+    if !shouldUpdateTitle && !shouldUpdateEmoji {
       cancelEditingTitle()
       return
     }
 
-    title = trimmedTitle
-    titleDraft = trimmedTitle
-    refreshWindowTitle()
+    if shouldUpdateTitle {
+      title = trimmedTitle
+      titleDraft = trimmedTitle
+      refreshWindowTitle()
+    }
+    emojiDraft = nextEmoji ?? ""
+    updateIconPeer(
+      title: shouldUpdateTitle ? trimmedTitle : nil,
+      emoji: nextEmoji,
+      updatesEmoji: shouldUpdateEmoji
+    )
     isEditingTitle = false
     isSavingTitle = true
 
@@ -132,11 +147,11 @@ final class ChatRouteToolbarTitleModel {
       do {
         _ = try await Api.realtime.send(.updateChatInfo(
           chatID: chatId,
-          title: trimmedTitle,
-          emoji: nil
+          title: shouldUpdateTitle ? trimmedTitle : nil,
+          emoji: shouldUpdateEmoji ? (nextEmoji ?? "") : nil
         ))
       } catch {
-        log.error("Failed to update chat title", error: error)
+        log.error("Failed to update chat info", error: error)
       }
     }
   }
@@ -190,6 +205,7 @@ final class ChatRouteToolbarTitleModel {
     title = resolvedTitle()
     if !isEditingTitle {
       titleDraft = title
+      emojiDraft = resolvedEmoji() ?? ""
     }
     iconPeer = resolvedIconPeer()
     updateParentChatSubscription()
@@ -233,6 +249,22 @@ final class ChatRouteToolbarTitleModel {
     }
 
     return nil
+  }
+
+  private func resolvedEmoji() -> String? {
+    Self.normalizedEmoji(resolvedChat()?.emoji)
+  }
+
+  private func updateIconPeer(title: String?, emoji: String?, updatesEmoji: Bool) {
+    guard var chat = resolvedChat() else { return }
+    if let title {
+      chat.title = title
+    }
+    if updatesEmoji {
+      chat.emoji = emoji
+    }
+    loadedChat = chat
+    iconPeer = .chat(chat)
   }
 
   private func resolvedStatus() -> Status {
@@ -409,5 +441,12 @@ final class ChatRouteToolbarTitleModel {
       log.error("Failed to check chat rename eligibility", error: error)
       return false
     }
+  }
+
+  private static func normalizedEmoji(_ emoji: String?) -> String? {
+    guard let emoji else { return nil }
+    let trimmed = emoji.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let first = trimmed.first else { return nil }
+    return String(first)
   }
 }
