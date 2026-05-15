@@ -23,6 +23,7 @@ type ReleaseOptions = {
   sparkleDir: string;
   releaseTag: string;
   skipGithubRelease: boolean;
+  allowDirty: boolean;
   skip: Set<string>;
   fromTask: string;
   dryRun: boolean;
@@ -30,6 +31,7 @@ type ReleaseOptions = {
   rollback: boolean;
   rollbackToBuild: string;
   rollbackStepsBack: number;
+  dropBuild: string;
 };
 
 type ParsedArgs = Omit<ReleaseOptions, "channel" | "releaseTag"> & {
@@ -43,6 +45,22 @@ type RollbackMetadata = {
   removedBuilds: string[];
 };
 
+type PruneMetadata = {
+  droppedBuild: string;
+  droppedUrl: string;
+  latestBuild: string;
+  latestUrl: string;
+  remainingBuilds: string[];
+};
+
+type BuiltAppMetadata = {
+  infoPlist: string;
+  buildNumber: string;
+  version: string;
+  commit: string;
+  feedUrl: string;
+};
+
 type ReleaseContext = ReleaseOptions & {
   rootDir: string;
   tempDir: string;
@@ -51,6 +69,8 @@ type ReleaseContext = ReleaseOptions & {
   appcastPath: string;
   appcastOutputPath: string;
   rollbackMetaPath: string;
+  pruneMetaPath: string;
+  historyDir: string;
   buildNumber: string;
   version: string;
   commit: string;
@@ -61,6 +81,10 @@ type ReleaseContext = ReleaseOptions & {
   rollbackSelectedBuild: string;
   rollbackSelectedUrl: string;
   rollbackRemovedBuilds: string[];
+  pruneDroppedBuild: string;
+  pruneDroppedUrl: string;
+  pruneLatestBuild: string;
+  pruneLatestUrl: string;
 };
 
 function usage(): string {
@@ -75,6 +99,7 @@ function usage(): string {
     "  --sparkle-dir <path>             Sparkle tools dir (default: <root>/.action/sparkle)",
     "  --release-tag <tag>              Attach DMG to GitHub release/tag (default: beta->tip, stable->empty)",
     "  --skip-github-release            Skip GitHub release/tag steps",
+    "  --allow-dirty                    Allow a stable build from a dirty worktree",
     "  --from <id>                      Resume from a task id without rerunning earlier steps (preflight still runs)",
     "  --skip <ids>                     Skip steps (comma-separated or repeatable)",
     "                                  Known ids: build, upload-sentry-dsyms, post-check, upload-dmg, verify-dmg, gen-appcast, validate-appcast, upload-appcast, github",
@@ -82,6 +107,7 @@ function usage(): string {
     "  --rollback                       Roll back the live appcast to an older build already present in the channel feed",
     "  --rollback-to-build <build>      Target build to restore (default: previous appcast item)",
     "  --rollback-steps-back <n>        Pick the Nth previous appcast item (default: 1)",
+    "  --drop-build <build>             Remove one non-latest build from the live appcast and republish it",
     "  --pause-before-notarize          Pause after app/DMG build so you can test locally, then continue notarization",
     "  --upload-sentry-dsyms            Upload dSYMs to Sentry (disabled by default while the upload flow is broken)",
     "  --dry-run                         Print what would run, without executing the pipeline",
@@ -108,6 +134,7 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   let sparkleDir = resolve(rootDir, ".action/sparkle");
   let releaseTag: string | undefined;
   let skipGithubRelease = false;
+  let allowDirty = false;
   const skip = new Set<string>();
   let fromTask = "";
   let dryRun = false;
@@ -115,6 +142,7 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   let rollback = false;
   let rollbackToBuild = "";
   let rollbackStepsBack = 1;
+  let dropBuild = "";
   let uploadSentryDsyms = false;
 
   const resolveFromRoot = (p: string): string => {
@@ -161,6 +189,10 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
       skipGithubRelease = true;
       continue;
     }
+    if (arg === "--allow-dirty") {
+      allowDirty = true;
+      continue;
+    }
     if (arg === "--from") {
       fromTask = eat(i).trim();
       if (!fromTask) die(`Missing value for ${arg}`);
@@ -184,6 +216,12 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
         die(`Invalid --rollback-steps-back: ${raw}`);
       }
       rollbackStepsBack = value;
+      i++;
+      continue;
+    }
+    if (arg === "--drop-build") {
+      dropBuild = eat(i).trim();
+      if (!dropBuild) die(`Missing value for ${arg}`);
       i++;
       continue;
     }
@@ -225,7 +263,10 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   if (rollback && uploadSentryDsyms) {
     die("--upload-sentry-dsyms is not supported with --rollback.");
   }
-  if (!rollback) {
+  if (dropBuild && uploadSentryDsyms) {
+    die("--upload-sentry-dsyms is not supported with --drop-build.");
+  }
+  if (!rollback && !dropBuild) {
     if (uploadSentryDsyms && skip.has("upload-sentry-dsyms")) {
       die("Use either --upload-sentry-dsyms or --skip upload-sentry-dsyms, not both.");
     }
@@ -255,6 +296,24 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
   if (rollback && skipGithubRelease) {
     die("--skip-github-release is not supported with --rollback.");
   }
+  if (dropBuild && rollback) {
+    die("Use either --drop-build or --rollback, not both.");
+  }
+  if (dropBuild && skip.size > 0) {
+    die("--skip is not supported with --drop-build.");
+  }
+  if (dropBuild && pauseBeforeNotarize) {
+    die("--pause-before-notarize is not supported with --drop-build.");
+  }
+  if (dropBuild && releaseTag) {
+    die("--release-tag is not supported with --drop-build.");
+  }
+  if (dropBuild && skipGithubRelease) {
+    die("--skip-github-release is not supported with --drop-build.");
+  }
+  if (dropBuild && allowDirty) {
+    die("--allow-dirty is only useful for builds and is not supported with --drop-build.");
+  }
 
   return {
     channel,
@@ -264,6 +323,7 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
     sparkleDir,
     releaseTag,
     skipGithubRelease,
+    allowDirty,
     skip,
     fromTask,
     dryRun,
@@ -271,6 +331,7 @@ function parseArgs(argv: string[], rootDir: string): ParsedArgs {
     rollback,
     rollbackToBuild,
     rollbackStepsBack,
+    dropBuild,
   };
 }
 
@@ -309,6 +370,118 @@ function git(rootDir: string, args: string[]): string {
   const res = spawnSync({ cmd: ["git", "-C", rootDir, ...args], stdout: "pipe", stderr: "pipe" });
   if (res.exitCode !== 0) return "";
   return new TextDecoder().decode(res.stdout).trim();
+}
+
+function gitLines(rootDir: string, args: string[]): string[] {
+  const out = git(rootDir, args);
+  return out ? out.split("\n").map((line) => line.trim()).filter(Boolean) : [];
+}
+
+function defaultAppcastUrl(ctx: ReleaseContext): string {
+  if (ctx.appcastUrl) return ctx.appcastUrl;
+  if (ctx.baseUrl) return `${ctx.baseUrl}/mac/${ctx.channel}/appcast.xml`;
+  const publicBaseUrl = process.env.PUBLIC_RELEASES_R2_PUBLIC_BASE_URL?.trim();
+  const baseUrl = publicBaseUrl ? trimTrailingSlash(publicBaseUrl) : "https://public-assets.inline.chat";
+  return `${baseUrl}/mac/${ctx.channel}/appcast.xml`;
+}
+
+function readBuiltAppMetadata(ctx: ReleaseContext): BuiltAppMetadata {
+  if (!existsSync(ctx.appPath)) throw new Error(`App not found at ${ctx.appPath}`);
+  const infoPlist = resolve(ctx.appPath, "Contents/Info.plist");
+  const buildNumber = readPlistString(infoPlist, "CFBundleVersion");
+  const version = readPlistString(infoPlist, "CFBundleShortVersionString");
+  const commit = readPlistString(infoPlist, "InlineCommit");
+  const feedUrl = readPlistString(infoPlist, "SUFeedURL");
+
+  const missing = [
+    ["CFBundleVersion", buildNumber],
+    ["CFBundleShortVersionString", version],
+    ["InlineCommit", commit],
+    ["SUFeedURL", feedUrl],
+  ].flatMap(([key, value]) => (value ? [] : [key]));
+  if (missing.length) {
+    throw new Error(`Built app metadata missing in ${infoPlist}: ${missing.join(", ")}`);
+  }
+
+  return { infoPlist, buildNumber, version, commit, feedUrl };
+}
+
+function verifyBuiltAppMetadata(ctx: ReleaseContext, ui: Ui): BuiltAppMetadata {
+  const metadata = readBuiltAppMetadata(ctx);
+  const expectedBuild = git(ctx.rootDir, ["rev-list", "--count", "HEAD"]);
+  const expectedCommit = git(ctx.rootDir, ["rev-parse", "--short", "HEAD"]);
+  const expectedFeedUrl = defaultAppcastUrl(ctx);
+  const mismatches: string[] = [];
+
+  if (!expectedBuild) mismatches.push("Unable to compute expected CFBundleVersion from git.");
+  else if (metadata.buildNumber !== expectedBuild) {
+    mismatches.push(`CFBundleVersion is ${metadata.buildNumber}, expected ${expectedBuild}.`);
+  }
+
+  if (!expectedCommit) mismatches.push("Unable to compute expected InlineCommit from git.");
+  else if (metadata.commit !== expectedCommit) {
+    mismatches.push(`InlineCommit is ${metadata.commit}, expected ${expectedCommit}.`);
+  }
+
+  if (metadata.feedUrl !== expectedFeedUrl) {
+    mismatches.push(`SUFeedURL is ${metadata.feedUrl}, expected ${expectedFeedUrl}.`);
+  }
+
+  if (mismatches.length) {
+    throw new Error(`Built app metadata mismatch in ${metadata.infoPlist}:\n- ${mismatches.join("\n- ")}`);
+  }
+
+  ctx.buildNumber = metadata.buildNumber;
+  ctx.version = metadata.version;
+  ctx.commit = metadata.commit;
+  ctx.commitLong = git(ctx.rootDir, ["rev-parse", "HEAD"]);
+  ctx.appcastUrl = expectedFeedUrl;
+  ui.info(`Verified app metadata: build ${ctx.buildNumber}, commit ${ctx.commit}, feed ${ctx.appcastUrl}`);
+  return metadata;
+}
+
+function releaseBuildWillRun(opts: ReleaseOptions): boolean {
+  return !opts.rollback && !opts.dropBuild && taskEnabled(opts, "build") && (!opts.fromTask || opts.fromTask === "build");
+}
+
+function writeReleaseHistory(ctx: ReleaseContext, action: "release" | "rollback" | "drop-build", ui: Ui) {
+  const build = ctx.buildNumber || ctx.rollbackSelectedBuild || ctx.pruneLatestBuild || ctx.dropBuild || "unknown";
+  const path = resolve(ctx.historyDir, `${nowIsoCompact()}-${ctx.channel}-${action}-${build}.json`);
+  const payload = {
+    schemaVersion: 1,
+    action,
+    createdAt: new Date().toISOString(),
+    channel: ctx.channel,
+    buildNumber: ctx.buildNumber || undefined,
+    version: ctx.version || undefined,
+    commit: ctx.commit || undefined,
+    commitLong: ctx.commitLong || undefined,
+    dmgUrl: ctx.dmgUrl || undefined,
+    appcastUrl: ctx.appcastUrl || undefined,
+    releaseTag: ctx.releaseTag || undefined,
+    appPath: ctx.appPath,
+    dmgPath: ctx.dmgPath,
+    derivedData: ctx.derivedData,
+    rollback: ctx.rollback
+      ? {
+          selectedBuild: ctx.rollbackSelectedBuild,
+          selectedUrl: ctx.rollbackSelectedUrl,
+          removedBuilds: ctx.rollbackRemovedBuilds,
+        }
+      : undefined,
+    appcastPrune: ctx.dropBuild
+      ? {
+          droppedBuild: ctx.pruneDroppedBuild,
+          droppedUrl: ctx.pruneDroppedUrl,
+          latestBuild: ctx.pruneLatestBuild,
+          latestUrl: ctx.pruneLatestUrl,
+        }
+      : undefined,
+  };
+
+  mkdirSync(ctx.historyDir, { recursive: true });
+  writeFileSync(path, `${JSON.stringify(payload, null, 2)}\n`);
+  ui.info(`Wrote release history: ${path}`);
 }
 
 function sleep(ms: number): Promise<void> {
@@ -587,7 +760,7 @@ function buildResumeCommand(ctx: ReleaseContext, fromTask: string): string {
   const defaultAppPath = resolve(defaultDerivedData, "Build/Products/Release/Inline.app");
   const defaultDmgPath = resolve(ctx.rootDir, "build/macos-direct/Inline.dmg");
   const defaultSparkleDir = resolve(ctx.rootDir, ".action/sparkle");
-  const defaultReleaseTag = ctx.rollback ? "" : ctx.channel === "beta" ? "tip" : "";
+  const defaultReleaseTag = ctx.rollback || ctx.dropBuild ? "" : ctx.channel === "beta" ? "tip" : "";
   const concreteSkipIds = [...ctx.skip]
     .filter((id) => !["upload", "appcast", "github"].includes(id))
     .sort();
@@ -596,6 +769,8 @@ function buildResumeCommand(ctx: ReleaseContext, fromTask: string): string {
     args.push("--rollback");
     if (ctx.rollbackToBuild) args.push("--rollback-to-build", ctx.rollbackToBuild);
     else if (ctx.rollbackStepsBack !== 1) args.push("--rollback-steps-back", String(ctx.rollbackStepsBack));
+  } else if (ctx.dropBuild) {
+    args.push("--drop-build", ctx.dropBuild);
   } else if (ctx.releaseTag !== defaultReleaseTag) {
     args.push("--release-tag", ctx.releaseTag);
   }
@@ -603,7 +778,8 @@ function buildResumeCommand(ctx: ReleaseContext, fromTask: string): string {
   if (ctx.skipGithubRelease) args.push("--skip-github-release");
   if (concreteSkipIds.length) args.push("--skip", concreteSkipIds.join(","));
   if (ctx.pauseBeforeNotarize) args.push("--pause-before-notarize");
-  if (!ctx.rollback && !ctx.skip.has("upload-sentry-dsyms")) args.push("--upload-sentry-dsyms");
+  if (ctx.allowDirty) args.push("--allow-dirty");
+  if (!ctx.rollback && !ctx.dropBuild && !ctx.skip.has("upload-sentry-dsyms")) args.push("--upload-sentry-dsyms");
   if (ctx.derivedData !== defaultDerivedData) args.push("--derived-data", ctx.derivedData);
   if (ctx.appPath !== defaultAppPath) args.push("--app-path", ctx.appPath);
   if (ctx.dmgPath !== defaultDmgPath) args.push("--dmg-path", ctx.dmgPath);
@@ -619,10 +795,10 @@ async function main() {
 
   let keepTempDir = false;
   const parsedRaw = parseArgs(process.argv.slice(2), rootDir);
-  if (!parsedRaw.rollback) {
+  if (!parsedRaw.rollback && !parsedRaw.dropBuild) {
     validateSkipIds(parsedRaw.skip);
   }
-  const parsed0 = parsedRaw.rollback ? parsedRaw : computeSkipOptions(parsedRaw);
+  const parsed0 = parsedRaw.rollback || parsedRaw.dropBuild ? parsedRaw : computeSkipOptions(parsedRaw);
   let channel = parsed0.channel;
   if (!channel) {
     if (!interactive) {
@@ -633,7 +809,7 @@ async function main() {
       console.log(`Using channel: ${channel}`);
     }
   }
-  const releaseTag = parsed0.rollback ? "" : parsed0.releaseTag || (channel === "beta" ? "tip" : "");
+  const releaseTag = parsed0.rollback || parsed0.dropBuild ? "" : parsed0.releaseTag || (channel === "beta" ? "tip" : "");
   const opts: ReleaseOptions = {
     channel,
     derivedData: parsed0.derivedData,
@@ -642,6 +818,7 @@ async function main() {
     sparkleDir: parsed0.sparkleDir,
     releaseTag,
     skipGithubRelease: parsed0.skipGithubRelease || parsed0.skip.has("github"),
+    allowDirty: parsed0.allowDirty,
     skip: parsed0.skip,
     fromTask: parsed0.fromTask,
     dryRun: parsed0.dryRun,
@@ -649,6 +826,7 @@ async function main() {
     rollback: parsed0.rollback,
     rollbackToBuild: parsed0.rollbackToBuild,
     rollbackStepsBack: parsed0.rollbackStepsBack,
+    dropBuild: parsed0.dropBuild,
   };
 
   // Temp dir is created up-front so we can point to it on failures.
@@ -666,6 +844,8 @@ async function main() {
     appcastPath: resolve(tempDir, "appcast.xml"),
     appcastOutputPath: resolve(tempDir, "appcast_new.xml"),
     rollbackMetaPath: resolve(tempDir, "rollback_meta.json"),
+    pruneMetaPath: resolve(tempDir, "prune_meta.json"),
+    historyDir: resolve(rootDir, "build/macos-release-history"),
     buildNumber: "",
     version: "",
     commit: "",
@@ -676,13 +856,19 @@ async function main() {
     rollbackSelectedBuild: "",
     rollbackSelectedUrl: "",
     rollbackRemovedBuilds: [],
+    pruneDroppedBuild: "",
+    pruneDroppedUrl: "",
+    pruneLatestBuild: "",
+    pruneLatestUrl: "",
     ...opts,
   };
 
   ui.setHintLine(
     opts.rollback
       ? `Rollback  Channel: ${opts.channel}${opts.rollbackToBuild ? `  Build: ${opts.rollbackToBuild}` : `  Steps back: ${opts.rollbackStepsBack}`}${opts.fromTask ? `  From: ${opts.fromTask}` : ""}${opts.dryRun ? "  Dry run" : ""}`
-      : `Release  Channel: ${opts.channel}${opts.releaseTag ? `  Tag: ${opts.releaseTag}` : ""}${opts.fromTask ? `  From: ${opts.fromTask}` : ""}${opts.pauseBeforeNotarize ? "  Pause before notarize" : ""}${opts.dryRun ? "  Dry run" : ""}`,
+      : opts.dropBuild
+        ? `Drop build  Channel: ${opts.channel}  Build: ${opts.dropBuild}${opts.dryRun ? "  Dry run" : ""}`
+        : `Release  Channel: ${opts.channel}${opts.releaseTag ? `  Tag: ${opts.releaseTag}` : ""}${opts.fromTask ? `  From: ${opts.fromTask}` : ""}${opts.pauseBeforeNotarize ? "  Pause before notarize" : ""}${opts.allowDirty ? "  Allow dirty" : ""}${opts.dryRun ? "  Dry run" : ""}`,
   );
 
   const tasks: Task[] = [];
@@ -692,14 +878,14 @@ async function main() {
     for (const c of ["bun", "python3", "curl", "git"]) {
       if (!commandExists(c)) missing.push(c);
     }
-    if (ctx.rollback) {
-      // Rollback only needs feed editing + upload tooling.
+    if (ctx.rollback || ctx.dropBuild) {
+      // Appcast-only operations need feed editing + upload tooling.
     } else if (taskEnabled(opts, "build")) {
       for (const c of ["xcodebuild", "xcrun", "codesign", "security", "create-dmg", "rsync", "unzip", "perl"]) {
         if (!commandExists(c)) missing.push(c);
       }
     }
-    if (!ctx.rollback && taskEnabled(opts, "upload-sentry-dsyms")) {
+    if (!ctx.rollback && !ctx.dropBuild && taskEnabled(opts, "upload-sentry-dsyms")) {
       if (!commandExists("ditto")) {
         ui.info("Warning: upload-sentry-dsyms is best-effort and will fail because `ditto` is missing.");
       }
@@ -707,17 +893,29 @@ async function main() {
         ui.info("Warning: upload-sentry-dsyms is best-effort and will be skipped after a failure unless SENTRY_AUTH_TOKEN or an authenticated `sentry` CLI session is available.");
       }
     }
-    if (!ctx.rollback && taskEnabled(opts, "post-check")) {
+    if (!ctx.rollback && !ctx.dropBuild && taskEnabled(opts, "post-check")) {
       for (const c of ["hdiutil", "spctl", "lipo"]) {
         if (!commandExists(c)) missing.push(c);
       }
     }
-    if (!ctx.rollback && !opts.skipGithubRelease && opts.releaseTag) {
+    if (!ctx.rollback && !ctx.dropBuild && !opts.skipGithubRelease && opts.releaseTag) {
       if (!commandExists("gh")) missing.push("gh");
     }
     if (ctx.pauseBeforeNotarize && taskEnabled(opts, "build") && !interactive) {
       if (ctx.dryRun) ui.info("Warning: --pause-before-notarize requires an interactive terminal when executing the build.");
       else throw new Error("--pause-before-notarize requires an interactive terminal.");
+    }
+    if (releaseBuildWillRun(ctx) && ctx.channel === "stable") {
+      const dirty = gitLines(ctx.rootDir, ["status", "--porcelain"]);
+      if (dirty.length && !ctx.allowDirty) {
+        const sample = dirty.slice(0, 12).join("\n");
+        const extra = dirty.length > 12 ? `\n... and ${dirty.length - 12} more` : "";
+        const message = `Stable release builds require a clean worktree. Commit or discard changes before building, or pass --allow-dirty for an intentional local/dev build.\n${sample}${extra}`;
+        if (ctx.dryRun) ui.info(`Warning: ${message}`);
+        else throw new Error(message);
+      } else if (dirty.length && ctx.allowDirty) {
+        ui.info("Warning: building a stable release from a dirty worktree because --allow-dirty was passed.");
+      }
     }
     if (missing.length) {
       if (ctx.dryRun) {
@@ -864,7 +1062,7 @@ async function main() {
         ui.info("Would run:");
         ui.info(`  UPLOAD_MODE=appcast CHANNEL=${ctx.channel} APPCAST_PATH=<temp>/appcast_new.xml BUILD_NUMBER=<selected-build> bun run scripts/macos/release-direct.ts`);
         ui.info("Requires env:");
-        ui.info("  PUBLIC_RELEASES_R2_ACCESS_KEY_ID, PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY, PUBLIC_RELEASES_R2_BUCKET, PUBLIC_RELEASES_R2_ENDPOINT");
+        ui.info("  PUBLIC_RELEASES_R2_ACCESS_KEY_ID, PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY, PUBLIC_RELEASES_R2_BUCKET, PUBLIC_RELEASES_R2_ENDPOINT, PUBLIC_RELEASES_R2_PUBLIC_BASE_URL");
       },
       run: async (ctx, ui) => {
         if (!ctx.buildNumber) {
@@ -874,6 +1072,126 @@ async function main() {
         requireEnv("PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY");
         requireEnv("PUBLIC_RELEASES_R2_BUCKET");
         requireEnv("PUBLIC_RELEASES_R2_ENDPOINT");
+        requireEnv("PUBLIC_RELEASES_R2_PUBLIC_BASE_URL");
+        await runStreaming(ui, ["bun", "run", resolve(ctx.rootDir, "scripts/macos/release-direct.ts")], {
+          cwd: ctx.rootDir,
+          env: {
+            UPLOAD_MODE: "appcast",
+            CHANNEL: ctx.channel,
+            APPCAST_PATH: ctx.appcastOutputPath,
+            BUILD_NUMBER: ctx.buildNumber,
+          },
+        });
+      },
+    });
+  } else if (opts.dropBuild) {
+    tasks.push({
+      id: "fetch-appcast",
+      title: "Fetch current appcast",
+      enabled: true,
+      dryRun: (ctx, ui) => {
+        ui.info("Would run:");
+        ui.info("  curl -fsSL <PUBLIC_RELEASES_R2_PUBLIC_BASE_URL>/mac/<channel>/appcast.xml -o <temp>/appcast.xml");
+        ui.info("Requires env:");
+        ui.info("  PUBLIC_RELEASES_R2_PUBLIC_BASE_URL");
+      },
+      run: async (ctx, ui) => {
+        ctx.baseUrl = trimTrailingSlash(requireEnv("PUBLIC_RELEASES_R2_PUBLIC_BASE_URL"));
+        ctx.appcastUrl = `${ctx.baseUrl}/mac/${ctx.channel}/appcast.xml`;
+        await runStreaming(ui, ["curl", "-fsSL", ctx.appcastUrl, "-o", ctx.appcastPath], { cwd: ctx.rootDir });
+      },
+    });
+
+    tasks.push({
+      id: "prepare-prune",
+      title: "Remove build from appcast",
+      enabled: true,
+      dryRun: (ctx, ui) => {
+        ui.info("Would run:");
+        ui.info(`  python3 scripts/macos/prune_appcast.py --appcast <temp>/appcast.xml --output <temp>/appcast_new.xml --metadata-output <temp>/prune_meta.json --drop-build ${ctx.dropBuild}`);
+      },
+      run: async (ctx, ui) => {
+        await runStreaming(
+          ui,
+          [
+            "python3",
+            resolve(ctx.rootDir, "scripts/macos/prune_appcast.py"),
+            "--appcast",
+            ctx.appcastPath,
+            "--output",
+            ctx.appcastOutputPath,
+            "--metadata-output",
+            ctx.pruneMetaPath,
+            "--drop-build",
+            ctx.dropBuild,
+          ],
+          { cwd: ctx.rootDir },
+        );
+
+        const metadata = JSON.parse(await Bun.file(ctx.pruneMetaPath).text()) as PruneMetadata;
+        ctx.pruneDroppedBuild = metadata.droppedBuild;
+        ctx.pruneDroppedUrl = metadata.droppedUrl;
+        ctx.pruneLatestBuild = metadata.latestBuild;
+        ctx.pruneLatestUrl = metadata.latestUrl;
+        ctx.buildNumber = metadata.latestBuild;
+        ctx.dmgUrl = metadata.latestUrl;
+
+        ui.info(`Dropped appcast build: ${ctx.pruneDroppedBuild}`);
+        ui.info(`Current latest build remains: ${ctx.pruneLatestBuild}`);
+        if (metadata.remainingBuilds.length > 0) {
+          ui.info(`Remaining builds: ${metadata.remainingBuilds.join(", ")}`);
+        }
+      },
+    });
+
+    tasks.push({
+      id: "validate-appcast",
+      title: "Validate pruned appcast",
+      enabled: true,
+      dryRun: (ctx, ui) => {
+        ui.info("Would run:");
+        ui.info("  python3 scripts/macos/validate_appcast.py --appcast <temp>/appcast_new.xml --require-build <latest-build> --require-url <latest-dmg-url>");
+      },
+      run: async (ctx, ui) => {
+        if (!ctx.pruneLatestBuild || !ctx.pruneLatestUrl) {
+          throw new Error("Pruned appcast metadata missing. prepare-prune must run first.");
+        }
+        await runStreaming(
+          ui,
+          [
+            "python3",
+            resolve(ctx.rootDir, "scripts/macos/validate_appcast.py"),
+            "--appcast",
+            ctx.appcastOutputPath,
+            "--require-build",
+            ctx.pruneLatestBuild,
+            "--require-url",
+            ctx.pruneLatestUrl,
+          ],
+          { cwd: ctx.rootDir },
+        );
+      },
+    });
+
+    tasks.push({
+      id: "upload-appcast",
+      title: "Upload pruned appcast to R2",
+      enabled: true,
+      dryRun: (ctx, ui) => {
+        ui.info("Would run:");
+        ui.info(`  UPLOAD_MODE=appcast CHANNEL=${ctx.channel} APPCAST_PATH=<temp>/appcast_new.xml BUILD_NUMBER=<latest-build> bun run scripts/macos/release-direct.ts`);
+        ui.info("Requires env:");
+        ui.info("  PUBLIC_RELEASES_R2_ACCESS_KEY_ID, PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY, PUBLIC_RELEASES_R2_BUCKET, PUBLIC_RELEASES_R2_ENDPOINT, PUBLIC_RELEASES_R2_PUBLIC_BASE_URL");
+      },
+      run: async (ctx, ui) => {
+        if (!ctx.buildNumber) {
+          throw new Error("Latest build number missing. prepare-prune must run first.");
+        }
+        requireEnv("PUBLIC_RELEASES_R2_ACCESS_KEY_ID");
+        requireEnv("PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY");
+        requireEnv("PUBLIC_RELEASES_R2_BUCKET");
+        requireEnv("PUBLIC_RELEASES_R2_ENDPOINT");
+        requireEnv("PUBLIC_RELEASES_R2_PUBLIC_BASE_URL");
         await runStreaming(ui, ["bun", "run", resolve(ctx.rootDir, "scripts/macos/release-direct.ts")], {
           cwd: ctx.rootDir,
           env: {
@@ -985,11 +1303,6 @@ async function main() {
       if (!existsSync(ctx.appPath)) throw new Error(`App not found at ${ctx.appPath}`);
       if (!existsSync(ctx.dmgPath)) throw new Error(`DMG not found at ${ctx.dmgPath}`);
 
-      // Pull build number from the built app for consistency (works with --skip build).
-      const infoPlist = resolve(ctx.appPath, "Contents/Info.plist");
-      ctx.buildNumber = readPlistString(infoPlist, "CFBundleVersion") || "";
-      if (!ctx.buildNumber) throw new Error(`Unable to read CFBundleVersion from ${infoPlist}`);
-
       // R2 URL context.
       // release-direct.ts will also check these, but validating here gives a clearer error.
       requireEnv("PUBLIC_RELEASES_R2_ACCESS_KEY_ID");
@@ -997,8 +1310,9 @@ async function main() {
       requireEnv("PUBLIC_RELEASES_R2_BUCKET");
       requireEnv("PUBLIC_RELEASES_R2_ENDPOINT");
       ctx.baseUrl = trimTrailingSlash(requireEnv("PUBLIC_RELEASES_R2_PUBLIC_BASE_URL"));
-      ctx.dmgUrl = `${ctx.baseUrl}/mac/${ctx.channel}/${ctx.buildNumber}/Inline.dmg`;
       ctx.appcastUrl = `${ctx.baseUrl}/mac/${ctx.channel}/appcast.xml`;
+      verifyBuiltAppMetadata(ctx, ui);
+      ctx.dmgUrl = `${ctx.baseUrl}/mac/${ctx.channel}/${ctx.buildNumber}/Inline.dmg`;
 
       await runStreaming(ui, ["bun", "run", resolve(ctx.rootDir, "scripts/macos/release-direct.ts")], {
         cwd: ctx.rootDir,
@@ -1026,12 +1340,10 @@ async function main() {
     run: async (ctx, ui) => {
       if (!ctx.dmgUrl) {
         // If upload-dmg was skipped, we still want a consistent URL for verification/appcast.
-        const infoPlist = resolve(ctx.appPath, "Contents/Info.plist");
-        ctx.buildNumber = ctx.buildNumber || readPlistString(infoPlist, "CFBundleVersion") || "";
-        if (!ctx.buildNumber) throw new Error(`Unable to read CFBundleVersion from ${infoPlist}`);
         ctx.baseUrl = ctx.baseUrl || trimTrailingSlash(requireEnv("PUBLIC_RELEASES_R2_PUBLIC_BASE_URL"));
-        ctx.dmgUrl = `${ctx.baseUrl}/mac/${ctx.channel}/${ctx.buildNumber}/Inline.dmg`;
         ctx.appcastUrl = `${ctx.baseUrl}/mac/${ctx.channel}/appcast.xml`;
+        verifyBuiltAppMetadata(ctx, ui);
+        ctx.dmgUrl = `${ctx.baseUrl}/mac/${ctx.channel}/${ctx.buildNumber}/Inline.dmg`;
       }
 
       for (let attempt = 1; attempt <= 5; attempt++) {
@@ -1078,18 +1390,12 @@ async function main() {
       // Ensure URLs/metadata.
       if (!ctx.dmgUrl || !ctx.appcastUrl) {
         ctx.baseUrl = ctx.baseUrl || trimTrailingSlash(requireEnv("PUBLIC_RELEASES_R2_PUBLIC_BASE_URL"));
-        const infoPlist = resolve(ctx.appPath, "Contents/Info.plist");
-        ctx.buildNumber = ctx.buildNumber || readPlistString(infoPlist, "CFBundleVersion") || "";
-        if (!ctx.buildNumber) throw new Error(`Unable to read CFBundleVersion from ${infoPlist}`);
-        ctx.dmgUrl = `${ctx.baseUrl}/mac/${ctx.channel}/${ctx.buildNumber}/Inline.dmg`;
         ctx.appcastUrl = `${ctx.baseUrl}/mac/${ctx.channel}/appcast.xml`;
+        verifyBuiltAppMetadata(ctx, ui);
+        ctx.dmgUrl = `${ctx.baseUrl}/mac/${ctx.channel}/${ctx.buildNumber}/Inline.dmg`;
+      } else {
+        verifyBuiltAppMetadata(ctx, ui);
       }
-
-      // Read build metadata from the built app where possible.
-      const infoPlist = resolve(ctx.appPath, "Contents/Info.plist");
-      ctx.version = readPlistString(infoPlist, "CFBundleShortVersionString") || ctx.buildNumber;
-      ctx.commit = readPlistString(infoPlist, "InlineCommit") || git(ctx.rootDir, ["rev-parse", "--short", "HEAD"]);
-      ctx.commitLong = git(ctx.rootDir, ["rev-parse", "HEAD"]);
 
       writeFileSync(ctx.signingKeyPath, sparklePrivateKey);
 
@@ -1159,13 +1465,10 @@ async function main() {
       ui.info("  python3 scripts/macos/validate_appcast.py --appcast <temp>/appcast_new.xml --require-build <build> --require-url <dmg-url>");
     },
     run: async (ctx, ui) => {
-      if (!ctx.buildNumber) {
-        const infoPlist = resolve(ctx.appPath, "Contents/Info.plist");
-        ctx.buildNumber = readPlistString(infoPlist, "CFBundleVersion") || "";
-        if (!ctx.buildNumber) throw new Error(`Unable to read CFBundleVersion from ${infoPlist}`);
-      }
-      if (!ctx.dmgUrl) {
+      if (!ctx.buildNumber || !ctx.dmgUrl) {
         ctx.baseUrl = ctx.baseUrl || trimTrailingSlash(requireEnv("PUBLIC_RELEASES_R2_PUBLIC_BASE_URL"));
+        ctx.appcastUrl = `${ctx.baseUrl}/mac/${ctx.channel}/appcast.xml`;
+        verifyBuiltAppMetadata(ctx, ui);
         ctx.dmgUrl = `${ctx.baseUrl}/mac/${ctx.channel}/${ctx.buildNumber}/Inline.dmg`;
       }
 
@@ -1184,19 +1487,16 @@ async function main() {
       ui.info("Would run:");
       ui.info(`  UPLOAD_MODE=appcast CHANNEL=${ctx.channel} APPCAST_PATH=<temp>/appcast_new.xml BUILD_NUMBER=<from app plist> bun run scripts/macos/release-direct.ts`);
       ui.info("Requires env:");
-      ui.info("  PUBLIC_RELEASES_R2_ACCESS_KEY_ID, PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY, PUBLIC_RELEASES_R2_BUCKET, PUBLIC_RELEASES_R2_ENDPOINT");
+      ui.info("  PUBLIC_RELEASES_R2_ACCESS_KEY_ID, PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY, PUBLIC_RELEASES_R2_BUCKET, PUBLIC_RELEASES_R2_ENDPOINT, PUBLIC_RELEASES_R2_PUBLIC_BASE_URL");
     },
     run: async (ctx, ui) => {
-      if (!ctx.buildNumber) {
-        const infoPlist = resolve(ctx.appPath, "Contents/Info.plist");
-        ctx.buildNumber = readPlistString(infoPlist, "CFBundleVersion") || "";
-        if (!ctx.buildNumber) throw new Error(`Unable to read CFBundleVersion from ${infoPlist}`);
-      }
-
       requireEnv("PUBLIC_RELEASES_R2_ACCESS_KEY_ID");
       requireEnv("PUBLIC_RELEASES_R2_SECRET_ACCESS_KEY");
       requireEnv("PUBLIC_RELEASES_R2_BUCKET");
       requireEnv("PUBLIC_RELEASES_R2_ENDPOINT");
+      ctx.baseUrl = ctx.baseUrl || trimTrailingSlash(requireEnv("PUBLIC_RELEASES_R2_PUBLIC_BASE_URL"));
+      ctx.appcastUrl = `${ctx.baseUrl}/mac/${ctx.channel}/appcast.xml`;
+      verifyBuiltAppMetadata(ctx, ui);
       await runStreaming(ui, ["bun", "run", resolve(ctx.rootDir, "scripts/macos/release-direct.ts")], {
         cwd: ctx.rootDir,
         env: {
@@ -1338,7 +1638,10 @@ async function main() {
     process.exit(1);
   }
 
-  ui.info(opts.rollback ? "Rollback appcast publish complete." : "Release pipeline complete.");
+  if (!opts.dryRun) {
+    writeReleaseHistory(ctx, opts.rollback ? "rollback" : opts.dropBuild ? "drop-build" : "release", ui);
+  }
+  ui.info(opts.rollback ? "Rollback appcast publish complete." : opts.dropBuild ? "Appcast prune publish complete." : "Release pipeline complete.");
 }
 
 await main();
