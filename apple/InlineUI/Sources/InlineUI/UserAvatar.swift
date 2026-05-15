@@ -1,8 +1,6 @@
-import GRDB
 import InlineKit
+import Kingfisher
 import Logger
-import Nuke
-import NukeUI
 import SwiftUI
 
 public struct UserAvatar: View, Equatable {
@@ -30,6 +28,10 @@ public struct UserAvatar: View, Equatable {
 
   let nameForInitials: String
 
+  @Environment(\.colorScheme) private var colorScheme
+  @Environment(\.displayScale) private var displayScale
+  @State private var avatarLoadFailed = false
+
   public static func getNameForInitials(user: User) -> String {
     AvatarColorUtility.formatNameForHashing(
       firstName: user.firstName,
@@ -51,7 +53,7 @@ public struct UserAvatar: View, Equatable {
     username = user.username
     self.size = size
     remoteUrl = user.getRemoteURL()
-    localUrl = user.getLocalURL()
+    localUrl = Self.existingFileUrl(user.getLocalURL())
     stableAvatarIdentity = user.stableAvatarIdentity
     self.ignoresSafeArea = ignoresSafeArea
     self.backgroundOpacity = backgroundOpacity
@@ -67,7 +69,7 @@ public struct UserAvatar: View, Equatable {
     let user = userInfo.user
     userId = user.id
     remoteUrl = user.getRemoteURL() // ?? userInfo.profilePhoto?.first?.getRemoteURL()
-    localUrl = user.getLocalURL() // ?? userInfo.profilePhoto?.first?.getLocalURL()
+    localUrl = Self.existingFileUrl(user.getLocalURL()) // ?? userInfo.profilePhoto?.first?.getLocalURL()
     stableAvatarIdentity = userInfo.stableAvatarIdentity
     firstName = user.firstName
     lastName = user.lastName
@@ -122,8 +124,6 @@ public struct UserAvatar: View, Equatable {
     firstName == nil && lastName == nil && email == nil && username == nil
   }
 
-  @Environment(\.colorScheme) private var colorScheme
-
   private var backgroundColor: Color {
     AvatarColorUtility.colorFor(name: nameForInitials)
       .adjustLuminosity(by: colorScheme == .dark ? -0.1 : 0)
@@ -140,43 +140,54 @@ public struct UserAvatar: View, Equatable {
     )
   }
 
+  private var avatarUrl: URL? {
+    localUrl ?? remoteUrl
+  }
+
+  private var avatarCacheKey: String {
+    let identity = stableAvatarIdentity
+      ?? remoteUrl?.absoluteString
+      ?? localUrl?.absoluteString
+      ?? "user:\(userId)"
+
+    return "user-avatar:\(identity)"
+  }
+
+  private var targetSize: CGSize {
+    let side = max(size, 1)
+    return CGSize(width: side, height: side)
+  }
+
   @ViewBuilder
   public var avatar: some View {
-    if remoteUrl != nil || localUrl != nil {
-      LazyImage(
-        url: localUrl ?? remoteUrl,
-        content: { state in
-
-          if state.isLoading {
-            placeholder
-          } else if state.error != nil {
+    if let avatarUrl {
+      KFImage.url(avatarUrl, cacheKey: avatarCacheKey)
+        .setProcessor(DownsamplingImageProcessor(size: targetSize))
+        .scaleFactor(displayScale)
+        .cacheOriginalImage()
+        .loadDiskFileSynchronously()
+        .cancelOnDisappear(true)
+        .placeholder {
+          if avatarLoadFailed {
             initials
           } else {
-            state.image?
-              .resizable()
-              // .aspectRatio(contentMode: .fit)
-              // for not square profile photo
-              .aspectRatio(contentMode: .fill)
-              .frame(width: size, height: size)
-              .background(backgroundGradient)
-              .clipShape(Circle())
-              .fixedSize()
-              .task {
-                // don't re-save if already
-                guard localUrl == nil else { return }
-                guard let image = try? state.result?.get().image else { return }
-
-                Task.detached {
-                  do {
-                    try await User.cacheImage(userId: userId, image: image)
-                  } catch {
-                    Log.shared.error("Failed to cache image", error: error)
-                  }
-                }
-              }
+            placeholder
           }
         }
-      )
+        .onSuccess { result in
+          avatarLoadFailed = false
+          cacheRemoteAvatarIfNeeded(result, sourceUrl: avatarUrl)
+        }
+        .onFailure { _ in
+          avatarLoadFailed = true
+        }
+        .resizable()
+        // For non-square profile photos.
+        .aspectRatio(contentMode: .fill)
+        .frame(width: size, height: size)
+        .background(backgroundGradient)
+        .clipShape(Circle())
+        .fixedSize()
     } else {
       initials
     }
@@ -190,5 +201,26 @@ public struct UserAvatar: View, Equatable {
     } else {
       avatar
     }
+  }
+
+  private func cacheRemoteAvatarIfNeeded(_ result: RetrieveImageResult, sourceUrl: URL) {
+    guard sourceUrl.isFileURL == false else { return }
+    guard localUrl == nil else { return }
+    guard result.cacheType == .none else { return }
+    guard let data = result.data(), data.isEmpty == false else { return }
+
+    Task.detached(priority: .utility) { [userId, data] in
+      do {
+        try await User.cacheImageData(userId: userId, data: data)
+      } catch {
+        Log.shared.error("Failed to cache image", error: error)
+      }
+    }
+  }
+
+  private static func existingFileUrl(_ url: URL?) -> URL? {
+    guard let url else { return nil }
+    guard url.isFileURL else { return url }
+    return FileManager.default.fileExists(atPath: url.path) ? url : nil
   }
 }
