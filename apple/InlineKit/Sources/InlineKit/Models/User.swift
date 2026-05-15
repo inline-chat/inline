@@ -1,8 +1,10 @@
 import Auth
 import Foundation
 import GRDB
+import ImageIO
 import InlineProtocol
 import Logger
+import UniformTypeIdentifiers
 
 public struct ApiUser: Codable, Hashable, Sendable {
   public var id: Int64
@@ -238,7 +240,10 @@ public extension ApiUser {
 
     if let existing {
       // Check if we need to clear local cache due to profile photo change
-      let shouldClearCache = existing.shouldInvalidateLocalCache(newFileUniqueId: profileFileUniqueId)
+      let shouldClearCache = existing.shouldInvalidateLocalCache(
+        newFileUniqueId: profileFileUniqueId,
+        newFileId: file?.id
+      )
 
       // keep existing values
       user.profileFileId = file?.id ?? existing.profileFileId
@@ -394,11 +399,51 @@ public extension User {
     }
   }
 
-  /// Check if the local cache should be invalidated based on profileFileUniqueId changes
+  static func cacheImageData(userId: Int64, data: Data) async throws {
+    Log.shared.debug("Trying to cache image data")
+
+    let directory = User.getProfileCacheDirectory()
+    let format = imageFormat(for: data)
+    let localPath = "User\(UUID().uuidString).\(format.fileExtension)"
+    let localUrl = directory.appendingPathComponent(localPath)
+
+    try data.write(to: localUrl, options: .atomic)
+
+    _ = try await AppDatabase.shared.dbWriter.write { db in
+      try User.filter(id: userId).updateAll(db, [
+        Column("profileLocalPath").set(to: localPath),
+      ])
+    }
+  }
+
+  private static func imageFormat(for data: Data) -> ImageFormat {
+    guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+          let type = CGImageSourceGetType(source),
+          let utType = UTType(type as String)
+    else {
+      return .jpeg
+    }
+
+    if utType.conforms(to: .png) {
+      return .png
+    }
+
+    return .jpeg
+  }
+
+  /// Check if the local cache should be invalidated based on profile photo identity changes.
   /// Used internally by save methods to automatically handle cache invalidation
-  func shouldInvalidateLocalCache(newFileUniqueId: String?) -> Bool {
-    // Only invalidate cache if we have a new unique ID and it's different from our current one
-    if let newId = newFileUniqueId, newId != profileFileUniqueId {
+  func shouldInvalidateLocalCache(newFileUniqueId: String?, newFileId: String? = nil) -> Bool {
+    if let newId = normalizedAvatarIdentityValue(newFileUniqueId),
+       newId != normalizedAvatarIdentityValue(profileFileUniqueId)
+    {
+      return true
+    }
+
+    if normalizedAvatarIdentityValue(newFileUniqueId) == nil,
+       let newId = normalizedAvatarIdentityValue(newFileId),
+       newId != normalizedAvatarIdentityValue(profileFileId)
+    {
       return true
     }
 

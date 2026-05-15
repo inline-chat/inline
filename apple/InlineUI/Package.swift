@@ -29,7 +29,6 @@ let package = Package(
 
   dependencies: [
     .package(name: "InlineKit", path: "../InlineKit"),
-    .package(url: "https://github.com/kean/Nuke", from: "12.8.0"),
     .package(url: "https://github.com/onevcat/Kingfisher", from: "7.0.0"),
   ],
 
@@ -37,8 +36,6 @@ let package = Package(
     .target(
       name: "InlineUI",
       dependencies: baseDependencies + [
-        .product(name: "Nuke", package: "Nuke"),
-        .product(name: "NukeUI", package: "Nuke"),
         .product(name: "Kingfisher", package: "Kingfisher"),
       ],
       swiftSettings: swiftSettings
