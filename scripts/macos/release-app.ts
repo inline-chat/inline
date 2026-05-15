@@ -440,8 +440,8 @@ function verifyBuiltAppMetadata(ctx: ReleaseContext, ui: Ui): BuiltAppMetadata {
   return metadata;
 }
 
-function releaseBuildWillRun(opts: ReleaseOptions): boolean {
-  return !opts.rollback && !opts.dropBuild && taskEnabled(opts, "build") && (!opts.fromTask || opts.fromTask === "build");
+function stableReleaseNeedsCleanWorktree(opts: ReleaseOptions): boolean {
+  return !opts.rollback && !opts.dropBuild && opts.channel === "stable";
 }
 
 function writeReleaseHistory(ctx: ReleaseContext, action: "release" | "rollback" | "drop-build", ui: Ui) {
@@ -905,12 +905,12 @@ async function main() {
       if (ctx.dryRun) ui.info("Warning: --pause-before-notarize requires an interactive terminal when executing the build.");
       else throw new Error("--pause-before-notarize requires an interactive terminal.");
     }
-    if (releaseBuildWillRun(ctx) && ctx.channel === "stable") {
+    if (stableReleaseNeedsCleanWorktree(ctx)) {
       const dirty = gitLines(ctx.rootDir, ["status", "--porcelain"]);
       if (dirty.length && !ctx.allowDirty) {
         const sample = dirty.slice(0, 12).join("\n");
         const extra = dirty.length > 12 ? `\n... and ${dirty.length - 12} more` : "";
-        const message = `Stable release builds require a clean worktree. Commit or discard changes before building, or pass --allow-dirty for an intentional local/dev build.\n${sample}${extra}`;
+        const message = `Stable releases require a clean worktree. Commit or discard changes before publishing, or pass --allow-dirty for an intentional local/dev build.\n${sample}${extra}`;
         if (ctx.dryRun) ui.info(`Warning: ${message}`);
         else throw new Error(message);
       } else if (dirty.length && ctx.allowDirty) {

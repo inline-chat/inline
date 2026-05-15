@@ -49,9 +49,8 @@ Beta also updates the GitHub `tip` release by default. Add
 `--skip-github-release` if you only want the Sparkle/R2 release. Stable does not
 use a GitHub release tag unless you pass `--release-tag`.
 
-Stable releases fail before the build step when the worktree is dirty. Commit
-the changes first. For intentional local/dev stable builds only, pass
-`--allow-dirty`.
+Stable releases fail during preflight when the worktree is dirty. Commit the
+changes first. For intentional local/dev stable builds only, pass `--allow-dirty`.
 
 Every successful local release operation writes a non-secret record under:
 
