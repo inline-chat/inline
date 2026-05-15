@@ -145,20 +145,33 @@ struct ChatRouteTitleBar: View {
     @Bindable var model = model
 
     return VStack(alignment: .leading, spacing: 0) {
-      TextField("Chat Title", text: $model.titleDraft)
-        .textFieldStyle(.roundedBorder)
-        .focused($isTitleFocused)
-        .frame(width: 260)
-        .onSubmit {
-          model.commitTitleEdit()
-        }
-        .onExitCommand {
-          model.cancelEditingTitle()
-        }
+      HStack(spacing: 8) {
+        EmojiTextFieldPicker(
+          emoji: $model.emojiDraft,
+          size: 28,
+          placeholderSystemImage: "number",
+          accessibilityLabel: "Chat icon"
+        )
+
+        TextField("Chat Title", text: $model.titleDraft)
+          .textFieldStyle(.roundedBorder)
+          .focused($isTitleFocused)
+          .frame(width: 226)
+          .onSubmit {
+            model.commitTitleEdit()
+          }
+          .onExitCommand {
+            model.cancelEditingTitle()
+          }
+      }
     }
     .padding(14)
     .onAppear {
       focusTitleField()
+    }
+    .onChange(of: model.emojiDraft) { _, _ in
+      guard model.isEditingTitle else { return }
+      model.commitTitleEdit()
     }
   }
 
