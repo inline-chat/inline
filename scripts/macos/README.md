@@ -28,10 +28,12 @@ The command runs:
 1. Preflight tool checks.
 2. Build, sign, create DMG, notarize, and staple.
 3. Post-check the DMG, code signature, Gatekeeper, Sparkle keys, and archs.
-4. Upload the DMG to R2.
-5. Verify the public DMG URL.
-6. Sign and generate the Sparkle appcast.
-7. Validate and upload the appcast.
+4. Verify the built app metadata (`CFBundleVersion`, `InlineCommit`, and
+   `SUFeedURL`) matches the selected release.
+5. Upload the DMG to R2.
+6. Verify the public DMG URL.
+7. Sign and generate the Sparkle appcast.
+8. Validate and upload the appcast.
 
 Stable publishes to:
 
@@ -46,6 +48,16 @@ Beta publishes to:
 Beta also updates the GitHub `tip` release by default. Add
 `--skip-github-release` if you only want the Sparkle/R2 release. Stable does not
 use a GitHub release tag unless you pass `--release-tag`.
+
+Stable releases fail before the build step when the worktree is dirty. Commit
+the changes first. For intentional local/dev stable builds only, pass
+`--allow-dirty`.
+
+Every successful local release operation writes a non-secret record under:
+
+```text
+build/macos-release-history/
+```
 
 ## Local Test Build
 
@@ -110,6 +122,9 @@ bun run macos:release-app -- --channel stable --from post-check
 
 # Skip a step explicitly.
 bun run macos:release-app -- --channel beta --skip github
+
+# Intentional local/dev stable build from a dirty worktree.
+bun run macos:release-app -- --channel stable --allow-dirty
 ```
 
 Known step ids:
@@ -152,6 +167,23 @@ bun run macos:release-app -- --channel stable --rollback --rollback-to-build 123
 bun run macos:release-app -- --channel stable --rollback --dry-run
 ```
 
+## Appcast Prune
+
+Use prune when a stale non-latest build should be removed from the live appcast
+without changing the current latest build. This republishes only `appcast.xml`.
+
+```bash
+cd scripts
+
+# Remove one stale build from stable.
+bun run macos:release-app -- --channel stable --drop-build 12345
+
+# Preview the prune path.
+bun run macos:release-app -- --channel stable --drop-build 12345 --dry-run
+```
+
+If the build you pass is the latest appcast item, use rollback instead.
+
 ## Lower-Level Scripts
 
 - `build-direct.sh`: build, sign, DMG, notarize, and staple.
@@ -162,4 +194,5 @@ bun run macos:release-app -- --channel stable --rollback --dry-run
 - `update_appcast.py`: generate the Sparkle appcast from `sign_update` output.
 - `validate_appcast.py`: validate appcasts before upload.
 - `rollback_appcast.py`: remove newer entries from an appcast for rollback.
+- `prune_appcast.py`: remove one stale non-latest item from an appcast.
 - `build-local-app.sh`: create a local `Inline-Dev.app` for testing.
