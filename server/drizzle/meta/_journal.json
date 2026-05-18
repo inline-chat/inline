@@ -505,6 +505,13 @@
       "when": 1775053087513,
       "tag": "0071_add-message-rev-and-translation-msg-rev",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1779114521675,
+      "tag": "0072_add-chat-list-hidden",
+      "breakpoints": true
     }
   ]
 }

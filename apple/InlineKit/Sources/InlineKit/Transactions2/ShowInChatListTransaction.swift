@@ -4,8 +4,8 @@ import InlineProtocol
 import Logger
 import RealtimeV2
 
-public struct ShowChatInSidebarTransaction: Transaction2 {
-  public var method: InlineProtocol.Method = .showChatInSidebar
+public struct ShowInChatListTransaction: Transaction2 {
+  public var method: InlineProtocol.Method = .showInChatList
   public var context: Context
   public var type: TransactionKindType = .mutation()
 
@@ -17,14 +17,14 @@ public struct ShowChatInSidebarTransaction: Transaction2 {
     case context
   }
 
-  private var log = Log.scoped("Transactions/ShowChatInSidebar")
+  private var log = Log.scoped("Transactions/ShowInChatList")
 
   public init(peerId: Peer) {
     context = Context(peerId: peerId)
   }
 
   public func input(from context: Context) -> InlineProtocol.RpcCall.OneOf_Input? {
-    .showChatInSidebar(.with {
+    .showInChatList(.with {
       $0.peerID = context.peerId.toInputPeer()
     })
   }
@@ -35,16 +35,16 @@ public struct ShowChatInSidebarTransaction: Transaction2 {
         guard var dialog = try Dialog.get(peerId: context.peerId).fetchOne(db) else {
           return
         }
-        dialog.sidebarVisible = true
+        dialog.chatListHidden = nil
         try dialog.save(db)
       }
     } catch {
-      log.error("Failed to optimistically show chat in sidebar", error: error)
+      log.error("Failed to optimistically show chat in chat list", error: error)
     }
   }
 
   public func apply(_ result: RpcResult.OneOf_Result?) async throws(TransactionExecutionError) {
-    guard case let .showChatInSidebar(response) = result else {
+    guard case let .showInChatList(response) = result else {
       throw TransactionExecutionError.invalid
     }
 
@@ -59,18 +59,18 @@ public struct ShowChatInSidebarTransaction: Transaction2 {
         _ = try response.dialog.saveFull(db)
       }
     } catch {
-      log.error("Failed to apply showChatInSidebar result", error: error)
+      log.error("Failed to apply showInChatList result", error: error)
       throw TransactionExecutionError.invalid
     }
   }
 
   public func failed(error: TransactionError2) async {
-    log.error("ShowChatInSidebar transaction failed", error: error)
+    log.error("ShowInChatList transaction failed", error: error)
   }
 }
 
-public extension Transaction2 where Self == ShowChatInSidebarTransaction {
-  static func showChatInSidebar(peerId: Peer) -> ShowChatInSidebarTransaction {
-    ShowChatInSidebarTransaction(peerId: peerId)
+public extension Transaction2 where Self == ShowInChatListTransaction {
+  static func showInChatList(peerId: Peer) -> ShowInChatListTransaction {
+    ShowInChatListTransaction(peerId: peerId)
   }
 }

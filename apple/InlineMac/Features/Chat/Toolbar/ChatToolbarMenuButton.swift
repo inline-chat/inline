@@ -49,9 +49,9 @@ struct ChatToolbarMenuButton: View {
         }
       }
 
-      if peer.isThread, model.state.isSidebarVisible == false {
-        Button("Keep in Sidebar", systemImage: "sidebar.left") {
-          keepInSidebar()
+      if peer.isThread, model.state.isChatListHidden {
+        Button("Keep in Chat List", systemImage: "sidebar.left") {
+          keepInChatList()
         }
       }
 
@@ -153,13 +153,13 @@ struct ChatToolbarMenuButton: View {
     dependencies.openChatInfo(peer: peer)
   }
 
-  private func keepInSidebar() {
+  private func keepInChatList() {
     Task(priority: .userInitiated) {
       do {
-        _ = try await realtimeV2.send(.showChatInSidebar(peerId: peer))
+        _ = try await realtimeV2.send(.showInChatList(peerId: peer))
       } catch {
         await MainActor.run {
-          ToastCenter.shared.showError("Failed to keep chat in sidebar")
+          ToastCenter.shared.showError("Failed to keep chat in chat list")
         }
       }
     }
@@ -354,7 +354,7 @@ private final class ChatToolbarMenuModel: ObservableObject {
 private struct ChatToolbarMenuState: Equatable {
   var isPinned = false
   var isArchived = false
-  var isSidebarVisible = true
+  var isChatListHidden = false
   var canRename = false
   var chatSpaceId: Int64?
   var title = "Chat"
@@ -371,7 +371,7 @@ private struct ChatToolbarMenuState: Equatable {
   ) throws {
     isPinned = dialog?.pinned ?? false
     isArchived = dialog?.archived ?? false
-    isSidebarVisible = dialog?.sidebarVisible != false
+    isChatListHidden = dialog?.chatListHidden == true
     chatSpaceId = chat?.spaceId
     title = chat?.humanReadableTitle ?? "Chat"
     destructiveAction = ChatDestructiveActionResolver.action(

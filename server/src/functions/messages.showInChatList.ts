@@ -4,11 +4,11 @@ import { ChatModel } from "@in/server/db/models/chats"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import {
-  emitSidebarChatOpenUpdates,
+  emitChatListOpenUpdates,
   ensureLinkedSubthreadDialogs,
   getDialogForUser,
   isLinkedSubthread,
-  promoteLinkedSubthreadDialogsToSidebar,
+  promoteLinkedSubthreadDialogsToChatList,
 } from "@in/server/modules/subthreads"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -22,7 +22,7 @@ type Output = {
   dialog: Dialog
 }
 
-export async function showChatInSidebar(input: Input, context: FunctionContext): Promise<Output> {
+export async function showInChatList(input: Input, context: FunctionContext): Promise<Output> {
   if (input.peerId.type.oneofKind !== "chat") {
     throw RealtimeRpcError.PeerIdInvalid()
   }
@@ -33,13 +33,13 @@ export async function showChatInSidebar(input: Input, context: FunctionContext):
   let dialog = await getDialogForUser(chat.id, context.currentUserId)
 
   if (isLinkedSubthread(chat)) {
-    const { dialogs, activatedDialogs } = await promoteLinkedSubthreadDialogsToSidebar({
+    const { dialogs, activatedDialogs } = await promoteLinkedSubthreadDialogsToChatList({
       chat,
       userIds: [context.currentUserId],
     })
 
     if (activatedDialogs.length > 0) {
-      await emitSidebarChatOpenUpdates({
+      await emitChatListOpenUpdates({
         chat,
         dialogs: activatedDialogs,
       })
@@ -50,7 +50,6 @@ export async function showChatInSidebar(input: Input, context: FunctionContext):
     const { dialogs } = await ensureLinkedSubthreadDialogs({
       chat,
       userIds: [context.currentUserId],
-      sidebarVisible: true,
     })
     dialog = dialogs.find((candidate) => candidate.userId === context.currentUserId)
   }

@@ -56,7 +56,6 @@ describe("messages.deleteMessage", () => {
     await db.insert(schema.dialogs).values({
       chatId: childChat.id,
       userId: currentUser.id,
-      sidebarVisible: false,
     })
 
     await db.insert(schema.messages).values([

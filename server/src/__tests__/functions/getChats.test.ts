@@ -101,7 +101,7 @@ describe("getChats", () => {
     expect(hasLastMsg).toBe(true)
   })
 
-  test("excludes linked subthreads whose dialog is hidden from sidebar", async () => {
+  test("excludes linked subthreads whose dialog is hidden from chat list", async () => {
     const owner = await testUtils.createUser("hidden-subthread-owner@example.com")
     const participant = await testUtils.createUser("hidden-subthread-participant@example.com")
     if (!owner || !participant) throw new Error("Users not created")
@@ -136,7 +136,7 @@ describe("getChats", () => {
     await db.insert(schema.dialogs).values({
       chatId: childChat.id,
       userId: participant.id,
-      sidebarVisible: false,
+      chatListHidden: true,
     })
 
     const hiddenResult = await getChats({}, makeHandlerContext(participant.id))
@@ -144,7 +144,7 @@ describe("getChats", () => {
 
     await db
       .update(schema.dialogs)
-      .set({ sidebarVisible: true })
+      .set({ chatListHidden: null })
       .where(and(eq(schema.dialogs.chatId, childChat.id), eq(schema.dialogs.userId, participant.id)))
 
     const visibleResult = await getChats({}, makeHandlerContext(participant.id))

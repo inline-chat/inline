@@ -36,7 +36,7 @@ import { getUpdatesState } from "./updates.getUpdatesState"
 import { getUpdates } from "./updates.getUpdates"
 import { forwardMessages } from "./messages.forwardMessages"
 import { createSubthread } from "./messages.createSubthread"
-import { showChatInSidebar } from "./messages.showChatInSidebar"
+import { showInChatList } from "./messages.showInChatList"
 import { reserveChatIds } from "./messages.reserveChatIds"
 import { invokeMessageAction } from "./messages.invokeMessageAction"
 import { answerMessageAction } from "./messages.answerMessageAction"
@@ -64,7 +64,7 @@ export const Functions = {
     updateDialogNotificationSettings: updateDialogNotificationSettings,
     forwardMessages: forwardMessages,
     createSubthread: createSubthread,
-    showChatInSidebar: showChatInSidebar,
+    showInChatList: showInChatList,
     reserveChatIds: reserveChatIds,
     invokeMessageAction: invokeMessageAction,
     answerMessageAction: answerMessageAction,

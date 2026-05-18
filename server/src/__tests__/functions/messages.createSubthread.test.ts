@@ -45,14 +45,14 @@ describe("messages.createSubthread", () => {
 
     const childChatId = Number(result.chat.id)
     const childDialogs = await db
-      .select({ userId: schema.dialogs.userId, sidebarVisible: schema.dialogs.sidebarVisible })
+      .select({ userId: schema.dialogs.userId, chatListHidden: schema.dialogs.chatListHidden })
       .from(schema.dialogs)
       .where(eq(schema.dialogs.chatId, childChatId))
 
     expect(childDialogs).toEqual([
       {
         userId: creator.id,
-        sidebarVisible: false,
+        chatListHidden: true,
       },
     ])
 
@@ -130,7 +130,7 @@ describe("messages.createSubthread", () => {
     )
 
     expect(result.dialog?.chatId).toBe(BigInt(childChat.id))
-    expect(result.dialog?.sidebarVisible).toBe(false)
+    expect(result.dialog?.chatListHidden).toBe(true)
     expect(result.anchorMessage?.id).toBe(1n)
 
     const existingDialog = await db
@@ -140,6 +140,6 @@ describe("messages.createSubthread", () => {
       .limit(1)
       .then((rows) => rows[0])
 
-    expect(existingDialog?.sidebarVisible).toBe(false)
+    expect(existingDialog?.chatListHidden).toBe(true)
   })
 })

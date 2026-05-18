@@ -13,7 +13,7 @@ import type { Peer, Update } from "@inline-chat/protocol/core"
 import type { ServerUpdate } from "@inline-chat/protocol/server"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
-import { emitSidebarChatOpenUpdates, getChatById, isLinkedSubthread, promoteLinkedSubthreadDialogsToSidebar } from "@in/server/modules/subthreads"
+import { emitChatListOpenUpdates, getChatById, isLinkedSubthread, promoteLinkedSubthreadDialogsToChatList } from "@in/server/modules/subthreads"
 
 export const Input = Type.Object({
   pinned: Optional(Type.Boolean()),
@@ -63,11 +63,11 @@ export const handler = async (
 
   let previousArchived: boolean | null | undefined
   let shouldPublishArchiveUpdate = false
-  let shouldPromoteToSidebar = false
+  let shouldPromoteToChatList = false
 
   let dialog = await db.transaction(async (tx) => {
     const [existingDialog] = await tx
-      .select({ archived: dialogs.archived, sidebarVisible: dialogs.sidebarVisible, chatId: dialogs.chatId })
+      .select({ archived: dialogs.archived, chatListHidden: dialogs.chatListHidden, chatId: dialogs.chatId })
       .from(dialogs)
       .where(whereClause)
       .limit(1)
@@ -77,10 +77,10 @@ export const handler = async (
     }
 
     previousArchived = existingDialog.archived
-    const shouldPromoteForPin = input.pinned === true && existingDialog.sidebarVisible === false
+    const shouldPromoteForPin = input.pinned === true && existingDialog.chatListHidden === true
     const shouldPromoteForUnarchive =
-      input.archived === false && existingDialog.archived === true && existingDialog.sidebarVisible === false
-    shouldPromoteToSidebar = shouldPromoteForPin || shouldPromoteForUnarchive
+      input.archived === false && existingDialog.archived === true && existingDialog.chatListHidden === true
+    shouldPromoteToChatList = shouldPromoteForPin || shouldPromoteForUnarchive
 
     const updateSet: Partial<typeof dialogs.$inferInsert> = {}
     if (input.pinned !== undefined) updateSet.pinned = input.pinned
@@ -131,14 +131,14 @@ export const handler = async (
     RealtimeUpdates.pushToUser(currentUserId, [update], { skipSessionId: currentSessionId })
   }
 
-  if (shouldPromoteToSidebar && dialog.chatId) {
+  if (shouldPromoteToChatList && dialog.chatId) {
     const chat = await getChatById(dialog.chatId)
     if (chat && isLinkedSubthread(chat)) {
-      const { activatedDialogs } = await promoteLinkedSubthreadDialogsToSidebar({
+      const { activatedDialogs } = await promoteLinkedSubthreadDialogsToChatList({
         chat,
         userIds: [currentUserId],
       })
-      await emitSidebarChatOpenUpdates({
+      await emitChatListOpenUpdates({
         chat,
         dialogs: activatedDialogs,
       })

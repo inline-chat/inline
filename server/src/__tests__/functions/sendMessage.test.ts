@@ -510,7 +510,7 @@ describe("sendMessage", () => {
     expect(hasDialogArchivedUpdate).toBe(true)
   })
 
-  test("promotes mentioned users into sidebar-visible reply-thread dialogs", async () => {
+  test("promotes mentioned users into chat-list-shown reply-thread dialogs", async () => {
     const owner = await testUtils.createUser(nextEmail("thread-owner"))
     const mentioned = await testUtils.createUser(nextEmail("thread-mentioned"))
     await db.update(users).set({ username: "replythreadmentioned" }).where(eq(users.id, mentioned.id)).execute()
@@ -558,7 +558,7 @@ describe("sendMessage", () => {
       .where(and(eq(dialogs.chatId, childChat.id), eq(dialogs.userId, mentioned.id)))
       .limit(1)
 
-    expect(recipientDialog?.sidebarVisible).toBe(true)
+    expect(recipientDialog?.chatListHidden).toBeNull()
 
     const userUpdates = await db.query.updates.findMany({
       where: {
@@ -574,7 +574,7 @@ describe("sendMessage", () => {
     expect(hasChatOpenUpdate).toBe(true)
   })
 
-  test("promotes replied-to authors into sidebar-visible reply-thread dialogs", async () => {
+  test("promotes replied-to authors into chat-list-shown reply-thread dialogs", async () => {
     const owner = await testUtils.createUser(nextEmail("thread-reply-owner"))
     const repliedUser = await testUtils.createUser(nextEmail("thread-replied-user"))
 
@@ -632,7 +632,7 @@ describe("sendMessage", () => {
       .where(and(eq(dialogs.chatId, childChat.id), eq(dialogs.userId, repliedUser.id)))
       .limit(1)
 
-    expect(recipientDialog?.sidebarVisible).toBe(true)
+    expect(recipientDialog?.chatListHidden).toBeNull()
 
     const parentMessages = await getMessages(
       {
@@ -685,7 +685,7 @@ describe("sendMessage", () => {
     await db.insert(dialogs).values({
       chatId: childChat.id,
       userId: owner.id,
-      sidebarVisible: false,
+      chatListHidden: true,
     })
 
     await sendMessage(
@@ -704,6 +704,6 @@ describe("sendMessage", () => {
       .where(and(eq(dialogs.chatId, childChat.id), eq(dialogs.userId, owner.id)))
       .limit(1)
 
-    expect(senderDialog?.sidebarVisible).toBe(false)
+    expect(senderDialog?.chatListHidden).toBe(true)
   })
 })

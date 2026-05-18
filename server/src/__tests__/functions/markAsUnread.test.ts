@@ -226,7 +226,6 @@ describe("markAsUnread", () => {
       userId: currentUser.id,
       readInboxMaxId: 1,
       unreadMark: false,
-      sidebarVisible: false,
     })
 
     await db.insert(messages).values({

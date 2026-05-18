@@ -55,7 +55,7 @@ export async function getDialogForUser(chatId: number, userId: number): Promise<
 export async function ensureLinkedSubthreadDialogs(input: {
   chat: Pick<DbChat, "id" | "spaceId">
   userIds: number[]
-  sidebarVisible: boolean
+  chatListHidden?: boolean
 }): Promise<{ dialogs: DbDialog[]; createdDialogs: DbDialog[] }> {
   const uniqueUserIds = Array.from(
     new Set(input.userIds.filter((userId) => Number.isSafeInteger(userId) && userId > 0)),
@@ -82,7 +82,7 @@ export async function ensureLinkedSubthreadDialogs(input: {
           chatId: input.chat.id,
           userId,
           spaceId: input.chat.spaceId ?? null,
-          sidebarVisible: input.sidebarVisible,
+          ...(input.chatListHidden === true ? { chatListHidden: true } : {}),
         })),
       )
       .onConflictDoNothing()
@@ -95,7 +95,7 @@ export async function ensureLinkedSubthreadDialogs(input: {
   }
 }
 
-export async function promoteLinkedSubthreadDialogsToSidebar(input: {
+export async function promoteLinkedSubthreadDialogsToChatList(input: {
   chat: Pick<DbChat, "id" | "spaceId">
   userIds: number[]
 }): Promise<{ dialogs: DbDialog[]; activatedDialogs: DbDialog[] }> {
@@ -113,7 +113,7 @@ export async function promoteLinkedSubthreadDialogsToSidebar(input: {
     .where(and(eq(dialogs.chatId, input.chat.id), inArray(dialogs.userId, uniqueUserIds)))
 
   const hiddenDialogUserIds = existingDialogs
-    .filter((dialog) => dialog.sidebarVisible === false)
+    .filter((dialog) => dialog.chatListHidden)
     .map((dialog) => dialog.userId)
   const existingUserIds = new Set(existingDialogs.map((dialog) => dialog.userId))
   const missingUserIds = uniqueUserIds.filter((userId) => !existingUserIds.has(userId))
@@ -122,7 +122,7 @@ export async function promoteLinkedSubthreadDialogsToSidebar(input: {
   if (hiddenDialogUserIds.length > 0) {
     promotedDialogs = await db
       .update(dialogs)
-      .set({ sidebarVisible: true })
+      .set({ chatListHidden: null })
       .where(and(eq(dialogs.chatId, input.chat.id), inArray(dialogs.userId, hiddenDialogUserIds)))
       .returning()
   }
@@ -136,7 +136,6 @@ export async function promoteLinkedSubthreadDialogsToSidebar(input: {
           chatId: input.chat.id,
           userId,
           spaceId: input.chat.spaceId ?? null,
-          sidebarVisible: true,
         })),
       )
       .onConflictDoNothing()
@@ -432,14 +431,14 @@ export async function emitReplyThreadParentRepliesUpdateIfNeeded(input: {
   })
 }
 
-export async function emitSidebarChatOpenUpdates(input: {
+export async function emitChatListOpenUpdates(input: {
   chat: DbChat
   dialogs: DbDialog[]
 }): Promise<void> {
   const uniqueDialogs = Array.from(
     new Map(
       input.dialogs
-        .filter((dialog) => dialog.sidebarVisible)
+        .filter((dialog) => !dialog.chatListHidden)
         .map((dialog) => [dialog.userId, dialog]),
     ).values(),
   )

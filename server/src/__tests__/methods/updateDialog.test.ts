@@ -102,7 +102,7 @@ describe("updateDialog", () => {
     await db.insert(dialogsTable).values({
       userId: participant.id,
       chatId: childChat.id,
-      sidebarVisible: false,
+      chatListHidden: true,
       pinned: false,
       archived: true,
     })
@@ -115,12 +115,12 @@ describe("updateDialog", () => {
       .where(and(eq(dialogsTable.chatId, childChat.id), eq(dialogsTable.userId, participant.id)))
       .limit(1)
 
-    expect(dialogAfterPin?.sidebarVisible).toBe(true)
+    expect(dialogAfterPin?.chatListHidden).toBeNull()
     expect(dialogAfterPin?.pinned).toBe(true)
 
     await db
       .update(dialogsTable)
-      .set({ sidebarVisible: false, archived: true, pinned: false })
+      .set({ chatListHidden: true, archived: true, pinned: false })
       .where(and(eq(dialogsTable.chatId, childChat.id), eq(dialogsTable.userId, participant.id)))
 
     await handler({ peerThreadId: String(childChat.id), archived: false }, makeContext(participant.id))
@@ -131,7 +131,7 @@ describe("updateDialog", () => {
       .where(and(eq(dialogsTable.chatId, childChat.id), eq(dialogsTable.userId, participant.id)))
       .limit(1)
 
-    expect(dialogAfterUnarchive?.sidebarVisible).toBe(true)
+    expect(dialogAfterUnarchive?.chatListHidden).toBeNull()
     expect(dialogAfterUnarchive?.archived).toBe(false)
   })
 })

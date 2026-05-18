@@ -163,7 +163,7 @@ public struct HomeChatItem: Codable, FetchableRecord, PersistableRecord, Hashabl
         optional: Dialog.space
       )
 
-    request = Dialog.applyingSidebarVisibilityFilter(request)
+    request = Dialog.applyingChatListVisibilityFilter(request)
 
 //      .including(
 //        optional: Dialog.peerThread

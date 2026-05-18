@@ -252,7 +252,7 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
           },
           dialogs: {
             userId: currentUserId,
-            sidebarVisible: true,
+            OR: [{ chatListHidden: false }, { chatListHidden: { isNull: true } }],
           },
         },
       ],

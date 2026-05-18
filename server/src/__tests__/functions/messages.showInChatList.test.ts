@@ -4,15 +4,15 @@ import { db } from "@in/server/db"
 import { UpdatesModel } from "@in/server/db/models/updates"
 import * as schema from "@in/server/db/schema"
 import { UpdateBucket } from "@in/server/db/schema/updates"
-import { showChatInSidebar } from "@in/server/functions/messages.showChatInSidebar"
+import { showInChatList } from "@in/server/functions/messages.showInChatList"
 import { setupTestLifecycle, testUtils } from "../setup"
 
-describe("messages.showChatInSidebar", () => {
+describe("messages.showInChatList", () => {
   setupTestLifecycle()
 
   test("promotes a hidden linked reply-thread dialog and enqueues chatOpen", async () => {
-    const owner = await testUtils.createUser("show-sidebar-owner@example.com")
-    const viewer = await testUtils.createUser("show-sidebar-viewer@example.com")
+    const owner = await testUtils.createUser("show-chat-list-owner@example.com")
+    const viewer = await testUtils.createUser("show-chat-list-viewer@example.com")
 
     const parentChat = await testUtils.createChat(null, "Parent Thread", "thread", false, owner.id)
     if (!parentChat) {
@@ -49,10 +49,10 @@ describe("messages.showChatInSidebar", () => {
       chatId: childChat.id,
       userId: viewer.id,
       spaceId: childChat.spaceId,
-      sidebarVisible: false,
+      chatListHidden: true,
     })
 
-    const result = await showChatInSidebar(
+    const result = await showInChatList(
       {
         peerId: {
           type: {
@@ -66,7 +66,7 @@ describe("messages.showChatInSidebar", () => {
 
     expect(result.chat.id).toBe(BigInt(childChat.id))
     expect(result.dialog.chatId).toBe(BigInt(childChat.id))
-    expect(result.dialog.sidebarVisible).toBe(true)
+    expect(result.dialog.chatListHidden).toBeUndefined()
 
     const [updatedDialog] = await db
       .select()
@@ -74,7 +74,7 @@ describe("messages.showChatInSidebar", () => {
       .where(and(eq(schema.dialogs.chatId, childChat.id), eq(schema.dialogs.userId, viewer.id)))
       .limit(1)
 
-    expect(updatedDialog?.sidebarVisible).toBe(true)
+    expect(updatedDialog?.chatListHidden).toBeNull()
 
     const userUpdates = await db.query.updates.findMany({
       where: {
