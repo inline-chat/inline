@@ -168,7 +168,7 @@ async function getChatAndDialogForThread(
     const { dialogs: ensuredDialogs } = await ensureLinkedSubthreadDialogs({
       chat,
       userIds: [currentUserId],
-      sidebarVisible: false,
+      chatListHidden: true,
     })
 
     return {

@@ -51,11 +51,11 @@ import { desktopPushSuppressionTracker } from "@in/server/modules/notifications/
 import { processOutgoingText } from "@in/server/modules/message/processOutgoingText"
 import { normalizeAndValidateMessageActions } from "@in/server/modules/message/messageActions"
 import {
-  emitSidebarChatOpenUpdates,
+  emitChatListOpenUpdates,
   isLinkedSubthread,
   isReplyThread,
   persistMessageRepliesUpdate,
-  promoteLinkedSubthreadDialogsToSidebar,
+  promoteLinkedSubthreadDialogsToChatList,
   pushMessageRepliesUpdate,
 } from "@in/server/modules/subthreads"
 
@@ -285,19 +285,19 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   // remove the need to lock the chat row. then we should deliver the update
   // with sequence number so we can ensure gap-free delivery.
   const updateGroup = await getUpdateGroupFromInputPeer(inputPeer, { currentUserId })
-  const sidebarPromotionUserIds = await getLinkedSubthreadSidebarPromotionUserIds({
+  const chatListPromotionUserIds = await getLinkedSubthreadChatListPromotionUserIds({
     chat,
     currentUserId,
     replyToMessageId: replyToMsgIdNumber ?? undefined,
     entities,
     updateGroup,
   })
-  if (sidebarPromotionUserIds.length > 0) {
-    const { activatedDialogs } = await promoteLinkedSubthreadDialogsToSidebar({
+  if (chatListPromotionUserIds.length > 0) {
+    const { activatedDialogs } = await promoteLinkedSubthreadDialogsToChatList({
       chat,
-      userIds: sidebarPromotionUserIds,
+      userIds: chatListPromotionUserIds,
     })
-    await emitSidebarChatOpenUpdates({
+    await emitChatListOpenUpdates({
       chat,
       dialogs: activatedDialogs,
     })
@@ -398,7 +398,7 @@ const getMentionedUserIds = (entities: MessageEntities | undefined): number[] =>
   return Array.from(userIds)
 }
 
-const getLinkedSubthreadSidebarPromotionUserIds = async ({
+const getLinkedSubthreadChatListPromotionUserIds = async ({
   chat,
   currentUserId,
   replyToMessageId,

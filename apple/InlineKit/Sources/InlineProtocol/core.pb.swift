@@ -103,7 +103,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case getBotCommands // = 43
   case setBotCommands // = 44
   case getPeerBotCommands // = 45
-  case showChatInSidebar // = 46
+  case showInChatList // = 46
   case reserveChatIds // = 47
   case invokeMessageAction // = 48
   case answerMessageAction // = 49
@@ -162,7 +162,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 43: self = .getBotCommands
     case 44: self = .setBotCommands
     case 45: self = .getPeerBotCommands
-    case 46: self = .showChatInSidebar
+    case 46: self = .showInChatList
     case 47: self = .reserveChatIds
     case 48: self = .invokeMessageAction
     case 49: self = .answerMessageAction
@@ -219,7 +219,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .getBotCommands: return 43
     case .setBotCommands: return 44
     case .getPeerBotCommands: return 45
-    case .showChatInSidebar: return 46
+    case .showInChatList: return 46
     case .reserveChatIds: return 47
     case .invokeMessageAction: return 48
     case .answerMessageAction: return 49
@@ -276,7 +276,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .getBotCommands,
     .setBotCommands,
     .getPeerBotCommands,
-    .showChatInSidebar,
+    .showInChatList,
     .reserveChatIds,
     .invokeMessageAction,
     .answerMessageAction,
@@ -1151,14 +1151,14 @@ public struct Dialog: Sendable {
   /// Clears the value of `notificationSettings`. Subsequent reads from it will return its default value.
   public mutating func clearNotificationSettings() {self._notificationSettings = nil}
 
-  public var sidebarVisible: Bool {
-    get {return _sidebarVisible ?? false}
-    set {_sidebarVisible = newValue}
+  public var chatListHidden: Bool {
+    get {return _chatListHidden ?? false}
+    set {_chatListHidden = newValue}
   }
-  /// Returns true if `sidebarVisible` has been explicitly set.
-  public var hasSidebarVisible: Bool {return self._sidebarVisible != nil}
-  /// Clears the value of `sidebarVisible`. Subsequent reads from it will return its default value.
-  public mutating func clearSidebarVisible() {self._sidebarVisible = nil}
+  /// Returns true if `chatListHidden` has been explicitly set.
+  public var hasChatListHidden: Bool {return self._chatListHidden != nil}
+  /// Clears the value of `chatListHidden`. Subsequent reads from it will return its default value.
+  public mutating func clearChatListHidden() {self._chatListHidden = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1173,7 +1173,7 @@ public struct Dialog: Sendable {
   fileprivate var _chatID: Int64? = nil
   fileprivate var _unreadMark: Bool? = nil
   fileprivate var _notificationSettings: DialogNotificationSettings? = nil
-  fileprivate var _sidebarVisible: Bool? = nil
+  fileprivate var _chatListHidden: Bool? = nil
 }
 
 /// A thread
@@ -3185,12 +3185,12 @@ public struct RpcCall: Sendable {
     set {input = .getPeerBotCommands(newValue)}
   }
 
-  public var showChatInSidebar: ShowChatInSidebarInput {
+  public var showInChatList: ShowInChatListInput {
     get {
-      if case .showChatInSidebar(let v)? = input {return v}
-      return ShowChatInSidebarInput()
+      if case .showInChatList(let v)? = input {return v}
+      return ShowInChatListInput()
     }
-    set {input = .showChatInSidebar(newValue)}
+    set {input = .showInChatList(newValue)}
   }
 
   public var reserveChatIds: ReserveChatIdsInput {
@@ -3273,7 +3273,7 @@ public struct RpcCall: Sendable {
     case getBotCommands(GetBotCommandsInput)
     case setBotCommands(SetBotCommandsInput)
     case getPeerBotCommands(GetPeerBotCommandsInput)
-    case showChatInSidebar(ShowChatInSidebarInput)
+    case showInChatList(ShowInChatListInput)
     case reserveChatIds(ReserveChatIdsInput)
     case invokeMessageAction(InvokeMessageActionInput)
     case answerMessageAction(AnswerMessageActionInput)
@@ -3659,12 +3659,12 @@ public struct RpcResult: @unchecked Sendable {
     set {_uniqueStorage()._result = .getPeerBotCommands(newValue)}
   }
 
-  public var showChatInSidebar: ShowChatInSidebarResult {
+  public var showInChatList: ShowInChatListResult {
     get {
-      if case .showChatInSidebar(let v)? = _storage._result {return v}
-      return ShowChatInSidebarResult()
+      if case .showInChatList(let v)? = _storage._result {return v}
+      return ShowInChatListResult()
     }
-    set {_uniqueStorage()._result = .showChatInSidebar(newValue)}
+    set {_uniqueStorage()._result = .showInChatList(newValue)}
   }
 
   public var reserveChatIds: ReserveChatIdsResult {
@@ -3747,7 +3747,7 @@ public struct RpcResult: @unchecked Sendable {
     case getBotCommands(GetBotCommandsResult)
     case setBotCommands(SetBotCommandsResult)
     case getPeerBotCommands(GetPeerBotCommandsResult)
-    case showChatInSidebar(ShowChatInSidebarResult)
+    case showInChatList(ShowInChatListResult)
     case reserveChatIds(ReserveChatIdsResult)
     case invokeMessageAction(InvokeMessageActionResult)
     case answerMessageAction(AnswerMessageActionResult)
@@ -4114,12 +4114,12 @@ public struct GetChatResult: @unchecked Sendable {
   fileprivate var _storage = _StorageClass.defaultInstance
 }
 
-public struct ShowChatInSidebarInput: Sendable {
+public struct ShowInChatListInput: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  /// Peer ID to surface in the sidebar.
+  /// Peer ID to surface in the chat list.
   public var peerID: InputPeer {
     get {return _peerID ?? InputPeer()}
     set {_peerID = newValue}
@@ -4136,7 +4136,7 @@ public struct ShowChatInSidebarInput: Sendable {
   fileprivate var _peerID: InputPeer? = nil
 }
 
-public struct ShowChatInSidebarResult: @unchecked Sendable {
+public struct ShowInChatListResult: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -7225,7 +7225,7 @@ public struct UpdateNewChat: @unchecked Sendable {
   fileprivate var _storage = _StorageClass.defaultInstance
 }
 
-/// Update when a chat becomes sidebar-visible for a specific user.
+/// Update when a chat becomes chat-list-visible for a specific user.
 public struct UpdateChatOpen: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -8269,7 +8269,7 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     43: .same(proto: "GET_BOT_COMMANDS"),
     44: .same(proto: "SET_BOT_COMMANDS"),
     45: .same(proto: "GET_PEER_BOT_COMMANDS"),
-    46: .same(proto: "SHOW_CHAT_IN_SIDEBAR"),
+    46: .same(proto: "SHOW_IN_CHAT_LIST"),
     47: .same(proto: "RESERVE_CHAT_IDS"),
     48: .same(proto: "INVOKE_MESSAGE_ACTION"),
     49: .same(proto: "ANSWER_MESSAGE_ACTION"),
@@ -9359,7 +9359,7 @@ extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     7: .standard(proto: "chat_id"),
     8: .standard(proto: "unread_mark"),
     9: .standard(proto: "notification_settings"),
-    10: .standard(proto: "sidebar_visible"),
+    10: .standard(proto: "chat_list_hidden"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -9377,7 +9377,7 @@ extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
       case 7: try { try decoder.decodeSingularInt64Field(value: &self._chatID) }()
       case 8: try { try decoder.decodeSingularBoolField(value: &self._unreadMark) }()
       case 9: try { try decoder.decodeSingularMessageField(value: &self._notificationSettings) }()
-      case 10: try { try decoder.decodeSingularBoolField(value: &self._sidebarVisible) }()
+      case 10: try { try decoder.decodeSingularBoolField(value: &self._chatListHidden) }()
       default: break
       }
     }
@@ -9415,7 +9415,7 @@ extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     try { if let v = self._notificationSettings {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
     } }()
-    try { if let v = self._sidebarVisible {
+    try { if let v = self._chatListHidden {
       try visitor.visitSingularBoolField(value: v, fieldNumber: 10)
     } }()
     try unknownFields.traverse(visitor: &visitor)
@@ -9431,7 +9431,7 @@ extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     if lhs._chatID != rhs._chatID {return false}
     if lhs._unreadMark != rhs._unreadMark {return false}
     if lhs._notificationSettings != rhs._notificationSettings {return false}
-    if lhs._sidebarVisible != rhs._sidebarVisible {return false}
+    if lhs._chatListHidden != rhs._chatListHidden {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -11826,7 +11826,7 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     44: .same(proto: "getBotCommands"),
     45: .same(proto: "setBotCommands"),
     46: .same(proto: "getPeerBotCommands"),
-    47: .same(proto: "showChatInSidebar"),
+    47: .same(proto: "showInChatList"),
     48: .same(proto: "reserveChatIds"),
     49: .same(proto: "invokeMessageAction"),
     50: .same(proto: "answerMessageAction"),
@@ -12426,16 +12426,16 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
         }
       }()
       case 47: try {
-        var v: ShowChatInSidebarInput?
+        var v: ShowInChatListInput?
         var hadOneofValue = false
         if let current = self.input {
           hadOneofValue = true
-          if case .showChatInSidebar(let m) = current {v = m}
+          if case .showInChatList(let m) = current {v = m}
         }
         try decoder.decodeSingularMessageField(value: &v)
         if let v = v {
           if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.input = .showChatInSidebar(v)
+          self.input = .showInChatList(v)
         }
       }()
       case 48: try {
@@ -12684,8 +12684,8 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       guard case .getPeerBotCommands(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 46)
     }()
-    case .showChatInSidebar?: try {
-      guard case .showChatInSidebar(let v)? = self.input else { preconditionFailure() }
+    case .showInChatList?: try {
+      guard case .showInChatList(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 47)
     }()
     case .reserveChatIds?: try {
@@ -12766,7 +12766,7 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     44: .same(proto: "getBotCommands"),
     45: .same(proto: "setBotCommands"),
     46: .same(proto: "getPeerBotCommands"),
-    47: .same(proto: "showChatInSidebar"),
+    47: .same(proto: "showInChatList"),
     48: .same(proto: "reserveChatIds"),
     49: .same(proto: "invokeMessageAction"),
     50: .same(proto: "answerMessageAction"),
@@ -13397,16 +13397,16 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
           }
         }()
         case 47: try {
-          var v: ShowChatInSidebarResult?
+          var v: ShowInChatListResult?
           var hadOneofValue = false
           if let current = _storage._result {
             hadOneofValue = true
-            if case .showChatInSidebar(let m) = current {v = m}
+            if case .showInChatList(let m) = current {v = m}
           }
           try decoder.decodeSingularMessageField(value: &v)
           if let v = v {
             if hadOneofValue {try decoder.handleConflictingOneOf()}
-            _storage._result = .showChatInSidebar(v)
+            _storage._result = .showInChatList(v)
           }
         }()
         case 48: try {
@@ -13657,8 +13657,8 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
         guard case .getPeerBotCommands(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 46)
       }()
-      case .showChatInSidebar?: try {
-        guard case .showChatInSidebar(let v)? = _storage._result else { preconditionFailure() }
+      case .showInChatList?: try {
+        guard case .showInChatList(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 47)
       }()
       case .reserveChatIds?: try {
@@ -14347,8 +14347,8 @@ extension GetChatResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementa
   }
 }
 
-extension ShowChatInSidebarInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = "ShowChatInSidebarInput"
+extension ShowInChatListInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ShowInChatListInput"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .standard(proto: "peer_id"),
   ]
@@ -14376,15 +14376,15 @@ extension ShowChatInSidebarInput: SwiftProtobuf.Message, SwiftProtobuf._MessageI
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  public static func ==(lhs: ShowChatInSidebarInput, rhs: ShowChatInSidebarInput) -> Bool {
+  public static func ==(lhs: ShowInChatListInput, rhs: ShowInChatListInput) -> Bool {
     if lhs._peerID != rhs._peerID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
 }
 
-extension ShowChatInSidebarResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = "ShowChatInSidebarResult"
+extension ShowInChatListResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "ShowInChatListResult"
   public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
     1: .same(proto: "chat"),
     2: .same(proto: "dialog"),
@@ -14451,7 +14451,7 @@ extension ShowChatInSidebarResult: SwiftProtobuf.Message, SwiftProtobuf._Message
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  public static func ==(lhs: ShowChatInSidebarResult, rhs: ShowChatInSidebarResult) -> Bool {
+  public static func ==(lhs: ShowInChatListResult, rhs: ShowInChatListResult) -> Bool {
     if lhs._storage !== rhs._storage {
       let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
         let _storage = _args.0

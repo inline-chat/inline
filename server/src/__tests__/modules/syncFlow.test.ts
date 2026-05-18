@@ -223,7 +223,7 @@ describe("Sync core flow", () => {
 
   it("inflates user bucket chatOpen updates", async () => {
     const user = await testUtils.createUser("chat-open-sync@example.com")
-    const chat = await testUtils.createChat(null, "Sidebar Thread", "thread", false, user.id)
+    const chat = await testUtils.createChat(null, "Chat List Thread", "thread", false, user.id)
     if (!chat) {
       throw new Error("Failed to create chat")
     }
@@ -236,7 +236,6 @@ describe("Sync core flow", () => {
         userId: user.id,
         chatId: chat.id,
         spaceId: null,
-        sidebarVisible: true,
       })
       .returning()
 
@@ -271,7 +270,7 @@ describe("Sync core flow", () => {
     }
     expect(userUpdate.update.chatOpen.chat?.id).toBe(BigInt(chat.id))
     expect(userUpdate.update.chatOpen.dialog?.chatId).toBe(BigInt(chat.id))
-    expect(userUpdate.update.chatOpen.dialog?.sidebarVisible).toBe(true)
+    expect(userUpdate.update.chatOpen.dialog?.chatListHidden).toBeUndefined()
   })
 
   it("inflates space bucket updates for member removal", async () => {

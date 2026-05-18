@@ -48,8 +48,11 @@ export const dialogs = pgTable(
     /** archived */
     archived: boolean("archived").default(false),
 
-    /** whether this dialog should appear in sidebar/home lists */
-    sidebarVisible: boolean("sidebar_visible").default(true).notNull(),
+    /** legacy visibility column kept in DB while chat_list_hidden rolls out */
+    legacySidebarVisible: boolean("sidebar_visible").default(true).notNull(),
+
+    /** whether this dialog should be hidden from chat list/home lists; null means false */
+    chatListHidden: boolean("chat_list_hidden"),
 
     /** manually marked as unread */
     unreadMark: boolean("unread_mark").default(false),

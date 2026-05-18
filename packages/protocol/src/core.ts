@@ -458,9 +458,9 @@ export interface Dialog {
      */
     notificationSettings?: DialogNotificationSettings;
     /**
-     * @generated from protobuf field: optional bool sidebar_visible = 10;
+     * @generated from protobuf field: optional bool chat_list_hidden = 10;
      */
-    sidebarVisible?: boolean;
+    chatListHidden?: boolean;
 }
 /**
  * A thread
@@ -2018,11 +2018,11 @@ export interface RpcCall {
          */
         getPeerBotCommands: GetPeerBotCommandsInput;
     } | {
-        oneofKind: "showChatInSidebar";
+        oneofKind: "showInChatList";
         /**
-         * @generated from protobuf field: ShowChatInSidebarInput showChatInSidebar = 47;
+         * @generated from protobuf field: ShowInChatListInput showInChatList = 47;
          */
-        showChatInSidebar: ShowChatInSidebarInput;
+        showInChatList: ShowInChatListInput;
     } | {
         oneofKind: "reserveChatIds";
         /**
@@ -2333,11 +2333,11 @@ export interface RpcResult {
          */
         getPeerBotCommands: GetPeerBotCommandsResult;
     } | {
-        oneofKind: "showChatInSidebar";
+        oneofKind: "showInChatList";
         /**
-         * @generated from protobuf field: ShowChatInSidebarResult showChatInSidebar = 47;
+         * @generated from protobuf field: ShowInChatListResult showInChatList = 47;
          */
-        showChatInSidebar: ShowChatInSidebarResult;
+        showInChatList: ShowInChatListResult;
     } | {
         oneofKind: "reserveChatIds";
         /**
@@ -2620,20 +2620,20 @@ export interface GetChatResult {
     anchorMessage?: Message;
 }
 /**
- * @generated from protobuf message ShowChatInSidebarInput
+ * @generated from protobuf message ShowInChatListInput
  */
-export interface ShowChatInSidebarInput {
+export interface ShowInChatListInput {
     /**
-     * Peer ID to surface in the sidebar.
+     * Peer ID to surface in the chat list.
      *
      * @generated from protobuf field: InputPeer peer_id = 1;
      */
     peerId?: InputPeer;
 }
 /**
- * @generated from protobuf message ShowChatInSidebarResult
+ * @generated from protobuf message ShowInChatListResult
  */
-export interface ShowChatInSidebarResult {
+export interface ShowInChatListResult {
     /**
      * @generated from protobuf field: Chat chat = 1;
      */
@@ -4602,7 +4602,7 @@ export interface UpdateNewChat {
     user?: User;
 }
 /**
- * Update when a chat becomes sidebar-visible for a specific user.
+ * Update when a chat becomes chat-list-visible for a specific user.
  *
  * @generated from protobuf message UpdateChatOpen
  */
@@ -5433,9 +5433,9 @@ export enum Method {
      */
     GET_PEER_BOT_COMMANDS = 45,
     /**
-     * @generated from protobuf enum value: SHOW_CHAT_IN_SIDEBAR = 46;
+     * @generated from protobuf enum value: SHOW_IN_CHAT_LIST = 46;
      */
-    SHOW_CHAT_IN_SIDEBAR = 46,
+    SHOW_IN_CHAT_LIST = 46,
     /**
      * @generated from protobuf enum value: RESERVE_CHAT_IDS = 47;
      */
@@ -6670,7 +6670,7 @@ class Dialog$Type extends MessageType<Dialog> {
             { no: 7, name: "chat_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 8, name: "unread_mark", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 9, name: "notification_settings", kind: "message", T: () => DialogNotificationSettings },
-            { no: 10, name: "sidebar_visible", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 10, name: "chat_list_hidden", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
         ]);
     }
     create(value?: PartialMessage<Dialog>): Dialog {
@@ -6711,8 +6711,8 @@ class Dialog$Type extends MessageType<Dialog> {
                 case /* optional DialogNotificationSettings notification_settings */ 9:
                     message.notificationSettings = DialogNotificationSettings.internalBinaryRead(reader, reader.uint32(), options, message.notificationSettings);
                     break;
-                case /* optional bool sidebar_visible */ 10:
-                    message.sidebarVisible = reader.bool();
+                case /* optional bool chat_list_hidden */ 10:
+                    message.chatListHidden = reader.bool();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -6753,9 +6753,9 @@ class Dialog$Type extends MessageType<Dialog> {
         /* optional DialogNotificationSettings notification_settings = 9; */
         if (message.notificationSettings)
             DialogNotificationSettings.internalBinaryWrite(message.notificationSettings, writer.tag(9, WireType.LengthDelimited).fork(), options).join();
-        /* optional bool sidebar_visible = 10; */
-        if (message.sidebarVisible !== undefined)
-            writer.tag(10, WireType.Varint).bool(message.sidebarVisible);
+        /* optional bool chat_list_hidden = 10; */
+        if (message.chatListHidden !== undefined)
+            writer.tag(10, WireType.Varint).bool(message.chatListHidden);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9560,7 +9560,7 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 44, name: "getBotCommands", kind: "message", oneof: "input", T: () => GetBotCommandsInput },
             { no: 45, name: "setBotCommands", kind: "message", oneof: "input", T: () => SetBotCommandsInput },
             { no: 46, name: "getPeerBotCommands", kind: "message", oneof: "input", T: () => GetPeerBotCommandsInput },
-            { no: 47, name: "showChatInSidebar", kind: "message", oneof: "input", T: () => ShowChatInSidebarInput },
+            { no: 47, name: "showInChatList", kind: "message", oneof: "input", T: () => ShowInChatListInput },
             { no: 48, name: "reserveChatIds", kind: "message", oneof: "input", T: () => ReserveChatIdsInput },
             { no: 49, name: "invokeMessageAction", kind: "message", oneof: "input", T: () => InvokeMessageActionInput },
             { no: 50, name: "answerMessageAction", kind: "message", oneof: "input", T: () => AnswerMessageActionInput },
@@ -9853,10 +9853,10 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         getPeerBotCommands: GetPeerBotCommandsInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).getPeerBotCommands)
                     };
                     break;
-                case /* ShowChatInSidebarInput showChatInSidebar */ 47:
+                case /* ShowInChatListInput showInChatList */ 47:
                     message.input = {
-                        oneofKind: "showChatInSidebar",
-                        showChatInSidebar: ShowChatInSidebarInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).showChatInSidebar)
+                        oneofKind: "showInChatList",
+                        showInChatList: ShowInChatListInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).showInChatList)
                     };
                     break;
                 case /* ReserveChatIdsInput reserveChatIds */ 48:
@@ -10033,9 +10033,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* GetPeerBotCommandsInput getPeerBotCommands = 46; */
         if (message.input.oneofKind === "getPeerBotCommands")
             GetPeerBotCommandsInput.internalBinaryWrite(message.input.getPeerBotCommands, writer.tag(46, WireType.LengthDelimited).fork(), options).join();
-        /* ShowChatInSidebarInput showChatInSidebar = 47; */
-        if (message.input.oneofKind === "showChatInSidebar")
-            ShowChatInSidebarInput.internalBinaryWrite(message.input.showChatInSidebar, writer.tag(47, WireType.LengthDelimited).fork(), options).join();
+        /* ShowInChatListInput showInChatList = 47; */
+        if (message.input.oneofKind === "showInChatList")
+            ShowInChatListInput.internalBinaryWrite(message.input.showInChatList, writer.tag(47, WireType.LengthDelimited).fork(), options).join();
         /* ReserveChatIdsInput reserveChatIds = 48; */
         if (message.input.oneofKind === "reserveChatIds")
             ReserveChatIdsInput.internalBinaryWrite(message.input.reserveChatIds, writer.tag(48, WireType.LengthDelimited).fork(), options).join();
@@ -10108,7 +10108,7 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 44, name: "getBotCommands", kind: "message", oneof: "result", T: () => GetBotCommandsResult },
             { no: 45, name: "setBotCommands", kind: "message", oneof: "result", T: () => SetBotCommandsResult },
             { no: 46, name: "getPeerBotCommands", kind: "message", oneof: "result", T: () => GetPeerBotCommandsResult },
-            { no: 47, name: "showChatInSidebar", kind: "message", oneof: "result", T: () => ShowChatInSidebarResult },
+            { no: 47, name: "showInChatList", kind: "message", oneof: "result", T: () => ShowInChatListResult },
             { no: 48, name: "reserveChatIds", kind: "message", oneof: "result", T: () => ReserveChatIdsResult },
             { no: 49, name: "invokeMessageAction", kind: "message", oneof: "result", T: () => InvokeMessageActionResult },
             { no: 50, name: "answerMessageAction", kind: "message", oneof: "result", T: () => AnswerMessageActionResult },
@@ -10401,10 +10401,10 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         getPeerBotCommands: GetPeerBotCommandsResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).getPeerBotCommands)
                     };
                     break;
-                case /* ShowChatInSidebarResult showChatInSidebar */ 47:
+                case /* ShowInChatListResult showInChatList */ 47:
                     message.result = {
-                        oneofKind: "showChatInSidebar",
-                        showChatInSidebar: ShowChatInSidebarResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).showChatInSidebar)
+                        oneofKind: "showInChatList",
+                        showInChatList: ShowInChatListResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).showInChatList)
                     };
                     break;
                 case /* ReserveChatIdsResult reserveChatIds */ 48:
@@ -10581,9 +10581,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* GetPeerBotCommandsResult getPeerBotCommands = 46; */
         if (message.result.oneofKind === "getPeerBotCommands")
             GetPeerBotCommandsResult.internalBinaryWrite(message.result.getPeerBotCommands, writer.tag(46, WireType.LengthDelimited).fork(), options).join();
-        /* ShowChatInSidebarResult showChatInSidebar = 47; */
-        if (message.result.oneofKind === "showChatInSidebar")
-            ShowChatInSidebarResult.internalBinaryWrite(message.result.showChatInSidebar, writer.tag(47, WireType.LengthDelimited).fork(), options).join();
+        /* ShowInChatListResult showInChatList = 47; */
+        if (message.result.oneofKind === "showInChatList")
+            ShowInChatListResult.internalBinaryWrite(message.result.showInChatList, writer.tag(47, WireType.LengthDelimited).fork(), options).join();
         /* ReserveChatIdsResult reserveChatIds = 48; */
         if (message.result.oneofKind === "reserveChatIds")
             ReserveChatIdsResult.internalBinaryWrite(message.result.reserveChatIds, writer.tag(48, WireType.LengthDelimited).fork(), options).join();
@@ -11370,19 +11370,19 @@ class GetChatResult$Type extends MessageType<GetChatResult> {
  */
 export const GetChatResult = new GetChatResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
-class ShowChatInSidebarInput$Type extends MessageType<ShowChatInSidebarInput> {
+class ShowInChatListInput$Type extends MessageType<ShowInChatListInput> {
     constructor() {
-        super("ShowChatInSidebarInput", [
+        super("ShowInChatListInput", [
             { no: 1, name: "peer_id", kind: "message", T: () => InputPeer }
         ]);
     }
-    create(value?: PartialMessage<ShowChatInSidebarInput>): ShowChatInSidebarInput {
+    create(value?: PartialMessage<ShowInChatListInput>): ShowInChatListInput {
         const message = globalThis.Object.create((this.messagePrototype!));
         if (value !== undefined)
-            reflectionMergePartial<ShowChatInSidebarInput>(this, message, value);
+            reflectionMergePartial<ShowInChatListInput>(this, message, value);
         return message;
     }
-    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ShowChatInSidebarInput): ShowChatInSidebarInput {
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ShowInChatListInput): ShowInChatListInput {
         let message = target ?? this.create(), end = reader.pos + length;
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
@@ -11401,7 +11401,7 @@ class ShowChatInSidebarInput$Type extends MessageType<ShowChatInSidebarInput> {
         }
         return message;
     }
-    internalBinaryWrite(message: ShowChatInSidebarInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+    internalBinaryWrite(message: ShowInChatListInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
         /* InputPeer peer_id = 1; */
         if (message.peerId)
             InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
@@ -11412,24 +11412,24 @@ class ShowChatInSidebarInput$Type extends MessageType<ShowChatInSidebarInput> {
     }
 }
 /**
- * @generated MessageType for protobuf message ShowChatInSidebarInput
+ * @generated MessageType for protobuf message ShowInChatListInput
  */
-export const ShowChatInSidebarInput = new ShowChatInSidebarInput$Type();
+export const ShowInChatListInput = new ShowInChatListInput$Type();
 // @generated message type with reflection information, may provide speed optimized methods
-class ShowChatInSidebarResult$Type extends MessageType<ShowChatInSidebarResult> {
+class ShowInChatListResult$Type extends MessageType<ShowInChatListResult> {
     constructor() {
-        super("ShowChatInSidebarResult", [
+        super("ShowInChatListResult", [
             { no: 1, name: "chat", kind: "message", T: () => Chat },
             { no: 2, name: "dialog", kind: "message", T: () => Dialog }
         ]);
     }
-    create(value?: PartialMessage<ShowChatInSidebarResult>): ShowChatInSidebarResult {
+    create(value?: PartialMessage<ShowInChatListResult>): ShowInChatListResult {
         const message = globalThis.Object.create((this.messagePrototype!));
         if (value !== undefined)
-            reflectionMergePartial<ShowChatInSidebarResult>(this, message, value);
+            reflectionMergePartial<ShowInChatListResult>(this, message, value);
         return message;
     }
-    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ShowChatInSidebarResult): ShowChatInSidebarResult {
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ShowInChatListResult): ShowInChatListResult {
         let message = target ?? this.create(), end = reader.pos + length;
         while (reader.pos < end) {
             let [fieldNo, wireType] = reader.tag();
@@ -11451,7 +11451,7 @@ class ShowChatInSidebarResult$Type extends MessageType<ShowChatInSidebarResult> 
         }
         return message;
     }
-    internalBinaryWrite(message: ShowChatInSidebarResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+    internalBinaryWrite(message: ShowInChatListResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
         /* Chat chat = 1; */
         if (message.chat)
             Chat.internalBinaryWrite(message.chat, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
@@ -11465,9 +11465,9 @@ class ShowChatInSidebarResult$Type extends MessageType<ShowChatInSidebarResult> 
     }
 }
 /**
- * @generated MessageType for protobuf message ShowChatInSidebarResult
+ * @generated MessageType for protobuf message ShowInChatListResult
  */
-export const ShowChatInSidebarResult = new ShowChatInSidebarResult$Type();
+export const ShowInChatListResult = new ShowInChatListResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class MarkAsUnreadInput$Type extends MessageType<MarkAsUnreadInput> {
     constructor() {

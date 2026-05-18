@@ -78,7 +78,7 @@ export async function createSubthread(input: Input, context: FunctionContext): P
       const { dialogs } = await ensureLinkedSubthreadDialogs({
         chat: existingReplyThread,
         userIds: [context.currentUserId],
-        sidebarVisible: false,
+        chatListHidden: true,
       })
 
       return encodeSubthreadResult({
@@ -106,7 +106,7 @@ export async function createSubthread(input: Input, context: FunctionContext): P
   const { dialogs: materializedDialogs } = await ensureLinkedSubthreadDialogs({
     chat,
     userIds: [context.currentUserId],
-    sidebarVisible: false,
+    chatListHidden: true,
   })
 
   if (!isLinkedSubthread(chat)) {

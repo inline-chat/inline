@@ -50,6 +50,7 @@ import { invokeMessageAction } from "@in/server/realtime/handlers/messages.invok
 import { answerMessageAction } from "@in/server/realtime/handlers/messages.answerMessageAction"
 import { createSubthread } from "@in/server/realtime/handlers/messages.createSubthread"
 import { revokeSessionHandler } from "@in/server/realtime/handlers/user.revokeSession"
+import { showInChatList } from "@in/server/realtime/handlers/messages.showInChatList"
 
 const log = new Log("rpc")
 
@@ -411,6 +412,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       const result = await createSubthread(call.input.createSubthread, handlerContext)
       return { oneofKind: "createSubthread", createSubthread: result }
+    }
+
+    case Method.SHOW_IN_CHAT_LIST: {
+      if (call.input.oneofKind !== "showInChatList") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await showInChatList(call.input.showInChatList, handlerContext)
+      return { oneofKind: "showInChatList", showInChatList: result }
     }
 
     case Method.RESERVE_CHAT_IDS: {

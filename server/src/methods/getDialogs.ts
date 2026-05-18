@@ -118,7 +118,7 @@ export const handler = async (
     where: and(
       eq(schema.dialogs.userId, currentUserId),
       eq(schema.dialogs.spaceId, spaceId),
-      eq(schema.dialogs.sidebarVisible, true),
+      or(isNull(schema.dialogs.chatListHidden), eq(schema.dialogs.chatListHidden, false)),
     ),
     with: { chat: { with: { lastMsg: { with: { from: true, file: true } } } } },
     limit: MAX_LIMIT,

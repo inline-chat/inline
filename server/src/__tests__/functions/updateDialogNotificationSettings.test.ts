@@ -233,12 +233,10 @@ describe("updateDialogNotificationSettings", () => {
       {
         chatId: parentChat.id,
         userId: owner.id,
-        sidebarVisible: true,
       },
       {
         chatId: parentChat.id,
         userId: participant.id,
-        sidebarVisible: true,
       },
     ])
 
@@ -285,14 +283,14 @@ describe("updateDialogNotificationSettings", () => {
 
     const [dialogRow] = await db
       .select({
-        sidebarVisible: dialogs.sidebarVisible,
+        chatListHidden: dialogs.chatListHidden,
         notificationSettings: dialogs.notificationSettings,
       })
       .from(dialogs)
       .where(and(eq(dialogs.chatId, childChat.id), eq(dialogs.userId, participant.id)))
       .limit(1)
 
-    expect(dialogRow?.sidebarVisible).toBe(false)
+    expect(dialogRow?.chatListHidden).toBe(true)
     expect(decodeDialogNotificationSettings(dialogRow?.notificationSettings)?.mode).toBe(
       DialogNotificationSettings_Mode.MENTIONS,
     )

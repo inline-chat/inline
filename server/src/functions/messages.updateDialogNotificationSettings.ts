@@ -98,7 +98,7 @@ export const updateDialogNotificationSettings = async (input: Input, context: Fu
         peerUserId: peerUserId ?? null,
         spaceId: chat.type === "thread" ? chat.spaceId : null,
         notificationSettings: nextDbBinary,
-        sidebarVisible: isLinkedSubthread(chat) ? false : true,
+        ...(isLinkedSubthread(chat) ? { chatListHidden: true } : {}),
       })
     } else if (bytesEqual(existing.notificationSettings, nextDbBinary)) {
       return false

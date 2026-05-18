@@ -489,7 +489,7 @@ export interface ServerUserUpdateDialogNotificationSettings {
     notificationSettings?: DialogNotificationSettings;
 }
 /**
- * Update for a user when a chat becomes sidebar-visible for them.
+ * Update for a user when a chat becomes chat-list-visible for them.
  *
  * @generated from protobuf message server.ServerUserUpdateChatOpen
  */
