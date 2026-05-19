@@ -4,7 +4,6 @@ import type { FunctionContext } from "@in/server/functions/_types"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import {
-  buildDefaultReplyThreadTitle,
   getAnchorMessageForChat,
   getChatById,
   getDialogForUser,
@@ -19,7 +18,7 @@ import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/update
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import type { ServerUpdate } from "@inline-chat/protocol/server"
 import type { Chat, Dialog, Message } from "@inline-chat/protocol/core"
-import { and, eq, inArray } from "drizzle-orm"
+import { eq, inArray } from "drizzle-orm"
 
 type Input = {
   parentChatId: bigint
@@ -89,7 +88,7 @@ export async function createSubthread(input: Input, context: FunctionContext): P
     }
   }
 
-  const title = normalizeOptionalString(input.title) ?? buildDefaultReplyThreadTitle(anchorMessage)
+  const title = normalizeOptionalString(input.title)
   const description = normalizeOptionalString(input.description)
   const emoji = normalizeOptionalString(input.emoji)
 
@@ -168,7 +167,7 @@ async function encodeSubthreadResult(input: {
 async function createSubthreadChat(input: {
   parentChat: DbChat
   parentMessageId?: number
-  title: string
+  title?: string
   description?: string
   emoji?: string
   createdBy: number
@@ -181,7 +180,7 @@ async function createSubthreadChat(input: {
         .values({
           type: "thread",
           spaceId: input.parentChat.spaceId ?? null,
-          title: input.title,
+          title: input.title ?? null,
           description: input.description ?? null,
           emoji: input.emoji ?? null,
           createdBy: input.createdBy,

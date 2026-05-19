@@ -57,6 +57,7 @@ import {
   pushMessageRepliesUpdate,
 } from "@in/server/modules/subthreads"
 import { setDialogOpenForUsers } from "@in/server/modules/dialogOpen"
+import { maybeScheduleThreadTitleGeneration } from "@in/server/modules/threadTitles"
 
 type Input = {
   peerId: InputPeer
@@ -334,6 +335,14 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
     unencryptedText: text,
     inputPeer,
     sendMode: input.sendMode,
+  })
+
+  maybeScheduleThreadTitleGeneration({
+    chat,
+    message: newMessage,
+    text,
+    entities,
+    currentUserId,
   })
 
   if (input.messageAttachments && input.messageAttachments.length > 0) {

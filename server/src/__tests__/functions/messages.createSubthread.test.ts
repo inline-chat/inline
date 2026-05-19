@@ -44,6 +44,15 @@ describe("messages.createSubthread", () => {
     expect(result.dialog).toBeDefined()
 
     const childChatId = Number(result.chat.id)
+    const childChat = await db
+      .select({ title: schema.chats.title })
+      .from(schema.chats)
+      .where(eq(schema.chats.id, childChatId))
+      .limit(1)
+      .then((rows) => rows[0])
+
+    expect(childChat?.title).toBeNull()
+
     const childDialogs = await db
       .select({ userId: schema.dialogs.userId, chatListHidden: schema.dialogs.chatListHidden })
       .from(schema.dialogs)
@@ -105,7 +114,7 @@ describe("messages.createSubthread", () => {
       .insert(schema.chats)
       .values({
         type: "thread",
-        title: "Re: anchor",
+        title: null,
         publicThread: false,
         createdBy: creator.id,
         parentChatId: parentChat.id,
