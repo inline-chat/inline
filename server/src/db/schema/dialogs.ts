@@ -1,4 +1,4 @@
-import { pgTable, boolean, unique, integer, text, bytea, index } from "drizzle-orm/pg-core"
+import { pgTable, boolean, unique, integer, text, bytea, index, timestamp } from "drizzle-orm/pg-core"
 import { users } from "./users"
 import { spaces } from "./spaces"
 import { relations } from "drizzle-orm/_relations"
@@ -53,6 +53,12 @@ export const dialogs = pgTable(
 
     /** whether this dialog should be hidden from chat list/home lists; null means false */
     chatListHidden: boolean("chat_list_hidden"),
+
+    /** sidebar inbox state; null means use the chat-type default */
+    open: boolean("open"),
+
+    /** when the dialog transitioned into the sidebar inbox */
+    openedDate: timestamp("opened_date", { mode: "date", precision: 3 }),
 
     /** manually marked as unread */
     unreadMark: boolean("unread_mark").default(false),

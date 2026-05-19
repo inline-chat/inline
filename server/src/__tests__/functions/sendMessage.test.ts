@@ -461,7 +461,7 @@ describe("sendMessage", () => {
     expect(message!.entities!.entities.some((entity) => entity!.type === MessageEntity_Type.MENTION)).toBe(false)
   })
 
-  test("unarchives recipient dialog and enqueues a user update", async () => {
+  test("marks recipient dialog explicitly open on incoming DM", async () => {
     const sender = (await testUtils.createUser(nextEmail("sender")))!
     const recipient = (await testUtils.createUser(nextEmail("recipient")))!
     const { chat } = await testUtils.createPrivateChatWithOptionalDialog({
@@ -473,7 +473,7 @@ describe("sendMessage", () => {
 
     await db
       .update(dialogs)
-      .set({ archived: true })
+      .set({ archived: true, chatListHidden: true, open: null, openedDate: null })
       .where(and(eq(dialogs.chatId, chat.id), eq(dialogs.userId, recipient.id)))
       .execute()
 
@@ -491,6 +491,9 @@ describe("sendMessage", () => {
       .limit(1)
 
     expect(updatedDialog?.archived).toBe(false)
+    expect(updatedDialog?.chatListHidden).toBeNull()
+    expect(updatedDialog?.open).toBe(true)
+    expect(updatedDialog?.openedDate).toBeInstanceOf(Date)
 
     const userUpdates = await db.query.updates.findMany({
       where: {
@@ -499,18 +502,19 @@ describe("sendMessage", () => {
       },
     })
 
-    const hasDialogArchivedUpdate = userUpdates
+    const hasChatOpenUpdate = userUpdates
       .map((update) => UpdatesModel.decrypt(update))
       .some(
         (update) =>
-          update.payload.update.oneofKind === "userDialogArchived" &&
-          update.payload.update.userDialogArchived.archived === false,
+          update.payload.update.oneofKind === "userChatOpen" &&
+          update.payload.update.userChatOpen.dialog?.open === true &&
+          update.payload.update.userChatOpen.dialog?.archived === false,
       )
 
-    expect(hasDialogArchivedUpdate).toBe(true)
+    expect(hasChatOpenUpdate).toBe(true)
   })
 
-  test("promotes mentioned users into chat-list-shown reply-thread dialogs", async () => {
+  test("opens mentioned users' reply-thread dialogs for the sidebar inbox", async () => {
     const owner = await testUtils.createUser(nextEmail("thread-owner"))
     const mentioned = await testUtils.createUser(nextEmail("thread-mentioned"))
     await db.update(users).set({ username: "replythreadmentioned" }).where(eq(users.id, mentioned.id)).execute()
@@ -559,6 +563,8 @@ describe("sendMessage", () => {
       .limit(1)
 
     expect(recipientDialog?.chatListHidden).toBeNull()
+    expect(recipientDialog?.open).toBe(true)
+    expect(recipientDialog?.openedDate).toBeInstanceOf(Date)
 
     const userUpdates = await db.query.updates.findMany({
       where: {
@@ -574,7 +580,7 @@ describe("sendMessage", () => {
     expect(hasChatOpenUpdate).toBe(true)
   })
 
-  test("promotes replied-to authors into chat-list-shown reply-thread dialogs", async () => {
+  test("opens replied-to authors' reply-thread dialogs for the sidebar inbox", async () => {
     const owner = await testUtils.createUser(nextEmail("thread-reply-owner"))
     const repliedUser = await testUtils.createUser(nextEmail("thread-replied-user"))
 
@@ -633,6 +639,8 @@ describe("sendMessage", () => {
       .limit(1)
 
     expect(recipientDialog?.chatListHidden).toBeNull()
+    expect(recipientDialog?.open).toBe(true)
+    expect(recipientDialog?.openedDate).toBeInstanceOf(Date)
 
     const parentMessages = await getMessages(
       {

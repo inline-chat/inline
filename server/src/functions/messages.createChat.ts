@@ -21,6 +21,7 @@ import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/update
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import type { ServerUpdate } from "@inline-chat/protocol/server"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
+import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
 
 export async function createChat(
   input: {
@@ -186,6 +187,7 @@ export async function createChat(
           userId: context.currentUserId,
           spaceId: hasSpaceId ? resolvedSpaceId : null,
           date: new Date(),
+          ...dialogOpenDefaultsForChat(chat),
         })
         .returning()
 
@@ -254,6 +256,7 @@ export async function createChat(
         userId: context.currentUserId,
         spaceId: hasSpaceId ? resolvedSpaceId : null,
         date: new Date(),
+        ...dialogOpenDefaultsForChat(chat[0]),
       })
       .returning()
 

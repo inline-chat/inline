@@ -20,6 +20,7 @@ import {
 } from "../api-types"
 import invariant from "tiny-invariant"
 import { DialogsModel } from "@in/server/db/models/dialogs"
+import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
 
 export const Input = Type.Object({})
 
@@ -65,6 +66,7 @@ export const handler = async (_: Static<typeof Input>, context: HandlerContext):
         chatId: selfChat.id,
         peerUserId: currentUserId,
         userId: currentUserId,
+        ...dialogOpenDefaultsForChat(selfChat),
       })
       .returning()
     selfChatDialog = newSelfChatDialog
@@ -106,6 +108,7 @@ export const handler = async (_: Static<typeof Input>, context: HandlerContext):
             userId: currentUserId,
             peerUserId: chat.minUserId === currentUserId ? chat.maxUserId : chat.minUserId,
             date: new Date(),
+            ...dialogOpenDefaultsForChat(chat),
           })
           .returning()
         if (dialog) created.push(dialog)

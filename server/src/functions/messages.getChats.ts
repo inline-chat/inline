@@ -15,12 +15,14 @@ import {
   type DbSpace,
   type DbChat,
   type DbDialog,
+  type DbNewDialog,
   type DbUser,
   type DbFile,
 } from "@in/server/db/schema"
 import { DialogsModel } from "@in/server/db/models/dialogs"
 import { encodePeerFromChat } from "@in/server/realtime/encoders/encodePeer"
 import { ChatModel } from "@in/server/db/models/chats"
+import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
 
 type Input = {}
 
@@ -60,7 +62,7 @@ async function ensurePrivateChatsForSpaceMembers(currentUserId: number): Promise
     }))
 
     const existingChats = await db
-      .select({ id: chats.id, minUserId: chats.minUserId, maxUserId: chats.maxUserId })
+      .select({ id: chats.id, type: chats.type, minUserId: chats.minUserId, maxUserId: chats.maxUserId })
       .from(chats)
       .where(and(eq(chats.type, "private"), or(eq(chats.minUserId, currentUserId), eq(chats.maxUserId, currentUserId))))
 
@@ -99,7 +101,7 @@ async function ensurePrivateChatsForSpaceMembers(currentUserId: number): Promise
 
     const existingDialogSet = new Set(existingDialogs.map((d) => `${d.chatId}-${d.userId}`))
 
-    const dialogsToCreate: { chatId: number; userId: number; peerUserId: number }[] = []
+    const dialogsToCreate: DbNewDialog[] = []
 
     for (const chat of allChatsToProcess) {
       if (chat.minUserId === null || chat.maxUserId === null) {
@@ -111,6 +113,7 @@ async function ensurePrivateChatsForSpaceMembers(currentUserId: number): Promise
           chatId: chat.id,
           userId: currentUserId,
           peerUserId: chat.minUserId === currentUserId ? chat.maxUserId : chat.minUserId,
+          ...dialogOpenDefaultsForChat({ type: "private" }),
         })
       }
 
@@ -120,6 +123,7 @@ async function ensurePrivateChatsForSpaceMembers(currentUserId: number): Promise
           chatId: chat.id,
           userId: otherUserId,
           peerUserId: currentUserId,
+          ...dialogOpenDefaultsForChat({ type: "private" }),
         })
       }
     }
@@ -355,6 +359,7 @@ export const getChats = async (input: Input, context: FunctionContext): Promise<
           // type-specific fields
           peerUserId: c.type === "private" ? (c.minUserId === currentUserId ? c.maxUserId : c.minUserId) : null,
           spaceId: c.type === "thread" ? c.spaceId : null,
+          ...dialogOpenDefaultsForChat(c),
         })),
       )
       .returning()

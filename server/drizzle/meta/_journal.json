@@ -512,6 +512,13 @@
       "when": 1779114521675,
       "tag": "0072_add-chat-list-hidden",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1779119609575,
+      "tag": "0073_add_dialog_open",
+      "breakpoints": true
     }
   ]
 }

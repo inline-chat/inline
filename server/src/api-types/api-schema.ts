@@ -15,6 +15,7 @@ import { Value } from "@sinclair/typebox/value"
 import type { DbReaction } from "../db/schema/reactions"
 import { InlineError } from "@in/server/types/errors"
 import { getSignedMediaPhotoUrl } from "@in/server/modules/files/path"
+import { effectiveDialogOpenForDialog } from "@in/server/modules/dialogOpen"
 
 // const BigIntString = Type.Transform(Type.BigInt())
 //   .Decode((value) => String(value))
@@ -251,6 +252,10 @@ export const TDialogInfo = Type.Object({
   readInboxMaxId: Optional(Type.Integer()),
   draft: Optional(Type.String()),
   archived: Optional(Type.Boolean()),
+  open: Optional(Type.Boolean()),
+  openedDate: Optional(TimestampMs),
+  sidebarVisible: Optional(Type.Boolean()),
+  chatListHidden: Optional(Type.Boolean()),
   // lastMsgId: Optional(Type.Integer()),
   // unreadMentionsCount: Optional(Type.Integer()), // https://core.telegram.org/api/mentions
   // unreadReactionsCount: Optional(Type.Integer()),
@@ -267,6 +272,10 @@ export const encodeDialogInfo = (dialog: DbDialog & { unreadCount: number }): TD
     readInboxMaxId: dialog.readInboxMaxId,
     draft: dialog.draft,
     archived: dialog.archived,
+    open: effectiveDialogOpenForDialog(dialog),
+    openedDate: dialog.openedDate,
+    sidebarVisible: dialog.chatListHidden !== true,
+    chatListHidden: dialog.chatListHidden === true ? true : undefined,
     unreadCount: dialog.unreadCount,
   })
 }

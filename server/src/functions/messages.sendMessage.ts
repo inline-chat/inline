@@ -52,12 +52,11 @@ import { processOutgoingText } from "@in/server/modules/message/processOutgoingT
 import { normalizeAndValidateMessageActions } from "@in/server/modules/message/messageActions"
 import {
   emitChatListOpenUpdates,
-  isLinkedSubthread,
   isReplyThread,
   persistMessageRepliesUpdate,
-  promoteLinkedSubthreadDialogsToChatList,
   pushMessageRepliesUpdate,
 } from "@in/server/modules/subthreads"
+import { setDialogOpenForUsers } from "@in/server/modules/dialogOpen"
 
 type Input = {
   peerId: InputPeer
@@ -285,21 +284,22 @@ export const sendMessage = async (input: Input, context: FunctionContext): Promi
   // remove the need to lock the chat row. then we should deliver the update
   // with sequence number so we can ensure gap-free delivery.
   const updateGroup = await getUpdateGroupFromInputPeer(inputPeer, { currentUserId })
-  const chatListPromotionUserIds = await getLinkedSubthreadChatListPromotionUserIds({
+  const sidebarOpenUserIds = await getSidebarOpenUserIds({
     chat,
     currentUserId,
     replyToMessageId: replyToMsgIdNumber ?? undefined,
     entities,
     updateGroup,
   })
-  if (chatListPromotionUserIds.length > 0) {
-    const { activatedDialogs } = await promoteLinkedSubthreadDialogsToChatList({
+  if (sidebarOpenUserIds.length > 0) {
+    const { changedDialogs } = await setDialogOpenForUsers({
       chat,
-      userIds: chatListPromotionUserIds,
+      userIds: sidebarOpenUserIds,
+      open: true,
     })
     await emitChatListOpenUpdates({
       chat,
-      dialogs: activatedDialogs,
+      dialogs: changedDialogs,
     })
   }
   const { updates: unarchiveUpdates } = await unarchiveIfNeeded({
@@ -398,7 +398,7 @@ const getMentionedUserIds = (entities: MessageEntities | undefined): number[] =>
   return Array.from(userIds)
 }
 
-const getLinkedSubthreadChatListPromotionUserIds = async ({
+const getSidebarOpenUserIds = async ({
   chat,
   currentUserId,
   replyToMessageId,
@@ -411,16 +411,18 @@ const getLinkedSubthreadChatListPromotionUserIds = async ({
   entities: MessageEntities | undefined
   updateGroup: UpdateGroup
 }): Promise<number[]> => {
-  if (!isLinkedSubthread(chat)) {
-    return []
-  }
-
   const eligibleUserIds = new Set(updateGroup.userIds.filter((userId) => userId !== currentUserId))
-  const promotedUserIds = new Set<number>()
+  const openUserIds = new Set<number>()
+
+  if (updateGroup.type === "dmUsers") {
+    for (const userId of eligibleUserIds) {
+      openUserIds.add(userId)
+    }
+  }
 
   for (const mentionedUserId of getMentionedUserIds(entities)) {
     if (eligibleUserIds.has(mentionedUserId)) {
-      promotedUserIds.add(mentionedUserId)
+      openUserIds.add(mentionedUserId)
     }
   }
 
@@ -428,14 +430,14 @@ const getLinkedSubthreadChatListPromotionUserIds = async ({
     try {
       const repliedToMessage = await MessageModel.getMessage(replyToMessageId, chat.id)
       if (eligibleUserIds.has(repliedToMessage.fromId)) {
-        promotedUserIds.add(repliedToMessage.fromId)
+        openUserIds.add(repliedToMessage.fromId)
       }
     } catch {
       // Keep send semantics unchanged if reply target is missing or inaccessible.
     }
   }
 
-  return Array.from(promotedUserIds)
+  return Array.from(openUserIds)
 }
 
 type EncodeMessageInput = Parameters<typeof Encoders.message>[0]
