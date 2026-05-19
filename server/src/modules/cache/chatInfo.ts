@@ -19,6 +19,10 @@ export function clearChatInfoCache() {
   cachedChatInfo.clear()
 }
 
+export function invalidateChatInfoCache(chatId: number) {
+  cachedChatInfo.delete(chatId)
+}
+
 export async function getCachedChatInfo(chatId: number): Promise<CachedChatInfo | undefined> {
   let cached = cachedChatInfo.get(chatId)
   if (cached) {
