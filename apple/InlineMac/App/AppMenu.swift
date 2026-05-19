@@ -403,7 +403,7 @@ final class AppMenu: NSObject {
 
     let quickSearchItem = NSMenuItem(
       title: "Quick Search",
-      action: #selector(focusSearch(_:)),
+      action: #selector(toggleQuickSearch(_:)),
       keyEquivalent: "k"
     )
     quickSearchItem.keyEquivalentModifierMask = [.command]
@@ -733,8 +733,8 @@ final class AppMenu: NSObject {
     sender.state = window.tabGroup?.isTabBarVisible == true ? .on : .off
   }
 
-  @objc private func focusSearch(_ sender: NSMenuItem) {
-    MainWindowOpenCoordinator.shared.openCommandBar()
+  @objc private func toggleQuickSearch(_ sender: NSMenuItem) {
+    MainWindowOpenCoordinator.shared.toggleCommandBar()
   }
 
   // MARK: - Chat Navigation Actions

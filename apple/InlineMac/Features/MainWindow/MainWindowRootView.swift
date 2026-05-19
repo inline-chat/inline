@@ -57,6 +57,8 @@ struct MainWindowRootView: View {
       nav3.open(destination.route)
     } openCommandBar: {
       nav3.openCommandBar()
+    } toggleCommandBar: {
+      nav3.toggleCommandBar()
     } toggleSidebar: {
       toggleSidebar()
     }
