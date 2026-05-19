@@ -14,6 +14,7 @@ import { RealtimeUpdates } from "@in/server/realtime/message"
 import type { ServerUpdate } from "@inline-chat/protocol/server"
 import type { MessageReplies, Update } from "@inline-chat/protocol/core"
 import { and, eq, inArray, sql } from "drizzle-orm"
+import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
 
 export const isLinkedSubthread = (chat: Pick<DbChat, "parentChatId">): boolean => chat.parentChatId != null
 
@@ -53,7 +54,7 @@ export async function getDialogForUser(chatId: number, userId: number): Promise<
 }
 
 export async function ensureLinkedSubthreadDialogs(input: {
-  chat: Pick<DbChat, "id" | "spaceId">
+  chat: Pick<DbChat, "id" | "spaceId" | "type">
   userIds: number[]
   chatListHidden?: boolean
 }): Promise<{ dialogs: DbDialog[]; createdDialogs: DbDialog[] }> {
@@ -82,6 +83,7 @@ export async function ensureLinkedSubthreadDialogs(input: {
           chatId: input.chat.id,
           userId,
           spaceId: input.chat.spaceId ?? null,
+          ...dialogOpenDefaultsForChat(input.chat),
           ...(input.chatListHidden === true ? { chatListHidden: true } : {}),
         })),
       )
@@ -96,7 +98,7 @@ export async function ensureLinkedSubthreadDialogs(input: {
 }
 
 export async function promoteLinkedSubthreadDialogsToChatList(input: {
-  chat: Pick<DbChat, "id" | "spaceId">
+  chat: Pick<DbChat, "id" | "spaceId" | "type">
   userIds: number[]
 }): Promise<{ dialogs: DbDialog[]; activatedDialogs: DbDialog[] }> {
   const uniqueUserIds = Array.from(
@@ -136,6 +138,7 @@ export async function promoteLinkedSubthreadDialogsToChatList(input: {
           chatId: input.chat.id,
           userId,
           spaceId: input.chat.spaceId ?? null,
+          ...dialogOpenDefaultsForChat(input.chat),
         })),
       )
       .onConflictDoNothing()
@@ -434,6 +437,7 @@ export async function emitReplyThreadParentRepliesUpdateIfNeeded(input: {
 export async function emitChatListOpenUpdates(input: {
   chat: DbChat
   dialogs: DbDialog[]
+  skipSessionId?: number
 }): Promise<void> {
   const uniqueDialogs = Array.from(
     new Map(
@@ -478,18 +482,24 @@ export async function emitChatListOpenUpdates(input: {
       return
     }
 
-    RealtimeUpdates.pushToUser(prepared.dialog.userId, [
-      {
-        seq: persisted.seq,
-        date: encodeDateStrict(persisted.date),
-        update: {
-          oneofKind: "chatOpen",
-          chatOpen: {
-            chat: prepared.chat,
-            dialog: prepared.encodedDialog,
+    const pushOptions = input.skipSessionId !== undefined ? { skipSessionId: input.skipSessionId } : undefined
+
+    RealtimeUpdates.pushToUser(
+      prepared.dialog.userId,
+      [
+        {
+          seq: persisted.seq,
+          date: encodeDateStrict(persisted.date),
+          update: {
+            oneofKind: "chatOpen",
+            chatOpen: {
+              chat: prepared.chat,
+              dialog: prepared.encodedDialog,
+            },
           },
         },
-      },
-    ])
+      ],
+      pushOptions,
+    )
   })
 }

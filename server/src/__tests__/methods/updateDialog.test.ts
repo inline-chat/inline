@@ -117,10 +117,12 @@ describe("updateDialog", () => {
 
     expect(dialogAfterPin?.chatListHidden).toBeNull()
     expect(dialogAfterPin?.pinned).toBe(true)
+    expect(dialogAfterPin?.open).toBe(true)
+    expect(dialogAfterPin?.openedDate).toBeInstanceOf(Date)
 
     await db
       .update(dialogsTable)
-      .set({ chatListHidden: true, archived: true, pinned: false })
+      .set({ chatListHidden: true, archived: true, pinned: false, open: false, openedDate: null })
       .where(and(eq(dialogsTable.chatId, childChat.id), eq(dialogsTable.userId, participant.id)))
 
     await handler({ peerThreadId: String(childChat.id), archived: false }, makeContext(participant.id))
@@ -133,5 +135,39 @@ describe("updateDialog", () => {
 
     expect(dialogAfterUnarchive?.chatListHidden).toBeNull()
     expect(dialogAfterUnarchive?.archived).toBe(false)
+    expect(dialogAfterUnarchive?.open).toBe(false)
+  })
+
+  test("preserves openedDate when pinning an already-open dialog", async () => {
+    const owner = await testUtils.createUser("open-pin-owner@example.com")
+    const participant = await testUtils.createUser("open-pin-participant@example.com")
+    if (!owner || !participant) throw new Error("Failed to create users")
+
+    const chat = await testUtils.createChat(null, "Pinned Inbox Thread", "thread", false, owner.id)
+    if (!chat) throw new Error("Failed to create chat")
+
+    await testUtils.addParticipant(chat.id, owner.id)
+    await testUtils.addParticipant(chat.id, participant.id)
+
+    const openedDate = new Date("2026-01-02T03:04:05.000Z")
+    await db.insert(dialogsTable).values({
+      userId: participant.id,
+      chatId: chat.id,
+      open: true,
+      openedDate,
+      pinned: false,
+    })
+
+    await handler({ peerThreadId: String(chat.id), pinned: true }, makeContext(participant.id))
+
+    const [dialog] = await db
+      .select()
+      .from(dialogsTable)
+      .where(and(eq(dialogsTable.chatId, chat.id), eq(dialogsTable.userId, participant.id)))
+      .limit(1)
+
+    expect(dialog?.pinned).toBe(true)
+    expect(dialog?.open).toBe(true)
+    expect(dialog?.openedDate?.getTime()).toBe(openedDate.getTime())
   })
 })

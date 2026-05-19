@@ -51,6 +51,7 @@ import { answerMessageAction } from "@in/server/realtime/handlers/messages.answe
 import { createSubthread } from "@in/server/realtime/handlers/messages.createSubthread"
 import { revokeSessionHandler } from "@in/server/realtime/handlers/user.revokeSession"
 import { showInChatList } from "@in/server/realtime/handlers/messages.showInChatList"
+import { updateDialogOpen } from "@in/server/realtime/handlers/messages.updateDialogOpen"
 
 const log = new Log("rpc")
 
@@ -420,6 +421,14 @@ export const handleRpcCall = async (call: RpcCall, handlerContext: HandlerContex
       }
       const result = await showInChatList(call.input.showInChatList, handlerContext)
       return { oneofKind: "showInChatList", showInChatList: result }
+    }
+
+    case Method.UPDATE_DIALOG_OPEN: {
+      if (call.input.oneofKind !== "updateDialogOpen") {
+        throw RealtimeRpcError.BadRequest()
+      }
+      const result = await updateDialogOpen(call.input.updateDialogOpen, handlerContext)
+      return { oneofKind: "updateDialogOpen", updateDialogOpen: result }
     }
 
     case Method.RESERVE_CHAT_IDS: {

@@ -10,6 +10,7 @@ import type { FunctionContext } from "@in/server/functions/_types"
 import { AccessGuardsCache } from "@in/server/modules/authorization/accessGuardsCache"
 import { generateToken } from "@in/server/utils/auth"
 import { SessionsModel } from "@in/server/db/models/sessions"
+import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
 
 // Test database configuration
 const BASE_TEST_DB_NAME = "test_db"
@@ -409,8 +410,8 @@ export const testUtils = {
     await db
       .insert(schema.dialogs)
       .values([
-        { userId: userA.id, chatId: chat.id, peerUserId: userB.id, spaceId },
-        { userId: userB.id, chatId: chat.id, peerUserId: userA.id, spaceId },
+        { userId: userA.id, chatId: chat.id, peerUserId: userB.id, spaceId, ...dialogOpenDefaultsForChat(chat) },
+        { userId: userB.id, chatId: chat.id, peerUserId: userA.id, spaceId, ...dialogOpenDefaultsForChat(chat) },
       ])
       .execute()
     const fromUser = messageFromUser || userB
@@ -462,6 +463,7 @@ export const testUtils = {
           userId: userA.id,
           peerUserId: userB.id,
           date: new Date(),
+          ...dialogOpenDefaultsForChat(chat),
         })
         .returning()
       if (dialogA) dialogs.push(dialogA)
@@ -475,6 +477,7 @@ export const testUtils = {
           userId: userB.id,
           peerUserId: userA.id,
           date: new Date(),
+          ...dialogOpenDefaultsForChat(chat),
         })
         .returning()
       if (dialogB) dialogs.push(dialogB)

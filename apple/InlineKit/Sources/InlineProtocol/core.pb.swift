@@ -108,6 +108,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
   case invokeMessageAction // = 48
   case answerMessageAction // = 49
   case revokeSession // = 50
+  case updateDialogOpen // = 51
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -167,6 +168,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case 48: self = .invokeMessageAction
     case 49: self = .answerMessageAction
     case 50: self = .revokeSession
+    case 51: self = .updateDialogOpen
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -224,6 +226,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     case .invokeMessageAction: return 48
     case .answerMessageAction: return 49
     case .revokeSession: return 50
+    case .updateDialogOpen: return 51
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -281,6 +284,7 @@ public enum Method: SwiftProtobuf.Enum, Swift.CaseIterable {
     .invokeMessageAction,
     .answerMessageAction,
     .revokeSession,
+    .updateDialogOpen,
   ]
 
 }
@@ -1151,6 +1155,19 @@ public struct Dialog: Sendable {
   /// Clears the value of `notificationSettings`. Subsequent reads from it will return its default value.
   public mutating func clearNotificationSettings() {self._notificationSettings = nil}
 
+  /// Deprecated wire field kept so old sidebar_visible=true does not decode as hidden.
+  ///
+  /// NOTE: This field was marked as deprecated in the .proto file.
+  public var sidebarVisible: Bool {
+    get {return _sidebarVisible ?? false}
+    set {_sidebarVisible = newValue}
+  }
+  /// Returns true if `sidebarVisible` has been explicitly set.
+  public var hasSidebarVisible: Bool {return self._sidebarVisible != nil}
+  /// Clears the value of `sidebarVisible`. Subsequent reads from it will return its default value.
+  public mutating func clearSidebarVisible() {self._sidebarVisible = nil}
+
+  /// Hide noisy reply threads from normal chat lists; this is independent of sidebar inbox open state.
   public var chatListHidden: Bool {
     get {return _chatListHidden ?? false}
     set {_chatListHidden = newValue}
@@ -1159,6 +1176,26 @@ public struct Dialog: Sendable {
   public var hasChatListHidden: Bool {return self._chatListHidden != nil}
   /// Clears the value of `chatListHidden`. Subsequent reads from it will return its default value.
   public mutating func clearChatListHidden() {self._chatListHidden = nil}
+
+  /// Stable sidebar inbox membership.
+  public var `open`: Bool {
+    get {return _open ?? false}
+    set {_open = newValue}
+  }
+  /// Returns true if ``open`` has been explicitly set.
+  public var hasOpen: Bool {return self._open != nil}
+  /// Clears the value of ``open``. Subsequent reads from it will return its default value.
+  public mutating func clearOpen() {self._open = nil}
+
+  /// Set only when open transitions from false to true.
+  public var openedDate: Int64 {
+    get {return _openedDate ?? 0}
+    set {_openedDate = newValue}
+  }
+  /// Returns true if `openedDate` has been explicitly set.
+  public var hasOpenedDate: Bool {return self._openedDate != nil}
+  /// Clears the value of `openedDate`. Subsequent reads from it will return its default value.
+  public mutating func clearOpenedDate() {self._openedDate = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1173,7 +1210,10 @@ public struct Dialog: Sendable {
   fileprivate var _chatID: Int64? = nil
   fileprivate var _unreadMark: Bool? = nil
   fileprivate var _notificationSettings: DialogNotificationSettings? = nil
+  fileprivate var _sidebarVisible: Bool? = nil
   fileprivate var _chatListHidden: Bool? = nil
+  fileprivate var _open: Bool? = nil
+  fileprivate var _openedDate: Int64? = nil
 }
 
 /// A thread
@@ -3225,6 +3265,14 @@ public struct RpcCall: Sendable {
     set {input = .revokeSession(newValue)}
   }
 
+  public var updateDialogOpen: UpdateDialogOpenInput {
+    get {
+      if case .updateDialogOpen(let v)? = input {return v}
+      return UpdateDialogOpenInput()
+    }
+    set {input = .updateDialogOpen(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Input: Equatable, Sendable {
@@ -3278,6 +3326,7 @@ public struct RpcCall: Sendable {
     case invokeMessageAction(InvokeMessageActionInput)
     case answerMessageAction(AnswerMessageActionInput)
     case revokeSession(RevokeSessionInput)
+    case updateDialogOpen(UpdateDialogOpenInput)
 
   }
 
@@ -3699,6 +3748,14 @@ public struct RpcResult: @unchecked Sendable {
     set {_uniqueStorage()._result = .revokeSession(newValue)}
   }
 
+  public var updateDialogOpen: UpdateDialogOpenResult {
+    get {
+      if case .updateDialogOpen(let v)? = _storage._result {return v}
+      return UpdateDialogOpenResult()
+    }
+    set {_uniqueStorage()._result = .updateDialogOpen(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Result: Equatable, Sendable {
@@ -3752,6 +3809,7 @@ public struct RpcResult: @unchecked Sendable {
     case invokeMessageAction(InvokeMessageActionResult)
     case answerMessageAction(AnswerMessageActionResult)
     case revokeSession(RevokeSessionResult)
+    case updateDialogOpen(UpdateDialogOpenResult)
 
   }
 
@@ -4158,6 +4216,70 @@ public struct ShowInChatListResult: @unchecked Sendable {
   public var hasDialog: Bool {return _storage._dialog != nil}
   /// Clears the value of `dialog`. Subsequent reads from it will return its default value.
   public mutating func clearDialog() {_uniqueStorage()._dialog = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+public struct UpdateDialogOpenInput: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Peer ID to open or close in the sidebar inbox.
+  public var peerID: InputPeer {
+    get {return _peerID ?? InputPeer()}
+    set {_peerID = newValue}
+  }
+  /// Returns true if `peerID` has been explicitly set.
+  public var hasPeerID: Bool {return self._peerID != nil}
+  /// Clears the value of `peerID`. Subsequent reads from it will return its default value.
+  public mutating func clearPeerID() {self._peerID = nil}
+
+  /// Whether this dialog should appear in the sidebar inbox.
+  public var `open`: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _peerID: InputPeer? = nil
+}
+
+public struct UpdateDialogOpenResult: @unchecked Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var chat: Chat {
+    get {return _storage._chat ?? Chat()}
+    set {_uniqueStorage()._chat = newValue}
+  }
+  /// Returns true if `chat` has been explicitly set.
+  public var hasChat: Bool {return _storage._chat != nil}
+  /// Clears the value of `chat`. Subsequent reads from it will return its default value.
+  public mutating func clearChat() {_uniqueStorage()._chat = nil}
+
+  public var dialog: Dialog {
+    get {return _storage._dialog ?? Dialog()}
+    set {_uniqueStorage()._dialog = newValue}
+  }
+  /// Returns true if `dialog` has been explicitly set.
+  public var hasDialog: Bool {return _storage._dialog != nil}
+  /// Clears the value of `dialog`. Subsequent reads from it will return its default value.
+  public mutating func clearDialog() {_uniqueStorage()._dialog = nil}
+
+  public var user: User {
+    get {return _storage._user ?? User()}
+    set {_uniqueStorage()._user = newValue}
+  }
+  /// Returns true if `user` has been explicitly set.
+  public var hasUser: Bool {return _storage._user != nil}
+  /// Clears the value of `user`. Subsequent reads from it will return its default value.
+  public mutating func clearUser() {_uniqueStorage()._user = nil}
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -8274,6 +8396,7 @@ extension Method: SwiftProtobuf._ProtoNameProviding {
     48: .same(proto: "INVOKE_MESSAGE_ACTION"),
     49: .same(proto: "ANSWER_MESSAGE_ACTION"),
     50: .same(proto: "REVOKE_SESSION"),
+    51: .same(proto: "UPDATE_DIALOG_OPEN"),
   ]
 }
 
@@ -9359,7 +9482,10 @@ extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     7: .standard(proto: "chat_id"),
     8: .standard(proto: "unread_mark"),
     9: .standard(proto: "notification_settings"),
-    10: .standard(proto: "chat_list_hidden"),
+    10: .standard(proto: "sidebar_visible"),
+    13: .standard(proto: "chat_list_hidden"),
+    11: .same(proto: "open"),
+    12: .standard(proto: "opened_date"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -9377,7 +9503,10 @@ extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
       case 7: try { try decoder.decodeSingularInt64Field(value: &self._chatID) }()
       case 8: try { try decoder.decodeSingularBoolField(value: &self._unreadMark) }()
       case 9: try { try decoder.decodeSingularMessageField(value: &self._notificationSettings) }()
-      case 10: try { try decoder.decodeSingularBoolField(value: &self._chatListHidden) }()
+      case 10: try { try decoder.decodeSingularBoolField(value: &self._sidebarVisible) }()
+      case 11: try { try decoder.decodeSingularBoolField(value: &self._open) }()
+      case 12: try { try decoder.decodeSingularInt64Field(value: &self._openedDate) }()
+      case 13: try { try decoder.decodeSingularBoolField(value: &self._chatListHidden) }()
       default: break
       }
     }
@@ -9415,8 +9544,17 @@ extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     try { if let v = self._notificationSettings {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
     } }()
-    try { if let v = self._chatListHidden {
+    try { if let v = self._sidebarVisible {
       try visitor.visitSingularBoolField(value: v, fieldNumber: 10)
+    } }()
+    try { if let v = self._open {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 11)
+    } }()
+    try { if let v = self._openedDate {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 12)
+    } }()
+    try { if let v = self._chatListHidden {
+      try visitor.visitSingularBoolField(value: v, fieldNumber: 13)
     } }()
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -9431,7 +9569,10 @@ extension Dialog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBas
     if lhs._chatID != rhs._chatID {return false}
     if lhs._unreadMark != rhs._unreadMark {return false}
     if lhs._notificationSettings != rhs._notificationSettings {return false}
+    if lhs._sidebarVisible != rhs._sidebarVisible {return false}
     if lhs._chatListHidden != rhs._chatListHidden {return false}
+    if lhs._open != rhs._open {return false}
+    if lhs._openedDate != rhs._openedDate {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -11831,6 +11972,7 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
     49: .same(proto: "invokeMessageAction"),
     50: .same(proto: "answerMessageAction"),
     51: .same(proto: "revokeSession"),
+    52: .same(proto: "updateDialogOpen"),
   ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -12490,6 +12632,19 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
           self.input = .revokeSession(v)
         }
       }()
+      case 52: try {
+        var v: UpdateDialogOpenInput?
+        var hadOneofValue = false
+        if let current = self.input {
+          hadOneofValue = true
+          if case .updateDialogOpen(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.input = .updateDialogOpen(v)
+        }
+      }()
       default: break
       }
     }
@@ -12704,6 +12859,10 @@ extension RpcCall: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBa
       guard case .revokeSession(let v)? = self.input else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 51)
     }()
+    case .updateDialogOpen?: try {
+      guard case .updateDialogOpen(let v)? = self.input else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 52)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -12771,6 +12930,7 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
     49: .same(proto: "invokeMessageAction"),
     50: .same(proto: "answerMessageAction"),
     51: .same(proto: "revokeSession"),
+    52: .same(proto: "updateDialogOpen"),
   ]
 
   fileprivate class _StorageClass {
@@ -13461,6 +13621,19 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
             _storage._result = .revokeSession(v)
           }
         }()
+        case 52: try {
+          var v: UpdateDialogOpenResult?
+          var hadOneofValue = false
+          if let current = _storage._result {
+            hadOneofValue = true
+            if case .updateDialogOpen(let m) = current {v = m}
+          }
+          try decoder.decodeSingularMessageField(value: &v)
+          if let v = v {
+            if hadOneofValue {try decoder.handleConflictingOneOf()}
+            _storage._result = .updateDialogOpen(v)
+          }
+        }()
         default: break
         }
       }
@@ -13676,6 +13849,10 @@ extension RpcResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementation
       case .revokeSession?: try {
         guard case .revokeSession(let v)? = _storage._result else { preconditionFailure() }
         try visitor.visitSingularMessageField(value: v, fieldNumber: 51)
+      }()
+      case .updateDialogOpen?: try {
+        guard case .updateDialogOpen(let v)? = _storage._result else { preconditionFailure() }
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 52)
       }()
       case nil: break
       }
@@ -14458,6 +14635,140 @@ extension ShowInChatListResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
         let rhs_storage = _args.1
         if _storage._chat != rhs_storage._chat {return false}
         if _storage._dialog != rhs_storage._dialog {return false}
+        return true
+      }
+      if !storagesAreEqual {return false}
+    }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateDialogOpenInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateDialogOpenInput"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "peer_id"),
+    2: .same(proto: "open"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._peerID) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self.`open`) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._peerID {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if self.`open` != false {
+      try visitor.visitSingularBoolField(value: self.`open`, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateDialogOpenInput, rhs: UpdateDialogOpenInput) -> Bool {
+    if lhs._peerID != rhs._peerID {return false}
+    if lhs.`open` != rhs.`open` {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension UpdateDialogOpenResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = "UpdateDialogOpenResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "chat"),
+    2: .same(proto: "dialog"),
+    3: .same(proto: "user"),
+  ]
+
+  fileprivate class _StorageClass {
+    var _chat: Chat? = nil
+    var _dialog: Dialog? = nil
+    var _user: User? = nil
+
+    #if swift(>=5.10)
+      // This property is used as the initial default value for new instances of the type.
+      // The type itself is protecting the reference to its storage via CoW semantics.
+      // This will force a copy to be made of this reference when the first mutation occurs;
+      // hence, it is safe to mark this as `nonisolated(unsafe)`.
+      static nonisolated(unsafe) let defaultInstance = _StorageClass()
+    #else
+      static let defaultInstance = _StorageClass()
+    #endif
+
+    private init() {}
+
+    init(copying source: _StorageClass) {
+      _chat = source._chat
+      _dialog = source._dialog
+      _user = source._user
+    }
+  }
+
+  fileprivate mutating func _uniqueStorage() -> _StorageClass {
+    if !isKnownUniquelyReferenced(&_storage) {
+      _storage = _StorageClass(copying: _storage)
+    }
+    return _storage
+  }
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    _ = _uniqueStorage()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      while let fieldNumber = try decoder.nextFieldNumber() {
+        // The use of inline closures is to circumvent an issue where the compiler
+        // allocates stack space for every case branch when no optimizations are
+        // enabled. https://github.com/apple/swift-protobuf/issues/1034
+        switch fieldNumber {
+        case 1: try { try decoder.decodeSingularMessageField(value: &_storage._chat) }()
+        case 2: try { try decoder.decodeSingularMessageField(value: &_storage._dialog) }()
+        case 3: try { try decoder.decodeSingularMessageField(value: &_storage._user) }()
+        default: break
+        }
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every if/case branch local when no optimizations
+      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+      // https://github.com/apple/swift-protobuf/issues/1182
+      try { if let v = _storage._chat {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+      } }()
+      try { if let v = _storage._dialog {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+      } }()
+      try { if let v = _storage._user {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+      } }()
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: UpdateDialogOpenResult, rhs: UpdateDialogOpenResult) -> Bool {
+    if lhs._storage !== rhs._storage {
+      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
+        let _storage = _args.0
+        let rhs_storage = _args.1
+        if _storage._chat != rhs_storage._chat {return false}
+        if _storage._dialog != rhs_storage._dialog {return false}
+        if _storage._user != rhs_storage._user {return false}
         return true
       }
       if !storagesAreEqual {return false}

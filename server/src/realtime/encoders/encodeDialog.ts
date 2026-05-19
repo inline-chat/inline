@@ -1,7 +1,8 @@
-import { Dialog, Member_Role, Peer, type Member } from "@inline-chat/protocol/core"
-import type { DbDialog, DbMember } from "@in/server/db/schema"
+import { Dialog, Peer } from "@inline-chat/protocol/core"
+import type { DbDialog } from "@in/server/db/schema"
 import { encodeDate } from "@in/server/realtime/encoders/helpers"
 import { decodeDialogNotificationSettings } from "@in/server/modules/notifications/dialogNotificationSettings"
+import { effectiveDialogOpenForDialog } from "@in/server/modules/dialogOpen"
 import { Log } from "@in/server/utils/log"
 
 const log = new Log("encodeDialog")
@@ -43,6 +44,9 @@ export function encodeDialog(dialog: DbDialog, { unreadCount }: { unreadCount: n
     readMaxId: dialog.readInboxMaxId ? BigInt(dialog.readInboxMaxId) : undefined,
     unreadMark: dialog.unreadMark ?? undefined,
     notificationSettings: decodeDialogNotificationSettings(dialog.notificationSettings),
+    open: effectiveDialogOpenForDialog(dialog),
+    openedDate: encodeDate(dialog.openedDate ?? undefined),
+    sidebarVisible: dialog.chatListHidden !== true,
     chatListHidden: dialog.chatListHidden === true ? true : undefined,
   }
 }

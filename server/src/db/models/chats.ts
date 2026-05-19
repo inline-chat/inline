@@ -9,6 +9,7 @@ import type { InputPeer } from "@inline-chat/protocol/core"
 import { Log } from "@in/server/utils/log"
 import type { PgTransaction } from "drizzle-orm/pg-core"
 import type { PostgresJsQueryResultHKT } from "drizzle-orm/postgres-js"
+import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
 
 const log = new Log("chats")
 
@@ -75,6 +76,7 @@ async function createUserChatAndDialog(input: {
           chatId: chat.id,
           userId: input.currentUserId,
           peerUserId: input.peerUserId,
+          ...dialogOpenDefaultsForChat(chat),
         })
         .returning()
     }

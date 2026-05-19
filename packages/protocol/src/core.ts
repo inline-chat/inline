@@ -458,9 +458,30 @@ export interface Dialog {
      */
     notificationSettings?: DialogNotificationSettings;
     /**
-     * @generated from protobuf field: optional bool chat_list_hidden = 10;
+     * Deprecated wire field kept so old sidebar_visible=true does not decode as hidden.
+     *
+     * @deprecated
+     * @generated from protobuf field: optional bool sidebar_visible = 10 [deprecated = true];
+     */
+    sidebarVisible?: boolean;
+    /**
+     * Hide noisy reply threads from normal chat lists; this is independent of sidebar inbox open state.
+     *
+     * @generated from protobuf field: optional bool chat_list_hidden = 13;
      */
     chatListHidden?: boolean;
+    /**
+     * Stable sidebar inbox membership.
+     *
+     * @generated from protobuf field: optional bool open = 11;
+     */
+    open?: boolean;
+    /**
+     * Set only when open transitions from false to true.
+     *
+     * @generated from protobuf field: optional int64 opened_date = 12;
+     */
+    openedDate?: bigint;
 }
 /**
  * A thread
@@ -2048,6 +2069,12 @@ export interface RpcCall {
          */
         revokeSession: RevokeSessionInput;
     } | {
+        oneofKind: "updateDialogOpen";
+        /**
+         * @generated from protobuf field: UpdateDialogOpenInput updateDialogOpen = 52;
+         */
+        updateDialogOpen: UpdateDialogOpenInput;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -2363,6 +2390,12 @@ export interface RpcResult {
          */
         revokeSession: RevokeSessionResult;
     } | {
+        oneofKind: "updateDialogOpen";
+        /**
+         * @generated from protobuf field: UpdateDialogOpenResult updateDialogOpen = 52;
+         */
+        updateDialogOpen: UpdateDialogOpenResult;
+    } | {
         oneofKind: undefined;
     };
 }
@@ -2642,6 +2675,40 @@ export interface ShowInChatListResult {
      * @generated from protobuf field: Dialog dialog = 2;
      */
     dialog?: Dialog;
+}
+/**
+ * @generated from protobuf message UpdateDialogOpenInput
+ */
+export interface UpdateDialogOpenInput {
+    /**
+     * Peer ID to open or close in the sidebar inbox.
+     *
+     * @generated from protobuf field: InputPeer peer_id = 1;
+     */
+    peerId?: InputPeer;
+    /**
+     * Whether this dialog should appear in the sidebar inbox.
+     *
+     * @generated from protobuf field: bool open = 2;
+     */
+    open: boolean;
+}
+/**
+ * @generated from protobuf message UpdateDialogOpenResult
+ */
+export interface UpdateDialogOpenResult {
+    /**
+     * @generated from protobuf field: Chat chat = 1;
+     */
+    chat?: Chat;
+    /**
+     * @generated from protobuf field: Dialog dialog = 2;
+     */
+    dialog?: Dialog;
+    /**
+     * @generated from protobuf field: optional User user = 3;
+     */
+    user?: User;
 }
 /**
  * Mark dialog as unread
@@ -5451,7 +5518,11 @@ export enum Method {
     /**
      * @generated from protobuf enum value: REVOKE_SESSION = 50;
      */
-    REVOKE_SESSION = 50
+    REVOKE_SESSION = 50,
+    /**
+     * @generated from protobuf enum value: UPDATE_DIALOG_OPEN = 51;
+     */
+    UPDATE_DIALOG_OPEN = 51
 }
 /**
  * @generated from protobuf enum PushNotificationProvider
@@ -6670,7 +6741,10 @@ class Dialog$Type extends MessageType<Dialog> {
             { no: 7, name: "chat_id", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
             { no: 8, name: "unread_mark", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
             { no: 9, name: "notification_settings", kind: "message", T: () => DialogNotificationSettings },
-            { no: 10, name: "chat_list_hidden", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ }
+            { no: 10, name: "sidebar_visible", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 13, name: "chat_list_hidden", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 11, name: "open", kind: "scalar", opt: true, T: 8 /*ScalarType.BOOL*/ },
+            { no: 12, name: "opened_date", kind: "scalar", opt: true, T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
         ]);
     }
     create(value?: PartialMessage<Dialog>): Dialog {
@@ -6711,8 +6785,17 @@ class Dialog$Type extends MessageType<Dialog> {
                 case /* optional DialogNotificationSettings notification_settings */ 9:
                     message.notificationSettings = DialogNotificationSettings.internalBinaryRead(reader, reader.uint32(), options, message.notificationSettings);
                     break;
-                case /* optional bool chat_list_hidden */ 10:
+                case /* optional bool sidebar_visible = 10 [deprecated = true];*/ 10:
+                    message.sidebarVisible = reader.bool();
+                    break;
+                case /* optional bool chat_list_hidden */ 13:
                     message.chatListHidden = reader.bool();
+                    break;
+                case /* optional bool open */ 11:
+                    message.open = reader.bool();
+                    break;
+                case /* optional int64 opened_date */ 12:
+                    message.openedDate = reader.int64().toBigInt();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -6753,9 +6836,18 @@ class Dialog$Type extends MessageType<Dialog> {
         /* optional DialogNotificationSettings notification_settings = 9; */
         if (message.notificationSettings)
             DialogNotificationSettings.internalBinaryWrite(message.notificationSettings, writer.tag(9, WireType.LengthDelimited).fork(), options).join();
-        /* optional bool chat_list_hidden = 10; */
+        /* optional bool sidebar_visible = 10 [deprecated = true]; */
+        if (message.sidebarVisible !== undefined)
+            writer.tag(10, WireType.Varint).bool(message.sidebarVisible);
+        /* optional bool chat_list_hidden = 13; */
         if (message.chatListHidden !== undefined)
-            writer.tag(10, WireType.Varint).bool(message.chatListHidden);
+            writer.tag(13, WireType.Varint).bool(message.chatListHidden);
+        /* optional bool open = 11; */
+        if (message.open !== undefined)
+            writer.tag(11, WireType.Varint).bool(message.open);
+        /* optional int64 opened_date = 12; */
+        if (message.openedDate !== undefined)
+            writer.tag(12, WireType.Varint).int64(message.openedDate);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -9564,7 +9656,8 @@ class RpcCall$Type extends MessageType<RpcCall> {
             { no: 48, name: "reserveChatIds", kind: "message", oneof: "input", T: () => ReserveChatIdsInput },
             { no: 49, name: "invokeMessageAction", kind: "message", oneof: "input", T: () => InvokeMessageActionInput },
             { no: 50, name: "answerMessageAction", kind: "message", oneof: "input", T: () => AnswerMessageActionInput },
-            { no: 51, name: "revokeSession", kind: "message", oneof: "input", T: () => RevokeSessionInput }
+            { no: 51, name: "revokeSession", kind: "message", oneof: "input", T: () => RevokeSessionInput },
+            { no: 52, name: "updateDialogOpen", kind: "message", oneof: "input", T: () => UpdateDialogOpenInput }
         ]);
     }
     create(value?: PartialMessage<RpcCall>): RpcCall {
@@ -9883,6 +9976,12 @@ class RpcCall$Type extends MessageType<RpcCall> {
                         revokeSession: RevokeSessionInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).revokeSession)
                     };
                     break;
+                case /* UpdateDialogOpenInput updateDialogOpen */ 52:
+                    message.input = {
+                        oneofKind: "updateDialogOpen",
+                        updateDialogOpen: UpdateDialogOpenInput.internalBinaryRead(reader, reader.uint32(), options, (message.input as any).updateDialogOpen)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -10048,6 +10147,9 @@ class RpcCall$Type extends MessageType<RpcCall> {
         /* RevokeSessionInput revokeSession = 51; */
         if (message.input.oneofKind === "revokeSession")
             RevokeSessionInput.internalBinaryWrite(message.input.revokeSession, writer.tag(51, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateDialogOpenInput updateDialogOpen = 52; */
+        if (message.input.oneofKind === "updateDialogOpen")
+            UpdateDialogOpenInput.internalBinaryWrite(message.input.updateDialogOpen, writer.tag(52, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -10112,7 +10214,8 @@ class RpcResult$Type extends MessageType<RpcResult> {
             { no: 48, name: "reserveChatIds", kind: "message", oneof: "result", T: () => ReserveChatIdsResult },
             { no: 49, name: "invokeMessageAction", kind: "message", oneof: "result", T: () => InvokeMessageActionResult },
             { no: 50, name: "answerMessageAction", kind: "message", oneof: "result", T: () => AnswerMessageActionResult },
-            { no: 51, name: "revokeSession", kind: "message", oneof: "result", T: () => RevokeSessionResult }
+            { no: 51, name: "revokeSession", kind: "message", oneof: "result", T: () => RevokeSessionResult },
+            { no: 52, name: "updateDialogOpen", kind: "message", oneof: "result", T: () => UpdateDialogOpenResult }
         ]);
     }
     create(value?: PartialMessage<RpcResult>): RpcResult {
@@ -10431,6 +10534,12 @@ class RpcResult$Type extends MessageType<RpcResult> {
                         revokeSession: RevokeSessionResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).revokeSession)
                     };
                     break;
+                case /* UpdateDialogOpenResult updateDialogOpen */ 52:
+                    message.result = {
+                        oneofKind: "updateDialogOpen",
+                        updateDialogOpen: UpdateDialogOpenResult.internalBinaryRead(reader, reader.uint32(), options, (message.result as any).updateDialogOpen)
+                    };
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -10596,6 +10705,9 @@ class RpcResult$Type extends MessageType<RpcResult> {
         /* RevokeSessionResult revokeSession = 51; */
         if (message.result.oneofKind === "revokeSession")
             RevokeSessionResult.internalBinaryWrite(message.result.revokeSession, writer.tag(51, WireType.LengthDelimited).fork(), options).join();
+        /* UpdateDialogOpenResult updateDialogOpen = 52; */
+        if (message.result.oneofKind === "updateDialogOpen")
+            UpdateDialogOpenResult.internalBinaryWrite(message.result.updateDialogOpen, writer.tag(52, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -11468,6 +11580,120 @@ class ShowInChatListResult$Type extends MessageType<ShowInChatListResult> {
  * @generated MessageType for protobuf message ShowInChatListResult
  */
 export const ShowInChatListResult = new ShowInChatListResult$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateDialogOpenInput$Type extends MessageType<UpdateDialogOpenInput> {
+    constructor() {
+        super("UpdateDialogOpenInput", [
+            { no: 1, name: "peer_id", kind: "message", T: () => InputPeer },
+            { no: 2, name: "open", kind: "scalar", T: 8 /*ScalarType.BOOL*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateDialogOpenInput>): UpdateDialogOpenInput {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        message.open = false;
+        if (value !== undefined)
+            reflectionMergePartial<UpdateDialogOpenInput>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateDialogOpenInput): UpdateDialogOpenInput {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* InputPeer peer_id */ 1:
+                    message.peerId = InputPeer.internalBinaryRead(reader, reader.uint32(), options, message.peerId);
+                    break;
+                case /* bool open */ 2:
+                    message.open = reader.bool();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateDialogOpenInput, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* InputPeer peer_id = 1; */
+        if (message.peerId)
+            InputPeer.internalBinaryWrite(message.peerId, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* bool open = 2; */
+        if (message.open !== false)
+            writer.tag(2, WireType.Varint).bool(message.open);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateDialogOpenInput
+ */
+export const UpdateDialogOpenInput = new UpdateDialogOpenInput$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UpdateDialogOpenResult$Type extends MessageType<UpdateDialogOpenResult> {
+    constructor() {
+        super("UpdateDialogOpenResult", [
+            { no: 1, name: "chat", kind: "message", T: () => Chat },
+            { no: 2, name: "dialog", kind: "message", T: () => Dialog },
+            { no: 3, name: "user", kind: "message", T: () => User }
+        ]);
+    }
+    create(value?: PartialMessage<UpdateDialogOpenResult>): UpdateDialogOpenResult {
+        const message = globalThis.Object.create((this.messagePrototype!));
+        if (value !== undefined)
+            reflectionMergePartial<UpdateDialogOpenResult>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UpdateDialogOpenResult): UpdateDialogOpenResult {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* Chat chat */ 1:
+                    message.chat = Chat.internalBinaryRead(reader, reader.uint32(), options, message.chat);
+                    break;
+                case /* Dialog dialog */ 2:
+                    message.dialog = Dialog.internalBinaryRead(reader, reader.uint32(), options, message.dialog);
+                    break;
+                case /* optional User user */ 3:
+                    message.user = User.internalBinaryRead(reader, reader.uint32(), options, message.user);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UpdateDialogOpenResult, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* Chat chat = 1; */
+        if (message.chat)
+            Chat.internalBinaryWrite(message.chat, writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* Dialog dialog = 2; */
+        if (message.dialog)
+            Dialog.internalBinaryWrite(message.dialog, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* optional User user = 3; */
+        if (message.user)
+            User.internalBinaryWrite(message.user, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message UpdateDialogOpenResult
+ */
+export const UpdateDialogOpenResult = new UpdateDialogOpenResult$Type();
 // @generated message type with reflection information, may provide speed optimized methods
 class MarkAsUnreadInput$Type extends MessageType<MarkAsUnreadInput> {
     constructor() {

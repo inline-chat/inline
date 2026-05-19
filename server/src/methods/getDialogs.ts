@@ -18,6 +18,7 @@ import {
 import type { HandlerContext } from "@in/server/controllers/helpers"
 import * as schema from "@in/server/db/schema"
 import { normalizeId, TInputId } from "@in/server/types/methods"
+import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
 
 export const Input = Type.Object({
   spaceId: TInputId,
@@ -79,6 +80,7 @@ async function createMissingDialogsForPublicChats(publicChats: any[], currentUse
             chatId: c.id,
             userId: currentUserId,
             spaceId: spaceId,
+            ...dialogOpenDefaultsForChat(c),
           })
           .returning()
         if (newDialog[0]) newDialogs.push(newDialog[0])
@@ -319,6 +321,7 @@ export const handler = async (
                 peerUserId: chat.minUserId === currentUserId ? chat.maxUserId : chat.minUserId,
                 userId: currentUserId,
                 date: new Date(),
+                ...dialogOpenDefaultsForChat(chat),
               })
               .returning()
             if (dialog) created.push(dialog)
@@ -365,6 +368,7 @@ export const handler = async (
           if (chat.type === "thread") {
             values.spaceId = spaceId
           }
+          Object.assign(values, dialogOpenDefaultsForChat(chat))
           const inserted = await tx.insert(schema.dialogs).values(values).returning()
           if (inserted[0]) created.push(inserted[0])
         }

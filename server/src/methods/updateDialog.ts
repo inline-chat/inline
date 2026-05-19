@@ -14,6 +14,7 @@ import type { ServerUpdate } from "@inline-chat/protocol/server"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { emitChatListOpenUpdates, getChatById, isLinkedSubthread, promoteLinkedSubthreadDialogsToChatList } from "@in/server/modules/subthreads"
+import { dialogOpenFieldsForOpen } from "@in/server/modules/dialogOpen"
 
 export const Input = Type.Object({
   pinned: Optional(Type.Boolean()),
@@ -67,7 +68,12 @@ export const handler = async (
 
   let dialog = await db.transaction(async (tx) => {
     const [existingDialog] = await tx
-      .select({ archived: dialogs.archived, chatListHidden: dialogs.chatListHidden, chatId: dialogs.chatId })
+      .select({
+        archived: dialogs.archived,
+        chatListHidden: dialogs.chatListHidden,
+        chatId: dialogs.chatId,
+        open: dialogs.open,
+      })
       .from(dialogs)
       .where(whereClause)
       .limit(1)
@@ -86,6 +92,9 @@ export const handler = async (
     if (input.pinned !== undefined) updateSet.pinned = input.pinned
     if (input.draft !== undefined) updateSet.draft = input.draft
     if (input.archived !== undefined) updateSet.archived = input.archived
+    if (input.pinned === true) {
+      Object.assign(updateSet, dialogOpenFieldsForOpen(existingDialog))
+    }
 
     const updatedDialog =
       Object.keys(updateSet).length > 0

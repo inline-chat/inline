@@ -34,6 +34,7 @@ import { UpdatesModel, type UpdateSeqAndDate } from "@in/server/db/models/update
 import { UpdateBucket } from "@in/server/db/schema/updates"
 import type { ServerUpdate } from "@inline-chat/protocol/server"
 import { encodeDateStrict } from "@in/server/realtime/encoders/helpers"
+import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
 
 export const Input = Type.Object({
   userId: Type.String(),
@@ -106,6 +107,7 @@ export const handler = async (
         userId: context.currentUserId,
         peerUserId: context.currentUserId,
         date: new Date(),
+        ...dialogOpenDefaultsForChat(chat),
       })
       .onConflictDoNothing()
       .returning()
@@ -134,12 +136,14 @@ export const handler = async (
           userId: minUserId,
           peerUserId: maxUserId,
           date: new Date(),
+          ...dialogOpenDefaultsForChat(chat),
         },
         {
           chatId: chat.id,
           userId: maxUserId,
           peerUserId: minUserId,
           date: new Date(),
+          ...dialogOpenDefaultsForChat(chat),
         },
       ])
       .onConflictDoUpdate({

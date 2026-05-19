@@ -8,9 +8,10 @@ import { Log } from "@in/server/utils/log"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
 import { db } from "@in/server/db"
 import { and, desc, eq, isNull, not } from "drizzle-orm"
-import { chats, dialogs, messages, type DbChat, type DbDialog } from "@in/server/db/schema"
+import { dialogs, messages, type DbChat, type DbDialog } from "@in/server/db/schema"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { ensureLinkedSubthreadDialogs, getAnchorMessageForChat, isLinkedSubthread } from "@in/server/modules/subthreads"
+import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
 
 type Input = {
   peerId: InputPeer
@@ -62,6 +63,7 @@ async function getChatAndDialogForDM(
         chatId: existingChat.id,
         userId: currentUserId,
         peerUserId,
+        ...dialogOpenDefaultsForChat(existingChat),
       })
       .returning()
 
@@ -148,6 +150,7 @@ async function getChatAndDialogForThread(
         chatId,
         userId: currentUserId,
         peerUserId,
+        ...dialogOpenDefaultsForChat(chat),
       })
       .returning()
 
