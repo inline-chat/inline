@@ -21,6 +21,7 @@ final class MainWindowOpenCoordinator {
     weak var toastPresenter: (any ToastPresenting)?
     let route: @MainActor (MainWindowDestination) -> Void
     let openCommandBar: @MainActor () -> Void
+    let toggleCommandBar: @MainActor () -> Void
     let toggleSidebar: @MainActor () -> Void
     var navigateChat: (@MainActor (_ offset: Int) -> Void)?
     var renameThread: (@MainActor () -> Bool)?
@@ -47,6 +48,7 @@ final class MainWindowOpenCoordinator {
     toastPresenter: (any ToastPresenting)?,
     route: @escaping @MainActor (MainWindowDestination) -> Void,
     openCommandBar: @escaping @MainActor () -> Void,
+    toggleCommandBar: @escaping @MainActor () -> Void,
     toggleSidebar: @escaping @MainActor () -> Void
   ) {
     guard let window else {
@@ -59,6 +61,7 @@ final class MainWindowOpenCoordinator {
       toastPresenter: toastPresenter,
       route: route,
       openCommandBar: openCommandBar,
+      toggleCommandBar: toggleCommandBar,
       toggleSidebar: toggleSidebar,
       navigateChat: sidebarNavigation[id],
       renameThread: threadRenaming[id]
@@ -170,6 +173,18 @@ final class MainWindowOpenCoordinator {
     }
 
     entry.openCommandBar()
+    focus(entry)
+    return true
+  }
+
+  @discardableResult
+  func toggleCommandBar() -> Bool {
+    guard let entry = activeEntry() else {
+      openMainWindow?()
+      return false
+    }
+
+    entry.toggleCommandBar()
     focus(entry)
     return true
   }

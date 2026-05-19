@@ -211,6 +211,10 @@ class Nav3 {
     cmdKVisible = true
   }
 
+  func toggleCommandBar() {
+    cmdKVisible.toggle()
+  }
+
   func closeCommandBar() {
     cmdKVisible = false
   }

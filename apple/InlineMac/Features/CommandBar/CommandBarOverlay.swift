@@ -48,6 +48,7 @@ private struct CommandBarOverlay: View {
   @State private var vimUnsubscriber: (() -> Void)?
   @State private var returnUnsubscriber: (() -> Void)?
   @State private var localKeyMonitor: Any?
+  @State private var resetsOnClose = false
 
   var body: some View {
     QuickSearchOverlayView(
@@ -65,7 +66,9 @@ private struct CommandBarOverlay: View {
       installKeyHandling()
     }
     .onDisappear {
-      viewModel.reset()
+      if resetsOnClose {
+        viewModel.reset()
+      }
       removeKeyHandling()
     }
     .onEscapeKey("swiftui_command_bar_escape") {
@@ -86,7 +89,8 @@ private struct CommandBarOverlay: View {
     }
   }
 
-  private func close() {
+  private func close(reset: Bool = true) {
+    resetsOnClose = reset
     nav.closeCommandBar()
   }
 

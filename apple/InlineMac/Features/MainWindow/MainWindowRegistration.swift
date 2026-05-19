@@ -7,6 +7,7 @@ extension View {
     toastPresenter: (any ToastPresenting)?,
     route: @escaping (MainWindowDestination) -> Void,
     openCommandBar: @escaping () -> Void,
+    toggleCommandBar: @escaping () -> Void,
     toggleSidebar: @escaping () -> Void
   ) -> some View {
     onHostingWindowChange { window in
@@ -17,6 +18,7 @@ extension View {
           toastPresenter: toastPresenter,
           route: route,
           openCommandBar: openCommandBar,
+          toggleCommandBar: toggleCommandBar,
           toggleSidebar: toggleSidebar
         )
       }
