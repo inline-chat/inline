@@ -4,6 +4,7 @@
 import * as stylex from "@stylexjs/stylex"
 import { useEffect, useRef, useState } from "react"
 import { AnimatePresence, motion } from "motion/react"
+import { SUPPORT_EMAIL, useHydratedEmail } from "~/lib/email"
 
 //import "./styles/style.css"
 
@@ -75,7 +76,6 @@ const COPY = {
       docs: "Docs",
       legal: "Legal",
       privacy: "Privacy",
-      email: "hey@inline.chat",
     },
     copyright: "© 2026 Inline Chat",
   },
@@ -89,6 +89,7 @@ const cardRadius = 22
 const firstContentRowHeight = 445
 const buttonHeight = 44
 export function Landing() {
+  const footerEmail = useHydratedEmail(SUPPORT_EMAIL)
   const [focused, setFocused] = useState(false)
   const [email, setEmail] = useState("")
   const [submitting, setSubmitting] = useState(false)
@@ -531,12 +532,12 @@ export function Landing() {
             </a>
           </div>
           <a
-            href="mailto:hey@inline.chat"
+            href={footerEmail.href}
             target="_blank"
             rel="noopener noreferrer"
             {...stylex.props(styles.footerLink)}
           >
-            {COPY.footer.links.email}
+            {footerEmail.label}
           </a>
         </div>
 
