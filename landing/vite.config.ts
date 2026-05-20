@@ -7,6 +7,7 @@ import stylex from "vite-plugin-stylex"
 import { nitro } from "nitro/vite"
 
 const host = process.env.TAURI_DEV_HOST
+const immutableAssetMaxAge = 60 * 60 * 24 * 365
 
 const plugins = [
   tailwindcss(),
@@ -58,6 +59,14 @@ const config = defineConfig({
   // @ts-ignore
   nitro: {
     preset: "bun",
+    publicAssets: [
+      {
+        dir: "node_modules/.nitro/vite/services/ssr/assets",
+        baseURL: "assets",
+        maxAge: immutableAssetMaxAge,
+        ignore: ["**/*.js"],
+      },
+    ],
   },
 })
 

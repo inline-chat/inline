@@ -1,9 +1,11 @@
 import * as stylex from "@stylexjs/stylex"
 import { useState } from "react"
 import { PageContainer } from "./Page"
+import { SUPPORT_EMAIL, emailValue, useHydratedEmail } from "~/lib/email"
 
 export const PageFooter = () => {
   const [isCopied, setIsCopied] = useState(false)
+  const email = useHydratedEmail(SUPPORT_EMAIL)
 
   return (
     <footer {...stylex.props(styles.footer)}>
@@ -18,7 +20,7 @@ export const PageFooter = () => {
           <div {...stylex.props(styles.links)}>
             <button
               onClick={() => {
-                navigator.clipboard.writeText("hey@inline.chat")
+                navigator.clipboard.writeText(emailValue(SUPPORT_EMAIL))
                 setIsCopied(true)
                 setTimeout(() => {
                   setIsCopied(false)
@@ -26,7 +28,7 @@ export const PageFooter = () => {
               }}
               {...stylex.props(styles.emailLink)}
             >
-              {isCopied ? "copied to clipboard" : "hey@inline.chat"}
+              {isCopied ? "copied to clipboard" : email.label}
             </button>
             <a href="/waitlist" {...stylex.props(styles.link)}>
               Join Waitlist

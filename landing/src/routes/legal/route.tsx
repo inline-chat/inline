@@ -3,6 +3,7 @@ import { useEffect, useState } from "react"
 
 import { MoonIcon, SunIcon } from "~/docs/lucide"
 import { LEGAL_NAV } from "~/legal/nav"
+import { SUPPORT_EMAIL, emailValue, useHydratedEmail } from "~/lib/email"
 
 import styleCssUrl from "../../landing/styles/style.css?url"
 import docsCssUrl from "../../landing/styles/docs.css?url"
@@ -35,6 +36,7 @@ function LegalLayout() {
 
   const [theme, setTheme] = useState<"light" | "dark" | null>(null)
   const [isFooterEmailCopied, setIsFooterEmailCopied] = useState(false)
+  const footerEmail = useHydratedEmail(SUPPORT_EMAIL)
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -142,7 +144,7 @@ function LegalLayout() {
                 className="docs-footer-copy"
                 onClick={async () => {
                   try {
-                    await navigator.clipboard.writeText("hey@inline.chat")
+                    await navigator.clipboard.writeText(emailValue(SUPPORT_EMAIL))
                     setIsFooterEmailCopied(true)
                     window.setTimeout(() => setIsFooterEmailCopied(false), 900)
                   } catch {
@@ -150,7 +152,7 @@ function LegalLayout() {
                   }
                 }}
               >
-                {isFooterEmailCopied ? "hey@inline.chat copied" : "hey@inline.chat"}
+                {isFooterEmailCopied ? "email copied" : footerEmail.label}
               </button>
             </div>
           </div>

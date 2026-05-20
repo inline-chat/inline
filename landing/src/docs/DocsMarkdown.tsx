@@ -4,6 +4,7 @@ import { Link } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 import { useEffect, useRef, useState } from "react"
 import { CheckIcon, CopyIcon } from "~/docs/lucide"
+import { emailFallback, emailParts } from "~/lib/email"
 
 type DocsMarkdownProps = {
   markdown: string
@@ -77,9 +78,12 @@ function PreWithCopy({ children, ...props }: { children?: ReactNode; [key: strin
 export function DocsMarkdown({ markdown, className }: DocsMarkdownProps) {
   const slugger = createSlugger()
   const [copiedEmail, setCopiedEmail] = useState<string | null>(null)
+  const [hydrated, setHydrated] = useState(false)
   const copiedEmailTimeout = useRef<number | null>(null)
 
   useEffect(() => {
+    setHydrated(true)
+
     return () => {
       if (copiedEmailTimeout.current !== null) {
         window.clearTimeout(copiedEmailTimeout.current)
@@ -116,6 +120,7 @@ export function DocsMarkdown({ markdown, className }: DocsMarkdownProps) {
           if (safeHref.startsWith("mailto:")) {
             const email = decodeURIComponent(safeHref.slice("mailto:".length).split("?")[0] ?? "")
             const isCopied = copiedEmail === email
+            const label = email ? (hydrated ? email : emailFallback(emailParts(email))) : nodeText(children)
 
             return (
               <button
@@ -138,7 +143,7 @@ export function DocsMarkdown({ markdown, className }: DocsMarkdownProps) {
                   }
                 }}
               >
-                {children}
+                {label}
                 {isCopied ? " copied" : ""}
               </button>
             )
