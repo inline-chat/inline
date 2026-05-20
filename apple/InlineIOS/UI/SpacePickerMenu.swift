@@ -82,20 +82,8 @@ struct SpacePickerMenu: View {
     return nil
   }
 
-  private func connectionStateForToolbar(activeSpace: Space?) -> RealtimeConnectionState? {
-    if let displayedConnectionState = realtimeState.displayedConnectionState {
-      return displayedConnectionState
-    }
-
-    // Avoid showing an empty placeholder on cold startup before the delayed
-    // displayed connection state appears.
-    guard activeSpace == nil else { return nil }
-    switch realtimeState.connectionState {
-      case .connected:
-        return nil
-      case .connecting, .updating:
-        return realtimeState.connectionState
-    }
+  private func connectionStateForToolbar(activeSpace _: Space?) -> RealtimeConnectionState? {
+    realtimeState.displayedConnectionState
   }
 }
 

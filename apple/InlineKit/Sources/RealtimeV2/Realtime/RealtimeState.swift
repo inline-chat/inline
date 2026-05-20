@@ -1,6 +1,42 @@
 import Combine
 import Foundation
 
+public enum RealtimeConnectionDisplayPhase: Sendable {
+  case coldStart
+  case reconnect
+}
+
+public struct RealtimeConnectionDisplayPolicy: Sendable {
+  public let coldStartDelaySeconds: TimeInterval
+  public let reconnectDelaySeconds: TimeInterval
+  public let hideDelaySeconds: TimeInterval
+
+  public init(
+    coldStartDelaySeconds: TimeInterval,
+    reconnectDelaySeconds: TimeInterval,
+    hideDelaySeconds: TimeInterval
+  ) {
+    self.coldStartDelaySeconds = coldStartDelaySeconds
+    self.reconnectDelaySeconds = reconnectDelaySeconds
+    self.hideDelaySeconds = hideDelaySeconds
+  }
+
+  public static let `default` = RealtimeConnectionDisplayPolicy(
+    coldStartDelaySeconds: 2,
+    reconnectDelaySeconds: 4,
+    hideDelaySeconds: 1
+  )
+
+  public func showDelaySeconds(for phase: RealtimeConnectionDisplayPhase) -> TimeInterval {
+    switch phase {
+    case .coldStart:
+      coldStartDelaySeconds
+    case .reconnect:
+      reconnectDelaySeconds
+    }
+  }
+}
+
 /// An ObservableObject class that represents the state of the Realtime connection for usage in SwiftUI views
 public class RealtimeState: ObservableObject, @unchecked Sendable {
   // Private properties
@@ -8,8 +44,10 @@ public class RealtimeState: ObservableObject, @unchecked Sendable {
   private var task: Task<Void, Never>?
   private var showTask: Task<Void, Never>?
   private var hideTask: Task<Void, Never>?
-  private let displayDelaySeconds: TimeInterval
-  private let hideDelaySeconds: TimeInterval
+  /// UI-facing display policy. This only controls `displayedConnectionState`;
+  /// it never feeds back into the engine's main `connectionState`.
+  private let displayPolicy: RealtimeConnectionDisplayPolicy
+  private var didReachConnectedState = false
 
   // Published properties
   @Published public var connectionState: RealtimeConnectionState = .connecting
@@ -19,12 +57,19 @@ public class RealtimeState: ObservableObject, @unchecked Sendable {
   public var connectionStatePublisher: PassthroughSubject<RealtimeConnectionState, Never> = .init()
   public var displayedConnectionStatePublisher: PassthroughSubject<RealtimeConnectionState?, Never> = .init()
 
-  public init(
-    displayDelaySeconds: TimeInterval = 1,
+  public init(displayPolicy: RealtimeConnectionDisplayPolicy = .default) {
+    self.displayPolicy = displayPolicy
+  }
+
+  public convenience init(
+    displayDelaySeconds: TimeInterval,
     hideDelaySeconds: TimeInterval = 1
   ) {
-    self.displayDelaySeconds = displayDelaySeconds
-    self.hideDelaySeconds = hideDelaySeconds
+    self.init(displayPolicy: RealtimeConnectionDisplayPolicy(
+      coldStartDelaySeconds: displayDelaySeconds,
+      reconnectDelaySeconds: displayDelaySeconds,
+      hideDelaySeconds: hideDelaySeconds
+    ))
   }
 
   public func start(realtime: RealtimeV2) {
@@ -48,20 +93,27 @@ public class RealtimeState: ObservableObject, @unchecked Sendable {
 
   @MainActor
   func applyConnectionState(_ state: RealtimeConnectionState) {
+    let displayPhase = currentDisplayPhase
     connectionState = state
     connectionStatePublisher.send(state)
-    updateDisplayedConnectionState(for: state)
+    updateDisplayedConnectionState(for: state, displayPhase: displayPhase)
+    if state == .connected || state == .updating {
+      didReachConnectedState = true
+    }
   }
 
   @MainActor
-  private func updateDisplayedConnectionState(for state: RealtimeConnectionState) {
+  private func updateDisplayedConnectionState(
+    for state: RealtimeConnectionState,
+    displayPhase: RealtimeConnectionDisplayPhase
+  ) {
     switch state {
       case .connected:
         showTask?.cancel()
         showTask = nil
 
         guard displayedConnectionState != nil else { return }
-        let hideDelaySeconds = hideDelaySeconds
+        let hideDelaySeconds = displayPolicy.hideDelaySeconds
         hideTask?.cancel()
         hideTask = Task { [weak self] in
           do {
@@ -86,7 +138,7 @@ public class RealtimeState: ObservableObject, @unchecked Sendable {
         }
 
         guard showTask == nil else { return }
-        let displayDelaySeconds = displayDelaySeconds
+        let displayDelaySeconds = displayPolicy.showDelaySeconds(for: displayPhase)
         showTask = Task { [weak self] in
           do {
             try await Task.sleep(for: .seconds(displayDelaySeconds))
@@ -101,6 +153,10 @@ public class RealtimeState: ObservableObject, @unchecked Sendable {
           }
         }
     }
+  }
+
+  private var currentDisplayPhase: RealtimeConnectionDisplayPhase {
+    didReachConnectedState ? .reconnect : .coldStart
   }
 
   @MainActor
