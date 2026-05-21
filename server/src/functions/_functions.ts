@@ -38,6 +38,7 @@ import { forwardMessages } from "./messages.forwardMessages"
 import { createSubthread } from "./messages.createSubthread"
 import { showInChatList } from "./messages.showInChatList"
 import { updateDialogOpen } from "./messages.updateDialogOpen"
+import { updateDialogOrder } from "./messages.updateDialogOrder"
 import { reserveChatIds } from "./messages.reserveChatIds"
 import { invokeMessageAction } from "./messages.invokeMessageAction"
 import { answerMessageAction } from "./messages.answerMessageAction"
@@ -67,6 +68,7 @@ export const Functions = {
     createSubthread: createSubthread,
     showInChatList: showInChatList,
     updateDialogOpen: updateDialogOpen,
+    updateDialogOrder: updateDialogOrder,
     reserveChatIds: reserveChatIds,
     invokeMessageAction: invokeMessageAction,
     answerMessageAction: answerMessageAction,

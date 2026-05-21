@@ -93,14 +93,14 @@ describe("getChatHistory", () => {
     })
     expect(dialogsUserA.length).toBe(1)
     expect(dialogsUserA[0]?.open).toBe(true)
-    expect(dialogsUserA[0]?.openedDate).toBeInstanceOf(Date)
+    expect(dialogsUserA[0]?.order).toBeTruthy()
 
     const dialogsUserB = await db._query.dialogs.findMany({
       where: and(eq(schema.dialogs.userId, userB.id), eq(schema.dialogs.peerUserId, userA.id)),
     })
     expect(dialogsUserB.length).toBe(1)
     expect(dialogsUserB[0]?.open).toBe(true)
-    expect(dialogsUserB[0]?.openedDate).toBeInstanceOf(Date)
+    expect(dialogsUserB[0]?.order).toBeTruthy()
   })
 
   test("throws error when trying to get chat history for non-existent user", async () => {
