@@ -493,7 +493,7 @@ describe("sendMessage", () => {
     expect(updatedDialog?.archived).toBe(false)
     expect(updatedDialog?.chatListHidden).toBeNull()
     expect(updatedDialog?.open).toBe(true)
-    expect(updatedDialog?.openedDate).toBeInstanceOf(Date)
+    expect(updatedDialog?.order).toBeTruthy()
 
     const userUpdates = await db.query.updates.findMany({
       where: {
@@ -564,7 +564,7 @@ describe("sendMessage", () => {
 
     expect(recipientDialog?.chatListHidden).toBeNull()
     expect(recipientDialog?.open).toBe(true)
-    expect(recipientDialog?.openedDate).toBeInstanceOf(Date)
+    expect(recipientDialog?.order).toBeTruthy()
 
     const userUpdates = await db.query.updates.findMany({
       where: {
@@ -640,7 +640,7 @@ describe("sendMessage", () => {
 
     expect(recipientDialog?.chatListHidden).toBeNull()
     expect(recipientDialog?.open).toBe(true)
-    expect(recipientDialog?.openedDate).toBeInstanceOf(Date)
+    expect(recipientDialog?.order).toBeTruthy()
 
     const parentMessages = await getMessages(
       {

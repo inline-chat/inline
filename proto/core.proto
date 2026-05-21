@@ -160,8 +160,12 @@ message Dialog {
   optional bool chat_list_hidden = 13;
   // Stable sidebar inbox membership.
   optional bool open = 11;
-  // Set only when open transitions from false to true.
+  // Deprecated: sidebar ordering is now stored in order.
   optional int64 opened_date = 12;
+  // Stable fractional order for normal sidebar inbox rows.
+  optional string order = 14;
+  // Stable fractional order for pinned sidebar rows.
+  optional string pinned_order = 15;
 }
 
 // A thread
@@ -750,6 +754,7 @@ enum Method {
   ANSWER_MESSAGE_ACTION = 49;
   REVOKE_SESSION = 50;
   UPDATE_DIALOG_OPEN = 51;
+  UPDATE_DIALOG_ORDER = 52;
 }
 
 message RpcCall {
@@ -806,6 +811,7 @@ message RpcCall {
     AnswerMessageActionInput answerMessageAction = 50;
     RevokeSessionInput revokeSession = 51;
     UpdateDialogOpenInput updateDialogOpen = 52;
+    UpdateDialogOrderInput updateDialogOrder = 53;
   }
 }
 
@@ -864,6 +870,7 @@ message RpcResult {
     AnswerMessageActionResult answerMessageAction = 50;
     RevokeSessionResult revokeSession = 51;
     UpdateDialogOpenResult updateDialogOpen = 52;
+    UpdateDialogOrderResult updateDialogOrder = 53;
   }
 }
 
@@ -987,9 +994,32 @@ message UpdateDialogOpenInput {
 
   // Whether this dialog should appear in the sidebar inbox.
   bool open = 2;
+
+  // Client-generated fractional order for local-first open transitions.
+  optional string order = 3;
 }
 
 message UpdateDialogOpenResult {
+  Chat chat = 1;
+  Dialog dialog = 2;
+  optional User user = 3;
+}
+
+message UpdateDialogOrderInput {
+  // Peer ID to reorder in the sidebar inbox.
+  InputPeer peer_id = 1;
+
+  // New normal sidebar fractional order.
+  optional string order = 2;
+
+  // New pinned sidebar fractional order.
+  optional string pinned_order = 3;
+
+  // Optional pin state change when reordering across sidebar lanes.
+  optional bool pinned = 4;
+}
+
+message UpdateDialogOrderResult {
   Chat chat = 1;
   Dialog dialog = 2;
   optional User user = 3;

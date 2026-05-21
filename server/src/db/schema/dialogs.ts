@@ -60,6 +60,12 @@ export const dialogs = pgTable(
     /** when the dialog transitioned into the sidebar inbox */
     openedDate: timestamp("opened_date", { mode: "date", precision: 3 }),
 
+    /** fractional order for normal sidebar inbox rows */
+    order: text("order"),
+
+    /** fractional order for pinned sidebar rows */
+    pinnedOrder: text("pinned_order"),
+
     /** manually marked as unread */
     unreadMark: boolean("unread_mark").default(false),
 
@@ -70,6 +76,8 @@ export const dialogs = pgTable(
     chatIdUserIdUnique: unique("chat_id_user_id_unique").on(table.chatId, table.userId),
     userIdChatIdIndex: index("dialogs_user_id_chat_id_idx").on(table.userId, table.chatId),
     userIdPeerUserIdIndex: index("dialogs_user_id_peer_user_id_idx").on(table.userId, table.peerUserId),
+    userIdOrderIndex: index("dialogs_user_id_order_idx").on(table.userId, table.order),
+    userIdPinnedOrderIndex: index("dialogs_user_id_pinned_order_idx").on(table.userId, table.pinnedOrder),
   }),
 )
 

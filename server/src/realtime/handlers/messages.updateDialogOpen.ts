@@ -14,7 +14,7 @@ export const updateDialogOpen = async (
   }
 
   return Functions.messages.updateDialogOpen(
-    { peerId: input.peerId, open: input.open },
+    { peerId: input.peerId, open: input.open, order: input.order },
     {
       currentSessionId: handlerContext.sessionId,
       currentUserId: handlerContext.userId,

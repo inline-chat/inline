@@ -14,7 +14,10 @@ import type { ServerUpdate } from "@inline-chat/protocol/server"
 import { UserBucketUpdates } from "@in/server/modules/updates/userBucketUpdates"
 import { RealtimeUpdates } from "@in/server/realtime/message"
 import { emitChatListOpenUpdates, getChatById, isLinkedSubthread, promoteLinkedSubthreadDialogsToChatList } from "@in/server/modules/subthreads"
-import { dialogOpenFieldsForOpen } from "@in/server/modules/dialogOpen"
+import { dialogOpenFieldsForOpen, nextDialogOrder } from "@in/server/modules/dialogOpen"
+import { FractionalIndex } from "@in/server/modules/fractionalIndex"
+
+const TDialogOrder = Type.String({ minLength: 1, maxLength: 128, pattern: "^[0-9A-Za-z]+$" })
 
 export const Input = Type.Object({
   pinned: Optional(Type.Boolean()),
@@ -23,6 +26,8 @@ export const Input = Type.Object({
   peerThreadId: Optional(TInputId),
   draft: Optional(Type.String()),
   archived: Optional(Type.Boolean()),
+  order: Optional(TDialogOrder),
+  pinnedOrder: Optional(TDialogOrder),
 })
 
 export const Response = Type.Object({
@@ -33,6 +38,13 @@ export const handler = async (
   input: Static<typeof Input>,
   { currentUserId, currentSessionId }: HandlerContext,
 ): Promise<Static<typeof Response>> => {
+  if (input.order !== undefined && !FractionalIndex.isValid(input.order)) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+  if (input.pinnedOrder !== undefined && !FractionalIndex.isValid(input.pinnedOrder)) {
+    throw new InlineError(InlineError.ApiError.BAD_REQUEST)
+  }
+
   const peerId: { userId: number } | { threadId: number } = input.peerUserId
     ? { userId: Number(input.peerUserId) }
     : input.peerThreadId
@@ -73,6 +85,8 @@ export const handler = async (
         chatListHidden: dialogs.chatListHidden,
         chatId: dialogs.chatId,
         open: dialogs.open,
+        order: dialogs.order,
+        pinnedOrder: dialogs.pinnedOrder,
       })
       .from(dialogs)
       .where(whereClause)
@@ -93,7 +107,14 @@ export const handler = async (
     if (input.draft !== undefined) updateSet.draft = input.draft
     if (input.archived !== undefined) updateSet.archived = input.archived
     if (input.pinned === true) {
-      Object.assign(updateSet, dialogOpenFieldsForOpen(existingDialog))
+      const order = existingDialog.order ?? input.order ?? (await nextDialogOrder(tx, currentUserId))
+      const pinnedOrder =
+        existingDialog.pinnedOrder ?? input.pinnedOrder ?? (await nextDialogOrder(tx, currentUserId, "pinned"))
+      Object.assign(updateSet, dialogOpenFieldsForOpen(existingDialog, order))
+      updateSet.pinnedOrder = pinnedOrder
+    }
+    if (input.pinned === false && existingDialog.open === true && !existingDialog.order) {
+      updateSet.order = input.order ?? (await nextDialogOrder(tx, currentUserId))
     }
 
     const updatedDialog =

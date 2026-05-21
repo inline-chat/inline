@@ -18,6 +18,8 @@ const baseDialog: DbDialog = {
   chatListHidden: null,
   open: false,
   openedDate: null,
+  order: null,
+  pinnedOrder: null,
   unreadMark: false,
   notificationSettings: null,
 }
@@ -36,14 +38,23 @@ describe("encodeDialog", () => {
     expect(hidden.chatListHidden).toBe(true)
   })
 
-  test("treats null open state as closed", () => {
+  test("preserves tri-state open encoding", () => {
     const thread = encode({ peerUserId: null, open: null })
-    expect(thread.open).toBe(false)
+    expect(thread.open).toBeUndefined()
 
     const dm = encode({ peerUserId: 2, open: null })
-    expect(dm.open).toBe(false)
+    expect(dm.open).toBeUndefined()
 
     const openDm = encode({ peerUserId: 2, open: true })
     expect(openDm.open).toBe(true)
+
+    const closedDm = encode({ peerUserId: 2, open: false })
+    expect(closedDm.open).toBe(false)
+  })
+
+  test("emits sidebar order fields", () => {
+    const dialog = encode({ order: "U", pinnedOrder: "j" })
+    expect(dialog.order).toBe("U")
+    expect(dialog.pinnedOrder).toBe("j")
   })
 })

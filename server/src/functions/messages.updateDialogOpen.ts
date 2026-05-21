@@ -5,6 +5,7 @@ import { UsersModel } from "@in/server/db/models/users"
 import type { FunctionContext } from "@in/server/functions/_types"
 import { AccessGuards } from "@in/server/modules/authorization/accessGuards"
 import { setDialogOpenForUsers } from "@in/server/modules/dialogOpen"
+import { FractionalIndex } from "@in/server/modules/fractionalIndex"
 import { emitChatListOpenUpdates } from "@in/server/modules/subthreads"
 import { Encoders } from "@in/server/realtime/encoders/encoders"
 import { RealtimeRpcError } from "@in/server/realtime/errors"
@@ -12,6 +13,7 @@ import { RealtimeRpcError } from "@in/server/realtime/errors"
 type Input = {
   peerId: InputPeer
   open: boolean
+  order?: string
 }
 
 type Output = {
@@ -21,6 +23,10 @@ type Output = {
 }
 
 export async function updateDialogOpen(input: Input, context: FunctionContext): Promise<Output> {
+  if (input.order != null && !FractionalIndex.isValid(input.order)) {
+    throw RealtimeRpcError.BadRequest()
+  }
+
   const chat = await ChatModel.getChatFromInputPeer(input.peerId, context)
   await AccessGuards.ensureChatAccess(chat, context.currentUserId)
 
@@ -28,6 +34,7 @@ export async function updateDialogOpen(input: Input, context: FunctionContext): 
     chat,
     userIds: [context.currentUserId],
     open: input.open,
+    order: input.order,
   })
 
   const dialog = dialogs.find((candidate) => candidate.userId === context.currentUserId)

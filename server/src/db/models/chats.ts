@@ -9,7 +9,7 @@ import type { InputPeer } from "@inline-chat/protocol/core"
 import { Log } from "@in/server/utils/log"
 import type { PgTransaction } from "drizzle-orm/pg-core"
 import type { PostgresJsQueryResultHKT } from "drizzle-orm/postgres-js"
-import { dialogOpenDefaultsForChat } from "@in/server/modules/dialogOpen"
+import { dialogOpenDefaultsForChat, nextDialogOrder } from "@in/server/modules/dialogOpen"
 
 const log = new Log("chats")
 
@@ -70,13 +70,16 @@ async function createUserChatAndDialog(input: {
     })
 
     if (!dialog) {
+      const openDefaults = dialogOpenDefaultsForChat(chat)
+      const order = openDefaults.open === true ? await nextDialogOrder(tx, input.currentUserId) : undefined
       ;[dialog] = await tx
         .insert(dialogs)
         .values({
           chatId: chat.id,
           userId: input.currentUserId,
           peerUserId: input.peerUserId,
-          ...dialogOpenDefaultsForChat(chat),
+          ...openDefaults,
+          order,
         })
         .returning()
     }
